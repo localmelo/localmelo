@@ -1368,13 +1368,10 @@ class InteractiveApp:
         return kb
 
     def _mode_key(self) -> None:
-        """Shift+Tab: the session switches Ask and Auto, else a hint says why not."""
+        """Shift+Tab: the session switches Ask and Auto."""
         switch = getattr(self.controller, "cycle_mode", None)
-        if switch is None:
-            return
-        hint = switch()
-        if hint:
-            self.hint(hint)
+        if switch is not None:
+            switch()
 
     def _tab(self) -> None:
         """Tab: the next completion; before the menu shows, complete at once.

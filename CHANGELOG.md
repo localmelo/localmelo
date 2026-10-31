@@ -17,8 +17,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   per chat, and in the main chat and the side chats it goes to the chat on
   the gateway, so the console and the app show it too (`/approvals ask|auto`
   now works there as well). The key never reaches Deny or `--yolo`, does
-  nothing while a question, a list or an approval is open, and waits for a
-  turn to end. [#NN]
+  nothing while a question, a list or an approval is open, and works during
+  a turn, where its line says when it applies. [#NN]
 - What a side chat's task ended with is kept in memory: other chats recall its
   summary like an earlier turn (`chat “<title>” · summary`), never as a note.
   The chat's own answers are already recalled as its turns. Part of #369.

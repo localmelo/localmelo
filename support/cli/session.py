@@ -199,9 +199,7 @@ def _progress_lines(payload: Mapping[str, Any], symbols: Any) -> list[str]:
 
 # The key that switches Ask and Auto, as the bar and /help name it.
 MODE_KEY: Final = "shift+tab"
-# Why the key did nothing: a turn is under way (the policy of a turn is fixed
-# when it starts), or --yolo (the key never leaves it).
-MODE_BUSY: Final = "Ask and Auto switch between turns (esc stops this one)."
+# What --yolo says to the key and to /approvals: neither leaves it.
 MODE_YOLO: Final = "YOLO is on (--yolo); restart without it to turn prompts on."
 # A turn that ran this long rings the bell when it ends.
 BELL_AFTER_S: Final = 30.0
@@ -1551,12 +1549,7 @@ class CliSession:
         if mode == "yolo":
             self.out.print(self._text("Approvals: YOLO (--yolo); no grants.", "muted"))
             if arguments:
-                self.out.print(
-                    self._text(
-                        "✗ YOLO is on; /approvals ask turns prompts on.",
-                        style="error",
-                    )
-                )
+                self.out.print(self._text(f"✗ {MODE_YOLO}", style="error"))
             return
         parts = arguments.split()
         if self.remote is not None:
@@ -1574,7 +1567,7 @@ class CliSession:
                 cast(Literal["ask", "auto"], parts[0].lower())
             ):
                 return
-            self.out.print(self._text(f"Approvals: {self.mode}"))
+            self.out.print(self._text(f"Approvals: {self.mode}{self._effect_note()}"))
             return
         if parts:
             what = parts[0].lower()
@@ -1591,7 +1584,29 @@ class CliSession:
                 )
                 return
         grants = ", ".join(sorted(approvals.allowed_tools)) or "none"
-        self.out.print(self._text(f"Approvals: {approvals.mode} · grants: {grants}"))
+        self.out.print(
+            self._text(
+                f"Approvals: {approvals.mode} · grants: {grants}{self._effect_note()}"
+            )
+        )
+
+    def _takes_effect(self) -> str:
+        """When a switch made now applies, while a turn is under way; "" otherwise.
+
+        The terminal's own chat keeps a turn's policy as it started, and the
+        gateway applies a chat's mode from its next step.
+        """
+        if self._state not in ("running", "stopping"):
+            return ""
+        return (
+            "from the next step"
+            if self.remote is not None
+            else "from your next message"
+        )
+
+    def _effect_note(self) -> str:
+        when = self._takes_effect()
+        return f" · {when}" if when else ""
 
     async def switch_mode(self, mode: Literal["ask", "auto", "deny"]) -> bool:
         """Switch the open chat's mode: what ``/approvals`` and Shift+Tab both do.
@@ -1614,28 +1629,31 @@ class CliSession:
             return False
         return True
 
-    def cycle_mode(self) -> str | None:
+    def cycle_mode(self) -> None:
         """Shift+Tab: Ask to Auto and back, as ``/approvals ask|auto`` switches.
 
         Deny goes to Ask. ``--yolo`` is never left by the key: one muted line
-        says how. The hint returned says why nothing happened; ``None`` is a
-        key that was handled (the transcript line follows the switch).
+        says how. A turn under way does not stop it: the bar changes at once
+        and the line says when the switch applies. The transcript line
+        follows the switch.
         """
-        if self._state != "idle":
-            return MODE_BUSY
         target = next_mode(self.mode)
         if target is None:
             self.out.print(self._text(MODE_YOLO, "muted"))
-            return None
+            return
         if self._mode_switching:
-            return None  # the gateway has not answered the last press
+            return  # the gateway has not answered the last press
         self._mode_switching = True
         self.spawn(self._mode_key(target))
-        return None
 
-    def _mode_line(self, mode: Literal["ask", "auto"]) -> Text:
-        """The quiet line a switch leaves: muted, Auto's name in the bar's colour."""
+    def _mode_line(self, mode: Literal["ask", "auto"], when: str = "") -> Text:
+        """The quiet line a switch leaves: muted, Auto's name in the bar's colour.
+
+        *when* adds where the switch applies (``from the next step``).
+        """
         lead, _, rest = MODE_SWITCHED[mode].partition(" ")
+        if when:
+            rest = f"{rest.removesuffix('.')}, {when}."
         return Text.assemble(
             (lead, "mode_auto" if mode == "auto" else "muted"), (" " + rest, "muted")
         )
@@ -1643,7 +1661,7 @@ class CliSession:
     async def _mode_key(self, target: Literal["ask", "auto"]) -> None:
         try:
             if await self.switch_mode(target):
-                self.out.print(self._mode_line(target))
+                self.out.print(self._mode_line(target, self._takes_effect()))
         finally:
             self._mode_switching = False
             if self.app is not None:

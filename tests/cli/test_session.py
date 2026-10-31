@@ -1487,14 +1487,19 @@ async def test_approvals_shows_and_switches_the_mode(setup: Setup) -> None:
     assert session.approvals.mode == "ask"
 
 
-async def test_approvals_under_yolo_says_how_to_turn_prompts_on(setup: Setup) -> None:
+async def test_approvals_under_yolo_says_it_stays_and_how_to_turn_prompts_on(
+    setup: Setup,
+) -> None:
     session, out = setup.session, setup.out
     session.approvals.mode = "yolo"
     session.enter("/approvals")
     await _until(lambda: "Approvals: YOLO (--yolo); no grants." in out.text())
     session.enter("/approvals ask")
-    await _until(lambda: "✗ YOLO is on; /approvals ask turns prompts on." in out.text())
-    assert session.approvals.mode == "yolo"
+    await _until(
+        lambda: "✗ YOLO is on (--yolo); restart without it to turn prompts on."
+        in out.text()
+    )
+    assert session.approvals.mode == "yolo"  # /approvals never leaves YOLO
 
 
 # ── U2a.3's /status, /retry and /mcp ──

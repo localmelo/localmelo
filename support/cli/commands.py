@@ -76,7 +76,7 @@ COMMANDS: Final[tuple[Command, ...]] = (
         (),
         "[ask|auto|deny|forget [tool]]",
         "Show or switch approvals: ask, auto, deny, forget",
-        "show",
+        True,
     ),
     Command("progress", (), "", "Show this turn's progress facts", True),
     Command("browser", (), "[on|off]", "Show or switch web browsing in Safari", "show"),

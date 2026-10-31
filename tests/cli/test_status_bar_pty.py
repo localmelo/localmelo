@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -131,3 +132,19 @@ def test_ascii_draws_the_mode_and_its_key_in_ascii(melo: Callable[..., Melo]) ->
     assert _bar(term, 100).endswith("auto - shift+tab")
     assert term.quit() == 0
     term.output.decode("ascii")  # nothing else reached the terminal
+
+
+def test_shift_tab_during_a_turn_switches_at_once_and_says_when_it_applies(
+    melo: Callable[..., Melo],
+) -> None:
+    term = melo(columns=120)
+    term.see("Ask melo")
+    term.type("hold on\r")
+    term.see("esc to stop")
+    term.type(b"\x1b[Z")  # not refused: the turn runs on under its own policy
+    term.see("blocked with the reason, from your next message.")
+    assert _bar(term, 120).endswith("auto · shift+tab")
+    term.type(b"\x1b")
+    term.see("Stopped")
+    time.sleep(1)  # the turn wraps up
+    assert term.quit() == 0

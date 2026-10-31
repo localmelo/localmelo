@@ -122,7 +122,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 | Ctrl+L | 清屏。 |
 | Ctrl+Z | 无操作（此版本的 melo 不会挂起）。 |
 
-- **Shift+Tab** 用一个按键完成 `/approvals ask` 和 `/approvals auto` 做的事：状态栏显示当前模式（`ask · shift+tab` 或 `auto · shift+tab`，Auto 用自己的颜色），并有一行淡色的话说明变了什么：`Auto: routine steps run; risky ones are blocked with the reason.` 或 `Ask: melo asks before running commands or changing files.` 有问题或列表打开时它什么都不做（绝不替你回答），轮次运行期间也不做（模式在两轮之间切换，与 `/approvals` 相同；Esc 可停止当前轮次）。它不会切到 Deny；使用 `--yolo` 时，它只说明 YOLO 已开启，不带 `--yolo` 重新启动才会打开询问。
+- **Shift+Tab** 用一个按键完成 `/approvals ask` 和 `/approvals auto` 做的事：状态栏显示当前模式（`ask · shift+tab` 或 `auto · shift+tab`，Auto 用自己的颜色），并有一行淡色的话说明变了什么：`Auto: routine steps run; risky ones are blocked with the reason.` 或 `Ask: melo asks before running commands or changing files.` 有问题或列表打开时它什么都不做（绝不替你回答），但轮次运行期间可以用：状态栏立刻变化，那行话会说明何时生效——在终端自己的对话里是 `from your next message`（一轮会沿用它开始时的策略），在主对话和侧边对话里是 `from the next step`。它不会切到 Deny；使用 `--yolo` 时，它只说明 YOLO 已开启，不带 `--yolo` 重新启动才会打开询问；`/approvals ask` 说的也是这句，因为 `/approvals` 同样不会离开 YOLO。
 - **队列。** 一次只能有一条消息等待，显示为 `↳ Queued for the next turn: …`；如果当前轮次以 `completed` 以外的状态结束，消息会返回输入框，不会发送。
 - **停止。** Esc 立即停止当前轮次（`■ Stopped`）；回答输出后，melo 最多花 2 秒记录运行步骤（参见[程序性记忆](../concepts/procedures.md)），下一条消息会等待记录完成。
 - **历史记录。** 消息和命令保存在 `~/.cache/localmelo/cli_history` 中（权限为 0600；超过 1 MB 时保留最新的 1,000 条），文件内容绝不会保存到其中；无法打开该文件时，会话在内存中保留历史记录并提示你。

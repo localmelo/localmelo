@@ -20,7 +20,8 @@ from localmelo.support.cli.approvals import (
     TerminalApprover,
     next_mode,
 )
-from localmelo.support.cli.session import MODE_BUSY, MODE_YOLO
+from localmelo.support.cli.output import RecordingOut
+from localmelo.support.cli.session import MODE_YOLO
 from localmelo.support.cli.text import cells
 from localmelo.support.cli.theme import ASCII, UNICODE
 
@@ -143,7 +144,7 @@ def test_auto_stands_out_from_the_muted_ask_at_every_depth(
 
 async def test_the_key_goes_ask_auto_ask_with_one_quiet_line_each(setup: Setup) -> None:
     session, out = setup.session, setup.out
-    assert session.cycle_mode() is None
+    session.cycle_mode()
     await _until(lambda: AUTO_LINE in out.text())
     assert session.approvals.mode == "auto"
     assert session.status_bar().mode == "auto" and setup.app.invalidated
@@ -154,7 +155,7 @@ async def test_the_key_goes_ask_auto_ask_with_one_quiet_line_each(setup: Setup) 
         (0, 5, "mode_auto"),
         (5, len(AUTO_LINE), "muted"),
     ]
-    assert session.cycle_mode() is None
+    session.cycle_mode()
     await _until(lambda: ASK_LINE in out.text())
     assert session.approvals.mode == "ask" and session.status_bar().mode == "ask"
     assert out.text().count(AUTO_LINE) == 1 and out.text().count(ASK_LINE) == 1
@@ -165,14 +166,14 @@ async def test_the_key_goes_ask_auto_ask_with_one_quiet_line_each(setup: Setup) 
 async def test_deny_goes_to_ask_and_yolo_is_never_left(setup: Setup) -> None:
     session, out = setup.session, setup.out
     session.approvals.set_mode("deny")
-    assert session.cycle_mode() is None
+    session.cycle_mode()
     await _until(lambda: ASK_LINE in out.text())
     assert session.approvals.mode == "ask"
     session.approvals.mode = "yolo"
-    assert session.cycle_mode() is None
+    session.cycle_mode()
     assert MODE_YOLO in out.text()
     assert session.approvals.mode == "yolo"  # unchanged, and told
-    assert session.cycle_mode() is None
+    session.cycle_mode()
     assert out.text().count(MODE_YOLO) == 2 and AUTO_LINE not in out.text()
 
 
@@ -180,7 +181,7 @@ async def test_the_key_and_the_command_leave_the_same_state(setup: Setup) -> Non
     session, out = setup.session, setup.out
     session.enter("/approvals auto")
     await _until(lambda: "Approvals: auto" in out.text())
-    assert session.cycle_mode() is None
+    session.cycle_mode()
     await _until(lambda: ASK_LINE in out.text())
     assert session.approvals.mode == "ask"
     session.enter("/approvals auto")
@@ -188,21 +189,45 @@ async def test_the_key_and_the_command_leave_the_same_state(setup: Setup) -> Non
     assert session.approvals.mode == "auto"
 
 
-async def test_the_key_waits_for_the_turn_to_end_like_the_command(setup: Setup) -> None:
+async def test_during_a_turn_the_key_switches_at_once_and_says_when_it_applies(
+    setup: Setup,
+) -> None:
     session, out = setup.session, setup.out
     session.enter("hello")
     assert session.state == "running"
-    assert session.cycle_mode() == MODE_BUSY
-    assert session.approvals.mode == "ask" and AUTO_LINE not in out.text()
+    session.cycle_mode()
+    await _until(lambda: session.status_bar().mode == "auto")  # the bar, at once
+    await _until(lambda: "Auto: " in out.text())
+    # The turn keeps the policy it started with; the next message gets Auto's.
+    assert AUTO_LINE.removesuffix(".") + ", from your next message." in _flat(out)
     await setup.idle()
-    assert session.cycle_mode() is None
-    await _until(lambda: session.approvals.mode == "auto")
+    assert session.approvals.mode == "auto"
+    session.cycle_mode()
+    await _until(lambda: ASK_LINE in _flat(out))  # idle again: no note
+    assert "next message." not in _flat(out).split(ASK_LINE, 1)[1]
+
+
+async def test_the_command_switches_during_a_turn_and_says_when_too(
+    setup: Setup,
+) -> None:
+    session, out = setup.session, setup.out
+    session.enter("hello")
+    assert session.state == "running"
+    assert session.enter("/approvals auto") is None  # not refused
+    await _until(lambda: "Approvals: auto" in out.text())
+    assert "not available while a turn runs" not in out.text()
+    assert "Approvals: auto · grants: none · from your next message" in out.text()
+    assert session.status_bar().mode == "auto"
+    await setup.idle()
+    session.enter("/approvals ask")
+    await _until(lambda: "Approvals: ask · grants: none" in out.text())
+    assert "Approvals: ask · grants: none ·" not in out.text()  # idle: no note
 
 
 async def test_a_press_while_the_switch_is_under_way_is_ignored(setup: Setup) -> None:
     session = setup.session
-    assert session.cycle_mode() is None
-    assert session.cycle_mode() is None  # no second spawn: the first has not run
+    session.cycle_mode()
+    session.cycle_mode()  # no second spawn: the first has not run
     await _until(lambda: not session._mode_switching)
     assert session.approvals.mode == "auto"
 
@@ -218,13 +243,6 @@ async def test_the_key_reaches_the_session_from_the_message_box() -> None:
         app.type("a draft" + SHIFT_TAB)
         await app.wait(lambda: controller.mode_presses == 2)
         assert app.ui.buffer.text == "a draft"  # nothing is typed by the key
-
-
-async def test_a_hint_says_why_the_key_did_nothing() -> None:
-    controller = FakeController(mode_hint=MODE_BUSY)
-    async with running_app(controller) as app:
-        app.type(SHIFT_TAB)
-        await app.wait(lambda: MODE_BUSY in app.text())
 
 
 async def test_the_key_does_not_answer_a_question() -> None:
@@ -304,6 +322,11 @@ def test_help_names_the_key() -> None:
 # ── The main chat: the key goes to the chat on the gateway ──
 
 
+def _flat(out: RecordingOut) -> str:
+    """What was printed, with a wrapped line joined (the longer lines wrap at 80)."""
+    return " ".join(out.text().split())
+
+
 def _patches(gateway: FakeGateway) -> list[tuple[str, str, object]]:
     return [r for r in gateway.requests if r[0] == "PATCH"]
 
@@ -314,7 +337,7 @@ async def test_in_the_main_chat_the_key_switches_the_chat_on_the_gateway(
     setup, gateway = chat
     session, out = setup.session, setup.out
     assert session.status_bar().mode == "ask"
-    assert session.cycle_mode() is None
+    session.cycle_mode()
     await _until(lambda: AUTO_LINE in out.text())
     assert _patches(gateway) == [
         ("PATCH", f"/api/sessions/{MAIN}", {"approvals": "auto"})
@@ -328,10 +351,35 @@ async def test_in_the_main_chat_the_key_switches_the_chat_on_the_gateway(
     )
     # The terminal's own chat is untouched: its Approvals stay where they were.
     assert session.approvals.mode == "ask"
-    assert session.cycle_mode() is None
+    session.cycle_mode()
     await _until(lambda: ASK_LINE in out.text())
     assert gateway.sessions[MAIN]["approvals"] == "ask"
     assert session.status_bar().mode == "ask"
+
+
+async def test_in_the_main_chat_a_turn_does_not_stop_the_key_and_the_line_says_when(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    session, out = setup.session, setup.out
+    assert session.enter("long work") is None
+    assert session.state == "running"
+    session.cycle_mode()
+    await _until(
+        lambda: AUTO_LINE.removesuffix(".") + ", from the next step." in _flat(out)
+    )
+    assert _patches(gateway) == [
+        ("PATCH", f"/api/sessions/{MAIN}", {"approvals": "auto"})
+    ]
+    assert session.status_bar().mode == "auto"
+    # The command is the same request, and says the same.
+    assert session.enter("/approvals ask") is None
+    await _until(lambda: "Approvals: ask · from the next step" in out.text())
+    assert _patches(gateway)[1:] == [
+        ("PATCH", f"/api/sessions/{MAIN}", {"approvals": "ask"})
+    ]
+    assert session.stop() is True
+    await setup.idle()
 
 
 async def test_the_main_chat_command_and_key_send_the_same_request(
@@ -343,7 +391,7 @@ async def test_the_main_chat_command_and_key_send_the_same_request(
     await _until(lambda: "Approvals: auto" in out.text())
     assert "works only in the terminal's own chat" not in out.text()
     via_command = _patches(gateway)
-    assert session.cycle_mode() is None
+    session.cycle_mode()
     await _until(lambda: ASK_LINE in out.text())
     assert via_command == [("PATCH", f"/api/sessions/{MAIN}", {"approvals": "auto"})]
     assert _patches(gateway)[1:] == [
@@ -368,14 +416,14 @@ async def test_a_refused_switch_says_so_and_changes_nothing(
 ) -> None:
     setup, gateway = chat
     gateway.refuse_mode = True
-    assert setup.session.cycle_mode() is None
+    setup.session.cycle_mode()
     await _until(lambda: "✗ Could not switch to auto" in setup.out.text())
     assert "A task's mode is fixed." in setup.out.text()
     assert AUTO_LINE not in setup.out.text()
     assert setup.session.status_bar().mode == "ask"
     # The next press is heard again.
     gateway.refuse_mode = False
-    assert setup.session.cycle_mode() is None
+    setup.session.cycle_mode()
     await _until(lambda: AUTO_LINE in setup.out.text())
 
 
@@ -404,7 +452,7 @@ async def test_a_new_side_chat_starts_in_the_mode_picked_before_its_first_messag
     assert session.enter("/side") is None
     await _until(lambda: "your first message starts it" in out.text())
     assert session.status_bar().mode == "ask"
-    assert session.cycle_mode() is None
+    session.cycle_mode()
     await _until(lambda: AUTO_LINE in out.text())
     assert not _patches(gateway)  # nothing exists on the gateway yet
     assert session.status_bar().mode == "auto"
@@ -433,7 +481,7 @@ async def test_status_in_the_main_chat_names_the_chats_mode(
 ) -> None:
     setup, _ = chat
     session, out = setup.session, setup.out
-    assert session.cycle_mode() is None
+    session.cycle_mode()
     await _until(lambda: AUTO_LINE in out.text())
     session.enter("/status all")
     await _until(lambda: "version    melo " in out.text())

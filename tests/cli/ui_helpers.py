@@ -43,9 +43,8 @@ class FakeController:
     entered: list[str] = field(default_factory=list)
     stops: int = 0
     title: str = "New session"
-    # Shift+Tab: how many times it was pressed, and the hint to answer with.
+    # Shift+Tab: how many times it was pressed.
     mode_presses: int = 0
-    mode_hint: str | None = None
 
     def enter(self, text: str) -> str | None:
         if self.state == "idle":
@@ -76,9 +75,8 @@ class FakeController:
     def tick(self) -> None:
         pass
 
-    def cycle_mode(self) -> str | None:
+    def cycle_mode(self) -> None:
         self.mode_presses += 1
-        return self.mode_hint
 
     def status_bar(self) -> StatusBar:
         return StatusBar(self.title, "ask")
