@@ -209,6 +209,7 @@ NOT_NOTES = [
     "My wifi password is hunter2-lighthouse.",
     "I prefer tea.",
     "Remember that I live in Utrecht.",
+    "My weekly sync is on Friday, right?",
 ]
 
 
@@ -230,6 +231,9 @@ def test_questions_to_dos_hypotheticals_negations_and_opinions_are_not_notes(
             "I live in Utrecht now. Can you find a bakery near me?",
             "You live in Utrecht now.",
         ),
+        ("Now I live in Utrecht.", "You live in Utrecht."),
+        ("I live in Lisbon, can you find me a flat?", "You live in Lisbon."),
+        ("我住在里斯本，帮我找房子。", "你住在里斯本。"),
     ],
 )
 def test_a_lasting_statement_in_a_message_becomes_one_note(

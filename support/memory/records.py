@@ -189,8 +189,17 @@ _CARD = re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)")
 STATEMENT_CHARS: Final = 200
 _LEAD_IN = re.compile(
     r"^(?:(?:btw|by the way|fyi|also|actually|oh|ok|okay|so|and|well|hey|hi|"
-    r"update|news|for the record|just so you know|heads up)\b[\s,:;!.—–-]*)+"
-    r"|^(?:对了|另外|顺便说一下|顺便|其实|告诉你|跟你说)[\s，,：:]*",
+    r"now|these days|currently|update|news|for the record|just so you know|"
+    r"heads up)\b[\s,:;!.—–-]*)+"
+    r"|^(?:对了|另外|顺便说一下|顺便|其实|告诉你|跟你说|现在)[\s，,：:]*",
+    re.IGNORECASE,
+)
+# Where a request or a question joins a statement: "I live in Lisbon, can you
+# find me a flat?" states "I live in Lisbon".
+_TAIL = re.compile(
+    r"\s*[,，;；:：]\s*(?:(?:can|could|would|will|please|so|but|and|then|find|"
+    r"help|tell|show|give|make|write|search|look|check|book|send|what|where|"
+    r"when|who|how|why|which|any|do you|is there)\b|请|帮|能|可以|麻烦|然后|所以|但是|你)",
     re.IGNORECASE,
 )
 _MINE = re.compile(r"^(?:i\b|my\b|(?:please )?call me\b|(?:请)?叫我|我)", re.IGNORECASE)
@@ -369,10 +378,11 @@ def _sentences(typed: str) -> list[str]:
 
 
 def _plain(sentence: str) -> str:
-    """*sentence* without its lead-in when it is a plain first-person statement:
-    not a question, a to-do, a hypothetical, a negation, the past or someone's
-    opinion, and no secret; else ``""``."""
+    """*sentence* without its lead-in or a request after it, when it is a plain
+    first-person statement: not a question, a to-do, a hypothetical, a
+    negation, the past or someone's opinion, and no secret; else ``""``."""
     text = _LEAD_IN.sub("", " ".join(sentence.split())).strip(" ,，")
+    text = _TAIL.split(text, maxsplit=1)[0]
     if (
         not text
         or len(text) > STATEMENT_CHARS
@@ -444,9 +454,7 @@ def statements(typed: str) -> list[Candidate]:
         if len(normalise(note)) < 4 or any(c.text == note for c in out):
             continue
         topic = topic_of(text, request=False)
-        out.append(
-            Candidate(note, sentence[:MAX_RECORD_CHARS], topic, "user_statement")
-        )
+        out.append(Candidate(note, text[:MAX_RECORD_CHARS], topic, "user_statement"))
     return out
 
 
