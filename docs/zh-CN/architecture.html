@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>架构 · localmelo</title>
-  <meta name="description" content="localmelo 各部分如何协同工作：智能体、检查、记忆和工具，以及外围的后端、网关和配置。">
+  <meta name="description" content="localmelo 各部分如何协同工作：对话、调度器和后台任务之间的工作流转，智能体、检查、记忆和工具，以及外围的后端、网关和配置。">
   <link rel="alternate" hreflang="en" href="https://localmelo.github.io/localmelo/en/architecture.html">
   <link rel="alternate" hreflang="zh-CN" href="https://localmelo.github.io/localmelo/zh-CN/architecture.html">
   <link rel="alternate" hreflang="x-default" href="https://localmelo.github.io/localmelo/en/architecture.html">
@@ -46,11 +46,79 @@
     <article class="content">
       <header class="doc-hero" id="overview">
         <h1>架构</h1>
-        <p class="lead">localmelo 的各部分如何协同工作，以当前代码为准。</p>
+        <p class="lead">localmelo 的各部分如何协同工作，以当前代码为准；尚未实现的部分标有“计划中”。</p>
       </header>
 
       <section class="section" id="diagram">
         <h2>架构图</h2>
+        <h3 id="flow">工作如何流转</h3>
+
+        <div class="diagram-scroll">
+          <div class="diagram" id="dia-flow" style="width:800px;height:520px">
+            <div class="group workers" id="f-workers" style="left:20px;top:384px;width:540px;height:120px">
+              <span class="group-label">后台</span>
+            </div>
+
+            <a class="node chat" id="f-main" href="#c-chats" style="left:20px;top:20px;width:250px;min-height:72px">
+              <span class="node-title">主对话</span>
+              <span class="node-sub">每人一个</span>
+            </a>
+            <a class="node chat" id="f-side" href="#c-chats" style="left:530px;top:20px;width:250px;min-height:72px">
+              <span class="node-title">旁支对话</span>
+              <span class="node-sub">能力相同 · 共享记忆</span>
+            </a>
+            <a class="node" id="f-chores" href="#c-chores" style="left:315px;top:128px;width:170px;min-height:72px">
+              <span class="node-title">定时事项</span>
+              <span class="node-sub">按时启动任务</span>
+            </a>
+            <div class="node static channel" id="f-chan" style="left:20px;top:150px;width:205px;min-height:125px">
+              <span class="node-title">对话与后台的通道</span>
+              <span class="node-sub"><span aria-hidden="true">↓</span> 状态和消息</span>
+              <span class="node-sub"><span aria-hidden="true">↑</span> 结果和进展</span>
+              <span class="node-sub"><span aria-hidden="true">↑</span> 请求协助 <span class="tag-planned">计划中</span></span>
+              <span class="node-sub"><span aria-hidden="true">↓</span> 上下文包 <span class="tag-planned">计划中</span></span>
+            </div>
+            <a class="node hub" id="f-sched" href="#c-scheduler" style="left:290px;top:262px;width:220px;min-height:72px">
+              <span class="node-title">调度器</span>
+              <span class="node-sub">级别 P0–P5 · 模型槽位</span>
+            </a>
+            <div class="node static worker planned" id="f-sw" style="left:590px;top:262px;width:190px;min-height:72px">
+              <span class="tag-planned badge">计划中</span>
+              <span class="node-title">旁支对话的后台任务</span>
+              <span class="node-sub">由旁支对话启动</span>
+            </div>
+            <a class="node worker" id="f-w1" href="#c-workers" style="left:40px;top:416px;width:150px;min-height:72px">
+              <span class="node-title">后台任务 1</span>
+              <span class="node-sub">完成一项工作</span>
+            </a>
+            <a class="node worker" id="f-w2" href="#c-workers" style="left:210px;top:416px;width:150px;min-height:72px">
+              <span class="node-title">后台任务 2</span>
+              <span class="node-sub">完成一项工作</span>
+            </a>
+            <a class="node worker" id="f-w3" href="#c-workers" style="left:380px;top:416px;width:150px;min-height:72px">
+              <span class="node-title">后台任务 3</span>
+              <span class="node-sub">完成一项工作</span>
+            </a>
+            <a class="node approval" id="f-appr" href="#c-checker" style="left:610px;top:416px;width:170px;min-height:72px">
+              <span class="node-title">审批</span>
+              <span class="node-sub">你，或自动模式的复核</span>
+            </a>
+
+            <svg class="conns" id="svg-flow" aria-hidden="true" focusable="false"></svg>
+          </div>
+        </div>
+
+        <div class="legend">
+          <div class="legend-item"><div class="legend-line"></div>localmelo 内部的调用和数据</div>
+          <div class="legend-item"><div class="legend-line dotted"></div><span class="tag-planned">计划中</span> 尚未实现</div>
+        </div>
+        <ul>
+          <li>你和主对话交流。旁支对话能力相同，共享记忆。</li>
+          <li>较大的工作交给调度器，来自主对话或定时事项，也来自旁支对话 <span class="tag-planned">计划中</span>。调度器按级别（P0 到 P5）和模型槽位给任务排序，再启动后台任务。</li>
+          <li>任务属于启动它的对话：进展和结果回到那里；旁支对话结束时会给主对话留一份总结 <span class="tag-planned">计划中</span>。</li>
+          <li>对话可以查看后台任务的状态，也可以给它发消息。后台任务向所属对话求助 <span class="tag-planned">计划中</span>；只有对话会来问你，批准每一步的只有你，或自动模式的复核。</li>
+        </ul>
+
         <h3 id="core">智能体的核心</h3>
         <p>任务在智能体中运行：智能体把上下文保存在记忆中，通过执行器运行工具。后端根据配置文件创建提供方，由提供方访问模型服务器。</p>
 
@@ -122,6 +190,72 @@
           <div class="legend-item"><div class="legend-line fail-l"></div>检查失败会结束运行</div>
         </div>
 
+        <h3 id="worker">后台任务的内部</h3>
+
+        <div class="diagram-scroll">
+          <div class="diagram" id="dia-worker" style="width:800px;height:548px">
+            <div class="group workers" id="w-group" style="left:10px;top:204px;width:580px;height:328px">
+              <span class="group-label bottom">后台任务 · 一项工作</span>
+            </div>
+            <a class="checker-zone" id="w-checks" href="#c-checker" style="left:24px;top:344px;width:552px;height:168px">
+              <span class="cz-label">检查</span>
+              <span class="cz-sub">被拒绝的调用会作为错误返回给模型</span>
+            </a>
+
+            <a class="node" id="w-sched" href="#c-scheduler" style="left:10px;top:16px;width:185px;min-height:146px">
+              <span class="node-title">调度器的级别和槽位</span>
+              <span class="node-sub">按级别（P0–P5）启动；每次模型调用要等有空闲槽位</span>
+            </a>
+            <div class="node static" id="w-pack" style="left:207px;top:16px;width:185px;min-height:146px">
+              <span class="node-title">所属对话给的任务说明</span>
+              <span class="node-sub">任务的目标</span>
+              <span class="node-sub">上下文包：你的原话和所属对话挑选的记忆条目 <span class="tag-planned">计划中</span></span>
+            </div>
+            <div class="node static" id="w-budget" style="left:404px;top:16px;width:185px;min-height:146px">
+              <span class="node-title">步数上限和收尾提示</span>
+              <span class="node-sub">最后两步留给提交和汇报</span>
+            </div>
+            <a class="node" id="w-agent" href="#c-agent" style="left:30px;top:236px;width:540px;min-height:72px">
+              <span class="node-title">智能体循环</span>
+              <span class="node-sub">规划一步 · 运行它的工具 · 在两次尝试之间反思</span>
+            </a>
+            <a class="node" id="w-exec" href="#c-executor" style="left:40px;top:380px;width:250px;min-height:90px">
+              <span class="node-title">执行器</span>
+              <span class="node-sub">在它的文件夹里使用文件、git 和 Python · 时间限制</span>
+            </a>
+            <a class="node approval" id="w-appr" href="#c-checker" style="left:310px;top:380px;width:250px;min-height:90px">
+              <span class="node-title">审批</span>
+              <span class="node-sub">你，或自动模式的复核</span>
+              <span class="node-sub">自动模式的沙箱：只在它的文件夹里写入</span>
+            </a>
+            <a class="node chat" id="w-chat" href="#c-chats" style="left:616px;top:16px;width:174px;min-height:90px">
+              <span class="node-title">所属对话</span>
+              <span class="node-sub">主对话或旁支对话</span>
+            </a>
+            <div class="node static channel" id="w-chan" style="left:616px;top:199px;width:174px;min-height:146px">
+              <span class="node-title">与所属对话的通道</span>
+              <span class="node-sub"><span aria-hidden="true">↓</span> 状态和消息</span>
+              <span class="node-sub"><span aria-hidden="true">↑</span> 结果和进展</span>
+              <span class="node-sub"><span aria-hidden="true">↑</span> 请求协助 <span class="tag-planned">计划中</span></span>
+            </div>
+
+            <svg class="conns" id="svg-worker" aria-hidden="true" focusable="false"></svg>
+          </div>
+        </div>
+
+        <div class="legend">
+          <div class="legend-item"><div class="legend-line"></div>localmelo 内部的调用和数据</div>
+          <div class="legend-item"><div class="legend-line dotted"></div><span class="tag-planned">计划中</span> 尚未实现</div>
+          <div class="legend-item"><div class="legend-box"></div>由检查器把关</div>
+        </div>
+        <p class="diagram-caption">后台任务快速完成一项工作。它自己没有长期记忆，遇到问题先问所属对话，只有对话才会来问你。</p>
+        <ul>
+          <li>它运行与对话的智能体相同的循环：规划一步，通过执行器运行工具，每次调用都要先过检查。</li>
+          <li>它从所属对话拿到任务说明：任务的目标，以及一份包含你的原话和记忆条目的上下文包 <span class="tag-planned">计划中</span>。</li>
+          <li>步数上限会让它停下；最后两步留给提交和汇报。</li>
+          <li>它的每一步由你批准，或由自动模式的复核决定；自动模式下它只在自己的文件夹里写入。</li>
+        </ul>
+
         <h3 id="around">智能体周围</h3>
         <p>消息从某个入口经网关进来，在对话或 worker 中运行；每一个都运行同一个智能体，旁边是记忆。点击图中的方框，可以跳到它的卡片。</p>
 
@@ -187,13 +321,13 @@
           <li>终端和 App 通过同一个端点文件找到正在运行的网关，所以后启动的那个会用已在运行的网关。</li>
           <li>主对话自己回答，或按优先级把更大的工作交给调度器；结果以卡片的形式回到它那里。</li>
           <li>定时事项按时启动任务；每 30 分钟，check-in 告诉主对话什么做完了或在等你。</li>
-          <li>Worker 和对话运行同一个智能体，记忆会召回到每一轮里。</li>
+          <li>Worker 和对话运行同一个智能体；对话把记忆召回到每一轮里，worker 自己不保留记忆。</li>
         </ul>
       </section>
 
       <section class="section" id="components">
         <h2>组件</h2>
-        <p>每张卡片说明一个部分做什么；点击两张图中的方框可以打开卡片，卡片上的链接打开对应的参考页。</p>
+        <p>每张卡片说明一个部分做什么；点击图中的方框可以打开卡片，卡片上的链接打开对应的参考页。</p>
         <div class="comp-grid">
           <div class="comp-card" id="c-cli">
             <h3>终端</h3>
@@ -263,6 +397,7 @@
               <li>网关按优先级启动排队的任务，每次几个，各在所属对话的文件夹里。</li>
               <li><code>melo worker</code> 根据任务说明文件运行一个任务，返回 JSON 结果。</li>
               <li>控制台的 Workers 视图列出每一次运行。</li>
+              <li>Worker 自己没有长期记忆；所属对话可以查看它的状态，也可以给它发消息。</li>
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/cli.md#worker-histories">Worker 参考</a>
           </div>
@@ -382,6 +517,8 @@
               <tr><td>工具和审批</td><td>五个内置工具、MCP 服务器、对高影响调用的复核、每个对话可选“询问”或“自动”</td><td><span class="chip done">已完成</span></td></tr>
               <tr><td>浏览</td><td>在你能看到的 Safari 窗口里读网页、跟随链接</td><td><span class="chip done">已完成</span></td></tr>
               <tr><td>调度器和 worker</td><td>任务队列、级别、worker、公平的排队、可选的闸门和 GPU 锁</td><td><span class="chip testing">测试中</span></td></tr>
+              <tr><td>旁支对话与主对话对等</td><td>旁支对话可以启动任务并收到结果，旁支对话结束时给主对话留一份总结</td><td>计划中</td></tr>
+              <tr><td>后台任务向对话求助</td><td>后台任务把一份简短的求助发给所属对话，每个任务带一份包含你的原话和记忆的上下文包，只有对话会来问你</td><td>计划中</td></tr>
               <tr><td>推理笔记</td><td>保留笔记并在循环中召回的压缩模式</td><td><span class="chip testing">测试中</span></td></tr>
               <tr><td>计算机操作</td><td>在浏览器里操作网页，重要的操作先问你</td><td>计划中</td></tr>
               <tr><td>空闲时学习</td><td>离线回顾过去的工作</td><td>计划中</td></tr>
@@ -411,10 +548,39 @@
   <script>
     (() => {
       const SVG_NS = "http://www.w3.org/2000/svg";
+      const PLANNED = "计划中";
+      // Diagrams whose labels sit on the curve itself, centred on it.
+      const CURVE = new Set(["svg-flow", "svg-worker"]);
 
       // Connectors of each diagram, by its svg. fs/ts: the side of each end; ff/tf: where
-      // along that side (0 to 1, default 0.5); dx, dy: label offset in pixels.
+      // along that side (0 to 1, default 0.5); dx, dy: label offset in pixels; lt: where
+      // along the curve a label sits (0 to 1); tag: a planned pill after the label;
+      // type "planned": a dotted line for a part that is not built yet.
       const DIAGRAMS = {
+        "svg-flow": [
+          { from: "f-main", fs: "right", ff: 0.3, to: "f-side", ts: "left", tf: 0.3, bidi: true, label: "共享记忆" },
+          { from: "f-side", fs: "left", ff: 0.75, to: "f-main", ts: "right", tf: 0.75, type: "planned", label: "结束时的总结", tag: true },
+          { from: "f-main", fs: "bottom", ff: 0.97, to: "f-sched", ts: "top", tf: 0.12, label: "任务", lt: 0.28 },
+          { from: "f-chores", fs: "bottom", to: "f-sched", ts: "top", label: "到期的事项" },
+          { from: "f-side", fs: "bottom", ff: 0.1, to: "f-sched", ts: "top", tf: 0.88, type: "planned", label: "任务", tag: true, lt: 0.28, dx: 12 },
+          { from: "f-sched", fs: "bottom", ff: 0.15, to: "f-w1", ts: "top" },
+          { from: "f-sched", fs: "bottom", ff: 0.5, to: "f-w2", ts: "top" },
+          { from: "f-sched", fs: "bottom", ff: 0.85, to: "f-w3", ts: "top" },
+          { from: "f-sched", fs: "right", to: "f-sw", ts: "left", type: "planned" },
+          { from: "f-main", fs: "bottom", ff: 0.408, to: "f-chan", ts: "top", tf: 0.4976, bidi: true },
+          { from: "f-chan", fs: "bottom", ff: 0.4976, to: "f-workers", ts: "top", tf: 0.182, bidi: true },
+          { from: "f-side", fs: "bottom", ff: 0.468, to: "f-sw", ts: "top", tf: 0.3, bidi: true, type: "planned", label: "同一条通道", tag: true },
+          { from: "f-workers", fs: "right", to: "f-appr", ts: "left", bidi: true }
+        ],
+        "svg-worker": [
+          { from: "w-sched", fs: "bottom", ff: 0.5, to: "w-agent", ts: "top", tf: 0.133 },
+          { from: "w-pack", fs: "bottom", ff: 0.5, to: "w-agent", ts: "top", tf: 0.498 },
+          { from: "w-budget", fs: "bottom", ff: 0.5, to: "w-agent", ts: "top", tf: 0.863 },
+          { from: "w-agent", fs: "bottom", ff: 0.25, to: "w-exec", ts: "top", tf: 0.5, bidi: true, label: "工具调用", lt: 0.3 },
+          { from: "w-exec", fs: "right", to: "w-appr", ts: "left", bidi: true },
+          { from: "w-agent", fs: "right", ff: 0.5, to: "w-chan", ts: "left", tf: 0.5, bidi: true },
+          { from: "w-chat", fs: "bottom", to: "w-chan", ts: "top", bidi: true }
+        ],
         "svg-overview": [
           { from: "n-cli", fs: "right", to: "n-agent", ts: "left", tf: 0.35, label: "一个任务" },
           { from: "n-gateway", fs: "right", to: "n-agent", ts: "left", tf: 0.75, label: "会话", dy: -14 },
@@ -461,6 +627,15 @@
         }
       }
 
+      // The point at t (0 to 1) of the cubic curve p1, c1, c2, p2.
+      function curvePoint(p1, c1, c2, p2, t) {
+        const u = 1 - t;
+        return {
+          x: u * u * u * p1.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * p2.x,
+          y: u * u * u * p1.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * p2.y
+        };
+      }
+
       // The Bezier control point that leaves p straight out of its side.
       function control(p, side, other) {
         const horizontal = side === "left" || side === "right";
@@ -477,6 +652,7 @@
         Object.entries(DIAGRAMS).forEach(([id, conns]) => {
           const svg = document.getElementById(id);
           const dia = svg.closest(".diagram");
+          const curve = CURVE.has(id);
           conns.forEach((c) => {
             const fe = document.getElementById(c.from);
             const te = document.getElementById(c.to);
@@ -493,11 +669,20 @@
             svg.appendChild(path);
             if (c.label) {
               const label = document.createElement("div");
-              label.className = "conn-label";
+              label.className = curve ? "conn-label centered" : "conn-label";
               label.setAttribute("aria-hidden", "true");
               label.textContent = c.label;
-              label.style.left = `${(p1.x + p2.x) / 2 + (c.dx || 0)}px`;
-              label.style.top = `${(p1.y + p2.y) / 2 - 10 + (c.dy || 0)}px`;
+              if (c.tag) {
+                const pill = document.createElement("span");
+                pill.className = "tag-planned";
+                pill.textContent = PLANNED;
+                label.appendChild(pill);
+              }
+              const m = curve
+                ? curvePoint(p1, c1, c2, p2, c.lt || 0.5)
+                : { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 - 10 };
+              label.style.left = `${m.x + (c.dx || 0)}px`;
+              label.style.top = `${m.y + (c.dy || 0)}px`;
               dia.appendChild(label);
             }
           });
