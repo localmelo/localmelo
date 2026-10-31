@@ -151,7 +151,7 @@ What a chat is told about memory:
 
 - That it keeps a note with `remember` when you share something lasting about yourself or your work, or a finished task's result is worth keeping, without asking you first.
 - That a fact you asked it to remember is saved already; that it never saves notes in a file or with code; and that it acknowledges a note in one short sentence.
-- That it says a fact is noted only after the `remember` tool confirmed it in this turn; if the tool refused, it tries once more with your own sentence written to you, or says plainly that the note was not kept. A note is written in the language of your message.
+- That a note is written in the language of your message, and that what memory brings back answers your question whether or not it was kept as a note: an earlier message of this chat or another counts as much as a note.
 - That it sees only the recent messages of the conversation: older parts of it, earlier chats and notes come back with your message when they match, and `search_memory` looks up more.
 - That when notes or earlier chats disagree, the newest one is true.
 - Your About-you and Preferences notes, in your own words (at most 600 characters, read when the chat starts its model; a replaced note is not listed).

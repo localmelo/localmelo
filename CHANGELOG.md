@@ -259,11 +259,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   never looked for, so a preference worded a little differently is kept, while
   `C15` for `C14` or Thursday for Wednesday is still refused, and so is a note
   in another language than your message (the refusal says to write it in the
-  language you used). The chat is told to say a fact is noted only after the
-  note was kept, and after a refusal to try once more with your own sentence or
-  say plainly that it was not kept; the instructions no longer quote the tool's
-  own answers, which the model had copied into replies instead of calling the
-  tool. When a reply says it noted a fact and no note was kept, melo keeps what
+  language you used). The chat's instructions no longer tell it when it may
+  say a fact is noted: quoting the tool's answers made the model copy them into
+  replies instead of calling the tool, and a rule about claiming saves made it
+  refuse facts it recalled that were never kept as notes. They now say that
+  what memory brings back answers the question whether or not it was kept as a
+  note. When a reply says it noted a fact and no note was kept, melo keeps what
   the reply named after the same checks (your words, no secret, the newer value
   replaces the old one, written to you: "Your flight to Faro is at gate 9", not
   "gate 9 for Faro") and shows it with Undo; when it cannot, nothing is kept
