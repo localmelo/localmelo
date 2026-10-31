@@ -87,7 +87,7 @@ from localmelo.support.memory.recall import (
 
 if TYPE_CHECKING:
     from localmelo.support.config import Config
-    from localmelo.support.sessions.store import SessionStore, TurnInfo
+    from localmelo.support.sessions.store import SessionStore, StoredEvent, TurnInfo
 
 logger = logging.getLogger(__name__)
 
@@ -1512,6 +1512,27 @@ class ChatMemory:
         }
 
     # ── Lifecycle ──
+
+    def side_ended(self, event: StoredEvent) -> None:
+        """Index a ``side.summary`` event (``data``: ``chat_id``, ``title``,
+        ``summary``, ``source``) in the background with :meth:`side_summary`;
+        the console's main chat calls it when a side chat finishes work. A
+        ``chat`` source (the chat's own run) is indexed as its turn already."""
+        data = event.event.get("data") or {}
+        chat_id, summary = data.get("chat_id"), data.get("summary")
+        if not (self.enabled and isinstance(chat_id, str) and chat_id):
+            return
+        if data.get("source", "chat") == "chat":
+            return
+        if isinstance(summary, str) and summary.strip():
+            title = str(data.get("title") or "")
+            self._spawn(self._side_ended(chat_id, title, summary))
+
+    async def _side_ended(self, chat_id: str, title: str, summary: str) -> None:
+        try:
+            await self.side_summary(chat_id, title, summary)
+        except Exception:
+            logger.warning("Could not index a side chat's summary", exc_info=True)
 
     def _spawn(self, coro: Any) -> None:
         task = asyncio.ensure_future(coro)
