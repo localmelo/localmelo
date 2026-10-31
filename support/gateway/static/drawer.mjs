@@ -1,3 +1,4 @@
+import {stepLine} from './blocked.mjs';
 import {formatTime, t} from './i18n.mjs';
 import {formatDuration, statusText} from './turns.mjs';
 
@@ -86,8 +87,25 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
       content.append(row);
     }
     if (tools.some((tool) => tool.granted)) content.append(button(t('drawer.tools.revokeAll'), () => revokeGrants()));
+    approvalsView(data.approvals || []);
     if (data.mcp_config_label) content.append(node('p', data.mcp_config_label));
     if (data.mcp_error) content.append(node('p', data.mcp_error));
+  }
+  // The steps the person allowed in this chat, which its tasks run again without asking (#369).
+  function approvalsView(approvals) {
+    if (!approvals.length) return;
+    content.append(node('h3', t('drawer.approvals.title'), 'drawer-subhead'), node('p', t('drawer.approvals.note')));
+    for (const entry of approvals) {
+      const row = node('div', undefined, 'drawer-tool drawer-approval');
+      const step = node('code', stepLine(entry.preview), 'drawer-approval-step');
+      step.title = String(entry.preview ?? '');
+      const at = formatTime(new Date(entry.at * 1000), 'clock');
+      row.append(step, node('p', t('drawer.approvals.when', {tool: entry.tool, time: at})));
+      const revoke = button(t('approvals.revoke'), () => revokeAt(`approvals/${encodeURIComponent(entry.id)}`));
+      revoke.setAttribute('aria-label', t('approvals.revokeStep', {step: stepLine(entry.preview, 60)}));
+      row.append(revoke);
+      content.append(row);
+    }
   }
   function memoryView(data) {
     line(content, t('drawer.memory.working'), `${(data.working || []).length} / ${data.working_max}`);
@@ -180,7 +198,10 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
       if (valid(token, session, selected)) busy = false;
     }
   }
-  async function revokeGrants(tool) {
+  function revokeGrants(tool) {
+    return revokeAt(`grants${tool === undefined ? '' : '/' + encodeURIComponent(tool)}`);
+  }
+  async function revokeAt(suffix) {
     if (busy || !open || currentId() !== id) return;
     const session = id;
     const token = ++generation;
@@ -189,7 +210,7 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
     if (content.contains(doc.activeElement)) closeButton.focus();
     for (const item of content.querySelectorAll('button')) item.disabled = true;
     try {
-      await api(path(session, `grants${tool === undefined ? '' : '/' + encodeURIComponent(tool)}`), {method: 'DELETE'});
+      await api(path(session, suffix), {method: 'DELETE'});
       if (!open || id !== session || currentId() !== session || tab !== 'tools') return;
       // A tab may have been reopened while the DELETE was pending. Refresh
       // even then: an earlier GET may have observed the old grant.

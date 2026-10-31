@@ -455,6 +455,10 @@ export function approvalTag(status, errorCategory, approval) {
     if (origin === "session") {
       return {short: t("turns.approval.grant.short"), long: t("turns.approval.grant.long")};
     }
+    // The person's earlier approval of this exact step, found by code in the task's chat (#369).
+    if (origin === "earlier") {
+      return {short: t("turns.approval.earlier.short"), long: t("turns.approval.earlier.long")};
+    }
     if (origin === "policy") {
       return {short: t("turns.approval.auto.short"), long: t("turns.approval.auto.long")};
     }
