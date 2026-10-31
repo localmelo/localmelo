@@ -88,25 +88,33 @@ those tools can do.
   you allowed in that chat (or in one of its tasks) runs again in that
   chat's later tasks without asking only when code finds the same tool, the
   same step key (the same command or Python syntax tree, the same file and
-  content, the same folder after resolving links, and unchanged files it
-  reads, a test runner's changed files melo could not read included) and
-  both reviews find no high-impact category. A tool allowed for
-  the chat covers its tasks' routine calls of that tool, as in the chat.
-  Each such step leaves a row with Revoke. Recorded approvals live in memory
-  only: a restart, Revoke or deleting the chat drops them.
+  content, the same folder after resolving links, and the files melo's
+  rules read for it unchanged) and melo's rules read the step themselves
+  and found it routine, both times. That covers `python_exec`, `shell_exec`,
+  `file_write` and `file_edit` only. A tool allowed for the chat covers its
+  tasks' routine calls of that tool, as in the chat. Each such step leaves a
+  row with Revoke, and the approval card says when an Allow will be kept.
+  Recorded approvals live in memory only: a restart, Revoke or deleting the
+  chat drops them.
 - **What never reuses an approval:** a high-impact step (any review
-  category, `self` and the click-only ones included) and a step nothing
-  reviewed both ask every time; a task you did not start (a chore, or one
-  another agent or program started) neither uses nor records approvals;
-  another chat's approvals never count; Auto's Allow once is one step, once,
-  and is never recorded; a revoked approval is gone. No model decides a
-  match: melo's explanation on a task's approval card is written from the
-  task's title and goal, the step and the review's reasons as data, never
-  from tool output, and nothing reads it back; the step, the buttons and
-  what an answer allows come from code.
-- **An earlier exact approval outranks Auto's block.** A step you allowed in
-  Ask, exactly as above and not high-impact, runs in the same chat's Auto
-  tasks instead of being blocked.
+  category, `self` and the click-only ones included); an undecided step
+  (melo could not see all it runs: a file too big or not read, a command
+  built at run time), a step a model settled, and a step nothing reviewed;
+  a tool the rules do not read (a network or MCP tool, or any other tool:
+  its calls are routine to the rules unread); a chore, or a task another
+  agent, a channel or melo itself started, which neither uses nor records
+  approvals; another chat's approvals; Auto's Allow once, which is one step,
+  once, and never recorded; an Allow answered after its chat was deleted;
+  a revoked approval. A task created with your gateway token (`POST
+  /api/tasks`, `melo task new`) counts as yours and belongs to the main
+  chat, so it uses the main chat's approvals: a token holder acts as you.
+- **No model decides a match.** melo's explanation on an approval card is
+  written for your own tasks and chores only, from the task's title and
+  goal, the step and the review's reasons as data, never from tool output,
+  and nothing reads it back; the step, the buttons and what an answer
+  allows come from code. Auto's blocks are never lifted by an earlier
+  approval: Auto blocks only steps that are not routine, and those are never
+  kept.
 - **The checks are guardrails, not a sandbox:**
   - a step runs only the tools it offered;
   - the arguments of built-in tools must have the declared types;

@@ -1530,27 +1530,35 @@ A task the person started asks through the chat that owns it (its
 chat's recorded approvals; a model never decides a match.
 
 - **Recorded.** Each Allow the person gives in a chat, or in one of its
-  tasks' approvals, is recorded for that chat when the review is not
-  high-impact (`verdict` not `high`, no category) and not missing. Auto's
-  Allow once is never recorded. Records live in the gateway's memory; a
-  restart or deleting the chat forgets them.
+  tasks' approvals (a task with `origin` `user`), is recorded for that chat
+  when the call is reusable: a tool melo's rules read (`python_exec`,
+  `shell_exec`, `file_write`, `file_edit`) that the rules themselves found
+  `routine`, in no category. Auto's Allow once, a chore's Allow and an Allow
+  answered after the chat was deleted are never recorded. Records live in
+  the gateway's memory; a restart or deleting the chat forgets them. A
+  waiting approval's `remembered` says, by code, whether its Allow will be
+  recorded.
 - **Matched.** A task's step runs without asking, with approval `origin`
   `earlier`, when a record of its chat has the same tool, the same step
   (Python by its syntax tree, a command by its exact text, a file write by
-  its path and content, the files it reads unchanged, a test runner's
-  changed files melo could not read as they were) and the same folder,
-  and the step's own review is not high-impact either. The chat gets an
-  `earlier` echo and the task's `earlier` lists the step (`live` until the
-  record is revoked). A session grant of the chat covers its tasks' routine
-  calls of that tool. In Auto, a match runs a step Auto would block.
-- **Never.** A high-impact or unreviewed step asks every time; a task the
-  person did not start (`origin` other than `user`) neither uses nor records
-  approvals; another chat's records never count.
-- **Explained.** When a task asks the person, its chat's model writes a few
-  sentences about the step (one request, at most 20 seconds, from the task's
-  title and objective, the call and the review's reasons, never a tool's
-  output). It is the approval's `explanation`: `{"state": "pending" | "ready"
-  | "none", "text"}`. Nothing reads it back; the answer decides.
+  its path and content, the files the rules read for it unchanged) and the
+  same folder, and the step is reusable too. The chat gets an `earlier` echo
+  and the task's `earlier` lists the step (`live` until the record is
+  revoked). A session grant of the chat covers its tasks' routine calls of
+  that tool.
+- **Never.** A high-impact, `undecided`, model-settled or unreviewed step,
+  and every call of a tool the rules do not read (network, MCP and other
+  tools), asks every time; a task with an `origin` other than `user` (a
+  chore's `user_rule` included) neither uses nor records approvals; another
+  chat's records never count; Auto never runs a step it blocked on a record.
+  A task made through `POST /api/tasks` is the person's (`origin` `user`) and
+  belongs to the main chat unless its `front_id` names another.
+- **Explained.** When a task with `origin` `user` or `user_rule` asks the
+  person, its chat's model writes a few sentences about the step (one
+  request, at most 20 seconds, from the task's title and objective, the call
+  and the review's reasons, never a tool's output). It is the approval's
+  `explanation`: `{"state": "pending" | "ready" | "none", "text"}`; any other
+  task's is `none`. Nothing reads it back; the answer decides.
 
 ## GET /api/approvals/{request_id}
 
@@ -1562,10 +1570,12 @@ session it belongs to.
 ```
 
 ```json
-{"approval": {"request_id": "00dc8a67e4e8481ab4208074d4685cab", "call_id": "call_1", "tool_name": "python_exec", "arguments": {"code": "print(1)"}, "arguments_complete": true, "preview": "print(1)", "workspace_root": "/home/me/notes", "workspace_label": "~/notes", "target": null, "review": {"verdict": "routine", "title": "", "reasons": [], "categories": []}, "explanation": {"state": "ready", "text": "It prints a number to check the setup. Nothing outside the folder changes."}, "session_id": "b79a99d86b50"}}
+{"approval": {"request_id": "00dc8a67e4e8481ab4208074d4685cab", "call_id": "call_1", "tool_name": "python_exec", "arguments": {"code": "print(1)"}, "arguments_complete": true, "preview": "print(1)", "workspace_root": "/home/me/notes", "workspace_label": "~/notes", "target": null, "review": {"verdict": "routine", "title": "", "reasons": [], "categories": []}, "explanation": {"state": "ready", "text": "It prints a number to check the setup. Nothing outside the folder changes."}, "remembered": true, "session_id": "b79a99d86b50"}}
 ```
 
-- A task's approval has `explanation`; a chat's has none.
+- A task's approval has `explanation`; a chat's has none. Both have
+  `remembered`, also on `pending_approvals` of `GET /api/sessions/{id}` and
+  of a task.
 - 404 `not_found` once it was answered, or for an unknown id.
 
 ## PATCH /api/sessions/{id}

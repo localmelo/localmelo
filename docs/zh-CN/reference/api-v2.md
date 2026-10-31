@@ -796,10 +796,10 @@ worker 运行或终端对话从 CLI 的文件读取。
 
 本人开始的任务，通过拥有它的对话（它的 `front_id`，否则是主对话）来问。在问任何人之前，代码先查这个对话记录的批准；是否匹配从不由模型决定。
 
-- **记录。** 本人在某个对话里、或在它的任务的审批中给出的每次允许，只要审查不是高影响（`verdict` 不是 `high`，没有类别）且不缺失，就为这个对话记录下来。Auto 的允许一次从不记录。记录只保存在网关内存里；重启或删除对话都会忘掉它们。
-- **匹配。** 当这个对话的某条记录与任务的这一步工具相同、步骤相同（Python 按语法树，命令按确切文本，文件写入按路径和内容，它读取的文件没有变化，测试运行器运行的、melo 读不了的已改文件也和当时一样）、文件夹相同，且这一步自己的审查也不是高影响时，这一步不再询问就运行，审批的 `origin` 为 `earlier`。对话会得到一条 `earlier` 回执，任务的 `earlier` 列出这一步（在记录被撤回之前 `live` 为 true）。对话的会话授权也覆盖它的任务对该工具的常规调用。在 Auto 中，匹配会让一个原本会被 Auto 拦下的步骤运行。
-- **从不。** 高影响或无法审查的步骤每次都问；不是本人开始的任务（`origin` 不是 `user`）既不使用也不记录批准；别的对话的记录从不算数。
-- **说明。** 任务问本人时，它的对话的模型会就这一步写几句话（一次请求，最多 20 秒，依据任务的标题和目标、这次调用以及审查的理由，从不读取工具的输出）。它是审批的 `explanation`：`{"state": "pending" | "ready" | "none", "text"}`。没有任何东西会读回它；决定的是答复。
+- **记录。** 本人在某个对话里、或在它的任务（`origin` 为 `user` 的任务）的审批中给出的每次允许，只要这次调用可以复用，就为这个对话记录下来：工具是 melo 的规则会读的（`python_exec`、`shell_exec`、`file_write`、`file_edit`），且规则自己判定为 `routine`、没有类别。Auto 的允许一次、定时事项里的允许，以及对话被删除之后才给出的允许，从不记录。记录只保存在网关内存里；重启或删除对话都会忘掉它们。等待中的审批的 `remembered` 由代码说明它的允许是否会被记录。
+- **匹配。** 当这个对话的某条记录与任务的这一步工具相同、步骤相同（Python 按语法树，命令按确切文本，文件写入按路径和内容，规则为它读过的文件没有变化）、文件夹相同，且这一步也可以复用时，这一步不再询问就运行，审批的 `origin` 为 `earlier`。对话会得到一条 `earlier` 回执，任务的 `earlier` 列出这一步（在记录被撤回之前 `live` 为 true）。对话的会话授权也覆盖它的任务对该工具的常规调用。
+- **从不。** 高影响、`undecided`、由模型判定或未经审查的步骤，以及规则不读的工具（网络、MCP 和其他工具）的每次调用，每次都问；`origin` 不是 `user` 的任务（包括定时事项的 `user_rule`）既不使用也不记录批准；别的对话的记录从不算数；Auto 从不凭记录运行它拦下的步骤。通过 `POST /api/tasks` 创建的任务属于本人（`origin` 为 `user`），除非 `front_id` 指向别的对话，否则属于主对话。
+- **说明。** `origin` 为 `user` 或 `user_rule` 的任务问本人时，它的对话的模型会就这一步写几句话（一次请求，最多 20 秒，依据任务的标题和目标、这次调用以及审查的理由，从不读取工具的输出）。它是审批的 `explanation`：`{"state": "pending" | "ready" | "none", "text"}`；其他任务的为 `none`。没有任何东西会读回它；决定的是答复。
 
 ## GET /api/approvals/{request_id}
 
@@ -810,10 +810,10 @@ worker 运行或终端对话从 CLI 的文件读取。
 ```
 
 ```json
-{"approval": {"request_id": "00dc8a67e4e8481ab4208074d4685cab", "call_id": "call_1", "tool_name": "python_exec", "arguments": {"code": "print(1)"}, "arguments_complete": true, "preview": "print(1)", "workspace_root": "/home/me/notes", "workspace_label": "~/notes", "target": null, "review": {"verdict": "routine", "title": "", "reasons": [], "categories": []}, "explanation": {"state": "ready", "text": "It prints a number to check the setup. Nothing outside the folder changes."}, "session_id": "b79a99d86b50"}}
+{"approval": {"request_id": "00dc8a67e4e8481ab4208074d4685cab", "call_id": "call_1", "tool_name": "python_exec", "arguments": {"code": "print(1)"}, "arguments_complete": true, "preview": "print(1)", "workspace_root": "/home/me/notes", "workspace_label": "~/notes", "target": null, "review": {"verdict": "routine", "title": "", "reasons": [], "categories": []}, "explanation": {"state": "ready", "text": "It prints a number to check the setup. Nothing outside the folder changes."}, "remembered": true, "session_id": "b79a99d86b50"}}
 ```
 
-- 任务的审批带 `explanation`；对话的没有。
+- 任务的审批带 `explanation`；对话的没有。两者都带 `remembered`，`GET /api/sessions/{id}` 和任务的 `pending_approvals` 里也有。
 - 已答复或未知的 id 返回 404 `not_found`。
 
 ## PATCH /api/sessions/{id}
