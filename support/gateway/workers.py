@@ -277,10 +277,19 @@ def task_home(task_id: str) -> tuple[str, dict[str, str]]:
     return home, env
 
 
+# The origins whose approvals melo explains in their chat: the person's tasks and chores.
+EXPLAINED_ORIGINS: Final = frozenset({"user", "user_rule"})
+
+
 def _remembers(origin: str) -> bool:
-    """Whether a task of *origin* may use and record the person's approvals (the person's own)."""
+    """Whether a task of *origin* uses and records the person's approvals in its chat.
+
+    Only a task the person started: not a chore (``user_rule``), which runs
+    unwatched on a rule the person set before, nor any task another agent,
+    a channel or melo itself started.
+    """
     try:
-        return worker_tool_allowlist(origin).remember_approvals
+        return origin == "user" and worker_tool_allowlist(origin).remember_approvals
     except TaskPolicyError:
         return False
 
@@ -2113,7 +2122,8 @@ class TaskWorkers:
 
             async def paused_ask(request: ApprovalRequest) -> ApprovalDecision:
                 answer = self.broker.begin(task_id, request)
-                if self.on_ask is not None:
+                # Only the person's tasks and chores: another's goal never reaches the model.
+                if self.on_ask is not None and record.origin in EXPLAINED_ORIGINS:
                     self.on_ask(task_id, request)
                 try:
                     point = await self._hold_approval(task_id, runner, request)

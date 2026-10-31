@@ -34,6 +34,8 @@ HIGH = ActionReview("high", ("install",), ("Installs requests with pip.",))
 SELF = ActionReview("high", ("self",), ("Changes localmelo's settings.",))
 CLICK = ActionReview("high", ("credentials",), ("Reads your keys.",))
 WORDS_ALLOWED = ActionReview("routine", ("download",), ("Downloads a file.",))
+# An undecided call the user's model settled as routine: a model's reading, not the rules'.
+MODEL_SETTLED = ActionReview("routine", (), ("melo could not tell.",), by="model")
 
 
 def request(
@@ -93,10 +95,16 @@ def owned(
     return OwnedTaskPolicy(inner, ledger, task, owner, on_use)
 
 
-def test_reusable_only_for_reviewed_calls_with_no_category() -> None:
-    assert reusable(ROUTINE) and reusable(UNDECIDED)
-    for review in (None, HIGH, SELF, CLICK, WORDS_ALLOWED):
-        assert not reusable(review)
+def test_reusable_only_for_a_routine_call_the_rules_read() -> None:
+    for tool in ("python_exec", "shell_exec", "file_write", "file_edit"):
+        assert reusable(tool, ROUTINE)
+    # Undecided: melo could not see what it runs (a file too big or unread, a
+    # command built at run time). Settled by a model: a model's reading.
+    for review in (None, UNDECIDED, MODEL_SETTLED, HIGH, SELF, CLICK, WORDS_ALLOWED):
+        assert not reusable("python_exec", review)
+    # A tool the rules do not read is routine to them without being read.
+    for tool in ("pay_invoice", "browser:example.com", "git_status", "file_read"):
+        assert not reusable(tool, ROUTINE)
 
 
 def test_the_ledger_matches_the_exact_step_in_the_same_folder(
@@ -120,20 +128,58 @@ def test_the_ledger_matches_the_exact_step_in_the_same_folder(
     assert ledger.match("chat-1", shell) is None
 
 
-def test_a_runner_whose_unreadable_changed_files_changed_asks_again(
+def test_a_step_melo_could_not_read_is_never_recorded_or_matched(
     folder: str,
 ) -> None:
-    # The step key is the command; the files a runner runs that melo could not read
-    # are compared as they were when the person allowed it.
+    # A runner over changed files melo could not read: the step key is only the command.
     def pytest_step(changed: tuple[str, ...]) -> ApprovalRequest:
         review = ActionReview("undecided", (), ("Runs lib.so.",), changed=changed)
         return request(folder, code="import pytest; pytest.main()", review=review)
 
     ledger = ApprovalLedger()
-    entry = ledger.record("chat-1", pytest_step(("lib.so:100:4",)))
-    assert ledger.match("chat-1", pytest_step(("lib.so:100:4",))) == entry
-    assert ledger.match("chat-1", pytest_step(("lib.so:200:9",))) is None
-    assert ledger.match("chat-1", pytest_step(())) is None
+    assert ledger.record("chat-1", pytest_step(("lib.so:100:4",))) is None
+    assert ledger.record("chat-1", request(folder, review=MODEL_SETTLED)) is None
+    assert ledger.entries("chat-1") == []
+    # The same command reviewed routine before does not cover it now.
+    ledger.record("chat-1", request(folder, code="import pytest; pytest.main()"))
+    assert ledger.match("chat-1", pytest_step(("lib.so:100:4",))) is None
+    assert ledger.match("chat-1", request(folder, review=MODEL_SETTLED)) is None
+
+
+async def test_an_undecided_step_asks_every_time(folder: str) -> None:
+    ledger = ApprovalLedger()
+    person = Asker(ApprovalDecision(True))
+    for task in ("task-1", "task-2"):
+        policy = owned(ledger, RememberingPolicy(person), task=task)
+        assert (await policy.decide(request(folder, review=UNDECIDED))).origin == "user"
+    assert len(person.asked) == 2 and ledger.entries("chat-1") == []
+
+
+async def test_a_tool_the_rules_do_not_read_asks_every_time(folder: str) -> None:
+    ledger = ApprovalLedger()
+    person = Asker(ApprovalDecision(True))
+    pay = {"to": "ACME Ltd", "amount": 100}
+    for task in ("task-1", "task-2"):
+        policy = owned(ledger, RememberingPolicy(person), task=task)
+        asked = request(folder, tool="pay_invoice", arguments=pay)
+        assert (await policy.decide(asked)).origin == "user"
+    assert len(person.asked) == 2 and ledger.entries("chat-1") == []
+
+
+async def test_an_allow_answered_after_its_chat_went_records_nothing(
+    folder: str,
+) -> None:
+    ledger = ApprovalLedger()
+    owners = iter(["chat-1", "main"])  # the chat is deleted while the person decides
+
+    async def owner() -> str | None:
+        return next(owners, "main")
+
+    policy = OwnedTaskPolicy(
+        RememberingPolicy(Asker(ApprovalDecision(True))), ledger, "t", owner
+    )
+    assert (await policy.decide(request(folder))).origin == "user"
+    assert ledger.entries("chat-1") == [] and ledger.entries("main") == []
 
 
 def test_high_impact_steps_are_never_recorded_or_matched(folder: str) -> None:
@@ -252,19 +298,20 @@ async def test_auto_allow_once_stays_one_step_once(folder: str) -> None:
     assert review_mode(policy, blocked) == "auto"
 
 
-async def test_an_earlier_approval_runs_a_blocked_auto_step(folder: str) -> None:
+async def test_an_auto_block_stays_a_block_whatever_was_allowed(folder: str) -> None:
+    # Auto blocks only steps that are not routine, and only routine ones are reusable.
     ledger = ApprovalLedger()
-    ledger.record("chat-1", request(folder, review=UNDECIDED))
+    assert ledger.record("chat-1", request(folder, review=UNDECIDED)) is None
+    ledger.record("chat-1", request(folder))
     policy = owned(ledger, AutoPolicy(task=True))
     decision = await policy.decide(request(folder, review=UNDECIDED))
-    assert decision.origin == "earlier"
+    assert (decision.allow, decision.origin) == (False, "auto")
 
 
 async def test_in_auto_what_auto_runs_runs_as_it_would(folder: str) -> None:
     ledger = ApprovalLedger()
     ledger.record("chat-1", request(folder))
     blocked = request(folder, code="print(2)", review=UNDECIDED)
-    ledger.record("chat-1", blocked)
     auto = AutoPolicy(task=True)
     uses: list[ApprovalUse] = []
     policy = owned(ledger, auto, uses=uses)
@@ -275,10 +322,10 @@ async def test_in_auto_what_auto_runs_runs_as_it_would(folder: str) -> None:
     once = await policy.decide(request(folder, code="print(2)", review=UNDECIDED))
     assert (once.origin, once.reason) == ("user", ALLOWED_ONCE)
     assert uses == []
-    # Then only the person's earlier approval runs it.
+    # Then it is blocked again: nothing recorded it.
     again = await policy.decide(request(folder, code="print(2)", review=UNDECIDED))
-    assert again.origin == "earlier" and len(uses) == 1
-    assert len(ledger.entries("chat-1")) == 2
+    assert (again.allow, again.origin) == (False, "auto") and uses == []
+    assert len(ledger.entries("chat-1")) == 1
 
 
 async def test_the_owner_chats_grant_covers_its_tasks_routine_calls(

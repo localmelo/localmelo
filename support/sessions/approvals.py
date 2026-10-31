@@ -35,6 +35,7 @@ from localmelo.melo.contracts.approvals import (
     review_mode,
 )
 from localmelo.melo.contracts.review import (
+    RULED_TOOLS,
     ActionReview,
     covered_by_grant,
     offers_grant,
@@ -289,14 +290,24 @@ LEDGER_KEPT: Final = 200
 USES_KEPT: Final = 500
 
 
-def reusable(review: ActionReview | None) -> bool:
-    """Whether an approval of a call reviewed as *review* may run the same step again.
+def reusable(tool_name: str, review: ActionReview | None) -> bool:
+    """Whether an approval of a call of *tool_name* reviewed as *review* may run the same step again.
 
-    Only a call the rules reviewed and found in no category: never a
-    high-impact one (#279), never ``self`` or a click-only category, never a
-    call nothing reviewed. Those ask every time.
+    Only a call of a tool melo's rules read (:data:`RULED_TOOLS`) that the
+    rules themselves found routine, in no category. Never a high-impact one
+    (#279: ``self`` and the click-only categories included); never an
+    undecided one (melo could not see what it runs: a file too big or not
+    read, a command built at run time); never one a model settled; never a
+    tool the rules do not read (a network or MCP tool is routine to them
+    unread); never a call nothing reviewed. Those ask every time.
     """
-    return review is not None and review.verdict != "high" and not review.categories
+    return (
+        tool_name in RULED_TOOLS
+        and review is not None
+        and review.verdict == "routine"
+        and review.by == "rules"
+        and not review.categories
+    )
 
 
 def _folder(workspace_root: str | None) -> str:
@@ -325,9 +336,6 @@ class RecordedApproval:
     categories: tuple[str, ...]
     preview: str
     at: float
-    # The changed files a runner runs that melo could not read, as they were
-    # (``ActionReview.changed``): not in the step key, so compared here.
-    changed: tuple[str, ...] = ()
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -360,9 +368,8 @@ class ApprovalLedger:
     An entry is the person's Allow of one exact step (its tool, its
     :func:`request_step` key and its folder) in a chat or in a task the chat
     owns. :meth:`match` finds an entry for a request of the same tool, key
-    and folder, whose runner reads the same unreadable changed files as they
-    were, when neither review is high-impact (:func:`reusable`); the model
-    never decides what matches. Memory only, like grants.
+    and folder when both reviews are routine by the rules (:func:`reusable`);
+    the model never decides what matches. Memory only, like grants.
     """
 
     def __init__(self, clock: Callable[[], float] = time.time) -> None:
@@ -375,7 +382,7 @@ class ApprovalLedger:
     def record(self, chat_id: str, request: ApprovalRequest) -> RecordedApproval | None:
         """Keep the person's Allow of *request*; ``None`` when it may never be used again."""
         review = request.review
-        if review is None or not reusable(review):
+        if review is None or not reusable(request.tool_name, review):
             return None
         key = request_step(request)
         entries = self._entries.setdefault(chat_id, OrderedDict())
@@ -391,7 +398,6 @@ class ApprovalLedger:
             review.categories,
             request.preview,
             self._clock(),
-            tuple(review.changed),
         )
         entries[entry.entry_id] = entry
         while len(entries) > LEDGER_KEPT:
@@ -400,16 +406,14 @@ class ApprovalLedger:
 
     def match(self, chat_id: str, request: ApprovalRequest) -> RecordedApproval | None:
         """The entry of chat *chat_id* that allowed exactly *request*'s step, else ``None``."""
-        review = request.review
-        if review is None or not reusable(review):
+        if not reusable(request.tool_name, request.review):
             return None
         key, folder = request_step(request), _folder(request.workspace_root)
         for entry in self._entries.get(chat_id, {}).values():
-            same = (entry.tool, entry.step_key, entry.folder, entry.changed) == (
+            same = (entry.tool, entry.step_key, entry.folder) == (
                 request.tool_name,
                 key,
                 folder,
-                tuple(review.changed),
             )
             if same and entry.verdict != "high" and not entry.categories:
                 return entry
@@ -468,9 +472,10 @@ class OwnedTaskPolicy:
     owner chat holds a grant of runs as under a session grant, and a call
     whose exact step the person allowed in that chat or one of its tasks
     runs with origin ``earlier``; *on_use* is told. When *inner* asks the
-    person and they allow, the approval is recorded in the owner chat. In
+    person and they allow, the approval is recorded in the chat that owns
+    the task when they answer (nothing, when that chat went meanwhile). In
     Auto, *inner* decides first (it asks nobody); only a step it blocked
-    runs on a recorded approval. Auto's Allow once is never recorded: it
+    could run on a recorded approval, and it blocks none that is reusable. Auto's Allow once is never recorded: it
     stays one exact step, once. *owner* gives the chat that owns the task
     now. A task the person did not start is never wrapped (its approvals
     are never remembered).
@@ -528,7 +533,9 @@ class OwnedTaskPolicy:
         self._chat = chat = await self._owner()
         if self._auto():
             # Auto asks nobody: what it runs (a routine step, an Allow once)
-            # runs as it would; a step it blocked may match an approval.
+            # runs as it would. It blocks only steps that are not routine,
+            # which match no approval: kept so the person outranks Auto if
+            # that ever changes.
             decision = await self.inner.decide(request)
             if not chat or decision.allow or decision.origin != "auto":
                 return decision
@@ -546,6 +553,8 @@ class OwnedTaskPolicy:
             and decision.allow
             and decision.origin == "user"
             and decision.reason != ALLOWED_ONCE
+            # The chat that asked still owns the task: a deleted chat's Allow is not the main chat's.
+            and await self._owner() == chat
         ):
             self._ledger.record(chat, request)
         return decision
