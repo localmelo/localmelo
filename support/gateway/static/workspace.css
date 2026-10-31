@@ -1837,8 +1837,7 @@ dialog::backdrop {
 }
 /* The Live section keeps the chat's link buttons, not the card's bordered ones. */
 .task-live .link-button,
-.task-answer .link-button,
-.task-earlier .link-button {
+.task-answer .link-button {
   padding: 4px 8px 4px 0;
   border: 0;
   background: none;
@@ -2387,7 +2386,7 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .task-earlier-list { margin: 0; padding: 0; list-style: none; }
 .task-earlier-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--line); }
 .task-earlier-when { grid-column: 1; color: var(--ink-3); font-size: var(--text-caption); }
-.task-earlier-row > :is(.link-button, .task-earlier-revoked) { grid-column: 2; grid-row: 1 / span 2; font-size: var(--text-small); }
+.task-earlier-row > :is(button, .task-earlier-revoked) { grid-column: 2; grid-row: 1 / span 2; }
 .task-earlier-revoked { color: var(--ink-3); }
 @media (max-width: 700px) {
   .mode-picker { position: static; }

@@ -342,7 +342,9 @@ export function echoNodes({doc, echo, done = false, act}) {
   mark.setAttribute("aria-hidden", "true");
   const level = Number.isInteger(echo.level) && echo.kind !== "suggest" ? echo.level : null;
   // An echo the gateway worded keeps its words for the page's language; the level is the chip.
-  const own = saidText(echo.said);
+  // A step that ran on an earlier approval says its time as the page writes a time.
+  const approvedAt = echo.kind === "earlier" ? Number(echo.approved_at) : 0;
+  const own = approvedAt ? t("approvals.used", {time: clock(approvedAt)}) : saidText(echo.said);
   const words = level === null || own !== null ? own ?? echo.line : echo.line.replace(/ · [^·]+$/, "").replace(/ → [^→]+$/, " →");
   // The words, the level and the buttons wrap together, under the words.
   const body = el("div", "echo-body");

@@ -159,7 +159,7 @@
   "approval.willDo": "melo 要做的事",
   "approval.write": "写入 {path}？",
   "approval.youAsked": "你的请求：“{text}”",
-  "approvals.ran": "{title} 运行了：{step}",
+  "approvals.ran": "任务「{title}」运行了 {step}",
   "approvals.revoke": "撤回",
   "approvals.revokeStep": "撤回你对 {step} 的批准",
   "approvals.revoked": "已撤回：下次这一步会再问你",

@@ -4867,7 +4867,8 @@ test('a step that ran on an earlier approval keeps Revoke in its chat after the 
     'POST /front/echoes/20': {status: 200, body: {echo: echoRow(22, {echo: 'revoked', of: 20, task_id: 't', title: 'Check the notes', line: 'Revoked: that step asks you again next time'})}},
   }));
   await h.run('init()');
-  assert.match(h.text('messages'), /Used your approval from 14:02.*Check the notes ran: print\(1\).*Revoke/);
+  const approved = new Date((NOW - 600) * 1000).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+  assert.ok(h.text('messages').includes(`Used your approval from ${approved} Task “Check the notes” ran print(1) Revoke`));
   await findNode(h.element('messages'), (node) => node.tag === 'button' && node.textContent === 'Revoke').click();
   await settle();
   assert.deepEqual(h.net.callsTo('/front/echoes/20')[0].body, {do: 'revoke'});

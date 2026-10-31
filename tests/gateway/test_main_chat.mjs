@@ -381,8 +381,10 @@ test('a step that ran on an earlier approval is a row with Revoke, which outlive
   const doc = fakeDoc();
   const acted = [];
   mainChat.echoNodes({doc, echo: used, act: (echo, does) => acted.push([echo.id, does])});
-  assert.equal(doc.made.find((item) => item.className === 'echo-text').textContent, 'Used your approval from 14:02');
-  assert.equal(doc.made.find((item) => item.className === 'echo-sub').textContent, 'Check the notes ran: print(1)');
+  // The time as the page writes one, not the gateway's stored words.
+  const approved = new Date((now - 600) * 1000).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+  assert.equal(doc.made.find((item) => item.className === 'echo-text').textContent, `Used your approval from ${approved}`);
+  assert.equal(doc.made.find((item) => item.className === 'echo-sub').textContent, 'Task “Check the notes” ran print(1)');
   doc.made.find((item) => item.tag === 'button').listeners.click();
   assert.deepEqual(acted, [[20, 'revoke']]);
   // Revoked: the row that answers it takes its button away.

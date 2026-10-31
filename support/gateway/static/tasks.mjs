@@ -472,7 +472,6 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       row.append(step, node('span', t('tasks.earlier.when', {approved: clock(use.approved_at), ran: clock(use.at)}), 'task-earlier-when'));
       if (use.live) {
         const revoke = button(t('approvals.revoke'), () => revokeEarlier(use), Boolean(state.busy));
-        revoke.className = 'link-button';
         revoke.setAttribute('aria-label', t('approvals.revokeStep', {step: stepLine(use.preview, 60)}));
         row.append(revoke);
       } else {

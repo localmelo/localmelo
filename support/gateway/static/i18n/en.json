@@ -171,7 +171,7 @@
   "approval.willDo": "What melo will do",
   "approval.write": "Write {path}?",
   "approval.youAsked": "You asked: “{text}”",
-  "approvals.ran": "{title} ran: {step}",
+  "approvals.ran": "Task “{title}” ran {step}",
   "approvals.revoke": "Revoke",
   "approvals.revokeStep": "Revoke your approval of {step}",
   "approvals.revoked": "Revoked: that step asks you again next time",
