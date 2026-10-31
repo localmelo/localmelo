@@ -44,7 +44,7 @@
 
 - **提问，或交代工作。** 简短的问题由主对话直接回答。较大的工作（多个步骤、文件、调研、写作）它会作为任务开始，并显示一行：`Started: Plan the trip · Normal`。结果以卡片回到主对话。
 - **用代码认得的说法。** `/task …`，或发送按钮旁的 **Run as a task**，会立刻把这条消息作为任务开始，不调用模型。`stop`、`pause`、`resume` 或 `first` 加上任务名（`pause the slides`、`暂停 Fix CI`、`先做 slides`）会立刻改变那个任务，并带 **Undo**。
-- **级别用词表示。** Now、Today、Normal、Whenever、If idle、Later。由你的话决定："urgent"、"asap"、"尽快" 或今天的截止时间（`by 5pm`、`今天下午三点前`）为 Today，"no rush"、"不急" 为 Whenever，其余为 Normal。那一行的 **Change** 设定你自己的级别，之后不再自动改变。
+- **级别用词表示。** Now、Today、Normal、Whenever、If idle、Later。由你的话决定："urgent"、"asap"、"尽快"、今天的截止时间（`by 5pm`、`今天下午三点前`）或请求里任何位置的 "today"、"今天"（"not today"、"今天不用" 除外）为 Today，"no rush"、"不急" 为 Whenever，其余为 Normal。那一行的 **Change** 设定你自己的级别，之后不再自动改变。
 - **只有你自己的话能改变任务。** 只算你键入的文字；附加的文件、网页或任务报告里写着 "stop the slides" 不会改变任何东西：那一行显示 `Suggested: stop Slides`，点一下才会生效。
 - **较长的请求。** 主对话 4 步内没有办完的消息会成为任务（`This needs more than a quick answer, so I started it as a task.`）；如果是提问，会先问 **Start this as a task?**。你打字时，已完成的结果会等到你发送或停顿 10 秒再出现；需要你批准的会立刻出现。
 
