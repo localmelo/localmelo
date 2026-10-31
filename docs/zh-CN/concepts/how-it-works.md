@@ -76,6 +76,18 @@
 - **工具时限。** `shell_exec` 为 30 秒，`python_exec` 为 60 秒，`file_read`、`file_write` 和 `list_files` 为 60 秒，MCP 工具使用其服务器的 `timeout`。`shell_exec` 和 `python_exec` 在带进程组的子进程中运行；超时或取消会终止进程组。交互式界面给它们 10 分钟。Python API 的 `tool_timeout_s` 见[在目录中工作](../guides/python.md#work-in-a-directory)。
 - **运行时限**（`--timeout`）。这是对整次运行唯一的时限。到期时，运行以 `timeout` 结束。
 
+<a id="the-main-chat-and-tasks"></a>
+
+## 主对话与任务
+
+![主对话开始任务并显示它们的级别](../../assets/img/main-chat-tasks.webp)
+
+- 主对话是一次简短的运行：最多 4 步，不做反思，关闭思考，带有开始、列出和改变任务、读取文件和搜索记忆的工具。
+- 代码先读你的消息。`/task` 和控制短语（"pause the slides"、"暂停 Fix CI"）不需要调用模型；问候或简短的问题直接得到回答。
+- 较大的工作成为任务：一个 worker 在对话旁边运行它，级别由你的话决定，结果以卡片回来。
+- 4 步内没有办完的运行会以 "This needs more than a quick answer, so I started it as a task" 结束；如果你提的是问题，会先问你。
+- 旁支对话、直接运行和 worker 照旧运行上面完整的循环。
+
 <a id="code-layout"></a>
 
 ## 代码布局

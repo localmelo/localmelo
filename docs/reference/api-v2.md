@@ -801,6 +801,32 @@ chat's conversation never holds it. Its `data`:
   `front_id` names, else to the main chat; its cards still come to the main
   chat.
 
+### Echoes in the main chat
+
+What the main chat did with a task is an `attention.echo` session event in the
+main chat, with no turn. A message that code handles (`/task TEXT`, a turn body
+with `"as_task": true`, or a short control phrase that names one open task)
+starts no turn: `POST /api/sessions/{main}/turns` answers 200 with the echo.
+
+```json
+{"echo": {"id": 41, "ts": 1793405483.9, "echo": "started", "task_id": "3f9c2a71b0de", "title": "summarize the readme", "level": 2, "reason": "you asked for it", "line": "Started: summarize the readme · Normal", "typed": "/task summarize the readme"}}
+```
+
+- `echo` is `started`, `control` (with `action` and `undo`), `level` (with
+  `undo`), `suggest` (a change the person's own words did not ask for, with
+  `action` and maybe `level`), `ask` (`Start this as a task?`, with `text` and
+  `turn_id`), `undone` or `failed`. `line` is the plain words; `typed` is the
+  message it answers; `of` is the echo it answers.
+- `as_task` on any session but the main chat is 400 `invalid_request`. A
+  repeated `client_request_id` of a delegation answers the same echo.
+- The main chat's turns pages add `echoes`, paged as `cards` are.
+- `POST /api/front/echoes/{id}` with `{"do": "undo" | "apply" | "start" |
+  "level", "level"?: "Today" | "P1" | 1}` answers 200 `{"echo"}`: Undo a
+  `control` or `level` echo (a stop starts the task again as a new task),
+  apply a `suggest`, start an `ask`, or set a `started` or `level` echo's
+  task to the person's level. Undo, apply and start answer once (409
+  `already_answered`); an unknown echo or task is 404.
+
 ## GET /api/sessions/{id}/events
 
 A Server-Sent Events stream of the session's events: the stored ones after

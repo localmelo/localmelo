@@ -385,6 +385,21 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - 网关在读取主对话或列表时写入卡片，另外每分钟一次；审批在此之前已答复的等待卡片永远不会写入。主对话的事件流以 `attention.card` 帧送来新卡片。
 - 通过 `POST /api/tasks` 创建的任务属于它的 `front_id` 所指的对话，没有时属于主对话；它的卡片仍然来到主对话。
 
+<a id="echoes-in-the-main-chat"></a>
+
+### 主对话中的回执行
+
+主对话对任务做了什么，是主对话里一个不属于任何轮次的 `attention.echo` 会话事件。由代码处理的消息（`/task TEXT`、带 `"as_task": true` 的轮次请求体，或点名一个未结束任务的简短控制短语）不开始轮次：`POST /api/sessions/{main}/turns` 以 200 返回该回执。
+
+```json
+{"echo": {"id": 41, "ts": 1793405483.9, "echo": "started", "task_id": "3f9c2a71b0de", "title": "summarize the readme", "level": 2, "reason": "you asked for it", "line": "Started: summarize the readme · Normal", "typed": "/task summarize the readme"}}
+```
+
+- `echo` 为 `started`、`control`（带 `action` 和 `undo`）、`level`（带 `undo`）、`suggest`（本人的话没有要求的改变，带 `action`，可能带 `level`）、`ask`（`Start this as a task?`，带 `text` 和 `turn_id`）、`undone` 或 `failed`。`line` 是平实的话；`typed` 是它回应的消息；`of` 是它回应的回执。
+- 在主对话以外的会话上使用 `as_task` 返回 400 `invalid_request`。委派时重复的 `client_request_id` 返回同一条回执。
+- 主对话的每一页另带 `echoes`，分页方式与 `cards` 相同。
+- `POST /api/front/echoes/{id}` 带 `{"do": "undo" | "apply" | "start" | "level", "level"?: "Today" | "P1" | 1}`，返回 200 `{"echo"}`：撤销 `control` 或 `level` 回执（停止的撤销会以新任务重新开始它）、应用 `suggest`、开始 `ask`，或把 `started` 或 `level` 回执的任务设为本人的级别。撤销、应用和开始只答复一次（409 `already_answered`）；未知的回执或任务为 404。
+
 ## GET /api/sessions/{id}/events
 
 会话事件的 Server-Sent Events 流：先是起点之后已保存的事件，然后是实时事件。
