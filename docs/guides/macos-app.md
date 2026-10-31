@@ -2,7 +2,15 @@
 
 # The macOS app (development build)
 
-The arm64 development app is a local prototype for the Mac that builds it, not a notarized release or a Homebrew cask. It is signed ad hoc, so no Apple developer account is needed. It needs macOS, a Swift compiler, `uv`, and network access to obtain the pinned standalone Python and locked dependencies at build time. The Swift compiler is the release Xcode at `/Applications/Xcode.app` when that is installed, and otherwise the Command Line Tools that `xcode-select -p` names (`xcode-select --install` installs them). With neither, the build stops before it does any work and prints one line that says so. A `DEVELOPER_DIR` set in the environment chooses another developer folder. It does not install, start or download a model server. No signing identities or Xcode settings are changed.
+A native window around the web console, a menu-bar item and Melo on your desktop. It is a local prototype for the Mac that builds it: signed ad hoc, so no Apple developer account, and neither notarized nor a Homebrew cask.
+
+![The console that the app shows in its own window: a chat with a panel beside it.](../assets/img/panel.webp)
+
+## Install
+
+- You need macOS, `uv`, network access at build time and a Swift compiler: the release Xcode at `/Applications/Xcode.app`, else the Command Line Tools (`xcode-select --install`).
+- With neither compiler the build stops at once and prints one line that says so; a `DEVELOPER_DIR` in the environment picks another developer folder.
+- The build starts, installs and downloads no model server, and changes no signing identity or Xcode setting.
 
 From a checkout named `localmelo`, one command builds the app and installs it for your user, with no admin rights:
 
@@ -10,109 +18,96 @@ From a checkout named `localmelo`, one command builds the app and installs it fo
 uv run python scripts/build_macos_app.py --install
 ```
 
-It says in plain words what it did and what to do next: open localmelo from Spotlight or from `~/Applications`. The window, the Dock and the menus call the app localmelo; `LocalMelo.app` is only the file name. The app goes to `~/Applications/LocalMelo.app`, replacing an earlier copy only when its bundle id is `org.localmelo.app`; any other app of that name is refused and left alone. `~/.local/bin/melo` is linked to the app's launcher only when no other `melo` is on `PATH` (the checkout's own `.venv/bin/melo`, which `uv run` puts first on `PATH`, does not count); an existing `melo` is never replaced, and if `~/.local/bin` is not on your `PATH` the output gives the line to add. Run the command again, after quitting localmelo, to upgrade in place. The pinned Python archive is cached in `~/Library/Caches/LocalMelo` and checked against its SHA-256 on every use. To remove the app and the link, and nothing else (your settings and chats stay in `~/.cache/localmelo`):
+- Open localmelo from Spotlight or `~/Applications`: the app is `~/Applications/LocalMelo.app`, and an earlier copy is replaced only when its bundle id is `org.localmelo.app`.
+- `~/.local/bin/melo` links to the app's launcher only when no other `melo` is on `PATH` (the checkout's own `.venv/bin/melo` does not count); an existing `melo` is never replaced.
+- To upgrade, quit localmelo and run the same command again; the pinned Python is cached in `~/Library/Caches/LocalMelo`.
+
+To remove the app and the link, and nothing else (settings and chats stay in `~/.cache/localmelo`):
 
 ```bash
 uv run python scripts/build_macos_app.py --uninstall
 ```
 
-To build without installing, give a new path:
+To build without installing, give a new path; the builder never overwrites an existing one:
 
 ```bash
 uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 ```
 
-The builder refuses to overwrite an existing output. It copies a Python runtime and the gateway extra into the bundle, compiles the Swift host with the compiler named above (the summary says which tools it used, for example `Built with the Command Line Tools.`), compiles the bundled Python to bytecode, signs every Mach-O file inside it and then the bundle, and includes a relocatable `Contents/Resources/runtime/bin/melo`. The bytecode is hash-based and never checks the source, and neither the launcher nor a direct run of the bundled interpreter writes more of it, so the signature stays valid. The exact standalone interpreter archive is pinned and SHA-256 checked before extraction; wheel hashes are checked against the lock file. Build tools run quietly and print only when one fails.
+The pinned Python archive and the wheels are checked against their hashes. The build leaves out parts of the Python runtime that nothing needs (36 MB; the app is about 147 MB). Code on the bundled interpreter, such as the `python_exec` tool, cannot import them, and `python -m venv` needs `--without-pip`.
 
-Before the dependencies go in, the builder trims the Python runtime it copied. IDLE, tkinter and turtle with the Tcl/Tk libraries they load, pip, setuptools, ensurepip and 2to3 are left out, 36 MB in all, so the app is about 147 MB instead of 183 MB. A fixed list of paths below the runtime decides (`UNUSED` in `scripts/build_macos_app.py`); `unittest`, `distutils`, `venv` and `pydoc` stay, and so does everything the dependencies import. A listed path that leads out of the runtime through a link stops the build. Code that runs on the bundled interpreter, such as the `python_exec` tool, cannot import what was left out, and `python -m venv` needs `--without-pip`.
+## The window
 
-Until the console has loaded, the window shows a native starting view: Melo's sitting portrait, `Starting localmelo…` and a
-spinner beside a line that names the step (`Starting the local server`, `Signing in`, `Opening your workspace`). If the
-gateway cannot start within its 20-second deadline, or stops later, the same view says why, under `localmelo could not
-start` or `localmelo stopped`, and offers **Try Again**, which starts a new gateway, **Open Log**, which opens
-`~/Library/Logs/LocalMelo/gateway.log`, and **Quit**. When the gateway quits on its own, the view says so in plain
-words (`Its background service quit unexpectedly. Try Again starts it again; Open Log shows what happened.`); the signal
-or exit status that tells why goes to the log. A problem never shows a dialog and never closes the app. The
-window and the web view use the console's canvas colour, so a dark window does not flash white.
+- A starting view shows Melo, `Starting localmelo…` and the step: `Starting the local server`, `Signing in`, `Opening your workspace`.
+- If the gateway does not start within 20 seconds, or stops later, the view says why and offers **Try Again**, **Open Log** and **Quit**.
+- The log is `~/Library/Logs/LocalMelo/gateway.log`; a problem never shows a dialog or closes the app.
+- The first-run setup is the console's settings dialog; the app uses the usual config and chats in `~/.cache/localmelo`.
 
-The portrait is one of the five sitting pictures, 108 x 140 points and without a frame, so the transparent picture stands on the canvas in light and dark. Its mood follows the step: working (tongue out) while the server starts and while the app signs in, calm once the gateway is ready and the console is loading, and with a drooping ear in the failure view. The calm portrait blinks twice every 11 seconds: an eyes-closed patch fades in over its eyes for a tenth of a second. It stays still under Reduce Motion, in Low Power Mode, when the Mac runs hot, while the window is hidden or covered, and while the screen sleeps. VoiceOver skips it, because the title and the step line say the same in words.
+## The menu-bar item
 
-The menu-bar item is the localmelo logo, Melo's round picture (`docs/assets/icon_small.png`), in colour. It is not a template image, so the system does not tint it and it looks the same on a light bar and a dark bar. Idle, it is the logo alone. While something runs, the number running sits beside it, counting the console's chats, tasks, direct runs and terminal chats (the count of the console's header chip). While a chat or a task waits for your answer to a tool approval, a red dot with a ring appears beside the logo; the red is lighter on a dark bar, so the dot stands out on both. All of it comes from the app's 2-second health check, so an approval shows within one poll. VoiceOver and the hover tooltip say it in words (`localmelo, nothing running`, `localmelo, 3 running` or `localmelo, waiting for your approval`), and the start of a wait is announced. The menu starts with what runs (`Nothing running`, `3 running`) and, while an approval waits, **Waiting for your approval**, which opens the window on that chat or task. Below them are **Open localmelo**, **Settings…** (Command-comma in the app menu too; it opens the console's settings) and **Quit localmelo**. **Sign In Again** joins them only when it can help: after four sign-in attempts in a row have failed, while the console shows its Locked screen, and always in developer mode (the app asks the page, which says its mode and whether it is locked). If the logo is missing from the bundle, the item shows the text `localmelo` instead.
+| You see | It means |
+|---|---|
+| The logo alone | Nothing runs. |
+| A number beside the logo | That many chats, tasks, direct runs and terminal chats run. |
+| A red dot with a ring | A chat or task waits for your answer to an approval. |
 
-The app's icon is Melo, the localmelo mascot, as the README shows it. It is a committed file, `macos/assets/AppIcon.icns`, and the build only copies it into the bundle as `LocalMelo.icns`. The plist's `CFBundleIconFile` names it, so the Dock, Spotlight and every dialog, the quit dialog included, show it instead of the generic icon. The menu-bar item's logo is committed the same way, as `macos/assets/MenuBarLogo.png` and `MenuBarLogo@2x.png` (18 and 36 px, rounded corners), and copied too; the build has no image code.
+- The menu lists what runs, **Waiting for your approval** (it opens that chat or task), **Open localmelo**, **Settings…** and **Quit localmelo**.
+- **Sign In Again** appears only when it can help: after four failed sign-ins, on the Locked screen, and always in developer mode.
+- The app checks every 2 seconds, so an approval shows within one poll; VoiceOver and the tooltip say the same in words.
 
-The three files come from the pictures in `docs/assets`. The icon is `docs/assets/melo.png`, a 400 x 534 picture: the whole picture, scaled to the height of the rounded tile of the macOS icon grid (824 of 1024 px) and fading into a tile of its own paper colour, which comes from the picture's four corners, so no edge of the picture shows. Every size from 16 to 1024 px is made from the picture itself with a Lanczos filter. The 1024-px size shows the picture about 1.5 times larger than it is, so it is a little soft until larger artwork arrives. The logo is `docs/assets/icon_small.png`. When a picture changes, make the files again on a Mac and commit them:
+## Melo on your desktop
+
+![Melo the Akita gets up from rest and starts working.](../assets/img/pet-smooth.webp)
+
+Close the window, minimize it or hide the app (Command-H) and a small Melo lies at the bottom right of the screen, above the Dock. It goes away when the window comes back.
+
+| Melo | Meaning |
+|---|---|
+| Flopped on its belly, half-closed eyes | Resting: nothing runs. |
+| Glancing up, tongue out | Working: a chat, task, run or terminal chat runs. |
+| Wide sparkling eyes, a small hop | Waiting for your approval. |
+| Happy closed eyes, tail wagging | Done: a run just ended well (6 seconds). |
+| Sad brows | The last run did not finish (10 seconds), or localmelo stopped. |
+| Asleep, a small "z" drifting up | Nothing has happened for a minute; touching Melo wakes it. |
+
+- Click Melo to open the window, or the chat or task that waits for you; drag it anywhere, and it remembers its place on each screen.
+- Right-click (or Control-click) for **Open localmelo**, **Hide Melo** and **Quit localmelo**; **Show Melo** in the menu-bar menu brings it back.
+- It stays above other windows and on every Space, is not in the Dock or Command-Tab, and never takes the keyboard.
+- Its state is in `~/Library/Application Support/LocalMelo/pet.json`.
+- Under Reduce Motion, in Low Power Mode, when the Mac runs hot or while Melo is hidden, it stops moving and shows still pictures.
+
+## Quit and the gateway
+
+- Opening the app starts its own gateway with `melo --serve --port 0`: a free port, never one that other work reserves, and an existing listener is not adopted.
+- Closing the window leaves the gateway running; quitting asks only when something would stop, for example `Quitting stops what is running: 2 tasks and 1 chat.`
+- Direct runs and terminal chats belong to other processes and go on: `Not affected: 1 run and 1 terminal chat.`
+- If another gateway holds the console's store, stop it first; a background service is checked with `melo serve status` and removed with `melo serve uninstall`.
+- Quit the app before removing its bundle; for isolated manual tests, use a temporary `HOME`.
+
+## Safety
+
+- The launch identifier the app sends to its gateway is an instance check, **not authentication**: any local process can read it and replay it.
+- The gateway still requires sign-in: the app gets short-lived, single-use login codes, never logs them and never puts the bearer token in a URL.
+- Same-user processes and other localhost services are outside the boundary, and tools run as you; do not expose the gateway on a network or use it with untrusted tasks.
+- The console's folder chip talks to the app through one handler, `localmeloFolder`, for pages from the gateway's own address only; **Show in Finder** shows only a folder the gateway lists or you picked.
+
+## For developers
+
+The app icon, the menu-bar logo and the desktop pictures are committed files (`macos/assets`, `macos/art/akita`) that the build copies; make them again on a Mac when a source picture changes:
 
 ```bash
 uv run --with pillow python scripts/make_app_icons.py
 ```
 
-Pillow is fetched for that one run; it is not a dependency of localmelo, and `iconutil`, which ships with macOS, packs the icon.
-
-Melo, the localmelo mascot, is an Akita puppy, and when you put the app away Melo lies on your desktop. Close the window, minimize it or hide the app (Command-H) and a small Melo appears at the bottom right of the screen, above the Dock. It stays above other windows and on every Space (it does not ask to appear over a full-screen app), is not in the Dock or in Command-Tab, and never takes the keyboard from the app you are using. It goes away when the window comes back, whether you open it from the Dock, the menu bar, Spotlight or by clicking Melo.
-
-What Melo looks like says what localmelo is doing, from the same 2-second health check the menu-bar item uses:
-
-| Melo | Meaning |
-|---|---|
-| Flopped on its belly, half-closed eyes | Resting: nothing runs. This is the default. |
-| Glancing up with its tongue out, a small bob when work starts | Working: a chat, task, run or terminal chat runs. |
-| Wide sparkling eyes and a small round mouth, a small hop when it starts | Waiting for your approval. |
-| Happy closed eyes and an open smile, its tail wags | Done: a run just ended well (for 6 seconds). |
-| Sad brows and a frown | The last run did not finish (for 10 seconds), or localmelo stopped. |
-| Asleep on its side, belly-down or on its back, a small "z" drifting up | Nothing has happened for a minute; the pose changes every 3 minutes, and touching Melo wakes it. |
-
-Click Melo to open the window, or, while it waits for an approval, the chat or task that needs your answer. Drag it anywhere; it remembers its place for each screen, snaps onto the bottom edge when you drop it near, and comes back on screen when the screens change. Right-click (or Control-click) for **Open localmelo**, **Hide Melo** and **Quit localmelo**. **Hide Melo** hides it for good, across launches, and **Show Melo** then appears in the menu-bar menu, as the one way back (Melo shows again the next time the window is put away). What it remembers is in `~/Library/Application Support/LocalMelo/pet.json`: whether it is hidden, the screen it was last on and its spot on each screen.
-
-Melo breathes slowly while it lies there, bobs when work starts, hops when it waits, wags its tail when a run is done (the tail itself swings about its base, four times, and settles; the body stays), sends up a small "z" while it sleeps, and changes pictures without a hitch: nothing that is moving is cut off (the breath carries on, or eases to rest if the next mood breathes differently; the "z" fades out; a hop lands), a change waits up to 0.4 seconds for a rest point such as the end of a breath, and then Melo squashes a little and rises (0.35 seconds) while the new picture fades in over its low point (0.25 seconds; between sleeping poses a slower 0.9-second fade, without the squash). It blinks twice every 11 seconds when it rests (the lazy picture, the default when nothing runs) and on the calm lying picture the pet shows before the first health reply, and that one also flicks its right ear every 13 seconds (the ear itself turns about its base and back in under half a second; the head stays); the sleeping poses have their eyes shut already, so they do not blink, and the working, waiting, done and failed pictures do not blink or flick an ear. All of this is Core Animation, so the app does no drawing of its own: no timer runs for Melo, and its mood is worked out again when a health reply, a touch or a change of window comes in. Melo stops moving (the blink, the ear, the tail, the "z" and the breathing alike), and each mood shows its still picture, under Reduce Motion, in Low Power Mode, when the Mac runs hot, while Melo is covered or hidden, and while the screen sleeps; a change of picture is then a plain 0.2-second cross-fade, with no squash. VoiceOver reads Melo as a button that names its mood (`Melo, resting. Nothing running.`, `Melo, working. 2 running.`, `Melo, waiting for your approval.`, `Melo, done.`, `Melo, the last run did not finish.`, `Melo, localmelo stopped.`) and says nothing aloud when a wait starts: the menu-bar item already announces it, so VoiceOver does not read it twice.
-
-The pictures are in the bundle under `Contents/Resources/akita`: nine for the desktop pet (lying, resting lazily, and in three sleeping poses), five sitting ones for the first window and the web console's empty chat, small faces and the favicon sizes, and the pieces of the moves (an eyes-closed patch for the calm lying, resting and sitting pictures and for the small face, the finished picture cut into a body without its tail and the tail alone, and the calm lying picture cut into a body without its right ear and the ear alone), each at 1x and `@2x`. Like the icon they are committed files, in `macos/art/akita` (1.38 MB, transparent PNGs with a thin cream rim so the outline still shows on a dark desktop), and the build copies the folder as it is. `anchors.json` gives every picture's canvas, ground line and centre in points, so that a change of pose does not jump, and the marks of the moves: the eye band of each patch, the tail's and the ear's box and the pivot each swings about, and where each sleeping pose's "z" starts. A patch is cut from the picture a model redrew with closed eyes, and only where it differs from the original, so the blink changes nothing but the eyes; the build stops with a message if a redrawn picture does not lie on its original. The art masters stay outside the repository; to make the pictures again from them, on a Mac:
-
 ```bash
 uv run --with pillow python scripts/build_pet_assets.py --picks /path/to/picks.json
 ```
 
-The web console shows the same pictures, so the same script copies the ones it needs into `support/gateway/static/akita`: the idle portrait and its blink patch, the five faces, the idle face's patch and the three favicon sizes, 155 KB in all (see [Melo in the page](web-console.md#melo-in-the-page)). `uv run --with pillow python scripts/build_pet_assets.py --console-only` copies them again from `macos/art/akita` without the masters, and a test keeps the copies equal to their sources.
+- `picks.json` is `{"root": "DIR", "picks": {"lie-idle": "path/below/DIR.png", ...}}` for the 14 states named in the script; Pillow is fetched for that run only.
+- The web console shows the same pictures: `--console-only` copies them again into `support/gateway/static/akita`, without the art masters (see [Melo in the page](web-console.md#melo-in-the-page)).
+- `GET /api/health` also says how the last run ended, in `status.recent` (see the [API reference](../reference/api-v2.md)); Melo reads it.
 
-`picks.json` is `{"root": "DIR", "picks": {"lie-idle": "path/below/DIR.png", ...}}` for the 14 states named in the script. Pillow is fetched for that run only, and two runs give the same bytes. `GET /api/health` now also says how the last run ended, in `status.recent` (see the [API reference](../reference/api-v2.md)); Melo reads it to show a run that just finished.
-
-Opening the app starts its own gateway with `melo --serve --port 0`. The gateway binds a free port and prints it in its
-startup line, `Gateway: http://127.0.0.1:PORT`, which the app reads from the gateway's output; the whole start has a
-20-second deadline. The app never chooses a port, so it cannot collide with another gateway or with the ports that other work
-reserves, and it does not adopt an existing listener. If another gateway holds the console store, stop that gateway
-first. For isolated manual tests, use a temporary `HOME`. Closing the window leaves the gateway running;
-quitting asks only when something would stop: a chat or task runs or waits for your answer, or the app cannot tell what runs.
-With nothing to stop, it quits at once. The quit dialog names what would stop, for example
-`Quitting stops what is running: 2 tasks and 1 chat.` (`Quitting stops 1 chat.` for one); direct runs and terminal chats
-belong to other processes and go on, which the dialog adds as `Not affected: 1 run and 1 terminal chat.` If the other gateway is the melo background
-service, `melo serve status` checks it and `melo serve uninstall` stops and removes it. Child output goes to
-`~/Library/Logs/LocalMelo/gateway.log`. This prototype has no log rotation.
-
-The app sends a random launch identifier to its child and checks it on a `GET /` probe, and again on main-frame page
-responses, to catch accidental port collisions. It also re-checks that the child still owns the port immediately
-before it sends each login code, so a listener that takes the port after the probe receives none, and the code is
-bound to the launch identifier, so only the app's own gateway accepts it. Its login request carries the identifier,
-so a gateway started by the app refuses a mismatched exchange. **This is an instance check, not
-authentication:** any local process can read the response header and replay it. The gateway separately requires
-authentication: for its own health checks and web view the app obtains short-lived, single-use login codes without
-logging them or placing the bearer token in a URL. The browser code is carried in a URL fragment, which the console
-removes after sign-in. It verifies the health cookie and retries a login that stores none. After a token rotation it
-signs in again and reloads; the app menu's **Sign In Again** action, which shows when sign-in has failed, does the same on demand. The codes come from a
-private in-bundle snippet; a documented `melo` command for this is A1b work, not yet available. Same-user processes and other localhost services remain outside the authentication boundary, and tools run as the user. Do not expose it on a network or use it with untrusted tasks.
-
-The console's folder chip reaches the app through one message handler, `localmeloFolder`. The app takes a
-message only from the gateway's own page (its main frame, over `http` from `127.0.0.1` on the gateway's port)
-and only a request it knows; a frame in the page, any other page and any other request is refused.
-**Choose a folder…** opens the system's folder panel and answers with the path the person picked, never one
-from the page. **Show in Finder** shows an existing folder only when the gateway lists it as a chat's
-(`GET /api/sessions`) or the person picked it in the panel; any other path is refused.
-
-The app and console use the regular localmelo config and session store under `~/.cache/localmelo`;
-first-run setup is the web console's settings dialog. The app does not install or remove the
-separate launchd service. Quit the app before removing its bundle.
-
-The WebKit integration tests open native windows and require a graphical macOS session. They
-are opt-in so a normal test run never steals focus; run them with a temporary HOME:
+The WebKit integration tests open native windows and need a graphical macOS session, so they are opt-in; run them with a temporary HOME:
 
 ```bash
 HOME="$(mktemp -d)" LOCALMELO_MACOS_UI_TESTS=1 nice -n 19 uv run pytest -q tests/test_macos_webview_integration.py

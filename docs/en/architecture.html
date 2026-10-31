@@ -145,7 +145,7 @@
             </a>
             <a class="node" id="a-chats" href="#c-chats" style="left:10px;top:232px;width:280px">
               <span class="node-title">Chats</span>
-              <span class="node-sub">side chats today · a main chat is planned</span>
+              <span class="node-sub">a main chat · side chats</span>
             </a>
             <a class="node" id="a-scheduler" href="#c-scheduler" style="left:335px;top:232px;width:190px">
               <span class="node-title">Scheduler</span>
@@ -206,9 +206,9 @@
             <h3>Chats</h3>
             <p>Each chat is a session whose turns survive a restart.</p>
             <ul>
-              <li>A turn runs on the chat's own agent, one turn at a time.</li>
-              <li>Before a turn, memory adds what it recalls for it.</li>
-              <li>The chat you are in is the scheduler's focus; a main chat that hands work to tasks is planned.</li>
+              <li>A turn runs on the chat's own agent, one turn at a time, with what memory recalls for it.</li>
+              <li>The console and the app open on a main chat; side chats sit under it, and it shows a card when one finishes or a task needs you.</li>
+              <li>The main chat handing work to tasks is planned.</li>
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/sessions.md">Sessions reference</a>
           </div>
@@ -340,13 +340,13 @@
             </thead>
             <tbody>
               <tr><td>Terminal</td><td>Chats, one-off tasks, approvals, and the run's progress facts in developer mode</td><td><span class="chip done">done</span></td></tr>
-              <tr><td>Console and app</td><td>Live chats, the panel beside a chat, Tasks and Workers views</td><td><span class="chip done">done</span></td></tr>
-              <tr><td>Memory across chats</td><td>Notes, an index of every chat, recall with sources, the Memory tab</td><td><span class="chip done">done</span></td></tr>
+              <tr><td>Console and app</td><td>A main chat with side chats, the panel beside a chat, tasks and workers</td><td><span class="chip done">done</span></td></tr>
+              <tr><td>Memory across chats</td><td>Notes kept when you ask or melo judges them worth keeping, recall with sources, the Memory tab</td><td><span class="chip done">done</span></td></tr>
               <tr><td>Tools and approvals</td><td>Five built-ins, MCP servers, review of high-impact calls</td><td><span class="chip done">done</span></td></tr>
               <tr><td>Browsing</td><td>Read and follow pages in Safari; acting on pages next</td><td><span class="chip building">building</span></td></tr>
               <tr><td>Scheduler and workers</td><td>Task queue, priorities, workers, an opt-in gate and the GPU lock</td><td><span class="chip testing">testing</span></td></tr>
               <tr><td>Reasoning notes</td><td>Compress modes that keep notes and recall them in the loop</td><td><span class="chip testing">testing</span></td></tr>
-              <tr><td>Main chat and side chats</td><td>One chat that knows you and hands work to tasks</td><td><span class="chip building">building</span></td></tr>
+              <tr><td>Main chat and side chats</td><td>The console and the app open on one main chat; handing work to tasks next</td><td><span class="chip building">building</span></td></tr>
               <tr><td>Learning while idle</td><td>Offline review of past work</td><td>planned</td></tr>
             </tbody>
           </table>

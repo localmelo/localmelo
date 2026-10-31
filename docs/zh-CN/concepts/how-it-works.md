@@ -2,11 +2,19 @@
 
 # localmelo 如何工作
 
-本页介绍一次运行中发生的事：步骤循环、尝试之间的反思、每一步提供的工具、记忆如何参与，以及时间限制如何工作。各参考页面列出选项；本页解释它们如何配合。
+一次运行中发生的事：步骤循环、尝试之间的反思、每一步提供的工具、记忆如何参与，以及时间限制如何工作。各参考页面列出选项；本页解释它们如何配合。
 
 <a id="the-run-loop"></a>
 
 ## 运行循环
+
+```text
+task
+ └─ step: build a request ─► model reply ─┬─ text, no tool call ─► the answer (completed)
+        ▲                                 └─ tool calls ─► checks ─► run ─► results
+        └───────────────── next step ◄─────────────────────────────────────┘
+an attempt that runs out of steps, or repeats itself ─► reflection ─► done, continue or stop
+```
 
 一次运行分步处理一项任务。每一步：
 
@@ -14,25 +22,33 @@
 2. 向模型提供工具列表（见[每一步的工具](#tools-in-each-step)）；
 3. 发送请求并读取回复。
 
-含有工具调用的回复会依次经过检查并执行调用。结果加入对话，然后开始下一步。只有文本、没有工具调用的回复是最终答案：运行以 `completed` 结束。
+含有工具调用的回复会依次经过检查并执行调用，结果加入对话。只有文本、没有工具调用的回复是最终答案：运行以 `completed` 结束。
 
 运行有预算：
 
 - 总共最多 30 步（`--steps`）。
 - 默认 `reflect` 策略下，步骤分为多次尝试，每次最多 10 步，一次运行最多 5 次尝试。
-- 使用 `--attempt-policy none` 时，一次运行只有一次尝试，最多 `--steps` 步。如果相同的工具调用或相同的错误连续三步重复，运行以 `stuck` 结束。
+- 使用 `--attempt-policy none` 时，一次运行只有一次尝试，最多 `--steps` 步；相同的工具调用或相同的错误连续三步重复，运行以 `stuck` 结束。
 
-既没有文本也没有工具调用的回复是空回复。localmelo 会要求模型继续，这一步仍计入预算。连续两个空回复会使运行以 `failed` 结束。
+有两种回复不算回答：
 
-只含模型未完成思考的回复绝不会被当作回答。思考模型用一个标记（`</think>`）结束思考；模型在标记之前停下时，服务器常会把思考作为回复的正文返回。localmelo 只凭事实识别这种回复，从不看措辞：一个始终没有关闭的 `<think>`；去掉思考后没有回答，且服务器统计了推理 token；流式回复的正文逐字重复服务器发送的推理；或者对于用标记结束思考的模型，回复既没有思考也没有标记。模型的格式取 `[cli.reasoning_tags]` 的声明（在终端中），否则取它先前回复所表现的格式：服务器在单独字段中发送了推理，并且这次回复统计的推理 token 为 0。回复的正文会成为它的思考（在终端和控制台中折叠显示），并按空回复处理：localmelo 再问一次，第二个回复仍没有回答时，运行以 `failed` 结束，错误为 `melo did not finish an answer`。
+- 既没有文本也没有工具调用的回复是空回复：localmelo 会要求模型继续，这一步仍计入预算，连续两个空回复会使运行以 `failed` 结束。
+- 只含模型未完成思考的回复绝不会被当作回答。localmelo 只凭事实识别它，从不看措辞：一个始终没有关闭的 `<think>`、去掉思考后没有回答、流式回复重复了服务器发送的推理，或者对于用标记（`</think>`）结束思考的模型，回复既没有思考也没有标记。模型的格式取 `[cli.reasoning_tags]` 的声明（在终端中），否则取它先前回复所表现的格式。
+- 这样的回复会成为它的思考，并按空回复处理：localmelo 再问一次，第二个回复仍没有回答时，运行以 `failed` 结束，错误为 `melo did not finish an answer`。
 
-使用 `--reasoning compress` 时，每个回复会在下一步之前被压缩成一条简短笔记：笔记记录回复的计划、发现、决定和未解决的问题，以及工具返回的内容；模型也可以在 `<note>` 块中自行编写。笔记、回复中的代码草稿和每次尝试的一份摘要，保存在对话窗口旁边仅驻留 RAM 的笔记存储中；待处理草稿在其工具结果之后固定一次。循环随后进行召回：每次尝试开始时，一块冻结的先前思考附在任务查询上；每个工具轮次附上一块窗口不再显示的笔记和草稿；`recall` 工具让模型请求更多内容。每个块都有边界，被标记为数据并经过候选项边界检查；首次携带它的请求将其记录在 `history.db` 的 `llm_calls.recall_json` 中。`legacy` 保持原有路径不变。见[循环中的召回](memory.md#recall-in-the-loop)。
+使用 `--reasoning compress` 时，每个回复会在下一步之前被压缩成一条简短笔记：
+
+- 笔记记录回复的计划、发现、决定和未解决的问题，以及工具返回的内容；模型也可以在 `<note>` 块中自行编写。
+- 笔记、回复中的代码草稿和每次尝试的一份摘要，保存在对话窗口旁边仅驻留 RAM 的笔记存储中。
+- 循环随后进行召回：每次尝试开始时，一块冻结的先前思考附在任务查询上；每个工具轮次附上窗口不再显示的笔记和草稿；`recall` 工具让模型请求更多内容。
+- 每个块都有边界，被标记为数据并经过候选项边界检查；首次携带它的请求将其记录在 `history.db` 的 `llm_calls.recall_json` 中。
+- `legacy` 保持原有路径不变。见[循环中的召回](memory.md#recall-in-the-loop)。
 
 <a id="reflection"></a>
 
 ## 反思
 
-默认 `reflect` 策略下，一次尝试用完步骤，或连续三步重复自身后，会进行反思。这是一次不带工具的请求，要求模型回顾本次尝试并回复一个 JSON 对象：摘要、失败之处、有帮助的内容和一个行动。
+默认 `reflect` 策略下，一次尝试用完步骤，或连续三步重复自身后，会进行反思：这是一次不带工具的请求，要求模型回顾本次尝试并回复一个 JSON 对象（摘要、失败之处、有帮助的内容和一个行动）。
 
 | 行动 | 结果 |
 |---|---|
@@ -41,30 +57,38 @@
 | `stop` | 运行以 `gate_stopped` 结束。 |
 | `decompose` | 任务应当拆分。localmelo 不拆分任务，因此运行以 `gate_stopped` 结束。 |
 
-只有当反思认为任务仍可行，并提出具体且新的下一步时，继续判定才允许运行继续。否则运行以 `gate_stopped` 结束。使用 `--reflection-gate utility` 时，也就是现有默认判定方式出现前的行为，反思还必须估计再次尝试的收益超过成本和重复风险：根据它自己的估计计算的效用分数必须达到 0.1。[评测](../project/evaluations.md#reflection-gate)在编程练习上比较了两种判定和不使用反思的运行。
-
-开发者设置 `--reflection-gate patient` 与 `flags` 只有一处不同：选择 `continue`、可行且具体但不新的下一步，仍会开始下一次尝试，每次运行一次。第二次这样的反思会像 `flags` 一样结束运行，反思的 `recommended_avoids` 照常传给下一次尝试。使用它以及使用 `answer_on_stop` 时，反思的 `useful_evidence`、`failed_hypotheses` 和 `recommended_avoids` 各最多保留 8 项，每项最多 300 个字符。
+- 只有当反思认为任务仍可行，并提出具体且新的下一步时，继续判定才允许运行继续；否则运行以 `gate_stopped` 结束。
+- 使用 `--reflection-gate utility`（该选项出现前的行为）时，反思还必须估计再次尝试的收益超过成本和重复风险：效用分数至少为 0.1（[评测](../project/evaluations.md#reflection-gate)比较了两种判定）。
+- 开发者设置 `--reflection-gate patient` 与 `flags` 只有一处不同：选择 `continue`、可行且具体但不新的下一步，仍会开始下一次尝试，每次运行一次。
+- 使用 `--reflection-gate patient` 以及使用 `answer_on_stop` 时，反思的 `useful_evidence`、`failed_hypotheses` 和 `recommended_avoids` 各最多保留 8 项，每项最多 300 个字符。
 
 关于反思的更多说明：
 
-- 只带着最新的反思继续：每次反思替换上一条。默认情况下，反思只作为一条普通消息加入对话一次，因此较早的那条会留到它随旧轮次一起被丢弃；使用 `--cache-layout v2` 时，它会被重建为每个请求的最后一条消息，提示中只有最新的一条。超过约 2,000 个字符的反思会被截短以适应预算，决定不变：先删去列表末尾的条目，再截短摘要末尾。使用 `--reflection-gate utility` 时，超长反思会直接结束运行，除非它选择了 `done`。
-- 如果步骤或尝试次数已经用尽，无法开始下一次尝试，反思会收到这一信息。它仍可选择 `done`；否则运行以 `budget_exhausted` 结束，并以反思给出的最佳答案作为结果。
-- 如果回复没有反思，即没有包含四种行动之一的 JSON 对象，localmelo 会再请求一次。如果第二次回复仍没有反思，则不带新反思开始下一次尝试；如果不能再开始，运行以 `budget_exhausted` 结束。见[运行结果](../reference/run-results.md#statuses)。
-- 如果回复的 JSON 只有一处常见小错误，例如字符串值后多出一个 `]`、JSON 没有对应转义的字符前多出的反斜杠，或被下一个键打断而没有闭合的数组，localmelo 会先修补再读取，无需第二次请求。如果解码器拒绝了第一次回复的 JSON，第二次请求会引用它的错误。
+- 只带着最新的反思继续：每次反思替换上一条。默认情况下，它只作为一条普通消息加入对话一次；使用 `--cache-layout v2` 时，它会被重建为每个请求的最后一条消息。
+- 超过约 2,000 个字符的反思会被截短以适应预算，决定不变（先删去列表末尾的条目，再截短摘要末尾）；使用 `--reflection-gate utility` 时，超长反思会直接结束运行，除非它选择了 `done`。
+- 如果无法开始下一次尝试，反思会收到这一信息；它仍可选择 `done`，否则运行以 `budget_exhausted` 结束，并以反思给出的最佳答案作为结果。
+- 如果回复没有反思（没有包含四种行动之一的 JSON 对象），localmelo 会再请求一次；如果第二次回复仍没有，则不带新反思开始下一次尝试，或以 `budget_exhausted` 结束（见[运行结果](../reference/run-results.md#statuses)）。
+- 如果回复的 JSON 只有一处常见小错误，例如字符串值后多出一个 `]`、JSON 没有对应转义的字符前多出的反斜杠，或被下一个键打断而没有闭合的数组，localmelo 会先修补再读取，无需第二次请求。
 
 <a id="tools-in-each-step"></a>
 
 ## 每一步的工具
 
-每一步都向模型提供一份工具列表，只有列表中的工具能在该步运行。默认列表包含所有内置工具，以及与任务匹配或模型已经在本次对话中调用过的少数其他工具。见[如何提供工具](../reference/tools.md#how-tools-are-offered)。
+- 每一步都向模型提供一份工具列表，只有列表中的工具能在该步运行。
+- 默认列表包含所有内置工具，以及与任务匹配或模型已经在本次对话中调用过的少数其他工具。
+- 见[如何提供工具](../reference/tools.md#how-tools-are-offered)。
 
 <a id="memory-in-the-loop"></a>
 
 ## 循环中的记忆
 
-每一步的规划请求都包含工作记忆中的最近对话。每个工具调用都会记录在历史记录中。在 `legacy` 下，启用记忆并配置嵌入后端时，请求还会包含与任务最接近的长期记忆；每个工具调用会被总结并写入长期记忆，运行结束时最新反思也会写入其中。运行结束时，运行所做的事（步骤数量以及工具调用的类别和标签）也会记入[程序记忆](procedures.md)，它不会被放入任何提示。限制和确切行为见[记忆如何工作](memory.md#how-memory-works)。
+- 每一步的规划请求都包含工作记忆中的最近对话，每个工具调用都会记录在历史记录中。
+- 在 `legacy` 下，启用记忆并配置嵌入后端时，请求还会包含与任务最接近的长期记忆；每个工具调用会被总结并写入长期记忆，运行结束时最新反思也会写入其中。
+- 运行结束时，运行所做的事（步骤数量以及工具调用的类别和标签）也会记入[程序记忆](procedures.md)，它不会被放入任何提示。
+- 在显式模式下，回复的笔记、尝试摘要和反思是长期记忆的**候选项**：只有信号准入时才会写入（排练、用户陈述、涵盖本次运行的用户请求，或对最终摘要使用 `--admit-on-outcome`）。
+- 经过检查的写入会对事实分类，与同类活动条目比较，并在存储的决策日志中记录一个动作（`NEW`、`UPDATE`、`RELATED`、`CONFLICT` 或 `IGNORE`）；所有存储文本都会先脱敏。
 
-在显式模式下，回复的笔记、尝试摘要和反思也都是长期记忆的**候选项**。只有信号准入时才会写入候选项：排练（后续重述、成功的工具调用根据它行动、反思的 `used_notes`）、用户陈述、涵盖本次运行的用户请求，或对最终摘要使用 `--admit-on-outcome`。经过检查的写入会对事实分类，与同类活动条目比较，并在存储的决策日志中记录一个动作（`NEW`、`UPDATE`、`RELATED`、`CONFLICT` 或 `IGNORE`）。文本经过目标为 `long` 的候选项边界，因此所有存储文本都会先脱敏。`legacy` 保持原来的路径：步骤摘要和反思提升行为不变。见[长期记忆](../../reference/memory.md#long-term-memory)（英文）。
+限制和确切行为见[记忆如何工作](memory.md#how-memory-works)和[长期记忆](../../reference/memory.md#long-term-memory)（英文）。
 
 <a id="timeouts"></a>
 
@@ -72,12 +96,20 @@
 
 三个限制分别适用于不同层级：
 
-- **对话请求超时**（120 秒；`ollama` 后端为 300 秒）。它限制 localmelo 等待模型服务器数据的时间，每次收到数据时计时器都会重置。localmelo 不流式接收回复，所以直到完整回复生成后才发送数据的服务器必须在超时内完成；思考较慢的模型可能需要更多时间。生成过程中持续发送保活字节的服务器不会超时。超时的请求会重试两次。见[对话请求超时](../reference/configuration.md#chat-request-timeout)。
-- **工具时限。** `shell_exec` 为 30 秒，`python_exec` 为 60 秒，`file_read`、`file_write` 和 `list_files` 为 60 秒，MCP 工具使用其服务器的 `timeout`。`shell_exec` 和 `python_exec` 在带进程组的子进程中运行；超时或取消会终止进程组。交互式界面给它们 10 分钟。Python API 的 `tool_timeout_s` 见[在目录中工作](../guides/python.md#work-in-a-directory)。
-- **运行时限**（`--timeout`）。这是对整次运行唯一的时限。到期时，运行以 `timeout` 结束。
+| 限制 | 取值 |
+|---|---|
+| 对话请求超时 | 120 秒（`ollama` 后端为 300 秒）：localmelo 等待模型服务器数据的时间，每次收到数据时计时器都会重置；超时的请求会重试两次。见[对话请求超时](../reference/configuration.md#chat-request-timeout)。 |
+| 工具时限 | `shell_exec` 为 30 秒，`python_exec` 为 60 秒，`file_read`、`file_write` 和 `list_files` 为 60 秒，MCP 工具使用其服务器的 `timeout`；交互式界面给前两者 10 分钟。`tool_timeout_s` 见[在目录中工作](../guides/python.md#work-in-a-directory)。 |
+| 运行时限（`--timeout`） | 对整次运行唯一的时限；到期时，运行以 `timeout` 结束。 |
+
+- `shell_exec` 和 `python_exec` 在带进程组的子进程中运行；超时或取消会终止进程组。
+- 直接运行、worker 和网关不流式接收回复，所以直到完整回复生成后才发送数据的服务器必须在超时内完成；思考较慢的模型可能需要更多时间。
 
 <a id="code-layout"></a>
 
 ## 代码布局
 
-代码分为两部分。`melo/` 包含智能体本身：运行循环、检查、工具执行器、记忆和模型提供方实现的接口。`support/` 负责连接外部：后端和模型提供方、网关及其网页工作区、MCP 服务器、配置和配置向导。它还包含离线比较记忆检索器的 `melo-retrieve` 命令，以及调度器（网页工作区的对话使用其门控；直接运行不使用）。见[架构页面](https://localmelo.github.io/localmelo/en/architecture.html)（英文）和[项目布局](https://github.com/localmelo/localmelo/blob/main/CONTRIBUTING.md#project-layout)（英文）。
+- `melo/` 包含智能体本身：运行循环、检查、工具执行器、记忆和模型提供方实现的接口。
+- `support/` 负责连接外部：后端和模型提供方、网关及其网页工作区、MCP 服务器、配置和配置向导。
+- 它还包含离线比较记忆检索器的 `melo-retrieve` 命令，以及调度器（网页工作区的对话使用其门控；直接运行不使用）。
+- 见[架构页面](https://localmelo.github.io/localmelo/en/architecture.html)（英文）和[项目布局](https://github.com/localmelo/localmelo/blob/main/CONTRIBUTING.md#project-layout)（英文）。

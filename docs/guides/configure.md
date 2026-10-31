@@ -1,13 +1,10 @@
 # Guide: Configure
 
-This guide covers the first run, the setup wizard, and how to update or uninstall localmelo. Read it when you set localmelo up on a machine or change its configuration; the settings are in the [configuration reference](../reference/configuration.md).
+Set localmelo up on a machine, change its configuration, update it or remove it. The settings are in the [configuration reference](../reference/configuration.md).
 
 ## First run
 
-In a terminal with no config file, `melo` offers the model server it finds,
-asks for a chat model, saves the answers and opens the interactive UI. When the
-server also lists an embedding model, it asks once whether to use it. Here
-oMLX runs on port 8000 with three models, and the first chat model is loaded:
+In a terminal with no config file, `melo` offers the model server it finds, asks for a chat model, saves the answers and opens the chat. Here oMLX runs on port 8000 with three models, and the first chat model is loaded:
 
 ```text
 $ melo
@@ -22,90 +19,65 @@ Found a model server at http://127.0.0.1:8000/v1 (3 models).
 Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 ```
 
-- A server on this computer that lists a model on port 8000, 8400, 11434 or
-  30000 is the one offered (a list, `Use this model server?`, with `Use it`
-  selected; `Use another server` asks for another URL); one with a chat model
-  comes first. Every question with a fixed set of answers is a list like this
-  one on a terminal: ↑ ↓ or a number move, Enter confirms, Esc takes the safe
-  answer (see [Questions are lists](terminal.md#questions-are-lists)). Listing a
-  server's models sends `GET /v1/models`. On a terminal the models are a list
-  to choose from (type to filter, ↑ ↓ to move, Enter to choose, Esc to
-  cancel; the list is erased once you choose) with the chat models only, as
-  above. Without a terminal, when answers are piped in, they are numbered
-  (`Model [1]:`), chat models first; an embedding or reranking model is
-  tagged `(embedding)` or `(reranking)` and is never the default. With
-  several chat models, setup
-  also asks which are in memory, with `GET /v1/models/status` (oMLX) and
-  `GET /api/ps` (Ollama), one second each and without a key: it marks the
-  loaded ones `(loaded)` and makes the first the default (highlighted), and
-  with none loaded there is no default: nothing is highlighted, so move to a
-  model with ↑ ↓ (or type a number, piped). Saving the choice asks
-  `GET /api/version` once, to tell an Ollama server apart, and `Use it` for
-  the embedding question sends one `POST /v1/embeddings` probe of the offered
-  model.
-- The embedding question (`Remember across chats with <model>?`) is asked only
-  when the list holds an embedding model other than the chat model. `Yes, with it`
-  saves three embedding values: the chat backend's key, its URL and the
-  offered model. A failed probe, `No, by words only` (or Esc), or
-  no candidate saves `embedding_backend = "none"` as before.
-- It saves an Ollama server (one that answers `GET /api/version`) as the
-  `ollama` backend, an oMLX server (its model listing names oMLX as the owner
-  of every model) as `omlx`, and any other OpenAI-compatible server as
-  `vllm`, and keeps the file's other settings. `omlx` is another name for the
-  `vllm` backend, so the settings stay in the `[vllm]` table. With no
-  embedding it writes:
+- melo looks on this computer at ports 8000, 8400, 11434 and 30000 (`GET /v1/models`) and offers the first server that lists a model, a chat model first.
+- Every question with a fixed set of answers is a list: ↑ ↓ or a number move, Enter confirms, Esc takes the safe answer (see [Questions are lists](terminal.md#questions-are-lists)).
+- The model list shows chat models only, and marks the ones the server says are in memory `(loaded)`: setup asks `GET /v1/models/status` (oMLX) or `GET /api/ps` (Ollama), one second each and without a key.
+- The first loaded model is the default; with none loaded there is no default, so move to a model with ↑ ↓ (or type a number, piped).
+- Piped answers are numbered instead (`Model [1]:`); an embedding or reranking model is tagged and is never the default.
+- No chat request is sent, so the server does not load a model for the check.
 
-  ```toml
-  # an Ollama server
-  chat_backend = "ollama"
-  embedding_backend = "none"
+If the server also lists an embedding model, one more question asks `Remember across chats with <model>?`:
 
-  [ollama]
-  chat_url = "http://127.0.0.1:11434/v1"
-  chat_model = "qwen3:8b"
-  ```
+- `Yes, with it` sends one `POST /v1/embeddings` probe and saves the chat backend's key, its URL and that model as the embedding backend.
+- `No, by words only` (or Esc), a failed probe or no candidate saves `embedding_backend = "none"`.
 
-  ```toml
-  # an oMLX server (another OpenAI-compatible server: "vllm")
-  chat_backend = "omlx"
-  embedding_backend = "none"
+What it saves, with no embedding model:
 
-  [vllm]
-  chat_url = "http://127.0.0.1:8000/v1"
-  chat_model = "Qwen3-8B-4bit"
-  ```
+```toml
+# an Ollama server
+chat_backend = "ollama"
+embedding_backend = "none"
 
-  `Yes, with it` writes the chat backend's embedding fields instead of `"none"`:
+[ollama]
+chat_url = "http://127.0.0.1:11434/v1"
+chat_model = "qwen3:8b"
+```
 
-  ```toml
-  chat_backend = "omlx"
-  embedding_backend = "omlx"
+```toml
+# an oMLX server (another OpenAI-compatible server: "vllm")
+chat_backend = "omlx"
+embedding_backend = "none"
 
-  [vllm]
-  chat_url = "http://127.0.0.1:8000/v1"
-  chat_model = "Qwen3-8B-4bit"
-  embedding_url = "http://127.0.0.1:8000/v1"
-  embedding_model = "Qwen3-Embedding-0.6B"
-  ```
+[vllm]
+chat_url = "http://127.0.0.1:8000/v1"
+chat_model = "Qwen3-8B-4bit"
+```
 
-  The `ollama` backend chats on Ollama's native API with a 300 s request
-  timeout; `vllm` and `omlx` use 120 s. A `chat_url` with or without `/v1` works for
-  Ollama: its version endpoint is asked at the root, and chat requests drop
-  a trailing `/v1`.
+`Yes, with it` writes the chat backend's embedding fields instead of `"none"`:
 
-- With no server running, it prints the commands that start one (oMLX on a Mac,
-  Ollama elsewhere) and asks `No model server found. What now?` (`Check
-  again`, `Enter an address`, `Quit`); the web console's setup card shows the
-  same commands and looks again every three seconds.
-- A server that does not answer, refuses the request without an API key,
-  or lists no models is named with the reason, and you can try again, start
-  without saving or quit (a list, `What now?`). localmelo never asks for an API key for a local
-  server.
-- The [command-line reference](terminal.md#first-run) has every prompt and
-  reason.
+```toml
+chat_backend = "omlx"
+embedding_backend = "omlx"
 
-For an embedding model, see [Set up an embedding model](embedding.md). For a
-cloud API or another backend, use the wizard.
+[vllm]
+chat_url = "http://127.0.0.1:8000/v1"
+chat_model = "Qwen3-8B-4bit"
+embedding_url = "http://127.0.0.1:8000/v1"
+embedding_model = "Qwen3-Embedding-0.6B"
+```
+
+- A server that answers `GET /api/version` is saved as `ollama`, one whose model list names oMLX as `omlx`, any other as `vllm`; `omlx` is another name for `vllm`, so its settings stay in `[vllm]`.
+- `ollama` chats on Ollama's native API with a 300 s request timeout, `vllm` and `omlx` with 120 s; Ollama's `chat_url` works with or without `/v1`.
+- The file's other settings are kept.
+
+When no server is ready:
+
+- With none running, melo prints the commands that start one (oMLX on a Mac, Ollama elsewhere) and asks `No model server found. What now?` (`Check again`, `Enter an address`, `Quit`); the web console's setup card shows the same commands.
+- A server that does not answer, needs an API key or lists no models is named with the reason, and you can try again, start without saving or quit.
+- localmelo never asks for an API key for a local server.
+- [The terminal guide](terminal.md#first-run) lists every prompt and reason.
+
+For an embedding model, see [Set up an embedding model](embedding.md). For a cloud API or another backend, use the wizard.
 
 ## Set up with the wizard
 
@@ -114,54 +86,23 @@ melo setup                  # the wizard, then the interactive UI
 melo --serve --reconfigure  # the wizard, then the gateway
 ```
 
-The wizard asks for a chat backend, its URL and model, and an embedding
-backend; [Save a configuration](../start/quickstart.md#save-a-configuration) lists the
-prompts. It sends a short test request to each server, saves the config
-file, and then opens the interactive UI or, with `--serve --reconfigure` (the
-one setup that has no command-word form), starts the gateway. Press Ctrl+C to
-stop the gateway.
+- The wizard asks for a chat backend, its URL and model, and an embedding backend; [Save a configuration](../start/quickstart.md#save-a-configuration) lists the prompts.
+- It sends a short test request to each server, saves the config file, then opens the chat or, with `--serve --reconfigure`, starts the gateway (Ctrl+C stops it).
+- In default mode `melo setup` starts as the first run does (`Found a model server at …`, `Use this model server?`); the full menu follows `Use another server`, developer mode or a saved backend with no server found.
+- In developer mode (`[ui] mode = "developer"`; `melo config set ui.mode developer` saves it) the full menu comes first.
+- Each question offers the file's current value in brackets: press Enter to keep it.
 
-In default mode, `melo setup` starts as the first
-run does: it prints `Found a model server at …` and asks `Use this model
-server?`. The full menu follows only after `Use another server`, in developer mode (`[ui] mode = "developer"`;
-`melo config set ui.mode developer` saves it), or when no server is found
-while a backend is saved. With nothing saved and no server running, it prints the
-commands that start one instead. `melo serve` before any setup does the same.
+When something fails:
 
-- Each question offers the config file's current value in brackets: press
-  Enter to keep it. The embedding question offers the saved backend; with
-  none saved, the first candidate the chat server lists, else `None`.
-- When no embedding is saved, the wizard lists the chat server's models
-  once (only for a local chat backend) and appends each embedding model it
-  finds as options `6`, `7`, … after the fixed five. The first candidate is
-  the default; choosing one saves the chat backend's URL and model and asks
-  no endpoint question. The fixed `1`–`4` options still ask for another
-  server's URL and model, and `5` is `None`. A server whose list cannot be
-  read falls back to those five silently; the end-of-wizard check reports a
-  dead server.
-- When the chat server's check fails, the wizard prints `Probe failed: …`
-  and asks `The check failed. What now?` as a list: `Try again` asks for the
-  URL and model again, with what you typed as the defaults; `Save anyway`
-  saves; `Cancel setup`, selected first, and Esc save nothing. Piped, the
-  question is `[r]etry, [s]ave anyway, [N]o [N]:` and `r`, `s` and `N` or
-  Enter answer it.
-- An HTTP 401 or 403 from a local server adds a note: localmelo sends no
-  API key to local servers. In oMLX, turn on
-  **Allow inference without API key**.
-- When the embedding server's check fails, the wizard saves with embedding
-  off (`embedding_backend = "none"`, no long-term memory) and says so. A
-  detected model that fails its probe is not left in the config's table.
-- `melo serve` runs the wizard by itself when there is no config file.
-- Without a terminal the wizard reads its answers from stdin. With no
-  config file and no terminal, `melo serve` exits with code 1 and one
-  line on stderr instead of waiting for answers that cannot come, as under
-  launchd. Pass `--force` with `melo serve` to start the
-  gateway anyway and configure it over `/api/settings`.
-- Run the wizard again to change backends. It keeps the other settings it
-  knows, such as `request_timeout_s` and `extra_body`, and rewrites the file
-  atomically in the current format (following a symlink when `config.toml`
-  is one, keeping an existing file's permissions, and creating a new file
-  with mode `0600`); comments and unknown keys are dropped.
+- A failed check of the chat server prints `Probe failed: …` and asks `The check failed. What now?`: `Try again`, `Save anyway` or `Cancel setup` (selected first; Esc also saves nothing). Piped, the question is `[r]etry, [s]ave anyway, [N]o [N]:`.
+- An HTTP 401 or 403 from a local server adds a note that localmelo sends no API key to local servers; in oMLX, turn on **Allow inference without API key**.
+- A failed check of the embedding server saves `embedding_backend = "none"` (no long-term memory) and says so.
+
+More about the wizard:
+
+- `melo serve` runs the wizard by itself when there is no config file; with no terminal either it exits with code 1 and one line on stderr, and `--force` starts the gateway anyway, to be configured over `/api/settings`.
+- Run the wizard again to change backends: it keeps settings it knows, such as `request_timeout_s` and `extra_body`, and rewrites the file atomically with mode `0600` for a new file; comments and unknown keys are dropped.
+- When more embedding models are found, the wizard appends them as options `6`, `7`, … after the fixed five; the first is the default and asks no endpoint question.
 
 ## Update localmelo
 
@@ -172,13 +113,10 @@ git pull
 uv sync --extra gateway
 ```
 
-If you installed with pip, repeat the last command of
-[Install with pip](../start/quickstart.md#install-with-pip) instead of `uv sync`.
+If you installed with pip, repeat the last command of [Install with pip](../start/quickstart.md#install-with-pip) instead of `uv sync`.
 
 ## Uninstall localmelo
 
 1. If you installed the background service, run `melo serve uninstall`.
 2. Delete the clone.
-3. Delete `~/.cache/localmelo` (your configuration and saved memory),
-   `~/.localmelo` (the background service's logs), and any directory you
-   used with `LOCALMELO_MEMORY_DIR` or `--memory-dir`.
+3. Delete `~/.cache/localmelo` (your configuration and saved memory), `~/.localmelo` (the background service's logs), and any directory you used with `LOCALMELO_MEMORY_DIR` or `--memory-dir`.
