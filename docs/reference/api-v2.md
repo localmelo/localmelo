@@ -1630,6 +1630,17 @@ panel uses these routes.
 - `POST /api/memory/reindex` rebuilds the chat index from the chats (turns that ended
   before the last "forget everything" stay out) and gives every note a vector of the
   embedding model now set: `{"notes": 0, "turns": 48}`.
+- `POST /api/memory/sleep` (developer mode, `[ui] mode = "developer"`; else 404 `not_found`) runs one sleep and
+  answers its report. The optional body `{"variant": "rules"}` names the variant (`off`, `rules`; `model` and
+  `model+tags` are 501 `not_built`, anything else 400); without it `[memory] sleep` decides, and `off` does nothing.
+  The report is `{"run_id", "variant", "started", "ended", "model_calls", "aborted", "capped", "changes": [{"op",
+  "before_ids", "after_id", "text", "source_turn"}]}`: `op` is `O1` (duplicates merged: `before_ids` superseded by
+  `after_id`), `O2` (a newer typed value written and superseding `before_ids`) or `O3` (a lost fact written);
+  `capped` is true when more changes are left for the next run (at most 20 per run). There is no turn to carry a
+  `memory.sleep` event, so the report is this answer; the run's ids are kept in the memory folder for the undo.
+- `DELETE /api/memory/sleep/{run_id}` (developer mode) puts that run back: what it superseded is current again
+  and what it wrote is removed, `{"run_id", "restored", "removed", "kept"}` (`kept`: a note a later note replaced or
+  you reworded, left as it is). An unknown or undone run is 404.
 
 ## GET /api/sessions/{id}/runs
 

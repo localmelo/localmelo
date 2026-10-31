@@ -45,7 +45,7 @@ way, and the message says where the word goes (`melo serve -X gateway.port=9000`
 |---|---|---|
 | `melo setup` | Choose the model server again, then open the chat. | |
 | `melo config` | Show where the config file is and which settings differ from the defaults. | |
-| `melo memory VERB` | See and change the notes melo keeps: `list`, `forget`, `status`, `reindex`. | `list -n N`, `forget ID`, `forget -y` |
+| `melo memory VERB` | See and change the notes melo keeps: `list`, `forget`, `status`, `reindex` (and `sleep` in developer mode). | `list -n N`, `forget ID`, `forget -y` |
 | `melo serve [install\|uninstall\|status\|stop]` | Run the gateway, manage it as a login service (macOS), or stop the one that is running. | `--host H`, `-p`/`--port N`, `--playground`, `--force` |
 | `melo console [--reset]` | Open the web console in your browser, signed in; over SSH or when no browser starts, print a one-use link instead. `--reset` rotates the access token. | `--host H`, `-p`/`--port N` |
 | `melo task VERB` | The `melo-task` client. | as `melo-task` |
@@ -161,6 +161,7 @@ Memory tab lists (see [Memory across chats](../concepts/memory.md#memory-across-
 | `melo memory forget [ID] [-y]` | Forget note `ID`, or with no `ID` every note and the chat index (chats stay). It asks first: on a terminal a list with `Keep it` or `Keep everything` first, with piped input a numbered question read from stdin; Esc, end of input and Enter keep. `-y` does not ask. Exit 1 when nothing was forgotten. |
 | `melo memory status` | Whether memory across chats is on, the number of notes and of indexed chat turns, how it searches (by meaning with the embedding model, or by words only), the folder and the last reason the embedding model was not used. |
 | `melo memory reindex` | Rebuild the chat index from the chats and give every note a vector of the embedding model now set. Turns that ended before the last "forget everything" stay out. Exit 1 while `melo serve` or the app runs, since it owns the chats. |
+| `melo memory sleep [VARIANT]` | Developer mode only (`[ui] mode = "developer"`; else exit 2). Tidy the notes with sleep variant `off` or `rules` (`[memory] sleep` when omitted; `model` and `model+tags` exit 1, not built yet) and print the report: the run id and each change (`O1` merge, `O2` newer value, `O3` recovered fact). Exit 1 while `melo serve` or the app runs. |
 
 ```text
 $ melo memory list

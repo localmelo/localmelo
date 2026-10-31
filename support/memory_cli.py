@@ -4,6 +4,8 @@
 and the index of every chat, after a question; ``status`` says what is on and how
 much is kept; ``reindex`` rebuilds the chat index and gives every note a vector of
 the embedding model now set. The files are shared with the web console and the app.
+``sleep [VARIANT]`` (developer mode only) tidies the notes by the ``[memory] sleep``
+variant and prints what it changed.
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ from localmelo.support.sessions.store import (
     default_path,
 )
 
-VERBS = ("list", "forget", "status", "reindex")
+VERBS = ("list", "forget", "status", "reindex", "sleep")
 
 
 def note_origin(entry: StoredEntry) -> str:
@@ -132,24 +134,33 @@ async def _status() -> int:
     return 0
 
 
+async def _open_chats() -> SessionStore | int | None:
+    """The chat file (``None`` when there is none), or the exit code when it cannot be read."""
+    if not os.path.isfile(default_path("gateway")):
+        return None
+    chats = SessionStore(writer="gateway")
+    try:
+        await chats.open()
+    except StoreOwnedError:
+        print(
+            "melo: the console or the app is running and owns the chats; "
+            "stop it, then run this again.",
+            file=sys.stderr,
+        )
+    except SessionStoreError as exc:
+        print(f"melo: cannot read the chats: {exc}", file=sys.stderr)
+    else:
+        return chats
+    await chats.aclose()
+    return 1
+
+
 async def _reindex() -> int:
     memory = ChatMemory(config.load)
-    chats: SessionStore | None = None
+    chats = await _open_chats()
     try:
-        if os.path.isfile(default_path("gateway")):
-            chats = SessionStore(writer="gateway")
-            try:
-                await chats.open()
-            except StoreOwnedError:
-                print(
-                    "melo: the console or the app is running and owns the chats; "
-                    "stop it, then run this again.",
-                    file=sys.stderr,
-                )
-                return 1
-            except SessionStoreError as exc:
-                print(f"melo: cannot read the chats: {exc}", file=sys.stderr)
-                return 1
+        if isinstance(chats, int):
+            return chats
         notes, turns = await memory.reindex(chats)
         _, model = memory.embedding()
         how = (
@@ -158,7 +169,35 @@ async def _reindex() -> int:
         print(f"Indexed {turns} chat turns and gave {notes} notes a vector, {how}.")
         return 0
     finally:
-        if chats is not None:
+        if isinstance(chats, SessionStore):
+            await chats.aclose()
+        await memory.aclose()
+
+
+async def _sleep(variant: str | None) -> int:
+    memory = ChatMemory(config.load)
+    chats = await _open_chats()
+    try:
+        if isinstance(chats, int):
+            return chats
+        try:
+            report = await memory.sleep(variant, chats=chats)
+        except NotImplementedError as exc:
+            print(f"melo: {exc}", file=sys.stderr)
+            return 1
+        found = len(report.changes)
+        print(
+            f"Sleep {report.variant}: {found} change{'s' if found != 1 else ''}, "
+            f"{report.model_calls} model calls, run {report.run_id}"
+            + (f" ({report.aborted})" if report.aborted else "")
+            + (" (more are left for the next run)" if report.capped else "")
+        )
+        for change in report.changes:
+            before = ",".join(str(i) for i in change.before_ids) or "-"
+            print(f"  {change.op}  {before} -> {change.after_id}  {change.text}")
+        return 0
+    finally:
+        if isinstance(chats, SessionStore):
             await chats.aclose()
         await memory.aclose()
 
@@ -181,6 +220,16 @@ def main(argv: Sequence[str], prog: str = "melo memory") -> int:
     forget.add_argument("-y", "--yes", action="store_true", help="do not ask")
     verbs.add_parser("status", help="what is on and how much is kept")
     verbs.add_parser("reindex", help="rebuild the chat index from the chats")
+    try:
+        developer = config.load().ui.mode == "developer"
+    except Exception:  # a broken config file must not stop the other verbs
+        developer = False
+    if developer:
+        tidy = verbs.add_parser("sleep", help="tidy the notes (developer mode)")
+        tidy.add_argument("variant", nargs="?", choices=config.MEMORY_SLEEP)
+    elif rest[:1] == ["sleep"]:
+        print('melo: "memory sleep" needs [ui] mode = "developer"', file=sys.stderr)
+        return 2
     args = parser.parse_args(rest)
     if args.verb == "list":
         return asyncio.run(_list(args.n))
@@ -188,4 +237,6 @@ def main(argv: Sequence[str], prog: str = "melo memory") -> int:
         return _forget(args.id, args.yes)
     if args.verb == "status":
         return asyncio.run(_status())
+    if args.verb == "sleep":
+        return asyncio.run(_sleep(args.variant))
     return asyncio.run(_reindex())

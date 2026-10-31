@@ -107,6 +107,8 @@ class ConsoleOptions:
     bundle of PR 5. *detect_transport* answers the requests of
     ``GET /api/setup/detect`` in place of the network. *memory_dir* is the
     folder of memory across chats (``~/.cache/localmelo/memory`` when None).
+    *dev_routes* opens the developer-only routes (the memory sleep trigger) as
+    ``[ui] mode = "developer"`` does.
     """
 
     store_path: str | None = None
@@ -119,6 +121,7 @@ class ConsoleOptions:
     dev_reload: bool = False
     detect_transport: httpx.AsyncBaseTransport | None = None
     memory_dir: str | None = None
+    dev_routes: bool = False
     # The main chat's Agent; None builds the front (FrontAgent), or, when a
     # test passes its own *builder*, the main chat runs on that one.
     front_builder: AgentBuilder | None = None

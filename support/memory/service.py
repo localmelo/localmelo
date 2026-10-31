@@ -15,6 +15,9 @@ kept, :meth:`ChatMemory.keep_changes` replaces an active note whose subject the
 user gave a new value ("My weekly sync is on Friday."). When the reply says it
 noted something and no note was kept, :meth:`ChatMemory.keep_claims` keeps what
 the reply named, by the same checks, or flags the turn ``unsaved_claim``.
+With the developer setting ``[memory] sleep`` (:mod:`.sleep`),
+:meth:`ChatMemory.sleep` tidies the notes while melo is idle;
+:meth:`ChatMemory.undo_sleep` puts a run back.
 A query embedding that takes over :data:`EMBED_TIMEOUT_S` or fails falls back
 to BM25 for that turn. ``[memory] retriever`` picks how notes are found:
 ``auto`` (words, and meaning too with an embedding model), ``bm25``,
@@ -47,6 +50,7 @@ from localmelo.melo.memory.retrieval import Doc, LLMRetriever, send_from_provide
 from localmelo.melo.memory.retrieval.base import elapsed_ms
 from localmelo.melo.schema import EMPTY_REPLY_NUDGE, Message, ToolDef, split_thinking
 from localmelo.support.memory import records
+from localmelo.support.memory import sleep as sleeping
 from localmelo.support.memory.index import (
     ConversationIndex,
     Document,
@@ -1151,6 +1155,43 @@ class ChatMemory:
             return next(
                 (e for e in await store.active_entries() if e.id == record_id), None
             )
+
+    async def sleep(
+        self,
+        variant: str | None = None,
+        *,
+        now: float | None = None,
+        chats: SessionStore | None = None,
+    ) -> sleeping.SleepReport:
+        """Tidy the notes with sleep *variant* (``[memory] sleep`` when ``None``);
+        what it changed. *chats* gives it the turns to replay (without them,
+        only duplicates are merged). Raises ``NotImplementedError`` for a
+        variant not built yet; nothing happens with memory off or ``off``.
+        """
+        cfg = self._settings()
+        variant = variant or (cfg.memory.sleep if cfg is not None else "off")
+        store, index = self.stores()
+        variant = variant if self.enabled else "off"
+        if variant != "rules":  # off, or not built yet (it raises): no file is read
+            return await sleeping.run(store, index, [], variant=variant, now=now)
+        await self.drain()
+        until = await index.meta("sleep_until")
+        turns = (
+            await sleeping.sleep_turns(chats, max(until, await index.forgotten_at()))
+            if chats is not None
+            else []
+        )
+        async with self._lock:
+            report = await sleeping.run(
+                store, index, turns, variant=variant, now=now, until=until
+            )
+        logger.info("memory.sleep %s", report.to_json())
+        return report
+
+    async def undo_sleep(self, run_id: str) -> dict[str, Any] | None:
+        """Put the sleep run *run_id* back (:func:`sleeping.undo`); ``None`` when unknown."""
+        async with self._lock:
+            return await sleeping.undo(*self.stores(), run_id)
 
     async def pinned_quotes(self) -> str:
         """About you and Preferences in the user's words, newest first, bounded."""

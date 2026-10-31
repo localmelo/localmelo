@@ -168,6 +168,18 @@ Where did I live before?
 
 直接运行（`melo "<task>"`）、终端对话、worker 和基准测试既不召回也不记笔记，也没有 `remember` 工具；任务的运行器只把结果加入索引。
 
+<a id="tidying-notes-while-idle-developer-setting"></a>
+
+### 空闲时整理笔记（开发者设置）
+
+`[memory] sleep`（默认关闭；`-X memory.sleep=rules` 只对一次运行生效，`melo -h all` 会列出它）把上次整理以来的对话和笔记对照一遍，整理一次，不调用模型。`model` 和 `model+tags` 尚未实现。
+
+- 合并重复：同一主题、或含义和措辞相近的两条笔记，旧的被新的取代；你改写过的笔记不会被合并掉。
+- 漏掉的替换：你较新的一条消息对某条笔记的主题给出另一个值（笔记 "You go by Pip." 之后你说 "My name is Juno."），新值会写入并取代那条笔记。
+- 找回遗漏的事实：某一轮里明确而长期的陈述，如果该轮没有任何笔记记下，就会补写；回复声称已记下的轮次优先。
+- 每次写入都用你自己的原话做上文的检查，标记为 `sleep` 并带上运行和所读的轮次，从不删除；一次最多 20 处改动，水位线避免同一轮被读两次。
+- `melo memory sleep [VARIANT]`（仅开发者模式）和 `POST /api/memory/sleep` 运行整理并报告改动；`DELETE /api/memory/sleep/{run_id}` 把整次运行完整撤销。
+
 <a id="see-and-change-what-melo-remembers"></a>
 
 ### 查看和修改 melo 记得什么

@@ -9,6 +9,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Developer setting `[memory] sleep` (`off` by default; `rules` is built, `model`
+  and `model+tags` answer "not built yet"; `-X memory.sleep=rules`, listed by
+  `melo -h all`) tidies the notes in one pass over the chats since the last
+  pass, with no model call and at most 20 changes per run: it merges duplicate
+  notes (the older is superseded), writes the newer value when a newer message
+  states another value of a note's subject, and recovers a lasting statement no
+  note of its turn kept (turns whose reply claimed a save first). Every write
+  passes the checks of a note on the user's own words, is marked `sleep` with
+  its run and turn, and nothing is deleted; a note the user reworded is not
+  merged away. `melo memory sleep [VARIANT]` (developer mode) and
+  `POST /api/memory/sleep` run it and report the changes; `DELETE
+  /api/memory/sleep/{run_id}` puts a whole run back. Part of #363. [#NN]
 - `file_read` takes `start_line` and `end_line` (1-based, inclusive), so a long
   file is read in parts instead of being sliced through Python. A read that
   shows only part of a file now ends with how many lines the file has and the

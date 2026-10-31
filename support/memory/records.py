@@ -1067,8 +1067,14 @@ async def write(
     *,
     source: dict[str, Any],
     embed_model: str,
+    origin: str = "user",
+    created_at: float | None = None,
 ) -> list[Written]:
-    """Write each candidate as a record of *source* (session, turn, chat, surface)."""
+    """Write each candidate as a record of *source* (session, turn, chat, surface).
+
+    *origin* and *created_at* are what the store keeps as the row's source and
+    time; sleep writes as ``sleep``, at the time of the turn it read.
+    """
     written: list[Written] = []
     for cand, vector in zip(found, vectors, strict=True):
         active = await store.active_entries()
@@ -1089,12 +1095,12 @@ async def write(
         entry_id, actual = await store.apply(
             text=cand.text,
             kind=cand.kind,
-            source="user",
+            source=origin,
             admitted_by=cand.admitted_by,
             provenance=provenance,
             task_id="",
             session_id=str(source.get("session_id", "")),
-            created_at=time.time(),
+            created_at=created_at or time.time(),
             embedding=vector,
             action=action,
             target_id=target,

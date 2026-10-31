@@ -893,6 +893,8 @@ melo 对用户保存的笔记，以及打开或关闭跨对话记忆的开关（
 - `DELETE /api/memory/records?all=true` 忘记所有笔记并清空对话索引，返回 `{"notes": 12, "turns": 48}`。没有 `all=true` 时返回 400。对话本身不受影响。
 - `PUT /api/memory`，请求体 `{"on": false}`，切换并保存 `[memory] across_chats`；返回 `{"on": false}`。此后开始的对话会使用它。
 - `POST /api/memory/reindex` 从对话重建对话索引（上次“忘记全部”之前结束的轮次不会进入），并给每条笔记补上当前嵌入模型的向量：`{"notes": 0, "turns": 48}`。
+- `POST /api/memory/sleep`（开发者模式，`[ui] mode = "developer"`，否则 404 `not_found`）运行一次整理并返回报告。可选的请求体 `{"variant": "rules"}` 指定方式（`off`、`rules`；`model` 和 `model+tags` 返回 501 `not_built`，其他值返回 400）；不带请求体时由 `[memory] sleep` 决定，`off` 什么也不做。报告是 `{"run_id", "variant", "started", "ended", "model_calls", "aborted", "capped", "changes": [{"op", "before_ids", "after_id", "text", "source_turn"}]}`：`op` 为 `O1`（合并重复：`before_ids` 被 `after_id` 取代）、`O2`（写入较新的输入值并取代 `before_ids`）或 `O3`（写入找回的事实）；`capped` 为 true 表示还有改动留给下一次（一次最多 20 处）。没有轮次可承载 `memory.sleep` 事件，所以报告就是这次的返回；这次运行改动的编号保存在记忆文件夹里，用于撤销。
+- `DELETE /api/memory/sleep/{run_id}`（开发者模式）把那次运行撤销：它取代的笔记重新生效，它写入的笔记被移除，返回 `{"run_id", "restored", "removed", "kept"}`（`kept`：之后被更新的笔记取代、或被你改写的笔记，保持原样）。未知或已撤销的运行返回 404。
 
 ## GET /api/sessions/{id}/runs
 

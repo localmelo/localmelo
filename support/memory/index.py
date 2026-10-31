@@ -5,16 +5,19 @@ to :data:`DOC_CHARS` and passed through ``redact_secrets``; a task's carries
 its title too. Tool output, page text and attachments are never indexed. The
 file is ``index.db`` in the memory folder, mode 0600, shared by every surface;
 deleting a chat deletes its documents. It can be rebuilt from the session files.
+Its ``meta`` table also holds the sleep watermark (``sleep_until``), and
+``sleep_runs`` what each sleep run changed, by id, for its undo.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Final
+from typing import Any, Final
 
 import aiosqlite
 import numpy as np
@@ -47,6 +50,11 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 CREATE INDEX IF NOT EXISTS documents_session ON documents(session_id);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS sleep_runs (
+    run_id  TEXT PRIMARY KEY,
+    started REAL NOT NULL,
+    changes TEXT NOT NULL
+);
 """
 _COLUMNS: Final = (
     "id, session_id, turn, surface, kind, title, text, created_at, vector, embed_model"
@@ -199,6 +207,7 @@ class ConversationIndex:
         async with secure_deletes(conn):
             cur = await conn.execute("DELETE FROM documents")
             if mark:
+                await conn.execute("DELETE FROM sleep_runs")
                 await conn.execute(
                     "INSERT OR REPLACE INTO meta (key, value) VALUES ('forgotten_at', ?)",
                     (time.time(),),
@@ -215,6 +224,46 @@ class ConversationIndex:
         ) as cur:
             row = await cur.fetchone()
         return float(row[0]) if row else 0.0
+
+    async def meta(self, key: str) -> float:
+        """A ``meta`` value; 0 for one never set."""
+        conn = await self._ready()
+        async with conn.execute("SELECT value FROM meta WHERE key = ?", (key,)) as cur:
+            row = await cur.fetchone()
+        return float(row[0]) if row else 0.0
+
+    async def set_meta(self, key: str, value: float) -> None:
+        conn = await self._ready()
+        await conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, value)
+        )
+        await conn.commit()
+
+    async def save_run(
+        self, run_id: str, started: float, changes: list[dict[str, Any]]
+    ) -> None:
+        """Keep what a sleep run changed (ids only, no note text) for its undo."""
+        conn = await self._ready()
+        await conn.execute(
+            "INSERT OR REPLACE INTO sleep_runs (run_id, started, changes) "
+            "VALUES (?, ?, ?)",
+            (run_id, started, json.dumps(changes)),
+        )
+        await conn.commit()
+
+    async def load_run(self, run_id: str) -> list[dict[str, Any]] | None:
+        """What a sleep run changed; ``None`` for a run unknown or already undone."""
+        conn = await self._ready()
+        async with conn.execute(
+            "SELECT changes FROM sleep_runs WHERE run_id = ?", (run_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        return list(json.loads(row[0])) if row else None
+
+    async def drop_run(self, run_id: str) -> None:
+        conn = await self._ready()
+        await conn.execute("DELETE FROM sleep_runs WHERE run_id = ?", (run_id,))
+        await conn.commit()
 
     async def aclose(self) -> None:
         if self._conn is not None:

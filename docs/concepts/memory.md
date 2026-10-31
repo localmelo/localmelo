@@ -162,6 +162,16 @@ What a chat is told about memory:
 
 Direct runs (`melo "<task>"`), the terminal chat, workers and the benchmark neither recall nor keep notes, and have no `remember` tool; a task's runner only adds its result to the index.
 
+### Tidying notes while idle (developer setting)
+
+`[memory] sleep` (off by default; `-X memory.sleep=rules` for one run, listed by `melo -h all`) tidies the notes in one pass over the chats since the last pass, with no model call. `model` and `model+tags` are not built yet.
+
+- Merge duplicates: of two notes of one subject, or close in meaning and wording, the older is superseded by the newer; a note you reworded is never merged away.
+- Missed supersede: a newer message of yours that states another value of a note's subject ("My name is Juno." after the note "You go by Pip.") replaces the note.
+- Lost facts: a plain, lasting statement that no note of its turn kept is written, turns where the reply said it noted something first.
+- Every write passes the checks above on your own words, is marked `sleep` with the run and the turn it read, and never deletes; a run makes at most 20 changes, and a watermark keeps it from reading a turn twice.
+- `melo memory sleep [VARIANT]` (developer mode only) and `POST /api/memory/sleep` run it and report the changes; `DELETE /api/memory/sleep/{run_id}` puts the whole run back.
+
 ### See and change what melo remembers
 
 ![The Memory tab of the console's panel: notes melo keeps about you, each with its source chat, Edit and Delete.](../assets/img/memory-tab.webp)

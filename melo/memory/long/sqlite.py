@@ -7,6 +7,7 @@ import json
 import logging
 import sqlite3
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -781,6 +782,52 @@ class SqliteLongTerm(LongTerm):
             await checkpoint_wal(conn)
         self._index = None
         return row is not None
+
+    async def set_status(
+        self,
+        entry_ids: Sequence[int],
+        status: str,
+        *,
+        keeper: int | None,
+        admitted_by: str,
+        reason: str,
+    ) -> list[int]:
+        """Mark active records superseded (by *keeper*, which stays active), or
+        superseded ones active again; the ids that changed.
+
+        Nothing is deleted. Each change writes an ``UPDATE`` decision row
+        (``entry_id`` the keeper, ``target_id`` the record) with *reason*.
+        """
+        if status not in ("active", "superseded"):
+            raise ValueError(f"Unknown long-term status: {status!r}")
+        before = "superseded" if status == "active" else "active"
+        conn = await self._ensure_ready()
+        changed: list[int] = []
+        async with self._write_lock:
+            await conn.execute("BEGIN IMMEDIATE")
+            try:
+                for entry_id in entry_ids:
+                    cur = await conn.execute(
+                        "UPDATE long_term SET status = ? WHERE id = ? AND status = ?",
+                        (status, entry_id, before),
+                    )
+                    if not cur.rowcount:
+                        continue
+                    changed.append(entry_id)
+                    await conn.execute(
+                        "INSERT INTO decisions (candidate_id, action, kind, "
+                        "admitted_by, entry_id, target_id, reason, source_ids_json, "
+                        "text_sha256, timestamp) SELECT '', 'UPDATE', kind, ?, ?, "
+                        "id, ?, '[]', '', ? FROM long_term WHERE id = ?",
+                        (admitted_by, keeper, reason[:500], time.time(), entry_id),
+                    )
+                await conn.commit()
+            except BaseException:
+                with contextlib.suppress(Exception):
+                    await conn.rollback()
+                raise
+        self._index = None
+        return changed
 
     async def set_vector(
         self, entry_id: int, embedding: list[float] | None, embed_model: str

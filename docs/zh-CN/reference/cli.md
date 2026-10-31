@@ -38,7 +38,7 @@ melo -h all                                  # every option, command and setting
 |---|---|---|
 | `melo setup` | 重新选择模型服务器，然后打开对话。 | |
 | `melo config` | 显示配置文件的位置，以及哪些设置与默认值不同。 | |
-| `melo memory VERB` | 查看和修改 melo 保存的笔记：`list`、`forget`、`status`、`reindex`。 | `list -n N`、`forget ID`、`forget -y` |
+| `melo memory VERB` | 查看和修改 melo 保存的笔记：`list`、`forget`、`status`、`reindex`（开发者模式下还有 `sleep`）。 | `list -n N`、`forget ID`、`forget -y` |
 | `melo serve [install\|uninstall\|status\|stop]` | 运行网关，把它作为登录服务管理（macOS），或停止正在运行的网关。 | `--host H`, `-p`/`--port N`, `--playground`, `--force` |
 | `melo console [--reset]` | 在浏览器中打开已登录的网页控制台；通过 SSH 或没有浏览器能启动时，改为输出一次性链接。`--reset` 轮换访问令牌。 | `--host H`, `-p`/`--port N` |
 | `melo task VERB` | `melo-task` 客户端。 | 同 `melo-task` |
@@ -131,6 +131,7 @@ melo -h all                                  # every option, command and setting
 | `melo memory forget [ID] [-y]` | 忘记编号为 `ID` 的笔记；不带 `ID` 则忘记全部笔记和对话索引（对话保留）。它会先问：终端里是一个列表，`Keep it` 或 `Keep everything` 排在第一位；管道输入时是从 stdin 读取的编号问题；Esc、输入结束和 Enter 都表示保留。`-y` 不提问。什么都没忘记时退出码为 1。 |
 | `melo memory status` | 跨对话记忆是否开启、笔记数和已索引的对话轮次数、怎样搜索（用嵌入模型按含义，或只按词）、文件夹，以及嵌入模型最近一次没被使用的原因。 |
 | `melo memory reindex` | 从对话重建对话索引，并给每条笔记补上当前嵌入模型的向量。上次“忘记全部”之前结束的轮次不会进入。`melo serve` 或应用运行时退出码为 1，因为对话由它们持有。 |
+| `melo memory sleep [VARIANT]` | 仅开发者模式（`[ui] mode = "developer"`，否则退出码 2）。用整理方式 `off` 或 `rules` 整理笔记（省略时用 `[memory] sleep`；`model` 和 `model+tags` 退出码为 1，尚未实现），并打印报告：运行编号和每处改动（`O1` 合并、`O2` 较新的值、`O3` 找回的事实）。`melo serve` 或应用运行时退出码为 1。 |
 
 ```text
 $ melo memory list
