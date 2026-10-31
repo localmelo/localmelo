@@ -172,7 +172,7 @@ async def test_urgency_words_make_today_and_run_as_a_task_delegates(
 async def test_run_as_a_task_is_for_chats_and_a_side_chat_owns_its_task(
     tmp_path: Path,
 ) -> None:
-    # Before T316 only the main chat took "Run as a task"; a side chat refused it.
+    # Side chats used to refuse "Run as a task"; only the main chat took it.
     async with console_with(tmp_path, answer("hi")) as (console, client, _):
         side = (await _create(client, tmp_path, "Hello"))["session"]["id"]
         await _wait_turn(client, side)
