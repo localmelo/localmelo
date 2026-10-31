@@ -844,8 +844,10 @@ Its `data`:
 
 What the main chat did with a task is an `attention.echo` session event in the
 main chat, with no turn. A message that code handles (`/task TEXT`, a turn body
-with `"as_task": true`, or a short control phrase that names one open task)
-starts no turn: `POST /api/sessions/{main}/turns` answers 200 with the echo.
+with `"as_task": true`, an imperative change to files it names, a short
+control phrase that names one open task, or a short follow-up word with a
+task's name) starts no turn: `POST /api/sessions/{main}/turns` answers 200
+with the echo.
 
 ```json
 {"echo": {"id": 41, "ts": 1793405483.9, "echo": "started", "task_id": "3f9c2a71b0de", "title": "summarize the readme", "level": 2, "reason": "you asked for it", "line": "Started: summarize the readme · Normal", "typed": "/task summarize the readme"}}
@@ -853,9 +855,13 @@ starts no turn: `POST /api/sessions/{main}/turns` answers 200 with the echo.
 
 - `echo` is `started`, `control` (with `action` and `undo`), `level` (with
   `undo`), `suggest` (a change the person's own words did not ask for, with
-  `action` and maybe `level`), `ask` (`Start this as a task?`, with `text`, the
-  whole message, `words`, what was typed, and `turn_id`), `undone` or `failed`. `line` is the plain words; `typed` is the
-  message it answers; `of` is the echo it answers.
+  `action` and maybe `level`; `action` `send` carries the message as `text`),
+  `ask` (`Start this as a task?`, with `text`, the whole message, `words`, what
+  was typed, and `turn_id`), `sent` (a message given to a task, `how`
+  `queued` for its next step or `continued` as a new turn of a finished task;
+  `line` `Sent to: <title>` or `Continued: <title>`), `undone` or `failed`.
+  `line` is the plain words; `typed` is the message it answers; `of` is the
+  echo it answers.
 - `as_task` on any session but the main chat is 400 `invalid_request`. A
   repeated `client_request_id` of a delegation answers the same echo.
 - The main chat's turns pages add `echoes`, paged as `cards` are.

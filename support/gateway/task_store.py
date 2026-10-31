@@ -1792,6 +1792,120 @@ class TaskStore:
         assert result is not None
         return result
 
+    async def reopen(
+        self,
+        task_id: str,
+        instruction: str,
+        *,
+        level: int | None = None,
+        reason: str = "",
+        actor: str = "user",
+    ) -> TaskRecord:
+        """Queue a done, failed or stopped task again, *instruction* as its next turn.
+
+        The task keeps its id, session and conversation: its card holds the
+        instruction, which the worker's next turn runs after loading the
+        earlier turns. A committed Resume row reserves that turn, so a
+        restart before it starts re-admits the task rather than fencing it.
+        *level* (from the person's words) replaces the old level; without
+        it the old level stays, and a paused task's Later goes back to
+        Normal.
+        """
+        text = instruction.strip() if isinstance(instruction, str) else ""
+        if not text:
+            raise ValueError("instruction must not be empty")
+        if level is not None and (
+            isinstance(level, bool) or not isinstance(level, int) or not 1 <= level <= 4
+        ):
+            raise ValueError("a follow-up's level is from 1 (Today) to 4 (If idle)")
+        now = self._clock()
+        async with self._store.component_event_transaction("task_reopen") as (
+            conn,
+            events,
+        ):
+            current = await self._get(conn, task_id)
+            if current is None:
+                raise TaskNotFoundError(f"No task has id {task_id}")
+            if current.state not in ("done", "failed", "cancelled"):
+                raise TaskStoreError("only a done, failed or stopped task continues")
+            if await _first(
+                conn,
+                "SELECT 1 FROM recovery_operations WHERE task_id = ? "
+                "AND kind = 'recovery' AND phase = 'prepared'",
+                (task_id,),
+            ):
+                raise TaskConflictError("another recovery operation is unresolved")
+            before = await _first(
+                conn,
+                "SELECT generation, operation_id FROM park_priority WHERE task_id = ?",
+                (task_id,),
+            )
+            await self._identity_transition(
+                conn, events, task_id, "sched.resumed", create=True, state="queued"
+            )
+            identity = await _first(
+                conn,
+                "SELECT generation FROM park_priority WHERE task_id = ?",
+                (task_id,),
+            )
+            await self._clear_snapshot(conn, task_id)
+            new: tuple[int, str, str, float | None]
+            if level is not None:
+                new = (level, "computed", reason, None)
+            elif current.level < 5:
+                new = (
+                    current.level,
+                    current.level_source,
+                    current.reason,
+                    current.user_rank,
+                )
+            else:
+                new = (2, "computed", "", None)
+            await self._write_level(conn, current, new[0], new[1], new[3], new[2], now)
+            if current.level != new[0]:
+                await self._event(
+                    conn,
+                    task_id,
+                    from_level=current.level,
+                    to_level=new[0],
+                    actor=actor,
+                    reason="follow-up",
+                    quote="",
+                    pinned=_pinned(new[1]),
+                    ts=now,
+                )
+            await conn.execute(
+                "UPDATE tasks SET state = 'queued', card = ?, wait_reason = '', "
+                "hold_site = '', finished_at = NULL, updated_at = ? WHERE task_id = ?",
+                (text, now, task_id),
+            )
+            request = _resume_request(
+                int(before[0]) if before else None,
+                before[1] if before else None,
+                actor,
+                await _next_turn_number(conn, task_id),
+            )
+            await conn.execute(
+                "INSERT INTO recovery_operations VALUES "
+                "(?, ?, 'resume', ?, 'committed', ?, NULL, 'queued')",
+                (
+                    task_id,
+                    uuid.uuid4().hex,
+                    request,
+                    int(identity[0]) if identity else None,
+                ),
+            )
+            await self._log(
+                conn,
+                "task.reopen",
+                task_id,
+                {"from": current.state, "level": new[0], "actor": actor},
+                ts=now,
+            )
+            result = await self._get(conn, task_id)
+        assert result is not None
+        return result
+
     async def fail_nonterminal_on_restart(self) -> int:
         """Fail unrecovered tasks together when a new gateway starts."""
         now = self._clock()

@@ -116,3 +116,12 @@ test('echoes stay in the timeline, never folded like cards, and a later echo ans
   assert.deepEqual(mainChat.echoActions({kind: 'suggest', action: 'level', level: 1, task_id: 't'}, false), [['Set to Today', 'apply']]);
   assert.deepEqual(mainChat.LEVELS, ['Now', 'Today', 'Normal', 'Whenever', 'If idle', 'Later']);
 });
+
+test('a message sent to a task is an echo line with no buttons; a suggested one sends on a tap', () => {
+  const [sent] = mainChat.mergeEchoes([], [
+    {id: 7, ts: 1_800_000_000, data: {echo: 'sent', how: 'continued', task_id: 't', title: 'Old report', line: 'Continued: Old report'}},
+  ]);
+  assert.equal(sent.kind, 'sent');
+  assert.deepEqual(mainChat.echoActions(sent, false), []);
+  assert.deepEqual(mainChat.echoActions({kind: 'suggest', action: 'send', task_id: 't'}, false), [['Send', 'apply']]);
+});

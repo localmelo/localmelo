@@ -88,6 +88,25 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- The main chat does what it is asked, or hands it off with its context. A
+  reply that only says what it will do ("I'll start by looking at the test
+  file…") no longer ends the turn: the work starts as a task, or a question asks
+  "Start this as a task?". A request to change files it names starts as a task
+  at once, under a short title, with no model call. `search_files` lets the
+  main chat answer "which file defines X?" in a step or two (read-only, at most
+  50 hits as `path:line`, inside its folder). A question is a `?` anywhere or
+  "quick question". The main chat answers in the language of your message, and
+  so does the hand-off sentence. A follow-up on a task ("finish it", "commit
+  it", "继续那个任务") goes to that task: a running task reads it at its next
+  step, and a done or stopped one continues in its own session with what it did
+  before, instead of a new task without that context; the line says
+  `Sent to: …` or `Continued: …`. The main chat reads each task's state and the
+  first lines of its answer, so "what got done?" names the commits tasks
+  reported. For API clients: echoes add `sent` (with `how`), a `suggest` with
+  `action` `send` sends the message on Apply, and `task_message` takes only
+  `task_id`. See
+  [Hand work to the main chat](docs/guides/web-console.md#hand-work-to-the-main-chat) ([#NN]).
+
 - When you update a fact, the newer value wins. Told "I live in Lisbon." in one chat
   and "I live in Utrecht." in another, a third chat asked "Where do I live?" recalled
   both: the Lisbon note had been replaced, but the Lisbon chat's turn came back first,

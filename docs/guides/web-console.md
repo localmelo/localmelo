@@ -156,11 +156,13 @@ worker runs did** (once a run or a terminal chat exists, and always in developer
 
 ![The main chat: a question answered, a task started at Normal that came back done, a task started at Today with its levels open, and a pause with Undo](../assets/img/main-chat-tasks.webp)
 
-- **Ask, or ask for work.** The main chat answers a quick question itself. Bigger work (several steps, files, research, writing) it starts as a task, with one line: `Started: Plan the trip · Normal`. Its result comes back as a card.
-- **Say it in code's words.** `/task …`, or **Run as a task** beside the send button, starts the message as a task at once, with no model call. `stop`, `pause`, `resume` or `first` with a task's name (`pause the slides`, `暂停 Fix CI`, `先做 slides`) changes that task at once, with **Undo**.
+- **Ask, or ask for work.** The main chat answers a quick question itself, and searches your folder for "which file defines X?". Bigger work (several steps, files, research, writing) it starts as a task, with one line: `Started: Plan the trip · Normal`. Its result comes back as a card. It never answers with only what it is about to do: a reply like "I'll start by looking at the test file" starts the work as a task instead.
+- **Say it in code's words.** `/task …`, or **Run as a task** beside the send button, starts the message as a task at once, with no model call. So does a request to change files it names (`Fix tests/cli/test_e2e_pty.py and commit`), under a short title. `stop`, `pause`, `resume` or `first` with a task's name (`pause the slides`, `暂停 Fix CI`, `先做 slides`) changes that task at once, with **Undo**.
+- **Follow up on a task.** `finish it`, `commit it` or `继续那个任务` goes to the task you mean: a running task reads it at its next step, and a done or stopped one continues in its own session, with what it did before. The line says where it went: `Sent to: Slides`, `Continued: Fix CI`.
+- **What got done.** The main chat reads each task's state and the first lines of its answer, so it can name the commits tasks made.
 - **Levels in words.** Now, Today, Normal, Whenever, If idle, Later. Your words choose: "urgent", "asap" or a deadline today (`by 5pm`, `今天下午三点前`) make it Today, "no rush" makes it Whenever, anything else is Normal. **Change** on the line sets your own level, which stays.
 - **Only your own words change a task.** What you type counts; an attached file, a web page or a task's report that says "stop the slides" changes nothing: the line reads `Suggested: stop Slides`, and one tap applies it.
-- **Long questions.** A message the main chat cannot settle in 4 steps becomes a task (`This needs more than a quick answer, so I started it as a task.`); a question asks **Start this as a task?** first. While you type, finished results wait until you send or pause for 10 seconds; one that needs your approval shows at once.
+- **Long questions.** A message the main chat cannot settle in 4 steps becomes a task (`This needs more than a quick answer, so I started it as a task.`); a question (a `?` anywhere, or "quick question") asks **Start this as a task?** first. It answers in the language of your message. While you type, finished results wait until you send or pause for 10 seconds; one that needs your approval shows at once.
 
 ## Pictures in the answer
 

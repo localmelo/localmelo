@@ -10,6 +10,7 @@ This guide explains how the scheduler decides when chat requests may reach a sha
 - **Its level.** Code reads only your own message: urgency words or a deadline today give Today (P1), "no rush" gives Whenever (P3), anything else Normal (P2). The reason is kept with the task (`you said "urgent"`). A page, a file or a task's report never sets a level.
 - **Your level stays.** A level you set (the line's **Change**, the panel, `melo task level`) is yours: the scheduler leaves it alone.
 - **Changes need your words.** The main chat changes a task (stop, pause, resume, a level) only when your latest message asks for it and names the task; otherwise it shows a suggestion you apply with one tap.
+- **Follow-ups go to their task.** A message about a task goes to it, never to a new task: a running task reads it at its next step, and a done, failed or stopped one is queued again in its own session with your message as its next turn. It keeps its level unless your words give one. Only your own message sends it: it names the task, or says `finish it` about the task the main chat showed last.
 - **Words in default mode.** Levels read Now, Today, Normal, Whenever, If idle and Later everywhere a level shows; developer mode adds the P-codes. `melo task` takes a word wherever it takes a P-code (`melo task level ID today`).
 
 ## The gate on chats (S2)

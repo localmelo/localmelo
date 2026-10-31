@@ -158,9 +158,9 @@ export function cardNode({doc, card, open}) {
 
 // ── Echoes: what the main chat did with a task ──
 
-const ECHO_KINDS = new Set(["started", "control", "level", "suggest", "ask", "undone", "failed"]);
-const MARKS = {started: "+", level: "↕", suggest: "?", ask: "?", undone: "↺", failed: "!",
-  stop: "■", pause: "‖", resume: "▶", first: "↑"};
+const ECHO_KINDS = new Set(["started", "control", "level", "suggest", "ask", "undone", "failed", "sent"]);
+const MARKS = {started: "+", level: "↕", suggest: "?", ask: "?", undone: "↺", failed: "!", sent: "→",
+  stop: "■", pause: "‖", resume: "▶", first: "↑", send: "→"};
 
 /** An echo as the page keeps it, from an `echoes` row or an `attention.echo` frame; null if unusable. */
 export function readEcho(row) {

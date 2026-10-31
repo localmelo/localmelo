@@ -558,7 +558,7 @@ async def test_the_gateway_builds_the_front_for_the_main_chat(tmp_path: Path) ->
         assert isinstance(agent, FrontAgent) and agent.front is console.front
         assert agent.options.max_steps == 4
         names = {tool.name for tool in agent.list_tools()}
-        assert {"task_create", "task_message", "file_read"} <= names
+        assert {"task_create", "task_message", "file_read", "search_files"} <= names
         gated: Any = agent.chat.llm
         assert gated.inner.extra_body == {
             "chat_template_kwargs": {"enable_thinking": False}
