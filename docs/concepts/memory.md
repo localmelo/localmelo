@@ -52,7 +52,7 @@ Two files in `~/.cache/localmelo/memory/` (the folder mode 0700, the files
 
   - A note replaces an older note of the same subject, in any topic: `I live in Utrecht` after `I live in Lisbon`, `call me Ray` after `call me R.`, `我的健身教练是小宇` after `…是阿凯`.
   - With an embedding model, so does a sentence that differs only in one short value: `I go to the gym on Fridays` after `… on Mondays`.
-  - Look-alikes of another subject stay apart: `my flight to Faro` beside `my flight to Porto`, `我的游泳课` beside `我的书法课`.
+  - Look-alikes of another subject stay apart: `my flight to Faro` beside `my flight to Porto`, `我的游泳课` beside `我的书法课`; so does a value of another kind: `my cat is grey` beside `my cat is called Biscuit`.
   - The replaced note is kept but never recalled or listed; Undo under the new note brings it back.
 
   Code checks every note the model keeps. Its words must come from what you

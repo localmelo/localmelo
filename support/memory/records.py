@@ -98,13 +98,14 @@ _SUBJECTS: Final = tuple(
         ("timezone", r"\btime ?zone\b|时区"),
         (
             "name",
-            r"^(?:please )?call me\b|\bgo(?:es)? by\b"
+            r"^(?:please )?call me\b|\bgo(?:es)? by [^ ]+(?: [^ ]+)?$"
             rf"|{_WHO}(?:'m| am|'re| are| is) (?:called|named)\b"
             r"|^(?:请)?叫我|希望被(?:叫作|称为)|(?:我|你|用户)的?名字",
         ),
         (
             "home",
-            rf"{_WHO} (?:live|lives|reside|resides)\b|(?:我|你|用户)(?:现在)?住在",
+            rf"{_WHO} (?:live|lives|reside|resides) (?:in|at|on|near)\b"
+            r"|(?:我|你|用户)(?:现在)?住在",
         ),
         (
             "job",
@@ -113,14 +114,20 @@ _SUBJECTS: Final = tuple(
         ),
     )
 )
-# "my X is Y" / "the user's X is Y" / "我的X是Y": X is the subject.
+# "my X is Y" / "the user's X is Y" / "我的X是Y": X is the subject, and how Y
+# relates to it (:func:`_relation`) tells a name from a day or a description.
 _OWNED = re.compile(
     r"^(?:my|your|our|(?:the )?user['’]s) ((?:[\w'’-]+ ){0,5}?[\w'’-]+) "
-    r"(?:is|are|was|were)\b"
+    r"(?:is|are|was|were)\b ?(.*)$"
 )
 _OWNED_ZH = re.compile(
-    r"^(?:我|你|用户)的?([^\s，,。是叫姓]{1,12}?)(?:现在|也)?(?:是|叫|姓)"
+    r"^(?:我|你|用户)的?([^\s，,。是叫姓]{1,12}?)(?:现在|也)?([是叫姓].*)$"
 )
+_RELATIONS: Final = frozenset({"called", "named", "on", "at", "in", "from"})
+_DESCRIBES: Final = frozenset(
+    {"a", "an", "very", "so", "really", "quite", "too", "not", "always", "never"}
+)
+_STILL: Final = frozenset({"now", "still", "currently", "also"})
 _ARTICLES: Final = frozenset({"a", "an", "the"})
 _TOKEN = re.compile(r"[a-z0-9]+|[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]")
 # Request phrases the shared lexicon lacks, read as "remember that":
@@ -369,6 +376,34 @@ def quote_for(note: str, said: Sequence[str]) -> str:
     return best[:MAX_RECORD_CHARS]
 
 
+def _relation(value: str) -> str:
+    """How the value after "is" (or 是, 叫, 姓) relates to its subject: a word
+    such as ``on`` or ``called``, ``desc`` for a description ("very strict",
+    "a doctor", "橙色的"), or ``""`` for a plain value ("Juno", "小宇")."""
+    if value[:1] in ("叫", "姓"):
+        return value[0]
+    if value[:1] == "是":
+        return "desc" if value.endswith("的") else ""
+    words = [w for w in value.split() if w not in _STILL]
+    first = words[0] if words else ""
+    return first if first in _RELATIONS else "desc" if first in _DESCRIBES else ""
+
+
+def _subject(text: str) -> tuple[str, str]:
+    """:func:`subject` and the relation of its value (:func:`_relation`)."""
+    folded = normalise(text)
+    for key, pattern in _SUBJECTS:
+        if pattern.search(folded):
+            return key, ""
+    if found := _OWNED.match(folded):
+        words = _TOKEN.findall(_POSSESSIVE.sub("", found.group(1)))
+        stems = " ".join(stem(w) for w in words if w not in _ARTICLES)
+        return stems, _relation(found.group(2))
+    if found := _OWNED_ZH.match(folded):
+        return found.group(1), _relation(found.group(2))
+    return "", ""
+
+
 def subject(text: str) -> str:
     """What *text* is about without its value; ``""`` when it names none.
 
@@ -377,15 +412,7 @@ def subject(text: str) -> str:
     教练是小宇" is ``健身教练``. Look-alikes keep apart: "flight to porto" is
     not "flight to faro", "书法课" is not "游泳课".
     """
-    folded = normalise(text)
-    for key, pattern in _SUBJECTS:
-        if pattern.search(folded):
-            return key
-    if found := _OWNED.match(folded):
-        words = _TOKEN.findall(_POSSESSIVE.sub("", found.group(1)))
-        return " ".join(stem(w) for w in words if w not in _ARTICLES)
-    found = _OWNED_ZH.match(folded)
-    return found.group(1) if found else ""
+    return _subject(text)[0]
 
 
 def _weight(tokens: Sequence[str]) -> float:
@@ -437,21 +464,22 @@ def decide(
 ) -> tuple[str, int | None]:
     """``("IGNORE", id)`` for a record kept already, ``("UPDATE", id)`` to supersede, or NEW.
 
-    An old record of the same :func:`subject` is replaced, whatever its topic;
-    two records that name different subjects never replace each other. Else,
-    with vectors, one close in meaning and :func:`value_apart`; else one of
-    the same *kind* that shares most content words ("said again in other words").
+    An old record of the same :func:`subject`, its value related the same way
+    ("is on", "is called", a plain value), is replaced, whatever its topic; two
+    records that name different subjects never replace each other. Else, with
+    vectors, one close in meaning and :func:`value_apart`; else one of the
+    same *kind* that shares most content words ("said again in other words").
     """
     folded = normalise(text)
-    mine = subject(text)
+    mine, how = _subject(text)
     tokens = content_tokens(text)
     best: StoredEntry | None = None
     best_score = 0.0
     for entry in active:
         if normalise(entry.text) == folded:
             return "IGNORE", entry.id
-        theirs = subject(entry.text)
-        if mine and theirs:
+        theirs, their_how = _subject(entry.text)
+        if mine and theirs and (mine != theirs or how == their_how):
             score = 1.0 if mine == theirs else 0.0
         elif _near(vector, embed_model, entry) and value_apart(text, entry.text):
             score = 1.0

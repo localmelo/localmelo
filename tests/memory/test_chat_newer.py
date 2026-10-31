@@ -318,6 +318,50 @@ def test_look_alikes_name_no_subject_or_another(
     assert not one or one != other
 
 
+@pytest.mark.parametrize(
+    ("old", "new", "replaced"),
+    [
+        (
+            "Your weekly sync is on Wednesday.",
+            "Your weekly sync is every Friday.",
+            True,
+        ),
+        ("You go by Ray.", "Your name is Juno.", True),
+        ("Your sister is a doctor.", "Your sister is an engineer.", True),
+        ("你的导师姓林。", "你的导师姓周。", True),
+        # One subject, a value of another kind: a name and a look, a name and
+        # a description, the way to work and a name, a flatmate and a city.
+        ("Your cat is called Biscuit.", "Your cat is grey.", False),
+        ("Your landlady is Gwen Pennywhistle.", "Your landlady is very strict.", False),
+        ("You go by bike to work.", "Your name is Juno.", False),
+        ("You live with your sister.", "You live in Utrecht.", False),
+        ("你的猫叫团子。", "你的猫是橘色的。", False),
+    ],
+)
+async def test_a_value_of_another_kind_does_not_replace(
+    tmp_path: Path, old: str, new: str, replaced: bool
+) -> None:
+    store = SessionStore(str(tmp_path / "sessions.db"), writer="gateway")
+    await store.open()
+    memory = ChatMemory(lambda: None, directory=str(tmp_path / "memory"))
+    try:
+        for note in (old, new):
+            typed = note.replace("Your", "My").replace("You", "I").replace("你", "我")
+            turn = await store.begin_turn(
+                None,
+                typed,
+                holder="test:1:newer",
+                title=typed,
+                new_session=NewSession(),
+            )
+            await memory.before_turn(store, turn, typed)
+            assert (await memory.remember(note, "about")).startswith("Remembered:")
+        assert len(await memory.records()) == (1 if replaced else 2)
+    finally:
+        await memory.aclose()
+        await store.aclose()
+
+
 def test_value_apart_wants_one_short_value_in_a_shared_frame() -> None:
     assert records.value_apart(
         "You go to the gym on Mondays.", "You go to the gym on Fridays."
