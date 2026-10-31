@@ -9,10 +9,15 @@ from localmelo.support.gateway.front_rules import (
     TaskRef,
     allows,
     allows_level,
+    allows_message,
+    intention_only,
+    is_chinese,
     is_question,
     level_number,
     level_word,
+    reply_language,
     route,
+    short_title,
     triage,
 )
 
@@ -164,3 +169,156 @@ def test_the_principal_rule_reads_only_the_persons_own_words() -> None:
     assert allows_level("the slides can wait, no rush", False, SLIDES)
     assert not allows_level("make it urgent", True, SLIDES)
     assert not allows_level("the slides are done?", True, SLIDES)
+
+
+# ── Questions, preambles, work and follow-ups ──
+
+
+def test_a_question_mark_anywhere_or_quick_question_is_a_question() -> None:
+    assert is_question(
+        "Quick question: which file defines DEFAULT_WORKSPACE? Answer in one line."
+    )
+    assert is_question("quick question: the folder for notes")
+    assert is_question("请问 notes.md 在哪个文件夹")
+    # A link's query string is not a question.
+    assert not is_question("summarize https://example.com/page?id=3")
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "I'll start by looking at the test file and finding the relevant code.",
+        "Sure! Let me check.",
+        "Let me look at the tests first. Then I'll fix the check and commit.",
+        "I'll start by:\n1. Reading the test\n2. Fixing it",
+        "OK, I'm going to search the repository for it…",
+        "我先看一下测试文件。",
+        "好的，我来检查一下这个文件，然后修改它。",
+    ],
+)
+def test_a_reply_that_only_announces_what_it_will_do(reply: str) -> None:
+    assert intention_only(reply)
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "Let me know if you need more.",
+        "I'll need the folder name to continue.",
+        "Let me check. The file is support/gateway/task_policy.py.",
+        "Which folder should I look in?",
+        "I'll look at it — which branch?",
+        "Started the slides; I'll tell you when they're done.",
+        "DEFAULT_WORKSPACE is defined in support/gateway/task_policy.py:24.",
+        "已交给后台任务处理：放宽优先级判定。",
+        "我先说结论：在 task_policy.py 里。是否还要别的？",
+        "",
+    ],
+)
+def test_an_answer_is_not_a_preamble(reply: str) -> None:
+    assert not intention_only(reply)
+
+
+@pytest.mark.parametrize(
+    ("typed", "title"),
+    [
+        (
+            "Please fix this today: in tests/cli/test_e2e_pty.py the list_files "
+            "test only checks one word. Make it check a file name and commit.",
+            "fix this today: in test_e2e_pty.py",
+        ),
+        (
+            "add a test for the parser in tests/test_app.py",
+            "add a test for the parser in test_app.py",
+        ),
+        ("In support/x.py, rename foo to bar", "In x.py, rename foo to bar"),
+        (
+            "把 docs/guides/embedding.md 里的图片换成 webp",
+            "把 embedding.md 里的图片换成",
+        ),
+        ("commit support/gateway/console/registry.py", "commit registry.py"),
+    ],
+)
+def test_an_imperative_change_to_named_files_is_work(typed: str, title: str) -> None:
+    routed = route(typed, TASKS)
+    assert (routed.route, routed.title, routed.text) == ("work", title, typed)
+
+
+@pytest.mark.parametrize(
+    "typed",
+    [
+        "Quick question: which file defines DEFAULT_WORKSPACE? Answer in one line.",
+        "can you fix tests/cli/test_e2e_pty.py",  # a question: the front's step
+        "summarize notes.md",  # reads, changes nothing
+        "make slides from notes.md",  # makes something new: the front's step
+        "fix and/or improve the docs",  # no file
+        "write a report on battery chemistry",
+        "The report task stopped before its commit. Please finish it: commit docs/a.md",
+        "finish the old report: commit docs/report.md",  # names a task: may follow it
+    ],
+)
+def test_other_messages_are_not_work(typed: str) -> None:
+    assert route(typed, TASKS).route != "work"
+
+
+def test_short_titles_cut_at_a_word() -> None:
+    long = "summarize every chapter of the handbook and write the findings down"
+    # At most 48 characters, at a word, without a trailing "and".
+    assert short_title(long) == "summarize every chapter of the handbook"
+    assert short_title("Fix CI. Then tell me.") == "Fix CI"
+    assert short_title("x" * 80) == "x" * 48
+    assert short_title(
+        "帮我整理一下这周的会议记录并发给团队成员们看看吧好吗谢谢你了"
+    ) == ("整理一下这周的会议记录并发给团队成员们看看吧好吗")
+    assert short_title("see https://example.com/a/b.html") == (
+        "see https://example.com/a/b.html"
+    )
+    assert short_title("   ") == "Task"
+
+
+@pytest.mark.parametrize(
+    ("typed", "task"),
+    [
+        ("continue the old report", DONE),
+        ("继续 Old report", DONE),
+        ("commit Fix CI", CI),
+        (f"finish {DONE.task_id}", DONE),
+    ],
+)
+def test_a_follow_up_word_and_a_named_task_follow_it(typed: str, task: TaskRef) -> None:
+    routed = route(typed, TASKS)
+    assert (routed.route, routed.task) == ("follow", task)
+
+
+def test_follow_ups_that_code_leaves_to_the_front() -> None:
+    assert route("finish it", TASKS).route == "plan"  # "it": the front knows which
+    assert route("did you finish the old report?", TASKS).route != "follow"
+    assert route("don't commit Fix CI", TASKS).route != "follow"
+
+
+def test_a_message_needs_the_persons_own_words_pointing_at_the_task() -> None:
+    assert allows_message("tell the slides to use a dark theme", SLIDES, newest=False)
+    assert allows_message("finish the old report: commit it", DONE, newest=False)
+    # "it" points at the newest task the main chat showed, and only with a
+    # follow-up word.
+    assert allows_message("finish it", DONE, newest=True)
+    assert allows_message("继续那个任务", DONE, newest=True)
+    assert not allows_message("finish it", DONE, newest=False)
+    assert not allows_message("summarize notes.md", DONE, newest=True)
+    assert not allows_message("summarize notes.md", SLIDES, newest=False)
+    assert not allows_message("", DONE, newest=True)
+
+
+def test_the_language_code_writes_in_follows_the_script() -> None:
+    assert (reply_language("fix it"), reply_language("修一下")) == (
+        "English",
+        "Chinese",
+    )
+    assert is_chinese("把 a.md 改一下") and not is_chinese("fix a.md")
+
+
+def test_a_title_is_named_without_its_filler_words() -> None:
+    e2e = TaskRef("444444444444", "Fix the e2e check", "done")
+    routed = route("commit Fix the e2e check", [*TASKS, e2e])
+    assert (routed.route, routed.task) == ("follow", e2e)
+    assert route("pause the slides for the 15:00 meeting", TASKS).task == SLIDES

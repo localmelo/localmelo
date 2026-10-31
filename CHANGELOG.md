@@ -93,6 +93,24 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- The main chat does what it is asked, or hands it off with its context. A
+  reply that only says what it will do ("I'll start by looking at the test
+  file…") no longer ends the turn: the work starts as a task, or a question asks
+  "Start this as a task?". A request to change files it names starts as a task
+  at once, under a short title, with no model call. `search_files` lets the
+  main chat answer "which file defines X?" in a step or two (read-only, at most
+  50 hits as `path:line`, inside its folder). A question is a `?` anywhere or
+  "quick question". The main chat answers in the language of your message, and
+  so does the hand-off sentence. A follow-up on a task ("finish it", "commit
+  it", "继续那个任务") goes to that task: a running task reads it at its next
+  step, and a done or stopped one continues in its own session with what it did
+  before, instead of a new task without that context; the line says
+  `Sent to: …` or `Continued: …`. The main chat reads each task's state and the
+  first lines of its answer, so "what got done?" names the commits tasks
+  reported. For API clients: echoes add `sent` (with `how`), a `suggest` with
+  `action` `send` sends the message on Apply, and `task_message` takes only
+  `task_id`. See
+  [Hand work to the main chat](docs/guides/web-console.md#hand-work-to-the-main-chat) ([#333]).
 - The newer value wins even when no note was kept, and melo is told to keep a
   lasting fact you state. After the newer-wins change, a local model answered 2 of 5
   updated facts right with an embedding model and 3 of 5 by words only, and the chat
@@ -2733,3 +2751,4 @@ earlier milestones.
 [#328]: https://github.com/localmelo/localmelo/pull/328
 [#332]: https://github.com/localmelo/localmelo/pull/332
 [#331]: https://github.com/localmelo/localmelo/pull/331
+[#333]: https://github.com/localmelo/localmelo/pull/333

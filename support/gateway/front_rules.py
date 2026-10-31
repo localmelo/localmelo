@@ -4,9 +4,11 @@ Pure functions over the text the person typed and the open tasks:
 
 - :func:`route` picks what the main chat does with a message: ``delegate``
   (``/task …`` or the composer's Run as a task), ``control`` (a control word
-  and a task the person named), ``chore`` (a repeating phrase, left to the
-  scheduled chores), ``answer`` (a greeting or a short question) or ``plan``
-  (the main chat's own planning step decides).
+  and a task the person named), ``follow`` (a follow-up word and a task the
+  person named, finished ones too), ``chore`` (a repeating phrase, left to the
+  scheduled chores), ``work`` (an imperative change to named files: a task at
+  once, with a short title), ``answer`` (a greeting or a short question) or
+  ``plan`` (the main chat's own planning step decides).
 - :func:`triage` gives a new task its level from the person's own words:
   Today for urgency words, a deadline today or the bare word "today"
   (``今天``) anywhere, Whenever for "no rush", Normal otherwise.
@@ -28,7 +30,7 @@ from typing import Final, Literal
 LEVEL_WORDS: Final = ("Now", "Today", "Normal", "Whenever", "If idle", "Later")
 FINISHED: Final = frozenset({"done", "failed", "cancelled", "expired"})
 
-Route = Literal["delegate", "control", "chore", "answer", "plan"]
+Route = Literal["delegate", "control", "follow", "chore", "work", "answer", "plan"]
 Action = Literal["stop", "pause", "resume", "first"]
 
 
@@ -68,6 +70,7 @@ class Routed:
     text: str = ""  # the work to delegate
     action: Action | None = None
     task: TaskRef | None = None
+    title: str = ""  # a short title for work code starts as a task
 
 
 def norm(text: str) -> str:
@@ -77,6 +80,16 @@ def norm(text: str) -> str:
 
 def _has_cjk(text: str) -> bool:
     return any("\u3400" <= ch <= "\u9fff" for ch in text)
+
+
+def is_chinese(text: str) -> bool:
+    """Whether a sentence code writes for *text* is Chinese: it has Chinese characters."""
+    return _has_cjk(text)
+
+
+def reply_language(text: str) -> str:
+    """The language the main chat answers *text* in, by its script."""
+    return "Chinese" if is_chinese(text) else "English"
 
 
 def _find(pattern: str, text: str) -> re.Match[str] | None:
@@ -138,24 +151,40 @@ def _title_tokens(title: str) -> set[str]:
 
 
 def named_task(
-    typed: str, phrase: str, tasks: Sequence[TaskRef], *, strict: bool = True
+    typed: str,
+    phrase: str,
+    tasks: Sequence[TaskRef],
+    *,
+    strict: bool = True,
+    finished: bool = False,
 ) -> TaskRef | None:
     """The one open task *typed* names, besides its control *phrase*, or None.
 
     Strict (code's own route): what is left is the task's id, its title, or
     a part of exactly one title (3 characters at least, 2 for Chinese).
     Loose (a tool's principal check): also a word of the title, of 4
-    letters at least, written in *typed*.
+    letters at least, written in *typed*. With *finished*, a finished task
+    can be the one named too.
     """
     text = norm(typed)
     rest = _rest(text, phrase)
-    open_tasks = [task for task in tasks if task.state not in FINISHED]
+    open_tasks = [task for task in tasks if finished or task.state not in FINISHED]
     for task in open_tasks:
         if task.task_id and re.search(rf"\b{re.escape(task.task_id)}\b", text):
             return task
     if rest and len(rest) >= (2 if _has_cjk(rest) else 3):
-        exact = [task for task in open_tasks if norm(task.title) == rest]
-        found = exact or [task for task in open_tasks if rest in norm(task.title)]
+        # A title is read as the rest is: without filler ("Fix the e2e check"
+        # is named by "fix e2e check").
+        titles = {
+            task.task_id: (norm(task.title), _rest(norm(task.title), ""))
+            for task in open_tasks
+        }
+        exact = [task for task in open_tasks if rest in titles[task.task_id]]
+        found = exact or [
+            task
+            for task in open_tasks
+            if any(rest in title for title in titles[task.task_id])
+        ]
         if len(found) == 1:
             return found[0]
     if strict:
@@ -197,6 +226,38 @@ def allows_level(typed: str, raise_: bool, task: TaskRef) -> bool:
     elif triage(typed)[0] != 3 and not any(_find(word, text) for word in _LATER):
         return False
     return named_task(typed, phrase, [task], strict=False) is not None
+
+
+# Words that carry on with a task: a follow-up, not a new piece of work.
+_FOLLOW: Final = _words(
+    "carry on|keep going|try again|go on|finish|continue|commit|push|redo|retry|"
+    "继续|接着|完成|做完|提交|重试|再试"
+)
+
+
+def follow_cue(typed: str) -> str | None:
+    """The first follow-up word in *typed* not under a negation, or None."""
+    text = norm(typed)
+    for phrase in _FOLLOW:
+        found = _find(phrase, text)
+        if found is not None and not _NEGATION.search(text[: found.start()]):
+            return phrase
+    return None
+
+
+def allows_message(typed: str, task: TaskRef, *, newest: bool) -> bool:
+    """The principal rule for a message to *task*: the person's own words point at it.
+
+    *typed* names the task (its id, or a word of its title, finished tasks
+    too), or has a follow-up word ("finish it", "继续那个任务") while *task*
+    is the *newest* one the main chat showed. A page, a file or a task's
+    report that names a task is never *typed*.
+    """
+    if not norm(typed):
+        return False
+    if named_task(typed, "", [task], strict=False, finished=True) is not None:
+        return True
+    return newest and follow_cue(typed) is not None
 
 
 # ── Delegation and its level ──
@@ -276,15 +337,170 @@ _QUESTION_START: Final = re.compile(
     r"do|does|did|should|would|will|have|has|may)\b"
 )
 _QUESTION_ZH: Final = re.compile(r"(?:吗|呢|么|什么|怎么|为什么|哪|谁|几|是否|多少)")
+_QUICK: Final = re.compile(r"\bquick question\b|快问|请问|问一下")
+_URL: Final = re.compile(r"https?://\S+|www\.\S+")
 
 
 def is_question(typed: str) -> bool:
+    """A question: a question mark anywhere (not in a link), "quick question", or a question's start."""
     text = norm(typed).rstrip()
+    bare = _URL.sub(" ", text)
     return (
-        text.endswith(("?", "？"))
+        "?" in bare
+        or "？" in bare
+        or bool(_QUICK.search(text))
         or bool(_QUESTION_START.match(text))
         or bool(_QUESTION_ZH.search(text[-6:]))
     )
+
+
+# ── Replies that only say what they will do ──
+
+_COURTESY: Final = re.compile(
+    r"^(?:sure|ok|okay|alright|all right|of course|got it|great|right|yes|certainly|"
+    r"absolutely|no problem|好的?|好吧|行|可以|当然|没问题|明白了?|收到)[\s,.!:;~，。！：；-]*$"
+)
+_INTENT: Final = re.compile(
+    r"^(?:(?:sure|ok|okay|alright|of course|got it|great|right|yes|certainly)\b[\s,.!:;-]*)?"
+    r"(?:(?:first|now|next|then|so)[\s,]+)?"
+    r"(?:i['’]ll(?!\s+need\b)|i will(?!\s+need\b)|i['’]m going to|i am going to|i['’]m gonna|"
+    r"let me(?!\s+know\b)|let['’]s|i need to|i['’]d like to|i want to|i['’]m about to|"
+    r"i plan to|i should)\b"
+    r"|^(?:(?:好的?|好吧|行|可以|当然|没问题|明白)[\s，,。.!！~]*)?"
+    r"(?:(?:首先|接下来|下面|现在|那)[，,\s]*)?(?:我先|我来|让我|我将|我会|我需要|我要|我去|我这就|我马上)"
+)
+_PLAN_STEP: Final = re.compile(
+    r"^(?:then|next|after that|afterwards|finally|first|second|third|once|and then|"
+    r"\d+[.)]|[-*•])(?:\W|$)|^(?:然后|接着|之后|最后|再|首先|其次|第[一二三四五六七八九十]|\d+[.、)])"
+)
+# A sentence ends at . ! ? … followed by a space (not after a list number), at
+# Chinese end marks, or at a line break.
+_SENTENCES: Final = re.compile(r"(?<=[^\d][.!?…])\s+|(?<=[。！？；…])|\n+")
+INTENT_CHARS: Final = 600
+
+
+def intention_only(reply: str) -> bool:
+    """Whether *reply* only announces what the assistant will do, and does none of it.
+
+    "I'll start by looking at the test file…", "Let me check.", "我先看一下测试文件。":
+    every sentence is an intention or a plan step. A reply that asks the
+    person something, carries code, or is long is an answer.
+    """
+    text = reply.strip()
+    if not text or len(text) > INTENT_CHARS or "```" in text:
+        return False
+    if "?" in text or "？" in text:
+        return False
+    parts = [norm(part) for part in _SENTENCES.split(text) if part and part.strip()]
+    while parts and _COURTESY.match(parts[0]):
+        parts.pop(0)
+    if not parts or not _INTENT.match(parts[0]):
+        return False
+    return all(_INTENT.match(part) or _PLAN_STEP.match(part) for part in parts[1:])
+
+
+# ── Work code starts as a task at once ──
+
+_EXTENSIONS: Final = (
+    "py|pyi|js|mjs|cjs|ts|tsx|jsx|md|rst|txt|json|toml|ya?ml|html?|css|scss|sh|zsh|"
+    "rs|go|java|kt|swift|c|cc|cpp|h|hpp|rb|php|sql|cfg|ini|csv|ipynb|xml|lock"
+)
+_FILE_NAME: Final = re.compile(rf"\b[\w.-]*\w\.(?:{_EXTENSIONS})\b")
+_PATH: Final = re.compile(
+    r"(?:^|[\s`'\"(（：:，,])(?:~/|\.\.?/|/)[\w.-]"  # ~/x, ./x, ../x, /x
+    r"|[\w.-]+/[\w.-]+/[\w./-]*"  # a/b/c
+    r"|\b[\w.-]*[_.][\w.-]*/[\w.-]+|\b[\w.-]+/[\w.-]*[_.][\w.-]*"  # one slash, a _ or .
+    r"|\b[\w.-]+/(?:\s|$)"  # a folder: name/
+)
+# Verbs that change what is there; making something new ("make slides from
+# notes.md") is left to the front's step.
+_CHANGE_EN: Final = (
+    "fix|change|edit|update|refactor|rename|replace|remove|delete|add|move|rewrite|"
+    "implement|commit|patch|correct|format|migrate|bump|revert"
+)
+_LEAD_EN: Final = re.compile(
+    r"^(?:(?:please|pls|kindly|now|also|and|then|ok|okay|so|just|quickly|go ahead and)[\s,]+)*"
+    rf"(?:{_CHANGE_EN})\b"
+)
+_CHANGE_ZH: Final = re.compile(
+    r"修复|修改|修一下|修好|改成|改为|改掉|改一下|换成|换掉|换一下|提交|删除|删掉|添加|加上|加到|"
+    r"放到|移到|移动|重命名|替换|实现|重构|更新"
+)
+_LEAD_ZH: Final = re.compile(r"^(?:请|麻烦你?|帮我|帮忙|给我|你)?(?:把|将|在)?")
+_LOCATION: Final = re.compile(r"^(?:in|for|at|on)\s+\S+\s*[,:;]\s*")
+
+
+def names_files(text: str) -> bool:
+    """Whether *text* names a file or a path (a link is neither)."""
+    bare = _URL.sub(" ", text)
+    return bool(_FILE_NAME.search(bare)) or any(
+        re.search(r"[^\W\d_]", found.group(0)) for found in _PATH.finditer(bare)
+    )
+
+
+def work_request(typed: str) -> bool:
+    """An imperative change to named files or paths: code starts it as a task at once.
+
+    "Please fix this today: in tests/cli/test_e2e_pty.py …", "把 docs/a.md 里的图换掉":
+    the message starts with a change verb (after "please" and the like, or
+    after a leading "in <path>:"), names a file or a path, and is not a
+    question.
+    """
+    text = norm(typed)
+    if not text or is_question(typed) or not names_files(text):
+        return False
+    if _has_cjk(text[:24]):
+        lead = text[_LEAD_ZH.match(text).end() :]  # type: ignore[union-attr]
+        first = re.split(r"[。！？；\n]", lead, maxsplit=1)[0]
+        return bool(_CHANGE_ZH.search(first))
+    return bool(
+        _LEAD_EN.match(text) or _LEAD_EN.match(_LOCATION.sub("", text, count=1))
+    )
+
+
+_TITLE_LEAD: Final = re.compile(
+    r"^(?:(?:/task|please|pls|kindly|could you|can you|would you|请|麻烦你?|帮我|帮忙)[\s,，]*)+",
+    re.IGNORECASE,
+)
+_TITLE_TAIL: Final = frozenset(
+    _words("the|a|an|in|of|to|and|or|for|with|on|at|by|from|that|so")
+)
+_IN_FOLDER: Final = re.compile(r"(?:~/|\.{0,2}/)?(?:[\w.-]+/)+([\w-]+\.\w+)")
+TITLE_CHARS: Final = 48
+TITLE_CHARS_ZH: Final = 24
+
+
+def short_title(text: str) -> str:
+    """A task's short title: the request's first sentence, paths as file names, cut at a word.
+
+    The person's own words, without "please" and the like; never cut
+    mid-word: at most :data:`TITLE_CHARS` characters (24 for Chinese),
+    without a trailing "the", "in" or punctuation.
+    """
+    lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
+    first = _TITLE_LEAD.sub("", lines[0] if lines else "").strip()
+    first = re.split(r"(?<=[^\d][.!?])\s|[。！？；;]", first, maxsplit=1)[0]
+    # A path reads as its file's name; a link and "and/or" stay as they are.
+    first = " ".join(
+        word if "://" in word else _IN_FOLDER.sub(r"\1", word) for word in first.split()
+    ).strip(" ,.:;，。：；")
+    if _has_cjk(first):
+        title = first[:TITLE_CHARS_ZH]
+        if re.match(r"\w\w", first[TITLE_CHARS_ZH - 1 : TITLE_CHARS_ZH + 1], re.ASCII):
+            title = re.sub(r"[\w.-]+$", "", title, flags=re.ASCII)  # never mid-word
+        title = title.rstrip(" ,，、：:")
+    else:
+        words: list[str] = []
+        for word in first.split():
+            if len(" ".join([*words, word])) > TITLE_CHARS:
+                break
+            words.append(word)
+        while len(words) > 1 and words[-1].casefold().strip(",:;") in _TITLE_TAIL:
+            words.pop()
+        title = " ".join(words).rstrip(" ,.:;")
+        if not title:
+            title = first[:TITLE_CHARS]
+    return title or "Task"
 
 
 _GREETING: Final = re.compile(
@@ -328,8 +544,23 @@ def route(
                 return Routed("control", action=found[0], task=task)
     if _REPEATS.search(text):
         return Routed("chore")
+    cue = follow_cue(stripped)
+    if len(text) <= CONTROL_CHARS and cue is not None and not is_question(stripped):
+        task = named_task(stripped, cue, tasks, finished=True)
+        if task is not None:
+            return Routed("follow", task=task)
     if _GREETING.match(text):
         return Routed("answer")
+    if work_request(stripped) and not (
+        cue is not None
+        and any(
+            named_task(stripped, "", [task], strict=False, finished=True)
+            for task in tasks
+        )
+    ):
+        # A follow-up word with a task's name may continue that task: the
+        # front's step decides.
+        return Routed("work", text=stripped, title=short_title(stripped))
     if (
         len(text) <= SHORT_CHARS
         and is_question(text)
@@ -346,11 +577,19 @@ __all__ = [
     "TaskRef",
     "allows",
     "allows_level",
+    "allows_message",
     "control_action",
+    "follow_cue",
+    "intention_only",
+    "is_chinese",
     "is_question",
     "level_number",
     "level_word",
     "named_task",
+    "names_files",
+    "reply_language",
     "route",
+    "short_title",
     "triage",
+    "work_request",
 ]
