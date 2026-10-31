@@ -57,6 +57,9 @@ KEPT_NOTES: Final = 3
 # to the model and the page.
 OLDER: Final = "older; replaced by a newer note"
 OLDER_TURN: Final = "older; replaced by a newer message"
+# Index document kinds besides a chat's turns (:mod:`.index`).
+SIDE_SUMMARY: Final = "side_summary"
+AGENT_EXCHANGE: Final = "agent_exchange"
 _KEPT_CHARS: Final = 120
 _LINE_CHARS: Final = 240
 _TITLE_CHARS: Final = 40
@@ -166,6 +169,10 @@ def chat_label(kind: str, title: str, surface: str) -> str:
     title = chat_title(title)
     if kind == "front":
         return "Main chat"
+    if kind == SIDE_SUMMARY:
+        return f"chat “{title}” · summary" if title else "a chat · summary"
+    if kind == AGENT_EXCHANGE:
+        return f"task “{title}” · question" if title else "a task · question"
     name = {"task": "task", "front_bg": "main chat task"}.get(kind, "chat")
     if surface == "cli" and kind == "chat":
         name = "terminal chat"
@@ -181,12 +188,13 @@ def in_view(item: Item, session_id: str, keep_from_turn: int | None) -> bool:
     """Whether *item* is a turn of chat *session_id* that the chat's model still
     sees: its turn is *keep_from_turn* or later, or any turn when that is ``None``.
 
-    Such a turn is not recalled: the chat has it already.
+    Such a turn is not recalled: the chat has it already. A summary or an
+    exchange (a turn below 0, :mod:`.index`) is never recalled to the chat it belongs to.
     """
     return (
         not item.is_record
         and item.session_id == session_id
-        and (keep_from_turn is None or item.turn >= keep_from_turn)
+        and (keep_from_turn is None or item.turn < 0 or item.turn >= keep_from_turn)
     )
 
 

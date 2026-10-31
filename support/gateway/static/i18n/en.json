@@ -429,6 +429,8 @@
   "errors.defaultWorkspace": "Could not create the default workspace {path}: {problem}",
   "errors.echoAnswered": "This was answered already.",
   "errors.forgetAllFlag": "Forgetting everything needs ?all=true.",
+  "errors.importGone": "That import has no notes left.",
+  "errors.importScanGone": "That scan is gone: scan again.",
   "errors.listFailed": "Could not list models at {url}: {reason}",
   "errors.listLocalOnly": "Listing models works for local backends only; type the model name.",
   "errors.mainDelete": "The main chat is always there: it cannot be deleted.",

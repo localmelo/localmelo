@@ -1673,13 +1673,14 @@ panel uses these routes.
 ```
 
 ```json
-{"on": true, "records": [{"id": 3, "text": "You prefer short answers.", "topic": "preferences", "quote": "I prefer short answers", "source": "you said it · chat “Planning”, Oct 30", "from": "from chat “Planning”, Oct 30", "chat_gone": false, "edited": false, "session_id": "3f9c2a7b1d4e", "created_at": 1793395000.0}], "documents": 12, "embedding_model": "", "retriever": "auto", "last_error": ""}
+{"on": true, "records": [{"id": 3, "text": "You prefer short answers.", "topic": "preferences", "quote": "I prefer short answers", "source": "you said it · chat “Planning”, Oct 30", "imported": false, "batch_id": "", "from": "from chat “Planning”, Oct 30", "chat_gone": false, "edited": false, "session_id": "3f9c2a7b1d4e", "created_at": 1793395000.0}], "documents": 12, "embedding_model": "", "retriever": "auto", "last_error": ""}
 ```
 
 - `GET /api/memory/records` lists the notes newest first; `?session_id=ID` keeps one chat's.
   `topic` is `about`, `preferences`, `people`, `projects` or `decisions`. `from` names the
   chat and the day, or `from a deleted chat, Oct 30` (`chat_gone` true) once the chat is
-  gone; `edited` is true once the user reworded the note. `documents` counts the chat turns in the
+  gone; `edited` is true once the user reworded the note; `imported` is true for a note
+  brought in from another assistant's file (with its `batch_id`; see below). `documents` counts the chat turns in the
   index, `embedding_model` is the model that searches by meaning (`""`: words only, which
   `retriever` `bm25` or `llm` always is) and `last_error` the last reason it was not used.
 - `PATCH /api/memory/records/{id}` with `{"text": "..."}` rewords a note in place and answers
@@ -1697,6 +1698,50 @@ panel uses these routes.
 - `POST /api/memory/reindex` rebuilds the chat index from the chats (turns that ended
   before the last "forget everything" stay out) and gives every note a vector of the
   embedding model now set: `{"notes": 0, "turns": 48}`.
+
+## Bring in memory from other assistants
+
+Notes from the files other coding assistants keep on this computer (see
+[Bring in memory from other assistants](../concepts/memory.md#bring-in-memory-from-other-assistants)).
+A scan reads under the user's home folder and writes nothing; a write needs the
+scan's `batch_id` and the sources the user chose.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/memory/import/scan
+```
+
+```json
+{"batch_id": "e86b19186930", "sources": [{"id": "claude-35bc414c", "harness": "claude", "path": "/home/me/.claude/CLAUDE.md", "scope": "user", "workspace": "", "items_found": 3, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 1}, "sample": ["Use uv for new Python projects.", "Keep commits small and focused on one change."]}, {"id": "hermes-2e22e64e", "harness": "hermes", "path": "/home/me/.hermes/memories/USER.md", "scope": "user", "workspace": "", "items_found": 2, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 0}, "sample": ["Prefers concise replies.", "The user is a PhD student in robotics."]}], "partial": false}
+```
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST -H 'Content-Type: application/json' -d '{"batch_id": "e86b19186930", "source_ids": ["claude-35bc414c"]}' http://127.0.0.1:8401/api/memory/import
+```
+
+```json
+{"batch_id": "e86b19186930", "written_ids": [1, 2], "skipped": 0, "event": {"type": "memory.import", "data": {"batch_id": "e86b19186930", "sources": [{"id": "claude-35bc414c", "harness": "claude", "written": 2}]}}}
+```
+
+- `GET /api/memory/import/scan` lists what it found; `sources` hold only files with a line
+  in them. `harness` is the lowercase name of the assistant the file belongs to (`claude`,
+  `hermes`, …), `path` the file's absolute path (for a folder of notes, the folder) and
+  `workspace` the project folder a folder of notes belongs to (`""` otherwise). `items_found`
+  counts the lines, `items_kept` those that would become notes (at most 60), and `filtered`
+  those left out, by reason: `secret`, `third_party` (private data of other people),
+  `wrong_owner`, `duplicate` and `mechanics` (lines about the other tool itself). `sample`
+  has up to 3 notes. `partial` is true when the scan stopped at its 2 s limit.
+- `POST /api/memory/import` writes the notes of the chosen `source_ids` (at most 300 in a
+  batch) and answers the new note ids; `skipped` counts the notes of those sources that were
+  not written (already notes, over the batch limit, or a source written before). A scan
+  that is gone (the gateway keeps the last four) is 404 `not_found`; an unknown source id,
+  or memory switched off, is 400 `invalid_request`.
+- The `memory.import` event (`batch_id` and, per source, `id`, `harness`, `written`) is in the
+  response as `event`: memory has no session channel to send it on.
+- `DELETE /api/memory/import/{batch_id}` takes the batch back: it deletes its notes, makes
+  the notes they replaced current again and answers `{"batch_id": "e86b19186930",
+  "removed": 2}`; a batch with no notes left is 404 `not_found`.
+- A note it wrote shows in `GET /api/memory/records` with `imported` true, its `batch_id`
+  and a `source` like `imported from the file CLAUDE.md, Oct 31`.
 
 ## GET /api/sessions/{id}/runs
 

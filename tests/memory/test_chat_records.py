@@ -151,6 +151,32 @@ def test_a_secret_beside_a_statement_refuses_only_the_secret() -> None:
     assert not records.sensitive("Order 4111 1111 1111 1112 shipped.")  # fails Luhn
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "My PIN is 4821.",
+        "my pin is 4821",
+        "bank pin: 4821",
+        "my pin 4821",
+        "Pin code 77",
+    ],
+)
+def test_a_pin_is_a_secret(text: str) -> None:
+    assert records.sensitive(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Pin the dependency versions in uv.lock.",
+        "Pin a note to every chat.",
+        "Spinning up",
+    ],
+)
+def test_pin_as_a_verb_is_not_a_secret(text: str) -> None:
+    assert not records.sensitive(text)
+
+
 async def _session(store: SessionStore, title: str = "Planning") -> str:
     turn = await store.begin_turn(
         None, title, holder=HOLDER, title=title, new_session=NewSession()

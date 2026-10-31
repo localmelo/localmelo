@@ -904,15 +904,41 @@ melo 对用户保存的笔记，以及打开或关闭跨对话记忆的开关（
 ```
 
 ```json
-{"on": true, "records": [{"id": 3, "text": "You prefer short answers.", "topic": "preferences", "quote": "I prefer short answers", "source": "you said it · chat “Planning”, Oct 30", "from": "from chat “Planning”, Oct 30", "chat_gone": false, "edited": false, "session_id": "3f9c2a7b1d4e", "created_at": 1793395000.0}], "documents": 12, "embedding_model": "", "retriever": "auto", "last_error": ""}
+{"on": true, "records": [{"id": 3, "text": "You prefer short answers.", "topic": "preferences", "quote": "I prefer short answers", "source": "you said it · chat “Planning”, Oct 30", "imported": false, "batch_id": "", "from": "from chat “Planning”, Oct 30", "chat_gone": false, "edited": false, "session_id": "3f9c2a7b1d4e", "created_at": 1793395000.0}], "documents": 12, "embedding_model": "", "retriever": "auto", "last_error": ""}
 ```
 
-- `GET /api/memory/records` 按时间从新到旧列出笔记；`?session_id=ID` 只保留某个对话的。`topic` 为 `about`、`preferences`、`people`、`projects` 或 `decisions`。`from` 写明对话和日期；对话被删除后是 `from a deleted chat, Oct 30`（`chat_gone` 为 true）；用户改写过笔记后 `edited` 为 true。`documents` 是对话索引中的轮次数，`embedding_model` 是按含义搜索的模型（`""` 表示只按词，`retriever` 为 `bm25` 或 `llm` 时总是如此），`last_error` 是它最近一次没被使用的原因。
+- `GET /api/memory/records` 按时间从新到旧列出笔记；`?session_id=ID` 只保留某个对话的。`topic` 为 `about`、`preferences`、`people`、`projects` 或 `decisions`。`from` 写明对话和日期；对话被删除后是 `from a deleted chat, Oct 30`（`chat_gone` 为 true）；用户改写过笔记后 `edited` 为 true；从其他助手的文件导入的笔记 `imported` 为 true（带 `batch_id`，见下文）。`documents` 是对话索引中的轮次数，`embedding_model` 是按含义搜索的模型（`""` 表示只按词，`retriever` 为 `bm25` 或 `llm` 时总是如此），`last_error` 是它最近一次没被使用的原因。
 - `PATCH /api/memory/records/{id}`，请求体 `{"text": "..."}`，原地改写一条笔记，并返回上述形式的笔记。旧文字被覆盖（不保留），新文字重新嵌入，笔记的决策行中的文字被清空。空文字、超过 300 个字符或看起来像密码或密钥的文字返回 400 `invalid_request` 并给出原因；未知笔记返回 404 `not_found`。
 - `DELETE /api/memory/records/{id}` 删除一条笔记、它的向量和它取代过的旧文字，并清空其决策行中的文字：204，或 404 `not_found`。带 `?undo=true`（消息下方的 “Undo”）时，被它替换的笔记恢复为当前。
 - `DELETE /api/memory/records?all=true` 忘记所有笔记并清空对话索引，返回 `{"notes": 12, "turns": 48}`。没有 `all=true` 时返回 400。对话本身不受影响。
 - `PUT /api/memory`，请求体 `{"on": false}`，切换并保存 `[memory] across_chats`；返回 `{"on": false}`。此后开始的对话会使用它。
 - `POST /api/memory/reindex` 从对话重建对话索引（上次“忘记全部”之前结束的轮次不会进入），并给每条笔记补上当前嵌入模型的向量：`{"notes": 0, "turns": 48}`。
+
+## Bring in memory from other assistants
+
+来自这台电脑上其他编程助手所保存文件的笔记（见[导入其他助手的记忆](../concepts/memory.md#bring-in-memory-from-other-assistants)）。扫描只读取用户主目录之内的文件，不写入任何内容；写入需要扫描给出的 `batch_id` 和用户选择的来源。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/memory/import/scan
+```
+
+```json
+{"batch_id": "e86b19186930", "sources": [{"id": "claude-35bc414c", "harness": "claude", "path": "/home/me/.claude/CLAUDE.md", "scope": "user", "workspace": "", "items_found": 3, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 1}, "sample": ["Use uv for new Python projects.", "Keep commits small and focused on one change."]}, {"id": "hermes-2e22e64e", "harness": "hermes", "path": "/home/me/.hermes/memories/USER.md", "scope": "user", "workspace": "", "items_found": 2, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 0}, "sample": ["Prefers concise replies.", "The user is a PhD student in robotics."]}], "partial": false}
+```
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST -H 'Content-Type: application/json' -d '{"batch_id": "e86b19186930", "source_ids": ["claude-35bc414c"]}' http://127.0.0.1:8401/api/memory/import
+```
+
+```json
+{"batch_id": "e86b19186930", "written_ids": [1, 2], "skipped": 0, "event": {"type": "memory.import", "data": {"batch_id": "e86b19186930", "sources": [{"id": "claude-35bc414c", "harness": "claude", "written": 2}]}}}
+```
+
+- `GET /api/memory/import/scan` 列出扫描结果；`sources` 只包含有内容的文件。`harness` 是该文件所属助手的小写名称（`claude`、`hermes`……），`path` 是文件的绝对路径（笔记文件夹则是该文件夹），`workspace` 是笔记文件夹所属的项目文件夹（否则为 `""`）。`items_found` 是行数，`items_kept` 是会成为笔记的行数（最多 60），`filtered` 按原因给出被舍弃的行数：`secret`、`third_party`（他人的私人信息）、`wrong_owner`、`duplicate` 和 `mechanics`（关于其他工具本身的行）。`sample` 最多 3 条笔记。扫描在 2 秒限制处停止时 `partial` 为 true。
+- `POST /api/memory/import` 写入所选 `source_ids` 的笔记（一批最多 300 条），返回新笔记的 id；`skipped` 统计这些来源中没有写入的笔记（已经是笔记、超过批次上限，或该来源已写入过）。扫描已不存在（网关保留最近四次）时返回 404 `not_found`；来源 id 未知或记忆已关闭时返回 400 `invalid_request`。
+- `memory.import` 事件（`batch_id`，以及每个来源的 `id`、`harness`、`written`）放在响应的 `event` 里：记忆没有可用来发送它的会话通道。
+- `DELETE /api/memory/import/{batch_id}` 收回整批：删除它的笔记，让被它们取代的笔记重新生效，并返回 `{"batch_id": "e86b19186930", "removed": 2}`；没有剩余笔记的批次返回 404 `not_found`。
+- 它写入的笔记会在 `GET /api/memory/records` 中显示 `imported` 为 true、带 `batch_id`，`source` 形如 `imported from the file CLAUDE.md, Oct 31`。
 
 ## GET /api/sessions/{id}/runs
 
