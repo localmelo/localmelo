@@ -207,7 +207,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     async def memory_import(body: ImportBody) -> dict[str, Any]:
         plan = console.memory.import_plan(body.batch_id)
         if plan is None:
-            raise ApiError(404, "not_found", "That scan is gone: scan again.")
+            raise ApiError(404, "not_found", t("errors.importScanGone"))
         try:
             return await console.memory.import_apply(plan, body.source_ids)
         except ValueError as exc:
@@ -217,7 +217,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     async def memory_import_undo(batch_id: str) -> dict[str, Any]:
         removed = await console.memory.undo_import(batch_id)
         if not removed:
-            raise ApiError(404, "not_found", "That import has no notes left.")
+            raise ApiError(404, "not_found", t("errors.importGone"))
         return {"batch_id": batch_id, "removed": removed}
 
     @app.put("/api/memory")
