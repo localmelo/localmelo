@@ -158,3 +158,27 @@ def test_an_approval_puts_the_call_as_a_request_without_its_command_or_text(
     tool: str, arguments: Any, words: str
 ) -> None:
     assert request_words(tool, arguments, root="/w") == words
+
+
+@pytest.mark.parametrize(
+    "reason, words",
+    [
+        ("Priority", "Waiting for a higher-priority task"),
+        ("Resources", "Waiting for a free model slot"),
+        ("Reservation", "Waiting while another job uses the model"),
+        ("Memory", "Waiting for free memory"),
+        ("Battery", "Waiting for the battery"),
+        ("Thermal", "Waiting for the Mac to cool down"),
+        ("IdleOnly", "Waiting until the Mac is idle"),
+        ("Paused", "Waiting for the model"),
+        ("", "Waiting for the model"),
+    ],
+)
+def test_a_held_call_says_why_in_words(reason: str, words: str) -> None:
+    assert activity_text(state="held", reason=reason) == ActivityText(words, "held")
+
+
+def test_a_reason_changes_only_a_held_state() -> None:
+    assert activity_text(state="waiting", reason="Priority") == ActivityText(
+        "Waiting for your approval", "wait"
+    )

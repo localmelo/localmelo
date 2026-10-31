@@ -97,6 +97,20 @@ def test_the_console_uses_the_workspace_pages_gate(tmp_path: Path) -> None:
     assert server.console._monitor is None
 
 
+def test_the_gate_takes_its_focus_window_from_the_config(tmp_path: Path) -> None:
+    cfg = _cfg(policy="class")
+    cfg.scheduler.focus_s = 7.0
+    server = GatewayServer(
+        cfg,
+        console_options=ConsoleOptions(
+            store_path=str(tmp_path / "sessions.db"), probe=QuietProbe()
+        ),
+    )
+
+    assert server.console is not None
+    assert server.console.gate.hold_wake_s == 7.0
+
+
 def test_a_test_supplied_gate_is_kept(tmp_path: Path) -> None:
     gate = ChatGate(policy="off", call_log_dir=None)
     server = GatewayServer(

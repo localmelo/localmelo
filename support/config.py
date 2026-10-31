@@ -296,14 +296,17 @@ class SchedulerConfig:
 
     ``n_srv`` is the model server's slot count, ``r_f`` the reserve kept for
     callers the gate cannot see (the CLI and direct runs) and ``n_fg`` the
-    background cap while a chat is focused. The call log holds one JSONL
-    file per gateway run; an empty ``call_log_dir`` means the default.
+    background cap while a chat is focused. A chat is focused while a model
+    call of its turn is running and for ``focus_s`` seconds after its last call
+    or keystroke; an open chat with no turn running is not. The call log holds
+    one JSONL file per gateway run; an empty ``call_log_dir`` means the default.
     """
 
     policy: str = "off"  # off | fcfs | class
     n_srv: int = 8
     r_f: int = 1
     n_fg: int = 1
+    focus_s: float = 10.0
     call_log: bool = True
     call_log_dir: str = ""
     # The GPU lock and the battery (S2b). An empty path means no lock
@@ -514,6 +517,15 @@ class Config:
                     f"[scheduler] {name} must be an integer >= {minimum}, "
                     f"got {value!r}"
                 )
+        focus: object = scheduler.focus_s
+        if (
+            isinstance(focus, bool)
+            or not isinstance(focus, int | float)
+            or not 0 < focus < float("inf")
+        ):
+            errors.append(
+                f"[scheduler] focus_s must be a number of seconds > 0, got {focus!r}"
+            )
         if not isinstance(scheduler.call_log, bool):
             errors.append(
                 f"[scheduler] call_log must be a boolean, got {scheduler.call_log!r}"
@@ -1466,6 +1478,7 @@ def save(cfg: Config) -> None:
         lines.append(f"n_srv = {scheduler.n_srv}")
         lines.append(f"r_f = {scheduler.r_f}")
         lines.append(f"n_fg = {scheduler.n_fg}")
+        lines.append(f"focus_s = {_toml_value(scheduler.focus_s)}")
         lines.append(f"call_log = {'true' if scheduler.call_log else 'false'}")
         lines.append(f"call_log_dir = {_toml_string(scheduler.call_log_dir)}")
         lines.append(f"gpu_lock_file = {_toml_string(scheduler.gpu_lock_file)}")

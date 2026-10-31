@@ -164,7 +164,11 @@ output or log the header; same-user processes can still read the token file.
   running turns of the CLI file by theirs.
 - `activity` says what the item is doing in plain words, and `icon` its kind:
   `Waiting for your approval` (`wait`), `Waiting for the model` (`held`, the
-  scheduler holds its model call), `Reading notes.md` and `Looking through
+  scheduler holds its model call; when the reason is known it says why:
+  `Waiting for a higher-priority task`, `Waiting for a free model slot`,
+  `Waiting while another job uses the model`, `Waiting for free memory`,
+  `Waiting for the battery`, `Waiting for the Mac to cool down` or `Waiting
+  until the Mac is idle`), `Reading notes.md` and `Looking through
   ~/talk` (`read`), `Writing slides.md` (`write`), `Running the tests` (for a
   command that runs a test suite), `Running a command` and `Running Python`
   (`run`), `Reading example.com`, `Reading the page` and `Following a link`
@@ -1364,8 +1368,10 @@ The page's typing heartbeat: this chat is the lane's focused chat.
 ```
 
 - 404 `not_found` for an unknown session. The call is a scheduler event for
-  the focused chat (the lane keeps its typing window); it does not open the
-  session and changes nothing else.
+  the focused chat (the lane keeps its typing window, `[scheduler] focus_s`,
+  10 seconds by default); it does not open the session and changes nothing
+  else. A chat that was only opened takes slots from tasks again once the
+  window ends.
 - A turn started through the turn routes, and a create with a first turn,
   also resets the chat's hold clock and focuses it, as a chat's own message
   does.

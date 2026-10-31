@@ -32,6 +32,7 @@ def _manager(app: FastAPI) -> SmokePlayground:
             n_srv=scheduler.n_srv,
             r_f=scheduler.r_f,
             n_fg=scheduler.n_fg,
+            focus_s=scheduler.focus_s,
             call_log_dir=call_log_dir(scheduler),
             lock_path=scheduler.gpu_lock_file or None,
             lock_self=scheduler.lock_self,
