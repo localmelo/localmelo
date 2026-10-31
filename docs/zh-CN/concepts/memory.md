@@ -200,6 +200,36 @@ Where did I live before?
 
 面板标签页背后的路由见 [API 参考](../reference/api-v2.md#memory-across-chats)。
 
+<a id="bring-in-memory-from-other-assistants"></a>
+
+### 导入其他助手的记忆
+
+melo 可以读取这台电脑上其他编程助手已经了解的关于你的信息，并保存为笔记，这样你不必从零开始。在你要求扫描之前，它什么都不读。
+
+- **扫描只看不写。** 它列出每个来源，说明 melo 会保留多少行、丢弃了什么；不写入任何内容，也不联网。
+- **每个来源一个选择**（默认开启，`Skip` 跳过某个来源），不会逐条笔记询问。完成后它会说 `Brought in 12 notes from … · Undo`。
+- **撤销会收回整批笔记**，被改动的行取代过的笔记会重新生效。
+- **导入的笔记和其他笔记一样被召回**，保持原来的语言，但不会固定在每个对话里；它们按笔记而不是指令来读。
+- **随时可以再扫描。** 已经是笔记的行会被跳过；你在同一位置改过的行会取代它旧文字的笔记。
+
+它读取什么，只在你的主目录之内，也不会跟随指向主目录之外的链接：
+
+| 来源 | 文件 |
+|---|---|
+| 指令文件 | `~/.claude/CLAUDE.md`、`$CLAUDE_CONFIG_DIR/CLAUDE.md`、`~/.cc-switch/claude-accounts/*/config/CLAUDE.md`、`~/.codex/AGENTS.md`、`~/.gemini/GEMINI.md`，以及它们用 `@path` 引入的文件（最多 4 层） |
+| 记忆笔记 | `~/.claude/projects/*/memory/*.md`，以及每个配置文件夹下的同类文件；笔记的 `type` 说明它是关于你（`user`、`feedback`）还是关于一个仍然存在的项目文件夹（`project`、`reference`） |
+| 记忆条目 | `~/.hermes/memories/USER.md` 和 `~/.hermes/memories/MEMORY.md`（或 `$HERMES_HOME` 下），每个 `§` 一条 |
+| 记忆数据库 | `~/.codex/memories_*.sqlite`，每一行的 `raw_memory`，以只读方式打开 |
+
+它不会保留：
+
+- 密钥，以及他人的私人信息：你的 git 配置里那个之外的邮箱地址、账号和 Apple ID 相关行、电话号码、写明姓名并带有编号的人。
+- 关于其他工具本身的行：它的工具调用、斜杠命令、钩子和设置文件。
+- 你已经有的笔记，以及两个来源共有的行（先出现的算数）。
+- 超过 256 KB 的文件、凭据文件、历史和对话记录一律不打开；每个来源最多 60 条笔记，每批最多 300 条。
+
+笔记就是那一行本身，经过整理，保持你的措辞和语言（第一人称的行会改用第二人称，和你自己的笔记一样）。不使用模型；笔记会显示它来自哪个文件的哪一行。路由见 [API 参考](../reference/api-v2.md#bring-in-memory-from-other-assistants)。
+
 <a id="reasoning-notes"></a>
 
 ## 推理笔记

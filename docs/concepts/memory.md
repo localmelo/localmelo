@@ -192,6 +192,34 @@ The other places:
 
 The routes behind the tab are in the [API reference](../reference/api-v2.md#memory-across-chats).
 
+### Bring in memory from other assistants
+
+melo can read what other coding assistants on this computer already know about you and keep it as notes, so you do not start from nothing. It reads nothing until you ask for a scan.
+
+- **A scan only looks.** It lists each source with how many lines melo would keep and what it dropped; it writes nothing and uses no network.
+- **One choice per source** (on by default, `Skip` to leave one out), never a question per note. Afterwards it says `Brought in 12 notes from … · Undo`.
+- **Undo takes the whole batch back**, and a note a changed line replaced is current again.
+- **Imported notes are recalled like any note**, in their own language, but never pinned to every chat; they read as notes, not instructions.
+- **Scan again any time.** A line that is a note already is skipped; a line you changed in the same place replaces the note of its old wording.
+
+What it reads, only inside your home folder and never through a link that leaves it:
+
+| Source | Files |
+|---|---|
+| Instruction files | `~/.claude/CLAUDE.md`, `$CLAUDE_CONFIG_DIR/CLAUDE.md`, `~/.cc-switch/claude-accounts/*/config/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`, and the files they pull in with `@path` (up to 4 levels) |
+| Memory notes | `~/.claude/projects/*/memory/*.md`, and the same under each config folder; a note's `type` says whether it is about you (`user`, `feedback`) or about one project folder that still exists (`project`, `reference`) |
+| Memory entries | `~/.hermes/memories/USER.md` and `~/.hermes/memories/MEMORY.md` (or under `$HERMES_HOME`), one entry per `§` |
+| Memory database | `~/.codex/memories_*.sqlite`, the `raw_memory` of each row, opened read-only |
+
+What it leaves out:
+
+- Secrets, and private data of other people: addresses other than the one in your git config, account and Apple ID lines, phone numbers, a named person with an ID.
+- Lines about the other tool itself: its tool calls, slash commands, hooks and settings files.
+- Lines you already have as notes, and lines two sources share (the first one counts).
+- Files over 256 KB, credential files, histories and transcripts are never opened; at most 60 notes come from one source and 300 from one batch.
+
+A note is the line itself, tidied, in your words and language (a first-person line reads in the second person, as your own notes do). No model is involved; the notes show the file and line they came from. The routes are in the [API reference](../reference/api-v2.md#bring-in-memory-from-other-assistants).
+
 ## Reasoning notes
 
 `melo --reasoning compress "<task>"` makes the loop keep a short **note** of every model reply instead of its reasoning. With the default `--note-writer auto`, the model writes the note itself before a tool call:
