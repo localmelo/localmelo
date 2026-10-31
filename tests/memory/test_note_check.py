@@ -55,6 +55,37 @@ def test_the_stemmer_ends_ies_and_ie_in_y_and_keeps_the_old_endings(
 
 
 @pytest.mark.parametrize(
+    ("word", "same"),
+    [
+        ("running", "run"),  # a doubled consonant the ending brought drops one
+        ("stopped", "stop"),
+        ("sitting", "sit"),
+        ("planned", "plan"),
+        ("falling", "fall"),  # l, s and z stay: they are in the bare word
+        ("missing", "miss"),
+        ("buzzing", "buzz"),
+        ("stuffed", "stuff"),  # f and d stay too ("stuff", "add")
+        ("adding", "add"),
+        ("added", "add"),
+        ("called", "call"),
+        ("meeting", "meet"),
+    ],
+)
+def test_the_stemmer_drops_the_doubled_consonant_an_ending_brought(
+    word: str, same: str
+) -> None:
+    assert stem(stem(word)) == stem(stem(same))
+    assert stem(word) == same
+
+
+def test_a_running_coach_is_grounded_in_what_the_user_typed() -> None:
+    note = "Ms. Petrova is your running coach."
+    # "running" in the note, "run" typed: one term, not a word the user lacks.
+    assert records.unsupported(note, ["Ms. Petrova is my coach for the run."]) == []
+    assert records.unsupported(note, ["Ms. Petrova is my running coach."]) == []
+
+
+@pytest.mark.parametrize(
     ("typed", "note"),
     [
         # What the cell refused: "then" and "key" for "followed by" and "most

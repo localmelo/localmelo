@@ -207,21 +207,38 @@ def snippet(text: str, limit: int = _LINE_CHARS) -> str:
     return flat if len(flat) <= limit else flat[: limit - 1] + "…"
 
 
+def _undoubled(base: str) -> str:
+    """*base* (a word without ``-ing`` or ``-ed``) with a doubled last consonant
+    reduced to one: "runn" gives "run"; "fall", "miss", "buzz", "stuff" and "add"
+    are words as they are."""
+    if (
+        len(base) >= 4
+        and base[-1] == base[-2]
+        and base[-1].isalpha()
+        and base[-1] not in "aeiouylszfd"
+    ):
+        return base[:-1]
+    return base
+
+
 def stem(word: str) -> str:
     """A lowercase ASCII word without a plural, ``-ing`` or ``-ed`` ending.
 
     So "meets" and "meeting" find "meet" and "Tuesdays" finds "tuesday"; both
     sides of a match are stemmed, so a stem need not be a word. ``-ies`` and a
-    long ``-ie`` end in ``y`` ("replies" and "reply", "movies" and "movie").
+    long ``-ie`` end in ``y`` ("replies" and "reply", "movies" and "movie"). A
+    doubled consonant the ending brought drops one ("running" and "run",
+    "stopped" and "stop"), unless the word keeps it bare: ``l``, ``s``, ``z``,
+    ``f`` and ``d`` stay ("falling", "missing", "buzzing", "stuffed", "adding").
     """
     if len(word) >= 5 and word.endswith("ies"):
         return word[:-3] + "y"
     if len(word) >= 5 and word.endswith("ie"):
         return word[:-2] + "y"
     if len(word) >= 6 and word.endswith("ing"):
-        return word[:-3]
+        return _undoubled(word[:-3])
     if len(word) >= 5 and word.endswith("ed"):
-        return word[:-2]
+        return _undoubled(word[:-2])
     if len(word) >= 4 and word.endswith("s") and not word.endswith(("ss", "us", "is")):
         return word[:-1]
     return word

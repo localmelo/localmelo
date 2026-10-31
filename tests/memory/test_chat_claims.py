@@ -4,8 +4,8 @@ After a completed chat run, when the answer claims a save (``Remembered: X``,
 ``Noted — X``, ``I've noted that X``, ``记下了：X``) and the turn kept no note,
 code keeps X through ``remember``'s own path: the user's words, no secret, the
 newer value supersedes the old one. When X is not the user's words, or the
-answer names nothing written to the user (a fragment such as "gate 9 for
-Faro"), nothing is kept and the turn's ``turn.memory`` event has
+answer states no fact (a fragment such as "gate 9 for Faro": no verb, no "you"),
+nothing is kept and the turn's ``turn.memory`` event has
 ``unsaved_claim`` true; a bare "Noted, thanks!" claims nothing. A turn that
 kept a note, a plain answer, workers, task runners and memory off do nothing. The claims are the real ones
 a guard cell of the benchmark answered with no note kept. End to end on the
@@ -66,6 +66,18 @@ CLAIMS = [
         "You live in Utrecht.",
     ),
     ("我住在乌得勒支。", "记下了：你住在乌得勒支。", "你住在乌得勒支。"),
+    # A fact about another person is a note too (the benchmark's third-party
+    # claims, kept by neither the model nor code before).
+    (
+        "Prof. Duarte's office is in the Atrium Wing.",
+        "I've noted that Prof. Duarte's office is in the Atrium Wing.",
+        "Prof. Duarte's office is in the Atrium Wing.",
+    ),
+    (
+        "Dr. Tanaka's phone number is 555-0230.",
+        "I've noted that Dr. Tanaka's phone number is 555-0230.",
+        "Dr. Tanaka's phone number is 555-0230.",
+    ),
     (PREFERENCE, f"Remembered: {PREFERENCE_CLAIM}", f"W{PREFERENCE_CLAIM[1:]}"),
 ]
 # A claim whose X is not the user's words (a changed value, a new word that is a
@@ -334,11 +346,27 @@ async def test_only_the_turn_under_way_keeps_a_claim(
         ("记住了：您住在乌得勒支。", "您住在乌得勒支。"),
         ("Noted — you pay 3.5 euros. Ok.", "You pay 3.5 euros."),
         ("Noted — it is YOURS.", "It is YOURS."),
-        # Not written to the user, with 3 content words or more: nothing usable.
+        # A statement about someone or something else is a fact to keep (remember's
+        # own checks decide whether it is the user's words).
+        (
+            "Noted — the group meeting is on Thursdays.",
+            "The group meeting is on Thursdays.",
+        ),
+        ("记下了：导师是周教授。", "导师是周教授。"),
+        # A title's "." ends no claim.
+        (
+            "I've noted that Mrs. Caldwell's phone number is 555-0318.",
+            "Mrs. Caldwell's phone number is 555-0318.",
+        ),
+        (
+            "Remembered: Dr. J. Smith works at the clinic. Anything else?",
+            "Dr. J. Smith works at the clinic.",
+        ),
+        # No statement (no verb, no possessive, not to the user), with 3 content
+        # words or more: nothing usable.
         ("Noted — gate 9 for Faro. I've also kept the Porto note.", ""),
+        ("Remembered: Gate 9 for Faro.", ""),
         ("Noted — it costs 3.5 euros. Ok.", ""),
-        ("Noted — the group meeting is on Thursdays.", ""),
-        ("记下了：导师是周教授。", ""),
         ("Noted — I'll use plain words.", ""),
         # The first claim counts.
         ("Noted — you like tea. Remembered: you like jam.", "You like tea."),
@@ -370,3 +398,60 @@ def test_claimed_reads_the_fact_a_reply_says_it_noted(answer: str, fact: str) ->
 )
 def test_claimed_is_none_when_a_reply_claims_no_save(answer: str) -> None:
     assert records.claimed(answer) is None
+
+
+# The seven third-party facts a benchmark reply claimed to have noted, with no
+# note kept: (what the user typed, the reply, the note code keeps).
+THIRD_PARTY = [
+    (
+        "Prof. Duarte's office is in the Atrium Wing.",
+        "I've noted that Prof. Duarte's office is in the Atrium Wing.",
+        "Prof. Duarte's office is in the Atrium Wing.",
+    ),
+    (
+        "Mrs. Caldwell's phone number is 555-0318.",
+        "I've noted that Mrs. Caldwell's phone number is 555-0318.",
+        "Mrs. Caldwell's phone number is 555-0318.",
+    ),
+    (
+        "Dr. Kowalski's office is on Pine Street.",
+        "I remember that Dr. Anna Kowalski is your dentist. I've noted that her "
+        "office is on Pine Street.",
+        "Her office is on Pine Street.",
+    ),
+    (
+        "Gerald's phone number is 555-0147.",
+        "I've noted that Gerald's phone number is 555-0147.",
+        "Gerald's phone number is 555-0147.",
+    ),
+    (
+        "Felix's birthday is on 2 August.",
+        "I've noted that Felix's birthday is on 2 August.",
+        "Felix's birthday is on 2 August.",
+    ),
+    (
+        "Dr. Tanaka's phone number is 555-0230.",
+        "I've noted that Dr. Tanaka's phone number is 555-0230.",
+        "Dr. Tanaka's phone number is 555-0230.",
+    ),
+    (
+        "Dr. Ortiz's office is room 512.",
+        "I've noted that Dr. Ortiz's office is in room 512.",
+        "Dr. Ortiz's office is in room 512.",
+    ),
+]
+
+
+@pytest.mark.parametrize(("typed", "answer", "fact"), THIRD_PARTY)
+async def test_a_fact_about_another_person_is_claimed_and_kept(
+    memory: ChatMemory, store: SessionStore, typed: str, answer: str, fact: str
+) -> None:
+    assert records.claimed(answer) == fact
+    turn = await store.begin_turn(
+        None, typed, holder="test:1:claims", title=typed, new_session=NewSession()
+    )
+    await memory.before_turn(store, turn, typed)
+    (kept,) = await memory.keep_claims(turn, answer)
+    assert kept.text == fact
+    (entry,) = await memory.records()
+    assert entry.admitted_by == "user_statement" and entry.provenance["quote"] == typed

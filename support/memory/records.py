@@ -382,18 +382,27 @@ _CLAIMS: Final = tuple(
 _CLAIM_END = re.compile(r"[。！？]+|[.!?]+(?:\s|$)|\n|\s?[(（]")
 _NOTED_TAIL = re.compile(r"[\s,;—–-]*\bnoted\b[.!\s]*$", re.IGNORECASE)
 _TO_USER = re.compile(r"\b(?:you|your|yours)\b|[你您]", re.IGNORECASE)
+# X reads as a statement of a fact when it has a verb or copula, or a possessive.
+_STATEMENT = re.compile(
+    r"\b(?:is|are|was|were|has|have|had|lives|works|starts|leaves|meets|teaches"
+    r"|coaches)\b|['\u2019]s\b|[是在叫有住]",
+    re.IGNORECASE,
+)
 CLAIM_TERMS: Final = 3
 
 
 def claimed(answer: str) -> str | None:
     """The fact *answer* says it noted, as a note sentence: ``None`` when it does
-    not claim a save, ``""`` when it does and names nothing written to the user.
+    not claim a save, ``""`` when it does and names no statement.
 
     The first claim counts: ``Remembered: X``, ``Noted — X`` (or ``:``/``,``),
     ``I've noted (that) X``, ``I'll remember (that) X``, ``Got it — X`` with a
     ``noted`` after it, ``记下了：X``, ``已记住：X``, ``记住了：X``. X ends where its
-    sentence does, or at a ``(``. A note is written to the user, so X must say
-    ``you``, ``your``, ``yours``, ``你`` or ``您``: without, X of at least
+    sentence does ("Prof." or "Mrs." does not end it, :data:`_HELD`), or at a
+    ``(``. X must read as a statement: written to the user (``you``, ``your``,
+    ``yours``, ``你``, ``您``) or with a verb, copula or possessive
+    (:data:`_STATEMENT`: "Prof. Duarte's office is in the Atrium Wing."); the
+    facts about another person are notes too. Otherwise X of at least
     :data:`CLAIM_TERMS` content words is a claim of nothing usable (``""``), and a
     shorter one ("Noted, thanks!") is no claim.
     """
@@ -401,12 +410,17 @@ def claimed(answer: str) -> str | None:
     found = [m for pattern in _CLAIMS if (m := pattern.search(text))]
     if not found:
         return None
-    rest = text[min(found, key=lambda m: m.start()).start("x") :]
+    rest = _HELD.sub(
+        lambda m: m.group().rstrip() + _JOINER,
+        text[min(found, key=lambda m: m.start()).start("x") :],
+    )
     fact = rest[: end.start()] if (end := _CLAIM_END.search(rest)) else rest
-    note = finished(_NOTED_TAIL.sub("", fact))
+    note = finished(_release(_NOTED_TAIL.sub("", fact)))
     if _TO_USER.search(note):
         return note
-    return "" if len(note_terms(note)) >= CLAIM_TERMS else None
+    if len(note_terms(note)) < CLAIM_TERMS:
+        return None
+    return note if _STATEMENT.search(note) else ""
 
 
 def candidates(typed: str) -> tuple[list[Candidate], bool]:
