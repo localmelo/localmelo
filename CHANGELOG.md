@@ -45,7 +45,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   chores and waiting approvals to the main chat. Starting a chat with **Run as
   a task** through the API is a submission like any other: the same
   `client_request_id` returns the same chat and task, a cancelled key makes
-  none, and its cancel stops the task. [#NN]
+  none, and its cancel stops the task. [#378]
 - A task can start with a short memory pack, a side chat's summary can be
   recalled from other chats, and a task's questions to its owner chat are kept
   apart from your notes: the pack holds your About you and Preferences notes,
@@ -117,7 +117,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   The news a chat reads with its next message is told once per task ending and
   per side chat, five at a time with the rest on the following message, and
   survives a gateway restart. A request you forbid or only quote (`don't delete
-  a.md`, `不要删除 a.md`) is never read as work, in the main chat's routing too. [#NN]
+  a.md`, `不要删除 a.md`) is never read as work, in the main chat's routing too. [#378]
 - A question that asks for a short answer ("briefly", "in one line", a Chinese
   "简单说") gets at most two steps, not four, before its stop answer. A task's
   title drops a level word that opens its request and is followed by a colon or
@@ -3164,3 +3164,4 @@ earlier milestones.
 [#371]: https://github.com/localmelo/localmelo/pull/371
 [#372]: https://github.com/localmelo/localmelo/pull/372
 [#374]: https://github.com/localmelo/localmelo/pull/374
+[#378]: https://github.com/localmelo/localmelo/pull/378
