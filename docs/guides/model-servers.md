@@ -15,17 +15,24 @@ Run a model server yourself and point localmelo at it: oMLX, Ollama, MLC LLM, vL
   guidance without cache or lifetime estimates for an unsupported installer.
   With a backend already saved and no server found, `melo setup` opens the full
   backend menu instead.
-- `Review setup plan` offers lifetime choices, manual steps and `Details`.
-  Exact versions, checksums, cache paths, per-volume disk readings, plan digest
-  and the proposed port are in `Details` or developer mode, not the default
-  summary. RAM uses GiB (shown as GB), with the exact byte count in `Details`;
-  less than 16 GB is a speed warning, not a manual-only restriction.
-  The pinned model is about 2.28 GB; oMLX 0.7.3's DMG is about 0.84 GB
-  on macOS 15 or 0.88 GB on macOS 26/27. The remaining download includes both.
-  Expansion/staging overhead is unmeasured; disk payload is only a lower bound.
-  `Set up and start` explains automatic setup is unavailable and shows manual
-  steps. Nothing installs, downloads, starts, saves settings or records approval.
-- Manual steps come from the same pinned recipe. They keep the model in the
+- The summary is printed once. The list then offers `Check again`,
+  `Show how to set one up`, `Enter an address` and `Quit`. `Show how to set one
+  up` prints at most six plain numbered steps: download oMLX, optionally check
+  its checksum, open it and move it to Applications, download the model, start
+  the server, then choose `Enter an address` in melo. Automatic setup is coming
+  soon. A `Check again` that finds no server prints the summary again only if
+  the cached amount or free space changed.
+- Developer mode prints the full details once and keeps a `Review setup plan`
+  menu with a lifetime option, manual steps and `Details`. Exact versions,
+  checksums, cache paths, per-volume disk readings, plan digest and the proposed
+  port are in `Details` or developer mode, not the default summary.
+- RAM uses GiB (shown as GB), with the exact byte count in `Details`; less than
+  16 GB is a speed warning, not a manual-only restriction. The pinned model is
+  about 2.28 GB; oMLX 0.7.3's DMG is about 0.84 GB on macOS 15 or 0.88 GB on
+  macOS 26/27. The remaining download includes both. Expansion/staging overhead
+  is unmeasured; disk payload is only a lower bound. Nothing installs,
+  downloads, starts or saves settings.
+- The steps come from the same pinned recipe. They keep the model in the
   standard Hugging Face cache, use a separate server settings directory, and
   disable oMLX's additional cache scan so this instance serves only the chosen
   snapshot. Install the official app yourself and copy the shown commands only

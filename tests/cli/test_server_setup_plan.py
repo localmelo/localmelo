@@ -5,6 +5,7 @@ from __future__ import annotations
 import builtins
 import hashlib
 import json
+import re
 import shlex
 import socket
 import subprocess
@@ -439,7 +440,10 @@ def test_default_preview_is_short_human_readable_and_counts_runtime_download() -
     assert lines[2] == "Download: up to 3.2 GB · Cached: 0 GB · Free: 10.0 GB"
     assert lines[3] == "Planned lifetime: stop when melo closes."
     assert "Ctrl+C" in "\n".join(setup.manual_steps(planned))
-    assert lines[4] == "Automatic setup is coming soon: Show manual steps to do it now."
+    assert (
+        lines[4]
+        == "Automatic setup is coming soon; melo can show you how to do it now."
+    )
     text = "\n".join(lines)
     for internal in (
         planned.digest,
@@ -641,13 +645,112 @@ def test_manual_steps_never_print_the_home_folder_path(
     ) in text
 
 
+def _numbered(lines: tuple[str, ...]) -> list[str]:
+    return [line for line in lines if re.match(r"\d\. ", line)]
+
+
+def test_numbered_steps_are_at_most_six_plain_steps_with_indented_commands() -> None:
+    planned = setup.plan(setup.detect())
+    steps = setup.numbered_steps(planned)
+    numbered = _numbered(steps)
+    assert [line[:2] for line in numbered] == ["1.", "2.", "3.", "4.", "5.", "6."]
+    assert steps[-1] == f"More help: {discovery.GUIDE_URL}"
+    assert planned.detection.asset is not None
+    assert numbered[0] == (
+        f"1. Download oMLX (0.9 GB): {planned.recipe.download_base}"
+        f"{planned.detection.asset.name}"
+    )
+    commands = [line for line in steps if line.startswith(setup.COMMAND_INDENT)]
+    assert len(commands) == 3
+    assert commands[0].strip().startswith("shasum -a 256 ")
+    assert (
+        commands[1].strip().startswith("HF_HUB_CACHE=")
+        and " hf download " in commands[1]
+    )
+    assert commands[2].strip().startswith("OMLX_HF_CACHE_ENABLED=0 omlx serve ")
+    # Plain words: no plan metadata, byte counts or staging jargon.
+    text = "\n".join(steps)
+    for internal in (
+        planned.digest,
+        planned.recipe.runtime_commit,
+        planned.recipe.model_revision + " ",
+        "SetupPlan",
+        "bytes",
+        "staging",
+        "approval",
+        "Details",
+    ):
+        assert internal not in text
+    assert "Gatekeeper" in text and "Ctrl+C" in text
+    assert f"http://127.0.0.1:{planned.port}/v1" in numbered[5]
+    assert "Enter an address" in numbered[5]
+
+
+def test_numbered_steps_run_the_same_commands_as_the_developer_manual_steps() -> None:
+    planned = setup.plan(setup.detect())
+    commands = {
+        line.strip()
+        for line in setup.numbered_steps(planned)
+        if line.startswith(setup.COMMAND_INDENT)
+    }
+    manual = set(setup.manual_steps(planned))
+    assert len(commands) == 3
+    assert {c for c in commands if " hf download " in c or "omlx serve" in c} <= manual
+    assert all(
+        bad not in "\n".join(commands)
+        for bad in ("--local-dir", "pip install", "~/models", "sudo")
+    )
+
+
+def test_numbered_steps_never_print_the_home_folder_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "someone"
+    monkeypatch.setenv("HOME", str(home))
+    text = "\n".join(setup.numbered_steps(setup.plan(setup.detect())))
+    for form in {str(home), str(home.resolve())}:
+        assert form not in text
+    assert '"$HOME/Downloads/oMLX-0.7.3-macos26-27.dmg"' in text
+    assert 'HF_HUB_CACHE="$HOME/.cache/huggingface/hub" hf download ' in text
+    assert '--base-path "$HOME/.cache/localmelo/server-setup/omlx-0.7.3" ' in text
+
+
+def test_numbered_steps_say_when_the_model_is_already_cached() -> None:
+    planned = setup.plan(replace(setup.detect(), missing_model_bytes=0))
+    numbered = _numbered(setup.numbered_steps(planned))
+    assert "already cached" in numbered[3]
+    assert "3.2 GB" not in "\n".join(numbered)
+    fetching = _numbered(setup.numbered_steps(setup.plan(setup.detect())))
+    assert "2.3 GB" in fetching[3] and "already cached" not in fetching[3]
+
+
+def test_manual_only_numbered_steps_use_the_platform_guide_in_the_same_style(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planned = setup.plan(replace(setup.detect(), asset=None))
+    steps = setup.numbered_steps(planned)
+    how = discovery.how_to_start()
+    numbered = _numbered(steps)
+    assert 1 <= len(numbered) <= 6 and numbered[-1].startswith(f"{len(numbered)}. ")
+    assert [
+        line.strip() for line in steps if line.startswith(setup.COMMAND_INDENT)
+    ] == (list(how.commands))
+    assert (
+        f"   {how.note}" in steps and steps[-1] == f"More help: {discovery.GUIDE_URL}"
+    )
+    text = "\n".join(steps)
+    assert how.name in text and "Enter an address" in text
+    for absent in ("hf download", "OMLX_HF_CACHE_ENABLED=0", ".dmg", "shasum"):
+        assert absent not in text
+
+
 def test_piped_preview_labels_the_guide_link() -> None:
     planned = setup.plan(setup.detect())
     assert setup.preview(planned, interactive=False)[4] == (
         f"Guide: {discovery.GUIDE_URL}"
     )
     assert setup.preview(planned)[4] == (
-        "Automatic setup is coming soon: Show manual steps to do it now."
+        "Automatic setup is coming soon; melo can show you how to do it now."
     )
 
 
@@ -710,5 +813,6 @@ def test_detect_plan_preview_and_manual_have_no_network_writes_processes_or_bind
         setup.preview(planned)
         and setup.details(planned)
         and setup.manual_steps(planned)
+        and setup.numbered_steps(planned)
     )
     assert planned.allowed_operations == ()

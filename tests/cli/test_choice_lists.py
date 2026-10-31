@@ -303,7 +303,7 @@ def test_with_no_server_the_list_checks_again_takes_an_address_or_quits(
     assert answers.prompts == prompts
     text = seen(drawn)
     assert "No model server found. What now?" in text and "❯ 1. Check again" in text
-    assert "2. Review setup plan" in text and "3. Enter an address" in text
+    assert "2. Show how to set one up" in text and "3. Enter an address" in text
     assert "4. Quit" in text
     assert "esc quit" in text
 

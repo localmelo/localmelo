@@ -149,7 +149,7 @@ Try: What is this project? · / commands · ctrl+d quit
 
 第一行显示软件包版本；在 git 检出中还会显示短提交号，如 `melo 0.1.0 (baab21e)`。`melo --version` 输出同一行并以退出码 0 退出。`/status` 检查模型是否有回应，并显示文件夹、会话、审批和上下文用量；`/status all` 还会显示工具、记忆、限制和文件。
 
-尚未保存后端且没有模型服务器在运行时，首次运行的 `melo` 和 `melo setup` 会显示简短的只读预览：推荐项、下载量上限、已缓存量、可用空间和计划生命周期。受支持的 Apple silicon Mac 推荐 oMLX 与 Qwen3 4B Instruct。选择 `Review setup plan` 可调整生命周期或查看手动步骤；其中的 `Details` 显示版本、路径和校验和，开发者模式也保留详细视图。自动设置尚未开放，`Set up and start` 只说明这一点并显示手动步骤，不会安装、下载、启动或保存。管道输入保留 `Press Enter to check again, type an address, or q to quit:`；其他系统保留对应平台的手动说明。自行启动服务器后输入该地址：建议的高位端口不在默认发现范围内。手动路径见[模型服务器指南](../guides/model-servers.md#setup-preview)。已有连接和直接任务不变。
+尚未保存后端且没有模型服务器在运行时，首次运行的 `melo` 和 `melo setup` 会显示简短的只读预览：推荐项、下载量上限、已缓存量、可用空间和计划生命周期。受支持的 Apple silicon Mac 推荐 oMLX 与 Qwen3 4B Instruct。摘要只显示一次。选择 `Show how to set one up` 可看到最多六步的编号步骤：下载 oMLX、移到“应用程序”、下载模型、启动服务器，最后在 melo 中选择 `Enter an address`。自动设置即将推出，目前不会安装、下载、启动或保存。开发者模式保留详细视图和带 `Details` 的检查菜单，可查看确切版本、路径和校验和。管道输入保留 `Press Enter to check again, type an address, or q to quit:`；其他系统保留对应平台的手动说明。自行启动服务器后输入该地址：建议的高位端口不在默认发现范围内。手动路径见[模型服务器指南](../guides/model-servers.md#setup-preview)。已有连接和直接任务不变。
 
 如果服务器还列出嵌入模型，首次运行会多问一个问题 `Remember across chats with <model>?`；选择默认选中的 `Yes, with it` 后，会在一次嵌入探测通过后保存。
 

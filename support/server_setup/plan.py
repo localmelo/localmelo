@@ -372,6 +372,9 @@ def _shell_path(path: str, home: Path | None = None) -> str:
     return shlex.quote(path)
 
 
+AUTOMATIC_SOON = "Automatic setup is coming soon; melo can show you how to do it now."
+
+
 def preview(setup: SetupPlan, *, interactive: bool = True) -> tuple[str, ...]:
     """A human summary; technical metadata requires Details or developer mode."""
     d = setup.detection
@@ -400,11 +403,7 @@ def preview(setup: SetupPlan, *, interactive: bool = True) -> tuple[str, ...]:
             if setup.keep_running
             else "Planned lifetime: stop when melo closes."
         ),
-        (
-            "Automatic setup is coming soon: Show manual steps to do it now."
-            if interactive
-            else f"Guide: {GUIDE_URL}"
-        ),
+        (AUTOMATIC_SOON if interactive else f"Guide: {GUIDE_URL}"),
     ]
     warnings = []
     help_target = "Details" if interactive else "the manual guide"
@@ -468,9 +467,59 @@ def details(setup: SetupPlan) -> tuple[str, ...]:
         ),
         "Manual commands run independently; stop them yourself with Ctrl+C.",
         f"Prospective loopback port: {setup.port} (availability unverified; not reserved).",
-        "Automatic setup is not available yet. No approval is recorded.",
+        "Automatic setup is not available yet.",
     ]
     return tuple(lines)
+
+
+# Numbered-step commands are indented by this much, so a terminal prints them
+# whole (never word-wrapped) and a reader can tell them from the sentences.
+COMMAND_INDENT = " " * 5
+
+
+def numbered_steps(setup: SetupPlan) -> tuple[str, ...]:
+    """At most six plain numbered steps to set a server up by hand, then the guide.
+
+    Copy-only: melo runs none of this. Commands are indented by
+    ``COMMAND_INDENT``; paths inside the home folder are written as ``$HOME``.
+    """
+    d, r = setup.detection, setup.recipe
+    if d.asset is None:
+        how = how_to_start()
+        return (
+            f"1. Install and start a model server, for example {how.name}:",
+            *(f"{COMMAND_INDENT}{command}" for command in how.commands),
+            f"   {how.note}",
+            "2. Back in melo, choose Enter an address and type the server's address.",
+            f"More help: {GUIDE_URL}",
+        )
+    missing = d.missing_model_bytes
+    model = (
+        f"4. Download the model ({_size(missing)}):"
+        if missing
+        else "4. Download the model (it is already cached, so this only checks it):"
+    )
+    download = f'"$HOME/Downloads/{d.asset.name}"'
+    return (
+        f"1. Download oMLX ({_size(d.asset.bytes)}): {r.download_base}{d.asset.name}",
+        "2. Optional: check the download by running:",
+        f"{COMMAND_INDENT}shasum -a 256 {download}",
+        f"   It should print this checksum: {d.asset.sha256}",
+        "3. Open the file and move oMLX to Applications. Use the normal macOS "
+        "prompts; do not bypass Gatekeeper. Then make Contents/MacOS/omlx-cli "
+        "inside the app available as the command omlx.",
+        model,
+        f"{COMMAND_INDENT}HF_HUB_CACHE={_shell_path(d.cache_root)} hf download "
+        f"{shlex.quote(r.model_repo)} --revision {shlex.quote(r.model_revision)}",
+        "5. Start the server. Leave that window open; Ctrl+C stops it:",
+        f"{COMMAND_INDENT}OMLX_HF_CACHE_ENABLED=0 omlx serve "
+        f"--base-path {_shell_path(d.state_path)} "
+        f"--model-dir {_shell_path(d.snapshot)} "
+        f"--host 127.0.0.1 --port {setup.port}",
+        f"6. Back in melo, choose Enter an address and type "
+        f"http://127.0.0.1:{setup.port}/v1",
+        f"More help: {GUIDE_URL}",
+    )
 
 
 def manual_steps(setup: SetupPlan) -> tuple[str, ...]:

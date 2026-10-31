@@ -207,12 +207,13 @@ The first row shows the package version, and on a git checkout the short commit,
 With no backend saved and no model server running, first-run `melo` and
 `melo setup` show a short, read-only preview: the recommendation, download upper
 bound, cached amount, free disk space and planned lifetime. On supported
-Apple-silicon Macs the recommendation is oMLX with Qwen3 4B Instruct. Choose
-`Review setup plan` for
-lifetime choices and manual steps, or `Details` inside that review for exact
-versions, paths and checksums; developer mode keeps the detailed view.
-Automatic setup is not available yet: `Set up and start` only explains this
-and shows manual steps. Nothing installs, downloads, starts or saves.
+Apple-silicon Macs the recommendation is oMLX with Qwen3 4B Instruct. The
+summary is printed once. Choose `Show how to set one up` for at most six
+numbered steps: download oMLX, move it to Applications, download the model,
+start the server, then `Enter an address` in melo. Automatic setup is coming
+soon, and nothing installs, downloads, starts or saves. Developer mode keeps
+the detailed view and a review menu with `Details` for exact versions, paths and
+checksums.
 Pipes retain `Press Enter to check again, type an address, or q to quit:`;
 other systems keep their platform's manual-server guidance. Start the server
 yourself and enter its address: the suggested high port is outside default

@@ -990,39 +990,13 @@ def test_a_fresh_guided_setup_with_no_server_says_how_to_start_one(
     assert "Welcome" not in capsys.readouterr().out
 
 
-def test_setup_picker_lifetime_manual_unavailable_start_back_and_quit_have_no_effects(
-    config_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
+def _forbid_side_effects(monkeypatch: pytest.MonkeyPatch) -> None:
     import socket
     import subprocess
-
-    script = iter(
-        [1, 1, 2, 0, 3, 4, 3]
-    )  # Review, lifetime, manual, start, details, back, quit.
-    asked: list[tuple[str, list[str], int, int | None]] = []
-    displayed: list[setup_plan.SetupPlan] = []
-    real_preview = setup_plan.preview
-    detailed = mock.Mock(wraps=setup_plan.details)
-    monkeypatch.setattr(setup_plan, "details", detailed)
-
-    def choose(title: str, rows: Any, default: int, escape: int | None = None) -> int:
-        asked.append((title, list(rows), default, escape))
-        return next(script)
-
-    def preview(
-        plan: setup_plan.SetupPlan, *, interactive: bool = True
-    ) -> tuple[str, ...]:
-        displayed.append(plan)
-        return real_preview(plan, interactive=interactive)
 
     def forbidden(*args: object, **kwargs: object) -> Any:
         raise AssertionError("setup preview attempted a side effect")
 
-    monkeypatch.setattr(onboard, "_arrow_keys", lambda: True)
-    monkeypatch.setattr(onboard, "_choose_from", choose)
-    monkeypatch.setattr(setup_plan, "preview", preview)
     monkeypatch.setattr(config, "save", forbidden)
     monkeypatch.setattr(onboard, "probe_chat", forbidden)
     monkeypatch.setattr(onboard, "probe_embedding", forbidden)
@@ -1030,13 +1004,129 @@ def test_setup_picker_lifetime_manual_unavailable_start_back_and_quit_have_no_ef
     monkeypatch.setattr(socket.socket, "bind", forbidden)
     monkeypatch.setattr(httpx.Client, "request", forbidden)
     monkeypatch.setattr(httpx.AsyncClient, "request", forbidden)
+
+
+def test_default_menu_shows_the_summary_once_and_numbered_steps_on_request(
+    config_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    script = iter([1, 1, 3])  # Show how to set one up, again, then Quit.
+    asked: list[tuple[str, list[str], int, int | None]] = []
+
+    def choose(title: str, rows: Any, default: int, escape: int | None = None) -> int:
+        asked.append((title, list(rows), default, escape))
+        return next(script)
+
+    monkeypatch.setattr(onboard, "_arrow_keys", lambda: True)
+    monkeypatch.setattr(onboard, "_choose_from", choose)
+    review = mock.Mock(side_effect=AssertionError("default mode has no review menu"))
+    monkeypatch.setattr(onboard, "_review_setup", review)
+    _forbid_side_effects(monkeypatch)
     result, detect, listed = _first_setup(_Answers(), found=None)
+    assert result is None and not config_path.exists()
+    detect.assert_awaited_once()  # Showing the steps never looks for a server.
+    listed.assert_not_called()
+    rows = ["Check again", "Show how to set one up", "Enter an address", "Quit"]
+    assert [a[1] for a in asked] == [rows] * 3
+    assert all(a[2] == 0 and a[3] == 3 for a in asked)  # Check again is the default.
+    out = capsys.readouterr().out
+    assert "Set up and start" not in out and "Review setup" not in out
+    assert "No approval" not in out and "Show manual steps" not in out
+    assert out.count("No model server is running yet.") == 1  # the summary, once
+    assert out.count("Download: up to 3.2 GB") == 1
+    assert out.count(setup_plan.AUTOMATIC_SOON) == 1
+    port = setup_plan.choose_port()
+    assert (
+        out.count(
+            f"6. Back in melo, choose Enter an address and type http://127.0.0.1:{port}/v1"
+        )
+        == 2
+    )
+    assert out.count("1. Download oMLX") == 2  # the steps, each time they are asked for
+
+
+def test_default_menu_summary_is_printed_again_only_when_a_look_changed_it(
+    config_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from dataclasses import replace
+
+    real = setup_plan.detect()
+    readings = iter([real, real, replace(real, missing_model_bytes=0)])
+    monkeypatch.setattr(setup_plan, "detect_bounded", lambda: next(readings))
+    script = iter([0, 0, 3])  # Check again twice (nothing, then a change), Quit.
+    monkeypatch.setattr(onboard, "_arrow_keys", lambda: True)
+    monkeypatch.setattr(onboard, "_choose_from", lambda *args: next(script))
+    result, detect, _ = _first_setup(_Answers(), found=None)
+    assert result is None and detect.await_count == 3
+    out = capsys.readouterr().out
+    missing = "✗ No model server found yet (looked at ports 8000, 11434).\n"
+    assert out.count(missing) == 2
+    assert out.count("Download: up to 3.2 GB") == 1
+    assert out.count("Download: up to 0.9 GB · Cached: 2.3 GB") == 1
+    assert out.index("up to 0.9 GB") > out.rindex(missing)
+    assert out.count("No model server is running yet.") == 2
+
+
+def test_a_failed_look_that_cannot_be_planned_keeps_the_screen_as_it_was(
+    config_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    real = setup_plan.detect()
+    calls = iter([real])
+
+    def bounded() -> Any:
+        try:
+            return next(calls)
+        except StopIteration as exc:
+            raise RuntimeError("setup metadata unavailable") from exc
+
+    monkeypatch.setattr(setup_plan, "detect_bounded", bounded)
+    script = iter([0, 3])
+    monkeypatch.setattr(onboard, "_arrow_keys", lambda: True)
+    monkeypatch.setattr(onboard, "_choose_from", lambda *args: next(script))
+    result, _, _ = _first_setup(_Answers(), found=None)
+    assert result is None
+    out = capsys.readouterr().out
+    assert out.count("No model server is running yet.") == 1
+    assert out.count("✗ No model server found yet") == 1
+
+
+def test_developer_review_keeps_its_menu_and_details_without_reprinting_the_summary(
+    config_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    script = iter(
+        [1, 1, 2, 0, 3, 4, 3]
+    )  # Review, lifetime, manual, start, details, back, quit.
+    asked: list[tuple[str, list[str], int, int | None]] = []
+    displayed: list[setup_plan.SetupPlan] = []
+    real_details = setup_plan.details
+
+    def choose(title: str, rows: Any, default: int, escape: int | None = None) -> int:
+        asked.append((title, list(rows), default, escape))
+        return next(script)
+
+    def details(plan: setup_plan.SetupPlan) -> tuple[str, ...]:
+        displayed.append(plan)
+        return real_details(plan)
+
+    monkeypatch.setattr(onboard, "_arrow_keys", lambda: True)
+    monkeypatch.setattr(onboard, "_choose_from", choose)
+    monkeypatch.setattr(setup_plan, "details", details)
+    _forbid_side_effects(monkeypatch)
+    result, detect, listed = _first_setup(_Answers(), found=None, developer=True)
     assert result is None and not config_path.exists()
     detect.assert_awaited_once()  # Opening/toggling the preview never rediscovers.
     listed.assert_not_called()
-    assert len({p.digest for p in displayed}) == 2
+    # The manifest is printed on entry and again for the Details choice only.
+    assert len(displayed) == 2
     assert displayed[0].keep_running is False
-    assert displayed[-1].keep_running is True
+    assert displayed[1].keep_running is True
     assert all(p.allowed_operations == () for p in displayed)
     assert asked[0][1] == [
         "Check again",
@@ -1051,15 +1141,17 @@ def test_setup_picker_lifetime_manual_unavailable_start_back_and_quit_have_no_ef
         "Details",
         "Back",
     ]
+    assert asked[2][1][1] == "Keep available after melo closes: On"
     assert asked[0][2] == 0  # Check again remains the safe default.
     assert asked[1][3] == 4 and asked[-1][3] == 3
     assert all("(preview)" not in row for _, rows, _, _ in asked for row in rows)
-    detailed.assert_called_once_with(displayed[-1])
     out = capsys.readouterr().out
-    assert "Planned lifetime: keep running after melo closes." in out
-    assert displayed[-1].digest in out
+    assert out.count(displayed[0].digest) == 1  # not printed per choice
+    assert out.count(displayed[1].digest) == 1
+    assert "Planned lifetime: keep running until explicitly stopped." in out
     assert out.count("Manual steps (copy only;") == 2
-    assert "Automatic setup is not available yet. No approval is recorded." in out
+    assert out.count(setup_plan.AUTOMATIC_SOON) == 1  # only after Set up and start
+    assert "No approval" not in out and "1. Download oMLX" not in out
 
 
 def test_no_server_picker_uses_existing_address_question(

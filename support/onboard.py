@@ -589,12 +589,13 @@ def _port(url: str) -> str:
     return tail.rsplit(":", 1)[1] if ":" in tail else tail
 
 
-def _review_setup(setup: server_setup.SetupPlan, *, developer: bool = False) -> None:
-    """Preview choices only: even Set up and start cannot authorize execution."""
-    render = server_setup.details if developer else server_setup.preview
+def _review_setup(setup: server_setup.SetupPlan) -> None:
+    """Developer preview choices: even Set up and start cannot authorize execution.
+
+    The summary is not printed again here; the caller printed it, and Details
+    shows the full manifest on request.
+    """
     while True:
-        for line in render(setup):
-            _say(line)
         rows = [
             "Set up and start",
             f"Keep available after melo closes: {'On' if setup.keep_running else 'Off'}",
@@ -615,9 +616,41 @@ def _review_setup(setup: server_setup.SetupPlan, *, developer: bool = False) -> 
         elif choice == 1:
             setup = replace(setup, keep_running=not setup.keep_running)
         else:
-            _say("Automatic setup is not available yet. No approval is recorded.")
+            if choice == 0:
+                _say(server_setup.AUTOMATIC_SOON)
             for line in server_setup.manual_steps(setup):
                 print(line)  # Keep copy-only shell commands on one logical line.
+
+
+def _show_steps(setup: server_setup.SetupPlan) -> None:
+    """Print the numbered steps; a command is kept whole, a sentence is wrapped."""
+    print()
+    for line in server_setup.numbered_steps(setup):
+        if line.startswith(server_setup.COMMAND_INDENT):
+            print(line)  # Copy-only shell commands stay on one logical line.
+        else:
+            _say(line, hang=3)
+    print()
+
+
+def _summary_lines(
+    setup: server_setup.SetupPlan, *, developer: bool
+) -> tuple[str, ...]:
+    """What the no-server screen says: the full manifest, or the short summary."""
+    if developer:
+        return server_setup.details(setup)
+    return server_setup.preview(setup, interactive=_arrow_keys())
+
+
+def _show_summary(setup: server_setup.SetupPlan, *, developer: bool) -> tuple[str, ...]:
+    """Print the no-server summary; the lines, to tell a later change."""
+    lines = _summary_lines(setup, developer=developer)
+    for line in lines:
+        _say(line)
+    if developer and not _arrow_keys():
+        for line in server_setup.manual_steps(setup):
+            print(line)
+    return lines
 
 
 def _wait_for_a_server(
@@ -625,10 +658,14 @@ def _wait_for_a_server(
 ) -> discovery.FoundServer | str | None:
     """Preview setup, then reuse discovery on Enter; return a server/address or quit.
 
-    EOFError and KeyboardInterrupt reach the caller. Piped input never enters
-    the setup picker or approves anything; Enter/address/q keep their meanings.
+    The summary is printed once. On a terminal it is printed again only when
+    Check again finds no server and the setup readings (cache, space) have
+    changed since. EOFError and KeyboardInterrupt reach the caller. Piped
+    input never enters the setup picker or approves anything; Enter/address/q
+    keep their meanings.
     """
     setup = None
+    shown: tuple[str, ...] = ()
     try:
         setup = server_setup.plan(server_setup.detect_bounded())
     except Exception:
@@ -639,19 +676,13 @@ def _wait_for_a_server(
         _say(how.note)
         print(discovery.GUIDE_URL)
     if setup is not None:
-        lines = (
-            server_setup.details(setup)
-            if developer
-            else server_setup.preview(setup, interactive=_arrow_keys())
-        )
-        for line in lines:
-            _say(line)
-        if developer and not _arrow_keys():
-            for line in server_setup.manual_steps(setup):
-                print(line)
-    rows = ["Check again", "Review setup plan", "Enter an address", "Quit"]
+        shown = _show_summary(setup, developer=developer)
+    if developer:
+        rows = ["Check again", "Review setup plan", "Enter an address", "Quit"]
+    else:
+        rows = ["Check again", "Show how to set one up", "Enter an address", "Quit"]
     if setup is None:
-        rows.remove("Review setup plan")
+        del rows[1]
     while True:
         if _arrow_keys():
             choice = _choose_from(
@@ -660,7 +691,10 @@ def _wait_for_a_server(
             if choice == len(rows) - 1:
                 return None
             if setup is not None and choice == 1:
-                _review_setup(setup, developer=developer)
+                if developer:
+                    _review_setup(setup)
+                else:
+                    _show_steps(setup)
                 continue
             answer = (
                 _question("Server URL", _FIRST_RUN_URL)
@@ -680,6 +714,22 @@ def _wait_for_a_server(
             return found
         ports = ", ".join(_port(url) for url in urls)
         _say(f"✗ No model server found yet (looked at ports {ports}).", hang=2)
+        if setup is not None and _arrow_keys():
+            setup, shown = _refreshed(setup, shown, developer=developer)
+
+
+def _refreshed(
+    setup: server_setup.SetupPlan, shown: tuple[str, ...], *, developer: bool
+) -> tuple[server_setup.SetupPlan, tuple[str, ...]]:
+    """Look at the cache and free space again; print the summary only if it changed."""
+    try:
+        fresh = server_setup.plan(server_setup.detect_bounded())
+    except Exception:
+        return setup, shown
+    fresh = replace(fresh, keep_running=setup.keep_running)
+    if _summary_lines(fresh, developer=developer) == shown:
+        return setup, shown
+    return fresh, _show_summary(fresh, developer=developer)
 
 
 def _servers_named() -> str:

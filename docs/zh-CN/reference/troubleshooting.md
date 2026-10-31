@@ -105,7 +105,7 @@ No model server is running yet.
 ```
 
 - **原因：** 四个常用端口（8000、8400、11434、30000，或 `LOCALMELO_DETECT_URLS` 中的 URL）都没有响应 `GET /v1/models`。
-- **修复：** 在受支持的 Apple silicon Mac 上，选择 `Review setup plan`，再选择 `Show manual steps`。自动设置尚未开放；其他系统保留手动服务器指南，管道和 `TERM=dumb` 输出指南链接，而不是无法选择的列表项。自行启动服务器后选择 `Check again`；使用非默认端口时选择 `Enter an address`。`Quit`（或 Esc）不保存任何内容。设置检查出错或耗时过长时，手动指南仍然可用。若已经保存后端但没有找到服务器，`melo setup` 会打开完整后端菜单。网页/应用设置卡片保留手动命令，并自动再次检查。
+- **修复：** 在受支持的 Apple silicon Mac 上，选择 `Show how to set one up`，会得到最多六步的编号步骤。自动设置即将推出；其他系统保留手动服务器指南，管道和 `TERM=dumb` 输出指南链接，而不是无法选择的列表项。自行启动服务器后选择 `Check again`；使用非默认端口时选择 `Enter an address`。`Quit`（或 Esc）不保存任何内容。设置检查出错或耗时过长时，手动指南仍然可用。若已经保存后端但没有找到服务器，`melo setup` 会打开完整后端菜单。网页/应用设置卡片保留手动命令，并自动再次检查。
 
 ### A model server cannot be used at the first run
 

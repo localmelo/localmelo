@@ -127,8 +127,8 @@ No model server is running yet.
 
 - **Cause:** none of the four usual ports (8000, 8400, 11434, 30000, or the URLs
   in `LOCALMELO_DETECT_URLS`) answered `GET /v1/models`.
-- **Fix:** on a supported Apple-silicon Mac, choose `Review setup plan`, then
-  `Show manual steps`. Automatic setup is not available yet. Other systems keep
+- **Fix:** on a supported Apple-silicon Mac, choose `Show how to set one up` for
+  up to six numbered steps. Automatic setup is coming soon. Other systems keep
   manual-server guidance; pipes and `TERM=dumb` print a guide link rather than
   advertising a picker choice. Start the server yourself, then `Check again`
   or `Enter an address` for a nondefault port. `Quit` (or Esc) saves nothing.

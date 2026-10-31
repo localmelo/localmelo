@@ -14,9 +14,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   lifetime. `Details` keeps versions, paths and checksums out of the default
   view. Setup checks have a time limit and manual fallback; pipes include a
   usable manual guide. Already saved a backend? With no server found, setup
-  keeps the full backend menu. Automatic setup is not available yet;
-  **Set up and start** only shows manual steps. Nothing installs, downloads, starts or saves, and direct runs
-  and existing connections are unchanged. [#NN]
+  keeps the full backend menu. The summary is printed once; the list then offers
+  **Check again**, **Show how to set one up** (at most six plain numbered steps:
+  download oMLX, move it to Applications, download the model, start the server,
+  then enter its address in melo), **Enter an address** and **Quit**. Automatic
+  setup is coming soon. Nothing installs, downloads, starts or saves, and direct
+  runs and existing connections are unchanged. Developer mode keeps the review
+  menu with **Details**. [#NN]
 
 - A task that is stuck asks the chat that started it instead of stopping. Its
   question shows there (`Task “Fix tests” asks…`, with the background, the
