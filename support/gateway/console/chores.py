@@ -349,7 +349,9 @@ class ChoreRunner:
             "enabled": chore.enabled,
             "revision": chore.revision,
             "front_id": chore.front_id,
+            # When the run starts (the schedule's time and a small jitter), and the time the schedule names.
             "next_run": chore.next_run if chore.enabled else None,
+            "next_at": self.store.planned(chore) if chore.enabled else None,
             "last_run": chore.last_run,
             "last": await self.last(chore),
             "created_at": chore.created_at,

@@ -671,7 +671,7 @@ that address API v2 by its version; other task routes use the `/api` prefix.
 Saved requests that run on a schedule (see [Chores that repeat](../guides/web-console.md#chores-that-repeat)); the panel's Scheduled tab uses these routes. A run is a task with origin `user_rule` in a folder of its own under the workspace, owned by the chat the chore belongs to (`front_id`: the main chat, or a side chat). Every chore carries a `revision` that each change bumps.
 
 ```json
-{"chore": {"id": "2ab01e8df4f1", "title": "brief me on my calendar", "request": "brief me on my calendar", "schedule": {"kind": "weekdays", "at": "08:30"}, "when": "every weekday at 8:30", "when_said": {"key": "schedule.weekdays", "params": {"time": {"clock": 510}}}, "level": 2, "level_word": "Normal", "enabled": true, "revision": 2, "front_id": "51742917baa0", "next_run": 1793262600.0, "last_run": 1793176260.0, "last": {"state": "done", "line": "Three meetings today.", "task_id": "edb413a9ca6d", "at": 1793176260.0}, "created_at": 1793170800.0, "late_min": null}}
+{"chore": {"id": "2ab01e8df4f1", "title": "brief me on my calendar", "request": "brief me on my calendar", "schedule": {"kind": "weekdays", "at": "08:30"}, "when": "every weekday at 8:30", "when_said": {"key": "schedule.weekdays", "params": {"time": {"clock": 510}}}, "level": 2, "level_word": "Normal", "enabled": true, "revision": 2, "front_id": "51742917baa0", "next_run": 1793262630.0, "next_at": 1793262600.0, "last_run": 1793176260.0, "last": {"state": "done", "line": "Three meetings today.", "task_id": "edb413a9ca6d", "at": 1793176260.0}, "created_at": 1793170800.0, "late_min": null}}
 ```
 
 - A chore's `level` (1 to 4) is its priority: the console shows it as `P` plus the number. `level_word` (`Today`, `Normal`, …) is kept for existing clients and is never what the console shows.
@@ -681,6 +681,7 @@ Saved requests that run on a schedule (see [Chores that repeat](../guides/web-co
 - `DELETE /api/chores/{id}` answers `{"deleted": id}`; with `?revision=N` a stale revision is 409 `stale_revision`.
 - `POST /api/chores/{id}/run` starts a task now and leaves the schedule: 202 `{"chore", "task"}`.
 - `PUT /api/checkin` with `{"on": false}` switches the check-in (kept in the file) and answers `{"checkin": {...}}`; `next_at` is null while it is off.
+- `next_at` is the time the schedule names for the next run (`08:30`), which the console shows; `next_run` is when the run starts, up to 120 seconds later, so chores do not all start on the minute. For an every-N-hours chore, which names no time, they are equal. Both are `null` while the chore is off.
 - `when_said` is `when` as words: a catalog key and its parameters, where a time of day is `{"clock": minutes after midnight}`. The page writes it in its own language and clock (`8:30 AM`, `上午 8:30`); `when` always writes the 24-hour clock (`8:30`), in the language of the request.
 - The check-in's note is written in the console's language: the `[console] language` setting, else the language the page asked for last, else English.
 

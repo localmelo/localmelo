@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -20,7 +21,7 @@ import httpx
 import pytest
 
 from localmelo.support.config import ConsoleConfig
-from localmelo.support.gateway.chore_schedule import Schedule
+from localmelo.support.gateway.chore_schedule import JITTER_S, Schedule
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console import chores as chores_module
 from localmelo.support.gateway.console.chores import CHECKIN_S, ChoreOptions
@@ -1269,3 +1270,38 @@ async def test_a_chore_carries_its_schedule_as_words_for_the_page(
             await client.get("/api/chores", headers={"X-LocalMelo-Language": "zh-Hans"})
         ).json()
         assert listed["chores"][0]["when"] == "每个工作日 8:30"
+
+
+async def test_the_next_time_shown_is_the_schedules_and_the_run_starts_within_the_jitter(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path, jitter=JITTER_S) as (
+        console,
+        client,
+        clock,
+        _,
+        _,
+    ):
+        store = console.chore_runner.store
+        # Whatever the jitter, a weekday chore set for 8:30 is shown at 8:30.
+        for jitter in (0.0, 1.0, 71.0, JITTER_S - 0.1, JITTER_S):
+            store._jitter = functools.partial(float, jitter)
+            chore = await add(client, f"Brief me {jitter}", BRIEF)
+            assert chore["next_at"] == at("2026-10-28 08:30"), jitter
+            assert chore["next_run"] == at("2026-10-28 08:30") + jitter
+        # An every-N-hours chore names no time: the start is what it shows.
+        hours = await add(client, "Water the plants", {"kind": "hours", "every": 6})
+        assert hours["next_at"] == hours["next_run"]
+        # A reminder shows its own time.
+        reminder = await add(client, "Reminder: call mom", FRIDAY)
+        assert reminder["next_at"] == at("2026-10-30 09:00")
+        # The run starts after the shown time and within the jitter: only the chore with no jitter
+        # starts on the minute, and all of them have started once JITTER_S has passed.
+        clock.now = at("2026-10-28 08:30") + 0.5
+        assert len(await console.chore_runner.tick()) == 1
+        clock.now = at("2026-10-28 08:30") + JITTER_S
+        assert len(await console.chore_runner.tick()) == 4
+        listed = (await client.get("/api/chores")).json()["chores"]
+        brief = [c for c in listed if c["title"].startswith("Brief me")]
+        # Planned again from now: the next slot is shown at 8:30 too.
+        assert {c["next_at"] for c in brief} == {at("2026-10-29 08:30")}

@@ -152,6 +152,23 @@ class ChoreStore:
         self._tz = tz
         self._jitter = jitter or (lambda: random.uniform(0.0, JITTER_S))
 
+    def planned(self, chore: Chore) -> float | None:
+        """The time the person's schedule names for the next run, without the start jitter.
+
+        ``next_run`` is when the run starts: that time plus up to
+        :data:`JITTER_S`, so chores do not all start on the minute. A daily,
+        weekday or one-time schedule names its time (``8:30``), which is what
+        a person is told; an every-N-hours one names none, so it stays
+        ``next_run``. ``None`` while the chore has no next run.
+        """
+        if chore.next_run is None:
+            return None
+        if chore.schedule.kind == "hours":
+            return chore.next_run
+        if chore.schedule.kind == "once":
+            return chore.schedule.when(self._tz)
+        return chore.schedule.next_after(chore.next_run - JITTER_S - 1.0, self._tz)
+
     def plan(self, schedule: Schedule, after: float) -> float:
         """The next run after *after*: the schedule's next time and a small jitter, never early."""
         return schedule.next_after(after, self._tz) + self._jitter()

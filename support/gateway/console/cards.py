@@ -25,11 +25,18 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Final
 
-from localmelo.support.gateway.i18n import current, said, said_text, t_in, using
+from localmelo.support.gateway.i18n import (
+    current,
+    said,
+    said_in,
+    said_text,
+    t_in,
+    using,
+)
 from localmelo.support.sessions.display import (
     TITLE_WIDTH,
     clean_output,
-    request_words,
+    request_said,
     short_title,
     status_text,
     title_width,
@@ -117,7 +124,12 @@ class MainChatCards:
         # The approvals with a waiting card and no answer yet; read once per flush.
         self._unanswered: set[str] | None = None
         # The newest card, for the list's unread dot.
-        self.last: dict[str, Any] | None = None
+        self._last: StoredEvent | None = None
+
+    @property
+    def last(self) -> dict[str, Any] | None:
+        """The newest card, its line in the language of the request that reads it."""
+        return None if self._last is None else card_json(self._last)
 
     async def start(self, main_id: str) -> None:
         """Begin listening for *main_id*, reading its newest card once."""
@@ -126,7 +138,7 @@ class MainChatCards:
         self._main_id = main_id
         found = await self._console.store.events_of_type(main_id, CARD_EVENT, limit=20)
         news = [card for card in found if _is_news(card.event.get("data"))]
-        self.last = card_json(news[-1]) if news else None
+        self._last = news[-1] if news else None
 
     def _heard(self, stored: StoredEvent) -> None:
         main = self._main_id
@@ -135,7 +147,7 @@ class MainChatCards:
             return
         if stored.session_id == main:
             if kind == CARD_EVENT and _is_news(stored.event.get("data")):
-                self.last = card_json(stored)
+                self._last = stored
             return
         if kind in (
             "turn.finished",
@@ -208,7 +220,7 @@ class MainChatCards:
                 **card,
                 "state": "waiting",
                 "request_id": asked,
-                "line": _waiting_line(data),
+                **_waiting_words(data),
             }
         if kind == "approval.resolved":
             return await self._answer_card(card, data)
@@ -340,10 +352,16 @@ def _reason(status: str, cause: str, result: dict[str, Any] | None) -> str:
     return f"{words}: {first}"
 
 
-def _waiting_line(data: dict[str, Any]) -> str:
-    """What the approval is for, in plain words: ``Wants to run a command``."""
-    asked = request_words(str(data.get("tool_name") or ""), data.get("arguments"))
-    return f"Wants to {asked[:1].lower()}{asked[1:]}"
+def _waiting_words(data: dict[str, Any]) -> dict[str, Any]:
+    """What the approval is for, in plain words: ``Wants to run a command``, with its words kept."""
+    asked = request_said(str(data.get("tool_name") or ""), data.get("arguments"))
+    key = str(asked["key"])
+    if key.startswith("steps.ask."):
+        verb = key.removeprefix("steps.ask.")
+        words = said(f"cards.wants.{verb}", **asked["params"])
+    else:
+        words = said("cards.wants.use", what=said("steps.aTool"))
+    return {"line": said_in("en", words), "said": words}
 
 
 __all__ = ["CARD_EVENT", "CARD_PAGE", "MainChatCards", "card_json", "card_title"]

@@ -354,7 +354,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 按时间表运行的已保存请求（见[定时事项](../guides/web-console.md#chores-that-repeat)）；面板的 Scheduled 标签页使用这些路由。一次运行是一个来源为 `user_rule` 的任务，在工作区下属于它自己的文件夹中运行，归定时事项所属的对话（`front_id`：主对话或某个旁支对话）。每个定时事项带有 `revision`，每次更改都会使它加一。
 
 ```json
-{"chore": {"id": "2ab01e8df4f1", "title": "brief me on my calendar", "request": "brief me on my calendar", "schedule": {"kind": "weekdays", "at": "08:30"}, "when": "every weekday at 8:30", "when_said": {"key": "schedule.weekdays", "params": {"time": {"clock": 510}}}, "level": 2, "level_word": "Normal", "enabled": true, "revision": 2, "front_id": "51742917baa0", "next_run": 1793262600.0, "last_run": 1793176260.0, "last": {"state": "done", "line": "Three meetings today.", "task_id": "edb413a9ca6d", "at": 1793176260.0}, "created_at": 1793170800.0, "late_min": null}}
+{"chore": {"id": "2ab01e8df4f1", "title": "brief me on my calendar", "request": "brief me on my calendar", "schedule": {"kind": "weekdays", "at": "08:30"}, "when": "every weekday at 8:30", "when_said": {"key": "schedule.weekdays", "params": {"time": {"clock": 510}}}, "level": 2, "level_word": "Normal", "enabled": true, "revision": 2, "front_id": "51742917baa0", "next_run": 1793262630.0, "next_at": 1793262600.0, "last_run": 1793176260.0, "last": {"state": "done", "line": "Three meetings today.", "task_id": "edb413a9ca6d", "at": 1793176260.0}, "created_at": 1793170800.0, "late_min": null}}
 ```
 
 - 定时事项的 `level`（1 到 4）就是它的优先级：控制台把它显示为 `P` 加数字。`level_word`（`Today`、`Normal` 等）为兼容现有客户端而保留，控制台从不显示它。
@@ -364,6 +364,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `DELETE /api/chores/{id}` 返回 `{"deleted": id}`；带 `?revision=N` 时，过期的 revision 返回 409 `stale_revision`。
 - `POST /api/chores/{id}/run` 立刻开始一个任务，时间表保持不变：202 `{"chore", "task"}`。
 - `PUT /api/checkin` 配合 `{"on": false}` 切换 check-in（保存在文件中），返回 `{"checkin": {...}}`；关闭期间 `next_at` 为 null。
+- `next_at` 是时间表为下一次运行定的时间（`08:30`），控制台显示的是它；`next_run` 是运行真正开始的时间，最多晚 120 秒，免得所有定时事项都在整点同时开始。每 N 小时的定时事项没有指定时刻，两者相等。事项关闭时两者都为 `null`。
 - `when_said` 是 `when` 的词形式：一个词库键和它的参数，其中一天里的时刻写成 `{"clock": minutes after midnight}`（午夜后的分钟数）。页面用自己的语言和钟点写它（`8:30 AM`、`上午 8:30`）；`when` 始终用 24 小时制（`8:30`），语言随请求。
 - check-in 的提示用控制台的语言写：先看 `[console] language` 设置，其次是页面最近一次请求的语言，否则是英文。
 

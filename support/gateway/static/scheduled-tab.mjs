@@ -39,7 +39,7 @@ export function lateWords(minutes) {
 /** The lines under a row's title: when it runs next (a one-time chore that ran: when), how late, then how the last run went. */
 export function rowLines(chore, now) {
   const done = chore.schedule?.kind === 'once' && !chore.enabled && chore.last_run;
-  const first = done ? t('sched.onceDone', {when: whenWords(chore.last_run, now)}) : chore.enabled ? t('sched.next', {when: whenWords(chore.next_run, now)}) : t('common.off');
+  const first = done ? t('sched.onceDone', {when: whenWords(chore.last_run, now)}) : chore.enabled ? t('sched.next', {when: whenWords(chore.next_at ?? chore.next_run, now)}) : t('common.off');
   const lines = [first];
   if (chore.late_min) lines.push(lateWords(chore.late_min));
   const ran = RAN.has(chore.last?.state) ? t(`sched.ran.${chore.last.state}`) : chore.last?.state;
