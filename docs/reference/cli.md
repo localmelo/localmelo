@@ -135,6 +135,9 @@ dot. `melo -h all` lists the keys with their defaults.
   `agent.reflection_gate`, `agent.tool_exposure`, `memory.dir`,
   `memory.keep_decision_text`, `retrieval.extra_body`, `endpoint.embedding_url`,
   `endpoint.embedding_model` and `endpoint.reasoning_field`.
+- `-X agent.answer_on_stop=on` also answers a run whose request the server refused for a
+  budget or rate limit (HTTP 429, or an error that says a budget is used): the run still ends
+  `provider_error`, but `result` holds the answer. See [Run results](run-results.md#statuses).
 - `melo config` shows the file and what differs from the defaults. `melo config keys
   [FILTER]` lists every key with its value, default and source (default, file or `-X`),
   `melo config get KEY` prints one, and `melo config set KEY VALUE` checks a key and
@@ -461,7 +464,14 @@ accepts the options named in [Interactive UI](#interactive-ui).
   the output reserve is not a generation cap. See [context accounting](configuration.md#context-accounting).
 - `--max-steps`: at least 1. With `reflect`, a run has attempts of up to 10
   steps, at most 5 attempts, and at most `--max-steps` steps in total. See
-  [How localmelo works](../concepts/how-it-works.md#the-run-loop).
+  [How localmelo works](../concepts/how-it-works.md#the-run-loop). To limit every
+  model request instead (planning, reflection and the rest), set `-X agent.max_calls=N`
+  (a developer setting, a whole number of 2 or more, no option of its own): the run
+  stops itself before the request that would pass `N` and ends `budget_exhausted` with
+  the error `Call budget reached: ...`. With `-X agent.answer_on_stop=on` the last call
+  is kept to ask once, without tools, for the final answer from the evidence, so the
+  run sends `N - 1` requests and then that one. Both appear in `melo -h all`, and
+  [Run results](run-results.md#statuses) says what the record holds.
 - `--reflection-gate`: see [Reflection](../concepts/how-it-works.md#reflection). It has
   no effect with `--attempt-policy none`. `patient` is a developer setting
   (`-X agent.reflection_gate=patient` for one run).

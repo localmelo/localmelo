@@ -84,6 +84,12 @@ def document_text(typed: str, answer: str, *, title: str = "") -> str:
     return redact_secrets("\n".join(parts)[:DOC_CHARS])[0]
 
 
+def typed_of(text: str) -> str:
+    """What the user typed, in a chat turn's document text (:func:`document_text`)."""
+    head = text.split("\nmelo: ", 1)[0]
+    return head.removeprefix("User: ") if head.startswith("User: ") else ""
+
+
 class ConversationIndex:
     """``index.db``: add, list and delete the documents of every session."""
 

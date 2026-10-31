@@ -92,6 +92,24 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- The newer value wins even when no note was kept, and melo is told to keep a
+  lasting fact you state. After the newer-wins change, a local model answered 2 of 5
+  updated facts right with an embedding model and 3 of 5 by words only, and the chat
+  where the old value was said still came back as current for nearly every question:
+  only 2 of 23 plain statements such as "I live in Utrecht." had become notes, so the
+  rule that a newer note replaces an older one seldom fired. Now, of two chat turns
+  where you said one thing with different values, the older comes after the newer and
+  reads `(older; replaced by a newer message)`, even without a note; when only the
+  older turn matches, the newer one comes with it. The chat's instructions and the
+  `remember` tool now say plainly to keep a plain, lasting fact about you (where you
+  live, your name, a person, your schedule, a preference) in the turn you say it, with
+  an English and a Chinese example; nothing asks you to confirm. Look-alikes such as
+  "my flight to Porto" and "my flight to Faro" stay apart. A developer setting for
+  comparison, `[memory] keep_statements` (off by default, `-X
+  memory.keep_statements=on`), makes code keep such a fact after the turn when the
+  model did not, never a question, a to-do, an "if", a "not", the past, what others
+  think, a passing state ("my build is failing") or a secret ([#329]).
+
 - When you update a fact, the newer value wins. Told "I live in Lisbon." in one chat
   and "I live in Utrecht." in another, a third chat asked "Where do I live?" recalled
   both: the Lisbon note had been replaced, but the Lisbon chat's turn came back first,
@@ -377,6 +395,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - The terminal's work zone and Ctrl+T say task levels in words in default mode
   (Now, Today, Normal, Whenever, If idle, Later); developer mode keeps P0-P5
   ([#330]).
+- A run that knows its call budget stops itself and answers from what it has. The
+  developer setting `[agent] max_calls = N` (`-X agent.max_calls=N`; a whole number of
+  2 or more, unset by default, listed by `melo config keys` and `melo -h all`) makes a
+  direct run count its model requests, planning, reflection and the rest, each attempt
+  of a retried request once, and stop before the one that would pass the limit. With
+  `answer_on_stop` on, the last call is kept for the final answer: the run sends `N - 1`
+  requests, then that one. The run ends `budget_exhausted` with the error `Call budget
+  reached: ...`; `result` is the answer (`"answered_on_stop": true`), else the latest text
+  the model wrote, and `config.max_calls` is in the JSON record. With `answer_on_stop` on,
+  a request the server refuses for a budget or rate limit (HTTP 429, or an error that says
+  a budget is used) now gets the answer request as well: the status stays `provider_error`,
+  and `result` is the answer, or the latest text the model wrote when that fails. Unset,
+  every request, output and exit code is unchanged ([#328]).
 
 - The macOS app shows what melo is doing while its window is put away. A small
   pill takes Melo's place on the desktop and says in one plain line what runs
@@ -2680,3 +2711,5 @@ earlier milestones.
 [#207]: https://github.com/localmelo/localmelo/pull/207
 [#208]: https://github.com/localmelo/localmelo/pull/208
 [#330]: https://github.com/localmelo/localmelo/pull/330
+[#329]: https://github.com/localmelo/localmelo/pull/329
+[#328]: https://github.com/localmelo/localmelo/pull/328
