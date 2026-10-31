@@ -381,7 +381,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   "马可的工作室在…") now has its owner and attribute as its subject, and a note
   whose subject the other's words do not hold never replaces it by shared
   words alone; a new value of the same fact still does ("…room 9C" then
-  "…room 12A") ([#NN]).
+  "…room 12A"). A change you state replaces the old note even when the chat
+  only asks about it: with the note "Your weekly sync is on Wednesday.", typing
+  "My weekly sync is on Friday." and getting "I previously noted it as
+  Wednesday. Would you like me to change it?" left Wednesday active and the
+  later question got a mixed answer. When the chat kept no note that turn, melo
+  now keeps each plain statement you typed that gives a new value to a subject
+  an active note holds, with Undo, whatever `keep_statements` says; a statement
+  of a new subject or a question is still left to the chat ([#NN]).
 
 - The main chat does what it is asked, or hands it off with its context. A
   reply that only says what it will do ("I'll start by looking at the test

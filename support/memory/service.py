@@ -10,9 +10,11 @@ During the run, the chat's model keeps notes with the ``remember`` tool
 (:meth:`ChatMemory.remember`), checked against what the chat shows; with the
 developer setting ``[memory] keep_statements``, after it,
 :meth:`ChatMemory.keep_statements` keeps the lasting facts the user stated
-that no note of the turn kept. When the reply says it noted something and no
-note was kept, :meth:`ChatMemory.keep_claims` keeps what the reply named, by
-the same checks, or flags the turn ``unsaved_claim``.
+that no note of the turn kept; whatever that setting says, when no note was
+kept, :meth:`ChatMemory.keep_changes` replaces an active note whose subject the
+user gave a new value ("My weekly sync is on Friday."). When the reply says it
+noted something and no note was kept, :meth:`ChatMemory.keep_claims` keeps what
+the reply named, by the same checks, or flags the turn ``unsaved_claim``.
 A query embedding that takes over :data:`EMBED_TIMEOUT_S` or fails falls back
 to BM25 for that turn. ``[memory] retriever`` picks how notes are found:
 ``auto`` (words, and meaning too with an embedding model), ``bm25``,
@@ -857,6 +859,39 @@ class ChatMemory:
         ]
         if not found:
             return []
+        return await self._keep(turn, found)
+
+    async def keep_changes(self, info: TurnInfo) -> list[records.Written]:
+        """After the chat turn *info* ran: when no note of the turn was kept, keep
+        the plain statements of its typed words that give a new value to a subject
+        an active note holds (:func:`records.changes`), as notes that supersede
+        the old one, with Undo.
+
+        "My weekly sync is on Friday." after a note "Your weekly sync is on
+        Wednesday." replaces it even when the model only asked whether to change
+        it. Whatever ``[memory] keep_statements`` says; a statement of a subject
+        no note holds is left to the model. Nothing outside the turn under way or
+        with memory off.
+        """
+        turn = CHAT_TURN.get()
+        if (
+            not self.enabled
+            or turn is None
+            or turn.info.id != info.id
+            or turn.memory.recall is None
+            or turn.memory.remembered
+            or turn.kept
+        ):
+            return []
+        async with self._lock:
+            active = await self.stores()[0].active_entries()
+        found = records.changes(turn.typed, active)
+        return await self._keep(turn, found) if found else []
+
+    async def _keep(
+        self, turn: ChatTurn, found: list[records.Candidate]
+    ) -> list[records.Written]:
+        """Write *found* as notes of the chat turn under way and publish them."""
         vectors, model, _ = await self._embed(
             [cand.text for cand in found], EMBED_TIMEOUT_S, query=False
         )

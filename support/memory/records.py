@@ -14,8 +14,10 @@ judgement: after the turn, a plain first-person statement of a lasting fact
 that names a subject ("I live in …", "my advisor is …", "call me …",
 "我的…是…") and that no note of the turn kept becomes one (:func:`statements`);
 a question, a to-do, a hypothetical, a negation or someone else's opinion
-never does. Each record
-has at most :data:`MAX_RECORD_CHARS` characters, its topic, the user's quote
+never does. Whatever that setting says, when the turn kept no note, code also
+keeps a plain statement that gives a new value to a subject an active note holds
+(:func:`changes`: "My weekly sync is on Friday." after "Your weekly sync is on
+Wednesday."). Each record has at most :data:`MAX_RECORD_CHARS` characters, its topic, the user's quote
 and where it was said. Text that looks like a secret is refused, not stored
 redacted. A new record of the same subject supersedes the old one ("call me
 Ray" after "call me R.", "我的健身教练是小宇" after "…是阿凯"): the old one is
@@ -564,6 +566,24 @@ def statements(typed: str) -> list[Candidate]:
         topic = topic_of(text, request=False)
         out.append(Candidate(note, text[:MAX_RECORD_CHARS], topic, "user_statement"))
     return out
+
+
+def changes(typed: str, active: Iterable[StoredEntry]) -> list[Candidate]:
+    """The plain statements of *typed* (:func:`statements`) that state a new value
+    of a subject an *active* note holds ("My weekly sync is on Friday." beside
+    "Your weekly sync is on Wednesday."): the user's change to an old note.
+    A statement of a subject no note names is not one, nor is one a note says."""
+    held: dict[str, set[str]] = {}
+    for entry in active:
+        if key := subject_key(entry.text):
+            held.setdefault(key, set()).add(normalise(entry.text))
+    return [
+        cand
+        for cand in statements(typed)
+        if (key := subject_key(cand.text))
+        and key in held
+        and normalise(cand.text) not in held[key]
+    ]
 
 
 def covered(cand: Candidate, notes: Iterable[Written]) -> bool:
