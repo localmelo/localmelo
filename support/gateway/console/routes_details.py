@@ -16,6 +16,7 @@ from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse, Response
 
 from localmelo.melo.schema import Message, ToolInfo
+from localmelo.support.gateway.i18n import t
 from localmelo.support.sessions.store import SessionInfo, SessionStoreError, TurnInfo
 
 from .errors import ApiError
@@ -63,7 +64,7 @@ async def _require_session(console: Console, session_id: str) -> SessionInfo:
         console, console.store.get_session(session_id), session_id
     )
     if info is None:
-        raise ApiError(404, "not_found", "Session not found.")
+        raise ApiError(404, "not_found", t("errors.sessionNotFound"))
     return info
 
 
@@ -110,7 +111,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         await _require_session(console, session_id)
         entry = console.sessions.get(session_id)
         if entry is None or tool not in entry.policy.allowed_tools:
-            raise ApiError(404, "not_found", "This tool has no session grant.")
+            raise ApiError(404, "not_found", t("errors.noGrant"))
         console.sessions.forget_grant(session_id, tool)
         return Response(status_code=204)
 

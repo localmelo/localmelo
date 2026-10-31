@@ -78,7 +78,7 @@ def test_the_pet_shows_only_while_the_window_is_put_away_and_a_click_goes_where_
 ) -> None:
     run_swift(
         tmp_path,
-        ["GatewayPolicy.swift", "PetPolicy.swift"],
+        ["GatewayPolicy.swift", "L10n.swift", "PetPolicy.swift"],
         r"""
 // The window is "in front" when it is ordered in, not minimized and the app is not hidden.
 precondition(petWindowShown(visible: true, minimized: false, appHidden: false))
@@ -128,7 +128,7 @@ def test_what_is_remembered_survives_a_damaged_file_and_a_changed_screen(
 ) -> None:
     run_swift(
         tmp_path,
-        ["GatewayPolicy.swift", "PetPolicy.swift"],
+        ["GatewayPolicy.swift", "L10n.swift", "PetPolicy.swift"],
         r"""
 func settings(_ text: String?) -> PetSettings { petSettings(text.map { Data($0.utf8) }) }
 
@@ -195,7 +195,7 @@ def test_each_mood_gets_its_breath_and_its_beat_and_nothing_moves_when_it_may_no
 ) -> None:
     run_swift(
         tmp_path,
-        ["GatewayPolicy.swift", "PetPolicy.swift", "PetMotion.swift"],
+        ["GatewayPolicy.swift", "L10n.swift", "PetPolicy.swift", "PetMotion.swift"],
         r"""
 // The plan: stopped lies still; unknown does not breathe but blinks and twitches its ear (its picture has the patch
 // and the ear pieces); sleeping breathes slow and deep and has its "z"; the resting dog breathes awake and blinks;
@@ -395,7 +395,7 @@ def test_a_change_waits_for_a_rest_point_and_a_change_of_pose_hides_in_a_squash(
 ) -> None:
     run_swift(
         tmp_path,
-        ["GatewayPolicy.swift", "PetPolicy.swift", "PetMotion.swift"],
+        ["GatewayPolicy.swift", "L10n.swift", "PetPolicy.swift", "PetMotion.swift"],
         r"""
 func number(_ value: Any?) -> Double? { (value as? NSNumber)?.doubleValue }
 func bitmap(_ width: Int, _ height: Int) -> CGImage {
@@ -527,7 +527,7 @@ def test_a_change_of_mood_does_not_jump_the_picture_where_the_eye_sees_it(
     # code snapped it back to 1.0, 0.009 away).
     run_swift(
         tmp_path,
-        ["GatewayPolicy.swift", "PetPolicy.swift", "PetMotion.swift"],
+        ["GatewayPolicy.swift", "L10n.swift", "PetPolicy.swift", "PetMotion.swift"],
         r"""
 import Metal
 guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue() else {
@@ -581,6 +581,7 @@ def test_the_calm_portrait_blinks_only_while_loops_may_run(tmp_path: Path) -> No
         tmp_path,
         [
             "GatewayPolicy.swift",
+            "L10n.swift",
             "PetPolicy.swift",
             "PetMotion.swift",
             "MotionGate.swift",
@@ -621,7 +622,7 @@ def test_the_console_settings_may_read_and_choose_what_is_on_the_desktop(
 ) -> None:
     run_swift(
         tmp_path,
-        ["GatewayPolicy.swift", "PetPolicy.swift"],
+        ["GatewayPolicy.swift", "L10n.swift", "PetPolicy.swift"],
         r"""
 precondition(desktopRequest(["action": "get"]) == .get)
 for mode in DesktopMode.allCases {

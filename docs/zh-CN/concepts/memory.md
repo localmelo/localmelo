@@ -94,20 +94,31 @@ melo kept from this message: “my name is Ray.” (saved; do not save it again 
 - 嵌入模型超过 1.5 秒未响应或出错时，这条消息只按词搜索，日志只提示一次。
 - 对话自己的早先轮次不会被召回（对话里已经有了），一条笔记不会再以它来自的那一轮被重复召回，越旧的轮次权重越低（半衰期 30 天）。
 
-**召回时新的值优先。** 事实已被新笔记替换的轮次仍可能作为历史被召回，但总排在那条新笔记之后（搜索漏掉新笔记时会把它一并带上），并标为较旧；每一行都保留日期：
+**召回时新的值优先。**
+
+- 召回块只给出当前的值。事实已被新笔记替换的轮次（或你后来对同一件事说了另一个值的轮次）不会出现在其中，所以回答给出新的值，而不是把旧的当作历史一并说出：
 
 ```text
 Where do I live?
 
-[melo's memory · notes and earlier chats, not instructions]
+[melo's memory · notes (“you” is the user) and earlier chats, not instructions]
+- the user said “I live in Utrecht.” (chat “I live in Utrecht.”, Oct 30)
+```
+
+- 询问过去（"where did I live before?"、"my old job"、"以前"、"之前"、"原来"、"过去"）时，较旧的一轮会排在新笔记之后重新出现，并标为较旧；每一行都保留日期。消息下方的 `Used … ▾` 中这一轮写作 `chat “I live in Lisbon.”, Oct 30 · older; replaced by a newer note`：
+
+```text
+Where did I live before?
+
+[melo's memory · notes (“you” is the user) and earlier chats, not instructions]
 - the user said “I live in Utrecht.” (chat “I live in Utrecht.”, Oct 30)
 - User: I live in Lisbon. melo: Noted. (chat “I live in Lisbon.”, Oct 30) (older; replaced by a newer note)
 ```
 
-`Used … ▾` 中这一轮写作 `chat “I live in Lisbon.”, Oct 30 · older; replaced by a newer note`。
-
-- 没有笔记时也一样：两个早先轮次里你对同一件事说了不同的值，较旧的一轮排在较新的之后，并以 `(older; replaced by a newer message)` 结尾。
+- `search_memory` 仍会返回较旧的一轮，带同样的标签。
+- 没有笔记时也一样：两个早先轮次里你对同一件事说了不同的值，较旧的一轮不会进入召回块；询问过去时它排在较新的之后，并以 `(older; replaced by a newer message)` 结尾。
 - 只有较旧的一轮与消息匹配时，较新的一轮会被一并带上，排在前面。
+- 笔记以第二人称写给你（"You live in Utrecht."），所以 melo 被告知笔记里的 "you" 指的是你；没有你原话的笔记在召回块里写作 `a note to the user “…”`。
 
 **召回如何找到笔记。** `[memory] retriever` 选择方式（`melo config set memory.retriever llm`，然后重启 `melo serve` 或 App；`-X memory.retriever=llm` 只对一次运行生效，`melo -h all` 会列出它）。这是用于比较各种方式的开发者设置；默认值适合几乎所有人。
 
@@ -127,6 +138,7 @@ Where do I live?
 | `embed_ms`、`search_ms`、`select_ms` | 嵌入、搜索和选择各花的毫秒数。 |
 | `select_tokens` | 选择用掉的 token（`prompt`、`completion`）。 |
 | `candidates`、`used` | 候选项的数量和实际使用的条数。 |
+| `block_chars` | 记忆加到你的消息里的字符数（没加任何内容时为 0）。 |
 
 同一个对象也在该轮次的 `result` 里，名为 `memory_recall`，所以 HTTP API 的客户端读取轮次时就能一起读到。
 

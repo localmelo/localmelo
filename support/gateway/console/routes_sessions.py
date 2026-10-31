@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import FastAPI, Header, Query
 from fastapi.responses import JSONResponse, Response
 
+from localmelo.support.gateway.i18n import t
 from localmelo.support.sessions.store import (
     SESSION_KINDS,
     SessionInfo,
@@ -62,7 +63,7 @@ async def _require_session(console: Console, session_id: str) -> SessionInfo:
         console, console.store.get_session(session_id), session_id
     )
     if info is None:
-        raise ApiError(404, "not_found", "Session not found.")
+        raise ApiError(404, "not_found", t("errors.sessionNotFound"))
     return info
 
 
@@ -75,7 +76,7 @@ async def _read_session(
         return info, console.store
     info = await _store_call(console, console.worker_history.get_session(session_id))
     if info is None:
-        raise ApiError(404, "not_found", "Session not found.")
+        raise ApiError(404, "not_found", t("errors.sessionNotFound"))
     return info, console.worker_history
 
 
@@ -394,7 +395,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     async def session_blob(session_id: str, sha256: str) -> Response:
         console.require_store()
         if _SHA256_RE.fullmatch(sha256) is None:
-            raise ApiError(404, "not_found", "Blob not found.")
+            raise ApiError(404, "not_found", t("errors.blobNotFound"))
         _, store = await _read_session(console, session_id)
         blob = await _store_call(
             console,
@@ -402,7 +403,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             None if store is console.worker_history else session_id,
         )
         if blob is None:
-            raise ApiError(404, "not_found", "Blob not found.")
+            raise ApiError(404, "not_found", t("errors.blobNotFound"))
         mime_type, data = blob
         if mime_type in _INLINE_IMAGES:
             disposition = "inline"

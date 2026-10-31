@@ -51,6 +51,7 @@ def run_swift(tmp_path: Path, source: str) -> None:
                 str(APP / name)
                 for name in (
                     "GatewayPolicy.swift",
+                    "L10n.swift",
                     "PetPolicy.swift",
                     "PillPolicy.swift",
                 )

@@ -31,6 +31,7 @@ def run_swift(tmp_path: Path, source: str) -> None:
             "/usr/bin/xcrun",
             "swiftc",
             str(APP / "GatewayPolicy.swift"),
+            str(APP / "L10n.swift"),
             str(APP / "PetPolicy.swift"),
             str(main),
             "-o",

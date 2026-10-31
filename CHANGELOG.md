@@ -7,6 +7,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ## [Unreleased]
 
+### Added
+
+- The web console and the macOS app speak Simplified Chinese. They follow the
+  browser's or the Mac's languages; **Settings → Appearance → Language**
+  (Automatic, English, 简体中文) or `melo config set console.language zh-Hans`
+  chooses one. Every screen is translated: the main chat with its cards and
+  lines, the panel's tabs, Tasks, Workers, Settings, the sign-in page, the
+  gateway's messages, and the app's menus, pill and quit dialog. The terminal
+  stays English. [#350]
+
 ### Changed
 
 - A run ends with a usable answer more often. The patient reflection gate
@@ -165,6 +175,26 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Memory answers give the current value, and notes say who they are about. After
+  you update a fact, asking about it recalled the older chat as well, marked
+  `(older; replaced by a newer note)`, and the answer named both ("Utrecht, the
+  earlier one said Lisbon"). Now the recall block leaves out a chat whose fact a
+  newer note or message replaced, unless your message asks about the past
+  ("before", "used to", "earlier", "previous", "old", "以前", "之前", "原来",
+  "过去"); `search_memory` still shows it. The chat's
+  instructions also say to answer with the newest value only, to use only the
+  notes that answer the question, and to keep a change ("I changed jobs; I work at
+  Acme now.") in that turn instead of asking about it. Notes are written to you
+  in the second person ("You live in Utrecht."), and every place that shows notes
+  to the model now says so ("you" in a note is the user): the recall block header,
+  the `remember` and `search_memory` tool texts, and the chat's instructions, which
+  asked for notes "in the user's words" while the tool wrote them to you, so "Your
+  name is Juno." could read as someone naming the assistant. A note without the words you typed reads
+  `a note to the user “…”` (or `the user's note “…”` when it starts with "I" or
+  "My"). Words that ask for an older value ("before", "earlier") no longer count
+  as content words of the question. The `recall` object of a turn also reports
+  `block_chars`, the length of the block added to your message (0 when none)
+  ([#348]).
 - A task you continue with a message starts its next run. A done, stopped or
   failed task (a run that used up its steps, say) that a message or a "Send"
   card continued ended again within a moment with no turn, because its
@@ -2842,3 +2872,5 @@ earlier milestones.
 [#344]: https://github.com/localmelo/localmelo/pull/344
 [#345]: https://github.com/localmelo/localmelo/pull/345
 [#346]: https://github.com/localmelo/localmelo/pull/346
+[#348]: https://github.com/localmelo/localmelo/pull/348
+[#350]: https://github.com/localmelo/localmelo/pull/350

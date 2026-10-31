@@ -104,10 +104,10 @@ async def default_memory(request: Any, tmp_path: Path) -> AsyncIterator[ChatMemo
 
 
 def lines_ok(lines: list[str], old: str, new: str) -> None:
-    """The newer value first; the older one only on a line that reads as older."""
+    """The newer value first, and the older one on no line (it is history)."""
     assert lines and new in lines[0]
     for line in lines:
-        assert old not in line or line.endswith(OLD_LABELS)
+        assert old not in line
 
 
 @pytest.mark.parametrize(
@@ -144,7 +144,7 @@ async def test_plain_statements_become_notes_and_the_newer_value_wins(
     _system, lines = chat.request()
     lines_ok(lines, old, new)
     for used in asked[-1]["used"]:
-        assert (old in used["text"]) == used["source"].endswith((OLDER, OLDER_TURN))
+        assert old not in used["text"]
 
     # Undo of the newer note brings the older one back.
     assert await memory.delete_record(kept["id"], undo=True)
@@ -181,12 +181,11 @@ async def test_without_notes_the_newer_turn_wins(
     stub.requests.clear()
     asked = await chat(asks)
     _system, lines = chat.request()
+    # The turn with the old value is not given to the model: it is replaced.
     lines_ok(lines, old, new)
-    assert any(line.endswith(f"({OLDER_TURN})") for line in lines)
-    sources = [u["source"] for u in asked[-1]["used"] if old in u["text"]]
-    assert sources and all(s.endswith(f" · {OLDER_TURN}") for s in sources)
+    assert not any(old in u["text"] for u in asked[-1]["used"])
 
-    # Asked for the old value, the newer turn comes in ahead of the older one.
+    # The search still finds it, after the newer turn, marked older.
     found = await memory.search(old)
     keys = [item.key for item in found]
     newer = next(item for item in found if new in item.text)

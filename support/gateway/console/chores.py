@@ -32,6 +32,7 @@ from localmelo.melo.schema import Message
 from localmelo.support.gateway.chat_gate import GatedLLM
 from localmelo.support.gateway.chore_store import Chore, ChoreStore
 from localmelo.support.gateway.front_rules import FINISHED, level_word
+from localmelo.support.gateway.i18n import said_text, t
 from localmelo.support.gateway.task_policy import TaskPolicyError, TaskSpec
 from localmelo.support.gateway.task_store import TaskConflictError, TaskStoreError
 from localmelo.support.sessions.store import SessionStoreError
@@ -290,7 +291,7 @@ class ChoreRunner:
             turns = await self.console.store.list_turns(record.task_id, limit=1)
             line = result_line("", turns[-1].answer) if turns else ""
         elif record.state in FINISHED:
-            line = record.wait_reason or "Stopped before it finished"
+            line = record.wait_reason or t("chores.stoppedEarly")
         at = record.finished_at or record.started_at or record.created_at
         return {
             "state": record.state,
@@ -305,7 +306,8 @@ class ChoreRunner:
             "title": chore.title,
             "request": chore.request,
             "schedule": chore.schedule.to_json(),
-            "when": chore.schedule.describe(),
+            # In the language the console page asked for; English for every other client.
+            "when": said_text(chore.schedule.said()),
             "level": chore.level,
             "level_word": level_word(chore.level),
             "enabled": chore.enabled,

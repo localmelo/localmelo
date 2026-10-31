@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse, Response
 from localmelo.melo.checker import Checker, GatewayIngressPayload
 from localmelo.melo.contracts.approvals import ApprovalDecision
 from localmelo.melo.contracts.review import offers_grant
+from localmelo.support.gateway.i18n import t
 from localmelo.support.sessions.store import (
     SessionBusyError,
     SessionInfo,
@@ -110,12 +111,12 @@ def _compose(request: TurnRequest | CancelRequest) -> str:
     """
     text = request.text.strip()
     if not text:
-        raise ApiError(400, "invalid_request", "text: the message must not be blank")
+        raise ApiError(400, "invalid_request", t("errors.blankMessage"))
     if request.attachments:
         raise ApiError(
             400,
             "invalid_request",
-            "attachments: files are not supported yet; send the text alone",
+            t("errors.noAttachments"),
         )
     return text
 
@@ -157,9 +158,7 @@ async def _sessions_call(
     try:
         return await coro
     except SessionBusyError as exc:
-        raise ApiError(
-            409, "session_busy", "A turn is already running in this session."
-        ) from exc
+        raise ApiError(409, "session_busy", t("errors.turnRunning")) from exc
     except SessionStoreError as exc:
         raise await console.store_api_error(exc, session_id) from exc
 
@@ -169,7 +168,7 @@ async def _require_session(console: Console, session_id: str) -> SessionInfo:
         console, console.store.get_session(session_id), session_id
     )
     if info is None:
-        raise ApiError(404, "not_found", "Session not found.")
+        raise ApiError(404, "not_found", t("errors.sessionNotFound"))
     return info
 
 
@@ -179,12 +178,12 @@ def _submission_error(exc: SubmissionError) -> ApiError:
         return ApiError(
             409,
             "submission_withdrawn",
-            "This message was cancelled before it started.",
+            t("errors.messageCancelled"),
         )
     return ApiError(
         409,
         "submission_conflict",
-        "This message id was already used for a different message.",
+        t("errors.messageIdUsed"),
     )
 
 
@@ -308,7 +307,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             raise ApiError(
                 409,
                 "turn_not_running",
-                "This turn is not running. It may have finished.",
+                t("errors.turnNotRunning"),
             )
         return JSONResponse(
             status_code=202, content={"turn_id": turn_id, "cancelling": True}
@@ -391,11 +390,9 @@ def add_routes(app: FastAPI, console: Console) -> None:
             decision = ApprovalDecision(False, body.reason)
         outcome = console.broker.answer(request_id, decision)
         if outcome == "unknown":
-            raise ApiError(404, "not_found", "Approval not found.")
+            raise ApiError(404, "not_found", t("errors.approvalNotFound"))
         if outcome == "already_resolved":
-            raise ApiError(
-                409, "already_answered", "This approval was answered already."
-            )
+            raise ApiError(409, "already_answered", t("errors.approvalAnswered"))
         return JSONResponse(
             content={
                 "request_id": request_id,
@@ -412,7 +409,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             raise ApiError(
                 409,
                 "task_session_read_only",
-                "A task session cannot be changed as a chat.",
+                t("errors.taskChange"),
             )
         # Both changes are judged before either is written, so a refused
         # title or workspace leaves the session as it was.
@@ -443,7 +440,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
                     session_id,
                 )
             if not renamed:
-                raise ApiError(404, "not_found", "Session not found.")
+                raise ApiError(404, "not_found", t("errors.sessionNotFound"))
         info = await _require_session(console, session_id)
         return JSONResponse(content={"session": console.session_body(info)})
 

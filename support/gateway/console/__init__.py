@@ -28,6 +28,7 @@ from fastapi.responses import JSONResponse
 from starlette.routing import Match
 
 from localmelo.support.gateway.chat_gate import ChatGate, call_log_dir
+from localmelo.support.gateway.i18n import LanguageMiddleware, t
 from localmelo.support.gateway.machine_monitor import MachineMonitor, read_pmset
 from localmelo.support.gateway.workers import TaskWorkers
 from localmelo.support.memory import ChatMemory
@@ -267,6 +268,8 @@ class Console:
         self.app = app
         app.state.console = self
         errors.install(app)
+        # The words the server writes follow the language the console page asks for.
+        app.add_middleware(LanguageMiddleware)
         routes_settings.add_routes(app, self)
         routes_sessions.add_routes(app, self)
         routes_status.add_routes(app, self)
@@ -447,7 +450,7 @@ class Console:
         raise ApiError(
             503,
             "store_unavailable",
-            self._store_error or "The session store is not available.",
+            self._store_error or t("errors.storeUnavailable"),
         )
 
     async def store_api_error(
@@ -469,7 +472,7 @@ class Console:
                     503, "store_unavailable", self._store_error or store_message(exc)
                 )
             if info is None:
-                return ApiError(404, "not_found", "This session was deleted.")
+                return ApiError(404, "not_found", t("errors.sessionDeleted"))
         return ApiError(
             503,
             "store_unavailable",
@@ -505,7 +508,7 @@ def _add_not_found(app: FastAPI) -> None:
 
     @app.api_route("/api", methods=methods)
     async def api_root_not_found() -> JSONResponse:
-        raise ApiError(404, "not_found", "Not found.")
+        raise ApiError(404, "not_found", t("errors.notFound"))
 
     @app.api_route("/api/{rest:path}", methods=methods)
     async def api_not_found(request: Request, rest: str) -> JSONResponse:
@@ -516,7 +519,7 @@ def _add_not_found(app: FastAPI) -> None:
                 detail="Method Not Allowed",
                 headers={"Allow": ", ".join(allowed)},
             )
-        raise ApiError(404, "not_found", "Not found.")
+        raise ApiError(404, "not_found", t("errors.notFound"))
 
 
 def _allowed_methods(app: FastAPI, path: str) -> list[str]:
