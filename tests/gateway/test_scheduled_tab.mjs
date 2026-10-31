@@ -5,7 +5,7 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {CHECKIN, EMPTY, rowLines, setupScheduledTab, whenWords} from '../../support/gateway/static/scheduled-tab.mjs';
+import {CHECKIN, EMPTY, lateWords, rowLines, setupScheduledTab, whenWords} from '../../support/gateway/static/scheduled-tab.mjs';
 
 class Element {
   constructor(tag) {
@@ -80,7 +80,7 @@ test('with no chores the tab says how to add one, under the check-in with its sw
   assert.ok(h.text().includes(CHECKIN));
   assert.match(h.text(), /Next check-in today at 7:30\s?AM/i);
   assert.ok(h.text().includes(EMPTY));
-  assert.equal(EMPTY, "Nothing scheduled. Ask in the main chat: 'every weekday at 8:30, brief me on my calendar'.");
+  assert.equal(EMPTY, "Nothing scheduled. Ask in the main chat: 'every weekday at 8:30, brief me on my calendar' or 'remind me tomorrow at 9 to call mom'.");
   assert.deepEqual(h.switches().map((item) => [item.attributes['aria-label'], item.attributes['aria-checked']]), [['Check-in', 'true']]);
 });
 
@@ -243,4 +243,57 @@ test('an unreadable schedule says so; a quiet reload keeps what is shown and nev
   const before = h.calls.length;
   assert.equal(h.tab.reload(), undefined);
   assert.equal(h.calls.length, before, 'an open edit is not read over');
+});
+
+// A reminder is a one-time chore: Friday 2026-10-30 09:00 (NOW is Wednesday the 28th).
+const reminder = (id, extra = {}) => chore(id, {title: 'send the report', request: 'Reminder: send the report', schedule: {kind: 'once', at: '2026-10-30T09:00'},
+  when: 'once, Fri Oct 30 at 9:00', level: 1, next_run: at(30, 9, 0), late_min: null, ...extra});
+
+test('a one-time chore lists its time, and when it has run it is done, with how late', () => {
+  const now = NOW / 1000;
+  assert.match(rowLines(reminder('r'), now)[0], /^Next Friday at 9:00\s?AM$/i);
+  // Done: switched off with no next time; the line says when it ran, not "Off".
+  const ran = reminder('r', {enabled: false, next_run: null, last_run: at(30, 9, 1), last: {state: 'done', line: 'Time to send the report.'}});
+  const lines = rowLines(ran, at(30, 12, 0));
+  assert.match(lines[0], /^Reminded today at 9:01\s?AM$/i);
+  assert.deepEqual(lines.slice(1), ['Last: Done · Time to send the report.']);
+  // A reminder that ran after the computer slept says so.
+  const late = rowLines({...ran, last_run: at(30, 11, 0), late_min: 120}, at(30, 12, 0));
+  assert.deepEqual(late.slice(1), ['ran 2 h late', 'Last: Done · Time to send the report.']);
+  assert.deepEqual([35, 60, 90, 120, 47 * 60, 48 * 60, 3 * 24 * 60].map(lateWords),
+    ['ran 35 min late', 'ran 1 h late', 'ran 2 h late', 'ran 2 h late', 'ran 47 h late', 'ran 2 days late', 'ran 3 days late']);
+  // A one-time chore the person switched off before it ran is just off.
+  assert.deepEqual(rowLines(reminder('r', {enabled: false, next_run: null}), now), ['Off']);
+});
+
+test('a reminder row shows its words and time, and opens to its request, with Edit time as a date and time', async () => {
+  const h = harness({chores: [reminder('r', {revision: 3})]});
+  await h.tab.show();
+  assert.ok(h.text().includes('send the report') && h.text().includes('once, Fri Oct 30 at 9:00'));
+  await h.open();
+  assert.ok(h.text().includes('Reminder: send the report'));
+  h.button('Edit time: send the report').click();
+  const form = h.tab.root.findAll((node) => node.className === 'sched-form')[0];
+  const inputs = form.findAll((node) => node.className === 'sched-input');
+  // No "how often" list for a one-time chore: only the date and time.
+  assert.equal(inputs.length, 1);
+  assert.deepEqual([inputs[0].tagName, inputs[0].type, inputs[0].value, inputs[0].attributes['aria-label']], ['INPUT', 'datetime-local', '2026-10-30T09:00', 'Date and time']);
+  inputs[0].value = '2026-11-02T08:15';
+  inputs[0].dispatch('input');
+  h.button('Save').click();
+  await settle();
+  assert.deepEqual(h.calls.at(-1), ['PATCH', '/chores/r', {revision: 3, schedule: {kind: 'once', at: '2026-11-02T08:15'}}]);
+  assert.equal(h.tab.state.edit, null);
+});
+
+test('a done reminder shows when it ran, and a refused switch-on stays in the tab', async () => {
+  const done = reminder('r', {enabled: false, next_run: null, last_run: at(28, 6, 59), late_min: 35,
+    last: {state: 'done', line: 'Time to send the report.'}});
+  const h = harness({chores: [done], fail: {'PATCH /chores/r': 'That time has passed. Choose a new time.'}});
+  await h.tab.show();
+  assert.ok(h.text().includes('Reminded today at 6:59'));
+  assert.ok(h.text().includes('ran 35 min late'));
+  h.switches()[1].click();
+  await settle();
+  assert.ok(h.text().includes('That time has passed. Choose a new time.'));
 });

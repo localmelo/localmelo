@@ -1,7 +1,8 @@
 """Chore schedules in code: when a chore is next due, and the phrases that name one.
 
 A chore repeats on one of three schedules: every day at a time, every weekday
-at a time, or every N hours. :meth:`Schedule.next_after` answers "when next?"
+at a time, or every N hours; or it runs once, on a date at a time (a reminder).
+:meth:`Schedule.next_after` answers "when next?"
 from a clock reading and an optional time zone (the computer's own when
 ``None``), and :func:`parse_phrase` reads a repeating phrase in a message
 ("every weekday at 8:30, brief me on my calendar", "每天早上九点 …") into a
@@ -17,11 +18,13 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, tzinfo
 from typing import Any, Final, Literal
 
-from localmelo.support.gateway.i18n import said
+from localmelo.support.gateway.i18n import said, said_text
 
-Kind = Literal["daily", "weekdays", "hours"]
-KINDS: Final = ("daily", "weekdays", "hours")
+Kind = Literal["daily", "weekdays", "hours", "once"]
+KINDS: Final = ("daily", "weekdays", "hours", "once")
 MAX_HOURS: Final = 24
+# A one-time schedule is at most this far ahead.
+MAX_AHEAD: Final = timedelta(days=366)
 # A run starts up to this long after its time, so chores do not all start on the minute.
 JITTER_S: Final = 120.0
 # What a phrase without a time means: a day part's own hour, else this.
@@ -29,7 +32,7 @@ DEFAULT_MINUTE: Final = 9 * 60
 
 
 class ScheduleError(ValueError):
-    """A schedule that is not one of the three kinds, or out of range."""
+    """A schedule that is not one of the kinds, or out of range."""
 
 
 def clock_text(minute: int) -> str:
@@ -39,15 +42,21 @@ def clock_text(minute: int) -> str:
 
 @dataclass(frozen=True)
 class Schedule:
-    """``daily`` and ``weekdays`` run at *minute* (after local midnight); ``hours`` every *hours*."""
+    """``daily`` and ``weekdays`` run at *minute* (after local midnight); ``hours`` every *hours*.
+
+    ``once`` runs on the local date *on* at *minute* and then never again.
+    """
 
     kind: Kind
     minute: int = 0
     hours: int = 0
+    on: date | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in KINDS:
-            raise ScheduleError("kind: every day, every weekday or every N hours")
+            raise ScheduleError("kind: every day, every weekday, every N hours or once")
+        if (self.on is not None) != (self.kind == "once"):
+            raise ScheduleError("on: a date, for a one-time schedule only")
         if self.kind == "hours":
             if not 1 <= self.hours <= MAX_HOURS:
                 raise ScheduleError(f"every: 1 to {MAX_HOURS} hours")
@@ -56,7 +65,7 @@ class Schedule:
 
     @classmethod
     def from_json(cls, data: object) -> Schedule:
-        """``{"kind": "weekdays", "at": "08:30"}`` or ``{"kind": "hours", "every": 4}``."""
+        """``{"kind": "weekdays", "at": "08:30"}``, ``{"kind": "hours", "every": 4}`` or ``{"kind": "once", "at": "2026-10-30T09:00"}``."""
         if not isinstance(data, Mapping):
             raise ScheduleError("schedule must be an object")
         kind = data.get("kind")
@@ -69,25 +78,53 @@ class Schedule:
                 raise ScheduleError(f"every: 1 to {MAX_HOURS} hours")
             return cls("hours", hours=every)
         if kind not in KINDS:
-            raise ScheduleError("kind: every day, every weekday or every N hours")
+            raise ScheduleError("kind: every day, every weekday, every N hours or once")
         at = data.get("at")
+        if kind == "once":
+            return cls._once(at)
         found = re.fullmatch(r"(\d{1,2}):(\d{2})", at) if isinstance(at, str) else None
         if found is None or int(found[1]) > 23 or int(found[2]) > 59:
             raise ScheduleError("at: a time of day, such as 08:30")
         return cls(kind, minute=int(found[1]) * 60 + int(found[2]))
 
+    @classmethod
+    def _once(cls, at: object) -> Schedule:
+        found = (
+            re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})", at)
+            if isinstance(at, str)
+            else None
+        )
+        try:
+            if found is None:
+                raise ValueError
+            year, month, day, hour, minute = (int(part) for part in found.groups())
+            if hour > 23 or minute > 59:
+                raise ValueError
+            return cls("once", minute=hour * 60 + minute, on=date(year, month, day))
+        except ValueError:
+            raise ScheduleError(
+                "at: a date and time, such as 2026-10-30T09:00"
+            ) from None
+
     def to_json(self) -> dict[str, Any]:
         if self.kind == "hours":
             return {"kind": "hours", "every": self.hours}
+        if self.on is not None:
+            return {"kind": "once", "at": f"{self.on.isoformat()}T{self._clock()}"}
         return {
             "kind": self.kind,
-            "at": f"{self.minute // 60:02d}:{self.minute % 60:02d}",
+            "at": self._clock(),
         }
 
+    def _clock(self) -> str:
+        return f"{self.minute // 60:02d}:{self.minute % 60:02d}"
+
     def describe(self) -> str:
-        """``every weekday at 8:30``, ``every day at 21:00``, ``every 4 hours``."""
+        """``every weekday at 8:30``, ``every day at 21:00``, ``every 4 hours``, ``once, Fri Oct 30 at 9:00``."""
         if self.kind == "hours":
             return "every hour" if self.hours == 1 else f"every {self.hours} hours"
+        if self.kind == "once":
+            return said_text(self.said(), "en")
         day = "every weekday" if self.kind == "weekdays" else "every day"
         return f"{day} at {clock_text(self.minute)}"
 
@@ -95,10 +132,36 @@ class Schedule:
         """:meth:`describe` as words a record keeps for the reader's language."""
         if self.kind == "hours":
             return said("schedule.hours", n=self.hours)
+        if self.on is not None:
+            return said("schedule.once", at=self.said_at())
         return said(f"schedule.{self.kind}", time=clock_text(self.minute))
 
+    def said_at(self) -> dict[str, Any]:
+        """A one-time schedule's date and time without "once": ``Fri Oct 30 at 9:00``."""
+        if self.on is None:
+            raise ScheduleError("only a one-time schedule has a date")
+        weekday, month = self.on.weekday(), self.on.month
+        return said(
+            "schedule.at",
+            weekday=said(f"time.weekday.{weekday}"),
+            month=said(f"time.month.{month}"),
+            day=self.on.day,
+            time=clock_text(self.minute),
+        )
+
     def next_after(self, after: float, tz: tzinfo | None = None) -> float:
-        """The first time strictly after *after* (epoch seconds) this schedule is due."""
+        """The first time strictly after *after* (epoch seconds) this schedule is due.
+
+        A one-time schedule has one: its own time, which must be after *after*
+        and at most :data:`MAX_AHEAD` later.
+        """
+        if self.on is not None:
+            when = self.when(tz)
+            if when <= after:
+                raise ScheduleError("That time has passed. Choose a new time.")
+            if when > after + MAX_AHEAD.total_seconds():
+                raise ScheduleError("Reminders can be at most a year ahead.")
+            return when
         if self.kind == "hours":
             return after + self.hours * 3600.0
         today = datetime.fromtimestamp(after, tz).date()
@@ -111,6 +174,12 @@ class Schedule:
             if at > after:
                 return at
         raise ScheduleError("no next time")  # unreachable: a week always has a weekday
+
+    def when(self, tz: tzinfo | None = None) -> float:
+        """A one-time schedule's own time (epoch seconds), past or not."""
+        if self.on is None:
+            raise ScheduleError("only a one-time schedule has a time")
+        return _at(self.on, self.minute, tz)
 
 
 def _at(day: date, minute: int, tz: tzinfo | None) -> float:
