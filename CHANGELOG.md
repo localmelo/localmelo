@@ -9,6 +9,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Reminders that run once at a time. Say `remind me to send the report on
+  Friday at 9`, `in 2 hours` or `提醒我明天九点给导师发邮件` in the main chat
+  and it shows the date and time it understood (`Remind you on Fri Oct 30 at
+  9:00?`) with **Remind me** and **Cancel**; with no time it asks `When should
+  I remind you?` and a reply of just a time (`Friday at 9`) answers it. At the
+  time a card says `Reminder: <your words>`, also when the run did not finish.
+  A reminder missed while the computer slept runs when melo starts again and
+  says how late it ran. The Scheduled tab lists it, then shows when it ran
+  (**Edit time** takes a date and time). In the API a chore's schedule can be
+  `{"kind": "once", "at": "2026-10-30T09:00"}`, at most a year ahead, and a
+  chore body gains `late_min`. [#NN]
 - The web console and the macOS app speak Simplified Chinese. They follow the
   browser's or the Mac's languages; **Settings → Appearance → Language**
   (Automatic, English, 简体中文) or `melo config set console.language zh-Hans`
