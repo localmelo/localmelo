@@ -436,6 +436,24 @@ def test_the_result_is_one_line(note: str, answer: str, line: str) -> None:
     assert result_line(note, answer) == line
 
 
+@pytest.mark.parametrize(
+    "answer, line",
+    [
+        # A "Done." that only says it is done gives way to the line after it.
+        ("Done.\nFixed the parser.\nTests pass.", "Fixed the parser."),
+        ("Done. Fixed the parser. Tests pass.", "Fixed the parser."),
+        ("已完成。修改了规则。测试通过。", "修改了规则。"),
+        # Nothing else follows, so the row says what the answer says.
+        ("Done.", "Done."),
+        ("All done!\n\n", "All done!"),
+        # Only an opening ack goes; the word inside a sentence stays.
+        ("Done by Friday for the report.", "Done by Friday for the report."),
+    ],
+)
+def test_a_result_line_reads_past_a_leading_done(answer: str, line: str) -> None:
+    assert result_line("", answer) == line
+
+
 def test_a_long_result_is_cut_at_a_word() -> None:
     found = result_line("", "word " * 60)
     assert len(found) <= 140 and found.endswith("word…")

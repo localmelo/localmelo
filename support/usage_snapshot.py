@@ -30,6 +30,14 @@ class TaskCounts:
     queued: int
     held: int
     top_level: int | None = None
+    # The held tasks that wait for the person (an approval or an answer), not
+    # for a free model slot or a higher-priority task.
+    waiting: int = 0
+
+
+def waits_for_you(count: int) -> str:
+    """The sentence for *count* tasks that wait for the person."""
+    return "1 task waits for you" if count == 1 else f"{count} tasks wait for you"
 
 
 def _count(value: object) -> int | None:
@@ -293,7 +301,7 @@ def status_segments(
     steps: bool = True,
     words: bool = False,
 ) -> list[str]:
-    """The status row's segments, left to right: cache, ctx, steps, tasks.
+    """The status row's segments, left to right: cache, ctx, steps, tasks, waiting.
 
     A segment with no data is left out, and so are the steps with *steps*
     false. Steps are the progress spec's level-0
@@ -341,8 +349,11 @@ def status_segments(
         segments.append(" ".join(facts))
     if tasks is not None:
         text = f"tasks {tasks.running} running {tasks.queued} queued"
-        # A task held on an approval waits for the user: never hide it.
         segments.append(text + (f" {tasks.held} held" if tasks.held else ""))
+        # The counts are for developers. A task that waits for the person is
+        # not: it gets a sentence of its own, which every mode draws.
+        if tasks.waiting > 0:
+            segments.append(waits_for_you(tasks.waiting))
     return segments
 
 

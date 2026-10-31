@@ -30,7 +30,7 @@ const stateWord = (state) => (STATES.has(state) ? t(`tasks.state.${state}`) : st
  * the answer (and, if it did not complete, why) above the facts and the work
  * folded under "Steps"; "Live" heads the work only while the task runs.
  * `developer()` says whether developer mode is on: the scheduler's priority
- * (P2) and its words are shown only then.
+ * (P2), its words and a Recovery card with nothing in it are shown only then.
  * `chooseFolder()` (optional) asks the macOS app's folder panel for a path and
  * resolves it, or null; without it, Choose a folder opens a path field. A task
  * that could not use its folder offers it, and starts again in the folder chosen.
@@ -131,8 +131,11 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const view = {rerender: render, answer: answerApproval, reload: () => refresh(), workspace: task.workspace_label, scope: 'task'};
     for (const request of pendingOf(task)) nodes.push(approvalCard(request, view));
     if (live) nodes.push(liveBox);
-    nodes.push(node('h2', t('tasks.recoveryCard')));
-    nodes.push(hasCard(task) ? node('pre', task.card, 'worker-brief task-card-text') : node('p', t('tasks.noCard'), 'muted'));
+    // The card is a developer's recovery note: default mode shows it only when there is one to read.
+    if (hasCard(task) || developer()) {
+      nodes.push(node('h2', t('tasks.recoveryCard')));
+      nodes.push(hasCard(task) ? node('pre', task.card, 'worker-brief task-card-text') : node('p', t('tasks.noCard'), 'muted'));
+    }
     const actions = node('div', undefined, 'task-actions');
     if (RESUMABLE.has(task.state) && !cardMissing(task)) {
       actions.append(button(t(state.busy === 'resume' ? 'tasks.resuming' : 'common.resume'), () => resume(), Boolean(state.busy)));

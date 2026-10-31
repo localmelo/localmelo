@@ -528,13 +528,13 @@ worker 运行或终端对话从 CLI 的文件读取。
   "cache": {"requests": 2, "last_percent": 67, "session_percent": 56, "idle_s": 200.0},
   "context": {"measured": 1000, "limit": 8000},
   "steps": {"active": true, "step": 3, "attempt": 1, "phase": ""},
-  "tasks": {"running": 1, "queued": 2, "held": 0, "top_level": 1}
+  "tasks": {"running": 1, "queued": 2, "held": 0, "top_level": 1, "waiting": 0}
 }
 ```
 
-- `segments` 是终端状态栏在开发者模式下从左到右绘制的内容：缓存、上下文、步骤、任务。没有数据的段会被省略。
+- `segments` 是终端状态栏在开发者模式下从左到右绘制的内容：缓存、上下文、步骤、任务；有被搁置的任务在等你批准时，最后还有一句 `1 task waits for you`（`N tasks wait for you`）。没有数据的段会被省略。
 - 服务器没有报告缓存 token 时，`cache.last_percent` 和 `cache.session_percent` 为 `null`，该段显示 `cache --`：绝不会显示 0%。`idle_s` 只在本地后端设置（本地服务器的缓存因内存而被淘汰，而不是因时间，所以没有倒计时）。
-- 在首次测量或一次运行的首个进度事实之前，`context` 和 `steps` 为 `null`。运行期间 `steps.active` 为 true。`tasks` 是任务存储中 running、queued 和 held 的数量，以及其中最高的优先级（`top_level`，没有任务时为 `null`）。
+- 在首次测量或一次运行的首个进度事实之前，`context` 和 `steps` 为 `null`。运行期间 `steps.active` 为 true。`tasks` 是任务存储中 running、queued 和 held 的数量，其中最高的优先级（`top_level`，没有任务时为 `null`），以及 `waiting`（held 任务中在等你批准或回答、而不是在等调度器的任务数）。
 - 折叠结果按会话缓存在其最后一个事件 id 上：没有新事件的读取不会读取任何事件。
 
 ## GET /api/sessions/{id}/blobs/{sha256}
