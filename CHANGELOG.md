@@ -363,7 +363,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   worker runs and their exit codes are unchanged. For API clients:
   `GET /api/sessions/{id}` adds `last_event_id`, and an approval's `review`
   adds `categories`. See [The main chat](docs/guides/terminal.md#the-main-chat)
-  ([#NN]).
+  ([#330]).
 
 - The terminal and the app share one gateway. Every gateway writes
   `~/.cache/localmelo/gateway/endpoint.json` as it starts and removes it as it
@@ -372,11 +372,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   app signs in to it as to its own, and Quit leaves a gateway it did not
   start running (the menu says so). `melo serve stop` stops the gateway that
   is running, and the line that says the terminal started one names it
-  ([#NN]).
+  ([#330]).
 
 - The terminal's work zone and Ctrl+T say task levels in words in default mode
   (Now, Today, Normal, Whenever, If idle, Later); developer mode keeps P0-P5
-  ([#NN]).
+  ([#330]).
 
 - The macOS app shows what melo is doing while its window is put away. A small
   pill takes Melo's place on the desktop and says in one plain line what runs
@@ -2679,3 +2679,4 @@ earlier milestones.
 [#206]: https://github.com/localmelo/localmelo/pull/206
 [#207]: https://github.com/localmelo/localmelo/pull/207
 [#208]: https://github.com/localmelo/localmelo/pull/208
+[#330]: https://github.com/localmelo/localmelo/pull/330
