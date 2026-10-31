@@ -139,7 +139,7 @@ When the model is not the saved default, a row after the folder gives the server
 | `/copy [turn]` | Copy a stored answer's Markdown; without a number, the latest finished, non-undone turn. |
 | `/usage` | Recorded steps, tool calls, tokens and time per turn, including undone work, with totals; `?` means not recorded. |
 | `/status [all]` | Five rows that say whether melo is ready: the model and its server (`✓ answers`, or why not), the folder, the session, what the approvals do, and how full the context is. `/status all`, and `/status` in developer mode, print every row. |
-| `/memory` | The notes melo keeps about you, as a list: Enter on a note offers `Back`, `Edit it` and `Delete it`; `Forget everything…` asks first. `/memory window` inspects the model's working window with no model call. |
+| `/memory` | The notes melo keeps about you, as a list: Enter on a note offers `Back`, `Edit it` and `Delete it`; `Forget everything…` asks first. `/memory import` offers the notes other assistants keep (see [First run](#first-run)). `/memory window` inspects the model's working window with no model call. |
 | `/attach PATH` | Stage one workspace text file; `/attachments` lists them and `/detach N\|all` removes them. |
 | `/verbose [on\|off]` | Verbose rendering: 40 thinking rows, a tool call's arguments, 20 output lines, the reflection's whole rationale. |
 | `/thinking [on\|off]` | The thinking excerpt on, or off (the default, except in developer mode). |
@@ -413,6 +413,18 @@ summary. Lifetime choices describe a possible future setup, not permission to ru
 anything. Manual commands run independently: stop the server yourself with Ctrl+C.
 Choose a free port and enter that address in melo; systems without the pinned Mac
 recipe keep their existing manual-server guidance.
+
+After the questions, and only on a terminal, the first run also offers the notes other assistants on this computer keep about you, once:
+
+```text
+ melo found notes on this Mac from other assistants
+ ❯ 1. Bring in 21 notes from 8 files
+   2. Show what they say
+   3. Not now
+ ↑↓ select · enter confirm · esc cancel
+```
+
+`Show what they say` prints each file as a path (`~/.claude/CLAUDE.md · 9 notes`) with a few sample lines and what was left out (`9 left out: secrets, other people's details`), then asks again. The list starts on `Show what they say`, so a bare Enter never brings anything in; once the files were shown it starts on `Bring in`. Nothing is brought in until you choose the first row, and only `Not now` ends the offer for good. Esc, ctrl+c and end of input leave without bringing anything in and without recording an answer, so the offer is made again: at the first run melo ends as a cancelled setup does (`Setup cancelled.`, exit 130 for Esc and ctrl+c), in `melo memory import` it says `Nothing brought in.`, and in `/memory import` Esc just closes the list. A file whose lines were all left out says `Nothing to bring in: the lines were left out (secrets)` instead of `Nothing new`. `melo memory import --undo BATCH` keeps a note you edited since and says so (`Took back 20 notes. Kept 1 note you edited.`). `/memory import` in a chat and `melo memory import` ask the same list later; a task run (`melo "task"`) never asks. With piped input the list is a numbered question read from stdin. The notes are the ones the console's Memory tab lists, and each import has a batch you can take back with `melo memory import --undo BATCH`.
 
 #### Questions are lists
 

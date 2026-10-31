@@ -9,6 +9,7 @@ into notes. :class:`~localmelo.support.memory.service.ChatMemory` wraps them.
 
 from __future__ import annotations
 
+from localmelo.support.memory.importer import offer
 from localmelo.support.memory.importer.plan import (
     ImportPlan,
     Note,
@@ -17,4 +18,4 @@ from localmelo.support.memory.importer.plan import (
     write,
 )
 
-__all__ = ["ImportPlan", "Note", "build_plan", "select", "write"]
+__all__ = ["ImportPlan", "Note", "build_plan", "offer", "select", "write"]

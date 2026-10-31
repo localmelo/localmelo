@@ -153,7 +153,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 | `/copy [turn]` | 复制已保存回答的 Markdown；不带编号时复制最近一个已完成、未被撤销的轮次。 |
 | `/usage` | 每个轮次记录的步骤、工具调用、词元和时间（包括被撤销的工作），并给出合计；`?` 表示未记录。 |
 | `/status [all]` | 五行说明 melo 是否就绪：模型及其服务器（`✓ answers`，或原因）、文件夹、会话、审批的作用，以及上下文有多满。`/status all`（开发者模式下直接 `/status`）输出所有行。 |
-| `/memory` | melo 记下的关于你的笔记，以列表显示：在某条笔记上按 Enter 会提供 `Back`、`Edit it` 和 `Delete it`；`Forget everything…` 会先询问。`/memory window` 不调用模型，检查模型的工作窗口。 |
+| `/memory` | melo 记下的关于你的笔记，以列表显示：在某条笔记上按 Enter 会提供 `Back`、`Edit it` 和 `Delete it`；`Forget everything…` 会先询问。`/memory import` 提议导入其他助手保存的笔记（见[首次运行](#first-run)）。`/memory window` 不调用模型，检查模型的工作窗口。 |
 | `/attach PATH` | 暂存一个工作区文本文件；`/attachments` 列出它们，`/detach N\|all` 移除它们。 |
 | `/verbose [on\|off]` | 详细显示：40 行思考、工具调用的参数、20 行输出、反思的完整理由。 |
 | `/thinking [on\|off]` | 打开思考摘录，或关闭（默认，开发者模式除外）。 |
@@ -451,6 +451,18 @@ Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 - `LOCALMELO_DETECT_URLS` 用逗号分隔的列表替换这四个 URL；空值会关闭查找。
 
 模型保留在 Hugging Face 缓存中。版本、校验和、缓存/设置路径、端口规则和计划摘要放在 `Details` 或开发者模式中，不占默认摘要。生命周期选择只描述未来可能执行的设置，不代表同意执行；手动命令独立运行，服务器须自行按 Ctrl+C 停止。选择空闲端口并在 melo 中输入该地址；没有对应固定 Mac 配方的系统保留现有手动说明。
+
+问题之后，并且只在终端里，首次运行还会提议一次：导入这台电脑上其他助手保存的关于你的笔记：
+
+```text
+ melo found notes on this Mac from other assistants
+ ❯ 1. Bring in 21 notes from 8 files
+   2. Show what they say
+   3. Not now
+ ↑↓ select · enter confirm · esc cancel
+```
+
+`Show what they say` 把每个文件打印成路径（`~/.claude/CLAUDE.md · 9 notes`），带几行示例和舍弃了什么（`9 left out: secrets, other people's details`），然后再问一次。列表默认停在 `Show what they say`，所以直接按 Enter 不会导入任何内容；看过文件之后，列表默认停在 `Bring in`。在你选第一行之前不会导入任何内容，只有 `Not now` 会让这个提议永久结束。Esc、ctrl+c 和输入结束只是离开，不导入任何内容，也不记录回答，所以之后还会再问：首次运行时 melo 像取消设置一样结束（`Setup cancelled.`，Esc 和 ctrl+c 退出码为 130），`melo memory import` 里会说 `Nothing brought in.`，`/memory import` 里 Esc 只是关闭列表。文件里的行全部被舍弃时，会说 `Nothing to bring in: the lines were left out (secrets)`，而不是 `Nothing new`。`melo memory import --undo BATCH` 会保留你之后编辑过的笔记并说明（`Took back 20 notes. Kept 1 note you edited.`）。之后可以在对话里用 `/memory import`，或用 `melo memory import` 再问同样的列表；任务运行（`melo "task"`）从不询问。管道输入时，列表是从 stdin 读取的编号问题。这些笔记就是控制台 Memory 标签页列出的那些，每次导入都有一个批次，可以用 `melo memory import --undo BATCH` 收回。
 
 <a id="questions-are-lists"></a>
 

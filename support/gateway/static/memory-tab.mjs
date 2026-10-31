@@ -6,9 +6,11 @@
  * deleted with `DELETE` on the same path; "Forget everything" names what goes before it calls
  * `DELETE /api/memory/records?all=true`; the switch is `PUT /api/memory`. The search box filters the loaded
  * list. `root` is mounted in the panel's body while the tab is open; `show()` reads the notes again.
- * `askAboutNotes` is the question a deleted chat with notes asks.
+ * `askAboutNotes` is the question a deleted chat with notes asks. "From other assistants" (import-card.mjs)
+ * looks for notes other assistants keep, brings in the checked files, and takes a batch back.
  */
 import {t} from './i18n.mjs';
+import {importSection} from './import-card.mjs';
 
 export const TOPICS = ['about', 'preferences', 'people', 'projects', 'decisions'];
 
@@ -70,7 +72,8 @@ export function setupMemoryTab({doc, api, developer = () => false}) {
   searchBox.append(search);
   const list = node('div', 'memory-rows');
   const foot = node('div', 'memory-foot');
-  root.append(head, searchBox, list, foot);
+  const importing = importSection({doc, api, rows: () => state.rows, reload: () => load({quiet: true}), redraw: () => draw()});
+  root.append(head, searchBox, list, importing.root, foot);
 
   async function load({quiet = false} = {}) {
     const mine = ++reads;
@@ -192,6 +195,8 @@ export function setupMemoryTab({doc, api, developer = () => false}) {
     drawHead();
     drawList();
     drawFoot();
+    importing.root.hidden = !state.loaded || !state.on;
+    if (!importing.root.hidden) importing.draw();
     searchBox.hidden = !state.rows.length;
   }
 
@@ -223,7 +228,15 @@ export function setupMemoryTab({doc, api, developer = () => false}) {
   }
 
   draw();
-  return {root, state, show: () => load(), reload: () => (state.edit === null && !state.busy ? load({quiet: true}) : undefined)};
+  /** `/memory import`: the notes are read, then "Look for notes" is pressed; false when memory is off (no section). */
+  async function lookForNotes() {
+    if (!state.loaded) await load();
+    if (!state.on) return false;
+    await importing.look();
+    return true;
+  }
+
+  return {root, state, show: () => load(), lookForNotes, reload: () => (state.edit === null && !state.busy ? load({quiet: true}) : undefined)};
 }
 
 /**

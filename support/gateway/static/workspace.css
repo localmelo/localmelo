@@ -703,6 +703,41 @@ button:hover:not(:disabled) {
 .setup-card .primary-button { min-height: 40px; padding: var(--space-2) var(--space-5); font-size: var(--text-body); }
 .setup-card .link-button { padding: 0; font-size: var(--text-small); }
 @media (max-width: 700px) { .setup-card .primary-button { width: 100%; min-height: 44px; } }
+/* Bringing in what other assistants know (import-card.mjs): the main chat's card, and the Memory tab's section, share the list. */
+.import-card { display: grid; gap: var(--space-3); max-width: 520px; margin: var(--space-5) auto 0; padding: var(--space-5); border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); text-align: left; }
+.import-card:has(.import-done) { grid-template-columns: 1fr auto; align-items: center; padding-block: var(--space-3); }
+.import-card h2 { margin: 0; font-size: var(--text-title); font-weight: 600; line-height: 24px; letter-spacing: normal; }
+.import-card p { margin: 0; font-size: var(--text-small); line-height: 18px; color: var(--ink-2); }
+.import-sources, .import-samples, .import-batches { margin: 0; padding: 0; list-style: none; }
+.import-sources { display: grid; gap: var(--space-1); }
+.import-source { border-radius: var(--radius-control); background: var(--raised); }
+.import-source:has(input:checked) { background: var(--tint); }
+.import-pick { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); cursor: pointer; }
+.import-pick input { flex: none; margin: 0; accent-color: var(--accent); }
+.import-path { flex: 1; min-width: 0; overflow-wrap: anywhere; font: var(--text-small)/18px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: normal; }
+.import-count { flex: none; font-size: var(--text-caption); color: var(--ink-2); }
+.import-more { padding: 0 var(--space-3) var(--space-2) 38px; font-size: var(--text-small); color: var(--ink-2); }
+.import-more summary { width: fit-content; color: var(--accent); font-size: var(--text-caption); cursor: pointer; }
+.import-samples { margin-top: var(--space-1); padding-left: var(--space-3); border-left: 2px solid var(--line); }
+.import-samples li { margin: 2px 0; overflow-wrap: anywhere; }
+.import-left { margin: var(--space-1) 0 0; color: var(--warn); font-size: var(--text-small); }
+.import-note { margin: 0; color: var(--ink-2); font-size: var(--text-small); }
+.import-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); }
+.import-card .primary-button { min-height: 40px; padding: var(--space-2) var(--space-5); font-size: var(--text-body); }
+.import-card .link-button, .memory-import .link-button { padding: 0; font-size: var(--text-small); }
+.import-done { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.import-ok { color: var(--ok); font-weight: 600; }
+.import-fault { grid-column: 1 / -1; margin: 0; color: var(--error); font-size: var(--text-small); }
+.memory-import { display: grid; gap: var(--space-2); padding: var(--space-3) 0 0; border-top: 1px solid var(--line); }
+.memory-sub { margin: 0; font-size: var(--text-body); font-weight: 600; }
+.memory-import .primary-button { min-height: 32px; padding: 6px 14px; font-size: var(--text-small); }
+.memory-import .outline-button { justify-self: start; }
+.import-batch { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-1) 0; color: var(--ink-2); font-size: var(--text-small); }
+@media (max-width: 700px) {
+  .import-card .primary-button { width: 100%; min-height: 44px; }
+  .import-card .link-button, .import-close, .memory-import .link-button, .memory-import .primary-button { min-height: 44px; }
+  .import-more summary { padding-block: var(--space-2); }
+}
 #messages:empty {
   display: none;
 }
@@ -758,6 +793,11 @@ button:hover:not(:disabled) {
 .blinks.portrait .welcome-mascot { margin: 0 auto; }
 .blinks.portrait::after { background-image: url(/assets/akita/sit-idle-blink.png); }
 .blinks.face::after { background-image: url(/assets/akita/face-idle-blink.png); }
+/* While the import card is offered (import-card.mjs), the hero shrinks to the portrait alone, so the card and its buttons fit above the composer. */
+.welcome.compact { padding: var(--space-5) 0 0; }
+.welcome.compact .blinks.portrait { margin-bottom: 0; }
+.welcome.compact .welcome-mascot { width: 54px; height: 70px; margin-bottom: 0; }
+.welcome.compact > h1, .welcome.compact > p { display: none; }
 /* Blinks at 4.2 s and 9.6 s: 60 ms in, 30 ms held, 70 ms out (the pet's own timing). */
 @keyframes melo-blink {
   0%, 38.18% { opacity: 0; }

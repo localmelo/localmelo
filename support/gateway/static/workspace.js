@@ -23,6 +23,7 @@ import { setupRunning } from "./running.mjs";
 import { setupPanel } from "./panel.mjs";
 import { levelCode, levelLabel } from "./levels.mjs";
 import { setupModelCard } from "./setup-card.mjs";
+import { setupImportCard } from "./import-card.mjs";
 import { folderName, setupFolderPicker } from "./folder.mjs";
 import { modeOf, setupModeChip } from "./mode.mjs";
 import { allowState, blockCard, blockFacts, reviewWords } from "./blocked.mjs";
@@ -485,6 +486,7 @@ function syncUI() {
   $("offline-banner").hidden = S.online;
   const setup = setupShown();
   setupCard.show(setup);
+  importCard.show(S.ready && !!S.health && !needsModel(S.health) && !setup && mainActive() && !workerMode);
   $("welcome").classList.toggle("needs-model", setup);
   input.disabled = setup;
   input.placeholder = setup ? t("header.connectToStart") : COMPOSER_PLACEHOLDER;
@@ -2900,6 +2902,8 @@ const modeChip = setupModeChip({
   },
   openSettings: () => openSettings("chats"),
 });
+// The main chat's one-time offer to bring in what other assistants on this Mac know (import-card.mjs).
+const importCard = setupImportCard({ root: $("import-card"), hero: $("welcome"), api });
 const setupCard = setupModelCard({
   root: $("setup-card"),
   api,
@@ -3000,6 +3004,8 @@ const slash = setupSlash({
     panel.select("memory", { focus: true });
     if (!matchMedia("(min-width: 900px)").matches) panel.openSheet();
   },
+  // `/memory import`: the Memory tab is open (above) and looks for notes as its button does; the list is the offer.
+  memoryImport: async () => ((await panel.lookForNotes()) ? [] : [{ text: t("slash.memoryImportOff"), tone: "muted" }]),
   openDrawer: (tab) => drawer.open(tab),
   settingsSaved,
   setMode: setChatMode,

@@ -220,7 +220,7 @@ The commands of the [terminal](terminal.md#commands) work on this page and in th
 | `/undo`, `/retry` | Forget the newest finished turn (its file changes stay), or run it again. |
 | `/copy [turn]` | Copy an answer to the clipboard; without a number, the latest. |
 | `/title [text]` | Show or set the chat's title. |
-| `/memory [window]` | Open the Memory tab; `window` shows the model's window. `/memory import` is kept for the import screen. |
+| `/memory [window\|import]` | Open the Memory tab; `window` shows the model's window; `import` also presses **Look for notes**, so the files other assistants keep are listed (a row says so when memory is off). |
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | Show the chat's mode and grants; `ask` and `auto` switch it and `forget` takes grants back. `deny` is for the terminal. |
 | `/browser [on\|off]` | Show or switch reading web pages in Safari, saved in `[browser] driver`. |
 | `/attach`, `/attachments`, `/detach` | The console takes no files yet, and says so. |
@@ -339,6 +339,18 @@ its handle closes it. The [macOS app](macos-app.md) now opens at 1280 × 800 so 
   the chats again.
 - With nothing remembered, the tab says how memory starts: tell melo something about yourself in a chat, such as `I
   prefer short answers`, or ask it to remember something.
+
+**From other assistants** (the foot of the Memory tab) brings in what other assistants on this Mac know about you.
+**Look for notes** lists the files that hold notes, as in the first-run card below; **Bring them in** writes the checked
+ones and the tab says `Brought in 4 notes.` Each batch stays listed as `4 notes brought in · Oct 31` with its own
+**Undo**, and an imported note says `From the file CLAUDE.md, Oct 31`.
+
+The first time the main chat opens with a model connected and memory on, it shows one card, `melo found notes on this Mac
+from other assistants`, with a row per file: its path (`~/.claude/CLAUDE.md`), `3 notes`, a checkbox (checked), and
+**See what is in it**, which shows the sample lines and what was left out (`2 left out: secrets, other people’s
+details`). **Bring them in** writes the checked files and the card says `Brought in 6 notes · Undo`; **Undo** takes the
+batch back and keeps any note you have edited since (`Taken back. Kept 1 note you edited.`). **Not now** closes the card, and it does not come back; if melo cannot save that answer, the card says so, and may ask again next time. Nothing is written until you press **Bring them
+in**, and a search that finds nothing shows no card.
 
 Closing a chat that made notes asks `Also forget the 2 notes from this chat?`: **Keep the notes** (first),
 **Forget the 2 notes too**, or **Don’t delete the chat**.
