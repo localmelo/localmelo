@@ -49,8 +49,14 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 ### 主对话
 
 - `melo` 打开主对话：与网页控制台和 App 相同的对话、卡片和任务。
-- 没有网关在运行时，melo 在后台用配置的端口启动一个，并用一行说明。它在 melo 退出后继续运行，任务因此不会中断；日志在 `~/.cache/localmelo/logs/gateway.log`。
-- melo 从不启动第二个网关：App 的网关在自己的端口上持有主对话时，melo 就与它对话。
+- melo 通过 `~/.cache/localmelo/gateway/endpoint.json` 找到正在运行的网关；无论由谁启动，每个网关启动时都会写入这个文件。
+- 没有网关在运行时，melo 在后台用配置的端口启动一个，并用一行说明。它在 melo 退出后继续运行，任务因此不会中断，直到 `melo serve stop`；日志在 `~/.cache/localmelo/logs/gateway.log`。
+
+```text
+Started the gateway in the background on port 8401; it keeps running until melo serve stop.
+```
+
+- melo 从不启动第二个网关：App 的网关在自己的端口上持有主对话时，melo 就与它对话。App 遇到 melo 启动的网关时也一样。
 - 连不上网关时，一行说明原因，终端继续使用自己的对话：
 
 ```text

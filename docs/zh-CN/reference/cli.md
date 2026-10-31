@@ -18,6 +18,7 @@ melo serve [-p PORT] [--host HOST]           # start the gateway (-p 0: a free p
 melo serve --playground                      # opt in to legacy playground (in progress)
 melo import dsh-jsonl FILE [--title TITLE]   # import worker history
 melo serve install|uninstall|status          # macOS background service
+melo serve stop                              # stop the gateway that is running
 melo -h all                                  # every option, command and setting
 ```
 
@@ -38,7 +39,7 @@ melo -h all                                  # every option, command and setting
 | `melo setup` | 重新选择模型服务器，然后打开对话。 | |
 | `melo config` | 显示配置文件的位置，以及哪些设置与默认值不同。 | |
 | `melo memory VERB` | 查看和修改 melo 保存的笔记：`list`、`forget`、`status`、`reindex`。 | `list -n N`、`forget ID`、`forget -y` |
-| `melo serve [install\|uninstall\|status]` | 运行网关，或把它作为登录服务管理（macOS）。 | `--host H`, `-p`/`--port N`, `--playground`, `--force` |
+| `melo serve [install\|uninstall\|status\|stop]` | 运行网关，把它作为登录服务管理（macOS），或停止正在运行的网关。 | `--host H`, `-p`/`--port N`, `--playground`, `--force` |
 | `melo console [--reset]` | 在浏览器中打开已登录的网页控制台；通过 SSH 或没有浏览器能启动时，改为输出一次性链接。`--reset` 轮换访问令牌。 | `--host H`, `-p`/`--port N` |
 | `melo task VERB` | `melo-task` 客户端。 | 同 `melo-task` |
 | `melo worker BRIEF` | 运行一个 worker brief。 | `--inbox FILE`, `--inbox-fd N`, `--parent ID`, `--title T`, `-o json\|stream-json` |
@@ -62,7 +63,7 @@ melo -h all                                  # every option, command and setting
 | `--save-session` | `--title` |
 | `--reconfigure` | `melo setup` |
 | `--serve` | `melo serve` |
-| `--daemon` | `melo serve install|uninstall|status` |
+| `--daemon` | `melo serve install|uninstall|status|stop` |
 | `--host` | `melo serve --host` |
 | `--port` | `melo serve -p` |
 | `--enable-playground` | `melo serve --playground` |

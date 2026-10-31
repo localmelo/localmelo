@@ -112,7 +112,8 @@ melo serve uninstall
 ## 停止网关
 
 - 在网关所在的终端中按 Ctrl+C。
-- 对于后台服务，运行 `melo serve uninstall`。单纯使用 `kill` 无济于事：launchd 会再次启动网关。
+- 在后台运行的网关（例如 `melo` 为主对话启动的那个）：运行 `melo serve stop`。它会输出 `Stopped the gateway on port N.` 或 `No gateway is running.`
+- 对于后台服务，运行 `melo serve uninstall`。单纯使用 `kill` 或 `melo serve stop` 无济于事：launchd 会再次启动网关。
 
 - 停止时会关闭所有会话；仍在运行任务的会话，其智能体会被关闭，任务以 `crashed` 结束。
 - 收到 SIGTERM 后，网关会先等待运行中的任务最多 3 秒，然后取消剩余任务：客户端请求会失败，运行以 `crashed` 结束。

@@ -25,7 +25,7 @@ from typing import Any
 import httpx
 import pytest
 
-from localmelo.support import config
+from localmelo.support import config, gateway_endpoint
 from localmelo.support.cli import main_chat
 from localmelo.support.cli.main_chat import (
     GatewayClient,
@@ -711,6 +711,42 @@ def test_connect_never_starts_a_second_gateway_on_the_same_file(
         "another gateway (pid 4242) holds it on a port melo cannot find"
     )
     assert main_chat.store_owner() is None  # released: nobody holds it
+
+
+def _published(port: int, gateway_id: str) -> None:
+    """The endpoint file as a running gateway (this process, alive) writes it."""
+    gateway_endpoint.write(
+        gateway_endpoint.Endpoint(
+            pid=os.getpid(), host="127.0.0.1", port=port, instance="",
+            id=gateway_id, started=1.0,
+        )
+    )  # fmt: skip
+
+
+class _Named(_Gateway):
+    """A gateway whose page carries its endpoint file's id."""
+
+    gateway_id = "c" * 32
+
+    def end_headers(self) -> None:
+        self.send_header(gateway_endpoint.GATEWAY_HEADER, self.gateway_id)
+        super().end_headers()
+
+
+def test_connect_finds_the_gateway_the_endpoint_file_names_first(home: Path) -> None:
+    with _serving(_Named) as named, _serving(_Gateway) as configured:
+        _published(named, _Named.gateway_id)
+        found = main_chat.connect(_cfg(configured), spawn=_no_spawn)
+    assert found == Link(f"http://127.0.0.1:{named}", named)
+
+
+def test_connect_ignores_an_endpoint_file_whose_port_says_otherwise(
+    home: Path,
+) -> None:
+    with _serving(_Named) as named, _serving(_Gateway) as configured:
+        _published(named, "d" * 32)  # a newer gateway reuses the port
+        found = main_chat.connect(_cfg(configured), spawn=_no_spawn)
+    assert found == Link(f"http://127.0.0.1:{configured}", configured)
 
 
 def test_the_chat_setting_and_its_override(monkeypatch: pytest.MonkeyPatch) -> None:

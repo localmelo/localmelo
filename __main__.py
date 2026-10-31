@@ -1950,7 +1950,7 @@ def _build_parser(
     )
     parser.add_argument(
         "--daemon",
-        choices=["install", "uninstall", "status"],
+        choices=["install", "uninstall", "status", "stop"],
         help="Manage launchd daemon",
     )
     for old_name, names in _NEW_SPELLINGS.items():
@@ -2117,6 +2117,13 @@ def main() -> None:
             info = daemon.status()
             for k, v in info.items():
                 print(f"  {k}: {v}")
+        elif args.daemon == "stop":
+            from localmelo.support import gateway_endpoint
+
+            code, line = gateway_endpoint.stop()
+            print(line)
+            if code:
+                raise SystemExit(code)
         return
 
     # Checked for direct mode, the `melo ""` loop and the gateway alike,

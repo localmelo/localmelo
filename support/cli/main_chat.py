@@ -22,6 +22,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from collections.abc import AsyncIterator, Callable, Coroutine, Mapping, Sequence
@@ -34,7 +35,7 @@ from rich.text import Text
 
 from localmelo.melo.contracts.approvals import ApprovalRequest
 from localmelo.melo.contracts.review import ActionReview
-from localmelo.support import console_link, task_cli
+from localmelo.support import console_link, gateway_endpoint, task_cli
 from localmelo.support.cli.text import cut_cells
 from localmelo.support.sessions.display import clean_output, home_label
 from localmelo.support.sessions.store import (
@@ -93,7 +94,7 @@ class Link:
         if self.started:
             return (
                 f"Started the gateway in the background on port {self.port}; "
-                "it keeps running after melo quits."
+                "it keeps running until melo serve stop."
             )
         return f"Connected to the gateway on port {self.port}."
 
@@ -228,7 +229,7 @@ def spawn_gateway(
     os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_CLOEXEC, 0o600)
     try:
-        return subprocess.Popen(
+        process = subprocess.Popen(
             [sys.executable, "-I", "-m", "localmelo", "--serve"]
             + ["--host", host.strip("[]"), "--port", str(port)],
             stdin=subprocess.DEVNULL,
@@ -239,6 +240,9 @@ def spawn_gateway(
         )
     finally:
         os.close(fd)
+    # Reaped when it ends, so `melo serve stop` never waits on a zombie.
+    threading.Thread(target=process.wait, daemon=True).start()
+    return process
 
 
 class Child(Protocol):
@@ -269,10 +273,11 @@ def connect(
 ) -> Link | Offline:
     """The gateway that holds the main chat, started when none runs (blocking).
 
-    The configured port first; then, when another gateway holds the main
-    chat's file (the app's, on a port of its own), the port it listens on;
-    else a new gateway on the configured port. *on_start* runs just before
-    one starts, so the terminal can say so.
+    The one the endpoint file names first (the app's, on a port of its own,
+    or one a terminal started); then the configured port; then, when another
+    gateway holds the main chat's file without the file (an older one), the
+    port it listens on; else a new gateway on the configured port.
+    *on_start* runs just before one starts, so the terminal can say so.
     """
     host, port = cfg.gateway.host, cfg.gateway.port
     url = _url(host, port)
@@ -280,6 +285,13 @@ def connect(
     # A gateway another melo is starting gets a moment; one started here, all of *start_s*.
     deadline = clock() + start_s / 4
     while True:
+        running = gateway_endpoint.live()
+        if running is not None:
+            found = look(running.url, running.port)
+            if found.main is not None:
+                return Link(running.url, running.port, started=process is not None)
+        if running is not None and not found.early:
+            return Offline(found.problem)
         if console_link.listening(host, port):
             found = look(url, port)
             if found.main is not None:

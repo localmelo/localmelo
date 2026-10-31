@@ -43,8 +43,14 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 ### The main chat
 
 - `melo` opens the main chat: the same conversation, cards and tasks as the web console and the app.
-- When no gateway runs, melo starts one in the background on the configured port and says so in one line. It keeps running after melo quits, so its tasks go on; its log is `~/.cache/localmelo/logs/gateway.log`.
-- melo never starts a second gateway: when the app's gateway holds the main chat on a port of its own, melo talks to that one.
+- melo finds the running gateway through `~/.cache/localmelo/gateway/endpoint.json`, which every gateway writes as it starts, whoever started it.
+- When no gateway runs, melo starts one in the background on the configured port and says so in one line. It keeps running after melo quits, so its tasks go on, until `melo serve stop`; its log is `~/.cache/localmelo/logs/gateway.log`.
+
+```text
+Started the gateway in the background on port 8401; it keeps running until melo serve stop.
+```
+
+- melo never starts a second gateway: when the app's gateway holds the main chat on a port of its own, melo talks to that one. The app does the same with a gateway melo started.
 - When the gateway cannot be reached, one line says why and the terminal keeps its own chat:
 
 ```text
