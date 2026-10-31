@@ -106,7 +106,9 @@ test('the plain row keeps the context, and leaves out the cache, the step and ph
     ['ctx 1.0k/8.0k'],
   );
   assert.deepEqual(plainSegments(['cache --', 'step 1']), [], 'a bare step number tells a new user nothing');
-  assert.deepEqual(plainSegments(['tasks 0 running 0 queued 2 held']), ['tasks 0 running 0 queued 2 held'], 'A task held for the user stays');
+  assert.deepEqual(plainSegments(['tasks 0 running 0 queued 2 held']), ['2 tasks wait for you'], 'A task held for the user stays, in words');
+  assert.deepEqual(plainSegments(['tasks 0 running 0 queued 1 held']), ['1 task waits for you'], 'one task, one sentence');
+  assert.deepEqual(plainSegments(['tasks 3 running 2 queued']), [], 'the running and queued counts are the developer\'s');
   assert.deepEqual(plainSegments([]), []);
 });
 

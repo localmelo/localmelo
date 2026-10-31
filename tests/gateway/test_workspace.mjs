@@ -3919,7 +3919,7 @@ test('default mode draws the plain status row and developer mode the whole one',
   };
   assert.deepEqual(await row(defaultMode), ['ctx 1.0k/8.0k']);
   assert.deepEqual(await row(baseRoutes), segments);
-  assert.deepEqual(plainSegments(['tasks 0 running 0 queued 1 held']), ['tasks 0 running 0 queued 1 held'], 'A task held for the user is never hidden');
+  assert.deepEqual(plainSegments(['tasks 0 running 0 queued 1 held']), ['1 task waits for you'], 'A task held for the user is never hidden, and never as counts');
 });
 
 test('the task list and card name the priority in developer mode only', async () => {

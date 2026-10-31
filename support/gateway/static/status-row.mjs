@@ -1,7 +1,25 @@
-/** A new user's row: the cache share, the step and phase and the scheduler's queue are for developers. */
+// The scheduler's counts, e.g. "tasks 0 running 0 queued 2 held"; the held ones wait for the user.
+const QUEUE = /^tasks \d+ running \d+ queued(?: (\d+) held)?$/;
+
+/**
+ * A new user's row: the cache share, the step and phase and the queue counts
+ * are for developers. What waits for the user is their business, so a held
+ * task stays in the row — in plain words ("2 tasks wait for you"), never as
+ * the scheduler's counts.
+ */
 export function plainSegments(segments) {
-  return segments.filter((text) => !text.startsWith('cache') && !text.startsWith('step ')
-    && !(text.startsWith('tasks ') && !/ \d+ held$/.test(text)));
+  const plain = [];
+  for (const text of segments) {
+    if (text.startsWith('cache') || text.startsWith('step ')) continue;
+    const queue = QUEUE.exec(text);
+    if (queue) {
+      const held = Number(queue[1] ?? 0);
+      if (held > 0) plain.push(held === 1 ? '1 task waits for you' : `${held} tasks wait for you`);
+      continue;
+    }
+    plain.push(text);
+  }
+  return plain;
 }
 
 /**
