@@ -70,7 +70,7 @@ The first of these that applies:
 
 | | Source | What happens |
 |---|---|---|
-| 1 | `melo setup` | The setup wizard, then the backend it saved. Default mode first offers the server it finds (`Found a model server at …`, `Use this model server?`); the full menu follows `Use another server`, developer mode, or a saved backend with no server found. Not with `--url` and no task. |
+| 1 | `melo setup` | The setup wizard, then the backend it saved. Default mode first offers the server it finds (`Found a model server at …`, `Use this model server?`); the full menu follows `Use another server` or developer mode; with no server found it shows the read-only preview and leaves saved settings unchanged. Not with `--url` and no task. |
 | 2 | `--url URL` | That server, without the config file. The model is `--model`, else the only chat model that `GET URL/models` lists (ids with `embed` or `rerank` are not chat models), else the one the server says is loaded; with several and none known loaded it exits 2, lists them and asks for `--model <id>`. |
 | 3 | The saved backend | `--model` replaces its model for this session. Nothing is checked before the UI opens; afterwards melo lists the server's models once and warns when it does not answer or does not list the model. |
 | 4 | No saved backend | The [first-run](#first-run) questions, then the UI. |
@@ -399,23 +399,16 @@ Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 
 - melo looks for a server on this computer with `GET /v1/models` on `127.0.0.1` ports 8000 (vLLM, oMLX), 8400 (MLC), 11434 (Ollama) and 30000 (SGLang), and offers the first that lists a model (one with a chat model comes first); no chat request is sent, so the server loads nothing.
 - Between the second and third lines melo asks `Use this model server?` as a list; with several models it shows the picker, and with an embedding model one more list asks `Remember across chats with nomic-embed-text?` (`Yes, with it`, `No, by words only`).
-- With no server running, it prints the commands that start one (oMLX on a Mac, Ollama elsewhere; see the [model servers guide](model-servers.md)) and asks `No model server found. What now?` (`Check again`, `Enter an address`, `Quit`).
+- With no server running, a supported Apple-silicon Mac shows the [read-only setup preview](model-servers.md#setup-preview): recommended server/model, pinned download sizes, missing cached files, free disk space and a lifetime preview. Choose `Review setup plan` for its lifetime option, manual steps and `Set up and start`, which only explains that automatic setup is not available and shows manual steps; nothing installs, downloads, starts or saves. Check again, enter an address and quit remain available; piped answers retain their original prompt. Other systems keep their platform's manual commands.
 - A server that cannot be used is named with its reason (`connection refused`, `no answer in 5 s`, `HTTP 401` or `HTTP 403` with `the server requires an API key; localmelo sends none to local servers (oMLX: "Allow inference without API key")`, `it lists no models`), and you can try again, start without saving or quit.
 - An Ollama server is saved as `chat_backend = "ollama"`, an oMLX server as `chat_backend = "omlx"` and any other as `"vllm"`; the embedding model choice is described in [Set up an embedding model](embedding.md).
 - `LOCALMELO_DETECT_URLS` replaces the four URLs with a comma-separated list; an empty value turns the search off.
 
-When no server is found, melo prints:
-
-```text
-No model server is running yet. To start one with oMLX:
-
-  brew tap jundot/omlx https://github.com/jundot/omlx
-  brew install jundot/omlx/omlx
-  omlx serve --model-dir ~/models --port 8000
-
-Put a model in its own folder of ~/models first. The guide shows how:
-https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md
-```
+The preview keeps the pinned model in the Hugging Face cache and proposes a
+separate server settings directory. The lifetime choice and plan digest describe
+a possible future setup, not permission to run anything. Copy the manual steps
+only when ready, choose a free port and recheck that address in melo. On systems
+without the pinned Mac recipe, the existing manual-server guidance remains.
 
 #### Questions are lists
 

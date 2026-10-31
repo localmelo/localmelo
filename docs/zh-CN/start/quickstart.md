@@ -149,7 +149,7 @@ Try: What is this project? · / commands · ctrl+d quit
 
 第一行显示软件包版本；在 git 检出中还会显示短提交号，如 `melo 0.1.0 (baab21e)`。`melo --version` 输出同一行并以退出码 0 退出。`/status` 检查模型是否有回应，并显示文件夹、会话、审批和上下文用量；`/status all` 还会显示工具、记忆、限制和文件。
 
-没有模型服务器在运行时，`melo` 会打印这台电脑上启动服务器的命令（Mac 上是 oMLX，其他系统是 Ollama，都出自[模型服务器指南](../guides/model-servers.md)），并询问 `No model server found. What now?`，选项有 `Check again`、`Enter an address` 和 `Quit`（管道输入时为 `Press Enter to check again, type an address, or q to quit:`）。在另一个终端里启动服务器，然后选择 `Check again`；melo 自己不安装、不启动任何东西。
+没有模型服务器在运行时，首次运行的 `melo` 和 `melo setup` 会在受支持的 Apple silicon Mac 上显示只读设置预览：oMLX 0.7.3、Qwen3 4B Instruct（4-bit，约 2.28 GB）、Hugging Face 缓存中仍缺少的模型文件、运行时下载量和可用磁盘空间。“随会话退出而停止”的生命周期也只是预览，修改后不会保存。选择 `Review setup plan` 可以预览生命周期或查看手动步骤，其中的 `Set up and start` 只说明自动设置尚未开放并显示手动步骤，不会安装、下载或启动任何东西。用方向键列表重新检查、输入地址或退出；管道输入保留 `Press Enter to check again, type an address, or q to quit:`，绝不代表同意设置。其他系统保留对应平台的手动启动说明。自行启动服务器后输入该地址：预览建议的高位端口不在默认发现范围内，`Check again` 只重新检查常用端口。保留缓存的手动路径见[模型服务器指南](../guides/model-servers.md#setup-preview)。已有连接和直接任务不受影响。
 
 如果服务器还列出嵌入模型，首次运行会多问一个问题 `Remember across chats with <model>?`；选择默认选中的 `Yes, with it` 后，会在一次嵌入探测通过后保存。
 
@@ -185,7 +185,7 @@ melo serve
 
 Ollama 的默认 URL `http://localhost:11434` 不带 `/v1`。这是正确的：`ollama` 后端使用 Ollama 自己的 API，而不是 OpenAI 兼容 API。
 
-接下来，向导向每个服务器发送简短的测试请求（`Probing backends ...`）。如果对话服务器无响应，会显示 `Probe failed: …` 并询问 `The check failed. What now?`，选项有 `Try again`、`Save anyway` 和 `Cancel setup`（管道输入时为 `[r]etry, [s]ave anyway, [N]o [N]:`）；`Try again` 会重新询问 URL 和模型，按 Enter 会选中默认的 `Cancel setup`，不保存任何内容。如果只有嵌入服务器失败，向导会关闭嵌入并保存，同时告知你。成功时会显示 `Config saved to …` 和 `~/.cache/localmelo/config.toml` 的路径，然后打开交互式界面；用 Ctrl+D 离开它。接着运行 `melo serve`，它会在 `http://127.0.0.1:8401` 启动网关，并在此终端持续运行。在默认模式下，`melo setup` 先问首次运行的那个问题：显示 `Found a model server at …` 并询问 `Use this model server?`。只有选择 `Use another server`、处于开发者模式，或已保存后端但没有找到服务器时，才会出现上面的完整菜单；什么都没保存时，会改为输出启动服务器的命令。
+接下来，向导向每个服务器发送简短的测试请求（`Probing backends ...`）。如果对话服务器无响应，会显示 `Probe failed: …` 并询问 `The check failed. What now?`，选项有 `Try again`、`Save anyway` 和 `Cancel setup`（管道输入时为 `[r]etry, [s]ave anyway, [N]o [N]:`）；`Try again` 会重新询问 URL 和模型，按 Enter 会选中默认的 `Cancel setup`，不保存任何内容。如果只有嵌入服务器失败，向导会关闭嵌入并保存，同时告知你。成功时会显示 `Config saved to …` 和 `~/.cache/localmelo/config.toml` 的路径，然后打开交互式界面；用 Ctrl+D 离开它。接着运行 `melo serve`，它会在 `http://127.0.0.1:8401` 启动网关，并在此终端持续运行。在默认模式下，`melo setup` 先问首次运行的那个问题：显示 `Found a model server at …` 并询问 `Use this model server?`。只有选择 `Use another server` 或处于开发者模式时，才会出现上面的完整菜单；没有找到服务器时，会显示只读设置预览，并保留已有的连接设置。
 
 <a id="start-the-gateway"></a>
 

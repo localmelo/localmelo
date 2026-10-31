@@ -72,7 +72,7 @@ embedding_model = "Qwen3-Embedding-0.6B"
 
 When no server is ready:
 
-- With none running, melo prints the commands that start one (oMLX on a Mac, Ollama elsewhere) and asks `No model server found. What now?` (`Check again`, `Enter an address`, `Quit`); the web console's setup card shows the same commands.
+- With none running, supported Apple-silicon Macs show the terminal's [read-only setup preview](model-servers.md#setup-preview): the recommendation, pinned download sizes, cache/disk readings and lifetime. `Set up and start` currently shows an unavailable notice and manual steps, never an install. The list also lets you check again, enter an address or quit; pipes retain their existing typed answers. Other platforms and the web/app setup card keep manual-server guidance.
 - A server that does not answer, needs an API key or lists no models is named with the reason, and you can try again, start without saving or quit.
 - localmelo never asks for an API key for a local server.
 - [The terminal guide](terminal.md#first-run) lists every prompt and reason.
@@ -88,7 +88,7 @@ melo --serve --reconfigure  # the wizard, then the gateway
 
 - The wizard asks for a chat backend, its URL and model, and an embedding backend; [Save a configuration](../start/quickstart.md#save-a-configuration) lists the prompts.
 - It sends a short test request to each server, saves the config file, then opens the chat or, with `--serve --reconfigure`, starts the gateway (Ctrl+C stops it).
-- In default mode `melo setup` starts as the first run does (`Found a model server at …`, `Use this model server?`); the full menu follows `Use another server`, developer mode or a saved backend with no server found.
+- In default mode `melo setup` starts as the first run does (`Found a model server at …`, `Use this model server?`); the full menu follows `Use another server` or developer mode. With none found, the read-only setup preview leaves any saved connection unchanged.
 - In developer mode (`[ui] mode = "developer"`; `melo config set ui.mode developer` saves it) the full menu comes first.
 - Each question offers the file's current value in brackets: press Enter to keep it.
 

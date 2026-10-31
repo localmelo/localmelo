@@ -7,11 +7,12 @@ import os
 import sys
 import textwrap
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from localmelo.support import config
 from localmelo.support.backends import discovery
 from localmelo.support.onboard_probe import ProbeError, probe_chat, probe_embedding
+from localmelo.support.server_setup import plan as server_setup
 
 
 def _ask(prompt: str, default: str = "") -> str:
@@ -275,8 +276,8 @@ def run_backend_setup(*, guided: bool = False) -> config.Config | None:
     """Run the split backend setup flow.
 
     With *guided* (default mode's ``--reconfigure``), a model server found on
-    this machine is offered first, as the first run does; the full menu below
-    follows only when none is found or the user declines it.
+    this machine is offered first, as the first run does; no server shows the
+    read-only setup preview. The full menu follows a declined/unusable server.
 
     1. Choose and configure the chat backend.
     2. Choose and configure the embedding backend.
@@ -587,32 +588,60 @@ def _port(url: str) -> str:
     return tail.rsplit(":", 1)[1] if ":" in tail else tail
 
 
-def _wait_for_a_server(urls: Sequence[str]) -> discovery.FoundServer | str | None:
-    """Say how to start a model server, then look again each time Enter is pressed.
+def _review_setup(setup: server_setup.SetupPlan) -> None:
+    """Preview choices only: even Set up and start cannot authorize execution."""
+    while True:
+        for line in server_setup.preview(setup):
+            _say(line)
+        choice = _choose_from(
+            "Review setup (nothing will run)",
+            [
+                "Set up and start",
+                f"Keep available after melo closes: {'On' if setup.keep_running else 'Off'} (preview)",
+                "Show manual steps",
+                "Back",
+            ],
+            0,
+            3,
+        )
+        if choice == 3:
+            return
+        if choice == 1:
+            setup = replace(setup, keep_running=not setup.keep_running)
+        else:
+            _say("Automatic setup is not available yet. No approval is recorded.")
+            for line in server_setup.manual_steps(setup):
+                print(line)  # Keep copy-only shell commands on one logical line.
 
-    Returns the server a look found, or the address typed in its place (the
-    caller checks it), or None when the user quits. EOFError and
-    KeyboardInterrupt reach the caller.
+
+def _wait_for_a_server(urls: Sequence[str]) -> discovery.FoundServer | str | None:
+    """Preview setup, then reuse discovery on Enter; return a server/address or quit.
+
+    EOFError and KeyboardInterrupt reach the caller. Piped input never enters
+    the setup picker or approves anything; Enter/address/q keep their meanings.
     """
-    how = discovery.how_to_start()
-    _say(f"No model server is running yet. To start one with {how.name}:")
-    print()
-    for command in how.commands:
-        print(f"  {command}")
-    print()
-    _say(f"{how.note} The guide shows how:")
-    print(discovery.GUIDE_URL)
+    setup = server_setup.plan(
+        server_setup.detect()
+    )  # Reuse the caller's no-server result.
+    for line in server_setup.preview(setup):
+        _say(line)
+    if not _arrow_keys():
+        for line in server_setup.manual_steps(setup):
+            print(line)
     while True:
         if _arrow_keys():
             choice = _choose_from(
                 "No model server found. What now?",
-                ["Check again", "Enter an address", "Quit"],
+                ["Check again", "Review setup plan", "Enter an address", "Quit"],
                 0,
-                2,
+                3,
             )
-            if choice == 2:
+            if choice == 3:
                 return None
-            answer = _question("Server URL", _FIRST_RUN_URL) if choice == 1 else ""
+            if choice == 1:
+                _review_setup(setup)
+                continue
+            answer = _question("Server URL", _FIRST_RUN_URL) if choice == 2 else ""
         else:
             answer = input(
                 "Press Enter to check again, type an address, or q to quit: "
@@ -874,16 +903,16 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
     The first line says what the first run needs: a model server. A server
     found on this machine is offered with one question (``n`` asks for a URL,
     prefilled with it); the model is chosen from the server's list. With none
-    found, it prints the commands that start one and looks again on each
+    found, it previews a pinned setup (no execution) and looks again on each
     Enter; an address typed instead is checked as a URL is. Only
     ``GET <url>/models`` is sent, and ``GET /api/version`` once when saving, to
     tell Ollama apart. When the check of a URL fails the user may retry, start
     without saving, or quit (None). EOFError and KeyboardInterrupt reach the
     caller.
 
-    With *ask_keep* (``--reconfigure``), a ``n``, or no server found while a
-    backend is saved, raises :class:`_FullMenuError` before anything is saved,
-    and a model server without an embedding model is told how to get one.
+    With *ask_keep* (``--reconfigure``), declining a found server or a server
+    without models raises :class:`_FullMenuError` before anything is saved.
+    A no-server preview never changes the saved connection.
     """
     urls = discovery.detect_urls()
     # A reconfigure knows what melo needs; a first run says it, also when it
@@ -893,7 +922,11 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
         _say(f"melo uses a model server on this computer ({_servers_named()}).")
     found = asyncio.run(discovery.detect_local_server(urls)) if urls else None
     typed = ""
-    if found is None and urls and first:
+    if found is None and urls:
+        if not first:
+            _say(
+                "Your saved server connection was not changed. Retry, review a separate setup, or enter an address."
+            )
         waited = _wait_for_a_server(urls)
         if waited is None:
             return None
