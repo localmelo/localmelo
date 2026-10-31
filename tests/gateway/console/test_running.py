@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from localmelo.melo.checker.redaction import REDACTED
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.support.gateway.console import Console, ConsoleOptions
-from localmelo.support.gateway.console.running import MAX_ITEMS
+from localmelo.support.gateway.console.running import MAX_ITEMS, task_counts
 from localmelo.support.gateway.console.worker_reader import WorkerReader
 from localmelo.support.sessions.store import (
     NewSession,
@@ -72,13 +72,21 @@ def lapse(path: Path, *session_ids: str) -> None:
 
 
 class Record:
-    def __init__(self, task_id: str, state: str, level_eff: int, title: str) -> None:
+    def __init__(
+        self,
+        task_id: str,
+        state: str,
+        level_eff: int,
+        title: str,
+        wait_reason: str = "",
+    ) -> None:
         self.task_id, self.state, self.level_eff, self.title = (
             task_id,
             state,
             level_eff,
             title,
         )
+        self.wait_reason = wait_reason
 
 
 def status(client: TestClient) -> dict[str, Any]:
@@ -174,7 +182,7 @@ async def test_running_tasks_are_counted_with_the_queue(
             Record("t1", "running", 2, "Index the repo"),
             Record("t2", "running", 3, "Summarize"),
             Record("t3", "queued", 1, "Later"),
-            Record("t4", "held", 4, "Held"),
+            Record("t4", "held", 4, "Held", "Waiting for a free model slot"),
             Record("t5", "done", 0, "Over"),
         ]
 
@@ -187,6 +195,30 @@ async def test_running_tasks_are_counted_with_the_queue(
         {"kind": "task", "id": "t1", "title": "Index the repo", **thinking},
         {"kind": "task", "id": "t2", "title": "Summarize", **thinking},
     ]
+
+
+def test_only_a_task_held_on_the_person_is_waiting_for_you() -> None:
+    live = [
+        Record("t1", "held", 2, "Asks to write", "approval"),
+        Record("t2", "held", 2, "Asks a question", "input"),
+        Record(
+            "t3", "held", 2, "Behind a higher one", "Waiting for a higher-priority task"
+        ),
+        Record("t4", "held", 2, "No slot", "scheduler"),
+        Record("t5", "held", 2, "No reason"),
+        # Only a held task can wait for the person: a stale reason on another state does not count.
+        Record("t6", "running", 2, "Working", "approval"),
+        Record("t7", "queued", 2, "Queued", "approval"),
+    ]
+    counts = task_counts(live)
+    assert counts is not None
+    assert (counts.running, counts.queued, counts.held, counts.waiting) == (1, 1, 5, 2)
+    slot = task_counts([Record("t4", "held", 2, "No slot", "scheduler")])
+    assert slot is not None
+    assert (slot.held, slot.waiting) == (1, 0)
+    empty = task_counts([])
+    assert empty is not None and empty.waiting == 0
+    assert task_counts(None) is None
 
 
 async def test_runs_and_terminal_chats_count_only_under_a_live_lease(

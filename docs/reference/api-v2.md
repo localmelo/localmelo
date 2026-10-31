@@ -990,20 +990,23 @@ the CLI's file.
   "cache": {"requests": 2, "last_percent": 67, "session_percent": 56, "idle_s": 200.0},
   "context": {"measured": 1000, "limit": 8000},
   "steps": {"active": true, "step": 3, "attempt": 1, "phase": ""},
-  "tasks": {"running": 1, "queued": 2, "held": 0, "top_level": 1}
+  "tasks": {"running": 1, "queued": 2, "held": 0, "top_level": 1, "waiting": 0}
 }
 ```
 
 - `segments` is what the terminal's status bar draws in developer mode, left to
-  right: cache, context, step, tasks. A segment with no data is left out.
+  right: cache, context, step, tasks, then a sentence such as `1 task waits for
+  you` (`N tasks wait for you`) while a held task waits for your approval. A
+  segment with no data is left out.
 - `cache.last_percent` and `cache.session_percent` are `null`, and the
   segment reads `cache --`, when the server reported no cached tokens: never
   0%. `idle_s` is set for a local backend only (a local server's cache is
   evicted by memory, not by time, so there is no countdown).
 - `context` and `steps` are `null` before a measurement or a run's first
   progress fact. `steps.active` is true while a run is going. `tasks` is the
-  task store's running, queued and held counts and the highest priority
-  among them (`top_level`, `null` with none).
+  task store's running, queued and held counts, the highest priority
+  among them (`top_level`, `null` with none) and `waiting`, how many held tasks
+  wait for the person (an approval or an answer) rather than for the scheduler.
 - The fold is cached per session at its last event id: a read with no new
   event reads no events.
 

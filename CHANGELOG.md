@@ -10,10 +10,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 ### Changed
 
 - A task's page in default mode no longer shows an empty "Recovery card"
-  heading (developer mode still does), and the status row drops the queue's
-  counts but keeps a task that waits for you, in words ("2 tasks wait for
-  you"). An Activity row for an answer that opens with "Done." shows what
-  the answer says next, as the main chat's card already did ([#NN]).
+  heading (developer mode still does). The status row in default mode leaves
+  out the queue's counts, a held task's too, and says "1 task waits for you"
+  (or "N tasks wait for you") while a task waits for your approval; the status
+  route's `tasks` object gains `waiting` for that count. An Activity row for
+  an answer that opens with "Done." shows what the answer says next, as the
+  main chat's card already did ([#NN]).
 
 - The main chat always works in the default folder (`[gateway] workspace`,
   else `~/localmelo-workspace`): a changed default applies at its next turn,
