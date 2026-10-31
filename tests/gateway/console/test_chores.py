@@ -156,11 +156,11 @@ async def test_a_chore_is_created_listed_changed_and_deleted(tmp_path: Path) -> 
         assert chore["next_run"] == at("2026-10-28 08:30") + 30
         assert chore["front_id"] == console.main_id
         assert chore["last"] is None and chore["last_run"] is None
-        # The title comes from the request when none is given.
+        # The title is the request's first clause when none is given.
         derived = await add(
             client, "Water the plants. Then rest.", {"kind": "hours", "every": 6}
         )
-        assert derived["title"] == "Water the plants. Then rest."
+        assert derived["title"] == "Water the plants"
 
         listed = (await client.get("/api/chores")).json()
         assert [c["id"] for c in listed["chores"]] == [chore["id"], derived["id"]]
