@@ -9,7 +9,9 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import StrictFloat, StrictInt, StrictStr
 
+from localmelo.melo.contracts.approvals import ApprovalRequest
 from localmelo.support.gateway.auto_blocks import BlockError
+from localmelo.support.gateway.i18n import t
 from localmelo.support.gateway.resume_evidence import (
     ConfirmationRequiredError,
     RecoveryUnknownError,
@@ -118,7 +120,15 @@ async def _resume_call(console: Console, operation: Awaitable[T]) -> T:
 def _approvals(console: Console, task: dict[str, Any]) -> dict[str, Any]:
     """*task* with the approvals it waits for; the broker keys them by task id."""
     pending = console.broker.pending(str(task.get("task_id")))
-    return {**task, "pending_approvals": [approval_json(r) for r in pending]}
+    return {**task, "pending_approvals": [task_approval(console, r) for r in pending]}
+
+
+def task_approval(console: Console, request: ApprovalRequest) -> dict[str, Any]:
+    """A task's pending approval with melo's explanation (#369): text to read, never a decision."""
+    return {
+        **approval_json(request),
+        "explanation": console.explanations.get(request.request_id),
+    }
 
 
 def add_routes(app: FastAPI, console: Console) -> None:
@@ -172,6 +182,18 @@ def add_routes(app: FastAPI, console: Console) -> None:
             status_code=202,
             content={"task": _approvals(console, task), "message": outcome},
         )
+
+    @app.get("/api/approvals/{request_id}")
+    async def pending_approval(request_id: str) -> JSONResponse:
+        """One approval that waits, as its card reads it: a task's carries its explanation."""
+        request = console.broker.request(request_id)
+        session = console.broker.session_of(request_id)
+        if request is None or session is None:
+            raise ApiError(404, "not_found", t("errors.approvalNotFound"))
+        info = await console.store.get_session(session)
+        owned = info is not None and info.kind == "task"
+        body = task_approval(console, request) if owned else approval_json(request)
+        return JSONResponse(content={"approval": {**body, "session_id": session}})
 
     @app.post("/api/tasks/{task_id}/blocks/{request_id}/allow")
     async def allow_block(task_id: str, request_id: str) -> JSONResponse:

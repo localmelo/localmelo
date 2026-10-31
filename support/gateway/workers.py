@@ -71,6 +71,7 @@ from localmelo.support.gateway.resume_evidence import (
 from localmelo.support.gateway.resume_tokens import ResumeBinding, ResumeTokens
 from localmelo.support.gateway.startup_recovery import StartupRecovery
 from localmelo.support.gateway.task_policy import (
+    TaskPolicyError,
     TaskSpec,
     WorkspaceError,
     configured_root,
@@ -105,7 +106,10 @@ from localmelo.support.sessions.agents import (
 )
 from localmelo.support.sessions.approvals import (
     ApprovalBroker,
+    ApprovalLedger,
+    ApprovalUse,
     ChatMode,
+    OwnedTaskPolicy,
     RememberingPolicy,
     chat_mode,
 )
@@ -267,6 +271,14 @@ def task_home(task_id: str) -> tuple[str, dict[str, str]]:
     return home, env
 
 
+def _remembers(origin: str) -> bool:
+    """Whether a task of *origin* may use and record the person's approvals (the person's own)."""
+    try:
+        return worker_tool_allowlist(origin).remember_approvals
+    except TaskPolicyError:
+        return False
+
+
 def _turn_text(record: TaskRecord) -> tuple[str, str | None]:
     """A task's next turn text, and the person's own words when it differs.
 
@@ -402,6 +414,7 @@ class TaskWorkers:
         hub: SessionHub,
         broker: ApprovalBroker | None = None,
         memory: ChatMemory | None = None,
+        ledger: ApprovalLedger | None = None,
     ) -> None:
         self.store = store
         # A task's result goes into the conversation index; a worker writes
@@ -453,6 +466,14 @@ class TaskWorkers:
         self._auto: dict[str, AutoPolicy] = {}
         # The chat a task asks when it is stuck (#369); the console sets it.
         self.owner: OwnerChannel | None = None
+        # The person's Allows per chat: a task uses its chat's (#369). The
+        # console sets the chat that owns work a chat started (the main chat
+        # once that chat is gone), what a step that ran on an earlier
+        # approval shows, and what starts when a task asks the person.
+        self.ledger = ledger or ApprovalLedger()
+        self.chat_of: Callable[[str | None], Awaitable[str | None]] | None = None
+        self.on_earlier: Callable[[ApprovalUse], Awaitable[None]] | None = None
+        self.on_ask: Callable[[str, ApprovalRequest], None] | None = None
         # What each running task did last, for task_get (see live()).
         self._live: dict[str, dict[str, Any]] = {}
 
@@ -2052,6 +2073,8 @@ class TaskWorkers:
 
             async def paused_ask(request: ApprovalRequest) -> ApprovalDecision:
                 answer = self.broker.begin(task_id, request)
+                if self.on_ask is not None:
+                    self.on_ask(task_id, request)
                 try:
                     point = await self._hold_approval(task_id, runner, request)
                     decision = await answer
@@ -2072,6 +2095,15 @@ class TaskWorkers:
             if task_mode == "auto":
                 # Nobody is asked, so nothing holds the task (#339).
                 policy = self._auto.setdefault(task_id, AutoPolicy(task=True))
+            if _remembers(record.origin):
+                # Its chat's grants and the person's earlier Allows first (#369).
+                policy = OwnedTaskPolicy(
+                    policy,
+                    self.ledger,
+                    task_id,
+                    lambda: self._owner_chat(task_id),
+                    self._earlier,
+                )
             async with self._lock:
                 self._runners[task_id] = runner
                 if (
@@ -2327,6 +2359,15 @@ class TaskWorkers:
                         )
                 await self._schedule()
 
+    async def _owner_chat(self, task_id: str) -> str | None:
+        """The chat that owns *task_id* now: the one that started it, else the main chat."""
+        front = (await self.tasks.get_task(task_id)).front_id or self.front_id
+        return await self.chat_of(front) if self.chat_of is not None else front
+
+    async def _earlier(self, use: ApprovalUse) -> None:
+        if self.on_earlier is not None:
+            await self.on_earlier(use)
+
     async def _body(self, record: TaskRecord) -> dict:
         body = asdict(record)
         body["wait_reason"] = self.gate.held(record.task_id) or body["wait_reason"]
@@ -2347,6 +2388,8 @@ class TaskWorkers:
         )
         policy = self._auto.get(record.task_id)
         body["allowances"] = dict(policy.given) if policy is not None else {}
+        # Its steps that ran on the person's earlier approval, each with Revoke (#369).
+        body["earlier"] = self.ledger.uses_of(record.task_id)
         if record.state == "failed" and record.wait_reason == "invalid_workspace":
             body["folder_problem"] = await self.folder_problem(record.task_id)
         # A run that used all its steps is stopped, and continues from its page (#341).

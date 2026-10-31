@@ -4,8 +4,9 @@ These are the drawer's three tabs. `tools` opens the session, because the
 list is the Agent's and a provider's tools appear only once it started;
 `memory` never opens it, so a paused session shows the conversation the
 gateway kept, every text redacted; `runs` reads the turns it has, with each
-`RunResult` but its answer text. The two `DELETE` routes take back a session grant, which lives
-in the registry's `RememberingPolicy` and never in the store.
+`RunResult` but its answer text. Two `DELETE` routes take back a session grant, which lives
+in the registry's `RememberingPolicy` and never in the store; a third takes back one approval
+the chat recorded for its tasks (#369), which lives in memory too.
 """
 
 from __future__ import annotations
@@ -97,9 +98,12 @@ def add_routes(app: FastAPI, console: Console) -> None:
         assert entry.agent is not None
         granted = entry.policy.allowed_tools
         tools: list[ToolInfo] = entry.agent.list_tools()
+        recorded = console.approvals.entries(session_id)
         return JSONResponse(
             content={
                 "tools": [tool_json(tool, tool.name in granted) for tool in tools],
+                # The steps the person allowed here, which this chat's tasks may run again.
+                "approvals": [approval.to_json() for approval in recorded],
                 "mcp_config_label": "",
                 "mcp_error": MCP_DEFERRED,
             }
@@ -120,6 +124,15 @@ def add_routes(app: FastAPI, console: Console) -> None:
         console.require_store()
         await _require_session(console, session_id)
         console.sessions.forget_grant(session_id)
+        return Response(status_code=204)
+
+    @app.delete("/api/sessions/{session_id}/approvals/{entry_id}")
+    async def revoke_approval(session_id: str, entry_id: str) -> Response:
+        """Take back one recorded approval: the step asks again; what ran stays run."""
+        console.require_store()
+        await _require_session(console, session_id)
+        if not console.approvals.revoke(session_id, entry_id):
+            raise ApiError(404, "not_found", t("errors.noApproval"))
         return Response(status_code=204)
 
     @app.get("/api/sessions/{session_id}/memory")
