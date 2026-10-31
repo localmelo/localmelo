@@ -926,8 +926,9 @@ class ConsoleSessions:
             resumed = entry.runner.last_resume
             await self._reconcile(entry)
             self._note_turn_start(session_id)
+            # The person's words, not the attachments the text carries.
             turn = await entry.runner.start_turn(
-                undone.user_text, approval=entry.policy
+                undone.user_text, approval=entry.policy, words=undone.typed_text or None
             )
             entry.last_used = self._clock()
             return turn, resumed

@@ -122,6 +122,14 @@ async def test_url_builder_accepts_reasoning_field_and_retrieval_extra_body(
     )
     try:
         assert agent._llm.reasoning_field == "reasoning"
-        assert agent._llm.extra_body_by_kind == {"retrieve": {"temperature": 0.1}}
+        # A step review gets its own short, unthinking body (#339).
+        assert agent._llm.extra_body_by_kind == {
+            "retrieve": {"temperature": 0.1},
+            "review": {
+                "temperature": 0,
+                "max_tokens": 200,
+                "chat_template_kwargs": {"enable_thinking": False},
+            },
+        }
     finally:
         await agent.close()

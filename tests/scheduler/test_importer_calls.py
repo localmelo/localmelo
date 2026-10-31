@@ -509,7 +509,11 @@ def test_the_call_kind_header_names_the_kind_of_a_chat_call(
         rec(1, 1.0, 2.0, role="aux", **headers_file(tmp_path, 1, value)),
     ]
     traces, report = import_calls(write(tmp_path, records))
-    assert [c.kind for c in traces[0].calls] == ["plan", value]
+    # A step review counts as an auxiliary call (reflect) in the simulator.
+    assert [c.kind for c in traces[0].calls] == [
+        "plan",
+        REQUEST_KIND_TO_CALL_KIND[value],
+    ]
     assert report.kind_sources == (("header", 1), ("history", 0), ("guess", 1))
     assert report.kind_unknown == 0
 

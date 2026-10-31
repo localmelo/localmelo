@@ -66,6 +66,8 @@ REQUEST_KIND_TO_CALL_KIND: dict[str, CallKind] = {
     "reflect": "reflect",
     "retrieve": "retrieve",
     "estimate": "estimate",
+    # A step review is a short request beside the run: an auxiliary call.
+    "review": "reflect",
 }
 
 # The kind sources of ImportReport.kind_sources, in report order. A

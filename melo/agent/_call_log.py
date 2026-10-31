@@ -109,8 +109,12 @@ class CallLog:
         ``redactions`` counts both. *reasoning_key* is kept only when the
         response has thinking. A ``plan`` response becomes the latest
         planning row before it is written, whether or not the write
-        succeeds.
+        succeeds. A step review's reply (``review``) is no row: the call's
+        approval record keeps its answer, and readers of history before
+        it know four kinds.
         """
+        if kind == "review":
+            return
         seq = self._seq
         self._seq += 1
         if kind == "plan":

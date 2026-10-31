@@ -19,7 +19,6 @@ from typing import Final, Literal
 
 from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
-    ApprovalPolicy,
     ApprovalRequest,
 )
 from localmelo.melo.contracts.review import covered_by_grant, offers_grant
@@ -40,8 +39,10 @@ class RememberingPolicy:
     tool's name. A grant covers routine calls only: a high-impact or
     undecided call (see :mod:`localmelo.melo.contracts.review`) is asked
     about every time, and a ``remember`` on a high-impact one is dropped,
-    so it allows that call and grants nothing. Grants are per tool name and
-    per policy object, and never stored.
+    so it allows that call and grants nothing. Under a grant the agent's
+    gate first lets the user's model review an undecided call
+    (:meth:`silent_for`); one it finds routine then runs on the grant.
+    Grants are per tool name and per policy object, and never stored.
     """
 
     def __init__(self, ask: AskFunction) -> None:
@@ -59,6 +60,11 @@ class RememberingPolicy:
         else:
             self._granted.discard(tool_name)
 
+    def silent_for(self, request: ApprovalRequest) -> bool:
+        """Whether a grant would let *request* run unasked: the gate then lets
+        the user's model review an undecided call first (#279 §3.3)."""
+        return request.tool_name in self._granted
+
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
         if request.tool_name in self._granted and covered_by_grant(request.review):
             return ApprovalDecision(True, origin="session")
@@ -72,23 +78,6 @@ class RememberingPolicy:
         ):
             self._granted.add(request.tool_name)
         return decision
-
-
-class RoutineOnlyPolicy:
-    """Runs routine calls unasked and leaves every other call to *inner*.
-
-    The terminal's auto mode: a routine call (or one nothing reviewed) is
-    allowed with origin ``policy``; a high-impact or undecided one goes to
-    *inner*, which asks.
-    """
-
-    def __init__(self, inner: ApprovalPolicy) -> None:
-        self.inner = inner
-
-    async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
-        if covered_by_grant(request.review):
-            return ApprovalDecision(True, origin="policy")
-        return await self.inner.decide(request)
 
 
 @dataclass

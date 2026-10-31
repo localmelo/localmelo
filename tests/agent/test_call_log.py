@@ -83,6 +83,18 @@ async def _record(log: CallLog, kind: str, response: Message, **kwargs: Any) -> 
     await log.record(kind, response, **fields)
 
 
+async def test_a_step_review_s_reply_is_no_row() -> None:
+    # History readers before #339 know four kinds; the approval record keeps
+    # the review's answer.
+    history, run = FakeHistory(), Counters(steps=1, attempts=1)
+    log = CallLog(history, "t1", run)
+    await _record(log, "plan", _reply("Listing.", calls=1))
+    await _record(log, "review", _reply('{"verdict": "routine"}'))
+    await _record(log, "plan", _reply("Done."))
+    assert [(r.seq, r.kind) for r in history.rows] == [(0, "plan"), (1, "plan")]
+    assert log.last_seq == 1
+
+
 def test_only_a_history_with_both_writers_is_a_call_history() -> None:
     assert isinstance(SqliteHistory(":memory:"), CallHistory)
     assert isinstance(FakeHistory(), CallHistory)

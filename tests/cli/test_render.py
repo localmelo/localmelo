@@ -340,6 +340,30 @@ def test_an_empty_output_says_so() -> None:
             {"allowed": False, "origin": "error", "remember": False, "reason": "boom"},
             "approval failed",
         ),
+        # Auto mode (#339): a routine call, a block, the user's words, an allowance.
+        ({"allowed": True, "origin": "auto", "remember": False}, "auto-allowed"),
+        (
+            {
+                "allowed": False,
+                "origin": "auto",
+                "remember": False,
+                "reason": "installs software",
+            },
+            "blocked: installs software",
+        ),
+        (
+            {
+                "allowed": True,
+                "origin": "auto",
+                "remember": False,
+                "review": {"verdict": "routine", "categories": ["install"]},
+            },
+            "allowed: you asked for it",
+        ),
+        (
+            {"allowed": True, "origin": "user", "remember": False, "allowance": "once"},
+            "allowed once",
+        ),
     ],
 )
 def test_approval_tags(approval: dict[str, Any], tag: str) -> None:

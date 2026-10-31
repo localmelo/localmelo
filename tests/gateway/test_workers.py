@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -516,3 +516,54 @@ async def test_blocked_gate_cancel_real_runner(
         await hub.aclose()
         await gate.close()
         await store.aclose()
+
+
+def test_a_task_s_turn_reads_the_person_s_words_not_the_objective() -> None:
+    from types import SimpleNamespace
+
+    from localmelo.support.gateway.workers import _turn_text
+
+    def record(card: str, **spec: str) -> Any:
+        return SimpleNamespace(card=card, spec={"objective": "Install x", **spec})
+
+    assert _turn_text(record("")) == ("Install x", None)
+    assert _turn_text(record("", user_words="chart it")) == ("Install x", "chart it")
+    # A task stopped before it ran: its next turn carries the request first.
+    assert _turn_text(record("Install x\n\nnow", user_words="chart it")) == (
+        "Install x\n\nnow",
+        "chart it\n\nnow",
+    )
+    assert _turn_text(record("thanks, go on", user_words="chart it")) == (
+        "thanks, go on",
+        "thanks, go on",
+    )
+
+
+def test_a_resumption_card_is_not_the_person_s_words() -> None:
+    from types import SimpleNamespace
+
+    from localmelo.support.gateway.park_card import build_park_card
+    from localmelo.support.gateway.workers import _turn_text
+    from localmelo.support.sessions.store import StoredEvent
+
+    spec = {
+        "title": "Sign-in helper",
+        "objective": "Find a way to sign in daily.\n\nDetails:  the forum.",
+        "user_words": "can you sign me in every day?",
+    }
+    reply = "Next I will pip install playwright and add a LaunchAgent."
+    event = {"type": "assistant.message", "run_id": "r", "data": {"content": reply}}
+    card = build_park_card(
+        spec, [StoredEvent(id=1, session_id="s", turn=1, event=event)]
+    )
+    assert reply in card
+    assert _turn_text(cast(Any, SimpleNamespace(spec=spec, card=card))) == (
+        card,
+        "can you sign me in every day?",
+    )
+    # A task the person started: its objective is their words.
+    own = {"objective": "Find a way to sign in daily."}
+    assert _turn_text(cast(Any, SimpleNamespace(spec=own, card=card))) == (
+        card,
+        "Find a way to sign in daily.",
+    )
