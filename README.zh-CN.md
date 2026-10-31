@@ -103,7 +103,7 @@ melo --url http://127.0.0.1:11434/v1 --model qwen3:8b "What is 6*7?"
 ```
 <!-- /usage -->
 
-- 单独运行 `melo` 可以对话；第一次运行会找到正在运行的服务器并保存配置。
+- 单独运行 `melo` 可以对话；第一次运行会找到正在运行的服务器并保存配置。未找到时，[只读设置预览](docs/zh-CN/guides/model-servers.md#setup-preview)会显示所需内容和手动步骤，不会执行安装。
 - `melo serve` 启动网关，并在浏览器中打开网页控制台。
 - `-u` 和 `-m` 是 `--url` 和 `--model` 的简写；[旧写法](docs/zh-CN/reference/cli.md#old-spelling-to-new)仍然可用。
 - [`melo-task`](docs/zh-CN/reference/scheduler.md#task-command) 创建并控制网关的后台任务。

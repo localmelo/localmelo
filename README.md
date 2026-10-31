@@ -108,7 +108,7 @@ melo --url http://127.0.0.1:11434/v1 --model qwen3:8b "What is 6*7?"
 ```
 <!-- /usage -->
 
-- Run `melo` alone to chat; the first run finds a running server and saves a configuration.
+- Run `melo` alone to chat; the first run finds a running server and saves a configuration. With none found, a [read-only setup preview](docs/guides/model-servers.md#setup-preview) shows what is needed and the manual steps; it installs nothing.
 - `melo serve` starts the gateway and opens the web console in your browser.
 - `-u` and `-m` are short for `--url` and `--model`; [old spellings](docs/reference/cli.md#old-spelling-to-new) still work.
 - [`melo-task`](docs/reference/scheduler.md#task-command) creates and controls the gateway's background tasks.
