@@ -50,11 +50,13 @@ Python 调用方可以在显式推理模式中启用 `AgentOptions(typed_asserti
 在网页控制台和 App 中，melo 会跨对话保存关于你的简短笔记（见[跨对话记忆](../concepts/memory.md#memory-across-chats)）。它用两种方式记一条笔记，都不会请你确认：
 
 - **请它记。** "Remember that Sam has the lab keys"、"keep in mind that my group meeting is on Thursdays"、"记住：我的车停在B2层"、"别忘了…" 或 "帮我记一下…" 会立刻被记下。
-- **告诉它。** "I prefer short answers" 或 "call me Ray" 会在 melo 判断值得记时被记下，对话里一个已完成任务的结果也是如此；只有网页、文件或工具输出说过的内容它从不记，密码或密钥也从不记。
+- **告诉它。** "I prefer short answers" 或 "call me Ray" 会在 melo 判断值得记时被记下，对话里一个已完成任务的结果也是如此；只有网页、文件、工具输出或任务向对话提的问题说过的内容它从不记，密码或密钥也从不记。
 - melo 被告知：关于你的明确、长期的事实（"I live in Utrecht"、"我的导师是周教授"），要在你说出的那一轮就记下。
 - **改掉它。** 在任意对话里说出新的值（"I live in Utrecht now"、"我的健身教练是小宇"）：它会替换关于同一件事的旧笔记，召回时排在最前，回答只给出新的值：只有你问起过去（"before"、"used to"、"以前"）时，你说旧值的那个对话才会重新出现，并被标为较旧。
 - **长对话。** 对话只让最新的消息留在视野里。你在同一个对话里更早说过的话，匹配你的消息时会回来，并标为 `this chat`。
+- **任务从它们开始。** 你从一个对话开始的任务（或你保存的定时事项）会带着与它相关的笔记开始：关于你和你偏好的笔记、它所在文件夹的笔记，以及与它的请求匹配的笔记。人物和决定不包括在内，因为任务要调用工具。任务页面把它们折叠在“melo 告诉任务的内容”下。关闭记忆，或没有匹配的笔记时，任务不带这些内容开始。继续或重启时使用同样的内容。
 - 每条笔记会以 `Remembered: … · Undo` 显示在你的消息下方；对新值点 Undo 会恢复旧笔记。
+- **其他助手。** 主对话第一次打开时，或在终端里第一次打开 `melo` 时，melo 会提议导入这台 Mac 上其他助手保存的关于你的笔记，以文件列表的形式（见[导入其他助手的记忆](../concepts/memory.md#bring-in-memory-from-other-assistants)）。在你选择之前不会导入任何内容，**Not now** 会结束这个提议。之后可以用 Memory 标签页的 **From other assistants**、`/memory import` 或 `melo memory import`。
 - 之后要查看、改写或忘掉笔记，使用控制台的 **Memory** 标签页、终端里的 `/memory`，或 `melo memory list` 和 `melo memory forget`；要停止记笔记，运行 `melo config set memory.across_chats false`，然后重启 `melo serve` 或 App。
 
 <a id="turn-long-term-memory-off"></a>

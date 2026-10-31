@@ -384,6 +384,12 @@ func folderRequest(_ body: Any) -> FolderRequest? {
     }
 }
 
+/// Whether a page message asks the app to quit: `{"action": "quit"}` and nothing else.
+func quitRequest(_ body: Any) -> Bool {
+    guard let message = body as? [String: Any], message.count == 1 else { return false }
+    return message["action"] as? String == "quit"
+}
+
 /// Whether a message came from the gateway's own page: its main frame, over http, from 127.0.0.1 and the gateway's port.
 func acceptsBridgeMessage(scheme: String, host: String, port: Int, isMainFrame: Bool, gatewayPort: Int) -> Bool {
     isMainFrame && gatewayPort > 0 && scheme == "http" && host == "127.0.0.1" && port == gatewayPort

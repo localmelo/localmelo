@@ -38,6 +38,8 @@ CONSOLE = ROOT / "support/gateway/console"
 # Words written by modules the terminal runs too, which need no gateway.
 USAGE = ROOT / "support/usage_snapshot.py"
 DISPLAY = ROOT / "support/sessions/display.py"
+# The terminal's main chat, which writes the catalog's English (``t_in("en", …)``).
+TERMINAL = ROOT / "support/cli/main_chat.py"
 APP = ROOT / "macos/LocalMeloApp"
 CASES = json.loads((ROOT / "tests/fixtures/i18n_cases.json").read_text("utf-8"))
 _PARAM = re.compile(r"\{(\w+)\}")
@@ -47,6 +49,7 @@ CONVERTED_JS = (
     "blocked.mjs",
     "drawer.mjs",
     "folder.mjs",
+    "import-card.mjs",
     "levels.mjs",
     "main-chat.mjs",
     "memory-tab.mjs",
@@ -58,6 +61,8 @@ CONVERTED_JS = (
     "scheduled-tab.mjs",
     "settings.mjs",
     "setup-card.mjs",
+    "slash-actions.mjs",
+    "slash.mjs",
     "status-row.mjs",
     "task-live.mjs",
     "tasks.mjs",
@@ -72,6 +77,7 @@ CONVERTED_PY = (
     "front.py",
     "registry.py",
     "routes_chores.py",
+    "routes_commands.py",
     "routes_details.py",
     "routes_memory.py",
     "routes_page.py",
@@ -118,7 +124,7 @@ PY_ENGLISH = {
     "front_id must name a console chat",
     "Choose what to change.",
     "Worker filters require kind=worker or kind=terminal.",
-    "as_task: tasks start from the main chat",
+    "as_task: tasks start from a chat",
     "reason: only a denial takes a reason",
 }
 # Swift: the app's log lines, the gateway's own command line, and names.
@@ -250,6 +256,7 @@ def named_keys() -> tuple[set[str], set[str], set[str]]:
         *ROOT.glob("support/gateway/*.py"),
         USAGE,
         DISPLAY,
+        TERMINAL,
     ]:
         text = path.read_text("utf-8")
         found |= set(_PY_KEY.findall(text)) | set(_WORDS_KEY.findall(text))

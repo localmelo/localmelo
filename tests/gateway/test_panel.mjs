@@ -84,7 +84,8 @@ function harness({rows = [], turns = null, storage = null, failActivity = false,
     }
     if (path.startsWith('/sessions/')) return {turns: [{turn: 1, status: 'running', events: h.turns}], has_earlier: false};
     if (path.startsWith('/tasks/')) return {task: {}};
-    if (path === '/memory/records') return {on: true, records: [], documents: 0, embedding_model: '', last_error: ''};
+    if (path === '/memory/records') return {on: h.memoryOn !== false, records: [], documents: 0, embedding_model: '', last_error: ''};
+    if (path === '/memory/import/scan') return {batch_id: 'b1', sources: [], partial: false, home: '/h'};
     if (path.startsWith('/chores')) {
       const id = new URL(path, 'http://x').searchParams.get('session_id') ?? '';
       return {chores: h.chores?.(id) ?? [], checkin: {on: true, every_min: 30, next_at: 86400 * 400 + 1800, last_at: null}, scope: id ? 'chat' : 'all'};
@@ -384,6 +385,16 @@ test('a task names its folder in Activity and in Workers; a row without one adds
   assert.deepEqual(folders(), ['In /Volumes/Photos', 'In ~/notes']);
 });
 
+test('a task a side chat started says so in the whole day\'s list', async () => {
+  const h = harness({rows: [
+    task({id: 't1', title: 'Find hotels', state: 'running', at: 2000, from: 'Trip plan'}),
+    task({id: 't2', title: 'Book a table', state: 'done', result: 'Done.', at: 1000}),
+  ]});
+  await h.panel.update(health());
+  const chips = () => h.root.findAll((node) => node.className === 'activity-folder activity-from').map((node) => node.textContent);
+  assert.deepEqual(chips(), ['From Trip plan']);
+});
+
 test('a held worker says why in the server\'s words, a plain hold keeps the state words', async () => {
   const day = [
     task({id: 't1', title: 'Slides', state: 'held', activity: 'Waiting for a higher-priority task', icon: 'held', at: 4000}),
@@ -547,6 +558,25 @@ test("a window grown past the sheet's width closes the sheet, so the page is not
   assert.deepEqual([h.root.classList.contains('sheet-open'), h.chat.inert, h.backdrop.hidden], [false, false, true]);
 });
 
+test("an edit open on Scheduled does not follow the panel to another chat", async () => {
+  const sample = (id, title) => ({id, title, request: title, schedule: {kind: 'daily', at: '09:00'}, when: 'every day at 9:00', level: 2, level_word: 'Normal',
+    enabled: true, revision: 1, next_run: 86400 * 400 + 7200, last_run: null, last: null});
+  const h = harness({openChat: 'side-1'});
+  h.chores = (id) => (id === 'side-2' ? [sample('b', 'Second chore')] : [sample('a', 'First chore')]);
+  await h.panel.update(health());
+  h.tabs()[2].click();
+  await settle();
+  h.body().find((node) => node.className === 'sched-head').click();
+  h.body().find((node) => node.attributes?.['aria-label'] === 'Edit time: First chore').click();
+  assert.ok(h.body().find((node) => node.className === 'sched-form'), 'the first chat\'s chore is being edited');
+  h.open = 'side-2';
+  await h.panel.follow();
+  await settle();
+  assert.match(h.body().text(), /Second chore/);
+  assert.ok(!h.body().text().includes('First chore'));
+  assert.equal(h.body().find((node) => node.className === 'sched-form'), null, 'the editor did not stay');
+});
+
 test('Scheduled lists the check-in and the chores of the open chat, and reads them again as the panel refreshes', async () => {
   const sample = (id, title) => ({id, title, request: title, schedule: {kind: 'daily', at: '09:00'}, when: 'every day at 9:00', level: 2, level_word: 'Normal',
     enabled: true, revision: 1, next_run: 86400 * 400 + 7200, last_run: null, last: null});
@@ -571,3 +601,17 @@ test('Scheduled lists the check-in and the chores of the open chat, and reads th
   await settle();
   assert.equal(h.calls.filter(([, path]) => path.startsWith('/chores')).length, 3);
 });
+
+test('lookForNotes opens the Memory tab\'s "Look for notes" (the console\'s /memory import), and says no when memory is off', async () => {
+  const h = harness();
+  h.panel.select('memory');
+  assert.equal(await h.panel.lookForNotes(), true);
+  assert.ok(h.calls.some(([method, path]) => method === 'GET' && path === '/memory/import/scan'), 'the files were looked at');
+  assert.match(h.body().text(), /From other assistants.*No notes found on this Mac\./);
+  const off = harness();
+  off.memoryOn = false;
+  off.panel.select('memory');
+  assert.equal(await off.panel.lookForNotes(), false);
+  assert.ok(!off.calls.some(([, path]) => path === '/memory/import/scan'), 'with memory off nothing is scanned');
+});
+

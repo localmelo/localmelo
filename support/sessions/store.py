@@ -144,7 +144,10 @@ MAX_WITHDRAWN_PER_SCOPE: Final = 1_000
 # Events per append_events transaction (the runner's writer batches).
 WRITER_BATCH_MAX: Final = 200
 # The version of the tables below, in PRAGMA user_version.
-SCHEMA_VERSION: Final = 2
+SCHEMA_VERSION: Final = 3
+# Who began a turn other than the person: ``ask_owner`` is a chat's internal
+# turn that answers a task's question (``turns.origin``; ``""`` the person).
+TURN_ORIGINS: Final = frozenset({"", "ask_owner"})
 
 # The statuses a RunResult can have (docs/run-results.md, "Statuses").
 RUN_STATUSES: Final = frozenset(
@@ -168,7 +171,7 @@ RUN_STATUSES: Final = frozenset(
 SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
     {
         "turn.started": frozenset(
-            {"turn", "turn_id", "user_text", "client_request_id"}
+            {"turn", "turn_id", "user_text", "client_request_id", "origin"}
         ),
         "turn.finished": frozenset({"turn", "turn_id", "status", "error", "cause"}),
         "turn.undone": frozenset({"turn", "turn_id"}),
@@ -208,6 +211,11 @@ SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
             }
         ),
     }
+)
+# Session event keys an event may lack: turn.started's origin is only on a
+# turn the person did not begin (#369).
+OPTIONAL_SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
+    {"turn.started": frozenset({"origin"})}
 )
 # The session events that a run's writer may store with its batches; the
 # store writes the others itself.
@@ -275,6 +283,7 @@ _SCHEMA: Final = (
     started_at  REAL NOT NULL,
     finished_at REAL,
     note        TEXT NOT NULL DEFAULT '',
+    origin      TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (session_id, turn)
 )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS turns_running ON turns(session_id) "
@@ -432,6 +441,8 @@ class TurnInfo:
     client_request_id: str | None
     typed_text: str
     attachments: tuple[TextAttachment, ...] | None = None
+    # ``""``: the person's turn; ``"ask_owner"``: the chat answers a task (#369).
+    origin: str = ""
 
 
 def check_attachment_submission(
@@ -777,7 +788,8 @@ _TURN_COLUMNS: Final = (
     "t.id, t.session_id, t.turn, t.run_id, t.user_text, t.status, t.cause, "
     "t.answer, t.result, t.holder, t.undone, t.started_at, t.finished_at, "
     "(SELECT a.client_request_id FROM submissions a WHERE a.session_id = t.session_id "
-    "AND a.turn = t.turn AND a.state = 'accepted'), t.typed_text, t.attachments"
+    "AND a.turn = t.turn AND a.state = 'accepted'), t.typed_text, t.attachments, "
+    "t.origin"
 )
 _SUBMISSION_COLUMNS: Final = (
     "u.client_request_id, u.scope, u.state, u.session_id, u.text_sha256, u.error, "
@@ -803,6 +815,7 @@ def _turn_info(row: Sequence[Any]) -> TurnInfo:
         client_request_id=row[13],
         typed_text=row[14],
         attachments=decode_attachments(row[15]),
+        origin=row[16],
     )
 
 
@@ -1027,8 +1040,17 @@ class SessionStore:
         else:
             async with self._transaction(conn, "migrate"):
                 version = await self._user_version(conn)
-                if version == 1:
-                    await conn.execute("ALTER TABLE turns ADD COLUMN attachments TEXT")
+                if version < SCHEMA_VERSION:
+                    rows = await _rows(conn, "PRAGMA table_info(turns)")
+                    have = {row[1] for row in rows}
+                    if "attachments" not in have:
+                        await conn.execute(
+                            "ALTER TABLE turns ADD COLUMN attachments TEXT"
+                        )
+                    if "origin" not in have:
+                        await conn.execute(
+                            "ALTER TABLE turns ADD COLUMN origin TEXT NOT NULL DEFAULT ''"
+                        )
                     await conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         # 7. Retention (T-2) and 8. recovery (T-3), before anything serves.
         self._stop_if_closed()
@@ -1611,13 +1633,16 @@ class SessionStore:
         workspace: str | None = None,
         min_turns: int = 0,
         kinds: Collection[str] | None = ("chat",),
+        or_events: Collection[str] = (),
     ) -> list[SessionInfo]:
         """Sessions, the most recently updated first.
 
         *query* matches the title or any turn's user text (``LIKE``, with
         ``%`` and ``_`` taken literally); *workspace* the stored workspace
         exactly; *min_turns* keeps the sessions with at least that many
-        turns, running ones included. *kinds* ``None`` means every kind.
+        turns, running ones included, and also those with an event of one of
+        the types in *or_events* (a chat that took a task by code, with no
+        turn yet). *kinds* ``None`` means every kind.
         """
         if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
             raise ValueError(f"limit must be an int >= 1, got {limit!r}")
@@ -1639,10 +1664,16 @@ class SessionStore:
             # Any turn counts, a running or an undone one too: a session
             # with a turn is a session the list shows, from the moment its
             # first turn's row exists.
-            clauses.append(
-                "AND (SELECT COUNT(*) FROM turns m WHERE m.session_id = s.id) >= ?"
-            )
+            kept = "(SELECT COUNT(*) FROM turns m WHERE m.session_id = s.id) >= ?"
             args.append(min_turns)
+            if or_events:
+                marks = ", ".join("?" * len(or_events))
+                kept += (
+                    " OR EXISTS (SELECT 1 FROM events e WHERE e.session_id = s.id "
+                    f"AND e.type IN ({marks}))"
+                )
+                args += list(or_events)
+            clauses.append(f"AND ({kept})")
         async with self._lock:
             conn = await self._ready()
             rows = await _rows(
@@ -1650,6 +1681,22 @@ class SessionStore:
                 f"SELECT {_SESSION_COLUMNS} FROM sessions s WHERE 1 {kind_sql} "
                 f"{' '.join(clauses)} ORDER BY s.updated_at DESC LIMIT ?",
                 (*kind_args, *args, limit),
+            )
+            now = self._clock()
+            return [self._session_info(row, now) for row in rows]
+
+    async def sessions_with_meta(self, key: str) -> list[SessionInfo]:
+        """Every session whose ``meta`` has *key* set (not null), oldest first.
+
+        No cap: a recovery at start reads them all (a chat's queued messages).
+        """
+        async with self._lock:
+            conn = await self._ready()
+            rows = await _rows(
+                conn,
+                f"SELECT {_SESSION_COLUMNS} FROM sessions s WHERE "
+                "json_extract(s.meta, ?) IS NOT NULL ORDER BY s.created_at",
+                (f'$."{key}"',),
             )
             now = self._clock()
             return [self._session_info(row, now) for row in rows]
@@ -2002,6 +2049,20 @@ class SessionStore:
             for row in reversed(rows)
         ]
 
+    async def events_of_type_anywhere(
+        self, type_: str, *, before_id: int | None = None, limit: int = 200
+    ) -> list[StoredEvent]:
+        """A page of the events of one type in any session, newest first: *limit* of them with ids below *before_id*."""
+        sql = "SELECT id, session_id, turn, event FROM events WHERE type = ?"
+        args: list[Any] = [type_]
+        if before_id is not None:
+            sql += " AND id < ?"
+            args.append(before_id)
+        async with self._lock:
+            conn = await self._ready()
+            rows = await _rows(conn, sql + " ORDER BY id DESC LIMIT ?", (*args, limit))
+        return [StoredEvent(row[0], row[1], row[2], json.loads(row[3])) for row in rows]
+
     async def rename_session(
         self, session_id: str, title: str, *, only_if: str | None = None
     ) -> bool:
@@ -2137,6 +2198,7 @@ class SessionStore:
         create_scope: bool = False,
         attachments: Sequence[TextAttachment] = (),
         typed_text: str | None = None,
+        origin: str = "",
     ) -> TurnInfo:
         """Start a turn of *user_text* under *holder*, in one transaction (T-5).
 
@@ -2152,8 +2214,12 @@ class SessionStore:
         under a free lease is recovered instead). The turn gets the next
         number, the lease, the session's first title (*title* when it has
         text, else the user text), the submission, and the events
-        ``turn.started`` and, with that title, ``session.title``.
+        ``turn.started`` and, with that title, ``session.title``. *origin*
+        (:data:`TURN_ORIGINS`) marks a turn the person did not begin, which
+        gives the session no title.
         """
+        if origin not in TURN_ORIGINS:
+            raise ValueError(f"origin must be one of {sorted(TURN_ORIGINS)}")
         if (session_id is None) == (new_session is None):
             raise ValueError("begin_turn takes a session_id or a new_session, not both")
         if not isinstance(user_text, str) or not user_text.strip():
@@ -2245,7 +2311,8 @@ class SessionStore:
                 turn_id = uuid.uuid4().hex
                 await conn.execute(
                     "INSERT INTO turns (session_id, turn, id, user_text, typed_text, "
-                    "attachments, holder, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "attachments, holder, started_at, origin) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         session_id,
                         number,
@@ -2255,11 +2322,12 @@ class SessionStore:
                         attachment_data,
                         holder,
                         now,
+                        origin,
                     ),
                 )
                 # 6. The lease, and 7. the first title.
                 new_title = None
-                if not current_title:
+                if not current_title and not origin:
                     new_title = title_from_text(typed or user_text)
                 await conn.execute(
                     "UPDATE sessions SET lease_holder = ?, lease_until = ?, "
@@ -2298,6 +2366,8 @@ class SessionStore:
                             "turn_id": turn_id,
                             "user_text": user_text,
                             "client_request_id": client_request_id,
+                            # Only on a turn the person did not begin (#369).
+                            **({"origin": origin} if origin else {}),
                         },
                         now,
                     ),

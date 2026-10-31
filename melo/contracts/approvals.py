@@ -41,10 +41,11 @@ from localmelo.melo.schema import ToolTier
 
 # Who decided: the person asked ("user"), a grant for the rest of the
 # session ("session"), a fixed policy ("policy"), no answer in time
-# ("timeout"), or auto mode's review ("auto", #339): it runs a routine call
+# ("timeout"), auto mode's review ("auto", #339): it runs a routine call
 # and blocks the rest, and a denial's reason is then the whole note the
-# model reads.
-ApprovalOrigin = Literal["user", "session", "policy", "timeout", "auto"]
+# model reads; or the person's earlier approval of the exact same step,
+# found by code in the chat that owns a task ("earlier").
+ApprovalOrigin = Literal["user", "session", "policy", "timeout", "auto", "earlier"]
 # How a policy wants a call reviewed before it decides: "ask" (a person
 # will be asked, or nothing runs unasked: the rules alone), "silent" (it
 # would allow the call without a person, as under a session grant: the
@@ -113,9 +114,9 @@ class ApprovalDecision:
 
     A field of the wrong type raises ``TypeError``. ``ValueError`` is
     raised for an unknown origin, and for the pairs no policy may give:
-    ``remember`` on a denial, and ``origin="session"`` on a denial (a
-    session grant only allows) or ``origin="timeout"`` on an allow (a
-    timeout only denies).
+    ``remember`` on a denial, ``origin="session"`` or ``"earlier"`` on a
+    denial (a grant and an earlier approval only allow), and
+    ``origin="timeout"`` on an allow (a timeout only denies).
     """
 
     allow: bool
@@ -143,10 +144,10 @@ class ApprovalDecision:
             )
         if self.remember and not self.allow:
             raise ValueError("ApprovalDecision.remember needs allow=True")
-        if self.origin == "session" and not self.allow:
+        if self.origin in ("session", "earlier") and not self.allow:
             raise ValueError(
-                "ApprovalDecision.origin 'session' needs allow=True: "
-                "a session grant only allows"
+                f"ApprovalDecision.origin {self.origin!r} needs allow=True: "
+                "a grant or an earlier approval only allows"
             )
         if self.origin == "timeout" and self.allow:
             raise ValueError(

@@ -87,6 +87,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# ChatMemory's tool that keeps a note of the person's words.
+_NOTE_TOOLS: Final = ("remember",)
+
 EventCallback = Callable[[StoredEvent], Awaitable[None] | None]
 ResumeMode = Literal["pairs", "window"]
 ResumeLoader = Callable[[], Awaitable[int]]
@@ -149,6 +152,8 @@ class _Turn:
     words: str | None = None
     # The run's routine name, run_task's ``routine=`` (UR-N).
     routine: str | None = None
+    # Who began a turn the person did not (``TurnInfo.origin``); "" for theirs.
+    origin: str = ""
     queue: asyncio.Queue[tuple[Any, ...]] = field(default_factory=asyncio.Queue)
     # The task that runs the turn: the runner's own (start_turn) or the
     # caller's (run_turn).
@@ -238,7 +243,10 @@ class SessionRunner:
     ``[memory] keep_statements`` on, code keeps a lasting fact the user stated
     that no note kept, or, whatever that says, a new value the user gave a
     subject an active note holds), and a completed turn is indexed; *index_only* (a
-    task's runner) only indexes.
+    task's runner) only indexes. *context*, when given, ends the text each
+    turn sends the model, after any recalled block: it is in neither the
+    stored turn nor the person's words, and a text that would not fit the
+    query limit is left out.
 
     The Agent needs ``AgentOptions(record_answers=True)`` and a
     ``workspace_root``, and the caller awaits ``agent.start()`` before it
@@ -263,6 +271,8 @@ class SessionRunner:
         pictures: bool = False,
         memory: ChatMemory | None = None,
         index_only: bool = False,
+        context: str = "",
+        review_since: Callable[[], Awaitable[float | None]] | None = None,
     ) -> None:
         self._worker = new_session is not None and new_session.kind == "worker"
         if not self._worker:
@@ -287,6 +297,9 @@ class SessionRunner:
         self._pictures = pictures
         self._memory = None if self._worker else memory
         self._index_only = index_only
+        self._context = context
+        # An earlier start for a turn's review window (a task that uses its chat's approvals).
+        self._review_since = review_since
         self._sensitive_reads: dict[str, str] = {}
         self._holder = holder or process_holder(store.writer)
         self._resume_mode: ResumeMode = resume_mode
@@ -415,6 +428,7 @@ class SessionRunner:
         routine: str | None = None,
         attachments: Sequence[TextAttachment] = (),
         words: str | None = None,
+        origin: str = "",
     ) -> TurnInfo:
         """Begin a turn of *text* and return it once its row exists.
 
@@ -422,7 +436,8 @@ class SessionRunner:
         RunResult. *routine* names the run's routine (``Agent.run_task``'s
         ``routine=``), passed only when given. *words* are the person's own
         words when *text* is not (``Agent.run_task``'s ``user_words=``; the
-        typed text otherwise). With *client_request_id*, a
+        typed text otherwise). *origin* marks a turn the person did not
+        begin (``SessionStore.begin_turn``). With *client_request_id*, a
         key already accepted raises ``SubmissionRepeated`` with the stored
         turn and starts nothing, a withdrawn one ``SubmissionWithdrawn``,
         and one used for another text ``SubmissionConflict``.
@@ -436,6 +451,7 @@ class SessionRunner:
             tuple(attachments),
             own_task=True,
             words=words,
+            origin=origin,
         )
         return turn.turn
 
@@ -463,6 +479,7 @@ class SessionRunner:
         *,
         own_task: bool,
         words: str | None = None,
+        origin: str = "",
     ) -> _Turn:
         self._check_open()
         typed_text = text
@@ -516,6 +533,7 @@ class SessionRunner:
                 attachments,
                 typed_text,
                 words,
+                origin,
             )
         )
         self._begin = begin
@@ -558,6 +576,7 @@ class SessionRunner:
         attachments: tuple[TextAttachment, ...],
         typed_text: str,
         words: str | None = None,
+        origin: str = "",
     ) -> _Turn:
         try:
             # The last turn's end must be stored before the next turn: in a
@@ -573,6 +592,7 @@ class SessionRunner:
                 create_scope=self._create_scope_key,
                 attachments=attachments,
                 typed_text=typed_text if attachments else None,
+                origin=origin,
             )
             self._create_scope_key = False
         finally:
@@ -587,8 +607,10 @@ class SessionRunner:
             text=text,
             approval=approval,
             routine=routine,
-            typed=typed_text,
+            # Another's words are never the person's: memory reads none of them.
+            typed="" if origin else typed_text,
             words=words,
+            origin=origin,
         )
         turn.writer = asyncio.create_task(self._write_events(turn))
         turn.lease = asyncio.create_task(self._keep_lease(turn))
@@ -700,14 +722,29 @@ class SessionRunner:
             if self._inbox is not None:
                 kwargs["inbox"] = self._inbox
             kwargs["user_words"] = turn.typed if turn.words is None else turn.words
+            if turn.origin:
+                # Not the person's message: no consent, and no note of theirs.
+                kwargs["from_person"] = False
+                if self._memory is not None:
+                    kwargs["hide_tools"] = _NOTE_TOOLS
             # The chat began when its session did, across reloads and restarts.
             with contextlib.suppress(Exception):
                 session = await self._store.get_session(turn.turn.session_id)
                 if session is not None:
                     kwargs["chat_started"] = session.created_at
+            if self._review_since is not None:
+                since: float | None = None
+                with contextlib.suppress(Exception):
+                    since = await self._review_since()
+                if since is not None:
+                    kwargs["chat_started"] = min(
+                        since, kwargs.get("chat_started", since)
+                    )
             text = turn.text
             if self._memory is not None and not self._index_only:
                 text = await self._recall(turn)
+            if self._context and len(text) + len(self._context) + 2 <= MAX_QUERY_LEN:
+                text = f"{text}\n\n{self._context}"
             before = await self._scan_folder(turn)
             returned = await turn.agent.run_task(text, **kwargs)
         except BaseException as exc:

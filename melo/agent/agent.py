@@ -1205,6 +1205,8 @@ class _RunState:
     # The confinement's refused writes when the run started.
     refused_writes_base: int = 0
     fixed_tools: list[ToolDef] | None = None
+    # run_task(hide_tools=): the tools this run is not offered.
+    hidden: frozenset[str] = frozenset()
     # reflection_gate="patient": whether the run's one non-novel continue is spent.
     patience_spent: bool = False
     # answer_on_stop: whether result is the answer of the extra request.
@@ -4070,6 +4072,8 @@ class Agent:
                 self.hippo.resolve_tools(query, hints=tool_hints, exclude=offered),
                 key=lambda t: t.name,
             )
+        if run is not None and run.hidden:
+            tools = [t for t in tools if t.name not in run.hidden]
 
         resolution_check = self.checker.check_tool_resolution(
             ToolResolutionResult(
@@ -5498,6 +5502,8 @@ class Agent:
         inbox: InboxSource | None = None,
         user_words: str | None = None,
         chat_started: float | None = None,
+        from_person: bool = True,
+        hide_tools: Collection[str] = (),
     ) -> RunResult:
         """Run one task and report how it ended.
 
@@ -5685,7 +5691,12 @@ class Agent:
         Without it, the query is, up to a recalled-memory block.
         *chat_started* is when the chat began (wall-clock seconds, the
         session's stored start): a step review counts the files changed
-        since then as written in this chat.
+        since then as written in this chat. With *from_person* false, the
+        query is a request the person did not send (a task's question to its
+        chat): a step review counts no new message of theirs, so a block or
+        consent of their last message holds and the query's words allow
+        nothing, and long-term memory takes no statement or remember request
+        of the user's from it. *hide_tools* are not offered in this run.
 
         Before the run starts, ``TypeError`` is raised when *on_event* or
         *observe* is not callable or is a coroutine function, when both
@@ -5725,9 +5736,11 @@ class Agent:
             refused_writes_base=(
                 0 if self._confinement is None else self._confinement.refused
             ),
+            hidden=frozenset(hide_tools),
         )
         # The user's own words, which a step review reads (never tool output).
-        self._reviewer.user_message(query if user_words is None else user_words)
+        if from_person:
+            self._reviewer.user_message(query if user_words is None else user_words)
         if chat_started is not None:
             self._reviewer.since = chat_started
         prefix_run = self.chat.begin_prefix()
@@ -5798,11 +5811,12 @@ class Agent:
                     self.hippo.working.append(query_msg)
                     run.task_query_msg = query_msg
                     run.query_in_memory = True
-                    if self.options.reasoning != "legacy":
+                    if self.options.reasoning != "legacy" and from_person:
                         # Only the user's own text gives a user signal: a
                         # direct statement is admitted at once, while the
                         # fact a remember request carries is staged and
-                        # admitted with the digest at flush.
+                        # admitted with the digest at flush. A query the
+                        # person did not write gives none.
                         signals = classify_user_text(query)
                         for candidate in user_candidates(
                             query,

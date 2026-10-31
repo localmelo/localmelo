@@ -27,9 +27,12 @@ from localmelo.support.sessions.submissions import check_client_request_id
 
 from .cards import CARD_EVENT, CARD_PAGE, card_json
 from .errors import ApiError
+from .explain import remembered
 from .front import ECHO_EVENT
+from .running import waiting_by_chat
 from .shapes import approval_json, session_json, submission_json, turn_json
 from .sse import EventStream, EventStreamResponse
+from .task_submissions import created, submission_of
 from .worker_reader import WorkerRecord, _total_tokens, decode_cursor, encode_cursor
 
 if TYPE_CHECKING:
@@ -114,8 +117,15 @@ def _completion_tokens(turn: TurnInfo) -> int:
     return max(0, value)
 
 
-def _pending_approvals(console: Console, session_id: str) -> list[dict[str, Any]]:
-    return [approval_json(request) for request in console.broker.pending(session_id)]
+def _pending_approvals(
+    console: Console, session_id: str, kind: str
+) -> list[dict[str, Any]]:
+    """A session's waiting approvals; a chat's say whether its Allow is kept for its tasks (#369)."""
+    chat = kind != "task"
+    return [
+        {**approval_json(r), "remembered": chat and remembered("user", r)}
+        for r in console.broker.pending(session_id)
+    ]
 
 
 def _worker_body(
@@ -215,11 +225,19 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 query=query,
                 kinds=(kind,),
                 min_turns=0 if kind == "front" else 1,
+                # A chat that took a task by code has an echo and no turn.
+                or_events=(ECHO_EVENT, CARD_EVENT),
             ),
         )
         has_more = len(sessions) > limit
+        bodies = [console.session_body(info) for info in sessions[:limit]]
+        waiting = await waiting_by_chat(console) if kind == "chat" else {}
+        for body in bodies:
+            if waiting.get(body["id"]):
+                # A side chat's task waits for the person's answer.
+                body["waiting_tasks"] = waiting[body["id"]]
         content: dict[str, Any] = {
-            "sessions": [console.session_body(info) for info in sessions[:limit]],
+            "sessions": bodies,
             # The one shared gate's machine snapshot: the page's header
             # shows the GPU lock and battery, as its /v1 list did (S2b).
             "machine": console.gate.machine_payload(),
@@ -227,7 +245,11 @@ def add_routes(app: FastAPI, console: Console) -> None:
         }
         if kind == "chat":
             # The chats are the main chat's side chats; the list names it.
-            content["main"] = await _store_call(console, console.main_body())
+            main = await _store_call(console, console.main_body())
+            asking = sum(n for owner, n in waiting.items() if owner != console.main_id)
+            if main is not None and asking:
+                main["waiting_in_side"] = asking  # tasks waiting in side chats
+            content["main"] = main
         return JSONResponse(content=content)
 
     @app.get("/api/sessions/{session_id}")
@@ -272,7 +294,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
                     else console.session_body(info)
                 ),
                 "pending_approvals": (
-                    [] if worker else _pending_approvals(console, session_id)
+                    [] if worker else _pending_approvals(console, session_id, info.kind)
                 ),
                 "grants": grants,
                 "granted_at": granted_at,
@@ -313,7 +335,8 @@ def add_routes(app: FastAPI, console: Console) -> None:
             has_earlier = bool(older)
         cards: list[StoredEvent] = []
         echoes: list[StoredEvent] = []
-        if info.kind == "front":
+        if info.kind in ("front", "chat"):
+            # Every console chat's page is as new as what has come back to it.
             await console.cards.flush()
             cards = await _page_cards(console, session_id, turns, before)
             echoes = await _page_cards(console, session_id, turns, before, ECHO_EVENT)
@@ -338,7 +361,8 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 # The stream replays from here: the cards and echoes already given.
                 first = min(event.id or 1 for event in cards + echoes)
                 body["replay_from"] = max(first - 1, 0)
-        if info.kind == "front":
+        if info.kind == "front" or cards or echoes:
+            # A side chat has them only once it started a task.
             body["cards"] = [card_json(event) for event in cards]
             body["echoes"] = [card_json(event) for event in echoes]
         return JSONResponse(content=body)
@@ -436,6 +460,11 @@ def add_routes(app: FastAPI, console: Console) -> None:
             console.store.get_submission(session_id, client_request_id),
             session_id,
         )
+        if submission is None and session_id is None:
+            # A create that made a chat for a task is accepted, with the chat and the task.
+            made = await created(console, client_request_id)
+            if made is not None:
+                return submission_of(made[0], made[1], client_request_id)
         return submission_json(submission, client_request_id)
 
     @app.get("/api/sessions/{session_id}/submissions/{client_request_id}")
@@ -499,7 +528,7 @@ async def _page_cards(
     before: int | None,
     type_: str = CARD_EVENT,
 ) -> list[StoredEvent]:
-    """The main chat's cards (or echoes) beside a page of its turns, the newest :data:`CARD_PAGE`.
+    """A chat's cards (or echoes) beside a page of its turns, the newest :data:`CARD_PAGE`.
 
     From the page's oldest turn (or the start, when it is the oldest page)
     to the next page's first turn (or now).

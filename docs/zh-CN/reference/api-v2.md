@@ -138,7 +138,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 
 - `since`（自纪元起的秒数）是这一天的开始；默认是网关所在电脑的本地午夜，不能是将来的时间（`400 invalid_request`），最多往回一周。
 - `session_id`（最多 128 个字符）是面板当前打开的对话。对于侧边对话，`scope` 为 `chat`，行是该对话自己的一行和它启动的任务（任务的 `front_id`）；未知的 id 视为没有任何内容的侧边对话。对于主对话（类型为 `front` 的会话，或 `meta` 里有 `main: true` 的会话），以及不带 `session_id` 时，`scope` 为 `all`，行是一整天的内容，包括 worker 运行和终端对话。
-- 一行是会话在 `since` 或之后仍在运行或已结束的最新轮次（仍在运行的轮次一定在内，无论它多早开始），或在那之后有变化或尚未结束的任务。运行中 `state` 为 `running`、`waiting`（有审批在等待）、`held`（调度器暂缓了它的模型调用）、`queued` 或 `paused`，否则为 `done`、`failed` 或 `stopped`；用完步数的任务是 `stopped` 并带 `can_continue: true`（它存储的状态是 `failed`），其 `result` 是它的最终回答里说明还剩什么的那一句。运行中的行说明它在做什么（`activity` 和 `icon`，与 [`status.items`](#get-apihealth) 中的相同）；已结束的行在 `result` 中说明结果，一行，最多 140 个字符（该轮的摘要，否则是回答的第一句，失败时是原因），其 `icon` 是它最后一次工具调用的类别（没有工具调用时为 `done`，或为 `failed`、`stopped`）。`at` 是它结束的时间（运行中的行：开始的时间；任务：最后一次变化的时间），`turns` 是对话当天开始的轮次数，`level` 是任务的优先级（0 到 5）。结果始终是平实的话：运行自己的标记写作 `Stopped before answering` 或 `Ended without an answer`，路径写作 `Made a picture` 或文件名，代码让位给它周围的第一句话（没有时写 `Wrote some code`）。
+- 一行是会话在 `since` 或之后仍在运行或已结束的最新轮次（仍在运行的轮次一定在内，无论它多早开始），或在那之后有变化或尚未结束的任务。运行中 `state` 为 `running`、`waiting`（有审批在等待）、`held`（调度器暂缓了它的模型调用）、`queued` 或 `paused`，否则为 `done`、`failed` 或 `stopped`；用完步数的任务是 `stopped` 并带 `can_continue: true`（它存储的状态是 `failed`），其 `result` 是它的最终回答里说明还剩什么的那一句。运行中的行说明它在做什么（`activity` 和 `icon`，与 [`status.items`](#get-apihealth) 中的相同）；已结束的行在 `result` 中说明结果，一行，最多 140 个字符（该轮的摘要，否则是回答的第一句，失败时是原因），其 `icon` 是它最后一次工具调用的类别（没有工具调用时为 `done`，或为 `failed`、`stopped`）。`at` 是它结束的时间（运行中的行：开始的时间；任务：最后一次变化的时间），`turns` 是对话当天开始的轮次数，`level` 是任务的优先级（0 到 5）。结果始终是平实的话：运行自己的标记写作 `Stopped before answering` 或 `Ended without an answer`，路径写作 `Made a picture` 或文件名，代码让位给它周围的第一句话（没有时写 `Wrote some code`）。在一整天的列表里，旁支对话开始的任务还带 `from`，即那个对话的标题。
 - `approvals` 按从旧到新列出该行的会话今天请求做的事，最多 20 条：`{id, what, answer, at}`。`what` 是用平实的话描述的调用（`Write slides.md`、`Run the tests`、`Run a command`，从不显示命令行、代码或文本），`at` 是请求的时间，`answer` 为 `waiting`、`allowed once`、`allowed for this chat`、`allowed automatically`、`denied`、`no answer`（超时）或 `withdrawn`（轮次先结束了）。对话或任务中 `waiting` 的请求用 `POST /api/approvals/{id}` 回答，与对话的卡片相同。运行和终端对话的行与其余内容一样经过脱敏。
 - 运行中的行在前，其余从新到旧，最多 100 行；有行被省略时 `more` 为 `true`。无法读取的来源不添加任何行，并在 `unavailable` 中写出（`chats`、`tasks`、`runs`、`approvals`）。
 
@@ -195,6 +195,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `memory_retriever` 是 `[memory] retriever`，即对话查找笔记的方式：`auto`、`bm25`、`embedding` 或 `llm`。
 - `language` 是 `[console] language`，即控制台的语言：`auto`、`en` 或 `zh-Hans`。
 - `approvals` 是 `[approvals] mode`，即新对话开始时的模式：`ask` 或 `auto`（文件中的其他值按 `ask` 读取）。
+- 当 `[browser] driver` 不是 `off` 时，`browser` 为 true：melo 可以在 Safari 中读网页（见[浏览](../guides/browsing.md)）。
 - `developer_settings` 是 `melo -h all` 列出的每个键，按它的顺序以分区分组（`""` 是顶层）：`value` 是当前使用的值，`default` 是默认值，两者都按帮助的写法；`flag` 是设置该键的旧选项，`issue` 是决定对比实验的 issue；`file` 为 false 的键只作用于一次运行（它的值就是默认值）。`run_options` 是帮助里日常选项之后的那些选项行。控制台的 Developer 分区以只读方式显示两者。
 
 ## PUT /api/settings
@@ -213,6 +214,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `memory_retriever` 可选：`auto`、`bm25`、`embedding` 或 `llm`，设置 `[memory] retriever`（其他值返回 400 `invalid_request`；没有嵌入模型时设为 `embedding` 返回 400 `invalid_settings`）；省略时保留已保存的值。
 - `language` 可选：`auto`、`en` 或 `zh-Hans`，设置 `[console] language`（其他值返回 400 `invalid_request`）；省略时保留已保存的值。页面会重新载入，显示新的语言。
 - `approvals` 可选：`ask` 或 `auto`，设置 `[approvals] mode`，即新对话开始时的模式（其他值返回 400 `invalid_request`）；省略时保留已保存的值。之前创建的对话保留各自的模式。
+- `browser` 可选：`true` 把 `[browser] driver` 设为 `safari-automation`，`false` 设为 `off`（其他值返回 400 `invalid_request`）；省略时保留已保存的值。`/browser on` 和 `/browser off` 保存的就是它。
 - 控制台一次保存一项更改：带上读取时的 `revision`，只发送改动的字段；它的 Undo 是同一个请求，换成之前的值。
 - 与磁盘上的文件不匹配的 `revision` 会返回 409 `settings_changed`。两个并发的 `PUT` 请求若读取了同一个 `revision`，两者都可能通过检查；最后写入者胜出，`os.replace` 保证文件不会被撕裂。
 - 服务器会重新加载 `config.toml`，因此命令行的 `--host` 和 `--port` 覆盖值从不写入磁盘；它会保留其他节、`extra_body`、`mcp_config`、`request_timeout_s`、`[agent]` 和 `[scheduler]`，校验候选设置（失败时返回 `400 invalid_settings` 并附 `details.errors`），以原子方式写入 `config.toml`，关闭空闲的会话智能体，使下一轮以新设置打开，并返回更新后的 `GET /api/settings` 响应体。
@@ -313,7 +315,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 资源关闭失败会隔离该 worker，并保持其槽位被计数；重试之后，中断的任务会报告 `cleanup failed; slot held until restart`。
 
 任务对象包含任务 id、规范化的 `spec`、`state`、优先级和来源、`wait_reason`、`pending_approvals`（任务正在等待的批准，形状与会话的相同；没有时为空；与对话一样，用 `POST
-/api/approvals/{request_id}` 回答其中一个）、时间戳、工作区和 `priority_events`，以及保留的计量字段。服务、等待和工具计量尚未实现。
+/api/approvals/{request_id}` 回答其中一个；每个还带 `explanation`，见[任务的批准](#a-tasks-approvals-go-through-its-chat)）、`earlier`（它凭之前的批准运行的步骤）、时间戳、工作区和 `priority_events`，以及保留的计量字段。服务、等待和工具计量尚未实现。
 
 任务保留创建时其对话的[模式](#ask-and-auto)（`approvals`，`ask` 或 `auto`）；之后切换对话不会改变它。Auto 下的任务不问任何人，所以没有东西会让它停下等待，它的调用在写入沙箱中运行。它的对象另有 `blocked`，即 Auto 拦下的步骤（从旧到新：`request_id`、`call_id`、`name`、`step_key`、`reason`、`review`、`preview`、`ts`、`turn`、`can_allow`，以及 `used_at`，即被允许的步骤运行的时间，否则为 `null`），还有与对话相同的 `allowances`。任务在没有被拦下步骤的情况下继续。`POST
 /api/tasks/{task_id}/blocks/{request_id}/allow` 允许一次（与对话相同），并把继续的消息发给任务：尚未结束的任务返回 202 `{"task": ...,
@@ -377,7 +379,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 
 ## GET /api/sessions
 
-最新的会话排在最前面。默认只列出 `chat` 会话：即主对话的旁支对话，列表在 `main` 中给出主对话本身。
+最新的会话排在最前面。默认只列出 `chat` 会话：即主对话的旁支对话，列表在 `main` 中给出主对话本身。旁支对话有了轮次，或有了 `attention.echo` 或 `attention.card` 事件（它用代码接了一个任务，还没有轮次），才会列出。
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- 'http://127.0.0.1:8401/api/sessions?query=notes&limit=50'
@@ -388,7 +390,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 ```
 
 - **主对话。** 网关的会话文件中恰好有一个主对话：一个类型为 `front`、标题为 `Main chat` 的会话，在控制台第一次打开该文件时创建，早于它的第一条消息。它永远不会被删除。每个类型为 `chat` 的控制台对话都是它的旁支对话；主对话出现之前创建的对话也原样成为它的旁支对话。每个会话对象用 `main` 说明这一点：主对话为 `true`，其他会话为 `false`。
-- `main`（仅在默认的 `kind=chat` 下出现）是主对话的会话对象，另加 `last_card`：它最新的一张[卡片](#cards-in-the-main-chat)，没有时为 `null`。只要 `last_card.id` 比客户端上次显示的卡片更新，客户端就把主对话标为未读。只有在存储无法读取时，`main` 才为 `null`。
+- `main`（仅在默认的 `kind=chat` 下出现）是主对话的会话对象，另加 `last_card`：它最新的一张[卡片](#cards-in-the-main-chat)，没有时为 `null`。只要 `last_card.id` 比客户端上次显示的卡片更新，客户端就把主对话标为未读。只有在存储无法读取时，`main` 才为 `null`。列表里的旁支对话带 `waiting_tasks`（仅在大于 0 时出现）：它的任务里有多少个在等人答复（因审批或输入而被搁置）；`main` 带 `waiting_in_side`（仅在大于 0 时出现）：所有旁支对话的这个数的总和。客户端标记旁支对话那一行，并在主对话那一行显示总数。
 - `limit` 为 1 到 200（默认 50）。`query` 最多 200 个字符，与会话的标题或任一轮次的用户文本匹配。`has_more` 表示该页之外还有更早的会话。
 - 会话在拥有一个轮次之后即被列出，正在运行的轮次也算在内：创建操作一旦保存了第一个轮次的行，会话就会出现。创建操作留下的、从未开始其消息的行（例如中途关机）没有轮次，因此不会被列出；`GET /api/sessions/{id}` 仍会显示它。
 - `kind` 为 `chat`（默认）、`front`、`front_bg`、`task`、`worker` 或 `terminal`；其他任何值都是 400 `invalid_request`。`front` 列出主对话，在它的第一条消息之前也会列出。`worker` 和 `terminal` 以 SQLite 只读模式读取 CLI 会话文件：`worker` 列出直接运行，`terminal` 列出交互式 `melo` 会话的对话，`kind=chat` 从不包含它们。CLI 文件不存在时返回空列表，且网关不会创建它。SQLite 可能会在读取期间创建 `-wal` 和 `-shm` 记账附属文件；读取器不以写入方式打开主数据库，也不使用 immutable 模式。
@@ -461,13 +463,13 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - 对于被 `Try again` 撤销的轮次，`undone` 为 `true`；此类轮次仍会被列出。
 - `answer` 和 `result.result` 是保存的副本：密钥已脱敏，并且在保留期之后，内联的 `<think>` 块已被删除。
 - 轮次运行期间，`cause` 为 `""`。
-- 主对话的每一页另带 `cards`，即这一页轮次旁边的卡片，按从旧到新排列：从该页最旧的轮次（最旧的一页则从头开始）到下一页的第一个轮次（最新的一页则到现在为止），最多取最新的 50 张。没有轮次的主对话给出最新的 50 张卡片，`replay_from` 位于其中最旧一张之前，因此事件流不会回放更早的内容。
+- 主对话的每一页另带 `cards`，即这一页轮次旁边的卡片，按从旧到新排列：从该页最旧的轮次（最旧的一页则从头开始）到下一页的第一个轮次（最新的一页则到现在为止），最多取最新的 50 张。没有轮次的主对话给出最新的 50 张卡片，`replay_from` 位于其中最旧一张之前，因此事件流不会回放更早的内容。旁支对话一旦有卡片或回执（它开始过任务），它的每一页也同样带 `cards` 和 `echoes`；没有的旁支对话两个键都没有。
 
 <a id="cards-in-the-main-chat"></a>
 
 ### 主对话中的卡片
 
-旁支对话的一次运行结束，或任务完成、失败或等待审批时，主对话会得到一张卡片：一个不属于任何轮次的 `attention.card` 会话事件。卡片从来不是轮次：没有模型会读取它，主对话的对话内容也从不包含它。
+旁支对话的一次运行结束时，主对话会得到一张卡片：一个不属于任何轮次的 `attention.card` 会话事件。任务完成、失败或等待审批时，开始它的对话得到卡片（看它的 `front_id`：主对话或某个旁支对话；那个旁支对话已不存在时则是主对话）。卡片从来不是轮次：没有模型会读取它，任何对话的对话内容也从不包含它。
 
 它的 `data`：
 
@@ -475,12 +477,12 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 {"source_id": "8983e7f06ecf", "source_kind": "chat", "title": "Plan the Tokyo trip", "state": "done", "line": "Three days in Tokyo.\nThen Kyoto.", "at": 1793399544.339885}
 ```
 
-- `state` 为 `done`、`failed`、`stopped`（任务用完了步数，可用 `POST /api/tasks/{id}/continue` 继续）、`waiting`（有审批在等待答复）或 `answered`（该审批已答复）。`source_kind` 为 `chat` 或 `task`，`source_id` 是要打开的旁支对话或任务。`title` 至多 48 列：本人或主对话给的标题保持不变，更长的在词的边界处截断。`at` 是事情发生的时间。
+- `state` 为 `done`、`failed`、`stopped`（任务用完了步数，可用 `POST /api/tasks/{id}/continue` 继续）、`waiting`（有审批在等待答复）、`answered`（该审批已答复）或 `blocked`（任务里被 Auto 拦下的一步：`request_id`、`step_key`、`name`、`preview`、`review` 和 `can_allow` 与任务的 `blocked` 相同，`line` 为 `Blocked: deletes files`；允许一次用 `POST /api/tasks/{id}/blocks/{request_id}/allow`）。每张 `blocked` 卡片都会显示，不会并入它的任务较新的卡片。`source_kind` 为 `chat` 或 `task`，`source_id` 是要打开的旁支对话或任务。`title` 至多 48 列：本人或主对话给的标题保持不变，更长的在词的边界处截断。`at` 是事情发生的时间。
 - `line` 是平实的话：`done` 卡片上是回答的前两行（后面还有内容时，开头的 `Done.` 省略）；`failed` 卡片上是运行没有结束的原因（先是状态的文字，再是错误的第一行）；`stopped` 卡片上是最终回答里说明还剩什么的那一句（否则是它的前两行，再否则是 `Ran out of steps`）；`waiting` 卡片上是它请求做什么（`Wants to run Python`、`Wants to write notes.md`）；`answered` 卡片上是答复（`Allowed once`、`Allowed for this chat`、`Allowed for this task`、`Allowed automatically`、`Denied`、`No answer in time`、`Not run: it stopped first`）。
 - `waiting` 卡片有 `request_id`。该审批得到答复后，会有一张状态为 `answered`、`request_id` 相同、`line` 为答复的卡片跟在它后面，客户端把这一张卡片显示为带着答复、不再有 Review 的样子。答复不是新消息：它永远不是列表的 `last_card`，等待卡片从未写入时也不会写入答复。
 - 旁支对话的轮次由其运行结束时（`cause` 为 `run`）才算；本人停止、关机或崩溃都不产生卡片。任务以 `done`、`failed` 或 `expired` 结束时才算；本人停止不产生卡片。
 - 网关在读取主对话或列表时写入卡片，另外每分钟一次；审批在此之前已答复的等待卡片永远不会写入；之后才答复的审批会跟上它的 `answered` 卡片。主对话的事件流以 `attention.card` 帧送来新卡片。
-- 通过 `POST /api/tasks` 创建的任务属于它的 `front_id` 所指的对话，没有时属于主对话；它的卡片仍然来到主对话。
+- 通过 `POST /api/tasks` 创建的任务属于它的 `front_id` 所指的对话，没有时属于主对话；它的卡片，以及该对话任务工具产生的回执，都来到那个对话。旁支对话的 `done` 卡片，以及它的某个任务的 `done` 卡片，也会在主对话的下一轮里读成一行点名那个旁支对话的消息。
 
 <a id="echoes-in-the-main-chat"></a>
 
@@ -492,10 +494,29 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 {"echo": {"id": 41, "ts": 1793405483.9, "echo": "started", "task_id": "3f9c2a71b0de", "title": "summarize the readme", "level": 2, "reason": "you asked for it", "line": "Started: summarize the readme · P2", "typed": "/task summarize the readme"}}
 ```
 
-- `echo` 为 `started`、`control`（带 `action` 和 `undo`）、`level`（带 `undo`）、`suggest`（本人的话没有要求的改变，带 `action`，可能带 `level`；`action` 为 `send` 时以 `text` 带上那条消息）、`ask`（`Start this as a task?`，带完整消息 `text`、键入的文字 `words` 和 `turn_id`）、`sent`（交给某个任务的消息，`how` 为 `queued`（下一步读到）或 `continued`（已结束的任务的新一轮）；`line` 为 `Sent to: <title>` 或 `Continued: <title>`）、`chore`（代码读懂的重复短语：`Run this every weekday at 8:30?`，带 `title`、`text`（要做的工作）、`schedule`、`when` 和 `level`；带时间的提醒用语给出 `Remind you on Fri Oct 30 at 9:00?`，带 `reminder: true`、`text` 为 `Reminder: <words>`、`work`（原话）、`once` 的 `schedule`，没有 `level`）、`chore_saved`（带 `chore_id`）、`checkin`（check-in 的说明，带 `items`）、`undone` 或 `failed`。提醒用语没有可用的时间（没有时间、时间已过、或在一年之后）时，改为给出带 `ask: "when"` 和 `work` 的 `ask` 回执（`When should I remind you?`）；它没有按钮，一小时内下一条如果只是一个时间（`Friday at 9`），就用 `chore` 回执答复它（`of` 是这条提问）。`line` 是平实的话，优先级用代码表示（`Started: <title> · P2`、`<title> → P3`、`Undone: <title> is back to P2`）；`typed` 是它回应的消息；`of` 是它回应的回执。
-- 在主对话以外的会话上使用 `as_task` 返回 400 `invalid_request`。委派时重复的 `client_request_id` 返回同一条回执。
+- `echo` 为 `started`、`control`（带 `action` 和 `undo`）、`level`（带 `undo`）、`suggest`（本人的话没有要求的改变，带 `action`，可能带 `level`；`action` 为 `send` 时以 `text` 带上那条消息）、`ask`（`Start this as a task?`，带完整消息 `text`、键入的文字 `words` 和 `turn_id`）、`sent`（交给某个任务的消息，`how` 为 `queued`（下一步读到）或 `continued`（已结束的任务的新一轮）；`line` 为 `Sent to: <title>` 或 `Continued: <title>`）、`chore`（代码读懂的重复短语：`Run this every weekday at 8:30?`，带 `title`、`text`（要做的工作）、`schedule`、`when` 和 `level`；带时间的提醒用语给出 `Remind you on Fri Oct 30 at 9:00?`，带 `reminder: true`、`text` 为 `Reminder: <words>`、`work`（原话）、`once` 的 `schedule`，没有 `level`）、`chore_saved`（带 `chore_id`）、`checkin`（check-in 的说明，带 `items`）、`undone`、`failed`、`earlier`（任务的一步凭本人之前的批准运行：`task_id`、`title`、`entry_id`、`approved_at`、`preview`，`line` 为 `Used your approval from 14:02`）或 `revoked`（那个批准已撤回；`of` 是那条 `earlier` 回执）。提醒用语没有可用的时间（没有时间、时间已过、或在一年之后）时，改为给出带 `ask: "when"` 和 `work` 的 `ask` 回执（`When should I remind you?`）；它没有按钮，一小时内下一条如果只是一个时间（`Friday at 9`），就用 `chore` 回执答复它（`of` 是这条提问）。`line` 是平实的话，优先级用代码表示（`Started: <title> · P2`、`<title> → P3`、`Undone: <title> is back to P2`）；`typed` 是它回应的消息；`of` 是它回应的回执。
+- 在任务会话上使用 `as_task` 返回 400 `invalid_request`；主对话和旁支对话都接受它（`POST /api/sessions` 带 `turn.as_task` 也一样：先创建一个空对话，用这条消息命名，返回 201 以及 `session` 和任务的 `echo`，没有轮次；带 `client_request_id` 时它是创建范围的一次提交：已取消的键为 409 `submission_withdrawn`，已为另一条消息接受的键为 409 `submission_conflict`（在为任务创建过对话的键下创建消息也是 409：两种键在存储里分开保存），重复的请求返回 200，带着第一次创建的对话和回执以及 `repeated: true`（网关在任务和回执之间停止过，则回执会重新写出），`GET /api/submissions/{key}` 读到 `accepted`，带对话的 `session_id`（对话被删除、任务交给主对话之后是主对话的）和 `task_id`，该键的取消会停止任务（202，`cancelling`）而不是存一条撤回；任务无法开始则为 400 且不会留下对话，已经开始的任务则保留它的对话），旁支对话从第二条消息起适用代码规则（`/task`、控制短语、跟进、定时事项和提醒），任务属于那个旁支对话。委派时重复的 `client_request_id` 返回同一条回执。
+- 对话会把它已告知的新闻记成一个 `attention.news` 事件（轮次为 `null`；含 `floor`、`tasks`、`sides`），客户端忽略它。
+- 一轮的回执存在被说话的那个对话里。关于别的对话的任务的回执带 `from_main: true` 或 `from_chat`（那个对话的标题）。
 - 主对话的每一页另带 `echoes`，分页方式与 `cards` 相同。
-- `POST /api/front/echoes/{id}` 带 `{"do": "undo" | "apply" | "start" | "level" | "save" | "once" | "cancel", "level"?: "P1" | 1 | "Today"}`，返回 200 `{"echo"}`：撤销 `control` 或 `level` 回执（停止的撤销会以新任务重新开始它）或 `chore_saved` 回执（定时事项被删除）、应用 `suggest`、开始 `ask`，或把 `started` 或 `level` 回执的任务设为本人的级别。对 `chore` 回执，`save` 保存定时事项（以 `chore_saved` 回执答复；提醒以 P1 保存，保存前时间已过则为 400），`once` 把它的工作作为一个任务开始（提醒不行：400），`cancel` 什么也不保存（以 `undone` 回执答复）。每个只答复一次（409 `already_answered`）；未知的回执或任务为 404，已保存 50 个事项时 `save` 为 409 `invalid_transition`，与回执不符的 `do` 为 400 `invalid_request`。
+- `POST /api/front/echoes/{id}` 带 `{"do": "undo" | "apply" | "start" | "level" | "save" | "once" | "cancel" | "revoke", "level"?: "P1" | 1 | "Today"}`，返回 200 `{"echo"}`：撤销 `control` 或 `level` 回执（停止的撤销会以新任务重新开始它）或 `chore_saved` 回执（定时事项被删除）、应用 `suggest`、开始 `ask`、把 `started` 或 `level` 回执的任务设为本人的级别，或撤回 `earlier` 回执用到的批准（以 `revoked` 回执答复）。对 `chore` 回执，`save` 保存定时事项（以 `chore_saved` 回执答复；提醒以 P1 保存，保存前时间已过则为 400），`once` 把它的工作作为一个任务开始（提醒不行：400），`cancel` 什么也不保存（以 `undone` 回执答复）。每个只答复一次（409 `already_answered`）；未知的回执或任务为 404，已保存 50 个事项时 `save` 为 409 `invalid_transition`，与回执不符的 `do` 为 400 `invalid_request`。请求体可带 `session_id`，指明回执在哪个旁支对话里（未知的对话或不是旁支对话为 404）；缺失时是主对话的。
+
+
+<a id="a-tasks-question"></a>
+
+### 任务的问题
+
+卡住的 worker 会调用 `ask_owner`；它的对话（`front_id`，否则是主对话）会收到带 `task_id`、`title` 和 `ask_id` 的回执：
+
+- `task_ask`：问题本身，带 `fields`（`background`、`situation`、`problem`、`likely_causes`、`options`、`help_needed`、`if_unsolvable`）和 `lead`（对话内部轮次的第一行）；任务自己的对话已被删除时带 `from_chat`（任务的标题）。
+- `task_answered`（`text`，`of` 指问题）：对话用 `task_answer` 作了回答。
+- `task_escalate`（`parts`：`background`、`what_happened`、`tried`、`choices`、`question`；`waiting` 是当时这个对话里有几个任务在等本人）：对话用 `ask_person` 问了本人。`POST /api/front/echoes/{id}` 带 `{"do": "reply", "text": "…"}` 回答它（200 `{"echo"}`，即 `ask_end`；问题结束后为 409 `already_answered`）。
+- `answer_sent`（`typed`、`undo_s`）：这个对话里恰好有一个任务在等本人时，一条不是提问、工作请求、命令、控制短语或问候的消息就是它的回答（以 200 返回这条回执，不开始轮次）。`undo_s` 秒（10）后交给任务，随后有一条 `answer_delivered` 回执（`of`）；在此之前用 `{"do": "undo"}` 会返回 `undone` 回执，任务继续等待，消息作为一轮开始（交付后为 409 `already_answered`）。`/answer TASK TEXT` 按标题立即回答在等的任务（返回 `ask_end`）；有几个在等却没写标题，或者没有任务在等，会有一条 `failed` 回执说明。
+- 消息正在排队保存时，重复同一个 `client_request_id` 会等它的结果，并得到同样的回答。
+- `ask_end`（`how`：带 `text` 的 `person`、`timeout`、`stopped` 或 `expired`；`of` 指问题或那条询问）。
+- `queued`（`typed`）和 `dequeued`（`of`）：对话回答任务期间发来的消息会被保留，`POST /api/sessions/{id}/turns` 以 200 返回 `queued` 回执而不是 409，并作为对话的下一轮运行；重启后也会运行，且只运行一次：用它的 `client_request_id`（或 melo 自己的键）已经开始的轮次不会再运行。消息只有存下之后才算接受；否则返回 503 `store_unavailable`，并有一条 `failed` 回执（`of` 指那条排队回执，带 `typed`）说明它没有发出。
+
+对话的内部轮次是带 `"origin": "ask_owner"` 的轮次（本人的轮次没有这个键，轮次记录和 `turn.started` 中都是如此），键入文字为空，用户文字就是那个问题。任务等待期间，任务的请求体带 `ask`：`{"ask_id", "chat_id", "chat_title", "on": "owner" | "person"}`，否则为 `null`。
 
 ## GET /api/sessions/{id}/events
 
@@ -523,6 +544,24 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 - 当客户端断开连接、会话不再存在（此时重连会得到 404），以及网关关闭时，流即结束。浏览器使用 `Last-Event-ID` 重连，并且恰好一次地收到它错过的每个事件。
 - worker 运行（CLI 文件中的会话）从 CLI 文件提供，帧、`after`、`follow` 和 `Last-Event-ID` 都相同。该文件由另一个进程写入，因此跟随的流约每秒读取一次，发送带 id 的新事件，并在运行不再持有有效租约且最后一个事件已发送后结束（会话对象中 `busy` 为 false）。没有有效租约的运行（例如崩溃后留下的）会被回放并立即结束。保活与对话相同；每个打开的流是该文件的一个读取者，客户端离开时关闭。
 - 终端对话以同样方式流式提供，并经过脱敏。当它的某个轮次在终端的租约下运行时它处于活动状态，因此该轮次结束时流也结束；请再次读取会话对象，查看是否有另一个轮次在运行。
+
+## GET /api/commands
+
+终端的斜杠命令，供控制台的 `/` 菜单和命令行使用。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/commands
+```
+
+```json
+{"commands": [{"name": "exit", "aliases": ["quit"], "args": "", "help": {"en": "Quit", "zh-Hans": "退出"},
+               "during_turn": true, "keys": "ctrl+d", "action": "exit"}, "..."],
+ "everyday": ["chats", "side", "main", "task", "answer", "retry", "..."]}
+```
+
+- 列表就是终端自己的命令表，顺序相同，所以终端里新增的命令会出现在这里。`help` 是 `en` 和 `zh-Hans` 的一行说明；`args` 是用法文字（`[name]`、`PATH`）；`keys` 是效果相同的按键。
+- `during_turn` 为 `true`（一轮运行时可用）、`false`（那时被拒绝）或 `"show"`（那时只有不带参数才可用）。`action` 是页面对该命令的处理；`everyday` 是 `/help` 先列出的命令。
+- 一条消息只有以 `/` 加小写名字开头、后面是空白或结尾时才是命令。页面自己运行命令，从不把它发给对话。
 
 ## GET /api/sessions/{id}/status
 
@@ -613,7 +652,8 @@ worker 运行或终端对话从 CLI 的文件读取。
 | 400 | `invalid_workspace` | 文件夹不是绝对路径或 `~/` 开头，已不再是目录，或者无法创建默认工作区 |
 | 400 | `text_rejected` | 检查器拒绝了消息文本，与 `/v1/agent/run` 请求的处理方式相同 |
 | 409 | `session_busy` | 该会话中已有轮次正在运行 |
-| 409 | `not_latest_turn` | 重试所指的轮次不是最新已结束的那一个 |
+| 409 | `not_latest_turn` | 重试或撤销所指的轮次不是最新已结束的那一个 |
+| 409 | `not_retryable` | 重试所指的轮次回答的是任务的提问 |
 | 409 | `submission_conflict` | 该 `client_request_id` 已用于另一条消息 |
 | 409 | `submission_withdrawn` | 该 `client_request_id` 在开始之前已被取消 |
 | 409 | `turn_not_running` | 取消所指的轮次并未在运行 |
@@ -683,6 +723,19 @@ worker 运行或终端对话从 CLI 的文件读取。
 - 该轮次被标记为已撤销——并发出一个 `turn.undone` 事件——它的文本会开始一个新的轮次，且没有 `client_request_id`。回答为 202，附带新的轮次，以及重放撤销所留下内容的那次打开的恢复键。
 - 任务会话返回 409 `task_session_read_only`；它不能作为对话重试。
 - 除非该 id 是最新的、已结束且未撤销的轮次，否则返回 409 `not_latest_turn`：丢失了某个轮次结束信息的客户端，应重试它所持有的那个 id。轮次运行期间返回 409 `session_busy`。
+- 回答任务提问的轮次（`origin` 为 `ask_owner`）返回 409 `not_retryable`：其中的话不是用户说的。
+
+## POST /api/sessions/{id}/undo
+
+忘掉最近一轮已结束的轮次（`/undo`）。它的文件改动保留。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/undo \
+  -H 'Content-Type: application/json' -d '{"turn_id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e"}'
+```
+
+- 回答为 200 `{"turn_id": "…", "undone": true}`。该轮次被标记为已撤销（发出 `turn.undone` 事件），Agent 的对话里不再有它，也不运行任何东西：之后不会有模型调用。
+- 错误与重试路由相同，只是措辞为撤销：任务会话返回 409 `task_session_read_only`，不是最新的、已结束且未撤销的轮次返回 409 `not_latest_turn`，轮次运行期间返回 409 `session_busy`。
 
 ## POST /api/turns/{turn_id}/cancel
 
@@ -736,6 +789,32 @@ worker 运行或终端对话从 CLI 的文件读取。
 - `reason` 只属于 `deny`，最多 500 个字符；与其他 choice 一起使用的 reason 会返回 400 `invalid_request`。
 - 未知或已过期的请求返回 404 `not_found`；已被答复的请求返回 409 `already_answered`，因此两个客户端竞争同一张卡片时，只会得到一个答复。
 - 审批保存在网关的内存中。网关停止时，等待某个审批的轮次会以 `cancelled` 结束，原因为 `shutdown`，且其卡片被保存为已撤回。
+
+<a id="a-tasks-approvals-go-through-its-chat"></a>
+
+### 任务的批准经过它的对话
+
+本人开始的任务，通过拥有它的对话（它的 `front_id`，否则是主对话）来问。在问任何人之前，代码先查这个对话记录的批准；是否匹配从不由模型决定。
+
+- **记录。** 本人在某个对话里、或在它的任务（`origin` 为 `user` 的任务）的审批中给出的每次允许，只要这次调用可以复用，就为这个对话记录下来：工具是 melo 的规则会读的（`python_exec`、`shell_exec`、`file_write`、`file_edit`），且规则自己判定为 `routine`、没有类别。Auto 的允许一次、定时事项里的允许，以及对话被删除之后才给出的允许，从不记录。记录只保存在网关内存里；重启或删除对话都会忘掉它们。等待中的审批的 `remembered` 由代码说明它的允许是否会被记录。
+- **匹配。** 当这个对话的某条记录与任务的这一步工具相同、步骤相同（Python 按语法树，命令按确切文本，文件写入按路径和内容，规则为它读过的文件没有变化）、文件夹相同，且这一步也可以复用时，这一步不再询问就运行，审批的 `origin` 为 `earlier`。对话会得到一条 `earlier` 回执，任务的 `earlier` 列出这一步（在记录被撤回之前 `live` 为 true）。对话的会话授权也覆盖它的任务对该工具的常规调用。使用对话记录或授权的任务，审查时会读这个对话开始以来改动过的所有文件，所以早先的任务写下的文件会在记录或授权放行一步之前被读到；读不到对话的开始时间时，两者都不适用，改为问本人。
+- **从不。** 高影响、`undecided`、由模型判定或未经审查的步骤，以及规则不读的工具（网络、MCP 和其他工具）的每次调用，每次都问；`origin` 不是 `user` 的任务（包括定时事项的 `user_rule`）既不使用也不记录批准；别的对话的记录从不算数；Auto 从不凭记录运行它拦下的步骤。通过 `POST /api/tasks` 创建的任务属于本人（`origin` 为 `user`），除非 `front_id` 指向别的对话，否则属于主对话。
+- **说明。** `origin` 为 `user` 或 `user_rule` 的任务问本人时，它的对话的模型会就这一步写几句话（一次请求，最多 20 秒，依据任务的标题和目标、这次调用以及审查的理由，从不读取工具的输出）。它是审批的 `explanation`：`{"state": "pending" | "ready" | "none", "text"}`；其他任务的为 `none`。没有任何东西会读回它；决定的是答复。
+
+## GET /api/approvals/{request_id}
+
+一个正在等待答复的审批，形状与它的卡片读取的相同，并带上它所属的会话。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/approvals/00dc8a67e4e8481ab4208074d4685cab
+```
+
+```json
+{"approval": {"request_id": "00dc8a67e4e8481ab4208074d4685cab", "call_id": "call_1", "tool_name": "python_exec", "arguments": {"code": "print(1)"}, "arguments_complete": true, "preview": "print(1)", "workspace_root": "/home/me/notes", "workspace_label": "~/notes", "target": null, "review": {"verdict": "routine", "title": "", "reasons": [], "categories": []}, "explanation": {"state": "ready", "text": "It prints a number to check the setup. Nothing outside the folder changes."}, "remembered": true, "session_id": "b79a99d86b50"}}
+```
+
+- 任务的审批带 `explanation`；对话的没有。两者都带 `remembered`，`GET /api/sessions/{id}` 和任务的 `pending_approvals` 里也有。
+- 已答复或未知的 id 返回 404 `not_found`。
 
 ## PATCH /api/sessions/{id}
 
@@ -792,6 +871,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 - 任务会话返回 409 `task_session_read_only`；它不能作为对话被删除。
 - 主对话返回 409 `main_chat`（`The main chat is always there: it cannot be deleted.`），并保持原样。
 - 204 且无响应体：该会话的行、轮次、事件和 blob 都已删除，它在记忆对话索引中的条目也已删除。melo 在这个对话里产生的笔记会保留（笔记比对话活得久，之后显示为 `from a deleted chat`）；`?notes=forget` 会一并忘记。`notes` 的其他取值返回 400。
+- 旁支对话没做完的任务和定时事项从此归主对话（它们的 `front_id` 变成主对话的），仍在等人答复的卡片会在主对话里重新写一张；已完成的任务保留原来的记录。
 - 在仍在进行的 security-1b 改动中，轮次运行或启动排队期间，409 `session_busy` 会拒绝删除；它不会取消该轮次，也不会删除其行。请取消或等待它结束，然后重试。持有会话锁的维护操作也可能短暂地返回该错误，即使没有轮次在运行；请等待后重试。
 - 未知会话返回 404 `not_found`。
 
@@ -837,8 +917,10 @@ worker 运行或终端对话从 CLI 的文件读取。
 ```
 
 ```json
-{"tools": [{"name": "python_exec", "description": "Run Python code ...", "parameters": {"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]}, "source": "builtin", "requires_approval": true, "granted": false}], "mcp_config_label": "", "mcp_error": "MCP is not built in the console yet"}
+{"tools": [{"name": "python_exec", "description": "Run Python code ...", "parameters": {"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]}, "source": "builtin", "requires_approval": true, "granted": false}], "approvals": [{"id": "763fa9e3c647", "tool": "python_exec", "folder": "/home/me/notes", "verdict": "routine", "categories": [], "preview": "print(1)", "at": 1793482098.376}], "mcp_config_label": "", "mcp_error": "MCP is not built in the console yet"}
 ```
+
+- `approvals` 是本人在这个对话里允许过的步骤，从新到旧，它的任务会不再询问就再次运行它们（[任务的批准](#a-tasks-approvals-go-through-its-chat)）。
 
 - `source` 为 `builtin`、`provided`（MCP 服务器的工具）或 `custom`。`requires_approval` 表示调用它之前会先询问；`granted` 表示本会话在网关本次运行的剩余时间内允许它。
 - 控制台会话处于网关模式：它列出 `file_read`、`file_write`、`list_files` 和 `python_exec`，从不列出 `shell_exec`。
@@ -856,6 +938,17 @@ worker 运行或终端对话从 CLI 的文件读取。
 
 - 204 且无响应体；`GET /api/sessions/{id}` 的 `grants` 和 `granted_at` 都会去掉它。
 - 会话未打开或该工具没有授权时返回 404 `not_found`。`DELETE /api/sessions/{id}/grants` 不带工具名时，会忘记每一项授权，并返回 204，无论会话是否打开。
+
+## DELETE /api/sessions/{id}/approvals/{entry_id}
+
+收回对话的一条批准记录，使这一步下次再次询问。已经凭它运行的不会撤销。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X DELETE http://127.0.0.1:8401/api/sessions/9b57aff256d5/approvals/763fa9e3c647
+```
+
+- 204 且无响应体；任务的 `earlier` 中对应的一项变为 `"live": false`。
+- 对话没有这条记录（已撤回，或重启后已忘记）时返回 404 `not_found`。
 
 ## GET /api/sessions/{id}/memory
 
@@ -905,7 +998,7 @@ melo 对用户保存的笔记，以及打开或关闭跨对话记忆的开关（
 ```
 
 ```json
-{"batch_id": "e86b19186930", "sources": [{"id": "claude-35bc414c", "harness": "claude", "path": "/home/me/.claude/CLAUDE.md", "scope": "user", "workspace": "", "items_found": 3, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 1}, "sample": ["Use uv for new Python projects.", "Keep commits small and focused on one change."]}, {"id": "hermes-2e22e64e", "harness": "hermes", "path": "/home/me/.hermes/memories/USER.md", "scope": "user", "workspace": "", "items_found": 2, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 0}, "sample": ["Prefers concise replies.", "The user is a PhD student in robotics."]}], "partial": false}
+{"batch_id": "e86b19186930", "sources": [{"id": "claude-35bc414c", "harness": "claude", "path": "/home/me/.claude/CLAUDE.md", "scope": "user", "workspace": "", "items_found": 3, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 1}, "sample": ["Use uv for new Python projects.", "Keep commits small and focused on one change."]}, {"id": "hermes-2e22e64e", "harness": "hermes", "path": "/home/me/.hermes/memories/USER.md", "scope": "user", "workspace": "", "items_found": 2, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 0}, "sample": ["Prefers concise replies.", "The user is a PhD student in robotics."]}], "partial": false, "home": "/home/me"}
 ```
 
 ```bash
@@ -916,11 +1009,12 @@ melo 对用户保存的笔记，以及打开或关闭跨对话记忆的开关（
 {"batch_id": "e86b19186930", "written_ids": [1, 2], "skipped": 0, "event": {"type": "memory.import", "data": {"batch_id": "e86b19186930", "sources": [{"id": "claude-35bc414c", "harness": "claude", "written": 2}]}}}
 ```
 
-- `GET /api/memory/import/scan` 列出扫描结果；`sources` 只包含有内容的文件。`harness` 是该文件所属助手的小写名称（`claude`、`hermes`……），`path` 是文件的绝对路径（笔记文件夹则是该文件夹），`workspace` 是笔记文件夹所属的项目文件夹（否则为 `""`）。`items_found` 是行数，`items_kept` 是会成为笔记的行数（最多 60），`filtered` 按原因给出被舍弃的行数：`secret`、`third_party`（他人的私人信息）、`wrong_owner`、`duplicate` 和 `mechanics`（关于其他工具本身的行）。`sample` 最多 3 条笔记。扫描在 2 秒限制处停止时 `partial` 为 true。
+- `GET /api/memory/import/scan` 列出扫描结果；`sources` 只包含有内容的文件。`harness` 是该文件所属助手的小写名称（`claude`、`hermes`……），`path` 是文件的绝对路径（笔记文件夹则是该文件夹），`workspace` 是笔记文件夹所属的项目文件夹（否则为 `""`）。`items_found` 是行数，`items_kept` 是会成为笔记的行数（最多 60），`filtered` 按原因给出被舍弃的行数：`secret`、`third_party`（他人的私人信息）、`wrong_owner`、`duplicate` 和 `mechanics`（关于其他工具本身的行）。`sample` 最多 3 条笔记。扫描在 2 秒限制处停止时 `partial` 为 true。`home` 是用户的主文件夹，客户端据此把 `path` 写成 `~/…`。
 - `POST /api/memory/import` 写入所选 `source_ids` 的笔记（一批最多 300 条），返回新笔记的 id；`skipped` 统计这些来源中没有写入的笔记（已经是笔记、超过批次上限，或该来源已写入过）。扫描已不存在（网关保留最近四次）时返回 404 `not_found`；来源 id 未知或记忆已关闭时返回 400 `invalid_request`。
+- `GET /api/memory/import/offer` 在记忆开启、且这台电脑上从未提议过导入笔记时返回 `{"pending": true}`；首次运行的卡片先问它，再扫描。对它发 `DELETE` 记下“暂不”，返回 `{"pending": false}`；记录无法写入时返回 `{"pending": true}`（提议仍然有效）。写入笔记（`POST /api/memory/import`）也算提议已经做过，扫描不算。记录是记忆文件夹里的 `import_offer.json`，控制台、App 和终端共用。
 - `memory.import` 事件（`batch_id`，以及每个来源的 `id`、`harness`、`written`）放在响应的 `event` 里：记忆没有可用来发送它的会话通道。
-- `DELETE /api/memory/import/{batch_id}` 收回整批：删除它的笔记，让被它们取代的笔记重新生效，并返回 `{"batch_id": "e86b19186930", "removed": 2}`；没有剩余笔记的批次返回 404 `not_found`。
-- 它写入的笔记会在 `GET /api/memory/records` 中显示 `imported` 为 true、带 `batch_id`，`source` 形如 `imported from the file CLAUDE.md, Oct 31`。
+- `DELETE /api/memory/import/{batch_id}` 收回整批：删除它的笔记，让被它们取代的笔记重新生效，并返回 `{"batch_id": "e86b19186930", "removed": 2}`。用户之后改写过的笔记会保留（它已经是用户自己的了）；此时返回里还有 `"kept": 1`（这类笔记的数量），且只在这时才有。既没有可收回的笔记、也没有保留的笔记的批次返回 404 `not_found`。
+- 它写入的笔记会在 `GET /api/memory/records` 中显示 `imported` 为 true、带 `batch_id`，`source` 形如 `imported from the file CLAUDE.md, Oct 31`；它的 `from` 用读者的语言写成 `from the file CLAUDE.md, Oct 31`（中文是“来自文件 CLAUDE.md，10月31日”）。
 
 ## GET /api/sessions/{id}/runs
 

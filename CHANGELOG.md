@@ -40,12 +40,120 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   Sleep undo preserves inactive history without recalling or listing it;
   explicit user forgetting still physically erases that history and linked
   versions. No export or training is implemented. Part of #363. [#NN]
+- A task's approvals go through the chat that started it, and the same
+  approved step is not asked twice. A task's step that needs you shows in its
+  chat's card with the whole approval card, and, for your own tasks and
+  chores, **melo's explanation** under the step says what the task is doing,
+  why it needs the step, what could go wrong and what each answer does; it
+  decides nothing. Once you allowed a step in a chat or one of its tasks,
+  that chat's later tasks run the exact same Python code, shell command or
+  file write (same folder, nothing melo read for it changed) without asking,
+  when melo's rules read the whole step and found it routine; the card says
+  so, and the chat shows `Used your approval from 2:02 PM` with **Revoke**.
+  "Allow for this chat" covers the chat's tasks too. High-impact steps, steps
+  melo could not see all of, tools its rules do not read (web or MCP tools),
+  chores and tasks you did not start always ask, and Auto's Allow once is
+  never remembered. A step Auto blocked in a task shows in its chat with
+  **Allow once**. The task's page and the chat's Details list what ran this
+  way, with Revoke. Part of #369. [#385]
+- A short, read-only setup preview when terminal first run finds no model
+  server: the recommendation, download/cache amounts and free space.
+  `Details` keeps versions, paths and checksums out of the default view. Setup checks have a time limit and manual fallback; pipes include a
+  usable manual guide. Already saved a backend? With no server found, setup
+  keeps the full backend menu. The summary is printed once; the list then offers
+  **Check again**, **Show how to set one up** (at most six plain numbered steps:
+  download oMLX, move it to Applications, download the model, start the server,
+  then enter its address in melo), **Enter an address** and **Quit**. Automatic
+  setup is coming soon. Nothing installs, downloads, starts or saves, and direct
+  runs and existing connections are unchanged. Developer mode keeps the review
+  menu with **Details**. [#383]
+
+- A task starts with what its chat knows about you and the project. When the
+  task is made, the notes about you and your preferences, the notes of its
+  folder and those that match its request are kept with the task and given to
+  its first request, under a heading that says they are information, not
+  instructions. A continue or a restart uses the same lines; memory off, or
+  nothing matching, starts the task without them. The task page folds them
+  under "What melo told the task". Part of #369. [#382]
+- Every slash command of the terminal works in the web console and the app.
+  Typing `/` at the start of the message box opens a menu above it that
+  narrows as you type (arrows and Enter or Tab, Esc, or a click; a command
+  without arguments runs on Enter), in English or Chinese. A command is never
+  sent to the model: `/model NAME` and `/backend URL` save through the
+  settings, `/new`, `/clear` and `/side TITLE` open a new chat, `/chats`,
+  `/sessions` and `/resume` pick one, `/main` goes back, `/status`, `/usage`,
+  `/progress`, `/help`, `/approvals` and `/browser` answer in a row under the
+  conversation, `/undo`, `/retry`, `/copy`, `/title`, `/memory` and `/expand`
+  act on the chat, `/verbose`, `/thinking` and `/stream` change how the page
+  shows it, and `/exit` asks, then quits the app (in a browser tab it says to
+  close the tab). `/task` and `/answer` go to the open chat as before. An
+  unknown command says so; `//text` and a message that starts with a space are
+  messages, as in the terminal. `/attach`, `/attachments`, `/detach` and `/mcp`
+  say the console does not have files or MCP yet. New for clients:
+  `GET /api/commands` (the terminal's table, so the two never drift),
+  `POST /api/sessions/{id}/undo` and `browser` on `PUT /api/settings`.
+  [#381]
+- A task that is stuck asks the chat that started it instead of stopping. Its
+  question shows there (`Task “Fix tests” asks…`, with the background, the
+  problem, the options and the help it needs), and melo answers it when the
+  chat is free (`melo answered “Fix tests”`), using the chat's tools and
+  memory, or asks you with the choices and their trade-offs and a box for your
+  answer (`“Fix tests” needs your answer`). The task waits without taking a
+  model slot: `Waiting on Main chat`, or `Waiting on you`. A message you send
+  while melo answers is queued and runs next, once, even after a restart, a
+  question with no answer in 10 minutes lets the task go on with its best
+  option, and melo's answer never approves a step. A task's words are never
+  taken as yours: they allow no blocked step, are never remembered as
+  something you said, and the turn that answers them cannot be retried.
+  Deleting a chat moves its open questions to the main chat. The terminal
+  shows the same rows: `Task “Fix tests” asks: …`, melo's answer, then `melo
+  answered` or `needs your answer`. melo's answer is kept as the task's
+  exchange, which later chats can recall, never as a note. When only one task
+  waits for you in a chat, you can just send your answer as a message (`Sent
+  to “Fix tests” as your answer`, with Undo for 10 seconds); with several,
+  `/answer Fix tests: B`, in the console and the terminal. The chat's
+  `task_get` now reads a running task live. [#379]
+- Side chats start tasks too. A side chat has the main chat's task tools and
+  code words (`/task …`, **Run as a task**, `pause the slides`, chores and
+  reminders), the same priorities and the same scheduler. A task belongs to the
+  chat that started it: its line, card, approvals, result and news come back to
+  that chat, and a chat acts on its own tasks first, then on the other chats'
+  (the line says whose). The main chat's Activity still lists every task and
+  names the side chat on the ones it did not start (`From Trip plan`), and its
+  next message reads one line when a side chat finished work. A side chat whose
+  task waits for you gets the dot on its row, and the main chat's row counts
+  them (`1 waiting in a side chat`). The terminal's `/task` works in a side
+  chat too. A chat's words reach its own tasks first and another chat's only
+  when they fit none of its own; words that fit several ask which with a
+  one-tap suggestion for each. Deleting a side chat hands its unfinished tasks,
+  chores and waiting approvals to the main chat. Starting a chat with **Run as
+  a task** through the API is a submission like any other: the same
+  `client_request_id` returns the same chat and task, a cancelled key makes
+  none, and its cancel stops the task. [#378]
+- On first run, melo offers to bring in what your other assistants already
+  know about you, so it knows you from your first message. The main chat shows
+  one card with a row per file (`~/.claude/CLAUDE.md`, how many notes, the
+  sample lines and what was left out); **Bring them in** writes the checked
+  files, **Undo** takes the batch back (a note you edited since stays, and the card
+  says how many), **Not now** ends the offer for good.
+  The terminal asks the same as a list (`Bring in 12 notes from 2 files`,
+  `Show what they say`, `Not now`; the list starts on `Show what they say`) on
+  the first interactive run, and later with `/memory import` or
+  `melo memory import` (`--undo BATCH` takes a batch back). Esc, ctrl+c and end
+  of input leave without recording an answer, so the offer comes again. In the
+  console and the app, `/memory import` opens the Memory tab and looks for notes.
+  The Memory tab gets **From other assistants** (**Look for notes**, and each
+  batch with its own **Undo**), and an imported note says which file it came
+  from. Nothing is brought in until you choose; a task run never asks. New:
+  `GET` and `DELETE /api/memory/import/offer`, `home` in the scan and `kept` in
+  an undo's answer. Part of
+  #364. [#384]
 - A task can start with a short memory pack, a side chat's summary can be
   recalled from other chats, and a task's questions to its owner chat are kept
   apart from your notes: the pack holds your About you and Preferences notes,
   the project's notes and the notes that match the objective (never People or
   Decisions); a question from a task is agent data that no note is written
-  from. Nothing calls these yet. Part of #369. [#374]
+  from. The summaries are not called yet. Part of #369. [#374]
 - Bring in what other coding assistants on this computer remember. A scan
   (`GET /api/memory/import/scan`) reads the instruction and memory files they
   keep under your home folder (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`,
@@ -105,6 +213,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- A task the model proposes starts only when your message is a request for
+  work, and then your own message is the task; otherwise the chat shows `Start
+  this as a task?` with your own message, in the main chat and in side chats.
+  The news a chat reads with its next message is told once per task ending and
+  per side chat, five at a time with the rest on the following message, and
+  survives a gateway restart. A request you forbid or only quote (`don't delete
+  a.md`, `不要删除 a.md`) is never read as work, in the main chat's routing too. [#378]
 - A question that asks for a short answer ("briefly", "in one line", a Chinese
   "简单说") gets at most two steps, not four, before its stop answer. A task's
   title drops a level word that opens its request and is followed by a colon or
@@ -3151,3 +3266,10 @@ earlier milestones.
 [#371]: https://github.com/localmelo/localmelo/pull/371
 [#372]: https://github.com/localmelo/localmelo/pull/372
 [#374]: https://github.com/localmelo/localmelo/pull/374
+[#378]: https://github.com/localmelo/localmelo/pull/378
+[#379]: https://github.com/localmelo/localmelo/pull/379
+[#381]: https://github.com/localmelo/localmelo/pull/381
+[#382]: https://github.com/localmelo/localmelo/pull/382
+[#383]: https://github.com/localmelo/localmelo/pull/383
+[#384]: https://github.com/localmelo/localmelo/pull/384
+[#385]: https://github.com/localmelo/localmelo/pull/385

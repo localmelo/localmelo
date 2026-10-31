@@ -3,7 +3,8 @@
 ``list`` prints them newest first; ``forget [ID]`` forgets one note, or every note
 and the index of every chat, after a question; ``status`` says what is on and how
 much is kept; ``reindex`` rebuilds the chat index and gives every note a vector of
-the embedding model now set. The files are shared with the web console and the app.
+the embedding model now set; ``import`` offers the notes other assistants keep
+(``--undo BATCH`` takes a batch back). The files are shared with the web console and the app.
 ``sleep [VARIANT]`` (developer mode only) tidies the notes by the ``[memory] sleep``
 variant and prints what it changed.
 """
@@ -27,7 +28,7 @@ from localmelo.support.sessions.store import (
     default_path,
 )
 
-VERBS = ("list", "forget", "status", "reindex", "sleep")
+VERBS = ("list", "forget", "status", "reindex", "import", "sleep")
 
 
 def note_origin(entry: StoredEntry) -> str:
@@ -220,6 +221,12 @@ def main(argv: Sequence[str], prog: str = "melo memory") -> int:
     forget.add_argument("-y", "--yes", action="store_true", help="do not ask")
     verbs.add_parser("status", help="what is on and how much is kept")
     verbs.add_parser("reindex", help="rebuild the chat index from the chats")
+    bring = verbs.add_parser(
+        "import", help="bring in the notes other assistants keep, after a question"
+    )
+    bring.add_argument(
+        "-u", "--undo", metavar="BATCH", help="take back the notes of an earlier import"
+    )
     try:
         developer = config.load().ui.mode == "developer"
     except Exception:  # a broken config file must not stop the other verbs
@@ -239,4 +246,8 @@ def main(argv: Sequence[str], prog: str = "melo memory") -> int:
         return asyncio.run(_status())
     if args.verb == "sleep":
         return asyncio.run(_sleep(args.variant))
+    if args.verb == "import":
+        from localmelo.support.cli import memory_import
+
+        return memory_import.command(args.undo)
     return asyncio.run(_reindex())

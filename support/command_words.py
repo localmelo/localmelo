@@ -45,14 +45,16 @@ _HELP = {
         "melo config keys recall",
     ),
     "memory": (
-        "melo memory [list [-n N] | forget [ID] [-y] | status | reindex]",
+        "melo memory [list [-n N] | forget [ID] [-y] | status | reindex | import]",
         "See and change the notes melo keeps about you, which the web console and the\n"
         "app list in their Memory tab. list prints them newest first; forget removes\n"
         "one note, or every note and the chat index after a question; status says what\n"
         "is on; reindex rebuilds the chat index and gives notes a vector of the\n"
-        "embedding model now set.",
+        "embedding model now set; import offers the notes other assistants keep on\n"
+        "this Mac, after a question.",
         "  -n N            list: only the newest N\n"
-        "  -y, --yes       forget: do not ask",
+        "  -y, --yes       forget: do not ask\n"
+        "  -u, --undo ID   import: take back an earlier import",
         "melo memory list",
     ),
     "serve": (

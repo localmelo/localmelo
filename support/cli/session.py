@@ -502,24 +502,27 @@ class CliSession:
     def _main_chat_command(
         self, command: commands.Command | None, name: str, arguments: str, text: str
     ) -> tuple[commands.Command | None, str, str] | str | None:
-        """A command in the main chat: sent, refused, renamed or left as it is.
+        """A command in the main chat or a side chat: sent, refused, renamed or left as it is.
 
-        ``/task …`` goes to the main chat as a message (its rule starts a
-        task); ``/new`` and ``/clear`` start a side chat; a command of the
-        terminal's own chat says so. A string is the hint that keeps the draft.
+        ``/task …`` goes to the open chat as a message (its rule starts a
+        task that chat owns); ``/new`` and ``/clear`` start a side chat; a
+        command of the terminal's own chat says so. A string is the hint that
+        keeps the draft.
         """
         assert self.remote is not None
-        if command is not None and command.name == "task":
-            if not self.remote.chat.main:
+        if command is not None and command.name in ("task", "answer"):
+            chat = self.remote.chat
+            if not chat.main and chat.id is None:
+                # A side chat its first message has not made yet has no tasks to own.
                 self.out.print(
                     self._text(
-                        "Tasks start from the main chat: /main, then /task …",
+                        "Send this chat's first message first, then /task …",
                         style="error",
                     )
                 )
                 return None
             if self._state != "idle":
-                return "/task is not available while a turn runs (esc stops it)."
+                return f"/{name} is not available while a turn runs (esc stops it)."
             self.submit(text)
             return None
         if command is not None and command.name in ("new", "clear"):
@@ -729,13 +732,16 @@ class CliSession:
             failed=error is not None,
         )
 
-    def follow_turn(self, text: str) -> bool:
-        """Draw a turn of the open chat that another window sent; False when busy."""
+    def follow_turn(self, text: str, *, echo: bool = True) -> bool:
+        """Draw a turn of the open chat that another window sent; False when busy.
+
+        Without *echo*, its text is not shown (a task's question, #369).
+        """
         if self._state != "idle" or self._closed or self.remote is None:
             return False
         self._state = "running"
         self._stop_wanted = self._stop_landed = False
-        self.renderer.begin_turn(text)
+        self.renderer.begin_turn(text, echo=echo)
         self._work = self.spawn(self._remote_turn(text, typed=False))
         if self.app is not None:
             self.app.invalidate()
@@ -932,7 +938,7 @@ class CliSession:
                     main_chat=self.remote is not None,
                 )
             )
-        elif name in ("chats", "side", "main", "task"):
+        elif name in ("chats", "side", "main", "task", "answer"):
             await self._chats_command(name, arguments)
         elif name == "attach":
             await self._attach_file(arguments)
@@ -1014,7 +1020,7 @@ class CliSession:
                     style="muted",
                 )
             )
-        elif name == "task":
+        elif name in ("task", "answer"):
             pass  # sent as a message (see _main_chat_command)
         elif name == "chats":
             await remote.pick()

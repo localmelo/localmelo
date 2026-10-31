@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -28,12 +29,22 @@ from fastapi.responses import JSONResponse
 from starlette.routing import Match
 
 from localmelo.support.gateway.chat_gate import ChatGate, call_log_dir
-from localmelo.support.gateway.i18n import LANGUAGES, LanguageMiddleware, t
+from localmelo.support.gateway.i18n import (
+    LANGUAGES,
+    LanguageMiddleware,
+    said,
+    t,
+    t_in,
+)
 from localmelo.support.gateway.machine_monitor import MachineMonitor, read_pmset
 from localmelo.support.gateway.workers import TaskWorkers
 from localmelo.support.memory import ChatMemory
 from localmelo.support.sessions import display
-from localmelo.support.sessions.approvals import ApprovalBroker
+from localmelo.support.sessions.approvals import (
+    ApprovalBroker,
+    ApprovalLedger,
+    ApprovalUse,
+)
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.store import (
     FAILED_ERROR,
@@ -50,6 +61,7 @@ from . import (
     errors,
     front,
     routes_chores,
+    routes_commands,
     routes_details,
     routes_memory,
     routes_page,
@@ -60,12 +72,14 @@ from . import (
     routes_tasks,
     routes_turns,
 )
-from .cards import MainChatCards
+from .asks import OwnerAsks
+from .cards import CARD_EVENT, MainChatCards
 from .chores import ChoreOptions, ChoreRunner
 from .errors import ApiError
-from .front import Front, FrontAgent, build_front_agent
+from .explain import Explainer, Explanations
+from .front import Front, FrontAgent, SideAgent, build_front_agent
 from .probe import ModelServerProbe, Probe
-from .registry import SWEEP_INTERVAL_S, AgentBuilder, ConsoleSessions
+from .registry import SWEEP_INTERVAL_S, AgentBuilder, ConsoleSessions, default_builder
 from .shapes import session_json
 from .worker_reader import WorkerReader
 
@@ -74,6 +88,7 @@ if TYPE_CHECKING:
 
     from localmelo.melo.agent import Agent
     from localmelo.support.config import Config
+    from localmelo.support.gateway.task_store import TaskRecord
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +145,9 @@ class ConsoleOptions:
     # The reply that names a task the main chat starts without a title of its own;
     # None asks the model. A test passes one, so no request leaves the machine.
     titler: Callable[[str], Awaitable[str]] | None = None
+    # Writes melo's explanation of a task's approval; None asks the model.
+    # A test passes one, so no request leaves the machine.
+    explainer: Explainer | None = None
 
 
 class Console:
@@ -157,15 +175,20 @@ class Console:
         self._monitor = None if self.options.gate is not None else self._build_monitor()
         self.memory = ChatMemory(lambda: self.cfg, directory=self.options.memory_dir)
         self.front = Front(self)
+        # The side chats' fronts, made when a chat first needs one.
+        self._side_fronts: dict[str, Front] = {}
         own_front = self.options.front_builder or not self.options.builder
+        # The person's Allows per chat, which the chat's tasks use (#369).
+        self.approvals = ApprovalLedger()
         self.sessions = ConsoleSessions(
             self.store,
             self.broker,
             lambda: self.cfg,
-            builder=self.options.builder,
+            builder=self.options.builder or self._side_agent,
             front_builder=self._front_agent if own_front else None,
             gate=self.gate,
             memory=self.memory,
+            ledger=self.approvals,
         )
         self.workers = TaskWorkers(
             self.store,
@@ -174,7 +197,17 @@ class Console:
             self.hub,
             broker=self.broker,
             memory=self.memory,
+            ledger=self.approvals,
         )
+        # A task asks the chat that started it when it is stuck (#369).
+        self.asks = OwnerAsks(self)
+        self.workers.owner = self.asks
+        # A task's approvals go through its chat (#369): its chat's recorded
+        # approvals first, then the person, with melo's explanation.
+        self.explanations = Explanations(self)
+        self.workers.chat_of = self.effective_owner
+        self.workers.on_earlier = self._used_earlier
+        self.workers.on_ask = self.explanations.start
         self.probe: Probe = self.options.probe or ModelServerProbe(cfg)
         # The one main chat of the store's file, once it is open; and the
         # cards that come back to it from side chats and tasks.
@@ -241,6 +274,122 @@ class Console:
             agent.front = self.front
         return agent
 
+    def front_for(self, chat_id: str | None) -> Front:
+        """The front of a chat: the main chat's (``None``), or the side chat *chat_id*'s."""
+        if chat_id is None or chat_id == self.main_id:
+            return self.front
+        front = self._side_fronts.get(chat_id)
+        if front is None:
+            front = self._side_fronts[chat_id] = Front(self, chat_id)
+        return front
+
+    async def forget_front(self, chat_id: str) -> None:
+        """Drop a deleted side chat's front."""
+        front = self._side_fronts.pop(chat_id, None)
+        if front is not None:
+            await front.aclose()
+
+    async def effective_owner(self, front_id: str | None) -> str | None:
+        """The chat that owns work *front_id* started, as things stand: that chat while it exists, else the main chat.
+
+        The one answer cards, news and the selection of a task all use, so a
+        task whose chat went (and not yet rehomed, or ended while it went)
+        belongs to the main chat everywhere.
+        """
+        main = self.main_id
+        if not front_id or front_id == main:
+            return main
+        try:
+            info = await self.store.get_session(front_id)
+        except SessionStoreError:
+            return front_id  # unreadable: leave it where it was
+        return front_id if info is not None and info.kind == "chat" else main
+
+    async def effective(self, records: list[TaskRecord]) -> list[TaskRecord]:
+        """*records* with each task's ``front_id`` its :meth:`effective_owner`."""
+        owners: dict[str | None, str | None] = {}
+        found = []
+        for record in records:
+            if record.front_id not in owners:
+                owners[record.front_id] = await self.effective_owner(record.front_id)
+            owner = owners[record.front_id]
+            found.append(
+                record
+                if owner == record.front_id or not record.front_id
+                else dataclasses.replace(record, front_id=owner)
+            )
+        return found
+
+    async def _used_earlier(self, use: ApprovalUse) -> None:
+        """A task's step ran on the person's earlier approval: its chat says so, with Revoke."""
+        record = await self.workers.tasks.get_task(use.task_id)
+        clock = time.strftime("%H:%M", time.localtime(use.approved_at))
+        await self.front_for(use.chat_id).echo(
+            {
+                "echo": "earlier",
+                "task_id": use.task_id,
+                "title": record.title,
+                "entry_id": use.entry_id,
+                "approved_at": use.approved_at,
+                "preview": use.preview,
+                "line": t_in("en", "approvals.used", time=clock),
+                "said": said("approvals.used", time=clock),
+            }
+        )
+
+    async def delete_chat(self, chat_id: str, *, forget_notes: bool = False) -> None:
+        """Delete side chat *chat_id*; its unfinished work and waiting cards are the main chat's.
+
+        One transition, held against the cards: no card is written while it runs,
+        so none is lost with the chat, and what is delivered meanwhile is written
+        to the main chat after it. The chat's unfinished tasks, and the ones that
+        end meanwhile, become the main chat's (a finished one keeps its record), so
+        their cards and their news agree; so do its chores and the approvals that
+        still wait for the person, on a card written again in the main chat.
+        """
+        main = self.main_id
+        async with self.cards.holding():
+            waiting = await self.cards.waiting_in(chat_id)
+            going = await self.workers.tasks.unfinished(chat_id)
+            await self.sessions.delete(chat_id, forget_notes=forget_notes)
+            moved = set(await self.workers.tasks.rehome(chat_id, main, also=going))
+            await self.chore_runner.store.rehome(chat_id, main)
+            pending = {
+                request.request_id
+                for task_id in moved
+                for request in self.broker.pending(task_id)
+            }
+            for card in waiting:
+                if main is not None and card.get("request_id") in pending:
+                    await self.store.append_session_event(main, CARD_EVENT, card)
+        try:
+            # Its tasks' open questions go to the main chat too (#369).
+            await self.asks.hand_over(chat_id)
+        except Exception:
+            logger.exception("Could not move a deleted chat's open questions")
+        await self.forget_front(chat_id)
+        # The Allows given in it go with it: its tasks ask the main chat's.
+        self.approvals.drop(chat_id)
+
+    async def _side_agent(
+        self, settings: Config, workspace: str, mcp_config: str | None, session_id: str
+    ) -> Agent:
+        """A side chat's Agent: the full agent loop with the task tools of its own front."""
+        front = self.front_for(session_id)
+        agent = await default_builder(
+            settings,
+            workspace,
+            mcp_config,
+            session_id,
+            gate=self.gate,
+            memory=self.memory,
+            tools=[front.tools],
+            agent_class=SideAgent,
+        )
+        if isinstance(agent, FrontAgent):
+            agent.front = front
+        return agent
+
     # ── The gate ──
 
     def _build_gate(self) -> ChatGate:
@@ -302,6 +451,7 @@ class Console:
         routes_memory.add_routes(app, self)
         routes_tasks.add_routes(app, self)
         routes_chores.add_routes(app, self)
+        routes_commands.add_routes(app, self)
         front.add_routes(app, self)
         activity.add_routes(app, self)
         _add_not_found(app)
@@ -332,6 +482,13 @@ class Console:
             self.main_id = main.id
             self.workers.front_id = main.id
             await self.cards.start(main.id)
+            try:
+                await self.asks.expire_stale()
+                await self.asks.restore_queued()
+            except Exception:
+                logger.exception(
+                    "Could not end the asks or run the queue of the last run"
+                )
             self.chore_runner.start()
         except SessionStoreError as exc:
             self._store_ok = False
@@ -402,7 +559,9 @@ class Console:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         await self.chore_runner.aclose()
-        await self.front.aclose()
+        await self.explanations.aclose()
+        for each in (self.front, *self._side_fronts.values()):
+            await each.aclose()
         if self._monitor is not None:
             with contextlib.suppress(Exception):
                 await self._monitor.stop()
@@ -410,6 +569,8 @@ class Console:
             try:
                 await self.workers.aclose()
             finally:
+                # The rows of the asks the close stopped land before the store closes.
+                await self.asks.aclose()
                 with contextlib.suppress(Exception):
                     await self.cards.flush()
                 await self.sessions.close_all()

@@ -311,6 +311,14 @@ class ChoreStore:
             )  # fmt: skip
             return cursor.rowcount == 1
 
+    async def rehome(self, front_id: str, to: str | None) -> int:
+        """Hand the chores of chat *front_id* to chat *to*; how many."""
+        async with self._store.component_transaction("chore_rehome") as conn:
+            cursor = await conn.execute(
+                "UPDATE chores SET front_id = ? WHERE front_id = ?", (to, front_id)
+            )
+            return cursor.rowcount
+
     async def mark_reported(self, reported: dict[str, str]) -> None:
         """Record that the check-in told the person about each chore's run (``chore_id -> task_id``)."""
         async with self._store.component_transaction("chore_reported") as conn:

@@ -204,13 +204,21 @@ Try: What is this project? · / commands · ctrl+d quit
 
 The first row shows the package version, and on a git checkout the short commit, as in `melo 0.1.0 (baab21e)`; `melo --version` prints the same line and exits 0. `/status` checks that the model answers and shows the folder, session, approvals and context use; `/status all` adds the tools, memory, limits and files.
 
-With no model server running, `melo` prints this computer's commands for
-starting one (oMLX on a Mac, Ollama elsewhere, the ones in the
-[model servers guide](../guides/model-servers.md)) and asks
-`No model server found. What now?` with `Check again`, `Enter an address` and
-`Quit` (piped: `Press Enter to check again, type an address, or q to quit:`).
-Start the server in another terminal, then choose `Check again`; melo installs
-and starts nothing itself.
+With no backend saved and no model server running, first-run `melo` and
+`melo setup` show a short, read-only preview: the recommendation, download upper
+bound, cached amount and free disk space. On supported
+Apple-silicon Macs the recommendation is oMLX with Qwen3 4B Instruct. The
+summary is printed once. Choose `Show how to set one up` for at most six
+numbered steps: download oMLX, move it to Applications, download the model,
+start the server, then `Enter an address` in melo. Automatic setup is coming
+soon, and nothing installs, downloads, starts or saves. Developer mode keeps
+the detailed view and a review menu with `Details` for exact versions, paths and
+checksums.
+Pipes retain `Press Enter to check again, type an address, or q to quit:`;
+other systems keep their platform's manual-server guidance. Start the server
+yourself and enter its address: the suggested high port is outside default
+discovery. [Model servers](../guides/model-servers.md#setup-preview) explains
+the manual path. Existing connections and direct tasks are unchanged.
 
 If the server also lists an embedding model, the first run adds one question,
 `Remember across chats with <model>?`, and `Yes, with it` (selected first) saves it
@@ -274,9 +282,9 @@ Ctrl+D. Then `melo serve` starts the gateway on `http://127.0.0.1:8401`, and
 it keeps running in this terminal. In default mode `melo setup` starts with the
 first run's question: it prints `Found a model server at …` and asks
 `Use this model server?`. The full menu above follows only after
-`Use another server`, in developer mode, or when no server is found while a
-backend is saved; with nothing saved, it prints the commands that start a
-server instead.
+`Use another server` or in developer mode. With none found and a backend already
+saved, it shows the full backend menu; with nothing saved, it shows the read-only
+setup preview.
 
 ## Start the gateway
 

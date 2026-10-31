@@ -7,11 +7,12 @@ import os
 import sys
 import textwrap
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from localmelo.support import config
 from localmelo.support.backends import discovery
 from localmelo.support.onboard_probe import ProbeError, probe_chat, probe_embedding
+from localmelo.support.server_setup import plan as server_setup
 
 
 def _ask(prompt: str, default: str = "") -> str:
@@ -275,8 +276,9 @@ def run_backend_setup(*, guided: bool = False) -> config.Config | None:
     """Run the split backend setup flow.
 
     With *guided* (default mode's ``--reconfigure``), a model server found on
-    this machine is offered first, as the first run does; the full menu below
-    follows only when none is found or the user declines it.
+    this machine is offered first, as the first run does. With no server, only
+    a fresh setup shows the read-only preview; a saved backend uses the full menu.
+    The full menu also follows a declined/unusable server.
 
     1. Choose and configure the chat backend.
     2. Choose and configure the embedding backend.
@@ -587,32 +589,118 @@ def _port(url: str) -> str:
     return tail.rsplit(":", 1)[1] if ":" in tail else tail
 
 
-def _wait_for_a_server(urls: Sequence[str]) -> discovery.FoundServer | str | None:
-    """Say how to start a model server, then look again each time Enter is pressed.
+def _review_setup(setup: server_setup.SetupPlan) -> None:
+    """Developer preview choices: even Set up and start cannot authorize execution.
 
-    Returns the server a look found, or the address typed in its place (the
-    caller checks it), or None when the user quits. EOFError and
-    KeyboardInterrupt reach the caller.
+    The summary is not printed again here; the caller printed it, and Details
+    shows the full manifest on request.
     """
-    how = discovery.how_to_start()
-    _say(f"No model server is running yet. To start one with {how.name}:")
+    while True:
+        rows = [
+            "Set up and start",
+            f"Keep available after melo closes: {'On' if setup.keep_running else 'Off'}",
+            "Show manual steps",
+            "Details",
+            "Back",
+        ]
+        if setup.detection.asset is None:
+            rows = rows[2:]
+        choice = _choose_from("Review setup (nothing will run)", rows, 0, len(rows) - 1)
+        if setup.detection.asset is None:
+            choice += 2
+        if choice == 4:
+            return
+        if choice == 3:
+            for line in server_setup.details(setup):
+                _say(line)
+        elif choice == 1:
+            setup = replace(setup, keep_running=not setup.keep_running)
+        else:
+            if choice == 0:
+                _say(server_setup.AUTOMATIC_SOON)
+            for line in server_setup.manual_steps(setup):
+                print(line)  # Keep copy-only shell commands on one logical line.
+
+
+def _show_steps(setup: server_setup.SetupPlan) -> None:
+    """Print the numbered steps; a command is kept whole, a sentence is wrapped."""
     print()
-    for command in how.commands:
-        print(f"  {command}")
+    for line in server_setup.numbered_steps(setup):
+        if line.startswith(server_setup.COMMAND_INDENT):
+            print(line)  # Copy-only shell commands stay on one logical line.
+        else:
+            _say(line, hang=3)
     print()
-    _say(f"{how.note} The guide shows how:")
-    print(discovery.GUIDE_URL)
+
+
+def _summary_lines(
+    setup: server_setup.SetupPlan, *, developer: bool
+) -> tuple[str, ...]:
+    """What the no-server screen says: the full manifest, or the short summary."""
+    if developer:
+        return server_setup.details(setup)
+    return server_setup.preview(setup, interactive=_arrow_keys())
+
+
+def _show_summary(setup: server_setup.SetupPlan, *, developer: bool) -> tuple[str, ...]:
+    """Print the no-server summary; the lines, to tell a later change."""
+    lines = _summary_lines(setup, developer=developer)
+    for line in lines:
+        _say(line)
+    if developer and not _arrow_keys():
+        for line in server_setup.manual_steps(setup):
+            print(line)
+    return lines
+
+
+def _wait_for_a_server(
+    urls: Sequence[str], *, developer: bool = False
+) -> discovery.FoundServer | str | None:
+    """Preview setup, then reuse discovery on Enter; return a server/address or quit.
+
+    The summary is printed once. On a terminal it is printed again only when
+    Check again finds no server and the setup readings (cache, space) have
+    changed since. EOFError and KeyboardInterrupt reach the caller. Piped
+    input never enters the setup picker or approves anything; Enter/address/q
+    keep their meanings.
+    """
+    setup = None
+    shown: tuple[str, ...] = ()
+    try:
+        setup = server_setup.plan(server_setup.detect_bounded())
+    except Exception:
+        how = discovery.how_to_start()
+        _say(f"Setup checks unavailable. Start {how.name} manually:")
+        for command in how.commands:
+            print(command)
+        _say(how.note)
+        print(discovery.GUIDE_URL)
+    if setup is not None:
+        shown = _show_summary(setup, developer=developer)
+    if developer:
+        rows = ["Check again", "Review setup plan", "Enter an address", "Quit"]
+    else:
+        rows = ["Check again", "Show how to set one up", "Enter an address", "Quit"]
+    if setup is None:
+        del rows[1]
     while True:
         if _arrow_keys():
             choice = _choose_from(
-                "No model server found. What now?",
-                ["Check again", "Enter an address", "Quit"],
-                0,
-                2,
+                "No model server found. What now?", rows, 0, len(rows) - 1
             )
-            if choice == 2:
+            if choice == len(rows) - 1:
                 return None
-            answer = _question("Server URL", _FIRST_RUN_URL) if choice == 1 else ""
+            if setup is not None and choice == 1:
+                if developer:
+                    _review_setup(setup)
+                else:
+                    _show_steps(setup)
+                continue
+            answer = (
+                _question("Server URL", _FIRST_RUN_URL)
+                if choice == len(rows) - 2
+                else ""
+            )
         else:
             answer = input(
                 "Press Enter to check again, type an address, or q to quit: "
@@ -626,6 +714,22 @@ def _wait_for_a_server(urls: Sequence[str]) -> discovery.FoundServer | str | Non
             return found
         ports = ", ".join(_port(url) for url in urls)
         _say(f"✗ No model server found yet (looked at ports {ports}).", hang=2)
+        if setup is not None and _arrow_keys():
+            setup, shown = _refreshed(setup, shown, developer=developer)
+
+
+def _refreshed(
+    setup: server_setup.SetupPlan, shown: tuple[str, ...], *, developer: bool
+) -> tuple[server_setup.SetupPlan, tuple[str, ...]]:
+    """Look at the cache and free space again; print the summary only if it changed."""
+    try:
+        fresh = server_setup.plan(server_setup.detect_bounded())
+    except Exception:
+        return setup, shown
+    fresh = replace(fresh, keep_running=setup.keep_running)
+    if _summary_lines(fresh, developer=developer) == shown:
+        return setup, shown
+    return fresh, _show_summary(fresh, developer=developer)
 
 
 def _servers_named() -> str:
@@ -868,33 +972,35 @@ def _offer_embedding(
     return candidate, ollama
 
 
-def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
+def run_first_setup(
+    *, ask_keep: bool = False, developer: bool = False
+) -> FirstSetup | None:
     """Ask for a model server's URL and model, check them, and save them.
 
     The first line says what the first run needs: a model server. A server
     found on this machine is offered with one question (``n`` asks for a URL,
     prefilled with it); the model is chosen from the server's list. With none
-    found, it prints the commands that start one and looks again on each
+    found, it previews a pinned setup (no execution) and looks again on each
     Enter; an address typed instead is checked as a URL is. Only
     ``GET <url>/models`` is sent, and ``GET /api/version`` once when saving, to
     tell Ollama apart. When the check of a URL fails the user may retry, start
     without saving, or quit (None). EOFError and KeyboardInterrupt reach the
     caller.
 
-    With *ask_keep* (``--reconfigure``), a ``n``, or no server found while a
-    backend is saved, raises :class:`_FullMenuError` before anything is saved,
-    and a model server without an embedding model is told how to get one.
+    With *ask_keep* (``--reconfigure``), declining a found server or a server
+    without models raises :class:`_FullMenuError` before anything is saved.
+    A no-server preview never changes the saved connection.
     """
-    urls = discovery.detect_urls()
     # A reconfigure knows what melo needs; a first run says it, also when it
     # reaches this question through `melo serve`.
     first = not ask_keep or not config.load().is_configured
     if first:
         _say(f"melo uses a model server on this computer ({_servers_named()}).")
+    urls = discovery.detect_urls()
     found = asyncio.run(discovery.detect_local_server(urls)) if urls else None
     typed = ""
     if found is None and urls and first:
-        waited = _wait_for_a_server(urls)
+        waited = _wait_for_a_server(urls, developer=developer)
         if waited is None:
             return None
         if isinstance(waited, str):
