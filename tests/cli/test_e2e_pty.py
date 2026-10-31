@@ -199,6 +199,8 @@ def test_a_message_gets_its_answer_and_ctrl_d_quits(
 ) -> None:
     term = melo()
     term.see("Ask melo")
+    term.see("stub-model (/model to change)")
+    term.see("Try: What is this project?")
     text = term.text()
     assert "melo " in text and "stub-model (/model to change)" in text
     assert "Try: What is this project?" in text and "╭─ melo" not in text
@@ -230,6 +232,10 @@ def test_a_file_write_waits_for_the_answer(
     assert (
         tmp_path / "demo-project" / "notes.txt"
     ).read_text() == "remember the milk\n"
+    # The tool row and its approval tag can reach the terminal after the
+    # answer, so each is waited for before the screen is read.
+    term.see("file_write  notes.txt")
+    term.see("allowed")
     assert "file_write  notes.txt" in term.text() and "allowed" in term.text()
     # The line under the footer, from the real result and the approval's snapshot.
     term.see("Changed + notes.txt (+1)")
@@ -333,6 +339,8 @@ def test_with_no_config_a_url_is_offered_and_declining_saves_nothing(
     term.type("\x1b[B")  # Not now
     term.type("\r")
     term.see("Ask melo")
+    term.see("stub-model (/model to change)")
+    term.see(f"{stub.base_url} · from --url (not saved)")
     assert "stub-model (/model to change)" in term.text()
     assert f"{stub.base_url} · from --url (not saved)" in term.text()
     assert term.quit() == 0
@@ -442,6 +450,8 @@ def test_yolo_runs_tools_without_asking(
     term.see("⚠ YOLO: no approval")
     term.type("list the folder\r")
     term.see("The folder holds what")
+    term.see("No approvals for this turn (--yolo)")
+    term.see("notes.txt")
     assert "Run a shell command?" not in term.text()
     assert "No approvals for this turn (--yolo)" in term.text()
     assert "notes.txt" in term.text()
@@ -455,6 +465,8 @@ def test_a_yolo_file_write_is_named_without_counts(
     term.see("⚠ YOLO: no approval")
     term.type("write the notes\r")
     term.see("I wrote notes.txt.")
+    # The footer line under the answer can reach the terminal after it.
+    term.see("  Changed notes.txt")
     assert term.quit() == 0
     assert (
         tmp_path / "demo-project" / "notes.txt"
@@ -471,6 +483,7 @@ def test_a_history_file_that_cannot_be_opened_is_not_fatal(
     (tmp_path / ".cache" / "localmelo" / "cli_history").mkdir(parents=True)
     term = melo()
     term.see("Ask melo")
+    term.see("The input history is not saved this time")
     assert "The input history is not saved this time" in term.text()
     assert "Traceback" not in term.text()
     term.type("hello\r")
