@@ -141,12 +141,15 @@ and closing the open side chat goes back to the main chat too. Chats made before
 chat existed are its side chats, as they were.
 
 When a side chat's run ends, or a task finishes, fails or waits for your approval, the
-main chat shows a card under the day it happened: `Done: Plan the Tokyo trip` with the
-answer's first sentence, `Did not finish: Fix CI` with how it ended, or `Fix CI needs your
-approval`. **Open side chat**, **Open task** or **Review** goes to it. A card is not a
-message: the model never reads it. Between two of your messages a busy side chat keeps
-only its newest card. A stop of your own, a shutdown or an approval answered before the
-main chat was looked at makes no card.
+main chat shows a card under the day it happened:
+
+- `Done: Fix the list_files test` with the first two lines of the answer: what changed, the tests, the commit.
+- `Did not finish: Fix CI` with why it ended.
+- `Needs your approval: Fix CI` with what it asks. Once you answer, the same card says how ("Allowed once", "Allowed for this task", "Denied") and no longer offers **Review**.
+- A title is the one the main chat gave the task, or the first part of your request, cut at a word.
+- **Open side chat**, **Open task** or **Review** goes to the source. A card is not a message: the model never reads it.
+
+Between two of your messages a busy side chat keeps only its newest card. A stop of your own, a shutdown or an approval answered before the main chat was looked at makes no card.
 
 The panel's **Workers** tab lists the workers of the open chat: a side chat's own, and in
 the main chat all of today's. For runs of earlier days, an empty main chat links **See what
@@ -345,9 +348,13 @@ redacted.
 **Tasks** (`#/tasks`; in default mode, in the sidebar once a task exists) lists the
 scheduler's tasks, newest update first, with state, priority (developer mode only) and
 title. Open one (`#/tasks/<id>`) to see its state, the saved
-recovery card (shown as plain text), the evidence status and the actions its
+recovery card (shown as plain text), the evidence status when there is some and the actions its
 state allows, and the same status row as a chat (a task has no row until it has
-run). Like Workers, the view replaces the chat while it is open.
+run). Like Workers, the view replaces the chat while it is open. The header says
+**Tasks**; developer mode adds "Scheduler tasks".
+
+- A task that ended opens with its answer, set as in a chat, above its facts. A task that
+  did not complete says why in the same place. Its steps are folded under **Steps**.
 
 - **Resume** appears for a parked or interrupted task. The page asks the
   server and confirms only when the server requires it: then a dialog says "A
@@ -364,8 +371,10 @@ run). Like Workers, the view replaces the chat while it is open.
   (Deny); pausing or stopping the task withdraws the card. While it is open,
   the view reads the task (or the list) again every 3 seconds and redraws only
   what changed, so a request that arrives later appears by itself.
-- A started task shows a **Live** section below its approval card: its steps,
-  tool calls and model text, drawn as the Workers view draws a run. The card
+- A started task shows its steps below its approval card, under **Live** while it runs
+  and under **Steps** otherwise: its steps, tool calls and model text, drawn as the
+  Workers view draws a run. A `python_exec` step names the command its code runs
+  (`grep -rn DEFAULT_WORKSPACE .`) rather than its first import. The card
   reads the task's session once (`GET /api/sessions/<task id>/turns?events=true`)
   and, while the task runs or waits for approval, follows
   `GET /api/sessions/<task id>/events?after=<last id>`. New events are folded in
@@ -374,8 +383,8 @@ run). Like Workers, the view replaces the chat while it is open.
   approval card keeps its focus. A hidden tab closes the stream and a shown one
   resumes after the last event. When the task is done, failed, cancelled,
   expired, interrupted or parked, the stream closes after one last read; a
-  resumed task is followed again. A task that never started shows no Live
-  section, and a finished task shows its work once. The console shows task
+  resumed task is followed again. A task that never started shows no steps,
+  and a finished task shows its work once. The console shows task
   events as it shows a chat's: the same authenticated loopback, no extra
   redaction.
 - **Stop** uses the task's own stop, not the chat's. It is available until the
