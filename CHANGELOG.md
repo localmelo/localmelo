@@ -100,7 +100,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   from. Nothing is brought in until you choose; a task run never asks. New:
   `GET` and `DELETE /api/memory/import/offer`, `home` in the scan and `kept` in
   an undo's answer. Part of
-  #364. [#NN]
+  #364. [#384]
 - A task can start with a short memory pack, a side chat's summary can be
   recalled from other chats, and a task's questions to its owner chat are kept
   apart from your notes: the pack holds your About you and Preferences notes,
@@ -3224,3 +3224,4 @@ earlier milestones.
 [#381]: https://github.com/localmelo/localmelo/pull/381
 [#382]: https://github.com/localmelo/localmelo/pull/382
 [#383]: https://github.com/localmelo/localmelo/pull/383
+[#384]: https://github.com/localmelo/localmelo/pull/384
