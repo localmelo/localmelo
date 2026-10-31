@@ -231,7 +231,7 @@ def test_the_first_run_offers_other_assistants_notes_once_as_a_list(
             lambda out: b"melo found notes on this Mac from other assistants" in out, 30
         ), term.output
         assert term.read_until(lambda out: b"Bring in 2 notes from 1 file" in out, 30)
-        term.type(b"\x1b[B\r")  # Show what they say
+        term.type(b"\r")  # the list starts on Show what they say
         assert term.read_until(lambda out: b"Prefer tabs in Makefiles." in out, 30)
         assert term.read_until(lambda out: b"Not now" in out, 30), term.output
         term.type(b"\x1b[B\x1b[B\r")  # the list again: Not now

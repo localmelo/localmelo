@@ -110,18 +110,45 @@ def test_a_typed_answer_shows_what_the_files_say_then_brings_the_notes_in(
     assert not pending(), "bringing notes in counts as the offer made"
 
 
-def test_not_now_and_no_answer_bring_nothing_in_and_the_offer_counts_as_made(
+def test_the_not_now_row_brings_nothing_in_and_ends_the_offer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     typed(monkeypatch, "3\n")
     assert memory_import.offer() == 0
     assert notes() == [] and not pending()
-    # Nobody at the other end of the pipe: end of input is not consent.
-    memory_dir = Path(ChatMemory(config.load).directory) / "import_offer.json"
-    memory_dir.unlink()
+
+
+def test_no_answer_is_not_a_choice_so_the_offer_stays_open(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """End of input, ctrl+c and Esc leave without recording anything: only the Not now row ends the offer."""
     typed(monkeypatch, "")
-    assert memory_import.offer() == 0
-    assert notes() == [] and not pending()
+    assert memory_cli.main(["import"]) == 0
+    assert "Nothing brought in." in capsys.readouterr().out
+    assert notes() == [] and pending()
+    for raised, code in ((KeyboardInterrupt, 130), (EOFError, 0)):
+        monkeypatch.setattr(onboard, "_ask_choice", mock.MagicMock(side_effect=raised))
+        assert memory_cli.main(["import"]) == code
+        assert notes() == [] and pending()
+
+
+def test_a_bare_enter_shows_what_the_files_say_and_never_brings_notes_in(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The list starts on "Show what they say"; after the files were shown, Enter may bring them in."""
+    typed(monkeypatch, "\n")
+    assert memory_cli.main(["import"]) == 0
+    out = capsys.readouterr().out
+    assert "[2]:" in out and "~/.claude/CLAUDE.md" in out
+    assert "Brought in" not in out and notes() == [] and pending()
+    typed(monkeypatch, "\n\n")
+    assert memory_cli.main(["import"]) == 0
+    out = capsys.readouterr().out
+    assert (
+        out.index("~/.claude/CLAUDE.md") < out.index("[1]:") < out.index("Brought in ")
+    )
+    assert notes() and not pending()
 
 
 def test_the_command_brings_in_and_takes_back_a_batch(
@@ -230,10 +257,13 @@ def test_a_failing_offer_never_stops_melo(monkeypatch: pytest.MonkeyPatch) -> No
     memory_import.first_run()
 
 
-def _interactive(monkeypatch: pytest.MonkeyPatch, *, terminal: bool) -> mock.MagicMock:
-    """Run the interactive entry up to the UI with the first run spied; the spy."""
+def _interactive(
+    monkeypatch: pytest.MonkeyPatch, *, terminal: bool, real: bool = False
+) -> Any:
+    """Run the interactive entry up to the UI; the first run is spied (the spy is returned), or *real* (the exit code)."""
     spy = mock.MagicMock()
-    monkeypatch.setattr(memory_import, "first_run", spy)
+    if not real:
+        monkeypatch.setattr(memory_import, "first_run", spy)
     monkeypatch.setattr(launch, "ui_terminal", lambda: terminal)
     monkeypatch.setattr(
         launch,
@@ -246,8 +276,10 @@ def _interactive(monkeypatch: pytest.MonkeyPatch, *, terminal: bool) -> mock.Mag
         mock.MagicMock(side_effect=FileExistsError(17, "x")),
     )
     args = argparse.Namespace(reconfigure=False, workspace=None, base_url=None)
-    run_interactive(args, parser=argparse.ArgumentParser(), options=AgentOptions())
-    return spy
+    code = run_interactive(
+        args, parser=argparse.ArgumentParser(), options=AgentOptions()
+    )
+    return code if real else spy
 
 
 def test_only_the_interactive_ui_at_a_terminal_makes_the_first_run_offer(
@@ -289,7 +321,7 @@ async def test_slash_memory_import_is_a_list_that_shows_the_files_then_brings_th
         task = asyncio.create_task(memory_import.bring_in(session))  # type: ignore[arg-type]
         await driver.wait(lambda: "melo found notes on this Mac" in driver.text())
         assert "Bring in " in driver.text() and "Show what they say" in driver.text()
-        driver.type(DOWN + ENTER)
+        driver.type(ENTER)  # the list starts on "Show what they say"
         await driver.wait(lambda: "~/.claude/CLAUDE.md" in "".join(session.out.lines))
         await driver.wait(lambda: "Show what they say" in driver.text())
         assert await read_notes() == [], "showing writes nothing"
@@ -297,15 +329,6 @@ async def test_slash_memory_import_is_a_list_that_shows_the_files_then_brings_th
         await asyncio.wait_for(task, 5)
     assert "Brought in " in "".join(session.out.lines)
     assert "Use uv for new Python projects." in await read_notes() and not pending()
-
-
-async def test_esc_in_the_list_is_not_now() -> None:
-    async with running_app() as driver:
-        task = asyncio.create_task(memory_import.bring_in(Session(driver)))  # type: ignore[arg-type]
-        await driver.wait(lambda: "Not now" in driver.text())
-        driver.type(ESC)
-        await asyncio.wait_for(task, 5)
-    assert await read_notes() == [] and not pending()
 
 
 async def test_slash_memory_import_is_a_command_of_the_chat(tmp_path: Path) -> None:
@@ -324,3 +347,104 @@ async def test_slash_memory_import_is_a_command_of_the_chat(tmp_path: Path) -> N
         with pytest.raises(ValueError, match="/memory import"):
             await SessionTools(session).run("memory", "what")
     assert seen == [session]
+
+
+# ── What is printed, and what ends the offer ──
+
+
+def test_a_line_with_terminal_controls_reaches_the_screen_clean(home: Path) -> None:
+    """A note's sample is printed as a terminal would leave it: no title, colour or clipboard sequence."""
+    gemini = home / ".gemini" / "GEMINI.md"
+    gemini.write_text(
+        gemini.read_text() + "- Use uv \x1b]0;pwned\x07and \x1b[31mred\x1b[0m tools.\n"
+    )
+    plan = asyncio.run(memory_import._scan())
+    assert plan is not None
+    shown = memory_import.describe(plan)
+    assert "Use uv and red tools." in shown
+    assert not any(ch in shown for ch in ("\x1b", "\x07", "pwned")), repr(shown)
+
+
+def test_the_home_is_written_as_a_tilde_even_when_it_is_a_link(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, home: Path
+) -> None:
+    link = tmp_path / "link"
+    link.symlink_to(home)
+    monkeypatch.setenv("HOME", str(link))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: link))
+    plan = asyncio.run(memory_import._scan())
+    assert plan is not None
+    shown = memory_import.describe(plan)
+    assert "~/.claude/CLAUDE.md · " in shown
+    assert str(home) not in shown and str(link) not in shown
+
+
+def test_files_whose_lines_were_all_left_out_do_not_say_nothing_is_new(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    only = tmp_path / "secret-home"
+    (only / ".hermes" / "memories").mkdir(parents=True)
+    (only / ".hermes" / "memories" / "MEMORY.md").write_text(
+        "The wifi password is hunter2.§Ask Dr. Priya Rao (student ID 4821937) about grades."
+    )
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: only))
+    monkeypatch.setenv("HOME", str(only))
+    ask = mock.MagicMock(side_effect=AssertionError("asked"))
+    monkeypatch.setattr(onboard, "_ask_choice", ask)
+    assert memory_import.offer() == 0
+    out = capsys.readouterr().out
+    assert out.startswith("Nothing to bring in: the lines were left out (")
+    assert "secrets" in out and "Nothing new" not in out
+    assert pending(), "nothing was offered, so the offer is still open"
+
+
+def test_the_first_run_with_ctrl_c_or_ctrl_d_cancels_like_setup_and_records_nothing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    for raised, code in ((KeyboardInterrupt, 130), (EOFError, 0)):
+        monkeypatch.setattr(onboard, "_ask_choice", mock.MagicMock(side_effect=raised))
+        assert _interactive(monkeypatch, terminal=True, real=True) == code
+        assert capsys.readouterr().out == "\nSetup cancelled.\n"
+        assert pending() and notes() == []
+
+
+async def test_esc_leaves_the_list_and_only_the_not_now_row_ends_the_offer() -> None:
+    async with running_app() as driver:
+        task = asyncio.create_task(memory_import.bring_in(Session(driver)))  # type: ignore[arg-type]
+        await driver.wait(lambda: "Not now" in driver.text())
+        driver.type(ESC)
+        await asyncio.wait_for(task, 5)
+    assert await read_notes() == [] and pending()
+    async with running_app() as driver:
+        task = asyncio.create_task(memory_import.bring_in(Session(driver)))  # type: ignore[arg-type]
+        await driver.wait(lambda: "Not now" in driver.text())
+        driver.type(DOWN + DOWN + ENTER)  # from "Show what they say" to "Not now"
+        await asyncio.wait_for(task, 5)
+    assert await read_notes() == [] and not pending()
+
+
+def test_undo_says_how_many_notes_you_edited_were_kept(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    typed(monkeypatch, "1\n")
+    memory_import.offer()
+    batch = capsys.readouterr().out.split("--undo ")[1].split()[0]
+
+    async def edit() -> None:
+        memory = ChatMemory(config.load)
+        try:
+            first = (await memory.records())[0]
+            await memory.edit_record(first.id, "You prefer very short answers.")
+        finally:
+            await memory.aclose()
+
+    asyncio.run(edit())
+    total = len(notes())
+    assert memory_import.undo(batch) == 0
+    assert (
+        f"Took back {total - 1} notes. Kept 1 note you edited."
+        in capsys.readouterr().out
+    )
+    assert notes() == ["You prefer very short answers."]
