@@ -101,25 +101,23 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
 
     private func createMenu() {
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: L10n.t("app.menu.open", "Open localmelo"), action: #selector(openWindow), keyEquivalent: "")
-        appMenu.addItem(withTitle: L10n.t("app.menu.settings", "Settings…"), action: #selector(openSettings), keyEquivalent: ",")
-        let signIn = appMenu.addItem(withTitle: L10n.t("app.menu.signIn", "Sign In Again"), action: #selector(signInAgain),
-                                     keyEquivalent: "")
+        appMenu.addItem(withTitle: "", action: #selector(openWindow), keyEquivalent: "").word(.open)
+        appMenu.addItem(withTitle: "", action: #selector(openSettings), keyEquivalent: ",").word(.settings)
+        let signIn = appMenu.addItem(withTitle: "", action: #selector(signInAgain), keyEquivalent: "").word(.signIn)
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: quitTitle(attached: false), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q").word(.quit)
         let root = NSMenu()
         let entry = NSMenuItem()
         entry.submenu = appMenu
         root.addItem(entry)
-        let edit = NSMenu(title: L10n.t("app.edit.menu", "Edit"))
-        for (title, action, key) in [(L10n.t("app.edit.undo", "Undo"), "undo:", "z"), (L10n.t("app.edit.redo", "Redo"), "redo:", "Z"),
-                                      (L10n.t("app.edit.cut", "Cut"), "cut:", "x"), (L10n.t("app.edit.copy", "Copy"), "copy:", "c"),
-                                      (L10n.t("app.edit.paste", "Paste"), "paste:", "v"),
-                                      (L10n.t("app.edit.selectAll", "Select All"), "selectAll:", "a")] {
-            edit.addItem(withTitle: title, action: Selector(action), keyEquivalent: key)
+        let edit = NSMenu()
+        for (word, action, key) in [(MenuWord.undo, "undo:", "z"), (.redo, "redo:", "Z"), (.cut, "cut:", "x"), (.copy, "copy:", "c"),
+                                    (.paste, "paste:", "v"), (.selectAll, "selectAll:", "a")] {
+            edit.addItem(withTitle: "", action: Selector(action), keyEquivalent: key).word(word)
         }
         let editEntry = NSMenuItem()
         editEntry.submenu = edit
+        editEntry.word(.edit)
         root.addItem(editEntry)
         NSApp.mainMenu = root
         menuBar = MenuBar(menu: appMenu.copy() as? NSMenu ?? NSMenu(), waiting: #selector(openWaiting),
@@ -162,6 +160,18 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     }
 
     @objc private func showPet() { pet.setHidden(false) }
+
+    // The console page names the language it chose each time it loads, so also after Settings changed it: every menu, the
+    // pill and the pet's label follow without the app starting over. The same language again does nothing.
+    private func languageChosen(_ language: String) {
+        guard language != L10n.language else { return }
+        L10n.use(language)
+        let attached = child.map { !$0.owned } ?? false
+        for menu in [NSApp.mainMenu, menuBar.statusItem.menu, pet.view.menu].compactMap({ $0 }) { retitle(menu, attached: attached) }
+        menuBar.refresh()
+        pet.languageChanged()
+        pill.languageChanged()
+    }
 
     private func handle(_ action: FailureAction) {
         switch action {
@@ -663,6 +673,9 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                           current: { [weak self] in self?.pet?.settings.mode ?? .pill },
                           choose: { [weak self] mode in self?.pet?.setDesktop(mode) }),
             contentWorld: .page, name: DesktopBridge.name)
+        configuration.userContentController.add(
+            LanguageBridge(gatewayPort: { [weak self] in self?.port ?? 0 }, changed: { [weak self] in self?.languageChosen($0) }),
+            contentWorld: .page, name: LanguageBridge.name)
         let view = ConsoleWebView(frame: content.bounds, configuration: configuration)
         view.autoresizingMask = [.width, .height]
         view.navigationDelegate = self
@@ -701,6 +714,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         webView?.navigationDelegate = nil
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: FolderBridge.name, contentWorld: .page)
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: DesktopBridge.name, contentWorld: .page)
+        webView?.configuration.userContentController.removeScriptMessageHandler(forName: LanguageBridge.name, contentWorld: .page)
         webView?.removeFromSuperview()
         webView = nil
         page = PageState()

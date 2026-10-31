@@ -173,6 +173,11 @@ final class PetController: NSObject {
         reconcile()
     }
 
+    /// The console's language changed: the pet's label is written again.
+    func languageChanged() {
+        if isShown { refresh() }
+    }
+
     /// The person hid Melo (Hide Melo) or brought it back (Show Melo); remembered. Showing again brings back what the
     /// person had: Melo with the pill, or Melo alone.
     func setHidden(_ hidden: Bool) {
@@ -303,14 +308,12 @@ final class PetController: NSObject {
 
     private func menu() -> NSMenu {
         let menu = NSMenu()
-        for (title, action) in [(L10n.t("app.menu.open", "Open localmelo"), #selector(menuOpen)),
-                                (L10n.t("app.pet.hide", "Hide Melo"), #selector(menuHide))] {
-            menu.addItem(withTitle: title, action: action, keyEquivalent: "").target = self
+        for (word, action) in [(MenuWord.open, #selector(menuOpen)), (.hidePet, #selector(menuHide))] {
+            menu.addItem(withTitle: "", action: action, keyEquivalent: "").word(word).target = self
         }
         menu.addItem(desktop.makeItem())
         menu.addItem(.separator())
-        menu.addItem(withTitle: quitTitle(attached: false), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
-            .target = NSApp
+        menu.addItem(withTitle: "", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "").word(.quit).target = NSApp
         return menu
     }
 
