@@ -28,7 +28,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   waits for you in a chat, you can just send your answer as a message (`Sent
   to “Fix tests” as your answer`, with Undo for 10 seconds); with several,
   `/answer Fix tests: B`, in the console and the terminal. The chat's
-  `task_get` now reads a running task live. [#NN]
+  `task_get` now reads a running task live. [#379]
 - Side chats start tasks too. A side chat has the main chat's task tools and
   code words (`/task …`, **Run as a task**, `pause the slides`, chores and
   reminders), the same priorities and the same scheduler. A task belongs to the
@@ -3165,3 +3165,4 @@ earlier milestones.
 [#372]: https://github.com/localmelo/localmelo/pull/372
 [#374]: https://github.com/localmelo/localmelo/pull/374
 [#378]: https://github.com/localmelo/localmelo/pull/378
+[#379]: https://github.com/localmelo/localmelo/pull/379
