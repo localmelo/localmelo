@@ -43,7 +43,7 @@
 
 网页控制台、macOS App 和网关写给页面的文字都用下表的译法，文档也用同样的词。词库是 `support/gateway/static/i18n/zh-Hans.json`，键与 `en.json` 一一对应。
 
-- 不翻译：命令（如 `melo console`）、路径、模型名、级别 P0-P5、HTTP 路由、状态值和配置键。
+- 不翻译：命令（如 `melo console`）、路径、模型名、级别 P0-P5、HTTP 路由、状态值和配置键。语言选项用各自语言的名字：English、简体中文。
 - 计数写成数字加量词：“3 个任务”“2 条笔记”“1 次工具调用”；中文不分单复数。
 - 按钮用动词：“保存”“取消”“重试”；macOS 菜单沿用系统的译法：拷贝、粘贴、全选、撤销、重做。
 - 中文与数字或拉丁字母之间加空格，句中用全角标点；见[维护文档](../project/documentation.md)（英文）中的排版规则。
@@ -68,5 +68,7 @@
 | Settings, developer mode | 设置，开发者模式 |
 | sign in, gateway | 登录，网关 |
 | menu-bar item, activity pill, Melo on your desktop | 菜单栏项，活动胶囊，桌面上的 Melo |
-| Scheduled (tab), chore | 定时，定时事项 |
+| Scheduled (tab), chore, check-in | 定时，定时事项，例行查看 |
+| priority, chat level | 优先级，对话级别 |
+| Appearance, Theme, Language, Automatic | 外观，主题，语言，自动 |
 | Copy, Try again | 拷贝，重试 |

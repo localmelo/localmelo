@@ -54,7 +54,7 @@ uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 ## 语言
 
 - 窗口、菜单、活动胶囊、宠物菜单和退出对话框使用控制台的语言：英文或简体中文，按 Mac 的首选语言选择。
-- `melo config set console.language zh-Hans`（或 `en`，或 `auto`）为 App 和控制台指定一种；App 在启动时读取它。
+- **设置 → 外观 → 语言**（或 `melo config set console.language zh-Hans`、`en` 或 `auto`）为 App 和控制台指定一种。窗口立即改变；菜单、活动胶囊和对话框在 App 下次打开时改变。
 - App 里的控制台也按同样的方式从 Mac 的语言选择；见[网页控制台：语言](web-console.md#language)。
 
 <a id="the-menu-bar-item"></a>

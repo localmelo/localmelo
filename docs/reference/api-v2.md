@@ -304,6 +304,7 @@ file's revision.
   "mode": "default",
   "across_chats": true,
   "memory_retriever": "auto",
+  "language": "auto",
   "advanced_options": [
     {"option": "--host", "tier": "advanced", "issue": ""},
     {"option": "--retriever", "tier": "experimental", "issue": "#4"}
@@ -336,6 +337,8 @@ file's revision.
   experimental one, `""` otherwise).
 - `memory_retriever` is `[memory] retriever`, how a chat finds its notes:
   `auto`, `bm25`, `embedding` or `llm`.
+- `language` is `[console] language`, the console's language: `auto`, `en`
+  or `zh-Hans`.
 - `developer_settings` is every key `melo -h all` lists, grouped by section
   in its order (`""` is the top level): `value` is the one in use and
   `default` the default, both as the help prints them; `flag` is the old
@@ -369,6 +372,9 @@ sessions.
   `[memory] retriever` (other values are 400 `invalid_request`; `embedding`
   without an embedding model is 400 `invalid_settings`); omitted, the saved
   value is kept.
+- `language` is optional: `auto`, `en` or `zh-Hans` sets `[console] language`
+  (other values are 400 `invalid_request`); omitted, the saved value is kept.
+  The page loads again to show the new language.
 - The console saves one change at a time: the loaded `revision` with only the
   changed field, and its Undo is the same request with the earlier value.
 - A `revision` that does not match the file on disk returns 409
