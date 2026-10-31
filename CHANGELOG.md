@@ -109,7 +109,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   reported. For API clients: echoes add `sent` (with `how`), a `suggest` with
   `action` `send` sends the message on Apply, and `task_message` takes only
   `task_id`. See
-  [Hand work to the main chat](docs/guides/web-console.md#hand-work-to-the-main-chat) ([#NN]).
+  [Hand work to the main chat](docs/guides/web-console.md#hand-work-to-the-main-chat) ([#332]).
 
 - When you update a fact, the newer value wins. Told "I live in Lisbon." in one chat
   and "I live in Utrecht." in another, a third chat asked "Where do I live?" recalled
@@ -2681,3 +2681,4 @@ earlier milestones.
 [#207]: https://github.com/localmelo/localmelo/pull/207
 [#208]: https://github.com/localmelo/localmelo/pull/208
 [#328]: https://github.com/localmelo/localmelo/pull/328
+[#332]: https://github.com/localmelo/localmelo/pull/332
