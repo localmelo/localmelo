@@ -5,6 +5,7 @@ import binascii
 import hashlib
 import re
 import time
+import unicodedata
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
@@ -119,9 +120,35 @@ def clip_session_text(text: str) -> str:
 _THINK_BLOCK = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
 _THINK_OPENING = re.compile(r"\s*<think>", re.IGNORECASE)
 _THINK_CLOSING = re.compile(r"</think>", re.IGNORECASE)
+# Some models spell the block out: ``<thinking>...</thinking>``.
+_THINKING_LEADING = re.compile(
+    r"\s*<thinking>(.*?)</thinking>", re.DOTALL | re.IGNORECASE
+)
 
 
 ReasoningTags = Literal["explicit", "closing_only", "none"]
+
+
+def split_leading_thinking(text: str) -> tuple[str, str] | None:
+    """``(thinking, rest)`` for a closed ``<thinking>`` block that starts *text*.
+
+    The block may follow leading whitespace and have any letter case; *rest*
+    is what follows its closing tag, as it is. ``None`` for any other text:
+    one that only mentions the tag later, or opens it and never closes it.
+    """
+    block = _THINKING_LEADING.match(text)
+    if block is None:
+        return None
+    return block.group(1).strip(), text[block.end() :]
+
+
+def has_content(text: str) -> bool:
+    """Whether *text* has a letter or a digit, in any script.
+
+    A reply of dots, dashes, punctuation or emoji only has none: it says
+    nothing, and the agent treats it as an empty reply.
+    """
+    return any(unicodedata.category(char)[0] in "LN" for char in text)
 
 
 def split_thinking(
@@ -129,8 +156,11 @@ def split_thinking(
 ) -> tuple[str, str]:
     """Split the reasoning in a ``<think>`` block off *text*: ``(thinking, text)``.
 
-    - The first ``<think>...</think>`` block, in any letter case and
-      anywhere in *text*, is the thinking.
+    - A closed ``<thinking>...</thinking>`` block that starts *text* (after
+      leading whitespace) is the thinking. Only a leading, closed one: a
+      mention of the tag later in the text, or an unclosed one, stays text.
+    - Otherwise the first ``<think>...</think>`` block, in any letter case
+      and anywhere in *text*, is the thinking.
     - Otherwise a ``<think>`` at the start, after leading whitespace, that
       is never closed makes the rest of *text* the thinking, as when the
       output was cut off at the token limit while the model thought.
@@ -146,14 +176,18 @@ def split_thinking(
     OpenAI-compatible server without a reasoning parser, put the reasoning
     at the start of a reply's content as such a block.
     A declared ``reasoning_tags`` selects the same trusted framing used by
-    streaming: ``explicit`` recognizes a leading opening tag, ``closing_only``
+    streaming: ``explicit`` recognizes a leading opening tag (``<think>``,
+    or a closed ``<thinking>`` block), ``closing_only``
     treats text before the first closing tag as thinking, and ``none`` keeps
-    tags literal. With no declaration, the original rules above are unchanged.
+    tags literal. With no declaration, the rules above apply.
     """
     if reasoning_tags is not None:
         if reasoning_tags == "none":
             return "", text.strip() if strip_answer else text
         if reasoning_tags == "explicit":
+            spelled = split_leading_thinking(text)
+            if spelled is not None:
+                return spelled[0], spelled[1].strip() if strip_answer else spelled[1]
             leading = len(text) - len(text.lstrip())
             if not text[leading:].lower().startswith("<think>"):
                 return "", text.strip() if strip_answer else text
@@ -167,6 +201,9 @@ def split_thinking(
         return text[: closing.start()].strip(), (
             answer.strip() if strip_answer else answer
         )
+    spelled = split_leading_thinking(text)
+    if spelled is not None:
+        return spelled[0], spelled[1].strip() if strip_answer else spelled[1]
     block = _THINK_BLOCK.search(text)
     if block is not None:
         rest = text[: block.start()] + text[block.end() :]
@@ -231,6 +268,9 @@ def unfinished_as_thinking(content: str, thinking: str) -> str:
 
     The tags go, and content that repeats the thinking is kept once.
     """
+    spelled = split_leading_thinking(content)
+    if spelled is not None:
+        content = f"{spelled[0]}\n\n{spelled[1]}"
     text = _THINK_OPENING.sub("", _THINK_CLOSING.sub("", content), count=1).strip()
     parts = [thinking.strip()]
     if not _same_words(text, thinking):
