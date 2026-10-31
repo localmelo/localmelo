@@ -10,8 +10,8 @@ Pure functions over the text the person typed and the open tasks:
   once, with a short title), ``answer`` (a greeting or a short question) or
   ``plan`` (the main chat's own planning step decides).
 - :func:`triage` gives a new task its level from the person's own words:
-  Today for urgency words, a deadline today or the bare word "today"
-  (``今天``) anywhere, Whenever for "no rush", Normal otherwise.
+  P1 for urgency words, a deadline today or the bare word "today"
+  (``今天``) anywhere, P3 for "no rush", P2 otherwise.
 - :func:`allows` is the principal rule for the main chat's control tools: a
   change counts as the person's only when their own typed message has the
   control word and names the task. Page text, tool output and a task's
@@ -26,28 +26,58 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final, Literal
 
-# Levels in words, P0 to P5 (design 2.5); P-codes stay in developer mode.
+# Levels P0 to P5. People read the P-code, with its meaning where there is room
+# (``P1 · today``). The words stay what people may type and what the API's
+# ``level_word`` answers; the meanings are the one table to translate.
 LEVEL_WORDS: Final = ("Now", "Today", "Normal", "Whenever", "If idle", "Later")
+LEVEL_MEANINGS: Final = (
+    "runs first; others wait",
+    "today",
+    "normal",
+    "when there is time",
+    "only when the computer is idle",
+    "on hold until you start it",
+)
 FINISHED: Final = frozenset({"done", "failed", "cancelled", "expired"})
 
 Route = Literal["delegate", "control", "follow", "chore", "work", "answer", "plan"]
 Action = Literal["stop", "pause", "resume", "first"]
 
 
+def _index(level: object) -> int:
+    """0-5 for a level; 2 (normal) for anything that is not one."""
+    if isinstance(level, int) and not isinstance(level, bool) and 0 <= level <= 5:
+        return level
+    return 2
+
+
 def level_word(level: object) -> str:
     """``Normal`` for 2; ``Normal`` for anything that is not a level."""
-    if isinstance(level, int) and not isinstance(level, bool) and 0 <= level <= 5:
-        return LEVEL_WORDS[level]
-    return LEVEL_WORDS[2]
+    return LEVEL_WORDS[_index(level)]
+
+
+def level_code(level: object) -> str:
+    """``P2`` for 2; ``P2`` for anything that is not a level."""
+    return f"P{_index(level)}"
+
+
+def level_label(level: object) -> str:
+    """The code and its meaning: ``P1 · today``."""
+    return f"{level_code(level)} · {LEVEL_MEANINGS[_index(level)]}"
+
+
+def level_menu() -> str:
+    """Every level in one line, for a model's tool description."""
+    return ", ".join(f"{level_code(n)} ({LEVEL_MEANINGS[n]})" for n in range(6))
 
 
 def level_number(value: object) -> int | None:
-    """0-5 from a level word (``today``, ``If idle``) or a P-code (``P1``); else None."""
+    """0-5 from a P-code (``P1``, ``p1``, ``1``) or a level word (``today``, ``If idle``); else None."""
     if isinstance(value, int) and not isinstance(value, bool):
         return value if 0 <= value <= 5 else None
     text = " ".join(str(value).split()).casefold()
-    if re.fullmatch(r"p[0-5]", text):
-        return int(text[1])
+    if re.fullmatch(r"p?[0-5]", text):
+        return int(text[-1])
     words = [word.casefold() for word in LEVEL_WORDS]
     return words.index(text) if text in words else None
 
@@ -312,7 +342,7 @@ def triage(typed: str) -> tuple[int, str]:
     """A delegated task's level and reason, from the person's own words only.
 
     Ease words first, so "not urgent" is never urgency; then urgency words, a
-    deadline today or the bare word for today (Today); else Normal (design 2.5;
+    deadline today or the bare word for today (P1); else P2 (design 2.5;
     S5's full table later).
     """
     text = norm(typed)
@@ -572,6 +602,7 @@ def route(
 
 
 __all__ = [
+    "LEVEL_MEANINGS",
     "LEVEL_WORDS",
     "Routed",
     "TaskRef",
@@ -583,6 +614,9 @@ __all__ = [
     "intention_only",
     "is_chinese",
     "is_question",
+    "level_code",
+    "level_label",
+    "level_menu",
     "level_number",
     "level_word",
     "named_task",

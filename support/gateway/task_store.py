@@ -869,7 +869,7 @@ class TaskStore:
         explicit force.
         """
         if isinstance(level, bool) or not isinstance(level, int) or not 0 <= level <= 5:
-            raise ValueError("level must be an integer from 0 (P0) to 5 (Later)")
+            raise ValueError("level must be an integer from 0 to 5 (P0 to P5)")
         if source not in ("user", "user_rule", "computed"):
             raise ValueError("source must be 'user', 'user_rule' or 'computed'")
         if level == 0 and source != "user":
@@ -1812,8 +1812,8 @@ class TaskStore:
         earlier turns. A committed Resume row reserves that turn, so a
         restart before it starts re-admits the task rather than fencing it.
         *level* (from the person's words) replaces the old level; without
-        it the old level stays, and a paused task's Later goes back to
-        Normal.
+        it the old level stays, and a paused task's P5 goes back to
+        P2.
         """
         text = instruction.strip() if isinstance(instruction, str) else ""
         if not text:
@@ -1821,7 +1821,7 @@ class TaskStore:
         if level is not None and (
             isinstance(level, bool) or not isinstance(level, int) or not 1 <= level <= 4
         ):
-            raise ValueError("a follow-up's level is from 1 (Today) to 4 (If idle)")
+            raise ValueError("a follow-up's level is from 1 (P1) to 4 (P4)")
         now = self._clock()
         async with self._store.component_event_transaction("task_reopen") as (
             conn,

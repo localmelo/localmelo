@@ -10,6 +10,7 @@
   <link rel="alternate" hreflang="x-default" href="https://localmelo.github.io/localmelo/en/index.html">
   <link rel="icon" href="../assets/icon_small.png">
   <link rel="stylesheet" href="../assets/site.css">
+  <script src="../assets/usage.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">跳到正文</a>
@@ -65,21 +66,31 @@
       <section class="section" id="quickstart">
         <h2>快速开始</h2>
         <p>你需要 macOS（Linux 应该也能运行；不支持 Windows），以及 Python 3.11 或更高版本、Git 和 <a href="https://docs.astral.sh/uv/">uv</a>。</p>
-        <figure class="terminal">
-          <figcaption class="terminal-title">安装</figcaption>
-          <pre><code>git clone https://github.com/localmelo/localmelo.git
-cd localmelo
-uv sync --extra gateway
-source .venv/bin/activate</code></pre>
-        </figure>
-        <figure class="terminal">
-          <figcaption class="terminal-title">用 oMLX 运行任务</figcaption>
-          <pre><code>melo -u http://127.0.0.1:8000/v1 -m Qwen3-8B-4bit "What is 6*7?"</code></pre>
-        </figure>
-        <figure class="terminal">
-          <figcaption class="terminal-title">用 Ollama 运行任务</figcaption>
-          <pre><code>melo -u http://127.0.0.1:11434/v1 -m qwen3:8b "What is 6*7?"</code></pre>
-        </figure>
+        <!-- usage:steps --><ol class="steps">
+<li class="step"><h3><a href="quickstart.html#install">安装</a></h3>
+<p>克隆仓库，让 uv 完成安装。</p>
+<figure class="usage" aria-label="安装" data-copy="git clone https://github.com/localmelo/localmelo.git&#10;cd localmelo&#10;uv sync --extra gateway&#10;source .venv/bin/activate"><div class="usage-bar"><span class="usage-title"></span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">git</span> <span class="s">clone</span> <span class="a">https://github.com/<wbr>localmelo/<wbr>localmelo.git</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">cd</span> <span class="a">localmelo</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">sync</span> <span class="f">--extra</span> <span class="a">gateway</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">source</span> <span class="a">.venv/bin/activate</span></span></code></pre></figure></li>
+<li class="step"><h3><a href="quickstart.html#run-your-first-task">运行第一个任务</a></h3>
+<p>让 melo 连接你的模型服务器并提一个问题，答案会打印在 stdout。</p>
+<figure class="usage" aria-label="用 oMLX 运行任务" data-copy="melo -u http://127.0.0.1:8000/v1 -m Qwen3-8B-4bit &quot;What is 6*7?&quot;"><div class="usage-bar"><span class="usage-title">用 oMLX 运行任务</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="f">-u</span> <span class="a">http://127.0.0.1:8000/v1</span> <span class="f">-m</span> <span class="a">Qwen3-8B-4bit</span> <span class="q">"What is 6*7?"</span></span></code></pre></figure>
+<figure class="usage" aria-label="用 Ollama 运行任务" data-copy="melo -u http://127.0.0.1:11434/v1 -m qwen3:8b &quot;What is 6*7?&quot;"><div class="usage-bar"><span class="usage-title">用 Ollama 运行任务</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="f">-u</span> <span class="a">http://127.0.0.1:11434/<wbr>v1</span> <span class="f">-m</span> <span class="a">qwen3:8b</span> <span class="q">"What is 6*7?"</span></span></code></pre></figure></li>
+<li class="step"><h3><a href="quickstart.html#interactive-conversations">打开主对话</a></h3>
+<p>不带任务运行 melo：首次运行会找到你的服务器并保存配置。</p>
+<figure class="usage" aria-label="主对话" data-copy="melo"><div class="usage-bar"><span class="usage-title"></span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span></span></code></pre></figure></li>
+<li class="step"><h3><a href="quickstart.html#interactive-conversations">交给它一个任务</a></h3>
+<p>在对话里提出更大的工作：它会成为任务，完成后以卡片回来。</p>
+<figure class="step-shot"><img src="../assets/img/cards.webp" alt="主对话中的三张卡片：一个已完成的任务（改了什么、跑了哪些测试）、一个已答复的批准请求和一个在等你的批准请求。" width="1280" height="800" loading="lazy"></figure></li>
+<li class="step"><h3><a href="quickstart.html#set-up-an-embedding-model">查看它记住了什么</a></h3>
+<p>melo 跨对话保存笔记；你可以列出它们，或忘掉某一条。</p>
+<figure class="usage" aria-label="melo 记得什么" data-copy="melo memory list&#10;melo memory forget 3 -y"><div class="usage-bar"><span class="usage-title"></span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="s">memory</span> <span class="s">list</span></span>
+<span class="ln out"><span class="o">   3  Preferences  You prefer short answers.</span></span>
+<span class="ln out"><span class="o">      from chat “I prefer short answers”, Oct 30</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="s">memory</span> <span class="s">forget</span> <span class="a">3</span> <span class="f">-y</span></span>
+<span class="ln out"><span class="o">Forgot note 3.</span></span></code></pre></figure></li>
+</ol><!-- /usage -->
         <ul>
           <li>请保留目录名 <code>localmelo</code>：软件包就是从这个目录构建的。</li>
           <li>在搭载 Apple 芯片的 Mac 上推荐 <a href="https://github.com/jundot/omlx">oMLX</a> 作为模型服务器；其他系统用 <a href="https://ollama.com">Ollama</a>。</li>

@@ -7,6 +7,8 @@
  * /api/chores/{id}/run`; "Delete" asks first, then calls `DELETE`. `root` is mounted in the panel's body while the
  * tab is open; `show()` reads the list again and `reload()` does so quietly, unless an edit is open.
  */
+import {levelLabel} from './levels.mjs';
+
 export const EMPTY = "Nothing scheduled. Ask in the main chat: 'every weekday at 8:30, brief me on my calendar'.";
 export const CHECKIN = 'Every 30 min while localmelo runs · uses the model only if something is due';
 const KINDS = [['daily', 'Every day'], ['weekdays', 'Every weekday'], ['hours', 'Every N hours']];
@@ -34,7 +36,7 @@ export function rowLines(chore, now) {
   return lines;
 }
 
-export function setupScheduledTab({doc, api, chat = () => '', developer = () => false, clock = Date.now}) {
+export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now}) {
   const state = {loaded: false, error: '', chores: [], checkin: null, scope: 'all', open: null, edit: null, ask: null, notice: '', busy: false};
   let reads = 0;
   function node(tag, className, text) {
@@ -147,8 +149,7 @@ export function setupScheduledTab({doc, api, chat = () => '', developer = () => 
   function detail(chore) {
     const box = node('div', 'sched-detail');
     box.append(node('p', 'sched-request', chore.request));
-    const level = developer() ? `P${chore.level} · ${chore.level_word}` : chore.level_word;
-    box.append(node('p', 'sched-line', `Priority: ${level}`));
+    box.append(node('p', 'sched-line', `Priority: ${levelLabel(chore.level)}`));
     if (state.edit?.id === chore.id) { box.append(timeForm(chore)); return box; }
     const actions = node('div', 'sched-actions');
     if (state.ask === chore.id) {

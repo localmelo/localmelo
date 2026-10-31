@@ -39,6 +39,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - A delegated task whose request says "today" or "今天" anywhere (and not "not today" or "今天不用") is Today level; before, only "by/before/due today" counted. The console takes its default folder from the same place as tasks, so both always agree. The embedding guide shows the setup picture, and the folder-listing terminal test checks a real file name.
 - A resumed task waits its turn by level: a task that comes back after an approval is admitted by level and then age, whatever order the answers came in, and when every worker slot is taken a higher-level queued task makes the lowest worker park at its next step boundary (never in the middle of a tool) and queue again. A chat counts as focused only while a call of its turn is running and for `[scheduler] focus_s` seconds (new, default 10; the window was 30) after its last call or keystroke, so an open chat with no turn running leaves the server's free slots to tasks. A held task says why in the panel and the activity rows (`Waiting for a higher-priority task`, `Waiting for a free model slot`) ([#332]).
 
+- Priorities read as P0 to P5 everywhere a person sees one. A menu says what
+  each means (`P1 · today`, `P3 · when there is time`, `P4 · only when the
+  computer is idle`, `P5 · on hold until you start it`), a chip shows the code
+  with its meaning as a tooltip, and the main chat's lines, the panel's list,
+  the Scheduled tab, the terminal's task bar and list and `melo task` all use
+  the same codes in both modes; before, default mode used the words (Now,
+  Today, Normal, Whenever, If idle, Later) and only developer mode showed the
+  codes. Typing is unchanged: "today", "no rush", "later", the old words,
+  `P1` and `1` still set the same levels. The API still answers `level_word`
+  beside `level` ([#343]).
+
 ### Security
 
 - The approval card says why melo asks, and never offers a chat-wide allow for
@@ -119,6 +130,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   ([#188]).
 
 ### Fixed
+
+- A task you continue with a message starts its next run. A done, stopped or
+  failed task (a run that used up its steps, say) that a message or a "Send"
+  card continued ended again within a moment with no turn, because its
+  worker looked for tool-capture evidence before the new run was recorded as
+  running. The run now starts as running first, then sets up its tools. A
+  run that still cannot start says why on its card in the main chat and in the
+  panel's activity list ("Could not continue: …") instead of repeating the
+  earlier run's reason ([#344]).
 
 - The main chat does what it is asked, or hands it off with its context. A
   reply that only says what it will do ("I'll start by looking at the test
@@ -403,6 +423,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Docs
 
+- Commands on the website and in both READMEs are coloured terminal blocks: the command, its options, its values, quoted strings, comments and output each get their own colour, from the terminal's own palette in light and dark, with a Copy button that copies the commands only. The home page and the Quickstart open with five numbered steps (install, a first task, the main chat, a task, memory), each with a terminal block or a picture; the READMEs show the same blocks as light and dark pictures with the commands as text below. The blocks are generated from `scripts/usage_blocks.toml` by `scripts/usage_blocks.py` (`sync`, `contrast`), and the docs builder draws Markdown fences tagged `shell` or `console` the same way ([#342]).
 - The website and both READMEs catch up with the main chat, memory across chats, Scheduled chores, the activity pill and the terminal on the main chat. The home page shows eight feature cards, each with a picture (a main chat with side chats, memory you can see, chores that run on time, tasks that say what happened, the terminal in the same chat, the pill, approvals, browsing) and a console picture of the main chat at the top; three new WebP pictures live in `docs/assets/img/`. The roadmap board (home and updates, English and Chinese) moves finished work into a Done strip under the Now, Next and Later columns and adds the open work (plain words on the task page, dogfood round 2 on the new build, computer use in the browser, art for Melo's working poses). The architecture page's second diagram adds the Scheduled chores tick and check-in feeding the scheduler, the terminal as a client of the same gateway as the app, and the endpoint file they share (the first diagram is unchanged), and the Components section gains cards for the endpoint file and Scheduled chores; the status table follows. The README's "What you can do" points and second picture match the home page. `docs/STYLE.md` and its Chinese counterpart describe the Done strip ([#335]).
 - oMLX is documented as a supported local server, recommended on Apple silicon, next to Ollama: the README quick start (English and Chinese), the quickstart, the model servers guide, the configuration reference and the website home, quickstart and architecture pages say that its config key is `vllm` and explain which model first-run setup picks, and the first-run transcript and the `--base-url` model rule match the code ([#237]).
 - Chinese (zh-CN) twins of the command-line, API v2 and troubleshooting references in `docs/zh-CN/reference/`, covered by the docs anchor and example tests ([#203]).
@@ -2782,3 +2803,6 @@ earlier milestones.
 [#333]: https://github.com/localmelo/localmelo/pull/333
 [#334]: https://github.com/localmelo/localmelo/pull/334
 [#335]: https://github.com/localmelo/localmelo/pull/335
+[#342]: https://github.com/localmelo/localmelo/pull/342
+[#343]: https://github.com/localmelo/localmelo/pull/343
+[#344]: https://github.com/localmelo/localmelo/pull/344

@@ -25,6 +25,11 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 
 from markdown_it import MarkdownIt
 
+try:
+    from localmelo.scripts import usage_blocks
+except ImportError:  # run as `python scripts/build_docs.py`
+    import usage_blocks  # type: ignore[no-redef,import-not-found]
+
 
 class DocumentationError(ValueError):
     """The manifest or its paths cannot be built safely."""
@@ -54,7 +59,9 @@ def _slug(text: str) -> str:
     )
 
 
-def _parser(rewrite: Callable[[str], str] | None = None) -> MarkdownIt:
+def _parser(
+    rewrite: Callable[[str], str] | None = None, lang: str = "en"
+) -> MarkdownIt:
     parser = (
         MarkdownIt("commonmark", {"html": False})
         .enable("table")
@@ -105,6 +112,18 @@ def _parser(rewrite: Callable[[str], str] | None = None) -> MarkdownIt:
                         child.attrSet(attr, rewrite(value))
 
     parser.core.ruler.after("inline", "docs_headings_and_links", headings_and_links)
+    renderer: Any = parser.renderer
+    plain_fence = renderer.rules["fence"]
+
+    def fence(tokens: Any, index: int, options: Any, env: Any) -> Any:
+        """`console` and `shell` fences become coloured terminal blocks."""
+        token = tokens[index]
+        words = token.info.split()
+        if words and words[0] in ("console", "shell"):
+            return usage_blocks.render_fence(token.content, words[0], lang) + "\n"
+        return plain_fence(tokens, index, options, env)
+
+    renderer.rules["fence"] = fence
     return parser
 
 
@@ -154,7 +173,9 @@ def _rewriter(
     return rewrite
 
 
-def _page(title: str, content: str, *, lang: str, nav: str, alternate: str) -> str:
+def _page(
+    title: str, content: str, *, lang: str, nav: str, alternate: str, assets: str = ""
+) -> str:
     language = html.escape(lang, quote=True)
     label = html.escape(title)
     switch = (
@@ -165,7 +186,14 @@ def _page(title: str, content: str, *, lang: str, nav: str, alternate: str) -> s
     return (
         '<!doctype html>\n<html lang="' + language + '">\n<head>\n'
         '<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n'
-        f"<title>{label} · localmelo</title>\n</head>\n<body>\n"
+        f"<title>{label} · localmelo</title>\n"
+        + (
+            f'<link rel="stylesheet" href="{assets}site.css">\n'
+            f'<script src="{assets}usage.js" defer></script>\n'
+            if assets
+            else ""
+        )
+        + "</head>\n<body>\n"
         '<a href="#main">Skip to content</a>\n'
         f'<nav aria-label="Documentation">{nav}</nav>\n{switch}\n'
         f'<main id="main"><article>\n{content}</article></main>\n</body>\n</html>\n'
@@ -217,7 +245,7 @@ def build(manifest_path: Path, output_dir: Path) -> list[Path]:
                 rendered = source_file.read_text(encoding="utf-8")
             else:
                 text = source_file.read_text(encoding="utf-8")
-                content = _parser(_rewriter(source, output, targets)).render(text)
+                content = _parser(_rewriter(source, output, targets), lang).render(text)
                 nav = "".join(
                     f'<span>{html.escape(section["title"])}</span>'
                     + "".join(
@@ -240,6 +268,7 @@ def build(manifest_path: Path, output_dir: Path) -> list[Path]:
                     lang="zh-CN" if lang == "zh" else "en",
                     nav=nav,
                     alternate=alternate,
+                    assets=_relative(output, "assets/") + "/",
                 )
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text(rendered, encoding="utf-8", newline="\n")
