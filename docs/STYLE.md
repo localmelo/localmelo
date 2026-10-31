@@ -34,7 +34,7 @@ lists, with no PR or issue numbers in their prose.
 - A picture before words: a screenshot, a short loop or a diagram for each feature section that has one, placed under the heading; a table for a comparison.
 - A command goes in a terminal block, not a bare code block: a title, the prompt, one colour each for the command, its options, its values and its strings, and a Copy button that copies the command alone. `scripts/usage_blocks.py` draws the blocks; edit `scripts/usage_blocks.toml`, never the generated markup.
 - A guide that renames or removes a heading keeps the old one as an anchor (`<a id="old-heading"></a>`) so links and the manifest still resolve.
-- Pictures live in `docs/assets/img/` as WebP, at most 1280 pixels wide, with alt text; a page's pictures stay under 3 MB, and both languages show the same ones.
+- Pictures live in `docs/assets/img/` as WebP, at most 1280 pixels wide, with alt text; a page's pictures stay under 3 MB. Both languages show the same pictures, except that a screenshot of the console has a Chinese version (the name ends in `-zh`) for the Chinese pages.
 - No PR or issue numbers on these pages; where a reader may want detail, add a small "What changed" link to the changelog.
 - `docs/for-agents.md`, `docs/llms.txt` and the changelog stay exact and terse, and keep their PR numbers.
 
