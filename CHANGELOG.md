@@ -390,6 +390,28 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `GET /api/health` `status.recent` also says what the finished run was called
   (`title`) ([#326]).
 
+- Chores that run on time, and a 30-minute check-in. Say `every weekday at 8:30,
+  brief me on my calendar` (or `每天早上九点 …`) in the main chat and it asks
+  `Run this every weekday at 8:30?` with **Save chore**, **Just once** and
+  **Cancel**; rules read the phrase (every day, every weekday or every 1 to 24
+  hours, with an optional time or day part), no model is called, and nothing is
+  saved or started until you tap. A saved chore is a task with origin
+  `user_rule`, started by a code-only tick every 30 s with up to two minutes of
+  jitter and never early; a run missed while the computer slept runs once at
+  wake, and a chore whose last run has not ended skips its slot. The panel's
+  **Scheduled** tab lists the check-in (switch, next time) and each chore (when,
+  next run, how the last run went, switch; **Run now**, **Edit time**, **Delete**);
+  `#/scheduled` opens it. Every 30 minutes the check-in looks, in code, for a
+  finished chore run or a task that has waited for you: with nothing it makes no
+  model call and no card, otherwise one model call writes a short note and one
+  card goes to the main chat. For API clients: `GET|POST /api/chores`,
+  `PATCH|DELETE /api/chores/{id}` (revision-checked, 409 `stale_revision`),
+  `POST /api/chores/{id}/run`, `PUT /api/checkin`, and `chore`, `chore_saved`
+  and `checkin` echoes (`do`: `save`, `once`, `cancel`). The scheduler
+  component of the gateway's session file is version 6; an older file gains the
+  `chores` and `chore_meta` tables and keeps every row. See
+  [Chores that repeat](docs/guides/web-console.md#chores-that-repeat) ([#327]).
+
 - The main chat answers, or hands bigger work to a task by level. It answers a
   quick question itself and starts bigger work as a task it owns, with one line
   such as `Started: Plan the trip · Normal`; the result comes back as a card.
@@ -2647,6 +2669,7 @@ earlier milestones.
 [#320]: https://github.com/localmelo/localmelo/pull/320
 [#322]: https://github.com/localmelo/localmelo/pull/322
 [#326]: https://github.com/localmelo/localmelo/pull/326
+[#327]: https://github.com/localmelo/localmelo/pull/327
 [#310]: https://github.com/localmelo/localmelo/pull/310
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
