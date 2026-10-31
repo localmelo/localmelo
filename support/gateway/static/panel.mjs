@@ -323,6 +323,12 @@ export function setupPanel({
     if (live.state.error) box.append(node('p', 'panel-note', live.state.error));
     const actions = node('div', 'activity-actions');
     if (row.kind === 'task' && LIVE.has(row.state)) actions.append(...taskActions(row));
+    // A task that ran out of steps goes on from where it stopped.
+    else if (row.kind === 'task' && row.can_continue) {
+      const go = button('outline-button', t('failure.continue'), () => act(row, null, '/continue'));
+      go.disabled = state.busy === key(row);
+      actions.append(go);
+    }
     const link = node('a', 'activity-open', t(row.state === 'waiting' ? 'common.review' : `panel.open.${row.kind}`));
     link.href = `${HREF[row.kind]}${encodeURIComponent(row.id)}`;
     link.addEventListener('click', () => setSheet(false));
@@ -354,13 +360,13 @@ export function setupPanel({
     for (const control of nodes) control.disabled = busy;
     return nodes;
   }
-  async function act(row, change) {
+  async function act(row, change, tail = '') {
     if (state.busy) return;
     state.busy = key(row);
     state.notice = '';
     drawBody();
     try {
-      await api(`/tasks/${encodeURIComponent(row.id)}`, {method: 'PATCH', body: change});
+      await api(`/tasks/${encodeURIComponent(row.id)}${tail}`, tail ? {method: 'POST'} : {method: 'PATCH', body: change});
     } catch (error) {
       state.noticeFor = key(row);
       state.notice = error?.message || t('panel.taskChangeFailed');

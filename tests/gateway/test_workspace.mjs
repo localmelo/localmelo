@@ -3443,6 +3443,32 @@ test('a task refused its folder says why and starts again in the folder chosen',
   assert.equal(h.context.location.hash, '#/tasks/t2');
 });
 
+test('a task that ran out of steps reads stopped with what is left, and Continue picks it up', async () => {
+  const calls = [];
+  const h = await openTask({
+    'GET /tasks/t1': {task: taskRow('t1', {state: 'failed', card: '', out_of_steps: true, wait_reason: 'Out of steps',
+      left: 'Remaining: run the tests and commit.'})},
+    'POST /tasks/t1/continue': () => { calls.push('continue'); return {status: 202, body: {task: taskRow('t1', {state: 'queued', out_of_steps: false}), message: 'continued'}}; },
+  });
+  const text = flatten(h.element('task-panel'));
+  assert.match(text, /State\s*stopped/);
+  assert.match(text, /What is left\s*Remaining: run the tests and commit\./);
+  assert.doesNotMatch(text, /Out of steps/, 'the stored reason is not shown as a wait');
+  assert.doesNotMatch(text, /failed/);
+  assert.equal(labelled(h, 'Stop'), null, 'a finished task cannot be stopped');
+  labelled(h, 'Continue').click(); await settle();
+  assert.deepEqual(calls, ['continue']);
+  assert.match(flatten(h.element('task-panel')), /Continuing from where it stopped\./);
+  assert.match(flatten(h.element('task-panel')), /State\s*queued/);
+  assert.equal(labelled(h, 'Continue'), null, 'it has gone on, so there is nothing to continue');
+});
+
+test('a task that failed for another reason stays failed and offers no Continue', async () => {
+  const h = await openTask({'GET /tasks/t1': {task: taskRow('t1', {state: 'failed', card: '', out_of_steps: false, wait_reason: 'no disk'})}});
+  assert.match(flatten(h.element('task-panel')), /State\s*failed/);
+  assert.equal(labelled(h, 'Continue'), null);
+});
+
 test('a task whose commit is all that is left says so with the command', async () => {
   const h = await openTask({'GET /tasks/t1': {task: taskRow('t1', {state: 'done', card: '', not_committed: 'Not committed. Run: git commit -am "Fix"'})}});
   assert.match(flatten(h.element('task-panel')), /Not committed\. Run: git commit -am "Fix"/);

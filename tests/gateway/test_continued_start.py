@@ -24,7 +24,9 @@ from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ToolCall, ToolDef
 from localmelo.support.config import Config
 from localmelo.support.gateway.chat_gate import ChatGate
+from localmelo.support.gateway.finishing import OUT_OF_STEPS
 from localmelo.support.gateway.recovery_store import RecoveryStore
+from localmelo.support.gateway.task_store import TaskStoreError
 from localmelo.support.gateway.workers import TaskWorkers
 from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.hub import SessionHub
@@ -163,6 +165,45 @@ async def test_a_task_out_of_steps_continues_to_a_second_turn(workers: Setup) ->
     (first_state, first), (second_state, second) = llm.builds
     assert (first_state, second_state) == ("running", "running")
     assert first and second and first != second
+
+
+async def test_a_run_out_of_steps_is_stopped_and_continues_from_its_page(
+    workers: Setup,
+) -> None:
+    pool, llm, workspace = workers
+    llm.replies = [lists_files(), lists_files(), says("Committed.")]
+    row, _ = await pool.create({"prompt": "Fix it", "workspace": str(workspace)})
+    task_id = row["task_id"]
+    await _settled(pool, task_id, 1, "failed")
+    # Still a failed task in the store, with the reason that makes it a stop.
+    record = await pool.tasks.get_task(task_id)
+    assert (record.state, record.wait_reason) == ("failed", OUT_OF_STEPS)
+    body = await pool.get(task_id)
+    assert body["out_of_steps"] is True
+    _, how = await pool.continue_stopped(task_id)
+    assert how == "continued"
+    queued = await pool.tasks.get_task(task_id)
+    assert queued.wait_reason == "" and queued.card
+    await _settled(pool, task_id, 2, "done")
+    assert (await pool.get(task_id))["out_of_steps"] is False
+    # A task that is done has nothing to continue from here.
+    with pytest.raises(TaskStoreError, match="ran out of steps"):
+        await pool.continue_stopped(task_id)
+
+
+async def test_a_run_that_could_not_start_is_not_a_stop(workers: Setup) -> None:
+    pool, llm, workspace = workers
+    llm.replies = [lists_files(), lists_files()]
+    row, _ = await pool.create({"prompt": "Fix it", "workspace": str(workspace)})
+    task_id = row["task_id"]
+    await _settled(pool, task_id, 1, "failed")
+    llm.start_error = RuntimeError("the model server is not answering")
+    await pool.message(task_id, "commit what you have")
+    await _settled(pool, task_id, 1, "failed")
+    body = await pool.get(task_id)
+    assert body["out_of_steps"] is False
+    with pytest.raises(TaskStoreError, match="ran out of steps"):
+        await pool.continue_stopped(task_id)
 
 
 async def test_a_failed_task_continues_after_a_second_message(workers: Setup) -> None:

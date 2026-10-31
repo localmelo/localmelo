@@ -456,6 +456,36 @@ test('a running task opens to its live steps, which follow the task stream until
   assert.equal(h.root.find((node) => node.className === 'activity-actions').children.length, 1, 'a finished task offers only its link');
 });
 
+test('a task that ran out of steps reads Stopped with what is left, and its row offers Continue', async () => {
+  const stopped = row({state: 'stopped', icon: 'stopped', result: 'Remaining: run the tests and commit.', can_continue: true});
+  const failed = row({id: 't2', title: 'Broke', state: 'failed', icon: 'failed', result: 'no disk'});
+  const h = harness({rows: [stopped, failed]});
+  await h.panel.update(health());
+  h.tabs()[1].click();
+  const lines = h.root.findAll((node) => node.className === 'activity-line').map((node) => node.textContent);
+  assert.deepEqual(lines, ['Stopped · Remaining: run the tests and commit.', 'Failed · no disk']);
+  h.heads()[0].click();
+  await settle();
+  const actions = h.root.find((node) => node.className === 'activity-actions');
+  assert.deepEqual(actions.children.map((node) => node.textContent), ['Continue', 'Open task']);
+  actions.children[0].click();
+  await settle();
+  assert.deepEqual(h.calls.find(([, path]) => path.endsWith('/continue')), ['POST', '/tasks/t1/continue', undefined]);
+  // A real failure has no Continue.
+  h.heads()[1].click();
+  await settle();
+  assert.deepEqual(h.root.find((node) => node.className === 'activity-actions').children.map((node) => node.textContent), ['Open task']);
+});
+
+test('a task held on an approval says so in the row, a slot wait keeps its words', async () => {
+  const asks = row({state: 'held', icon: 'wait', activity: 'Needs your approval'});
+  const slot = row({id: 't2', title: 'Slides', state: 'held', icon: 'held', activity: 'Waiting for a free model slot'});
+  const h = harness({rows: [asks, slot]});
+  await h.panel.update(health());
+  assert.deepEqual(h.root.findAll((node) => node.className === 'activity-line').map((node) => node.textContent),
+    ['Needs your approval', 'Waiting for a free model slot']);
+});
+
 test('between calls the open row ends with what it is doing; a waiting row offers Review', async () => {
   const thinking = row({state: 'running', activity: 'Thinking', icon: 'think'});
   const waiting = row({id: 'c9', kind: 'chat', title: 'Add the date', state: 'waiting', activity: 'Waiting for your approval', icon: 'wait'});

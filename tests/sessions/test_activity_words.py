@@ -201,6 +201,12 @@ def test_a_held_call_says_why_in_words(reason: str, words: str) -> None:
     assert activity_text(state="held", reason=reason) == ActivityText(words, "held")
 
 
+def test_a_task_held_on_an_approval_waits_for_the_person_not_the_model() -> None:
+    assert activity_text(state="held", reason="Approval") == ActivityText(
+        "Needs your approval", "wait"
+    )
+
+
 def test_a_reason_changes_only_a_held_state() -> None:
     assert activity_text(state="waiting", reason="Priority") == ActivityText(
         "Waiting for your approval", "wait"

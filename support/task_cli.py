@@ -190,6 +190,14 @@ def _level_label(task: dict[str, Any]) -> str:
     return f"P{level}"
 
 
+def _state_word(task: dict[str, Any]) -> str:
+    """The task's state for a person: ``stopped`` when its run ran out of steps (#341).
+
+    ``--json`` keeps the stored state, ``failed``, and says ``out_of_steps``.
+    """
+    return "stopped" if task.get("out_of_steps") is True else str(task.get("state", ""))
+
+
 def execute(
     args: argparse.Namespace,
     client: httpx.Client,
@@ -305,7 +313,7 @@ def execute(
                 (
                     _safe(task.get("task_id", "")),
                     _level_label(task),
-                    _safe(task.get("state", "")),
+                    _safe(_state_word(task)),
                     _safe(title),
                     _safe(_waiting_approval(task) or ""),
                 )
@@ -321,7 +329,7 @@ def execute(
     else:
         task = data["task"]
         print(
-            f"{_safe(task.get('task_id', ''))}  {_safe(task.get('state', ''))}",
+            f"{_safe(task.get('task_id', ''))}  {_safe(_state_word(task))}",
             file=out,
             flush=True,
         )
@@ -346,6 +354,10 @@ def execute(
                 print(f"  Reason: {_safe(reason)}", file=out)
             if approval:
                 print(f"  {_safe(approval)}", file=out)
+            elif task.get("out_of_steps") is True:
+                print("  Ran out of steps: continue it from the console.", file=out)
+                if task.get("left"):
+                    print(f"  Left: {_safe(task['left'])}", file=out)
             elif wait:
                 print(f"  Waiting: {_safe(wait)}", file=out)
         out.flush()

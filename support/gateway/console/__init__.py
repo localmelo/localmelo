@@ -19,7 +19,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final
 
@@ -124,6 +124,9 @@ class ConsoleOptions:
     front_builder: AgentBuilder | None = None
     # The chore clock and check-in; a test replaces the clock, the beats and the summary.
     chores: ChoreOptions | None = None
+    # The reply that names a task the main chat starts without a title of its own;
+    # None asks the model. A test passes one, so no request leaves the machine.
+    titler: Callable[[str], Awaitable[str]] | None = None
 
 
 class Console:

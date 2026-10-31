@@ -520,6 +520,36 @@ def test_show_prints_only_the_reason_and_wait_a_task_has() -> None:
     assert "  Reason: budget\n" in text and "Waiting:" not in text
 
 
+_STOPPED = {
+    "task_id": "abc",
+    "state": "failed",
+    "out_of_steps": True,
+    "title": "Fix it",
+    "level": 2,
+    "wait_reason": "Out of steps",
+    "left": "Remaining: run the tests and commit.",
+}
+
+
+def test_a_task_that_ran_out_of_steps_reads_stopped_for_a_person() -> None:
+    text = _run(["show", "abc"], {"task": _STOPPED})
+    assert text.splitlines() == [
+        "abc  stopped",
+        "  Title: Fix it",
+        "  Level: P2",
+        "  Ran out of steps: continue it from the console.",
+        "  Left: Remaining: run the tests and commit.",
+    ]
+    listed = _run(["list"], {"tasks": [_STOPPED, {**_STOPPED, "out_of_steps": False}]})
+    assert [row.split()[2] for row in listed.splitlines()[1:]] == ["stopped", "failed"]
+
+
+def test_json_keeps_the_stored_state_of_a_task_that_ran_out_of_steps() -> None:
+    text = _run(["show", "abc", "--json"], {"task": _STOPPED})
+    task = json.loads(text)["task"]
+    assert (task["state"], task["out_of_steps"]) == ("failed", True)
+
+
 def test_list_adds_the_approval_line_under_a_waiting_task() -> None:
     quiet = {"task_id": "def", "state": "queued", "title": "Other"}
     text = _run(["list"], {"tasks": [_HELD, quiet]})

@@ -516,6 +516,15 @@ def test_lines_cut_to_the_width_and_keep_how_to_open() -> None:
     assert asked.plain == "→ Start this as a task?  /task and your message starts it"
 
 
+def test_a_task_that_ran_out_of_steps_is_a_stopped_card_not_a_failed_one() -> None:
+    card = {"state": "stopped", "source_id": "t1", "source_kind": "task",
+            "title": "Fix it", "line": "Remaining: run the tests"}  # fmt: skip
+    line = card_line(card, UNICODE, 80)
+    assert line.plain.startswith("■ Stopped: Fix it")
+    assert line.plain.endswith("Remaining: run the tests  melo task show t1")
+    assert "Not finished" not in line.plain
+
+
 def test_an_approval_request_from_the_gateways_list() -> None:
     request = approval_request(
         {"request_id": "r", "call_id": "c", "tool_name": "file_write",

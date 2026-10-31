@@ -11,10 +11,11 @@ from fastapi.testclient import TestClient
 
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.errors import ApiError
+from localmelo.support.gateway.finishing import OUT_OF_STEPS
 from localmelo.support.gateway.task_policy import WorkspaceError
 from localmelo.support.gateway.task_store import TaskConflictError, TaskNotFoundError
 
-from .conftest import HOLDER, all_events, core_event
+from .conftest import HOLDER, all_events, core_event, run_result
 
 
 class FakeWorkers:
@@ -165,6 +166,65 @@ def test_real_task_control_errors(
     response = client.patch(url, json={"state": "stop"})
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "invalid_transition"
+
+
+async def test_a_task_that_ran_out_of_steps_continues_from_its_page(
+    client: TestClient,
+    console: Console,
+    workspace: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    async def no_schedule() -> None:
+        pass
+
+    monkeypatch.setattr(console.workers, "_schedule", no_schedule)
+    created = client.post(
+        "/api/tasks", json={"objective": "fix it", "workspace": workspace}
+    )
+    task_id = created.json()["task"]["task_id"]
+    url = f"/api/tasks/{task_id}"
+    # Not stopped yet: nothing to continue.
+    refused = client.post(f"{url}/continue")
+    assert refused.status_code == 409
+    assert refused.json()["error"]["code"] == "invalid_transition"
+    store = console.store
+    turn = await store.begin_turn(task_id, "fix it", holder=HOLDER)
+    await store.finish_turn(
+        task_id,
+        turn.turn,
+        holder=HOLDER,
+        status="budget_exhausted",
+        cause="run",
+        result=run_result(),
+        answer="Fixed the check. Remaining: run the tests and commit.",
+    )
+    await console.workers.tasks.change(
+        task_id, state="failed", actor="scheduler", failure_reason=OUT_OF_STEPS
+    )
+    console.gate.finish_task(task_id, "failed")
+    page = client.get(url).json()["task"]
+    # Stored as failed, read as a stop with what is left.
+    assert (page["state"], page["out_of_steps"]) == ("failed", True)
+    assert page["left"] == "Remaining: run the tests and commit."
+    listed = client.get("/api/tasks").json()["tasks"]
+    assert [row["out_of_steps"] for row in listed] == [True]
+    assert "left" not in listed[0]  # only a task's own page reads its answer
+    sent = client.post(f"{url}/continue")
+    assert sent.status_code == 202, sent.text
+    assert sent.json()["message"] == "continued"
+    queued = client.get(url).json()["task"]
+    assert (queued["state"], queued["out_of_steps"]) == ("queued", False)
+    # Once it goes on, there is nothing to continue until it stops again.
+    assert client.post(f"{url}/continue").status_code == 409
+
+
+def test_continue_reports_a_missing_task(client: TestClient) -> None:
+    missing = client.post("/api/tasks/nope/continue")
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == "not_found"
 
 
 def test_real_task_workspace_symlink_swap(

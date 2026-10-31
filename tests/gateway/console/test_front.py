@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -43,11 +43,15 @@ from .test_turn_writes import _create, _post_turn, _wait_turn, console_with
 
 @contextlib.asynccontextmanager
 async def front_console(
-    tmp_path: Path, *replies: Message, chores: ChoreOptions | None = None
+    tmp_path: Path,
+    *replies: Message,
+    chores: ChoreOptions | None = None,
+    titler: Callable[[str], Awaitable[str]] | None = None,
 ) -> AsyncIterator[tuple[Console, httpx.AsyncClient, ScriptedLLM]]:
     """A console whose main chat runs a FrontAgent on *replies*; workers never start.
 
-    *chores* replaces the chore clock, beats and summary of the console.
+    *chores* replaces the chore clock, beats and summary of the console, and
+    *titler* the model's reply that names a task code starts.
     """
     llm = ScriptedLLM(replies)
     holder: list[Console] = []
@@ -73,6 +77,7 @@ async def front_console(
             probe=FakeProbe(),
             gate=quiet_gate(),
             chores=chores,
+            titler=titler,
         ),
     )
     holder.append(console)

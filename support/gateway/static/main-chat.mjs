@@ -50,7 +50,7 @@ export function readCard(row) {
   const data = row?.data && typeof row.data === "object" ? {...row.data, id: row.id, ts: row.ts} : row;
   const id = Number(data?.id);
   if (!Number.isFinite(id) || !data?.source_id) return null;
-  const state = ["done", "failed", "waiting", "answered"].includes(data.state) ? data.state : "done";
+  const state = ["done", "failed", "stopped", "waiting", "answered"].includes(data.state) ? data.state : "done";
   return {
     id,
     at: Number(data.at) || Number(data.ts) || 0,
@@ -158,13 +158,18 @@ export function cardWords(card) {
     const denied = card.answer ? card.answer === "denied" : card.line.startsWith("Denied");
     return {mark: allowed ? "✓" : denied ? "✕" : "·", heading: t("mainChat.card.answered", {title}), action: open};
   }
-  if (card.reminder) return {mark: card.state === "failed" ? "✕" : "✓", heading: t("mainChat.card.reminder", {title}), action: open};
+  if (card.reminder) return {mark: card.state === "failed" || card.state === "stopped" ? "✕" : "✓", heading: t("mainChat.card.reminder", {title}), action: open};
   if (card.state === "failed") return {mark: "✕", heading: t("mainChat.card.failed", {title}), action: open};
+  // A task that ran out of steps stopped; it can go on from where it was, so Continue comes first.
+  if (card.state === "stopped") return {mark: "■", heading: t("mainChat.card.stopped", {title}), action: open, more: t("failure.continue")};
   return {mark: "✓", heading: t("mainChat.card.done", {title}), action: open};
 }
 
-/** One card's node: `{doc, card, open}`; `open` gets the card. Its day is the divider above it. */
-export function cardNode({doc, card, open}) {
+/**
+ * One card's node: `{doc, card, open, resume}`; `open` gets the card, and `resume(card, button)` is the
+ * Continue of a stopped task's card. Its day is the divider above it.
+ */
+export function cardNode({doc, card, open, resume = null}) {
   const el = (tag, className, text) => {
     const node = doc.createElement(tag);
     if (className) node.className = className;
@@ -190,6 +195,12 @@ export function cardNode({doc, card, open}) {
   action.type = "button";
   action.addEventListener("click", () => open(card));
   const foot = el("div", "main-card-foot");
+  if (words.more && resume) {
+    const more = el("button", "outline-button", words.more);
+    more.type = "button";
+    more.addEventListener("click", () => resume(card, more));
+    foot.append(more);
+  }
   foot.append(action, el("span", "main-card-time", card.at ? clock(card.at) : ""));
   node.append(mark, text, foot);
   return node;
