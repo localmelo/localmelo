@@ -37,6 +37,26 @@ _IMPORT = re.compile(r"(?<!\S)@((?:~|\.{1,2}|[\w.-]+)?/\S*|[\w.-]+\.\w+)")
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 _BULLET = re.compile(r"^(?:[-*+•]|\d+[.)])\s+")
 _BLOCK = re.compile(r"[>|][+-]?")  # a YAML block scalar's marker, not a value
+# A line that never continues the one above: a "Why:" note, or a link or URL alone.
+_OWN_LINE = re.compile(
+    r"(?:why|how to apply)\s*[:：]|(?:\[[^\]]*\]\([^)]*\)|https?://\S+)\s*$",
+    re.IGNORECASE,
+)
+_ABBREVIATIONS = frozenset(
+    (
+        "e.g.",
+        "i.e.",
+        "etc.",
+        "vs.",
+        "cf.",
+        "approx.",
+        "dr.",
+        "mr.",
+        "mrs.",
+        "ms.",
+        "prof.",
+    )
+)
 _NOISE = re.compile(
     r"^(?:\[[^\]]*\]\([^)]*\)|https?://\S+|(?:why|how to apply)\s*[:：])",
     re.IGNORECASE,
@@ -160,34 +180,70 @@ def _split(text: str) -> list[str]:
     return [s for _, s in split_sentences(text)]
 
 
+def _ended(text: str) -> bool:
+    """Whether *text* ends a sentence, so the next line starts a new one."""
+    last = text.rsplit(None, 1)[-1].lower()
+    return (
+        text.endswith((".", "!", "?", "。", "！", "？")) and last not in _ABBREVIATIONS
+    )
+
+
+def _emit(
+    pending: tuple[int, str] | None, stack: list[tuple[int, str]], path: str, kind: str
+) -> Iterator[Statement]:
+    """The statements of one bullet or paragraph (*pending*: its first line's number and text)."""
+    if pending is None:
+        return
+    number, body = pending
+    if len(body) < 4 or body.endswith((":", "：")) or _NOISE.match(body):
+        return
+    heading = " › ".join(h for _, h in stack)
+    for sentence in _split(body):
+        yield Statement(sentence, path, number, heading, kind)
+
+
 def markdown(
     text: str, path: str, kind: str = "", title: str = ""
 ) -> Iterator[Statement]:
     """The bullets and sentences of Markdown, each with its heading path.
 
-    Code, tables, comments, headings alone, lead-ins ending in a colon, links
-    and URLs alone, and "Why:" notes are not statements.
+    The lines of a bullet or paragraph that is wrapped over several lines are one
+    statement, numbered by its first line (a line that ends a sentence ends it,
+    so lines that each hold a sentence stay apart). Code, tables, comments, headings alone,
+    lead-ins ending in a colon, links and URLs alone, and "Why:" notes are not
+    statements.
     """
     stack: list[tuple[int, str]] = [(0, title)] if title else []
     fenced = False
+    pending: tuple[int, str] | None = None
     for number, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
-        if line.startswith(("```", "~~~")):
-            fenced = not fenced
-        elif fenced or not line or line.startswith(("<!--", "|")):
-            continue
+        fence = line.startswith(("```", "~~~"))
+        if fence or fenced or not line or line.startswith(("<!--", "|")):
+            yield from _emit(pending, stack, path, kind)
+            pending = None
+            fenced = not fenced if fence else fenced
         elif head := _HEADING.match(line):
+            yield from _emit(pending, stack, path, kind)
+            pending = None
             level = len(head[1])
             while stack and stack[-1][0] >= level:
                 stack.pop()
             stack.append((level, head[2]))
         else:
             body = _BULLET.sub("", line.lstrip("> ")).replace("**", "").strip()
-            if len(body) < 4 or body.endswith((":", "：")) or _NOISE.match(body):
-                continue
-            heading = " › ".join(h for _, h in stack)
-            for sentence in _split(body):
-                yield Statement(sentence, path, number, heading, kind)
+            if (
+                pending is not None
+                and not _ended(pending[1])
+                and not _BULLET.match(line)
+                and not line.startswith(">")
+                and not _OWN_LINE.match(body)
+            ):
+                pending = (pending[0], f"{pending[1]} {body}")
+            else:
+                yield from _emit(pending, stack, path, kind)
+                pending = (number, body)
+    yield from _emit(pending, stack, path, kind)
 
 
 def _unquote(value: str) -> str:
@@ -250,7 +306,7 @@ def _file(
                 if depth < MAX_IMPORT_DEPTH:
                     yield from _file(target, src, home, seen, depth + 1)
         rest = rest.strip(" -*·:：")
-        if len(rest) >= 4 and not re.fullmatch(r"@\S+", rest):
+        if len(rest) >= 4 and not re.fullmatch(r"(?:@\S+\s*)+", rest):
             yield replace(st, text=rest)
 
 

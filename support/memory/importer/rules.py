@@ -30,6 +30,23 @@ _MECHANICS = re.compile(
     r"|\.claude/(?:hooks|commands|agents|skills)|\bpermissions?\.(?:allow|deny)\b"
     r"|\ballowedTools\b|\bbypassPermissions\b|\bhooks? (?:config|settings)\b"
 )
+# Key material and the details that name a key: fingerprints, public and private keys,
+# a private key's path with the words about it, a 40-hex fingerprint of a PGP key.
+_KEY_MATERIAL = re.compile(
+    r"SHA256:[A-Za-z0-9+/]{20,}|(?<![0-9A-Fa-f:])(?:[0-9A-Fa-f]{2}:){15}[0-9A-Fa-f]{2}(?![0-9A-Fa-f:])"
+    r"|\b(?:ssh-(?:ed25519|rsa|dss)|ecdsa-sha2-nistp\d+)\s+AAAA[A-Za-z0-9+/]{16,}"
+    r"|-----BEGIN"
+    r"|(?<![0-9A-Fa-f])(?:[0-9A-Fa-f]{4} ){9}[0-9A-Fa-f]{4}(?![0-9A-Fa-f])"
+)
+_HEX40 = re.compile(r"(?<![0-9A-Fa-f])[0-9A-Fa-f]{40}(?![0-9A-Fa-f])")
+_PGP_WORDS = re.compile(r"\b(?:pgp|gpg|fingerprint|fpr|signing key)\b", re.IGNORECASE)
+_KEY_PATH = re.compile(
+    r"(?:~|\$HOME|/[\w./-]*)/\.ssh/(?!(?:config|known_hosts|authorized_keys)\b)[\w.-]+"
+)
+_KEY_WORDS = re.compile(r"\b(?:key|passphrase|fingerprint)\b", re.IGNORECASE)
+# How the other tool picks a setting: its precedence among environment variables.
+_ENV_NAME = re.compile(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b")
+_PRECEDENCE = re.compile(r"\bprecedence\b|\S+\s+>\s+\S+\s+>\s+\S+", re.IGNORECASE)
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 _ACCOUNT = re.compile(
     r"\bApple ?ID\b|苹果\s?ID|\b(?:Apple|iCloud|Google|GitHub|Microsoft) account\b"
@@ -105,9 +122,21 @@ def own_email(home: Path) -> str:
     return ""
 
 
+def _key_detail(text: str) -> bool:
+    """Whether *text* is, or names, a key: its material or fingerprint, or the path
+    of a private key with the words about it (a how-to on ``~/.ssh/config`` is not)."""
+    return bool(
+        _KEY_MATERIAL.search(text)
+        or (_HEX40.search(text) and _PGP_WORDS.search(text))
+        or (_KEY_PATH.search(text) and _KEY_WORDS.search(text))
+    )
+
+
 def reject(text: str, email: str) -> str:
-    """Why *text* is not kept: ``secret``, ``third_party`` or ``mechanics``; ``""`` if it is."""
-    if records.sensitive(text):
+    """Why *text* is not kept: ``secret`` (a key's material, fingerprint or private
+    path included), ``third_party`` or ``mechanics`` (an env variable's precedence
+    included); ``""`` if it is."""
+    if records.sensitive(text) or _key_detail(text):
         return "secret"
     emails = {m.lower() for m in _EMAIL.findall(text)}
     if (
@@ -117,7 +146,8 @@ def reject(text: str, email: str) -> str:
         or (_ID.search(text) and _PERSON.search(text))
     ):
         return "third_party"
-    return "mechanics" if _MECHANICS.search(text) else ""
+    precedence = _ENV_NAME.search(text) and _PRECEDENCE.search(text)
+    return "mechanics" if _MECHANICS.search(text) or precedence else ""
 
 
 def _word_of_name(word: str) -> bool:

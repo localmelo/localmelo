@@ -31,10 +31,12 @@ from localmelo.melo.schema import new_record_id
 from localmelo.support.memory import records
 from localmelo.support.memory.importer.rules import own_email, reject, topic_for
 from localmelo.support.memory.importer.sources import (
+    Source,
     Statement,
     discover,
     read_source,
 )
+from localmelo.support.memory.importer.voice import to_you
 
 PER_SOURCE = 60
 PER_BATCH = 300
@@ -95,6 +97,14 @@ def _changed(
     return None
 
 
+def _by_assistant(src: Source) -> bool:
+    """Whether the assistant wrote *src* (its note files, its memory database, its
+    own Hermes notes), not the user (instruction files, Hermes ``USER.md``)."""
+    return src.kind in ("memory", "sqlite") or (
+        src.kind == "hermes" and Path(src.path).stem != "USER"
+    )
+
+
 def _by_rounds(
     statements: Sequence[Statement], by_file: bool, notes: Sequence[Note]
 ) -> Iterator[Statement]:
@@ -151,10 +161,12 @@ def build_plan(
             if reason := reject(st.text, email):
                 counts[reason] += 1
                 continue
-            # "me@host" must stay an address: no first-to-second-person swap.
-            text = (records.finished if "@" in st.text else records.second_person)(
-                st.text
-            )
+            if _by_assistant(src):  # "I" is the assistant, "the user" is the person
+                text = records.finished(to_you(st.text))
+            elif "@" in st.text:  # "me@host" must stay an address: no swap
+                text = records.finished(st.text)
+            else:
+                text = records.second_person(st.text)
             if records.wrong_owner(text, st.text):
                 counts["wrong_owner"] += 1
                 continue
