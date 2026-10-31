@@ -358,7 +358,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   a request the server refuses for a budget or rate limit (HTTP 429, or an error that says
   a budget is used) now gets the answer request as well: the status stays `provider_error`,
   and `result` is the answer, or the latest text the model wrote when that fails. Unset,
-  every request, output and exit code is unchanged ([#NN]).
+  every request, output and exit code is unchanged ([#328]).
 
 - The macOS app shows what melo is doing while its window is put away. A small
   pill takes Melo's place on the desktop and says in one plain line what runs
@@ -2661,3 +2661,4 @@ earlier milestones.
 [#206]: https://github.com/localmelo/localmelo/pull/206
 [#207]: https://github.com/localmelo/localmelo/pull/207
 [#208]: https://github.com/localmelo/localmelo/pull/208
+[#328]: https://github.com/localmelo/localmelo/pull/328
