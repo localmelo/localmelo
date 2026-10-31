@@ -48,6 +48,9 @@ STATEMENTS = [
     ("Our team lives in Pittsburgh.", "Your team lives in Pittsburgh.", "about"),
     ("我的猫叫团子。", "你的猫叫团子。", "about"),
     ("我的导师姓林。", "你的导师姓林。", "about"),
+    ("My piano teacher is Mr. Bellamy.", "Your piano teacher is Mr. Bellamy.", "about"),
+    ("My vet is Dr. Yuki Tanaka.", "Your vet is Dr. Yuki Tanaka.", "about"),
+    ("My advisor is J. Smith.", "Your advisor is J. Smith.", "about"),
 ]
 
 
@@ -78,6 +81,11 @@ STATEMENTS = [
         ("别忘了我的组会是每周四。", ["你的组会是每周四。"], ["about"]),
         ("帮我记一下：我的车停在B2层。", ["你的车停在B2层。"], ["about"]),
         ("记住：叫我小王", ["你希望被叫作小王。"], ["about"]),
+        (
+            "Remember that my piano teacher is Mr. Bellamy.",
+            ["Your piano teacher is Mr. Bellamy."],
+            ["about"],
+        ),
     ],
 )
 def test_a_request_to_remember_becomes_a_second_person_record_in_english_and_chinese(
@@ -205,6 +213,7 @@ async def test_a_turn_writes_its_records_with_source_and_says_so(
             }
         ],
         "refused": "it looked like a password or key",
+        "unsaved_claim": False,
     }
     (entry,) = await memory.records()
     assert entry.session_id == sid and entry.source == "user"

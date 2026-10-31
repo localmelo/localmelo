@@ -53,6 +53,7 @@ Python 调用方可以在显式推理模式中启用 `AgentOptions(typed_asserti
 - **告诉它。** "I prefer short answers" 或 "call me Ray" 会在 melo 判断值得记时被记下，对话里一个已完成任务的结果也是如此；只有网页、文件或工具输出说过的内容它从不记，密码或密钥也从不记。
 - melo 被告知：关于你的明确、长期的事实（"I live in Utrecht"、"我的导师是周教授"），要在你说出的那一轮就记下。
 - **改掉它。** 在任意对话里说出新的值（"I live in Utrecht now"、"我的健身教练是小宇"）：它会替换关于同一件事的旧笔记，召回时排在最前，回答只给出新的值：只有你问起过去（"before"、"used to"、"以前"）时，你说旧值的那个对话才会重新出现，并被标为较旧。
+- **长对话。** 对话只让最新的消息留在视野里。你在同一个对话里更早说过的话，匹配你的消息时会回来，并标为 `this chat`。
 - 每条笔记会以 `Remembered: … · Undo` 显示在你的消息下方；对新值点 Undo 会恢复旧笔记。
 - 之后要查看、改写或忘掉笔记，使用控制台的 **Memory** 标签页、终端里的 `/memory`，或 `melo memory list` 和 `melo memory forget`；要停止记笔记，运行 `melo config set memory.across_chats false`，然后重启 `melo serve` 或 App。
 
