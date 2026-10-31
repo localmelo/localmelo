@@ -149,7 +149,7 @@ def memory_view(
         content = split_thinking(message.content)[1]
         content = " ".join(clean_output(redact_secrets(content)[0]).split())
         if message.role == "tool":
-            prefix = f"└ {names.get(message.tool_call_id, 'tool')} "
+            prefix = f"{symbols.connector} {names.get(message.tool_call_id, 'tool')} "
         elif message.role == "user":
             prefix = "› "
         elif message.role == "assistant":
