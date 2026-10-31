@@ -28,6 +28,7 @@ from localmelo.support.gateway.console.front import (
     ASK_TEXT,
     ECHO_EVENT,
     STARTED_TEXT,
+    TASK_TOOLS,
     FrontAgent,
     front_options,
     thinking_off,
@@ -126,7 +127,7 @@ async def test_slash_task_delegates_at_normal_without_a_model_call(
         assert response.status_code == 200, response.text
         echo = response.json()["echo"]
         assert echo["echo"] == "started"
-        assert echo["line"] == "Started: make slides from notes.md · Normal"
+        assert echo["line"] == "Started: make slides from notes.md · P2"
         assert echo["typed"] == "/task make slides from notes.md"
         record = await _task(console, echo["task_id"])
         assert record.front_id == console.main_id
@@ -146,11 +147,11 @@ async def test_urgency_words_make_today_and_run_as_a_task_delegates(
         echo = (
             await _say(client, console, "fix the build, it's urgent", as_task=True)
         ).json()["echo"]
-        assert echo["line"].endswith("· Today")
+        assert echo["line"].endswith("· P1")
         record = await _task(console, echo["task_id"])
         assert (record.level, record.reason) == (1, 'you said "urgent"')
         calm = (await _say(client, console, "/task tidy photos, no rush")).json()
-        assert calm["echo"]["line"].endswith("· Whenever")
+        assert calm["echo"]["line"].endswith("· P3")
         # The same key twice starts one task.
         key = {"client_request_id": "k-1"}
         first = (await _say(client, console, "/task one", **key)).json()["echo"]
@@ -190,12 +191,15 @@ async def test_a_control_phrase_changes_the_task_and_undo_puts_it_back(
             f"/api/front/echoes/{echo['id']}", json={"do": "undo"}
         )
         assert twice.status_code == 409
-        # First moves it to Today and stays; Undo hands the level back to the system.
+        # First moves it to P1 and stays; Undo hands the level back to the system.
         first = (await _say(client, console, "先做 slides")).json()["echo"]
-        assert first["line"] == "Slides for the 15:00 meeting → Today"
+        assert first["line"] == "Slides for the 15:00 meeting → P1"
         record = await _task(console, task_id)
         assert (record.level, record.level_source) == (1, "user")
-        await client.post(f"/api/front/echoes/{first['id']}", json={"do": "undo"})
+        undone = await client.post(
+            f"/api/front/echoes/{first['id']}", json={"do": "undo"}
+        )
+        assert undone.json()["echo"]["line"].endswith("is back to P2")
         record = await _task(console, task_id)
         assert (record.level, record.level_source) == (2, "computed")
         # A stop is undone by starting the task again.
@@ -228,9 +232,15 @@ async def test_the_started_lines_change_sets_the_persons_level(tmp_path: Path) -
         changed = await client.post(
             f"/api/front/echoes/{echo['id']}", json={"do": "level", "level": "Whenever"}
         )
-        assert changed.json()["echo"]["line"] == "tidy the photos → Whenever"
+        assert changed.json()["echo"]["line"] == "tidy the photos → P3"
         record = await _task(console, echo["task_id"])
         assert (record.level, record.level_source) == (3, "user")
+        # A P-code and a number set the same level as the old word.
+        for value in ("P4", "p1", 2):
+            again = await client.post(
+                f"/api/front/echoes/{echo['id']}", json={"do": "level", "level": value}
+            )
+            assert again.json()["echo"]["level"] == int(str(value)[-1])
 
 
 # ── The front's own step, with task tools ──
@@ -249,7 +259,7 @@ async def test_the_front_starts_a_task_with_its_tool(tmp_path: Path) -> None:
         turn = await _wait_turn(client, str(console.main_id))
         assert turn["status"] == "completed"
         echoes = await _echoes(console)
-        assert [e["line"] for e in echoes] == ["Started: Slides · Today"]
+        assert [e["line"] for e in echoes] == ["Started: Slides · P1"]
         record = await _task(console, echoes[0]["task_id"])
         assert (record.level, record.front_id) == (1, console.main_id)
         # The tools the front offers: the task tools and two read-only file tools.
@@ -288,7 +298,7 @@ async def test_a_turn_not_settled_in_four_steps_becomes_a_task(tmp_path: Path) -
         assert (turn["status"], turn["answer"]) == ("completed", STARTED_TEXT)
         assert len(llm.requests) == 4
         [echo] = await _echoes(console)
-        assert echo["line"] == "Started: research three laptops for me · Normal"
+        assert echo["line"] == "Started: research three laptops for me · P2"
         assert (await _task(console, echo["task_id"])).level == 2
         # The next turn reads the handoff, not a missing answer.
         entry = console.sessions.get(str(console.main_id))
@@ -370,6 +380,17 @@ async def _attach(console: Console, typed: str, file_text: str) -> None:
             title=typed or None,
             attachments=(TextAttachment("notes.txt", file_text),),
         )
+
+
+def test_the_priority_tool_names_every_level_by_its_code() -> None:
+    [tool] = [t for t in TASK_TOOLS if t.name == "task_set_priority"]
+    for code, meaning in (
+        ("P0", "runs first; others wait"),
+        ("P1", "today"),
+        ("P3", "when there is time"),
+        ("P5", "on hold until you start it"),
+    ):
+        assert f"{code} ({meaning})" in tool.description
 
 
 async def test_an_attachment_alone_is_not_the_persons_words(tmp_path: Path) -> None:
