@@ -134,6 +134,12 @@ async def test_model_variant_runs_checked_ops_and_undo_through_the_api(
         0,
     )
     assert report["ms"] >= 0 and report["changes"][0]["op"] == "ADD"
+    assert report["selected"] == report["processed"]
+    assert len(report["proposals"]) == 1
+    label = report["proposals"][0]
+    assert label["verdict"] == "applied" and label["quote"] == quote
+    assert report["changes"][0]["proposal"] == label
+    assert report["changes"][0]["verdict"] == "applied"
     assert (await client.get("/api/memory/records")).json()["records"][0][
         "text"
     ] == "You are allergic to peanuts."

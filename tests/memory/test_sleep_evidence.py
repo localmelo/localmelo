@@ -79,6 +79,12 @@ async def test_mixed_run_reports_evidence_and_retains_rows_through_undo_redo(
         source = next(t for t in turns if (t.session_id, t.turn) == (session, number))
         assert change["quote"] and change["quote"] in source.typed
         assert change["before_texts"] == [before[i] for i in change["before_ids"]]
+        assert change["verdict"] == "applied"
+        if change["op"] in {"O1", "O2", "O3"}:
+            assert change["proposal"] is None
+        else:
+            assert change["proposal"] in payload["proposals"]
+            assert change["proposal"]["verdict"] == "applied"
     all_ids = {i for i, _, _ in rules.rows(memory)}
     before_ids = {i for change in report.changes for i in change.before_ids}
     assert before_ids <= all_ids

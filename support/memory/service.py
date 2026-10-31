@@ -1424,6 +1424,10 @@ class ChatMemory:
             )
             return [int(item.key[2:]) for item in found if item.is_record][:6]
 
+        async def embed_note(text: str) -> tuple[Sequence[float] | None, str]:
+            embedded = await self._embed([text], EMBED_TIMEOUT_S, query=False)
+            return (embedded.vectors[0] if embedded.vectors else None, embedded.model)
+
         async with self._lock:
             report = await sleeping.run(
                 store,
@@ -1437,6 +1441,7 @@ class ChatMemory:
                 is_active=active,
                 lock=cfg.memory.sleep_lock if cfg is not None else "",
                 budget=budget,
+                embed_note=embed_note if self.embedding()[0] is not None else None,
             )
         logger.info("memory.sleep %s", report.to_json())
         return report

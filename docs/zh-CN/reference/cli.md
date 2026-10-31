@@ -123,7 +123,7 @@ melo -h all                                  # every option, command and setting
 
 ### 记忆
 
-`melo memory VERB` 查看和修改 melo 保存的关于你的笔记，也就是控制台 Memory 标签页列出的那些（见[跨对话记忆](../concepts/memory.md#memory-across-chats)）。它读写 `~/.cache/localmelo/memory/`，从不调用模型。
+`melo memory VERB` 查看和修改 melo 保存的关于你的笔记，也就是控制台 Memory 标签页列出的那些（见[跨对话记忆](../concepts/memory.md#memory-across-chats)）。它读写 `~/.cache/localmelo/memory/`。查看和忘记笔记不调用模型；`reindex` 可为笔记和轮次生成嵌入，开发者模式的 `sleep` 按所选方式使用配置的嵌入模型和聊天模型。
 
 | 动词 | 作用 |
 |---|---|

@@ -2,7 +2,7 @@
 
 In-turn writing leaves defects only a later pass can see. ``[memory] sleep``
 (``off`` by default) replays chat turns against the notes: ``rules`` makes no
-model requests; ``model`` and ``model+tags`` then use at most twelve chat
+chat requests; ``model`` and ``model+tags`` then use at most twelve chat
 requests (oldest first within each priority group), with an eight-second timeout and
 code checks on every proposal. All variants make at most
 :data:`MAX_CHANGES` changes. The rules are:
@@ -13,7 +13,9 @@ code checks on every proposal. All variants make at most
 - ``O2`` missed supersede: a newer typed statement of a note's subject with
   another value is written, and supersedes the note;
 - ``O3`` recover lost facts: a plain, lasting statement of a turn that no note
-  of the turn keeps is written (turns flagged ``unsaved_claim`` first).
+  keeps is written (turns flagged ``unsaved_claim`` first). An active note that
+  holds all its values blocks recovery when cosine is at least 0.9, or at least
+  half of non-value content words overlap without comparable embeddings.
 
 Every write passes the checks a note passes (:func:`records.unsupported`,
 :func:`records.wrong_owner`, :func:`records.sensitive`) on the user's own typed
@@ -79,6 +81,8 @@ pronoun with the person named in typed or previous; keep the rest unchanged.
 """
 NotesFor = Callable[[str], Awaitable[list[int]]]
 IsActive = Callable[[], Awaitable[bool]]
+EmbedNote = Callable[[str], Awaitable[tuple[Sequence[float] | None, str]]]
+FACT_TIMEOUT = 1.5
 # Of the newest notes, how many are compared for duplicates.
 MAX_NOTES: Final = 1_000
 DUPLICATE_COSINE: Final = 0.9
@@ -96,6 +100,8 @@ class Change:
     source_turn: list[Any] | None = None
     quote: str = ""
     before_texts: list[str] = field(default_factory=list)
+    verdict: str = "applied"
+    proposal: dict[str, Any] | None = None
 
 
 def _before_texts(ids: Sequence[int], notes: Sequence[StoredEntry]) -> list[str]:
@@ -120,6 +126,8 @@ class SleepReport:
     ms: float = 0.0
     processed: list[list[Any]] = field(default_factory=list)
     refusals: list[dict[str, Any]] = field(default_factory=list)
+    selected: list[list[Any]] = field(default_factory=list)
+    proposals: list[dict[str, Any]] = field(default_factory=list)
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -349,6 +357,100 @@ def _stale(text: str, turn: SleepTurn, turns: Sequence[SleepTurn]) -> bool:
     return False
 
 
+async def _check(lock: str, is_active: IsActive | None) -> None:
+    if lock and Path(lock).expanduser().exists():
+        raise RuntimeError("sleep lock is held")
+    if is_active is not None and await is_active():
+        raise RuntimeError("user is active")
+
+
+@dataclass
+class _FactGuard:
+    """Existing values plus near meaning or shared words: never add the fact twice.
+
+    Different known subjects remain distinct. Cache one bounded embedding per
+    candidate across rules/model checks; no embedding or a failed one uses words.
+    """
+
+    embed_note: EmbedNote | None = None
+    lock: str = ""
+    is_active: IsActive | None = None
+    vectors: dict[str, tuple[Sequence[float] | None, str]] = field(default_factory=dict)
+
+    async def held(self, text: str, active: Sequence[StoredEntry]) -> bool:
+        values = records.value_terms(text)
+        if not values:
+            return False
+        mine = records.subject_key(text)
+        matching = [
+            note
+            for note in active
+            if values <= records._evidence([note.text])
+            and not (
+                mine
+                and records.subject_key(note.text)
+                and mine != records.subject_key(note.text)
+            )
+            and not records.wrong_owner(text, note.text)
+        ]
+        if not matching:
+            return False
+        if self.embed_note is not None and any(n.vector is not None for n in matching):
+            if text not in self.vectors:
+                await _check(self.lock, self.is_active)
+                try:
+                    async with asyncio.timeout(FACT_TIMEOUT):
+                        self.vectors[text] = await self.embed_note(text)
+                except Exception:
+                    self.vectors[text] = (None, "")
+            vector, model = self.vectors[text]
+        else:
+            vector, model = None, ""
+        mine_vector = unit(vector)
+        terms = set(records.note_terms(text)) - values
+        for note in matching:
+            theirs = unit(note.vector)
+            if (
+                mine_vector is not None
+                and theirs is not None
+                and model
+                and model == note.embed_model
+                and mine_vector.shape == theirs.shape
+            ):
+                if float(np.dot(mine_vector, theirs)) >= DUPLICATE_COSINE:
+                    return True
+            elif (
+                overlap(
+                    terms,
+                    set(records.note_terms(note.text)) - records.value_terms(note.text),
+                )
+                >= 0.5
+            ):
+                return True
+        return False
+
+
+def _diagnostic(turn: SleepTurn, proposal: Any, verdict: str) -> dict[str, Any]:
+    """Bounded training labels, never a raw malformed reply or a refused secret."""
+    data = proposal if isinstance(proposal, dict) else {}
+
+    def safe(value: Any) -> str:
+        if not isinstance(value, str):
+            return ""
+        return "[redacted]" if records.sensitive(value) else value[:200]
+
+    op = data.get("op")
+    return {
+        "session_id": turn.session_id,
+        "turn": turn.turn,
+        "op": op if op in ("ADD", "UPDATE", "RETIRE", "NOOP", "PARSE") else "INVALID",
+        "note_id": data.get("note_id") if type(data.get("note_id")) is int else None,
+        "text": safe(data.get("text")),
+        "quote": safe(data.get("quote")),
+        "verdict": verdict,
+    }
+
+
 async def run(
     store: SqliteLongTerm,
     index: ConversationIndex,
@@ -362,6 +464,7 @@ async def run(
     is_active: IsActive | None = None,
     lock: str = "",
     budget: int | None = None,
+    embed_note: EmbedNote | None = None,
 ) -> SleepReport:
     """One sleep over the notes and the *turns* that finished after *until*.
 
@@ -392,8 +495,9 @@ async def run(
         str(n.id): n.provenance.get("edited_at", 0)
         for n in await store.active_entries()
     }
+    guard = _FactGuard(embed_note, lock, is_active)
     try:
-        await _tidy(store, index, report, fresh, turns)
+        await _tidy(store, index, report, fresh, turns, guard)
         if len(report.changes) >= MAX_CHANGES:
             report.capped = True
         if model and not report.capped:
@@ -406,6 +510,7 @@ async def run(
                 lock,
                 index,
                 MODEL_BUDGET if budget is None else budget,
+                guard=guard,
             ).run(fresh, turns)
         if fresh and not report.capped:
             done = {tuple(key) for key in report.processed}
@@ -447,6 +552,7 @@ async def _tidy(
     report: SleepReport,
     fresh: Sequence[SleepTurn],
     turns: Sequence[SleepTurn],
+    guard: _FactGuard,
 ) -> None:
     """The changes of one run, added to *report* as they are made."""
     active = await store.active_entries()
@@ -492,6 +598,8 @@ async def _tidy(
         if len(report.changes) >= MAX_CHANGES:
             report.capped = True
             return
+        if await guard.held(cand.text, active):
+            continue
         place = [turn.session_id, turn.turn]
         source = {"session_id": turn.session_id, "source": "sleep", "turn": turn.turn}
         found = records.Candidate(cand.text, cand.quote, cand.topic, "sleep")
@@ -531,14 +639,14 @@ class _ModelPass:
     index: ConversationIndex
     budget: int
     turns: Sequence[SleepTurn] = ()
+    guard: _FactGuard | None = None
 
     async def check(self) -> None:
-        if self.lock and Path(self.lock).expanduser().exists():
-            raise RuntimeError("sleep lock is held")
-        if self.is_active is not None and await self.is_active():
-            raise RuntimeError("user is active")
+        await _check(self.lock, self.is_active)
 
-    async def request(self, payload: dict[str, Any]) -> list[Any] | None:
+    async def request(
+        self, turn: SleepTurn, payload: dict[str, Any]
+    ) -> list[Any] | None:
         await self.check()
         if self.provider is None:
             raise RuntimeError("chat model is not configured")
@@ -554,6 +662,7 @@ class _ModelPass:
             }
         provider.extra_body_by_kind = {"retrieve": body}
         self.report.model_calls += 1
+        self.report.selected.append([turn.session_id, turn.turn])
         async with asyncio.timeout(MODEL_TIMEOUT):
             reply = await send_from_provider(provider)(
                 [
@@ -636,10 +745,17 @@ class _ModelPass:
             payload["rewrite"] = notes[0].id
         timed_out: TimeoutError | None = None
         try:
-            proposals = await self.request(payload)
+            proposals = await self.request(turn, payload)
         except TimeoutError as exc:
             timed_out, proposals = exc, None
         if proposals is None:
+            self.report.proposals.append(
+                _diagnostic(
+                    turn,
+                    {"op": "PARSE", "note_id": notes[0].id if rewrite else None},
+                    "refused:parse",
+                )
+            )
             self.report.refused += 1
             failures = await self.index.failed_attempt(
                 turn.session_id,
@@ -662,30 +778,37 @@ class _ModelPass:
             return False
         for proposal in proposals:
             await self.check()
-            if len(self.report.changes) >= MAX_CHANGES:
+            before = len(self.report.changes)
+            if before >= MAX_CHANGES:
                 self.report.capped = True
-                break
-            if not await self.apply(turn, proposal, {n.id for n in notes}, rewrite):
+                verdict = "noop"  # returned, but not applied after the change cap
+            else:
+                verdict = await self.apply(
+                    turn, proposal, {n.id for n in notes}, rewrite
+                )
+            diagnostic = _diagnostic(turn, proposal, verdict)
+            self.report.proposals.append(diagnostic)
+            for change in self.report.changes[before:]:
+                change.verdict = verdict
+                change.proposal = dict(diagnostic)
+            if verdict.startswith("refused:"):
                 self.report.refused += 1
         return True
 
     async def apply(
         self, turn: SleepTurn, proposal: Any, ids: set[int], rewrite: bool
-    ) -> bool:
+    ) -> str:
         if not isinstance(proposal, dict):
-            return False
+            return "refused:parse"
         op, quote = proposal.get("op"), proposal.get("quote")
         if op == "NOOP":
-            return True
+            return "noop"
         if op not in ("ADD", "UPDATE", "RETIRE") or (rewrite and op != "UPDATE"):
-            return False
-        if (
-            not isinstance(quote, str)
-            or not quote.strip()
-            or quote not in turn.typed
-            or records.sensitive(quote)
-        ):
-            return False
+            return "refused:parse"
+        if not isinstance(quote, str) or not quote.strip() or quote not in turn.typed:
+            return "refused:quote_not_in_text"
+        if records.sensitive(quote):
+            return "refused:sensitive"
         active = await self.store.active_entries()
         note_id, text = proposal.get("note_id"), proposal.get("text")
         old = next(
@@ -696,17 +819,22 @@ class _ModelPass:
             ),
             None,
         )
-        if op != "ADD" and (old is None or (not rewrite and not _newer(turn, old))):
-            return False
+        if op != "ADD":
+            if old is None:
+                return "refused:decide_mismatch"
+            if rewrite and _edited(old):
+                return "refused:edited"
+            if not rewrite and not _newer(turn, old):
+                return "refused:edited" if _edited(old) else "refused:not_newer"
         if op == "RETIRE" and old is not None:
-            if (
-                not _NEGATION.search(quote)
-                or records.unsupported(old.text, [quote])
-                or not set(records.note_terms(quote))
-                & set(records.note_terms(old.text))
-                or records.wrong_owner(old.text, quote)
-            ):
-                return False
+            if not _NEGATION.search(quote):
+                return "refused:no_negation"
+            if not set(records.note_terms(quote)) & set(records.note_terms(old.text)):
+                return "refused:no_shared_term"
+            if records.unsupported(old.text, [quote]):
+                return "refused:unsupported"
+            if records.wrong_owner(old.text, quote):
+                return "refused:wrong_owner"
             done = await self.store.set_status(
                 [old.id],
                 "superseded",
@@ -726,26 +854,31 @@ class _ModelPass:
                         before_texts=[old.text],
                     )
                 )
-            return True
+            return "applied" if done else "noop"
         evidence = [turn.typed, turn.previous] if rewrite else [quote]
-        if (
-            not isinstance(text, str)
-            or not text.strip()
-            or len(text) > 300
-            or records.sensitive(text)
-            or records.unsupported(text, evidence)
-            or records.wrong_owner(text, quote)
-            or _stale(text, turn, self.turns)
-        ):
-            return False
+        if not isinstance(text, str) or not text.strip() or len(text) > 300:
+            return "refused:parse"
+        if records.sensitive(text):
+            return "refused:sensitive"
+        if records.unsupported(text, evidence):
+            return "refused:unsupported"
+        if records.wrong_owner(text, quote):
+            return "refused:wrong_owner"
+        if _stale(text, turn, self.turns):
+            return "refused:stale"
         cand = records.Candidate(
             text, quote, records.topic_of(text, request=False), "sleep"
         )
         action, target = records.decide(text, active, kind=cand.kind)
-        if op == "ADD" and (note_id is not None or action != "NEW"):
-            return False
+        if op == "ADD" and (
+            note_id is not None
+            or action != "NEW"
+            or await (self.guard or _FactGuard()).held(text, active)
+        ):
+            return "refused:decide_mismatch"
         if op == "UPDATE" and not rewrite and (action != "UPDATE" or target != note_id):
-            return False
+            return "refused:decide_mismatch"
+        before_changes = len(self.report.changes)
         source = {
             "source": "sleep",
             "run_id": self.report.run_id,
@@ -756,24 +889,21 @@ class _ModelPass:
             # O4 may change the subject key. Only the opening pronoun may change.
             match = _PRONOUN.match(old.text)
             if (
-                _edited(old)
-                or match is None
+                match is None
                 or _PRONOUN.match(text)
                 or not text.endswith(old.text[match.end() :])
             ):
-                return False
+                return "refused:decide_mismatch"
             tail = old.text[match.end() :]
             name = (
                 re.sub(r"(?:['’]s|的)$", "", text[: -len(tail)].strip()).strip()
                 if tail
                 else ""
             )
-            if (
-                not name
-                or records._owner(text) == "user"
-                or name.casefold() not in " ".join(evidence).casefold()
-            ):
-                return False
+            if records._owner(text) == "user":
+                return "refused:wrong_owner"
+            if not name or name.casefold() not in " ".join(evidence).casefold():
+                return "refused:unsupported"
             entry_id, _ = await self.store.apply(
                 text=text,
                 kind=old.kind,
@@ -831,7 +961,7 @@ class _ModelPass:
                         before_texts=_before_texts(before, active),
                     )
                 )
-        return True
+        return "applied" if len(self.report.changes) > before_changes else "noop"
 
 
 async def undo(

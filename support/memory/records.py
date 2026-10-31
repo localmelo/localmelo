@@ -706,6 +706,19 @@ def _flagged(note: str) -> set[str]:
     return {_stem(word) for word in words if word.isascii()}
 
 
+def value_terms(note: str) -> set[str]:
+    """The stemmed values whose exact presence grounding requires (not paraphrases)."""
+    flagged = _flagged(note)
+    return {
+        term
+        for term in note_terms(note)
+        if not term.isascii()
+        or term in flagged
+        or _VALUE_WORD.fullmatch(term) is not None
+        or any(char.isdigit() for char in term)
+    }
+
+
 def unsupported(note: str, evidence: Sequence[str]) -> list[str]:
     """The content words of *note* that the *evidence* texts lack, when that is
     too much: ``[]`` means grounded.
@@ -720,18 +733,9 @@ def unsupported(note: str, evidence: Sequence[str]) -> list[str]:
     gone = _missing(note, evidence)
     if not gone:
         return []
-    flagged = _flagged(note)
-
-    def is_value(term: str) -> bool:
-        return (
-            not term.isascii()
-            or term in flagged
-            or _VALUE_WORD.fullmatch(term) is not None
-            or any(char.isdigit() for char in term)
-        )
-
-    values = [term for term in gone if is_value(term)]
-    others = [term for term in note_terms(note) if not is_value(term)]
+    valued = value_terms(note)
+    values = [term for term in gone if term in valued]
+    others = [term for term in note_terms(note) if term not in valued]
     lost = [term for term in gone if term not in values]
     if not values and len(others) - len(lost) >= WORDS_FOUND * len(others):
         return []

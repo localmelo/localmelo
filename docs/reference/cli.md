@@ -153,7 +153,9 @@ dot. `melo -h all` lists the keys with their defaults.
 
 `melo memory VERB` sees and changes the notes melo keeps about you, the same ones the console's
 Memory tab lists (see [Memory across chats](../concepts/memory.md#memory-across-chats)). It reads and writes
-`~/.cache/localmelo/memory/` and never calls a model.
+`~/.cache/localmelo/memory/`. Listing and forgetting notes make no model request;
+`reindex` may embed notes and turns, and developer-only `sleep` may use the configured
+embedding and chat models as its variant requires.
 
 | Verb | What it does |
 |---|---|
