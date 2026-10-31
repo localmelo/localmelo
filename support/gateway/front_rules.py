@@ -8,8 +8,8 @@ Pure functions over the text the person typed and the open tasks:
   scheduled chores), ``answer`` (a greeting or a short question) or ``plan``
   (the main chat's own planning step decides).
 - :func:`triage` gives a new task its level from the person's own words:
-  Today for urgency words or a deadline today, Whenever for "no rush",
-  Normal otherwise.
+  Today for urgency words, a deadline today or the bare word "today"
+  (``今天``) anywhere, Whenever for "no rush", Normal otherwise.
 - :func:`allows` is the principal rule for the main chat's control tools: a
   change counts as the person's only when their own typed message has the
   control word and names the task. Page text, tool output and a task's
@@ -214,12 +214,45 @@ _EASY: Final = _words(
     "不急|不着急|不紧急|有空|慢慢来"
 )
 
+# The bare word for today, anywhere in the request, is a deadline of itself. A
+# possessive ("today's news") only names a thing about today, so the Latin form
+# asks for nothing after the word; Chinese has no such form.
+_TODAY: Final = re.compile(r"(?<![\w])today(?![\w'’])")
+_TODAY_ZH: Final = re.compile("今天")
+# Chinese has no possessive, and its negation often follows the word instead of
+# standing before it.
+_NOT_AFTER_ZH: Final = re.compile(
+    r"^(?:先|暂|暂时)?(?:不(?:用|要|必|需要|想|急|做|赶)|别|没)"
+)
+_NOT_BEFORE_ZH: Final = re.compile(r"(?:不是|并非|不|别|没|无)$")
+
+
+def _says_today(text: str) -> str:
+    """The bare ``today`` (``今天``) *text* says without negating it; else ``""``.
+
+    A negation before the word negates it in both languages ("not today",
+    "不是今天"); in Chinese one right after it does too ("今天不用"). A negated
+    word is not the deadline the person asked for.
+    """
+    for word, pattern in (("today", _TODAY), ("今天", _TODAY_ZH)):
+        for found in pattern.finditer(text):
+            before = text[: found.start()]
+            after = text[found.end() :]
+            negated = bool(_NEGATION.search(before))
+            if word == "今天":
+                negated = negated or bool(_NOT_BEFORE_ZH.search(before))
+                negated = negated or bool(_NOT_AFTER_ZH.match(after))
+            if not negated:
+                return word
+    return ""
+
 
 def triage(typed: str) -> tuple[int, str]:
     """A delegated task's level and reason, from the person's own words only.
 
-    Ease words first, so "not urgent" is never urgency; then urgency words or a
-    deadline today (Today); else Normal (design 2.5; S5's full table later).
+    Ease words first, so "not urgent" is never urgency; then urgency words, a
+    deadline today or the bare word for today (Today); else Normal (design 2.5;
+    S5's full table later).
     """
     text = norm(typed)
     for phrase in _EASY:
@@ -232,6 +265,9 @@ def triage(typed: str) -> tuple[int, str]:
     deadline = _DEADLINE.search(text)
     if deadline:
         return 1, f'you said "{deadline.group(0).strip()}"'
+    word = _says_today(text)
+    if word:
+        return 1, f'you said "{word}"'
     return 2, "you asked for it"
 
 
