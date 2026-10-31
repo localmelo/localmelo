@@ -339,6 +339,16 @@ button:hover:not(:disabled) {
 .main-card-foot .link-button { padding: 0; font-size: var(--text-small); }
 .main-card-note { color: var(--ink-2); font-size: var(--text-small); }
 .main-card-time { margin-left: auto; color: var(--muted); font-size: var(--text-caption); }
+/* A step Auto blocked in a task: the block's amber edge, and the block itself under the heading, unboxed. */
+.main-card[data-state="blocked"] { box-shadow: inset 3px 0 0 var(--warn); }
+.main-card[data-state="blocked"] .main-card-mark { background: var(--warn-tint); color: var(--warn); }
+.main-card .block-card { margin: var(--space-2) 0 0; padding: 0; background: none; border: 0; box-shadow: none; }
+.main-card .block-mark { display: none; }
+.main-card .block-title { font-size: var(--text-small); }
+.main-card .block-why { padding-left: 0; }
+.main-card :is(.block-step, .block-foot, .block-error) { margin-left: 0; }
+/* A task's approval, answered in the card that says it waits. */
+.main-card .approval-card { margin: 10px 0 0; }
 /* Echoes: one quiet line for what the main chat did with a task. The level word is the colour:
    amber when it jumps the queue (Now, Today), green for Normal, grey below. */
 .echo { display: flex; align-items: flex-start; gap: 10px; max-width: 600px; margin: -8px 0 20px; color: var(--ink-2); font-size: var(--text-small); }
@@ -363,6 +373,7 @@ button:hover:not(:disabled) {
 /* A task's question (#369): its fields fold under the row; the answer and the person's reply are quoted. */
 .echo[data-kind="task_ask"] .echo-mark { background: var(--warn-tint); color: var(--warn); }
 .echo[data-kind="task_answered"] .echo-mark { background: var(--tint); color: var(--accent); }
+.echo[data-kind="earlier"] .echo-mark { background: var(--tint); color: var(--ok); }
 :is(.ask-details, .ask-fields, .ask-quote, .ask-reply) { flex: 1 0 100%; min-width: 0; }
 .ask-details summary { width: fit-content; color: var(--accent); cursor: pointer; }
 .ask-fields { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin: 6px 0 0; padding-left: 12px; border-left: 2px solid var(--line); }
@@ -703,6 +714,41 @@ button:hover:not(:disabled) {
 .setup-card .primary-button { min-height: 40px; padding: var(--space-2) var(--space-5); font-size: var(--text-body); }
 .setup-card .link-button { padding: 0; font-size: var(--text-small); }
 @media (max-width: 700px) { .setup-card .primary-button { width: 100%; min-height: 44px; } }
+/* Bringing in what other assistants know (import-card.mjs): the main chat's card, and the Memory tab's section, share the list. */
+.import-card { display: grid; gap: var(--space-3); max-width: 520px; margin: var(--space-5) auto 0; padding: var(--space-5); border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); text-align: left; }
+.import-card:has(.import-done) { grid-template-columns: 1fr auto; align-items: center; padding-block: var(--space-3); }
+.import-card h2 { margin: 0; font-size: var(--text-title); font-weight: 600; line-height: 24px; letter-spacing: normal; }
+.import-card p { margin: 0; font-size: var(--text-small); line-height: 18px; color: var(--ink-2); }
+.import-sources, .import-samples, .import-batches { margin: 0; padding: 0; list-style: none; }
+.import-sources { display: grid; gap: var(--space-1); }
+.import-source { border-radius: var(--radius-control); background: var(--raised); }
+.import-source:has(input:checked) { background: var(--tint); }
+.import-pick { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); cursor: pointer; }
+.import-pick input { flex: none; margin: 0; accent-color: var(--accent); }
+.import-path { flex: 1; min-width: 0; overflow-wrap: anywhere; font: var(--text-small)/18px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: normal; }
+.import-count { flex: none; font-size: var(--text-caption); color: var(--ink-2); }
+.import-more { padding: 0 var(--space-3) var(--space-2) 38px; font-size: var(--text-small); color: var(--ink-2); }
+.import-more summary { width: fit-content; color: var(--accent); font-size: var(--text-caption); cursor: pointer; }
+.import-samples { margin-top: var(--space-1); padding-left: var(--space-3); border-left: 2px solid var(--line); }
+.import-samples li { margin: 2px 0; overflow-wrap: anywhere; }
+.import-left { margin: var(--space-1) 0 0; color: var(--warn); font-size: var(--text-small); }
+.import-note { margin: 0; color: var(--ink-2); font-size: var(--text-small); }
+.import-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); }
+.import-card .primary-button { min-height: 40px; padding: var(--space-2) var(--space-5); font-size: var(--text-body); }
+.import-card .link-button, .memory-import .link-button { padding: 0; font-size: var(--text-small); }
+.import-done { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.import-ok { color: var(--ok); font-weight: 600; }
+.import-fault { grid-column: 1 / -1; margin: 0; color: var(--error); font-size: var(--text-small); }
+.memory-import { display: grid; gap: var(--space-2); padding: var(--space-3) 0 0; border-top: 1px solid var(--line); }
+.memory-sub { margin: 0; font-size: var(--text-body); font-weight: 600; }
+.memory-import .primary-button { min-height: 32px; padding: 6px 14px; font-size: var(--text-small); }
+.memory-import .outline-button { justify-self: start; }
+.import-batch { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-1) 0; color: var(--ink-2); font-size: var(--text-small); }
+@media (max-width: 700px) {
+  .import-card .primary-button { width: 100%; min-height: 44px; }
+  .import-card .link-button, .import-close, .memory-import .link-button, .memory-import .primary-button { min-height: 44px; }
+  .import-more summary { padding-block: var(--space-2); }
+}
 #messages:empty {
   display: none;
 }
@@ -758,6 +804,11 @@ button:hover:not(:disabled) {
 .blinks.portrait .welcome-mascot { margin: 0 auto; }
 .blinks.portrait::after { background-image: url(/assets/akita/sit-idle-blink.png); }
 .blinks.face::after { background-image: url(/assets/akita/face-idle-blink.png); }
+/* While the import card is offered (import-card.mjs), the hero shrinks to the portrait alone, so the card and its buttons fit above the composer. */
+.welcome.compact { padding: var(--space-5) 0 0; }
+.welcome.compact .blinks.portrait { margin-bottom: 0; }
+.welcome.compact .welcome-mascot { width: 54px; height: 70px; margin-bottom: 0; }
+.welcome.compact > h1, .welcome.compact > p { display: none; }
 /* Blinks at 4.2 s and 9.6 s: 60 ms in, 30 ms held, 70 ms out (the pet's own timing). */
 @keyframes melo-blink {
   0%, 38.18% { opacity: 0; }
@@ -1241,6 +1292,8 @@ dialog::backdrop {
 .drawer-event pre { margin: 2px 0; font-size: var(--text-caption); white-space: pre-wrap; overflow-wrap: anywhere; }
 .drawer-tool, .drawer-memory, .drawer-run, .drawer-event { padding: 10px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .drawer-content p { margin: 4px 0; }
+.drawer-subhead { margin: 18px 0 2px; font-size: var(--text-body); }
+.drawer-approval-step, .task-earlier-step { display: block; overflow: hidden; color: var(--ink); font: var(--text-caption)/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: normal; text-overflow: ellipsis; white-space: nowrap; }
 .sr-only {
   position: absolute;
   width: 1px;
@@ -1615,6 +1668,12 @@ dialog::backdrop {
 .approval-why { margin: 0 0 2px; font-weight: 600; }
 .approval-reasons { margin: 0 0 8px; padding-left: 20px; line-height: 1.5; }
 .approval-asked { margin: 0 0 10px; color: var(--ink-2); line-height: 1.5; }
+/* melo's explanation of a task's step: the model's words, set apart from the step and the reasons code wrote. */
+.approval-explain { margin: 10px 0 0; padding: 8px 12px; border-radius: var(--radius-control); background: var(--raised); box-shadow: inset 2px 0 0 var(--ink-3); }
+.approval-explain-label { margin: 0; color: var(--ink-2); font-size: var(--text-caption); font-weight: 600; }
+.approval-explain-text { margin: 2px 0 0; line-height: 1.5; }
+.approval-explain-note { margin: 6px 0 0; color: var(--ink-3); font-size: var(--text-caption); line-height: 1.45; }
+.approval-explaining { margin: 10px 0 0; color: var(--ink-3); font-size: var(--text-caption); }
 /* A diff: its rows fill the box, so a removed or added one is tinted edge to edge. */
 .approval-diff { padding: 0; white-space: normal; }
 .diff-row { display: grid; grid-template-columns: 4ch 1.5ch minmax(0, 1fr); gap: 0 var(--space-2); padding: 0 10px; white-space: pre-wrap; }
@@ -1633,6 +1692,7 @@ dialog::backdrop {
 .approval-actions .primary-button, .failure-actions .primary-button { gap: 0; }
 .failure-actions .primary-button { font-size: var(--text-small); min-height: 32px; padding: 6px 14px; }
 .approval-warning { margin: 0 0 4px; color: var(--ink-2); line-height: 1.5; }
+.approval-remembered { margin: 0 0 4px; color: var(--ink-2); line-height: 1.5; }
 .failure-hint { margin: 0 0 8px; color: var(--ink-2); line-height: 1.5; }
 .failure-error { margin: 0 0 8px; color: var(--ink-2); overflow-wrap: anywhere; }
 .failure-card[data-severity="error"] .failure-error,
@@ -1849,6 +1909,10 @@ dialog::backdrop {
 .task-steps[open] > summary {
   margin-bottom: 8px;
 }
+.task-pack { margin: 16px 0 8px; }
+.task-pack > summary { cursor: pointer; font-weight: 600; min-height: 24px; }
+.task-pack[open] > summary { margin-bottom: 8px; }
+.task-pack ul { margin: 8px 0 0; padding-left: 20px; }
 .task-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2360,6 +2424,15 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .task-blocked > p { margin: 0; }
 .task-block > summary { padding: var(--space-2) 0; color: var(--warn); font-weight: 600; cursor: pointer; }
 .task-block > .block-card { margin: 0; }
+/* Steps that ran on the person's earlier approval: the step, when, and Revoke. */
+.task-earlier { display: grid; gap: var(--space-2); }
+.task-earlier h2 { margin-bottom: 0; }
+.task-earlier > p { margin: 0; }
+.task-earlier-list { margin: 0; padding: 0; list-style: none; }
+.task-earlier-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--line); }
+.task-earlier-when { grid-column: 1; color: var(--ink-3); font-size: var(--text-caption); }
+.task-earlier-row > :is(button, .task-earlier-revoked) { grid-column: 2; grid-row: 1 / span 2; }
+.task-earlier-revoked { color: var(--ink-3); }
 @media (max-width: 700px) {
   .mode-picker { position: static; }
   .mode-menu { right: 0; width: auto; }
@@ -2367,4 +2440,45 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
   .block-why, .block-step, .block-foot, .block-error { margin-left: 0; padding-left: 0; }
   .block-step { padding: var(--space-2) var(--space-3); }
   .block-once { flex-basis: 100%; margin-left: 0; }
+}
+
+/* Slash commands: the menu over the composer, and the local rows a command answers with. Commands are code, so
+   they are monospace: the name in the accent, its arguments muted, its words in the ink of a hint. The menu and
+   a /help table are one grid, so the names, arguments and words line up from row to row. */
+.composer { position: relative; }
+.slash-menu, .local-table { display: grid; grid-template-columns: max-content minmax(0, 17ch) minmax(0, 1fr); column-gap: var(--space-3); align-content: start; }
+.slash-menu { position: absolute; left: 0; right: 0; bottom: calc(100% + var(--space-2)); z-index: 20; max-height: min(340px, 45dvh); overflow-y: auto; overscroll-behavior: contain; padding: var(--space-1); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-float); }
+.slash-item, .local-help { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: baseline; }
+.slash-item { padding: 6px var(--space-2); border-radius: var(--radius-control); cursor: pointer; }
+.slash-item[aria-selected="true"] { background: var(--tint); box-shadow: inset 2px 0 0 var(--accent); }
+.slash-item:hover { background: var(--soft); }
+.slash-name, .slash-args, .local-label { font: var(--text-small)/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: normal; }
+.slash-name { grid-column: 1; color: var(--accent); font-weight: 600; }
+.slash-args { grid-column: 2; color: var(--ink-3); overflow-wrap: anywhere; }
+.slash-help { grid-column: 3; min-width: 0; overflow: hidden; color: var(--ink-2); font-size: var(--text-small); text-overflow: ellipsis; white-space: nowrap; }
+.local-help .slash-help { white-space: normal; }
+.slash-empty, .slash-foot { grid-column: 1 / -1; padding: var(--space-2); color: var(--ink-3); font-size: var(--text-caption); }
+.slash-foot { margin-top: var(--space-1); border-top: 1px solid var(--line); }
+.local-rows { max-width: 800px; margin: 0 auto; padding-top: var(--space-4); }
+.local-row { margin: 0 0 var(--space-4); padding-left: var(--space-3); border-left: 2px solid var(--line); }
+.local-command { display: flex; gap: var(--space-2); margin-bottom: var(--space-1); }
+.local-command::before { content: "›"; color: var(--ink-3); }
+.local-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-2); margin-top: 2px; color: var(--ink-2); font-size: var(--text-small); }
+.local-label { flex: none; min-width: 11ch; color: var(--ink-3); }
+.local-text { min-width: 0; overflow-wrap: anywhere; }
+.local-text[data-tone="muted"] { color: var(--ink-3); }
+.local-text[data-tone="ok"] { color: var(--ok); }
+.local-text[data-tone="warn"] { color: var(--warn); }
+.local-text[data-tone="error"] { color: var(--error); }
+.local-table { margin-top: 2px; }
+.local-choice { margin-left: var(--space-2); padding: 3px var(--space-3); background: none; border: 1px solid var(--control); border-radius: var(--radius-control); color: var(--ink); font-size: var(--text-small); }
+.local-choice.primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+@media (max-width: 700px) {
+  .slash-menu, .local-table { grid-template-columns: max-content minmax(0, 1fr); }
+  .slash-args { display: none; }
+  .slash-help { grid-column: 2; }
+  .slash-item { padding: 10px var(--space-2); }
+  .slash-help { white-space: normal; }
+  .slash-foot { display: none; }
+  .local-choice { min-height: 44px; }
 }

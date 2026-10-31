@@ -348,6 +348,8 @@ file's revision.
   or `zh-Hans`.
 - `approvals` is `[approvals] mode`, the mode a new chat starts in: `ask` or
   `auto` (another value in the file reads `ask`).
+- `browser` is true when `[browser] driver` is not `off`: melo may read web
+  pages in Safari ([browsing](../guides/browsing.md)).
 - `developer_settings` is every key `melo -h all` lists, grouped by section
   in its order (`""` is the top level): `value` is the one in use and
   `default` the default, both as the help prints them; `flag` is the old
@@ -387,6 +389,9 @@ sessions.
 - `approvals` is optional: `ask` or `auto` sets `[approvals] mode`, the mode
   new chats start in (other values are 400 `invalid_request`); omitted, the
   saved value is kept. Chats made before keep their own mode.
+- `browser` is optional: `true` sets `[browser] driver` to `safari-automation`,
+  `false` to `off` (anything else is 400 `invalid_request`); omitted, the saved
+  value is kept. It is what `/browser on` and `/browser off` save.
 - The console saves one change at a time: the loaded `revision` with only the
   changed field, and its Undo is the same request with the earlier value.
 - A `revision` that does not match the file on disk returns 409
@@ -583,7 +588,9 @@ retries, the interrupted task reports `cleanup failed; slot held until restart`.
 Task objects include the task id, normalized `spec`, `state`, priority and
 source, `wait_reason`, `pending_approvals` (the approvals the task waits for, in
 the shape of a session's; empty when none; answer one with `POST
-/api/approvals/{request_id}`, as for a chat), timestamps, workspace and `priority_events`, along
+/api/approvals/{request_id}`, as for a chat; each also has `explanation`, see
+[a task's approvals](#a-tasks-approvals-go-through-its-chat)), `earlier` (its steps that ran on
+an earlier approval), timestamps, workspace and `priority_events`, along
 with reserved accounting fields. Service, wait and tool accounting are not
 implemented yet.
 
@@ -939,7 +946,11 @@ Its `data`:
 
 - `state` is `done`, `failed`, `stopped` (a task ran out of steps; it can
   continue with `POST /api/tasks/{id}/continue`), `waiting` (an approval waits
-  for an answer) or `answered` (that approval was answered). `source_kind` is `chat` or `task`,
+  for an answer), `answered` (that approval was answered) or `blocked` (a
+  step Auto blocked in a task: `request_id`, `step_key`, `name`, `preview`,
+  `review` and `can_allow` as in the task's `blocked`, `line` `Blocked: deletes
+  files`; Allow once is `POST /api/tasks/{id}/blocks/{request_id}/allow`).
+  Every `blocked` card is shown: none folds into a newer card of its task. `source_kind` is `chat` or `task`,
   and `source_id` is the side chat or the task to open. `title` is at most 48
   columns: a title the person or the main chat gave stays, a longer one is cut
   at a word. `at` is when it happened.
@@ -994,7 +1005,10 @@ with the echo.
   `Remind you on Fri Oct 30 at 9:00?` with `reminder: true`, `text`
   `Reminder: <words>`, `work` (the words), a `once` `schedule` and no
   `level`), `chore_saved` (with `chore_id`),
-  `checkin` (the check-in's note, with `items`), `undone` or `failed`. A reminder
+  `checkin` (the check-in's note, with `items`), `undone`, `failed`, `earlier`
+  (a task's step ran on the person's earlier approval: `task_id`, `title`,
+  `entry_id`, `approved_at`, `preview`, `line` `Used your approval from 14:02`)
+  or `revoked` (that approval was taken back; `of` is the `earlier` echo). A reminder
   cue with no usable time (none, one that has passed, one more than a year
   ahead) gives an `ask` echo with `ask: "when"` and `work` instead (`When should
   I remind you?`); it has no buttons, and the next message, if it is only a
@@ -1025,11 +1039,12 @@ with the echo.
   title.
 - The main chat's turns pages add `echoes`, paged as `cards` are.
 - `POST /api/front/echoes/{id}` with `{"do": "undo" | "apply" | "start" |
-  "level" | "save" | "once" | "cancel", "level"?: "P1" | 1 | "Today"}` answers
+  "level" | "save" | "once" | "cancel" | "revoke", "level"?: "P1" | 1 | "Today"}` answers
   200 `{"echo"}`: Undo a `control` or `level` echo (a stop starts the task
   again as a new task) or a `chore_saved` one (the chore is deleted), apply a
-  `suggest`, start an `ask`, or set a `started` or `level` echo's task to the
-  person's level. On a `chore` echo, `save` keeps the chore (a `chore_saved`
+  `suggest`, start an `ask`, set a `started` or `level` echo's task to the
+  person's level, or revoke the approval an `earlier` echo used (a `revoked`
+  echo answers). On a `chore` echo, `save` keeps the chore (a `chore_saved`
   echo answers; a reminder is kept at P1, and one whose time passed meanwhile is 400),
   `once` starts its work as one task (not for a reminder: 400) and `cancel` keeps
   nothing (an `undone` echo answers). Each answers once (409
@@ -1129,6 +1144,31 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 - A terminal chat is streamed the same way, redacted. It is live while one
   of its turns runs under the terminal's lease, so the stream ends when that
   turn ends; read the session object again to see whether another turn runs.
+
+## GET /api/commands
+
+The terminal's slash commands, for the console's `/` menu and its command
+rows.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/commands
+```
+
+```json
+{"commands": [{"name": "exit", "aliases": ["quit"], "args": "", "help": {"en": "Quit", "zh-Hans": "退出"},
+               "during_turn": true, "keys": "ctrl+d", "action": "exit"}, "..."],
+ "everyday": ["chats", "side", "main", "task", "answer", "retry", "..."]}
+```
+
+- The list is the terminal's own table in its order, so a command added there
+  appears here. `help` holds the one-line words in `en` and `zh-Hans`; `args`
+  is the usage text (`[name]`, `PATH`); `keys` is a key that does the same.
+- `during_turn` is `true` (runs while a turn runs), `false` (refused then) or
+  `"show"` (runs then only without arguments). `action` is what the page does
+  with the command; `everyday` names the commands `/help` lists first.
+- A message is a command only when it starts with `/` and a lowercase name
+  followed by whitespace or its end. The page runs a command itself and never
+  sends it to a chat.
 
 ## GET /api/sessions/{id}/status
 
@@ -1277,7 +1317,7 @@ These codes answer on the write routes besides the shared ones above:
 | 400 | `invalid_workspace` | the folder is not absolute or `~/`, is no longer a directory, or the default workspace cannot be created |
 | 400 | `text_rejected` | the checker refused the message text, as it does for a `/v1/agent/run` request |
 | 409 | `session_busy` | a turn is already running in the session |
-| 409 | `not_latest_turn` | retry named a turn that is not the newest finished one |
+| 409 | `not_latest_turn` | retry or undo named a turn that is not the newest finished one |
 | 409 | `not_retryable` | retry named a turn that answered a task's question |
 | 409 | `submission_conflict` | the `client_request_id` was used for a different message |
 | 409 | `submission_withdrawn` | the `client_request_id` was cancelled before it started |
@@ -1389,6 +1429,23 @@ Run the newest finished turn's text again.
 - 409 `not_retryable` for a turn that answered a task's question
   (`origin` `ask_owner`): its words are not the person's.
 
+## POST /api/sessions/{id}/undo
+
+Forget the newest finished turn (`/undo`). Its file changes stay.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/undo \
+  -H 'Content-Type: application/json' -d '{"turn_id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e"}'
+```
+
+- The answer is 200 `{"turn_id": "…", "undone": true}`. The turn is marked
+  undone (an event `turn.undone`), the Agent's conversation loses it, and
+  nothing runs: no model call follows.
+- The errors are the retry route's, with the undo wording: a task session is
+  409 `task_session_read_only`, an id that is not the newest finished, not
+  undone turn is 409 `not_latest_turn`, and a running turn is 409
+  `session_busy`.
+
 ## POST /api/turns/{turn_id}/cancel
 
 Stop a running turn, from the id the events gave.
@@ -1465,6 +1522,64 @@ event stream, or from `pending_approvals`.
 - Approvals live in the gateway's memory. A turn waiting on one when the
   gateway stops is finished `cancelled` with cause `shutdown`, and its card
   is stored as withdrawn.
+
+### A task's approvals go through its chat
+
+A task the person started asks through the chat that owns it (its
+`front_id`, else the main chat). Before anyone is asked, code looks up the
+chat's recorded approvals; a model never decides a match.
+
+- **Recorded.** Each Allow the person gives in a chat, or in one of its
+  tasks' approvals (a task with `origin` `user`), is recorded for that chat
+  when the call is reusable: a tool melo's rules read (`python_exec`,
+  `shell_exec`, `file_write`, `file_edit`) that the rules themselves found
+  `routine`, in no category. Auto's Allow once, a chore's Allow and an Allow
+  answered after the chat was deleted are never recorded. Records live in
+  the gateway's memory; a restart or deleting the chat forgets them. A
+  waiting approval's `remembered` says, by code, whether its Allow will be
+  recorded.
+- **Matched.** A task's step runs without asking, with approval `origin`
+  `earlier`, when a record of its chat has the same tool, the same step
+  (Python by its syntax tree, a command by its exact text, a file write by
+  its path and content, the files the rules read for it unchanged) and the
+  same folder, and the step is reusable too. The chat gets an `earlier` echo
+  and the task's `earlier` lists the step (`live` until the record is
+  revoked). A session grant of the chat covers its tasks' routine calls of
+  that tool. A task that uses its chat's records or grants is reviewed with
+  every file changed since that chat began, so a file an earlier task wrote
+  is read before a record or grant covers a step; when the chat's start
+  cannot be read, neither applies and the person is asked.
+- **Never.** A high-impact, `undecided`, model-settled or unreviewed step,
+  and every call of a tool the rules do not read (network, MCP and other
+  tools), asks every time; a task with an `origin` other than `user` (a
+  chore's `user_rule` included) neither uses nor records approvals; another
+  chat's records never count; Auto never runs a step it blocked on a record.
+  A task made through `POST /api/tasks` is the person's (`origin` `user`) and
+  belongs to the main chat unless its `front_id` names another.
+- **Explained.** When a task with `origin` `user` or `user_rule` asks the
+  person, its chat's model writes a few sentences about the step (one
+  request, at most 20 seconds, from the task's title and objective, the call
+  and the review's reasons, never a tool's output). It is the approval's
+  `explanation`: `{"state": "pending" | "ready" | "none", "text"}`; any other
+  task's is `none`. Nothing reads it back; the answer decides.
+
+## GET /api/approvals/{request_id}
+
+One approval that waits for an answer, as its card reads it, with the
+session it belongs to.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/approvals/00dc8a67e4e8481ab4208074d4685cab
+```
+
+```json
+{"approval": {"request_id": "00dc8a67e4e8481ab4208074d4685cab", "call_id": "call_1", "tool_name": "python_exec", "arguments": {"code": "print(1)"}, "arguments_complete": true, "preview": "print(1)", "workspace_root": "/home/me/notes", "workspace_label": "~/notes", "target": null, "review": {"verdict": "routine", "title": "", "reasons": [], "categories": []}, "explanation": {"state": "ready", "text": "It prints a number to check the setup. Nothing outside the folder changes."}, "remembered": true, "session_id": "b79a99d86b50"}}
+```
+
+- A task's approval has `explanation`; a chat's has none. Both have
+  `remembered`, also on `pending_approvals` of `GET /api/sessions/{id}` and
+  of a task.
+- 404 `not_found` once it was answered, or for an unknown id.
 
 ## PATCH /api/sessions/{id}
 
@@ -1620,8 +1735,12 @@ Every tool the session's Agent offers, with whether this session allows it.
 ```
 
 ```json
-{"tools": [{"name": "python_exec", "description": "Run Python code ...", "parameters": {"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]}, "source": "builtin", "requires_approval": true, "granted": false}], "mcp_config_label": "", "mcp_error": "MCP is not built in the console yet"}
+{"tools": [{"name": "python_exec", "description": "Run Python code ...", "parameters": {"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]}, "source": "builtin", "requires_approval": true, "granted": false}], "approvals": [{"id": "763fa9e3c647", "tool": "python_exec", "folder": "/home/me/notes", "verdict": "routine", "categories": [], "preview": "print(1)", "at": 1793482098.376}], "mcp_config_label": "", "mcp_error": "MCP is not built in the console yet"}
 ```
+
+- `approvals` are the steps the person allowed in this chat, newest first,
+  which its tasks run again without asking
+  ([a task's approvals](#a-tasks-approvals-go-through-its-chat)).
 
 - `source` is `builtin`, `provided` (an MCP server's tool) or `custom`.
   `requires_approval` says a call of it asks first; `granted` says this
@@ -1649,6 +1768,19 @@ Take back one session grant, so the tool asks again next time.
 - 404 `not_found` when the session is not open or the tool has no grant.
   `DELETE /api/sessions/{id}/grants` without a tool forgets every grant and
   answers 204, whether or not the session is open.
+
+## DELETE /api/sessions/{id}/approvals/{entry_id}
+
+Take back one recorded approval of a chat, so the step asks again next
+time. What ran on it stays done.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X DELETE http://127.0.0.1:8401/api/sessions/9b57aff256d5/approvals/763fa9e3c647
+```
+
+- 204 with no body; the task's `earlier` reads `"live": false` for it.
+- 404 `not_found` when the chat has no such record (revoked already, or
+  forgotten by a restart).
 
 ## GET /api/sessions/{id}/memory
 
@@ -1724,7 +1856,7 @@ scan's `batch_id` and the sources the user chose.
 ```
 
 ```json
-{"batch_id": "e86b19186930", "sources": [{"id": "claude-35bc414c", "harness": "claude", "path": "/home/me/.claude/CLAUDE.md", "scope": "user", "workspace": "", "items_found": 3, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 1}, "sample": ["Use uv for new Python projects.", "Keep commits small and focused on one change."]}, {"id": "hermes-2e22e64e", "harness": "hermes", "path": "/home/me/.hermes/memories/USER.md", "scope": "user", "workspace": "", "items_found": 2, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 0}, "sample": ["Prefers concise replies.", "The user is a PhD student in robotics."]}], "partial": false}
+{"batch_id": "e86b19186930", "sources": [{"id": "claude-35bc414c", "harness": "claude", "path": "/home/me/.claude/CLAUDE.md", "scope": "user", "workspace": "", "items_found": 3, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 1}, "sample": ["Use uv for new Python projects.", "Keep commits small and focused on one change."]}, {"id": "hermes-2e22e64e", "harness": "hermes", "path": "/home/me/.hermes/memories/USER.md", "scope": "user", "workspace": "", "items_found": 2, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 0}, "sample": ["Prefers concise replies.", "The user is a PhD student in robotics."]}], "partial": false, "home": "/home/me"}
 ```
 
 ```bash
@@ -1742,19 +1874,28 @@ scan's `batch_id` and the sources the user chose.
   counts the lines, `items_kept` those that would become notes (at most 60), and `filtered`
   those left out, by reason: `secret`, `third_party` (private data of other people),
   `wrong_owner`, `duplicate` and `mechanics` (lines about the other tool itself). `sample`
-  has up to 3 notes. `partial` is true when the scan stopped at its 2 s limit.
+  has up to 3 notes. `partial` is true when the scan stopped at its 2 s limit. `home` is the
+  user's home folder, so a client can write a `path` as `~/…`.
 - `POST /api/memory/import` writes the notes of the chosen `source_ids` (at most 300 in a
   batch) and answers the new note ids; `skipped` counts the notes of those sources that were
   not written (already notes, over the batch limit, or a source written before). A scan
   that is gone (the gateway keeps the last four) is 404 `not_found`; an unknown source id,
   or memory switched off, is 400 `invalid_request`.
+- `GET /api/memory/import/offer` answers `{"pending": true}` while memory is on and bringing
+  notes in was never offered on this computer; the first-run card asks it before it scans.
+  `DELETE` on it records "Not now" and answers `{"pending": false}`, or `{"pending": true}` when the record could not be written (the offer stays open). A write of notes
+  (`POST /api/memory/import`) records the offer as made too, a scan does not. The record is
+  `import_offer.json` in the memory folder, shared by the console, the app and the terminal.
 - The `memory.import` event (`batch_id` and, per source, `id`, `harness`, `written`) is in the
   response as `event`: memory has no session channel to send it on.
 - `DELETE /api/memory/import/{batch_id}` takes the batch back: it deletes its notes, makes
   the notes they replaced current again and answers `{"batch_id": "e86b19186930",
-  "removed": 2}`; a batch with no notes left is 404 `not_found`.
+  "removed": 2}`. A note the user reworded since stays (it is theirs now); then the answer
+  also has `"kept": 1`, the number of such notes, and only then. A batch with nothing left to
+  take back and nothing kept is 404 `not_found`.
 - A note it wrote shows in `GET /api/memory/records` with `imported` true, its `batch_id`
-  and a `source` like `imported from the file CLAUDE.md, Oct 31`.
+  and a `source` like `imported from the file CLAUDE.md, Oct 31`; its `from` reads
+  `from the file CLAUDE.md, Oct 31` in the reader's language.
 
 ## GET /api/sessions/{id}/runs
 

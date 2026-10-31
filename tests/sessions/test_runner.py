@@ -368,6 +368,39 @@ async def test_a_turn_passes_the_person_s_own_words_to_the_review(
     await s.aclose()
 
 
+async def test_a_turns_review_window_starts_at_the_earlier_start_it_is_given(
+    tmp_path: Path,
+) -> None:
+    s = await setup(tmp_path, [answer("one"), answer("two"), answer("three")])
+    given: list[float | Exception] = [100.0, 4e12, RuntimeError("store closed")]
+
+    async def review_since() -> float | None:
+        value = given.pop(0)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    await s.runner.close()
+    s.runner = SessionRunner(
+        s.agent, s.store, None, new_session=NewSession(), review_since=review_since
+    )
+    original = s.agent.run_task
+    with mock.patch.object(
+        s.agent, "run_task", autospec=True, wraps=original
+    ) as run_task:
+        # A task that uses its chat's approvals is reviewed from the chat's start.
+        await s.runner.run_turn("one")
+        assert run_task.call_args.kwargs["chat_started"] == 100.0
+        assert s.runner.session_id is not None
+        session = await s.store.get_session(s.runner.session_id)
+        assert session is not None
+        # A later start, or none, leaves the session's own.
+        for text in ("two", "three"):
+            await s.runner.run_turn(text)
+            assert run_task.call_args.kwargs["chat_started"] == session.created_at
+    await s.aclose()
+
+
 # ── Conversation ────────────────────────────────────────────────────────────
 
 

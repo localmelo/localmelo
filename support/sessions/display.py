@@ -357,6 +357,10 @@ def approval_tag(
             return ApprovalText(
                 "allowed by a session grant", "Allowed by a grant for this session"
             )
+        if origin == "earlier":
+            return ApprovalText(
+                "your earlier approval", "Allowed: you approved this exact step before"
+            )
         if origin == "policy":
             return ApprovalText("auto-allowed", "Allowed: approvals are set to auto")
         if approval.get("remember"):

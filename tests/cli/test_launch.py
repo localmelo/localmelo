@@ -15,6 +15,7 @@ from unittest import mock
 import pytest
 
 from localmelo.melo.agent import AgentOptions
+from localmelo.support import config
 from localmelo.support.backends.discovery import DiscoveryError, LoadedModels
 from localmelo.support.cli import launch
 from localmelo.support.cli.launch import Choice, choose_backend, run_interactive
@@ -277,11 +278,40 @@ def test_with_no_config_the_first_run_saves_and_the_session_uses_the_config() ->
         mock.patch("localmelo.support.onboard.run_first_setup", faked.first),
     ):
         choice = _choice(choose_backend(_args()))
-    faked.first.assert_called_once_with()
+    faked.first.assert_called_once_with(developer=False)
     assert (choice.backend.model, choice.backend.source) == ("m", "saved")
     assert choice.cfg is not None and choice.checked
     # The first run has just said how long-term memory is added.
     assert choice.backend.memory_told
+
+
+@pytest.mark.parametrize(
+    ("flag", "mode", "expected"),
+    [(False, "default", False), (True, "default", True), (False, "developer", True)],
+)
+def test_first_run_details_use_existing_developer_flag_or_ui_mode(
+    flag: bool, mode: str, expected: bool
+) -> None:
+    cfg = Config()
+    cfg.ui.mode = mode
+    faked = Faked(cfg=cfg, first=None)
+    assert faked.choose(developer=flag) == 0
+    faked.first.assert_called_once_with(developer=expected)
+    faked.listing.assert_not_called()
+
+
+def test_first_run_details_honor_existing_process_only_ui_mode_override() -> None:
+    config.set_overrides({"ui.mode": "developer"})
+    with (
+        mock.patch.object(config, "_load_file", return_value=Config()),
+        mock.patch.object(config, "save") as save,
+        mock.patch(
+            "localmelo.support.onboard.run_first_setup", return_value=None
+        ) as first,
+    ):
+        assert choose_backend(_args()) == 0
+    first.assert_called_once_with(developer=True)
+    save.assert_not_called()
 
 
 def test_a_server_started_anyway_is_used_unsaved_with_the_chat_model_first() -> None:

@@ -48,7 +48,13 @@ from localmelo.melo.memory.retrieval import Doc, LLMRetriever, send_from_provide
 from localmelo.melo.memory.retrieval.base import elapsed_ms
 from localmelo.melo.schema import EMPTY_REPLY_NUDGE, Message, ToolDef, split_thinking
 from localmelo.support.memory import records
-from localmelo.support.memory.importer import ImportPlan, build_plan, select, write
+from localmelo.support.memory.importer import (
+    ImportPlan,
+    build_plan,
+    offer,
+    select,
+    write,
+)
 from localmelo.support.memory.index import (
     DOC_CHARS,
     SUMMARY_TURN,
@@ -1379,6 +1385,14 @@ class ChatMemory:
     def import_plan(self, batch_id: str) -> ImportPlan | None:
         return self._plans.get(batch_id)
 
+    def import_pending(self) -> bool:
+        """Whether memory is on and bringing in other assistants' notes was never offered."""
+        return self.enabled and not offer.offered(self.directory)
+
+    def import_offered(self, answer: str) -> None:
+        """Record the offer as made (``declined``; a write of notes from a chosen file records ``brought``)."""
+        offer.mark(self.directory, answer)
+
     async def import_apply(
         self, plan: ImportPlan, source_ids: Sequence[str]
     ) -> dict[str, Any]:
@@ -1405,6 +1419,8 @@ class ChatMemory:
         for (source_id, _), entry_id in zip(chosen, ids, strict=True):
             if entry_id is not None:
                 written.setdefault(source_id, []).append(entry_id)
+        if source_ids:  # choosing no file is no answer to the offer
+            offer.mark(self.directory, "brought")
         wanted = list(dict.fromkeys(source_ids))
         plan.applied.update(wanted)
         harness = {s["id"]: s["harness"] for s in plan.sources}
@@ -1423,21 +1439,41 @@ class ChatMemory:
             "event": {"type": "memory.import", "data": data},
         }
 
+    async def _batch_entries(self, batch_id: str) -> list[StoredEntry]:
+        """The active notes a batch brought in, edited ones too (the caller holds the lock)."""
+        return [
+            e
+            for e in await self.stores()[0].active_entries()
+            if e.provenance.get("source") == "import"
+            and e.provenance.get("batch_id") == batch_id
+        ]
+
     async def undo_import(self, batch_id: str) -> int:
-        """Delete the notes of a batch and make what they superseded current; how many."""
+        """Delete the notes of a batch and make what they superseded current; how many.
+
+        A note the person reworded since is theirs now: it stays (see :meth:`import_kept`).
+        """
         async with self._lock:
             store = self.stores()[0]
             mine = [
                 e.id
-                for e in await store.active_entries()
-                if e.provenance.get("source") == "import"
-                and e.provenance.get("batch_id") == batch_id
+                for e in await self._batch_entries(batch_id)
+                if not e.provenance.get("edited")
             ]
             for entry_id in mine:
                 await store.delete_entry(entry_id, restore=True)
         if plan := self._plans.get(batch_id):
             plan.applied.clear()
         return len(mine)
+
+    async def import_kept(self, batch_id: str) -> int:
+        """How many notes of a batch the person edited, which an undo leaves in place."""
+        async with self._lock:
+            return sum(
+                1
+                for e in await self._batch_entries(batch_id)
+                if e.provenance.get("edited")
+            )
 
     async def pinned_quotes(self) -> str:
         """About you and Preferences in the user's words, newest first, bounded."""

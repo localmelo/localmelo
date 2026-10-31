@@ -1,7 +1,7 @@
 import {taskLive} from './task-live.mjs';
 import {levelCode, levelLabel} from './levels.mjs';
 import {formatTime, t} from './i18n.mjs';
-import {allowState, blockCard, blockFacts} from './blocked.mjs';
+import {allowState, blockCard, blockFacts, stepLine} from './blocked.mjs';
 
 const RESUMABLE = new Set(['parked', 'interrupted']);
 const FINISHED = new Set(['done', 'failed', 'cancelled', 'expired']);
@@ -46,6 +46,28 @@ function defaultEvery(fn, ms) {
   return () => clearInterval(timer);
 }
 
+// What the task's chat knew about the person and the folder when the task began (its spec's
+// context_pack, one "- " line each): a folded list, and nothing when the task had no pack.
+export function packFold(doc, task) {
+  const lines = String(task?.spec?.context_pack ?? '').split('\n').map((line) => line.replace(/^- /, '')).filter(Boolean);
+  if (!lines.length) return null;
+  const fold = doc.createElement('details');
+  fold.className = 'task-pack';
+  const summary = doc.createElement('summary');
+  summary.textContent = t('tasks.pack.title');
+  const note = doc.createElement('p');
+  note.className = 'muted';
+  note.textContent = t('tasks.pack.note');
+  const list = doc.createElement('ul');
+  for (const line of lines) {
+    const item = doc.createElement('li');
+    item.textContent = line;
+    list.append(item);
+  }
+  fold.append(summary, note, list);
+  return fold;
+}
+
 export function setupTasks({api, root, newId, navigate, approvalCard, every = defaultEvery, statusRow = null, live: liveOptions = null, developer = () => true, chooseFolder = null}) {
   const doc = root.ownerDocument;
   const state = {mode: 'list', epoch: 0, tasks: [], task: null, error: '', notice: '',
@@ -87,6 +109,9 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   // The steps auto mode blocked (#339); "open" ones were not allowed and run since.
   const blockedOf = (task) => (Array.isArray(task.blocked) ? task.blocked : []);
   const openBlocks = (task) => blockedOf(task).filter((block) => !block.used_at && !task.allowances?.[block.step_key]);
+  // The steps that ran on the person's earlier approval in the task's chat (#369).
+  const earlierOf = (task) => (Array.isArray(task.earlier) ? task.earlier : []);
+  const clock = (value) => formatTime(new Date(value * 1000), 'clock');
   // A task waiting on its question's answer says whose (#369).
   const askText = (ask) => (ask.on === 'person' ? t('ask.waitingOnYou') : t('ask.waitingOn', {chat: ask.chat_title ?? ''}));
   const stateText = (task) => (pendingOf(task).length ? t('common.waitingApproval') : task.ask ? askText(task.ask) : isStopped(task) ? t('tasks.state.stopped') : stateWord(task.state));
@@ -145,6 +170,9 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const view = {rerender: render, answer: answerApproval, reload: () => refresh(), workspace: task.workspace_label, scope: 'task'};
     for (const request of pendingOf(task)) nodes.push(approvalCard(request, view));
     if (blockedOf(task).length) nodes.push(blockedBox(task));
+    if (earlierOf(task).length) nodes.push(earlierBox(task));
+    const pack = packFold(doc, task);
+    if (pack) nodes.push(pack);
     if (live) nodes.push(liveBox);
     // The card is a developer's recovery note: default mode shows it only when there is one to read.
     if (hasCard(task) || developer()) {
@@ -453,6 +481,44 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       live?.sync(outcome.data.task);
     } else state.blockError[requestId] = outcome.error?.message || t('tasks.requestFailed');
     render();
+  }
+
+  // Steps that ran without asking because they matched, exactly, a step the person allowed in the task's
+  // chat. Revoke takes that approval back (the step asks again next time); what ran stays done.
+  function earlierBox(task) {
+    const box = node('section', undefined, 'task-earlier');
+    box.append(node('h2', t('tasks.earlier.title')), node('p', t('tasks.earlier.note'), 'muted'));
+    const list = node('ul', undefined, 'task-earlier-list');
+    for (const use of earlierOf(task)) {
+      const row = node('li', undefined, 'task-earlier-row');
+      const step = node('code', stepLine(use.preview), 'task-earlier-step');
+      step.title = String(use.preview ?? '');
+      row.append(step, node('span', t('tasks.earlier.when', {approved: clock(use.approved_at), ran: clock(use.at)}), 'task-earlier-when'));
+      if (use.live) {
+        const revoke = button(t('approvals.revoke'), () => revokeEarlier(use), Boolean(state.busy));
+        revoke.setAttribute('aria-label', t('approvals.revokeStep', {step: stepLine(use.preview, 60)}));
+        row.append(revoke);
+      } else {
+        row.append(node('span', t('tasks.earlier.revoked'), 'task-earlier-revoked'));
+      }
+      list.append(row);
+    }
+    box.append(list);
+    return box;
+  }
+
+  async function revokeEarlier(use) {
+    const epoch = state.epoch;
+    const where = `/sessions/${encodeURIComponent(use.chat_id)}/approvals/${encodeURIComponent(use.entry_id)}`;
+    const outcome = await act(`revoke:${use.entry_id}`, () => api(where, {method: 'DELETE'}));
+    if (!outcome || epoch !== state.epoch) return;
+    // Not found: revoked already, from the chat or another page.
+    if (outcome.error && outcome.error.status !== 404) {
+      state.error = errorText(outcome.error);
+      render();
+      return;
+    }
+    await refresh();
   }
 
   // A task refused its folder never ran: it says why and starts again in a folder the person chooses.

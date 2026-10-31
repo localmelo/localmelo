@@ -23,13 +23,15 @@ import { setupRunning } from "./running.mjs";
 import { setupPanel } from "./panel.mjs";
 import { levelCode, levelLabel } from "./levels.mjs";
 import { setupModelCard } from "./setup-card.mjs";
+import { setupImportCard } from "./import-card.mjs";
 import { folderName, setupFolderPicker } from "./folder.mjs";
 import { modeOf, setupModeChip } from "./mode.mjs";
 import { allowState, blockCard, blockFacts, reviewWords } from "./blocked.mjs";
 import { picturesNode, setupPictureBox } from "./pictures.mjs";
 import { memoryNodes } from "./memory.mjs";
+import { parseCommand, setupSlash } from "./slash.mjs";
 import { askAboutNotes } from "./memory-tab.mjs";
-import { answered, askTurn, byDay, cardNode, echoNodes, isMain, mergeCards, mergeEchoes, shortTime, timeline } from "./main-chat.mjs";
+import { answered, askTurn, byDay, cardBlock, cardNode, echoDone, echoNodes, isMain, mergeCards, mergeEchoes, shortTime, timeline } from "./main-chat.mjs";
 import {
   activity,
   applyEvent,
@@ -83,6 +85,8 @@ const S = {
   defaultMode: "ask", // The mode new chats start in, as `GET /api/settings` says it.
   modeSaving: false,
   allowing: {}, // Allow once under way or failed, by the block's request id: "allowing" or the error.
+  // A task's step Auto blocked, allowed once from its chat's card: `{until, used}` by request id (#369).
+  cardAllows: {},
   drafts: {},
   outbox: {},
   cancelling: new Set(),
@@ -92,7 +96,10 @@ const S = {
   levelsOpen: false,
   lastPresenceAt: 0,
   noticeKind: "",
+  pendingTitle: "", // The name `/side TITLE` or `/title TEXT` gave the chat that is not sent yet.
 };
+// How the page shows a chat, as the terminal's /verbose, /thinking and /stream set it (kept in this browser).
+const prefs = { verbose: false, thinking: false, stream: true, ...stored(KEY + "-prefs") };
 
 const input = $("input");
 const COMPOSER_PLACEHOLDER = input.placeholder;
@@ -100,6 +107,8 @@ let noticeTimer = null;
 let sessionListSnapshot = "";
 let messageSnapshot = "";
 const liveNodes = new Map();
+// A tool call's card, so /expand can bring it into view.
+const callCards = new WeakMap();
 // The tool cards still running, so `tick` can move their clocks.
 const runningCards = new Map();
 // Request state survives ordinary SSE-driven rerenders, including the guard.
@@ -448,6 +457,7 @@ function chatMeta(session) {
 }
 
 function syncUI() {
+  slash.draw();
   const view = S.activeId ? S.view : null;
   const session = activeSession();
   const turn = runningTurn();
@@ -478,6 +488,7 @@ function syncUI() {
   $("offline-banner").hidden = S.online;
   const setup = setupShown();
   setupCard.show(setup);
+  importCard.show(S.ready && !!S.health && !needsModel(S.health) && !setup && mainActive() && !workerMode);
   $("welcome").classList.toggle("needs-model", setup);
   input.disabled = setup;
   input.placeholder = setup ? t("header.connectToStart") : COMPOSER_PLACEHOLDER;
@@ -826,6 +837,7 @@ function newChat({ saveCurrent = true } = {}) {
   // Closing the last chat has already deleted its draft: saving the composer
   // then would write that chat's text over a waiting new-chat draft.
   if (saveCurrent) saveDraft();
+  S.pendingTitle = "";
   if (S.activeId !== null) approvalStates.clear();
   closeStream();
   S.activeId = null;
@@ -1051,8 +1063,12 @@ function viewSnapshot() {
     S.outbox[S.activeId ?? "new"] ?? null,
     // Allow once (#339): a request under way, and each allowance still open or run out.
     S.allowing,
+    Object.entries(S.cardAllows).map(([id, {until, used}]) => [id, used, until > nowSeconds()]),
+    // A task's approval drawn in its chat's card, as last read (#369).
+    showsItems(view) ? [...taskApprovals.entries()] : null,
     Object.entries(view?.session?.allowances ?? {}).map(([key, until]) => [key, until > nowSeconds()]),
     developerMode,
+    prefs,
   ]);
 }
 
@@ -1077,7 +1093,7 @@ function renderMessages(forceScroll = false, preserveScroll = false) {
   const focusRequest = focusCard !== container ? focusCard?.dataset?.requestId : null;
   const focusKey = focusRequest ? focus?.dataset?.approvalFocus : null;
   const focusState = focusRequest ? approvalStates.get(focusRequest) : null;
-  if (focusState?.composing && view?.pending.has(focusRequest)) return;
+  if (focusState?.composing && (view?.pending.has(focusRequest) || taskApprovals.get(focusRequest)?.request)) return;
   const selection = focusKey === "reason" ? [focus.selectionStart, focus.selectionEnd, focus.selectionDirection] : null;
   // A reply box the person types in keeps its focus and caret (its words are kept by row).
   const replyFor = focus?.dataset?.replyFor ?? null;
@@ -1172,10 +1188,13 @@ function mainNodes(view, turns) {
   const ended = new Set((view?.cards ?? []).filter((card) => ["done", "failed", "stopped"].includes(card.state)).map((card) => card.sourceId));
   return timeline(turns, view?.cards ?? [], nowSeconds(), echoes).flatMap((item) => {
     if (item.kind === "turn") return [turnNode(item.turn, item.turn === newest, askTurn(item.turn, echoes))];
-    if (item.kind === "card") return [cardNode({ doc: document, card: item.card, open: openCard, resume: continueCard })];
+    if (item.kind === "card") {
+      const card = item.card;
+      return [cardNode({ doc: document, card, open: openCard, resume: continueCard, approval: taskApprovalNode(card), block: cardAllow(card) })];
+    }
     if (item.kind === "echo") {
       const echo = item.echo;
-      const gone = done.has(echo.id) || dismissed.has(echo.id) || ended.has(echo.task_id);
+      const gone = echoDone(echo, done, ended) || dismissed.has(echo.id);
       return echoNodes({ doc: document, echo, done: gone, act: actOnEcho });
     }
     return [el("div", "day-divider", item.label)];
@@ -1257,6 +1276,104 @@ async function continueCard(card, button) {
   }
 }
 
+// ── A task's approvals in the chat that owns it (#369) ──
+
+// A waiting task's approval as last read, by request id: `{request}`, or `{gone: true}` once it was
+// answered or is not found. While melo writes its explanation, it is read again, a bounded number of times.
+const taskApprovals = new Map();
+const EXPLAIN_POLL_MS = 1500;
+const EXPLAIN_TRIES = 16;
+
+/** The approval card a waiting task's card holds, or null until it is read (or when there is none). */
+function taskApprovalNode(card) {
+  if (card.state !== "waiting" || card.sourceKind !== "task" || !card.requestId || workerMode) return null;
+  const found = taskApprovals.get(card.requestId);
+  if (!found) {
+    readTaskApproval(card.requestId);
+    return null;
+  }
+  if (!found.request) return null;
+  const request = found.request;
+  return approvalCard(request, {
+    rerender: () => { messageSnapshot = ""; renderMessages(false, true); },
+    answer: answerTaskApproval,
+    reload: () => readTaskApproval(String(request.request_id)),
+    workspace: request.workspace_label,
+    scope: "task",
+  });
+}
+
+async function readTaskApproval(id, tries = 0) {
+  const known = taskApprovals.get(id);
+  if (known?.gone || known?.reading) return;
+  taskApprovals.set(id, { ...(known ?? {}), reading: true });
+  try {
+    const { approval } = await api(`/approvals/${encodeURIComponent(id)}`);
+    if (taskApprovals.get(id)?.gone) return;
+    taskApprovals.set(id, { request: approval });
+    // The text comes after the card: read it again until it is there, or settled without it.
+    if (approval.explanation?.state === "pending" && tries < EXPLAIN_TRIES) {
+      setTimeout(() => readTaskApproval(id, tries + 1), EXPLAIN_POLL_MS);
+    }
+  } catch (error) {
+    // Answered or gone: the card's answer comes on the stream. Another failure leaves the card's Review.
+    taskApprovals.set(id, error?.status === 404 ? { gone: true } : { failed: true });
+  }
+  renderMessages(false, true);
+}
+
+/** An answer to a task's approval from its chat: the same route and the same choices as the task's page. */
+async function answerTaskApproval(request, state, choice) {
+  const id = String(request.request_id);
+  if (workerMode || state.submitting || approvalNow() - state.mountedAt < 500) return;
+  if (choice !== "deny" && (request.arguments_complete !== true || (request.tool_name === "file_write" && !request.target))) return;
+  state.submitting = true;
+  messageSnapshot = "";
+  renderMessages(false, true);
+  try {
+    await api(`/approvals/${encodeURIComponent(id)}`, {
+      body: { choice, ...(choice === "deny" ? { reason: state.reason } : {}) },
+    });
+    taskApprovals.set(id, { gone: true });
+  } catch (error) {
+    state.submitting = false;
+    notify(t("approval.answerFailed", { problem: error.message }), { sticky: true });
+  }
+  messageSnapshot = "";
+  renderMessages(false, true);
+}
+
+/** What a blocked task step's card needs for Allow once: where it stands, and the request. */
+function cardAllow(card) {
+  const facts = cardBlock(card);
+  if (!facts) return null;
+  const given = S.cardAllows[facts.requestId] ?? {};
+  const busy = S.allowing[facts.requestId];
+  return {
+    allowing: allowState({ until: given.until ?? null, used: given.used ?? null, now: nowSeconds() }),
+    busy: busy === "allowing" ? "allowing" : false,
+    developer: developerMode,
+    error: busy && busy !== "allowing" ? busy : "",
+    onAllow: () => allowCardBlock(card, facts),
+  };
+}
+
+/** Allow once a step Auto blocked in a task, from its card in the chat: the task's own route. */
+async function allowCardBlock(card, facts) {
+  S.allowing[facts.requestId] = "allowing";
+  renderMessages(false, true);
+  try {
+    const { task } = await api(`/tasks/${encodeURIComponent(card.sourceId)}/blocks/${encodeURIComponent(facts.requestId)}/allow`, { method: "POST" });
+    const block = (task?.blocked ?? []).find((item) => item.request_id === facts.requestId);
+    S.cardAllows[facts.requestId] = { until: task?.allowances?.[facts.stepKey] ?? null, used: block?.used_at ?? null };
+    delete S.allowing[facts.requestId];
+    panel.refresh();
+  } catch (error) {
+    S.allowing[facts.requestId] = error.message || t("panel.taskChangeFailed");
+  }
+  renderMessages(false, true);
+}
+
 /** A card's Open: the side chat, or the task. */
 function openCard(card) {
   if (card.sourceKind === "task") globalThis.location.hash = `#/tasks/${encodeURIComponent(card.sourceId)}`;
@@ -1267,23 +1384,18 @@ function turnNode(turn, newest = false, asked = askTurn(turn)) {
   const section = el("section", "turn");
   if (turn.undone) section.classList.add("undone");
   section.dataset.turnId = turn.id || String(turn.turn);
-  // A task's question is the row above it, not a message the person typed (#369).
-  if (!asked) section.append(userNode(turn));
+  // A task's question is the row above it, not a message the person typed.
+  if (!asked) section.append(userNode(turn, newest));
   section.append(assistantNode(turn, newest));
   return section;
 }
 
-function userNode(turn) {
+function userNode(turn, newest = false) {
   const article = el("article", "msg user");
   article.append(el("div", "user-bubble", turn.userText), ...memoryOf(turn));
   if (turn.undone) {
-    article.append(
-      el(
-        "p",
-        "turn-caption",
-        t("chat.retriedBelow"),
-      ),
-    );
+    // Nothing follows an undo (/undo); a retry is followed by the turn that ran again.
+    article.append(el("p", "turn-caption", t(newest ? "chat.undoneNote" : "chat.retriedBelow")));
   }
   return article;
 }
@@ -1570,6 +1682,7 @@ function workGroup(turn) {
     !turn.finishedAt ||
     (S.view?.pending.size ?? 0) > 0 ||
     turn.userToggledGroup ||
+    prefs.verbose ||
     turn.status !== "completed";
   const summary = workSummary(turn, { held: heldOf(turn) });
   const group = workBox(summary, open);
@@ -1581,7 +1694,9 @@ function workGroup(turn) {
       if (group.open !== open) turn.userToggledGroup = group.open;
     });
   }
-  for (const item of shownItems(turn)) {
+  // /stream off: a turn shows when it ends (an approval it waits on still shows).
+  const steps = prefs.stream || turn.finishedAt ? shownItems(turn) : shownItems(turn).filter((item) => item.pendingRequestId);
+  for (const item of steps) {
     group.append(itemNode(item, turn, { inline }));
     const request = item.pendingRequestId && S.view?.pending.get(item.pendingRequestId);
     if (request) group.append(approvalCard(request, chatApproval, turn.userText));
@@ -1602,13 +1717,14 @@ function itemNode(item, turn, context = {}) {
     case "thinking": {
       if (context.inline) return el("div", "thinking-body", item.text);
       const card = el("details", "thinking");
-      card.open = item.expanded === true;
+      card.open = item.expanded ?? prefs.thinking;
       card.append(el("summary", "", item.durationS === null ? t("turns.summary.thought")
         : t("tool.thoughtFor", { duration: formatDuration(item.durationS) })));
       const body = el("div", "thinking-body", item.text);
       card.append(body);
+      // Only a change of the person's own is kept: opening it by /thinking is not.
       card.addEventListener("toggle", () => {
-        item.expanded = card.open;
+        if (card.open !== (item.expanded ?? prefs.thinking)) item.expanded = card.open;
       });
       return card;
     }
@@ -1780,6 +1896,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
       view.rerender();
     }));
   }
+  card.append(...explanationNodes(request.explanation));
   const actions = el("div", "approval-actions");
   const denyView = el("div", "deny-view");
   // On a high-impact card the safe answer is the filled one.
@@ -1792,6 +1909,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
     state.deny = true;
     actions.hidden = true;
     grant.hidden = true;
+    if (kept) kept.hidden = true;
     denyView.hidden = false;
     reason.focus();
   });
@@ -1807,6 +1925,11 @@ function approvalCard(request, view = chatApproval, asked = "") {
   grant.id = `approval-scope-${id}`;
   if (!high) session.setAttribute("aria-describedby", grant.id);
   card.append(grant);
+  // The server says, by code, when the person's Allow is kept for the chat's later tasks (#369).
+  const kept = !high && request.remembered === true
+    ? el("p", "approval-remembered", t(`approval.remembered.${view.scope === "task" ? "task" : "chat"}`))
+    : null;
+  if (kept) card.append(kept);
   const note = t("approval.instead");
   const label = el("label", "", note);
   const reason = el("input", "deny-reason");
@@ -1832,6 +1955,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
     denyView.hidden = true;
     actions.hidden = false;
     grant.hidden = false;
+    if (kept) kept.hidden = false;
     deny.focus();
   });
   reason.addEventListener("keydown", (event) => {
@@ -1851,6 +1975,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
   denyView.hidden = !state.deny;
   actions.hidden = state.deny;
   grant.hidden = state.deny;
+  if (kept) kept.hidden = state.deny;
   card.append(denyView);
   if (request.arguments_complete !== true) {
     card.append(el("p", "approval-warning", request.arguments_complete === false
@@ -1868,6 +1993,24 @@ function approvalCard(request, view = chatApproval, asked = "") {
   enable();
   setTimeout(enable, Math.max(0, 500 - (approvalNow() - state.mountedAt)));
   return card;
+}
+
+/**
+ * melo's explanation of a task's step (#369), under the step and the review's reasons: words for the
+ * person to read, labelled as melo's. The step, the buttons and what an answer approves come from code.
+ */
+function explanationNodes(explanation) {
+  if (explanation?.state === "pending") return [el("p", "approval-explaining", t("approval.explaining"))];
+  const text = explanation?.state === "ready" ? String(explanation.text ?? "").trim() : "";
+  if (!text) return [];
+  const box = el("section", "approval-explain");
+  box.setAttribute("aria-label", t("approval.explanation"));
+  box.append(
+    el("p", "approval-explain-label", t("approval.explanation")),
+    el("p", "approval-explain-text", text),
+    el("p", "approval-explain-note", t("approval.explanationNote")),
+  );
+  return [box];
 }
 
 async function answerApproval(request, state, choice) {
@@ -1929,7 +2072,8 @@ function toolCard(item, turn, context = {}) {
   const state = toolState(item, { held: context.readOnly ? "" : heldOf(turn), now: nowSeconds() });
   const card = el("details", "tool-card");
   card.dataset.state = state.state;
-  card.open = item.expanded === true;
+  card.open = item.expanded ?? prefs.verbose;
+  callCards.set(item, card);
   const summary = el("summary", "tool-summary");
   summary.append(el("span", "tool-mark", state.mark));
   summary.append(el("span", "tool-name", item.name));
@@ -1942,7 +2086,7 @@ function toolCard(item, turn, context = {}) {
   card.append(summary);
   card.append(toolBody(item, context));
   card.addEventListener("toggle", () => {
-    item.expanded = card.open;
+    if (card.open !== (item.expanded ?? prefs.verbose)) item.expanded = card.open;
   });
   return card;
 }
@@ -2091,7 +2235,22 @@ async function send({ asTask = false } = {}) {
   if (workerMode) return;
   lastKey = 0;
   showHeld();
-  return queueMessage(input.value.trim(), { clearInput: true, asTask });
+  const draft = input.value;
+  if (!asTask && parseCommand(draft)) {
+    // A slash command runs here and never reaches the model; one that is refused keeps its draft.
+    input.value = "";
+    saveDraft();
+    resizeInput();
+    syncUI();
+    if ((await slash.handle(draft)) === "keep" && !input.value) {
+      input.value = draft;
+      saveDraft();
+      resizeInput();
+      syncUI();
+    }
+    return;
+  }
+  return queueMessage(draft.trim(), { clearInput: true, asTask });
 }
 
 async function queueMessage(text, {clearInput = false, asTask = false} = {}) {
@@ -2104,6 +2263,7 @@ async function queueMessage(text, {clearInput = false, asTask = false} = {}) {
   // the store answers `repeated` instead of running it twice.
   const again = previous && previous.state === "failed" && previous.text === text;
   const key = again ? previous.clientRequestId : newClientRequestId();
+  slash.clearRows(slot);
   S.outbox[slot] = { clientRequestId: key, text, state: "sending", error: "", ...(asTask ? { asTask } : {}) };
   if (clearInput) {
     input.value = "";
@@ -2131,6 +2291,7 @@ async function submit(slot, key, text) {
       if (S.outbox[slot]?.clientRequestId !== key) return;
       const created = body.session;
       S.newMode = null;
+      applyPendingTitle(created);
       forgetDraft("new", text);
       delete S.outbox.new;
       delete S.outbox[created.id];
@@ -2789,6 +2950,19 @@ const panel = setupPanel({
 });
 const pictureBox = setupPictureBox({ dialog: $("picture-box") });
 const drawer = setupDrawer({ api, currentId: () => S.activeId, root: $("details-drawer"), trigger: $("details-trigger"), developer: () => developerMode });
+/** The page after Settings (or a slash command) saved: the mode, the status row and the model chip follow. */
+async function settingsSaved(saved) {
+  await refreshMode(saved);
+  drawer.modeChanged();
+  chatStatus.bump();
+  if (!developerMode) await findSections();
+  try {
+    setHealth(await api("/health"));
+    syncUI();
+  } catch (error) {
+    notify(t("chat.settingsRefreshFailed", { problem: error.message }), {sticky: true});
+  }
+}
 const showSettings = setupSettings({
   api,
   developer: () => developerMode,
@@ -2803,18 +2977,7 @@ const showSettings = setupSettings({
   // Only the macOS app registers these handlers; a browser has none.
   desktop: () => globalThis.webkit?.messageHandlers?.localmeloDesktop,
   folders: () => globalThis.webkit?.messageHandlers?.localmeloFolder,
-  onSaved: async (saved) => {
-    await refreshMode(saved);
-    drawer.modeChanged();
-    chatStatus.bump();
-    if (!developerMode) await findSections();
-    try {
-      setHealth(await api("/health"));
-      syncUI();
-    } catch (error) {
-      notify(t("chat.settingsRefreshFailed", { problem: error.message }), {sticky: true});
-    }
-  },
+  onSaved: settingsSaved,
 });
 function openSettings(section) {
   drawer.close();
@@ -2831,6 +2994,25 @@ const folderPicker = setupFolderPicker({
   // Only the macOS app registers this handler; a browser has none.
   bridge: () => globalThis.webkit?.messageHandlers?.localmeloFolder,
 });
+/** Switch the open chat to Ask or Auto, from its next step; before a chat exists, the next new chat's mode. Throws what the gateway refuses. */
+async function setChatMode(mode) {
+  const id = S.activeId;
+  if (!id) {
+    S.newMode = mode === S.defaultMode ? null : mode;
+    return;
+  }
+  S.modeSaving = true;
+  modeChip.update();
+  try {
+    const body = await api(`/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: { approvals: mode } });
+    for (const session of [listed(id), S.view?.id === id ? S.view.session : null]) {
+      if (session) Object.assign(session, body.session);
+    }
+  } finally {
+    S.modeSaving = false;
+    syncUI();
+  }
+}
 // Ask or Auto (#339): the chat's mode, switched from its next step; before a chat exists, the next new chat's.
 const modeChip = setupModeChip({
   doc: document,
@@ -2844,28 +3026,17 @@ const modeChip = setupModeChip({
     };
   },
   pick: async (mode) => {
-    const id = S.activeId;
-    if (!id) {
-      S.newMode = mode === S.defaultMode ? null : mode;
-      return;
-    }
-    S.modeSaving = true;
-    modeChip.update();
     try {
-      const body = await api(`/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: { approvals: mode } });
-      for (const session of [listed(id), S.view?.id === id ? S.view.session : null]) {
-        if (session) Object.assign(session, body.session);
-      }
+      await setChatMode(mode);
       notify(t("auto.switched", { mode: t(`auto.mode.${mode}`) }));
     } catch (error) {
       notify(t("auto.switchFailed", { problem: error.message }), { sticky: true });
-    } finally {
-      S.modeSaving = false;
-      syncUI();
     }
   },
   openSettings: () => openSettings("chats"),
 });
+// The main chat's one-time offer to bring in what other assistants on this Mac know (import-card.mjs).
+const importCard = setupImportCard({ root: $("import-card"), hero: $("welcome"), api });
 const setupCard = setupModelCard({
   root: $("setup-card"),
   api,
@@ -2878,6 +3049,118 @@ const setupCard = setupModelCard({
     syncUI();
     input.focus();
   },
+});
+
+// ── Slash commands ──
+
+/** Name the chat just created as `/side TITLE` or `/title TEXT` said; the chat keeps its first words if the gateway refuses. */
+async function applyPendingTitle(created) {
+  const wanted = S.pendingTitle;
+  S.pendingTitle = "";
+  if (!wanted) return;
+  try {
+    const body = await api(`/sessions/${encodeURIComponent(created.id)}`, { method: "PATCH", body: { title: wanted } });
+    for (const session of [created, listed(created.id), S.view?.id === created.id ? S.view.session : null]) {
+      if (session) Object.assign(session, body.session);
+    }
+    renderSessions();
+    syncUI();
+  } catch { /* The title is a nicety. */ }
+}
+
+const slash = setupSlash({
+  doc: document,
+  input,
+  menu: $("slash-menu"),
+  rows: $("local-rows"),
+  api,
+  enabled: () => S.authenticated && !workerMode && !taskMode && !input.disabled,
+  slot: () => S.activeId ?? "new",
+  state: () => {
+    const session = activeSession();
+    return {
+      id: S.activeId,
+      session,
+      title: session ? title(session) : newTitle(),
+      main: mainActive(),
+      turns: S.view?.turns ?? [],
+      // A message that failed to send is the person's to resend or edit; it does not hold the commands back.
+      busy: runningTurn() !== null || (pendingOutbox() !== null && pendingOutbox().state !== "failed"),
+      developer: developerMode,
+      health: S.health,
+    };
+  },
+  submit: send,
+  sync: () => {
+    saveDraft();
+    resizeInput();
+    syncUI();
+  },
+  scrollToEnd: () => {
+    $("scroll").scrollTop = $("scroll").scrollHeight;
+  },
+  send: (text) => queueMessage(text, { clearInput: true }),
+  newChat: (name) => {
+    newChat();
+    if (!name) return;
+    S.pendingTitle = name;
+    notify(t("slash.titleNext", { title: name }));
+  },
+  setNewTitle: (name) => {
+    S.pendingTitle = name;
+  },
+  setTitle: async (name) => {
+    const id = S.activeId;
+    const body = await api(`/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: { title: name } });
+    for (const session of [listed(id), S.view?.id === id ? S.view.session : null]) {
+      if (session) Object.assign(session, body.session);
+    }
+    renderSessions();
+    syncUI();
+  },
+  sessions: () => S.sessions,
+  // The chat picker is the sidebar's list, filtered by what was typed.
+  pickChat: (filter) => {
+    $("search").value = filter;
+    renderSessions();
+    sidebar(true);
+    $("search").focus();
+  },
+  openChat: (id) => openSession(id),
+  openMain: () => {
+    if (!S.main) return false;
+    openSession(S.main.id);
+    return true;
+  },
+  openSettings: (section) => openSettings(section),
+  openMemory: () => {
+    panel.select("memory", { focus: true });
+    if (!matchMedia("(min-width: 900px)").matches) panel.openSheet();
+  },
+  // `/memory import`: the Memory tab is open (above) and looks for notes as its button does; the list is the offer.
+  memoryImport: async () => ((await panel.lookForNotes()) ? [] : [{ text: t("slash.memoryImportOff"), tone: "muted" }]),
+  openDrawer: (tab) => drawer.open(tab),
+  settingsSaved,
+  setMode: setChatMode,
+  view: {
+    get: (name) => prefs[name],
+    set: (name, on) => {
+      prefs[name] = on;
+      persist(KEY + "-prefs", prefs);
+      renderMessages(false);
+    },
+  },
+  reveal: (item) => {
+    item.expanded = true;
+    item.showAll = true;
+    renderMessages(false);
+    callCards.get(item)?.scrollIntoView?.({ block: "center" });
+  },
+  writeText: (text) => navigator.clipboard.writeText(text),
+  // Only the macOS app registers these handlers; a browser tab has neither.
+  isApp: () => !!globalThis.webkit?.messageHandlers?.localmeloFolder,
+  canQuit: () => !!globalThis.webkit?.messageHandlers?.localmeloQuit,
+  quit: () => globalThis.webkit.messageHandlers.localmeloQuit.postMessage({ action: "quit" }),
 });
 
 // ── The clock ──
@@ -3028,6 +3311,7 @@ $("composer").addEventListener("submit", (event) => {
 });
 $("task-btn").addEventListener("click", () => send({ asTask: true }));
 input.addEventListener("keydown", (event) => {
+  if (slash.key(event)) return;
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
     event.preventDefault();
     send();

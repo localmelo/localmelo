@@ -71,7 +71,7 @@ The first of these that applies:
 
 | | Source | What happens |
 |---|---|---|
-| 1 | `melo setup` | The setup wizard, then the backend it saved. Default mode first offers the server it finds (`Found a model server at …`, `Use this model server?`); the full menu follows `Use another server`, developer mode, or a saved backend with no server found. Not with `--url` and no task. |
+| 1 | `melo setup` | The setup wizard, then the backend it saved. Default mode first offers the server it finds (`Found a model server at …`, `Use this model server?`); the full menu follows `Use another server`, developer mode, or no server found with a backend already saved. With nothing saved and no server found, it shows the read-only preview. Not with `--url` and no task. |
 | 2 | `--url URL` | That server, without the config file. The model is `--model`, else the only chat model that `GET URL/models` lists (ids with `embed` or `rerank` are not chat models), else the one the server says is loaded; with several and none known loaded it exits 2, lists them and asks for `--model <id>`. |
 | 3 | The saved backend | `--model` replaces its model for this session. Nothing is checked before the UI opens; afterwards melo lists the server's models once and warns when it does not answer or does not list the model. |
 | 4 | No saved backend | The [first-run](#first-run) questions, then the UI. |
@@ -122,6 +122,7 @@ When the model is not the saved default, a row after the folder gives the server
 - The everyday commands come first: `/model`, `/new`, `/status`, `/help`, `/exit`, `/undo`, `/copy` and `/retry`.
 - A message that starts with `/` and a lowercase name is a command; an unknown name prints `Unknown command /NAME. /help lists the commands.` and keeps the draft, and `/etc/hosts is broken` is a message.
 - To send a message that starts like a command, start it with a space.
+- The [web console and the app](web-console.md#slash-commands) understand the same commands, with the same names and the same rule for a message that starts like one.
 
 | Command | What it does |
 |---|---|
@@ -138,7 +139,7 @@ When the model is not the saved default, a row after the folder gives the server
 | `/copy [turn]` | Copy a stored answer's Markdown; without a number, the latest finished, non-undone turn. |
 | `/usage` | Recorded steps, tool calls, tokens and time per turn, including undone work, with totals; `?` means not recorded. |
 | `/status [all]` | Five rows that say whether melo is ready: the model and its server (`✓ answers`, or why not), the folder, the session, what the approvals do, and how full the context is. `/status all`, and `/status` in developer mode, print every row. |
-| `/memory` | The notes melo keeps about you, as a list: Enter on a note offers `Back`, `Edit it` and `Delete it`; `Forget everything…` asks first. `/memory window` inspects the model's working window with no model call. |
+| `/memory` | The notes melo keeps about you, as a list: Enter on a note offers `Back`, `Edit it` and `Delete it`; `Forget everything…` asks first. `/memory import` offers the notes other assistants keep (see [First run](#first-run)). `/memory window` inspects the model's working window with no model call. |
 | `/attach PATH` | Stage one workspace text file; `/attachments` lists them and `/detach N\|all` removes them. |
 | `/verbose [on\|off]` | Verbose rendering: 40 thinking rows, a tool call's arguments, 20 output lines, the reflection's whole rationale. |
 | `/thinking [on\|off]` | The thinking excerpt on, or off (the default, except in developer mode). |
@@ -401,23 +402,29 @@ Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 
 - melo looks for a server on this computer with `GET /v1/models` on `127.0.0.1` ports 8000 (vLLM, oMLX), 8400 (MLC), 11434 (Ollama) and 30000 (SGLang), and offers the first that lists a model (one with a chat model comes first); no chat request is sent, so the server loads nothing.
 - Between the second and third lines melo asks `Use this model server?` as a list; with several models it shows the picker, and with an embedding model one more list asks `Remember across chats with nomic-embed-text?` (`Yes, with it`, `No, by words only`).
-- With no server running, it prints the commands that start one (oMLX on a Mac, Ollama elsewhere; see the [model servers guide](model-servers.md)) and asks `No model server found. What now?` (`Check again`, `Enter an address`, `Quit`).
+- With no server running, a supported Apple-silicon Mac shows the [read-only setup preview](model-servers.md#setup-preview): a short recommendation/download/cache/free-space summary, with a warning only when needed. The summary is printed once. Choose `Show how to set one up` for at most six plain numbered steps (download oMLX, move it to Applications, download the model, start the server, then enter its address); automatic setup is coming soon, and nothing installs, downloads, starts or saves. Developer mode keeps a `Review setup plan` menu with its lifetime option, manual steps and `Details`. Check again, enter an address and quit remain available; piped answers retain their original prompt and show a manual-guide link, not a picker action. Other systems keep manual-server guidance without cache estimates.
 - A server that cannot be used is named with its reason (`connection refused`, `no answer in 5 s`, `HTTP 401` or `HTTP 403` with `the server requires an API key; localmelo sends none to local servers (oMLX: "Allow inference without API key")`, `it lists no models`), and you can try again, start without saving or quit.
 - An Ollama server is saved as `chat_backend = "ollama"`, an oMLX server as `chat_backend = "omlx"` and any other as `"vllm"`; the embedding model choice is described in [Set up an embedding model](embedding.md).
 - `LOCALMELO_DETECT_URLS` replaces the four URLs with a comma-separated list; an empty value turns the search off.
 
-When no server is found, melo prints:
+The model stays in the Hugging Face cache. Versions, checksums, cache/state paths,
+port policy and plan digest are in `Details` or developer mode, not the default
+summary. Lifetime choices describe a possible future setup, not permission to run
+anything. Manual commands run independently: stop the server yourself with Ctrl+C.
+Choose a free port and enter that address in melo; systems without the pinned Mac
+recipe keep their existing manual-server guidance.
+
+After the questions, and only on a terminal, the first run also offers the notes other assistants on this computer keep about you, once:
 
 ```text
-No model server is running yet. To start one with oMLX:
-
-  brew tap jundot/omlx https://github.com/jundot/omlx
-  brew install jundot/omlx/omlx
-  omlx serve --model-dir ~/models --port 8000
-
-Put a model in its own folder of ~/models first. The guide shows how:
-https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md
+ melo found notes on this Mac from other assistants
+ ❯ 1. Bring in 21 notes from 8 files
+   2. Show what they say
+   3. Not now
+ ↑↓ select · enter confirm · esc cancel
 ```
+
+`Show what they say` prints each file as a path (`~/.claude/CLAUDE.md · 9 notes`) with a few sample lines and what was left out (`9 left out: secrets, other people's details`), then asks again. The list starts on `Show what they say`, so a bare Enter never brings anything in; once the files were shown it starts on `Bring in`. Nothing is brought in until you choose the first row, and only `Not now` ends the offer for good. Esc, ctrl+c and end of input leave without bringing anything in and without recording an answer, so the offer is made again: at the first run melo ends as a cancelled setup does (`Setup cancelled.`, exit 130 for Esc and ctrl+c), in `melo memory import` it says `Nothing brought in.`, and in `/memory import` Esc just closes the list. A file whose lines were all left out says `Nothing to bring in: the lines were left out (secrets)` instead of `Nothing new`. `melo memory import --undo BATCH` keeps a note you edited since and says so (`Took back 20 notes. Kept 1 note you edited.`). `/memory import` in a chat and `melo memory import` ask the same list later; a task run (`melo "task"`) never asks. With piped input the list is a numbered question read from stdin. The notes are the ones the console's Memory tab lists, and each import has a batch you can take back with `melo memory import --undo BATCH`.
 
 #### Questions are lists
 

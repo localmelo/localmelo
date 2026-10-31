@@ -79,7 +79,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 
 | | 来源 | 做法 |
 |---|---|---|
-| 1 | `melo setup` | 运行配置向导，然后使用它保存的后端。默认模式下，它先提供在本机找到的服务器（`Found a model server at …`、`Use this model server?`）；只有选择 `Use another server`、处于开发者模式，或已保存后端但没有找到服务器时，才出现完整菜单。不带任务时不能与 `--url` 同用。 |
+| 1 | `melo setup` | 运行配置向导，然后使用它保存的后端。默认模式下，它先提供在本机找到的服务器（`Found a model server at …`、`Use this model server?`）；选择 `Use another server`、处于开发者模式，或已经保存后端但没有找到服务器时，会出现完整菜单；尚未保存后端且没有找到服务器时，会显示只读预览。不带任务时不能与 `--url` 同用。 |
 | 2 | `--url URL` | 使用该服务器，不使用配置文件。模型使用 `--model` 指定的模型，否则使用 `GET URL/models` 列出的唯一对话模型（ID 包含 `embed` 或 `rerank` 的不是对话模型），再否则使用服务器说明已加载的那一个；有多个且不知道哪个已加载时，退出码为 2，列出这些模型并要求使用 `--model <id>`。 |
 | 3 | 已保存的后端 | 若指定 `--model`，则在本会话中用它替代保存的模型。界面打开前不做检查：之后 melo 会列出一次服务器模型，如果服务器没有响应或没有列出该模型，就会警告。 |
 | 4 | 没有已保存的后端 | 先回答[首次运行](#first-run)的问题，然后打开界面。 |
@@ -136,6 +136,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 - 常用命令排在最前：`/model`、`/new`、`/status`、`/help`、`/exit`、`/undo`、`/copy` 和 `/retry`。
 - 以 `/` 和小写名称开头的消息是命令；未知名称会输出 `Unknown command /NAME. /help lists the commands.` 并保留草稿，而 `/etc/hosts is broken` 是一条消息。
 - 要发送以命令样式开头的消息，请在开头加一个空格。
+- [网页控制台和应用](web-console.md#slash-commands)理解同样的命令，名字相同，以命令样式开头的消息也是同一条规则。
 
 | 命令 | 作用 |
 |---|---|
@@ -152,7 +153,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 | `/copy [turn]` | 复制已保存回答的 Markdown；不带编号时复制最近一个已完成、未被撤销的轮次。 |
 | `/usage` | 每个轮次记录的步骤、工具调用、词元和时间（包括被撤销的工作），并给出合计；`?` 表示未记录。 |
 | `/status [all]` | 五行说明 melo 是否就绪：模型及其服务器（`✓ answers`，或原因）、文件夹、会话、审批的作用，以及上下文有多满。`/status all`（开发者模式下直接 `/status`）输出所有行。 |
-| `/memory` | melo 记下的关于你的笔记，以列表显示：在某条笔记上按 Enter 会提供 `Back`、`Edit it` 和 `Delete it`；`Forget everything…` 会先询问。`/memory window` 不调用模型，检查模型的工作窗口。 |
+| `/memory` | melo 记下的关于你的笔记，以列表显示：在某条笔记上按 Enter 会提供 `Back`、`Edit it` 和 `Delete it`；`Forget everything…` 会先询问。`/memory import` 提议导入其他助手保存的笔记（见[首次运行](#first-run)）。`/memory window` 不调用模型，检查模型的工作窗口。 |
 | `/attach PATH` | 暂存一个工作区文本文件；`/attachments` 列出它们，`/detach N\|all` 移除它们。 |
 | `/verbose [on\|off]` | 详细显示：40 行思考、工具调用的参数、20 行输出、反思的完整理由。 |
 | `/thinking [on\|off]` | 打开思考摘录，或关闭（默认，开发者模式除外）。 |
@@ -444,23 +445,24 @@ Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 
 - melo 通过 `GET /v1/models` 在 `127.0.0.1` 的端口 8000（vLLM、oMLX）、8400（MLC）、11434（Ollama）和 30000（SGLang）上查找本机服务器，并提供第一个列出模型的服务器（有对话模型的排在最前）；不会发送任何对话请求，所以服务器不会加载任何东西。
 - 在第二行和第三行之间，melo 以列表询问 `Use this model server?`；有多个模型时会显示选择器，有嵌入模型时还会有一个列表询问 `Remember across chats with nomic-embed-text?`（`Yes, with it`、`No, by words only`）。
-- 没有服务器在运行时，它会输出启动服务器的命令（Mac 上是 oMLX，其他系统是 Ollama；见[模型服务器指南](model-servers.md)），并询问 `No model server found. What now?`（`Check again`、`Enter an address`、`Quit`）。
+- 没有服务器在运行时，受支持的 Apple silicon Mac 会显示[只读设置预览](model-servers.md#setup-preview)：用简短摘要显示推荐项、下载量、已缓存量和可用空间，仅在需要时添加警告。摘要只显示一次。选择 `Show how to set one up` 可看到最多六步的简明编号步骤（下载 oMLX、移到“应用程序”、下载模型、启动服务器，最后输入它的地址）；自动设置即将推出，不会安装、下载、启动或保存。开发者模式保留 `Review setup plan` 菜单，其中有生命周期选项、手动步骤和 `Details`。仍可重新检查、输入地址或退出；管道输入保留原有提示，并显示手动指南链接而不是列表操作。其他系统保留手动服务器指南，不估算缓存。
 - 无法使用的服务器会连同原因一起指出（`connection refused`、`no answer in 5 s`、`HTTP 401` 或 `HTTP 403` 并附 `the server requires an API key; localmelo sends none to local servers (oMLX: "Allow inference without API key")`、`it lists no models`），你可以重试、不保存直接启动或退出。
 - Ollama 服务器保存为 `chat_backend = "ollama"`，oMLX 服务器保存为 `chat_backend = "omlx"`，其他保存为 `"vllm"`；嵌入模型的选择见[配置嵌入模型](embedding.md)。
 - `LOCALMELO_DETECT_URLS` 用逗号分隔的列表替换这四个 URL；空值会关闭查找。
 
-没有找到服务器时，melo 会输出：
+模型保留在 Hugging Face 缓存中。版本、校验和、缓存/设置路径、端口规则和计划摘要放在 `Details` 或开发者模式中，不占默认摘要。生命周期选择只描述未来可能执行的设置，不代表同意执行；手动命令独立运行，服务器须自行按 Ctrl+C 停止。选择空闲端口并在 melo 中输入该地址；没有对应固定 Mac 配方的系统保留现有手动说明。
+
+问题之后，并且只在终端里，首次运行还会提议一次：导入这台电脑上其他助手保存的关于你的笔记：
 
 ```text
-No model server is running yet. To start one with oMLX:
-
-  brew tap jundot/omlx https://github.com/jundot/omlx
-  brew install jundot/omlx/omlx
-  omlx serve --model-dir ~/models --port 8000
-
-Put a model in its own folder of ~/models first. The guide shows how:
-https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md
+ melo found notes on this Mac from other assistants
+ ❯ 1. Bring in 21 notes from 8 files
+   2. Show what they say
+   3. Not now
+ ↑↓ select · enter confirm · esc cancel
 ```
+
+`Show what they say` 把每个文件打印成路径（`~/.claude/CLAUDE.md · 9 notes`），带几行示例和舍弃了什么（`9 left out: secrets, other people's details`），然后再问一次。列表默认停在 `Show what they say`，所以直接按 Enter 不会导入任何内容；看过文件之后，列表默认停在 `Bring in`。在你选第一行之前不会导入任何内容，只有 `Not now` 会让这个提议永久结束。Esc、ctrl+c 和输入结束只是离开，不导入任何内容，也不记录回答，所以之后还会再问：首次运行时 melo 像取消设置一样结束（`Setup cancelled.`，Esc 和 ctrl+c 退出码为 130），`melo memory import` 里会说 `Nothing brought in.`，`/memory import` 里 Esc 只是关闭列表。文件里的行全部被舍弃时，会说 `Nothing to bring in: the lines were left out (secrets)`，而不是 `Nothing new`。`melo memory import --undo BATCH` 会保留你之后编辑过的笔记并说明（`Took back 20 notes. Kept 1 note you edited.`）。之后可以在对话里用 `/memory import`，或用 `melo memory import` 再问同样的列表；任务运行（`melo "task"`）从不询问。管道输入时，列表是从 stdin 读取的编号问题。这些笔记就是控制台 Memory 标签页列出的那些，每次导入都有一个批次，可以用 `melo memory import --undo BATCH` 收回。
 
 <a id="questions-are-lists"></a>
 
