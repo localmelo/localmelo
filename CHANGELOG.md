@@ -19,7 +19,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   then enter its address in melo), **Enter an address** and **Quit**. Automatic
   setup is coming soon. Nothing installs, downloads, starts or saves, and direct
   runs and existing connections are unchanged. Developer mode keeps the review
-  menu with **Details**. [#NN]
+  menu with **Details**. [#383]
 
 - A task starts with what its chat knows about you and the project. When the
   task is made, the notes about you and your preferences, the notes of its
@@ -3205,3 +3205,4 @@ earlier milestones.
 [#379]: https://github.com/localmelo/localmelo/pull/379
 [#381]: https://github.com/localmelo/localmelo/pull/381
 [#382]: https://github.com/localmelo/localmelo/pull/382
+[#383]: https://github.com/localmelo/localmelo/pull/383
