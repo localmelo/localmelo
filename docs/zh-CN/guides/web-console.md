@@ -128,7 +128,7 @@
 | `/undo`、`/retry` | 忘掉最近一轮已结束的轮次（文件改动保留），或把它再跑一次。 |
 | `/copy [turn]` | 把一个回答拷贝到剪贴板；不带数字时是最新的。 |
 | `/title [text]` | 查看或设置对话标题。 |
-| `/memory [window]` | 打开“记忆”标签页；`window` 显示模型的窗口。`/memory import` 留给导入界面。 |
+| `/memory [window\|import]` | 打开“记忆”标签页；`window` 显示模型的窗口；`import` 还会按下 **Look for notes**，列出其他助手保存的文件（记忆关闭时会有一行说明）。 |
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | 显示对话的模式和授权；`ask` 和 `auto` 切换模式，`forget` 收回授权。`deny` 只在终端里有。 |
 | `/browser [on\|off]` | 查看或切换在 Safari 中读网页，保存到 `[browser] driver`。 |
 | `/attach`、`/attachments`、`/detach` | 控制台暂时不能附加文件，并会这样说明。 |
@@ -189,6 +189,10 @@
 - **Edit** 打开笔记供改写；**Save** 保存新文字（看起来像密码或密钥的文字会被拒绝并说明原因）。**Delete** 会问 `Forget this note?`，选项是 **Keep it** 和 **Forget it**。
 - **Forget everything…** 在删除之前说明将删除什么：`This removes 12 notes and melo's search index of 48 chat turns. Your chats stay. It cannot be undone.` **Keep everything** 排在第一位。开发者模式下，**Rebuild search index** 会重新读取对话。
 - 没有任何记忆时，标签页说明记忆怎样开始：在对话里告诉 melo 一件关于你自己的事（如 `I prefer short answers`），或让它记住某件事。
+
+**From other assistants**（Memory 标签页底部）导入这台 Mac 上其他助手已经了解的关于你的信息。**Look for notes** 列出含有笔记的文件，样子和下面首次运行的卡片一样；**Bring them in** 写入勾选的文件，标签页会说 `Brought in 4 notes.`。每一批都会继续列为 `4 notes brought in · Oct 31`，并带自己的 **Undo**；导入的笔记会写明 `From the file CLAUDE.md, Oct 31`。
+
+主对话在已连接模型且记忆开启时第一次打开，会显示一张卡片 `melo found notes on this Mac from other assistants`，每个文件一行：路径（`~/.claude/CLAUDE.md`）、`3 notes`、一个复选框（默认勾选），以及 **See what is in it**，展开后显示示例行和舍弃了什么（`2 left out: secrets, other people’s details`）。**Bring them in** 写入勾选的文件，卡片显示 `Brought in 6 notes · Undo`；**Undo** 收回这一批，但会保留你之后编辑过的笔记（`Taken back. Kept 1 note you edited.`）。**Not now** 关闭卡片，它不会再回来；如果 melo 无法保存这个回答，卡片会说明，下次可能还会再问。在你按下 **Bring them in** 之前不会写入任何内容；什么都没找到时不显示卡片。
 
 关闭一个产生过笔记的对话时会问 `Also forget the 2 notes from this chat?`：**Keep the notes**（第一位）、**Forget the 2 notes too** 或 **Don’t delete the chat**。
 

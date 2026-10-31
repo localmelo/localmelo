@@ -49,6 +49,7 @@ CONVERTED_JS = (
     "blocked.mjs",
     "drawer.mjs",
     "folder.mjs",
+    "import-card.mjs",
     "levels.mjs",
     "main-chat.mjs",
     "memory-tab.mjs",

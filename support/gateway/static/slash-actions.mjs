@@ -7,7 +7,7 @@
  * `host` is the page (`workspace.js`): `api`, `state()`, and the moves it makes: `send`,
  * `newChat`, `pickChat`, `openChat`, `openMain`, `openSettings`, `openMemory`, `settingsSaved`,
  * `setMode`, `setTitle`, `setNewTitle`, `view`, `reveal`, `writeText`, `isApp`, `canQuit`, `quit`
- * and, once the import screens land, `memoryImport`.
+ * and `memoryImport` (`/memory import`: the Memory tab looks for notes).
  */
 
 import {saidText, t} from './i18n.mjs';

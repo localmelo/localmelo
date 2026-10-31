@@ -525,6 +525,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{ setupPanel \} from "\.\/panel\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/levels\.mjs";\n/m, '')
   .replace(/^import \{ setupModelCard \} from "\.\/setup-card\.mjs";\n/m, '')
+  .replace(/^import \{ setupImportCard \} from "\.\/import-card\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/folder\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/pictures\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/memory\.mjs";\n/m, '')
@@ -729,6 +730,8 @@ function harness(routes, {mobile = false} = {}) {
     setupStatusRow,
     setupRunning,
     setupModelCard,
+    // The first-run import card has its own tests (test_import_card.mjs); here it only hears when it may show.
+    setupImportCard: ({root}) => ({show(visible) { root.shown = visible; }}),
     folderName,
     setupFolderPicker,
     picturesNode,
@@ -745,7 +748,9 @@ function harness(routes, {mobile = false} = {}) {
     setupSettings: () => async () => { context.settingsOpened = (context.settingsOpened || 0) + 1; },
     setupDrawer: () => drawer,
     // The panel beside the chat has its own tests (test_panel.mjs); here it only hears health.
-    setupPanel: () => ({health: [], update(body) { this.health.push(body); }, closeSheet: () => false}),
+    // `/memory import` opens its tab and presses "Look for notes": a test sets `notesOn` and reads `notesLooked`.
+    setupPanel: () => ({health: [], update(body) { this.health.push(body); }, closeSheet: () => false, select() {}, openSheet() {},
+      lookForNotes: async () => { context.notesLooked = (context.notesLooked ?? 0) + 1; return context.notesOn !== false; }}),
     document,
     location: {hash: '', pathname: '/', search: ''},
     history: {replaceState(_state, _title, url) { context.location.hash = ''; context.replacedUrl = url; }},
@@ -4276,6 +4281,42 @@ test('the main chat opens by default, pinned above its side chats, which are gro
   assert.equal(h.element('welcome-workers').hidden, false);
 });
 
+test('the first-run import card may show only in the main chat, with a model connected, outside setup and worker mode', async () => {
+  const card = (h) => h.element('import-card').shown;
+  const h = harness(mainRoutes({'GET /sessions?kind=worker&limit=50': {sessions: [], next_cursor: null}}));
+  await h.run('init()');
+  assert.equal(h.state().activeId, 'm');
+  assert.equal(card(h), true, 'the main chat of a configured page');
+  findNode(h.element('session-list'), (node) => node.dataset?.sessionId === 'a').children[0].click();
+  await settle();
+  assert.equal(card(h), false, 'a side chat is not where the offer is made');
+  h.element('header-parent').click();
+  await settle();
+  assert.equal(card(h), true, 'back in the main chat');
+  h.context.location.hash = '#/workers';
+  await h.windowListeners.hashchange[0]();
+  await settle();
+  assert.equal(card(h), false, 'worker mode');
+  h.context.location.hash = '#/s/m';
+  await h.windowListeners.hashchange[0]();
+  await settle();
+  assert.equal(card(h), true, 'and back');
+  // No chat open: the setup card (or a new side chat) has the welcome.
+  h.context.location.hash = '#/new';
+  await h.windowListeners.hashchange[0]();
+  await settle();
+  assert.equal(card(h), false, 'no chat is open');
+  for (const [patch, why] of [
+    [{configured: false}, 'no model is configured'],
+    [{model_server: {reachable: false, url: 'http://127.0.0.1:1/v1', name: 'x', models: [], loaded: []}}, 'the model server cannot be reached'],
+  ]) {
+    const off = harness(mainRoutes({'GET /health': {...health, ...patch}, 'GET /setup/detect': nothing}));
+    await off.run('init()');
+    assert.equal(off.state().activeId, 'm');
+    assert.equal(card(off), false, `with the main chat open but ${why}`);
+  }
+});
+
 test('a side chat names the main chat it belongs to, and that name goes back to it', async () => {
   const h = harness(mainRoutes());
   await h.run('init()');
@@ -4928,6 +4969,21 @@ test('a slash command typed in the composer runs on the page, answers in a local
   assert.match(h.text('local-rows'), /Unknown command \/nonsense — \/help lists them/);
   assert.equal(turnPosts(h).length, 0);
   assert.equal(h.state().outbox.a, undefined, 'No pending message either');
+});
+
+test('/memory import opens the Memory tab and looks for notes; with memory off a row says so', async () => {
+  const h = harness(withCommands());
+  await h.run('init()');
+  h.element('input').value = '/memory import';
+  await h.run('send()');
+  assert.equal(h.context.notesLooked, 1, 'the tab looked for notes as its button does');
+  assert.equal(turnPosts(h).length, 0);
+  assert.doesNotMatch(h.text('local-rows'), /not on this page yet/, 'the import screen is on this page now');
+  h.context.notesOn = false;
+  h.element('input').value = '/memory import';
+  await h.run('send()');
+  assert.equal(h.context.notesLooked, 2);
+  assert.match(h.text('local-rows'), /Memory across chats is off\. Turn on Remember across chats in the Memory tab first\./);
 });
 
 test('a message that only looks like a command is sent as the person wrote it, and a sent message clears the rows', async () => {

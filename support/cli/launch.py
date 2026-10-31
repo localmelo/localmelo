@@ -325,6 +325,17 @@ def run_interactive(
         return 1
     if isinstance(choice, int):
         return choice
+    # Once per computer, to a person at a terminal: bring in what other assistants already know.
+    from localmelo.support.cli import memory_import
+
+    try:
+        memory_import.first_run()
+    except EOFError:
+        print("\nSetup cancelled.")
+        return 0
+    except KeyboardInterrupt:
+        print("\nSetup cancelled.")
+        return 130
     explicit = {
         name
         for name in (

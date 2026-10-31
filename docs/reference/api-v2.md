@@ -1843,7 +1843,7 @@ scan's `batch_id` and the sources the user chose.
 ```
 
 ```json
-{"batch_id": "e86b19186930", "sources": [{"id": "claude-35bc414c", "harness": "claude", "path": "/home/me/.claude/CLAUDE.md", "scope": "user", "workspace": "", "items_found": 3, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 1}, "sample": ["Use uv for new Python projects.", "Keep commits small and focused on one change."]}, {"id": "hermes-2e22e64e", "harness": "hermes", "path": "/home/me/.hermes/memories/USER.md", "scope": "user", "workspace": "", "items_found": 2, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 0}, "sample": ["Prefers concise replies.", "The user is a PhD student in robotics."]}], "partial": false}
+{"batch_id": "e86b19186930", "sources": [{"id": "claude-35bc414c", "harness": "claude", "path": "/home/me/.claude/CLAUDE.md", "scope": "user", "workspace": "", "items_found": 3, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 1}, "sample": ["Use uv for new Python projects.", "Keep commits small and focused on one change."]}, {"id": "hermes-2e22e64e", "harness": "hermes", "path": "/home/me/.hermes/memories/USER.md", "scope": "user", "workspace": "", "items_found": 2, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 0}, "sample": ["Prefers concise replies.", "The user is a PhD student in robotics."]}], "partial": false, "home": "/home/me"}
 ```
 
 ```bash
@@ -1861,19 +1861,28 @@ scan's `batch_id` and the sources the user chose.
   counts the lines, `items_kept` those that would become notes (at most 60), and `filtered`
   those left out, by reason: `secret`, `third_party` (private data of other people),
   `wrong_owner`, `duplicate` and `mechanics` (lines about the other tool itself). `sample`
-  has up to 3 notes. `partial` is true when the scan stopped at its 2 s limit.
+  has up to 3 notes. `partial` is true when the scan stopped at its 2 s limit. `home` is the
+  user's home folder, so a client can write a `path` as `~/…`.
 - `POST /api/memory/import` writes the notes of the chosen `source_ids` (at most 300 in a
   batch) and answers the new note ids; `skipped` counts the notes of those sources that were
   not written (already notes, over the batch limit, or a source written before). A scan
   that is gone (the gateway keeps the last four) is 404 `not_found`; an unknown source id,
   or memory switched off, is 400 `invalid_request`.
+- `GET /api/memory/import/offer` answers `{"pending": true}` while memory is on and bringing
+  notes in was never offered on this computer; the first-run card asks it before it scans.
+  `DELETE` on it records "Not now" and answers `{"pending": false}`, or `{"pending": true}` when the record could not be written (the offer stays open). A write of notes
+  (`POST /api/memory/import`) records the offer as made too, a scan does not. The record is
+  `import_offer.json` in the memory folder, shared by the console, the app and the terminal.
 - The `memory.import` event (`batch_id` and, per source, `id`, `harness`, `written`) is in the
   response as `event`: memory has no session channel to send it on.
 - `DELETE /api/memory/import/{batch_id}` takes the batch back: it deletes its notes, makes
   the notes they replaced current again and answers `{"batch_id": "e86b19186930",
-  "removed": 2}`; a batch with no notes left is 404 `not_found`.
+  "removed": 2}`. A note the user reworded since stays (it is theirs now); then the answer
+  also has `"kept": 1`, the number of such notes, and only then. A batch with nothing left to
+  take back and nothing kept is 404 `not_found`.
 - A note it wrote shows in `GET /api/memory/records` with `imported` true, its `batch_id`
-  and a `source` like `imported from the file CLAUDE.md, Oct 31`.
+  and a `source` like `imported from the file CLAUDE.md, Oct 31`; its `from` reads
+  `from the file CLAUDE.md, Oct 31` in the reader's language.
 
 ## GET /api/sessions/{id}/runs
 

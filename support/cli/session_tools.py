@@ -6,7 +6,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from localmelo.melo.schema import INTERRUPT_LABEL, NO_ANSWER_LABEL, split_thinking
-from localmelo.support.cli import memory_notes, terminal
+from localmelo.support.cli import memory_import, memory_notes, terminal
 from localmelo.support.cli.session_views import memory_view, usage_view
 from localmelo.support.cli.text import cut_cells
 from localmelo.support.sessions.display import clean_output
@@ -37,8 +37,10 @@ class SessionTools:
 
     async def run(self, name: str, arguments: str) -> None:
         s = self.session
-        if name == "memory" and arguments not in ("", "window"):
-            raise ValueError("Use /memory, or /memory window for the model's window.")
+        if name == "memory" and arguments not in ("", "window", "import"):
+            raise ValueError(
+                "Use /memory, /memory import, or /memory window for the model's window."
+            )
         if arguments and name not in ("title", "copy", "memory"):
             raise ValueError(f"Use /{name}.")
         if name == "title":
@@ -53,6 +55,10 @@ class SessionTools:
                     "/memory opens when the turn ends; /memory window works now."
                 )
             await memory_notes.manage(s)
+        elif name == "memory" and arguments == "import":
+            if s.state != "idle":
+                raise ValueError("/memory import opens when the turn ends.")
+            await memory_import.bring_in(s)
         elif name == "memory":
             loaded = s.runner.last_resume if s.runner is not None else None
             s.out.print(
