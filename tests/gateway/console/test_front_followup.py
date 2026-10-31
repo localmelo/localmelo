@@ -12,13 +12,14 @@ scripted model; no worker starts.
 from __future__ import annotations
 
 import asyncio
+import copy
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from localmelo.melo.contracts.providers import BaseLLMProvider
-from localmelo.melo.schema import Message
+from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console import front as front_module
 from localmelo.support.gateway.console.front import (
@@ -32,7 +33,7 @@ from localmelo.support.gateway.console.front import (
 )
 from localmelo.support.gateway.finishing import OUT_OF_STEPS
 from localmelo.support.gateway.front_rules import short_title
-from localmelo.tests.sessions.helpers import answer, tool_call
+from localmelo.tests.sessions.helpers import ScriptedLLM, answer, tool_call
 
 from ..conftest import REAL_ASK_TITLE
 from .conftest import HOLDER, run_result
@@ -500,7 +501,11 @@ async def test_continue_the_task_resumes_a_paused_task_whatever_the_length(
 
 
 async def test_a_brief_question_at_the_cap_gets_its_stop_answer(tmp_path: Path) -> None:
-    replies = [*_four_steps(), answer("It reads Done only when the answer is empty.")]
+    # A brief question has two steps (BRIEF_STEPS), then its stop answer.
+    replies = [
+        *_four_steps()[:2],
+        answer("It reads Done only when the answer is empty."),
+    ]
     async with front_console(tmp_path, *replies) as (console, client, llm):
         await _say(
             client,
@@ -516,6 +521,7 @@ async def test_a_brief_question_at_the_cap_gets_its_stop_answer(tmp_path: Path) 
         assert await _echoes(console) == []
         assert await console.workers.tasks.list_tasks() == []
         assert BRIEF_NOTE in llm.requests[0][-1].content
+        assert len(llm.requests) == 3  # two steps, then the stop answer
         entry = console.sessions.get(str(console.main_id))
         assert entry is not None and entry.agent is not None
         assert entry.agent.options.answer_on_stop is False  # only this turn asked
@@ -529,6 +535,63 @@ async def test_a_brief_question_with_no_stop_answer_still_asks(tmp_path: Path) -
         await _say(client, console, "briefly, how is the Done card made?")
         turn = await _wait_turn(client, str(console.main_id))
         assert turn["answer"] == ASK_TEXT
+
+
+# Each search narrows the one before, so no step repeats another (three repeats
+# with the same results make a stuck run, which gets no stop answer).
+NARROWING = ("DEFAULT_WORKSPACE =", "DEFAULT_WORKSPACE", "DEFAULT_WORK", "DEFAULT_")
+
+
+class SearchUntilStopped(ScriptedLLM):
+    """Calls search_files at each planning request; the stop request has no tools."""
+
+    async def chat(
+        self, messages: list[Message], tools: list[ToolDef] | None = None
+    ) -> Message:
+        self.requests.append(copy.deepcopy(messages))
+        if not tools:
+            return answer("It is set in support/gateway/task_policy.py.")
+        pattern = NARROWING[len(self.requests) - 1]
+        return tool_call(
+            "search_files", {"pattern": pattern}, call_id=f"s{len(self.requests)}"
+        )
+
+
+async def test_a_brief_question_that_keeps_searching_stops_at_two_steps(
+    tmp_path: Path,
+) -> None:
+    model = SearchUntilStopped()
+    async with front_console(tmp_path, model=model) as (console, client, _):
+        await _say(client, console, "briefly, which file defines DEFAULT_WORKSPACE?")
+        turn = await _wait_turn(client, str(console.main_id))
+        assert (turn["status"], turn["answer"]) == (
+            "completed",
+            "It is set in support/gateway/task_policy.py.",
+        )
+        # Two searches, then the request for the stop answer: no task is offered.
+        assert len(model.requests) == 3
+        assert await _echoes(console) == []
+        assert await console.workers.tasks.list_tasks() == []
+
+
+async def test_a_question_that_is_not_brief_keeps_four_steps(tmp_path: Path) -> None:
+    searches = [
+        tool_call("search_files", {"pattern": pattern}, call_id=f"s{n}")
+        for n, pattern in enumerate(NARROWING[:3], start=1)
+    ]
+    replies = [*searches, answer("It is set in support/gateway/task_policy.py.")]
+    async with front_console(tmp_path, *replies) as (console, client, llm):
+        await _say(
+            client, console, "Quick question: which file defines DEFAULT_WORKSPACE?"
+        )
+        turn = await _wait_turn(client, str(console.main_id))
+        assert (turn["status"], turn["answer"]) == (
+            "completed",
+            "It is set in support/gateway/task_policy.py.",
+        )
+        # The fourth step is the answer: the brief cap does not apply to it.
+        assert len(llm.requests) == 4
+        assert await _echoes(console) == []
 
 
 # ── A task code starts is named in a few words ──
