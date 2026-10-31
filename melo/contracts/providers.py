@@ -35,6 +35,20 @@ LLM_REQUEST_KIND: contextvars.ContextVar[str] = contextvars.ContextVar(
 LLM_REQUEST_KINDS: Final = ("plan", "reflect", "retrieve", "estimate", "review")
 
 
+def thinking_disabled(body: Mapping[str, Any]) -> bool:
+    """Whether a request body tells the model not to think (#357).
+
+    That is ``chat_template_kwargs.enable_thinking`` set to false (vLLM,
+    oMLX and other servers that render the model's chat template) or
+    ``think`` set to false (Ollama). Anything else, including no setting, is
+    a model that may think.
+    """
+    kwargs = body.get("chat_template_kwargs")
+    if isinstance(kwargs, Mapping) and kwargs.get("enable_thinking") is False:
+        return True
+    return body.get("think") is False
+
+
 class ProviderError(Exception):
     """A request to a model server failed.
 
@@ -125,6 +139,12 @@ class BaseLLMProvider(ABC):
     # token counts only: Message.usage's keys and any the server adds, such
     # as "cached_tokens". Set as last_reasoning_key is; None when unknown.
     last_usage: dict[str, int] | None = None
+
+    # Whether this provider's planning requests tell the model not to think
+    # (see thinking_disabled). A provider sets it on the instance from its
+    # request fields; a wrapper copies it. The agent then takes a reply's
+    # words, wherever the server put them, as the model's answer (#357).
+    thinking_off: bool = False
 
     # The request key this provider can send Message.thinking back under:
     # None (never sends it), "auto" (the key the last reply came from),

@@ -83,10 +83,23 @@ NO_ANSWER_LABEL = "[no answer: the run ended with status {status}]"
 # Replaces a kept answer that the memory-write check refuses, with the
 # check's reason; a status label would claim that no answer was given.
 ANSWER_NOT_KEPT_LABEL = "[answer not kept in working memory: {reason}]"
+# What the model reads in place of INTERRUPT_LABEL or NO_ANSWER_LABEL: they
+# stay in working memory and in the saved turn, but a request carries this
+# user-side note instead, since a model copies an assistant message that
+# says "no answer" and every later turn then fails the same way (#357).
+UNANSWERED_NOTE = "[The previous request ended without an answer.]"
 
 # Characters of an answer or a user text that a session keeps in working
 # memory (see clip_session_text).
 SESSION_TEXT_CHARS = 8_000
+
+
+def is_no_answer_label(text: str) -> bool:
+    """Whether *text* is :data:`INTERRUPT_LABEL` or a :data:`NO_ANSWER_LABEL`."""
+    head, tail = NO_ANSWER_LABEL.split("{status}")
+    return text == INTERRUPT_LABEL or (
+        text.startswith(head) and text.endswith(tail) and "\n" not in text
+    )
 
 
 def answer_text(status: str, result: str) -> str:
@@ -229,6 +242,7 @@ def unfinished_thinking(
     framing: str | None,
     reasoning_tokens: int | None = None,
     streamed: bool = False,
+    thinking_off: bool = False,
 ) -> bool:
     """Whether a reply without tool calls is only thinking that never ended (#278).
 
@@ -249,6 +263,11 @@ def unfinished_thinking(
       count of 0, the server's word that it found no reasoning in a reply
       of a model that reasons; it found no end mark and returned all of it
       as the answer.
+
+    With *thinking_off*, the request told the model not to think (see
+    :func:`answer_from_thinking`), so the last two rules do not apply: text
+    with no reasoning is the answer a model that does not think gives, and
+    a framing seen on an earlier reply says nothing about it (#357).
     """
     opened = framing != "none" and _THINK_OPENING.match(content) is not None
     if opened and _THINK_CLOSING.search(content) is None:
@@ -256,11 +275,35 @@ def unfinished_thinking(
     answer = content if framing == "none" else split_thinking(content)[1]
     if not answer.strip():
         return bool(reasoning_tokens)
+    if thinking_off:
+        return False
     if thinking.strip():
         return streamed and _same_words(content, thinking)
     if _THINK_CLOSING.search(content) is not None:
         return False
     return framing == "closing_only" or (framing == "field" and reasoning_tokens == 0)
+
+
+def answer_from_thinking(
+    content: str, thinking: str, *, reasoning_tokens: int | None = None
+) -> str:
+    """The answer of a reply from a model that was told not to think (#357).
+
+    Such a model has no thinking to put in a reply, so a reply whose answer
+    text is empty but whose *thinking* has words (a server that sends its
+    whole output in the reasoning field) gave those words as its answer.
+    Empty, and the reply stays as it is, when *content* has an answer, or
+    opens a ``<think>`` block it never closes, or the provider counted
+    *reasoning_tokens*: the model did think, and the rules of
+    :func:`unfinished_thinking` apply.
+    """
+    if reasoning_tokens:
+        return ""
+    if _THINK_OPENING.match(content) and _THINK_CLOSING.search(content) is None:
+        return ""
+    if split_thinking(content)[1].strip():
+        return ""
+    return unfinished_as_thinking(content, thinking)
 
 
 def unfinished_as_thinking(content: str, thinking: str) -> str:

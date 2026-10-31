@@ -23,6 +23,7 @@ from localmelo.melo.memory.history.sqlite import SqliteHistory  # noqa: E402
 from localmelo.melo.schema import (  # noqa: E402
     INTERRUPT_LABEL,
     NO_ANSWER_LABEL,
+    UNANSWERED_NOTE,
     Message,
     TaskRecord,
     ToolDef,
@@ -499,10 +500,9 @@ async def test_a_stop_closes_the_turn_with_the_interrupt_label(
     window = manager._sessions[sid].agent.hippo.working.get_window()
     assert turns(window) == [("user", "Long question"), ("assistant", INTERRUPT_LABEL)]
     assert (await manager.run(sid, "Try again"))["answer"] == "Answer 2"
+    # The window keeps the label; the model reads a note in its place (#357).
     assert turns(llm.requests[1]) == [
-        ("user", "Long question"),
-        ("assistant", INTERRUPT_LABEL),
-        ("user", "Try again"),
+        ("user", f"Long question\n\n{UNANSWERED_NOTE}\n\nTry again"),
     ]
 
 

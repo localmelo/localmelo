@@ -7,7 +7,11 @@ from typing import Any
 
 import httpx
 
-from localmelo.melo.contracts.providers import LLM_REQUEST_KIND, BaseLLMProvider
+from localmelo.melo.contracts.providers import (
+    LLM_REQUEST_KIND,
+    BaseLLMProvider,
+    thinking_disabled,
+)
 from localmelo.melo.schema import Message, ToolCall, ToolDef, describe_images
 from localmelo.support.providers._http import (
     attempt_headers,
@@ -203,6 +207,7 @@ class OllamaNativeChat(BaseLLMProvider):
     ) -> None:
         self.model = model
         self.extra_body = prepare_extra_body(extra_body)
+        self.thinking_off = thinking_disabled(self.extra_body)
         # The native wire field is fixed; it has no "auto" or other key.
         self.reasoning_field = "thinking"
         self.requires_reasoning_replay = requires_reasoning_replay

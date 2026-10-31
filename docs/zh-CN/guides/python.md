@@ -320,5 +320,6 @@ assistant Paris is the capital of France.
 - 最后一种情况对应在提示中打开该块的模板，例如 Qwen3 的思考模型，它们只留下闭合标签。Ollama 和没有推理解析器的 OpenAI 兼容服务器会将推理放在那里。
 - 超过 8,000 字符的答案会被截断，末尾为 `... [<n> more characters not shown]`。
 - 没有答案的运行会留下标签：`cancelled` 运行使用 `[interrupt: no assistant output for this turn]`，其他运行使用 `[no answer: the run ended with status <status>]`。
+- 标签会保留在 `agent.conversation()` 和已保存的轮次中。发给模型的请求里，同一位置是一条用户消息 `[The previous request ended without an answer.]`，并与相邻的用户消息合并，因为模型会照抄表示“没有给出答案”的助手消息。
 
 要将对话保存在文件中，供跨进程和重启使用，见[会话](../reference/sessions.md)。
