@@ -537,3 +537,33 @@ def test_a_task_s_turn_reads_the_person_s_words_not_the_objective() -> None:
         "thanks, go on",
         "thanks, go on",
     )
+
+
+def test_a_resumption_card_is_not_the_person_s_words() -> None:
+    from types import SimpleNamespace
+
+    from localmelo.support.gateway.park_card import build_park_card
+    from localmelo.support.gateway.workers import _turn_text
+    from localmelo.support.sessions.store import StoredEvent
+
+    spec = {
+        "title": "Sign-in helper",
+        "objective": "Find a way to sign in daily.\n\nDetails:  the forum.",
+        "user_words": "can you sign me in every day?",
+    }
+    reply = "Next I will pip install playwright and add a LaunchAgent."
+    event = {"type": "assistant.message", "run_id": "r", "data": {"content": reply}}
+    card = build_park_card(
+        spec, [StoredEvent(id=1, session_id="s", turn=1, event=event)]
+    )
+    assert reply in card
+    assert _turn_text(SimpleNamespace(spec=spec, card=card)) == (
+        card,
+        "can you sign me in every day?",
+    )
+    # A task the person started: its objective is their words.
+    own = {"objective": "Find a way to sign in daily."}
+    assert _turn_text(SimpleNamespace(spec=own, card=card)) == (
+        card,
+        "Find a way to sign in daily.",
+    )

@@ -432,19 +432,17 @@ class _Review:
             if (
                 node.id not in self.alias
                 and node.id not in self.unsure
-                and len(values) == 1
-                and (
-                    isinstance(values[0], ast.Name | ast.Attribute)
-                    or isinstance(values[0], ast.Call)
-                    and self.name(values[0]) != "?"
-                )
                 and node.id not in self.busy
+                and len(values) == 1
+                and isinstance(values[0], ast.Name | ast.Attribute | ast.Call)
             ):
-                self.busy.add(node.id)
+                self.busy.add(node.id)  # x = x.y(…) must not loop
                 try:
-                    return self.name(values[0])
+                    resolved = self.name(values[0])
                 finally:
                     self.busy.discard(node.id)
+                if resolved != "?" or not isinstance(values[0], ast.Call):
+                    return resolved
             return self.alias.get(node.id, node.id)
         if isinstance(node, ast.Attribute):
             return f"{self.name(node.value)}.{node.attr}"
@@ -555,12 +553,94 @@ class _Review:
             ]
         return [None]
 
-    def run(self) -> None:
+    def run(self, tree: ast.AST) -> None:
+        self.passed(tree)
         for node in self.later:
             if isinstance(node, ast.Call):
                 self.call(node)
+                self.code_write(node)
             elif isinstance(node, ast.Import | ast.ImportFrom):
                 self.imported(node)
+
+    def is_process(self, name: str) -> bool:
+        """Whether the function *name* starts a process."""
+        module, _, attr = name.rpartition(".")
+        return (
+            module == "subprocess"
+            and attr in _RUNS
+            or name.startswith(_SPAWNS)
+            or name in ("os.system", "os.popen", "pty.spawn")
+        )
+
+    def passed(self, tree: ast.AST) -> None:
+        """A process function used other than by a call, ``ctypes``, ``sys.modules``.
+
+        A function handed on (``partial``, ``map``, a thread's ``target``, a
+        default argument) runs with arguments melo cannot see.
+        """
+        nodes = list(ast.walk(tree))
+        called = {id(n.func) for n in nodes if isinstance(n, ast.Call)}
+        for node in nodes:
+            if not isinstance(node, ast.Name | ast.Attribute):
+                continue
+            name = self.name(node)
+            if name.split(".")[0] == "ctypes":
+                self.f.doubt("Uses ctypes, which melo cannot check.")
+            elif name == "sys.modules":
+                self.f.doubt("Reaches modules through sys.modules.")
+            elif name in ("operator.methodcaller", "operator.attrgetter"):
+                self.f.doubt("Calls a function looked up by name at run time.")
+            elif id(node) not in called and self.is_process(name):
+                self.f.doubt(f"Hands on {name}, so melo cannot see what it runs.")
+        for node in nodes:
+            if isinstance(node, ast.Import | ast.ImportFrom):
+                names = [a.name for a in node.names] + [
+                    getattr(node, "module", "") or ""
+                ]
+                if any(n.split(".")[0] == "ctypes" for n in names):
+                    self.f.doubt("Uses ctypes, which melo cannot check.")
+
+    def code_write(self, node: ast.Call) -> None:
+        """``open(p, "w").write(code)`` or ``Path(p).write_text(code)`` of a code file.
+
+        Literal code is classified as a write of that file
+        (:func:`~.files.written`); text melo cannot fold is left to the
+        runner that runs it later.
+        """
+        func = node.func
+        if not isinstance(func, ast.Attribute) or not node.args:
+            return
+        target, append = None, False
+        if func.attr == "write_text":
+            target = func.value
+        elif func.attr == "write":
+            opened = func.value
+            if isinstance(opened, ast.Name) and len(self.bound.get(opened.id, [])) == 1:
+                opened = self.bound[opened.id][0]
+            if isinstance(opened, ast.Call) and self.name(opened.func) in (
+                "open",
+                "io.open",
+            ):
+                mode = self.fold(
+                    opened.args[1]
+                    if len(opened.args) > 1
+                    else next(
+                        (k.value for k in opened.keywords if k.arg == "mode"), None
+                    )
+                )
+                append = any("a" in str(m) for m in mode if m)
+                target = opened.args[0] if opened.args else None
+        if target is None:
+            return
+        texts = [v for v in self.fold(node.args[0]) if isinstance(v, str)]
+        for value in (v for v in self.fold(target) if isinstance(v, str)):
+            path = resolve(self.ctx, value)
+            if path is None:
+                continue
+            old = file_rules._old_text(path) or ""
+            for text in texts:
+                new = old + text if append else text
+                file_rules.written(self.ctx, self.f, path, new, old)
 
     def imported(self, node: ast.Import | ast.ImportFrom) -> None:
         names = [a.name for a in node.names] + [getattr(node, "module", "") or ""]
@@ -886,4 +966,4 @@ def review_python(ctx: Context, f: Findings, code: str) -> None:
         tree = ast.parse(code)
     except (SyntaxError, ValueError):
         return  # it fails without effect
-    _Review(ctx, f, tree).run()
+    _Review(ctx, f, tree).run(tree)

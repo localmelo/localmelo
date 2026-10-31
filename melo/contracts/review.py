@@ -140,7 +140,10 @@ class ActionReview:
     (the reasons an undecided call has in ``reasons``): words never allow
     such a call. ``inputs`` name the local files whose content the rules
     read, each as ``path:digest``; :func:`step_key` includes them, so a
-    changed file makes another step.
+    changed file makes another step. ``changed`` names the files changed
+    in this chat that a runner (``pytest``…) runs and melo could not read,
+    as they are now: not part of the key, it tells one review of the step
+    from the next.
     """
 
     verdict: Verdict
@@ -152,6 +155,7 @@ class ActionReview:
     model: ModelAnswer | None = None
     doubts: tuple[str, ...] = ()
     inputs: tuple[str, ...] = ()
+    changed: tuple[str, ...] = ()
 
     def to_json(self) -> dict[str, Any]:
         out: dict[str, Any] = {

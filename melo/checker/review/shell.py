@@ -79,13 +79,19 @@ _WRITERS = {
 # Programs that run the project's own files: a test runner, a build tool, a
 # package script. With code changed in this chat they are undecided.
 _RUNNERS = set(["pytest", "py.test", "tox", "nox", "make", "gmake", "just"])
-_RUNNERS |= set(["ninja", "rake", "gradle", "gradlew", "mvn", "npx", "bunx"])
+_RUNNERS |= set(["ninja", "rake", "gradle", "gradlew", "mvn", "npx", "bunx", "pnpx"])
+_RUNNERS |= set(["jest", "vitest", "mocha", "pre-commit", "ctest", "hatch"])
+# `<tool> run …` runs a script the project's configuration names.
+_RUN_WRAPPERS = set(["uv", "poetry", "pdm", "hatch", "pipenv"])
+# git commands that run the repository's hooks.
+_HOOKED = set(["commit", "push", "merge", "rebase", "am", "pull", "checkout"])
 _FILE_RUNNERS = set(["node", "deno", "bun", "ruby", "perl", "php", "tsx", "ts-node"])
 _PACKAGE_RUNS = set(["test", "t", "run", "run-script", "start", "exec", "x"])
 _BUILDS = {
     "cargo": set(["run", "test", "build", "bench", "check"]),
     "go": set(["run", "test", "generate"]),
     "swift": set(["run", "test", "build"]),
+    "xcodebuild": set(["test", "build", "build-for-testing", "test-without-building"]),
 }
 _YARN_OWN = set(["add", "install", "remove", "init", "global", "config", "info"])
 # One rule a line: a pattern over "program args…", the category ("?" for
@@ -125,6 +131,7 @@ _RULES = [
 ^git reset .*--hard ;; delete ;; Resets with --hard, which discards uncommitted changes.
 ^git clean .*\s-\w*[xX] ;; delete ;; Deletes untracked and ignored files (git clean -x).
 ^git config .*--(global|system) ;; persistence ;; Changes your global git settings.
+^git config .*core\.hookspath|^git config .*core\.hooksPath ;; persistence ;; Points git at hooks that run on later commits.
 """.strip().splitlines())
 ]
 
@@ -200,10 +207,11 @@ def review_shell(ctx: Context, f: Findings, command: str) -> None:
         return f.doubt("Has a quote that does not close.")
     cwd, before, url, bare_before = ctx.root, "", "", False
     for op, argv, redirs in segments:
-        body = None
+        body, writes = None, []
         for kind, target in redirs:
             if kind in _WRITES and not target.isdigit():
                 touch(ctx, f, target, "write", cwd)
+                writes.append((kind, target))
             elif kind == "<":
                 touch(ctx, f, target, "read", cwd)
             elif kind == "<<" and bodies:
@@ -211,10 +219,13 @@ def review_shell(ctx: Context, f: Findings, command: str) -> None:
         for token in argv:
             for inner in re.findall(r"\$\((.*)\)|`([^`]*)`", token, re.S):
                 review_shell(ctx.deeper(), f, inner[0] or inner[1])
+        if argv[1:2] == ["run"] and os.path.basename(argv[0]) in _RUN_WRAPPERS:
+            file_rules.runner(ctx, f, f"{os.path.basename(argv[0])} run")
         argv = _unwrap(f, argv)
         if not argv:
             continue
         prog = os.path.basename(argv[0])
+        _writes_code(ctx, f, argv, body, writes, cwd)
         if prog == "cd":
             cwd = resolve(ctx, (argv + ["~"])[1], cwd) or cwd
             continue
@@ -374,19 +385,60 @@ def run_argv(ctx: Context, f: Findings, argv: list[str], cwd: str) -> None:
             script(ctx, f, argv[0], "", cwd)
     if _runs_project(prog, words):
         file_rules.runner(ctx, f, prog)
+    if prog == "git" and set(plain[:1]) & _HOOKED:
+        file_rules.hooks(ctx, f, f"git {plain[0]}")
 
 
 def _runs_project(prog: str, words: list[str]) -> bool:
     """Whether ``prog words…`` runs the project's files on its own."""
     if prog in _RUNNERS or os.path.basename(prog) in _RUNNERS:
         return True
+    if "node_modules/.bin/" in prog:
+        return True
     if prog in _FILE_RUNNERS:
         return bool(words)
-    if prog in ("npm", "pnpm", "bun"):
+    if prog in ("npm", "bun"):
         return bool(words) and words[0] in _PACKAGE_RUNS
-    if prog == "yarn":
+    if prog in ("yarn", "pnpm"):
         return bool(words) and words[0] not in _YARN_OWN
+    if prog == "xcodebuild":
+        return bool(set(words) & _BUILDS[prog])
     return prog in _BUILDS and bool(words) and words[0] in _BUILDS[prog]
+
+
+def _writes_code(
+    ctx: Context,
+    f: Findings,
+    argv: list[str],
+    body: str | None,
+    writes: list[tuple[str, str]],
+    cwd: str,
+) -> None:
+    """``cat > x.py <<EOF``, ``tee``, ``echo … > x.sh``: the code it writes.
+
+    Literal text written to a code file is classified as a write of it
+    (:func:`~.files.written`); ``>>`` adds to what is there.
+    """
+    prog, args = os.path.basename(argv[0]), argv[1:]
+    if prog in ("cat", "tee") and body is not None:
+        text = body + "\n"
+    elif prog == "echo":
+        text = " ".join(a for a in args if a not in ("-n", "-e", "-E")) + "\n"
+    elif prog == "printf" and len(args) == 1:
+        text = args[0].replace("\\n", "\n")
+    else:
+        return
+    targets = list(writes)
+    if prog == "tee":
+        mode = ">>" if "-a" in args else ">"
+        targets += [(mode, a) for a in args if not a.startswith("-")]
+    for kind, target in targets:
+        path = resolve(ctx, target, cwd)
+        if path is None:
+            continue
+        old = file_rules._old_text(path) or ""
+        new = old + text if kind == ">>" else text
+        file_rules.written(ctx, f, path, new, old)
 
 
 def is_melo_python(ctx: Context, interp: str) -> bool:

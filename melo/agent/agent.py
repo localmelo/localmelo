@@ -1556,14 +1556,16 @@ class _ApprovalGate:
         run, call = self._run, self._call
         preview = call_preview(request.tool_name, request.arguments)
         if self._checker is not None:
-            self.review = self._checker.review_action(
+            # In a thread: a runner's review walks the workspace.
+            self.review = await asyncio.to_thread(
+                self._checker.review_action,
                 ActionReviewPayload(
                     request.tool_name,
                     dict(request.arguments),
                     self._workspace_root,
                     since=None if self._reviewer is None else self._reviewer.since,
                     destructive=self._destructive,
-                )
+                ),
             )
         asking = ApprovalRequest(
             request_id=uuid.uuid4().hex,
@@ -2298,7 +2300,8 @@ class Agent:
         thinking block in the loaded copies; the caller's messages are
         unchanged, and prompt-cap fitting can strip thinking before facts.
         What the step review kept of the chat (the user's words, settled
-        reviews, blocks) starts over.
+        reviews, blocks) starts over; with ``[]`` the chat also begins now,
+        for what the review counts as changed in this chat.
 
         Raises ``RuntimeError`` during a run, and ``TypeError``, before
         anything is cleared, for an item that is not a
@@ -2312,8 +2315,9 @@ class Agent:
                 raise TypeError(
                     f"load_conversation takes Message objects, got {type(msg).__name__}"
                 )
-        # Another chat, an undo or a reload: the step review starts over too.
-        self._reviewer.reset()
+        # Another chat, an undo or a reload: the step review starts over too;
+        # an empty conversation is a new chat, which begins now.
+        self._reviewer.reset(new_chat=not loaded)
         loaded = copy.deepcopy(loaded)
         if self.options.reasoning != "legacy":
             # Normalize legacy checkpoints once, before prompt-cap fitting
@@ -5449,6 +5453,7 @@ class Agent:
         routine: str | None = None,
         inbox: InboxSource | None = None,
         user_words: str | None = None,
+        chat_started: float | None = None,
     ) -> RunResult:
         """Run one task and report how it ended.
 
@@ -5634,6 +5639,9 @@ class Agent:
         carries more (attachments, task news, a task's objective another
         model wrote): a step review reads only them as the user's words.
         Without it, the query is, up to a recalled-memory block.
+        *chat_started* is when the chat began (wall-clock seconds, the
+        session's stored start): a step review counts the files changed
+        since then as written in this chat.
 
         Before the run starts, ``TypeError`` is raised when *on_event* or
         *observe* is not callable or is a coroutine function, when both
@@ -5676,6 +5684,8 @@ class Agent:
         )
         # The user's own words, which a step review reads (never tool output).
         self._reviewer.user_message(query if user_words is None else user_words)
+        if chat_started is not None:
+            self._reviewer.since = chat_started
         prefix_run = self.chat.begin_prefix()
         stats = self.chat.reset_stats()
         budget_accounting = BUDGET_ACCOUNTING.set((self.chat, self.chat._accounting))

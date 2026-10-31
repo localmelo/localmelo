@@ -1036,6 +1036,7 @@ class Front:
             spec = dataclasses.replace(
                 spec, workspace=str(record.spec.get("workspace") or ""), level=record.level,
                 level_source=record.level_source, reason=record.reason,
+                user_words=str(record.spec.get("user_words") or ""),
             )  # fmt: skip
             return await self._start(
                 spec, record.front_id, of=echo_id, word="Started again"

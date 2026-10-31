@@ -215,6 +215,20 @@ async def test_a_control_phrase_changes_the_task_and_undo_puts_it_back(
         assert llm.requests == []
 
 
+async def test_a_task_started_again_keeps_the_person_s_words(tmp_path: Path) -> None:
+    async with front_console(tmp_path) as (console, client, _):
+        echo = (await _say(client, console, "/task make slides from notes.md")).json()
+        task_id = echo["echo"]["task_id"]
+        stop = (await _say(client, console, "停止 slides")).json()["echo"]
+        assert (await _task(console, task_id)).state == "cancelled"
+        again = (
+            await client.post(f"/api/front/echoes/{stop['id']}", json={"do": "undo"})
+        ).json()["echo"]
+        restarted = await _task(console, again["task_id"])
+        # For its step reviews (#339): what the person typed, not the objective.
+        assert restarted.spec["user_words"] == "/task make slides from notes.md"
+
+
 async def test_two_taps_at_once_start_one_task(tmp_path: Path) -> None:
     async with front_console(tmp_path) as (console, client, _):
         ask = {"echo": "ask", "text": "which laptop?", "turn_id": "t", "line": "Start?"}

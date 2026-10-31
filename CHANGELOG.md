@@ -32,9 +32,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   runs on the grant. A review asks a local model for a short answer at
   temperature 0 with thinking off, so it answers in time. Only the words you
   typed count as yours (not attachments, recalled notes or task news); a
-  write of code is judged by what the code does; a test or build run after
-  code in the folder changed goes to your model; and a step with parts melo
-  cannot read is never allowed by words alone. The terminal tags a blocked
+  write of code is judged by what it adds to the file; a test or build run
+  reads the code that changed in the chat, and goes to your model when a
+  changed file is one melo cannot read; and a step with parts melo cannot
+  read is never allowed by words alone. The terminal tags a blocked
   step `blocked: installs software`; events record each decision, and a run
   without approvals has no `reviews` in `run.finished` ([#NN]).
 - A task's page in default mode no longer shows an empty "Recovery card"

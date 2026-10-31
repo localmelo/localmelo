@@ -858,3 +858,92 @@ async def test_the_model_s_own_reason_is_kept_but_never_shown_as_melo_s(
     ]
     assert approval["review"]["model"]["reason"] == said
     assert said not in llm.tool_messages()[0]
+
+
+@pytest.mark.asyncio
+async def test_a_message_without_words_ends_a_consent(tmp_path: Path) -> None:
+    llm = FakeModel(
+        [*_plans([VENV]), *_plans([VENV], answer="explained")],
+        [
+            verdict(verdict="ask", category="install", user_asked="yes"),
+            verdict(verdict="ask", category="install", user_asked="no"),
+        ],
+    )
+    agent, fake = _agent(llm, tmp_path / "ws")
+    policy = AutoPolicy()
+
+    await agent.run_task("install matplotlib", approval=policy)
+    # Only an attachment: no words, but a new message all the same.
+    await agent.run_task("[attached notes.md]", approval=policy, user_words="")
+
+    assert fake.ran == [VENV]
+    assert len(llm.review_requests) == 2
+
+
+def test_the_chat_s_start_survives_a_reload() -> None:
+    now = [1000.0]
+    reviewer = _step_review.StepReviewer(
+        lambda: None, wall=lambda: now[0]  # type: ignore[arg-type,return-value]
+    )
+    assert reviewer.since == 1000.0
+    now[0] = 2000.0
+    reviewer.reset()  # an undo, a reload, a retry, another model
+    assert reviewer.since == 1000.0
+    reviewer.reset(new_chat=True)  # /new
+    assert reviewer.since == 2000.0
+
+
+@pytest.mark.asyncio
+async def test_the_agent_keeps_the_chat_s_start_and_takes_the_session_s(
+    tmp_path: Path,
+) -> None:
+    agent, _ = _agent(FakeModel([_answer("a"), _answer("b")]), tmp_path / "ws")
+    began = agent._reviewer.since
+    agent.load_conversation([Message(role="user", content="hi")])
+    assert agent._reviewer.since == began
+    await agent.run_task("hello", approval=AutoPolicy(), chat_started=12.5)
+    assert agent._reviewer.since == 12.5
+    agent.load_conversation([])  # a new chat begins now
+    assert agent._reviewer.since > 12.5
+    await agent.close()
+
+
+@pytest.mark.asyncio
+async def test_the_rules_run_off_the_event_loop(tmp_path: Path) -> None:
+    import threading
+
+    llm = FakeModel(_plans(["print(1)"]))
+    agent, fake = _agent(llm, tmp_path / "ws")
+    seen: list[str] = []
+    review = agent.checker.review_action
+
+    def recording(payload: Any) -> Any:
+        seen.append(threading.current_thread().name)
+        return review(payload)
+
+    agent.checker.review_action = recording  # type: ignore[method-assign]
+
+    await agent.run_task("print one", approval=AutoPolicy())
+
+    assert fake.ran == ["print(1)"]
+    assert seen and seen[0] != threading.main_thread().name
+
+
+@pytest.mark.asyncio
+async def test_a_runner_s_reviews_have_their_own_cap(tmp_path: Path) -> None:
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "x.test.js").write_text("require('child_process')\n")
+    codes = [
+        f"import subprocess\nsubprocess.run(['npm', 'test', '{n}'])" for n in range(4)
+    ]
+    llm = FakeModel(_plans(codes), [verdict() for _ in range(3)])
+    agent, fake = _agent(llm, ws)
+    agent._reviewer.since = 0.0
+
+    await agent.run_task("run the tests", approval=AutoPolicy())
+
+    # Three runner reviews run; the fourth finds the runner cap used up,
+    # while the turn's other reviews are left.
+    assert len(llm.review_requests) == 3
+    assert len(fake.ran) == 3

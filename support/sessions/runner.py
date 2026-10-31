@@ -699,6 +699,11 @@ class SessionRunner:
             if self._inbox is not None:
                 kwargs["inbox"] = self._inbox
             kwargs["user_words"] = turn.typed if turn.words is None else turn.words
+            # The chat began when its session did, across reloads and restarts.
+            with contextlib.suppress(Exception):
+                session = await self._store.get_session(turn.turn.session_id)
+                if session is not None:
+                    kwargs["chat_started"] = session.created_at
             text = turn.text
             if self._memory is not None and not self._index_only:
                 text = await self._recall(turn)

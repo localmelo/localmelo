@@ -355,6 +355,12 @@ async def test_a_turn_passes_the_person_s_own_words_to_the_review(
         assert "pip install" in call.args[0]
         assert call.kwargs["user_words"] == "chart it"
 
+        # The chat began when its session did (#339): not at a reload.
+        assert s.runner.session_id is not None
+        session = await s.store.get_session(s.runner.session_id)
+        assert session is not None
+        assert call.kwargs["chat_started"] == session.created_at
+
         # A task's turn names the words the person typed when it was made.
         await s.runner.start_turn("Install matplotlib and chart", words="chart it")
         await s.runner.wait()

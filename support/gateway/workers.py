@@ -38,7 +38,7 @@ from localmelo.support.gateway.chat_gate import (
     SessionClient,
 )
 from localmelo.support.gateway.finishing import could_not_continue, not_committed
-from localmelo.support.gateway.park_card import build_park_card
+from localmelo.support.gateway.park_card import CARD_START, build_park_card
 from localmelo.support.gateway.park_store import ParkStore
 from localmelo.support.gateway.process_identity import gone as process_gone
 from localmelo.support.gateway.process_identity import identity as process_identity
@@ -156,11 +156,14 @@ def _turn_text(record: TaskRecord) -> tuple[str, str | None]:
 
     A task the main chat made has an objective another model wrote; the
     spec keeps what the person typed (``user_words``), which a step review
-    reads instead.
+    reads instead. A resumption card is melo's, with the last reply and
+    reflection in it: the person's words are then those of the request.
     """
     objective = str(record.spec["objective"])
     text = record.card or objective
     typed = str(record.spec.get("user_words") or "")
+    if text.startswith(CARD_START):
+        return text, typed or objective
     return text, (text.replace(objective, typed, 1) if typed else None)
 
 

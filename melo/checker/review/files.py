@@ -7,17 +7,24 @@
   classify that module's files (at most :data:`~.paths.MAX_READS` files a
   call, see :meth:`~.paths.Findings.take`).
 - A runner that runs the project's files on its own (``pytest``, ``make``,
-  ``npm test``…) is undecided when code in the workspace changed in this
-  chat, and those files' content is classified too.
+  ``npm test``…) classifies the code changed in this chat that melo reads;
+  a changed file it cannot read (JavaScript, a config file) makes it
+  undecided.
+
+A write or an edit counts only what it adds: what the new text does that
+the file's old text did not. What a file's code would do when it runs
+later is never ``self``; running it is judged then.
 """
 
 from __future__ import annotations
 
 import ast
+import glob
 import json
 import os
 import re
 import textwrap
+from collections.abc import Callable
 
 from localmelo.melo.checker.review.paths import Context, Findings, shown
 
@@ -36,13 +43,18 @@ _CODE_SUFFIXES = (
 _CODE_NAMES = frozenset(
     ["Makefile", "makefile", "GNUmakefile", "justfile", "Justfile", "package.json"]
     + ["Rakefile", "Gemfile", "pom.xml", "build.rs", "go.mod", "Package.swift"]
+    + [".pre-commit-config.yaml", "CMakeLists.txt"]
 )
+# Python runs the import lines of a .pth file in site-packages at every start.
+_PTH_GLOBS = [f"{venv}/lib/python*/site-packages/*.pth" for venv in (".venv", "venv")]
 # Files a runner's walk looks at, at most; more is a doubt.
 MAX_FILES = 5000
+# The largest file whose old text an edit or a write is compared with.
+EDIT_BYTES = 1024 * 1024
 
 
 def kind_of(path: str, text: str) -> str:
-    """``python``, ``shell``, ``make``, ``package`` or ``""`` (not code melo reads)."""
+    """``python``, ``shell``, ``make``, ``package``, ``pth`` or ``""`` (not code melo reads)."""
     name = os.path.basename(path)
     lower = name.lower()
     if lower.endswith((".py", ".pyw")):
@@ -53,6 +65,8 @@ def kind_of(path: str, text: str) -> str:
         return "make"
     if name == "package.json":
         return "package"
+    if lower.endswith(".pth"):
+        return "pth"
     first = text.split("\n", 1)[0]
     if first.startswith("#!"):
         if "python" in first:
@@ -70,6 +84,9 @@ def review_text(ctx: Context, f: Findings, path: str, text: str) -> None:
     kind = kind_of(path, text)
     if kind == "python":
         python.review_python(here, f, text)
+    elif kind == "pth":
+        lines = [line for line in text.split("\n") if line.startswith("import")]
+        python.review_python(here, f, "\n".join(lines))
     elif kind == "shell":
         shell.review_shell(here, f, text)
     elif kind == "make":
@@ -90,47 +107,73 @@ def review_text(ctx: Context, f: Findings, path: str, text: str) -> None:
         shell.review_shell(here, f, "\n".join(commands))
 
 
-def _merged(f: Findings, g: Findings, lead: str) -> None:
-    """*g*'s findings in *f*, each reason after *lead* ("Writes x.py, code that")."""
+def _findings(ctx: Context, path: str, text: str) -> Findings:
+    """What *text*, as the code of *path*, does: its own findings, not ``self``."""
+    g = Findings()
+    if text:
+        review_text(ctx, g, path, text)
+    g.high.pop("self", None)  # running it later is judged then
+    return g
+
+
+def _added(f: Findings, new: Findings, old: Findings, lead: str) -> None:
+    """*new*'s findings that *old* lacks, in *f*, each reason after *lead*."""
 
     def said(reason: str) -> str:
         return f"{lead} {reason[:1].lower()}{reason[1:]}"
 
-    for category, reasons in g.high.items():
+    for category, reasons in new.high.items():
         for reason in reasons:
-            f.add(category, said(reason))
-    for reason in g.unsure:
-        f.doubt(said(reason))
-    f.paths += g.paths
-    f.read.update(g.read)
+            if reason not in old.high.get(category, []):
+                f.add(category, said(reason))
+    for reason in new.unsure:
+        if reason not in old.unsure:
+            f.doubt(said(reason))
+    f.paths += [p for p in new.paths if p not in old.paths]
 
 
-def written(ctx: Context, f: Findings, path: str, text: str) -> None:
-    """A write of *text* to *path*: code takes the categories of what it does."""
+def _old_text(path: str) -> str | None:
+    """*path*'s text now: ``""`` when there is no file, ``None`` when unreadable.
+
+    An edit's file is read up to :data:`EDIT_BYTES`: classifying 300 KB of
+    Python takes under 0.1 s, and the review runs off the event loop.
+    """
+    try:
+        if os.path.getsize(path) > EDIT_BYTES:
+            return None
+        with open(path, encoding="utf-8") as file:
+            return file.read()
+    except FileNotFoundError:
+        return ""
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def written(ctx: Context, f: Findings, path: str, text: str, old: str = "") -> None:
+    """A write of *text* to *path* over *old*: code takes what it adds."""
     if not kind_of(path, text):
         return
-    g = Findings(read=dict(f.read))
-    review_text(ctx, g, path, text)
-    _merged(f, g, f"Writes {shown(ctx, path)}, code that")
+    lead = f"Writes {shown(ctx, path)}, code that"
+    _added(f, _findings(ctx, path, text), _findings(ctx, path, old), lead)
+
+
+def replaced(ctx: Context, f: Findings, path: str, text: str) -> None:
+    """A whole-file write of *text* to *path*: what it adds to the file there."""
+    old = _old_text(path)
+    written(ctx, f, path, text, old or "")
 
 
 def edited(ctx: Context, f: Findings, path: str, old: str, new: str) -> None:
-    """An edit of *path* that puts *new* in place of *old*: the file it makes.
+    """An edit of *path* that puts *new* in place of *old*: what it adds.
 
     An edit whose *old* text is not in the file fails and changes nothing.
     A file melo cannot read (too large, not text) has *new* classified
     alone, and Python that does not parse alone is a doubt.
     """
-    try:
-        if os.path.getsize(path) > 64 * 1024:
-            raise OSError
-        with open(path, encoding="utf-8") as file:
-            text: str | None = file.read()
-    except (OSError, UnicodeDecodeError):
-        text = None
+    text = _old_text(path)
     if text is not None:
-        if old in text:
-            written(ctx, f, path, text.replace(old, new, 1))
+        if old and old in text:
+            written(ctx, f, path, text.replace(old, new, 1), text)
         return
     if kind_of(path, new) == "python":
         try:
@@ -188,8 +231,23 @@ def _code_name(name: str) -> bool:
     return name in _CODE_NAMES or name.lower().endswith(_CODE_SUFFIXES)
 
 
-def changed_files(ctx: Context) -> tuple[list[str], bool]:
-    """Code in the workspace changed since ``ctx.since``; whether the walk was cut."""
+def _changed(path: str, since: float) -> bool:
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return False
+    # The change time too: setting a file's time back changes it.
+    return max(info.st_mtime, info.st_ctime) >= since
+
+
+def changed_files(
+    ctx: Context, keep: Callable[[str], bool] = _code_name
+) -> tuple[list[str], bool]:
+    """Code in the workspace changed since ``ctx.since``; whether the walk was cut.
+
+    The walk skips ``.git``, dependencies and caches, but a virtual
+    environment's ``.pth`` files count: Python runs them at every start.
+    """
     since, count = ctx.since or 0.0, 0
     found: list[str] = []
     for top, dirs, files in os.walk(ctx.root):
@@ -200,35 +258,82 @@ def changed_files(ctx: Context) -> tuple[list[str], bool]:
             count += 1
             if count > MAX_FILES:
                 return found, True
-            if not _code_name(name):
-                continue
             path = os.path.join(top, name)
-            try:
-                info = os.lstat(path)
-            except OSError:
-                continue
-            # The change time too: setting a file's time back changes it.
-            if max(info.st_mtime, info.st_ctime) >= since:
+            if keep(name) and _changed(path, since):
                 found.append(path)
+    for pattern in _PTH_GLOBS:
+        found += sorted(
+            p for p in glob.glob(os.path.join(ctx.root, pattern)) if _changed(p, since)
+        )
     return found, False
 
 
+def _marker(path: str) -> str:
+    """A changed file melo did not read, as it is now (``path:mtime:size``)."""
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return f"{path}:gone"
+    return f"{path}:{info.st_mtime_ns}:{info.st_size}"
+
+
 def runner(ctx: Context, f: Findings, prog: str) -> None:
-    """*prog* runs the project's files: undecided when any changed in this chat."""
-    if ctx.since is None:
+    """*prog* runs the project's files: what changed in this chat is read.
+
+    A changed file of a kind melo reads is classified (its findings are
+    the step's); one melo cannot read makes the step undecided, and only
+    those (``Findings.changed``) tell one run of the step from the next:
+    the step key is the command, so an allowance holds across edits.
+    """
+    if ctx.since is None or f.ran_runner:
         return
+    f.ran_runner = True
     found, cut = changed_files(ctx)
     if cut:
         f.doubt(f"Runs {prog} in a folder too large for melo to check.")
-    if not found:
-        return
-    names = ", ".join(shown(ctx, p) for p in found[:3])
-    more = f" and {len(found) - 3} more" if len(found) > 3 else ""
-    f.doubt(f"Runs {prog}, which runs files changed in this chat ({names}{more}).")
+    unread: list[str] = []
     for path in found:
-        text = f.take(path) if kind_of(path, "") else ""
-        if not text:
+        text = f.take(path, key=False) if kind_of(path, "") else None
+        if text is None:
+            unread.append(path)
+            f.changed.append(_marker(path))
+        elif text:
+            g = _findings(ctx, path, text)
+            _added(
+                f,
+                g,
+                Findings(),
+                f"Runs {shown(ctx, path)}, changed in this chat, which",
+            )
+    if unread:
+        names = ", ".join(shown(ctx, p) for p in unread[:3])
+        more = f" and {len(unread) - 3} more" if len(unread) > 3 else ""
+        f.doubt(
+            f"Runs {prog}, which runs files changed in this chat that melo does "
+            f"not read ({names}{more})."
+        )
+
+
+def hooks(ctx: Context, f: Findings, prog: str) -> None:
+    """A git command that runs hooks: the hooks changed in this chat are read."""
+    if ctx.since is None:
+        return
+    since = ctx.since
+    folder = os.path.join(ctx.root, ".git", "hooks")
+    config = os.path.join(ctx.root, ".git", "config")
+    if _changed(config, since):
+        f.doubt(f"Runs {prog} after .git/config changed, which can name other hooks.")
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return
+    for name in names:
+        path = os.path.join(folder, name)
+        if name.endswith(".sample") or not _changed(path, since):
             continue
-        g = Findings(read=dict(f.read))
-        review_text(ctx, g, path, text)
-        _merged(f, g, f"Runs {shown(ctx, path)}, changed in this chat, which")
+        text = f.take(path, key=False)
+        if text:
+            g = _findings(ctx, path, text) if kind_of(path, text) else Findings()
+            lead = f"Runs the git hook {name}, changed in this chat, which"
+            _added(f, g, Findings(), lead)
+        f.doubt(f"Runs the git hook {name}, changed in this chat.")

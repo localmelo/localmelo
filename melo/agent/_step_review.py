@@ -64,6 +64,9 @@ if TYPE_CHECKING:
 
 # Blocks in one turn that stop it: a second of the same kind, or this many.
 BLOCKS_PER_TURN: Final = 3
+# Reviews of a runner (pytest…) that runs changed files melo does not read,
+# a turn: apart from the turn's other reviews, so test cycles leave them.
+RUNNER_REVIEWS_PER_TURN: Final = 3
 # Blocks of a chat kept for the prompt and the "go ahead" check.
 BLOCKS_KEPT: Final = 20
 
@@ -96,6 +99,7 @@ class RunReviews:
     """One run's reviews: what ``run.finished`` reports, and the stop rule's state."""
 
     used: int = 0
+    runner_used: int = 0
     calls: list[tuple[str, str, str]] = field(default_factory=list)
     blocks: list[tuple[str, str]] = field(default_factory=list)
     counts: dict[str, int] = field(
@@ -132,19 +136,22 @@ class StepReviewer:
         self._chat = chat
         self._clock = clock
         self._wall = wall
+        # When the chat began: the rules count a file changed after it as
+        # written in this chat. A session runner sets the stored start.
+        self.since = wall()
         self.reset()
 
-    def reset(self) -> None:
-        """Start a new chat: no messages, reviews or blocks kept.
+    def reset(self, *, new_chat: bool = False) -> None:
+        """Forget the messages, reviews and blocks kept (a reload, an undo).
 
-        ``since`` is now: the rules count a file changed after it as
-        written in this chat.
+        With *new_chat*, the chat also begins now (``since``).
         """
         self._requests: deque[str] = deque(maxlen=EARLIER_REQUESTS + 1)
         self._marker = 0
         self._cache: dict[str, tuple[ActionReview, int, Purpose]] = {}
         self._blocks: deque[_Block] = deque(maxlen=BLOCKS_KEPT)
-        self.since = self._wall()
+        if new_chat:
+            self.since = self._wall()
 
     # ── The user's words ──
 
@@ -155,8 +162,10 @@ class StepReviewer:
         are not the user's words, and an earlier answer could argue a call.
         """
         text = own_words(text)
+        # A message counts even with no words (an attachment): a consent or a
+        # block of the last message does not carry over to it.
+        self._marker += 1
         if text.strip():
-            self._marker += 1
             self._requests.append(text[:MAX_REQUEST_CHARS])
 
     @property
@@ -224,6 +233,9 @@ class StepReviewer:
         purpose = self._purpose(review, mode, step_names(tool_name, arguments))
         if purpose is None:
             return review
+        # A runner's review holds while the files it could not read stay as
+        # they are.
+        key = key + "|" + "|".join(review.changed) if review.changed else key
         cached = self._cache.get(key)
         if cached is not None and (
             cached[1] == self._marker
@@ -231,12 +243,17 @@ class StepReviewer:
             and cached[0].verdict == "routine"
         ):
             return cached[0]
+        runner = bool(review.changed)
+        used = run.runner_used if runner else run.used
         if len(action) > MAX_ACTION_CHARS:
             answer = ModelAnswer(error="the call is too long to review")
-        elif run.used >= REVIEWS_PER_TURN:
+        elif used >= (RUNNER_REVIEWS_PER_TURN if runner else REVIEWS_PER_TURN):
             answer = ModelAnswer(error="this turn's reviews are used up")
         else:
-            run.used += 1
+            if runner:
+                run.runner_used += 1
+            else:
+                run.used += 1
             run.counts["model"] += 1
             inputs = ReviewInputs(
                 workspace=workspace or "",

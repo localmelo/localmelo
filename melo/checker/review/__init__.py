@@ -49,7 +49,7 @@ def review_action(payload: ActionReviewPayload) -> ActionReview:
             f.high.pop("outside_write", None)
             path = resolve(ctx, raw)
             if path is not None and payload.tool_name == "file_write":
-                file_rules.written(ctx, f, path, str(args.get("content") or ""))
+                file_rules.replaced(ctx, f, path, str(args.get("content") or ""))
             elif path is not None:
                 old, new = str(args.get("old") or ""), str(args.get("new") or "")
                 file_rules.edited(ctx, f, path, old, new)
