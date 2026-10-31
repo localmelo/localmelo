@@ -129,8 +129,11 @@ redaction limitations.
   so a refused file is left byte for byte as it was; beside a file in WAL
   mode, SQLite may still create its `-wal` and `-shm` files. A file of a
   newer schema raises
-  `<path> has schema version <n>; this localmelo reads version 2`. Version 1
-  stores are migrated in place by adding nullable `turns.attachments` metadata.
+  `<path> has schema version <n>; this localmelo reads version 3`. Older
+  stores are migrated in place: version 1 gains nullable `turns.attachments`
+  metadata, and versions 1 and 2 gain `turns.origin` (`''` on every turn the
+  person began; `ask_owner` on a chat's internal turn that answers a task's
+  question, `TurnInfo.origin`, which gives a session no title).
 - **The owner lock.** The gateway's store holds a lock on `<path>.owner` for
   its life. A second gateway on the file gets `StoreOwnedError`:
   `Another melo gateway (pid <n>) is using <path>. Stop it to use the console here.`
@@ -204,7 +207,8 @@ and is `""` while it runs:
 
 Store methods for sessions and turns: `create_session`, `get_session`,
 `find_sessions`, `list_sessions` (newest first, chats unless you pass
-`kinds`), `rename_session`, `update_session`, `delete_session` (refused
+`kinds`), `sessions_with_meta(key)` (every session whose `meta` has `key`
+set, oldest first, no cap), `rename_session`, `update_session`, `delete_session` (refused
 while a turn runs), `list_turns(session_id, limit=, before=)`,
 `list_events(session_id, after_id=, limit=, turns=)`, `undo_last_turn` and
 `get_window`. `runner.undo()` undoes the newest finished turn and resumes;
@@ -387,6 +391,9 @@ It prints, for example:
   returns at most `limit` records (1 to 5,000). Each `TurnChange` holds the
   turn's fields as they read now, its session's kind, title, workspace and
   model, and the turn's `run_id`, the `task_id` of its run in `history.db`.
+  Its `origin` is `ask_owner` for a chat's turn on a task's question, whose
+  `user_text` is the task's words, not the person's; `""` otherwise, and in
+  a file of schema 2.
 - A turn undone later appears again as an `undone` record, so applying the
   records in order is always right. Running turns appear once they end.
 - `export_turns(paths, out, after=None)` writes one JSON line per record,

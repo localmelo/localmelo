@@ -42,7 +42,7 @@ Python callers can enable `AgentOptions(typed_assertions=True)` in an explicit r
 In the web console and the app, melo keeps short notes about you across chats (see [Memory across chats](../concepts/memory.md#memory-across-chats)). It keeps one two ways, and never asks you to confirm it:
 
 - **Ask it.** "Remember that Sam has the lab keys", "keep in mind that my group meeting is on Thursdays", "记住：我的车停在B2层", "别忘了…" or "帮我记一下…" is kept at once.
-- **Tell it.** "I prefer short answers" or "call me Ray" is kept when melo judges it worth keeping, as it does with a finished task's result in the chat; never what only a web page, a file or a tool's output says, and never a password or key.
+- **Tell it.** "I prefer short answers" or "call me Ray" is kept when melo judges it worth keeping, as it does with a finished task's result in the chat; never what only a web page, a file, a tool's output or a task's question to the chat says, and never a password or key.
 - melo is told to keep a plain, lasting fact about you ("I live in Utrecht", "我的导师是周教授") in the turn you say it.
 - **Change it.** Say the new value in any chat ("I live in Utrecht now", "我的健身教练是小宇"): it replaces the old note about the same thing and comes first in recall, and answers give the new value only: the chat where you said the old value comes back, marked older, only when you ask about the past ("before", "used to", "以前").
 - **Long chats.** The chat keeps its newest messages in view. What you said earlier in the same chat comes back when it matches your message, marked `this chat`.

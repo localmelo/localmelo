@@ -1008,6 +1008,25 @@ class ConsoleSessions:
             entry.last_used = self._clock()
             return turn, resumed
 
+    async def start_internal(self, session_id: str, text: str, origin: str) -> TurnInfo:
+        """Begin a turn the person did not type (a task's question, #369) in an idle chat.
+
+        :class:`SessionBusyError` while a turn runs. The turn has the chat's
+        mode; the chat does not take the scheduler's focus for it.
+        """
+        async with self.lock(session_id):
+            entry = await self.open(session_id)
+            if entry.runner.busy:
+                raise SessionBusyError(f"Session {session_id} is running a turn")
+            entry.resumed = None
+            if self._gate is not None:
+                self._gate.turn_start(session_id)
+            turn = await entry.runner.start_turn(
+                text, approval=entry.policy, origin=origin
+            )
+            entry.last_used = self._clock()
+            return turn
+
     async def retry(
         self, session_id: str, turn_id: str
     ) -> tuple[TurnInfo, ResumeInfo | None]:
@@ -1033,6 +1052,9 @@ class ConsoleSessions:
                     "not_latest_turn",
                     t("errors.retryNewest"),
                 )
+            if latest.origin:
+                # A task's question (#369): its words are not the person's to send.
+                raise ApiError(409, "not_retryable", t("errors.retryAsk"))
             undone = await entry.runner.undo()
             if undone is None:
                 raise ApiError(

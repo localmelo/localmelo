@@ -89,7 +89,7 @@ worker 会话也使用命令行界面的文件：每个直接任务默认都会�
 
 脱敏限制见 [worker 历史记录](../../reference/cli.md#worker-histories)（英文）。
 
-- **写入者标记。** 新文件会记录它的写入者。打开另一个写入者的文件会抛出 `SessionStoreError`，例如 `<path> belongs to the gateway (writer 'gateway'); open it with writer='gateway' or use the default path`；标记缺失或未知的文件抛出 `<path> has no valid writer marker`；不是会话文件的文件（例如 `history.db`）抛出 `<path> is not a localmelo sessions file`。存储器在写入任何内容之前先在只读连接上读取这些信息，因此被拒绝的文件保持原样、逐字节不变；在 WAL 模式下，SQLite 仍可能在文件旁创建它的 `-wal` 和 `-shm` 文件。schema 更新的文件抛出 `<path> has schema version <n>; this localmelo reads version 2`。版本 1 的存储器通过添加可为空的 `turns.attachments` 元数据原地迁移。
+- **写入者标记。** 新文件会记录它的写入者。打开另一个写入者的文件会抛出 `SessionStoreError`，例如 `<path> belongs to the gateway (writer 'gateway'); open it with writer='gateway' or use the default path`；标记缺失或未知的文件抛出 `<path> has no valid writer marker`；不是会话文件的文件（例如 `history.db`）抛出 `<path> is not a localmelo sessions file`。存储器在写入任何内容之前先在只读连接上读取这些信息，因此被拒绝的文件保持原样、逐字节不变；在 WAL 模式下，SQLite 仍可能在文件旁创建它的 `-wal` 和 `-shm` 文件。schema 更新的文件抛出 `<path> has schema version <n>; this localmelo reads version 3`。较旧的存储器会原地迁移：版本 1 添加可为空的 `turns.attachments` 元数据，版本 1 和 2 添加 `turns.origin`（本人开始的每一轮为 `''`；对话回答任务问题的内部轮次为 `ask_owner`，即 `TurnInfo.origin`，它不给会话起标题）。
 - **所有者锁。** 网关的存储器在其整个生命周期内持有 `<path>.owner` 上的锁。同一文件上的第二个网关会得到 `StoreOwnedError`：`Another melo gateway (pid <n>) is using <path>. Stop it to use the console here.` 进程以任何方式结束时系统都会释放该锁，因此崩溃后下一个网关可以立即启动。文件必须位于本地磁盘上。
 - **私有文件。** 缺失的目录以 `0700` 权限创建，文件以 `0600` 权限创建。写入者自己的目录（`gateway/` 或 `cli/`）在权限更宽松时会被设为 `0700`；你自己选择的目录保持它的权限，其他用户可读时会有一条 WARNING。
 - **打开。** 存储器在第一次被等待的调用时打开，或者用 `await store.open()` 打开。每次打开失败都会抛出 `SessionStoreError`（或 `StoreOwnedError`），并且可以重试：文件在写入任何内容之前就被拒绝，打开的每一步写入各自是一个事务，失败（例如磁盘已满）会回滚该事务；它之前的步骤（例如已恢复的轮次）保持完成。在 `await store.aclose()` 之后，每次调用都会抛出 `SessionStoreError("The session store is closed")`，仍在进行中的打开也一样。
@@ -116,7 +116,7 @@ worker 会话也使用命令行界面的文件：每个直接任务默认都会�
 - **“Interrupted”是一个标签，不是状态。** 界面把 `shutdown` 和 `crash` 两个原因显示为“Interrupted”；状态始终是一个运行状态。
 - **写入失败。** 当网关的存储无法记录一个运行中轮次的事件或结束，它会以 `SessionStoreError("The session store could not record a change; restart the gateway")` 拒绝新工作，直到它重启，读取照常工作；重启会结束该轮。对于命令行界面的文件，运行器会在 0.5、1 和 2 秒后重试结束该轮（关闭期间只重试一次），并在会话的下一轮或撤销之前再试一次；在此之前会话保持忙碌。
 
-会话和轮次的存储方法：`create_session`、`get_session`、`find_sessions`、`list_sessions`（最新的在前；除非传入 `kinds`，否则只列出聊天）、`rename_session`、`update_session`、`delete_session`（有轮次运行时被拒绝）、`list_turns(session_id, limit=, before=)`、`list_events(session_id, after_id=, limit=, turns=)`、`undo_last_turn` 和 `get_window`。`runner.undo()` 撤销最新的已完成轮次并恢复；期间开始的轮次会等待恢复完成。
+会话和轮次的存储方法：`create_session`、`get_session`、`find_sessions`、`list_sessions`（最新的在前；除非传入 `kinds`，否则只列出聊天）、`sessions_with_meta(key)`（`meta` 中设置了 `key` 的所有会话，最早的在前，没有上限）、`rename_session`、`update_session`、`delete_session`（有轮次运行时被拒绝）、`list_turns(session_id, limit=, before=)`、`list_events(session_id, after_id=, limit=, turns=)`、`undo_last_turn` 和 `get_window`。`runner.undo()` 撤销最新的已完成轮次并恢复；期间开始的轮次会等待恢复完成。
 
 <a id="message-ids-and-submissions"></a>
 
@@ -262,7 +262,7 @@ asyncio.run(main())
 1 line(s); cursor 7
 ```
 
-- `changes(after_event_id=0, limit=500, kinds=None, with_events=False)` 最多返回 `limit` 条记录（1 到 5,000）。每条 `TurnChange` 保存该轮当前的字段、其会话的类型、标题、工作区和模型，以及该轮的 `run_id`，即它在 `history.db` 中运行的 `task_id`。
+- `changes(after_event_id=0, limit=500, kinds=None, with_events=False)` 最多返回 `limit` 条记录（1 到 5,000）。每条 `TurnChange` 保存该轮当前的字段、其会话的类型、标题、工作区和模型，以及该轮的 `run_id`，即它在 `history.db` 中运行的 `task_id`。对话回答任务问题的轮次 `origin` 为 `ask_owner`，其 `user_text` 是任务的话，不是用户的；其他轮次以及 schema 2 文件中的轮次为 `""`。
 - 之后被撤销的轮次会再次以 `undone` 记录出现，因此按顺序应用这些记录总是正确的。运行中的轮次在结束后出现。
 - `export_turns(paths, out, after=None)` 为每条记录写一行 JSON，`{"kind": "localmelo.session_turn", "v": 1, ...}`，并返回每个路径的新游标；下次把这些游标作为 `after` 传回。
 - 读取器不加锁、不运行恢复，并拒绝更新的 schema。schema 版本为 0 的文件（例如空文件）没有记录。

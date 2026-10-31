@@ -87,7 +87,9 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   // The steps auto mode blocked (#339); "open" ones were not allowed and run since.
   const blockedOf = (task) => (Array.isArray(task.blocked) ? task.blocked : []);
   const openBlocks = (task) => blockedOf(task).filter((block) => !block.used_at && !task.allowances?.[block.step_key]);
-  const stateText = (task) => (pendingOf(task).length ? t('common.waitingApproval') : isStopped(task) ? t('tasks.state.stopped') : stateWord(task.state));
+  // A task waiting on its question's answer says whose (#369).
+  const askText = (ask) => (ask.on === 'person' ? t('ask.waitingOnYou') : t('ask.waitingOn', {chat: ask.chat_title ?? ''}));
+  const stateText = (task) => (pendingOf(task).length ? t('common.waitingApproval') : task.ask ? askText(task.ask) : isStopped(task) ? t('tasks.state.stopped') : stateWord(task.state));
 
   function evidenceText(task) {
     if (state.evidence === 'unverified_processes') return t('tasks.evidence.unverified');

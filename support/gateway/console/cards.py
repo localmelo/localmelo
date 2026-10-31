@@ -305,6 +305,8 @@ class MainChatCards:
             info.id, limit=1, before=turn + 1 if turn else None
         )
         last = turns[-1] if turns else None
+        if last is not None and last.origin:
+            return None  # a side chat answering a task's question is no news (#369)
         ended: dict[str, Any]
         note = ""
         if state == "failed" and info.kind == "task":
