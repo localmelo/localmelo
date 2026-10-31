@@ -129,7 +129,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   running. The run now starts as running first, then sets up its tools. A
   run that still cannot start says why on its card in the main chat and in the
   panel's activity list ("Could not continue: …") instead of repeating the
-  earlier run's reason ([#NN]).
+  earlier run's reason ([#344]).
 
 - The main chat does what it is asked, or hands it off with its context. A
   reply that only says what it will do ("I'll start by looking at the test
@@ -2796,3 +2796,4 @@ earlier milestones.
 [#335]: https://github.com/localmelo/localmelo/pull/335
 [#342]: https://github.com/localmelo/localmelo/pull/342
 [#343]: https://github.com/localmelo/localmelo/pull/343
+[#344]: https://github.com/localmelo/localmelo/pull/344
