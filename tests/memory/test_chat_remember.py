@@ -415,3 +415,27 @@ async def test_a_note_gets_a_vector_without_the_query_instruction(
         assert entry.embed_model == "Qwen3-Embedding-0.6B" and entry.vector
     finally:
         await memory.aclose()
+
+
+@pytest.mark.parametrize(
+    ("typed", "note", "quote"),
+    [
+        (
+            "My piano teacher is Mr. Bellamy.",
+            "Your piano teacher is Mr. Bellamy.",
+            "My piano teacher is Mr. Bellamy.",
+        ),
+        (
+            "I like tea. My advisor is J. Smith. Thanks!",
+            "Your advisor is J. Smith.",
+            "My advisor is J. Smith.",
+        ),
+    ],
+)
+async def test_a_quote_is_not_cut_at_a_title_or_an_initial(
+    memory: ChatMemory, store: SessionStore, typed: str, note: str, quote: str
+) -> None:
+    await memory.before_turn(store, await _turn(store, typed), typed)
+    assert (await memory.remember(note, "people")).startswith("Remembered: ")
+    (entry,) = await memory.records()
+    assert entry.provenance["quote"] == quote

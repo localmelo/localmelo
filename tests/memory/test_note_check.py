@@ -166,3 +166,45 @@ def test_the_script_hint_needs_a_script_the_user_never_typed() -> None:
     assert not records.other_script(["bike"], ["My car is red."])
     assert not records.other_script(["公"], ["我的公司在北京。"])
     assert not records.other_script(["14"], ["我的车位是14。"])
+
+
+@pytest.mark.parametrize(
+    ("typed", "note"),
+    [
+        ("My piano teacher is Mr. Bellamy.", "Your piano teacher is Mr. Bellamy."),
+        (
+            "My thesis reader is Prof. Ines Duarte.",
+            "Your thesis reader is Prof. Ines Duarte.",
+        ),
+        ("My vet is Dr. Yuki Tanaka.", "Your vet is Dr. Yuki Tanaka."),
+        ("My advisor is J. Smith.", "Your advisor is J. Smith."),
+        ("My team is Reds vs. Blues.", "Your team is Reds vs. Blues."),
+    ],
+)
+def test_an_abbreviation_or_an_initial_does_not_end_the_quoted_sentence(
+    typed: str, note: str
+) -> None:
+    assert records.quote_for(note, [typed]) == typed
+    assert records.quote_for(note, [f"I like tea. {typed} Thanks."]) == typed
+
+
+@pytest.mark.parametrize(
+    "typed",
+    [
+        "I like tea. My name is Ray.",
+        "So do I. My name is Ray.",
+        "I live in the U.S. My name is Ray.",
+        "I like apples, pears, etc. My name is Ray.",
+        "I like tea; my name is Ray.",
+    ],
+)
+def test_a_text_of_two_sentences_still_splits_for_the_quote(typed: str) -> None:
+    assert records.quote_for("Your name is Ray.", [typed]) == (
+        "my name is Ray." if ";" in typed else "My name is Ray."
+    )
+
+
+def test_a_request_with_a_title_is_kept_whole() -> None:
+    (cand,) = records.candidates("Remember that my piano teacher is Mr. Bellamy.")[0]
+    assert cand.text == "Your piano teacher is Mr. Bellamy."
+    assert cand.quote == "my piano teacher is Mr. Bellamy."

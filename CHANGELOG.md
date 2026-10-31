@@ -213,7 +213,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   "gate 9 for Faro") and shows it with Undo; when it cannot, nothing is kept
   and the turn's `turn.memory` event has `unsaved_claim: true`. A bare "Noted,
   thanks!" claims nothing. A request to be
-  reminded at a time is scheduled, never kept as a note ([#NN]).
+  reminded at a time is scheduled, never kept as a note. The sentence quoted
+  under a note ("you said …") is no longer cut at a title or an abbreviation
+  (`Mr.`, `Prof.`, `Dr.`, `St.`, `vs.`, `No. 5`, an initial such as `J. Smith`), which had
+  shown "My piano teacher is Mr." and made the chat answer that your note was
+  cut off; the same cut had saved a "remember that …" request as "Your piano
+  teacher is Mr." ([#NN]).
 
 - The main chat does what it is asked, or hands it off with its context. A
   reply that only says what it will do ("I'll start by looking at the test

@@ -251,8 +251,13 @@ _PASSING_WORDS: Final = (
     "delayed cancelled canceled crashed frozen blocked finished"
 )
 _PASSING: Final = frozenset(_PASSING_WORDS.split())
-# A title's "." ends no sentence: the joiner holds it to the name after it.
-_TITLE = re.compile(r"\b(Dr|Mr|Mrs|Ms|Mx|Prof|St|Jr|Sr|Mt)\.\s+")
+# The "." of a title ("Mr."), "vs.", "No. 5", an "etc." that goes on and an
+# initial ("J. Smith") ends no sentence: the joiner holds it to the word after.
+_HELD = re.compile(
+    r"\b(?:Dr|Mr|Mrs|Ms|Mx|Prof|St|Jr|Sr|Mt|vs)\.[^\S\n]+"
+    r"|\betc\.[^\S\n]+(?=[a-z\d])|\bNo\.[^\S\n]+(?=\d)"
+    r"|(?<![\w.'\u2019])[A-HJ-Z]\.[^\S\n]+(?=[A-Z][a-z])"
+)
 _JOINER: Final = "\u2060"
 # A sentence that may carry a request to remember (:func:`said` reads its fact).
 _MAY_ASK = re.compile(
@@ -415,18 +420,18 @@ def candidates(typed: str) -> tuple[list[Candidate], bool]:
     if not typed.strip() or len(typed) > MAX_TYPED_CHARS:
         return [], False
     # A ";" joins two statements as often as it joins two clauses.
-    joined = re.sub(r"\s*[;；]\s*", "\n", typed)
     joined = "\n".join(
         _ALSO_ASKS.sub("remember that ", sentence, count=1)
-        for _, sentence in split_sentences(joined)
+        for sentence in _split(typed, hold=True)
     )
     signals = classify_user_text(joined)
-    found = list(signals.request_facts)
+    facts = [_release(f) for f in signals.facts]
+    found = [_release(f) for f in signals.request_facts]
     # A request whose words after the marker did not read as a fact alone
     # ("Remember, I'm allergic to peanuts.") keeps the whole sentence.
-    found += [f for f in signals.facts if classify_user_text(f).remember]
+    found += [f for f in facts if classify_user_text(f).remember]
     # A statement is not kept by rule, but one with a secret still says so.
-    refused = any(sensitive(s) for s in signals.facts)
+    refused = any(sensitive(s) for s in facts)
     out: list[Candidate] = []
     for sentence in found:
         if sensitive(sentence):
@@ -440,13 +445,26 @@ def candidates(typed: str) -> tuple[list[Candidate], bool]:
     return out, refused
 
 
+def _split(text: str, *, hold: bool = False) -> list[str]:
+    """The sentences of *text*: a ";" ends one too, a title or abbreviation
+    such as "Mr." or an initial such as "J." does not (:data:`_HELD`). With
+    *hold* the joiner stays in them, for a reader that splits again."""
+    joined = _HELD.sub(lambda m: m.group().rstrip() + _JOINER, text)
+    joined = re.sub(r"\s*[;；]\s*", "\n", joined)
+    return [s if hold else _release(s) for _, s in split_sentences(joined)]
+
+
+def _release(sentence: str) -> str:
+    """*sentence* with the joiner of :func:`_split` read back as a space."""
+    return sentence.replace(_JOINER, " ")
+
+
 def _sentences(typed: str) -> list[str]:
-    """The sentences of the user's *typed* words (a ";" ends one too, a title
-    such as "Dr." does not); none for a message too long to be a statement."""
+    """The sentences of the user's *typed* words (:func:`_split`); none for a
+    message too long to be a statement."""
     if not typed.strip() or len(typed) > MAX_TYPED_CHARS:
         return []
-    joined = _TITLE.sub("\\1." + _JOINER, re.sub(r"\s*[;；]\s*", "\n", typed))
-    return [s.replace("." + _JOINER, ". ") for _, s in split_sentences(joined)]
+    return _split(typed)
 
 
 def _plain(sentence: str) -> str:
@@ -679,7 +697,7 @@ def quote_for(note: str, said: Sequence[str]) -> str:
     terms = set(note_terms(note))
     best, score = "", 0
     for text in said:
-        for _, sentence in split_sentences(re.sub(r"\s*[;；]\s*", "\n", text)):
+        for sentence in _split(text):
             hits = len(terms - set(_missing(note, [sentence])))
             if hits > score:
                 best, score = sentence, hits
