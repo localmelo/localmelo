@@ -46,6 +46,7 @@ In the web console and the app, melo keeps short notes about you across chats (s
 - melo is told to keep a plain, lasting fact about you ("I live in Utrecht", "我的导师是周教授") in the turn you say it.
 - **Change it.** Say the new value in any chat ("I live in Utrecht now", "我的健身教练是小宇"): it replaces the old note about the same thing and comes first in recall, and answers give the new value only: the chat where you said the old value comes back, marked older, only when you ask about the past ("before", "used to", "以前").
 - **Long chats.** The chat keeps its newest messages in view. What you said earlier in the same chat comes back when it matches your message, marked `this chat`.
+- **Tasks start with them.** A task you start from a chat (or a chore you saved) begins with the notes that matter for it: those about you and your preferences, the notes of its folder, and the notes that match its request. People and decisions are left out, because a task calls tools. The task's page folds them under "What melo told the task". With memory off, or no matching note, a task starts without them. A continue or a restart uses the same lines.
 - Each note shows under your message as `Remembered: … · Undo`; Undo on a new value brings the old one back.
 - To see, reword or forget notes later, use the console's **Memory** tab, `/memory` in the terminal, or `melo memory list` and `melo memory forget`; to stop keeping notes, run `melo config set memory.across_chats false` and restart `melo serve` or the app.
 

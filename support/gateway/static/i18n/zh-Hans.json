@@ -1312,6 +1312,8 @@
   "tasks.missing": "无法继续：缺少恢复信息。",
   "tasks.noCard": "没有保存恢复卡片。",
   "tasks.none": "还没有任务。",
+  "tasks.pack.note": "任务开始时，你的聊天记得的关于你和这个项目的内容。这是资料，不是指令。",
+  "tasks.pack.title": "melo 告诉任务的内容",
   "tasks.recoveryCard": "恢复卡片",
   "tasks.requestFailed": "请求失败。请重试。",
   "tasks.resumeAccepted": "已接受继续。任务状态：{state}。",
