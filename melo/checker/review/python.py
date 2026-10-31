@@ -13,6 +13,7 @@ from localmelo.melo.checker.review.paths import (
     Context,
     Findings,
     resolve,
+    secret_name,
     shown,
     touch,
     under,
@@ -76,9 +77,172 @@ _PASS = set(
 )
 
 
+# Commands a local helper may run while the call stays routine: they only
+# read (#324). A word or flag of _WRITE_WORDS makes one of them write.
+_READ_ONLY = set(
+    ["ls", "cat", "head", "tail", "wc", "grep", "egrep", "rg", "pwd", "file"]
+    + ["stat", "du", "tree", "which", "find", "echo", "diff"]
+)
+_GIT_READS = set(
+    ["status", "log", "diff", "show", "branch", "rev-parse", "ls-files", "blame"]
+    + ["describe", "shortlog", "ls-tree", "remote"]
+)
+_WRITE_FLAGS = ("--output", "-delete", "-exec", "-execdir", "-ok", "-fprint", "-fls")
+# git options that run a program the repository or the command names.
+_GIT_RUNS = (
+    "--ext-diff",
+    "--textconv",
+    "--exec-path",
+    "--upload-pack",
+    "--receive-pack",
+)
+# Short flags that make a read-only command write a file or run a program:
+# tree -o FILE, file -C (writes a compiled magic file), rg --pre COMMAND.
+_PROG_WRITES = {"tree": "o", "file": "C"}
+# The only flags a listing `git branch` or `git remote` takes here; others
+# (--unset-upstream, --edit-description, -m) change the repository.
+_GIT_LISTS = set(["-a", "-r", "-v", "-vv", "-l", "--list", "--all", "--remotes"])
+_GIT_LISTS |= set(["--verbose", "--show-current", "--no-color"])
+_HELPER_KEYWORDS = set(
+    ["capture_output", "text", "check", "cwd", "timeout", "stdout", "stderr"]
+    + ["encoding", "errors", "universal_newlines"]
+)
+
+
+def read_only_argv(argv: tuple[str, ...]) -> bool:
+    """Whether the literal command *argv* only reads (git status, ls, grep…).
+
+    Before git's subcommand only ``-C <dir>`` and ``--no-pager`` pass (``-c``,
+    ``--exec-path`` or any ``--opt=value`` can make git run a program), and an
+    option that runs a configured program (``--ext-diff``, ``--textconv``,
+    ``--upload-pack``) or writes (``--output``) is refused anywhere.
+    """
+    if not argv or any(a.startswith(_WRITE_FLAGS) for a in argv):
+        return False
+    prog, args = os.path.basename(argv[0]), list(argv[1:])
+    if prog in ("grep", "egrep", "fgrep") and _recursive(args):
+        return False  # it reads every file below, hidden ones (.env) too
+    short = "".join(a[1:] for a in args if a[:1] == "-" and a[1:2] != "-")
+    if prog in _PROG_WRITES and _PROG_WRITES[prog] in short:
+        return False
+    if prog == "rg" and any(a.startswith("--pre") for a in args):
+        return False
+    if prog != "git":
+        return prog in _READ_ONLY
+    if any(a == "-c" or a.startswith(_GIT_RUNS) for a in args):
+        return False
+    while args[:1] in (["-C"], ["--no-pager"]):
+        args = args[2:] if args[0] == "-C" else args[1:]
+    if not args or args[0] not in _GIT_READS:
+        return False
+    # `git branch NAME` makes a branch and `git remote add` adds one.
+    return args[0] not in ("branch", "remote") or set(args[1:]) <= _GIT_LISTS
+
+
+def _recursive(args: list[str]) -> bool:
+    """Whether grep's *args* ask it to read the folders it names, recursively.
+
+    Long options count by any prefix grep accepts (``--rec``), and ``-d`` or
+    ``--directories`` by a ``recurse`` value, inline or in the next word.
+    """
+    for i, arg in enumerate(args):
+        name, _, value = arg.partition("=")
+        value = value or "".join(args[i + 1 : i + 2])
+        if arg.startswith("--") and len(name) > 3:
+            if "--recursive".startswith(name):
+                return True
+            if "--dereference-recursive".startswith(name):
+                return True
+            if "--directories".startswith(name) and value == "recurse":
+                return True
+        elif arg[:1] == "-" and arg[1:2] != "-":
+            if set("rR") & set(arg) or "d" in arg and "recurse" in (arg, value):
+                return True
+    return False
+
+
 # The nodes the first pass looks at; the rest are skipped fast.
 _BINDS = {ast.Call, ast.Import, ast.ImportFrom, ast.Assign, ast.AnnAssign}
 _BINDS |= {ast.NamedExpr, ast.For, ast.AsyncFor, ast.comprehension, ast.withitem}
+
+
+_Def = ast.FunctionDef | ast.AsyncFunctionDef
+
+
+def _helper(node: _Def) -> ast.Call | None:
+    """The process call of a local helper that passes its arguments on as argv.
+
+    ``def run(*a): subprocess.run(list(a), …)`` (also ``a``, ``[*a]`` or
+    ``tuple(a)``), or ``def run(cmd): subprocess.run(cmd, …)``, with nothing
+    but output and error keywords: no shell, no new session. ``None`` when
+    *node* is not such a helper.
+    """
+    args = node.args
+    # `def run(*a)`: every argument of a call is the command; `def run(cmd,
+    # cwd=None)`: the first is, and the others keep their defaults.
+    name = args.vararg.arg if args.vararg and not args.args else None
+    if not args.vararg and len(args.args) - len(args.defaults) == 1:
+        name = args.args[0].arg
+    if args.posonlyargs:
+        return None
+    if node.decorator_list or name is None:
+        return None
+    found = None
+    for inner in ast.walk(node):
+        if _changes(inner, name):
+            return None  # the argv it runs may not be what its caller passed
+        if not isinstance(inner, ast.Call):
+            continue
+        func = inner.func
+        dotted = func.attr if isinstance(func, ast.Attribute) else ""
+        module = getattr(func, "value", None)
+        if (
+            not isinstance(module, ast.Name)
+            or module.id != "subprocess"
+            or dotted not in _RUNS - {"getoutput", "getstatusoutput"}
+        ):
+            continue
+        first = inner.args[0] if inner.args else None
+        if (
+            isinstance(first, ast.Call)
+            and isinstance(first.func, ast.Name)
+            and first.func.id in ("list", "tuple")
+            and len(first.args) == 1
+            and not first.keywords
+        ):
+            first = first.args[0]
+        elif (
+            isinstance(first, ast.List)
+            and len(first.elts) == 1
+            and isinstance(first.elts[0], ast.Starred)
+        ):
+            first = first.elts[0].value
+        if (
+            found is not None
+            or name is None
+            or not isinstance(first, ast.Name)
+            or first.id != name
+            or len(inner.args) != 1
+            or any(k.arg not in _HELPER_KEYWORDS for k in inner.keywords)
+        ):
+            return None
+        found = inner
+    return found
+
+
+def _changes(node: ast.AST, name: str) -> bool:
+    """Whether *node* rebinds, changes or calls a method of the parameter *name*."""
+    store = (ast.Store, ast.Del)
+    if isinstance(node, ast.Name) and node.id == name:
+        return isinstance(node.ctx, store)
+    if isinstance(node, ast.Attribute | ast.Subscript):
+        value = node.value
+        return isinstance(value, ast.Name) and value.id == name
+    return isinstance(node, ast.Global | ast.Nonlocal) and name in node.names
+
+
+# Names that reach a function without calling it by its name.
+_INDIRECT = frozenset(["globals", "locals", "vars", "getattr", "__import__"])
 
 
 class _Review:
@@ -88,6 +252,48 @@ class _Review:
         self.alias: dict[str, str] = {}
         self.bound: dict[str, list[ast.expr]] = {}
         self.later: list[ast.AST] = []  # the calls and imports, once all is bound
+        # Local helpers that run their arguments as a command (see _helper),
+        # by name: the calls of one are reviewed at each call site instead.
+        # Only a module's own functions, called by their name: a method, a
+        # helper passed as a value (map(run, …)), reached as an attribute or
+        # by globals() is not followed, and its call is reviewed as before.
+        self.helpers: dict[str, tuple[ast.Call, _Def]] = {}
+        for node in getattr(tree, "body", []):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                inner = _helper(node)
+                if inner is not None:
+                    self.helpers[node.name] = (inner, node)
+        nodes = list(ast.walk(tree))
+        loads = [
+            n.id
+            for n in nodes
+            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
+        ]
+        called = [
+            n.func.id
+            for n in nodes
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        ]
+        attrs = [
+            n.attr
+            for n in nodes
+            if isinstance(n, ast.Attribute)
+            and not (isinstance(n.value, ast.Name) and n.value.id == "subprocess")
+        ]
+        all_defs = [
+            n.name
+            for n in nodes
+            if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
+        ]
+        for name in list(self.helpers):
+            if (
+                loads.count(name) != called.count(name)
+                or name in attrs
+                or all_defs.count(name) > 1
+                or _INDIRECT & set(loads)
+            ):
+                self.helpers.pop(name)
+        self.forwarded = {id(inner) for inner, _ in self.helpers.values()}
         for node in ast.walk(tree):
             if type(node) not in _BINDS:
                 continue
@@ -217,6 +423,10 @@ class _Review:
             self.f.add("install", "Runs pip's installer from Python.")
 
     def call(self, node: ast.Call) -> None:
+        if id(node) in self.forwarded:
+            return  # a helper's own call: its call sites are reviewed
+        if isinstance(node.func, ast.Name) and node.func.id in self.helpers:
+            return self.helper_call(node, *self.helpers[node.func.id])
         ctx, f, name = self.ctx, self.f, self.name(node.func)
         attr, base = name.rsplit(".", 1)[-1], getattr(node.func, "value", None)
         kw = {k.arg: k.value for k in node.keywords if k.arg}
@@ -301,6 +511,115 @@ class _Review:
             for url in self.fold(first):
                 if "://" in str(url) and shell.LARGE.search(str(url).split("?")[0]):
                     shell.download(ctx, f, url, url.rsplit("/", 1)[-1], ctx.root)
+
+    def helper_call(self, node: ast.Call, inner: ast.Call, fn: _Def) -> None:
+        """One call of a local helper: routine only for literal read-only commands.
+
+        Each command must only read (:func:`read_only_argv`), every path it
+        names must lie inside the workspace (links followed), and none may name
+        a file that holds passwords or keys (:func:`secret_name`, high impact).
+        """
+        if node.keywords or any(isinstance(a, ast.Starred) for a in node.args):
+            return self.f.doubt("Runs a command melo could not read.")
+        base = self.helper_base(inner, fn)
+        if base is None:
+            return self.f.doubt("Runs a command in a folder melo could not place.")
+        if fn.args.vararg is not None:
+            argvs: list[Any] = list(product(*(self.fold(a) for a in node.args)))[:8]
+        elif len(node.args) != 1:
+            return self.f.doubt("Passes a helper more than its command.")
+        else:
+            argvs = [
+                tuple(v) if isinstance(v, list) else v for v in self.fold(node.args[0])
+            ]
+        for argv in argvs:
+            if not isinstance(argv, tuple) or not all(isinstance(a, str) for a in argv):
+                self.f.doubt("Runs a command melo could not read.")
+                continue
+            if not read_only_argv(argv):
+                self.f.doubt(
+                    f"Runs {os.path.basename(argv[0]) if argv else 'a command'} "
+                    "through a helper, which melo allows unasked only for reads."
+                )
+            if os.path.basename(argv[0]) == "rg" and not self.files_only(argv, base):
+                self.f.doubt(
+                    "Searches folders with rg, which melo allows unasked only for files."
+                )
+            if argv:
+                self.helper_paths(argv, base)
+                shell.run_argv(self.ctx.deeper(), self.f, list(argv), base)
+
+    def files_only(self, argv: tuple[str, ...], base: str) -> bool:
+        """Whether rg's *argv* names only regular files to search (no folder)."""
+        words = [a for a in argv[1:] if not a.startswith("-")]
+        given = {"-e", "-f", "--regexp", "--file"} & set(argv)
+        paths = words if given else words[1:]
+        found = [resolve(self.ctx, p, base) for p in paths]
+        return bool(found) and all(p is not None and os.path.isfile(p) for p in found)
+
+    def helper_base(self, inner: ast.Call, fn: _Def) -> str | None:
+        """The folder a helper's command runs in: the workspace, a literal
+        folder inside it, or ``None`` when melo cannot tell."""
+        node = next((k.value for k in inner.keywords if k.arg == "cwd"), None)
+        if isinstance(node, ast.Name):
+            # A parameter keeps its default: a call that passes it is refused.
+            params = fn.args.args
+            defaults = dict(
+                zip(
+                    [p.arg for p in params[len(params) - len(fn.args.defaults) :]],
+                    fn.args.defaults,
+                    strict=True,
+                )
+            )
+            defaults.update(
+                (p.arg, d)
+                for p, d in zip(fn.args.kwonlyargs, fn.args.kw_defaults, strict=True)
+                if d is not None
+            )
+            if node.id in defaults:
+                node = defaults[node.id]
+            elif node.id in {p.arg for p in (*params, *fn.args.kwonlyargs)}:
+                return None
+        if node is None or isinstance(node, ast.Constant) and node.value is None:
+            return self.ctx.root
+        values = self.fold(node)
+        if len(values) == 1 and isinstance(values[0], str):
+            path = resolve(self.ctx, values[0])
+            if path is not None and under(path, self.ctx.root):
+                return path
+        return None
+
+    def helper_paths(self, argv: tuple[str, ...], base: str) -> None:
+        """Doubt a path outside the workspace; flag a secret file's name."""
+        ctx, f = self.ctx, self.f
+        prog, args = os.path.basename(argv[0]), list(argv[1:])
+        words = [a for a in args if not a.startswith("-")]
+        # grep's first word is its pattern, not a file (unless -e or -f gave it).
+        pattern = (
+            words[0]
+            if prog in ("grep", "egrep", "rg") and not {"-e", "-f"} & set(args)
+            else None
+        )
+        for i, arg in enumerate(args):
+            folder = prog == "git" and i > 0 and args[i - 1] == "-C"
+            if arg.startswith("-"):
+                parts = [arg.split("=", 1)[1]] if "=" in arg else []
+            elif prog == "git" and ":" in arg and not folder:
+                parts = [arg.split(":", 1)[1] or "."]  # REV:path, from the root
+                folder = True
+            else:
+                parts = [] if arg is pattern else [arg]
+            for part in parts:
+                if secret_name(part):
+                    f.add(
+                        "credentials",
+                        f"Reads {part}, which may hold passwords or keys.",
+                    )
+                if folder or part.startswith(("/", "~")) or "/" in part or ".." in part:
+                    path = resolve(ctx, part, base)
+                    if path is None or not under(path, ctx.root):
+                        name = part if path is None else shown(ctx, path)
+                        f.doubt(f"Reads {name}, outside {ctx.folder}.")
 
     def paths(self, node: ast.AST | None, doubt: bool, op: str) -> None:
         values = [v for v in self.fold(node) if isinstance(v, str)]

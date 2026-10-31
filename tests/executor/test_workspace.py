@@ -52,6 +52,7 @@ from localmelo.melo.executor import (
     ExecutionStatus,
     Executor,
     WorkspacePolicy,
+    builtin_names,
     register_builtins,
 )
 from localmelo.melo.memory.coordinator import Hippo
@@ -96,6 +97,9 @@ def _executor(
     register_builtins(
         executor,
         hippo,
+        # Every built-in by name: the interactive default leaves out the
+        # task-only ones (git_status, file_edit).
+        names=builtin_names(),
         mode="interactive",
         workspace_root=workspace_root if rooted_tools else None,
         tool_timeout_s=tool_timeout_s,

@@ -11,7 +11,7 @@ source that cannot be read adds nothing and is named in ``unavailable``.
 With ``session_id`` the list follows that chat: a side chat's own row and the
 tasks it started, with the main chat (or no ``session_id``) listing all of
 the day. Each row also carries the approvals its session asked for today, in
-plain words with how they were answered.
+plain words with how they were answered, and a task's row its ``folder``.
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from fastapi.responses import JSONResponse
 
 from localmelo.support.sessions.display import (
     activity_text,
+    home_label,
     request_words,
     split_thinking,
     status_text,
@@ -60,6 +61,9 @@ TASK_STATES: Final = {
     "interrupted": "paused",
     **TASK_OUTCOMES,
 }
+# A task that failed because it could not use its folder (it never runs in
+# another one), as its row and its card say it.
+FOLDER_REFUSED: Final = "Could not use its folder"
 UNTITLED: Final = {
     "chat": "Chat",
     "task": "Task",
@@ -274,6 +278,10 @@ async def _task_rows(
         row = _row("task", record.task_id, record.title, state, at)
         row["level"] = record.level_eff
         row["_chat"] = record.front_id or ""
+        session = await console.store.get_session(record.task_id)
+        row["folder"] = (
+            home_label(session.workspace) if session and session.workspace else ""
+        )
         if state == "running":
             await _live(row, console)
         elif state in LIVE:
@@ -283,6 +291,8 @@ async def _task_rows(
             turn = sessions.get(record.task_id)
             ended = _ended(turn) if turn is not None else (state, state, "")
             result = ended[2] or (record.wait_reason if state == "failed" else "")
+            if record.wait_reason == "invalid_workspace" and state == "failed":
+                result = FOLDER_REFUSED
             row.update(icon=ended[1] if state == "done" else state, result=result)
         rows.append(row)
     return rows

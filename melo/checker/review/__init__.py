@@ -35,7 +35,7 @@ def review_action(payload: ActionReviewPayload) -> ActionReview:
             review_shell(ctx, f, str(text or ""))
         elif payload.tool_name == "python_exec":
             review_python(ctx, f, str(args.get("code") or ""))
-        elif payload.tool_name == "file_write":
+        elif payload.tool_name in ("file_write", "file_edit"):
             # The workspace fence places it; only what the path is counts.
             touch(ctx, f, str(args.get("path") or ""), "write")
             f.high.pop("outside_write", None)

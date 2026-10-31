@@ -25,6 +25,7 @@ import pytest
 
 import localmelo.__main__ as cli
 from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.checker import TASK_BUILTINS
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.executor import builtin_names
 from localmelo.melo.schema import Message, RunResult, ToolDef
@@ -175,7 +176,8 @@ class TestFlags:
 
     @pytest.mark.parametrize(
         ("value", "builtins"),
-        [("all", frozenset(builtin_names())), ("none", frozenset())],
+        # A task's own built-ins are not in `all` (see test_direct_mode_pinned).
+        [("all", frozenset(builtin_names() - TASK_BUILTINS)), ("none", frozenset())],
     )
     def test_builtins_all_and_none(
         self, value: str, builtins: frozenset[str] | None
@@ -189,7 +191,7 @@ class TestFlags:
             ran = _main("--builtins", "all", "")
         assert ran.code == 0
         assert ran.options.mode == "direct"
-        assert ran.options.builtins == frozenset(builtin_names())
+        assert ran.options.builtins == frozenset(builtin_names() - TASK_BUILTINS)
 
     def test_memory_on(self) -> None:
         assert _main("--memory", "on", "q").options.memory is True

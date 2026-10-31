@@ -22,6 +22,8 @@ BUILTIN_TIERS: Mapping[str, ToolTier] = {
     "file_read": "read",
     "list_files": "read",
     "file_write": "write",
+    "file_edit": "write",
+    "git_status": "read",
     "shell_exec": "exec",
     "python_exec": "exec",
 }

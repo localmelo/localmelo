@@ -138,7 +138,10 @@ def register_builtins(
             fn,
             timeout_ms=timeout_ms,
             requires_approval=tier_requires_approval(tier),
-            process_free=tool_def.name in {"file_read", "file_write", "list_files"},
+            # git_status starts git, but only to read: a crash leaves no
+            # effect to recover, so a task's capture skips it as a file's.
+            process_free=tool_def.name
+            in {"file_read", "file_write", "file_edit", "list_files", "git_status"},
         )
 
 

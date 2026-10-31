@@ -28,6 +28,9 @@ const WARNING = 'A process from before the restart may still be running. Resumin
  * folded under "Steps"; "Live" heads the work only while the task runs.
  * `developer()` says whether developer mode is on: the scheduler's priority
  * (P2) and its words are shown only then.
+ * `chooseFolder()` (optional) asks the macOS app's folder panel for a path and
+ * resolves it, or null; without it, Choose a folder opens a path field. A task
+ * that could not use its folder offers it, and starts again in the folder chosen.
  */
 const POLL_MS = 3000;
 
@@ -37,10 +40,10 @@ function defaultEvery(fn, ms) {
   return () => clearInterval(timer);
 }
 
-export function setupTasks({api, root, newId, navigate, approvalCard, every = defaultEvery, statusRow = null, live: liveOptions = null, developer = () => true}) {
+export function setupTasks({api, root, newId, navigate, approvalCard, every = defaultEvery, statusRow = null, live: liveOptions = null, developer = () => true, chooseFolder = null}) {
   const doc = root.ownerDocument;
   const state = {mode: 'list', epoch: 0, tasks: [], task: null, error: '', notice: '',
-    busy: '', evidence: '', dialog: null, pending: null, again: null, stepsOpen: false};
+    busy: '', evidence: '', dialog: null, pending: null, again: null, stepsOpen: false, folderField: false, folderText: ''};
   let active = false;
   let stopPolling = null;
   const liveBox = doc.createElement('section');
@@ -94,7 +97,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       const link = node('a', undefined, 'worker-row task-row');
       link.href = `#/tasks/${encodeURIComponent(task.task_id)}`;
       link.append(node('strong', task.title || task.task_id),
-        node('span', [stateText(task), developer() ? `P${task.level_eff ?? task.level}` : '', `updated ${when(task.updated_at)}`].filter(Boolean).join(' · '), 'muted'));
+        node('span', [stateText(task), developer() ? `P${task.level_eff ?? task.level}` : '', `updated ${when(task.updated_at)}`, task.workspace_label ? `in ${task.workspace_label}` : ''].filter(Boolean).join(' · '), 'muted'));
       nodes.push(link);
     }
     return nodes;
@@ -110,7 +113,8 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     row('State', stateText(task));
     if (developer()) row('Priority', `P${task.level_eff ?? task.level}`);
     row('Updated', when(task.updated_at));
-    if (task.wait_reason) row('Waiting', task.wait_reason);
+    // A refused folder says why in its own box below, in words.
+    if (task.wait_reason && !task.folder_problem) row('Waiting', task.wait_reason);
     if (task.workspace_label) row('Workspace', task.workspace_label);
     // Evidence is shown when there is some to show, never as "not needed".
     const evidence = evidenceText(task);
@@ -118,6 +122,8 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const nodes = [back];
     if (live) { drawLive(); nodes.push(answerBox); }
     nodes.push(meta);
+    if (task.folder_problem) nodes.push(folderBox(task));
+    if (task.not_committed) nodes.push(node('p', task.not_committed, 'task-note'));
     if (statusRow) nodes.push(statusRow.element);
     const view = {rerender: render, answer: answerApproval, reload: () => refresh(), workspace: task.workspace_label, scope: 'task'};
     for (const request of pendingOf(task)) nodes.push(approvalCard(request, view));
@@ -371,6 +377,66 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       Object.assign(state, {task: outcome.data.task, dialog: null, pending: null, evidence: '', notice: `Stop accepted. The task is ${outcome.data.task.state}.`});
       live?.sync(outcome.data.task);
     } else state.error = errorText(outcome.error);
+    render();
+  }
+
+  // A task refused its folder never ran: it says why and starts again in a folder the person chooses.
+  function folderBox(task) {
+    const box = node('div', undefined, 'task-missing task-folder');
+    box.setAttribute('role', 'alert');
+    const where = task.workspace_label || 'its folder';
+    box.append(node('p', `This task did not start: melo cannot work in ${where}. ${String(task.folder_problem).replace(/\.?$/, '.')}`),
+      node('p', 'It never runs in another folder instead. Choose a folder to start it there.', 'muted'));
+    const busy = Boolean(state.busy);
+    if (state.folderField) {
+      const field = node('input', undefined, 'task-folder-path');
+      field.type = 'text';
+      field.value = state.folderText;
+      field.placeholder = '~/projects/my-app';
+      field.setAttribute('aria-label', 'Folder path');
+      field.addEventListener('input', () => { state.folderText = field.value; });
+      field.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); startIn(field.value); }
+      });
+      box.append(field, button(state.busy === 'folder' ? 'Starting…' : 'Start here', () => startIn(field.value), busy));
+    } else {
+      box.append(button('Choose a folder', () => pickFolder(), busy));
+    }
+    return box;
+  }
+
+  async function pickFolder() {
+    const picked = chooseFolder ? await chooseFolder().catch(() => null) : undefined;
+    if (typeof picked === 'string' && picked.startsWith('/')) return startIn(picked);
+    if (picked === undefined) {
+      state.folderField = true;
+      render();
+      root.querySelector('.task-folder-path')?.focus();
+    }
+  }
+
+  async function startIn(path) {
+    const text = String(path ?? '').trim();
+    if (!/^(\/|~\/)\S/.test(text)) {
+      state.error = 'Type a full path, such as ~/projects/my-app.';
+      render();
+      return;
+    }
+    const epoch = state.epoch;
+    if (!state.again) state.again = newId();
+    const task = state.task;
+    const spec = task.spec || {};
+    const body = {objective: spec.objective, title: spec.title, workspace: text, request_key: state.again};
+    if (task.front_id) body.front_id = task.front_id;
+    const outcome = await act('folder', () => api('/tasks', {method: 'POST', body}));
+    if (!outcome || epoch !== state.epoch) return;
+    if (outcome.data) {
+      Object.assign(state, {again: null, folderField: false, folderText: ''});
+      navigate(`#/tasks/${encodeURIComponent(outcome.data.task.task_id)}`);
+      return;
+    }
+    if (outcome.error.status) state.again = null;
+    state.error = errorText(outcome.error);
     render();
   }
 

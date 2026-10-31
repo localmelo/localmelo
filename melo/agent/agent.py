@@ -73,6 +73,7 @@ from localmelo.melo.agent._chat import (
 from localmelo.melo.agent._context_fit import ContextFitError
 from localmelo.melo.agent._events import GateVerdict, _Emitter, check_sink
 from localmelo.melo.agent._json_repair import error_line, rejected_objects, repairs
+from localmelo.melo.agent._task_aids import FINISH_NOTE, refusal_note
 from localmelo.melo.agent._tool_images import ToolImageStore
 from localmelo.melo.agent.options import (
     REPLAY_TURN_CAP,
@@ -3264,7 +3265,7 @@ class Agent:
     def _touched_names(call: ToolCall) -> list[str]:
         """The paths and command words a successful call acted on."""
         names: list[str] = []
-        if call.tool_name in ("file_read", "file_write"):
+        if call.tool_name in ("file_read", "file_write", "file_edit"):
             path = call.arguments.get("path")
             if isinstance(path, str) and path.strip():
                 names.append(path)
@@ -4043,6 +4044,12 @@ class Agent:
                 cut = 0 if sp.error else max(len(outcome.output) - len(sp.output), 0)
             else:
                 result, cut = outcome.to_tool_result(), 0
+            if self.options.task_aids:
+                note = refusal_note(result.error or result.output)
+                if note and result.error:
+                    result.error = f"{note}\n{result.error}"
+                elif note:
+                    result.output = f"{note}\n{result.output}"
             captured = None
             if self.options.captured_history and run.inflight is not None:
                 kept, notes = _sanitize_images(outcome.images)
@@ -4083,7 +4090,11 @@ class Agent:
                 call.tool_name, call.arguments, outcome.status.value, exported.output
             )
         )
-        if not result.error.strip() and call.tool_name in ("file_read", "file_write"):
+        if not result.error.strip() and call.tool_name in (
+            "file_read",
+            "file_write",
+            "file_edit",
+        ):
             path = call.arguments.get("path")
             if isinstance(path, str) and path.strip():
                 run.recent_path = path
@@ -4972,6 +4983,8 @@ class Agent:
             self.chat.check_call_budget()  # before the step starts, not inside it
             if budget - step == 2:
                 await self._deadline_check(run)
+                if self.options.task_aids and run.last_attempt:
+                    self.hippo.working.append(Message(role="user", content=FINISH_NOTE))
             reflection = run.reflection_msg
             if reflection is not None and not self.hippo.working.holds(reflection):
                 # An eviction took the latest reflection: it goes back once, at

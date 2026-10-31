@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import functools
 import os
 import re
@@ -9,7 +10,9 @@ from dataclasses import dataclass, field
 
 from localmelo.melo.contracts.review import TITLES, ActionReview
 
-# Under the home folder. Reads count too: passwords, keys and cookies.
+# Under the home folder. Reads count too: passwords, keys and cookies. An
+# entry that starts with "**/" is a file name, anywhere (shell patterns, any
+# case), that a read through a helper may not name unasked (see secret_name).
 _CREDENTIALS = [
     ".ssh",
     ".aws",
@@ -19,6 +22,8 @@ _CREDENTIALS = [
     ".gnupg",
     ".kube",
     ".pypirc",
+    ".npmrc",
+    ".git-credentials",
     ".password-store",
     "Library/Keychains",
     "Library/Cookies",
@@ -26,7 +31,26 @@ _CREDENTIALS = [
     "Library/Application Support/Google/Chrome",
     "Library/Application Support/Firefox",
     ".cache/localmelo",
+    "**/.env*",
+    "**/*.pem",
+    "**/*.key",
+    "**/*.p12",
+    "**/id_rsa*",
+    "**/id_ed25519*",
+    "**/id_ecdsa*",
+    "**/.netrc",
+    "**/.npmrc",
+    "**/.pypirc",
+    "**/.git-credentials",
+    "**/credentials*",
+    "**/secrets*",
+    "**/*token",
+    "**/*.token",
+    "**/token.*",
+    "**/*token.json",
+    "**/*token.txt",
 ]
+_ANYWHERE = "**/"
 # Writes here make something run later on its own.
 _PERSISTENCE = [
     "Library/LaunchAgents",
@@ -136,10 +160,23 @@ def _places(home: str, root: str) -> dict[str, tuple[str, ...]]:
     return {
         "self": (f"{home}/.cache/localmelo", *_APP, f"{home}{_APP[0]}"),
         "persistence": (*later, f"{root}/.envrc", *_LAUNCHD),
-        "credentials": tuple(os.path.join(home, p) for p in _CREDENTIALS),
+        "credentials": tuple(
+            os.path.join(home, p) for p in _CREDENTIALS if not p.startswith(_ANYWHERE)
+        ),
         "temp": tuple(os.path.realpath(p) for p in _HARMLESS),
         "caches": tuple(os.path.join(home, p) for p in _CACHES),
     }
+
+
+def secret_name(text: str) -> bool:
+    """Whether a part of *text* (a path, ``REV:path`` or ``--opt=path``) names a secret file."""
+    names = [p.lower() for p in re.split(r"[/:=\\]", text) if p]
+    return any(
+        fnmatch.fnmatchcase(name, pattern[len(_ANYWHERE) :].lower())
+        for pattern in _CREDENTIALS
+        if pattern.startswith(_ANYWHERE)
+        for name in names
+    )
 
 
 def where(ctx: Context, path: str, *, write: bool) -> str:
