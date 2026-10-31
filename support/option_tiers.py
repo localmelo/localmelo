@@ -128,6 +128,7 @@ EXPERIMENTAL_KEYS: dict[str, str] = {
     "agent.tool_images_keep": "#280",
     "agent.tool_images_retire": "#280",
     "memory.retriever": "#299",
+    "memory.keep_statements": "#299",
 }
 
 # Long option name -> tier, for every option the parser has.
@@ -198,7 +199,7 @@ OLD_SPELLINGS: dict[str, str] = {
     "--save-session": "--title",
     "--reconfigure": "melo setup",
     "--serve": "melo serve",
-    "--daemon": "melo serve install|uninstall|status",
+    "--daemon": "melo serve install|uninstall|status|stop",
     "--host": "melo serve --host",
     "--port": "melo serve -p",
     "--enable-playground": "melo serve --playground",

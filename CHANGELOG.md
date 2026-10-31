@@ -92,6 +92,24 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- The newer value wins even when no note was kept, and melo is told to keep a
+  lasting fact you state. After the newer-wins change, a local model answered 2 of 5
+  updated facts right with an embedding model and 3 of 5 by words only, and the chat
+  where the old value was said still came back as current for nearly every question:
+  only 2 of 23 plain statements such as "I live in Utrecht." had become notes, so the
+  rule that a newer note replaces an older one seldom fired. Now, of two chat turns
+  where you said one thing with different values, the older comes after the newer and
+  reads `(older; replaced by a newer message)`, even without a note; when only the
+  older turn matches, the newer one comes with it. The chat's instructions and the
+  `remember` tool now say plainly to keep a plain, lasting fact about you (where you
+  live, your name, a person, your schedule, a preference) in the turn you say it, with
+  an English and a Chinese example; nothing asks you to confirm. Look-alikes such as
+  "my flight to Porto" and "my flight to Faro" stay apart. A developer setting for
+  comparison, `[memory] keep_statements` (off by default, `-X
+  memory.keep_statements=on`), makes code keep such a fact after the turn when the
+  model did not, never a question, a to-do, an "if", a "not", the past, what others
+  think, a passing state ("my build is failing") or a secret ([#329]).
+
 - When you update a fact, the newer value wins. Told "I live in Lisbon." in one chat
   and "I live in Utrecht." in another, a third chat asked "Where do I live?" recalled
   both: the Lisbon note had been replaced, but the Lisbon chat's turn came back first,
@@ -346,6 +364,37 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The terminal talks in the main chat. `melo` now opens the same main chat as
+  the web console and the app: its turns, its cards and the tasks it starts.
+  When no gateway runs, melo starts one in the background on the configured
+  port and says so in one line; it keeps running after melo quits, so its
+  tasks go on. melo never starts a second gateway: when the app's gateway
+  holds the main chat on a port of its own, melo talks to that one. When the
+  gateway cannot be reached, one line says why and the terminal keeps its own
+  chat. `/chats` lists the main chat and its side chats, `/side [title]` starts
+  a side chat in this folder and `/main` goes back; the status bar names the
+  open chat. An approval asked in a turn shows as the terminal's usual list
+  and is answered through the gateway, and a card (a side chat or a task that
+  finished, did not finish or waits) is one coloured line that says how to
+  open it. `-X cli.chat=local` (or `[cli] chat = "local"`) keeps the
+  terminal's own chat, as `-u`, `-c`, `-r` and `--yolo` do. Direct runs,
+  worker runs and their exit codes are unchanged. For API clients:
+  `GET /api/sessions/{id}` adds `last_event_id`, and an approval's `review`
+  adds `categories`. See [The main chat](docs/guides/terminal.md#the-main-chat)
+  ([#330]).
+
+- The terminal and the app share one gateway. Every gateway writes
+  `~/.cache/localmelo/gateway/endpoint.json` as it starts and removes it as it
+  stops; the terminal and the app read it first, so whichever starts second
+  uses the running gateway instead of failing on the main chat's store. The
+  app signs in to it as to its own, and Quit leaves a gateway it did not
+  start running (the menu says so). `melo serve stop` stops the gateway that
+  is running, and the line that says the terminal started one names it
+  ([#330]).
+
+- The terminal's work zone and Ctrl+T say task levels in words in default mode
+  (Now, Today, Normal, Whenever, If idle, Later); developer mode keeps P0-P5
+  ([#330]).
 - A run that knows its call budget stops itself and answers from what it has. The
   developer setting `[agent] max_calls = N` (`-X agent.max_calls=N`; a whole number of
   2 or more, unset by default, listed by `melo config keys` and `melo -h all`) makes a
@@ -2678,5 +2727,7 @@ earlier milestones.
 [#206]: https://github.com/localmelo/localmelo/pull/206
 [#207]: https://github.com/localmelo/localmelo/pull/207
 [#208]: https://github.com/localmelo/localmelo/pull/208
+[#330]: https://github.com/localmelo/localmelo/pull/330
+[#329]: https://github.com/localmelo/localmelo/pull/329
 [#328]: https://github.com/localmelo/localmelo/pull/328
 [#331]: https://github.com/localmelo/localmelo/pull/331

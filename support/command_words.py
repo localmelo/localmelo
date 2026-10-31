@@ -22,7 +22,7 @@ from collections.abc import Callable, Sequence
 from typing import NoReturn
 
 COMMANDS = ("setup", "config", "memory", "serve", "console", "task", "worker", "import")
-DAEMON_ACTIONS = ("install", "uninstall", "status")
+DAEMON_ACTIONS = ("install", "uninstall", "status", "stop")
 TASK_VERBS = ("new", "list", "show", "pause", "resume", "stop", "follow", "level")
 # The words that run with nothing after them (the others need a file, a verb or a key).
 _RUN_ALONE = ("setup", "serve", "console")
@@ -56,9 +56,9 @@ _HELP = {
         "melo memory list",
     ),
     "serve": (
-        "melo serve [install|uninstall|status] [options]",
+        "melo serve [install|uninstall|status|stop] [options]",
         "Run the gateway (web console and HTTP API). install, uninstall and status\n"
-        "manage it as a login service on macOS.",
+        "manage it as a login service on macOS; stop ends the one that is running.",
         "  --host H        listen address (default 127.0.0.1)\n"
         "  -p, --port N    listen port (default 8401; 0 picks a free one)\n"
         "  --playground    enable the development playground routes\n"
@@ -114,7 +114,7 @@ SUMMARIES = (
     ("setup", "choose the model server again"),
     ("config", "show or change the settings"),
     ("memory VERB", "see and change the notes melo keeps (melo memory -h)"),
-    ("serve [ACTION]", "run the gateway; install | uninstall | status"),
+    ("serve [ACTION]", "run the gateway; install | uninstall | status | stop"),
     ("console", "open the web console in your browser"),
     ("task VERB", "manage background tasks (melo task -h)"),
     ("worker BRIEF", "run a worker brief and print its result"),

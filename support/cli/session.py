@@ -20,7 +20,7 @@ import os
 import shlex
 import sys
 import time
-from collections.abc import AsyncIterator, Callable, Coroutine, Mapping
+from collections.abc import AsyncIterator, Callable, Coroutine, Mapping, Sequence
 from typing import Any, Final, Literal, cast
 
 from prompt_toolkit.application.application import attach_winch_signal_handler
@@ -56,6 +56,7 @@ from localmelo.support.cli.attachments import (
 from localmelo.support.cli.attachments import (
     load as load_attachment,
 )
+from localmelo.support.cli.main_chat import GatewayError, MainChat
 from localmelo.support.cli.output import Out
 from localmelo.support.cli.picker import ModelRow
 from localmelo.support.cli.render import (
@@ -285,6 +286,8 @@ class CliSession:
         self.session_tools = SessionTools(self)
         self.exit_code = 0
         self.saved_resume_hint = ""
+        # The main chat through the gateway; None: the terminal's own chat.
+        self.remote: MainChat | None = None
 
     # ── What the app reads ──
 
@@ -321,7 +324,7 @@ class CliSession:
                 )
             )
             if self.work is not None:
-                work = tuple(work_parts(self.work.summary))
+                work = tuple(work_parts(self.work.summary, words=self.work.words))
         elif last:
             usage = (BarPart(f"ctx {format_tokens(last)}"),)
         return StatusBar(
@@ -368,6 +371,19 @@ class CliSession:
         figure = step_figure(step, learned=learned_total(progress))
         dot = f" {self.renderer.symbols.dot} "
         return dot.join(part for part in (figure, f"{STEPS_KEY} steps") if part)
+
+    @property
+    def workspace(self) -> str:
+        """The folder this terminal works in: side chats and ``!`` commands start here."""
+        return self.agent.workspace_root or os.getcwd()
+
+    async def choose_from(
+        self, title: str, options: Sequence[str], *, default: int = 0
+    ) -> int | None:
+        """The app's option list (arrow keys and Enter); None without an app or on Esc."""
+        if self.app is None:
+            return None
+        return await self.app.choose_from(title, options, default=default)
 
     def on_event(self, stored: StoredEvent) -> None:
         """Render one event of a turn, and redraw the bar its usage may change."""
@@ -420,6 +436,11 @@ class CliSession:
                 return self._enter_shell(shell, text)
             text = shell.text  # the escape: the message "! text"
         parsed = commands.parse_command(text)
+        if parsed is not None and self.remote is not None:
+            routed = self._main_chat_command(*parsed, text)
+            if routed is None or isinstance(routed, str):
+                return routed
+            parsed = routed
         if parsed is not None:
             command, name, arguments = parsed
             if command is None:
@@ -477,6 +498,44 @@ class CliSession:
         return (
             UNDO_HINT if self._pending_command == "undo" else _STATE_HINTS[self._state]
         )
+
+    def _main_chat_command(
+        self, command: commands.Command | None, name: str, arguments: str, text: str
+    ) -> tuple[commands.Command | None, str, str] | str | None:
+        """A command in the main chat: sent, refused, renamed or left as it is.
+
+        ``/task …`` goes to the main chat as a message (its rule starts a
+        task); ``/new`` and ``/clear`` start a side chat; a command of the
+        terminal's own chat says so. A string is the hint that keeps the draft.
+        """
+        assert self.remote is not None
+        if command is not None and command.name == "task":
+            if not self.remote.chat.main:
+                self.out.print(
+                    self._text(
+                        "Tasks start from the main chat: /main, then /task …",
+                        style="error",
+                    )
+                )
+                return None
+            if self._state != "idle":
+                return "/task is not available while a turn runs (esc stops it)."
+            self.submit(text)
+            return None
+        if command is not None and command.name in ("new", "clear"):
+            side = commands.find("side")
+            assert side is not None
+            return side, "side", ""
+        if command is not None and command.name in commands.LOCAL_ONLY:
+            self.out.print(
+                self._text(
+                    f"/{name} works only in the terminal's own chat "
+                    "(melo -X cli.chat=local).",
+                    style="error",
+                )
+            )
+            return None
+        return command, name, arguments
 
     def _enter_shell(self, shell: usershell.ShellInput, text: str) -> str | None:
         """``! command`` and ``!``: only when idle, else the draft stays."""
@@ -537,6 +596,11 @@ class CliSession:
         """Send *text* as the next turn (idle only)."""
         self._state = "running"
         self._stop_wanted = self._stop_landed = False
+        if self.remote is not None:
+            # The open chat keeps its title; a new side chat's comes from the gateway.
+            self.renderer.begin_turn(text)
+            self._work = self.spawn(self._remote_turn(text))
+            return
         if self.runner is None or self.runner.session_id is None:
             self.title = self.session_tools.pending_title or title_from_text(text)
         first_turn = self.runner is None or self.runner.session_id is None
@@ -629,6 +693,58 @@ class CliSession:
             await self.navigation.refresh_refs()
         if error is not None and attachments:
             self._attachments = attachments + self._attachments
+        completed = result is not None and result.status == "completed"
+        self._after_turn(text, started, completed=completed, failed=error is not None)
+
+    async def _remote_turn(
+        self, text: str, *, typed: bool = True, retry: str = ""
+    ) -> None:
+        """One turn of the main chat or a side chat, run by the gateway.
+
+        *typed* is False for a turn sent in another window, which the
+        terminal only follows: its message is never given back. *retry* is
+        the turn that ``/retry`` runs again.
+        """
+        assert self.remote is not None
+        started = self._clock()
+        error: Exception | None = None
+        status = ""
+        try:
+            status = await (
+                self.remote.run_turn(text, retry=retry) if typed else self.remote.wait()
+            )
+        except GatewayError as exc:
+            error = exc
+        if error is not None and not self._closed:
+            said = str(error)
+            said = said[:1].upper() + said[1:]
+            self.out.print(self._text(f"✗ {said}", style="error"))
+        cause = "user_stop" if self._stop_wanted else ""
+        self.renderer.end_turn(None, None, cause=cause)
+        completed = status in ("completed", "echo")
+        self._after_turn(
+            text if typed else "",
+            started,
+            completed=completed,
+            failed=error is not None,
+        )
+
+    def follow_turn(self, text: str) -> bool:
+        """Draw a turn of the open chat that another window sent; False when busy."""
+        if self._state != "idle" or self._closed or self.remote is None:
+            return False
+        self._state = "running"
+        self._stop_wanted = self._stop_landed = False
+        self.renderer.begin_turn(text)
+        self._work = self.spawn(self._remote_turn(text, typed=False))
+        if self.app is not None:
+            self.app.invalidate()
+        return True
+
+    def _after_turn(
+        self, text: str, started: float, *, completed: bool, failed: bool
+    ) -> None:
+        """The end of every turn: idle again, then the queued message or the draft back."""
         self._state = "idle"
         self._work = None
         if self.app is not None:
@@ -638,11 +754,11 @@ class CliSession:
         if self._closed:
             return  # the session shuts down: a queued message is not sent
         queued = self.take_queued()
-        completed = result is not None and result.status == "completed"
-        if queued is not None and completed and error is None:
+        if queued is not None and completed and not failed:
             self.submit(queued)
             return
         # A turn that could not run gives its message back, then the queued one.
+        error = failed and bool(text)
         back = [part for part in (text if error else None, queued) if part]
         if not back or self.app is None:
             return
@@ -689,7 +805,10 @@ class CliSession:
         self._state = "stopping"
         self._stop_wanted = True
         self.renderer.stopped_by("user_stop")
-        self._try_cancel(reason, "user_stop")
+        if self.remote is not None:
+            self.remote.stop()
+        else:
+            self._try_cancel(reason, "user_stop")
         return True
 
     def _try_cancel(self, reason: str, cause: Literal["user_stop", "shutdown"]) -> None:
@@ -718,7 +837,7 @@ class CliSession:
         self.renderer.echo(text)
         try:
             await self._command(name, arguments)
-        except (ValueError, SessionStoreError, SessionBusyError) as exc:
+        except (ValueError, SessionStoreError, SessionBusyError, GatewayError) as exc:
             message = (
                 DELETED
                 if isinstance(exc, UnknownSessionError)
@@ -810,8 +929,11 @@ class CliSession:
                     self.renderer.symbols,
                     everything=self.developer,
                     width=self.out.width,
+                    main_chat=self.remote is not None,
                 )
             )
+        elif name in ("chats", "side", "main", "task"):
+            await self._chats_command(name, arguments)
         elif name == "attach":
             await self._attach_file(arguments)
         elif name == "attachments":
@@ -855,6 +977,51 @@ class CliSession:
             self.mcp()
         elif name == "browser":
             await browsing.command(self, arguments)
+
+    async def open_main_chat(self) -> None:
+        """Open the main chat; if it does not open, this is the terminal's own chat."""
+        remote = self.remote
+        if remote is None:
+            return
+        try:
+            await remote.start()
+        except GatewayError as exc:
+            self.remote, self.title = None, ""
+            await remote.close()
+            self.out.print(
+                self._text(
+                    f"⚠ The main chat did not open: {exc}. "
+                    "This is the terminal's own chat.",
+                    style="warn",
+                )
+            )
+            if self.app is not None:
+                self.app.invalidate()
+            return
+        self.spawn(remote.watch())
+
+    async def _chats_command(self, name: str, arguments: str) -> None:
+        """/chats, /side and /main: the main chat's chats, through the gateway.
+
+        ``/task`` reaches here only in the terminal's own chat: in the main
+        chat it is sent as a message.
+        """
+        remote = self.remote
+        if remote is None:
+            self.out.print(
+                self._text(
+                    f"/{name} works in the main chat; this is the terminal's own chat.",
+                    style="muted",
+                )
+            )
+        elif name == "task":
+            pass  # sent as a message (see _main_chat_command)
+        elif name == "chats":
+            await remote.pick()
+        elif name == "side":
+            await remote.side(arguments)
+        else:
+            await remote.main()
 
     async def _attach_file(self, arguments: str) -> None:
         try:
@@ -1219,6 +1386,19 @@ class CliSession:
 
     async def retry(self) -> None:
         """``/retry``: re-run the newest turn, undoing it only when still live."""
+        if self.remote is not None:
+            last = await self.remote.last_turn()
+            if last is None:
+                self.out.print(self._text("✗ Nothing to retry.", style="error"))
+                return
+            turn_id, text = last
+            first = " ".join(text.split())[:60]
+            self.out.print(self._text(f"↻ Retrying: {first}"))
+            self._state = "running"
+            self._stop_wanted = self._stop_landed = False
+            self.renderer.begin_turn(text)
+            self._work = self.spawn(self._remote_turn(text, retry=turn_id))
+            return
         if self.runner is None:
             self.out.print(self._text("✗ Nothing to retry.", style="error"))
             return
@@ -1673,6 +1853,9 @@ class CliSession:
         if self._closed:
             return
         self._closed = True
+        if self.remote is not None:
+            # A turn of the main chat goes on in the gateway: stop following it.
+            await self.remote.close()
         if self._state in ("running", "stopping"):
             self._stop_wanted = True
             self.renderer.stopped_by(cause)

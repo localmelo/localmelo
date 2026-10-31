@@ -65,6 +65,7 @@ chat_model = "qwen3:8b"
 | `cross_task_cold` | `[retrieval]` | `0` | 没有匹配的同任务摘要时，允许 0 或 1 条跨任务摘要；仍受上限和后端下限约束。一般记忆绕过这道门。 |
 | `across_chats` | `[memory]` | `true` | 网页控制台和 App 中的跨对话记忆：你请 melo 记住的事，以及它判断值得记的你告诉它的事，它会记成笔记；它为每个完成的对话轮次和任务结果建立索引，并在每条新消息时带回相关内容，注明出处。`false` 全部关闭。直接运行和 worker 从不使用它。见[跨对话记忆](../concepts/memory.md#memory-across-chats)。 |
 | `retriever` | `[memory]` | `"auto"` | 网页控制台或 App 中的对话如何为一条消息找到笔记：`"auto"`（按词搜索；设置了嵌入模型时也按语义搜索）、`"bm25"`（只按词，不向模型发请求）、`"embedding"`（有模型时与 `auto` 相同；没有嵌入模型时 `melo serve` 拒绝启动）或 `"llm"`（先按词挑出最多 20 个候选，再由对话模型在 4 秒内从中选择；超时、出错或回复无法读取时只按词搜索；不调用嵌入模型）。这是用于比较各种方式的开发者设置：`-X memory.retriever=llm` 只对一次运行生效，`melo -h all` 会列出它。每次召回的耗时在 `turn.memory` 的 `recall` 对象里。见[召回如何找到笔记](../concepts/memory.md#memory-across-chats)。 |
+| `keep_statements` | `[memory]` | `false` | 用于比较的开发者设置。`true`：网页控制台或 App 的一轮对话之后，代码会把用户说出、但模型没有用 `remember` 记下的每个关于自己的明确、长期的事实记成笔记（"I live in …"、"my advisor is …"、"call me …"、"我的…是…"），同样显示 `Remembered · Undo`；问题、待办、"如果"、"不"、过去、别人的看法、一时的状态和密钥从不记。默认只有模型的判断和你自己的要求会记笔记。`-X memory.keep_statements=on` 只对一次运行生效，`melo -h all` 会列出它。见[跨对话记忆](../concepts/memory.md#memory-across-chats)。 |
 | `admit_on_outcome` | `[memory]` | `false` | R6-lite：只在运行结束时准入最后一次尝试的摘要，并在其来源中带上最终状态。`--admit-on-outcome` 旗标对一次运行优先；直接模式会读这张表，交互式界面和网关不读，且在 `legacy` 中被接受但不生效。 |
 | `api_key_env` | 云端后端 | 未设置 | 保存 API 密钥的环境变量名称。 |
 | `base_url` | 云端后端 | 厂商的 URL | API 的 URL。 |
@@ -73,6 +74,7 @@ chat_model = "qwen3:8b"
 | `workspace` | `[gateway]` | `""` | 网页控制台会话的默认工作区文件夹（为空时为 `~/localmelo-workspace`）；仅在设置时写入。 |
 | `stream` | `[cli]` | `true` | 仅在交互式界面使用的实时流式，除非关闭否则默认开启（`/stream off`、`-X cli.stream=false`、`melo config set cli.stream false`）；没有该界面的运行从不流式。`/new` 会把 `/stream` 恢复为此值。无效值在界面中警告并回退；直接运行和网关不会因此失败。见[流式回复](../guides/terminal.md#streamed-replies)。 |
 | `status_line` | `[cli]` | `"auto"` | `"auto"`：交互式状态栏根据已收到的事件显示用量区（词元数或费用、`ctx`、缓存和空闲时间或速率限制），网关有任务时还显示任务。`"off"`：只保留运行区（标题或运行中轮次的步骤）和上一次请求的 `ctx`。高级选项：没有命令行参数。其他值在界面中警告并回退；直接运行和网关不会因此失败。见[状态栏](../guides/terminal.md#the-status-bar)。 |
+| `chat` | `[cli]` | `"main"` | 不带任务的 `melo` 打开什么。`"main"`：经网关的主对话，没有网关运行时在后台启动一个。`"local"`：终端自己的对话，不经网关（一次运行用 `-X cli.chat=local`；`-u`、`-c`、`-r` 和 `--yolo` 也会打开它）。开发者设置；其他值会警告并回退。见[主对话](../guides/terminal.md#the-main-chat)。 |
 | `colors` | `[cli]` | `"auto"` | 交互式界面的颜色数量：`"auto"`（根据 `COLORTERM` 和 `TERM`）、`"16"`、`"256"` 或 `"truecolor"`。`NO_COLOR` 仍会关闭颜色。开发者设置：`-X cli.colors=256` 只用于本次运行。其他值会警告并回退。见[终端颜色](../guides/terminal.md#terminal-colours)。 |
 | `background` | `[cli]` | `"auto"` | 交互式界面所用的终端背景：`"auto"`（先询问终端，再看 `COLORFGBG`），什么都不回答的终端（tmux、screen、ssh）可设为 `"dark"` 或 `"light"`。开发者设置：`-X cli.background=light`。见[终端颜色](../guides/terminal.md#terminal-colours)。 |
 | `reasoning_tags` | `[cli]` | 未设置 | 一张 `MODEL = "explicit" \| "closing_only" \| "none"` 表：某模型回复的可信分帧声明；`stream = false` 时也会用它切分完整回复。没有条目的模型使用保守规则（内容一直保留到回复结束）。目前需要手工设置，引导流程还不会询问它。 |
