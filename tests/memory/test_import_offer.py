@@ -115,3 +115,32 @@ def test_a_folder_that_cannot_be_written_is_logged_not_raised(tmp_path: Path) ->
     blocker.write_text("not a folder")
     offer.mark(str(blocker / "memory"), "brought")
     assert not offer.offered(str(blocker / "memory"))
+
+
+def test_a_record_that_cannot_be_finished_leaves_none_so_the_offer_stays_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A full disk after the file was created: no error, and no half-written file that reads as "made"."""
+    folder = str(tmp_path / "memory")
+
+    def full(*args: object, **kwargs: object) -> None:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(offer.json, "dump", full)
+    offer.mark(folder, "declined")
+    assert not offer.offered(folder)
+    assert not (Path(folder) / offer.NAME).exists()
+    monkeypatch.undo()
+    offer.mark(
+        folder, "declined"
+    )  # the disk has room again: the next answer is the first
+    assert offer.offered(folder)
+
+
+async def test_choosing_no_file_is_no_answer_to_the_offer(
+    memory: ChatMemory,  # noqa: F811
+    home: Path,  # noqa: F811
+) -> None:
+    plan = await memory.import_scan(home=home)
+    done = await memory.import_apply(plan, [])
+    assert done["written_ids"] == [] and memory.import_pending()

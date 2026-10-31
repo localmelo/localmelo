@@ -11,8 +11,10 @@ every note and the index of every chat. ``GET /api/memory/import/scan`` lists
 what other assistants' files hold (no writes), ``POST /api/memory/import`` writes
 the chosen sources of a scan as notes (the ``memory.import`` event is in the
 response: memory has no session channel) and ``DELETE /api/memory/import/{batch_id}``
-takes the batch back; ``GET /api/memory/import/offer`` says whether the offer to do it
-was never made (the first run's card) and ``DELETE`` on it records "Not now".
+takes the batch back (``kept`` counts the notes the person had reworded, which stay; only
+present when above 0); ``GET /api/memory/import/offer`` says whether the offer to do it
+was never made (the first run's card) and ``DELETE`` on it records "Not now" and answers
+whether the offer is still open (it is when the record could not be written).
 ``PUT /api/memory`` switches
 ``[memory] across_chats`` and ``POST /api/memory/reindex`` rebuilds the index
 from the chats.
@@ -219,10 +221,10 @@ def add_routes(app: FastAPI, console: Console) -> None:
 
     @app.get("/api/memory/import/scan")
     async def memory_import_scan() -> dict[str, Any]:
-        # The home folder lets the page write a path as `~/…`.
+        # The home folder, as the scan's paths spell it, lets the page write a path as `~/…`.
         return {
             **(await console.memory.import_scan()).to_json(),
-            "home": str(Path.home()),
+            "home": str(Path.home().resolve()),
         }
 
     @app.get("/api/memory/import/offer")
@@ -232,7 +234,8 @@ def add_routes(app: FastAPI, console: Console) -> None:
     @app.delete("/api/memory/import/offer")
     async def memory_import_decline() -> dict[str, bool]:
         console.memory.import_offered("declined")
-        return {"pending": False}
+        # Still pending when the record could not be written: the page must not say "Not now" was kept.
+        return {"pending": console.memory.import_pending()}
 
     @app.post("/api/memory/import")
     async def memory_import(body: ImportBody) -> dict[str, Any]:
@@ -247,9 +250,15 @@ def add_routes(app: FastAPI, console: Console) -> None:
     @app.delete("/api/memory/import/{batch_id}")
     async def memory_import_undo(batch_id: str) -> dict[str, Any]:
         removed = await console.memory.undo_import(batch_id)
-        if not removed:
+        # Notes the person reworded since stay: they are theirs now.
+        kept = await console.memory.import_kept(batch_id)
+        if not removed and not kept:
             raise ApiError(404, "not_found", t("errors.importGone"))
-        return {"batch_id": batch_id, "removed": removed}
+        return {
+            "batch_id": batch_id,
+            "removed": removed,
+            **({"kept": kept} if kept else {}),
+        }
 
     @app.put("/api/memory")
     async def memory_switch(body: SwitchBody) -> dict[str, bool]:

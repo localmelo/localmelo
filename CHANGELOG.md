@@ -50,14 +50,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   know about you, so it knows you from your first message. The main chat shows
   one card with a row per file (`~/.claude/CLAUDE.md`, how many notes, the
   sample lines and what was left out); **Bring them in** writes the checked
-  files, **Undo** takes the batch back, **Not now** ends the offer for good.
+  files, **Undo** takes the batch back (a note you edited since stays, and the card
+  says how many), **Not now** ends the offer for good.
   The terminal asks the same as a list (`Bring in 12 notes from 2 files`,
-  `Show what they say`, `Not now`) on the first interactive run, and later with
-  `/memory import` or `melo memory import` (`--undo BATCH` takes a batch back).
+  `Show what they say`, `Not now`; the list starts on `Show what they say`) on
+  the first interactive run, and later with `/memory import` or
+  `melo memory import` (`--undo BATCH` takes a batch back). Esc, ctrl+c and end
+  of input leave without recording an answer, so the offer comes again.
   The Memory tab gets **From other assistants** (**Look for notes**, and each
   batch with its own **Undo**), and an imported note says which file it came
   from. Nothing is brought in until you choose; a task run never asks. New:
-  `GET` and `DELETE /api/memory/import/offer`, and `home` in the scan. Part of
+  `GET` and `DELETE /api/memory/import/offer`, `home` in the scan and `kept` in
+  an undo's answer. Part of
   #364. [#NN]
 - A task can start with a short memory pack, a side chat's summary can be
   recalled from other chats, and a task's questions to its owner chat are kept

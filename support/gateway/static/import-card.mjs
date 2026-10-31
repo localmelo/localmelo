@@ -52,12 +52,28 @@ export function readScan(data) {
     kept: Number(source.items_kept) || 0,
     sample: (Array.isArray(source.sample) ? source.sample : []).map(String),
     left: leftOut(source.filtered),
+    filtered: Object.fromEntries(REASONS.map((reason) => [reason, Number(source.filtered?.[reason]) || 0])),
   }));
   return {batchId: String(data?.batch_id ?? ""), partial: data?.partial === true, sources};
 }
 
 /** Whether a scan holds a note to bring in. */
 export const hasNotes = (scan) => scan.sources.some((source) => source.kept > 0);
+
+/**
+ * What to say of a scan with no note to bring in. Files with lines melo already has: "Nothing new". Files whose
+ * lines were all left out for another reason: that reason, so the person is not told something untrue. No files
+ * (or files with no line): "No notes found".
+ */
+export function nothingToBring(scan) {
+  const total = Object.fromEntries(REASONS.map((reason) => [reason, scan.sources.reduce((sum, source) => sum + source.filtered[reason], 0)]));
+  if (total.duplicate > 0) return t("importCard.nothingNew");
+  const reasons = REASONS.filter((reason) => total[reason] > 0).map((reason) => t(`importCard.reason.${reason}`));
+  return reasons.length ? t("importCard.nothingToBring", {reasons: reasons.join(t("importCard.join"))}) : t("memoryTab.import.none");
+}
+
+/** The ids of *chosen* that a fresh scan still has with a note in them: a file the person unchecked stays unchecked. */
+const stillChosen = (chosen, scan) => new Set([...chosen].filter((id) => scan.sources.some((source) => source.id === id && source.kept > 0)));
 
 /** The ids a scan starts with checked: every file with a note in it. */
 export const allKept = (scan) => new Set(scan.sources.filter((source) => source.kept > 0).map((source) => source.id));
@@ -98,16 +114,17 @@ export function setupImportCard({root, api, hero = null}) {
   root.hidden = true;
   let shown = false;
   let started = false; // Asked once per page load: a failure is not asked again until the page reloads.
-  let phase = "idle"; // idle | checking | offer | done | undone | gone
+  let phase = "idle"; // idle | checking | offer | done | undone | unsaved | gone
   let busy = false;
   let scan = null;
   let chosen = new Set();
   let result = null;
   let fault = "";
 
-  async function look() {
-    scan = readScan(await api("/memory/import/scan"));
-    chosen = allKept(scan);
+  async function look({again = false} = {}) {
+    const fresh = readScan(await api("/memory/import/scan"));
+    chosen = again ? stillChosen(chosen, fresh) : allKept(fresh);
+    scan = fresh;
   }
 
   function render() {
@@ -131,7 +148,8 @@ export function setupImportCard({root, api, hero = null}) {
       parts.push(actions);
     } else {
       const line = el(doc, "p", "import-done");
-      if (phase === "undone") line.append(t("importCard.undone"));
+      if (phase === "undone") line.append(result.kept ? t("importCard.undoneKept", {n: result.kept}) : t("importCard.undone"));
+      else if (phase === "unsaved") line.append(t("importCard.notSaved"));
       else if (result.written) {
         const undoButton = button(doc, "link-button", t("memory.undo"), undo);
         undoButton.disabled = busy;
@@ -171,7 +189,7 @@ export function setupImportCard({root, api, hero = null}) {
     } catch (error) {
       fault = failure(error, fallback);
       // A scan the gateway forgot is read again, so the next press has a batch to write.
-      if (error.status === 404 && phase === "offer") await look().catch(() => {});
+      if (error.status === 404 && phase === "offer") await look({again: true}).catch(() => {});
     }
     busy = false;
     render();
@@ -184,15 +202,16 @@ export function setupImportCard({root, api, hero = null}) {
   }, "importCard.bringFailed");
 
   const undo = () => !busy && working(async () => {
-    await api(`/memory/import/${encodeURIComponent(result.batchId)}`, {method: "DELETE"});
+    const reply = await api(`/memory/import/${encodeURIComponent(result.batchId)}`, {method: "DELETE"});
+    result.kept = Number(reply?.kept) || 0; // notes the person reworded since stay
     phase = "undone";
   }, "importCard.undoFailed");
 
-  async function decline() {
-    phase = "gone";
-    render();
-    await api("/memory/import/offer", {method: "DELETE"}).catch(() => {}); // The card is gone either way.
-  }
+  /** "Not now": the card goes once the gateway kept the answer; else it says so, and it stays hidden after Close. */
+  const decline = () => !busy && working(async () => {
+    const reply = await api("/memory/import/offer", {method: "DELETE"}).catch(() => null);
+    phase = reply && reply.pending === false ? "gone" : "unsaved";
+  }, "importCard.notSaved");
 
   return {
     /** Show or hide the card; the first time it is shown it asks whether to offer. */
@@ -211,11 +230,14 @@ function dayOf(at) {
   return formatTime(date, date.getFullYear() === new Date().getFullYear() ? "day" : "dayYear");
 }
 
-/** The batches the notes in `rows` were brought in by: `[{id, count, at}]`, newest first. */
+/**
+ * The batches the notes in `rows` were brought in by: `[{id, count, at}]`, newest first. A note the person
+ * reworded is theirs now, which an Undo keeps, so it does not count.
+ */
 export function batches(rows) {
   const found = new Map();
   for (const row of rows) {
-    if (!row.imported || !row.batch_id) continue;
+    if (!row.imported || !row.batch_id || row.edited) continue;
     const batch = found.get(row.batch_id) ?? {id: row.batch_id, count: 0, at: 0};
     batch.count += 1;
     batch.at = Math.max(batch.at, Number(row.created_at) || 0);
@@ -256,17 +278,30 @@ export function importSection({doc, api, rows, reload, redraw}) {
     scan = readScan(await api("/memory/import/scan"));
     chosen = allKept(scan);
     phase = hasNotes(scan) ? "found" : "idle";
-    line = phase === "found" ? "" : t(scan.sources.length ? "importCard.nothingNew" : "memoryTab.import.none");
+    line = phase === "found" ? "" : nothingToBring(scan);
   }, "memoryTab.import.lookFailed");
+  /** The gateway forgot the scan (it restarted): read the files again, so the next press has a batch to write. */
+  async function rescan() {
+    const fresh = readScan(await api("/memory/import/scan"));
+    chosen = stillChosen(chosen, fresh);
+    scan = fresh;
+    phase = hasNotes(fresh) ? "found" : "idle";
+  }
   const bring = () => !busy && working(async () => {
-    const done = await api("/memory/import", {method: "POST", body: {batch_id: scan.batchId, source_ids: [...chosen]}});
-    line = done.written_ids?.length ? t("importCard.done", {n: done.written_ids.length}) : t("importCard.nothingNew");
-    phase = "idle";
+    try {
+      const done = await api("/memory/import", {method: "POST", body: {batch_id: scan.batchId, source_ids: [...chosen]}});
+      line = done.written_ids?.length ? t("importCard.done", {n: done.written_ids.length}) : t("importCard.nothingNew");
+      phase = "idle";
+    } catch (error) {
+      if (error.status === 404) await rescan().catch(() => {}); // the refusal is still said
+      throw error;
+    }
     await reload();
   }, "importCard.bringFailed");
   const take = (id) => !busy && working(async () => {
-    await api(`/memory/import/${encodeURIComponent(id)}`, {method: "DELETE"});
-    line = t("importCard.undone");
+    const reply = await api(`/memory/import/${encodeURIComponent(id)}`, {method: "DELETE"});
+    const kept = Number(reply?.kept) || 0;
+    line = kept ? t("importCard.undoneKept", {n: kept}) : t("importCard.undone");
     await reload();
   }, "importCard.undoFailed");
 

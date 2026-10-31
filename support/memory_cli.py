@@ -198,5 +198,5 @@ def main(argv: Sequence[str], prog: str = "melo memory") -> int:
     if args.verb == "import":
         from localmelo.support.cli import memory_import
 
-        return memory_import.undo(args.undo) if args.undo else memory_import.offer()
+        return memory_import.command(args.undo)
     return asyncio.run(_reindex())

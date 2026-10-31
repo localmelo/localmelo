@@ -1,11 +1,12 @@
 /**
  * Bringing in what other assistants know (import-card.mjs) in a DOM double: the main chat's first-run card
- * (offer, working, done with Undo, "Not now", an empty scan, a partial one, refusals) and the Memory tab's
+ * (offer, working, done with Undo, "Not now" and when it could not be saved, an empty scan, a partial one, refusals,
+ * an Undo that keeps notes the person edited) and the Memory tab's
  * "From other assistants" section (look, bring in, batches with Undo, the "from <file>" label of a note).
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {batches, homePath, leftOut, readScan, setupImportCard} from '../../support/gateway/static/import-card.mjs';
+import {batches, homePath, leftOut, nothingToBring, readScan, setupImportCard} from '../../support/gateway/static/import-card.mjs';
 import {setupMemoryTab} from '../../support/gateway/static/memory-tab.mjs';
 
 class Element {
@@ -38,18 +39,22 @@ const HERMES = {id: 'hermes-2e22e64e', harness: 'hermes', path: `${HOME}/.hermes
   filtered: {secret: 0, third_party: 0, wrong_owner: 0, duplicate: 0, mechanics: 0}, sample: ['Prefers concise replies.']};
 const scan = (sources = [CLAUDE, HERMES], extra = {}) => ({batch_id: 'b1', sources, partial: false, home: HOME, ...extra});
 
-/** A gateway double: the offer, the scan and the writes; `fail` makes a call refuse, `hold` keeps a call pending. */
-function harness({pending = true, scanned = scan(), fail = {}, written = [1, 2, 3, 4]} = {}) {
+/**
+ * A gateway double: the offer, the scan and the writes; `fail` makes a call refuse, `hold` keeps a call pending.
+ * `kept` is the count of edited notes an Undo leaves (absent from the reply when 0); `unsaved` makes "Not now"
+ * answer that the offer is still open.
+ */
+function harness({pending = true, scanned = scan(), fail = {}, written = [1, 2, 3, 4], kept = 0, unsaved = false} = {}) {
   const h = {calls: [], pending, scanned, hold: {}};
   h.api = async (path, options = {}) => {
     const method = options.method ?? 'GET';
     h.calls.push([method, path, options.body]);
     if (h.hold[`${method} ${path}`]) await h.hold[`${method} ${path}`];
     if (fail[`${method} ${path}`]) throw Object.assign(new Error(fail[`${method} ${path}`].message), {status: fail[`${method} ${path}`].status});
-    if (path === '/memory/import/offer') return {pending: method === 'GET' ? h.pending : false};
+    if (path === '/memory/import/offer') return {pending: method === 'GET' ? h.pending : unsaved};
     if (path === '/memory/import/scan') return h.scanned;
     if (path === '/memory/import') return {batch_id: options.body.batch_id, written_ids: written, skipped: 0};
-    if (path.startsWith('/memory/import/')) return {batch_id: path.split('/').pop(), removed: written.length};
+    if (path.startsWith('/memory/import/')) return {batch_id: path.split('/').pop(), removed: written.length, ...(kept ? {kept} : {})};
     return {};
   };
   h.root = new Element('section');
@@ -137,6 +142,7 @@ test('while the card shows, the empty chat’s hero is compact, so the card and 
   h.card.show(true);
   assert.deepEqual(h.hero.classList.classes, ['compact']);
   h.root.button('Not now').click();
+  await settle();
   assert.deepEqual(h.hero.classList.classes, [], 'the hero is back once the card is gone');
   // No card, no compact hero: an offer already made, and a scan with no note to bring in.
   for (const options of [{pending: false}, {scanned: scan([])}, {scanned: scan([{...CLAUDE, items_kept: 0, sample: []}])}]) {
@@ -181,6 +187,19 @@ test('Undo takes the batch back and says so; Close hides the card', async () => 
   assert.ok(!h.paths().includes('DELETE /memory/import/offer'), 'closing does not decline anything');
 });
 
+test('Undo says how many notes you edited were kept, in the right plural, and says nothing of it for none', async () => {
+  for (const [kept, wanted] of [[1, 'Taken back. Kept 1 note you edited. Close'], [3, 'Taken back. Kept 3 notes you edited. Close'], [0, 'Taken back. Close']]) {
+    const h = harness({kept});
+    h.card.show(true);
+    await settle();
+    h.root.button('Bring them in').click();
+    await settle();
+    h.root.button('Undo').click();
+    await settle();
+    assert.equal(h.root.text(), wanted);
+  }
+});
+
 test('"Not now" records the offer as made and the card does not come back', async () => {
   const h = harness();
   h.card.show(true);
@@ -195,6 +214,27 @@ test('"Not now" records the offer as made and the card does not come back', asyn
   await settle();
   assert.equal(h.root.hidden, true);
   assert.equal(h.calls.filter(([method]) => method === 'GET').length, 2, 'it did not ask again');
+});
+
+test('"Not now" waits for the gateway: a card whose answer was not kept says so and stays hidden after Close', async () => {
+  for (const options of [{unsaved: true}, {fail: {'DELETE /memory/import/offer': {message: 'disk full', status: 500}}}]) {
+    const h = harness(options);
+    h.card.show(true);
+    await settle();
+    h.root.button('Not now').click();
+    assert.ok(h.root.button('Not now').disabled, 'a second press is not possible while it is saved');
+    await settle();
+    assert.equal(h.root.hidden, false, 'the card stays to say so');
+    assert.equal(h.root.text(), 'Could not save your answer, so melo may ask again next time. Close');
+    assert.deepEqual(h.hero.classList.classes, ['compact']);
+    h.root.button('Close').click();
+    assert.equal(h.root.hidden, true);
+    h.card.show(false);
+    h.card.show(true);
+    await settle();
+    assert.equal(h.root.hidden, true, 'it does not come back until the page reloads');
+    assert.equal(h.calls.filter(([method]) => method === 'GET').length, 2, 'and does not ask again');
+  }
 });
 
 test('no card when the offer was made, when the scan finds nothing, or when asking fails', async () => {
@@ -268,12 +308,13 @@ test('notes that were all known already say so and offer no Undo', async () => {
   assert.equal(h.root.text(), 'Nothing new: melo already knows these. Close');
 });
 
-test('the batches are the imported notes grouped, newest first', () => {
-  const note = (id, batch, at, imported = true) => ({id, imported, batch_id: batch, created_at: at});
+test('the batches are the imported notes grouped, newest first; a note you edited is yours and no longer counts', () => {
+  const note = (id, batch, at, imported = true, edited = false) => ({id, imported, batch_id: batch, created_at: at, edited});
   assert.deepEqual(batches([note(1, 'a', 10), note(2, 'a', 30), note(3, 'b', 50), note(4, '', 90, false), note(5, '', 95)]), [
     {id: 'b', count: 1, at: 50},
     {id: 'a', count: 2, at: 30},
   ]);
+  assert.deepEqual(batches([note(1, 'a', 10), note(2, 'a', 30, true, true), note(3, 'b', 50, true, true)]), [{id: 'a', count: 1, at: 10}]);
 });
 
 // ── The Memory tab's section ──
@@ -340,11 +381,19 @@ test('the Memory tab: nothing found, a refused look, past batches without a look
   await settle();
   assert.match(none.text(), /No notes found on this Mac\./);
 
-  const known = tab({scanned: scan([{...CLAUDE, items_kept: 0, sample: []}])});
+  const REPEATS = {secret: 0, third_party: 0, wrong_owner: 0, duplicate: 5, mechanics: 0};
+  const known = tab({scanned: scan([{...CLAUDE, items_kept: 0, sample: [], filtered: REPEATS}])});
   await known.tab.show();
   known.tab.root.button('Look for notes').click();
   await settle();
   assert.match(known.text(), /Nothing new: melo already knows these\./, 'files whose notes are all known are not "no notes"');
+
+  const leftOut = tab({scanned: scan([{...CLAUDE, items_kept: 0, sample: []}])}); // 1 secret, 1 other person's detail
+  await leftOut.tab.show();
+  leftOut.tab.root.button('Look for notes').click();
+  await settle();
+  assert.match(leftOut.text(), /Nothing to bring in: the lines were left out \(secrets, other people’s details\)\./);
+  assert.doesNotMatch(leftOut.text(), /Nothing new/, 'lines that were left out are not "already known"');
 
   const refused = tab({fail: {'GET /memory/import/scan': {message: ''}}});
   await refused.tab.show();
@@ -360,4 +409,46 @@ test('the Memory tab: nothing found, a refused look, past batches without a look
   const off = tab({on: false});
   await off.tab.show();
   assert.doesNotMatch(off.text(), /From other assistants/, 'with memory off there is nothing to bring notes into');
+});
+
+test('what to say when no file holds a note: repeats are known, other reasons are named, nothing is "no notes"', () => {
+  const said = (...filtered) => nothingToBring(readScan(scan(filtered.map((counts, n) => ({...CLAUDE, id: `s${n}`, items_kept: 0, sample: [], filtered: counts})))));
+  assert.equal(said({duplicate: 3}), 'Nothing new: melo already knows these.');
+  assert.equal(said({duplicate: 3, secret: 1}, {mechanics: 2}), 'Nothing new: melo already knows these.', 'repeats explain the files');
+  assert.equal(said({secret: 1}, {mechanics: 2}), 'Nothing to bring in: the lines were left out (secrets, how the other tool works).');
+  assert.equal(said({}), 'No notes found on this Mac.');
+  assert.equal(nothingToBring(readScan(scan([]))), 'No notes found on this Mac.');
+});
+
+test('the Memory tab: Undo says how many edited notes it kept; a forgotten scan is read again and the choice stays', async () => {
+  const h = tab({kept: 2});
+  await h.tab.show();
+  h.tab.root.button('Look for notes').click();
+  await settle();
+  h.tab.root.boxes()[1].toggle(false);
+  h.tab.root.button('Bring them in').click();
+  await settle();
+  h.tab.root.button('Undo').click();
+  await settle();
+  assert.match(h.text(), /Taken back\. Kept 2 notes you edited\./);
+
+  const gone = tab({fail: {'POST /memory/import': {message: 'That scan is gone: scan again.', status: 404}}});
+  await gone.tab.show();
+  gone.tab.root.button('Look for notes').click();
+  await settle();
+  gone.tab.root.boxes()[1].toggle(false);
+  gone.tab.root.button('Bring them in').click();
+  await settle();
+  assert.match(gone.text(), /That scan is gone: scan again\./);
+  assert.equal(gone.paths().filter((call) => call === 'GET /memory/import/scan').length, 2, 'the scan was read again');
+  assert.ok(gone.tab.root.button('Bring them in'), 'the list is still there, with a batch to write');
+  assert.deepEqual(gone.tab.root.boxes().map((box) => box.checked), [true, false], 'the file left unchecked stays unchecked');
+
+  const refused = tab({fail: {'POST /memory/import': {message: 'No.', status: 400}}});
+  await refused.tab.show();
+  refused.tab.root.button('Look for notes').click();
+  await settle();
+  refused.tab.root.button('Bring them in').click();
+  await settle();
+  assert.equal(refused.paths().filter((call) => call === 'GET /memory/import/scan').length, 1, 'only a forgotten scan is read again');
 });

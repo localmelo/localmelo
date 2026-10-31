@@ -355,11 +355,16 @@ async def test_slash_memory_import_is_a_command_of_the_chat(tmp_path: Path) -> N
 def test_a_line_with_terminal_controls_reaches_the_screen_clean(home: Path) -> None:
     """A note's sample is printed as a terminal would leave it: no title, colour or clipboard sequence."""
     gemini = home / ".gemini" / "GEMINI.md"
+    dirty = "- Use uv \x1b]0;pwned\x07and \x1b[31mred\x1b[0m tools.\n"
     gemini.write_text(
-        gemini.read_text() + "- Use uv \x1b]0;pwned\x07and \x1b[31mred\x1b[0m tools.\n"
-    )
+        "# Style\n" + dirty + gemini.read_text()
+    )  # the first lines are the sample
     plan = asyncio.run(memory_import._scan())
     assert plan is not None
+    raw = [line for source in plan.sources for line in source["sample"]]
+    assert any(
+        "\x1b" in line for line in raw
+    ), "the scan keeps the line as the file has it"
     shown = memory_import.describe(plan)
     assert "Use uv and red tools." in shown
     assert not any(ch in shown for ch in ("\x1b", "\x07", "pwned")), repr(shown)

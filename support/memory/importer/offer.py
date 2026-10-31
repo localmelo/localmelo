@@ -7,6 +7,7 @@ none of them offers again by itself.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -28,15 +29,15 @@ def mark(directory: str, answer: str) -> None:
     """Record the offer as made, with the *answer* (``brought`` or ``declined``); the first stays.
 
     The file is created exclusively, so two answers at once leave one whole record, the first. A folder that
-    cannot be written is logged, not raised: the notes just written must not turn into an error.
+    cannot be written (or fills up half way, which leaves no record) is logged, not raised: the notes just
+    written must not turn into an error.
     """
     if answer not in ANSWERS:
         raise ValueError(f"The answer is one of {ANSWERS}, not {answer!r}.")
+    path = os.path.join(directory, NAME)
     try:
         make_private_dir(directory)
-        fd = os.open(
-            os.path.join(directory, NAME), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
-        )
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
         return  # the first answer stays
     except OSError:
@@ -44,5 +45,13 @@ def mark(directory: str, answer: str) -> None:
             "Could not record the import offer in %s.", directory, exc_info=True
         )
         return
-    with os.fdopen(fd, "w", encoding="utf-8") as file:
-        json.dump({"answer": answer, "at": time.time()}, file)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            json.dump({"answer": answer, "at": time.time()}, file)
+    except OSError:
+        # A half-written record would read as an offer made: leave none, so the offer stays open.
+        log.warning(
+            "Could not record the import offer in %s.", directory, exc_info=True
+        )
+        with contextlib.suppress(OSError):
+            os.unlink(path)

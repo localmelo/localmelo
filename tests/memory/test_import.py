@@ -318,6 +318,22 @@ async def test_undo_takes_the_whole_batch_and_leaves_the_users_own_notes(
     assert await memory.undo_import(plan.batch_id) == 0
 
 
+async def test_undo_leaves_a_note_the_user_reworded_and_counts_it(
+    memory: ChatMemory, home: Path
+) -> None:
+    """An edited note is the person's own words now: undo keeps it, and says how many it kept."""
+    plan = await scan(memory, home)
+    await memory.import_apply(plan, [s["id"] for s in plan.sources])
+    assert await memory.import_kept(plan.batch_id) == 0
+    first = (await memory.records())[0]
+    await memory.edit_record(first.id, "You like very short answers.")
+    assert await memory.import_kept(plan.batch_id) == 1
+    assert await memory.undo_import(plan.batch_id) == 20
+    assert [n.text for n in await memory.records()] == ["You like very short answers."]
+    assert await memory.import_kept(plan.batch_id) == 1
+    assert await memory.undo_import(plan.batch_id) == 0
+
+
 async def test_a_line_the_user_already_has_is_a_duplicate_not_a_replacement(
     memory: ChatMemory, home: Path
 ) -> None:

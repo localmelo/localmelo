@@ -4275,6 +4275,42 @@ test('the main chat opens by default, pinned above its side chats, which are gro
   assert.equal(h.element('welcome-workers').hidden, false);
 });
 
+test('the first-run import card may show only in the main chat, with a model connected, outside setup and worker mode', async () => {
+  const card = (h) => h.element('import-card').shown;
+  const h = harness(mainRoutes({'GET /sessions?kind=worker&limit=50': {sessions: [], next_cursor: null}}));
+  await h.run('init()');
+  assert.equal(h.state().activeId, 'm');
+  assert.equal(card(h), true, 'the main chat of a configured page');
+  findNode(h.element('session-list'), (node) => node.dataset?.sessionId === 'a').children[0].click();
+  await settle();
+  assert.equal(card(h), false, 'a side chat is not where the offer is made');
+  h.element('header-parent').click();
+  await settle();
+  assert.equal(card(h), true, 'back in the main chat');
+  h.context.location.hash = '#/workers';
+  await h.windowListeners.hashchange[0]();
+  await settle();
+  assert.equal(card(h), false, 'worker mode');
+  h.context.location.hash = '#/s/m';
+  await h.windowListeners.hashchange[0]();
+  await settle();
+  assert.equal(card(h), true, 'and back');
+  // No chat open: the setup card (or a new side chat) has the welcome.
+  h.context.location.hash = '#/new';
+  await h.windowListeners.hashchange[0]();
+  await settle();
+  assert.equal(card(h), false, 'no chat is open');
+  for (const [patch, why] of [
+    [{configured: false}, 'no model is configured'],
+    [{model_server: {reachable: false, url: 'http://127.0.0.1:1/v1', name: 'x', models: [], loaded: []}}, 'the model server cannot be reached'],
+  ]) {
+    const off = harness(mainRoutes({'GET /health': {...health, ...patch}, 'GET /setup/detect': nothing}));
+    await off.run('init()');
+    assert.equal(off.state().activeId, 'm');
+    assert.equal(card(off), false, `with the main chat open but ${why}`);
+  }
+});
+
 test('a side chat names the main chat it belongs to, and that name goes back to it', async () => {
   const h = harness(mainRoutes());
   await h.run('init()');

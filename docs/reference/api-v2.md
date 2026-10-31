@@ -1751,14 +1751,16 @@ scan's `batch_id` and the sources the user chose.
   or memory switched off, is 400 `invalid_request`.
 - `GET /api/memory/import/offer` answers `{"pending": true}` while memory is on and bringing
   notes in was never offered on this computer; the first-run card asks it before it scans.
-  `DELETE` on it records "Not now" and answers `{"pending": false}`. A write of notes
+  `DELETE` on it records "Not now" and answers `{"pending": false}`, or `{"pending": true}` when the record could not be written (the offer stays open). A write of notes
   (`POST /api/memory/import`) records the offer as made too, a scan does not. The record is
   `import_offer.json` in the memory folder, shared by the console, the app and the terminal.
 - The `memory.import` event (`batch_id` and, per source, `id`, `harness`, `written`) is in the
   response as `event`: memory has no session channel to send it on.
 - `DELETE /api/memory/import/{batch_id}` takes the batch back: it deletes its notes, makes
   the notes they replaced current again and answers `{"batch_id": "e86b19186930",
-  "removed": 2}`; a batch with no notes left is 404 `not_found`.
+  "removed": 2}`. A note the user reworded since stays (it is theirs now); then the answer
+  also has `"kept": 1`, the number of such notes, and only then. A batch with nothing left to
+  take back and nothing kept is 404 `not_found`.
 - A note it wrote shows in `GET /api/memory/records` with `imported` true, its `batch_id`
   and a `source` like `imported from the file CLAUDE.md, Oct 31`; its `from` reads
   `from the file CLAUDE.md, Oct 31` in the reader's language.

@@ -143,7 +143,7 @@
 
 **From other assistants**（Memory 标签页底部）导入这台 Mac 上其他助手已经了解的关于你的信息。**Look for notes** 列出含有笔记的文件，样子和下面首次运行的卡片一样；**Bring them in** 写入勾选的文件，标签页会说 `Brought in 4 notes.`。每一批都会继续列为 `4 notes brought in · Oct 31`，并带自己的 **Undo**；导入的笔记会写明 `From the file CLAUDE.md, Oct 31`。
 
-主对话在已连接模型且记忆开启时第一次打开，会显示一张卡片 `melo found notes on this Mac from other assistants`，每个文件一行：路径（`~/.claude/CLAUDE.md`）、`3 notes`、一个复选框（默认勾选），以及 **See what is in it**，展开后显示示例行和舍弃了什么（`2 left out: secrets, other people’s details`）。**Bring them in** 写入勾选的文件，卡片显示 `Brought in 6 notes · Undo`；**Undo** 收回这一批。**Not now** 关闭卡片，它不会再回来。在你按下 **Bring them in** 之前不会写入任何内容；什么都没找到时不显示卡片。
+主对话在已连接模型且记忆开启时第一次打开，会显示一张卡片 `melo found notes on this Mac from other assistants`，每个文件一行：路径（`~/.claude/CLAUDE.md`）、`3 notes`、一个复选框（默认勾选），以及 **See what is in it**，展开后显示示例行和舍弃了什么（`2 left out: secrets, other people’s details`）。**Bring them in** 写入勾选的文件，卡片显示 `Brought in 6 notes · Undo`；**Undo** 收回这一批，但会保留你之后编辑过的笔记（`Taken back. Kept 1 note you edited.`）。**Not now** 关闭卡片，它不会再回来；如果 melo 无法保存这个回答，卡片会说明，下次可能还会再问。在你按下 **Bring them in** 之前不会写入任何内容；什么都没找到时不显示卡片。
 
 关闭一个产生过笔记的对话时会问 `Also forget the 2 notes from this chat?`：**Keep the notes**（第一位）、**Forget the 2 notes too** 或 **Don’t delete the chat**。
 

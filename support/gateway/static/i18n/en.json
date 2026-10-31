@@ -709,7 +709,9 @@
   "importCard.lead": "Pick what melo may learn from, so it knows you from your first message. You can take it back.",
   "importCard.leftOut": "{n} left out: {reasons}",
   "importCard.look": "See what is in it",
+  "importCard.notSaved": "Could not save your answer, so melo may ask again next time.",
   "importCard.nothingNew": "Nothing new: melo already knows these.",
+  "importCard.nothingToBring": "Nothing to bring in: the lines were left out ({reasons}).",
   "importCard.partial": "The search stopped early, so a few files may be missing.",
   "importCard.reason.duplicate": "repeats",
   "importCard.reason.mechanics": "how the other tool works",
@@ -719,6 +721,10 @@
   "importCard.title": "melo found notes on this Mac from other assistants",
   "importCard.undoFailed": "Could not take the notes back. Try again.",
   "importCard.undone": "Taken back.",
+  "importCard.undoneKept": {
+    "one": "Taken back. Kept {n} note you edited.",
+    "other": "Taken back. Kept {n} notes you edited."
+  },
   "importCard.working": "Bringing them in…",
   "levels.p0": "runs first; others wait",
   "levels.p1": "today",

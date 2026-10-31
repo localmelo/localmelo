@@ -6,6 +6,7 @@ it, so the routes (which scan the user's home) never read the real one.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -173,3 +174,66 @@ async def test_an_imported_note_says_which_file_it_came_from_in_the_readers_lang
         "/api/memory/records", headers={"X-LocalMelo-Language": "zh-Hans"}
     )
     assert zh.json()["records"][0]["from"].startswith("来自文件 GEMINI.md，")
+
+
+async def test_not_now_says_so_only_when_the_record_was_kept(
+    setup: Setup,  # noqa: F811
+) -> None:
+    """A folder that cannot be written keeps the offer open, and the page is told."""
+    if os.geteuid() == 0:
+        pytest.skip("root writes anywhere")
+    console, client, _ = setup
+    folder = Path(console.memory.directory)
+    folder.mkdir(parents=True, exist_ok=True)
+    folder.chmod(0o500)
+    try:
+        refused = await client.delete("/api/memory/import/offer")
+        assert (refused.status_code, refused.json()) == (200, {"pending": True})
+        assert (await client.get("/api/memory/import/offer")).json() == {
+            "pending": True
+        }
+    finally:
+        folder.chmod(0o700)
+    kept = await client.delete("/api/memory/import/offer")
+    assert kept.json() == {"pending": False}
+
+
+async def test_the_scan_names_the_home_as_the_paths_spell_it_even_when_it_is_a_link(
+    setup: Setup,  # noqa: F811
+    fake_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, client, _ = setup
+    link = tmp_path / "link"
+    link.symlink_to(fake_home)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: link))
+    monkeypatch.setenv("HOME", str(link))
+    scan = (await client.get("/api/memory/import/scan")).json()
+    assert scan["home"] == str(fake_home) and scan["sources"]
+    assert all(
+        source["path"].startswith(scan["home"] + "/") for source in scan["sources"]
+    )
+
+
+async def test_undo_leaves_notes_the_person_reworded_and_says_how_many(
+    setup: Setup,  # noqa: F811
+) -> None:
+    """`kept` is in the answer only when above 0; a batch with nothing left to take back is still 404."""
+    _, client, _ = setup
+    scan = (await client.get("/api/memory/import/scan")).json()
+    gemini = next(s["id"] for s in scan["sources"] if s["harness"] == "gemini")
+    body = {"batch_id": scan["batch_id"], "source_ids": [gemini]}
+    assert (await client.post("/api/memory/import", json=body)).status_code == 200
+    first = (await client.get("/api/memory/records")).json()["records"][0]
+    edited = await client.patch(
+        f"/api/memory/records/{first['id']}", json={"text": "You prefer short answers."}
+    )
+    assert edited.status_code == 200
+    gone = await client.delete(f"/api/memory/import/{scan['batch_id']}")
+    assert gone.json() == {"batch_id": scan["batch_id"], "removed": 2, "kept": 1}
+    rows = (await client.get("/api/memory/records")).json()["records"]
+    assert [r["text"] for r in rows] == ["You prefer short answers."]
+    again = await client.delete(f"/api/memory/import/{scan['batch_id']}")
+    assert again.json() == {"batch_id": scan["batch_id"], "removed": 0, "kept": 1}
+    assert (await client.delete("/api/memory/import/no-such-batch")).status_code == 404

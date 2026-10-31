@@ -130,7 +130,7 @@ melo -h all                                  # every option, command and setting
 | `melo memory list [-n N]` | 按时间从新到旧打印笔记：编号、主题、文字，以及每条来自哪个对话和哪一天。`-n N` 只保留最新的 N 条。 |
 | `melo memory forget [ID] [-y]` | 忘记编号为 `ID` 的笔记；不带 `ID` 则忘记全部笔记和对话索引（对话保留）。它会先问：终端里是一个列表，`Keep it` 或 `Keep everything` 排在第一位；管道输入时是从 stdin 读取的编号问题；Esc、输入结束和 Enter 都表示保留。`-y` 不提问。什么都没忘记时退出码为 1。 |
 | `melo memory status` | 跨对话记忆是否开启、笔记数和已索引的对话轮次数、怎样搜索（用嵌入模型按含义，或只按词）、文件夹，以及嵌入模型最近一次没被使用的原因。 |
-| `melo memory import [-u BATCH]` | 提议导入这台电脑上其他助手保存的关于你的笔记：一个列表，选项是 `Bring in N notes from M files`、`Show what they say` 和 `Not now`（管道输入时是编号问题；输入结束算 `Not now`）。选第一行之前不写入任何内容，选了之后打印批次；`-u BATCH`（`--undo`）收回该批次。`--undo` 找不到笔记时退出码为 1。 |
+| `melo memory import [-u BATCH]` | 提议导入这台电脑上其他助手保存的关于你的笔记：一个列表，选项是 `Bring in N notes from M files`、`Show what they say` 和 `Not now`（管道输入时是编号问题）。列表默认停在 `Show what they say`。选第一行之前不写入任何内容，选了之后打印批次；Esc、ctrl+c 和输入结束不导入任何内容，也不记录回答（`Nothing brought in.`，Esc 和 ctrl+c 退出码为 130，其他为 0）。`-u BATCH`（`--undo`）收回该批次，并保留你之后编辑过的笔记（`Kept N notes you edited.`）。`--undo` 找不到笔记时退出码为 1。 |
 | `melo memory reindex` | 从对话重建对话索引，并给每条笔记补上当前嵌入模型的向量。上次“忘记全部”之前结束的轮次不会进入。`melo serve` 或应用运行时退出码为 1，因为对话由它们持有。 |
 
 ```text

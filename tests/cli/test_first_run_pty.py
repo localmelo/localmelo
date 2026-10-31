@@ -252,3 +252,38 @@ def test_the_first_run_offers_other_assistants_notes_once_as_a_list(
     finally:
         term.close()
     assert "found notes on this Mac" not in _text(term)
+
+
+@pytest.mark.parametrize(
+    ("key", "code"), [(b"\x1b", 130), (b"\x03", 130), (b"\x04", 0)]
+)
+def test_esc_ctrl_c_and_ctrl_d_at_the_notes_list_cancel_like_setup_and_offer_again(
+    chat_server: FakeChatServer,  # noqa: F811
+    tmp_path: Path,
+    key: bytes,
+    code: int,
+) -> None:
+    """No answer is not "Not now": melo ends as a cancelled setup ends, and the next run asks again."""
+    chat_server.models = ["chat-a"]
+    rules = tmp_path / ".codex" / "AGENTS.md"
+    rules.parent.mkdir(parents=True)
+    rules.write_text("# Rules\n- Prefer tabs in Makefiles.\n")
+    term = _melo(tmp_path, chat_server)
+    try:
+        assert term.read_until(lambda out: b"Use this model server?" in out, 30)
+        term.type(b"\r")
+        assert term.read_until(lambda out: b"Bring in 1 note from 1 file" in out, 30)
+        term.type(key)
+        assert _exit_code(term) == code, term.output
+    finally:
+        term.close()
+    assert "Setup cancelled." in _text(term) and READY.decode() not in _text(term)
+    term = _melo(tmp_path, chat_server)
+    try:
+        assert term.read_until(
+            lambda out: b"melo found notes on this Mac from other assistants" in out, 30
+        ), term.output
+        term.type(b"\x03")
+        _exit_code(term)
+    finally:
+        term.close()

@@ -472,7 +472,7 @@ https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md
  ↑↓ select · enter confirm · esc cancel
 ```
 
-`Show what they say` 把每个文件打印成路径（`~/.claude/CLAUDE.md · 9 notes`），带几行示例和舍弃了什么（`9 left out: secrets, other people's details`），然后再问一次。在你选第一行之前不会导入任何内容；`Not now`、Esc 和输入结束都会让这个提议永久结束。之后可以在对话里用 `/memory import`，或用 `melo memory import` 再问同样的列表；任务运行（`melo "task"`）从不询问。管道输入时，列表是从 stdin 读取的编号问题。这些笔记就是控制台 Memory 标签页列出的那些，每次导入都有一个批次，可以用 `melo memory import --undo BATCH` 收回。
+`Show what they say` 把每个文件打印成路径（`~/.claude/CLAUDE.md · 9 notes`），带几行示例和舍弃了什么（`9 left out: secrets, other people's details`），然后再问一次。列表默认停在 `Show what they say`，所以直接按 Enter 不会导入任何内容；看过文件之后，列表默认停在 `Bring in`。在你选第一行之前不会导入任何内容，只有 `Not now` 会让这个提议永久结束。Esc、ctrl+c 和输入结束只是离开，不导入任何内容，也不记录回答，所以之后还会再问：首次运行时 melo 像取消设置一样结束（`Setup cancelled.`，Esc 和 ctrl+c 退出码为 130），`melo memory import` 里会说 `Nothing brought in.`，`/memory import` 里 Esc 只是关闭列表。文件里的行全部被舍弃时，会说 `Nothing to bring in: the lines were left out (secrets)`，而不是 `Nothing new`。`melo memory import --undo BATCH` 会保留你之后编辑过的笔记并说明（`Took back 20 notes. Kept 1 note you edited.`）。之后可以在对话里用 `/memory import`，或用 `melo memory import` 再问同样的列表；任务运行（`melo "task"`）从不询问。管道输入时，列表是从 stdin 读取的编号问题。这些笔记就是控制台 Memory 标签页列出的那些，每次导入都有一个批次，可以用 `melo memory import --undo BATCH` 收回。
 
 <a id="questions-are-lists"></a>
 

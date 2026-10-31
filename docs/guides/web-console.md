@@ -311,7 +311,7 @@ The first time the main chat opens with a model connected and memory on, it show
 from other assistants`, with a row per file: its path (`~/.claude/CLAUDE.md`), `3 notes`, a checkbox (checked), and
 **See what is in it**, which shows the sample lines and what was left out (`2 left out: secrets, other people’s
 details`). **Bring them in** writes the checked files and the card says `Brought in 6 notes · Undo`; **Undo** takes the
-batch back. **Not now** closes the card, and it does not come back. Nothing is written until you press **Bring them
+batch back and keeps any note you have edited since (`Taken back. Kept 1 note you edited.`). **Not now** closes the card, and it does not come back; if melo cannot save that answer, the card says so, and may ask again next time. Nothing is written until you press **Bring them
 in**, and a search that finds nothing shows no card.
 
 Closing a chat that made notes asks `Also forget the 2 notes from this chat?`: **Keep the notes** (first),
