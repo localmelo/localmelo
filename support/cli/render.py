@@ -357,9 +357,20 @@ def approval_tag(status: str, approval: Mapping[str, Any] | None) -> str:
     if approval.get("allowed"):
         if origin == "session":
             return "allowed by a session grant"
-        if origin == "policy":
+        if origin in ("policy", "auto"):
+            review = approval.get("review")
+            if (
+                origin == "auto"
+                and isinstance(review, Mapping)
+                and review.get("categories")
+            ):
+                return "allowed: you asked for it"
             return "auto-allowed"
+        if approval.get("allowance") == "once":
+            return "allowed once"
         return "allowed for the session" if approval.get("remember") else "allowed"
+    if origin == "auto":
+        return f"blocked: {reason}" if reason else "blocked"
     if origin == "policy":
         return f"denied by policy: {reason}" if reason else "denied by policy"
     if origin == "user":

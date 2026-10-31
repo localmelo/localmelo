@@ -315,7 +315,10 @@ def check_events(recorder: Recorder) -> None:
     """Pinned keys, JSON envelopes, and one tool.finished per tool.started."""
     open_call: str | None = None
     for event in recorder.events:
-        assert set(event.data) == EVENT_FIELDS[event.type], event.type
+        # Only a run with an approval policy has run.finished's reviews (#339).
+        absent = {"reviews"} if event.type == "run.finished" else set()
+        assert set(event.data) <= EVENT_FIELDS[event.type], event.type
+        assert EVENT_FIELDS[event.type] - set(event.data) <= absent, event.type
         json.dumps(event.to_dict(), allow_nan=False)
         if event.type == "tool.started":
             assert open_call is None

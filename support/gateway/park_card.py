@@ -11,6 +11,9 @@ from localmelo.support.gateway.task_policy import TaskSpec
 from localmelo.support.sessions.store import StoredEvent
 
 MAX_CARD_CHARS = 2_000
+# How every card begins: a turn whose text starts so is melo's card, not words
+# the person typed.
+CARD_START = "Where stopped: "
 
 
 def _text(value: object, limit: int) -> str:
@@ -89,7 +92,7 @@ def build_park_card(
         stopped += "; tool call without a recorded finish"
     left = _text("; ".join(items), 300) or "Completion criteria not recorded"
     card = (
-        f"Where stopped: {stopped}\n"
+        f"{CARD_START}{stopped}\n"
         f"Objective: {objective}\n"
         f"Last reflection (reported): {reflection or 'Not recorded'}\n"
         f"Last reply (reported): {reply or 'Not recorded'}\n"

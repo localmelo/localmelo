@@ -148,7 +148,7 @@ asyncio.run(main())
 | `reflection` | 反思的效果确定之后。 | `attempt`, `action`, `continue_run`, `flags`, `gate`, `utility`, `stop_reason`, `rationale`, `summary`, `best_effort_result`, `requests`, `readable`, `unreadable_reason`, `repaired`, `usage`, `duration_s` |
 | `run.progress` | 仅当设置 `progress=True` 时：紧接在 `run.started` 之后；每次 `step.started`、`tool.finished`、`reflection.started` 和 `stuck` 通知之后；以及紧接在 `run.finished` 之前。 | `level`, `state`, `step`, `attempt`, `limits`, `phase`, `cycle`, `tests`, `items`, `fraction`, `expected_steps`, `past`, `off_reason`, `basis` |
 | `context_budget` | 启用上下文记账时，每次规划或反思尝试一次，包括失败的尝试。 | `kind`, `model`, `attempt`, `proxy_version`, `source`, `estimate`, `measured_prompt_tokens`, `input_limit`, `over_limit`, `image_allowance`, `pruned` |
-| `run.finished` | 最后一个。 | `result` |
+| `run.finished` | 最后一个。 | `result`, `reviews` |
 
 <a id="runstarted"></a>
 
@@ -237,7 +237,7 @@ asyncio.run(main())
 - `output_chars`：`output` 的长度，即使事件中的副本被截断也如此（见[载荷规则](#payload-rules)）。
 - `duration_s`：工具运行的时间：未运行时为 `0`；对于被取消或崩溃的调用，则为自 `tool.started` 起算的时间。
 - `images`：工具返回的图片，每张都是 `{sha256, mime_type, size_bytes}`。`AgentEvent.images` 保存图片本身。
-- `approval`：未询问审批策略时为 `null`：对于不需要审批的工具、没有策略的运行，以及在策略会被询问之前就被拒绝的调用。否则为 `{request_id, allowed, reason, remember, origin}`，其中 `origin` 是决定的来源（`user`、`session`、`policy` 或 `timeout`）；策略失败时为 `error`；运行在策略做决定期间被取消时为 `withdrawn`。见[审批工具调用](../guides/python.md#approve-tool-calls)。
+- `approval`：未询问审批策略时为 `null`：对于不需要审批的工具、没有策略的运行，以及在策略会被询问之前就被拒绝的调用。否则为 `{request_id, allowed, reason, remember, origin}`，其中 `origin` 是决定的来源（`user`、`session`、`policy`、`timeout` 或 `auto`）；策略失败时为 `error`；运行在策略做决定期间被取消时为 `withdrawn`。在自动模式下，以及对审查结果不是明确常规的调用，它还带有 `mode`（`"auto"`）、`review`（审查结果：`verdict`、`categories`、`reasons`、`paths`、`by`（`rules` 或 `model`）、`rules_version`，以及询问过模型时的 `model`：`{verdict, category, fits_request, user_asked, reason, ms}` 或 `{error, ms}`）和 `step_key`（32 个十六进制字符：同一文件夹中的同一步骤）；被允许一次的步骤带有 `allowance: "once"`。来源为 `auto` 且 `allowed: false` 表示自动模式拦下的步骤；此时 `reason` 用几个词说明它（`installs software`）。见[审批工具调用](../guides/python.md#approve-tool-calls)。
 - `exit_code`：`shell_exec` 或 `python_exec` 所运行的子进程的退出状态；负值 `-N` 表示被信号 `N` 结束。对于其他工具、子进程从未启动的调用，以及工具因超时或取消而杀死子进程的情况，它为 `null`。非零退出不会改变 `status`：`shell_exec` 仍然成功，其文本以 `[exit code <n>]` 开头；`python_exec` 则以 `Python exited with code <n>` 失败。
 
 <a id="note"></a>
@@ -397,6 +397,7 @@ asyncio.run(main())
 ### run.finished：运行结束
 
 - `result`：运行的 `RunResult`，即 `RunResult.to_dict()`。其中没有任何内容被截断，因此 `RunResult(**event.data["result"])` 可以重建它。
+- `reviews`：只有带审批策略的运行才有：规则判为 `routine`、`high` 和 `undecided` 的调用数，运行发出的 `model` 审查次数，以及 `blocked`：自动模式拦下的步骤，每个为 `{call_id, title, step_key}`。没有策略的运行，以及在加入这个键之前存储的事件，没有 `reviews`。
 
 当 `run_task` 因运行被取消而抛出异常时，也会发出 `run.finished`；此时它保存 `run_task` 本会返回的 `RunResult`。
 

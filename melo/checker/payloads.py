@@ -71,7 +71,11 @@ class ActionReviewPayload:
     """One call about to run, for the action review (``Checker.review_action``).
 
     ``home``, ``executable`` and ``prefix`` default to the running process's
-    (``~``, ``sys.executable``, ``sys.prefix``); tests set them.
+    (``~``, ``sys.executable``, ``sys.prefix``); tests set them. ``since``
+    is when the chat began (wall-clock seconds): a runner such as ``pytest``
+    is undecided when code in the workspace changed after it; ``None``
+    skips that check. ``destructive``: the tool says it can destroy data
+    (an MCP tool's ``destructiveHint``).
     """
 
     tool_name: str = ""
@@ -80,6 +84,8 @@ class ActionReviewPayload:
     home: str = ""
     executable: str = ""
     prefix: str = ""
+    since: float | None = None
+    destructive: bool = False
 
 
 # ── Memory boundary ──

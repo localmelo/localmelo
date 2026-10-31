@@ -202,6 +202,57 @@ def load_mcp_providers(path: str) -> list[BaseToolProvider]:
     return [McpToolProvider(load_mcp_config(os.path.expanduser(path)))]
 
 
+# A step review (request kind "review", #339) is a short JSON answer: no
+# thinking, no sampling spread, and a small reply, so a thinking local model
+# answers in time instead of timing out into a block.
+REVIEW_MAX_TOKENS: Final = 200
+# The backends whose OpenAI-compatible servers take chat_template_kwargs
+# (None: a --base-url server, a local one).
+_TEMPLATE_KWARGS_BACKENDS: Final = frozenset({"vllm", "sglang", None})
+_LOCAL_BACKENDS: Final = frozenset({"vllm", "sglang", "mlc", "ollama", None})
+
+
+def review_body(llm: BaseLLMProvider, backend: str | None) -> dict[str, Any]:
+    """The extra request body of a step review for *llm* on *backend*.
+
+    Ollama's native API: ``think`` off and ``options`` with temperature 0 and
+    :data:`REVIEW_MAX_TOKENS` (``num_predict``), over the provider's own
+    options. An OpenAI-compatible server: temperature 0 and ``max_tokens``,
+    and, where the server takes it, ``chat_template_kwargs.enable_thinking``
+    off over the provider's own kwargs. A cloud backend gets nothing: its
+    models answer fast, and some refuse these fields.
+    """
+    if backend not in _LOCAL_BACKENDS:
+        return {}
+    own = getattr(llm, "extra_body", None) or {}
+    from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
+
+    if isinstance(llm, OllamaNativeChat):
+        found = own.get("options")
+        options: Mapping[str, Any] = found if isinstance(found, Mapping) else {}
+        return {
+            "think": False,
+            "options": {
+                **options,
+                "temperature": 0,
+                "num_predict": REVIEW_MAX_TOKENS,
+            },
+        }
+    body: dict[str, Any] = {"temperature": 0, "max_tokens": REVIEW_MAX_TOKENS}
+    if backend in _TEMPLATE_KWARGS_BACKENDS:
+        kwargs = own.get("chat_template_kwargs")
+        kwargs = dict(kwargs) if isinstance(kwargs, Mapping) else {}
+        body["chat_template_kwargs"] = {**kwargs, "enable_thinking": False}
+    return body
+
+
+def with_review_body(llm: BaseLLMProvider, backend: str | None) -> None:
+    """Give *llm*'s step reviews :func:`review_body`, keeping its other kinds."""
+    body = review_body(llm, backend)
+    if body:
+        llm.extra_body_by_kind = {**llm.extra_body_by_kind, "review": body}
+
+
 async def build_session_agent(
     *,
     cfg: Config | None,
@@ -370,6 +421,7 @@ async def build_session_agent(
                         copy.deepcopy(dict(retrieval_extra_body))
                     )
                 }
+            with_review_body(llm, None if cfg is None else cfg.chat_backend)
             if wrap_llm is not None:
                 llm = wrap_llm(llm)
             if wrap_embedding is not None and embedding is not None:
@@ -385,6 +437,9 @@ async def build_session_agent(
             agent = (agent_class or Agent)(
                 config=cfg, options=agent_options, tool_providers=providers
             )
+            built = getattr(agent, "_llm", None)
+            if isinstance(built, BaseLLMProvider):
+                with_review_body(built, cfg.chat_backend)
     except BaseException:
         # No Agent exists to own these if a wrapper or constructor refused.
         for provider in (llm, embedding, *providers):

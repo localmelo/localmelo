@@ -356,7 +356,10 @@ async def check_guarantees(
     stamps = [event.ts for event in events]
     assert stamps == sorted(stamps)
     for event in events:
-        assert set(event.data) == EVENT_FIELDS[event.type], event.type
+        # Only a run with an approval policy has run.finished's reviews (#339).
+        absent = {"reviews"} if event.type == "run.finished" else set()
+        assert set(event.data) <= EVENT_FIELDS[event.type], event.type
+        assert EVENT_FIELDS[event.type] - set(event.data) <= absent, event.type
         envelope = event.to_dict()
         assert envelope["v"] == 1
         json.dumps(envelope, allow_nan=False)
@@ -476,6 +479,7 @@ class TestSequence:
         # Only the integer fields of usage.
         assert answer.data["usage"] == {"total_tokens": 5}
         assert (answer.data["step"], answer.data["tool_calls"]) == (2, [])
+        # No approval policy: no reviews key (#339).
         assert done.data == {"result": result.to_dict()}
         assert RunResult(**done.data["result"]) == result
 
@@ -611,7 +615,7 @@ class TestFields:
                 "image_allowance",
                 "pruned",
             },
-            "run.finished": {"result"},
+            "run.finished": {"result", "reviews"},
         } == {name: set(keys) for name, keys in EVENT_FIELDS.items()}
 
     @pytest.mark.asyncio
@@ -737,7 +741,9 @@ class TestFields:
         # Budget events need an opted-in run; test_request_accounting pins one.
         assert seen == set(EVENT_FIELDS) - {"memory", "context_budget"}
         for event in events:
-            assert set(event.data) == EVENT_FIELDS[event.type]
+            # These runs have no approval policy: no reviews key (#339).
+            no_policy = {"reviews"} if event.type == "run.finished" else set()
+            assert set(event.data) == EVENT_FIELDS[event.type] - no_policy
         details = {
             event.data["kind"]: set(event.data["detail"])
             for event in reflect.of("notice") + stuck.of("notice")

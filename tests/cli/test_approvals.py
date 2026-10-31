@@ -14,6 +14,7 @@ from localmelo.melo.contracts.approvals import (
     AllowAllPolicy,
     ApprovalDecision,
     ApprovalRequest,
+    AutoPolicy,
     DenyAllPolicy,
 )
 from localmelo.melo.contracts.review import ActionReview
@@ -31,7 +32,7 @@ from localmelo.support.cli.approvals import (
 )
 from localmelo.support.cli.render import LiveState
 from localmelo.support.cli.text import cells
-from localmelo.support.sessions.approvals import RememberingPolicy, RoutineOnlyPolicy
+from localmelo.support.sessions.approvals import RememberingPolicy
 from localmelo.tests.cli.ui_helpers import (
     BACKSPACE,
     CTRL_C,
@@ -77,8 +78,8 @@ def _request(
         (
             "auto",
             ["shell_exec"],
-            "runs routine commands without asking; asks before installs, "
-            "downloads and changes outside the folder",
+            "works without asking; blocks risky steps and steps you did not ask "
+            "for, and explains them",
         ),
         ("deny", [], "never runs commands or changes files"),
         ("yolo", [], "runs everything without asking (--yolo)"),
@@ -753,8 +754,8 @@ def test_the_modes_wrap_the_policy() -> None:
     assert isinstance(approvals.snapshots.inner, RememberingPolicy)
     approvals.set_mode("auto")
     assert approvals.policy() is approvals.snapshots
-    assert isinstance(approvals.snapshots.inner, RoutineOnlyPolicy)
-    assert approvals.snapshots.inner.inner is approvals._policy
+    assert isinstance(approvals.snapshots.inner, AutoPolicy)
+    assert approvals.snapshots.inner is approvals._auto
     approvals.set_mode("deny")
     policy = approvals.policy()
     assert isinstance(policy, DenyAllPolicy)
@@ -762,7 +763,7 @@ def test_the_modes_wrap_the_policy() -> None:
     assert Approvals(ask, "yolo").policy() is None
 
 
-async def test_auto_mode_asks_before_a_high_impact_call() -> None:
+async def test_auto_mode_blocks_a_high_impact_call_without_asking() -> None:
     asked: list[ApprovalRequest] = []
 
     async def ask(request: ApprovalRequest) -> ApprovalDecision:
@@ -777,9 +778,15 @@ async def test_auto_mode_asks_before_a_high_impact_call() -> None:
         review=ActionReview("high", ("install",), ("Installs x with pip.",)),
     )
     ls = dataclasses.replace(_request(), review=ActionReview("routine"))
-    assert await policy.decide(ls) == ApprovalDecision(True, origin="policy")
-    assert await policy.decide(pip) == ApprovalDecision(False, "no")
-    assert asked == [pip]
+    assert await policy.decide(ls) == ApprovalDecision(True, origin="auto")
+    assert await policy.decide(pip) == ApprovalDecision(
+        False, "installs software", origin="auto"
+    )
+    assert asked == []  # nobody is asked in auto mode
+    # A new chat forgets the allowances of the old one.
+    old = approvals._auto
+    approvals.reset()
+    assert approvals._auto is not old
 
 
 async def test_grants_survive_auto_and_ask_until_forgotten() -> None:
