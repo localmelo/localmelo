@@ -327,7 +327,7 @@
   "front.echo.pausesNext": "将在下一步暂停：{title}",
   "front.echo.resumeFailed": "无法继续 {title}：{problem}",
   "front.echo.resumed": "已继续：{title}",
-  "front.echo.runThis": "{when}运行这个？",
+  "front.echo.runThis": "按“{when}”运行这个？",
   "front.echo.saved": "已保存：{title} · {when}",
   "front.echo.sendFailed": "无法发送给 {title}：{problem}",
   "front.echo.sentTo": "已发送给：{title}",

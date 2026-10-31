@@ -23,11 +23,11 @@ export function whenWords(at, now) {
   const time = new Date(at * 1000);
   const day = (stamp) => { const d = new Date(stamp * 1000); d.setHours(0, 0, 0, 0); return d.getTime() / 1000; };
   const ahead = Math.round((day(at) - day(now)) / 86400);
-  const clock = time.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+  // The day and the time as the page's language writes them (in English, as this computer does).
+  const names = language() === 'en' ? [] : 'zh-CN';
+  const clock = time.toLocaleTimeString(names, {hour: 'numeric', minute: '2-digit'});
   if (ahead <= 0) return t('sched.when.today', {clock});
   if (ahead === 1) return t('sched.when.tomorrow', {clock});
-  // The day's name in the page's language (in English, as this computer writes it).
-  const names = language() === 'en' ? [] : 'zh-CN';
   const label = ahead < 7 ? time.toLocaleDateString(names, {weekday: 'long'}) : time.toLocaleDateString(names, {month: 'short', day: 'numeric'});
   return t('sched.when.day', {day: label, clock});
 }

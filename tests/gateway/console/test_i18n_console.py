@@ -212,4 +212,4 @@ async def test_an_echo_keeps_its_english_line_and_its_words_for_the_page(
         if echo["echo"] != "level":
             assert said_text(echo["said"], "zh-Hans") != english, echo
     proposal = next(echo for echo in echoes if echo["echo"] == "chore")
-    assert said_text(proposal["said"], "zh-Hans") == "每个工作日 8:30运行这个？"
+    assert said_text(proposal["said"], "zh-Hans") == "按“每个工作日 8:30”运行这个？"
