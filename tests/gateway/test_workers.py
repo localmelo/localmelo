@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -557,13 +557,13 @@ def test_a_resumption_card_is_not_the_person_s_words() -> None:
         spec, [StoredEvent(id=1, session_id="s", turn=1, event=event)]
     )
     assert reply in card
-    assert _turn_text(SimpleNamespace(spec=spec, card=card)) == (
+    assert _turn_text(cast(Any, SimpleNamespace(spec=spec, card=card))) == (
         card,
         "can you sign me in every day?",
     )
     # A task the person started: its objective is their words.
     own = {"objective": "Find a way to sign in daily."}
-    assert _turn_text(SimpleNamespace(spec=own, card=card)) == (
+    assert _turn_text(cast(Any, SimpleNamespace(spec=own, card=card))) == (
         card,
         "Find a way to sign in daily.",
     )
