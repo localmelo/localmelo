@@ -15,7 +15,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   its first request, under a heading that says they are information, not
   instructions. A continue or a restart uses the same lines; memory off, or
   nothing matching, starts the task without them. The task page folds them
-  under "What melo told the task". Part of #369. [#NN]
+  under "What melo told the task". Part of #369. [#382]
 - Every slash command of the terminal works in the web console and the app.
   Typing `/` at the start of the message box opens a menu above it that
   narrows as you type (arrows and Enter or Tab, Esc, or a click; a command
@@ -3192,3 +3192,4 @@ earlier milestones.
 [#378]: https://github.com/localmelo/localmelo/pull/378
 [#379]: https://github.com/localmelo/localmelo/pull/379
 [#381]: https://github.com/localmelo/localmelo/pull/381
+[#382]: https://github.com/localmelo/localmelo/pull/382
