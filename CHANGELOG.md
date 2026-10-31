@@ -99,7 +99,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   such as "my flight to Porto" and "my flight to Faro" stay apart. The old note is kept
   but never recalled, and Undo brings it back. A turn whose fact was replaced comes
   after the newer note and reads `(older; replaced by a newer note)`, and the chat is
-  told that when notes or earlier chats disagree, the newest one is true ([#NN]).
+  told that when notes or earlier chats disagree, the newest one is true ([#322]).
 
 - A fact you state is kept as a note, and melo no longer goes off to save it in a
   file. On a real model, "My group meeting is on Thursdays at 3 pm.", "Remember that Sam
@@ -2597,6 +2597,7 @@ earlier milestones.
 [#316]: https://github.com/localmelo/localmelo/pull/316
 [#317]: https://github.com/localmelo/localmelo/pull/317
 [#320]: https://github.com/localmelo/localmelo/pull/320
+[#322]: https://github.com/localmelo/localmelo/pull/322
 [#310]: https://github.com/localmelo/localmelo/pull/310
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202
