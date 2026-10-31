@@ -324,6 +324,10 @@ def run_interactive(
         return 1
     if isinstance(choice, int):
         return choice
+    # Once per computer, to a person at a terminal: bring in what other assistants already know.
+    from localmelo.support.cli import memory_import
+
+    memory_import.first_run()
     explicit = {
         name
         for name in (
