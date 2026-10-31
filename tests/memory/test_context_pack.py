@@ -41,7 +41,8 @@ class OwnerInfo(TurnInfo):
 
 def as_owner(info: TurnInfo, origin: str = ASK_OWNER) -> OwnerInfo:
     fields = {f.name: getattr(info, f.name) for f in dataclasses.fields(info)}
-    return OwnerInfo(**fields, origin=origin)
+    # The turn store's TurnInfo has origin now (#369): it is set here.
+    return OwnerInfo(**{**fields, "origin": origin})
 
 
 @pytest.fixture()

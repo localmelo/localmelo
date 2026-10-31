@@ -84,6 +84,7 @@ COMMANDS: Final[tuple[Command, ...]] = (
     Command("side", (), "[title]", "Start a side chat in this folder", False),
     Command("main", (), "", "Go back to the main chat", False),
     Command("task", (), "TEXT", "Start a task in this chat: /task TEXT", False),
+    Command("answer", (), "TASK TEXT", "Answer a task that waits for you", False),
     Command("mcp", (), "", "Show the MCP servers", True),
 )
 
@@ -117,7 +118,7 @@ HELP_GROUPS: Final = (
 # The same in the main chat.
 MAIN_HELP_GROUPS: Final = (
     ("Chats", ("chats", "side", "main")),
-    ("Turns", ("task", "retry")),
+    ("Turns", ("task", "answer", "retry")),
     ("Model", ("status",)),
     ("Help", ("help", "exit")),
 )

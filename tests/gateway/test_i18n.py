@@ -38,6 +38,8 @@ CONSOLE = ROOT / "support/gateway/console"
 # Words written by modules the terminal runs too, which need no gateway.
 USAGE = ROOT / "support/usage_snapshot.py"
 DISPLAY = ROOT / "support/sessions/display.py"
+# The terminal's main chat, which writes the catalog's English (``t_in("en", …)``).
+TERMINAL = ROOT / "support/cli/main_chat.py"
 APP = ROOT / "macos/LocalMeloApp"
 CASES = json.loads((ROOT / "tests/fixtures/i18n_cases.json").read_text("utf-8"))
 _PARAM = re.compile(r"\{(\w+)\}")
@@ -251,6 +253,7 @@ def named_keys() -> tuple[set[str], set[str], set[str]]:
         *ROOT.glob("support/gateway/*.py"),
         USAGE,
         DISPLAY,
+        TERMINAL,
     ]:
         text = path.read_text("utf-8")
         found |= set(_PY_KEY.findall(text)) | set(_WORDS_KEY.findall(text))

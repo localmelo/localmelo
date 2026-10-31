@@ -1039,6 +1039,48 @@ with the echo.
   side chat (404 for an unknown chat or one that is not a side chat); absent,
   it is the main chat's.
 
+### A task's question
+
+A worker that is stuck calls `ask_owner`; its chat (`front_id`, else the main
+chat) gets echoes with `task_id`, `title` and `ask_id`:
+
+- `task_ask`: the question, with `fields` (`background`, `situation`,
+  `problem`, `likely_causes`, `options`, `help_needed`, `if_unsolvable`) and
+  `lead`, the first line of the chat's internal turn; `from_chat` (the task's
+  title) when the task's own chat was deleted.
+- `task_answered` (`text`, `of` the question): the chat answered with
+  `task_answer`.
+- `task_escalate` (`parts`: `background`, `what_happened`, `tried`,
+  `choices`, `question`; `waiting`, how many of the chat's tasks waited for
+  the person then): the chat asked the person with `ask_person`.
+  `POST /api/front/echoes/{id}` with `{"do": "reply", "text": "…"}` answers it
+  (200 `{"echo"}`, the `ask_end`; 409 `already_answered` once it is closed).
+- `answer_sent` (`typed`, `undo_s`): with exactly one of the chat's tasks
+  waiting for the person, a message that is not a question, a work request, a
+  command, a control phrase or a greeting is its answer (200 with this echo
+  instead of a turn). It reaches the task after `undo_s` seconds (10), and an
+  `answer_delivered` echo (`of`) follows; `{"do": "undo"}` before then answers
+  an `undone` echo, the task keeps waiting and the message starts as a turn
+  (409 `already_answered` after delivery). `/answer TASK TEXT` answers a
+  waiting task by its title at once (the `ask_end`); with several waiting and
+  no title, or none waiting, a `failed` echo says so.
+- A repeated `client_request_id` while its message is being queued waits for
+  it and gets the same answer.
+- `ask_end` (`how`: `person` with `text`, `timeout`, `stopped` or `expired`;
+  `of` the question or the escalation).
+- `queued` (`typed`) and `dequeued` (`of`): a message sent while the chat
+  answers a task is kept, `POST /api/sessions/{id}/turns` answering 200 with the
+  `queued` echo instead of 409, and runs as the chat's next turn, after a
+  restart too, and once: a turn its `client_request_id` (or melo's own key)
+  already started is not run again. It is accepted only once it is stored;
+  otherwise the answer is 503 `store_unavailable` and a `failed` echo (`of`
+  the queued one, `typed`) says it was not sent.
+
+The chat's internal turn is a turn with `"origin": "ask_owner"` (the key is
+absent on the person's turns, in the turn row and in `turn.started`), empty
+typed text and the question as its user text. A task body has `ask`: `{"ask_id", "chat_id", "chat_title", "on":
+"owner" | "person"}` while it waits, else `null`.
+
 ## GET /api/sessions/{id}/events
 
 A Server-Sent Events stream of the session's events: the stored ones after
@@ -1236,6 +1278,7 @@ These codes answer on the write routes besides the shared ones above:
 | 400 | `text_rejected` | the checker refused the message text, as it does for a `/v1/agent/run` request |
 | 409 | `session_busy` | a turn is already running in the session |
 | 409 | `not_latest_turn` | retry named a turn that is not the newest finished one |
+| 409 | `not_retryable` | retry named a turn that answered a task's question |
 | 409 | `submission_conflict` | the `client_request_id` was used for a different message |
 | 409 | `submission_withdrawn` | the `client_request_id` was cancelled before it started |
 | 409 | `turn_not_running` | cancel named a turn that is not running |
@@ -1343,6 +1386,8 @@ Run the newest finished turn's text again.
 - 409 `not_latest_turn` unless the id is the newest finished, not undone
   turn: a client that lost a turn's end retries the id it holds. 409
   `session_busy` while a turn runs.
+- 409 `not_retryable` for a turn that answered a task's question
+  (`origin` `ask_owner`): its words are not the person's.
 
 ## POST /api/turns/{turn_id}/cancel
 

@@ -9,6 +9,26 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A task that is stuck asks the chat that started it instead of stopping. Its
+  question shows there (`Task “Fix tests” asks…`, with the background, the
+  problem, the options and the help it needs), and melo answers it when the
+  chat is free (`melo answered “Fix tests”`), using the chat's tools and
+  memory, or asks you with the choices and their trade-offs and a box for your
+  answer (`“Fix tests” needs your answer`). The task waits without taking a
+  model slot: `Waiting on Main chat`, or `Waiting on you`. A message you send
+  while melo answers is queued and runs next, once, even after a restart, a
+  question with no answer in 10 minutes lets the task go on with its best
+  option, and melo's answer never approves a step. A task's words are never
+  taken as yours: they allow no blocked step, are never remembered as
+  something you said, and the turn that answers them cannot be retried.
+  Deleting a chat moves its open questions to the main chat. The terminal
+  shows the same rows: `Task “Fix tests” asks: …`, melo's answer, then `melo
+  answered` or `needs your answer`. melo's answer is kept as the task's
+  exchange, which later chats can recall, never as a note. When only one task
+  waits for you in a chat, you can just send your answer as a message (`Sent
+  to “Fix tests” as your answer`, with Undo for 10 seconds); with several,
+  `/answer Fix tests: B`, in the console and the terminal. The chat's
+  `task_get` now reads a running task live. [#379]
 - Side chats start tasks too. A side chat has the main chat's task tools and
   code words (`/task …`, **Run as a task**, `pause the slides`, chores and
   reminders), the same priorities and the same scheduler. A task belongs to the
@@ -44,7 +64,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   apart from your notes: the pack holds your About you and Preferences notes,
   the project's notes and the notes that match the objective (never People or
   Decisions); a question from a task is agent data that no note is written
-  from. Nothing calls these yet. Part of #369. [#374]
+  from. Nothing calls the pack or the summaries yet. Part of #369. [#374]
 - Bring in what other coding assistants on this computer remember. A scan
   (`GET /api/memory/import/scan`) reads the instruction and memory files they
   keep under your home folder (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`,
@@ -3158,3 +3178,4 @@ earlier milestones.
 [#372]: https://github.com/localmelo/localmelo/pull/372
 [#374]: https://github.com/localmelo/localmelo/pull/374
 [#378]: https://github.com/localmelo/localmelo/pull/378
+[#379]: https://github.com/localmelo/localmelo/pull/379

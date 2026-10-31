@@ -435,7 +435,7 @@ asyncio.run(main())
 
 | 类型 | 何时 | `data` 键 |
 |---|---|---|
-| `turn.started` | 一轮开始，先于其运行的事件。 | `turn`, `turn_id`, `user_text`, `client_request_id` |
+| `turn.started` | 一轮开始，先于其运行的事件。 | `turn`, `turn_id`, `user_text`, `client_request_id`；`origin`（`ask_owner`）只出现在不是用户开始的轮次上 |
 | `turn.finished` | 该轮结束：它的最后一个事件。 | `turn`, `turn_id`, `status`, `error`, `cause` |
 | `turn.undone` | 某轮被撤销；该事件不属于任何轮次。 | `turn`, `turn_id` |
 | `turn.pictures` | 控制台的一轮产生了图片：在其运行的最后一个事件之后、`turn.finished` 之前。没有图片时不存在，终端的文件里也没有。 | `turn`, `turn_id`, `pictures` |
@@ -470,4 +470,4 @@ asyncio.run(main())
 
 在架构版本 1（`v` 为 1）内，类型和键只会增加，绝不会删除或重命名。忽略你不认识的类型和键。
 
-在 `prefix` 出现之前存储的 `assistant.message` 或 `reflection` 不包含该键（`localmelo.melo.contracts.events` 中的 `OPTIONAL_EVENT_FIELDS` 列出了这类键，会话存储也接受缺少它们的事件）。`localmelo.melo.contracts` 中的 `EVENT_FIELDS` 把每个类型映射到其键，`localmelo.support.sessions.store` 中的 `SESSION_EVENT_FIELDS` 则映射每个会话类型。
+在 `prefix` 出现之前存储的 `assistant.message` 或 `reflection` 不包含该键（`localmelo.melo.contracts.events` 中的 `OPTIONAL_EVENT_FIELDS` 列出了这类键，会话存储也接受缺少它们的事件）。`localmelo.melo.contracts` 中的 `EVENT_FIELDS` 把每个类型映射到其键，`localmelo.support.sessions.store` 中的 `SESSION_EVENT_FIELDS` 则映射每个会话类型；那里的 `OPTIONAL_SESSION_EVENT_FIELDS` 列出事件可以缺少的会话键（`turn.started` 的 `origin`）。
