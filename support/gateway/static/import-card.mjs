@@ -14,7 +14,7 @@
  */
 import {formatTime, t} from "./i18n.mjs";
 
-const REASONS = ["secret", "third_party", "wrong_owner", "duplicate", "mechanics"];
+const REASONS = ["secret", "third_party", "wrong_owner", "duplicate", "mechanics", "capped"];
 
 function el(doc, tag, className, text) {
   const node = doc.createElement(tag);

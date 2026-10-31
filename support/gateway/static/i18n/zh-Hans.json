@@ -743,6 +743,7 @@
   "importCard.nothingNew": "没有新内容：melo 已经知道这些了。",
   "importCard.nothingToBring": "没有可导入的内容：这些行都被略过了（{reasons}）。",
   "importCard.partial": "搜索提前结束，可能漏掉了一些文件。",
+  "importCard.reason.capped": "超出上限的内容",
   "importCard.reason.duplicate": "重复的内容",
   "importCard.reason.mechanics": "其他工具自身的用法",
   "importCard.reason.secret": "密钥和密码",
