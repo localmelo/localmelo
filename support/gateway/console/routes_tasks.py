@@ -31,6 +31,7 @@ from localmelo.support.sessions.store import SessionStoreError
 from .activity import left_line
 from .bodies import Body
 from .errors import ApiError
+from .explain import remembered
 from .shapes import approval_json
 
 if TYPE_CHECKING:
@@ -120,14 +121,25 @@ async def _resume_call(console: Console, operation: Awaitable[T]) -> T:
 def _approvals(console: Console, task: dict[str, Any]) -> dict[str, Any]:
     """*task* with the approvals it waits for; the broker keys them by task id."""
     pending = console.broker.pending(str(task.get("task_id")))
-    return {**task, "pending_approvals": [task_approval(console, r) for r in pending]}
+    origin = str(task.get("origin") or "")
+    return {
+        **task,
+        "pending_approvals": [task_approval(console, r, origin) for r in pending],
+    }
 
 
-def task_approval(console: Console, request: ApprovalRequest) -> dict[str, Any]:
-    """A task's pending approval with melo's explanation (#369): text to read, never a decision."""
+def task_approval(
+    console: Console, request: ApprovalRequest, origin: str
+) -> dict[str, Any]:
+    """A task's pending approval with melo's explanation (#369): text to read, never a decision.
+
+    ``remembered`` says, by code, whether the person's Allow is kept for the
+    chat's later tasks, so the card can say so.
+    """
     return {
         **approval_json(request),
         "explanation": console.explanations.get(request.request_id),
+        "remembered": remembered(origin, request),
     }
 
 
@@ -191,8 +203,11 @@ def add_routes(app: FastAPI, console: Console) -> None:
         if request is None or session is None:
             raise ApiError(404, "not_found", t("errors.approvalNotFound"))
         info = await console.store.get_session(session)
-        owned = info is not None and info.kind == "task"
-        body = task_approval(console, request) if owned else approval_json(request)
+        if info is not None and info.kind == "task":
+            origin = (await console.workers.tasks.get_task(session)).origin
+            body = task_approval(console, request, origin)
+        else:
+            body = {**approval_json(request), "remembered": remembered("user", request)}
         return JSONResponse(content={"approval": {**body, "session_id": session}})
 
     @app.post("/api/tasks/{task_id}/blocks/{request_id}/allow")

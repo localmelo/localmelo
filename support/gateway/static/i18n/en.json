@@ -133,6 +133,8 @@
   "approval.openSite": "Let melo open {site}?",
   "approval.pythonCode": "Python code",
   "approval.reload": "Reload approval details",
+  "approval.remembered.chat": "Your Allow also lets this chat's tasks run this exact step later without asking, until you revoke it.",
+  "approval.remembered.task": "Your Allow also lets later tasks from the same chat run this exact step without asking, until you revoke it.",
   "approval.replace": "Replace {path}?",
   "approval.replaceSize": "Replace {path} ({size})?",
   "approval.rule.high": "A {scope}-wide allow never covers installs, downloads or changes outside {workspace}.",

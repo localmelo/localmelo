@@ -1909,6 +1909,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
     state.deny = true;
     actions.hidden = true;
     grant.hidden = true;
+    if (kept) kept.hidden = true;
     denyView.hidden = false;
     reason.focus();
   });
@@ -1924,6 +1925,11 @@ function approvalCard(request, view = chatApproval, asked = "") {
   grant.id = `approval-scope-${id}`;
   if (!high) session.setAttribute("aria-describedby", grant.id);
   card.append(grant);
+  // The server says, by code, when the person's Allow is kept for the chat's later tasks (#369).
+  const kept = !high && request.remembered === true
+    ? el("p", "approval-remembered", t(`approval.remembered.${view.scope === "task" ? "task" : "chat"}`))
+    : null;
+  if (kept) card.append(kept);
   const note = t("approval.instead");
   const label = el("label", "", note);
   const reason = el("input", "deny-reason");
@@ -1949,6 +1955,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
     denyView.hidden = true;
     actions.hidden = false;
     grant.hidden = false;
+    if (kept) kept.hidden = false;
     deny.focus();
   });
   reason.addEventListener("keydown", (event) => {
@@ -1968,6 +1975,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
   denyView.hidden = !state.deny;
   actions.hidden = state.deny;
   grant.hidden = state.deny;
+  if (kept) kept.hidden = state.deny;
   card.append(denyView);
   if (request.arguments_complete !== true) {
     card.append(el("p", "approval-warning", request.arguments_complete === false

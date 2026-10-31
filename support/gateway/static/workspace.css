@@ -1692,6 +1692,7 @@ dialog::backdrop {
 .approval-actions .primary-button, .failure-actions .primary-button { gap: 0; }
 .failure-actions .primary-button { font-size: var(--text-small); min-height: 32px; padding: 6px 14px; }
 .approval-warning { margin: 0 0 4px; color: var(--ink-2); line-height: 1.5; }
+.approval-remembered { margin: 0 0 4px; color: var(--ink-2); line-height: 1.5; }
 .failure-hint { margin: 0 0 8px; color: var(--ink-2); line-height: 1.5; }
 .failure-error { margin: 0 0 8px; color: var(--ink-2); overflow-wrap: anywhere; }
 .failure-card[data-severity="error"] .failure-error,

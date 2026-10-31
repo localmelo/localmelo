@@ -4858,6 +4858,25 @@ test('melo\'s explanation is labelled as its words and decides nothing: the butt
   assert.equal(findNode(plain, (node) => String(node.className).startsWith('approval-explain')), null);
 });
 
+test('a card says when the person\'s Allow is kept for later tasks, as the server decides', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const kept = (scope, remembered, extra = {}) => {
+    h.context.request = {request_id: `k-${scope}-${remembered}`, tool_name: 'python_exec', arguments: {code: 'print(1)'},
+      arguments_complete: true, remembered, ...extra};
+    const view = `({rerender() {}, answer() {}, reload() {}, scope: ${JSON.stringify(scope)}})`;
+    return findNode(h.run(`approvalCard(request, ${view})`), (node) => node.className === 'approval-remembered');
+  };
+  assert.equal(kept('chat', true).textContent,
+    'Your Allow also lets this chat\'s tasks run this exact step later without asking, until you revoke it.');
+  assert.equal(kept('task', true).textContent,
+    'Your Allow also lets later tasks from the same chat run this exact step without asking, until you revoke it.');
+  assert.equal(kept('task', false), null);
+  assert.equal(kept('task', undefined), null);
+  // A high-impact card asks every time: it never says so, whatever it is sent.
+  assert.equal(kept('task', true, {review: {verdict: 'high', categories: ['delete'], reasons: ['Deletes x.']}}), null);
+});
+
 test('a task\'s approval is answered in its chat\'s card, and melo\'s explanation comes when it is ready', async () => {
   let explanation = {state: 'pending', text: ''};
   const h = harness(mainRoutes({

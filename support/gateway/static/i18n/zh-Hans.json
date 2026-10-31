@@ -121,6 +121,8 @@
   "approval.openSite": "让 melo 打开 {site}？",
   "approval.pythonCode": "Python 代码",
   "approval.reload": "重新读取审批详情",
+  "approval.remembered.chat": "你的允许也会让这个对话的任务之后遇到完全相同的这一步时不再询问，直到你撤回。",
+  "approval.remembered.task": "你的允许也会让同一个对话后来的任务遇到完全相同的这一步时不再询问，直到你撤回。",
   "approval.replace": "替换 {path}？",
   "approval.replaceSize": "替换 {path}（{size}）？",
   "approval.rule.high": "{scope}范围的允许从不包括安装、下载或 {workspace} 之外的改动。",
