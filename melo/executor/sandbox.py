@@ -28,6 +28,11 @@ from typing import Protocol
 from localmelo.melo.contracts.own_gateway import OwnGateway, current
 
 SANDBOX_EXEC = "/usr/bin/sandbox-exec"
+# The sockets of container engines (Docker, Podman, Colima, OrbStack, Lima…),
+# as a pattern over a socket's path.
+ENGINE_SOCKET = (
+    r"(docker|podman|colima|orbstack|lima|containerd|nerdctl|finch)[^/]*\.sock$"
+)
 TMP_DIR = ".melo-tmp"
 OFF_HINT = (
     "set agent.confine_writes to false to run without it "
@@ -186,7 +191,8 @@ def profile(paths: Sequence[str], guard: OwnGateway | None = None) -> str:
     gateway's files, connecting to its port on this computer, and asking
     macOS to open a file, an app or a URL (``lsopen``: LaunchServices then
     answers ``permErr``); these rules come last, so they win over the
-    folders allowed before them. Apple Events are not denied: no harmless
+    folders allowed before them. It also denies connecting to a container
+    engine's socket (:data:`ENGINE_SOCKET`). Apple Events are not denied: no harmless
     check shows a rule for them taking effect, so the review judges them.
     """
     rules = [
@@ -204,6 +210,8 @@ def profile(paths: Sequence[str], guard: OwnGateway | None = None) -> str:
         text += f"(deny file-read* file-write*\n  {closed})\n"
     if guard is not None:
         text += "(deny lsopen)\n"
+        # A container engine's socket: its containers reach every file.
+        text += f'(deny network-outbound (remote unix-socket (path-regex #"{ENGINE_SOCKET}")))\n'
     for port in guard.ports if guard is not None else ():
         text += f'(deny network-outbound (remote ip "localhost:{int(port)}"))\n'
     return text

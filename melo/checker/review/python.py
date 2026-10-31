@@ -18,6 +18,7 @@ from localmelo.melo.checker.review.paths import (
     SENDING,
     Context,
     Findings,
+    engine_socket,
     own_port,
     reach_own,
     resolve,
@@ -48,6 +49,13 @@ _SPAWNS = ("os.exec", "os.spawn", "os.posix_spawn", "asyncio.create_subprocess")
 # AppleScript and Apple Events, and Cocoa's app launcher and task runner.
 _DRIVERS = set(["appscript", "applescript", "py_applescript", "ScriptingBridge"])
 _DRIVER_NAMES = set(["NSAppleScript", "NSWorkspace", "NSTask", "SBApplication"])
+# Calls that connect to a server or a socket, by their last name.
+_SOCKET_CALLS = set(
+    ["connect", "connect_ex", "create_connection", "open_unix_connection", "request"]
+    + ["urlopen", "Request", "get", "post", "put", "patch", "delete", "head", "Session"]
+    + ["UnixHTTPConnection", "HTTPConnection", "Client", "AsyncClient", "HTTPTransport"]
+    + ["AsyncHTTPTransport", "UnixConnector", "DockerClient", "APIClient", "from_env"]
+)
 # An HTTP request line written to a socket: b'POST /path HTTP/1.1…'.
 _REQUEST_LINE = re.compile(r"^b?['\"]?([A-Z]+) ")
 _PATH_OPS = {
@@ -859,6 +867,15 @@ class _Review:
                     continue
                 self.globbed(f"{folder}/{pattern}" if folder else pattern)
         values = [*node.args, *kw.values()]
+        if attr in _SOCKET_CALLS or name in ("docker.from_env", "docker.DockerClient"):
+            texts = [v for a in values for v in self.fold(a) if isinstance(v, str)]
+            if name.startswith("docker.") or any(engine_socket(f, t) for t in texts):
+                if name.startswith("docker."):
+                    f.add(
+                        "system",
+                        "Talks to a container engine, whose containers can reach every file.",
+                    )
+                return
         # A fetch that sends nothing: a GET of /api/health only asks whether melo runs.
         methods = {str(m).upper() for m in self.fold(kw.get("method"))} - {"NONE"}
         sending = not (

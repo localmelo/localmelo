@@ -17,6 +17,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -507,9 +508,10 @@ def test_the_auto_profile_closes_the_gateway_s_files_and_port() -> None:
         '(deny network-outbound (remote ip "localhost:8401"))\n'
         '(deny network-outbound (remote ip "localhost:8402"))\n'
     )
-    assert "network" not in profile(["/ws"], OwnGateway(ports=(), files=()))
+    assert "remote ip" not in profile(["/ws"], OwnGateway(ports=(), files=()))
     assert "file-read" not in profile(["/ws"])
     assert "(deny lsopen)" in text and "lsopen" not in profile(["/ws"])
+    assert "(remote unix-socket (path-regex" in text
 
 
 def test_the_default_guard_covers_the_sign_in_and_the_store(
@@ -633,3 +635,43 @@ async def test_an_auto_call_cannot_ask_macos_to_open_anything(
     for c, status in ((plain, "-10814"), (guarded, "-54")):
         python = rooted_builtins(str(ws), tool_env=env, confinement=c)["python_exec"][0]
         assert (await python(_LS_PROBE)).strip() == status
+
+
+@pytest.mark.usefixtures("no_user_temp")
+async def test_an_auto_call_cannot_reach_a_container_engine_s_socket(
+    ws: Path, home: Path
+) -> None:
+    if sys.platform != "darwin":
+        pytest.skip("writes are confined only on macOS")
+    # A short folder of our own: a socket's path is at most 104 bytes.
+    folder = Path(tempfile.mkdtemp(prefix="melo-sock-", dir="/tmp"))
+    servers = []
+    try:
+        for name in ("docker-test.sock", "other.sock"):
+            server = socket.socket(socket.AF_UNIX)
+            server.bind(str(folder / name))
+            server.listen(2)
+            servers.append(server)
+        env = {"HOME": str(home)}
+        try:
+            c = confine(str(ws), child_env(env), guard=OwnGateway(ports=(), files=()))
+        except ConfinementError as exc:
+            pytest.skip(str(exc))
+        assert c is not None
+        python = rooted_builtins(str(ws), tool_env=env, confinement=c)["python_exec"][0]
+        code = (
+            "import socket\n"
+            "for name in ('docker-test.sock', 'other.sock'):\n"
+            "    s = socket.socket(socket.AF_UNIX)\n"
+            "    try:\n"
+            f"        s.connect({str(folder)!r} + '/' + name)\n"
+            "        print(name, 'ok')\n"
+            "    except OSError as e:\n"
+            "        print(name, type(e).__name__)\n"
+        )
+        out = await python(code)
+        assert "docker-test.sock PermissionError" in out and "other.sock ok" in out
+    finally:
+        for server in servers:
+            server.close()
+        shutil.rmtree(folder, ignore_errors=True)

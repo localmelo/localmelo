@@ -10,7 +10,7 @@ import os
 import re
 import socket
 from dataclasses import dataclass, field, replace
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from localmelo.melo.contracts import own_gateway
 from localmelo.melo.contracts.review import TITLES, ActionReview
@@ -303,6 +303,23 @@ _LOOPBACK = re.compile(r"localhost|127(\.\d{1,3}){3}|::1|0\.0\.0\.0|0")
 _ADDRESS = re.compile(r"^(\[[0-9a-fA-F:.]+\]|[\w.-]+):\d+(/\S*)?$")
 # A request line's method in a literal sent over a socket, or a method named.
 SENDING = ("POST", "PUT", "PATCH", "DELETE")
+
+
+# A container engine's socket (Docker, Podman, Colima…): its containers reach every file.
+_ENGINE_SOCKET = re.compile(
+    r"(docker|podman|colima|orbstack|lima|containerd|nerdctl|finch)[^/]*\.sock\b",
+    re.IGNORECASE,
+)
+
+
+def engine_socket(f: Findings, text: str) -> bool:
+    """A connection to a container engine's socket in *text* (a path or a URL): high."""
+    if not _ENGINE_SOCKET.search(unquote(text)):
+        return False
+    f.add(
+        "system", "Talks to a container engine, whose containers can reach every file."
+    )
+    return True
 
 
 def loopback(host: str) -> bool:

@@ -14,6 +14,7 @@ from localmelo.melo.checker.review.paths import (
     SENDING,
     Context,
     Findings,
+    engine_socket,
     loopback,
     own_api,
     own_port,
@@ -157,7 +158,6 @@ _WRAPPERS = set(
         "caffeinate",
         "timeout",
         "xargs",
-        "npx",
         "stdbuf",
         "unbuffer",
         "chronic",
@@ -169,6 +169,8 @@ _WRAPPERS = set(
         "flock",
     ]
 )
+# Programs that fetch a package and run it (see _package_run).
+_PACKAGE_RUNNERS = set(["npx", "bunx", "pnpx", "uvx"])
 # Options of one wrapper that take a value, beyond _VALUED.
 _WRAPPER_VALUED: dict[str, set[str]] = {
     "stdbuf": {"-i", "-o", "-e"},
@@ -411,11 +413,17 @@ def _review_shell(ctx: Context, f: Findings, command: str) -> None:
 
 
 def _unwrap(f: Findings, argv: list[str]) -> list[str]:
-    """*argv* without ``VAR=x`` prefixes and wrappers such as ``nice`` or ``uv run``."""
+    """*argv* without ``VAR=x`` prefixes and wrappers such as ``nice`` or ``uv run``.
+
+    With ``PATH=.:$PATH`` (a folder named relatively first), a program named
+    bare may be a file there: it is named by that path then (``./tool``).
+    """
+    local = ""
     while argv:
         prog = os.path.basename(argv[0])
         if re.match(r"[A-Za-z_]\w*=", argv[0]):
             _runs_var(f, argv[0])
+            local = local or _local_path(argv[0])
             argv = argv[1:]
             continue
         if prog in ("sudo", "doas"):
@@ -426,8 +434,11 @@ def _unwrap(f: Findings, argv: list[str]) -> list[str]:
             "run"
         ]:
             argv = argv[1:]
+        elif _package_run(f, prog, argv):
+            if prog not in _PACKAGE_RUNNERS:
+                argv = [prog, *argv[2:]]  # without dlx / exec / x
         elif prog not in _WRAPPERS and prog != "gtimeout":
-            return argv
+            break
         rest, i = argv[1:], 0
         valued = _VALUED | _WRAPPER_VALUED.get(prog, set())
         while i < len(rest) and (
@@ -435,12 +446,55 @@ def _unwrap(f: Findings, argv: list[str]) -> list[str]:
         ):
             if "=" in rest[i] and rest[i][:1] != "-":
                 _runs_var(f, rest[i])
+                local = local or _local_path(rest[i])
             i += 2 if rest[i] in valued else 1
         if prog == "flock" and i < len(rest):
             i += 1  # its lock file, then the command
         # xargs adds arguments melo cannot see.
         argv = rest[i:] + (["$value"] if prog == "xargs" and rest[i:] else [])
+    if local and argv and "/" not in argv[0]:
+        argv = [os.path.join(local, argv[0]), *argv[1:]]
     return argv
+
+
+def _local_path(assignment: str) -> str:
+    """For ``PATH=…``: the first folder it names relatively (``.``, ``bin``), else ``""``."""
+    name, _, value = assignment.partition("=")
+    if name != "PATH":
+        return ""
+    for part in value.split(":"):
+        if part in ("", ".") or not part.startswith(("/", "$", "~")):
+            return "./" if part in ("", ".") else part
+    return ""
+
+
+def _package_run(f: Findings, prog: str, argv: list[str]) -> bool:
+    """``npx pkg``, ``uvx pkg``, ``pnpm dlx pkg`` and the like: a doubt, then its program.
+
+    They fetch a package when it is not there and run it; melo reads
+    neither the package nor what it runs.
+    """
+    sub = argv[1:2]
+    runs = (
+        prog in _PACKAGE_RUNNERS
+        or prog in ("pnpm", "yarn")
+        and sub == ["dlx"]
+        or prog == "npm"
+        and sub in (["exec"], ["x"])
+        or prog == "bun"
+        and sub == ["x"]
+    )
+    if runs:
+        words = [
+            a
+            for a in argv[1:]
+            if not a.startswith("-") and a not in ("dlx", "exec", "x")
+        ]
+        f.doubt(
+            f"Runs the package {words[0] if words else 'it names'} with {prog}, which may "
+            "download it; melo does not read it."
+        )
+    return runs
 
 
 def _runs_var(f: Findings, assignment: str) -> None:
@@ -616,6 +670,10 @@ def run_argv(
     if prog in _RECURSIVE or prog in ("grep", "egrep", "fgrep") and _recursive(args):
         for arg in _searched(args):
             search(ctx, f, arg, cwd)
+    if prog in _NETWORK or prog == "socat":
+        for word in args:
+            if engine_socket(f, word):
+                break
     if prog in _NETWORK:
         sending = prog not in ("curl", "wget", *_HTTPIE) or _method(argv) in SENDING
         sending = sending or (prog in ("curl", "wget") and _output(argv)[1])
@@ -1103,7 +1161,26 @@ def script(ctx: Context, f: Findings, raw: str, kind: str, cwd: str) -> None:
     python = (
         kind == "python" or not kind and (raw.endswith(".py") or "python" in shebang)
     )
+    reader = _shebang(shebang) if not kind and not python else ""
+    if reader == "osascript":
+        return f.add("system", "Drives another app or a shell through AppleScript.")
+    if reader and reader not in _SHELLS | {"ksh", "env", ""}:
+        # A program for an interpreter melo does not read: one made in this
+        # chat asks, as code given to perl or node inline does.
+        if _made(ctx, path):
+            f.doubt(f"Runs {os.path.basename(path)}, {reader} code melo does not read.")
+        return
     _code(ctx, f, "python" if python else "sh", text, os.path.dirname(path))
+
+
+def _shebang(line: str) -> str:
+    """The interpreter a ``#!`` line names (``env``'s program too), else ``""``."""
+    if not line.startswith("#!"):
+        return ""
+    words = line[2:].split()
+    while words and os.path.basename(words[0]) == "env":
+        words = [w for w in words[1:] if not w.startswith("-") and "=" not in w]
+    return os.path.basename(words[0]) if words else ""
 
 
 def _code(ctx: Context, f: Findings, prog: str, body: str, here: str = "") -> None:

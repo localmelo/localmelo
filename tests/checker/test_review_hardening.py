@@ -1098,3 +1098,118 @@ def test_a_project_s_own_runner_is_as_before(ws: Path, command: str) -> None:
     (ws / "main.rs").write_text("fn main() {}\n")
     assert sh(ws, command).verdict == "routine"
     assert sh(ws, command, since=time.time() - 60).verdict == "undecided"
+
+
+# ── Last round: engine sockets, package runners, scripts made here, melo's places ──
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "curl -s --unix-socket /var/run/docker.sock http://localhost/containers/json",
+        "curl --unix-socket ~/.colima/default/docker.sock http://x/info",
+        "nc -U /var/run/docker.sock",
+        "socat - UNIX-CONNECT:/Users/me/.orbstack/run/docker.sock",
+    ],
+)
+def test_a_connection_to_a_container_engine_is_high(ws: Path, command: str) -> None:
+    assert "system" in sh(ws, command).categories, command
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "import socket\ns = socket.socket(socket.AF_UNIX)\ns.connect('/var/run/docker.sock')",
+        "import http.client\nc = http.client.HTTPConnection('localhost')\n"
+        "c.sock = __import__('socket').socket(1)\nc.sock.connect('/var/run/docker.sock')",
+        "import requests_unixsocket\ns = requests_unixsocket.Session()\n"
+        "s.get('http+unix://%2Fvar%2Frun%2Fdocker.sock/info')",
+        "import httpx\nhttpx.Client(transport=httpx.HTTPTransport(uds='/run/podman/podman.sock'))",
+        "import docker\ndocker.from_env().containers.list()",
+    ],
+)
+def test_python_that_talks_to_a_container_engine_is_high(ws: Path, code: str) -> None:
+    assert "system" in py(ws, code).categories, code
+
+
+def test_a_check_that_the_engine_socket_exists_is_routine(ws: Path) -> None:
+    code = "import os\nprint(os.path.exists('/var/run/docker.sock'))"
+    assert py(ws, code).verdict == "routine"
+    assert sh(ws, "ls -la /var/run/docker.sock").verdict == "routine"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "npx cowsay hi",
+        "npx --yes create-react-app x",
+        "bunx cowsay",
+        "pnpx cowsay",
+        "uvx ruff check",
+        "pnpm dlx cowsay",
+        "yarn dlx cowsay",
+        "npm exec cowsay",
+        "bun x cowsay",
+    ],
+)
+def test_a_package_fetched_and_run_asks(ws: Path, command: str) -> None:
+    review = sh(ws, command)
+    assert review.verdict == "undecided" and "package" in review.reasons[0], command
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["./tool", "sh -c ./tool", "exec ./tool", "command ./tool", "PATH=.:$PATH tool"],
+)
+def test_a_script_for_another_interpreter_made_here_asks(
+    ws: Path, command: str
+) -> None:
+    (ws / "tool").write_text('#!/usr/bin/env perl\nsystem("open x.command");\n')
+    (ws / "tool").chmod(0o755)
+    since = time.time() - 60
+    assert sh(ws, command, since=since).verdict == "undecided", command
+    code = "import subprocess\nsubprocess.run(['./tool'])"
+    assert py(ws, code, since=since).verdict == "undecided"
+
+
+def test_a_shell_script_made_here_is_judged_by_what_it_says(ws: Path) -> None:
+    (ws / "ok.sh").write_text("#!/bin/sh\necho hi\n")
+    assert sh(ws, "./ok.sh", since=time.time() - 60).verdict == "routine"
+
+
+@pytest.mark.parametrize(
+    ("name", "content"),
+    [
+        (
+            "steal.js",
+            "fs.readFileSync(os.homedir() + '/.cache/localmelo/gateway/auth/token')",
+        ),
+        ("main.go", 'os.ReadFile(home + "/.cache/localmelo/gateway/sessions.db")'),
+        (
+            "x.rb",
+            "File.read(File.expand_path('~/.cache/localmelo/gateway/auth/token'))",
+        ),
+        ("call.ts", "fetch('http://127.0.0.1:8765/api/settings', {method: 'PUT'})"),
+        ("c.c", 'connect_to("localhost", 8765);'),
+    ],
+)
+def test_code_that_names_melo_s_own_places_is_itself(
+    ws: Path, gateway_port: int, name: str, content: str
+) -> None:
+    review = rv(ws, "file_write", {"path": name, "content": content})
+    assert "self" in review.categories, name
+
+
+def test_code_that_names_other_places_is_routine(ws: Path, gateway_port: int) -> None:
+    review = rv(
+        ws, "file_write", {"path": "a.js", "content": "fetch('http://127.0.0.1:3000/')"}
+    )
+    assert review.verdict == "routine"
+    note = "See ~/.cache/localmelo/gateway/auth in the docs."
+    assert (
+        rv(ws, "file_write", {"path": "notes.md", "content": note}).verdict == "routine"
+    )
+    # An edit of a file that named them already adds nothing.
+    (ws / "old.js").write_text("const t = '~/.cache/localmelo/gateway/auth/token';\n")
+    edit = {"path": "old.js", "old": "const t", "new": "let t"}
+    assert rv(ws, "file_edit", edit).verdict == "routine"
