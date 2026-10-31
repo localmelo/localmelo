@@ -2,6 +2,8 @@
 
 An embedding model is optional. localmelo never downloads, starts or serves one: you run a model server, and localmelo calls a model that server already serves.
 
+![The first run lists the server's models and offers one for long-term memory.](../assets/img/embedding.webp)
+
 ## What it buys
 
 - Without an embedding backend, working memory and history still work.
