@@ -386,8 +386,6 @@ class Front:
         # Tasks each turn of the main chat started, by turn id.
         self.made: dict[str, int] = {}
 
-    # ── Reading ──
-
     def current_turn(self) -> TurnInfo | None:
         """The main chat's running turn: the person's latest typed message."""
         main = self.console.main_id
@@ -409,8 +407,7 @@ class Front:
         self, typed: str, composed: str, *, as_task: bool, key: str | None
     ) -> dict[str, Any] | None:
         """The echo of a message that code handled, or ``None`` for the model."""
-        refs = [_ref(r) for r in await self.records()]
-        routed = route(typed, refs, as_task=as_task)
+        routed = route(typed, [_ref(r) for r in await self.records()], as_task=as_task)
         if routed.route == "delegate":
             work = route(composed, as_task=as_task).text
             if not work:
@@ -419,6 +416,8 @@ class Front:
         if routed.route == "control" and routed.task and routed.action:
             return await self.control(routed.task, routed.action, show=typed)
         return None
+
+    # ── Tasks: start, change, suggest ──
 
     async def delegate(
         self,
@@ -435,47 +434,42 @@ class Front:
         level, reason = triage(typed)
         try:
             spec = TaskSpec.from_payload({"objective": work, "title": title or None})
-            spec = dataclasses.replace(spec, level=level, reason=reason)
+        except TaskPolicyError as exc:
+            return await self._failed(f"Could not start a task: {exc}", show)
+        spec = dataclasses.replace(spec, level=level, reason=reason)
+        main = self.console.main_id
+        return await self._start(spec, main, show=show, key=key, turn=turn, of=of)
+
+    async def _start(
+        self,
+        spec: TaskSpec,
+        front_id: str | None,
+        *,
+        show: str | None = None,
+        key: str | None = None,
+        turn: TurnInfo | None = None,
+        of: int | None = None,
+        word: str = "Started",
+    ) -> dict[str, Any]:
+        try:
             task, repeated = await self.console.workers.create_spec(
-                spec, front_id=self.console.main_id, request_key=key
+                spec, front_id=front_id, request_key=key
             )
         except (TaskPolicyError, ValueError, TaskStoreError) as exc:
-            return await self.echo(
-                {"echo": "failed", "line": f"Could not start a task: {exc}"}, show
-            )
+            return await self._failed(f"Could not start a task: {exc}", show)
         if turn is not None:
             self.made[turn.id] = self.made.get(turn.id, 0) + 1
             while len(self.made) > 64:
                 self.made.pop(next(iter(self.made)))
-        if repeated:
-            for event in reversed(await self._echoes()):
-                data = event.event.get("data") or {}
-                if (
-                    data.get("echo") == "started"
-                    and data.get("task_id") == task["task_id"]
-                ):
-                    return card_json(event)
-        return await self._started(task, show, of)
-
-    async def _started(
-        self,
-        task: dict[str, Any],
-        show: str | None,
-        of: int | None,
-        word: str = "Started",
-    ) -> dict[str, Any]:
-        return await self.echo(
-            {
-                "echo": "started",
-                "task_id": task["task_id"],
-                "title": task["title"],
-                "level": task["level"],
-                "reason": task["reason"],
-                "line": f"{word}: {task['title']} · {level_word(task['level'])}",
-                **({"of": of} if of is not None else {}),
-            },
-            show,
-        )
+        for event in reversed(await self._echoes() if repeated else []):
+            data = event.event.get("data") or {}
+            if data.get("echo") == "started" and data.get("task_id") == task["task_id"]:
+                return card_json(event)
+        line = f"{word}: {task['title']} · {level_word(task['level'])}"
+        return await self._echo(
+            "started", task["task_id"], task["title"], line, show, of,
+            level=task["level"], reason=task["reason"],
+        )  # fmt: skip
 
     async def control(
         self,
@@ -488,36 +482,24 @@ class Front:
         """Stop, pause, resume or move *task* first; the echo carries Undo."""
         record = await self.record(task.task_id)
         if record is None:
-            return await self.echo(
-                {"echo": "failed", "line": "That task is gone."}, show
+            return await self._failed("That task is gone.", show)
+        if action == "first":
+            return await self.set_level(record, 1, show=show, of=of)
+        problem = await self._change(record, state=action)
+        if problem:
+            return await self._failed(
+                f"Could not {action} {record.title}: {problem}", show
             )
-        undo = {"pause": {"state": "resume"}, "resume": {"state": "pause"}}.get(
-            action, {"again": True}
-        )
-        try:
-            if action == "first":
-                return await self.set_level(record, 1, show=show, of=of)
-            await self.console.workers.update(record.task_id, state=action)
-        except (TaskStoreError, TaskPolicyError, ValueError) as exc:
-            return await self.echo(
-                {
-                    "echo": "failed",
-                    "line": f"Could not {action} {record.title}: {_plain(exc)}",
-                },
-                show,
-            )
-        return await self.echo(
-            {
-                "echo": "control",
-                "action": action,
-                "task_id": record.task_id,
-                "title": record.title,
-                "undo": undo,
-                "line": f"{_DONE_WORDS[action]}: {record.title}",
-                **({"of": of} if of is not None else {}),
-            },
-            show,
-        )
+        undo = {"pause": {"state": "resume"}, "resume": {"state": "pause"}}
+        now = await self.record(record.task_id)
+        # A running task pauses at its next step (scheduler design 2.5).
+        later = action == "pause" and now is not None and now.state != "parked"
+        word = "Pauses at its next step" if later else _DONE_WORDS[action]
+        line = f"{word}: {record.title}"
+        return await self._echo(
+            "control", record.task_id, record.title, line, show, of,
+            action=action, undo=undo.get(action, {"again": True}),
+        )  # fmt: skip
 
     async def set_level(
         self,
@@ -529,19 +511,16 @@ class Front:
     ) -> dict[str, Any]:
         """The person's level for *record*; it stays (``level_source=user``)."""
         before: int | str = record.level if record.level_source == "user" else "auto"
-        task = await self.console.workers.update(record.task_id, level=level)
-        return await self.echo(
-            {
-                "echo": "level",
-                "task_id": record.task_id,
-                "title": record.title,
-                "level": task["level"],
-                "undo": {"level": before},
-                "line": f"{record.title} → {level_word(task['level'])}",
-                **({"of": of} if of is not None else {}),
-            },
-            show,
-        )
+        problem = await self._change(record, level=level)
+        if problem:
+            return await self._failed(
+                f"Could not change {record.title}: {problem}", show
+            )
+        line = f"{record.title} → {level_word(level)}"
+        return await self._echo(
+            "level", record.task_id, record.title, line, show, of,
+            level=level, undo={"level": before},
+        )  # fmt: skip
 
     async def suggest(
         self, record: TaskRecord, action: str, *, level: int | None = None
@@ -552,31 +531,27 @@ class Front:
             if action == "level"
             else f"{action} {record.title}"
         )
-        return await self.echo(
-            {
-                "echo": "suggest",
-                "action": action,
-                "task_id": record.task_id,
-                "title": record.title,
-                **({"level": level} if level is not None else {}),
-                "line": f"Suggested: {what}",
-            }
-        )
+        extra: dict[str, Any] = {} if level is None else {"level": level}
+        return await self._echo(
+            "suggest", record.task_id, record.title, f"Suggested: {what}", action=action, **extra
+        )  # fmt: skip
 
     async def handed_off(self, turn: TurnInfo, *, asks: bool) -> None:
         """After a turn ran out of steps: start its work, or ask whether to."""
         typed = turn.typed_text or turn.user_text
         if asks:
-            await self.echo(
-                {
-                    "echo": "ask",
-                    "text": typed,
-                    "turn_id": turn.id,
-                    "line": "Start this as a task?",
-                }
-            )
+            data = {"echo": "ask", "text": typed, "turn_id": turn.id}
+            await self.echo({**data, "line": "Start this as a task?"})
         elif not self.made.get(turn.id):
             await self.delegate(turn.user_text, typed=typed, turn=turn)
+
+    async def _change(self, record: TaskRecord, **change: Any) -> str:
+        """Change *record* as the person asked; what stopped it, or ``""``."""
+        try:
+            await self.console.workers.update(record.task_id, **change)
+        except (TaskStoreError, TaskPolicyError, ValueError) as exc:
+            return _plain(exc)
+        return ""
 
     # ── Echoes ──
 
@@ -587,19 +562,34 @@ class Front:
         main = self.console.main_id
         if main is None:
             raise ApiError(503, "store_unavailable", "The main chat is not open yet.")
-        if show:
-            data = {**data, "typed": show}
-        stored = await self.console.store.append_session_event(main, ECHO_EVENT, data)
+        stored = await self.console.store.append_session_event(
+            main, ECHO_EVENT, {**data, "typed": show} if show else data
+        )
         return card_json(stored)
+
+    async def _echo(
+        self,
+        kind: str,
+        task_id: str,
+        title: str,
+        line: str,
+        show: str | None = None,
+        of: int | None = None,
+        **extra: Any,
+    ) -> dict[str, Any]:
+        data = {"echo": kind, "task_id": task_id, "title": title, "line": line, **extra}
+        return await self.echo(data if of is None else {**data, "of": of}, show)
+
+    async def _failed(self, line: str, show: str | None) -> dict[str, Any]:
+        return await self.echo({"echo": "failed", "line": line}, show)
 
     async def _echoes(self, after_id: int = 0) -> list[StoredEvent]:
         main = self.console.main_id
         if main is None:
             return []
+        store = self.console.store
         return list(
-            await self.console.store.events_of_type(
-                main, ECHO_EVENT, after_id=after_id, limit=200
-            )
+            await store.events_of_type(main, ECHO_EVENT, after_id=after_id, limit=200)
         )
 
     async def act(self, echo_id: int, do: str, level: object = None) -> dict[str, Any]:
@@ -609,14 +599,14 @@ class Front:
         if not isinstance(echo, dict):
             raise ApiError(404, "not_found", "Not found.")
         if do != "level" and any(
-            (event.event.get("data") or {}).get("of") == echo_id for event in found[1:]
+            (e.event.get("data") or {}).get("of") == echo_id for e in found[1:]
         ):
             raise ApiError(409, "already_answered", "This was answered already.")
         kind = echo.get("echo")
-        record = await self.record(str(echo.get("task_id", "")))
         if do == "start" and kind == "ask":
             text = str(echo.get("text", ""))
             return await self.delegate(text, typed=text, of=echo_id)
+        record = await self.record(str(echo.get("task_id", "")))
         if record is None:
             raise ApiError(404, "not_found", "That task is gone.")
         if do == "level" and kind in ("started", "level"):
@@ -625,7 +615,7 @@ class Front:
                 raise ApiError(
                     400,
                     "invalid_request",
-                    "level: one of Now, Today, Normal, Whenever, If idle, Later",
+                    "level: Now, Today, Normal, Whenever, If idle or Later",
                 )
             return await self.set_level(record, number)
         if do == "apply" and kind == "suggest":
@@ -635,57 +625,37 @@ class Front:
                 )
             return await self.control(_ref(record), echo["action"], of=echo_id)
         if do == "undo" and kind in ("control", "level"):
-            return await self._undo(record, echo, echo_id)
+            return await self._undo(record, echo.get("undo") or {}, echo_id)
         raise ApiError(400, "invalid_request", f"{do} does not apply to this line.")
 
     async def _undo(
-        self, record: TaskRecord, echo: dict[str, Any], echo_id: int
+        self, record: TaskRecord, undo: dict[str, Any], echo_id: int
     ) -> dict[str, Any]:
-        undo = echo.get("undo") or {}
         if undo.get("again"):
             # A stop is undone by starting the task again, at the level it had.
+            objective = str(record.spec.get("objective") or record.title)
             spec = TaskSpec.from_payload(
-                {
-                    "objective": str(record.spec.get("objective") or record.title),
-                    "title": record.title,
-                }
+                {"objective": objective, "title": record.title}
             )
             spec = dataclasses.replace(
-                spec,
-                workspace=str(record.spec.get("workspace") or ""),
-                level=record.level,
-                level_source=record.level_source,
-                reason=record.reason,
+                spec, workspace=str(record.spec.get("workspace") or ""), level=record.level,
+                level_source=record.level_source, reason=record.reason,
+            )  # fmt: skip
+            return await self._start(
+                spec, record.front_id, of=echo_id, word="Started again"
             )
-            try:
-                task, _ = await self.console.workers.create_spec(
-                    spec, front_id=record.front_id
-                )
-            except (TaskPolicyError, ValueError, TaskStoreError) as exc:
-                raise ApiError(
-                    409, "invalid_transition", f"Could not undo: {_plain(exc)}"
-                ) from exc
-            return await self._started(task, None, echo_id, "Started again")
-        try:
-            if "level" in undo:
-                await self.console.workers.update(record.task_id, level=undo["level"])
-                now = await self.record(record.task_id)
-                line = f"Undone: {record.title} is back to {level_word(now.level if now else 2)}"
-            else:
-                await self.console.workers.update(record.task_id, state=undo["state"])
-                line = f"Undone: {record.title} is {'paused' if undo['state'] == 'pause' else 'going again'}"
-        except (TaskStoreError, TaskPolicyError, ValueError) as exc:
-            raise ApiError(
-                409, "invalid_transition", f"Could not undo: {_plain(exc)}"
-            ) from exc
-        return await self.echo(
-            {
-                "echo": "undone",
-                "task_id": record.task_id,
-                "title": record.title,
-                "of": echo_id,
-                "line": line,
-            }
+        problem = await self._change(record, **undo)
+        if problem:
+            raise ApiError(409, "invalid_transition", f"Could not undo: {problem}")
+        now = await self.record(record.task_id) or record
+        state = (
+            f"back to {level_word(now.level)}"
+            if "level" in undo
+            else "paused" if undo.get("state") == "pause" else "going again"
+        )
+        line = f"Undone: {record.title} is {state}"
+        return await self._echo(
+            "undone", record.task_id, record.title, line, of=echo_id
         )
 
 

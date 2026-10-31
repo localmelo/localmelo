@@ -322,7 +322,8 @@ button:hover:not(:disabled) {
 .main-card-time { margin-left: auto; color: var(--muted); font-size: var(--text-caption); }
 /* Echoes: one quiet line for what the main chat did with a task. The level word is the colour:
    amber when it jumps the queue (Now, Today), green for Normal, grey below. */
-.echo { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 6px; max-width: 600px; margin: -8px 0 20px; color: var(--ink-2); font-size: var(--text-small); }
+.echo { display: flex; align-items: flex-start; gap: 10px; max-width: 600px; margin: -8px 0 20px; color: var(--ink-2); font-size: var(--text-small); }
+.echo-body { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 6px; min-width: 0; min-height: 20px; }
 .echo-mark { flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: var(--radius-pill); background: var(--raised); color: var(--ink-3); font-size: var(--text-caption); font-weight: 700; }
 .echo[data-kind="started"] .echo-mark { background: var(--tint); color: var(--ok); }
 .echo[data-kind="failed"] { color: var(--error); }
@@ -350,6 +351,8 @@ button:hover:not(:disabled) {
 }
 @media (max-width: 700px), (pointer: coarse) {
   .header-parent, .main-card-foot .link-button, .echo-actions button, .echo-level-item, .task-button { min-height: 44px; }
+  /* A tall target on a line as tall as its words. */
+  .echo-actions .link-button { margin-block: -12px; }
   /* The target is tall; the line stays as tall as the title. */
   .header-trail { align-items: center; }
   .header-parent { margin-block: -12px; }

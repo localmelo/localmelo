@@ -224,12 +224,14 @@ export function echoNodes({doc, echo, done = false, act, developer = false}) {
   mark.setAttribute("aria-hidden", "true");
   const level = Number.isInteger(echo.level) && echo.kind !== "suggest" ? echo.level : null;
   const words = level === null ? echo.line : echo.line.replace(/ · [^·]+$/, "").replace(/ → [^→]+$/, " →");
-  const text = el("p", "echo-text", words);
-  line.append(mark, text);
+  // The words, the level and the buttons wrap together, under the words.
+  const body = el("div", "echo-body");
+  body.append(el("p", "echo-text", words));
+  line.append(mark, body);
   if (level !== null) {
     const chip = el("span", "echo-level", developer ? `P${level} · ${LEVELS[level]}` : LEVELS[level]);
     chip.dataset.level = String(level);
-    line.append(chip);
+    body.append(chip);
   }
   const buttons = el("span", "echo-actions");
   for (const [label, does] of echoActions(echo, done)) {
@@ -243,7 +245,7 @@ export function echoNodes({doc, echo, done = false, act, developer = false}) {
     });
     buttons.append(button);
   }
-  if (buttons.children.length) line.append(buttons);
+  if (buttons.children.length) body.append(buttons);
   nodes.push(line);
   return nodes;
 }

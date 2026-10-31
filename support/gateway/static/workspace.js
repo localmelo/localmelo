@@ -1130,12 +1130,14 @@ function mainNodes(view, turns) {
   const newest = turns[turns.length - 1];
   const echoes = view?.echoes ?? [];
   const done = answered(echoes);
+  // A task that came back finished takes no more changes: its lines lose their buttons.
+  const ended = new Set((view?.cards ?? []).filter((card) => card.state !== "waiting").map((card) => card.sourceId));
   return timeline(turns, view?.cards ?? [], nowSeconds(), echoes).flatMap((item) => {
     if (item.kind === "turn") return [turnNode(item.turn, item.turn === newest)];
     if (item.kind === "card") return [cardNode({ doc: document, card: item.card, open: openCard })];
     if (item.kind === "echo") {
       const echo = item.echo;
-      const gone = done.has(echo.id) || dismissed.has(echo.id);
+      const gone = done.has(echo.id) || dismissed.has(echo.id) || ended.has(echo.task_id);
       return echoNodes({ doc: document, echo, done: gone, act: actOnEcho, developer: developerMode });
     }
     return [el("div", "day-divider", item.label)];

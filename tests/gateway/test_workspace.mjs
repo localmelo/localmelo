@@ -4313,3 +4313,12 @@ test('while the person types, a result card waits; a waiting card shows at once'
   await h.run('send()');
   assert.match(h.text('messages'), /Done: Fix CI/, 'The next send shows what waited');
 });
+
+test('a task that came back finished offers no more changes on its echo lines', async () => {
+  const echoes = [echoRow(80, {echo: 'started', task_id: 't9', title: 'Find jobs', level: 2, line: 'Started: Find jobs · Normal'})];
+  const cards = [cardRow(81, {at: NOW - 10, ts: NOW - 10, source_id: 't9', source_kind: 'task', title: 'Find jobs', line: 'Two new roles.'})];
+  const h = harness(mainRoutes({'GET /sessions/m/turns?limit=10': {turns: [], has_earlier: false, replay_from: 0, cards, echoes}}));
+  await h.run('init()');
+  assert.match(h.text('messages'), /Started: Find jobs.*Done: Find jobs/);
+  assert.equal(findNode(h.element('messages'), (node) => node.textContent === 'Change'), null);
+});
