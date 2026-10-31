@@ -2,9 +2,13 @@
 
 # 用 melo 浏览网页
 
-本指南说明如何让 melo 在 Safari 中读取网页、它在那里能做什么和不能做什么，以及由谁决定它可以打开哪些网站。读者是在 Mac 上用终端或网页控制台与 melo 对话的人。开启前请先阅读安全部分；相关设置见[配置参考](../reference/configuration.md)。
+在 Mac 上，通过终端或网页控制台，让 melo 在 Safari 中读取网页。开启前请先阅读安全部分；相关设置见[配置参考](../reference/configuration.md)。
 
-浏览**默认关闭**，并且在第一部分里**只读**。melo 在 Safari 的*自动化窗口*中打开网页、跟随链接并读取内容。它不会点击按钮、填写表单、登录、发帖或购买；这些留到后面（见[后续计划](#what-is-coming)）。
+![终端对话里，melo 打开一个网页并说明它的内容。](../../assets/img/browser.webp)
+
+- 浏览**默认关闭**，并且在第一部分里**只读**。
+- melo 在 Safari 的*自动化窗口*中打开网页、跟随链接并读取内容。
+- 它不会点击按钮、填写表单、登录、发帖或购买；这些留到后面（见[后续计划](#what-is-coming)）。
 
 <a id="what-you-need"></a>
 
@@ -24,7 +28,9 @@
 /browser
 ```
 
-显示浏览是否开启；开启时会检查 Safari 是否有响应，然后给出一个列表：**Turn browsing on**（开启浏览）或 **Leave it off**（保持关闭）。`/browser on` 和 `/browser off` 不经列表直接执行。已有保存的配置时，选择会写入 `~/.cache/localmelo/config.toml` 的 `[browser] driver`；对话会换到一个新的 Agent 上继续，已说的内容不会丢失。
+- 它显示浏览是否开启；开启时会检查 Safari 是否有响应，然后一个列表提供 **Turn browsing on**（开启浏览）或 **Leave it off**（保持关闭）。
+- `/browser on` 和 `/browser off` 不经列表直接执行。
+- 已有保存的配置时，选择会写入 `~/.cache/localmelo/config.toml` 的 `[browser] driver`；对话会换到一个新的 Agent 上继续，已说的内容不会丢失。
 
 只为一次运行开启、不保存：
 
@@ -39,9 +45,7 @@ melo -X browser.driver=safari-automation
 driver = "safari-automation"
 ```
 
-默认是 `"off"`。
-
-网页控制台在打开每个对话时读取同一个设置；用 `melo config set browser.driver safari-automation` 修改，然后打开新对话。
+默认是 `"off"`。网页控制台在打开每个对话时读取同一个设置：用 `melo config set browser.driver safari-automation` 修改，然后打开新对话。
 
 <a id="set-up-safari"></a>
 
@@ -49,24 +53,27 @@ driver = "safari-automation"
 
 Safari 必须允许外部程序打开自动化窗口。在 Safari 中：
 
-1. 打开**设置**，进入**开发者**标签页。如果没有开发者标签页，先打开**高级**标签页并勾选**显示网页开发者功能**。
+1. 打开**设置**，进入**开发者**标签页。没有开发者标签页时，先打开**高级**标签页并勾选**显示网页开发者功能**。
 2. 勾选**允许远程自动化**（完整名称可能是“允许远程自动化和外部代理”）。
 
-关闭时，melo 会在第一次浏览调用的回答和 `/browser` 中直接说明：
+关闭时，melo 会在第一次浏览的回答和 `/browser` 中说明：
 
 ```text
 Safari is not set up for melo yet. In Safari, open Settings > Developer and turn on "Allow remote automation" ...
 ```
 
-打开开关后再问一次即可；melo 每次调用都会重新尝试连接，不必重启。两个开关都打开后检查仍失败时，Apple 的一次性 WebDriver 设置是在终端运行 `safaridriver --enable`（会要求输入密码）；melo 从不替你运行它。
-
-melo 只在第一次浏览调用（或 `/browser`）时才启动 Safari 的自动化服务器。从不浏览的对话不会打开任何东西。
+- 打开开关后再问一次即可；melo 每次调用都会重新连接，不必重启。
+- 两个开关都打开后检查仍失败时，Apple 的一次性设置是在终端运行 `safaridriver --enable`（会要求输入密码）；melo 从不替你运行它。
+- melo 只在第一次浏览调用（或 `/browser`）时才启动 Safari 的自动化服务器；从不浏览的对话不会打开任何东西。
 
 <a id="what-the-automation-windows-are"></a>
 
 ## 自动化窗口是什么
 
-Safari 把它们与你自己的窗口分开打开，地址栏是橙色的。它们从空白状态开始，像无痕窗口：**你的登录状态、Cookie 和自动填充都不可用**，之后什么也不保留，同一时间只运行一个自动化会话。窗口上方的一层面板会拦截你的鼠标和键盘；打断它会提示停止会话。所以 melo 能读不需要登录的网页。只有登录后才显示的网页，以及会质疑自动化浏览器的网站，在这一部分里可能无法使用。
+- 它们与你自己的窗口分开打开，地址栏是橙色的。
+- 它们从空白状态开始，像无痕窗口：**你的登录状态、Cookie 和自动填充都不可用**，之后什么也不保留。
+- 同一时间只运行一个自动化会话；窗口上方的一层面板会拦截你的鼠标和键盘，打断它会提示停止会话。
+- 所以 melo 能读不需要登录的网页；登录后才显示的网页，以及会质疑自动化浏览器的网站，暂时可能无法使用。
 
 <a id="what-melo-can-do"></a>
 
@@ -116,7 +123,10 @@ elements:
 
 ## 后续计划
 
-这是浏览功能的第一部分。接下来依次计划：在你自己已登录的浏览器里操作（Chrome 扩展；点击和输入，发送、发帖、购买和登录需要确认，`auto` 和 `--yolo` 无法跳过），然后是按计划运行的已保存例行任务（例如每日签到），其步骤由你事先批准一次。这些目前都还不存在。
+浏览功能分几部分构建；接下来这两部分目前都还不存在。
+
+- 在你自己已登录的浏览器里操作（Chrome 扩展）：点击和输入，发送、发帖、购买和登录需要确认，`auto` 和 `--yolo` 无法跳过。
+- 按计划运行的已保存例行任务（例如每日签到），其步骤由你事先批准一次。
 
 <a id="troubleshooting"></a>
 

@@ -191,7 +191,7 @@ current priority, and forgetting it alone preserves its identity;
 `held(task_id)` reports the gate's reason as it does for a chat. Task routes
 write priority changes through the store.
 
-S3a.2 adds [task routes](api-v2.md#scheduler-tasks-s3a2) and in-process workers.
+The gateway has [task routes](api-v2.md#scheduler-tasks-s3a2) and in-process workers.
 New user tasks are queued by effective priority, rank and creation time, with
 at most four resident workers; a successfully parked worker releases its slot.
 Each uses `mode="gateway"`, `memory=False` and the console's shared gate for
@@ -227,8 +227,8 @@ built from persisted evidence. A task paused before it starts does not
 start a worker until resumed. Resume restores the prior priority unless a new
 level is supplied; without a saved pause snapshot (such as a task created or
 set at P5), resume falls back to computed P2. Resuming an unpaused task returns
-409 `not_paused`. The task PATCH route rejects `first` with 400; it is deferred
-to S6b.
+409 `not_paused`. The task PATCH route rejects `first` with 400; it is not supported
+yet.
 
 ## Controlled Resume (S3b.2 PR3b-1)
 
