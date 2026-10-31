@@ -65,6 +65,7 @@ uv run --offline --locked --extra dev python scripts/build_docs.py --output "$SI
 
 - 在 `docs/README.md` 和 `docs/zh-CN/README.md` 的索引中加入新的 Markdown 页面，并在同一个 pull request 中把它的中文对应页加到 `docs/zh-CN/` 下的同一路径。两者都要列入 `docs/manifest.json`。只有新用户需要时，才把它加入顶层 `README.md` 和 `README.zh-CN.md` 的文档表格；该表格保持简短，并以指向索引的链接结束。
 - 新增网站页面时，两种语言都要加上，并加入每个网站页面的导航。记忆设计是例外：它是设计记录，架构页和路线图页改为链接到它。
+- 网站和 README 里的命令是生成的终端块：修改 `scripts/usage_blocks.toml`，再运行 `uv run python scripts/usage_blocks.py sync`（页面过期时测试会失败）。Markdown 指南里，命令脚本用 `shell` 标记，带 `$ ` 提示符的记录用 `console` 标记；构建器把两者画成同样的块。
 - 写入文档的每条命令都要先实际运行一遍。
 - 每次改变行为、选项、输出或功能状态时，都要同步更新 `for-agents.md`，并把新页面加入 `llms.txt`。这两个文件是写给智能体看的：紧凑、精确、简短。
 

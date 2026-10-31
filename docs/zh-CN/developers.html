@@ -10,6 +10,7 @@
   <link rel="alternate" hreflang="x-default" href="https://localmelo.github.io/localmelo/en/developers.html">
   <link rel="icon" href="../assets/icon_small.png">
   <link rel="stylesheet" href="../assets/site.css">
+  <script src="../assets/usage.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">跳到正文</a>
@@ -97,12 +98,9 @@
       <section class="section" id="setup">
         <h2>开发环境</h2>
         <p>你需要 Python 3.11 或更高版本、Git 和 <a href="https://docs.astral.sh/uv/">uv</a>；只有控制台的 JavaScript 测试需要 Node（版本见 <code>.nvmrc</code>）。</p>
-        <figure class="terminal">
-          <figcaption class="terminal-title">开发环境</figcaption>
-          <pre><code>git clone https://github.com/localmelo/localmelo.git
-cd localmelo                 # keep this name: the package is built from it
-uv sync --extra dev --extra gateway</code></pre>
-        </figure>
+        <!-- usage:dev-setup --><figure class="usage" aria-label="开发环境" data-copy="git clone https://github.com/localmelo/localmelo.git&#10;cd localmelo&#10;uv sync --extra dev --extra gateway"><div class="usage-bar"><span class="usage-title">开发环境</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">git</span> <span class="s">clone</span> <span class="a">https://github.com/<wbr>localmelo/<wbr>localmelo.git</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">cd</span> <span class="a">localmelo</span>  <span class="k"># keep this name: the package is built from it</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">sync</span> <span class="f">--extra</span> <span class="a">dev</span> <span class="f">--extra</span> <span class="a">gateway</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li><code>uv</code> 根据 <code>uv.lock</code> 创建 <code>.venv/</code>，使用 <code>.python-version</code> 中的 Python 3.13；localmelo 支持 3.11 或更高版本。</li>
           <li><code>--extra dev</code> 加入 pytest、ruff、black、mypy 和 pre-commit；<code>--extra gateway</code> 加入 FastAPI 和 uvicorn。</li>
@@ -113,11 +111,8 @@ uv sync --extra dev --extra gateway</code></pre>
       <section class="section" id="running">
         <h2>运行命令行</h2>
         <p><code>melo</code> 安装在 <code>.venv/bin/</code>，不在 PATH 上。在克隆目录里通过 uv 运行：</p>
-        <figure class="terminal">
-          <figcaption class="terminal-title">在克隆目录中运行</figcaption>
-          <pre><code>uv run melo "What is 6*7?"
-uv run melo serve</code></pre>
-        </figure>
+        <!-- usage:dev-run --><figure class="usage" aria-label="在克隆目录中运行" data-copy="uv run melo &quot;What is 6*7?&quot;&#10;uv run melo serve"><div class="usage-bar"><span class="usage-title">在克隆目录中运行</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">run</span> <span class="c">melo</span> <span class="q">"What is 6*7?"</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">run</span> <span class="c">melo</span> <span class="s">serve</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li>在其他地方，指明克隆目录：<code>uv run --project DIR melo …</code>。</li>
           <li>运行需要模型服务器：传入 <code class="wrap">-u http://127.0.0.1:11434/v1 -m qwen3:8b</code>，或者先运行一次 <code>uv run melo setup</code>。</li>
@@ -128,17 +123,11 @@ uv run melo serve</code></pre>
       <section class="section" id="tests">
         <h2>测试</h2>
         <p>开发时只运行受改动影响的测试；由 <code>pytest-testmon</code> 挑选：</p>
-        <figure class="terminal">
-          <figcaption class="terminal-title">开发时</figcaption>
-          <pre><code>uv run pytest --testmon -q</code></pre>
-        </figure>
+        <!-- usage:dev-test --><figure class="usage" aria-label="开发时" data-copy="uv run pytest --testmon -q"><div class="usage-bar"><span class="usage-title">开发时</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">run</span> <span class="c">pytest</span> <span class="f">--testmon</span> <span class="f">-q</span></span></code></pre></figure><!-- /usage -->
         <p>
           提交 pull request 之前，把整套离线测试并行运行一次：
         </p>
-        <figure class="terminal">
-          <figcaption class="terminal-title">提交 pull request 之前</figcaption>
-          <pre><code>uv run pytest -n auto -q</code></pre>
-        </figure>
+        <!-- usage:dev-test-all --><figure class="usage" aria-label="提交 pull request 之前" data-copy="uv run pytest -n auto -q"><div class="usage-bar"><span class="usage-title">提交 pull request 之前</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">run</span> <span class="c">pytest</span> <span class="f">-n</span> <span class="a">auto</span> <span class="f">-q</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li>整套测试不需要模型服务器，也不向它发请求；少数命令行测试会在回环地址上提供一个模拟 API。</li>
           <li>只运行一个文件夹时写出它的名字：<code class="wrap">uv run pytest tests/agent -q</code>。</li>
@@ -168,15 +157,9 @@ uv run melo serve</code></pre>
           </table>
         </div>
         <p>控制台的 JavaScript 有自己的测试；它们需要 Node，pytest 不运行它们：</p>
-        <figure class="terminal">
-          <figcaption class="terminal-title">JavaScript 测试</figcaption>
-          <pre><code>node --test tests/gateway/test_markdown.mjs tests/gateway/test_workspace.mjs</code></pre>
-        </figure>
+        <!-- usage:dev-node --><figure class="usage" aria-label="JavaScript 测试" data-copy="node --test tests/gateway/test_markdown.mjs tests/gateway/test_workspace.mjs"><div class="usage-bar"><span class="usage-title">JavaScript 测试</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">node</span> <span class="f">--test</span> <span class="a">tests/<wbr>gateway/<wbr>test_markdown.mjs</span> <span class="a">tests/<wbr>gateway/<wbr>test_workspace.mjs</span></span></code></pre></figure><!-- /usage -->
         <p>连接真实模型服务器的测试需要手动开启；普通运行不发送任何对话请求：</p>
-        <figure class="terminal">
-          <figcaption class="terminal-title">真实后端的冒烟测试</figcaption>
-          <pre><code>LOCALMELO_SMOKE=1 uv run pytest -m smoke_backend tests/smoke/test_backend_smoke.py -q</code></pre>
-        </figure>
+        <!-- usage:dev-smoke --><figure class="usage" aria-label="真实后端的冒烟测试" data-copy="LOCALMELO_SMOKE=1 uv run pytest -m smoke_backend tests/smoke/test_backend_smoke.py -q"><div class="usage-bar"><span class="usage-title">真实后端的冒烟测试</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="f">LOCALMELO_SMOKE</span><span class="x">=</span><span class="a">1</span> <span class="c">uv</span> <span class="s">run</span> <span class="c">pytest</span> <span class="f">-m</span> <span class="a">smoke_backend</span> <span class="a">tests/<wbr>smoke/<wbr>test_backend_smoke.py</span> <span class="f">-q</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li>它们询问 <code>127.0.0.1:11434</code> 上的 Ollama 和 <code>127.0.0.1:8400</code> 上的 MLC LLM，跳过没有响应的服务器。</li>
           <li><code class="wrap">tests/smoke/core_loop_test.py</code> 运行更长的记忆场景；见它的 <a href="https://github.com/localmelo/localmelo/blob/main/tests/smoke/README.md">README</a>。</li>
@@ -185,12 +168,9 @@ uv run melo serve</code></pre>
 
       <section class="section" id="lint">
         <h2>代码检查和类型</h2>
-        <figure class="terminal">
-          <figcaption class="terminal-title">检查</figcaption>
-          <pre><code>uv run ruff check .
-uv run black --check .
-uv run mypy .</code></pre>
-        </figure>
+        <!-- usage:dev-checks --><figure class="usage" aria-label="检查" data-copy="uv run ruff check .&#10;uv run black --check .&#10;uv run mypy ."><div class="usage-bar"><span class="usage-title">检查</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">run</span> <span class="c">ruff</span> <span class="s">check</span> <span class="a">.</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">run</span> <span class="c">black</span> <span class="f">--check</span> <span class="a">.</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">run</span> <span class="c">mypy</span> <span class="a">.</span></span></code></pre></figure><!-- /usage -->
         <p>
           Black 按 88 列格式化。Ruff 启用 <code>E</code>、<code>W</code>、<code>F</code>、<code>I</code>、<code>N</code>、<code>UP</code>、<code>B</code> 和 <code>SIM</code>；<code>E501</code> 交给 black 处理。Mypy 要求每个函数都有类型标注（<code>disallow_untyped_defs</code>），并检查没有标注的函数体，<code>__main__.py</code> 除外。pre-commit 运行的是同样的三项检查。
         </p>
@@ -312,10 +292,7 @@ uv run mypy .</code></pre>
         </ul>
         <p>新的 Markdown 页面要加进 <a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/README.md">docs/zh-CN/README.md</a> 的索引；<a href="https://github.com/localmelo/localmelo/blob/main/docs/project/documentation.md">维护文档（英文）</a>说明了结构和术语表。</p>
         <p>在本地预览网站：</p>
-        <figure class="terminal">
-          <figcaption class="terminal-title">预览</figcaption>
-          <pre><code>python3 -m http.server 8080 --bind 127.0.0.1 --directory docs</code></pre>
-        </figure>
+        <!-- usage:dev-preview --><figure class="usage" aria-label="预览" data-copy="python3 -m http.server 8080 --bind 127.0.0.1 --directory docs"><div class="usage-bar"><span class="usage-title">预览</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">python3</span> <span class="f">-m</span> <span class="a">http.server</span> <span class="a">8080</span> <span class="f">--bind</span> <span class="a">127.0.0.1</span> <span class="f">--directory</span> <span class="a">docs</span></span></code></pre></figure><!-- /usage -->
         <p>
           然后打开 <code>http://127.0.0.1:8080/en/</code>。
         </p>

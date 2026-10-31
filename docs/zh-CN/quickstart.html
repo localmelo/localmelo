@@ -10,6 +10,7 @@
   <link rel="alternate" hreflang="x-default" href="https://localmelo.github.io/localmelo/en/quickstart.html">
   <link rel="icon" href="../assets/icon_small.png">
   <link rel="stylesheet" href="../assets/site.css">
+  <script src="../assets/usage.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">跳到正文</a>
@@ -38,6 +39,7 @@
     <nav class="sidebar" aria-label="本页内容">
       <p class="sidebar-label">本页内容</p>
       <a href="#before-you-begin">开始之前</a>
+      <a href="#five-steps">五步上手</a>
       <a href="#install">安装</a>
       <a href="#run-your-first-task">运行第一个任务</a>
       <a href="#json-output">以 JSON 格式获取结果</a>
@@ -65,12 +67,41 @@
         </ul>
       </section>
 
+      <section class="section" id="five-steps">
+        <h2>五步上手</h2>
+        <!-- usage:steps --><ol class="steps">
+<li class="step"><h3><a href="quickstart.html#install">安装</a></h3>
+<p>克隆仓库，让 uv 完成安装。</p>
+<figure class="usage" aria-label="安装" data-copy="git clone https://github.com/localmelo/localmelo.git&#10;cd localmelo&#10;uv sync --extra gateway&#10;source .venv/bin/activate"><div class="usage-bar"><span class="usage-title"></span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">git</span> <span class="s">clone</span> <span class="a">https://github.com/<wbr>localmelo/<wbr>localmelo.git</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">cd</span> <span class="a">localmelo</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">sync</span> <span class="f">--extra</span> <span class="a">gateway</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">source</span> <span class="a">.venv/bin/activate</span></span></code></pre></figure></li>
+<li class="step"><h3><a href="quickstart.html#run-your-first-task">运行第一个任务</a></h3>
+<p>让 melo 连接你的模型服务器并提一个问题，答案会打印在 stdout。</p>
+<figure class="usage" aria-label="用 oMLX 运行任务" data-copy="melo -u http://127.0.0.1:8000/v1 -m Qwen3-8B-4bit &quot;What is 6*7?&quot;"><div class="usage-bar"><span class="usage-title">用 oMLX 运行任务</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="f">-u</span> <span class="a">http://127.0.0.1:8000/v1</span> <span class="f">-m</span> <span class="a">Qwen3-8B-4bit</span> <span class="q">"What is 6*7?"</span></span></code></pre></figure>
+<figure class="usage" aria-label="用 Ollama 运行任务" data-copy="melo -u http://127.0.0.1:11434/v1 -m qwen3:8b &quot;What is 6*7?&quot;"><div class="usage-bar"><span class="usage-title">用 Ollama 运行任务</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="f">-u</span> <span class="a">http://127.0.0.1:11434/<wbr>v1</span> <span class="f">-m</span> <span class="a">qwen3:8b</span> <span class="q">"What is 6*7?"</span></span></code></pre></figure></li>
+<li class="step"><h3><a href="quickstart.html#interactive-conversations">打开主对话</a></h3>
+<p>不带任务运行 melo：首次运行会找到你的服务器并保存配置。</p>
+<figure class="usage" aria-label="主对话" data-copy="melo"><div class="usage-bar"><span class="usage-title"></span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span></span></code></pre></figure></li>
+<li class="step"><h3><a href="quickstart.html#interactive-conversations">交给它一个任务</a></h3>
+<p>在对话里提出更大的工作：它会成为任务，完成后以卡片回来。</p>
+<figure class="step-shot"><img src="../assets/img/cards.webp" alt="主对话中的三张卡片：一个已完成的任务（改了什么、跑了哪些测试）、一个已答复的批准请求和一个在等你的批准请求。" width="1280" height="800" loading="lazy"></figure></li>
+<li class="step"><h3><a href="quickstart.html#set-up-an-embedding-model">查看它记住了什么</a></h3>
+<p>melo 跨对话保存笔记；你可以列出它们，或忘掉某一条。</p>
+<figure class="usage" aria-label="melo 记得什么" data-copy="melo memory list&#10;melo memory forget 3 -y"><div class="usage-bar"><span class="usage-title"></span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="s">memory</span> <span class="s">list</span></span>
+<span class="ln out"><span class="o">   3  Preferences  You prefer short answers.</span></span>
+<span class="ln out"><span class="o">      from chat “I prefer short answers”, Oct 30</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="s">memory</span> <span class="s">forget</span> <span class="a">3</span> <span class="f">-y</span></span>
+<span class="ln out"><span class="o">Forgot note 3.</span></span></code></pre></figure></li>
+</ol><!-- /usage -->
+      </section>
+
       <section class="section" id="install">
         <h2>安装</h2>
-        <pre><code>git clone https://github.com/localmelo/localmelo.git
-cd localmelo
-uv sync --extra gateway
-source .venv/bin/activate</code></pre>
+        <!-- usage:install --><figure class="usage" aria-label="安装" data-copy="git clone https://github.com/localmelo/localmelo.git&#10;cd localmelo&#10;uv sync --extra gateway&#10;source .venv/bin/activate"><div class="usage-bar"><span class="usage-title">安装</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">git</span> <span class="s">clone</span> <span class="a">https://github.com/<wbr>localmelo/<wbr>localmelo.git</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">cd</span> <span class="a">localmelo</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">sync</span> <span class="f">--extra</span> <span class="a">gateway</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">source</span> <span class="a">.venv/bin/activate</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li>uv 创建 <code>.venv/</code>（需要时会安装 Python 3.13），并装好网关的依赖。</li>
           <li>请保留目录名 <code>localmelo</code>：改名的目录或 ZIP 下载会报错 <code class="wrap">ModuleNotFoundError: No module named 'localmelo'</code>。</li>
@@ -79,11 +110,11 @@ source .venv/bin/activate</code></pre>
         </ul>
 
         <h3 id="install-with-pip">用 pip 安装</h3>
-        <pre><code>git clone https://github.com/localmelo/localmelo.git
-cd localmelo
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[gateway]"</code></pre>
+        <!-- usage:install-pip --><figure class="usage" aria-label="用 pip 安装" data-copy="git clone https://github.com/localmelo/localmelo.git&#10;cd localmelo&#10;python3 -m venv .venv&#10;source .venv/bin/activate&#10;pip install -e &quot;.[gateway]&quot;"><div class="usage-bar"><span class="usage-title">用 pip 安装</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">git</span> <span class="s">clone</span> <span class="a">https://github.com/<wbr>localmelo/<wbr>localmelo.git</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">cd</span> <span class="a">localmelo</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">python3</span> <span class="f">-m</span> <span class="a">venv</span> <span class="a">.venv</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">source</span> <span class="a">.venv/bin/activate</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">pip</span> <span class="s">install</span> <span class="f">-e</span> <span class="q">".[gateway]"</span></span></code></pre></figure><!-- /usage -->
         <p><code>python3</code> 必须是 Python 3.11 或更高版本；<code>-e</code> 让安装始终链接到这份代码。</p>
       </section>
 
@@ -92,9 +123,9 @@ pip install -e ".[gateway]"</code></pre>
         <div class="callout warning">
           <p><strong>模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件：没有沙箱。</strong>要在不使用工具的情况下运行任务，请加上 <code>--builtins none</code>。见<a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">安全策略（英文）</a>。</p>
         </div>
-        <pre><code>melo -u http://127.0.0.1:11434/v1 -m qwen3:8b "What is 6*7?"</code></pre>
+        <!-- usage:run-ollama --><figure class="usage" aria-label="用 Ollama 运行任务" data-copy="melo -u http://127.0.0.1:11434/v1 -m qwen3:8b &quot;What is 6*7?&quot;"><div class="usage-bar"><span class="usage-title">用 Ollama 运行任务</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="f">-u</span> <span class="a">http://127.0.0.1:11434/<wbr>v1</span> <span class="f">-m</span> <span class="a">qwen3:8b</span> <span class="q">"What is 6*7?"</span></span></code></pre></figure><!-- /usage -->
         <p>使用 <a href="#serve-a-model-with-omlx">oMLX</a> 时，用它的地址和模型文件夹的名称：</p>
-        <pre><code>melo -u http://127.0.0.1:8000/v1 -m Qwen3-8B-4bit "What is 6*7?"</code></pre>
+        <!-- usage:run-omlx --><figure class="usage" aria-label="用 oMLX 运行任务" data-copy="melo -u http://127.0.0.1:8000/v1 -m Qwen3-8B-4bit &quot;What is 6*7?&quot;"><div class="usage-bar"><span class="usage-title">用 oMLX 运行任务</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="f">-u</span> <span class="a">http://127.0.0.1:8000/v1</span> <span class="f">-m</span> <span class="a">Qwen3-8B-4bit</span> <span class="q">"What is 6*7?"</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li>答案打印在 stdout 上，退出码为 0（<code>echo $?</code> 打印 <code>0</code>）。</li>
           <li><code>-u</code>（<code>--url</code>）为本次运行指定服务器，不读配置文件；<code>-m</code>（<code>--model</code>）指定模型。</li>
@@ -105,7 +136,7 @@ pip install -e ".[gateway]"</code></pre>
 
       <section class="section" id="json-output">
         <h2>以 JSON 格式获取结果</h2>
-        <pre><code>melo -u http://127.0.0.1:11434/v1 -m qwen3:8b -o json "What is 6*7?"</code></pre>
+        <!-- usage:run-json --><figure class="usage" aria-label="一行 JSON" data-copy="melo -u http://127.0.0.1:11434/v1 -m qwen3:8b -o json &quot;What is 6*7?&quot;"><div class="usage-bar"><span class="usage-title">一行 JSON</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="f">-u</span> <span class="a">http://127.0.0.1:11434/<wbr>v1</span> <span class="f">-m</span> <span class="a">qwen3:8b</span> <span class="f">-o</span> <span class="a">json</span> <span class="q">"What is 6*7?"</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li>stdout 中正好是一行 JSON；只有 <code>status</code> 为 <code>completed</code> 时退出码才是 0。</li>
         </ul>
@@ -120,15 +151,15 @@ pip install -e ".[gateway]"</code></pre>
       <section class="section" id="save-a-configuration">
         <h2>保存配置</h2>
         <p>在终端里运行 <code>melo</code>。还没有保存配置时，它会找到这台电脑上的模型服务器，询问是否使用，并保存 <code>~/.cache/localmelo/config.toml</code>：</p>
-        <pre><code>$ melo
-melo uses a model server on this computer (oMLX, Ollama, LM Studio…).
-Found a model server at http://127.0.0.1:11434/v1 (1 model).
-✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
-melo remembers across chats by words only; melo setup adds search by meaning.
-Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
-melo 0.1.0 · qwen3:8b (/model to change)
-~/demo-project
-Try: What is this project? · / commands · ctrl+d quit</code></pre>
+        <!-- usage:first-run --><figure class="usage" aria-label="首次运行" data-copy="melo"><div class="usage-bar"><span class="usage-title">首次运行</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span></span>
+<span class="ln out"><span class="o">melo uses a model server on this computer (oMLX, Ollama, LM Studio…).</span></span>
+<span class="ln out"><span class="o">Found a model server at http://127.0.0.1:11434/v1 (1 model).</span></span>
+<span class="ln out"><span class="y">✓</span><span class="o"> http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.</span></span>
+<span class="ln out"><span class="o">melo remembers across chats by words only; melo setup adds search by meaning.</span></span>
+<span class="ln out"><span class="o">Saved to ~/.cache/localmelo/config.toml (melo setup changes it).</span></span>
+<span class="ln out"><span class="o">melo 0.1.0 · qwen3:8b (/model to change)</span></span>
+<span class="ln out"><span class="o">~/demo-project</span></span>
+<span class="ln out"><span class="o">Try: What is this project? · / commands · ctrl+d quit</span></span></code></pre><figcaption>melo 找到服务器，只问一次，然后保存配置。</figcaption></figure><!-- /usage -->
         <figure class="shot">
           <img src="../assets/img/status.webp" alt="终端里的 /status：模型及其能否回答、文件夹、会话、审批和上下文用量。" width="1280" height="1298" loading="lazy">
           <figcaption><code>/status</code> 检查模型能否回答，并显示文件夹、会话和审批设置。</figcaption>
@@ -142,8 +173,8 @@ Try: What is this project? · / commands · ctrl+d quit</code></pre>
 
         <h3 id="with-the-setup-wizard">使用配置向导</h3>
         <p>配置向导还能设置嵌入服务器或云端 API。使用云端 API 时，先运行 <code>export OPENAI_API_KEY="&lt;your key&gt;"</code>（或你所用服务商的变量）。</p>
-        <pre><code>melo setup
-melo serve</code></pre>
+        <!-- usage:setup-serve --><figure class="usage" aria-label="配置向导和网关" data-copy="melo setup&#10;melo serve"><div class="usage-bar"><span class="usage-title">配置向导和网关</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="s">setup</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="s">serve</span></span></code></pre></figure><!-- /usage -->
         <div class="table-wrap">
           <table>
             <thead>
@@ -171,16 +202,16 @@ melo serve</code></pre>
           <img src="../assets/img/embedding.webp" alt="首次运行找到一个模型服务器，并询问是否用它的嵌入模型在对话之间保持记忆。" width="1280" height="291" loading="lazy">
         </figure>
         <p>长期记忆需要一个你的服务器已经在提供的嵌入模型。使用 Ollama 时：</p>
-        <pre><code>ollama pull qwen3-embedding:0.6b
-curl -sS http://127.0.0.1:11434/v1/embeddings \
-  -H 'Content-Type: application/json' \
-  -d '{"model": "qwen3-embedding:0.6b", "input": "ping"}'
-melo setup    # Embedding backend: 2 (Ollama); URL http://localhost:11434; model qwen3-embedding:0.6b</code></pre>
+        <!-- usage:embed-ollama --><figure class="usage" aria-label="用 Ollama 设置嵌入模型" data-copy="ollama pull qwen3-embedding:0.6b&#10;curl -sS http://127.0.0.1:11434/v1/embeddings \&#10;  -H &#x27;Content-Type: application/json&#x27; \&#10;  -d &#x27;{&quot;model&quot;: &quot;qwen3-embedding:0.6b&quot;, &quot;input&quot;: &quot;ping&quot;}&#x27;&#10;melo setup"><div class="usage-bar"><span class="usage-title">用 Ollama 设置嵌入模型</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">ollama</span> <span class="s">pull</span> <span class="a">qwen3-embedding:0.6b</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">curl</span> <span class="f">-sS</span> <span class="a">http://127.0.0.1:11434/<wbr>v1/<wbr>embeddings</span> <span class="x">\</span></span>
+<span class="ln cmd">  <span class="f">-H</span> <span class="q">'Content-Type: application/json'</span> <span class="x">\</span></span>
+<span class="ln cmd">  <span class="f">-d</span> <span class="q">'{"model": "qwen3-embedding:0.6b", "input": "ping"}'</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="s">setup</span>  <span class="k"># Embedding backend: 2 (Ollama); URL http://localhost:11434; model qwen3-embedding:0.6b</span></span></code></pre></figure><!-- /usage -->
         <p>使用 oMLX 时，对话服务器同时提供这个模型：</p>
-        <pre><code>curl -sS http://127.0.0.1:8000/v1/models
-curl -sS http://127.0.0.1:8000/v1/embeddings \
-  -H 'Content-Type: application/json' \
-  -d '{"model": "Qwen3-Embedding-0.6B", "input": "ping"}'</code></pre>
+        <!-- usage:embed-omlx --><figure class="usage" aria-label="用 oMLX 设置嵌入模型" data-copy="curl -sS http://127.0.0.1:8000/v1/models&#10;curl -sS http://127.0.0.1:8000/v1/embeddings \&#10;  -H &#x27;Content-Type: application/json&#x27; \&#10;  -d &#x27;{&quot;model&quot;: &quot;Qwen3-Embedding-0.6B&quot;, &quot;input&quot;: &quot;ping&quot;}&#x27;"><div class="usage-bar"><span class="usage-title">用 oMLX 设置嵌入模型</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">curl</span> <span class="f">-sS</span> <span class="a">http://127.0.0.1:8000/<wbr>v1/<wbr>models</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">curl</span> <span class="f">-sS</span> <span class="a">http://127.0.0.1:8000/<wbr>v1/<wbr>embeddings</span> <span class="x">\</span></span>
+<span class="ln cmd">  <span class="f">-H</span> <span class="q">'Content-Type: application/json'</span> <span class="x">\</span></span>
+<span class="ln cmd">  <span class="f">-d</span> <span class="q">'{"model": "Qwen3-Embedding-0.6B", "input": "ping"}'</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li>回复中必须有非空的 <code>data[0].embedding</code>。</li>
           <li>使用 oMLX 时，设置 <code>embedding_backend = "vllm"</code> 以及 <code>embedding_url</code> 和 <code>embedding_model</code>（<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#omlx">oMLX（英文）</a>）。</li>
@@ -192,13 +223,13 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
       <section class="section" id="start-the-gateway">
         <h2>启动网关</h2>
         <p>运行 <code>melo serve</code>。在第二个终端里检查网关并通过它运行一个任务；令牌通过管道交给 curl，不出现在命令行里：</p>
-        <pre><code>{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/v1/health
-{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/v1/agent/run \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What is 6*7?"}'</code></pre>
+        <!-- usage:gateway-check --><figure class="usage" aria-label="检查网关并运行任务" data-copy="{ printf &#x27;Authorization: Bearer &#x27;; cat ~/.cache/localmelo/gateway/auth/token; printf &#x27;\n&#x27;; } | curl -H @- http://127.0.0.1:8401/v1/health&#10;{ printf &#x27;Authorization: Bearer &#x27;; cat ~/.cache/localmelo/gateway/auth/token; printf &#x27;\n&#x27;; } | curl -H @- -X POST http://127.0.0.1:8401/v1/agent/run \&#10;  -H &quot;Content-Type: application/json&quot; \&#10;  -d &#x27;{&quot;query&quot;: &quot;What is 6*7?&quot;}&#x27;"><div class="usage-bar"><span class="usage-title">检查网关并运行任务</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="x">{</span> <span class="c">printf</span> <span class="q">'Authorization: Bearer '</span><span class="x">;</span> <span class="c">cat</span> <span class="a">~/<wbr>.cache/<wbr>localmelo/<wbr>gateway/<wbr>auth/<wbr>token</span><span class="x">;</span> <span class="c">printf</span> <span class="q">'\n'</span><span class="x">;</span> <span class="x">}</span> <span class="x">|</span> <span class="c">curl</span> <span class="f">-H</span> <span class="a">@-</span> <span class="a">http://127.0.0.1:8401/<wbr>v1/<wbr>health</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="x">{</span> <span class="c">printf</span> <span class="q">'Authorization: Bearer '</span><span class="x">;</span> <span class="c">cat</span> <span class="a">~/<wbr>.cache/<wbr>localmelo/<wbr>gateway/<wbr>auth/<wbr>token</span><span class="x">;</span> <span class="c">printf</span> <span class="q">'\n'</span><span class="x">;</span> <span class="x">}</span> <span class="x">|</span> <span class="c">curl</span> <span class="f">-H</span> <span class="a">@-</span> <span class="f">-X</span> <span class="a">POST</span> <span class="a">http://127.0.0.1:8401/<wbr>v1/<wbr>agent/<wbr>run</span> <span class="x">\</span></span>
+<span class="ln cmd">  <span class="f">-H</span> <span class="q">"Content-Type: application/json"</span> <span class="x">\</span></span>
+<span class="ln cmd">  <span class="f">-d</span> <span class="q">'{"query": "What is 6*7?"}'</span></span></code></pre></figure><!-- /usage -->
         <p>示例输出（数值会有所不同）：</p>
-        <pre><code>{"status":"ok","uptime":12.3,"sessions":{"active":0,"busy":0,"max":50},"chat_backend":"ollama","embedding_backend":"none"}
-{"result":"42","session_id":"a7e8f646ca2e"}</code></pre>
+        <!-- usage:gateway-output --><figure class="usage" aria-label="示例输出"><div class="usage-bar"><span class="usage-title">示例输出</span></div><pre class="usage-body"><code><span class="ln out"><span class="o">{"status":"ok","uptime":12.3,"sessions":{"active":0,"busy":0,"max":50},"chat_backend":"ollama","embedding_backend":"none"}</span></span>
+<span class="ln out"><span class="o">{"result":"42","session_id":"a7e8f646ca2e"}</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li>健康检查不会联系模型服务器；运行任务才会。</li>
           <li>在这台电脑的终端里，<code>melo serve</code> 会在浏览器中打开控制台；<code>melo console</code> 可再次打开。</li>
@@ -213,12 +244,12 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
         <figure class="shot">
           <img src="../assets/img/first-answer.webp" alt="终端里的对话：思考、三个安静的工具调用行，以及带代码示例的答案。" width="1280" height="828" loading="lazy">
         </figure>
-        <pre><code>melo
-# Or talk to an OpenAI-compatible server that is not saved. Without
-# -m it uses the server's only chat model or its one loaded model;
-# with several chat models and not exactly one loaded, it exits 2 and lists them:
-melo -u http://127.0.0.1:8000/v1
-melo -u http://127.0.0.1:8000/v1 -m YOUR_MODEL_ID</code></pre>
+        <!-- usage:interactive --><figure class="usage" aria-label="对话" data-copy="melo&#10;melo -u http://127.0.0.1:8000/v1&#10;melo -u http://127.0.0.1:8000/v1 -m YOUR_MODEL_ID"><div class="usage-bar"><span class="usage-title">对话</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span></span>
+<span class="ln note"><span class="k"># Or talk to an OpenAI-compatible server that is not saved. Without</span></span>
+<span class="ln note"><span class="k"># -m it uses the server's only chat model or its one loaded model;</span></span>
+<span class="ln note"><span class="k"># with several chat models and not exactly one loaded, it exits 2 and lists them:</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="f">-u</span> <span class="a">http://127.0.0.1:8000/v1</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="f">-u</span> <span class="a">http://127.0.0.1:8000/v1</span> <span class="f">-m</span> <span class="a">YOUR_MODEL_ID</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li>每个工具调用显示为一行，答案以 Markdown 打印；开发者模式还会显示步骤、阶段和本次运行的进度事实。</li>
           <li>输入 <code>/</code> 查看命令：<code>/help</code>、<code>/model</code>、<code>/status</code>、<code>/attach PATH</code>、<code>/new</code>；Ctrl+D 退出。</li>
@@ -244,25 +275,25 @@ melo -u http://127.0.0.1:8000/v1 -m YOUR_MODEL_ID</code></pre>
         <ol>
           <li>
             <p>用 Homebrew 安装 oMLX（oMLX App 也会安装 <code>~/.omlx/bin/omlx</code>）：</p>
-            <pre><code>brew tap jundot/omlx https://github.com/jundot/omlx
-brew install jundot/omlx/omlx</code></pre>
+            <!-- usage:omlx-install --><figure class="usage" aria-label="安装 oMLX" data-copy="brew tap jundot/omlx https://github.com/jundot/omlx&#10;brew install jundot/omlx/omlx"><div class="usage-bar"><span class="usage-title">安装 oMLX</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">brew</span> <span class="s">tap</span> <span class="a">jundot/omlx</span> <span class="a">https://github.com/<wbr>jundot/<wbr>omlx</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">brew</span> <span class="s">install</span> <span class="a">jundot/omlx/omlx</span></span></code></pre></figure><!-- /usage -->
           </li>
           <li>
             <p>把每个模型放进各自的文件夹；文件夹名就是模型 ID：</p>
-            <pre><code>hf download mlx-community/Qwen3-8B-4bit --local-dir ~/models/Qwen3-8B-4bit</code></pre>
+            <!-- usage:omlx-download --><figure class="usage" aria-label="下载模型" data-copy="hf download mlx-community/Qwen3-8B-4bit --local-dir ~/models/Qwen3-8B-4bit"><div class="usage-bar"><span class="usage-title">下载模型</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">hf</span> <span class="s">download</span> <span class="a">mlx-community/<wbr>Qwen3-8B-4bit</span> <span class="f">--local-dir</span> <span class="a">~/models/Qwen3-8B-4bit</span></span></code></pre></figure><!-- /usage -->
           </li>
           <li>
             <p>启动服务器，让它在单独的终端里一直运行：</p>
-            <pre><code>omlx serve --model-dir ~/models --port 8000</code></pre>
+            <!-- usage:omlx-serve --><figure class="usage" aria-label="启动 oMLX" data-copy="omlx serve --model-dir ~/models --port 8000"><div class="usage-bar"><span class="usage-title">启动 oMLX</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">omlx</span> <span class="s">serve</span> <span class="f">--model-dir</span> <span class="a">~/models</span> <span class="f">--port</span> <span class="a">8000</span></span></code></pre></figure><!-- /usage -->
             <p>不要设置 <code>--api-key</code>：localmelo 不会向本地服务器发送密钥。遇到 HTTP 401 时，在 oMLX 管理页面中打开 <strong>Allow inference without API key</strong>。</p>
           </li>
           <li>
             <p>检查服务器是否列出了该模型（<code>"id": "Qwen3-8B-4bit"</code>）：</p>
-            <pre><code>curl -sS http://127.0.0.1:8000/v1/models</code></pre>
+            <!-- usage:omlx-models --><figure class="usage" aria-label="列出模型" data-copy="curl -sS http://127.0.0.1:8000/v1/models"><div class="usage-bar"><span class="usage-title">列出模型</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">curl</span> <span class="f">-sS</span> <span class="a">http://127.0.0.1:8000/<wbr>v1/<wbr>models</span></span></code></pre></figure><!-- /usage -->
           </li>
           <li>
             <p>用这个 ID 运行任务（第一个请求会加载模型；<code>-X request_timeout_s=600</code> 给它更多时间）：</p>
-            <pre><code>melo -u http://127.0.0.1:8000/v1 -m Qwen3-8B-4bit "What is 6*7?"</code></pre>
+            <!-- usage:run-omlx --><figure class="usage" aria-label="用 oMLX 运行任务" data-copy="melo -u http://127.0.0.1:8000/v1 -m Qwen3-8B-4bit &quot;What is 6*7?&quot;"><div class="usage-bar"><span class="usage-title">用 oMLX 运行任务</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="f">-u</span> <span class="a">http://127.0.0.1:8000/v1</span> <span class="f">-m</span> <span class="a">Qwen3-8B-4bit</span> <span class="q">"What is 6*7?"</span></span></code></pre></figure><!-- /usage -->
           </li>
         </ol>
         <figure class="shot">
