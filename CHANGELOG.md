@@ -346,7 +346,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   recalled like turns of other chats, marked `this chat, Oct 30`, and the ones
   still in view are not; `search_memory` finds them too. The instructions say what
   is true: the chat sees the recent messages, and older parts of the conversation,
-  earlier chats and notes come back with your message when they match ([#NN]).
+  earlier chats and notes come back with your message when they match ([#370]).
 
 - Notes the model keeps get kept, and it never claims a save it did not make.
   A note passes when its values match what you typed and most of its other
@@ -408,7 +408,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   longer replaces "You live in Utrecht." (a value with a digit or a unit word
   such as 楼/floor/apartment is another kind than a place or a name, for home,
   job, name and timezone), and "我搬到7楼了" / "I moved to Berlin." now state a
-  new home ([#NN]).
+  new home ([#370]).
 
 - The main chat does what it is asked, or hands it off with its context. A
   reply that only says what it will do ("I'll start by looking at the test
@@ -3093,3 +3093,4 @@ earlier milestones.
 [#365]: https://github.com/localmelo/localmelo/pull/365
 [#367]: https://github.com/localmelo/localmelo/pull/367
 [#368]: https://github.com/localmelo/localmelo/pull/368
+[#370]: https://github.com/localmelo/localmelo/pull/370
