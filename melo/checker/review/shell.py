@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import base64
 import os
 import re
 import shlex
 from urllib.parse import urlparse
 
+from localmelo.melo.checker.review import files as file_rules
 from localmelo.melo.checker.review import python as py_rules
 from localmelo.melo.checker.review.paths import (
     Context,
@@ -18,7 +20,6 @@ from localmelo.melo.checker.review.paths import (
 )
 
 MAX_DEPTH = 3
-SCRIPT_BYTES = 64 * 1024
 _OPS = re.compile(r"&&|\|\||;;|\|&|&>>|&>|>>|>&|<&|<<<|<<|<\(|>\(|>\||[;&|()<>\n]")
 _SEPARATORS = set([";", "&&", "||", "|", "|&", "&", "(", ")", "<(", ">(", ";;"]) | {
     "\n"
@@ -76,6 +77,24 @@ _WRITERS = {
     **dict.fromkeys(["touch", "mkdir", "tee", "truncate"], "all"),
     **dict.fromkeys(["chmod", "chown", "chgrp"], "rest"),
 }
+# Programs that run the project's own files: a test runner, a build tool, a
+# package script. With code changed in this chat they are undecided.
+_RUNNERS = set(["pytest", "py.test", "tox", "nox", "make", "gmake", "just"])
+_RUNNERS |= set(["ninja", "rake", "gradle", "gradlew", "mvn", "npx", "bunx", "pnpx"])
+_RUNNERS |= set(["jest", "vitest", "mocha", "pre-commit", "ctest", "hatch"])
+# `<tool> run …` runs a script the project's configuration names.
+_RUN_WRAPPERS = set(["uv", "poetry", "pdm", "hatch", "pipenv"])
+# git commands that run the repository's hooks.
+_HOOKED = set(["commit", "push", "merge", "rebase", "am", "pull", "checkout"])
+_FILE_RUNNERS = set(["node", "deno", "bun", "ruby", "perl", "php", "tsx", "ts-node"])
+_PACKAGE_RUNS = set(["test", "t", "run", "run-script", "start", "exec", "x"])
+_BUILDS = {
+    "cargo": set(["run", "test", "build", "bench", "check"]),
+    "go": set(["run", "test", "generate"]),
+    "swift": set(["run", "test", "build"]),
+    "xcodebuild": set(["test", "build", "build-for-testing", "test-without-building"]),
+}
+_YARN_OWN = set(["add", "install", "remove", "init", "global", "config", "info"])
 # One rule a line: a pattern over "program args…", the category ("?" for
 # undecided) and the reason; {prog} is the program.
 _RULES = [
@@ -113,6 +132,7 @@ _RULES = [
 ^git reset .*--hard ;; delete ;; Resets with --hard, which discards uncommitted changes.
 ^git clean .*\s-\w*[xX] ;; delete ;; Deletes untracked and ignored files (git clean -x).
 ^git config .*--(global|system) ;; persistence ;; Changes your global git settings.
+^git config .*core\.hookspath|^git config .*core\.hooksPath ;; persistence ;; Points git at hooks that run on later commits.
 """.strip().splitlines())
 ]
 
@@ -187,11 +207,13 @@ def review_shell(ctx: Context, f: Findings, command: str) -> None:
     except ValueError:
         return f.doubt("Has a quote that does not close.")
     cwd, before, url, bare_before = ctx.root, "", "", False
+    said: str | None = None  # what the last command printed, when literal
     for op, argv, redirs in segments:
-        body = None
+        body, writes = None, []
         for kind, target in redirs:
             if kind in _WRITES and not target.isdigit():
                 touch(ctx, f, target, "write", cwd)
+                writes.append((kind, target))
             elif kind == "<":
                 touch(ctx, f, target, "read", cwd)
             elif kind == "<<" and bodies:
@@ -199,10 +221,15 @@ def review_shell(ctx: Context, f: Findings, command: str) -> None:
         for token in argv:
             for inner in re.findall(r"\$\((.*)\)|`([^`]*)`", token, re.S):
                 review_shell(ctx.deeper(), f, inner[0] or inner[1])
+        if argv[1:2] == ["run"] and os.path.basename(argv[0]) in _RUN_WRAPPERS:
+            file_rules.runner(ctx, f, f"{os.path.basename(argv[0])} run")
         argv = _unwrap(f, argv)
         if not argv:
             continue
         prog = os.path.basename(argv[0])
+        piped = said if op in ("|", "|&") else None
+        said = _literal_output(argv, body, piped)
+        _writes_code(ctx, f, argv, said, writes, cwd)
         if prog == "cd":
             cwd = resolve(ctx, (argv + ["~"])[1], cwd) or cwd
             continue
@@ -360,6 +387,108 @@ def run_argv(ctx: Context, f: Findings, argv: list[str], cwd: str) -> None:
         path = resolve(ctx, argv[0], cwd)
         if path and where(ctx, path, write=False) == "inside":
             script(ctx, f, argv[0], "", cwd)
+    if _runs_project(prog, words):
+        file_rules.runner(ctx, f, prog)
+    if prog == "git" and set(plain[:1]) & _HOOKED:
+        file_rules.hooks(ctx, f, f"git {plain[0]}")
+
+
+def _runs_project(prog: str, words: list[str]) -> bool:
+    """Whether ``prog words…`` runs the project's files on its own."""
+    if prog in _RUNNERS or os.path.basename(prog) in _RUNNERS:
+        return True
+    if "node_modules/.bin/" in prog:
+        return True
+    if prog in _FILE_RUNNERS:
+        return bool(words)
+    if prog in ("npm", "bun"):
+        return bool(words) and words[0] in _PACKAGE_RUNS
+    if prog in ("yarn", "pnpm"):
+        return bool(words) and words[0] not in _YARN_OWN
+    if prog == "xcodebuild":
+        return bool(set(words) & _BUILDS[prog])
+    return prog in _BUILDS and bool(words) and words[0] in _BUILDS[prog]
+
+
+def _printf(args: list[str]) -> str | None:
+    """What ``printf FORMAT ARGS…`` prints, for ``%s``, ``%b``, ``%d`` and escapes."""
+    if not args:
+        return None
+    fmt = args[0].replace("\\n", "\n").replace("\\t", "\t")
+    parts, rest, out = re.split(r"%[sbd]", fmt), list(args[1:]), []
+    holes = len(parts) - 1
+    while True:
+        take, rest = rest[:holes], rest[holes:]
+        take += [""] * (holes - len(take))
+        out.append(
+            parts[0] + "".join(v + p for v, p in zip(take, parts[1:], strict=True))
+        )
+        if not rest or not holes:
+            return "".join(out).replace("%%", "%")
+
+
+def _literal_output(argv: list[str], body: str | None, piped: str | None) -> str | None:
+    """What a command prints when melo can tell: ``echo``, ``printf``, a
+    here-document, ``cat`` or ``tee`` of a pipe, ``base64 -d`` of one."""
+    prog, args = os.path.basename(argv[0]), argv[1:]
+    words = [a for a in args if not a.startswith("-")]
+    if prog == "echo":
+        return " ".join(a for a in args if a not in ("-n", "-e", "-E")) + "\n"
+    if prog == "printf":
+        return _printf(args)
+    if prog in ("cat", "tee") and body is not None:
+        return body + "\n"
+    if prog == "cat" and not words or prog == "tee":
+        return piped
+    if prog == "base64" and {"-d", "-D", "--decode"} & set(args) and piped:
+        try:
+            return base64.b64decode(piped.strip(), validate=False).decode()
+        except (ValueError, UnicodeDecodeError):
+            return None
+    return None
+
+
+def _writes_code(
+    ctx: Context,
+    f: Findings,
+    argv: list[str],
+    text: str | None,
+    writes: list[tuple[str, str]],
+    cwd: str,
+) -> None:
+    """``cat > x.py <<EOF``, ``… | tee``, ``echo … > x.sh``, ``cp a.py b.py``.
+
+    Literal text written to a code file is classified as a write of it
+    (:func:`~.files.written`), and so is a copy of a local file; ``>>``
+    adds to what is there.
+    """
+    prog, args = os.path.basename(argv[0]), argv[1:]
+    words = [a for a in args if not a.startswith("-")]
+    if prog == "cp" and len(words) == 2:
+        source = resolve(ctx, words[0], cwd)
+        target = resolve(ctx, words[1], cwd)
+        if source is None or target is None:
+            return
+        if os.path.isdir(target):
+            target = os.path.join(target, os.path.basename(source))
+        copied = file_rules._old_text(source)
+        if copied:
+            old = file_rules._old_text(target) or ""
+            file_rules.written(ctx, f, target, copied, old)
+        return
+    if text is None:
+        return
+    targets = list(writes)
+    if prog == "tee":
+        mode = ">>" if "-a" in args else ">"
+        targets += [(mode, a) for a in words]
+    for kind, target in targets:
+        path = resolve(ctx, target, cwd)
+        if path is None:
+            continue
+        old = file_rules._old_text(path) or ""
+        new = old + text if kind == ">>" else text
+        file_rules.written(ctx, f, path, new, old)
 
 
 def is_melo_python(ctx: Context, interp: str) -> bool:
@@ -408,8 +537,16 @@ def _pip(ctx: Context, f: Findings, args: list[str], interp: str) -> None:
 
 
 def _python(ctx: Context, f: Findings, argv: list[str], cwd: str) -> None:
-    """A Python interpreter run with *argv*; ``"?"`` names an unknown program."""
+    """A Python interpreter run with *argv*; ``"?"`` names an unknown program.
+
+    An interpreter in the workspace (``.venv/bin/python``) runs its
+    environment's ``.pth`` files at its start: those changed in this chat
+    are read.
+    """
     interp, i = argv[0], 1
+    where_it = resolve(ctx, interp, cwd) if "/" in interp else None
+    if where_it is not None and where(ctx, where_it, write=False) == "inside":
+        file_rules.site_hooks(ctx, f, os.path.basename(interp))
     while i < len(argv):
         arg, rest = argv[i], argv[i + 1 :]
         if arg in ("-V", "--version", "-h", "--help"):
@@ -449,6 +586,10 @@ def _module(ctx: Context, f: Findings, interp: str, name: str, args: list[str]) 
             f.add("service", "Opens a web server that other computers can reach.")
     elif name in ("playwright", "uv", "pipx", "huggingface_hub", "conda"):
         run_argv(ctx, f, [name.replace("huggingface_hub", "hf"), *args], ctx.root)
+    elif name in ("pytest", "unittest", "tox", "nox", "doctest"):
+        file_rules.runner(ctx, f, f"python -m {name}")
+    else:
+        file_rules.module(ctx, f, name, main=True)
 
 
 def download(ctx: Context, f: Findings, url: str, target: str, cwd: str) -> None:
@@ -471,22 +612,20 @@ def download(ctx: Context, f: Findings, url: str, target: str, cwd: str) -> None
 def script(ctx: Context, f: Findings, raw: str, kind: str, cwd: str) -> None:
     """Classify a local script the call runs, once (one level deep)."""
     path = resolve(ctx, raw, cwd)
-    try:
-        if not path or os.path.getsize(path) > SCRIPT_BYTES or ctx.depth > 1:
-            raise OSError
-        with open(path, encoding="utf-8") as file:
-            text = file.read()
-    except (OSError, UnicodeDecodeError):
+    if not path or ctx.depth > 1:
         return f.doubt(f"Runs {raw}, which melo could not read.")
+    text = f.take(path)
+    if not text:
+        return  # read before, or a doubt
     shebang = text.split("\n", 1)[0]
     python = (
         kind == "python" or not kind and (raw.endswith(".py") or "python" in shebang)
     )
-    _code(ctx, f, "python" if python else "sh", text)
+    _code(ctx, f, "python" if python else "sh", text, os.path.dirname(path))
 
 
-def _code(ctx: Context, f: Findings, prog: str, body: str) -> None:
+def _code(ctx: Context, f: Findings, prog: str, body: str, here: str = "") -> None:
     if _PY.match(prog):
-        py_rules.review_python(ctx.deeper(), f, body)
+        py_rules.review_python(ctx.deeper(here or None), f, body)
     elif prog in _SHELLS:
-        review_shell(ctx.deeper(), f, body)
+        review_shell(ctx.deeper(here or None), f, body)

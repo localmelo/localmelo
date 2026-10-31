@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -341,3 +342,10 @@ def test_case_variant_home_uses_filesystem_identity(
     assert validate_task_workspace(str(variant / "Work"), cfg()) == os.path.realpath(
         variant / "Work"
     )
+
+
+def test_the_person_s_words_are_kept_only_when_trusted_code_sets_them() -> None:
+    spec = TaskSpec.from_payload({"objective": "Install matplotlib and chart it"})
+    assert "user_words" not in spec.to_dict()
+    typed = dataclasses.replace(spec, user_words="chart my capex")
+    assert typed.to_dict()["user_words"] == "chart my capex"

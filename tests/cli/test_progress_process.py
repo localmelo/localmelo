@@ -239,7 +239,12 @@ def test_the_line_is_erased_before_the_status_line(
     chat_server: FakeChatServer, tmp_path: Path
 ) -> None:
     _queue(chat_server, SESSION)
-    done = _run(chat_server, tmp_path, ["--max-steps", "2", "fix the tests"])
+    # The extra request for an answer (on by default) would end with output.
+    done = _run(
+        chat_server,
+        tmp_path,
+        ["-X", "agent.answer_on_stop=off", "--max-steps", "2", "fix the tests"],
+    )
     assert done.returncode == 2
     assert done.stdout == b""
     status = "melo: run ended with status budget_exhausted: "

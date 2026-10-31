@@ -30,6 +30,45 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- A run ends with a usable answer more often. The patient reflection gate
+  (`--reflection-gate patient`) and `[agent] answer_on_stop` are now the
+  defaults: a next step that is not new still continues once per run, and a
+  run that stops with no answer is asked once for it. On two sets of 24
+  questions, runs that gave an answer rose from 7 to 17 on the first set and
+  from 19 to 20 on the second. `--reflection-gate flags -X
+  agent.answer_on_stop=off` gives the earlier behavior. A routine learned
+  under the earlier gate learns its steps again once. The interactive UI, the
+  console, the app and the gateway always use the new defaults, except the
+  console's main chat, which still hands a turn that runs out of steps to a
+  task ([#353]).
+
+- When a task asks for a closing line, such as `FINAL ANSWER: ...`, and the
+  answer lacks it, one more request, without tools, asks for that line from
+  the answer alone and it is added after the answer. The line is found in the
+  task's own text only, a task that names none is left as it is, and a request
+  that fails leaves the answer as it was. The JSON record gains `"format_fixed":
+  true` for such a run (absent otherwise). `-X agent.answer_on_stop=off` turns
+  it off together with the answer request ([#353]).
+
+- Auto mode, part 1: the terminal's `/approvals auto` now means auto mode.
+  Nothing asks: routine steps run, and a step that installs, downloads,
+  changes files outside the folder or does anything else high-impact is
+  blocked unless your own words ask for it; a step melo's rules cannot judge
+  goes to your model, which also checks that it serves what you asked. A
+  blocked step does not run: melo reads a note and explains in its answer what
+  was blocked and why, why it wanted it, and other ways to reach the goal. A
+  second block of the same kind ends the turn with that explanation. Before,
+  auto ran routine steps and still asked about the rest. Under a chat grant in
+  ask mode, your model now reviews a step the rules cannot judge before it
+  runs on the grant. A review asks a local model for a short answer at
+  temperature 0 with thinking off, so it answers in time. Only the words you
+  typed count as yours (not attachments, recalled notes or task news); a
+  write of code is judged by what it adds to the file; a test or build run
+  reads the code that changed in the chat, and goes to your model when a
+  changed file is one melo cannot read; and a step with parts melo cannot
+  read is never allowed by words alone. The terminal tags a blocked
+  step `blocked: installs software`; events record each decision, and a run
+  without approvals has no `reviews` in `run.finished` ([#352]).
 - A task's page in default mode no longer shows an empty "Recovery card"
   heading (developer mode still does). The status row in default mode leaves
   out the queue's counts, a held task's too, and says "1 task waits for you"
@@ -2865,3 +2904,5 @@ earlier milestones.
 [#346]: https://github.com/localmelo/localmelo/pull/346
 [#348]: https://github.com/localmelo/localmelo/pull/348
 [#350]: https://github.com/localmelo/localmelo/pull/350
+[#352]: https://github.com/localmelo/localmelo/pull/352
+[#353]: https://github.com/localmelo/localmelo/pull/353

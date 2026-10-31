@@ -78,7 +78,11 @@ from localmelo.support.gateway.front_rules import (
 )
 from localmelo.support.gateway.i18n import said, said_text, t, t_in
 from localmelo.support.gateway.reminder_time import Reminder, parse_reminder, parse_when
-from localmelo.support.gateway.task_policy import TaskPolicyError, TaskSpec
+from localmelo.support.gateway.task_policy import (
+    MAX_OBJECTIVE_CHARS,
+    TaskPolicyError,
+    TaskSpec,
+)
 from localmelo.support.gateway.task_store import TaskRecord, TaskStoreError
 from localmelo.support.sessions.agents import (
     build_session_agent,
@@ -179,13 +183,18 @@ def answer_head(answer: str, chars: int = ANSWER_CHARS) -> str:
 
 
 def front_options(settings: Config | None) -> AgentOptions:
-    """The main chat's options: at most 4 steps, no reflection, read-only file tools."""
+    """The main chat's options: at most 4 steps, no reflection, read-only file tools.
+
+    A turn that runs out of steps is handed off to a task, so the chat does not
+    spend a request asking for an answer first (``answer_on_stop``).
+    """
     options = configured_session_options(settings, AgentOptions(mode="gateway"))
     return dataclasses.replace(
         options,
         max_steps=FRONT_STEPS,
         attempt_policy="none",
         builtins=frozenset({"file_read", "list_files"}),
+        answer_on_stop=False,
     )
 
 
@@ -760,7 +769,8 @@ class Front:
             spec = TaskSpec.from_payload({"objective": work, "title": title or None})
         except TaskPolicyError as exc:
             return await self._failed(show, "front.echo.startFailed", problem=str(exc))
-        spec = dataclasses.replace(spec, level=level, reason=reason)
+        words = typed.strip()[:MAX_OBJECTIVE_CHARS]
+        spec = dataclasses.replace(spec, level=level, reason=reason, user_words=words)
         main = self.console.main_id
         return await self._start(spec, main, show=show, key=key, turn=turn, of=of)
 
@@ -1101,6 +1111,7 @@ class Front:
             spec = dataclasses.replace(
                 spec, workspace=str(record.spec.get("workspace") or ""), level=record.level,
                 level_source=record.level_source, reason=record.reason,
+                user_words=str(record.spec.get("user_words") or ""),
             )  # fmt: skip
             return await self._start(
                 spec, record.front_id, of=echo_id, word="Started again"

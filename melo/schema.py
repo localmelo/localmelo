@@ -569,7 +569,9 @@ class RunResult:
     ``answered_on_stop`` is true only for a run that ended ``gate_stopped``
     or ``budget_exhausted`` with no answer, whose ``result`` then comes from
     the extra request that ``AgentOptions.answer_on_stop`` makes.
-    :meth:`to_dict` leaves it out when it is false.
+    ``format_fixed`` is true only for a run whose ``result`` got the closing line
+    that the task's text asks for, from one more request of the same option.
+    :meth:`to_dict` leaves each out when it is false.
     """
 
     task_id: str
@@ -591,6 +593,7 @@ class RunResult:
     prefix_cache: dict[str, Any] | None = None
     confinement: dict[str, Any] | None = None
     answered_on_stop: bool = False
+    format_fixed: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         """A deep copy as a plain dict, with keys in field order.
@@ -609,6 +612,8 @@ class RunResult:
             del data["confinement"]
         if not data["answered_on_stop"]:
             del data["answered_on_stop"]
+        if not data["format_fixed"]:
+            del data["format_fixed"]
         return data
 
 

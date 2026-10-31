@@ -1,8 +1,9 @@
 """reflection_gate="patient", answer_on_stop and the reflection list caps.
 
-All three are developer options that are off by default: the gate table, the
-once-per-run allowance, the extra request for an answer when a run stops without
-one, and the caps on a reflection's lists. No real model.
+The gate table, the once-per-run allowance, the extra request for an answer when a
+run stops without one, and the caps on a reflection's lists. ``patient`` and
+``answer_on_stop`` are the defaults now; these tests build their agents with the
+earlier values (``tests/legacy_options.py``) and turn each on by name. No real model.
 """
 
 from __future__ import annotations
@@ -44,6 +45,9 @@ from localmelo.tests.agent.test_reflection_gate import (
 TASK = (
     "Use echo to find the person.\nEnd your reply with one line: FINAL ANSWER: <answer>"
 )
+# The same task without the closing line: the format request (see
+# test_answer_format.py) asks nothing about it.
+PLAIN_TASK = "Use echo to find the person."
 STALE = {"next_step_is_novel": False}  # a continue that is only not novel
 # The cache options of a plain run today (the shared helpers send the earlier ones).
 DEFAULT_CACHE: dict[str, Any] = {
@@ -260,7 +264,7 @@ class TestAnswerOnStop:
 
     @pytest.mark.asyncio
     async def test_the_request_has_no_tools_and_the_evidence(self) -> None:
-        _, llm = await _stopped(_answer("x"), answer_on_stop=True)
+        _, llm = await _stopped(_answer("FINAL ANSWER: x"), answer_on_stop=True)
         [call] = _answer_requests(llm)
         assert not call["tools"]
         text = call["messages"][-1].content
@@ -335,7 +339,7 @@ class TestAnswerOnStop:
             ]
         )
         agent = _agent(llm, steps_per_attempt=1, answer_on_stop=True)
-        result = await agent.run_task(TASK)
+        result = await agent.run_task(PLAIN_TASK)
         assert (result.status, result.result) == ("gate_stopped", "7")
         assert result.answered_on_stop is False
         assert "answered_on_stop" not in result.to_dict()
@@ -345,13 +349,13 @@ class TestAnswerOnStop:
     async def test_no_request_for_other_statuses(self) -> None:
         llm = FakeLLM([_answer("42")])
         agent = _agent(llm, answer_on_stop=True)
-        result = await agent.run_task(TASK)
+        result = await agent.run_task(PLAIN_TASK)
         assert (result.status, result.result) == ("completed", "42")
         assert len(llm.calls) == 1
 
     @pytest.mark.asyncio
-    async def test_off_by_default(self) -> None:
-        result, llm = await _stopped(_answer("never asked"))
+    async def test_off_when_turned_off(self) -> None:
+        result, llm = await _stopped(_answer("never asked"), answer_on_stop=False)
         assert (result.status, result.result) == ("gate_stopped", "")
         assert "answered_on_stop" not in result.to_dict()
         assert "answer_on_stop" not in result.config
@@ -509,7 +513,10 @@ class TestOptionValues:
         with pytest.raises(ValueError, match="reflection_gate"):
             AgentOptions(reflection_gate="impatient")  # type: ignore[arg-type]
 
+    def test_the_defaults_are_the_patient_gate_and_the_answer_request(self) -> None:
+        options = AgentOptions()
+        assert (options.reflection_gate, options.answer_on_stop) == ("patient", True)
+
     def test_answer_on_stop_must_be_a_bool(self) -> None:
-        assert AgentOptions().answer_on_stop is False
         with pytest.raises(ValueError, match="answer_on_stop"):
             AgentOptions(answer_on_stop="on")  # type: ignore[arg-type]

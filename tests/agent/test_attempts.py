@@ -18,7 +18,7 @@ from localmelo.melo.schema import (
     ToolCall,
     ToolDef,
 )
-from localmelo.tests.legacy_options import legacy_options
+from localmelo.tests.legacy_options import LEGACY_ANSWER_OPTIONS, legacy_options
 
 # ── Fake providers ──────────────────────────────────────────────────────────
 
@@ -242,7 +242,12 @@ class TestMaxAttemptsExhausted:
 
     @pytest.mark.asyncio
     async def test_all_attempts_used(self) -> None:
-        options = AgentOptions(steps_per_attempt=1, max_attempts=2, max_steps=10)
+        options = AgentOptions(
+            steps_per_attempt=1,
+            max_attempts=2,
+            max_steps=10,
+            **LEGACY_ANSWER_OPTIONS,
+        )
 
         llm = FakeLLM()
         # Attempt 0: 1 tool call → budget exhausted
@@ -289,7 +294,9 @@ class TestStuckDetection:
 
     @pytest.mark.asyncio
     async def test_repeated_tool_calls_detected(self) -> None:
-        options = AgentOptions(steps_per_attempt=5, max_attempts=1)
+        options = AgentOptions(
+            steps_per_attempt=5, max_attempts=1, **LEGACY_ANSWER_OPTIONS
+        )
 
         llm = FakeLLM()
         # Same tool+args 3 times → stuck
@@ -747,6 +754,7 @@ class TestPrePlanIncludesReflections:
             max_attempts=3,
             max_steps=10,
             reflection_gate="utility",
+            answer_on_stop=False,
         )
 
         llm = FakeLLM()

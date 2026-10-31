@@ -115,7 +115,9 @@ async def test_every_event_has_exactly_the_pinned_keys() -> None:
     await agent.run_task(QUERY, on_event=recorder, progress=True)
     assert EVENT_FIELDS["run.progress"] == frozenset(PROGRESS_KEYS)
     for event in recorder.events:
-        assert set(event.data) == EVENT_FIELDS[event.type]
+        # No approval policy: run.finished has no reviews key (#339).
+        no_policy = {"reviews"} if event.type == "run.finished" else set()
+        assert set(event.data) == EVENT_FIELDS[event.type] - no_policy
         assert event.to_dict()["v"] == 1
 
 

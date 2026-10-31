@@ -345,6 +345,7 @@ from-the-child
 - 命令、代码或文件内容按它将要运行的样子完整显示，折行但绝不截断；控制字符和会改变文字顺序的字符会转义显示并附一行警告。
 - 面板最多显示正文的 8 行，之后是 `… +N lines (v views all)`。
 - `--yolo` 不经询问运行所有工具，状态栏显示 `⚠ YOLO: no approvals`；开发者模式会加上工具的权限层级（见[权限层级](tools-mcp.md#permission-tiers)）。
+- `/approvals auto` 打开自动模式：什么都不会询问。常规步骤直接运行；高影响步骤会被拦下，除非你自己的话要求它；melo 无法判断的步骤先交给你的模型审查。被拦下的步骤不会运行，它那一行会写明原因（`⊘ … · blocked: installs software`），melo 会在回答里说明它想做什么，以及还有哪些别的办法。说“go ahead”可以让它再试一次。`/approvals ask` 关闭自动模式。
 
 <a id="the-workspace"></a>
 

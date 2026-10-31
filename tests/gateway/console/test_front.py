@@ -134,6 +134,8 @@ async def test_slash_task_delegates_at_normal_without_a_model_call(
         assert (record.level, record.level_source) == (2, "computed")
         assert record.reason == "you asked for it"
         assert record.spec["objective"] == "make slides from notes.md"
+        # What the person typed, for the task's step reviews (#339).
+        assert record.spec["user_words"] == "/task make slides from notes.md"
         assert llm.requests == []
         page = (await client.get(f"/api/sessions/{console.main_id}/turns")).json()
         assert page["turns"] == []
@@ -211,6 +213,20 @@ async def test_a_control_phrase_changes_the_task_and_undo_puts_it_back(
         assert again["line"].startswith("Started again: Slides")
         assert (await _task(console, again["task_id"])).state == "queued"
         assert llm.requests == []
+
+
+async def test_a_task_started_again_keeps_the_person_s_words(tmp_path: Path) -> None:
+    async with front_console(tmp_path) as (console, client, _):
+        echo = (await _say(client, console, "/task make slides from notes.md")).json()
+        task_id = echo["echo"]["task_id"]
+        stop = (await _say(client, console, "停止 slides")).json()["echo"]
+        assert (await _task(console, task_id)).state == "cancelled"
+        again = (
+            await client.post(f"/api/front/echoes/{stop['id']}", json={"do": "undo"})
+        ).json()["echo"]
+        restarted = await _task(console, again["task_id"])
+        # For its step reviews (#339): what the person typed, not the objective.
+        assert restarted.spec["user_words"] == "/task make slides from notes.md"
 
 
 async def test_two_taps_at_once_start_one_task(tmp_path: Path) -> None:
@@ -542,6 +558,8 @@ async def test_side_chats_keep_todays_agent(tmp_path: Path) -> None:
 def test_front_options_and_thinking_off() -> None:
     options = front_options(make_cfg())
     assert (options.max_steps, options.attempt_policy) == (4, "none")
+    # A turn out of steps is handed off; the chat does not ask for an answer first.
+    assert options.answer_on_stop is False
     assert options.builtins == frozenset({"file_read", "list_files"})
     cfg = _vllm()
     off = thinking_off(cfg)

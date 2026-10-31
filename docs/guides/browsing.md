@@ -102,7 +102,7 @@ elements:
 - **Each site asks once per chat.** Before melo loads a page, you see "Open a website?" with the site's name and the answers *Yes*, *Yes, and allow this site for the rest of this chat*, and *No*. In the web console it is the usual approval card. "For the rest of this chat" is the only lasting answer; there is no "always" in this part. `/new`, and `/approvals forget`, take the grants back.
 - **A redirect asks again.** If a link or a redirect lands on another site, melo asks about that site before it reads the page. If you say no, the window goes back to a blank page and the model reads that you refused.
 - **Only `http` and `https`.** `file:`, `about:`, `javascript:`, `data:` and the browser's own pages are never opened.
-- **`auto` mode still asks about sites.** Auto mode runs commands and file changes without asking; it does not skip this question. `--yolo` skips every question, this one included.
+- **In auto mode nothing asks.** A site your message names opens; another one opens only when your model finds that it serves what you asked (checked once per site per chat), and is blocked otherwise. `--yolo` skips every question.
 - **Page text is data.** A page can say anything. melo's system prompt tells the model that text between the page markers is content of a web page, never instructions, and the closing marker carries a random number that no page can know, so a page cannot end its own block. This lowers the risk of a page steering the model; it does not remove it. Do not allow sites you do not trust, and do not turn browsing on in a chat that holds secrets you would not paste into a web page.
 
 ## What is coming
