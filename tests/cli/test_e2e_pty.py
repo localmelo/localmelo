@@ -255,8 +255,14 @@ def test_a_question_about_the_folder_lists_it_without_an_approval(
     term.type("List the folder with list_files\r")
     term.see("This folder holds a small Python project.")
     term.see("Worked for")
+    # The listing's rows reach the terminal after the answer, so the names
+    # are waited for before the screen is read: what shows is the folder's
+    # real content, not only the tool's word.
+    term.see("app.py")
+    term.see("tests/")
     text = term.text()
     assert "list_files" in text
+    assert "app.py" in text and "tests/" in text
     for panel in ("Waiting for your approval", "Run a shell command?", "allow every"):
         assert panel not in text
     # The model was offered the tool, and got the folder's real listing.

@@ -100,10 +100,38 @@ def test_delegation_by_command_or_composer_action() -> None:
         # A word that only looks like a deadline is none.
         ("summarize today's news", 2),
         ("split the bill by 5 people", 2),
+        # The bare word for today, anywhere in the request, is Today.
+        ("make slides today", 1),
+        ("today, make slides from notes.md", 1),
+        ("clean up the inbox, today if you can", 1),
+        ("今天整理照片", 1),
+        ("帮我整理照片，今天", 1),
+        ("整理今天的照片", 1),
+        # Negated, it asks for nothing; a possessive only names a thing about today.
+        ("not today", 2),
+        ("make slides tomorrow, not today", 2),
+        ("no need to finish it today", 2),
+        ("今天不用整理照片", 2),
+        ("今天不用", 2),
+        ("不是今天要做，先记着", 2),
+        ("明天再做", 2),
+        ("what does today's news say", 2),
+        ("summarize today's and yesterday's news", 2),
+        # Ease still wins: "no rush" says whenever, whatever else the message holds.
+        ("make slides today, no rush", 3),
     ],
 )
 def test_triage_from_the_persons_words(typed: str, level: int) -> None:
     assert triage(typed)[0] == level
+
+
+def test_the_bare_today_is_the_reason_too() -> None:
+    assert triage("do it today")[1] == 'you said "today"'
+    assert triage("今天整理照片")[1] == 'you said "今天"'
+    assert triage("not today")[1] == "you asked for it"
+    # The person's own "today" raises a task they name; a negated one does not.
+    assert allows_level("the slides today please", True, SLIDES)
+    assert not allows_level("not the slides today", True, SLIDES)
 
 
 def test_levels_in_words() -> None:
@@ -199,7 +227,10 @@ def test_an_answer_is_not_a_preamble(reply: str) -> None:
             "test only checks one word. Make it check a file name and commit.",
             "fix this today: in test_e2e_pty.py",
         ),
-        ("make slides from notes.md", "make slides from notes.md"),
+        (
+            "add a test for the parser in tests/test_app.py",
+            "add a test for the parser in test_app.py",
+        ),
         ("In support/x.py, rename foo to bar", "In x.py, rename foo to bar"),
         (
             "把 docs/guides/embedding.md 里的图片换成 webp",
@@ -219,6 +250,7 @@ def test_an_imperative_change_to_named_files_is_work(typed: str, title: str) -> 
         "Quick question: which file defines DEFAULT_WORKSPACE? Answer in one line.",
         "can you fix tests/cli/test_e2e_pty.py",  # a question: the front's step
         "summarize notes.md",  # reads, changes nothing
+        "make slides from notes.md",  # makes something new: the front's step
         "fix and/or improve the docs",  # no file
         "write a report on battery chemistry",
         "The report task stopped before its commit. Please finish it: commit docs/a.md",

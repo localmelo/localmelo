@@ -7,6 +7,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ## [Unreleased]
 
+### Changed
+
+- A delegated task whose request says "today" or "今天" anywhere (and not "not today" or "今天不用") is Today level; before, only "by/before/due today" counted. The console takes its default folder from the same place as tasks, so both always agree. The embedding guide shows the setup picture, and the folder-listing terminal test checks a real file name.
+
 ### Security
 
 - The approval card says why melo asks, and never offers a chat-wide allow for
@@ -360,6 +364,40 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - Chinese (zh-CN) twins of the docs index, the evaluations page and the docs maintenance guide, and purpose lines on 14 pages that opened on a heading; the docs tests check the twins' anchors, code blocks and inline code ([#216]).
 
 ### Added
+
+- The macOS app shows what melo is doing while its window is put away. A small
+  pill takes Melo's place on the desktop and says in one plain line what runs
+  ("Reading example.com", "Running the tests"), with "+1" when more run. It
+  turns amber while an approval waits, shows "Done: …" for 6 seconds and
+  "Stopped: …" for 10, and says "Model server not reachable" while the model
+  server is down; then Melo comes back, wagging after a "Done". Click it to
+  open the chat or task it names, drag it like Melo, or press **×** to hide it
+  until the next task starts. **On the desktop**, in the menu-bar menu and in
+  Melo's menu, chooses the pill with Melo (the default), Melo only or nothing.
+  `GET /api/health` `status.recent` also says what the finished run was called
+  (`title`) ([#326]).
+
+- Chores that run on time, and a 30-minute check-in. Say `every weekday at 8:30,
+  brief me on my calendar` (or `每天早上九点 …`) in the main chat and it asks
+  `Run this every weekday at 8:30?` with **Save chore**, **Just once** and
+  **Cancel**; rules read the phrase (every day, every weekday or every 1 to 24
+  hours, with an optional time or day part), no model is called, and nothing is
+  saved or started until you tap. A saved chore is a task with origin
+  `user_rule`, started by a code-only tick every 30 s with up to two minutes of
+  jitter and never early; a run missed while the computer slept runs once at
+  wake, and a chore whose last run has not ended skips its slot. The panel's
+  **Scheduled** tab lists the check-in (switch, next time) and each chore (when,
+  next run, how the last run went, switch; **Run now**, **Edit time**, **Delete**);
+  `#/scheduled` opens it. Every 30 minutes the check-in looks, in code, for a
+  finished chore run or a task that has waited for you: with nothing it makes no
+  model call and no card, otherwise one model call writes a short note and one
+  card goes to the main chat. For API clients: `GET|POST /api/chores`,
+  `PATCH|DELETE /api/chores/{id}` (revision-checked, 409 `stale_revision`),
+  `POST /api/chores/{id}/run`, `PUT /api/checkin`, and `chore`, `chore_saved`
+  and `checkin` echoes (`do`: `save`, `once`, `cancel`). The scheduler
+  component of the gateway's session file is version 6; an older file gains the
+  `chores` and `chore_meta` tables and keeps every row. See
+  [Chores that repeat](docs/guides/web-console.md#chores-that-repeat) ([#327]).
 
 - The main chat answers, or hands bigger work to a task by level. It answers a
   quick question itself and starts bigger work as a task it owns, with one line
@@ -2617,6 +2655,8 @@ earlier milestones.
 [#317]: https://github.com/localmelo/localmelo/pull/317
 [#320]: https://github.com/localmelo/localmelo/pull/320
 [#322]: https://github.com/localmelo/localmelo/pull/322
+[#326]: https://github.com/localmelo/localmelo/pull/326
+[#327]: https://github.com/localmelo/localmelo/pull/327
 [#310]: https://github.com/localmelo/localmelo/pull/310
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202

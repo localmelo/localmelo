@@ -4,6 +4,8 @@
 
 嵌入模型是可选的。localmelo 不会下载、启动或提供模型：你需要运行模型服务器，localmelo 会调用该服务器已经提供的模型。
 
+![首次运行列出服务器上的模型，并推荐一个用于长期记忆。](../../assets/img/embedding.webp)
+
 <a id="what-it-buys"></a>
 
 ## 有什么作用

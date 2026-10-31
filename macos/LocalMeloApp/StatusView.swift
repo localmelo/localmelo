@@ -3,7 +3,7 @@ import AppKit
 /// The console's colours, so the window around the console reads as part of it.
 /// Each pair is light, then dark: the console's canvas and ink tokens.
 enum Palette {
-    private static func pair(_ light: UInt32, _ dark: UInt32) -> NSColor {
+    static func pair(_ light: UInt32, _ dark: UInt32) -> NSColor {
         NSColor(name: nil) { appearance in
             let hex = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
             return NSColor(srgbRed: CGFloat(hex >> 16 & 0xff) / 255, green: CGFloat(hex >> 8 & 0xff) / 255,

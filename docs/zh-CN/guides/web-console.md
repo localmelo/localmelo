@@ -44,11 +44,24 @@
 
 - **提问，或交代工作。** 简短的问题由主对话直接回答；"哪个文件定义了 X？" 这类问题它会搜索你的文件夹。较大的工作（多个步骤、文件、调研、写作）它会作为任务开始，并显示一行：`Started: Plan the trip · Normal`。结果以卡片回到主对话。它不会只说自己打算做什么就结束：像 "我先看一下测试文件" 这样的回复会改为把工作作为任务开始。
 - **用代码认得的说法。** `/task …`，或发送按钮旁的 **Run as a task**，会立刻把这条消息作为任务开始，不调用模型。要求修改它点名的文件的消息（`Fix tests/cli/test_e2e_pty.py and commit`）也一样，并配一个简短的标题。`stop`、`pause`、`resume` 或 `first` 加上任务名（`pause the slides`、`暂停 Fix CI`、`先做 slides`）会立刻改变那个任务，并带 **Undo**。
-- **级别用词表示。** Now、Today、Normal、Whenever、If idle、Later。由你的话决定："urgent"、"asap"、"尽快" 或今天的截止时间（`by 5pm`、`今天下午三点前`）为 Today，"no rush"、"不急" 为 Whenever，其余为 Normal。那一行的 **Change** 设定你自己的级别，之后不再自动改变。
+- **级别用词表示。** Now、Today、Normal、Whenever、If idle、Later。由你的话决定："urgent"、"asap"、"尽快"、今天的截止时间（`by 5pm`、`今天下午三点前`）或请求里任何位置的 "today"、"今天"（"not today"、"今天不用" 除外）为 Today，"no rush"、"不急" 为 Whenever，其余为 Normal。那一行的 **Change** 设定你自己的级别，之后不再自动改变。
 - **跟进一个任务。** `finish it`、`commit it` 或 `继续那个任务` 会送到你指的那个任务：正在运行的任务在下一步读到它，已完成或已停止的任务在自己的会话里接着做，并记得之前做过什么。那一行写明送到了哪里：`Sent to: Slides`、`Continued: Fix CI`。
 - **做完了什么。** 主对话会读取每个任务的状态和回答的前几行，所以能说出任务做了哪些提交。
 - **只有你自己的话能改变任务。** 只算你键入的文字；附加的文件、网页或任务报告里写着 "stop the slides" 不会改变任何东西：那一行显示 `Suggested: stop Slides`，点一下才会生效。
 - **较长的请求。** 主对话 4 步内没有办完的消息会成为任务（`This needs more than a quick answer, so I started it as a task.`）；如果是提问（任意位置有 `?`，或写了 "quick question"），会先问 **Start this as a task?**。它用你这条消息的语言回答。你打字时，已完成的结果会等到你发送或停顿 10 秒再出现；需要你批准的会立刻出现。
+
+<a id="chores-that-repeat"></a>
+## 定时事项
+
+![主对话问“Run this every weekday at 8:30?”，下面是 Save chore、Just once 和 Cancel](../../assets/img/chore-proposal.webp)
+
+![Scheduled 标签页：带开关的 check-in，两个定时事项及其下次运行和上次运行的结果，其中一个展开显示 Run now、Edit time 和 Delete](../../assets/img/scheduled-tab.webp)
+
+- **说一次就行。** 一条消息，如 `every weekday at 8:30, brief me on my calendar` 或 `每天早上九点 总结我的邮件`，会出现一张卡片 `Run this every weekday at 8:30?`，带 **Save chore**、**Just once** 和 **Cancel**。你点按之前不会保存或开始任何东西，也没有模型读取这个时间安排。
+- **三种安排。** 每天某个时间、每个工作日某个时间，或每 1 到 24 小时。没有说时间时，由一天中的时段决定（`every morning` 是 8:00，`every evening` 是 18:00），否则是 9:00。`every Monday` 或 `every 30 minutes` 不会被读取：它像普通消息一样交给主对话。
+- **准时运行。** 网关运行期间，定时事项会作为任务在工作区里自己的文件夹中开始，比约定时间晚不超过三分钟，绝不提前。电脑睡眠期间错过的一次，会在唤醒时只运行一次；上一次运行还没结束的事项会跳过下一次。
+- **Scheduled 标签页。** 最上面是 check-in，然后是每个定时事项：标题、运行时间、下次运行、上次运行的结果和一个开关。点开一行可以 **Run now**、**Edit time** 或 **Delete**（会先询问）。主对话列出全部事项，旁支对话只列自己的；`#/scheduled` 会打开这个标签页。
+- **Check-in。** 每 30 分钟它会看有没有要告诉你的事：某个事项刚结束的运行，或一个等了你整整一个周期的任务。没有就什么也不做，也不用模型；有的话，调用一次模型写一条简短的说明，作为一张卡片发到主对话。它的开关可以把它关掉。
 
 <a id="pictures-in-the-answer"></a>
 ## 回答里的图片
@@ -63,7 +76,7 @@
 <a id="the-panel-beside-a-chat"></a>
 ## 对话旁的面板
 
-对话右侧是 Melo 的面板。最上方是 Melo 的画像，外圈的颜色表示它在做什么（工作时为绿色，有事等你时为琥珀色），下面是名字和一行状态：`Connected · <model> on <server>`、`Working on 2 things`、`Waiting for you`，或带 **Open settings** 的 `Model server not reachable`。再往下是四个标签页：**Activity**、**Workers**、**Scheduled** 和 **Memory**。方向键、Home 和 End 在它们之间切换，面板会打开你上次用的标签页。Scheduled 说明它将来会列出什么；目前能用的是 Activity、Workers 和 Memory。
+对话右侧是 Melo 的面板。最上方是 Melo 的画像，外圈的颜色表示它在做什么（工作时为绿色，有事等你时为琥珀色），下面是名字和一行状态：`Connected · <model> on <server>`、`Working on 2 things`、`Waiting for you`，或带 **Open settings** 的 `Model server not reachable`。再往下是四个标签页：**Activity**、**Workers**、**Scheduled** 和 **Memory**。方向键、Home 和 End 在它们之间切换，面板会打开你上次用的标签页。
 
 面板显示属于当前打开的对话的内容。侧边对话的面板列出这个对话自己的活动和它启动的 worker；主对话的面板，以及没有打开任何对话时的面板，列出今天的全部内容。Melo 的状态行也跟随对话：在侧边对话里，它说明这个对话在做什么。打开另一个对话会重新读取列表。
 
