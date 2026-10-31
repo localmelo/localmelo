@@ -117,7 +117,7 @@ class FakeGateway:
 
     async def handle(self, request: httpx.Request) -> httpx.Response:
         path, method = request.url.path, request.method
-        body = json.loads(request.content) if request.content else None
+        body: Any = json.loads(request.content) if request.content else None
         self.requests.append((method, path, body))
         parts = path.strip("/").split("/")
         if path == "/api/sessions" and method == "GET":

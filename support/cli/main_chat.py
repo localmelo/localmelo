@@ -241,6 +241,12 @@ def spawn_gateway(
         os.close(fd)
 
 
+class Child(Protocol):
+    """A gateway being started: whether it has ended, and how."""
+
+    def poll(self) -> int | None: ...
+
+
 def _last_line(log: str) -> str:
     """The log's last line that says something, cut short; ``""`` when unreadable."""
     with contextlib.suppress(OSError), open(os.path.expanduser(log), "rb") as file:
@@ -257,7 +263,7 @@ def connect(
     cfg: Config,
     *,
     on_start: Callable[[], None] = lambda: None,
-    spawn: Callable[[str, int], subprocess.Popen[bytes]] = spawn_gateway,
+    spawn: Callable[[str, int], Child] = spawn_gateway,
     start_s: float = START_S,
     clock: Callable[[], float] = time.monotonic,
 ) -> Link | Offline:
@@ -270,7 +276,7 @@ def connect(
     """
     host, port = cfg.gateway.host, cfg.gateway.port
     url = _url(host, port)
-    process: subprocess.Popen[bytes] | None = None
+    process: Child | None = None
     # A gateway another melo is starting gets a moment; one started here, all of *start_s*.
     deadline = clock() + start_s / 4
     while True:
@@ -818,6 +824,9 @@ class MainChat:
                 )
                 return
             decision = await self.host.approver.ask(approval_request(pending))
+            # Answered here: the gateway's "resolved" for it cancels nothing now.
+            if self._asks.get(request_id) is asyncio.current_task():
+                del self._asks[request_id]
             choice = (
                 "deny"
                 if not decision.allow
