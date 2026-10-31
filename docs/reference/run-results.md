@@ -11,7 +11,7 @@ retried.
 | `completed` | 0 | The model gave a final answer, or a reflection decided that the task was done. |
 | `failed` | 2 | A check refused the run, or the model gave two replies in a row with no answer. |
 | `gate_stopped` | 2 | After an attempt, the reflection decided not to continue. |
-| `budget_exhausted` | 2 | The run used all its steps or attempts without a final answer. |
+| `budget_exhausted` | 2 | The run used all its steps or attempts, or reached its call budget, without a final answer. |
 | `context_budget_exceeded` | 2 | The pinned request cannot fit the configured input budget, or a smaller retry still overflowed. |
 | `stuck` | 2 | The same tool calls, or the same errors, repeated three steps in a row. |
 | `provider_error` | 2 | A request to the model server failed. |
@@ -51,6 +51,21 @@ Details:
   `unknown` allowed. The run keeps its status and `error`; `result` is that
   answer and the record gains `"answered_on_stop": true`. The request counts in
   `n_aux`. A request that fails, or a blank reply, leaves the run as it was.
+  It also answers a run that ends `provider_error` because the server refused a
+  request for a budget or rate limit (HTTP 429 once its retries are used, or an
+  error that says a budget is used): the status and `error` stay the server's, and
+  `result` is the answer, or, when that request fails, the latest text the model
+  wrote in the run.
+- **A call budget.** The developer setting `[agent] max_calls = N` (`-X
+  agent.max_calls=N`, a whole number of 2 or more) makes a direct run count its
+  model requests (planning, reflection and the rest, each attempt of a retried
+  request once) and stop before the one that would pass the limit. With
+  `answer_on_stop` on, the last call is kept for the answer: the run stops after
+  `N - 1` requests and the answer request is call `N`. The run ends
+  `budget_exhausted` with the error `Call budget reached: <k> model requests sent
+  (max_calls N)`. `result` is the answer (and the record has `"answered_on_stop":
+  true`), else the latest text the model wrote in the run, else empty. Unset, the
+  default, nothing changes.
 - **Unreadable reflections.** A reflection reply is readable when it holds a
   JSON object whose `recommended_action` is `done`, `continue`, `stop` or
   `decompose`; other JSON, such as a tool call written out as text, does not
@@ -76,7 +91,7 @@ Details:
   is not an object. With no attempt left the run ends as
   `budget_exhausted` instead.
 - **`budget_exhausted`.** The error is `Max steps reached` or
-  `Max attempts reached`. With `--attempt-policy reflect`, a last reflection
+  `Max attempts reached`, or `Call budget reached: ...` with `max_calls`. With `--attempt-policy reflect`, a last reflection
   can still choose `done`; otherwise its best effort becomes `result`.
 - **`stuck`.** Only with `--attempt-policy none`; with `reflect`, a
   reflection decides what happens next. The error is
@@ -167,6 +182,7 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `memory_dir` | The directory of the SQLite files, or `null` when memory stays in RAM. |
 | `tools` | Every registered tool, built-in and MCP, sorted by name. |
 | `answer_on_stop` | `true` when the run set it; absent otherwise. |
+| `max_calls` | The run's call budget when it set one; absent otherwise. |
 | `window_eviction` | `chunk` (the default) or `boundary` when the run used one; absent for `slide`. |
 | `reflect_tool_guard` | `true` when the run used the guard (the default); absent with `--reflect-tool-guard off`. |
 | `cache_layout` | `v3` (the default) when the run used it; absent for `v2`. |

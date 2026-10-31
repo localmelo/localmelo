@@ -2537,6 +2537,13 @@ def _build_direct_mode_agent(
         config_value_error("[agent] answer_on_stop must be a boolean")
     if budget_cfg.agent.answer_on_stop:
         options = dataclasses.replace(options, answer_on_stop=True)
+    calls = budget_cfg.agent.max_calls
+    if calls is not None and (
+        isinstance(calls, bool) or not isinstance(calls, int) or calls < 2
+    ):
+        config_value_error(f"[agent] max_calls must be an int >= 2, got {calls!r}")
+    if calls is not None:
+        options = dataclasses.replace(options, max_calls=calls)
 
     if not isinstance(budget_cfg.agent.confine_direct_runs, bool):
         config_value_error("[agent] confine_direct_runs must be a boolean")
