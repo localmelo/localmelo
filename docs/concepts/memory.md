@@ -162,6 +162,20 @@ What a chat is told about memory:
 
 Direct runs (`melo "<task>"`), the terminal chat, workers and the benchmark neither recall nor keep notes, and have no `remember` tool; a task's runner only adds its result to the index.
 
+### Tidying notes while idle (developer setting)
+
+`[memory] sleep` is off by default. Run a pass explicitly with `melo memory sleep [VARIANT]` (developer mode) or `POST /api/memory/sleep`; `-X memory.sleep=rules` sets it for one run, and `melo -h all` lists it.
+
+- **`rules`** makes no chat-model request: merge duplicate notes, replace a fact with your newer stated value, and recover lasting statements no note kept. A note you reworded is never merged away. Before adding a lost fact, it checks whether an active note already holds its values: with comparable embeddings, cosine must reach 0.9; otherwise, at least half the stemmed non-value words must overlap. Different known subjects stay separate. A configured embedding is bounded to 1.5 seconds per candidate and cached within the pass; failure falls back to words.
+- **`model`** runs those rules first, then asks the chat model about selected turns, oldest first, with their previous message and up to six matching active notes. It can add a fact, update a value or retire an explicitly retracted fact; a separate pass resolves a note's opening pronoun from its source and previous turn. At most 12 chat requests per run, eight seconds each, with temperature zero.
+- **`model+tags`** uses the same limit, prioritizing turns with an unsaved claim, a remember request, a nearby saved change, or notes recalled in a later turn, oldest first within each group. Both model variants spend only the available requests; they do not process every turn when the limit is reached.
+
+Code checks every proposed change against your typed words: its quote must occur in the source message, values and owners must match, and secrets are refused. An update must identify the same note the write rules select; a retirement needs a negation, a shared content word and evidence of the retracted value. Your edits change only on newer typed evidence. A run makes at most 20 changes and never hard-deletes a note. Before each model request, it checks for new chat activity and an optional `[memory] sleep_lock` path (unset by default); it stops if either is present, preserving completed changes.
+
+The report includes `model_calls`, `refused`, elapsed `ms`, changes and any abort reason. Unselected turns remain pending for later runs within a 14-day window. An unreadable answer or timeout leaves its turn pending once; a second failure completes it with `reason: "parse"` in `refusals`, so it cannot block the backlog. Reasoning is separated from the final answer before JSON is read. Older turns cannot revive facts later typed words withdrew or replaced. Processed turn and per-note rewrite ids prevent replay, even after undo; the watermark stays before the oldest pending turn. An abort or change cap leaves it unchanged. `DELETE /api/memory/sleep/{run_id}` restores retired and superseded notes and removes notes the pass wrote, including preexisting conflicts but without overwriting later writes or edits. Sleep undo keeps inactive history, never recalled or listed; explicitly forgetting a note, its chat history or everything physically removes that history.
+
+The report lists `selected` turns in request order and each model operation in `proposals`: its source, operation, target, text and quote (each at most 200 characters, secrets redacted), and `applied`, `noop` or the specific refused check. Applied changes carry that same label. Parse failures are visible even on the first attempt; operations skipped after the change cap are `noop` with `capped=true`. These are diagnostics, not an export or training pipeline.
+
 ### What a task starts with
 
 A task's worker has no long-term memory of its own: it neither recalls nor keeps notes. What it knows about you comes in one short **context pack** that the chat that started it builds once, when the task is created. Workers do not use it yet; the pack is ready for the chat to call.

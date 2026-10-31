@@ -19,6 +19,37 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   now works there as well). The key never reaches Deny or `--yolo`, does
   nothing while a question, a list or an approval is open, and works during
   a turn, where its line says when it applies. [#NN]
+- Note tidying skips facts whose values an active note already holds, using
+  bounded embedding similarity or a word-only fallback without merging different
+  known subjects. Reports list selected turns and each model operation's bounded,
+  secret-redacted verdict; applied changes carry the same label. [#389]
+
+- Developer setting `[memory] sleep` (`off` by default; `rules`, `model`
+  and `model+tags`; `-X memory.sleep=rules`, listed by
+  `melo -h all`) tidies the notes in one pass over the chats since the last
+  pass, with at most 20 changes per run. Its rules make no chat-model call: they
+  merge duplicate notes (the older is superseded), write the newer value when a newer message
+  states another value of a note's subject, and recover a lasting statement no
+  note of its turn kept (turns whose reply claimed a save first). Every write
+  passes the checks of a note on the user's own words, is marked `sleep` with
+  its run and turn, and nothing is deleted; a note the user reworded is not
+  merged away. `melo memory sleep [VARIANT]` (developer mode) and
+  `POST /api/memory/sleep` run it and report the changes; `DELETE
+  /api/memory/sleep/{run_id}` puts a whole run back. The model variants add an
+  evidence-checked pass for missing facts, changed values and retractions,
+  plus named references in place of dangling pronouns. Both use at most twelve
+  chat requests, oldest-first within each priority group; `model+tags`
+  prioritizes tagged turns. Pending turns resume within fourteen days, but
+  cannot revive later retractions. Processed turns and pronoun rewrites stay
+  processed after undo. Unreadable replies/timeouts are tried at most twice;
+  reasoning is separated before parsing. Undo restores preexisting conflicts
+  while preserving later changes. New chat activity or a configured
+  `[memory] sleep_lock` stops model work; reports include refused proposals,
+  skipped parse failures and elapsed time. Part of #363. [#389]
+- Sleep reports retain each change's quoted evidence and ordered before texts.
+  Sleep undo preserves inactive history without recalling or listing it;
+  explicit user forgetting still physically erases that history and linked
+  versions. No export or training is implemented. Part of #363. [#389]
 - What a side chat's task ended with is kept in memory: other chats recall its
   summary like an earlier turn (`chat “<title>” · summary`), never as a note.
   The chat's own answers are already recalled as its turns. Part of #369.
@@ -3265,3 +3296,4 @@ earlier milestones.
 [#385]: https://github.com/localmelo/localmelo/pull/385
 [#387]: https://github.com/localmelo/localmelo/pull/387
 [#388]: https://github.com/localmelo/localmelo/pull/388
+[#389]: https://github.com/localmelo/localmelo/pull/389
