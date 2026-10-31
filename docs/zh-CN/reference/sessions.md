@@ -262,7 +262,7 @@ asyncio.run(main())
 1 line(s); cursor 7
 ```
 
-- `changes(after_event_id=0, limit=500, kinds=None, with_events=False)` 最多返回 `limit` 条记录（1 到 5,000）。每条 `TurnChange` 保存该轮当前的字段、其会话的类型、标题、工作区和模型，以及该轮的 `run_id`，即它在 `history.db` 中运行的 `task_id`。
+- `changes(after_event_id=0, limit=500, kinds=None, with_events=False)` 最多返回 `limit` 条记录（1 到 5,000）。每条 `TurnChange` 保存该轮当前的字段、其会话的类型、标题、工作区和模型，以及该轮的 `run_id`，即它在 `history.db` 中运行的 `task_id`。对话回答任务问题的轮次 `origin` 为 `ask_owner`，其 `user_text` 是任务的话，不是用户的；其他轮次以及 schema 2 文件中的轮次为 `""`。
 - 之后被撤销的轮次会再次以 `undone` 记录出现，因此按顺序应用这些记录总是正确的。运行中的轮次在结束后出现。
 - `export_turns(paths, out, after=None)` 为每条记录写一行 JSON，`{"kind": "localmelo.session_turn", "v": 1, ...}`，并返回每个路径的新游标；下次把这些游标作为 `after` 传回。
 - 读取器不加锁、不运行恢复，并拒绝更新的 schema。schema 版本为 0 的文件（例如空文件）没有记录。

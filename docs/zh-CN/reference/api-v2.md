@@ -630,6 +630,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 | 400 | `text_rejected` | 检查器拒绝了消息文本，与 `/v1/agent/run` 请求的处理方式相同 |
 | 409 | `session_busy` | 该会话中已有轮次正在运行 |
 | 409 | `not_latest_turn` | 重试所指的轮次不是最新已结束的那一个 |
+| 409 | `not_retryable` | 重试所指的轮次回答的是任务的提问 |
 | 409 | `submission_conflict` | 该 `client_request_id` 已用于另一条消息 |
 | 409 | `submission_withdrawn` | 该 `client_request_id` 在开始之前已被取消 |
 | 409 | `turn_not_running` | 取消所指的轮次并未在运行 |
@@ -699,6 +700,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 - 该轮次被标记为已撤销——并发出一个 `turn.undone` 事件——它的文本会开始一个新的轮次，且没有 `client_request_id`。回答为 202，附带新的轮次，以及重放撤销所留下内容的那次打开的恢复键。
 - 任务会话返回 409 `task_session_read_only`；它不能作为对话重试。
 - 除非该 id 是最新的、已结束且未撤销的轮次，否则返回 409 `not_latest_turn`：丢失了某个轮次结束信息的客户端，应重试它所持有的那个 id。轮次运行期间返回 409 `session_busy`。
+- 回答任务提问的轮次（`origin` 为 `ask_owner`）返回 409 `not_retryable`：其中的话不是用户说的。
 
 ## POST /api/turns/{turn_id}/cancel
 

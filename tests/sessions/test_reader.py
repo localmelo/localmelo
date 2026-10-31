@@ -298,3 +298,36 @@ async def test_export_turns_writes_one_line_per_change(tmp_path: Path) -> None:
     assert again[str(gateway_path)] == cursors[str(gateway_path)]
     await gateway.aclose()
     await terminal.aclose()
+
+
+async def test_a_tasks_question_is_marked_by_its_origin_and_older_files_read_as_the_persons(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "s.db"
+    store = SessionStore(path, writer="gateway")
+    sid = await turn_of(store, None, "one")
+    asked = await store.begin_turn(
+        sid, "[task t1 · Fix asks · data]", holder=HOLDER, origin="ask_owner"
+    )
+    await store.finish_turn(
+        sid, asked.turn, holder=HOLDER, status="completed", cause="run",
+        result=run_result(result="B"), answer="B",
+    )  # fmt: skip
+    await store.aclose()
+    out = io.StringIO()
+    await export_turns([path], out)
+    lines = [json.loads(line) for line in out.getvalue().splitlines()]
+    assert [(line["user_text"], line["origin"]) for line in lines] == [
+        ("one", ""),
+        ("[task t1 · Fix asks · data]", "ask_owner"),
+    ]
+    # A file a schema-2 localmelo wrote has no origin column: its turns are the person's.
+    old = tmp_path / "old.db"
+    with sqlite3.connect(path) as conn, sqlite3.connect(old) as copy:
+        conn.backup(copy)
+    with sqlite3.connect(old) as conn:
+        conn.execute("ALTER TABLE turns DROP COLUMN origin")
+        conn.execute("PRAGMA user_version = 2")
+    reader = SessionReader(old)
+    assert [c.origin for c in await reader.changes()] == ["", ""]
+    await reader.aclose()

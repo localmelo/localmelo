@@ -217,6 +217,8 @@ const MARKS = {started: "+", level: "↕", suggest: "?", ask: "?", undone: "↺"
 const ASK_FIELDS = ["background", "situation", "problem", "likely_causes", "options", "help_needed", "if_unsolvable"];
 const PERSON_PARTS = ["background", "what_happened", "tried", "choices", "question"];
 const camel = (name) => name.replace(/_(\w)/g, (_, letter) => letter.toUpperCase());
+// What the person typed in a reply box, by row: a redraw of the chat keeps it.
+const replyDrafts = new Map();
 
 /** Whether *turn* is the chat's internal turn on a task's question: its row stands in for the person's bubble. */
 export function askTurn(turn, echoes = []) {
@@ -355,21 +357,35 @@ function askNodes({el, echo, done, act}) {
   if (echo.kind === "task_answered" || (echo.kind === "ask_end" && echo.text)) return [el("blockquote", "ask-quote", echo.text)];
   if (echo.kind !== "task_escalate") return [];
   const nodes = [fields(echo.parts, PERSON_PARTS, (name) => t(`ask.part.${name}`))];
-  if (done) return nodes;
+  const key = `${echo.ask_id ?? ""}:${echo.id}`;
+  if (done) {
+    replyDrafts.delete(key);
+    return nodes;
+  }
   const form = el("form", "ask-reply");
   const box = el("textarea", "ask-reply-text");
   box.rows = 2;
   box.placeholder = t("ask.replyHint");
   box.setAttribute("aria-label", t("ask.replyLabel", {title: echo.title ?? ""}));
+  box.dataset.replyFor = key;
+  box.value = replyDrafts.get(key) ?? "";
+  box.addEventListener("input", () => replyDrafts.set(key, box.value));
   const send = el("button", "outline-button", t("ask.send"));
   send.type = "submit";
   form.append(box, send);
-  form.addEventListener("submit", (event) => {
+  form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const text = box.value.trim();
     if (!text) return box.focus();
     send.disabled = true;
-    return act(echo, "reply", null, text);
+    let sent = false;
+    try {
+      sent = (await act(echo, "reply", null, text)) !== false;
+    } finally {
+      // Not sent: the words stay and Send works again.
+      if (sent) replyDrafts.delete(key);
+      else send.disabled = false;
+    }
   });
   nodes.push(form);
   return nodes;

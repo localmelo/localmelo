@@ -33,7 +33,7 @@ from localmelo.support.gateway.console.front import (
 from localmelo.support.gateway.console.running import item_activity
 from localmelo.support.gateway.workers import ASK_FIELDS, MAX_ASKS, AskOwner
 from localmelo.support.sessions.agents import session_options
-from localmelo.support.sessions.store import StoredEvent
+from localmelo.support.sessions.store import SessionStore, StoredEvent
 from localmelo.tests.sessions.helpers import ScriptedLLM, answer, tool_call
 
 from .conftest import PORT, FakeProbe, make_cfg, quiet_gate
@@ -74,11 +74,12 @@ class Script(ScriptedLLM):
 def asked_task(messages: list[Message]) -> str:
     """The task whose question the request carries."""
     for message in reversed(messages):
-        found = re.search(
+        # A stopped turn's question stays above the next one in the same message.
+        found = re.findall(
             r"\[task ([0-9a-f]{12}) · .* asks · data", str(message.content)
         )
         if message.role == "user" and found:
-            return found.group(1)
+            return str(found[-1])
     raise AssertionError("no task's question in the request")
 
 
@@ -613,7 +614,7 @@ async def test_the_persons_reply_answers_the_task(
         assert heard[-1].event["data"]["by"] == "person"
 
 
-async def test_a_stop_ends_the_wait_at_once_and_a_late_answer_is_refused(
+async def test_a_stop_ends_the_wait_and_the_chats_turn_on_it_at_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     release = asyncio.Event()
@@ -632,12 +633,10 @@ async def test_a_stop_ends_the_wait_at_once_and_a_late_answer_is_refused(
             "stopped",
             ask_row["id"],
         )
-        release.set()
-        await _wait_turn(client, str(console.main_id))
-        late = tool_results(models["main"], 1)[-1]
-        assert (
-            late == "Not done: the question is closed (stopped); nothing waits for it."
-        )
+        # The chat's turn on the question stopped with it: no late answer is sent.
+        turn = await _wait_turn(client, str(console.main_id))
+        assert (turn["status"], turn["cause"]) == ("cancelled", "closed")
+        assert len(models["main"].requests) == 1
 
 
 async def test_a_restart_marks_a_pending_ask_expired(
@@ -731,3 +730,185 @@ async def test_ask_owner_needs_every_field_and_asks_at_most_three_times_a_run() 
     assert len(owner.asked) == MAX_ASKS
     lone = AskOwner("t2", lambda: None)
     assert (await lone.ask(**FIELDS)).startswith("Not asked: no chat can answer;")
+
+
+# ── After a review (#369) ──
+
+
+@pytest.mark.parametrize("ends", ["timeout", "stop"])
+async def test_an_ask_that_ends_stops_its_chats_turn_and_the_next_ask_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ends: str
+) -> None:
+    never = asyncio.Event()
+    main: list[Reply] = [
+        held(never, answer("stalled")),
+        answers("second answer"),
+        answer("Answered."),
+    ]
+    workers: list[list[Reply]] = [[ASKS, answer("went on")], [ASKS, answer("done")]]
+    async with ask_console(tmp_path, monkeypatch, main=main, workers=workers) as (
+        console,
+        client,
+        models,
+    ):
+        console.asks.timeout_s = 0.3 if ends == "timeout" else 60.0
+        first = await start(console, "the first job")
+        await until(lambda: len(models["main"].requests) == 1)
+        second = await start(console, "the second job")
+        await until(lambda: console.asks.waiting(second))
+        if ends == "stop":
+            await console.workers.update(first, state="stop")
+        await ended(console, second)
+        results = [text for llm in models["workers"] for text in tool_results(llm)]
+        assert [r.endswith("\nsecond answer") for r in results].count(True) == 1
+        turns = await console.store.list_turns(str(console.main_id))
+        assert [(t.origin, t.status, t.cause) for t in turns] == [
+            ("ask_owner", "cancelled", "closed"),
+            ("ask_owner", "completed", "run"),
+        ]
+
+
+async def test_after_asking_the_person_the_chat_cannot_answer_for_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main: list[Reply] = [
+        asks_person,
+        answers("The owner's guess."),
+        answer("The task needs your answer."),
+    ]
+    async with ask_console(
+        tmp_path, monkeypatch, main=main, workers=[[ASKS, answer("done")]]
+    ) as (console, client, models):
+        task_id = await start(console, "a job")
+        await _wait_turn(client, str(console.main_id))
+        refused = tool_results(models["main"], 2)[-1]
+        assert refused == "Not done: the user was asked; their reply goes to the task."
+        assert (console.asks.waiting(task_id) or {}).get("on") == "person"
+        _, how = await console.workers.message(task_id, "B")
+        assert how == "answered"
+        await ended(console, task_id)
+        [result] = tool_results(models["workers"][0])
+        assert result == "[answer from the user, in their own words]\nB"
+
+
+async def test_a_question_to_the_person_moves_to_the_main_chat_when_its_chat_is_deleted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    side_script: list[Reply] = [
+        answer("Hello."),
+        asks_person,
+        answer("The task needs your answer."),
+    ]
+    async with ask_console(
+        tmp_path, monkeypatch, sides=[side_script], workers=[[ASKS, answer("done")]]
+    ) as (console, client, models):
+        created = await client.post(
+            "/api/sessions",
+            json={"turn": {"text": "side work"}, "workspace": str(tmp_path / "work")},
+        )
+        side = created.json()["session"]["id"]
+        await _wait_turn(client, side)
+        task_id = await start(console, "side job", title="Side job", front_id=side)
+        await until(lambda: (console.asks.waiting(task_id) or {}).get("on") == "person")
+        await _wait_turn(client, side)
+        assert (await client.delete(f"/api/sessions/{side}")).status_code == 204
+        main_id = str(console.main_id)
+        ask_row, escalation = await rows(console, main_id)
+        assert (ask_row["echo"], ask_row["from_chat"]) == ("task_ask", "Side job")
+        assert (escalation["echo"], escalation["parts"]) == ("task_escalate", PARTS)
+        assert (console.asks.waiting(task_id) or {}).get("chat_id") == main_id
+        info = await console.store.get_session(task_id)
+        assert info is not None and info.meta["ask"]["person_row"] == escalation["id"]
+        url = f"/api/front/echoes/{escalation['id']}"
+        response = await client.post(url, json={"do": "reply", "text": "B"})
+        assert response.status_code == 200, response.text
+        await ended(console, task_id)
+        [result] = tool_results(models["workers"][0])
+        assert result == "[answer from the user, in their own words]\nB"
+
+
+async def test_a_restart_expires_the_question_to_the_person_not_the_first_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main: list[Reply] = [asks_person, answer("The task needs your answer.")]
+    async with ask_console(
+        tmp_path, monkeypatch, main=main, workers=[[ASKS, answer("never")]]
+    ) as (console, client, _):
+        task_id = await start(console, "a job")
+        main_id = str(console.main_id)
+        await until(lambda: (console.asks.waiting(task_id) or {}).get("on") == "person")
+        await _wait_turn(client, main_id)
+        info = await console.store.get_session(task_id)
+        assert info is not None
+        mirror = info.meta["ask"]
+        _, escalation = await rows(console, main_id)
+        assert (mirror["person_row"], mirror["on"]) == (escalation["id"], "person")
+    # What a crash leaves: the mirror, which a clean close clears.
+    store = SessionStore(str(tmp_path / "sessions.db"), writer="gateway")
+    await store.open()
+    await store.update_session(task_id, meta_update={"ask": mirror})
+    await store.aclose()
+    async with ask_console(tmp_path, monkeypatch, run=False) as (console, client, _):
+        expired = (await rows(console, main_id))[-1]
+        assert (expired["echo"], expired["how"], expired["of"]) == (
+            "ask_end",
+            "expired",
+            escalation["id"],
+        )
+
+
+async def test_a_message_queued_before_a_restart_runs_after_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    never = asyncio.Event()
+    async with ask_console(
+        tmp_path,
+        monkeypatch,
+        main=[held(never, answer("stalled"))],
+        workers=[[ASKS, answer("never")]],
+    ) as (console, client, models):
+        main_id = str(console.main_id)
+        await start(console, "a job")
+        await until(lambda: len(models["main"].requests) == 1)
+        response = await _post_turn(client, main_id, "hello there")
+        assert response.status_code == 200, response.text
+        queued = response.json()["echo"]
+        info = await console.store.get_session(main_id)
+        assert info is not None
+        assert [q["typed"] for q in info.meta["queued"]] == ["hello there"]
+    async with ask_console(tmp_path, monkeypatch, main=[answer("Hi.")], run=False) as (
+        console,
+        client,
+        _,
+    ):
+
+        async def ran() -> bool:
+            turns = await console.store.list_turns(main_id)
+            return turns[-1].user_text == "hello there"
+
+        await until(ran)
+        await _wait_turn(client, main_id)
+        found = await rows(console, main_id)
+        assert [r["of"] for r in found if r["echo"] == "dequeued"] == [queued["id"]]
+        info = await console.store.get_session(main_id)
+        assert info is not None and info.meta.get("queued") is None
+
+
+async def test_a_turn_that_answered_a_task_cannot_be_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main: list[Reply] = [answers("B"), answer("Answered.")]
+    async with ask_console(
+        tmp_path, monkeypatch, main=main, workers=[[ASKS, answer("done")]]
+    ) as (console, client, _):
+        main_id = str(console.main_id)
+        await ended(console, await start(console, "a job"))
+        turn = await _wait_turn(client, main_id)
+        response = await client.post(
+            f"/api/sessions/{main_id}/retry", json={"turn_id": turn["id"]}
+        )
+        assert (response.status_code, response.json()["error"]["code"]) == (
+            409,
+            "not_retryable",
+        )
+        assert len(await console.store.list_turns(main_id)) == 1

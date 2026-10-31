@@ -13,11 +13,13 @@ box ("Task X needs your answer"), which waits as long as the person takes.
 Nothing here grants an approval.
 
 A message the person sends while an internal turn runs is queued, shown as
-queued, and runs as the chat's next turn, before any other internal turn. A
+queued, kept in the chat's ``meta.queued`` until it starts (a restart runs it
+then), and runs as the chat's next turn, before any other internal turn. A
 chat that neither answers nor asks the person within :data:`OWNER_TIMEOUT_S`
 of its internal turn's start, or whose internal turn ends without doing
 either, gives the worker "No answer from <chat>"; a stopped task ends its
-wait at once, and a restart marks a pending ask expired.
+wait at once. Either stops the internal turn. A restart marks a pending ask
+expired; a deleted chat's open questions move to the main chat.
 """
 
 from __future__ import annotations
@@ -55,6 +57,7 @@ MAX_PART_CHARS: Final = 800
 ASK_EVENT: Final = "task.ask"
 ANSWER_EVENT: Final = "task.answer"
 PERSON_PARTS: Final = ("background", "what_happened", "tried", "choices", "question")
+_CLOSED: Final = "The task's question closed"
 _NOT_NOW: Final = (
     "Not done: task_answer and ask_person answer a task's question, only in the "
     "turn that handles it."
@@ -79,6 +82,9 @@ class Ask:
     row: int | None = None
     person_row: int | None = None
     lead: str = ""
+    # What ask_person showed, and the internal turn that handles the ask.
+    parts: dict[str, str] = field(default_factory=dict)
+    turn_id: str = ""
 
 
 @dataclass
@@ -157,6 +163,7 @@ class OwnerAsks:
             return await ask.answer
         except asyncio.CancelledError:
             stopped = True  # a Stop: the wait ends now, and the chat's rows say so
+            self._stop_turn(ask)
             raise
         finally:
             if self._asks.get(task_id) is ask:
@@ -191,10 +198,29 @@ class OwnerAsks:
             extra["from_chat"] = ask.title
         row = await self._echo(ask, "task_ask", "ask.asks", **extra)
         ask.row = row["id"]
-        # The mirror a restart reads to mark the ask expired.
-        mirror = {"ask_id": ask.ask_id, "chat_id": ask.chat_id, "row": ask.row}
+        if ask.on == "person":
+            # Its chat was deleted: the question to the person moves, reply box and all.
+            row = await self._echo(ask, "task_escalate", "ask.needs", parts=ask.parts)
+            ask.person_row = row["id"]
+        await self._mirror(ask)
+
+    async def _mirror(self, ask: Ask) -> None:
+        """The mirror a restart reads to mark the ask's open row expired."""
+        mirror = {"ask_id": ask.ask_id, "chat_id": ask.chat_id, "row": ask.row,
+                  "person_row": ask.person_row, "on": ask.on}  # fmt: skip
         with contextlib.suppress(Exception):
             await self._store_mirror(ask.task_id, mirror)
+
+    async def hand_over(self, chat_id: str) -> None:
+        """Chat *chat_id* was deleted: its tasks' open questions are the main chat's now."""
+        self._people.pop(chat_id, None)  # its queued messages went with it
+        moved = [ask for ask in self._asks.values()
+                 if ask.chat_id == chat_id and not ask.closed]  # fmt: skip
+        for ask in moved:
+            await self._place(ask, chat_id)
+        if waiting := self._waiting.pop(chat_id, []):
+            self._waiting.setdefault(waiting[0].chat_id, []).extend(waiting)
+            self._kick(waiting[0].chat_id)
 
     async def reply(
         self, task_id: str, text: str, ask_id: str | None = None
@@ -230,6 +256,8 @@ class OwnerAsks:
         ask = self._current(front, task_id)
         if isinstance(ask, str):
             return ask
+        if ask.on == "person":
+            return "Not done: the user was asked; their reply goes to the task."
         text = text.strip()
         if not 1 <= len(text) <= MAX_ANSWER_CHARS:
             return f"Not done: an answer has 1 to {MAX_ANSWER_CHARS} characters."
@@ -256,9 +284,10 @@ class OwnerAsks:
         for name, text in clean.items():
             if not 1 <= len(text) <= MAX_PART_CHARS:
                 return f"Not done: fill {name} (1 to {MAX_PART_CHARS} characters)."
-        ask.on = "person"
+        ask.on, ask.parts = "person", clean
         row = await self._echo(ask, "task_escalate", "ask.needs", parts=clean)
         ask.person_row = row["id"]
+        await self._mirror(ask)
         return (
             "Asked the user; the task waits for their reply, with no time limit. "
             "Tell the user in one short sentence that the task needs their answer."
@@ -285,14 +314,43 @@ class OwnerAsks:
              "said": said("ask.queued", title=title)}
         )  # fmt: skip
         people.append(item)
+        await self._keep_queue(chat_id)
         self._kick(chat_id)
         return item.echo
 
+    async def _keep_queue(self, chat_id: str) -> None:
+        """Store *chat_id*'s queued messages, so a restart runs them."""
+        kept = [{"typed": q.typed, "composed": q.composed, "key": q.key,
+                 "echo": q.echo} for q in self._people.get(chat_id, [])]  # fmt: skip
+        with contextlib.suppress(Exception):
+            await self.console.store.update_session(
+                chat_id, meta_update={"queued": kept or None}
+            )
+
+    async def restore_queued(self) -> None:
+        """At start: the messages the last run queued and never started run now, in order."""
+        store = self.console.store
+        for info in await store.list_sessions(limit=1000, kinds=("chat", "front")):
+            kept = (info.meta or {}).get("queued")
+            if not isinstance(kept, list) or not kept:
+                continue
+            self._people[info.id] = [
+                _Queued(str(q.get("typed", "")), str(q.get("composed", "")),
+                        q.get("key"), dict(q.get("echo") or {}))  # fmt: skip
+                for q in kept
+                if isinstance(q, dict)
+            ]
+            self._kick(info.id)
+
     # ── Each chat's turns, one at a time ──
+
+    def _stopping(self) -> bool:
+        # A queued message waits in meta.queued for the next start, not a closing gateway.
+        return self._closed or self.console.shutdown.is_set()
 
     def _kick(self, chat_id: str) -> None:
         drain = self._drains.get(chat_id)
-        if not self._closed and (drain is None or drain.done()):
+        if not self._stopping() and (drain is None or drain.done()):
             # A fresh context: an ask comes from a worker's tool call, whose
             # context (its execution capture, say) is not the chat's.
             self._drains[chat_id] = asyncio.create_task(
@@ -300,11 +358,13 @@ class OwnerAsks:
             )
 
     async def _drain(self, chat_id: str) -> None:
-        while not self._closed and (
+        while not self._stopping() and (
             self._people.get(chat_id) or self._waiting.get(chat_id)
         ):
             try:
                 await self._idle(chat_id)
+                if self._stopping():
+                    return
                 if self._people.get(chat_id):
                     await self._send_queued(chat_id)
                 elif queue := self._waiting.get(chat_id):
@@ -328,21 +388,24 @@ class OwnerAsks:
             await asyncio.sleep(self.idle_s)
 
     async def _send_queued(self, chat_id: str) -> None:
-        item = self._people[chat_id].pop(0)
+        item = self._people[chat_id][0]
         front = self.console.front_for(chat_id)
         try:
             await self.console.sessions.start_turn(
                 chat_id, item.typed, item.composed, client_request_id=item.key
             )
         except SessionBusyError:
-            self._people[chat_id].insert(0, item)
             return
         except Exception as exc:
             logger.warning("A queued message could not start: %s", exc)
-            await front.echo({"echo": "failed", "line": t_in("en", "ask.notSent"),
+            # Never dropped unseen: its row says it was not sent, with its words.
+            await front.echo({"echo": "failed", "of": item.echo.get("id"),
+                              "typed": item.typed, "line": t_in("en", "ask.notSent"),
                               "said": said("ask.notSent")})  # fmt: skip
-            return
-        await front.echo({"echo": "dequeued", "of": item.echo["id"]})
+        else:
+            await front.echo({"echo": "dequeued", "of": item.echo.get("id")})
+        self._people[chat_id].pop(0)
+        await self._keep_queue(chat_id)
 
     async def _internal_turn(self, chat_id: str, ask: Ask) -> None:
         if await self.console.store.get_session(chat_id) is None:
@@ -366,6 +429,7 @@ class OwnerAsks:
                 await self._no_answer(ask)
                 return
             self._turns[turn.id] = ask
+            ask.turn_id = turn.id
             # The chat's time counts from here, not from the ask.
             timer = asyncio.create_task(self._time_out(ask))
             entry = self.console.sessions.get(chat_id)
@@ -395,7 +459,14 @@ class OwnerAsks:
     async def _time_out(self, ask: Ask) -> None:
         await asyncio.sleep(self.timeout_s)
         if ask.on == "owner":
+            self._stop_turn(ask)
             await self._no_answer(ask)
+
+    def _stop_turn(self, ask: Ask) -> None:
+        """Stop *ask*'s internal turn, if it runs: its chat and model slot are free again."""
+        entry = self.console.sessions.get(ask.chat_id)
+        if ask.turn_id and entry is not None:
+            entry.runner.cancel(_CLOSED, cause="closed", turn_id=ask.turn_id)
 
     async def _no_answer(self, ask: Ask) -> None:
         text = (
@@ -455,8 +526,9 @@ class OwnerAsks:
                       str(mirror.get("chat_id", "")), "", {},
                       asyncio.get_running_loop().create_future())  # fmt: skip
             if await store.get_session(ask.chat_id) is not None:
-                await self._echo(ask, "ask_end", "ask.expired", how="expired",
-                                 of=mirror.get("row"))  # fmt: skip
+                # The row that still waits: the question to the person, once asked.
+                of = mirror.get("person_row") or mirror.get("row")
+                await self._echo(ask, "ask_end", "ask.expired", how="expired", of=of)
             await self._store_mirror(record.task_id, None)
 
     def _spawn(self, job: Coroutine[Any, Any, None]) -> None:

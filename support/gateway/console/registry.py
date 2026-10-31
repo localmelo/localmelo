@@ -1044,6 +1044,9 @@ class ConsoleSessions:
                     "not_latest_turn",
                     t("errors.retryNewest"),
                 )
+            if latest.origin:
+                # A task's question (#369): its words are not the person's to send.
+                raise ApiError(409, "not_retryable", t("errors.retryAsk"))
             undone = await entry.runner.undo()
             if undone is None:
                 raise ApiError(

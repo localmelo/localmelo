@@ -385,6 +385,12 @@ function runningTurn() {
   return null;
 }
 
+/** The running turn that holds the composer: not the chat's turn on a task's question, during which a message is queued (#369). */
+function composerTurn() {
+  const turn = runningTurn();
+  return turn && askTurn(turn, S.view?.echoes ?? []) ? null : turn;
+}
+
 function pendingOutbox() {
   return S.outbox[S.activeId ?? "new"] ?? null;
 }
@@ -445,6 +451,7 @@ function syncUI() {
   const view = S.activeId ? S.view : null;
   const session = activeSession();
   const turn = runningTurn();
+  const busy = composerTurn();
   const held = turn && session?.held ? session.held : "";
   const pending = view ? view.pending.size : 0;
   const machine = machineLine(S.machine);
@@ -502,19 +509,19 @@ function syncUI() {
   setTextIfChanged(lockBanner, lockNote);
   if (!lockNote) lockBanner.hidden = true;
   $("model-btn").textContent = `${model?.name || t("header.chooseModel")}  ⌄`;
-  $("send-btn").hidden = !!turn;
-  $("stop-btn").hidden = !turn;
-  $("stop-btn").disabled = !turn || S.cancelling.has(turn.id);
-  $("stop-btn").textContent = `■ ${t(turn && S.cancelling.has(turn.id) ? "header.stopping" : "common.stop")}`;
+  $("send-btn").hidden = !!busy;
+  $("stop-btn").hidden = !busy;
+  $("stop-btn").disabled = !busy || S.cancelling.has(busy.id);
+  $("stop-btn").textContent = `■ ${t(busy && S.cancelling.has(busy.id) ? "header.stopping" : "common.stop")}`;
   const sending = pendingOutbox();
   $("send-btn").disabled =
     setup ||
     !S.online ||
-    !!turn ||
+    !!busy ||
     (sending !== null && sending.state !== "failed") ||
     !input.value.trim();
   // Run as a task: a chat starts the message as a task, without asking the model.
-  $("task-btn").hidden = !S.activeId || !!turn;
+  $("task-btn").hidden = !S.activeId || !!busy;
   $("task-btn").disabled = $("send-btn").disabled;
   $("run-status").textContent = turn ? (held ? holdText(held) : t(developerMode ? "header.runningOnBackend" : "header.workingDots")) : "";
   $("level-btn").textContent = levelName(session?.level);
@@ -1072,6 +1079,9 @@ function renderMessages(forceScroll = false, preserveScroll = false) {
   const focusState = focusRequest ? approvalStates.get(focusRequest) : null;
   if (focusState?.composing && view?.pending.has(focusRequest)) return;
   const selection = focusKey === "reason" ? [focus.selectionStart, focus.selectionEnd, focus.selectionDirection] : null;
+  // A reply box the person types in keeps its focus and caret (its words are kept by row).
+  const replyFor = focus?.dataset?.replyFor ?? null;
+  const caret = replyFor ? [focus.selectionStart, focus.selectionEnd, focus.selectionDirection] : null;
   messageSnapshot = snapshot;
   liveNodes.clear();
   runningCards.clear();
@@ -1092,6 +1102,11 @@ function renderMessages(forceScroll = false, preserveScroll = false) {
       replacement.focus({preventScroll: true});
       if (selection && selection[0] !== null) replacement.setSelectionRange?.(...selection);
     }
+  }
+  if (replyFor) {
+    const box = [...container.querySelectorAll("textarea[data-reply-for]")].find((node) => node.dataset.replyFor === replyFor);
+    box?.focus({preventScroll: true});
+    if (caret && caret[0] !== null) box?.setSelectionRange?.(...caret);
   }
   $("welcome").hidden = nodes.length > 0 || (!!S.activeId && !mainActive());
   if (forceScroll || (nearBottom && !preserveScroll)) scroller.scrollTop = scroller.scrollHeight;
@@ -1188,9 +1203,12 @@ async function actOnEcho(echo, does, level, text) {
     panel.refresh();
   } catch (error) {
     notify(error.message || t("panel.taskChangeFailed"));
+    return false;
+  } finally {
+    renderMessages(false);
+    syncUI();
   }
-  renderMessages(false);
-  syncUI();
+  return true;
 }
 
 // Results wait while the person types (design 2.7): a waiting card shows at once; a done or
@@ -2080,7 +2098,7 @@ async function queueMessage(text, {clearInput = false, asTask = false} = {}) {
   if (workerMode) return;
   const slot = S.activeId ?? "new";
   const previous = S.outbox[slot];
-  if (!text || runningTurn() !== null) return;
+  if (!text || composerTurn() !== null) return;
   if (previous && (previous.state !== "failed" || !clearInput)) return;
   // The same text, failed after a check of unknown outcome, keeps its key:
   // the store answers `repeated` instead of running it twice.
@@ -2264,7 +2282,7 @@ async function cancelSend(slot, entry) {
 
 async function stop() {
   if (workerMode) return;
-  const turn = runningTurn();
+  const turn = composerTurn();
   if (!turn || !turn.id || S.cancelling.has(turn.id)) return;
   S.cancelling.add(turn.id);
   syncUI();
@@ -3180,7 +3198,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   // Escape is for what is open; it stops work only from the composer, where the keyboard is for melo.
-  if (runningTurn() !== null && document.activeElement === input) stop();
+  if (composerTurn() !== null && document.activeElement === input) stop();
 });
 document.addEventListener("visibilitychange", () => {
   if (S.authenticated && !document.hidden) refreshList();

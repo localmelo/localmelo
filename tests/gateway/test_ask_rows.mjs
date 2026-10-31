@@ -7,6 +7,7 @@ import test from 'node:test';
 
 import {useLanguage} from '../../support/gateway/static/i18n.mjs';
 import {answered, askTurn, echoNodes, mergeEchoes, readEcho} from '../../support/gateway/static/main-chat.mjs';
+import {canContinue, canRetry} from '../../support/gateway/static/turns.mjs';
 
 const NOON = new Date(2026, 9, 31, 12, 0, 0).getTime() / 1000;
 const FIELDS = {background: 'It fixes the tests.', situation: 'Two fail.', problem: 'The cache is stale.',
@@ -127,4 +128,48 @@ test('the rows read in Chinese', async () => {
   } finally {
     await useLanguage('en');
   }
+});
+
+test('a reply being typed survives a redraw of the chat, and goes once sent', async () => {
+  const echo = row(30, {echo: 'task_escalate', line: '“Fix tests” needs your answer', parts: PARTS});
+  const first = fakeDoc();
+  echoNodes({doc: first, echo, act: () => true});
+  const box = first.made.find((node) => node.tag === 'textarea');
+  assert.equal(box.dataset.replyFor, 'a1:30');
+  box.value = 'B, because';
+  box.listeners.input();
+  // Another row arrives: the chat is drawn again, and the words are still there.
+  const again = fakeDoc();
+  echoNodes({doc: again, echo, act: () => true});
+  const redrawn = again.made.find((node) => node.tag === 'textarea');
+  assert.equal(redrawn.value, 'B, because');
+  await again.made.find((node) => node.tag === 'form').listeners.submit({preventDefault() {}});
+  const after = fakeDoc();
+  echoNodes({doc: after, echo, act: () => true});
+  assert.equal(after.made.find((node) => node.tag === 'textarea').value, '');
+});
+
+test('a reply that could not be sent keeps its words, and Send works again', async () => {
+  const echo = row(31, {echo: 'task_escalate', line: '“Fix tests” needs your answer', parts: PARTS});
+  for (const act of [async () => false, async () => { throw new Error('offline'); }]) {
+    const doc = fakeDoc();
+    echoNodes({doc, echo, act});
+    const box = doc.made.find((node) => node.tag === 'textarea');
+    const send = doc.made.find((node) => node.tag === 'button');
+    box.value = 'B';
+    box.listeners.input();
+    await doc.made.find((node) => node.tag === 'form').listeners.submit({preventDefault() {}}).catch(() => {});
+    assert.equal(send.disabled, false);
+    const redrawn = fakeDoc();
+    echoNodes({doc: redrawn, echo, act});
+    assert.equal(redrawn.made.find((node) => node.tag === 'textarea').value, 'B');
+  }
+});
+
+test('a turn that answered a task\'s question offers no Retry or Continue', () => {
+  const turn = {origin: 'ask_owner', finishedAt: 5, undone: false, status: 'budget_exhausted', result: {n_tool: 2}};
+  assert.equal(canRetry(turn, true), false);
+  assert.equal(canContinue(turn, true), false);
+  assert.equal(canRetry({...turn, origin: ''}, true), true);
+  assert.equal(canContinue({...turn, origin: ''}, true), true);
 });

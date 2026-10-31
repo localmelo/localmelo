@@ -701,6 +701,8 @@ class ChatMemory:
         each time the model keeps one.
         """
         CHAT_TURN.set(None)
+        if info.origin:
+            typed = ""  # a turn the person did not begin holds no words of theirs
         keep_from: int | None = None
         if window is not None and self.enabled:
             try:
@@ -775,12 +777,15 @@ class ChatMemory:
     async def remember(self, text: str, topic: str = "") -> str:
         """Keep *text* as a note of the chat turn under way; what the model reads back.
 
-        Refused: outside a chat's turn, a secret, and words the user did not
-        type in this chat and no finished task's result shown in it holds.
+        Refused: outside a chat's turn, in a turn the person did not begin
+        (``TurnInfo.origin``), a secret, and words the user did not type in
+        this chat and no finished task's result shown in it holds.
         """
         turn = CHAT_TURN.get()
         if not self.enabled or turn is None or turn.memory.recall is None:
             return "Not remembered: memory across chats is off in this chat."
+        if turn.info.origin:
+            return "Not remembered: this turn answers a task, not the user."
         note = records.finished(text)
         if len(normalise(note)) < 4 or not records.note_terms(note):
             return "Not remembered: the note is empty."
@@ -848,6 +853,7 @@ class ChatMemory:
             or not self.keeps_statements()
             or turn is None
             or turn.info.id != info.id
+            or turn.info.origin
             or turn.memory.recall is None
         ):
             return []
@@ -878,6 +884,7 @@ class ChatMemory:
             not self.enabled
             or turn is None
             or turn.info.id != info.id
+            or turn.info.origin
             or turn.memory.recall is None
             or turn.memory.remembered
             or turn.kept
@@ -926,6 +933,7 @@ class ChatMemory:
             not self.enabled
             or turn is None
             or turn.info.id != info.id
+            or turn.info.origin
             or turn.memory.recall is None
             or turn.memory.remembered
             or turn.kept
@@ -948,7 +956,7 @@ class ChatMemory:
         return [
             t.typed_text if t.attachments else t.user_text
             for t in await turn.store.list_turns(turn.info.session_id)
-            if t.turn < turn.info.turn and not t.undone
+            if t.turn < turn.info.turn and not t.undone and not t.origin
         ]
 
     async def _results(self, turn: ChatTurn) -> list[str]:
@@ -977,8 +985,11 @@ class ChatMemory:
     def after_turn(
         self, store: SessionStore, info: TurnInfo, typed: str, answer: str
     ) -> None:
-        """Index a finished turn in the background (its embedding included)."""
-        if self.enabled and answer.strip():
+        """Index a finished turn in the background (its embedding included).
+
+        A turn the person did not begin (``origin``) is not indexed.
+        """
+        if self.enabled and answer.strip() and not info.origin:
             self._spawn(self._index_turn(store, info, typed, answer))
 
     async def _index_turn(
@@ -1090,6 +1101,7 @@ class ChatMemory:
                     if (
                         turn.status == "completed"
                         and not turn.undone
+                        and not turn.origin
                         and answer.strip()
                         and (turn.finished_at or 0) > since
                     ):

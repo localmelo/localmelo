@@ -390,6 +390,9 @@ It prints, for example:
   returns at most `limit` records (1 to 5,000). Each `TurnChange` holds the
   turn's fields as they read now, its session's kind, title, workspace and
   model, and the turn's `run_id`, the `task_id` of its run in `history.db`.
+  Its `origin` is `ask_owner` for a chat's turn on a task's question, whose
+  `user_text` is the task's words, not the person's; `""` otherwise, and in
+  a file of schema 2.
 - A turn undone later appears again as an `undone` record, so applying the
   records in order is always right. Running turns appear once they end.
 - `export_turns(paths, out, after=None)` writes one JSON line per record,

@@ -1255,6 +1255,7 @@ These codes answer on the write routes besides the shared ones above:
 | 400 | `text_rejected` | the checker refused the message text, as it does for a `/v1/agent/run` request |
 | 409 | `session_busy` | a turn is already running in the session |
 | 409 | `not_latest_turn` | retry named a turn that is not the newest finished one |
+| 409 | `not_retryable` | retry named a turn that answered a task's question |
 | 409 | `submission_conflict` | the `client_request_id` was used for a different message |
 | 409 | `submission_withdrawn` | the `client_request_id` was cancelled before it started |
 | 409 | `turn_not_running` | cancel named a turn that is not running |
@@ -1362,6 +1363,8 @@ Run the newest finished turn's text again.
 - 409 `not_latest_turn` unless the id is the newest finished, not undone
   turn: a client that lost a turn's end retries the id it holds. 409
   `session_busy` while a turn runs.
+- 409 `not_retryable` for a turn that answered a task's question
+  (`origin` `ask_owner`): its words are not the person's.
 
 ## POST /api/turns/{turn_id}/cancel
 

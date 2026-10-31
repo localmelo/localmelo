@@ -426,6 +426,7 @@
   "errors.notDirectory": "不是文件夹：{path}",
   "errors.notFound": "找不到。",
   "errors.noteGone": "melo 的记忆里没有这条笔记。",
+  "errors.retryAsk": "回答任务提问的那一轮不能重试。",
   "errors.retryNewest": "只有最新一轮已结束的对话可以重试。",
   "errors.sessionDeleted": "这个会话已被删除。",
   "errors.sessionNotFound": "找不到这个会话。",

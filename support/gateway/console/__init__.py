@@ -277,6 +277,10 @@ class Console:
         for card in waiting:
             if main is not None and card.get("source_id") in moved:
                 await self.store.append_session_event(main, CARD_EVENT, card)
+        try:
+            await self.asks.hand_over(chat_id)
+        except Exception:
+            logger.exception("Could not move a deleted chat's open questions")
 
     async def _side_agent(
         self, settings: Config, workspace: str, mcp_config: str | None, session_id: str
@@ -390,8 +394,11 @@ class Console:
             await self.cards.start(main.id)
             try:
                 await self.asks.expire_stale()
+                await self.asks.restore_queued()
             except Exception:
-                logger.exception("Could not mark the asks of the last run expired")
+                logger.exception(
+                    "Could not end the asks or run the queue of the last run"
+                )
             self.chore_runner.start()
         except SessionStoreError as exc:
             self._store_ok = False

@@ -443,6 +443,7 @@
   "errors.notDirectory": "Not a directory: {path}",
   "errors.notFound": "Not found.",
   "errors.noteGone": "That note is not in melo's memory.",
+  "errors.retryAsk": "A turn that answered a task's question cannot be tried again.",
   "errors.retryNewest": "Only the newest finished turn can be tried again.",
   "errors.sessionDeleted": "This session was deleted.",
   "errors.sessionNotFound": "Session not found.",

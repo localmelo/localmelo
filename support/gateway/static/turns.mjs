@@ -410,13 +410,13 @@ export function statusLine(status, error) {
 
 /** Continue keeps tool side effects and is only safe to offer on the newest turn. */
 export function canContinue(turn, newest) {
-  return newest && !!turn.finishedAt && !turn.undone && Number(turn.result?.n_tool) > 0 &&
+  return newest && !turn.origin && !!turn.finishedAt && !turn.undone && Number(turn.result?.n_tool) > 0 &&
     ["budget_exhausted", "context_budget_exceeded", "gate_stopped", "provider_error", "timeout", "cancelled"].includes(turn.status);
 }
 
-/** A retry undoes the newest finished turn, never an earlier or undone one. */
+/** A retry undoes the newest finished turn, never an earlier or undone one, nor a task's question. */
 export function canRetry(turn, newest) {
-  return newest && !turn.undone && !!turn.finishedAt && turn.status !== "completed";
+  return newest && !turn.origin && !turn.undone && !!turn.finishedAt && turn.status !== "completed";
 }
 
 /** `approval_tag`: the short and long text of how an approval ended, or null. */

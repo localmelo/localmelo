@@ -87,6 +87,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# ChatMemory's tool that keeps a note of the person's words.
+_NOTE_TOOLS: Final = ("remember",)
+
 EventCallback = Callable[[StoredEvent], Awaitable[None] | None]
 ResumeMode = Literal["pairs", "window"]
 ResumeLoader = Callable[[], Awaitable[int]]
@@ -149,6 +152,8 @@ class _Turn:
     words: str | None = None
     # The run's routine name, run_task's ``routine=`` (UR-N).
     routine: str | None = None
+    # Who began a turn the person did not (``TurnInfo.origin``); "" for theirs.
+    origin: str = ""
     queue: asyncio.Queue[tuple[Any, ...]] = field(default_factory=asyncio.Queue)
     # The task that runs the turn: the runner's own (start_turn) or the
     # caller's (run_turn).
@@ -594,8 +599,10 @@ class SessionRunner:
             text=text,
             approval=approval,
             routine=routine,
-            typed=typed_text,
+            # Another's words are never the person's: memory reads none of them.
+            typed="" if origin else typed_text,
             words=words,
+            origin=origin,
         )
         turn.writer = asyncio.create_task(self._write_events(turn))
         turn.lease = asyncio.create_task(self._keep_lease(turn))
@@ -707,6 +714,11 @@ class SessionRunner:
             if self._inbox is not None:
                 kwargs["inbox"] = self._inbox
             kwargs["user_words"] = turn.typed if turn.words is None else turn.words
+            if turn.origin:
+                # Not the person's message: no consent, and no note of theirs.
+                kwargs["from_person"] = False
+                if self._memory is not None:
+                    kwargs["hide_tools"] = _NOTE_TOOLS
             # The chat began when its session did, across reloads and restarts.
             with contextlib.suppress(Exception):
                 session = await self._store.get_session(turn.turn.session_id)
