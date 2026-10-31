@@ -40,6 +40,22 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
   Start the gateway: melo serve
 ```
 
+### The main chat
+
+- `melo` opens the main chat: the same conversation, cards and tasks as the web console and the app.
+- When no gateway runs, melo starts one in the background on the configured port and says so in one line. It keeps running after melo quits, so its tasks go on; its log is `~/.cache/localmelo/logs/gateway.log`.
+- melo never starts a second gateway: when the app's gateway holds the main chat on a port of its own, melo talks to that one.
+- When the gateway cannot be reached, one line says why and the terminal keeps its own chat:
+
+```text
+⚠ No main chat (port 8401 is used by another program); this is the terminal's own chat.
+```
+
+- `/chats` lists the main chat and its side chats (arrow keys and Enter), `/side [title]` starts a side chat in this folder, and `/main` goes back. The status bar names the open chat.
+- An approval that a turn asks for is the usual list, answered through the gateway; one answered in the console closes here.
+- A card is one coloured line: a side chat or a task that finished, did not finish or waits for you, and how to open it. `/task …` starts a task, as in the console.
+- `/model`, `/backend`, `/undo`, `/copy`, `/sessions`, `/resume`, `/title`, `/usage`, `/attach`, `/approvals`, `/browser` and `/mcp` work in the terminal's own chat. `melo -X cli.chat=local` (or `[cli] chat = "local"`) opens it, as `-u URL`, `-c`, `-r` and `--yolo` do.
+
 ### Which model server
 
 ![The model picker under the input box: three models, the current one ticked, and a filter.](../assets/img/model-picker.webp)
@@ -125,6 +141,10 @@ When the model is not the saved default, a row after the folder gives the server
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | The approval mode and this session's grants; switch it, or forget one tool's grant (all with `forget`). |
 | `/browser [on\|off]` | Whether melo may read web pages in Safari (see [Browsing with melo](browsing.md)). |
 | `/mcp` | The MCP servers, their tools and the file they came from, and why MCP is off after a failure. |
+| `/chats` | In the main chat: the main chat and its side chats as a list; Enter opens one, `New side chat` starts one. |
+| `/side [title]` | In the main chat: a side chat in this folder, made by its first message. `/new` and `/clear` do the same there. |
+| `/main` | Back to the main chat from a side chat. |
+| `/task TEXT` | In the main chat: start a task, as `/task` does in the console. |
 | `/exit` (also `/quit`) | Quit; a running turn is stopped first. |
 
 - `/new`, `/clear`, `/sessions`, `/resume`, `/undo`, `/retry`, `/model` and `/backend` are refused while a turn runs: the draft stays and the hint says `/model is not available while a turn runs (esc stops it).`
@@ -223,7 +243,7 @@ The bar under the input box answers "how much has this used" and "what runs besi
 | `idle 2m` | The time since the last request, from one minute on. |
 | `$0.13 · ctx 100k · limit 42% ▮▮▯▯▯ ↻3m` | On a cloud API: the session's cost from the prices you configured (see [`[pricing]`](../reference/configuration.md#pricing)) and the tightest rate limit the last response reported, with the time until it resets. melo bundles no prices. |
 | `2/~4 · ctrl+o steps` | While a turn runs: step 2 of about 4 (the task took 4 steps before; `~` marks an estimate), and the key that lists the steps. |
-| `2 running · 1 queued · P1 · ctrl+t tasks` | When the gateway has unfinished tasks: their counts by state, the top priority and the key that lists them. |
+| `2 running · 1 queued · Today · ctrl+t tasks` | When the gateway has unfinished tasks: their counts by state, the top level and the key that lists them. Levels are words (Now, Today, Normal, Whenever, If idle, Later); developer mode shows P0-P5. |
 
 - Ctrl+T lists the tasks; Enter on one offers Pause or Resume, Raise to, Lower to and Stop (which asks first), exactly as `melo task pause|resume|level|stop` do.
 - melo asks the gateway for its tasks every 5 seconds, and only when a gateway token exists (`~/.cache/localmelo/gateway/auth`).

@@ -22,7 +22,6 @@ from typing import Any, Final, Protocol
 import httpx
 
 from localmelo.support import task_cli
-from localmelo.support.gateway.front_rules import LEVEL_WORDS
 from localmelo.support.usage_snapshot import BarPart
 
 # The key that opens the list, as the bar names it and prompt_toolkit binds it.
@@ -105,7 +104,7 @@ class WorkSummary:
 
 def level_name(level: int, words: bool = False) -> str:
     """A level as default mode says it (``Today``) or developer mode (``P1``)."""
-    return LEVEL_WORDS[level] if words else f"P{level}"
+    return task_cli.LEVEL_WORDS[level] if words else f"P{level}"
 
 
 def summarize(tasks: Sequence[WorkTask]) -> WorkSummary:

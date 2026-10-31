@@ -78,10 +78,11 @@ COMMANDS: Final[tuple[Command, ...]] = (
     ),
     Command("progress", (), "", "Show this turn's progress facts", True),
     Command("browser", (), "[on|off]", "Show or switch web browsing in Safari", "show"),
-    Command("mcp", (), "", "Show the MCP servers", True),
     Command("chats", (), "", "Pick the main chat or a side chat", False),
     Command("side", (), "[title]", "Start a side chat in this folder", False),
     Command("main", (), "", "Go back to the main chat", False),
+    Command("task", (), "TEXT", "Start a task from the main chat: /task TEXT", False),
+    Command("mcp", (), "", "Show the MCP servers", True),
 )
 
 # What the main chat leaves to the terminal's own chat: the commands that act
@@ -92,7 +93,6 @@ LOCAL_ONLY: Final = frozenset(
         "backend",
         "undo",
         "copy",
-        "retry",
         "attach",
         "attachments",
         "detach",
@@ -115,6 +115,7 @@ HELP_GROUPS: Final = (
 # The same in the main chat.
 MAIN_HELP_GROUPS: Final = (
     ("Chats", ("chats", "side", "main")),
+    ("Turns", ("task", "retry")),
     ("Model", ("status",)),
     ("Help", ("help", "exit")),
 )

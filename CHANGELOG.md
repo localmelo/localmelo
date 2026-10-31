@@ -342,6 +342,29 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The terminal talks in the main chat. `melo` now opens the same main chat as
+  the web console and the app: its turns, its cards and the tasks it starts.
+  When no gateway runs, melo starts one in the background on the configured
+  port and says so in one line; it keeps running after melo quits, so its
+  tasks go on. melo never starts a second gateway: when the app's gateway
+  holds the main chat on a port of its own, melo talks to that one. When the
+  gateway cannot be reached, one line says why and the terminal keeps its own
+  chat. `/chats` lists the main chat and its side chats, `/side [title]` starts
+  a side chat in this folder and `/main` goes back; the status bar names the
+  open chat. An approval asked in a turn shows as the terminal's usual list
+  and is answered through the gateway, and a card (a side chat or a task that
+  finished, did not finish or waits) is one coloured line that says how to
+  open it. `-X cli.chat=local` (or `[cli] chat = "local"`) keeps the
+  terminal's own chat, as `-u`, `-c`, `-r` and `--yolo` do. Direct runs,
+  worker runs and their exit codes are unchanged. For API clients:
+  `GET /api/sessions/{id}` adds `last_event_id`, and an approval's `review`
+  adds `categories`. See [The main chat](docs/guides/terminal.md#the-main-chat)
+  ([#NN]).
+
+- The terminal's work zone and Ctrl+T say task levels in words in default mode
+  (Now, Today, Normal, Whenever, If idle, Later); developer mode keeps P0-P5
+  ([#NN]).
+
 - The main chat answers, or hands bigger work to a task by level. It answers a
   quick question itself and starts bigger work as a task it owns, with one line
   such as `Started: Plan the trip · Normal`; the result comes back as a card.

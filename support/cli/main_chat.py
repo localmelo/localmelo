@@ -36,8 +36,6 @@ from localmelo.melo.contracts.approvals import ApprovalRequest
 from localmelo.melo.contracts.review import ActionReview
 from localmelo.support import console_link, task_cli
 from localmelo.support.cli.text import cut_cells
-from localmelo.support.gateway.console.cards import CARD_EVENT
-from localmelo.support.gateway.console.front import ECHO_EVENT
 from localmelo.support.sessions.display import clean_output, home_label
 from localmelo.support.sessions.store import (
     GATEWAY_SESSIONS_DB,
@@ -51,6 +49,9 @@ if TYPE_CHECKING:
     from localmelo.support.cli.render import TurnRenderer
     from localmelo.support.config import Config
 
+# The main chat's events that belong to no turn (the gateway's cards.py and front.py).
+CARD_EVENT: Final = "attention.card"
+ECHO_EVENT: Final = "attention.echo"
 # Where a gateway started from the terminal writes what it prints.
 GATEWAY_LOG: Final = "~/.cache/localmelo/logs/gateway.log"
 # How long a gateway started here may take to answer, in seconds.
@@ -335,8 +336,9 @@ def _refusal(response: httpx.Response) -> GatewayError:
     return GatewayError(f"the gateway answered {response.status_code}")
 
 
-def _path(session_id: str) -> str:
-    return "/api/sessions/" + quote(session_id, safe="")
+def _path(session_id: str, *rest: str) -> str:
+    """``/api/sessions/ID`` and the parts after it, the id quoted."""
+    return "/".join(["/api/sessions", quote(session_id, safe=""), *rest])
 
 
 class GatewayClient:
@@ -397,12 +399,12 @@ class GatewayClient:
 
     async def turns(self, session_id: str, limit: int) -> dict[str, Any]:
         return await self.call(
-            "GET", _path(session_id) + "/turns", params={"limit": limit}
+            "GET", _path(session_id, "turns"), params={"limit": limit}
         )
 
     async def send(self, session_id: str, text: str, key: str) -> dict[str, Any]:
         body = {"text": text, "client_request_id": key}
-        return await self.call("POST", _path(session_id) + "/turns", json=body)
+        return await self.call("POST", _path(session_id, "turns"), json=body)
 
     async def create(self, text: str, key: str, workspace: str) -> dict[str, Any]:
         """A new side chat in *workspace*, with *text* as its first message."""
@@ -412,11 +414,18 @@ class GatewayClient:
         }
         return await self.call("POST", "/api/sessions", json=body)
 
+    async def retry(self, session_id: str, turn_id: str) -> dict[str, Any]:
+        """Undo the newest finished turn and run its text again."""
+        body = {"turn_id": turn_id}
+        return await self.call("POST", _path(session_id, "retry"), json=body)
+
     async def rename(self, session_id: str, title: str) -> None:
         await self.call("PATCH", _path(session_id), json={"title": title})
 
     async def cancel(self, turn_id: str) -> None:
-        await self.call("POST", f"/api/turns/{quote(turn_id, safe='')}/cancel")
+        await self.call(
+            "POST", "/".join(["/api/turns", quote(turn_id, safe=""), "cancel"])
+        )
 
     async def answer(self, request_id: str, choice: str, reason: str = "") -> None:
         body = {"choice": choice, "reason": reason}
@@ -432,7 +441,7 @@ class GatewayClient:
         try:
             async with self._client().stream(
                 "GET",
-                _path(session_id) + "/events",
+                _path(session_id, "events"),
                 params={"after": after},
                 timeout=timeout,
             ) as response:
@@ -568,6 +577,8 @@ class _Turn:
     number: int | None = None
     turn_id: str = ""
     stop: bool = False  # a stop that waits for the turn's id
+    # A retry has no key: the next turn to start in the idle chat is it.
+    retry: bool = False
 
 
 class MainChat:
@@ -731,11 +742,11 @@ class MainChat:
             return
         turn, number = self._turn, event.get("turn")
         if kind == "turn.started":
+            key = data.get("client_request_id")
             if (
                 turn is not None
                 and turn.number is None
-                and turn.key
-                and data.get("client_request_id") == turn.key
+                and (turn.retry or (turn.key and key == turn.key))
             ):
                 turn.number = (
                     data.get("turn") if isinstance(data.get("turn"), int) else None
@@ -821,14 +832,26 @@ class MainChat:
 
     # ── Turns ──
 
-    async def run_turn(self, text: str) -> str:
+    async def last_turn(self) -> tuple[str, str] | None:
+        """The open chat's newest finished turn, its id and text; None without one."""
+        if self.chat.id is None:
+            return None
+        page = await self.client.turns(self.chat.id, 1)
+        turns = [t for t in page.get("turns") or [] if isinstance(t, dict)]
+        if not turns or turns[-1].get("status") == "running":
+            return None
+        return str(turns[-1].get("id") or ""), str(turns[-1].get("user_text") or "")
+
+    async def run_turn(self, text: str, *, retry: str = "") -> str:
         """Send *text* in the open chat and wait for its turn; its final status.
 
         ``echo`` when the main chat answered with an echo line (it started or
-        changed a task) and no turn ran.
+        changed a task) and no turn ran. With *retry*, the gateway undoes
+        that turn and runs its text again.
         """
         loop = asyncio.get_running_loop()
-        turn = _Turn(uuid.uuid4().hex, loop.create_future())
+        key = "" if retry else uuid.uuid4().hex
+        turn = _Turn(key, loop.create_future(), retry=bool(retry))
         self._turn = turn
         try:
             if self.chat.main and self.chat.id is None:
@@ -836,7 +859,9 @@ class MainChat:
                 if self.chat.id is None:
                     raise GatewayError("the main chat did not open")
             chat = self.chat
-            if chat.id is None:
+            if retry and chat.id is not None:
+                body = await self.client.retry(chat.id, retry)
+            elif chat.id is None:
                 body = await self.client.create(text, turn.key, self.host.workspace)
                 session = body.get("session") or {}
                 chat.id = str(session.get("id") or "")

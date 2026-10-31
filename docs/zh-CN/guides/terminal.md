@@ -44,6 +44,24 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
   Start the gateway: melo serve
 ```
 
+<a id="the-main-chat"></a>
+
+### 主对话
+
+- `melo` 打开主对话：与网页控制台和 App 相同的对话、卡片和任务。
+- 没有网关在运行时，melo 在后台用配置的端口启动一个，并用一行说明。它在 melo 退出后继续运行，任务因此不会中断；日志在 `~/.cache/localmelo/logs/gateway.log`。
+- melo 从不启动第二个网关：App 的网关在自己的端口上持有主对话时，melo 就与它对话。
+- 连不上网关时，一行说明原因，终端继续使用自己的对话：
+
+```text
+⚠ No main chat (port 8401 is used by another program); this is the terminal's own chat.
+```
+
+- `/chats` 列出主对话和它的侧边对话（方向键和 Enter），`/side [title]` 在当前文件夹开始一个侧边对话，`/main` 回到主对话。状态栏显示当前打开的对话。
+- 轮次请求的审批仍是熟悉的选项列表，答复经网关送达；在控制台答复的审批，这里的列表会关闭。
+- 卡片是一行彩色文字：一个侧边对话或任务已完成、未完成或在等你，以及如何打开它。`/task …` 会开始一个任务，与控制台相同。
+- `/model`、`/backend`、`/undo`、`/copy`、`/sessions`、`/resume`、`/title`、`/usage`、`/attach`、`/approvals`、`/browser` 和 `/mcp` 只在终端自己的对话里可用。`melo -X cli.chat=local`（或 `[cli] chat = "local"`）打开它，`-u URL`、`-c`、`-r` 和 `--yolo` 也是如此。
+
 <a id="which-model-server"></a>
 
 ### 选择模型服务器
@@ -137,6 +155,10 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | 审批模式和本会话的授权；切换它，或忘掉某个工具的授权（用 `forget` 忘掉全部）。 |
 | `/browser [on\|off]` | melo 是否可以在 Safari 中读取网页（见[用 melo 浏览网页](browsing.md)）。 |
 | `/mcp` | MCP 服务器、它们的工具和来源文件，以及失败后 MCP 为何关闭。 |
+| `/chats` | 在主对话中：以列表列出主对话和它的侧边对话；按 Enter 打开，`New side chat` 新开一个。 |
+| `/side [title]` | 在主对话中：在当前文件夹开始一个侧边对话，由第一条消息创建。在那里 `/new` 和 `/clear` 也是如此。 |
+| `/main` | 从侧边对话回到主对话。 |
+| `/task TEXT` | 在主对话中：开始一个任务，与控制台里的 `/task` 相同。 |
 | `/exit`（也可用 `/quit`） | 退出；正在运行的轮次会先被停止。 |
 
 - `/new`、`/clear`、`/sessions`、`/resume`、`/undo`、`/retry`、`/model` 和 `/backend` 在轮次运行期间会被拒绝：草稿保留，提示为 `/model is not available while a turn runs (esc stops it).`
@@ -245,7 +267,7 @@ from-the-child
 | `idle 2m` | 距最近一次请求的时间，一分钟起显示。 |
 | `$0.13 · ctx 100k · limit 42% ▮▮▯▯▯ ↻3m` | 在云端 API 上：按你配置的价格（见 [`[pricing]`](../reference/configuration.md#pricing)）算出的本会话费用，以及最近一次响应报告的最紧的速率限制和重置前的时间。melo 不内置价格。 |
 | `2/~4 · ctrl+o steps` | 轮次运行期间：第 2 步，共约 4 步（该任务之前用了 4 步；`~` 表示估计值），以及列出这些步骤的按键。 |
-| `2 running · 1 queued · P1 · ctrl+t tasks` | 网关有未完成的任务时：按状态统计的数量、最高优先级，以及列出它们的按键。 |
+| `2 running · 1 queued · Today · ctrl+t tasks` | 网关有未完成的任务时：按状态统计的数量、最高的级别，以及列出它们的按键。级别用文字表示（Now、Today、Normal、Whenever、If idle、Later）；开发者模式显示 P0-P5。 |
 
 - Ctrl+T 列出任务；在某个任务上按 Enter 会提供 Pause 或 Resume、Raise to、Lower to 和 Stop（会先询问），效果与 `melo task pause|resume|level|stop` 完全相同。
 - melo 每 5 秒向网关询问一次任务，并且只在存在网关令牌（`~/.cache/localmelo/gateway/auth`）时才询问。

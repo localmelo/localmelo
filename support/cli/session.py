@@ -509,7 +509,7 @@ class CliSession:
         terminal's own chat says so. A string is the hint that keeps the draft.
         """
         assert self.remote is not None
-        if command is None and name == "task":
+        if command is not None and command.name == "task":
             if not self.remote.chat.main:
                 self.out.print(
                     self._text(
@@ -696,18 +696,23 @@ class CliSession:
         completed = result is not None and result.status == "completed"
         self._after_turn(text, started, completed=completed, failed=error is not None)
 
-    async def _remote_turn(self, text: str, *, typed: bool = True) -> None:
+    async def _remote_turn(
+        self, text: str, *, typed: bool = True, retry: str = ""
+    ) -> None:
         """One turn of the main chat or a side chat, run by the gateway.
 
         *typed* is False for a turn sent in another window, which the
-        terminal only follows: its message is never given back.
+        terminal only follows: its message is never given back. *retry* is
+        the turn that ``/retry`` runs again.
         """
         assert self.remote is not None
         started = self._clock()
         error: Exception | None = None
         status = ""
         try:
-            status = await (self.remote.run_turn(text) if typed else self.remote.wait())
+            status = await (
+                self.remote.run_turn(text, retry=retry) if typed else self.remote.wait()
+            )
         except GatewayError as exc:
             error = exc
         if error is not None and not self._closed:
@@ -927,7 +932,7 @@ class CliSession:
                     main_chat=self.remote is not None,
                 )
             )
-        elif name in ("chats", "side", "main"):
+        elif name in ("chats", "side", "main", "task"):
             await self._chats_command(name, arguments)
         elif name == "attach":
             await self._attach_file(arguments)
@@ -996,7 +1001,11 @@ class CliSession:
         self.spawn(remote.watch())
 
     async def _chats_command(self, name: str, arguments: str) -> None:
-        """/chats, /side and /main: the main chat's chats, through the gateway."""
+        """/chats, /side and /main: the main chat's chats, through the gateway.
+
+        ``/task`` reaches here only in the terminal's own chat: in the main
+        chat it is sent as a message.
+        """
         remote = self.remote
         if remote is None:
             self.out.print(
@@ -1005,6 +1014,8 @@ class CliSession:
                     style="muted",
                 )
             )
+        elif name == "task":
+            pass  # sent as a message (see _main_chat_command)
         elif name == "chats":
             await remote.pick()
         elif name == "side":
@@ -1375,6 +1386,19 @@ class CliSession:
 
     async def retry(self) -> None:
         """``/retry``: re-run the newest turn, undoing it only when still live."""
+        if self.remote is not None:
+            last = await self.remote.last_turn()
+            if last is None:
+                self.out.print(self._text("✗ Nothing to retry.", style="error"))
+                return
+            turn_id, text = last
+            first = " ".join(text.split())[:60]
+            self.out.print(self._text(f"↻ Retrying: {first}"))
+            self._state = "running"
+            self._stop_wanted = self._stop_landed = False
+            self.renderer.begin_turn(text)
+            self._work = self.spawn(self._remote_turn(text, retry=turn_id))
+            return
         if self.runner is None:
             self.out.print(self._text("✗ Nothing to retry.", style="error"))
             return
