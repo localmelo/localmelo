@@ -5,6 +5,7 @@ from collections.abc import Collection
 from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
+from localmelo.melo.checker.commits import commit_credit_refusal
 from localmelo.melo.checker.payloads import (
     ActionReviewPayload,
     ExecutorResultPayload,
@@ -140,6 +141,8 @@ class Checker:
             refusal = exec_refusal(
                 tool_call.tool_name, tier, self._mode, self._named_builtins
             )
+        if refusal is None and not HARNESS_CALL.get():
+            refusal = commit_credit_refusal(tool_call.tool_name, tool_call.arguments)
         if refusal is not None:
             return CheckResult(allowed=False, reason=refusal)
         return CheckResult(allowed=True)

@@ -304,6 +304,12 @@ class _Review:
                 if inner is not None:
                     self.helpers[node.name] = (inner, node)
         nodes = list(ast.walk(tree))
+        # Whether the code reads a process's exit status, and the calls whose
+        # value is dropped (a statement of its own).
+        self.reads_status = any(
+            isinstance(n, ast.Attribute) and n.attr == "returncode" for n in nodes
+        )
+        self.dropped = {id(n.value) for n in nodes if isinstance(n, ast.Expr)}
         loads = [
             n.id
             for n in nodes
@@ -1057,10 +1063,17 @@ class _Review:
             )
             first = node.args[0] if node.args else kw.get("args")
             argvs = self.fold(node.args[1] if many else first)
+        status = (
+            self.reads_status
+            or self.fold(kw.get("check")) == ["True"]
+            or attr in ("check_call", "check_output")
+            or (name == "os.system" or attr == "call")
+            and id(node) not in self.dropped
+        )
         for argv in argvs:
             parts = [argv] if isinstance(argv, str) else list(argv or [])
             if isinstance(argv, str) and in_shell:
-                shell.review_shell(ctx.deeper(), f, argv)
+                shell.review_shell(ctx.deeper(), f, argv, status)
             elif not in_shell and any(isinstance(p, str) for p in parts):
                 program = parts[0] if isinstance(parts[0], str) else "?"
                 rest = [p if isinstance(p, str) else "$value" for p in parts[1:]]
