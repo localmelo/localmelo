@@ -895,13 +895,13 @@ def test_plain_terminal_offers_a_usable_guide_not_a_nonexistent_menu_action(
     result, _, _ = _first_setup(answers)
     assert result is None and answers.prompts == [_WAIT_PROMPT]
     out = capsys.readouterr().out
-    assert discovery.GUIDE_URL in out and "Show manual steps" not in out
+    assert f"Guide: {discovery.GUIDE_URL}" in out and "Show manual steps" not in out
     assert "Details" not in out
     if warning:
         assert "the manual guide" in out
     summary = out[out.index("No model server is running yet.") :]
     assert len(summary.splitlines()) <= 6 and all(
-        len(line) < 80 for line in summary.splitlines()
+        len(line) < 80 or discovery.GUIDE_URL in line for line in summary.splitlines()
     )
 
 

@@ -502,7 +502,8 @@ def test_preview_adds_only_one_warning_line(
     lines = setup.preview(setup.plan(detected), interactive=interactive)
     assert len(lines) == 6 and expected.lower() in lines[-1].lower()
     assert ("Details" if interactive else "the manual guide") in lines[-1]
-    assert all(len(line) < 80 for line in lines)
+    # The piped guide line is "Guide: " plus the URL, which may be wider.
+    assert all(len(line) < 80 or discovery.GUIDE_URL in line for line in lines)
 
 
 @pytest.mark.parametrize("interactive", [False, True])
@@ -526,7 +527,7 @@ def test_preview_combines_warnings_and_shows_multiple_volume_free_space(
     assert "keep running after melo closes" in lines[3]
     assert "Several setup checks need attention" in lines[-1]
     assert ("Details" if interactive else "the manual guide") in lines[-1]
-    assert all(len(line) < 80 for line in lines)
+    assert all(len(line) < 80 or discovery.GUIDE_URL in line for line in lines)
 
 
 def test_manual_only_summary_hides_cache_lifetime_and_irrelevant_disk_warning() -> None:
@@ -575,7 +576,7 @@ def test_manual_commands_are_pinned_shell_quoted_and_do_not_copy_models(
         "omlx",
         "serve",
         "--base-path",
-        planned.detection.state_path,
+        "$HOME/.cache/localmelo/server-setup/omlx-0.7.3",  # Shell expands $HOME.
         "--model-dir",
         planned.detection.snapshot,
         "--host",
@@ -590,6 +591,71 @@ def test_manual_commands_are_pinned_shell_quoted_and_do_not_copy_models(
     assert all(
         bad not in text for bad in ("--local-dir", "pip install", "~/models", "sudo")
     )
+
+
+def test_shell_path_uses_home_variable_inside_home_and_escapes_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    assert setup._shell_path(str(home), home) == '"$HOME"'
+    assert setup._shell_path(str(home), None) == '"$HOME"'
+    assert setup._shell_path(str(home / ".cache" / "hub"), home) == (
+        '"$HOME/.cache/hub"'
+    )
+    assert setup._shell_path(str(home / "with space"), None) == '"$HOME/with space"'
+    spaced = home / "my $dir" / 'a"b`c\\d'
+    assert setup._shell_path(str(spaced), home) == '"$HOME/my \\$dir/a\\"b\\`c\\\\d"'
+
+
+def test_shell_path_quotes_paths_outside_home_and_resolves_symlinks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "home"
+    outside = tmp_path / "home2" / "$cache x"  # Sibling sharing a name prefix.
+    assert setup._shell_path(str(outside), home) == shlex.quote(str(outside))
+    assert setup._shell_path("relative/$x", home) == shlex.quote("relative/$x")
+    real = tmp_path / "real-home"
+    link = tmp_path / "linked-home"
+    real.mkdir()
+    link.symlink_to(real, target_is_directory=True)
+    assert setup._shell_path(str(real / "c d"), link) == '"$HOME/c d"'
+    monkeypatch.setenv("HOME", str(home))
+    assert setup._shell_path(str(home / ".cache")) == '"$HOME/.cache"'
+
+
+def test_manual_steps_never_print_the_home_folder_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "someone"
+    monkeypatch.setenv("HOME", str(home))
+    text = "\n".join(setup.manual_steps(setup.plan(setup.detect())))
+    for form in {str(home), str(home.resolve())}:
+        assert form not in text
+    assert 'HF_HUB_CACHE="$HOME/.cache/huggingface/hub" hf download ' in text
+    assert (
+        '--base-path "$HOME/.cache/localmelo/server-setup/omlx-0.7.3" '
+        '--model-dir "$HOME/.cache/huggingface/hub/models--mlx-community--'
+        "Qwen3-4B-Instruct-2507-4bit/snapshots/"
+        '50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b" '
+    ) in text
+
+
+def test_piped_preview_labels_the_guide_link() -> None:
+    planned = setup.plan(setup.detect())
+    assert setup.preview(planned, interactive=False)[4] == (
+        f"Guide: {discovery.GUIDE_URL}"
+    )
+    assert setup.preview(planned)[4] == (
+        "Automatic setup is coming soon: Show manual steps to do it now."
+    )
+
+
+def test_recommended_line_only_appears_with_a_runtime_asset() -> None:
+    supported = setup.details(setup.plan(setup.detect()))
+    assert "Recommended: oMLX + Qwen3 4B Instruct." in supported
+    unsupported = setup.details(setup.plan(replace(setup.detect(), asset=None)))
+    assert not any("Recommended:" in line for line in unsupported)
 
 
 @pytest.mark.parametrize("bounded", [False, True])

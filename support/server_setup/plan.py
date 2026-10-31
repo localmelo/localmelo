@@ -348,6 +348,30 @@ def _ram(value: int | None) -> str:
     return "unknown" if value is None else f"{value / 1024**3:g} GB ({value:,} bytes)"
 
 
+def _shell_path(path: str, home: Path | None = None) -> str:
+    """Quote a path for a copy-ready command without printing the user name.
+
+    A path inside the home folder (the home folder itself included) becomes
+    "$HOME/<rest>" in double quotes, so the shell expands it; copy-ready
+    commands never print the person's user name. Anything else is shlex-quoted.
+    """
+    if os.path.isabs(path):
+        try:
+            root = (Path.home() if home is None else home).resolve()
+            target = Path(path).resolve()
+            if target.is_relative_to(root):
+                rest = target.relative_to(root).as_posix()
+                if rest == ".":
+                    return '"$HOME"'
+                escaped = "".join(
+                    "\\" + char if char in '\\"$`' else char for char in rest
+                )
+                return f'"$HOME/{escaped}"'
+        except (OSError, RuntimeError, ValueError):
+            pass
+    return shlex.quote(path)
+
+
 def preview(setup: SetupPlan, *, interactive: bool = True) -> tuple[str, ...]:
     """A human summary; technical metadata requires Details or developer mode."""
     d = setup.detection
@@ -379,7 +403,7 @@ def preview(setup: SetupPlan, *, interactive: bool = True) -> tuple[str, ...]:
         (
             "Automatic setup is coming soon: Show manual steps to do it now."
             if interactive
-            else GUIDE_URL
+            else f"Guide: {GUIDE_URL}"
         ),
     ]
     warnings = []
@@ -413,7 +437,7 @@ def details(setup: SetupPlan) -> tuple[str, ...]:
     d, r = setup.detection, setup.recipe
     lines = [
         "No model server is running yet. Setup preview only; nothing installed or started.",
-        "Recommended: oMLX + Qwen3 4B Instruct.",
+        *(["Recommended: oMLX + Qwen3 4B Instruct."] if d.asset else []),
         f"Platform: {d.system} {d.os_version} / {d.architecture}; RAM: {_ram(d.ram_bytes)}.",
         d.support,
         f"SetupPlan v{setup.version} SHA256: {setup.digest}",
@@ -468,8 +492,8 @@ def manual_steps(setup: SetupPlan) -> tuple[str, ...]:
         lifetime,
         f"Download: {r.download_base}{d.asset.name}",
         f"Verify SHA256 {d.asset.sha256}; install through normal macOS controls. Make the bundled Contents/MacOS/omlx-cli available as omlx; do not bypass Gatekeeper.",
-        f"HF_HUB_CACHE={shlex.quote(d.cache_root)} hf download {shlex.quote(r.model_repo)} --revision {shlex.quote(r.model_revision)}",
-        f"OMLX_HF_CACHE_ENABLED=0 omlx serve --base-path {shlex.quote(d.state_path)} --model-dir {shlex.quote(d.snapshot)} --host 127.0.0.1 --port {setup.port}",
+        f"HF_HUB_CACHE={_shell_path(d.cache_root)} hf download {shlex.quote(r.model_repo)} --revision {shlex.quote(r.model_revision)}",
+        f"OMLX_HF_CACHE_ENABLED=0 omlx serve --base-path {_shell_path(d.state_path)} --model-dir {_shell_path(d.snapshot)} --host 127.0.0.1 --port {setup.port}",
         f"Check the port is free before starting; enumerate http://127.0.0.1:{setup.port}/v1/models. The direct snapshot's served ID may be its revision hash rather than the repository ID; use the server-returned ID.",
         "Run melo setup and enter that server address (the prospective port is outside default discovery).",
     )
