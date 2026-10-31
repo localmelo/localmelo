@@ -84,10 +84,11 @@ def _check(function: Callable[[Any], T], value: Any) -> T:
 
 
 def _level(value: object) -> int | None:
+    """A level word or number the chore may have (Today to If idle), or ``None`` when absent."""
     if value is None:
         return None
     number = level_number(value)
-    if number is None:
+    if number is None or not 1 <= number <= 4:
         raise ApiError(
             400, "invalid_request", "level: Today, Normal, Whenever or If idle"
         )
@@ -133,13 +134,14 @@ def add_routes(app: FastAPI, console: Console) -> None:
             TaskSpec.from_payload, {"objective": request, "title": body.title}
         )
         schedule = _check(Schedule.from_json, body.schedule)
+        level = _level(body.level)
         chore = await _call(
             console,
             runner.store.create(
                 title=spec.title,
                 request=spec.objective,
                 schedule=schedule,
-                level=_level(body.level) or triage(request)[0],
+                level=triage(request)[0] if level is None else level,
                 front_id=await _owner(console, body.front_id),
             ),
         )

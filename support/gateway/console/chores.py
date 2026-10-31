@@ -256,7 +256,9 @@ class ChoreRunner:
 
         cfg = self.console.cfg
         inner = get_backend(cfg.chat_backend).build_chat_provider(thinking_off(cfg))
-        gate = self.console.gate.client(f"checkin:{self.console.main_id}")
+        # A session of its own for each check-in, dropped from the gate when it is done.
+        session = f"checkin:{self.console.main_id}:{int(self.clock())}"
+        gate = self.console.gate.client(session)
         try:
             reply = await asyncio.wait_for(
                 GatedLLM(inner, gate).chat(
@@ -268,6 +270,7 @@ class ChoreRunner:
                 SUMMARY_TIMEOUT_S,
             )
         finally:
+            self.console.gate.forget(session)
             with contextlib.suppress(Exception):
                 await inner.close()
         return reply.content

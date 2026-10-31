@@ -217,6 +217,8 @@ async def test_a_chore_is_created_listed_changed_and_deleted(tmp_path: Path) -> 
         {"request": "Brief me"},
         {"request": "Brief me", "schedule": BRIEF, "level": "Soon"},
         {"request": "Brief me", "schedule": BRIEF, "level": "Later"},
+        {"request": "Brief me", "schedule": BRIEF, "level": "Now"},
+        {"request": "Brief me", "schedule": BRIEF, "level": 0},
         {"request": "Brief me", "schedule": BRIEF, "front_id": "no-such-chat"},
         {"request": "Brief me", "schedule": BRIEF, "origin": "user"},
         {"request": "x" * 100_001, "schedule": BRIEF},
@@ -645,6 +647,14 @@ async def test_the_default_note_is_one_call_to_the_chat_model(
         console.chore_runner.next_checkin = (
             1e12  # this test asks for the check-in itself
         )
+        forgotten: list[str] = []
+        real_forget = console.gate.forget
+
+        def spy(session_id: str) -> None:
+            forgotten.append(session_id)
+            real_forget(session_id)
+
+        console.gate.forget = spy  # type: ignore[method-assign]
         await add(
             client, "Brief me", {"kind": "daily", "at": "08:30"}, title="Calendar brief"
         )
@@ -657,6 +667,9 @@ async def test_the_default_note_is_one_call_to_the_chat_model(
         assert [m.role for m in request] == ["system", "user"]
         assert "Calendar brief: Three meetings today." in request[1].content
         assert closed == [True] and len(built) == 1
+        # The note's own gate session is dropped when the call is done.
+        assert len(forgotten) == 1
+        assert forgotten[0].startswith(f"checkin:{console.main_id}:")
 
 
 # ── The main chat: a repeating phrase proposes a chore ──
