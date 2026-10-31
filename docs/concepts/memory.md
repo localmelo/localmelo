@@ -164,13 +164,15 @@ Direct runs (`melo "<task>"`), the terminal chat, workers and the benchmark neit
 
 ### Tidying notes while idle (developer setting)
 
-`[memory] sleep` (off by default; `-X memory.sleep=rules` for one run, listed by `melo -h all`) tidies the notes in one pass over the chats since the last pass, with no model call. `model` and `model+tags` are not built yet.
+`[memory] sleep` is off by default. Run a pass explicitly with `melo memory sleep [VARIANT]` (developer mode) or `POST /api/memory/sleep`; `-X memory.sleep=rules` sets it for one run, and `melo -h all` lists it.
 
-- Merge duplicates: of two notes of one subject, or close in meaning and wording, the older is superseded by the newer; a note you reworded is never merged away.
-- Missed supersede: a newer message of yours that states another value of a note's subject ("My name is Juno." after the note "You go by Pip.") replaces the note.
-- Lost facts: a plain, lasting statement that no note of its turn kept is written, turns where the reply said it noted something first.
-- Every write passes the checks above on your own words, is marked `sleep` with the run and the turn it read, and never deletes; a run makes at most 20 changes, and a watermark keeps it from reading a turn twice.
-- `melo memory sleep [VARIANT]` (developer mode only) and `POST /api/memory/sleep` run it and report the changes; `DELETE /api/memory/sleep/{run_id}` puts the whole run back.
+- **`rules`** makes no model request: merge duplicate notes, replace a fact with your newer stated value, and recover lasting statements no note kept. A note you reworded is never merged away.
+- **`model`** runs those rules first, then asks the chat model about selected turns, oldest first, with their previous message and up to six matching active notes. It can add a fact, update a value or retire an explicitly retracted fact; a separate pass resolves a note's opening pronoun from its source and previous turn. At most 12 chat requests per run, eight seconds each, with temperature zero.
+- **`model+tags`** uses the same limit, prioritizing turns with an unsaved claim, a remember request, a nearby saved change, or notes recalled in a later turn, oldest first within each group. Both model variants spend only the available requests; they do not process every turn when the limit is reached.
+
+Code checks every proposed change against your typed words: its quote must occur in the source message, values and owners must match, and secrets are refused. An update must identify the same note the write rules select; a retirement needs a negation, a shared content word and evidence of the retracted value. Your edits change only on newer typed evidence. A run makes at most 20 changes and never hard-deletes a note. Before each model request, it checks for new chat activity and an optional `[memory] sleep_lock` path (unset by default); it stops if either is present, preserving completed changes.
+
+The report includes `model_calls`, `refused`, elapsed `ms`, changes and any abort reason. Unselected turns remain pending for later runs within a 14-day window. An unreadable answer or timeout leaves its turn pending once; a second failure completes it with `reason: "parse"` in `refusals`, so it cannot block the backlog. Reasoning is separated from the final answer before JSON is read. Older turns cannot revive facts later typed words withdrew or replaced. Processed turn and per-note rewrite ids prevent replay, even after undo; the watermark stays before the oldest pending turn. An abort or change cap leaves it unchanged. `DELETE /api/memory/sleep/{run_id}` restores retired and superseded notes and removes notes the pass wrote, including preexisting conflicts but without overwriting later writes or edits.
 
 ### See and change what melo remembers
 

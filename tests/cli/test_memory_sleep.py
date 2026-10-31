@@ -1,7 +1,7 @@
 """``[memory] sleep`` and ``melo memory sleep``: a developer setting, off by default.
 
-The setting is ``off`` or ``rules`` (``model`` and ``model+tags`` are valid but
-not built yet). It is saved only when not ``off``, checked, set for one run with
+The setting is ``off``, ``rules``, ``model`` or ``model+tags``.
+It is saved only when not ``off``, checked, set for one run with
 ``-X``, and listed by the developer help only. The command is for developer
 mode: it runs the setting's sleep over the notes and chats and prints the report.
 """
@@ -53,6 +53,15 @@ def test_it_is_off_by_default_saved_only_when_set_and_checked(tmp_path: Path) ->
     assert any("[memory] sleep 'deep' is not recognised" in e for e in cfg.validate())
 
 
+def test_sleep_lock_round_trips_and_is_validated(home: Path) -> None:
+    cfg = Config(chat_backend="vllm", embedding_backend="none")
+    cfg.memory.sleep_lock = str(home / "idle.lock")
+    save(cfg)
+    assert config.load().memory.sleep_lock == cfg.memory.sleep_lock
+    cfg.memory.sleep_lock = 3  # type: ignore[assignment]
+    assert any("sleep_lock must be a path string" in e for e in cfg.validate())
+
+
 def test_x_sets_it_for_one_run_and_only_the_developer_help_lists_it(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -96,5 +105,5 @@ def test_the_command_is_for_developer_mode_and_prints_the_report(
     assert "Sleep off: 0 changes, 0 model calls, run " in capsys.readouterr().out
     assert memory_cli.main(["sleep", "rules"]) == 0
     assert "Sleep rules: 0 changes, 0 model calls, run " in capsys.readouterr().out
-    assert memory_cli.main(["sleep", "model"]) == 1
-    assert "not built yet" in capsys.readouterr().err
+    assert memory_cli.main(["sleep", "model"]) == 0
+    assert "Sleep model: 0 changes, 0 model calls, run " in capsys.readouterr().out

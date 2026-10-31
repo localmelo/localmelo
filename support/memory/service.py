@@ -1162,28 +1162,79 @@ class ChatMemory:
         *,
         now: float | None = None,
         chats: SessionStore | None = None,
+        budget: int | None = None,
     ) -> sleeping.SleepReport:
         """Tidy the notes with sleep *variant* (``[memory] sleep`` when ``None``);
         what it changed. *chats* gives it the turns to replay (without them,
-        only duplicates are merged). Raises ``NotImplementedError`` for a
-        variant not built yet; nothing happens with memory off or ``off``.
+        only duplicates are merged). Model variants share a twelve-call limit;
+        each call checks the optional sleep lock and new chat activity.
+        Nothing happens with memory off or ``off``.
         """
         cfg = self._settings()
+        began = time.time()
         variant = variant or (cfg.memory.sleep if cfg is not None else "off")
         store, index = self.stores()
         variant = variant if self.enabled else "off"
-        if variant != "rules":  # off, or not built yet (it raises): no file is read
+        if variant == "off" or variant not in sleeping.VARIANTS:
             return await sleeping.run(store, index, [], variant=variant, now=now)
         await self.drain()
         until = await index.meta("sleep_until")
+        forgotten = await index.forgotten_at()
         turns = (
-            await sleeping.sleep_turns(chats, max(until, await index.forgotten_at()))
+            await sleeping.sleep_turns(
+                chats,
+                (
+                    max(until, forgotten)
+                    if variant == "rules"
+                    else max(
+                        forgotten,
+                        (began if now is None else now) - sleeping.BACKLOG_SECONDS,
+                    )
+                ),
+            )
             if chats is not None
             else []
         )
+
+        async def active() -> bool:
+            if not self.enabled:
+                return True
+            if chats is not None:
+                for session in await chats.list_sessions(
+                    limit=100_000, kinds=("chat", "front")
+                ):
+                    if session.updated_at > began and any(
+                        t.started_at > began for t in await chats.list_turns(session.id)
+                    ):
+                        return True
+            return False
+
+        async def notes_for(typed: str) -> list[int]:
+            embedded = await self._embed([typed], EMBED_TIMEOUT_S, query=True)
+            vector = unit(embedded.vectors[0]) if embedded.vectors else None
+            found = ranked(
+                await self._sync(),
+                typed,
+                vector,
+                embedded.model,
+                now=time.time(),
+                coverage=0.0,
+            )
+            return [int(item.key[2:]) for item in found if item.is_record][:6]
+
         async with self._lock:
             report = await sleeping.run(
-                store, index, turns, variant=variant, now=now, until=until
+                store,
+                index,
+                turns,
+                variant=variant,
+                now=now,
+                until=max(until, forgotten),
+                provider=self.chat_provider() if variant.startswith("model") else None,
+                notes_for=notes_for,
+                is_active=active,
+                lock=cfg.memory.sleep_lock if cfg is not None else "",
+                budget=budget,
             )
         logger.info("memory.sleep %s", report.to_json())
         return report

@@ -422,8 +422,8 @@ async def test_a_failure_keeps_the_changes_made_and_says_why(
     assert older in {e.id for e in await memory.records()}
 
 
-async def test_off_does_nothing_and_the_model_variants_are_not_built(
-    memory: ChatMemory, chats: SessionStore
+async def test_off_does_nothing_and_model_variants_keep_rules_when_model_unavailable(
+    memory: ChatMemory, chats: SessionStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await put(memory, "You live in Lisbon.", LONG_AGO)
     await put(memory, "You live in Utrecht.", LONG_AGO + 5)
@@ -432,10 +432,15 @@ async def test_off_does_nothing_and_the_model_variants_are_not_built(
     off = await memory.sleep("off", chats=chats)
     assert (off.variant, off.changes, off.aborted) == ("off", [], "sleep is off")
     assert rows(memory) == before and await memory.stores()[1].meta("sleep_until") == 0
+    monkeypatch.setattr(memory, "chat_provider", lambda: None)
     for variant in ("model", "model+tags"):
-        with pytest.raises(NotImplementedError, match="not built yet"):
-            await memory.sleep(variant, chats=chats)
-    assert rows(memory) == before
+        report = await memory.sleep(variant, chats=chats)
+        assert report.variant == variant and report.model_calls == 0
+        assert [c.op for c in report.changes] == ["O1", "O3"]
+        assert report.aborted == "RuntimeError: chat model is not configured"
+        assert await memory.stores()[1].meta("sleep_until") == 0
+        await memory.undo_sleep(report.run_id)
+        assert rows(memory) == before
 
 
 async def test_the_setting_picks_the_variant_and_memory_off_does_nothing(

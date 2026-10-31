@@ -9,18 +9,28 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
-- Developer setting `[memory] sleep` (`off` by default; `rules` is built, `model`
-  and `model+tags` answer "not built yet"; `-X memory.sleep=rules`, listed by
+- Developer setting `[memory] sleep` (`off` by default; `rules`, `model`
+  and `model+tags`; `-X memory.sleep=rules`, listed by
   `melo -h all`) tidies the notes in one pass over the chats since the last
-  pass, with no model call and at most 20 changes per run: it merges duplicate
-  notes (the older is superseded), writes the newer value when a newer message
-  states another value of a note's subject, and recovers a lasting statement no
+  pass, with at most 20 changes per run. Its rules make no model call: they
+  merge duplicate notes (the older is superseded), write the newer value when a newer message
+  states another value of a note's subject, and recover a lasting statement no
   note of its turn kept (turns whose reply claimed a save first). Every write
   passes the checks of a note on the user's own words, is marked `sleep` with
   its run and turn, and nothing is deleted; a note the user reworded is not
   merged away. `melo memory sleep [VARIANT]` (developer mode) and
   `POST /api/memory/sleep` run it and report the changes; `DELETE
-  /api/memory/sleep/{run_id}` puts a whole run back. Part of #363. [#NN]
+  /api/memory/sleep/{run_id}` puts a whole run back. The model variants add an
+  evidence-checked pass for missing facts, changed values and retractions,
+  plus named references in place of dangling pronouns. Both use at most twelve
+  chat requests, oldest-first within each priority group; `model+tags`
+  prioritizes tagged turns. Pending turns resume within fourteen days, but
+  cannot revive later retractions. Processed turns and pronoun rewrites stay
+  processed after undo. Unreadable replies/timeouts are tried at most twice;
+  reasoning is separated before parsing. Undo restores preexisting conflicts
+  while preserving later changes. New chat activity or a configured
+  `[memory] sleep_lock` stops model work; reports include refused proposals,
+  skipped parse failures and elapsed time. Part of #363. [#NN]
 - `file_read` takes `start_line` and `end_line` (1-based, inclusive), so a long
   file is read in parts instead of being sliced through Python. A read that
   shows only part of a file now ends with how many lines the file has and the

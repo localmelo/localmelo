@@ -619,6 +619,15 @@ class SqliteLongTerm(LongTerm):
             rows = [tuple(row) for row in await cur.fetchall()]
         return [_stored(row) for row in rows]
 
+    async def entry(self, entry_id: int) -> StoredEntry | None:
+        """Read one record, including a superseded one (for a guarded undo)."""
+        conn = await self._ensure_ready()
+        async with conn.execute(
+            f"SELECT {_SELECT_COLUMNS} FROM long_term WHERE id = ?", (entry_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        return _stored(tuple(row)) if row is not None else None
+
     async def history_entries(self, task_id: str) -> list[StoredEntry]:
         """Return a task's entries, including superseded rows, newest first."""
         if not task_id:
@@ -745,6 +754,7 @@ class SqliteLongTerm(LongTerm):
                     provenance.update(
                         quote=text,
                         edited=True,
+                        edited_at=now,
                         embed_model=embed_model if vector else "",
                     )
                     await conn.execute(
