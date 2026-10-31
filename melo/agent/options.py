@@ -386,8 +386,8 @@ class AgentOptions:
     tool_images_keep: int = 3
     tool_images_retire: int = 2
     answer_on_stop: bool = False
-    task_aids: bool = False
     max_calls: int | None = None
+    task_aids: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.fixed_prefix, bool):

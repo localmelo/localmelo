@@ -12,6 +12,7 @@ import pytest
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._chat import REFLECTION_PROMPT
 from localmelo.melo.agent.agent import _resolve_memory_dir
+from localmelo.melo.checker import TASK_BUILTINS
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.executor import builtin_names
@@ -185,8 +186,9 @@ class TestConstruction:
 
 
 class TestBuiltinSelection:
-    # Every mode has these; only the chat surfaces add list_files.
-    THREE = builtin_names() - {"shell_exec", "list_files"}
+    # Every mode has these; only the chat surfaces add list_files. The
+    # task-only built-ins (file_edit, git_status) are in no mode's default.
+    THREE = frozenset({"file_read", "file_write", "python_exec"})
 
     def test_the_python_default_matches_direct(self) -> None:
         agent = Agent(llm=FakeLLM())
@@ -211,7 +213,7 @@ class TestBuiltinSelection:
 
     def test_the_interactive_default_keeps_shell(self) -> None:
         agent = Agent(llm=FakeLLM(), options=AgentOptions(mode="interactive"))
-        assert _tool_names(agent) == builtin_names()
+        assert _tool_names(agent) == builtin_names() - TASK_BUILTINS
         assert agent._run_config()["mode"] == "interactive"
 
     def test_an_explicit_set_wins_over_the_mode(self) -> None:
