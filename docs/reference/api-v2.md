@@ -582,7 +582,9 @@ on without a blocked step. `POST
 chat) and sends the go-ahead message to the task: 202 `{"task": ...,
 "message": "queued"}` for a task that has not finished (it reads it at its
 next step), `"continued"` for one that has (it runs again); 404 `not_found`
-for no such block, 409 `not_allowable` for one that cannot be allowed.
+for no such block, 409 `not_allowable` for one that cannot be allowed, 409
+`already_allowed` once the step ran on an allowance or while one waits. A
+task's allowances go when it finishes.
 
 Explicit user workspaces must be existing directories
 strictly inside home, outside hidden folders and `~/Library`; default
@@ -1424,9 +1426,11 @@ the person's message that asks melo to go ahead.
   `POST /api/sessions/{id}/turns` does; 202 with that turn.
 - 404 `not_found` for no such block in this chat; 409 `not_allowable` for a
   step that changes localmelo itself or a call a stopped turn did not run;
-  409 `session_busy` while a turn runs (nothing is allowed then); 409
-  `task_session_read_only` for a task (see below) and `not_a_chat` for
-  another kind.
+  409 `already_allowed` once the step ran on an allowance after the block,
+  or while an allowance of it waits; 409 `session_busy` while a turn runs
+  (nothing is allowed then); 409 `task_session_read_only` for a task (see
+  below) and `not_a_chat` for another kind. An allowance the turn it
+  started did not use goes when that turn ends.
 
 ## DELETE /api/sessions/{id}
 

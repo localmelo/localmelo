@@ -322,7 +322,7 @@ A call that installs software, downloads files, changes files outside the folder
 In auto mode nothing asks: routine steps run, and a risky step or one you did not ask for is blocked and explained.
 
 - **Switch:** `/approvals auto` turns it on for this chat, `/approvals ask` turns it off. `[approvals] mode` (the console's **New chats start in**, or `-X approvals.mode=auto` for one run) starts the terminal's own chat in it.
-- **What runs:** steps inside the folder that install, download, send or delete nothing; a step melo cannot judge goes to your model first. Its `shell_exec` and `python_exec` calls run in the write sandbox, so a write outside the folder fails even when no rule caught it.
+- **What runs:** steps inside the folder that install, download, send or delete nothing; a step melo cannot judge goes to your model first. Its `shell_exec` and `python_exec` calls run in the write sandbox, so a write outside the folder fails even when no rule caught it, and they can neither read melo's sign-in token nor reach melo's own API.
 - **What is blocked:** installs, downloads, changes outside the folder, deletes, passwords and keys, system settings and code from the internet, unless your own words ask for them; a change to localmelo itself never runs. The row says why (`⊘ … · blocked: installs software`), and melo explains in its answer what it wanted and the other ways.
 - **Allow it:** say "go ahead" and melo tries again; your model checks that your words ask for it. A step only a click can allow (passwords or keys, system settings, something that runs later, code from the internet or code melo cannot check) needs the console's **Allow once**.
 

@@ -316,7 +316,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 
 任务保留创建时其对话的[模式](#ask-and-auto)（`approvals`，`ask` 或 `auto`）；之后切换对话不会改变它。Auto 下的任务不问任何人，所以没有东西会让它停下等待，它的调用在写入沙箱中运行。它的对象另有 `blocked`，即 Auto 拦下的步骤（从旧到新：`request_id`、`call_id`、`name`、`step_key`、`reason`、`review`、`preview`、`ts`、`turn`、`can_allow`，以及 `used_at`，即被允许的步骤运行的时间，否则为 `null`），还有与对话相同的 `allowances`。任务在没有被拦下步骤的情况下继续。`POST
 /api/tasks/{task_id}/blocks/{request_id}/allow` 允许一次（与对话相同），并把继续的消息发给任务：尚未结束的任务返回 202 `{"task": ...,
-"message": "queued"}`（它在下一步读到消息），已结束的任务返回 `"continued"`（它再次运行）；没有这个被拦下的步骤返回 404 `not_found`，不能被允许的返回 409 `not_allowable`。
+"message": "queued"}`（它在下一步读到消息），已结束的任务返回 `"continued"`（它再次运行）；没有这个被拦下的步骤返回 404 `not_found`，不能被允许的返回 409 `not_allowable`，这一步已经凭允许运行过或仍有一个允许在等待时返回 409 `already_allowed`。任务结束时，它的允许随之失效。
 
 明确指定的用户工作区必须是主目录之内的现有目录（严格位于主目录内部），且位于隐藏文件夹和 `~/Library` 之外；默认工作区的选择方式见[调度器](scheduler.md#tasks-workers-and-the-scheduler-store-s3a)。无效的工作区请求返回 400 `invalid_workspace`；在运行或恢复之前变为无效的工作区会使任务以 `wait_reason="invalid_workspace"` 失败，而不是运行它。
 
@@ -770,7 +770,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 
 - 服务器在对话的记录中找到被拦下的步骤；客户端从不发送键。允许只涵盖那个确切的步骤（`step_key`）以及拦下时所列的步骤类别，只运行一次，30 分钟内有效，保存在内存中：重启后会被忘记。重试的调用记录为来源 `user` 且带 `allowance: "once"`。
 - 这条消息（使用控制台的语言）会像 `POST /api/sessions/{id}/turns` 一样开始一个轮次；返回 202，附带该轮次。
-- 对话中没有这个被拦下的步骤时返回 404 `not_found`；更改 localmelo 本身的步骤或已停止轮次未运行的调用返回 409 `not_allowable`；轮次运行期间返回 409 `session_busy`（此时不会允许任何东西）；任务（见下文）返回 409 `task_session_read_only`，其他类型返回 `not_a_chat`。
+- 对话中没有这个被拦下的步骤时返回 404 `not_found`；更改 localmelo 本身的步骤或已停止轮次未运行的调用返回 409 `not_allowable`；这一步在被拦下之后已凭允许运行过，或仍有一个允许在等待时，返回 409 `already_allowed`；轮次运行期间返回 409 `session_busy`（此时不会允许任何东西）；任务（见下文）返回 409 `task_session_read_only`，其他类型返回 `not_a_chat`。由它开始的那一轮没有用到的允许，会在那一轮结束时失效。
 
 ## DELETE /api/sessions/{id}
 

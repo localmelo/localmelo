@@ -632,11 +632,14 @@ asks before commands and file changes.
   or delete nothing. A step melo cannot judge goes to your model first and
   runs only when it is routine and part of what you asked. A write outside
   the folder fails in Auto even when no rule caught it: its output says
-  `writing outside the workspace is not allowed in auto mode`.
+  `writing outside the workspace is not allowed in auto mode`. A step in
+  Auto can neither read melo's sign-in token nor reach melo's own API.
 - **What is blocked.** Installs, downloads, changes outside the folder,
   deletes, passwords and keys, system settings, code from the internet and
   the like, unless your own words ask for them; a change to localmelo itself
-  never runs. The step's row reads `blocked: installs software`, a card under
+  never runs; in a folder that holds the copy of localmelo that is running,
+  a write under that copy is refused. The step's row reads
+  `blocked: installs software`, a card under
   the work says what and why and shows the step, and melo's answer gives the
   other ways.
 - **Allow it.** **Allow once** runs that exact step once, within 30 minutes,
@@ -649,8 +652,9 @@ asks before commands and file changes.
 - **Tasks.** A task keeps the mode its chat had when it was made. Its page
   shows **Mode** and lists **Blocked steps**, each opening the same card; the
   task goes on without them, and **Allow once** there sends the message to the
-  task.
-- Allowances live in memory: restarting localmelo forgets them.
+  task. A scheduled chore takes its chat's mode each time it runs.
+- Allowances live in memory: restarting localmelo forgets them, and one the
+  retried turn did not use goes when that turn ends.
 
 ## Persistence and limits
 
