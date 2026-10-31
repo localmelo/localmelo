@@ -164,7 +164,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   "My"). Words that ask for an older value ("before", "earlier") no longer count
   as content words of the question. The `recall` object of a turn also reports
   `block_chars`, the length of the block added to your message (0 when none)
-  ([#NN]).
+  ([#348]).
 - A task you continue with a message starts its next run. A done, stopped or
   failed task (a run that used up its steps, say) that a message or a "Send"
   card continued ended again within a moment with no turn, because its
@@ -2842,3 +2842,4 @@ earlier milestones.
 [#344]: https://github.com/localmelo/localmelo/pull/344
 [#345]: https://github.com/localmelo/localmelo/pull/345
 [#346]: https://github.com/localmelo/localmelo/pull/346
+[#348]: https://github.com/localmelo/localmelo/pull/348
