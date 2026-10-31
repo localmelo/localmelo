@@ -9,15 +9,18 @@ above that list's bar: most of the question's content words for BM25,
 :data:`MIN_COSINE` for vectors, so most turns recall nothing. Documents (not
 records) decay with a :data:`HALF_LIFE_DAYS` half-life, records rank first at
 an equal score, and at most :data:`PER_SESSION` documents come from one chat.
+A turn whose fact a newer note replaced comes after the rest, below that note,
+and reads as older (:func:`newer_first`).
 """
 
 from __future__ import annotations
 
+import dataclasses
 import math
 import re
 import time
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -46,6 +49,8 @@ NOT_KEPT_LINE: Final = (
     "and it must not be written anywhere (no file, no code)"
 )
 KEPT_NOTES: Final = 3
+# How a turn whose fact a newer note replaced reads, to the model and the page.
+OLDER: Final = "older; replaced by a newer note"
 _KEPT_CHARS: Final = 120
 _LINE_CHARS: Final = 240
 _TITLE_CHARS: Final = 40
@@ -65,7 +70,9 @@ class Item:
     ``text`` is what the person reads: a record in the second person, or a
     turn. ``quote`` is a record's words as the user typed them, which the
     model reads, so that "you" never stands for the user in its prompt.
-    ``where`` names the chat and the day.
+    ``where`` names the chat and the day. A record's ``replaces`` are the
+    turns (session id, turn) whose facts it replaced; ``older`` marks such a
+    turn when it is recalled.
     """
 
     key: str
@@ -77,6 +84,8 @@ class Item:
     quote: str = ""
     vector: np.ndarray | None = None  # unit length
     embed_model: str = ""
+    replaces: tuple[tuple[str, int], ...] = ()
+    older: bool = False
 
     @property
     def is_record(self) -> bool:
@@ -84,13 +93,15 @@ class Item:
 
     @property
     def source(self) -> str:
-        return ("you said it · " if self.is_record else "") + self.where
+        said = ("you said it · " if self.is_record else "") + self.where
+        return f"{said} · {OLDER}" if self.older else said
 
     @property
     def prompt(self) -> str:
         """The item as the model reads it, with where it came from."""
         if not self.is_record:
-            return f"{snippet(self.text)} ({self.where})"
+            older = f" ({OLDER})" if self.older else ""
+            return f"{snippet(self.text)} ({self.where}){older}"
         said = f"the user said “{self.quote}”" if self.quote else self.text
         return f"{said} ({self.where})"
 
@@ -243,6 +254,39 @@ def ranked(
         rows.append((score, item.is_record, item))
     rows.sort(key=lambda row: (row[0], row[1]), reverse=True)
     return [item for _, _, item in rows]
+
+
+def replaced_turns(corpus: Corpus) -> dict[tuple[str, int], Item]:
+    """The turns whose facts a note in *corpus* replaced, each to that note."""
+    return {
+        turn: item
+        for item in corpus.items.values()
+        if item.is_record
+        for turn in item.replaces
+    }
+
+
+def newer_first(
+    items: Sequence[Item], replaced: Mapping[tuple[str, int], Item]
+) -> list[Item]:
+    """*items* with each turn whose fact a newer note *replaced* moved after the
+    rest and marked older; that note comes in ahead of it if it was not found.
+
+    The old fact stays as history, as people keep it, but the newer one wins.
+    """
+    keys = {item.key for item in items}
+    fresh: list[Item] = []
+    stale: list[Item] = []
+    for item in items:
+        newer = None if item.is_record else replaced.get((item.session_id, item.turn))
+        if newer is None:
+            fresh.append(item)
+            continue
+        if newer.key not in keys:
+            keys.add(newer.key)
+            fresh.append(newer)
+        stale.append(dataclasses.replace(item, older=True))
+    return fresh + stale
 
 
 def pick(items: Sequence[Item], *, records: int, docs: int) -> list[Item]:

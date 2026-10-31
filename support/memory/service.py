@@ -50,8 +50,10 @@ from localmelo.support.memory.recall import (
     chat_label,
     day,
     kept_lines,
+    newer_first,
     pick,
     ranked,
+    replaced_turns,
     snippet,
     unit,
 )
@@ -203,6 +205,11 @@ def _record_item(entry: StoredEntry) -> Item:
         quote=str(provenance.get("quote") or ""),
         vector=unit(entry.vector),
         embed_model=entry.embed_model or str(provenance.get("embed_model") or ""),
+        replaces=tuple(
+            (str(turn[0]), int(turn[1]))
+            for turn in provenance.get("replaces") or []
+            if isinstance(turn, list) and len(turn) == 2
+        ),
     )
 
 
@@ -494,13 +501,15 @@ class ChatMemory:
                 if mode == "llm"
                 else []
             )
+            replaced = replaced_turns(corpus)
         recall.search_ms = elapsed_ms(started)
         recall.candidates = len(loose) if mode == "llm" else len(found)
         if loose:
             found = await self._select(
                 query, loose, found, recall, k=records_k + docs_k
             )
-        items = pick(found, records=records_k, docs=docs_k)
+        # A turn whose fact a newer note replaced comes after that note.
+        items = pick(newer_first(found, replaced), records=records_k, docs=docs_k)
         recall.used = len(items)
         return items
 

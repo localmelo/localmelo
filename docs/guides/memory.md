@@ -43,9 +43,9 @@ In the web console and the app, melo keeps short notes about you across chats (s
 
 - **Ask it.** "Remember that Sam has the lab keys", "keep in mind that my group meeting is on Thursdays", "记住：我的车停在B2层", "别忘了…" or "帮我记一下…" is kept at once.
 - **Tell it.** "I prefer short answers" or "call me Ray" is kept when melo judges it worth keeping, as it does with a finished task's result in the chat; never what only a web page, a file or a tool's output says, and never a password or key.
-- Each note shows under your message as `Remembered: … · Undo`.
-- To see, reword or forget notes later, use the console's **Memory** tab, `/memory` in the terminal, or `melo memory list` and `melo memory forget`.
-- To stop keeping notes, run `melo config set memory.across_chats false` and restart `melo serve` or the app.
+- **Change it.** Say the new value in any chat ("I live in Utrecht now", "我的健身教练是小宇"): it replaces the old note about the same thing and comes first in recall.
+- Each note shows under your message as `Remembered: … · Undo`; Undo on a new value brings the old one back.
+- To see, reword or forget notes later, use the console's **Memory** tab, `/memory` in the terminal, or `melo memory list` and `melo memory forget`; to stop keeping notes, run `melo config set memory.across_chats false` and restart `melo serve` or the app.
 
 ## Turn long-term memory off
 
