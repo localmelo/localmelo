@@ -1057,11 +1057,15 @@ chat) gets echoes with `task_id`, `title` and `ask_id`:
   `of` the question or the escalation).
 - `queued` (`typed`) and `dequeued` (`of`): a message sent while the chat
   answers a task is kept, `POST /api/sessions/{id}/turns` answering 200 with the
-  `queued` echo instead of 409, and runs as the chat's next turn.
+  `queued` echo instead of 409, and runs as the chat's next turn, after a
+  restart too, and once: a turn its `client_request_id` (or melo's own key)
+  already started is not run again. It is accepted only once it is stored;
+  otherwise the answer is 503 `store_unavailable` and a `failed` echo (`of`
+  the queued one, `typed`) says it was not sent.
 
 The chat's internal turn is a turn with `"origin": "ask_owner"` (the key is
-absent on the person's turns), empty typed text and the question as its user
-text. A task body has `ask`: `{"ask_id", "chat_id", "chat_title", "on":
+absent on the person's turns, in the turn row and in `turn.started`), empty
+typed text and the question as its user text. A task body has `ask`: `{"ask_id", "chat_id", "chat_title", "on":
 "owner" | "person"}` while it waits, else `null`.
 
 ## GET /api/sessions/{id}/events

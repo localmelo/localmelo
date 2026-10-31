@@ -5695,7 +5695,8 @@ class Agent:
         query is a request the person did not send (a task's question to its
         chat): a step review counts no new message of theirs, so a block or
         consent of their last message holds and the query's words allow
-        nothing. *hide_tools* are not offered in this run.
+        nothing, and long-term memory takes no statement or remember request
+        of the user's from it. *hide_tools* are not offered in this run.
 
         Before the run starts, ``TypeError`` is raised when *on_event* or
         *observe* is not callable or is a coroutine function, when both
@@ -5810,11 +5811,12 @@ class Agent:
                     self.hippo.working.append(query_msg)
                     run.task_query_msg = query_msg
                     run.query_in_memory = True
-                    if self.options.reasoning != "legacy":
+                    if self.options.reasoning != "legacy" and from_person:
                         # Only the user's own text gives a user signal: a
                         # direct statement is admitted at once, while the
                         # fact a remember request carries is staged and
-                        # admitted with the digest at flush.
+                        # admitted with the digest at flush. A query the
+                        # person did not write gives none.
                         signals = classify_user_text(query)
                         for candidate in user_candidates(
                             query,

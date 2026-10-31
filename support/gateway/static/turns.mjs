@@ -558,12 +558,14 @@ function ensureTurn(view, number, fields = {}) {
       turn: number,
       user_text: fields.userText ?? "",
       client_request_id: fields.clientRequestId ?? "",
+      origin: fields.origin ?? "",
       status: "running",
       running_here: true,
     });
     addTurn(view, turn);
   }
   if (fields.id && !turn.id) turn.id = fields.id;
+  if (fields.origin && !turn.origin) turn.origin = fields.origin;
   if (fields.userText && !turn.userText) turn.userText = fields.userText;
   if (fields.clientRequestId && !turn.clientRequestId) {
     turn.clientRequestId = fields.clientRequestId;
@@ -678,6 +680,7 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
       id: data.turn_id,
       userText: data.user_text,
       clientRequestId: data.client_request_id,
+      origin: data.origin,
     }) : findTurn(view, number);
 
   if (type === "turn.started") {

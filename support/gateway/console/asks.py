@@ -36,7 +36,12 @@ from typing import TYPE_CHECKING, Any, Final
 
 from localmelo.support.gateway.i18n import said, t_in
 from localmelo.support.sessions.display import ActivityText
-from localmelo.support.sessions.store import SessionBusyError, StoredEvent
+from localmelo.support.sessions.store import (
+    SessionBusyError,
+    SessionStoreError,
+    StoredEvent,
+)
+from localmelo.support.sessions.submissions import SubmissionRepeated
 from localmelo.support.words import said_in
 
 if TYPE_CHECKING:
@@ -91,7 +96,9 @@ class Ask:
 class _Queued:
     typed: str
     composed: str
-    key: str | None
+    # The submission key its turn starts with: the client's, else one of its
+    # own, so a turn started before a restart is found, not run again.
+    key: str
     echo: dict[str, Any] = field(default_factory=dict)
 
 
@@ -307,36 +314,51 @@ class OwnerAsks:
         title = (
             busy.title if busy else (people[-1].echo.get("title", "") if people else "")
         )
-        item = _Queued(typed, composed, key)
-        item.echo = await self.console.front_for(chat_id).echo(
+        front = self.console.front_for(chat_id)
+        item = _Queued(typed, composed, key or f"queued-{uuid.uuid4().hex}")
+        item.echo = await front.echo(
             {"echo": "queued", "title": title, "typed": typed,
              "line": t_in("en", "ask.queued", title=title),
              "said": said("ask.queued", title=title)}
         )  # fmt: skip
         people.append(item)
-        await self._keep_queue(chat_id)
+        try:
+            await self._keep_queue(chat_id)
+        except Exception as exc:
+            # Accepted only once it is stored: the row says it was not sent.
+            people.remove(item)
+            with contextlib.suppress(Exception):
+                await self._not_sent(chat_id, item)
+            if isinstance(exc, SessionStoreError):
+                raise
+            raise SessionStoreError("Could not keep the message for later") from exc
         self._kick(chat_id)
         return item.echo
 
     async def _keep_queue(self, chat_id: str) -> None:
-        """Store *chat_id*'s queued messages, so a restart runs them."""
+        """Store *chat_id*'s queued messages, so a restart runs them; raises on failure."""
         kept = [{"typed": q.typed, "composed": q.composed, "key": q.key,
                  "echo": q.echo} for q in self._people.get(chat_id, [])]  # fmt: skip
-        with contextlib.suppress(Exception):
-            await self.console.store.update_session(
-                chat_id, meta_update={"queued": kept or None}
-            )
+        await self.console.store.update_session(
+            chat_id, meta_update={"queued": kept or None}
+        )
+
+    async def _not_sent(self, chat_id: str, item: _Queued) -> None:
+        await self.console.front_for(chat_id).echo(
+            {"echo": "failed", "of": item.echo.get("id"), "typed": item.typed,
+             "line": t_in("en", "ask.notSent"), "said": said("ask.notSent")}
+        )  # fmt: skip
 
     async def restore_queued(self) -> None:
         """At start: the messages the last run queued and never started run now, in order."""
-        store = self.console.store
-        for info in await store.list_sessions(limit=1000, kinds=("chat", "front")):
-            kept = (info.meta or {}).get("queued")
-            if not isinstance(kept, list) or not kept:
+        for info in await self.console.store.sessions_with_meta("queued"):
+            kept = info.meta.get("queued")
+            if info.kind not in ("chat", "front") or not isinstance(kept, list):
                 continue
             self._people[info.id] = [
                 _Queued(str(q.get("typed", "")), str(q.get("composed", "")),
-                        q.get("key"), dict(q.get("echo") or {}))  # fmt: skip
+                        str(q.get("key") or f"queued-{uuid.uuid4().hex}"),
+                        dict(q.get("echo") or {}))  # fmt: skip
                 for q in kept
                 if isinstance(q, dict)
             ]
@@ -396,16 +418,26 @@ class OwnerAsks:
             )
         except SessionBusyError:
             return
+        except SubmissionRepeated:
+            pass  # it started before a restart: it ran, it is not run again
         except Exception as exc:
             logger.warning("A queued message could not start: %s", exc)
             # Never dropped unseen: its row says it was not sent, with its words.
-            await front.echo({"echo": "failed", "of": item.echo.get("id"),
-                              "typed": item.typed, "line": t_in("en", "ask.notSent"),
-                              "said": said("ask.notSent")})  # fmt: skip
-        else:
-            await front.echo({"echo": "dequeued", "of": item.echo.get("id")})
+            await self._not_sent(chat_id, item)
+            self._people[chat_id].pop(0)
+            await self._forget_started(chat_id)
+            return
+        await front.echo({"echo": "dequeued", "of": item.echo.get("id")})
         self._people[chat_id].pop(0)
-        await self._keep_queue(chat_id)
+        await self._forget_started(chat_id)
+
+    async def _forget_started(self, chat_id: str) -> None:
+        """Store the queue without the message just handled."""
+        try:
+            await self._keep_queue(chat_id)
+        except Exception:
+            # Kept as started: its key finds the turn after a restart.
+            logger.warning("Could not store the chat's queue", exc_info=True)
 
     async def _internal_turn(self, chat_id: str, ask: Ask) -> None:
         if await self.console.store.get_session(chat_id) is None:
@@ -430,6 +462,9 @@ class OwnerAsks:
                 return
             self._turns[turn.id] = ask
             ask.turn_id = turn.id
+            if ask.answer.done():
+                # Stopped (or answered) while the turn began: it ends now.
+                self._stop_turn(ask)
             # The chat's time counts from here, not from the ask.
             timer = asyncio.create_task(self._time_out(ask))
             entry = self.console.sessions.get(chat_id)

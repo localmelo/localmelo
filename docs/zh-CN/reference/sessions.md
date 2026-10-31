@@ -116,7 +116,7 @@ worker 会话也使用命令行界面的文件：每个直接任务默认都会�
 - **“Interrupted”是一个标签，不是状态。** 界面把 `shutdown` 和 `crash` 两个原因显示为“Interrupted”；状态始终是一个运行状态。
 - **写入失败。** 当网关的存储无法记录一个运行中轮次的事件或结束，它会以 `SessionStoreError("The session store could not record a change; restart the gateway")` 拒绝新工作，直到它重启，读取照常工作；重启会结束该轮。对于命令行界面的文件，运行器会在 0.5、1 和 2 秒后重试结束该轮（关闭期间只重试一次），并在会话的下一轮或撤销之前再试一次；在此之前会话保持忙碌。
 
-会话和轮次的存储方法：`create_session`、`get_session`、`find_sessions`、`list_sessions`（最新的在前；除非传入 `kinds`，否则只列出聊天）、`rename_session`、`update_session`、`delete_session`（有轮次运行时被拒绝）、`list_turns(session_id, limit=, before=)`、`list_events(session_id, after_id=, limit=, turns=)`、`undo_last_turn` 和 `get_window`。`runner.undo()` 撤销最新的已完成轮次并恢复；期间开始的轮次会等待恢复完成。
+会话和轮次的存储方法：`create_session`、`get_session`、`find_sessions`、`list_sessions`（最新的在前；除非传入 `kinds`，否则只列出聊天）、`sessions_with_meta(key)`（`meta` 中设置了 `key` 的所有会话，最早的在前，没有上限）、`rename_session`、`update_session`、`delete_session`（有轮次运行时被拒绝）、`list_turns(session_id, limit=, before=)`、`list_events(session_id, after_id=, limit=, turns=)`、`undo_last_turn` 和 `get_window`。`runner.undo()` 撤销最新的已完成轮次并恢复；期间开始的轮次会等待恢复完成。
 
 <a id="message-ids-and-submissions"></a>
 

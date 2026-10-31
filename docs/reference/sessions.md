@@ -207,7 +207,8 @@ and is `""` while it runs:
 
 Store methods for sessions and turns: `create_session`, `get_session`,
 `find_sessions`, `list_sessions` (newest first, chats unless you pass
-`kinds`), `rename_session`, `update_session`, `delete_session` (refused
+`kinds`), `sessions_with_meta(key)` (every session whose `meta` has `key`
+set, oldest first, no cap), `rename_session`, `update_session`, `delete_session` (refused
 while a turn runs), `list_turns(session_id, limit=, before=)`,
 `list_events(session_id, after_id=, limit=, turns=)`, `undo_last_turn` and
 `get_window`. `runner.undo()` undoes the newest finished turn and resumes;

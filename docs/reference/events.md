@@ -689,7 +689,7 @@ and `"run_id": ""`.
 
 | Type | When | `data` keys |
 |---|---|---|
-| `turn.started` | A turn begins, before its run's events. | `turn`, `turn_id`, `user_text`, `client_request_id` |
+| `turn.started` | A turn begins, before its run's events. | `turn`, `turn_id`, `user_text`, `client_request_id`; `origin` (`ask_owner`) only on a turn the person did not begin |
 | `turn.finished` | The turn ends: its last event. | `turn`, `turn_id`, `status`, `error`, `cause` |
 | `turn.undone` | A turn is undone; the event belongs to no turn. | `turn`, `turn_id` |
 | `turn.pictures` | A console turn made pictures: after its run's last event, before `turn.finished`. Absent when it made none, and in the terminal's file. | `turn`, `turn_id`, `pictures` |
@@ -778,4 +778,5 @@ A stored `assistant.message` or `reflection` from before `prefix` existed lacks 
 keys, and a session store accepts events without them).
 `EVENT_FIELDS` in `localmelo.melo.contracts` maps each type to its keys, and
 `SESSION_EVENT_FIELDS` in `localmelo.support.sessions.store` each session
-type.
+type; `OPTIONAL_SESSION_EVENT_FIELDS` there lists the session keys an event
+may lack (`turn.started`'s `origin`).

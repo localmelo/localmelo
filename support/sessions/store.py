@@ -171,7 +171,7 @@ RUN_STATUSES: Final = frozenset(
 SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
     {
         "turn.started": frozenset(
-            {"turn", "turn_id", "user_text", "client_request_id"}
+            {"turn", "turn_id", "user_text", "client_request_id", "origin"}
         ),
         "turn.finished": frozenset({"turn", "turn_id", "status", "error", "cause"}),
         "turn.undone": frozenset({"turn", "turn_id"}),
@@ -211,6 +211,11 @@ SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
             }
         ),
     }
+)
+# Session event keys an event may lack: turn.started's origin is only on a
+# turn the person did not begin (#369).
+OPTIONAL_SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
+    {"turn.started": frozenset({"origin"})}
 )
 # The session events that a run's writer may store with its batches; the
 # store writes the others itself.
@@ -1680,6 +1685,22 @@ class SessionStore:
             now = self._clock()
             return [self._session_info(row, now) for row in rows]
 
+    async def sessions_with_meta(self, key: str) -> list[SessionInfo]:
+        """Every session whose ``meta`` has *key* set (not null), oldest first.
+
+        No cap: a recovery at start reads them all (a chat's queued messages).
+        """
+        async with self._lock:
+            conn = await self._ready()
+            rows = await _rows(
+                conn,
+                f"SELECT {_SESSION_COLUMNS} FROM sessions s WHERE "
+                "json_extract(s.meta, ?) IS NOT NULL ORDER BY s.created_at",
+                (f'$."{key}"',),
+            )
+            now = self._clock()
+            return [self._session_info(row, now) for row in rows]
+
     async def list_turns(
         self, session_id: str, *, limit: int | None = None, before: int | None = None
     ) -> list[TurnInfo]:
@@ -2345,6 +2366,8 @@ class SessionStore:
                             "turn_id": turn_id,
                             "user_text": user_text,
                             "client_request_id": client_request_id,
+                            # Only on a turn the person did not begin (#369).
+                            **({"origin": origin} if origin else {}),
                         },
                         now,
                     ),

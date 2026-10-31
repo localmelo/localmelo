@@ -16,7 +16,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   or asks you with the choices and their trade-offs and a box for your answer
   (`“Fix tests” needs your answer`). The task waits without taking a model
   slot: `Waiting on Main chat`, or `Waiting on you`. A message you send while
-  melo answers is queued and runs next, even after a restart, a question with
+  melo answers is queued and runs next, once, even after a restart, a question with
   no answer in 10 minutes lets the task go on with its best option, and melo's
   answer never approves a step. A task's words are never taken as yours: they
   allow no blocked step, are never remembered as something you said, and the

@@ -28,6 +28,7 @@ from localmelo.melo.schema import ImagePart, Message, answer_text, split_thinkin
 from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
 from localmelo.support.sessions.store import (
     LEASE_S,
+    OPTIONAL_SESSION_EVENT_FIELDS,
     OUTCOME_CAUSES,
     RECENT_SESSIONS,
     RESERVED_EVENT_PREFIXES,
@@ -196,6 +197,25 @@ async def test_an_internal_turn_gives_a_new_session_no_title(tmp_path: Path) -> 
     )
     assert turn.origin == "ask_owner"
     assert (await store.get_session(info.id)).title == ""  # type: ignore[union-attr]
+    await store.aclose()
+
+
+async def test_turn_started_names_a_turn_the_person_did_not_begin(
+    tmp_path: Path,
+) -> None:
+    store = gateway(tmp_path / "sessions.db")
+    started = {}
+    for origin in ("", "ask_owner"):
+        info = await store.create_session()
+        await store.begin_turn(info.id, "x", holder=HOLDER, origin=origin)
+        [event] = [
+            e.event["data"]
+            for e in await store.list_events(info.id)
+            if e.event["type"] == "turn.started"
+        ]
+        started[origin] = event
+    assert "origin" not in started[""]
+    assert started["ask_owner"]["origin"] == "ask_owner"
     await store.aclose()
 
 
@@ -757,7 +777,13 @@ async def test_an_unknown_schema_component_is_ignored(tmp_path: Path) -> None:
 
 def test_the_session_event_keys_are_pinned() -> None:
     assert dict(SESSION_EVENT_FIELDS) == {
-        "turn.started": {"turn", "turn_id", "user_text", "client_request_id"},
+        "turn.started": {
+            "turn",
+            "turn_id",
+            "user_text",
+            "client_request_id",
+            "origin",
+        },
         "turn.finished": {"turn", "turn_id", "status", "error", "cause"},
         "turn.undone": {"turn", "turn_id"},
         "turn.pictures": {"turn", "turn_id", "pictures"},
@@ -790,6 +816,7 @@ def test_the_session_event_keys_are_pinned() -> None:
             "remember",
         },
     }
+    assert dict(OPTIONAL_SESSION_EVENT_FIELDS) == {"turn.started": {"origin"}}
     assert RESERVED_EVENT_PREFIXES == ("task.", "sched.", "attention.")
 
 

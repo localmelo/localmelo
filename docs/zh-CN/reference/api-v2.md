@@ -510,9 +510,9 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `task_answered`（`text`，`of` 指问题）：对话用 `task_answer` 作了回答。
 - `task_escalate`（`parts`：`background`、`what_happened`、`tried`、`choices`、`question`）：对话用 `ask_person` 问了本人。`POST /api/front/echoes/{id}` 带 `{"do": "reply", "text": "…"}` 回答它（200 `{"echo"}`，即 `ask_end`；问题结束后为 409 `already_answered`）。
 - `ask_end`（`how`：带 `text` 的 `person`、`timeout`、`stopped` 或 `expired`；`of` 指问题或那条询问）。
-- `queued`（`typed`）和 `dequeued`（`of`）：对话回答任务期间发来的消息会被保留，`POST /api/sessions/{id}/turns` 以 200 返回 `queued` 回执而不是 409，并作为对话的下一轮运行。
+- `queued`（`typed`）和 `dequeued`（`of`）：对话回答任务期间发来的消息会被保留，`POST /api/sessions/{id}/turns` 以 200 返回 `queued` 回执而不是 409，并作为对话的下一轮运行；重启后也会运行，且只运行一次：用它的 `client_request_id`（或 melo 自己的键）已经开始的轮次不会再运行。消息只有存下之后才算接受；否则返回 503 `store_unavailable`，并有一条 `failed` 回执（`of` 指那条排队回执，带 `typed`）说明它没有发出。
 
-对话的内部轮次是带 `"origin": "ask_owner"` 的轮次（本人的轮次没有这个键），键入文字为空，用户文字就是那个问题。任务等待期间，任务的请求体带 `ask`：`{"ask_id", "chat_id", "chat_title", "on": "owner" | "person"}`，否则为 `null`。
+对话的内部轮次是带 `"origin": "ask_owner"` 的轮次（本人的轮次没有这个键，轮次记录和 `turn.started` 中都是如此），键入文字为空，用户文字就是那个问题。任务等待期间，任务的请求体带 `ask`：`{"ask_id", "chat_id", "chat_title", "on": "owner" | "person"}`，否则为 `null`。
 
 ## GET /api/sessions/{id}/events
 

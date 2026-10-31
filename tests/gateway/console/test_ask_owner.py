@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import inspect
 import re
+import sqlite3
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
@@ -33,7 +34,11 @@ from localmelo.support.gateway.console.front import (
 from localmelo.support.gateway.console.running import item_activity
 from localmelo.support.gateway.workers import ASK_FIELDS, MAX_ASKS, AskOwner
 from localmelo.support.sessions.agents import session_options
-from localmelo.support.sessions.store import SessionStore, StoredEvent
+from localmelo.support.sessions.store import (
+    SessionStore,
+    SessionStoreError,
+    StoredEvent,
+)
 from localmelo.tests.sessions.helpers import ScriptedLLM, answer, tool_call
 
 from .conftest import PORT, FakeProbe, make_cfg, quiet_gate
@@ -912,3 +917,156 @@ async def test_a_turn_that_answered_a_task_cannot_be_retried(
             "not_retryable",
         )
         assert len(await console.store.list_turns(main_id)) == 1
+
+
+# ── After a second review (#369) ──
+
+
+async def test_a_stop_while_the_chats_turn_begins_stops_that_turn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    never = asyncio.Event()
+    async with ask_console(
+        tmp_path,
+        monkeypatch,
+        main=[held(never, answer("stalled"))],
+        workers=[[ASKS, answer("never")]],
+    ) as (console, client, models):
+        entered, go = asyncio.Event(), asyncio.Event()
+        begin = console.sessions.start_internal
+
+        async def slow(*args: Any, **kwargs: Any) -> Any:
+            entered.set()
+            await go.wait()
+            return await begin(*args, **kwargs)
+
+        monkeypatch.setattr(console.sessions, "start_internal", slow)
+        task_id = await start(console, "a job")
+        await asyncio.wait_for(entered.wait(), 5)
+        await console.workers.update(task_id, state="stop")
+        await ended(console, task_id, "cancelled")
+        go.set()
+        # The turn that began after the stop ends at once, freeing the chat.
+        turn = await _wait_turn(client, str(console.main_id))
+        assert (turn["status"], turn["cause"]) == ("cancelled", "closed")
+        await until(lambda: not console.asks._busy)
+
+
+async def test_a_message_that_cannot_be_kept_is_refused_and_shown_not_sent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    release = asyncio.Event()
+    main: list[Reply] = [held(release, answers("B")), answer("Answered.")]
+    async with ask_console(
+        tmp_path, monkeypatch, main=main, workers=[[ASKS, answer("done")]]
+    ) as (console, client, models):
+        main_id = str(console.main_id)
+        task_id = await start(console, "a job")
+        await until(lambda: len(models["main"].requests) == 1)
+        update = console.store.update_session
+
+        async def failing(session_id: str, **kwargs: Any) -> Any:
+            if "queued" in (kwargs.get("meta_update") or {}):
+                raise SessionStoreError("disk full")
+            return await update(session_id, **kwargs)
+
+        monkeypatch.setattr(console.store, "update_session", failing)
+        response = await _post_turn(client, main_id, "hello there")
+        assert (response.status_code, response.json()["error"]["code"]) == (
+            503,
+            "store_unavailable",
+        )
+        queued, failed = [
+            r for r in await rows(console, main_id) if r["echo"] in ("queued", "failed")
+        ]
+        assert (failed["of"], failed["typed"]) == (queued["id"], "hello there")
+        assert not console.asks._people.get(main_id)
+        release.set()
+        await ended(console, task_id)
+        await _wait_turn(client, main_id)
+        turns = await console.store.list_turns(main_id)
+        assert [t.origin for t in turns] == ["ask_owner"]
+
+
+@pytest.mark.parametrize("keyed", [False, True])
+async def test_a_queued_message_that_started_before_a_crash_is_not_run_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, keyed: bool
+) -> None:
+    release = asyncio.Event()
+    main: list[Reply] = [
+        held(release, answers("B")),
+        answer("Answered."),
+        answer("Hi."),
+    ]
+    extra = {"client_request_id": "msg-1"} if keyed else {}
+    async with ask_console(
+        tmp_path, monkeypatch, main=main, workers=[[ASKS, answer("done")]]
+    ) as (console, client, models):
+        main_id = str(console.main_id)
+        task_id = await start(console, "a job")
+        await until(lambda: len(models["main"].requests) == 1)
+        response = await _post_turn(client, main_id, "hello there", **extra)
+        assert response.status_code == 200, response.text
+        info = await console.store.get_session(main_id)
+        assert info is not None
+        kept = info.meta["queued"]
+        release.set()
+        await ended(console, task_id)
+
+        async def ran() -> bool:
+            turns = await console.store.list_turns(main_id)
+            last = turns[-1]
+            return last.user_text == "hello there" and last.finished_at is not None
+
+        await until(ran)
+    # What a crash after the start and before the queue's write leaves.
+    store = SessionStore(str(tmp_path / "sessions.db"), writer="gateway")
+    await store.open()
+    await store.update_session(main_id, meta_update={"queued": kept})
+    await store.aclose()
+    async with ask_console(tmp_path, monkeypatch, run=False) as (console, client, _):
+
+        async def drained() -> bool:
+            info = await console.store.get_session(main_id)
+            return info is not None and info.meta.get("queued") is None
+
+        await until(drained)
+        turns = await console.store.list_turns(main_id)
+        assert [t.user_text for t in turns].count("hello there") == 1
+        found = await rows(console, main_id)
+        assert [r for r in found if r["echo"] == "failed"] == []
+
+
+async def test_a_restart_runs_the_queue_of_a_chat_behind_a_thousand_newer_ones(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    never = asyncio.Event()
+    async with ask_console(
+        tmp_path,
+        monkeypatch,
+        main=[held(never, answer("stalled"))],
+        workers=[[ASKS, answer("never")]],
+    ) as (console, client, models):
+        main_id = str(console.main_id)
+        await start(console, "a job")
+        await until(lambda: len(models["main"].requests) == 1)
+        response = await _post_turn(client, main_id, "hello there")
+        assert response.status_code == 200, response.text
+    newer = time.time() + 60
+    with sqlite3.connect(tmp_path / "sessions.db") as conn:
+        conn.executemany(
+            "INSERT INTO sessions (id, kind, created_at, updated_at) "
+            "VALUES (?, 'chat', ?, ?)",
+            [(f"newer{n:04d}", newer + n, newer + n) for n in range(1000)],
+        )
+    async with ask_console(tmp_path, monkeypatch, main=[answer("Hi.")], run=False) as (
+        console,
+        client,
+        _,
+    ):
+
+        async def ran() -> bool:
+            turns = await console.store.list_turns(main_id)
+            return turns[-1].user_text == "hello there"
+
+        await until(ran)
