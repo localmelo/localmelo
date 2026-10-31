@@ -346,6 +346,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The macOS app shows what melo is doing while its window is put away. A small
+  pill takes Melo's place on the desktop and says in one plain line what runs
+  ("Reading example.com", "Running the tests"), with "+1" when more run. It
+  turns amber while an approval waits, shows "Done: …" for 6 seconds and
+  "Stopped: …" for 10, and says "Model server not reachable" while the model
+  server is down; then Melo comes back, wagging after a "Done". Click it to
+  open the chat or task it names, drag it like Melo, or press **×** to hide it
+  until the next task starts. **On the desktop**, in the menu-bar menu and in
+  Melo's menu, chooses the pill with Melo (the default), Melo only or nothing.
+  `GET /api/health` `status.recent` also says what the finished run was called
+  (`title`) ([#326]).
+
 - The main chat answers, or hands bigger work to a task by level. It answers a
   quick question itself and starts bigger work as a task it owns, with one line
   such as `Started: Plan the trip · Normal`; the result comes back as a card.
@@ -2602,6 +2614,7 @@ earlier milestones.
 [#317]: https://github.com/localmelo/localmelo/pull/317
 [#320]: https://github.com/localmelo/localmelo/pull/320
 [#322]: https://github.com/localmelo/localmelo/pull/322
+[#326]: https://github.com/localmelo/localmelo/pull/326
 [#310]: https://github.com/localmelo/localmelo/pull/310
 [#201]: https://github.com/localmelo/localmelo/pull/201
 [#202]: https://github.com/localmelo/localmelo/pull/202

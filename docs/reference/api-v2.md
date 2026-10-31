@@ -116,7 +116,7 @@ output or log the header; same-user processes can still read the token file.
       {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test", "activity": "Running the tests", "icon": "run"}
     ],
     "waiting": [],
-    "recent": {"kind": "chat", "id": "e5f60718293a", "outcome": "done", "ended_s_ago": 3.2},
+    "recent": {"kind": "chat", "id": "e5f60718293a", "title": "Plan the trip", "outcome": "done", "ended_s_ago": 3.2},
     "focus": {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test", "activity": "Running the tests", "icon": "run"}
   },
   "uptime_s": 132.4
@@ -182,8 +182,9 @@ output or log the header; same-user processes can still read the token file.
   the macOS app's menu bar reads the list at each poll. `sessions.pending_approvals`
   counts the open chats' requests only.
 - `status.recent` says how the newest finished chat turn, task, run or terminal
-  turn ended: `{"kind", "id", "outcome", "ended_s_ago"}`, or `null` when none did
-  (or when no store can be read). `kind` is as in `status.items`. `outcome` is
+  turn ended: `{"kind", "id", "title", "outcome", "ended_s_ago"}`, or `null` when none
+  did (or when no store can be read). `kind` is as in `status.items`; `title` is
+  what it was called (at most 200 characters, empty when it cannot be read). `outcome` is
   `done` (a run that completed, a task that is done), `stopped` (the person
   stopped it, or a task was cancelled or expired) or `failed` (any other end of
   a run, such as `provider_error`, `budget_exhausted` or `stuck`, and a failed
@@ -191,8 +192,7 @@ output or log the header; same-user processes can still read the token file.
   is `failed`. `ended_s_ago` is its age in seconds, to a tenth. A turn that a
   shutdown, a crash recovery, a takeover, a close or a park ended is no outcome,
   and an undone turn does not count. It is for a client that shows how the last
-  run went: the macOS app's policy for Melo reads it, and the app does not draw
-  Melo yet. One call reads the newest finished turn of
+  run went: the macOS app's pet and activity pill read it. One call reads the newest finished turn of
   the most recently updated sessions of each file by their indexes.
 
 ## GET /api/activity
