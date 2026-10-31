@@ -79,7 +79,7 @@ async def test_budget_leftovers_resume_once_and_undo_keeps_processed_markers(
     assert second.processed == [[t.session_id, t.turn] for t in turns[2:]]
     assert len(provider.calls) == 5 and len(await memory.records()) == 5
     await memory.undo_sleep(second.run_id)
-    assert rules.rows(memory) == first_rows
+    assert rules.active_rows(memory) == first_rows
     third = await memory.sleep("model", chats=chats, budget=3)
     assert not third.processed and third.model_calls == 0 and not third.changes
     assert len(provider.calls) == 5

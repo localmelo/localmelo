@@ -628,6 +628,21 @@ class SqliteLongTerm(LongTerm):
             row = await cur.fetchone()
         return _stored(tuple(row)) if row is not None else None
 
+    async def session_entries(
+        self, session_id: str, *, undone_only: bool = False
+    ) -> list[StoredEntry]:
+        """All of a chat's note versions, optionally only inactive sleep negatives."""
+        conn = await self._ensure_ready()
+        sql = f"SELECT {_SELECT_COLUMNS} FROM long_term WHERE session_id = ?"
+        if undone_only:
+            sql += (
+                " AND status = 'superseded' AND id IN (SELECT target_id "
+                "FROM decisions WHERE admitted_by = 'sleep' "
+                "AND reason LIKE 'undone: sleep %')"
+            )
+        async with conn.execute(sql, (session_id,)) as cur:
+            return [_stored(tuple(row)) for row in await cur.fetchall()]
+
     async def history_entries(self, task_id: str) -> list[StoredEntry]:
         """Return a task's entries, including superseded rows, newest first."""
         if not task_id:
@@ -659,13 +674,18 @@ class SqliteLongTerm(LongTerm):
             row = await cur.fetchone()
         return int(row[0]) if row else 0
 
-    async def delete_entry(self, entry_id: int, *, restore: bool = False) -> bool:
+    async def delete_entry(
+        self, entry_id: int, *, restore: bool = False, versions: bool = True
+    ) -> bool:
         """Delete one entry and its vector; ``False`` when there is none.
 
         The text of every decision row about it is blanked (``decisions.text``
         would keep it otherwise), and a ``DELETE`` row records the delete.
         With *restore*, the entry it superseded is active again, as an undo
-        of the write wants. The delete overwrites the freed pages.
+        of the write wants. Otherwise all linked versions, including undone
+        descendants, go too. ``versions=False`` deletes only the given row,
+        without restoring an ancestor (used to purge inactive session history).
+        The delete overwrites the freed pages, including quoted decision reasons.
         """
         conn = await self._ensure_ready()
         async with self._write_lock, secure_deletes(conn):
@@ -677,21 +697,25 @@ class SqliteLongTerm(LongTerm):
                     row = await cur.fetchone()
                 if row is not None:
                     gone = [entry_id]
-                    # Without a restore, the wordings it replaced go with it.
-                    older = None if restore else row[1]
-                    while older is not None and older not in gone:
-                        gone.append(older)
+                    # A forgotten fact takes its inactive descendants too;
+                    # a sleep undo may have restored an earlier active version.
+                    if not restore and versions:
                         async with conn.execute(
-                            "SELECT supersedes FROM long_term WHERE id = ?", (older,)
+                            "WITH RECURSIVE family(id) AS (VALUES (?) UNION "
+                            "SELECT n.id FROM long_term n JOIN family f ON "
+                            "n.supersedes = f.id UNION SELECT n.supersedes "
+                            "FROM long_term n JOIN family f ON n.id = f.id "
+                            "WHERE n.supersedes IS NOT NULL) SELECT id FROM family",
+                            (entry_id,),
                         ) as cur:
-                            found = await cur.fetchone()
-                        older = found[0] if found else None
+                            gone = [int(r[0]) for r in await cur.fetchall()]
                     marks = ", ".join("?" * len(gone))
                     await conn.execute(
                         f"DELETE FROM long_term WHERE id IN ({marks})", gone
                     )
                     await conn.execute(
-                        "UPDATE decisions SET text = NULL, text_sha256 = '' "
+                        "UPDATE decisions SET text = NULL, text_sha256 = '', "
+                        "reason = 'forgotten by the user' "
                         f"WHERE entry_id IN ({marks}) OR target_id IN ({marks})",
                         [*gone, *gone],
                     )

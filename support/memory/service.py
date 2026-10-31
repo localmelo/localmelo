@@ -1025,10 +1025,14 @@ class ChatMemory:
                 await self.stores()[1].add(doc)
 
     async def forget_session(self, session_id: str, turn: int | None = None) -> int:
-        """Delete what the index holds of a chat (of one turn, with *turn*)."""
+        """Delete indexed chat text and its inactive sleep negatives; keep active notes."""
         await self.drain()
         async with self._lock:
-            return await self.stores()[1].delete(session_id, turn)
+            store, index = self.stores()
+            for note in await store.session_entries(session_id, undone_only=True):
+                if turn is None or note.provenance.get("turn") == turn:
+                    await store.delete_entry(note.id, versions=False)
+            return await index.delete(session_id, turn)
 
     async def forget_all(self) -> tuple[int, int]:
         """Forget every note and empty the chat index; the counts of each.
@@ -1046,15 +1050,13 @@ class ChatMemory:
         return notes, turns
 
     async def forget_chat_notes(self, session_id: str) -> int:
-        """Delete the notes that came from one chat; how many."""
+        """Delete a chat's note history; return how many active notes it held."""
         async with self._lock:
             store = self.stores()[0]
-            mine = [
-                e.id for e in await store.active_entries() if e.session_id == session_id
-            ]
-            for entry_id in mine:
-                await store.delete_entry(entry_id)
-        return len(mine)
+            mine = await store.session_entries(session_id)
+            for note in mine:
+                await store.delete_entry(note.id, versions=note.status == "active")
+        return sum(note.status == "active" for note in mine)
 
     async def reindex(self, chats: SessionStore | None) -> tuple[int, int]:
         """Rebuild the chat index from *chats* and give every note a vector of the

@@ -31,6 +31,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   while preserving later changes. New chat activity or a configured
   `[memory] sleep_lock` stops model work; reports include refused proposals,
   skipped parse failures and elapsed time. Part of #363. [#NN]
+- Sleep reports retain each change's quoted evidence and ordered before texts.
+  Sleep undo preserves inactive history without recalling or listing it;
+  explicit user forgetting still physically erases that history and linked
+  versions. No export or training is implemented. Part of #363. [#NN]
 - `file_read` takes `start_line` and `end_line` (1-based, inclusive), so a long
   file is read in parts instead of being sliced through Python. A read that
   shows only part of a file now ends with how many lines the file has and the

@@ -93,6 +93,13 @@ class Change:
     after_id: int | None
     text: str
     source_turn: list[Any] | None = None
+    quote: str = ""
+    before_texts: list[str] = field(default_factory=list)
+
+
+def _before_texts(ids: Sequence[int], notes: Sequence[StoredEntry]) -> list[str]:
+    texts = {n.id: n.text for n in notes}
+    return [texts[i] for i in ids]
 
 
 @dataclass
@@ -441,10 +448,24 @@ async def _tidy(
     turns: Sequence[SleepTurn],
 ) -> None:
     """The changes of one run, added to *report* as they are made."""
-    for keep, older in duplicates(await store.active_entries()):
+    active = await store.active_entries()
+    sources = {(t.session_id, t.turn): t for t in turns}
+    for keep, older in duplicates(active):
         if len(report.changes) >= MAX_CHANGES:
             report.capped = True
             return
+        source_key = (keep.session_id, int(keep.provenance.get("turn") or 0))
+        source_turn = sources.get(source_key)
+        quote = (
+            str(keep.provenance.get("quote") or "")
+            or (source_turn.typed if source_turn is not None else keep.text)[:300]
+        )
+        if records.sensitive(quote):
+            quote = (
+                records.quote_for(keep.text, [source_turn.typed]) if source_turn else ""
+            )
+        if not quote or records.sensitive(quote):
+            continue
         if done := await store.set_status(
             older,
             "superseded",
@@ -452,11 +473,20 @@ async def _tidy(
             admitted_by="sleep",
             reason=f"merged into {keep.id} by sleep {report.run_id}",
         ):
-            report.changes.append(Change("O1", done, keep.id, keep.text))
+            report.changes.append(
+                Change(
+                    "O1",
+                    done,
+                    keep.id,
+                    keep.text,
+                    list(source_key),
+                    quote=quote,
+                    before_texts=_before_texts(done, active),
+                )
+            )
     for turn, cand in recoverable(fresh, await store.active_entries()):
-        if _stale(cand.text, turn, turns) or not _allowed(
-            turn, cand, await store.active_entries()
-        ):
+        active = await store.active_entries()
+        if _stale(cand.text, turn, turns) or not _allowed(turn, cand, active):
             continue
         if len(report.changes) >= MAX_CHANGES:
             report.capped = True
@@ -476,7 +506,17 @@ async def _tidy(
             op, before = (
                 ("O3", []) if note.replaced is None else ("O2", [note.replaced])
             )
-            report.changes.append(Change(op, before, note.id, note.text, place))
+            report.changes.append(
+                Change(
+                    op,
+                    before,
+                    note.id,
+                    note.text,
+                    place,
+                    quote=cand.quote or turn.typed[:300],
+                    before_texts=_before_texts(before, active),
+                )
+            )
 
 
 @dataclass
@@ -675,7 +715,15 @@ class _ModelPass:
             )
             if done:
                 self.report.changes.append(
-                    Change("RETIRE", done, None, old.text, [turn.session_id, turn.turn])
+                    Change(
+                        "RETIRE",
+                        done,
+                        None,
+                        old.text,
+                        [turn.session_id, turn.turn],
+                        quote=quote,
+                        before_texts=[old.text],
+                    )
                 )
             return True
         evidence = [turn.typed, turn.previous] if rewrite else [quote]
@@ -750,7 +798,15 @@ class _ModelPass:
             )
             if entry_id is not None:
                 self.report.changes.append(
-                    Change("O4", [old.id], entry_id, text, [turn.session_id, turn.turn])
+                    Change(
+                        "O4",
+                        [old.id],
+                        entry_id,
+                        text,
+                        [turn.session_id, turn.turn],
+                        quote=quote,
+                        before_texts=[old.text],
+                    )
                 )
         else:
             for note in await records.write(
@@ -764,7 +820,15 @@ class _ModelPass:
             ):
                 before = [] if note.replaced is None else [note.replaced]
                 self.report.changes.append(
-                    Change(op, before, note.id, note.text, [turn.session_id, turn.turn])
+                    Change(
+                        op,
+                        before,
+                        note.id,
+                        note.text,
+                        [turn.session_id, turn.turn],
+                        quote=quote,
+                        before_texts=_before_texts(before, active),
+                    )
                 )
         return True
 
@@ -773,7 +837,8 @@ async def undo(
     store: SqliteLongTerm, index: ConversationIndex, run_id: str
 ) -> dict[str, Any] | None:
     """Put a sleep run back: the notes it superseded are current again and the
-    notes it wrote are gone. ``None`` for a run unknown or already undone.
+    notes it wrote are inactive, not deleted. ``None`` for an unknown or undone run.
+    ``removed`` counts notes removed from active recall; their rows stay as history.
 
     A note the run wrote that a later note replaced, or the user reworded, is
     left as it is (``kept``), so undo never brings back a value that lost to a
@@ -821,8 +886,22 @@ async def undo(
             )
             restored += len(done)
         else:
-            await store.delete_entry(after, restore=True)
+            await store.set_status(
+                [after],
+                "superseded",
+                keeper=None,
+                admitted_by="sleep",
+                reason=f"undone: sleep {run_id}",
+            )
             removed += 1
-            restored += len(before)
+            restored += len(
+                await store.set_status(
+                    before,
+                    "active",
+                    keeper=None,
+                    admitted_by="sleep",
+                    reason=f"sleep {run_id} undone",
+                )
+            )
     await index.drop_run(run_id)
     return {"run_id": run_id, "restored": restored, "removed": removed, "kept": kept}

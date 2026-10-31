@@ -1634,7 +1634,8 @@ panel uses these routes.
   answers its report. The optional body `{"variant": "rules"}` names the variant (`off`, `rules`, `model` or
   `model+tags`; anything else is 400); without it `[memory] sleep` decides, and `off` does nothing.
   The report is `{"run_id", "variant", "started", "ended", "model_calls", "refused", "refusals", "ms", "processed", "aborted", "capped", "changes": [{"op",
-  "before_ids", "after_id", "text", "source_turn"}]}`: `op` is `O1` (duplicates merged: `before_ids` superseded by
+  "before_ids", "after_id", "text", "source_turn", "quote", "before_texts"}]}`: `quote` is the evidence span;
+  `before_texts` snapshots the superseded texts in `before_ids` order. `op` is `O1` (duplicates merged: `before_ids` superseded by
   `after_id`), `O2` (a newer typed value written and superseding `before_ids`), `O3` (a lost fact written),
   `ADD`, `UPDATE`, `RETIRE` (no replacement, `after_id` null) or `O4` (a pronoun resolved to a named person).
   Model variants default to twelve requests; `refused` counts invalid proposals, `ms` is elapsed time,

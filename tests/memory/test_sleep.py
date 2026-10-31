@@ -137,6 +137,11 @@ def rows(memory: ChatMemory) -> list[tuple[int, str, str]]:
         ).fetchall()
 
 
+def active_rows(memory: ChatMemory) -> list[tuple[int, str, str]]:
+    """The visible state, excluding inactive sleep history kept after undo."""
+    return [row for row in rows(memory) if row[2] == "active"]
+
+
 # ── O1: merge duplicates ──
 
 
@@ -360,7 +365,7 @@ async def test_the_watermark_keeps_a_second_run_from_redoing_a_turn(
     assert await texts(memory) == {"Your dentist is Lee Park."}
 
 
-async def test_undo_puts_everything_back_exactly(
+async def test_undo_restores_active_state_and_keeps_history(
     memory: ChatMemory, chats: SessionStore
 ) -> None:
     await put(memory, "You live in Lisbon.", LONG_AGO)
@@ -374,7 +379,11 @@ async def test_undo_puts_everything_back_exactly(
     assert rows(memory) != before
     undone = await memory.undo_sleep(report.run_id)
     assert undone == {"run_id": report.run_id, "restored": 2, "removed": 2, "kept": 0}
-    assert rows(memory) == before
+    assert active_rows(memory) == before
+    assert {i for i, _, _ in rows(memory)} == {
+        *(i for i, _, _ in before),
+        *(c.after_id for c in report.changes if c.after_id is not None),
+    }
     assert await memory.undo_sleep(report.run_id) is None  # once
     assert await memory.undo_sleep("nope") is None
 
@@ -440,7 +449,7 @@ async def test_off_does_nothing_and_model_variants_keep_rules_when_model_unavail
         assert report.aborted == "RuntimeError: chat model is not configured"
         assert await memory.stores()[1].meta("sleep_until") == 0
         await memory.undo_sleep(report.run_id)
-        assert rows(memory) == before
+        assert active_rows(memory) == before
 
 
 async def test_the_setting_picks_the_variant_and_memory_off_does_nothing(
