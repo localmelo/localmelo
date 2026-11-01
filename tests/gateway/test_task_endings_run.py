@@ -393,7 +393,7 @@ async def test_a_folder_unreadable_at_the_start_is_not_kept(
     assert (first["state"], first["reasons"]) == ("draft", ["unchecked"])
     # The next run reads the folder again: nothing changed, so it is ready.
     llm.replies = [says("Looked again.\nEnding: ready")]
-    await workers.continue_stopped(task_id)
+    await workers.message(task_id, "Look at it once more")
     second = (await ended(workers, task_id, turns=2))["ending"]
     assert (second["state"], second["reasons"]) == ("ready", [])
 
@@ -457,3 +457,23 @@ async def test_a_stop_while_the_ending_is_read_leaves_the_run_as_it_ended(
     record = await workers.tasks.get_task(task_id)
     assert record.state == "done"
     assert record.ending is not None and record.ending["state"] == "ready"
+
+
+async def test_a_website_visit_in_a_folder_without_git_ends_ready(
+    setup: Setup, tmp_path: Path
+) -> None:
+    workers, llm, _ = setup
+    folder = tmp_path / "localmelo-workspace"
+    folder.mkdir()
+    (folder / "notes.md").write_text("# Notes\n")
+    fetch = (
+        "import subprocess, sys\n"
+        "subprocess.run([sys.executable, '-c', 'print(\"<title>Example</title>\")'])\n"
+    )
+    llm.replies = [
+        call("python_exec", {"code": fetch}),
+        says("The page's title is Example.\nEnding: ready"),
+    ]
+    task = await ended(workers, await start(workers, folder, "Visit example.com"))
+    ending = task["ending"]
+    assert (ending["state"], ending["reasons"], ending["notes"]) == ("ready", [], [])

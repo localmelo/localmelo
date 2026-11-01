@@ -676,6 +676,33 @@ def asks_commit(text: str) -> bool:
     return bool(_ASKS_COMMIT.search(bare))
 
 
+# What asks for the tests to be run, beyond naming them: run, re-run, pytest, 跑测试.
+_ASKS_TESTS: Final = re.compile(
+    r"\b(?:run|re-?run|execute)\s+(?:\w+\s+){0,4}?(?:unit\s+)?tests?\b|\bpytest\b"
+    r"|\bunit\s?tests?\b|(?:跑|运行|执行)[^，。；,;！？\n]{0,12}?测试|单元测试|单测",
+    re.IGNORECASE,
+)
+# The ask negated: "don't run the tests", "skip the tests", "不用跑测试".
+_NO_TESTS: Final = re.compile(
+    r"\b(?:don['’]t|do\s+not|no\s+need\s+to|never|without|skip(?:ping)?)\s+"
+    r"(?:\w+\s+){0,2}?(?:run|re-?run|execut|test|pytest)\w*[^.;,!?\n]*"
+    r"|(?:不用|不需要|无需|不必|不要|先不|别|跳过)\s*(?:再)?\s*(?:跑|运行|执行)?[^，。；,;！？\n]{0,6}?测试",
+    re.IGNORECASE,
+)
+
+
+def asks_tests(text: str) -> bool:
+    """Whether *text* asks for the tests to be run, once quoted and forbidden spans are dropped.
+
+    "fix the parser and run the tests", "Finish it: run the tests that cover
+    your changes", "改完跑一下测试" ask; "don't run the tests", "不用测试",
+    "测试一下这个网站" (try the site out) and "the log says `pytest` failed" do
+    not.
+    """
+    bare = _NO_TESTS.sub(" ", _PIPELINE_NO.sub(" ", _QUOTED.sub(" ", text or "")))
+    return bool(_ASKS_TESTS.search(bare))
+
+
 def work_request(typed: str) -> bool:
     """An imperative change to named files or paths: code starts it as a task at once.
 

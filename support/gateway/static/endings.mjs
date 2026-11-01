@@ -12,6 +12,8 @@ const STATES = new Set(['ready', 'draft', 'blocked', 'failed', 'dropped']);
 const WHY = new Set(['tests_failed', 'tests_still_fail', 'tests_missing', 'tests_unverified', 'commit_missing', 'unchecked']);
 // The reasons a Finish it settles; tests that still fail with nothing changed have nothing to finish.
 const OWED = new Set(['tests_failed', 'tests_missing', 'tests_unverified', 'commit_missing', 'unchecked']);
+// What an ending notes beside its state, such as that no tests apply to the folder.
+const NOTES = new Set(['no_tests']);
 const OUTCOMES = new Set(['passed', 'failed', 'unknown']);
 export const ENDING_MARKS = {ready: '✓', draft: '◐', blocked: '?', failed: '✕', dropped: '■'};
 // The report's proposal line (`Ending: ready`), as the server's task_endings reads it.
@@ -29,6 +31,7 @@ export function readEnding(raw) {
     // What the worker proposed: a `dropped` it chose reads apart from the person's Stop.
     proposed: typeof raw.proposed === 'string' ? raw.proposed : null,
     reasons: list(raw.reasons).filter((reason) => typeof reason === 'string'),
+    notes: list(raw.notes).filter((note) => NOTES.has(note)),
     question: typeof raw.question === 'string' ? raw.question : '',
     tests: list(raw.tests).filter((test) => typeof test?.command === 'string' && OUTCOMES.has(test.outcome)),
   };
@@ -43,8 +46,9 @@ export const endingLabel = (ending) => t(`ending.state.${endingName(ending)}`);
 /** Why it is not ready, in words: its question, then what code found missing. */
 export function endingWhy(ending) {
   const asks = ending.state === 'blocked' ? ending.question || t('ending.reason.question') : '';
-  return [asks, ...ending.reasons.filter((reason) => WHY.has(reason)).map((reason) => t(`ending.reason.${reason}`))]
-    .filter(Boolean).join(' · ');
+  const why = ending.reasons.filter((reason) => WHY.has(reason)).map((reason) => t(`ending.reason.${reason}`));
+  const notes = (ending.notes ?? []).map((note) => t(`ending.note.${note}`));
+  return [asks, ...why, ...notes].filter(Boolean).join(' · ');
 }
 
 /**

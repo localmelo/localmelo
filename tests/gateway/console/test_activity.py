@@ -669,9 +669,11 @@ def test_a_long_result_is_cut_at_a_word() -> None:
             "Use /memory to see notes, and/or on 10/30.",
             "Use /memory to see notes, and/or on 10/30.",
         ),
+        # A Markdown link reads as its words; a bare link stays whole.
+        ("[docs](https://x.org/a/b) has the details.", "docs has the details."),
         (
-            "[docs](https://x.org/a/b) has the details.",
-            "[docs](https://x.org/a/b) has the details.",
+            "https://x.org/a/b has the details.",
+            "https://x.org/a/b has the details.",
         ),
     ],
 )
@@ -1028,3 +1030,100 @@ def test_approvals_of_reads_the_events_oldest_first_and_keeps_the_newest_twenty(
     odd["ts"] = "late"
     found = approvals_of([StoredEvent(2, "t", 1, odd)])
     assert found["t"][0]["at"] == 0.0 and found["t"][0]["what"] == "Write a file"
+
+
+# ── A chat's row says what happened, in plain words ──
+
+
+@pytest.mark.parametrize(
+    "answer, line",
+    [
+        (
+            "分两层说: **我(主聊天)自己**:没有联网工具。",
+            "我(主聊天)自己:没有联网工具。",
+        ),
+        (
+            "**Short answer:** I can't open websites myself. I offered a task.",
+            "I can't open websites myself.",
+        ),
+        (
+            "See [the guide](https://example.com/guide) for the *new* steps.",
+            "See the guide for the new steps.",
+        ),
+        (
+            "Renamed my_var to new_var in `app.py`.",
+            "Renamed my_var to new_var in app.py.",
+        ),
+        ("~~Old plan~~ The __new__ plan works.", "Old plan The new plan works."),
+    ],
+)
+def test_a_result_line_drops_markdown_and_a_lead_in(answer: str, line: str) -> None:
+    assert result_line("", answer) == line
+
+
+async def finished_chat(
+    console: Console, workspace: str, answer: str, events: Any = ()
+) -> str:
+    chat = await seed_turn(console.store, workspace, title="Web", status="running")
+    if events:
+        await console.store.append_events(
+            chat.session_id, chat.turn, list(events), holder=HOLDER
+        )
+    await console.store.finish_turn(
+        chat.session_id,
+        chat.turn,
+        holder=HOLDER,
+        status="completed",
+        cause="run",
+        result=run_result(result=answer),
+        answer=answer,
+    )
+    return chat.session_id
+
+
+def kept_note(ok: bool = True) -> dict[str, Any]:
+    status = "success" if ok else "error"
+    return core_event("tool.finished", call_id="c9", name="remember", status=status)
+
+
+@pytest.mark.parametrize("language", ["en", "zh-Hans"])
+async def test_a_chat_row_says_what_the_chat_did_before_its_reply(
+    client: TestClient,
+    console: Console,
+    workspace: str,
+    monkeypatch: pytest.MonkeyPatch,
+    language: str,
+) -> None:
+    tasks(monkeypatch, console)
+    client.cookies.set("localmelo_language", language)
+    reply = "分两层说: **我(主聊天)自己**:没有联网工具。"
+    chat = await finished_chat(console, workspace, reply)
+    row = activity(client)["rows"][0]
+    assert row["result"] == "我(主聊天)自己:没有联网工具。", "the reply, in plain words"
+    offer = {"echo": "suggest", "task_id": "t1", "title": "Visit example.com"}
+    await console.store.append_session_event(chat, "attention.echo", offer)
+    words = {
+        "en": (
+            "Offered a task: Visit example.com",
+            "Started a task: Visit example.com",
+        ),
+        "zh-Hans": ("提议了任务：Visit example.com", "开始了任务：Visit example.com"),
+    }[language]
+    assert activity(client)["rows"][0]["result"] == words[0]
+    # Started after the offer: the row says it once, as started.
+    await console.store.append_session_event(
+        chat, "attention.echo", {**offer, "echo": "started"}
+    )
+    assert activity(client)["rows"][0]["result"] == words[1]
+
+
+async def test_a_chat_row_says_it_kept_a_note(
+    client: TestClient,
+    console: Console,
+    workspace: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tasks(monkeypatch, console)
+    events = [kept_note(), kept_note(ok=False)]
+    await finished_chat(console, workspace, "**Noted.** You live in Utrecht.", events)
+    assert activity(client)["rows"][0]["result"] == "Kept a note"

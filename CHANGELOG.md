@@ -534,6 +534,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A task that changed no code is no longer told to run tests. Outside git, melo compares the
+  task folder before and after the run and counts only changed code files, so a task that
+  only looked at a website ends Ready; a write made by a shell command is still caught, and
+  a very large or unreadable folder reads as not checked. Tests are owed only where a test
+  setup applies or when you asked for them; a folder with no tests ends Ready with
+  "No tests apply", so Finish it can no longer loop. Fixes #408.
+- Activity's line for a chat says what happened in plain words: what the chat did first
+  (started or offered a task, kept a note), otherwise the first sentence of its reply
+  without Markdown or a lead-in such as "In short:", in English and Chinese. Fixes #409.
 - The memory block melo adds to a message now says when and who: a date has its year when
   it is not this year and its time when another line is from the same day, notes of one subject
   with different values come newest first with the older marked, and an earlier turn reads

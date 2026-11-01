@@ -4,21 +4,22 @@ A worker ends its report with a proposal (``Ending: ready``, ``Ending:
 blocked: <what it needs>``, ``Ending: failed``, ``Ending: dropped``). It is a
 claim, never evidence: :func:`decide` reads the run's own tool calls (each
 ``tool.started`` paired with its ``tool.finished`` by call id, in order) and
-the folder's git state against the :class:`Baseline` of the first run since
-the task last ended ready. Ready needs proof; any doubt leaves ``draft`` with
-its reason:
+the folder's state (its git state, or outside git a bounded snapshot of its
+code files) against the :class:`Baseline` of the first run since the task last
+ended ready. Ready needs proof; any doubt leaves ``draft`` with its reason:
 
 - ``tests_failed`` / ``tests_unverified``: the run's last test failed, or its
   result is unknown (in git or not);
 - ``tests_still_fail``: the last test failed and nothing was changed, so there
   is nothing to finish;
-- ``tests_missing``: code changed (in git since the baseline, outside git by
-  the run's own edits) and no test started after the latest call that could
-  have changed it;
+- ``tests_missing``: code changed since the baseline, or the person asked for
+  the tests, a test setup applies to the folder, and no test started after the
+  latest call that could have changed code. With no test setup the task owes
+  none; its ending notes ``no_tests`` when code changed or tests were asked;
 - ``commit_missing``: a commit was asked and changes since the baseline are not
   committed;
-- ``unchecked``: git could not be read, the folder lists too many changes, or
-  ``git stash list`` grew in this run (or in an earlier one, while it stays
+- ``unchecked``: git or the snapshot could not be read, the folder lists too
+  many changes (or files), or ``git stash list`` grew in this run (or in an earlier one, while it stays
   above the count that run started with).
 
 A test is one shape only: a plain test-runner command (no shell operators) or a
@@ -177,6 +178,29 @@ _SHELL_READS: Final = frozenset(
     | {"stat", "file", "du", "df", "date", "whoami", "uname"}
 )
 _DOC: Final = re.compile(r"\.(?:md|markdown|rst|adoc)$", re.I)
+# Folders a snapshot or a test-setup search never enters: environments and caches.
+_SKIP_DIRS: Final = re.compile(
+    r"\.git|\.hg|\.svn|\.venv|venv|node_modules|__pycache__|\.tox|\.nox|\.cache"
+    r"|\.\w+_cache|site-packages|\.build|DerivedData"
+)
+# Files a folder outside git may hold for a snapshot to read it whole (docs included).
+MAX_SEEN: Final = 20 * MAX_STAMPS
+# What says a test runner applies to a folder: its configuration, a tests
+# folder, or a test file.
+_TEST_FILES: Final = frozenset(
+    {"pytest.ini", "tox.ini", "noxfile.py", "conftest.py", "Cargo.toml", "go.mod"}
+    | {"Package.swift"}
+)
+_TEST_DIRS: Final = frozenset({"tests", "test", "__tests__", "spec"})
+_TEST_NAME: Final = re.compile(
+    r"test_\w+\.py|\w+_test\.(?:py|go)|.+\.(?:test|spec)\.[cm]?[jt]sx?"
+    r"|\w+Tests?\.(?:swift|java|kt)|\w+_spec\.rb"
+)
+# The default test script `npm init` writes: no test.
+_NPM_NO_TEST: Final = "no test specified"
+# A test runner's exit code for "no tests were collected" (pytest, unittest).
+_NO_TESTS_RAN: Final = 5
+_COLLECTS: Final = re.compile(r"\b(?:py\.?test|unittest)\b")
 # What running code leaves behind is not work: never owed a commit.
 _CACHE: Final = re.compile(
     r"(?:^|/)(?:__pycache__|\.\w+_cache|node_modules|\.tox|\.nox)/|\.py[co]$"
@@ -554,6 +578,8 @@ class _Call:
             return None
         if not command:
             return None
+        if self.exit_code == _NO_TESTS_RAN and _COLLECTS.search(command):
+            return None  # pytest or unittest found no test: nothing was tested
         if self.finish is None:
             return command, "unknown"
         if self.status != "success" or self.exit_code not in (0, None):
@@ -583,10 +609,12 @@ class _Call:
 
 @dataclass(frozen=True)
 class Baseline:
-    """A task folder's git state: changed files under it, HEAD and its stash count.
+    """A task folder's state: in git its changed files, HEAD and stash count;
+    outside git a snapshot of its code files (``stamps``; ``None`` with no folder).
 
     *floor*: the stash count an earlier run grew past; later runs stay unchecked
-    while the stash is above it (kept until the task ends ready).
+    while the stash is above it (kept until the task ends ready). *tests*: a
+    test setup applies to the folder (true when that could not be told).
     """
 
     stamps: Mapping[str, FileStamp] | None
@@ -595,27 +623,34 @@ class Baseline:
     git: bool = False
     error: bool = False
     floor: int | None = None
+    tests: bool = True
 
     def to_json(self) -> dict[str, Any]:
-        """What is kept until the task ends ready: changed files and HEAD, no stash."""
+        """What is kept until the task ends ready: its files, HEAD and test setup, no stash."""
         stamps = {k: list(v) for k, v in (self.stamps or {}).items()}
-        return {"git": self.git, "head": self.head, "stamps": stamps}
+        kept = {"git": self.git, "head": self.head, "stamps": stamps}
+        snapshot = (
+            {"snapshot": True} if not self.git and self.stamps is not None else {}
+        )
+        return {**kept, **snapshot, "tests": self.tests}
 
     def since(self, kept: Mapping[str, Any]) -> Baseline:
-        """This run's baseline: *kept* files, HEAD and floor, and this run's stash."""
+        """This run's baseline: *kept* files, HEAD, floor and test setup, this run's stash.
+
+        A folder outside git kept before snapshots were (no ``snapshot``) is judged
+        from this run's own start.
+        """
         git = bool(kept.get("git"))
-        files = {
+        files: dict[str, FileStamp] | None = {
             k: (int(v[0]), int(v[1])) for k, v in (kept.get("stamps") or {}).items()
         }
+        if not git and not kept.get("snapshot"):
+            files = dict(self.stamps) if self.stamps is not None else None
         floor = kept.get("stash_floor")
         floor = floor if type(floor) is int else None
+        tests = kept.get("tests", True) is not False or self.tests
         return Baseline(
-            files if git else None,
-            str(kept.get("head") or ""),
-            self.stash,
-            git,
-            False,
-            floor,
+            files, str(kept.get("head") or ""), self.stash, git, False, floor, tests
         )
 
 
@@ -639,11 +674,95 @@ def _git(folder: str, *args: str) -> tuple[int, str, str] | None:
     return done.returncode, out, err
 
 
+def _test_marker(folder: str, name: str, is_dir: bool) -> bool:
+    """Whether *name* in *folder* says a test runner applies there."""
+    if is_dir:
+        return name in _TEST_DIRS or name.endswith((".xcodeproj", ".xcworkspace"))
+    if name in _TEST_FILES or _TEST_NAME.fullmatch(name):
+        return True
+    if name not in ("package.json", "Makefile", "makefile", "GNUmakefile"):
+        return False
+    try:
+        with open(os.path.join(folder, name), encoding="utf-8", errors="replace") as f:
+            text = f.read(256 * 1024)
+    except OSError:
+        return True  # unreadable: a runner may apply
+    if name == "package.json":
+        found = re.search(r'"test"\s*:\s*"([^"]*)"', text)
+        return found is not None and _NPM_NO_TEST not in found.group(1)
+    return re.search(r"^test\s*:", text, re.M) is not None
+
+
+def _walk(folder: str) -> Any:
+    """``(root, dirs, files)`` under *folder*, never into environments or caches; raises OSError."""
+
+    def fail(error: OSError) -> None:
+        raise error
+
+    for root, dirs, files in os.walk(folder, onerror=fail):
+        dirs[:] = sorted(d for d in dirs if not _SKIP_DIRS.fullmatch(d))
+        yield root, dirs, sorted(files)
+
+
+def _tests_apply(folder: str, *, top: str = "") -> bool:
+    """Whether a test runner applies to *folder* (or the top of its repository, *top*).
+
+    Bounded: a folder too large to search, or one that cannot be read, counts
+    as having tests.
+    """
+    try:
+        if top and top != folder:
+            for name in os.listdir(top):
+                if _test_marker(top, name, os.path.isdir(os.path.join(top, name))):
+                    return True
+        seen = 0
+        for root, dirs, files in _walk(folder):
+            seen += len(dirs) + len(files)
+            if seen > MAX_SEEN:
+                return True
+            if any(_test_marker(root, d, True) for d in dirs) or any(
+                _test_marker(root, f, False) for f in files
+            ):
+                return True
+    except OSError:
+        return True
+    return False
+
+
+def _snapshot(folder: str) -> Baseline:
+    """A folder outside git: its code files' size and time, and whether tests apply.
+
+    At most :data:`MAX_STAMPS` code files and :data:`MAX_SEEN` files in all;
+    a larger folder, or one that cannot be read, gives ``error``.
+    """
+    stamps: dict[str, FileStamp] = {}
+    seen, tests = 0, False
+    try:
+        for root, dirs, files in _walk(folder):
+            seen += len(files)
+            if seen > MAX_SEEN:
+                return Baseline(None, error=True)
+            tests = tests or any(_test_marker(root, d, True) for d in dirs)
+            for name in files:
+                tests = tests or _test_marker(root, name, False)
+                path = os.path.join(root, name)
+                relative = os.path.relpath(path, folder).replace(os.sep, "/")
+                if _DOC.search(relative) or _CACHE.search(relative):
+                    continue
+                info = os.lstat(path)
+                stamps[relative] = (info.st_size, info.st_mtime_ns)
+                if len(stamps) > MAX_STAMPS:
+                    return Baseline(None, error=True)
+    except OSError:
+        return Baseline(None, error=True)
+    return Baseline(stamps, tests=tests)
+
+
 def _look(folder: str) -> Baseline:
-    """The folder's git state now; ``error`` when git could not say."""
+    """The folder's state now; ``error`` when git or the snapshot could not say."""
     where = _git(folder, "rev-parse", "--show-toplevel", "--show-prefix")
     if where is None or (where[0] and "not a git repository" in where[2]):
-        return Baseline(None)  # not a git folder, or git cannot run here
+        return _snapshot(folder)  # not a git folder, or git cannot run here
     status = _git(folder, "status", "--porcelain", "-z", "-uall", "--", ".")
     head = _git(folder, "rev-parse", "-q", "--verify", "HEAD")
     stash = _git(folder, "stash", "list")
@@ -669,7 +788,9 @@ def _look(folder: str) -> Baseline:
             stamps[name[len(prefix) :]] = (-1, -1)
         if len(stamps) > MAX_STAMPS:
             return _ERROR
-    return Baseline(stamps, head[1].strip(), len(stash[1].splitlines()), git=True)
+    tests = _tests_apply(folder, top=top)
+    head_id = head[1].strip()
+    return Baseline(stamps, head_id, len(stash[1].splitlines()), True, tests=tests)
 
 
 async def baseline(folder: str | None) -> Baseline:
@@ -707,15 +828,33 @@ async def _calls(store: SessionStore, task_id: str, turn: Any) -> list[_Call]:
         after = page[-1].id or after
 
 
-async def _changes(
-    folder: str | None, base: Baseline
-) -> tuple[bool, list[str], list[str]]:
-    """``(unchecked, changed code, own uncommitted changes)`` since *base*."""
+@dataclass(frozen=True)
+class _Seen:
+    """What the folder says since a baseline.
+
+    ``code`` is ``None`` when there is no folder to look at (the run's calls
+    say what changed); ``own`` holds a git folder's uncommitted changes.
+    """
+
+    unchecked: bool
+    code: list[str] | None
+    own: list[str]
+    tests: bool
+
+
+async def _changes(folder: str | None, base: Baseline) -> _Seen:
+    """The changed code, own uncommitted changes and test setup since *base*."""
     now = await baseline(folder)
+    tests = base.tests or now.tests
     if base.error or now.error or (base.git and not now.git):
-        return True, [], []
+        return _Seen(True, [], [], True)
     if not now.git:
-        return False, [], []
+        if folder is None or base.stamps is None or now.stamps is None:
+            return _Seen(False, None, [], tests)
+        before, after = base.stamps, now.stamps
+        gone = {name for name in before if name not in after}
+        moved = {name for name, stamp in after.items() if before.get(name) != stamp}
+        return _Seen(False, sorted(gone | moved), [], tests)
     before = base.stamps if base.git and base.stamps is not None else {}
     own = sorted(edited_files(before, now.stamps or {}))
     committed: list[str] = []
@@ -732,13 +871,13 @@ async def _changes(
             now.head,
         )
         if names is None or names[0]:
-            return True, [], own
+            return _Seen(True, [], own, True)
         committed = [name for name in names[1].split("\0") if name]
     code = sorted(p for p in {*own, *committed} if not _DOC.search(p))
     stashed = now.stash > (
         base.stash if base.floor is None else min(base.floor, base.stash)
     )
-    return stashed, code, own
+    return _Seen(stashed, code, own, tests)
 
 
 async def stash_floor(folder: str | None, base: Baseline) -> int | None:
@@ -756,28 +895,40 @@ async def stash_floor(folder: str | None, base: Baseline) -> int | None:
 
 
 async def _evidence(
-    store: SessionStore, task_id: str, turn: Any, folder: str | None, base: Baseline
-) -> tuple[list[str], list[tuple[_Call, tuple[str, str]]], list[str]]:
-    """Reasons about the run's tests and folder; its tests; its own changes."""
+    store: SessionStore,
+    task_id: str,
+    turn: Any,
+    folder: str | None,
+    base: Baseline,
+    asks_tests: bool,
+) -> tuple[list[str], list[tuple[_Call, tuple[str, str]]], list[str], list[str]]:
+    """Reasons about the run's tests and folder; its tests; its own changes; notes."""
     calls = await _calls(store, task_id, turn) if turn is not None else []
     tests = [(call, found) for call in calls if (found := call.test())]
-    unchecked, code, own = await _changes(folder, base)
-    # Outside git only the run's own calls say whether code changed.
-    changed = bool(code) or (not base.git and any(c.edits_code() for c in calls))
+    seen = await _changes(folder, base)
+    # With no folder to look at, only the run's own calls say whether code changed.
+    if seen.code is None:
+        changed = any(c.edits_code() for c in calls)
+    else:
+        changed = bool(seen.code)
     last = tests[-1][1][1] if tests else "passed"
     reasons: list[str] = []
+    notes: list[str] = []
     if last == "failed":
-        owed = changed or unchecked
+        owed = changed or seen.unchecked
         reasons.append("tests_failed" if owed else "tests_still_fail")
     elif last == "unknown":
         reasons.append("tests_unverified")
-    elif changed:
+    elif (changed or asks_tests) and not seen.tests:
+        notes.append("no_tests")  # no test setup applies: none is owed
+    elif changed or asks_tests:
         # A test must start after every call that could have changed code.
         writers = [call.finish for call in calls if call.writes()]
         latest = max((float("inf") if w is None else w for w in writers), default=0.0)
         if not any(call.start > latest for call, _ in tests):
             reasons.append("tests_missing")
-    return [*reasons, *(["unchecked"] if unchecked else [])], tests, own
+    unchecked = ["unchecked"] if seen.unchecked else []
+    return [*reasons, *unchecked], tests, seen.own, notes
 
 
 async def decide(
@@ -789,15 +940,22 @@ async def decide(
     folder: str | None,
     base: Baseline,
     asks_commit: bool,
+    asks_tests: bool = False,
 ) -> dict[str, Any] | None:
-    """The ending of a run that ended in *phase*, or ``None`` for its state's default."""
+    """The ending of a run that ended in *phase*, or ``None`` for its state's default.
+
+    *asks_tests*: the person asked for the tests, so they are owed (where a
+    test setup applies) even when no code changed.
+    """
     out_of_steps = phase == "failed" and failure_reason == OUT_OF_STEPS
     if phase != "done" and not out_of_steps:
         return None
     turns = await store.list_turns(task_id, limit=1)
     turn = turns[-1] if turns else None
     proposed, question = proposal(turn.answer if turn is not None else "")
-    reasons, tests, own = await _evidence(store, task_id, turn, folder, base)
+    reasons, tests, own, notes = await _evidence(
+        store, task_id, turn, folder, base, asks_tests
+    )
     if asks_commit and own:
         reasons.append("commit_missing")
     if out_of_steps:
@@ -823,6 +981,7 @@ async def decide(
         "question": question,
         "tests": kept,
         "uncommitted": own,
+        "notes": notes,
         "turn": turn.turn if turn is not None else None,
         "run_id": turn.run_id if turn is not None else "",
     }

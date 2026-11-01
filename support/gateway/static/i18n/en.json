@@ -1,4 +1,8 @@
 {
+  "activity.did.note": "Kept a note",
+  "activity.did.notes": "Kept {count} notes",
+  "activity.did.offered": "Offered a task: {title}",
+  "activity.did.started": "Started a task: {title}",
   "activity.folderRefused": "Could not use its folder",
   "activity.held.Approval": "Needs your approval",
   "activity.held.Battery": "Waiting for the battery",
@@ -471,6 +475,7 @@
   "ending.finishCommit": "Finish it: run the tests and commit",
   "ending.finishCommitMessage": "Finish it: run the tests that cover your changes, fix what fails, commit the changes, and end your report with its Ending line.",
   "ending.finishMessage": "Finish it: run the tests that cover your changes, fix what fails, and end your report with its Ending line.",
+  "ending.note.no_tests": "No tests apply",
   "ending.outcome.failed": "failed",
   "ending.outcome.passed": "passed",
   "ending.outcome.unknown": "result not checked",

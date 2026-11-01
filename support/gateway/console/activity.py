@@ -78,6 +78,23 @@ TASK_STATES: Final = {
 # another one), as its row says it and, in English, its card.
 FOLDER_REFUSED: Final = t_in("en", "activity.folderRefused")
 _MARKUP: Final = re.compile(r"^[\s#>*_`-]+")
+# Inline Markdown a line drops, keeping the words: links and images, strong,
+# emphasis, struck and code marks.
+_LINK: Final = re.compile(r"!?\[([^\]\n]*)\]\([^)\s]*\)")
+_STRONG: Final = re.compile(r"(\*\*|__|~~)(?=\S)(.+?)(?<=\S)\1")
+_STAR: Final = re.compile(r"(?<![\w*])\*(?=\S)([^*\n]+?)(?<=\S)\*(?![\w*])")
+_UNDER: Final = re.compile(r"(?<![\w_])_(?=\S)([^_\n]+?)(?<=\S)_(?![\w_])")
+_STRAY: Final = re.compile(r"\*\*|~~|`")
+# A short lead-in that only says how the reply is laid out: "In short:", "分两层说：".
+_LEAD_IN: Final = re.compile(
+    r"^(?:in short|short answer|in brief|tl;?dr|to sum up|in two parts|two parts|"
+    r"two things|here(?:'s| is) (?:what happened|the short version|the answer)|"
+    r"分两层说|分两点说|分两部分说|简单说|简单来说|简而言之|一句话|总结一下|总之|先说结论|"
+    r"结论|简短回答|简答)\s*[:：]\s*",
+    re.IGNORECASE,
+)
+# The main chat's echo rows (`front.ECHO_EVENT`): what the chat did besides answering.
+_ECHO: Final = "attention.echo"
 _SENTENCE: Final = re.compile(r"(?<=[.!?])\s|(?<=[。！？])")
 # What the run writes in place of an answer: `[interrupt: …]`, `[no answer: …]`.
 _MARKER: Final = re.compile(r"^\s*\[(interrupt|no answer|answer not kept)\b[^\]]*\]")
@@ -137,6 +154,19 @@ def _no_paths(text: str) -> str:
     return _PATH.sub(_named, text)
 
 
+def plain_text(text: str) -> str:
+    """*text* without inline Markdown, and without a lead-in that only announces its layout.
+
+    ``分两层说: **我(主聊天)自己**:没有联网工具。`` reads ``我(主聊天)自己:没有联网工具。``.
+    """
+    text = _LINK.sub(r"\1", text)
+    text = _STRONG.sub(r"\2", text)
+    text = _UNDER.sub(r"\1", _STAR.sub(r"\1", text))
+    text = _STRAY.sub("", text)
+    rest = _LEAD_IN.sub("", text.strip(), count=1)
+    return rest if rest.strip() else text
+
+
 def _marker_words(marker: str) -> str:
     """What a run's own marker (``[interrupt: …]``) says happened."""
     key = _MARKER_WORDS[marker]
@@ -162,7 +192,7 @@ def result_line(note: str, answer: str) -> str:
     text = " ".join(_prose(raw).split())
     if raw.strip() and not text:
         return t("activity.wroteCode")
-    text = _no_paths(_MARKUP.sub("", text))
+    text = _no_paths(plain_text(_MARKUP.sub("", text)))
     first = _SENTENCE.split(text, maxsplit=1)[0]
     if len(first) <= RESULT_CHARS:
         return first
@@ -297,6 +327,56 @@ async def _live(row: dict[str, Any], console: Console) -> None:
     row.update(activity=spoken(text), icon=text.icon)
 
 
+async def chat_did(console: Console, turn: DayTurn) -> str:
+    """What a chat did in its newest turn besides answering, in plain words, or ``""``.
+
+    The tasks it started or offered (its echo rows since the turn began; a
+    task offered and then started reads once, as started) and the notes it
+    kept (its ``remember`` calls that succeeded), joined with `` · ``.
+    """
+    try:
+        echoes = await console.store.events_of_type(turn.session_id, _ECHO, limit=50)
+        finished = await console.store.events_of_type(
+            turn.session_id, "tool.finished", limit=200
+        )
+    except (SessionStoreError, OSError, AttributeError):
+        return ""
+    tasks: dict[str, tuple[str, str]] = {}
+    for stored in echoes:
+        ts, data = stored.event.get("ts"), stored.event.get("data")
+        if not isinstance(ts, int | float) or ts < turn.started_at:
+            continue
+        data = data if isinstance(data, Mapping) else {}
+        kind = data.get("echo")
+        if kind not in ("started", "suggest"):
+            continue
+        key = str(data.get("task_id") or data.get("title") or stored.id)
+        if kind == "started" or key not in tasks:
+            tasks[key] = (str(kind), " ".join(str(data.get("title") or "").split()))
+    words = [
+        t(
+            "activity.did.started" if kind == "started" else "activity.did.offered",
+            title=_cut(title, TITLE_CHARS) or t("activity.untitled.task"),
+        )
+        for kind, title in tasks.values()
+    ]
+    notes = sum(
+        1
+        for stored in finished
+        if stored.turn == turn.turn
+        and isinstance(stored.event.get("data"), Mapping)
+        and stored.event["data"].get("name") == "remember"
+        and stored.event["data"].get("status") == "success"
+    )
+    if notes:
+        words.append(
+            t("activity.did.note")
+            if notes == 1
+            else t("activity.did.notes", count=str(notes))
+        )
+    return _cut(" · ".join(words), RESULT_CHARS)
+
+
 async def _session_rows(
     console: Console, turns: Iterable[DayTurn], kind_of: dict[str, str]
 ) -> list[dict[str, Any]]:
@@ -310,7 +390,9 @@ async def _session_rows(
             state, icon, result = _ended(turn)
             at = turn.finished_at or turn.started_at
             row = _row(kind, turn.session_id, turn.title, state, at, icon=icon)
-            row["result"] = result
+            # A console chat says what it did before what its reply says.
+            did = await chat_did(console, turn) if kind == "chat" else ""
+            row["result"] = did or result
         row["turns"] = turn.turns
         row["_chat"] = turn.session_id if kind == "chat" else ""
         rows.append(row)
@@ -555,6 +637,8 @@ __all__ = [
     "MAX_ROWS",
     "add_routes",
     "answer_lines",
+    "chat_did",
+    "plain_text",
     "answer_word",
     "approvals_of",
     "day_activity",

@@ -346,6 +346,8 @@ button:hover:not(:disabled) {
 .main-card[data-ending="failed"] .main-card-mark { background: var(--raised); color: var(--error); }
 .main-card[data-ending="dropped"] .main-card-mark { background: var(--raised); color: var(--muted); }
 .main-card-why { margin: 4px 0 0; color: var(--warn); font-size: var(--text-small); font-weight: 550; overflow-wrap: anywhere; }
+/* A ready task's note (no tests apply) is a remark, not a warning. */
+.main-card[data-ending="ready"] .main-card-why { color: var(--muted); font-weight: 400; }
 /* A step Auto blocked in a task: the block's amber edge, and the block itself under the heading, unboxed. */
 .main-card[data-state="blocked"] { box-shadow: inset 3px 0 0 var(--warn); }
 .main-card[data-state="blocked"] .main-card-mark { background: var(--warn-tint); color: var(--warn); }

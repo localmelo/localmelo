@@ -54,7 +54,7 @@ from localmelo.support.gateway.finishing import (
     is_out_of_steps,
     not_committed,
 )
-from localmelo.support.gateway.front_rules import asks_commit
+from localmelo.support.gateway.front_rules import asks_commit, asks_tests
 from localmelo.support.gateway.i18n import t as words
 from localmelo.support.gateway.park_card import CARD_START, build_park_card
 from localmelo.support.gateway.park_store import ParkStore
@@ -2552,6 +2552,7 @@ class TaskWorkers:
                 folder=workspace,
                 base=base,
                 asks_commit=any(asks_commit(text) for text in asked),
+                asks_tests=any(asks_tests(text) for text in asked),
             )
         except Exception:
             log.exception("Could not check how task %s ended", task_id)

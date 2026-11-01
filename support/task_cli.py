@@ -30,6 +30,7 @@ _WHY = (
     "commit_missing",
     "unchecked",
 )
+_NOTES = ("no_tests",)
 
 MAX_BRIEF_BYTES = 1024 * 1024
 MAX_OBJECTIVE_CHARS = 100_000
@@ -226,8 +227,12 @@ def ending_words(ending: Any) -> tuple[str, str]:
     name = "moot" if moot else ending["state"]
     reasons = ending.get("reasons")
     reasons = reasons if isinstance(reasons, list) else []
+    notes = ending.get("notes")
+    notes = notes if isinstance(notes, list) else []
     why = [str(ending.get("question") or "")]
     why += [t_in("en", f"ending.reason.{code}") for code in reasons if code in _WHY]
+    # What the ending notes beside it, such as that no tests apply to the folder.
+    why += [t_in("en", f"ending.note.{code}") for code in notes if code in _NOTES]
     return t_in("en", f"ending.state.{name}"), "; ".join(w for w in why if w)
 
 

@@ -305,7 +305,10 @@ health poll whenever what runs changes, and every 30 seconds:
 
 A result line is always plain words. A run stopped before it answered reads `Stopped before answering`, a picture
 reads `Made a picture`, a file the file's name, and an answer that is code the first sentence around the code (`Wrote
-some code` when there is none).
+some code` when there is none). Markdown is removed, a lead-in such as `In short:` is dropped, and the line ends at
+the first sentence. A chat's line says first what the chat did: `Started a task: Fix CI`,
+`Offered a task: Visit example.com`, `Kept a note`; only without any of these does it give its reply's first
+sentence.
 
 A row that asked you for approvals carries them folded under its result line: `1 approval`, or `2 approvals, 1
 waiting`. Select it to list each request in plain words (`Write slides.md`, `Run the tests`, `Run a command`; never
@@ -512,8 +515,9 @@ run). Like Workers, the view replaces the chat while it is open. The header says
   ran** lists the tests the task's own run started, each passed, failed or result
   not checked; a test its answer only mentions is not listed. **Ready** needs
   proof: when a test's result or the folder could not be checked, the task is not
-  ready. **Finish it** continues, with one tap, a task that still owes its tests
-  or its commit. The panel's Activity and Workers rows say the same, and
+  ready. A task whose folder has no test setup owes no tests: it reads **Ready**
+  with **No tests apply**. **Finish it** continues, with one tap, a task that
+  still owes its tests or its commit. The panel's Activity and Workers rows say the same, and
   `GET /api/tasks/<id>` carries it as `ending`.
 
 A button is disabled while its request is in flight. A refusal (a stale

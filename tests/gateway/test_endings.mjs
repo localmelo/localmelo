@@ -14,7 +14,7 @@ const DRAFT = {state: 'draft', proposed: 'ready', reasons: ['tests_missing', 'co
 test('an ending is kept only when its state is one code decides', () => {
   assert.equal(readEnding(null), null);
   assert.equal(readEnding({state: 'done'}), null, 'a scheduler state is not an ending');
-  assert.deepEqual(readEnding({state: 'ready'}), {state: 'ready', proposed: null, reasons: [], question: '', tests: []});
+  assert.deepEqual(readEnding({state: 'ready'}), {state: 'ready', proposed: null, reasons: [], notes: [], question: '', tests: []});
   const kept = readEnding({...DRAFT, tests: [...DRAFT.tests, {command: 'x', outcome: 'claimed'}, null]});
   assert.deepEqual(kept.tests, DRAFT.tests, 'a test without a known outcome is dropped');
 });
@@ -70,4 +70,11 @@ test('in Chinese, the state, the reasons and Finish it read in Chinese', async (
   assert.equal(finishLabel(draft), '收尾：跑测试并提交');
   assert.equal(endingLabel(readEnding({state: 'blocked'})), '需要你');
   await useLanguage('en');
+});
+
+test('a ready task whose folder has no tests says so, with nothing to finish', () => {
+  const ready = readEnding({state: 'ready', reasons: [], notes: ['no_tests', 'made_up']});
+  assert.deepEqual(ready.notes, ['no_tests'], 'only notes it knows');
+  assert.equal(endingWhy(ready), 'No tests apply');
+  assert.equal(canFinish(ready), false);
 });

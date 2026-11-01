@@ -1,4 +1,8 @@
 {
+  "activity.did.note": "记下了一条笔记",
+  "activity.did.notes": "记下了 {count} 条笔记",
+  "activity.did.offered": "提议了任务：{title}",
+  "activity.did.started": "开始了任务：{title}",
   "activity.folderRefused": "无法使用它的文件夹",
   "activity.held.Approval": "需要你批准",
   "activity.held.Battery": "在等电量恢复",
@@ -454,6 +458,7 @@
   "ending.finishCommit": "收尾：跑测试并提交",
   "ending.finishCommitMessage": "收尾：运行覆盖你改动的测试，修好失败的地方，提交改动，报告最后写上 Ending 行。",
   "ending.finishMessage": "收尾：运行覆盖你改动的测试，修好失败的地方，报告最后写上 Ending 行。",
+  "ending.note.no_tests": "没有适用的测试",
   "ending.outcome.failed": "没通过",
   "ending.outcome.passed": "通过",
   "ending.outcome.unknown": "结果没核对",
