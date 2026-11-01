@@ -1513,6 +1513,44 @@ async def test_a_runner_that_says_it_ran_no_test_is_no_result(
 
 
 @pytest.mark.parametrize(
+    ("command", "output", "result"),
+    [
+        ("ctest", "100% tests passed, 0 tests failed out of 5\n", True),
+        ("ctest", "No tests were found!!!\n", False),
+        ("python -m pytest -q", "12 passed, 0 tests skipped\n", True),
+        ("python -m pytest -q", "tests/test_x.py::test_x[0 tests] PASSED\n", True),
+        ("phpunit", "No tests executed!\n", False),
+        ("ctest", "No tests executed\n", True),
+        ("mix test", "Finished in 0.1 seconds\n10 tests, 0 failures\n", True),
+        ("mix test", "Finished in 0.1 seconds\n0 tests, 0 failures\n", False),
+        ("python manage.py test", "Ran 3 tests in 0.1s\n\nOK\n", True),
+        ("python manage.py test", "Ran 0 tests in 0.000s\n\nOK\n", False),
+        ("cargo test", "running 5 tests\ntest a ... ok\nrunning 0 tests\n", True),
+        ("cargo test", "running 0 tests\n\ntest result: ok. 0 passed\n", False),
+        ("mvn test", "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0\n", True),
+        (
+            "mvn test",
+            "[INFO] Tests run: 0, Failures: 0, Errors: 0, Skipped: 0\n",
+            False,
+        ),
+        ("mvn test", "[INFO] No tests to run.\n", False),
+    ],
+)
+async def test_only_a_runners_own_zero_count_means_it_ran_none(
+    repo: Path, command: str, output: str, result: bool
+) -> None:
+    base = await baseline(str(repo))
+    (repo / "app.py").write_text("x = 2\n")
+    run = (
+        Run()
+        .edit()
+        .call("shell_exec", {"command": command}, exit_code=0, output=output)
+    )
+    expected = ("ready", []) if result else ("draft", ["tests_missing"])
+    assert why(await end(run, repo, base)) == expected
+
+
+@pytest.mark.parametrize(
     "argv",
     [
         "['mvn', 'test', '-DskipTests']",

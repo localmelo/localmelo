@@ -282,12 +282,43 @@ _NPM_NO_TEST: Final = "no test specified"
 # A test runner's exit code for "no tests were collected" (pytest, unittest).
 _NO_TESTS_RAN: Final = 5
 _COLLECTS: Final = re.compile(r"\b(?:py\.?test|unittest)\b")
-# What a runner that exits 0 says when it ran no test: ctest, phpunit, mix, Django.
-_RAN_NO_TEST: Final = re.compile(
-    r"No tests were found|No tests executed|All tests have been excluded"
-    r"|(?<![\w.])0 tests\b|\bRan 0 tests\b",
-    re.I,
+# What a runner that exits 0 says when it ran no test, each read only from its
+# own runner's output: (the runner in its command, what it says).
+_RAN_NO_TEST: Final = (
+    (re.compile(r"\bctest\b"), re.compile(r"No tests were found")),
+    (re.compile(r"\bphpunit\b"), re.compile(r"No tests executed")),
+    (
+        re.compile(r"\bmix\s+test\b"),
+        re.compile(r"^\s*0 tests, 0 failures|All tests have been excluded", re.M),
+    ),
+    (re.compile(r"\bmanage\.py\s+test\b"), re.compile(r"^Ran 0 tests\b", re.M)),
+    (
+        re.compile(r"\bmvn\b.*\btest\b"),
+        re.compile(r"^(?:\[\w+\]\s*)?No tests to run", re.M),
+    ),
 )
+# Runners that count per test binary or class: no test ran when every count is 0.
+_ZERO_COUNTS: Final = (
+    (re.compile(r"\bcargo\s+test\b"), re.compile(r"^running (\d+) tests?\b", re.M)),
+    (
+        re.compile(r"\bmvn\b.*\btest\b"),
+        re.compile(r"^(?:\[\w+\]\s*)?Tests run: (\d+),", re.M),
+    ),
+)
+
+
+def _ran_no_test(command: str, output: str) -> bool:
+    """Whether a runner's own output says it ran no test (*command* names the runner)."""
+    for runner, says in _RAN_NO_TEST:
+        if runner.search(command) and says.search(output):
+            return True
+    for runner, counts in _ZERO_COUNTS:
+        found = counts.findall(output) if runner.search(command) else []
+        if found and all(int(count) == 0 for count in found):
+            return True
+    return False
+
+
 # Arguments that leave a pytest or unittest run whole: output and speed only.
 # Anything else (-k, -m, --deselect, a path, a node id) could filter its tests.
 _WHOLE_RUN: Final = re.compile(
@@ -719,7 +750,7 @@ class _Call:
             return False
         if self.exit_code == _NO_TESTS_RAN and _COLLECTS.search(command):
             return True
-        return self.exit_code in (0, None) and bool(_RAN_NO_TEST.search(self.output))
+        return self.exit_code in (0, None) and _ran_no_test(command, self.output)
 
     def _argv(self) -> list[str] | None:
         """The words of a test in its strict shape (one plain command), or None."""
