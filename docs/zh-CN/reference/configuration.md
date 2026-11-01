@@ -92,7 +92,7 @@ chat_model = "qwen3:8b"
 | `record_direct` | `[sessions]` | `true` | 把每次直接运行（`melo "<task>"`、`melo --brief FILE`）记录为 `~/.cache/localmelo/cli/sessions.db` 中的 worker 会话，网页控制台的 Workers 视图和 macOS 应用会读取它。只有 `false` 会关闭；`--no-save-session` 对单次运行起同样作用，`--save-session` 或 `--parent-run` 仍会记录。只在为 `false` 时写入。见 [Worker 历史记录](cli.md#worker-历史记录)。 |
 | `policy` | `[scheduler]` | `"off"` | 网页工作区的调用如何到达模型服务器：`off` 只记录，`fcfs` 先到先得，`class` 让 P1 先于 P2 得到准入（依此类推）；见[调度器](../guides/scheduler.md#the-gate-on-chats-s2)。 |
 | `driver` | `[browser]` | `"off"` | melo 是否可以在浏览器中读取网页：`off` 不提供浏览工具；`safari-automation` 为终端对话以及网页控制台和 App 的每个对话提供八个只读工具，在 Safari 的自动化窗口中打开网页（每个网站每次对话询问一次；见[用 melo 浏览网页](../guides/browsing.md)）。终端中用 `/browser` 切换；`-X browser.driver=safari-automation` 仅用于一次运行。直接运行、worker 运行和已保存的任务从不获得这些工具。其他任何值都是配置错误。 |
-| `web_fetch` | `[tools]` | `true` | 对话和任务是否可以用 `web_fetch` 工具读取公开网页（只读；从不访问这台电脑或它所在的局域网；你的消息没有提到的网站每个对话问一次，与浏览器共用；见[工具](tools.md#reading-a-public-web-page)）。`false` 移除这个工具；设置 → 对话和文件夹 → **读取网页** 是同一个开关；`-X tools.web_fetch=off` 仅用于一次运行。直接运行从不获得它。不是布尔值的任何值都是配置错误。 |
+| `web_fetch` | `[tools]` | `true` | 对话和任务是否可以用 `web_fetch` 工具读取公开网页（只读；从不访问这台电脑或它所在的局域网；你自己最近的消息没有提到的网站每个对话问一次，与浏览器共用；见[工具](tools.md#reading-a-public-web-page)）。`false` 移除这个工具；设置 → 对话和文件夹 → **读取网页** 是同一个开关；`-X tools.web_fetch=off` 仅用于一次运行。直接运行从不获得它。不是布尔值的任何值都是配置错误。 |
 | `n_srv` | `[scheduler]` | `8` | 模型服务器的槽位数。 |
 | `r_f` | `[scheduler]` | `1` | 为命令行和直接运行保留的槽位数；`n_srv <= 2` 时强制为 0。 |
 | `n_fg` | `[scheduler]` | `1` | 有聊天处于焦点时允许在途的后台调用数。 |

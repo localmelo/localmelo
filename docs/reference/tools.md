@@ -75,11 +75,17 @@ call itself asks nothing; each site passes the site gate below first.
 
 - **Site gate**, before the site's name is looked up, for the first address and for a redirect
   to another host:
-  - a site your own messages in the chat name, or a parent domain of it, is read at once, in
-    every mode (`docs.example.com` is named by `example.com`);
+  - a site your own recent messages name is read at once, in every mode. Recent means your
+    last 3 messages, the first 800 characters of each. Named means that host itself, or it
+    with `www.` added or removed: `example.com` does not name `docs.example.com`, so naming
+    a shared domain such as `vercel.app` names none of the sites under it. A full `http://`
+    or `https://` address names its host; a bare word such as `README.md` or `config.yaml`
+    whose last part is a common file extension names no site. Text you paste counts as your
+    own words, so a site in a pasted log or page names it too;
   - any other site asks once per chat with the browser's site question, worded "Let melo read
-    example.com?": one "allow for this chat" covers `web_fetch` and the browser tools, and
-    `/new` or `/approvals forget` takes it back;
+    example.com?", showing the full address it asks for (cut at 300 characters): one "allow
+    for this chat" covers `web_fetch` and the browser tools, and `/new` or `/approvals forget`
+    takes it back;
   - in auto mode, an unnamed site is reviewed by your model, as a site the browser would open is;
   - a task asks the chat that owns it; a task with nobody to ask reads no site.
   The address (its path and query, and its name through your resolver) is the one thing
@@ -118,9 +124,10 @@ call itself asks nothing; each site passes the site gate below first.
     unique-local, link-local and site-local addresses; and an IPv6 address that carries an IPv4
     one (mapped, compatible, NAT64, 6to4, Teredo);
   - any address of this computer's own, even a public one (an address it can bind, or one it
-    would send to from itself), and its local network: an address in the IPv6 /64, or the /24
-    of a public IPv4 address, that this computer sends from. These checks open a UDP socket and
-    never send on it.
+    would send to from itself), and the network it is on: the IPv6 /64 and /56 around the
+    address it sends from (so a guest or device network next to yours too), or the /24 around
+    it when it is a public IPv4 address. These checks open a UDP socket and never send on it.
+    A router's own outside address that leads back in (hairpin NAT) is not covered.
 - **DNS.** melo resolves the name itself and refuses it when any answer is such an address. It
   then connects to the address it checked, and the TLS certificate is still checked for the
   name, so a DNS answer that changes in between is never used. A port in the address is allowed

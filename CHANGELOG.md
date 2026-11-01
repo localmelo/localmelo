@@ -17,14 +17,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `[tools] web_fetch = false`. It only reads: one request, no cookies, no
   sign-ins, no forms, at most 2 MB, 30 seconds and 5 redirects (never from
   https to http), and PDFs and other files are refused for now. A site your
-  own message names reads at once; any other asks once per chat ("Let melo
-  read example.com?") before its name is even looked up, and one "allow for
-  this chat" covers the browser too; a task asks the chat that owns it. It
-  never reaches this computer or its local network: `localhost`, private,
-  link-local and cloud metadata addresses, `.local` names, numbers written in
-  odd forms, this computer's own addresses (a public IPv6 one included) and
-  its network, and a redirect or DNS answer that points to any of them are
-  refused, and melo connects to the address it checked. The page reaches the
+  own recent messages name reads at once (that host itself, with or without
+  `www.`; not a site under it, and not a file name such as `README.md`); any
+  other asks once per chat ("Let melo read example.com?", showing the full
+  address) before its name is even looked up, and one "allow for this chat"
+  covers the browser too; a task asks the chat that owns it. It never reaches
+  this computer or its local network: `localhost`, private, link-local and
+  cloud metadata addresses, `.local` names, numbers written in odd forms, this
+  computer's own addresses (a public IPv6 one included) and the network around
+  them (the IPv6 /64 and /56, the /24 of a public IPv4 address), and a
+  redirect or DNS answer that points to any of them are refused, and melo
+  connects to the address it checked. The page reaches the
   model marked as data, never instructions, nothing a server writes in its
   status line or headers reaches it, and the model is told to use the tool
   instead of `curl`. Direct runs do not get it. [#406]

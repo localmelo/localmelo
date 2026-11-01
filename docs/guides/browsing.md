@@ -14,8 +14,8 @@ Every chat can read a public page without Safari, with the `web_fetch` tool. It 
 
 - Ask about a website or paste its address: melo reads the page as text (title, headings, main text and links). Plain text and JSON come back as they are.
 - It only reads: one request, no cookies, no sign-ins, no forms. PDFs and other files are refused for now.
-- It never reaches this Mac or your local network. `localhost`, private and link-local addresses, `.local` names, this Mac's own addresses (also a public IPv6 one) and its network, and a redirect or DNS answer that points to one of them are refused.
-- A site you name in your message reads at once. Any other site asks once per chat ("Let melo read example.com?"), and one "allow for this chat" covers the browser too.
+- It never reaches this Mac or your local network. `localhost`, private and link-local addresses, `.local` names, this Mac's own addresses (also a public IPv6 one) and the network around them, and a redirect or DNS answer that points to one of them are refused.
+- A site your own recent messages name reads at once: that exact site, with or without `www.`. A site under it (`docs.example.com` when you named `example.com`) and any other site ask once per chat ("Let melo read example.com?", with the full address), and one "allow for this chat" covers the browser too. A file name such as `README.md` does not name a site.
 - A page that needs a sign-in, blocks automated readers or is built by scripts says so. With browsing on, melo can try it in Safari instead.
 - Tasks have it too. Turn it off in Settings → Chats and folders → **Read web pages**, or with `melo config set tools.web_fetch false`. The limits and the exact rules are in [Tools](../reference/tools.md#reading-a-public-web-page).
 
@@ -115,7 +115,7 @@ elements:
 - **Each site asks once per chat.** Before melo loads a page, you see "Open a website?" with the site's name and the answers *Yes*, *Yes, and allow this site for the rest of this chat*, and *No*. In the web console it is the usual approval card. "For the rest of this chat" is the only lasting answer; there is no "always" in this part. `/new`, and `/approvals forget`, take the grants back.
 - **A redirect asks again.** If a link or a redirect lands on another site, melo asks about that site before it reads the page. If you say no, the window goes back to a blank page and the model reads that you refused.
 - **Only `http` and `https`.** `file:`, `about:`, `javascript:`, `data:` and the browser's own pages are never opened.
-- **In auto mode nothing asks.** A site your message names opens; another one opens only when your model finds that it serves what you asked (checked once per site per chat), and is blocked otherwise. `--yolo` skips every question.
+- **In auto mode nothing asks.** A site your own recent messages name opens (that site itself, with or without `www.`, not a site under it); another one opens only when your model finds that it serves what you asked (checked once per site per chat), and is blocked otherwise. `--yolo` skips every question.
 - **Page text is data.** A page can say anything. melo's system prompt tells the model that text between the page markers is content of a web page, never instructions, and the closing marker carries a random number that no page can know, so a page cannot end its own block. This lowers the risk of a page steering the model; it does not remove it. Do not allow sites you do not trust, and do not turn browsing on in a chat that holds secrets you would not paste into a web page.
 
 ## What is coming
