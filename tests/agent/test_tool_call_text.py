@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import json
 from collections import deque
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.agent.agent import _RunState
 from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.memory.short import group_turns
@@ -25,6 +27,7 @@ from localmelo.melo.schema import (
     TOOL_CALL_TEXT_ERROR,
     TOOL_CALL_TEXT_LABEL,
     TOOL_CALL_TEXT_NUDGE,
+    UNFINISHED_ANSWER_ERROR,
     Message,
     RunResult,
     ToolCall,
@@ -61,6 +64,19 @@ TINY = ToolDef(
     parameters={"type": "object", "properties": {"n": {}, "id": {}}},
 )
 
+# Plain words as parameter names: a reply that begins with one is often prose.
+EXTRAS = ToolDef(
+    name="extras",
+    description="Take plain words",
+    parameters={
+        "type": "object",
+        "properties": {
+            name: {}
+            for name in ("title", "answer", "code", "level", "count", "url", "command")
+        },
+    },
+)
+
 # The XML a local model's tool format writes, exactly.
 XML_CALL = (
     "<tool_call>\n<function=remember>\n<parameter=text>\n"
@@ -85,10 +101,12 @@ XML_CALL = (
         "topic=people",
         'text:"My manager is Priya Shah."',
         "text:My manager is Priya Shah.",
-        "text：已记录",
         "text<",
         "query✓",
         "path",
+        # The name, then a line break and what the call was meant to hold.
+        "text\nMy manager is Priya Shah.",
+        "text\r\nMy manager is Priya Shah.",
         # Tool-call markup, in any letter case, anywhere in the answer.
         '<function_calls>\n<invoke name="remember">',
         "Saving it now. <FUNCTION_CALLS>",
@@ -115,6 +133,27 @@ XML_CALL = (
         "<thinking>I will save it.</thinking>\ntext=Priya",
         # Markup outside code, next to code that discusses it.
         "Use `<tool_call>` to call.\n<tool_call>{}",
+        "A model writes it so:\n<tool_call>{}",
+        # Other formats' tokens, at the start of the text or of a line.
+        '<|python_tag|>{"name": "remember", "parameters": {"text": "x"}}',
+        '[TOOL_CALLS][{"name": "remember", "arguments": {"text": "x"}}]',
+        '<|tool_call|>[{"name": "remember", "arguments": {"text": "x"}}]',
+        '<function_call>{"name": "remember", "arguments": {"text": "x"}}</function_call>',
+        "<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>function<｜tool▁sep｜>remember",
+        "<|tool_calls_section_begin|><|tool_call_begin|>functions.remember:0",
+        "to=functions.remember <|constrain|>json",
+        "Saving it.\n[TOOL_CALLS]",
+        # A call as JSON or as code, as the whole reply.
+        '{"name": "remember", "arguments": {"text": "My manager is Priya Shah."}}',
+        '{"name": "remember"}',
+        '{"text": "My manager is Priya Shah.", "topic": "people"}',
+        '{"query": "notes"}',
+        '```json\n{"name": "remember", "arguments": {"text": "x"}}\n```',
+        '```tool_code\nremember(text="x")\n```',
+        '```json\n{"text": "x"}\n```',
+        'remember(text="My manager is Priya Shah.", topic="people")',
+        '[remember(text="My manager is Priya Shah.", topic="people")]',
+        "search_files(query='notes')",
     ],
 )
 def test_a_tool_call_written_as_text_is_broken(text: str) -> None:
@@ -172,6 +211,29 @@ def test_a_tool_call_written_as_text_is_broken(text: str) -> None:
         "Use <b>bold</b>.",
         "A <function> is a block of code.",
         "The <parameter> element is optional.",
+        # Markup named in the middle of a sentence.
+        "A model wraps each call in <tool_call> tags around a JSON object.",
+        "Wrap it in <tool_call> tags.",
+        "The template emits <tool_call> and </tool_call> around JSON.",
+        "A chat template writes <function=name> and <parameter=x> blocks.",
+        "Some models start with [TOOL_CALLS] and end with a closing tag.",
+        "The model emits <|python_tag|> before a call.",
+        "It says to=functions.remember when it calls a tool.",
+        # A space before the emoji, and a line that is not the name's.
+        "text ✅ 已记录",
+        "text ✅",
+        # JSON and calls that are not a call of an offered tool.
+        '{"manager": "Priya Shah"}',
+        '{"name": "Priya Shah"}',
+        '{"text": "x", "path": "a.py"}',
+        '{"name": "other_tool", "arguments": {}}',
+        '[{"name": "remember"}]',
+        'Here is the JSON: {"text": "x"}',
+        '```json\n{"manager": "Priya Shah"}\n```',
+        '```python\nremember(text="x")\n```',
+        '```tool_code\nprint("hi")\n```',
+        "I would call remember(text) for that.",
+        "remember that your manager is Priya Shah.",
         # Reasoning that mentions a call is not the answer.
         "<think>I will call <function_calls> now.</think>Done.",
         "<thinking>text</thinking>Done.",
@@ -179,6 +241,58 @@ def test_a_tool_call_written_as_text_is_broken(text: str) -> None:
 )
 def test_a_real_answer_is_not_broken(text: str) -> None:
     assert broken_tool_call(text, [REMEMBER, SEARCH, TINY]) is False
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # A full-width colon, arrows, math signs and punctuation are prose.
+        "path：~/Developer/x.py",
+        "title：周报",
+        "text：好的",
+        "answer：42",
+        "text：已记下你的经理是 Priya Shah。",
+        "code→ done",
+        "text→speech pipeline",
+        "level>3 means high",
+        "count+1 is the next value",
+        "count±2",
+        "url/path/to is wrong",
+        "title-case words",
+        "answer. Yes.",
+        "command; then more",
+        "url?",
+        'url" is a field',
+        # A name inside a longer word.
+        "levels are 1 to 5",
+        "counts differ",
+        "answered twice",
+        # A space ends the name.
+        "title Party plan",
+        "answer 42",
+        # A code span, or a line of the reply that is not the first.
+        "`path` is the field.",
+        "Here:\ntext\nmore",
+    ],
+)
+def test_prose_that_starts_with_a_parameter_name_is_not_broken(text: str) -> None:
+    assert broken_tool_call(text, [REMEMBER, SEARCH, EXTRAS]) is False
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["text✅", "text✅ 已记录", "query👍", "text🎉 Done", "path⚠️ missing"],
+)
+def test_an_emoji_right_after_a_parameter_name_is_broken(text: str) -> None:
+    assert broken_tool_call(text, [REMEMBER, SEARCH, EXTRAS]) is True
+
+
+@pytest.mark.parametrize("word", ["path", "text", "query", "topic", "title", "code"])
+def test_a_one_word_reply_that_is_a_parameter_name_is_broken(word: str) -> None:
+    # It is the shape the failure takes (a reply of just "text"); the cost is
+    # that a genuine one-word answer equal to a parameter name is asked again.
+    assert broken_tool_call(word, [REMEMBER, SEARCH, EXTRAS]) is True
+    assert broken_tool_call(word.capitalize(), [REMEMBER, SEARCH, EXTRAS]) is False
 
 
 def test_a_parameter_name_counts_only_for_a_tool_that_is_offered() -> None:
@@ -282,7 +396,7 @@ def _remember_call(call_id: str = "call_1", *, content: str = "") -> Message:
     )
 
 
-def _decision(action: str) -> Message:
+def _decision(action: str, **fields: Any) -> Message:
     flags = {
         "task_still_feasible": True,
         "next_step_is_concrete": True,
@@ -305,6 +419,7 @@ def _decision(action: str) -> Message:
         "novelty": 0.1,
         "feasibility": 0.5,
         **flags,
+        **fields,
     }
     return Message(role="assistant", content=json.dumps(data))
 
@@ -413,7 +528,12 @@ async def test_a_run_that_keeps_writing_the_call_fails_honestly() -> None:
     )
     assert "text" not in result.result and memory.calls == []
     assert len(llm.requests) == 2
-    assert _notices(events) == ["tool_call_as_text"]
+    # The reply that ends the run has its notice too, before the run ends, so
+    # that a display drops its text instead of showing it as the last words.
+    assert _notices(events) == ["tool_call_as_text", "tool_call_as_text"]
+    counts = [e.data["detail"]["count"] for e in events if e.type == "notice"]
+    assert counts == [1, 2]
+    assert [e.type for e in events][-2:] == ["notice", "run.finished"]
 
 
 async def test_the_broken_text_is_not_the_runs_answer_under_the_default_policy() -> (
@@ -497,6 +617,32 @@ async def test_a_row_of_an_empty_and_a_broken_reply_fails_with_the_honest_error(
     )
 
 
+async def test_a_row_of_unfinished_thinking_and_a_broken_reply_keeps_the_unfinished_error() -> (
+    None
+):
+    result, events, _, _ = await _run("<think>still going", "text✅ 已记录")
+    assert (result.status, result.error, result.result) == (
+        "failed",
+        UNFINISHED_ANSWER_ERROR,
+        "",
+    )
+    # The broken reply that ends the run still has its notice.
+    assert _notices(events) == ["unfinished_answer", "tool_call_as_text"]
+    assert [e.type for e in events][-2:] == ["notice", "run.finished"]
+
+
+async def test_a_row_of_a_broken_reply_and_unfinished_thinking_keeps_the_unfinished_error() -> (
+    None
+):
+    result, events, _, _ = await _run("text", "<think>still going")
+    assert (result.status, result.error, result.result) == (
+        "failed",
+        UNFINISHED_ANSWER_ERROR,
+        "",
+    )
+    assert _notices(events) == ["tool_call_as_text"]
+
+
 async def test_two_empty_replies_keep_their_own_error() -> None:
     result, events, _, _ = await _run("...", "")
     assert (result.status, result.error) == ("failed", "empty replies")
@@ -515,6 +661,10 @@ async def test_two_empty_replies_keep_their_own_error() -> None:
         "Use `<function_calls>` for a call.",
         '```xml\n<function_calls>\n<invoke name="remember">\n```',
         "好的，已记录。",
+        "A model wraps each call in <tool_call> tags around a JSON object.",
+        "text：已记下你的经理是 Priya Shah。",
+        "text→speech pipeline",
+        "text ✅ 已记录",
     ],
 )
 async def test_a_real_answer_ends_the_run(answer: str) -> None:
@@ -522,6 +672,76 @@ async def test_a_real_answer_ends_the_run(answer: str) -> None:
     assert (result.status, result.result) == ("completed", answer)
     assert len(llm.requests) == 1 and memory.calls == []
     assert _notices(events) == []
+
+
+STOPPED = "<tool_call>\n<function=remember>\n<parameter=text>\nx\n</parameter>"
+
+
+@pytest.mark.parametrize(
+    ("final", "answered"),
+    [
+        (STOPPED, False),
+        ("Text: I saved nothing yet.", True),
+    ],
+)
+async def test_the_answer_on_stop_is_never_a_tool_call_written_as_text(
+    final: str, answered: bool
+) -> None:
+    # The stopped run's extra request offers no tools, and a model can still
+    # answer it with the markup of a call.
+    llm = _Scripted(
+        _remember_call(), _decision("continue", next_step_is_novel=False), final
+    )
+    agent, _ = _agent(
+        llm,
+        attempt_policy="reflect",
+        reflection_gate="flags",
+        steps_per_attempt=1,
+        max_attempts=3,
+        answer_on_stop=True,
+    )
+    try:
+        outcome = await agent.run_task("My manager is Priya Shah.")
+    finally:
+        await agent.close()
+    assert outcome.status == "gate_stopped"
+    assert outcome.answered_on_stop is answered
+    assert outcome.result == (final if answered else "")
+    assert "<tool_call>" not in outcome.result
+
+
+@pytest.mark.parametrize(
+    ("final", "expected"),
+    [
+        (STOPPED, None),
+        (
+            "I stopped because auto mode blocked the step.",
+            "I stopped because auto mode",
+        ),
+    ],
+)
+async def test_the_explanation_of_a_block_is_never_a_tool_call_written_as_text(
+    final: str, expected: str | None
+) -> None:
+    agent, _ = _agent(_Scripted())
+
+    async def final_answer(*args: Any, **kwargs: Any) -> Message:
+        return Message(role="assistant", content=final)
+
+    agent.chat.final_answer = final_answer  # type: ignore[method-assign]
+    run = _RunState(task_id="t")
+    try:
+        task = cast(Any, SimpleNamespace(task_id="t", query="q"))
+        await agent._answer_on_block(task, run)
+    finally:
+        await agent.close()
+    assert run.status == "completed"
+    if expected is None:
+        # The fixed explanation stands in for it.
+        assert run.result.startswith("I stopped here: auto mode blocked")
+    else:
+        assert run.result.startswith(expected)
+    assert "<tool_call>" not in run.result
 
 
 async def test_the_broken_text_does_not_reach_the_window_or_the_history() -> None:

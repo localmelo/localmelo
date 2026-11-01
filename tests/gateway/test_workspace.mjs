@@ -167,17 +167,34 @@ test('a tool call written as text is replaced by its notice, and the answer is t
   assert.equal(turn.answer, 'Noted: your manager is Priya Shah.');
 });
 
-test('a turn that kept writing its tool call as text says so plainly', () => {
+test('a turn that kept writing its tool call as text says so plainly, and shows none of the text', () => {
   const {turn, push} = fullTurn();
-  push('assistant.message', {step: 1, content: 'text✅ Saved', tool_calls: []});
+  push('assistant.message', {step: 1, content: 'text✅ 已记录', tool_calls: []});
   push('notice', {kind: 'tool_call_as_text', message: 'asking again', step: 1, attempt: 1, detail: {count: 1}});
   push('step.started', {step: 2, attempt: 1});
   push('assistant.message', {step: 2, content: 'text', tool_calls: []});
+  // The reply that ends the run has its notice too, before the run ends.
+  push('notice', {kind: 'tool_call_as_text', message: 'asking again', step: 2, attempt: 1, detail: {count: 2}});
   push('run.finished', {result: {status: 'failed', result: '', error: turns.TOOL_CALL_TEXT, duration_s: 3, n_tool: 0, steps: 2}});
+  assert.deepEqual(turn.items.map((item) => item.kind), ['notice', 'notice'], 'no assistant text is shown, live or replayed');
+  assert.equal(turn.heldText, '');
   assert.equal(turn.answer, '', 'the broken text is not the answer');
   assert.equal(turns.TOOL_CALL_TEXT, 'tool call written as text');
   assert.deepEqual(statusText('failed', 'run', turns.TOOL_CALL_TEXT), {word: 'Failed', severity: 'warn', title: 'The model wrote a tool call as text'});
   assert.equal(nextAction('failed', 'run', turns.TOOL_CALL_TEXT), 'retry');
+});
+
+test('a run that ends on a broken reply after unfinished thinking shows none of the text', () => {
+  const {turn, push} = fullTurn();
+  push('assistant.message', {step: 1, content: '', thinking: UNFINISHED, tool_calls: []});
+  push('notice', {kind: 'unfinished_answer', message: "The model's reply ended inside its thinking; asking it for its answer.", detail: {}});
+  push('step.started', {step: 2, attempt: 1});
+  push('assistant.message', {step: 2, content: 'text✅ 已记录', tool_calls: []});
+  push('notice', {kind: 'tool_call_as_text', message: 'asking again', step: 2, attempt: 1, detail: {count: 2}});
+  push('run.finished', {result: {status: 'failed', result: '', error: turns.UNFINISHED_ANSWER, duration_s: 3, n_tool: 0, steps: 2}});
+  assert.deepEqual(turn.items.map((item) => item.kind), ['thinking', 'notice', 'notice']);
+  assert.ok(!turn.items.some((item) => item.kind === 'assistant_text'));
+  assert.equal(turn.answer, '');
 });
 
 test('a tool call runs, asks for approval and finishes', () => {

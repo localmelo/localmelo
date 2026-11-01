@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import json
 import re
 import time
 import unicodedata
@@ -367,16 +368,36 @@ def unfinished_as_thinking(content: str, thinking: str) -> str:
     return "\n\n".join(part for part in parts if part)
 
 
-# Markup in which a model writes a tool call out as text, in any letter case.
-_CALL_MARKUP = re.compile(
-    r"<(?:function_calls\s*>|invoke\s+name\s*=|function\s+invoke\b"
-    r"|tool_call\s*>|function\s*=|parameter\s*=|arg_key\s*>)",
+# Tags in which a model writes a tool call out as text, in any letter case. A
+# tag that is cut off, or never closed, counts too.
+_CALL_TAG = re.compile(
+    r"<(?:function_calls\s*>|tool_call\s*>|arg_key\s*>"
+    r"|invoke\s+name\s*=[^>\n]*>?|function\s+invoke\b[^>\n]*>?"
+    r"|function\s*=[^>\n]*>?|parameter\s*=[^>\n]*>?)",
     re.IGNORECASE,
+)
+# Tokens that open a tool call in other chat formats.
+_CALL_TOKENS = (
+    "<|python_tag|>",
+    "[TOOL_CALLS]",
+    "<|tool_call|>",
+    "<function_call>",
+    "<\uff5ctool\u2581calls\u2581begin\uff5c>",
+    "<|tool_calls_section_begin|>",
+    "to=functions.",
+)
+_CALL_TOKEN_AT_LINE_START = re.compile(
+    r"^[ \t]*(?:" + "|".join(re.escape(token) for token in _CALL_TOKENS) + ")",
+    re.IGNORECASE | re.MULTILINE,
 )
 _CODE_FENCE = re.compile(r"\s{0,3}(`{3,}|~{3,})")
 _INLINE_CODE = re.compile(r"(`+)(?!`).+?(?<!`)\1(?!`)")
-# A parameter name shorter than this is too likely a plain word or letter.
-_MIN_PARAMETER_NAME = 3
+# A whole reply that is one fenced block of JSON, or of a call as code.
+_CALL_BLOCK = re.compile(
+    r"```[ \t]*(json|tool_code)[ \t]*\n(.*?)\n?```", re.DOTALL | re.IGNORECASE
+)
+# A parameter or tool name shorter than this is too likely a plain word or letter.
+_MIN_CALL_NAME = 3
 
 
 def _outside_code(text: str) -> str:
@@ -400,19 +421,79 @@ def _outside_code(text: str) -> str:
     return _INLINE_CODE.sub(" ", "\n".join(kept))
 
 
+def _call_markup(body: str) -> bool:
+    """Whether *body* holds tool-call markup that is not part of a sentence.
+
+    A tag counts at the start of the text or of a line, or when ``{``, ``<``,
+    a line break or the end of the text follows it. A token counts at the
+    start of the text or of a line only.
+    """
+    if _CALL_TOKEN_AT_LINE_START.search(body):
+        return True
+    for tag in _CALL_TAG.finditer(body):
+        line_start = body.rfind("\n", 0, tag.start()) + 1
+        if not body[line_start : tag.start()].strip():
+            return True
+        rest = body[tag.end() :]
+        tail = rest.lstrip(" \t")
+        if not tail or tail[0] in "\r\n" or rest[0] in "{<":
+            return True
+    return False
+
+
+def _call_index(tools: Iterable[ToolDef]) -> dict[str, frozenset[str]]:
+    """The offered tools' parameter names (of three characters or more) by tool name."""
+    index: dict[str, frozenset[str]] = {}
+    for tool in tools:
+        if len(tool.name) < _MIN_CALL_NAME:
+            continue
+        properties = tool.parameters.get("properties")
+        names = properties if isinstance(properties, Mapping) else ()
+        index[tool.name] = frozenset(
+            name
+            for name in names
+            if isinstance(name, str) and len(name) >= _MIN_CALL_NAME
+        )
+    return index
+
+
+def _json_call(text: str, index: Mapping[str, frozenset[str]]) -> bool:
+    """Whether *text* is one JSON object that names an offered tool, or whose
+    keys are all parameters of one offered tool."""
+    try:
+        data = json.loads(text)
+    except (ValueError, RecursionError):
+        return False
+    if not isinstance(data, dict) or not data:
+        return False
+    name = data.get("name")
+    if isinstance(name, str) and name in index:
+        return True
+    keys = set(data)
+    return any(keys <= names for names in index.values())
+
+
+def _starts_with_tool_call(text: str, index: Mapping[str, frozenset[str]]) -> bool:
+    """Whether *text* starts with an offered tool's name and ``(``, in a list or not."""
+    body = text.lstrip()
+    if body.startswith("["):
+        body = body[1:].lstrip()
+    return any(body.startswith(name + "(") for name in index)
+
+
 def _call_remnant(after: str) -> bool:
     """Whether *after*, what follows a leading parameter name, is a call's remnant.
 
-    That is: nothing; ``=``; ``<``; a colon with no space after it; or a
-    symbol or emoji such as ``✅``. A letter, a digit, a space and ordinary
-    punctuation (``text is short``, ``text-based``, ``text.``) are prose.
+    That is: nothing; ``=``; ``<``; a line break; a colon with no space after
+    it; or an emoji (a symbol of category ``So``, such as ``✅``). A letter,
+    a digit, a space and punctuation, arrows and math signs (``text is
+    short``, ``text-based``, ``text.``, ``text→speech``) are prose.
     """
-    if not after:
+    if not after or after[0] in "=<\n" or after.startswith("\r\n"):
         return True
-    first = after[0]
-    if first in ":：":
+    if after[0] == ":":
         return len(after) == 1 or not after[1].isspace()
-    return first in "=<" or unicodedata.category(first).startswith("S")
+    return unicodedata.category(after[0]) == "So"
 
 
 def broken_tool_call(text: str, tools: Iterable[ToolDef] = ()) -> bool:
@@ -425,38 +506,56 @@ def broken_tool_call(text: str, tools: Iterable[ToolDef] = ()) -> bool:
     code, so an answer that discusses such markup is not flagged. It is
     broken when it:
 
-    - holds tool-call markup, in any letter case: ``<function_calls>``,
-      ``<invoke name=``, ``<function invoke``, ``<tool_call>``,
-      ``<function=``, ``<parameter=`` or ``<arg_key>``; or
-    - starts, after whitespace, with the name of a parameter of one of
-      *tools* (the tools offered on this step; names of three characters
-      or more, case-sensitive) that is followed by nothing, ``=``, ``<``,
-      a colon with no space after it, or a symbol or emoji. So ``text``,
-      ``text=My manager is Priya.`` and ``text✅ Saved`` are broken, and
-      ``text is short``, ``Text messages are…``, ``text-based`` and
-      ``topic of the day`` are answers.
+    - holds tool-call markup, in any letter case: a ``<function_calls>``,
+      ``<tool_call>``, ``<arg_key>``, ``<invoke name=``, ``<function invoke``,
+      ``<function=`` or ``<parameter=`` tag at the start of the text or of a
+      line, or followed by ``{``, ``<``, a line break or the end of the text
+      (never in the middle of a sentence); or one of the tokens
+      ``<|python_tag|>``, ``[TOOL_CALLS]``, ``<|tool_call|>``,
+      ``<function_call>``, ``<｜tool▁calls▁begin｜>``,
+      ``<|tool_calls_section_begin|>`` and ``to=functions.`` at the start of
+      the text or of a line; or
 
-    A reply with real tool calls is not judged: its text accompanies them.
+    - needs the tools offered on this step (*tools*; names of three
+      characters or more) and is, as a whole, one JSON object (or one
+      fenced ``json`` or ``tool_code`` block) that has an offered tool as its
+      ``name`` or has only parameters of one offered tool as its keys; or
+      starts with an offered tool's name and ``(``; or starts, after
+      whitespace, with the name of a parameter of an offered tool
+      (case-sensitive) followed by nothing, ``=``, ``<``, a line break, a
+      colon with no space after it, or an emoji. So ``text``,
+      ``text=My manager is Priya.``, ``text:Priya``, ``text\nMy manager…``
+      and ``text✅ Saved`` are broken, and ``text is short``, ``Text
+      messages…``, ``text-based``, ``text: here`` and ``text ✅`` are answers.
+
+    A one-word reply that is the name of a parameter (``path``) is broken
+    too: it is the shape the failure takes, and the model is asked once
+    more. A reply with real tool calls is not judged: its text accompanies
+    them.
     """
-    body = _outside_code(split_thinking(text)[1])
-    if _CALL_MARKUP.search(body):
+    index = _call_index(tools)
+    answer = split_thinking(text)[1]
+    if index:
+        whole = answer.strip()
+        block = _CALL_BLOCK.fullmatch(whole)
+        inner = whole if block is None else block.group(2).strip()
+        if _json_call(inner, index) or (
+            block is not None and _starts_with_tool_call(inner, index)
+        ):
+            return True
+    body = _outside_code(answer)
+    if _call_markup(body):
         return True
     lead = body.strip()
-    if not lead:
+    if not lead or not index:
         return False
-    for tool in tools:
-        properties = tool.parameters.get("properties")
-        if not isinstance(properties, Mapping):
-            continue
-        for name in properties:
-            if (
-                isinstance(name, str)
-                and len(name) >= _MIN_PARAMETER_NAME
-                and lead.startswith(name)
-                and _call_remnant(lead[len(name) :])
-            ):
-                return True
-    return False
+    if _starts_with_tool_call(lead, index):
+        return True
+    return any(
+        lead.startswith(name) and _call_remnant(lead[len(name) :])
+        for names in index.values()
+        for name in names
+    )
 
 
 # ── Data types ──

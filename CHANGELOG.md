@@ -497,7 +497,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   "text" or a false "recorded" while nothing ran. localmelo now asks the model
   again and tells it what went wrong; a run whose replies keep doing it ends
   `failed` with the error `tool call written as text`. The terminal, the
-  console and the app show a quiet notice, never the text.
+  console and the app show a quiet notice, never the text, also for the last
+  reply of a failed run and when the turn is loaded again. It looks at the
+  shape only: call markup that starts the reply or a line, a reply that is
+  only a call as JSON or code, or one that starts with a tool's parameter name
+  and a leftover of a call. Prose, code blocks and sentences about such markup
+  are answers. A one-word reply that is just a parameter name is asked again
+  too. The same markup is no longer taken for an answer on stop or for the
+  explanation of a blocked step, nor shown as a task's last note.
 - The console and the app show a reply that starts with a closed
   `<thinking>...</thinking>` block as thinking, as the terminal already did,
   instead of as part of the answer.

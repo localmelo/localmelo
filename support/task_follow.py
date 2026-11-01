@@ -17,6 +17,8 @@ from urllib.parse import quote
 
 import httpx
 
+from localmelo.melo.schema import broken_tool_call
+
 
 class FollowError(Exception):
     """The follow could not be completed; messages never include response bodies."""
@@ -92,6 +94,9 @@ def _summary(kind: str, data: Mapping[str, Any]) -> str:
             parts.append(f"attempt {attempt}")
         return ", ".join(parts)
     if kind == "assistant.message":
+        said = data.get("content")
+        if isinstance(said, str) and broken_tool_call(said):
+            return "a tool call written as text, not run"
         if content := _field(data, "content"):
             return content
         if thinking := _field(data, "thinking"):

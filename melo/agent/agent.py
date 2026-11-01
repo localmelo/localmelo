@@ -5241,8 +5241,11 @@ class Agent:
         no answer either, and counts as an empty reply with a label, a nudge
         and a ``tool_call_as_text`` notice of its own. Its text is never the
         run's latest text, and a row that held one ends the run with the error
-        :data:`~localmelo.melo.schema.TOOL_CALL_TEXT_ERROR`. The step's
-        ``assistant.message`` event still has what the model sent.
+        :data:`~localmelo.melo.schema.TOOL_CALL_TEXT_ERROR` (unless the row
+        also held unfinished thinking, whose error wins). The step's
+        ``assistant.message`` event still has what the model sent, and the
+        notice follows it even when this reply ends the run, so a display
+        drops the text before ``run.finished``.
         """
         fingerprints: list[tuple[str, str, str]] = []
         reflections = (
@@ -5417,6 +5420,10 @@ class Agent:
                 run.empty_replies += 1
                 run.unfinished_row = run.unfinished_row or unfinished
                 run.broken_row = run.broken_row or broken
+                if broken:
+                    # Before the row's limit: the reply that ends the run is
+                    # dropped from the displays too, never shown as text.
+                    run.events.tool_call_as_text(run.empty_replies)
                 if run.empty_replies >= MAX_EMPTY_REPLIES:
                     run.end(
                         "failed",
@@ -5462,9 +5469,7 @@ class Agent:
                 )
                 if unfinished:
                     run.events.unfinished_answer()
-                elif broken:
-                    run.events.tool_call_as_text(run.empty_replies)
-                else:
+                elif not broken:
                     run.events.empty_reply(run.empty_replies)
                 continue
             run.empty_replies = 0
@@ -6761,6 +6766,8 @@ class Agent:
                 )
             )
             answer, thinking = reply.content.strip(), reply.thinking
+            if broken_tool_call(answer):  # no tools were offered: not an answer
+                answer, thinking = "", ""
         except CallBudgetError as exc:
             logger.info(
                 "No call left to explain the block of %s: %s", task.task_id, exc
@@ -6815,7 +6822,8 @@ class Agent:
             return
         reply = _split_inline_reasoning(reply)
         answer = reply.content.strip()
-        if not answer:
+        # A request without tools can still get a tool call written as text.
+        if not answer or broken_tool_call(answer):
             return
         run.result = answer
         run.answered_on_stop = True
