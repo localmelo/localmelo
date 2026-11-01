@@ -152,9 +152,11 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 
 - 在终端聊天里用 `/browser on` 打开它，或用 `melo -X browser.driver=safari-automation` 只对一次运行生效。
 - 在 Safari 里打开“设置 > 开发者”，把 “Allow remote automation” 打开一次。
-- 之后终端聊天和网页控制台会得到八个工具：`browser_open`、`browser_read`、`browser_find`、`browser_follow`、`browser_back`、`browser_tabs`、`browser_wait` 和 `browser_screenshot`。
+- 之后终端聊天以及网页控制台和 App 的每个聊天会得到八个工具：`browser_open`、`browser_read`、`browser_find`、`browser_follow`、`browser_back`、`browser_tabs`、`browser_wait` 和 `browser_screenshot`。
 - 它们在 Safari 自己的自动化窗口里工作，这些窗口启动时不带你的任何登录状态。
 - melo 加载网页之前会问 “Open a website?”，每个网站在一个聊天里问一次（`auto` 模式同样会问）；它不会点击、输入、登录或发布。直接运行、worker 和保存的任务从不会得到这些工具。
+
+不用 Safari 时，每个聊天和任务都可以用 `web_fetch` 读取公开网页，它默认开启（见[不用浏览器读取网页](browsing.md#read-a-page-without-the-browser)）。
 
 <a id="what-the-checks-do"></a>
 
@@ -216,6 +218,7 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 | `network` | 向本机外的对象发送数据或对其执行操作：HTTP API、聊天、支付、图形界面等。 | 是。 |
 
 - 内置工具的级别按名称固定：`file_read` 和 `list_files` 是 `read`，`file_write` 是 `write`，`shell_exec` 和 `python_exec` 是 `exec`。
+- `web_fetch` 和浏览工具虽然会访问互联网，但有意定为 `read`：它们不在任何地方做更改，调用本身也不需要审批。它们请求的地址仍可能把数据带出去，所以改由网站关卡来问：浏览器每个网站每个对话问一次；`web_fetch` 直接读取你自己最近的消息提到的网站（就是那个主机，`www.` 不计），其他网站每个对话问一次，并与浏览器共用同一个回答。`web_fetch` 从不访问这台电脑或它的局域网。
 - 该表优先于工具自身的声明，因此复用内置工具名称的提供的工具或自定义工具会继承该级别。
 - 模式决定实际提供哪些内置工具（见[选择内置工具](#choose-the-built-in-tools)）；网关或控制台会话在通常的三个之外还获得 `list_files`。
 - 除交互式界面外，各模式都不注册 `shell_exec`，因此模型仍然调用它时会收到 `shell_exec is not available in this run. Available tools: …`，其中列出本次运行的工具（未知的非内置名称仍使用 `Tool not found in registry` 消息）。
@@ -241,10 +244,10 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 
 | 主题 | 行为 |
 |---|---|
-| 范围限制 | `file_read` 和 `file_write` 相对于根目录解析相对路径，在解析 `..` 和符号链接后，只能访问真实路径位于根目录内的文件。外部路径会以 `Path '<path>' is outside allowed workspace root` 拒绝；空路径或包含 NUL 字符的路径以 `Argument 'path' for <tool> must be a non-empty string without NUL characters.` 拒绝。工具获得解析后的路径。 |
-| 限制不覆盖的情况 | `~` 不会展开，与根目录字母大小写不同的路径会被拒绝，硬链接不会被检测。 |
+| 范围限制 | `file_read` 和 `file_write` 相对于根目录解析相对路径，只能访问根目录内的文件，以文件系统为它们给出的路径为准：先解析 `..`、符号链接、不同的字母大小写和别名（macOS 的 `/.vol`、`/.resolve`、`/.nofollow`）。外部路径无论指向哪里，都会以 `Path '<path>' is outside allowed workspace root` 拒绝，除非可以询问一个人（见[工作区之外的文件夹](#folders-outside-the-workspace)）；空路径或包含 NUL 字符的路径以 `Argument 'path' for <tool> must be a non-empty string without NUL characters.` 拒绝。工具获得解析后的路径。 |
+| 限制不覆盖的情况 | `~` 不会展开，硬链接不会被检测。在不区分大小写的文件系统上，与根目录字母大小写不同的路径指向根目录内的文件，算作在根目录内。 |
 | `list_files` | 受同样的限制；不带路径（或路径为空）时列出根目录。它打开文件夹时不跟随符号链接，也不会进入其中的链接，因此指向根目录之外的链接显示为 `name@`，其目标不会被列出。 |
-| 打开文件 | 文件工具打开解析后的路径时不跟随符号链接，因此检查后取代文件的符号链接会被拒绝。非普通文件，例如 FIFO，会以 `Not a regular file: <path>` 拒绝。 |
+| 打开文件 | 文件工具打开解析后的路径时不跟随符号链接，并且在 macOS 和 Linux 上，打开的文件必须就是检查过的那个，因此检查后取代文件或路径上某个文件夹的符号链接会以 `Path '<path>' changed before it was opened; the call did not run.` 拒绝。非普通文件，例如 FIFO，会以 `Not a regular file: <path>` 拒绝。 |
 | 大小 | `file_read` 最多读取 200,000 字节。超过该大小或文本超过 50,000 字符的文件会按整行截断，末尾为 `... [truncated: the file has <n> lines; showing 1-<k>; read more with start_line=<k+1>]`（只有一行的文件为 `... [truncated: the file has <size> bytes]`）。 |
 | 行范围 | `file_read` 接受 `start_line` 和 `end_line`（从 1 开始计数，含两端），长文件因此可以分段读取。读到的部分末尾为 `... [the file has 1,240 lines; showing 1-400; read more with start_line=401]`，读到文件末尾时除外（此时为 `showing 801-1240`）；`start_line` 超出文件末尾会报错，并说明文件有多少行。melo 只统计前 64 MB 的行数（更长的文件报告为 `N+`）。 |
 | 命令 | `shell_exec` 和 `python_exec` 在拥有独立进程组的子进程中运行，超时或取消会终止它及其启动的所有进程；根目录只决定它们的启动目录。它们不受范围限制，可以访问任何路径；但在 macOS 上，worker 运行和保存的任务会拒绝它们在工作区之外的写入（`AgentOptions(confine_writes=True)`）。 |
@@ -282,6 +285,25 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 | 拒绝 | 会阻止调用。模型读取拒绝原因，例如 `The user denied this call. Do not run it again or reach the same result another way unless the user asks.` |
 | 故障时默认拒绝 | 引发错误或不返回决策的策略会以 `Approval failed, so the call did not run: <ExceptionType>: <message>` 拒绝调用。 |
 | 再次检查 | 在工作区根目录下，策略允许文件工具调用后会再次解析路径。如果此时路径解析到其他位置，例如策略决策期间符号链接取代了文件，会以 `Path '<path>' changed while waiting for approval; the call did not run.` 拒绝。 |
+
+<a id="folders-outside-the-workspace"></a>
+
+### 工作区之外的文件夹
+
+在你发起的对话或任务里，文件工具的路径在工作区之外时，melo 会询问你，而不是拒绝。卡片和终端面板会写出真实的文件夹（解析符号链接和 `..` 之后），以及这次调用是读取还是写入。
+
+| 回答 | 允许什么 |
+|---|---|
+| **允许一次** | 只有这一次调用。 |
+| **在这个对话里允许这个文件夹** | 在对话结束之前，读取这个文件夹及其下的内容（在任务里：到任务结束）。这个对话发起的任务也使用它允许的文件夹。 |
+| **总是允许这个文件夹** | 在你发起的每个对话和任务里都可以读取；这个文件夹记在设置的 **对话和文件夹** 里，你可以在那里移除（`[workspace] extra_folders`）。 |
+| **拒绝** | 什么都不运行；模型会读到一行写明文件夹的话，然后是通常的拒绝说明。 |
+
+- **读取和写入分开。** 文件夹授权只包括读取。在工作区之外写入属于高影响操作：每次都会询问，只提供 **允许一次** 和 **拒绝**，任何授权都不包括它。
+- **授权按文件系统给出的路径覆盖一个文件夹，** 以路径边界为准：`~/Documents/letters` 包括 `~/Documents/letters/cover-letter.md`，但不包括 `~/Documents/letters-old`。符号链接按它指向的目标计算，所以允许的文件夹里指向别处的链接会再次询问。文件系统别名（macOS 的 `/.vol`、`/.resolve`、`/.nofollow`）无论指向哪里，都从不提供、授权或记住。
+- **从不提供：** 密钥和凭据所在的位置（`~/.ssh`、`~/.gnupg`、`~/Library/Keychains`、`~/.aws`、`~/.config/gcloud`、`~/.kube`、`~/.docker/config.json`、`~/.netrc`、`~/.oci`、`~/.terraform.d`、`~/.cargo/credentials`、`~/.vault-token`、`~/.config/cloudflared`、密码库、浏览器配置、聊天应用的数据和命令行编程代理的登录信息）、melo 自己的数据文件夹（`~/.cache/localmelo`）、系统文件夹（`/System`、`/Library`、`/etc`、`/bin`、`/sbin`、除 `/usr/local` 以外的 `/usr`、`/dev`），以及你的整个主文件夹或 `/`。这些位置会直接拒绝并说明原因，不询问任何人。直接位于主文件夹里的文件可以允许一次，但不会记住它的文件夹。列出一个允许的文件夹时，这样的位置显示为 `name/ (not offered)`，不会进入。
+- **自动模式从不自行允许这样的路径：** 在 Auto 中卡片也会询问你。
+- **没有人可以询问时：** 直接运行、`--yolo`、deny 模式、不是你发起的任务（定时杂务、其他代理发起的任务），以及回答任务的对话轮次，都会像以前一样拒绝这个路径，对任何路径都是同一句 `Path '<path>' is outside allowed workspace root`。
 
 <a id="high-impact-calls"></a>
 

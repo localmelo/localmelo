@@ -24,7 +24,7 @@ const LANGUAGE_SETTINGS = ["auto", "en", "zh-Hans"];
 // How a new chat starts (#339): `[approvals] mode`.
 const APPROVAL_MODES = ["ask", "auto"];
 // `melo -h all` lists the settings by section; `settings.group.<section>` are the names people read.
-const GROUPS = new Set(["agent", "retrieval", "memory", "endpoint", "sessions", "cli", "ui", "scheduler", "browser", "gateway", "console"]);
+const GROUPS = new Set(["agent", "retrieval", "memory", "endpoint", "sessions", "cli", "ui", "scheduler", "browser", "tools", "gateway", "console", "workspace"]);
 const groupName = (section) => (section === "" ? t("settings.group.general") : GROUPS.has(section) ? t(`settings.group.${section}`) : section);
 const LOCAL_FIELDS = ["chat_url", "chat_model"];
 const CLOUD_FIELDS = ["api_key_env", "base_url", "chat_model"];
@@ -96,7 +96,7 @@ export function setupSettings({
   const inputIds = ["s-adapter", "s-chat-url", "s-key-env", "s-base-url", "s-chat-model", "s-embed-backend", "s-embed-url",
     "s-embed-model", "s-embed-use"];
   // Each saves on its own; they wait while a change is being saved.
-  const switchIds = ["s-across-chats", "s-developer", ...RECALL.map((name) => `s-recall-${name}`),
+  const switchIds = ["s-across-chats", "s-web-fetch", "s-developer", ...RECALL.map((name) => `s-recall-${name}`),
     ...LANGUAGE_SETTINGS.map((name) => `s-language-${name}`), ...APPROVAL_MODES.map((name) => `s-approvals-${name}`)];
   let settings = null;
   let sections = {};
@@ -406,10 +406,49 @@ export function setupSettings({
     });
     if (!rows.length) rows.push(Object.assign(document.createElement("li"), {className: "st-empty", textContent: t("settings.folder.recentEmpty")}));
     $("s-recent").replaceChildren(...rows);
+    extraFolders();
     // A gateway that does not report it has no mode for new chats to change.
     $("s-approvals-row").hidden = settings.approvals === undefined;
     for (const name of APPROVAL_MODES) $(`s-approvals-${name}`).checked = name === (settings.approvals || "ask");
+    // Reading public web pages (`[tools] web_fetch`); a gateway that does not report it has no switch.
+    $("s-web-fetch-row").hidden = settings.web_fetch === undefined;
+    $("s-web-fetch").checked = settings.web_fetch !== false;
     notes();
+  }
+
+  // The folders "Always allow this folder" kept (#405): each can be removed, with Undo. One melo never
+  // opens is shown struck through and is never used. A gateway that does not report the list hides it.
+  function extraFolders() {
+    const kept = Array.isArray(settings.extra_folders) ? settings.extra_folders : null;
+    for (const id of ["s-extra-title", "s-extra-hint", "s-extra"]) $(id).hidden = kept === null;
+    if (kept === null) return;
+    const make = (tag, className, text) => Object.assign(document.createElement(tag), {className, textContent: text});
+    const rows = kept.map((item) => {
+      const path = String(item.path ?? "");
+      const row = make("li", "st-row", "");
+      row.dataset.valid = String(item.valid !== false);
+      const text = make("div", "st-text", "");
+      text.append(make("span", "st-label", String(item.name || folderName(path))), make("span", "st-mono", path));
+      if (item.valid === false) text.append(make("p", "st-hint", t("settings.extra.invalid")));
+      const remove = make("button", "quiet-button", t("settings.extra.remove"));
+      remove.type = "button";
+      remove.disabled = saving;
+      remove.setAttribute("aria-label", t("settings.extra.removeLabel", {folder: path}));
+      remove.addEventListener("click", () => removeExtra(path));
+      const actions = make("div", "st-actions", "");
+      actions.append(remove);
+      row.append(text, actions);
+      return row;
+    });
+    if (!rows.length) rows.push(make("li", "st-empty", t("settings.extra.empty")));
+    $("s-extra").replaceChildren(...rows);
+  }
+  function removeExtra(path) {
+    const before = (settings?.extra_folders || []).map((item) => String(item.path ?? ""));
+    if (!before.includes(path)) return;
+    const after = before.filter((item) => item !== path);
+    commit({extra_folders: after}, t("settings.extra.removed", {folder: path}),
+      () => commit({extra_folders: before}, t("settings.undone", {what: t("settings.extra.restored", {folder: path})})));
   }
 
   function scheduled() {
@@ -577,6 +616,12 @@ export function setupSettings({
     if (saving || !settings) { event.target.checked = !on; return; }
     if (settings.across_chats === undefined) return; // an older gateway saves it with the connection
     settingCommit("across_chats", on, t(on ? "settings.across.on" : "settings.across.off"), !on, t(on ? "settings.across.off" : "settings.across.on"));
+  });
+  $("s-web-fetch").addEventListener("change", (event) => {
+    const on = event.target.checked;
+    if (saving || !settings || settings.web_fetch === undefined) { event.target.checked = !on; return; }
+    const words = (value) => t(value ? "settings.webFetch.on" : "settings.webFetch.off");
+    settingCommit("web_fetch", on, words(on), !on, words(!on));
   });
   for (const name of RECALL) {
     $(`s-recall-${name}`).addEventListener("change", (event) => {

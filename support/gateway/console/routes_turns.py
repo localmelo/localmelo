@@ -106,7 +106,9 @@ class CancelRequest(Body):
 
 
 class ApprovalAnswer(Body):
-    choice: Literal["once", "session", "deny"]
+    # "always" is for a folder outside the workspace (#405): it keeps the
+    # folder in the settings' extra folders.
+    choice: Literal["once", "session", "always", "deny"]
     reason: str = ""
 
 
@@ -544,12 +546,21 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 "invalid_request",
                 f"reason: at most {_MAX_REASON_CHARS} characters",
             )
+        asked = console.broker.request(request_id)
+        outside = None if asked is None else asked.outside
         if body.choice == "once":
             decision = ApprovalDecision(True)
+        elif body.choice in ("session", "always") and outside is not None:
+            # A folder outside the workspace (#405): a write, or a folder that
+            # may not be granted, is allowed once and granted nothing.
+            grant = outside.grantable
+            always = grant and body.choice == "always"
+            decision = ApprovalDecision(True, remember=grant, always=always)
+        elif body.choice == "always":
+            raise ApiError(400, "invalid_request", t("errors.alwaysNotFolder"))
         elif body.choice == "session":
             # A high-impact call is never granted for the chat: this answer
             # allows the one call, and the reply says so.
-            asked = console.broker.request(request_id)
             grant = asked is None or offers_grant(asked.review)
             decision = ApprovalDecision(True, remember=grant)
         else:
@@ -564,6 +575,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 "request_id": request_id,
                 "outcome": "allowed" if decision.allow else "denied",
                 "remember": decision.remember,
+                "always": decision.always,
             }
         )
 

@@ -79,6 +79,7 @@ chat_model = "qwen3:8b"
 | `host` | `[gateway]` | `"127.0.0.1"` | 回环监听地址；拒绝非回环绑定。 |
 | `port` | `[gateway]` | `8401` | 网关监听的端口。 |
 | `workspace` | `[gateway]` | `""` | 网页控制台会话的默认工作区文件夹（为空时为 `~/localmelo-workspace`）；仅在设置时写入。 |
+| `extra_folders` | `[workspace]` | `[]` | 在你发起的对话或任务里，melo 可以不经询问读取的工作区之外的文件夹（包括其下的内容）：每一项由审批卡片上的 **总是允许这个文件夹** 加入，在设置的 **对话和文件夹** 中移除。按真实路径保存（主文件夹写作 `~/`）。在那里写入仍然每次都会询问。不是绝对路径或 `~/` 开头的项、`/`、主文件夹或它上面的文件夹，以及 melo 从不打开的位置（密钥、它自己的数据、系统文件夹）都是设置错误，永远不会使用；最多 100 项。只有列表里有文件夹时才写入。见[工作区之外的文件夹](../guides/tools-mcp.md#folders-outside-the-workspace)。 |
 | `stream` | `[cli]` | `true` | 仅在交互式界面使用的实时流式，除非关闭否则默认开启（`/stream off`、`-X cli.stream=false`、`melo config set cli.stream false`）；没有该界面的运行从不流式。`/new` 会把 `/stream` 恢复为此值。无效值在界面中警告并回退；直接运行和网关不会因此失败。见[流式回复](../guides/terminal.md#streamed-replies)。 |
 | `status_line` | `[cli]` | `"auto"` | `"auto"`：交互式状态栏根据已收到的事件显示用量区（词元数或费用、`ctx`、缓存和空闲时间或速率限制），网关有任务时还显示任务。`"off"`：只保留运行区（标题或运行中轮次的步骤）和上一次请求的 `ctx`。高级选项：没有命令行参数。其他值在界面中警告并回退；直接运行和网关不会因此失败。见[状态栏](../guides/terminal.md#the-status-bar)。 |
 | `chat` | `[cli]` | `"main"` | 不带任务的 `melo` 打开什么。`"main"`：经网关的主对话，没有网关运行时在后台启动一个。`"local"`：终端自己的对话，不经网关（一次运行用 `-X cli.chat=local`；`-u`、`-c`、`-r` 和 `--yolo` 也会打开它）。开发者设置；其他值会警告并回退。见[主对话](../guides/terminal.md#the-main-chat)。 |
@@ -91,7 +92,8 @@ chat_model = "qwen3:8b"
 | `resume_mode` | `[sessions]` | `"pairs"` | 终端对话恢复：`pairs` 加载最近的用户/答案对；`window` 加载保存的工作窗口加上之后的问答对，没有可用的检查点时回退。无效值只在界面中警告或回退；直接运行不读取此设置。 |
 | `record_direct` | `[sessions]` | `true` | 把每次直接运行（`melo "<task>"`、`melo --brief FILE`）记录为 `~/.cache/localmelo/cli/sessions.db` 中的 worker 会话，网页控制台的 Workers 视图和 macOS 应用会读取它。只有 `false` 会关闭；`--no-save-session` 对单次运行起同样作用，`--save-session` 或 `--parent-run` 仍会记录。只在为 `false` 时写入。见 [Worker 历史记录](cli.md#worker-历史记录)。 |
 | `policy` | `[scheduler]` | `"off"` | 网页工作区的调用如何到达模型服务器：`off` 只记录，`fcfs` 先到先得，`class` 让 P1 先于 P2 得到准入（依此类推）；见[调度器](../guides/scheduler.md#the-gate-on-chats-s2)。 |
-| `driver` | `[browser]` | `"off"` | melo 是否可以在浏览器中读取网页：`off` 不提供浏览工具；`safari-automation` 为终端对话和网页控制台提供八个只读工具，在 Safari 的自动化窗口中打开网页（每个网站每次对话询问一次；见[用 melo 浏览网页](../guides/browsing.md)）。终端中用 `/browser` 切换；`-X browser.driver=safari-automation` 仅用于一次运行。直接运行、worker 运行和已保存的任务从不获得这些工具。其他任何值都是配置错误。 |
+| `driver` | `[browser]` | `"off"` | melo 是否可以在浏览器中读取网页：`off` 不提供浏览工具；`safari-automation` 为终端对话以及网页控制台和 App 的每个对话提供八个只读工具，在 Safari 的自动化窗口中打开网页（每个网站每次对话询问一次；见[用 melo 浏览网页](../guides/browsing.md)）。终端中用 `/browser` 切换；`-X browser.driver=safari-automation` 仅用于一次运行。直接运行、worker 运行和已保存的任务从不获得这些工具。其他任何值都是配置错误。 |
+| `web_fetch` | `[tools]` | `true` | 对话和任务是否可以用 `web_fetch` 工具读取公开网页（只读；从不访问这台电脑或它所在的局域网；你自己最近的消息没有提到的网站每个对话问一次，与浏览器共用；见[工具](tools.md#reading-a-public-web-page)）。`false` 移除这个工具；设置 → 对话和文件夹 → **读取网页** 是同一个开关；`-X tools.web_fetch=off` 仅用于一次运行。直接运行从不获得它。不是布尔值的任何值都是配置错误。 |
 | `n_srv` | `[scheduler]` | `8` | 模型服务器的槽位数。 |
 | `r_f` | `[scheduler]` | `1` | 为命令行和直接运行保留的槽位数；`n_srv <= 2` 时强制为 0。 |
 | `n_fg` | `[scheduler]` | `1` | 有聊天处于焦点时允许在途的后台调用数。 |
@@ -353,7 +355,7 @@ enable_thinking = false
 - 对 `ollama` 后端，这些字段进入 Ollama `/api/chat` 的请求体。localmelo 默认向 Ollama 请求模型的思考；`extra_body = { think = false }` 会关闭它。
 - `--base-url` 不读取配置文件，因此 `extra_body` 在那里不适用。
 
-驱动为 `off` 的 `[browser]` 表不会写入。
+驱动为 `off` 的 `[browser]` 表不会写入，`web_fetch` 为 `true` 的 `[tools]` 表也不会。
 
 <a id="mcp-servers"></a>
 

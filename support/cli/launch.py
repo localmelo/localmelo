@@ -30,6 +30,7 @@ from localmelo.melo.agent.options import reasoning_refusal
 from localmelo.melo.contracts import own_gateway
 from localmelo.support import config, gateway_endpoint, onboard
 from localmelo.support.backends import discovery
+from localmelo.support.browser import configured_driver
 from localmelo.support.cli.views import BackendInfo
 from localmelo.support.sessions.agents import (
     configured_cache_options,
@@ -543,12 +544,8 @@ async def main_async(
 
     store = SessionStore(writer="cli")
     factory: AgentFactory | None = None
-    browser_driver = config.load().browser.driver
-    if browser_driver not in config.BROWSER_DRIVERS:
-        logging.getLogger(__name__).warning(
-            "Invalid [browser] driver %r; browsing is off", browser_driver
-        )
-        browser_driver = "off"
+    loaded = config.load()
+    browser_driver = configured_driver(loaded)
     try:
         try:
             await store.open()
@@ -570,6 +567,7 @@ async def main_async(
             mcp_servers=mcp_servers,
             saves=choice.saves,
             browser_driver=browser_driver,
+            web_fetch=loaded.tools.web_fetch is True,
         )
         try:
             agent = await factory.build()

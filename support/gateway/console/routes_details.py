@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse, Response
 
 from localmelo.melo.schema import Message, ToolInfo
 from localmelo.support.gateway.i18n import t
+from localmelo.support.sessions import display
 from localmelo.support.sessions.store import SessionInfo, SessionStoreError, TurnInfo
 
 from .errors import ApiError
@@ -102,6 +103,11 @@ def add_routes(app: FastAPI, console: Console) -> None:
         return JSONResponse(
             content={
                 "tools": [tool_json(tool, tool.name in granted) for tool in tools],
+                # The folders outside the workspace this chat may read in (#405).
+                "folders": [
+                    {"path": folder, "label": display.home_label(folder)}
+                    for folder in entry.policy.allowed_folders
+                ],
                 # The steps the person allowed here, which this chat's tasks may run again.
                 "approvals": [approval.to_json() for approval in recorded],
                 "mcp_config_label": "",
@@ -124,6 +130,20 @@ def add_routes(app: FastAPI, console: Console) -> None:
         console.require_store()
         await _require_session(console, session_id)
         console.sessions.forget_grant(session_id)
+        return Response(status_code=204)
+
+    @app.delete("/api/sessions/{session_id}/folders")
+    async def forget_folder(session_id: str, path: str = "") -> Response:
+        """Take back the chat's grant of one folder outside the workspace (#405).
+
+        The folder is the ``path`` query parameter; without one, or for a
+        folder the chat was not granted, the answer is 404.
+        """
+        console.require_store()
+        await _require_session(console, session_id)
+        entry = console.sessions.get(session_id)
+        if entry is None or not entry.policy.forget_folder(path):
+            raise ApiError(404, "not_found", t("errors.noGrant"))
         return Response(status_code=204)
 
     @app.delete("/api/sessions/{session_id}/approvals/{entry_id}")

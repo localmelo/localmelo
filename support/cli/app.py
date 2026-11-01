@@ -68,10 +68,12 @@ from localmelo.melo.contracts.review import offers_grant
 from localmelo.support.cli.approvals import (
     BODY_LINES,
     ESCAPED_WARNING,
+    FOLDER_RULE,
     NO_GRANT_RULE,
     REASON_MAX_CHARS,
     PendingApproval,
     TerminalApprover,
+    folder_options,
     panel_text,
     session_option,
     session_warning,
@@ -1012,6 +1014,9 @@ class InteractiveApp:
         options = [(0, "Yes")]
         if pending.offer_session:
             options.append((1, session_option(pending.request)))
+        if pending.offer_always:
+            # A folder outside the workspace kept in the settings (#405).
+            options.append((3, folder_options(pending.request)[1]))
         options.append((2, "No, and tell melo why"))
         return options
 
@@ -1049,7 +1054,9 @@ class InteractiveApp:
             options += wrapped(style, f"{mark} {number}. {label}", width, "     ")
         keys: list[tuple[str, str]] = []
         if not pending.reason:
-            if pending.offer_session:
+            if pending.offer_always:
+                options += wrapped("", "  " + FOLDER_RULE, width, "  ")
+            elif pending.offer_session:
                 where = home_label(pending.request.workspace_root or "")
                 for line in session_warning(pending.request.tool_name, where):
                     options += wrapped("", "  " + line, width, "  ")
@@ -1204,6 +1211,8 @@ class InteractiveApp:
             self.approver.answer("once")
         elif index == 1:
             self.approver.answer("session")
+        elif index == 3:
+            self.approver.answer("always")
         elif index == 2:
             pending.selected = 2
             pending.reason = True
@@ -1239,7 +1248,7 @@ class InteractiveApp:
         choices = has_focus(self.panel_window)
         reason = has_focus(self.reason)
 
-        for number in (1, 2, 3):
+        for number in (1, 2, 3, 4):
 
             @kb.add(str(number), filter=choices)
             def _(event: KeyPressEvent, position: int = number - 1) -> None:

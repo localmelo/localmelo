@@ -328,6 +328,22 @@ A call that installs software, downloads files, changes files outside the folder
   ↑↓ select · enter confirm · 1-2 · v view all · esc stop the turn
 ```
 
+A file outside the folder gets a panel that names its real folder. A read offers that folder for this chat or always (kept in Settings), and a write asks every time with Yes and No only, starting on No (see [Folders outside the workspace](tools-mcp.md#folders-outside-the-workspace)):
+
+```text
+╭─ Let melo read in ~/Documents/letters? ────────────────────────────────────╮
+│ file_read · outside ~/demo-project · read only                             │
+│   melo wants to read ~/Documents/letters/cover-letter.md.                  │
+╰────────────────────────────────────────────────────────────────────────────╯
+❯ 1. Yes
+  2. Yes, and allow ~/Documents/letters for this chat
+  3. Yes, and always allow ~/Documents/letters (kept in Settings)
+  4. No, and tell melo why
+  Always keeps the folder in Settings, where you can remove it. Writing outside
+  the workspace still asks every time.
+  ↑↓ select · enter confirm · 1-4 · v view all · esc stop the turn
+```
+
 - `1` allows this call, `2` allows the tool's routine calls for the rest of the session, and `3` opens a field for a reason (at most 500 characters) that the model reads; ↑ ↓ and Enter choose too.
 - For 0.4 seconds after the panel opens only Esc and Ctrl+C act, so a message you were typing cannot answer it; Esc or Ctrl+C stops the turn.
 - The command, code or file content shows exactly as it will run, wrapped and never cut; control characters and text-reordering characters show escaped with a warning line.
@@ -345,7 +361,8 @@ In auto mode nothing asks: routine steps run, and a risky step or one you did no
 ### The workspace
 
 - melo works in the current folder, or in `--workspace DIR`.
-- File tools (`file_read`, `file_write`, `list_files`) stay in this folder; commands and Python can reach other files, so melo asks first.
+- File tools (`file_read`, `file_write`, `list_files`) stay in this folder, and ask before they open a folder outside it; key folders, melo's own data, system folders and your whole home folder are never offered. `/approvals` lists the folders this chat may read.
+- Commands and Python can reach other files. In Ask, melo asks first; in Auto, a routine command or script that only reads outside the folder runs without asking, while one that touches keys or passwords counts as high-impact.
 - The banner warns when the workspace is your home folder or `/`.
 - `shell_exec` and `python_exec` stop after 10 minutes in the UI (30 and 60 seconds for a task).
 

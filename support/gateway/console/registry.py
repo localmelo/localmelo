@@ -28,7 +28,8 @@ from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.melo.contracts.review import offers_grant
 from localmelo.melo.contracts.tools import BaseToolProvider
 from localmelo.melo.schema import Message
-from localmelo.support.config import gateway_workspace_problem
+from localmelo.support.browser import configured_driver
+from localmelo.support.config import SavedFolders, gateway_workspace_problem
 from localmelo.support.gateway.auto_blocks import BlockError
 from localmelo.support.gateway.chat_gate import ChatGate, GatedEmbedding, GatedLLM
 from localmelo.support.gateway.i18n import t
@@ -147,7 +148,8 @@ async def default_builder(
         model=None,
         workspace=workspace,
         options=configured_session_options(settings, AgentOptions(mode="gateway")),
-        browser_driver=settings.browser.driver,
+        browser_driver=configured_driver(settings),
+        web_fetch=settings.tools.web_fetch is True,
         wrap_llm=None if llm is None else (lambda inner: GatedLLM(inner, llm)),
         wrap_embedding=(
             None if llm is None else (lambda inner: GatedEmbedding(inner, llm))
@@ -216,6 +218,9 @@ class ConsoleSessions:
         # The person's Allows in each chat, which its tasks may use (#369).
         self.ledger = ledger or ApprovalLedger()
         self.ledger.grants_of = self.grants
+        self.ledger.folders_of = self.folder_grants
+        # The folders "Always allow this folder" keeps, read from the settings file (#405).
+        self.saved_folders = SavedFolders()
         self._settings = settings
         self._gate = gate
         self._memory = memory
@@ -262,6 +267,11 @@ class ConsoleSessions:
         """The tools chat *session_id* holds a grant of now (none while it is not open)."""
         entry = self._sessions.get(session_id)
         return frozenset() if entry is None else entry.policy.allowed_tools
+
+    def folder_grants(self, session_id: str) -> tuple[str, ...]:
+        """The folders outside the workspace chat *session_id* allowed for reading (#405)."""
+        entry = self._sessions.get(session_id)
+        return () if entry is None else entry.policy.allowed_folders
 
     def entries(self) -> list[OpenSession]:
         return list(self._sessions.values())
@@ -410,6 +420,7 @@ class ConsoleSessions:
             policy = ChatPolicy(
                 runner.observe(self._timed_ask(session_id, granted_at)),
                 self.mode_of(info),
+                saved=self.saved_folders,
             )
             entry = OpenSession(
                 session_id=session_id,
@@ -550,7 +561,12 @@ class ConsoleSessions:
             ):
                 # The person's Allow: this chat's tasks may run the same step (#369).
                 self.ledger.record(current, request)
-                if decision.remember and offers_grant(request.review):
+                # A folder's "this chat" is a grant of the folder, not of the tool.
+                if (
+                    decision.remember
+                    and request.outside is None
+                    and offers_grant(request.review)
+                ):
                     granted_at[request.tool_name] = self._clock()
             return decision
 
@@ -917,7 +933,9 @@ class ConsoleSessions:
             create_scope_key=client_request_id is not None,
         )
         policy = ChatPolicy(
-            runner.observe(self._timed_ask(info.id, granted_at)), chat_mode(info.meta)
+            runner.observe(self._timed_ask(info.id, granted_at)),
+            chat_mode(info.meta),
+            saved=self.saved_folders,
         )
         turn: TurnInfo | None = None
         if has_turn:

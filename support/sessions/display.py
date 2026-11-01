@@ -353,6 +353,19 @@ def approval_tag(
     if origin == "timeout":
         return ApprovalText("not answered in time", "Not approved in time")
     if approval.get("allowed"):
+        # A folder outside the workspace (#405) a grant or the settings let melo read.
+        folder = approval.get("folder")
+        scope = folder.get("scope") if isinstance(folder, Mapping) else ""
+        if scope == "always":
+            return ApprovalText(
+                "allowed: a folder you always allow",
+                "Allowed: the folder is in Settings, under Other folders melo may read",
+            )
+        if scope == "chat" and origin == "session":
+            return ApprovalText(
+                "allowed: folder allowed for this chat",
+                "Allowed: you allowed this folder for this chat",
+            )
         if origin == "session":
             return ApprovalText(
                 "allowed by a session grant", "Allowed by a grant for this session"
@@ -441,6 +454,15 @@ _BROWSER_READS: Final = frozenset(
 )
 
 
+def _host(url: object) -> str:
+    """The host of a page's address without ``www.``; ``""`` when it has none."""
+    try:
+        host = urlsplit(str(url or "")).hostname or ""
+    except ValueError:
+        return ""
+    return host.removeprefix("www.")
+
+
 def _file_name(arguments: Mapping[str, Any]) -> str:
     path = str(arguments.get("path") or "").rstrip("/")
     return path.rsplit("/", 1)[-1]
@@ -514,10 +536,8 @@ def activity_text(
         return _doing("run", "Python", "run")
     if name in ("recall", "search_memory", "remember"):
         return _state("remembering")
-    if name == "browser_open":
-        host = (urlsplit(str(args.get("url") or "")).hostname or "").removeprefix(
-            "www."
-        )
+    if name in ("browser_open", "web_fetch"):
+        host = _host(args.get("url"))
         if host:
             return _doing("read", host, "web")
         return _doing("open", said("steps.aPage"), "web")

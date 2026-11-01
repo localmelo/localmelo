@@ -116,6 +116,11 @@ class SettingsPutBody(_SettingsBaseBody):
     approvals: StrictStr | None = None
     # ``[browser] driver``: true reads web pages in Safari (``/browser on``), false turns it off; absent leaves it.
     browser: StrictBool | None = None
+    # ``[workspace] extra_folders``, the folders "Always allow this folder" kept
+    # (#405), as the whole new list; absent leaves it.
+    extra_folders: list[StrictStr] | None = None
+    # ``[tools] web_fetch``: whether chats and tasks read public web pages; absent leaves it.
+    web_fetch: StrictBool | None = None
 
 
 def _check_single_line(field: str, value: str) -> None:
@@ -393,12 +398,33 @@ def settings_json() -> dict[str, Any]:
             cfg.approvals.mode if cfg.approvals.mode in config.APPROVAL_MODES else "ask"
         ),
         "browser": cfg.browser.driver != "off",
+        "extra_folders": _extra_folders(cfg),
+        "web_fetch": cfg.tools.web_fetch is True,
         "advanced_options": _advanced_options(),
         "developer_settings": _developer_settings(cfg),
         "run_options": _run_options(),
         "file_label": display.home_label(config.config_path()),
         "revision": revision,
     }
+
+
+def _extra_folders(cfg: config.Config) -> list[dict[str, Any]]:
+    """``[workspace] extra_folders`` as the Settings list shows it (#405).
+
+    Each entry as kept, with its folder's name and whether it is valid: an
+    invalid one is never used, and the list shows it so it can be removed.
+    """
+    kept = cfg.workspace.extra_folders
+    if not isinstance(kept, list):
+        return []
+    return [
+        {
+            "path": str(item),
+            "name": os.path.basename(str(item).rstrip("/")) or str(item),
+            "valid": config.extra_folder_problem(item) is None,
+        }
+        for item in kept
+    ]
 
 
 def _validate_sections(sections: dict[str, Any]) -> None:
@@ -486,6 +512,11 @@ def _build_candidate(
             "invalid_request",
             f"approvals: Must be one of {config.APPROVAL_MODES}.",
         )
+    folders = getattr(body, "extra_folders", None)
+    if folders is not None:
+        errors = config.extra_folders_errors(folders)
+        if errors:
+            raise ApiError(400, "invalid_settings", errors[0], {"errors": errors})
 
     if check_revision is not None and check_revision != _file_revision():
         raise ApiError(
@@ -512,6 +543,11 @@ def _build_candidate(
     browser = getattr(body, "browser", None)
     if browser is not None:
         candidate.browser.driver = "safari-automation" if browser else "off"
+    if folders is not None:
+        candidate.workspace.extra_folders = list(folders)
+    web_fetch = getattr(body, "web_fetch", None)
+    if web_fetch is not None:
+        candidate.tools.web_fetch = web_fetch
     for sec_name, sec_fields in body.sections.items():
         target = getattr(candidate, sec_name)
         for field_name, field_val in sec_fields.items():
@@ -583,6 +619,10 @@ def _changed_fields(before: config.Config, after: config.Config) -> list[str]:
         changed.append("approvals")
     if before.browser.driver != after.browser.driver:
         changed.append("browser")
+    if before.workspace.extra_folders != after.workspace.extra_folders:
+        changed.append("extra_folders")
+    if before.tools.web_fetch != after.tools.web_fetch:
+        changed.append("web_fetch")
     for sec_name in config._LOCAL_SECTIONS:
         b_sec = getattr(before, sec_name)
         a_sec = getattr(after, sec_name)

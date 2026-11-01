@@ -511,6 +511,32 @@ test('a switch saves at once with the revision it read, says Saved, and Undo put
   assert.equal(h.element('s-across-chats').checked, true);
 });
 
+test('Read web pages: hidden for a gateway that does not report it, else a switch that saves web_fetch', async () => {
+  const older = harness({'GET /settings': full()});
+  await older.open('chats');
+  assert.equal(older.element('s-web-fetch-row').hidden, true);
+  let revision = 1;
+  const h = harness({
+    'GET /settings': full({web_fetch: true}),
+    'PUT /settings': (body) => full({revision: `rev${++revision}`, web_fetch: body.web_fetch ?? true}),
+  });
+  await h.open('chats');
+  assert.equal(h.element('s-web-fetch-row').hidden, false);
+  assert.equal(h.element('s-web-fetch').checked, true);
+  h.element('s-web-fetch').checked = false;
+  await h.element('s-web-fetch').emit('change');
+  await flush();
+  assert.deepEqual(h.puts().at(-1).options.body, {chat_backend: 'mlc', embedding_backend: 'none', workspace: '~/ws',
+    sections: {}, revision: 'rev1', web_fetch: false});
+  assert.equal(h.element('settings-saved-text').textContent, 'Saved: Reading web pages is off.');
+  assert.equal(h.element('s-web-fetch').checked, false);
+  await h.element('settings-undo').emit('click');
+  await flush();
+  assert.equal(h.puts().at(-1).options.body.web_fetch, true);
+  assert.equal(h.element('settings-saved-text').textContent, 'Undone: Reading web pages is on.');
+  assert.equal(h.element('s-web-fetch').checked, true);
+});
+
 test('a change made elsewhere meanwhile is a conflict: the switch goes back and Reload is offered', async () => {
   const conflict = Object.assign(new Error('stale'), {status: 409, code: 'settings_changed'});
   const h = harness({'GET /settings': full(), 'PUT /settings': () => { throw conflict; }});
@@ -874,4 +900,72 @@ test('after Undo the form opens on the connection as it is saved again', async (
   assert.equal(h.puts().at(-1).options.body.sections.mlc.chat_model, 'old');
   await h.element('s-change').emit('click');
   assert.equal(h.element('s-chat-model').value, 'old');
+});
+
+// ── The folders melo may read outside a chat's own folder (#405) ──
+
+const EXTRA = [
+  {path: '~/Documents/letters', name: 'letters', valid: true},
+  {path: '~/.ssh', name: '.ssh', valid: false},
+];
+
+test('Chats and folders lists the extra folders, and Remove saves the list without one, with Undo', async () => {
+  const bodies = [];
+  const h = harness({
+    'GET /settings': fixture({extra_folders: EXTRA}),
+    'PUT /settings': (body) => {
+      bodies.push(body);
+      const kept = EXTRA.filter((item) => body.extra_folders.includes(item.path));
+      return fixture({revision: `rev${bodies.length + 1}`, extra_folders: kept});
+    },
+  });
+  await h.open('chats');
+  const list = h.element('s-extra');
+  assert.equal(list.hidden, false);
+  assert.equal(h.element('s-extra-title').hidden, false);
+  const [letters, ssh] = list.children;
+  assert.equal(letters.dataset.valid, 'true');
+  assert.equal(words(letters), 'letters ~/Documents/letters Remove');
+  assert.equal(ssh.dataset.valid, 'false');
+  assert.match(words(ssh), /Not used: melo never opens this folder\./);
+  const remove = letters.children[1].children[0];
+  assert.equal(remove.attributes['aria-label'], 'Remove ~/Documents/letters from the folders melo may read');
+  await remove.emit('click');
+  await flush();
+  assert.deepEqual(bodies[0].extra_folders, ['~/.ssh']);
+  assert.equal(bodies[0].revision, 'rev1');
+  assert.equal(h.element('settings-saved-text').textContent, 'Saved: melo asks again before reading in ~/Documents/letters.');
+  assert.deepEqual(h.element('s-extra').children.map((row) => row.children[0].children[1].textContent), ['~/.ssh']);
+  await h.element('settings-undo').emit('click');
+  await flush();
+  assert.deepEqual(bodies[1].extra_folders, ['~/Documents/letters', '~/.ssh']);
+  assert.equal(h.element('settings-saved-text').textContent, 'Undone: melo may read in ~/Documents/letters again.');
+});
+
+test('with no extra folder the list says how one is added, and an older gateway hides it', async () => {
+  const empty = harness({'GET /settings': fixture({extra_folders: []})});
+  await empty.open('chats');
+  assert.equal(words(empty.element('s-extra')), 'None yet. When melo asks to read a folder outside its own, choose “Always allow this folder”.');
+  const older = harness({'GET /settings': fixture()});
+  await older.open('chats');
+  assert.equal(older.element('s-extra').hidden, true);
+  assert.equal(older.element('s-extra-title').hidden, true);
+  assert.equal(older.element('s-extra-hint').hidden, true);
+});
+
+test('the extra folders read in Simplified Chinese', async () => {
+  const {useLanguage} = await import('../../support/gateway/static/i18n.mjs');
+  await useLanguage('zh-Hans');
+  try {
+    const h = harness({'GET /settings': fixture({extra_folders: EXTRA})});
+    await h.open('chats');
+    const [letters, ssh] = h.element('s-extra').children;
+    assert.equal(words(letters), 'letters ~/Documents/letters 移除');
+    assert.match(words(ssh), /未使用：melo 从不打开这个文件夹。/);
+    const empty = harness({'GET /settings': fixture({extra_folders: []})});
+    await empty.open('chats');
+    assert.match(words(empty.element('s-extra')), /^还没有。/);
+  } finally {
+    await useLanguage('en');
+  }
 });

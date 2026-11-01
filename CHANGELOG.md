@@ -9,6 +9,40 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- When melo needs a file outside the chat's folder, it asks instead of
+  refusing, in a chat or task you started. The card in the console and the
+  app, and the option list in the terminal, name the real folder and offer
+  **Allow once**, **Allow this folder for this chat**, **Always allow this
+  folder** and **Deny**. "Always" keeps the folder in Settings, under
+  **Chats and folders**, where you can remove it (`[workspace]
+  extra_folders`). A grant covers reading only: writing outside the folder
+  asks every time. Key and credential folders, melo's own data, system
+  folders and your whole home folder are never offered. Auto mode never
+  allows such a folder by itself, and a run with no one to ask refuses it as
+  before. [#405]
+
+- melo reads a public web page in the chat: ask about a website or paste its
+  address, and it reads the page as text (title, headings, main text and
+  links; plain text and JSON as they are) with the new `web_fetch` tool. It is
+  on in every chat, the console's and the app's included, and in tasks, and is
+  turned off in Settings → Chats and folders → **Read web pages** or with
+  `[tools] web_fetch = false`. It only reads: one request, no cookies, no
+  sign-ins, no forms, at most 2 MB, 30 seconds and 5 redirects (never from
+  https to http), and PDFs and other files are refused for now. A site your
+  own recent messages name reads at once (that host itself, with or without
+  `www.`; not a site under it, and not a file name such as `README.md`); any
+  other asks once per chat ("Let melo read example.com?", showing the full
+  address) before its name is even looked up, and one "allow for this chat"
+  covers the browser too; a task asks the chat that owns it. It never reaches
+  this computer or its local network: `localhost`, private, link-local and
+  cloud metadata addresses, `.local` names, numbers written in odd forms, this
+  computer's own addresses (a public IPv6 one included) and the network around
+  them (the IPv6 /64 and /56, the /24 of a public IPv4 address), and a
+  redirect or DNS answer that points to any of them are refused, and melo
+  connects to the address it checked. The page reaches the
+  model marked as data, never instructions, nothing a server writes in its
+  status line or headers reaches it, and the model is told to use the tool
+  instead of `curl`. Direct runs do not get it. [#406]
 - The `turn.memory` event lists what the model's own memory search found in the turn, as an optional `searched` list (the same item shape as `used`).
 - With `[memory] sleep` set to `rules`, `model` or `model+tags`, the gateway
   now tidies the notes by itself while the computer is idle: no turn in the
@@ -470,6 +504,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- The file tools and the action review now compare a path as the file
+  system names it: another letter case of the workspace counts as inside,
+  and a macOS alias such as `/.vol` counts as the place it names, so it no
+  longer gets past the workspace check or the key folders. A file tool
+  opens only the file that was checked. [#405]
+
 - The approval card says why melo asks, and never offers a chat-wide allow for
   a high-impact call. In the web console and the macOS app, a call that
   installs software, downloads files, changes files outside the workspace or
@@ -568,6 +608,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   or offered a task, kept a note), then the first sentence of its reply without Markdown or
   a lead-in such as "In short:", in English and Chinese. Code keeps its words, struck text
   goes, and `x**2` stays. The main chat's row is named in your language. Fixes #409.
+- With browsing on (`[browser] driver = "safari-automation"`), the main chat
+  in the web console and the app now has the browser tools too, as the
+  terminal chat and side chats did. A `[browser] driver` that names no
+  browser now turns browsing off with a warning instead of stopping a console
+  chat from opening. [#406]
+- Page text with three or more `<` or `>` in a row can no longer form a page
+  marker in what the browser tools return: every such run is spaced out.
+  [#406]
 - The memory block melo adds to a message now says when and who: a date has its year when
   it is not this year and its time when another line is from the same day, notes of one subject
   with different values come newest first with the older marked, and an earlier turn reads
@@ -3451,4 +3499,5 @@ earlier milestones.
 [#392]: https://github.com/localmelo/localmelo/pull/392
 [#393]: https://github.com/localmelo/localmelo/pull/393
 [#396]: https://github.com/localmelo/localmelo/pull/396
+[#406]: https://github.com/localmelo/localmelo/issues/406
 [#412]: https://github.com/localmelo/localmelo/issues/412

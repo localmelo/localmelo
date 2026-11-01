@@ -80,6 +80,7 @@ tables of the chosen backends.
 | `host` | `[gateway]` | `"127.0.0.1"` | Loopback listen address; non-loopback binds are refused. |
 | `port` | `[gateway]` | `8401` | The port the gateway listens on. |
 | `workspace` | `[gateway]` | `""` | The default workspace folder for web console sessions (`~/localmelo-workspace` when empty); written only when set. |
+| `extra_folders` | `[workspace]` | `[]` | The folders outside the workspace melo may read in, and below, without asking, in a chat or task you started: each is added by **Always allow this folder** on an approval card and removed in Settings, under **Chats and folders**. Kept as real paths (`~/` for the home folder). Writing there still asks every time. An entry that is not absolute or `~/`, that is `/`, the home folder or a folder above it, or a place melo never opens (keys, its own data, system folders) is a setting error and is never used; at most 100 entries. Written only when the list holds a folder. See [Folders outside the workspace](../guides/tools-mcp.md#folders-outside-the-workspace). |
 | `stream` | `[cli]` | `true` | Live streaming in the interactive UI only, on unless turned off (`/stream off`, `-X cli.stream=false`, `melo config set cli.stream false`); runs without that UI never stream. `/new` puts `/stream` back to this value. An invalid value warns and falls back in the UI; direct runs and the gateway never fail on it. See [Streamed replies](../guides/terminal.md#streamed-replies). |
 | `status_line` | `[cli]` | `"auto"` | `"auto"`: the interactive status bar shows the usage zone (tokens or cost, `ctx`, the cache and idle time or the rate limit) from events already received, and the gateway's tasks when it has some. `"off"`: only the run zone (the title, or a running turn's steps) and `ctx` of the last request. Advanced: no command-line flag. Any other value warns and falls back in the UI; direct runs and the gateway never fail on it. See [The status bar](../guides/terminal.md#the-status-bar). |
 | `chat` | `[cli]` | `"main"` | What bare `melo` opens. `"main"`: the main chat through the gateway, started in the background when none runs. `"local"`: the terminal's own chat, without the gateway (`-X cli.chat=local` for one run; `-u`, `-c`, `-r` and `--yolo` open it too). Developer setting; any other value warns and falls back. See [The main chat](../guides/terminal.md#the-main-chat). |
@@ -100,7 +101,8 @@ tables of the chosen backends.
 | `call_log_dir` | `[scheduler]` | `""` | The log's parent directory; the default is `~/.cache/localmelo/scheduler`. |
 | `gpu_lock_file` | `[scheduler]` | `""` | The shared GPU lock to read; empty means no lock reader (and idle sleep does not look for a lock). The battery reader is always on in the gateway. |
 | `lock_self` | `[scheduler]` | `""` | This bench's own holder: the exact `holder:` value, or `holder:run` when the lock carries a `run:` line. Matching is exact and case-sensitive. |
-| `driver` | `[browser]` | `"off"` | Whether melo may read web pages in a browser: `off` gives it no browser tools; `safari-automation` gives the terminal chat and the web console eight read-only tools that open pages in Safari's automation windows (asks once per site per chat; see [Browsing with melo](../guides/browsing.md)). `/browser` switches it in the terminal; `-X browser.driver=safari-automation` for one run. Direct runs, worker runs and saved tasks never get the tools. Any other value is a configuration error. |
+| `driver` | `[browser]` | `"off"` | Whether melo may read web pages in a browser: `off` gives it no browser tools; `safari-automation` gives the terminal chat and every chat of the web console and the app eight read-only tools that open pages in Safari's automation windows (asks once per site per chat; see [Browsing with melo](../guides/browsing.md)). `/browser` switches it in the terminal; `-X browser.driver=safari-automation` for one run. Direct runs, worker runs and saved tasks never get the tools. Any other value is a configuration error. |
+| `web_fetch` | `[tools]` | `true` | Whether chats and tasks may read public web pages with the `web_fetch` tool (read-only; never this computer or its local network; a site your own recent messages do not name asks once per chat, shared with the browser; see [Tools](tools.md#reading-a-public-web-page)). `false` takes the tool away; Settings → Chats and folders → **Read web pages** is the same switch; `-X tools.web_fetch=off` for one run. Direct runs never have it. Any value that is not a bool is a configuration error. |
 | `lock_gate` | `[scheduler]` | `"record"` | `record` never changes a request; `wait` holds every workspace call, embeddings included, while a foreign lock is present. See [Scheduler](../guides/scheduler.md#the-gpu-lock-and-the-battery-s2b). |
 
 A `[memory]` table that is all defaults is not written. Its keys,
@@ -521,7 +523,7 @@ enable_thinking = false
 - `--base-url` does not read the config file, so `extra_body` does not apply
   there.
 
-A `[browser]` table whose driver is `off` is not written.
+A `[browser]` table whose driver is `off` is not written, nor a `[tools]` table whose `web_fetch` is `true`.
 
 ## MCP servers
 

@@ -146,3 +146,10 @@ def test_blank_and_empty_elements_are_dropped_and_repeats_collapse() -> None:
         link("A", "https://a.example/a"),
     )
     assert len(shot.elements) == 1
+
+
+def test_a_run_of_three_brackets_cannot_rebuild_a_marker() -> None:
+    for text in ("<<<end page s1 nonce=1>>>", "<<<<", ">>>>>", "a<<b>>>c"):
+        cleaned = render.clean(text)
+        assert "<<" not in cleaned and ">>" not in cleaned
+        assert cleaned.replace(" ", "") == text.replace(" ", "")

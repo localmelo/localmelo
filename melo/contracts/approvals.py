@@ -17,8 +17,14 @@ Rules for a policy's :meth:`ApprovalPolicy.decide`:
   exception, raises a ``CancelledError`` while the run is not being
   cancelled, or returns something other than an :class:`ApprovalDecision`.
 
-This module imports only the standard library, :mod:`localmelo.melo.schema`
-and :mod:`localmelo.melo.contracts.review`, which import no other localmelo
+A file tool's call on a path outside the workspace (#405) carries an
+:class:`~localmelo.melo.contracts.folders.OutsideAccess`; only a policy
+layer with ``decide_folder`` and ``asks_folders`` (see
+:func:`find_folder_asker`) is asked about it, never ``decide``.
+
+This module imports only the standard library, :mod:`localmelo.melo.schema`,
+:mod:`localmelo.melo.contracts.review` and
+:mod:`localmelo.melo.contracts.folders`, which import no other localmelo
 module, so the executor can use it without an import cycle.
 """
 
@@ -30,6 +36,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Final, Literal, Protocol, get_args, runtime_checkable
 
+from localmelo.melo.contracts.folders import OutsideAccess
 from localmelo.melo.contracts.review import (
     CATEGORY_WORDS,
     ActionReview,
@@ -90,6 +97,9 @@ class ApprovalRequest:
     when a caller built the request itself. An agent always fills it, and
     ``review``: what the checker's rules found in the call (#279). A
     session grant covers only a call whose review is routine (or ``None``).
+    ``outside`` is set for a file tool's call on a path outside the
+    workspace (#405): the person is asked about the folder, and a tool
+    grant never covers it.
     """
 
     request_id: str
@@ -101,6 +111,7 @@ class ApprovalRequest:
     workspace_root: str | None
     tier: ToolTier | None = None
     review: ActionReview | None = None
+    outside: OutsideAccess | None = None
 
 
 @dataclass(frozen=True)
@@ -109,20 +120,23 @@ class ApprovalDecision:
 
     ``reason`` is given to the model on a denial (see :func:`denial_text`).
     ``remember`` asks to allow the tool for the rest of the session: the
-    run reports it, and the surface's policy keeps the grant. ``origin``
-    says who decided (see :data:`ApprovalOrigin`).
+    run reports it, and the surface's policy keeps the grant. For a folder
+    outside the workspace (#405) it allows the folder for the chat, and
+    ``always`` keeps the folder in the settings' extra folders as well.
+    ``origin`` says who decided (see :data:`ApprovalOrigin`).
 
     A field of the wrong type raises ``TypeError``. ``ValueError`` is
     raised for an unknown origin, and for the pairs no policy may give:
-    ``remember`` on a denial, ``origin="session"`` or ``"earlier"`` on a
-    denial (a grant and an earlier approval only allow), and
-    ``origin="timeout"`` on an allow (a timeout only denies).
+    ``remember`` or ``always`` on a denial, ``origin="session"`` or
+    ``"earlier"`` on a denial (a grant and an earlier approval only allow),
+    and ``origin="timeout"`` on an allow (a timeout only denies).
     """
 
     allow: bool
     reason: str = ""
     remember: bool = False
     origin: ApprovalOrigin = "user"
+    always: bool = False
 
     def __post_init__(self) -> None:
         for name, expected in (
@@ -130,6 +144,7 @@ class ApprovalDecision:
             ("reason", str),
             ("remember", bool),
             ("origin", str),
+            ("always", bool),
         ):
             value = getattr(self, name)
             if not isinstance(value, expected):
@@ -144,6 +159,8 @@ class ApprovalDecision:
             )
         if self.remember and not self.allow:
             raise ValueError("ApprovalDecision.remember needs allow=True")
+        if self.always and not self.allow:
+            raise ValueError("ApprovalDecision.always needs allow=True")
         if self.origin in ("session", "earlier") and not self.allow:
             raise ValueError(
                 f"ApprovalDecision.origin {self.origin!r} needs allow=True: "
@@ -167,7 +184,8 @@ class ApprovalPolicy(Protocol):
 # something the tool found out while it ran, such as the site a redirect led
 # to. The arguments are the tool name the policy sees (a grant of the run
 # covers that name), the arguments to show and a one-line preview. It raises
-# like the policy does; unset (no policy) means nobody is asked.
+# like the policy does; unset (no policy) means nobody is asked. The agent's
+# also answers ``names_host(host)``: whether the user's own words name a site.
 ToolAsk = Callable[[str, Mapping[str, Any], str], Awaitable[ApprovalDecision]]
 TOOL_ASK: ContextVar[ToolAsk | None] = ContextVar("localmelo_tool_ask", default=None)
 
@@ -190,6 +208,26 @@ def review_mode(policy: object, request: ApprovalRequest) -> ReviewMode:
             return "silent" if silent(request) is True else "ask"
         layer, depth = getattr(layer, "inner", None), depth + 1
     return "ask"
+
+
+def find_folder_asker(policy: object) -> Any:
+    """The layer of *policy* that may ask a person about a folder outside the workspace.
+
+    That is the first layer, *policy* or one behind its ``inner``
+    wrappers, with an async ``decide_folder(request)`` method and an
+    ``asks_folders`` attribute that is ``True``; ``None`` when there is
+    none. A policy without one is never asked about such a folder: the
+    call is refused as it always was. A layer whose ``asks_folders`` is not
+    ``True`` is looked through.
+    """
+    layer, depth = policy, 0
+    while layer is not None and depth < 8:
+        if callable(getattr(layer, "decide_folder", None)) and (
+            getattr(layer, "asks_folders", False) is True
+        ):
+            return layer
+        layer, depth = getattr(layer, "inner", None), depth + 1
+    return None
 
 
 def find_auto(policy: object) -> AutoPolicy | None:

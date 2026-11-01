@@ -35,8 +35,10 @@ SECTIONS = (
     "ui",
     "console",
     "approvals",
+    "workspace",
     "scheduler",
     "browser",
+    "tools",
     "gateway",
 )
 

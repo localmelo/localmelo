@@ -35,6 +35,7 @@ import httpx
 from rich.text import Text
 
 from localmelo.melo.contracts.approvals import ApprovalRequest
+from localmelo.melo.contracts.folders import Access, OutsideAccess
 from localmelo.melo.contracts.review import ActionReview
 from localmelo.support import console_link, gateway_endpoint, task_cli
 from localmelo.support.cli import hanging
@@ -639,6 +640,18 @@ def _sleeps(echoes: Sequence[Any]) -> list[dict[str, Any]]:
     return [e for e in rows if e.get("echo") == "sleep" and e["id"] not in undone]
 
 
+def _outside(found: object) -> OutsideAccess | None:
+    """A path outside the workspace as the gateway lists it (#405), or ``None``."""
+    if not isinstance(found, dict) or found.get("access") not in ("read", "write"):
+        return None
+    path, folder = found.get("path"), found.get("folder")
+    if not isinstance(path, str) or not isinstance(folder, str):
+        return None
+    access: Access = "write" if found["access"] == "write" else "read"
+    grantable = found.get("grantable") is True and access == "read"
+    return OutsideAccess(path, folder, access, grantable)
+
+
 def approval_request(pending: Mapping[str, Any]) -> ApprovalRequest:
     """A pending approval as the gateway lists it, for the terminal's approval list."""
     review = pending.get("review")
@@ -656,6 +669,7 @@ def approval_request(pending: Mapping[str, Any]) -> ApprovalRequest:
     arguments = pending.get("arguments")
     root = pending.get("workspace_root")
     return ApprovalRequest(
+        outside=_outside(pending.get("outside")),
         request_id=str(pending.get("request_id") or ""),
         run_id="",
         call_id=str(pending.get("call_id") or ""),
@@ -1011,7 +1025,11 @@ class MainChat:
             choice = (
                 "deny"
                 if not decision.allow
-                else "session" if decision.remember else "once"
+                else (
+                    "always"
+                    if decision.always
+                    else "session" if decision.remember else "once"
+                )
             )
             await self.client.answer(request_id, choice, decision.reason)
         except GatewayError as exc:

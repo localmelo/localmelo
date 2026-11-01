@@ -24,7 +24,7 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
-from typing import TYPE_CHECKING, Any, Literal, TypeGuard
+from typing import TYPE_CHECKING, Any, Final, Literal, TypeGuard
 
 from localmelo.melo.agent._answer_format import (
     closing_line_of,
@@ -112,9 +112,11 @@ from localmelo.melo.contracts.approvals import (
     ReviewMode,
     block_note,
     find_auto,
+    find_folder_asker,
     review_mode,
 )
 from localmelo.melo.contracts.events import EventSink
+from localmelo.melo.contracts.folders import OutsideAccess, home_label
 from localmelo.melo.contracts.inbox import InboxError, InboxSource
 from localmelo.melo.contracts.providers import (
     BaseEmbeddingProvider,
@@ -125,6 +127,7 @@ from localmelo.melo.contracts.review import (
     CATEGORY_WORDS,
     RULED_TOOLS,
     SELF_DENIAL,
+    TITLES,
     ActionReview,
     block_words,
     step_key,
@@ -1287,6 +1290,9 @@ class _RunState:
     events: _Emitter = dataclasses.field(default_factory=_Emitter)
     # The approval policy the caller passed to run_task, or None.
     approval: ApprovalPolicy | None = None
+    # Whether the person sent the run's query (run_task's from_person): only
+    # then may a path outside the workspace be asked about (#405).
+    from_person: bool = True
     # The calls the gate reviewed, the model reviews sent and auto mode's
     # blocks (#339); run.finished carries the summary when a policy ran.
     reviews: RunReviews = dataclasses.field(default_factory=RunReviews)
@@ -1537,6 +1543,12 @@ class _ApprovalGate:
     (:data:`~localmelo.melo.checker.review.RULED_TOOLS`) that is not
     read-only is undecided in auto mode, so the user's model reviews it.
 
+    A file tool's call on a path outside the workspace (#405) is asked of
+    the policy's folder layer only
+    (:func:`~localmelo.melo.contracts.approvals.find_folder_asker`), and
+    only in a run the person started: auto mode never decides it and no
+    tool grant covers it (see :meth:`asks_folders` and :meth:`_folder`).
+
     The run's cancellation propagates, and the prompt counts as withdrawn.
     The policy fails closed otherwise: an exception it raises, a
     ``CancelledError`` while nothing cancels the run, and a return value
@@ -1573,7 +1585,18 @@ class _ApprovalGate:
         self._key = ""
         self._allowance = False
 
+    def asks_folders(self, outside: OutsideAccess) -> bool:
+        """Whether a person may be asked about *outside* (#405).
+
+        Only in a run the person started, and only when the policy has a
+        layer that asks about folders; otherwise the executor refuses the
+        path as it always did.
+        """
+        return self._run.from_person and find_folder_asker(self._policy) is not None
+
     async def __call__(self, request: ExecutionRequest) -> ApprovalDecision:
+        if request.outside is not None:
+            return await self._folder(request, request.outside)
         run, call = self._run, self._call
         preview = call_preview(request.tool_name, request.arguments)
         if self._checker is not None:
@@ -1716,6 +1739,95 @@ class _ApprovalGate:
             )
         return decided
 
+    async def _folder(
+        self, request: ExecutionRequest, outside: OutsideAccess
+    ) -> ApprovalDecision:
+        """Ask the person about a call on a path outside the workspace (#405).
+
+        The policy's folder layer decides; its answer may be a grant of the
+        folder for the chat or in the settings, which only a read uses. A
+        write is reviewed by the rules first and is high-impact: a write
+        into localmelo itself is denied without asking. Failures and the
+        run's cancellation go as they go for any other call.
+        """
+        run, call = self._run, self._call
+        self._mode = "ask"
+        preview = call_preview(request.tool_name, request.arguments)
+        if outside.access == "write":
+            review = None
+            if self._checker is not None:
+                review = await asyncio.to_thread(
+                    self._checker.review_action,
+                    ActionReviewPayload(
+                        request.tool_name,
+                        dict(request.arguments),
+                        self._workspace_root,
+                    ),
+                )
+            self.review = _outside_write(review, outside)
+            run.reviews.count(self.review)
+        asking = ApprovalRequest(
+            request_id=uuid.uuid4().hex,
+            run_id=run.task_id,
+            call_id=call.id,
+            tool_name=request.tool_name,
+            arguments=copy.deepcopy(request.arguments),
+            preview=preview,
+            workspace_root=self._workspace_root,
+            tier=self._tier,
+            review=self.review,
+            outside=outside,
+        )
+        asker = find_folder_asker(self._policy)
+        if asker is None or not run.from_person:
+            # asks_folders said yes, so only a policy changed meanwhile.
+            self._record(asking, origin="policy", reason=NO_FOLDER_ASKER)
+            return ApprovalDecision(False, NO_FOLDER_ASKER, origin="policy")
+        if self.review is not None and "self" in self.review.categories:
+            self._record(asking, origin="policy", reason=SELF_DENIAL)
+            return ApprovalDecision(False, SELF_DENIAL, origin="policy")
+        run.waiting_call_id = call.id
+        try:
+            decided: object = await asker.decide_folder(asking)
+        except asyncio.CancelledError as exc:
+            if _is_cancellation(exc):
+                self._record(asking, origin="withdrawn")
+                raise
+            run.waiting_call_id = ""
+            spurious = RuntimeError(
+                "the approval policy raised CancelledError while the run was "
+                "not cancelled"
+            )
+            self._record(asking, origin="error", reason=_exception_text(spurious))
+            raise spurious from None
+        except BaseException as exc:
+            run.waiting_call_id = ""
+            self._record(asking, origin="error", reason=_exception_text(exc))
+            raise
+        run.waiting_call_id = ""
+        if not isinstance(decided, ApprovalDecision):
+            no_decision = TypeError(
+                f"the approval policy returned {type(decided).__name__}, "
+                "not an ApprovalDecision"
+            )
+            self._record(asking, origin="error", reason=_exception_text(no_decision))
+            raise no_decision
+        if decided.allow and decided.origin in ("auto", "earlier"):
+            # Only a person, a grant of the folder or the settings allow it.
+            refused = ApprovalDecision(False, NO_FOLDER_ASKER, origin="policy")
+            self._record(asking, origin="policy", reason=NO_FOLDER_ASKER)
+            return refused
+        self._record(
+            asking,
+            origin=decided.origin,
+            allowed=decided.allow,
+            reason=decided.reason,
+            remember=decided.remember,
+        )
+        assert self.asked is not None
+        self.asked["folder"] = {**outside.to_json(), "scope": _folder_scope(decided)}
+        return decided
+
     def _block(
         self, asking: ApprovalRequest, auto: AutoPolicy | None, words: str = ""
     ) -> str:
@@ -1773,6 +1885,45 @@ class _ApprovalGate:
             self.asked["allowance"] = "once"
 
 
+# Why a path outside the workspace was refused when no person could be
+# asked after all (the policy changed while the call was checked).
+NO_FOLDER_ASKER: Final = "no one can allow a folder outside the workspace in this run"
+
+
+def _outside_write(review: ActionReview | None, outside: OutsideAccess) -> ActionReview:
+    """*review* of a write outside the workspace: high-impact, ``outside_write`` included.
+
+    The rules leave the category out of a file tool's review, since the
+    workspace fence used to place every write; here it is outside.
+    """
+    found = review or ActionReview("routine")
+    categories = [*found.categories]
+    if "outside_write" not in categories:
+        categories.append("outside_write")
+    order = list(TITLES)
+    categories.sort(key=lambda name: order.index(name) if name in order else len(order))
+    reasons = (
+        *found.reasons,
+        f"Writes {home_label(outside.path)}, outside the workspace.",
+    )
+    return dataclasses.replace(
+        found, verdict="high", categories=tuple(categories), reasons=reasons[:3]
+    )
+
+
+def _folder_scope(decision: ApprovalDecision) -> str:
+    """What allowed a call outside the workspace: once, chat, always, or "" (denied)."""
+    if not decision.allow:
+        return ""
+    if decision.origin == "session":
+        return "chat"
+    if decision.origin == "policy":
+        return "always"
+    if decision.always:
+        return "always"
+    return "chat" if decision.remember else "once"
+
+
 class _ToolAsk:
     """What a running tool uses to ask the run's approval policy (``TOOL_ASK``).
 
@@ -1800,6 +1951,10 @@ class _ToolAsk:
         self._call = call
         self._workspace_root = workspace_root
         self._reviewer = reviewer
+
+    def names_host(self, host: str) -> bool:
+        """Whether the user's recent messages name *host* itself (``www.`` aside)."""
+        return self._reviewer is not None and self._reviewer.names_host(host)
 
     async def __call__(
         self, tool_name: str, arguments: Mapping[str, Any], preview: str
@@ -5770,6 +5925,7 @@ class Agent:
                 progress=bool(progress),
             ),
             approval=approval,
+            from_person=from_person,
             routine=routine,
             inbox=inbox,
             brief=self.options.brief_probe is not None,

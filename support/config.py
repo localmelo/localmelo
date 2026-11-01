@@ -15,6 +15,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Final
 
+from localmelo.melo.contracts.folders import (
+    above_home,
+    canonical_path,
+    is_alias,
+    never_offered,
+)
 from localmelo.melo.schema import (
     LOCAL_WINDOW_MESSAGES,
     SHORT_TERM_MAX,
@@ -394,6 +400,35 @@ class BrowserConfig:
     driver: str = "off"  # off | safari-automation
 
 
+# The most folders ``[workspace] extra_folders`` keeps.
+EXTRA_FOLDERS_MAX: Final = 100
+
+
+@dataclass
+class WorkspaceConfig:
+    """The ``[workspace]`` table: folders outside the workspace melo may read (#405).
+
+    ``extra_folders`` holds the folders the person chose "Always allow this
+    folder" for, as real paths (``~/`` for the home folder). melo reads in
+    them, and below them, without asking in a chat or task the person
+    started; writing there still asks every time. An entry that is not
+    valid (see :func:`extra_folder_problem`) is ignored, never used.
+    """
+
+    extra_folders: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ToolsConfig:
+    """The ``[tools]`` table: tools a chat may use, each on or off.
+
+    ``web_fetch`` reads a public web page as text (on unless the file turns it
+    off). The chats and the console's tasks offer it; direct runs never do.
+    """
+
+    web_fetch: bool = True
+
+
 @dataclass
 class Config:
     chat_backend: str = (
@@ -436,6 +471,8 @@ class Config:
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     browser: BrowserConfig = field(default_factory=BrowserConfig)
+    workspace: WorkspaceConfig = field(default_factory=WorkspaceConfig)
+    tools: ToolsConfig = field(default_factory=ToolsConfig)
     # [pricing.<model>]: dollars per million tokens (input, output, and
     # cache_read for cached prompt tokens), for the terminal's session cost.
     # Configuration only: no price is bundled.
@@ -480,6 +517,7 @@ class Config:
         errors.extend(self._validate_memory())
         errors.extend(self._validate_scheduler())
         errors.extend(self._validate_browser())
+        errors.extend(self._validate_tools())
         # [cli] is a display preference: like [sessions] resume_mode, a bad
         # value warns and falls back in the interactive UI (cli_errors()), so
         # direct mode and the gateway never fail on it.
@@ -597,6 +635,14 @@ class Config:
             f"[browser] driver={self.browser.driver!r} is not one of {BROWSER_DRIVERS}"
         ]
 
+    def _validate_tools(self) -> list[str]:
+        """``[tools]`` holds bools."""
+        return [
+            f"[tools] {name} must be a bool, got {value!r}"
+            for name in ("web_fetch",)
+            if not isinstance(value := getattr(self.tools, name), bool)
+        ]
+
     def _validate_scheduler(self) -> list[str]:
         """``[scheduler]`` values are inside their documented ranges."""
         scheduler = self.scheduler
@@ -694,6 +740,10 @@ class Config:
             f"[console] language={self.console.language!r} "
             f"is not one of {CONSOLE_LANGUAGES}"
         ]
+
+    def _validate_workspace(self) -> list[str]:
+        """``[workspace] extra_folders`` is a list of folders melo may be given."""
+        return extra_folders_errors(self.workspace.extra_folders)
 
     def _validate_approvals(self) -> list[str]:
         """``[approvals] mode`` is ``ask`` or ``auto``."""
@@ -954,11 +1004,13 @@ class Config:
             *self._validate_memory(),
             *self._validate_scheduler(),
             *self._validate_browser(),
+            *self._validate_tools(),
             *self._validate_gateway_workspace(),
             *self._validate_cli(),
             *self._validate_ui(),
             *self._validate_console(),
             *self._validate_approvals(),
+            *self._validate_workspace(),
             *self._validate_request_timeout(),
         ]
 
@@ -1031,6 +1083,112 @@ def gateway_workspace_problem(value: object, *, allow_empty: bool = True) -> str
     except OSError:
         pass  # A workspace may be created later.
     return None
+
+
+def extra_folder_problem(value: object) -> str | None:
+    """Why *value* cannot be an entry of ``[workspace] extra_folders``, or ``None``.
+
+    An entry is an absolute path or one that starts with ``~/``, on one
+    line, and no file-system alias (macOS ``/.vol``, ``/.resolve``,
+    ``/.nofollow``). The folder the file system names for it must not be a
+    place melo never opens (keys, its own data, system folders) nor the
+    home folder or a folder above it.
+    """
+    if not isinstance(value, str):
+        return f"must be a string, got {value!r}"
+    if not value or has_control_or_surrogate(value):
+        return "Must be a single line with no control characters."
+    if not (os.path.isabs(value) or value.startswith("~/")):
+        return "Must be an absolute path or start with ~/."
+    if is_alias(os.path.realpath(os.path.expanduser(value))):
+        return "Must not be a file-system alias (/.vol, /.resolve, /.nofollow)."
+    real = canonical_path(os.path.expanduser(value))
+    if above_home(real):
+        return "Must not be /, the home folder or a folder above it."
+    if never_offered(real) is not None:
+        return "Must not be a folder melo never opens (keys, its own data, system folders)."
+    return None
+
+
+def extra_folders_errors(value: object) -> list[str]:
+    """What is wrong with ``[workspace] extra_folders``."""
+    if not isinstance(value, list):
+        return [f"[workspace] extra_folders must be a list, got {value!r}"]
+    if len(value) > EXTRA_FOLDERS_MAX:
+        return [f"[workspace] extra_folders holds at most {EXTRA_FOLDERS_MAX} folders"]
+    errors = []
+    for item in value:
+        problem = extra_folder_problem(item)
+        if problem is not None:
+            errors.append(f"[workspace] extra_folders entry {item!r}: {problem}")
+    return errors
+
+
+def folder_label(path: str) -> str:
+    """*path* as ``extra_folders`` keeps it: ``~/`` for the home folder, else absolute."""
+    home = canonical_path(os.path.expanduser("~"))
+    if path.startswith(home + "/"):
+        return "~/" + path[len(home) + 1 :]
+    return path
+
+
+def extra_folders(cfg: Config) -> list[str]:
+    """The valid entries of ``[workspace] extra_folders``, as absolute paths.
+
+    ``~`` is expanded, nothing else: a folder that became a symlink since
+    it was kept does not cover what it points to. An invalid entry is left
+    out, and so is a second one for the same folder.
+    """
+    value = cfg.workspace.extra_folders
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    for item in value[:EXTRA_FOLDERS_MAX]:
+        if extra_folder_problem(item) is None:
+            path = os.path.normpath(os.path.expanduser(item))
+            if path not in out:
+                out.append(path)
+    return out
+
+
+def add_extra_folder(folder: str) -> bool:
+    """Keep the real folder *folder* in ``[workspace] extra_folders`` and save.
+
+    Whether it was added: ``False`` when it is there already. ``ConfigError``
+    when it may not be kept (see :func:`extra_folder_problem`).
+    """
+    real = canonical_path(folder)
+    label = folder_label(real)
+    problem = extra_folder_problem(label)
+    if problem is not None:
+        raise ConfigError(f"[workspace] extra_folders entry {label!r}: {problem}")
+    cfg = load()
+    kept = cfg.workspace.extra_folders
+    if not isinstance(kept, list):
+        kept = []
+    if real in extra_folders(cfg) or label in kept:
+        return False
+    if len(kept) >= EXTRA_FOLDERS_MAX:
+        raise ConfigError(
+            f"[workspace] extra_folders holds at most {EXTRA_FOLDERS_MAX} folders"
+        )
+    cfg.workspace.extra_folders = [*kept, label]
+    save(cfg)
+    return True
+
+
+class SavedFolders:
+    """The extra folders in ``config.toml``, read on every use (#405).
+
+    A folder removed in Settings asks again from the next call on; one
+    added from a chat counts in every surface that reads the file.
+    """
+
+    def folders(self) -> list[str]:
+        return extra_folders(load())
+
+    def add(self, folder: str) -> bool:
+        return add_extra_folder(folder)
 
 
 def _is_positive_seconds(value: object) -> bool:
@@ -1214,6 +1372,11 @@ def _load_file() -> Config:
             if hasattr(cfg.browser, k):
                 setattr(cfg.browser, k, v)
 
+    if isinstance(data.get("tools"), dict):
+        for k, v in data["tools"].items():
+            if hasattr(cfg.tools, k):
+                setattr(cfg.tools, k, v)
+
     # A bad value is left for Config.validate to report.
     if isinstance(data.get("sessions"), dict):
         cfg.sessions.resume_mode = data["sessions"].get("resume_mode", "pairs")
@@ -1249,6 +1412,10 @@ def _load_file() -> Config:
         cfg.console.language = data["console"].get("language", cfg.console.language)
     if isinstance(data.get("approvals"), dict):
         cfg.approvals.mode = data["approvals"].get("mode", cfg.approvals.mode)
+    # A bad value is kept for Config.setting_errors; extra_folders() ignores it.
+    if isinstance(data.get("workspace"), dict):
+        found = data["workspace"].get("extra_folders", [])
+        cfg.workspace.extra_folders = list(found) if isinstance(found, list) else found
 
     cfg.request_timeout_s = data.get("request_timeout_s")
     cfg.mcp_config = str(data.get("mcp_config") or "")
@@ -1562,6 +1729,9 @@ def save(cfg: Config) -> None:
     if cfg.browser != BrowserConfig():
         lines.extend(["[browser]", f"driver = {_toml_string(cfg.browser.driver)}", ""])
 
+    if cfg.tools != ToolsConfig():
+        lines.extend(["[tools]", f"web_fetch = {_toml_value(cfg.tools.web_fetch)}", ""])
+
     if cfg.sessions != SessionsConfig():
         lines.append("[sessions]")
         if cfg.sessions.resume_mode != "pairs":
@@ -1589,6 +1759,10 @@ def save(cfg: Config) -> None:
         )
     if cfg.approvals != ApprovalsConfig():
         lines.extend(["[approvals]", f"mode = {_toml_value(cfg.approvals.mode)}", ""])
+    # Only a list that holds a folder is written; a bad value is kept as it is.
+    if cfg.workspace.extra_folders:
+        folders = cfg.workspace.extra_folders
+        lines.extend(["[workspace]", f"extra_folders = {_toml_value(folders)}", ""])
     retrieval = cfg.retrieval
     if retrieval != RetrievalConfig():
         lines.append("[retrieval]")

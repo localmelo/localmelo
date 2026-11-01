@@ -10,6 +10,21 @@
 - melo 在 Safari 的*自动化窗口*中打开网页、跟随链接并读取内容。
 - 它不会点击按钮、填写表单、登录、发帖或购买；这些留到后面（见[后续计划](#what-is-coming)）。
 
+<a id="read-a-page-without-the-browser"></a>
+
+## 不用浏览器读取网页
+
+每个对话都可以不经过 Safari、用 `web_fetch` 工具读取公开网页。它**默认开启**，不需要任何设置。
+
+- 问一个网站或贴上它的地址：melo 把网页读成文字（标题、各级标题、正文和链接）。纯文本和 JSON 原样返回。
+- 它只读：一次请求，不带 cookie，不登录，不填表。PDF 和其他文件暂时不读。
+- 它从不访问这台 Mac 或你的局域网。`localhost`、私有和链路本地地址、`.local` 名字、这台 Mac 自己的地址（包括公网 IPv6 地址）和它们周围的网络，以及指向它们的重定向或 DNS 结果都会被拒绝。
+- 你自己最近的消息提到的网站直接读取：就是那个网站，带不带 `www.` 都算。它下面的网站（你提到 `example.com` 时的 `docs.example.com`）和其他网站每个对话问一次（“让 melo 读取 example.com？”，并显示完整地址），一次“在这个对话里允许”也同时适用于浏览器。`README.md` 这样的文件名不算提到网站。
+- 需要登录、拦截自动读取或由脚本生成的网页，会说明这一点。开启浏览时，melo 可以改用 Safari 试试。
+- 任务也有它。在设置 → 对话和文件夹 → **读取网页** 中关闭，或用 `melo config set tools.web_fetch false`。限制和具体规则见[工具](../reference/tools.md#reading-a-public-web-page)。
+
+本页其余部分讲的是在 Safari 中浏览，它还能跟随链接并运行网页的脚本。
+
 <a id="what-you-need"></a>
 
 ## 需要什么
@@ -45,7 +60,7 @@ melo -X browser.driver=safari-automation
 driver = "safari-automation"
 ```
 
-默认是 `"off"`。网页控制台在打开每个对话时读取同一个设置：用 `melo config set browser.driver safari-automation` 修改，然后打开新对话。
+默认是 `"off"`。网页控制台和 App 在打开每个对话（包括主对话）时读取同一个设置：在那里用 `/browser on`，或用 `melo config set browser.driver safari-automation` 修改，然后打开新对话。
 
 <a id="set-up-safari"></a>
 
@@ -116,7 +131,7 @@ elements:
 - **每个网站每次对话问一次。** melo 加载页面之前，你会看到“Open a website?”，其中有网站名称和三个答案：*Yes*、*Yes, and allow this site for the rest of this chat* 和 *No*。在网页控制台中则是常见的批准卡片。“本次对话余下时间”是唯一持久的答案；这一部分没有“始终允许”。`/new` 和 `/approvals forget` 会收回这些授权。
 - **重定向会再问一次。** 如果链接或重定向落在另一个网站，melo 读取页面之前会先询问该网站。你拒绝后，窗口回到空白页，模型会读到你已拒绝。
 - **只有 `http` 和 `https`。** 从不打开 `file:`、`about:`、`javascript:`、`data:` 和浏览器自己的页面。
-- **`auto` 模式仍会询问网站。** auto 模式不经询问运行命令和修改文件，但不会跳过这个问题。`--yolo` 跳过所有问题，包括这个。
+- **自动模式下什么都不问。** 你自己最近的消息提到的网站直接打开（就是那个网站，带不带 `www.` 都算，不包括它下面的网站）；其他网站只有在你的模型认为它符合你的请求时才打开（每个网站每个对话检查一次），否则会被拦下。`--yolo` 跳过所有问题。
 - **网页文字是数据。** 网页可以写任何内容。melo 的系统提示告诉模型：页面标记之间的文字是网页的内容，绝不是指令；结束标记带有页面无法知道的随机数，所以页面无法自行结束它的块。这降低网页操纵模型的风险，但不能消除。不要允许你不信任的网站；也不要在含有你不会粘贴到网页里的机密的对话中开启浏览。
 
 <a id="what-is-coming"></a>
