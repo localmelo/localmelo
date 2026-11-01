@@ -170,8 +170,10 @@ _ALSO_ASKS = re.compile(
     re.IGNORECASE,
 )
 # Words a note adds when it restates what was said ("The user prefers…",
-# "You said: …", "You go by…") and function words a paraphrase swaps ("then",
-# "each", "use"); they are never what has to be found in the user's words.
+# "You said: …", "You go by…"), the assistant's name a note uses for "I"
+# ("You prefer that melo explains …"), and function words a paraphrase swaps
+# ("then", "each", "use", "who"); they are never what has to be found in the
+# user's words.
 _FRAMING: Final = frozenset(
     [
         "user",
@@ -204,6 +206,13 @@ _FRAMING: Final = frozenset(
         "use",
         "also",
         "always",
+        "melo",
+        "who",
+        "whom",
+        "whose",
+        "which",
+        "where",
+        "when",
     ]
 )
 # Terms that are values: a change in one is a different fact. A word is a value
@@ -312,6 +321,23 @@ _SWAPS: Final = (
     (re.compile("我"), "你"),
 )
 
+# The first person in a note (:func:`first_person`): "I" only as typed, a capital.
+_ME = re.compile(
+    r"(?-i:\bI\b(?!-\d))|\b(?:me|my|mine|myself)\b|我(?!们)", re.IGNORECASE
+)
+# What a note keeps as it is when it is put in the second person: a quoted span
+# and the numeral of "Phase I", "Type I diabetes", "World War I".
+_KEPT = re.compile(
+    r"\"[^\"]+\"|“[^”]+”|「[^」]+」"
+    r"|\b(?:Phase|Type|War|Chapter|Volume|Appendix|Category|Tier|Edition) I\b(?!['’])"
+)
+_KEPT_SPLIT = re.compile(f"({_KEPT.pattern})")
+# The user named in the third person (:func:`names_user`); "my user account" is no one.
+_THIRD_USER = re.compile(
+    r"(?<!\bmy )(?<!\byour )(?<!\bour )\buser(?:['’]s)?\b|\bthe person\b(?! I\b)|用户",
+    re.IGNORECASE,
+)
+
 
 @dataclass(frozen=True)
 class Candidate:
@@ -355,12 +381,41 @@ def sensitive(text: str) -> bool:
     return any(_luhn(re.sub(r"\D", "", m.group(0))) for m in _CARD.finditer(text))
 
 
-def second_person(sentence: str) -> str:
-    """The user's *sentence* as a record: second person, one sentence, bounded."""
-    text = " ".join(sentence.split()).strip(" -—:：,，")
+def _swap(text: str) -> str:
     for pattern, replacement in _SWAPS:
         text = pattern.sub(replacement, text)
+    return text
+
+
+def second_person(sentence: str, *, protect: bool = False) -> str:
+    """The user's *sentence* as a record: second person, one sentence, bounded.
+
+    With *protect*, a quoted span and a numeral "I" (:data:`_KEPT`) stay as typed.
+    """
+    text = " ".join(sentence.split()).strip(" -—:：,，")
+    pieces = _KEPT_SPLIT.split(text) if protect else [text]
+    text = "".join(_swap(p) if n % 2 == 0 else p for n, p in enumerate(pieces))
     return finished(text)
+
+
+def first_person(note: str) -> bool:
+    """Whether *note* speaks as "I": ``I`` (and ``I'm``, ``I've`` …), ``me``,
+    ``my``, ``mine``, ``myself`` or ``我`` (not ``我们``, not "we"), a quoted span
+    and a numeral "I" ("Phase I") aside."""
+    return _ME.search(_KEPT.sub(" ", note)) is not None
+
+
+def addresses_user(note: str) -> bool:
+    """Whether *note* says ``you``, ``your``, ``yours``, ``你`` or ``您``, a
+    quoted span aside."""
+    return _TO_USER.search(_KEPT.sub(" ", note)) is not None
+
+
+def names_user(note: str) -> bool:
+    """Whether *note* names the user in the third person (``the user``, ``user``,
+    ``the person``, ``用户``), a quoted span aside. Its "I" is then the assistant:
+    "The user wants me to answer in Chinese."."""
+    return _THIRD_USER.search(_KEPT.sub(" ", note)) is not None
 
 
 def finished(text: str) -> str:
@@ -441,6 +496,11 @@ def _about_a_person(sentence: str) -> bool:
 # How a reply says it kept a note (:func:`claimed`); group ``x`` starts the fact.
 _AT = r"(?:^|(?<=[.!?。！？\n]))\s*"
 _LEAD = r"\s*(?:[—–:：,]|--?)\s*"
+# Where a claim may start without a subject before it: the text, a sentence, a
+# clause after "Got it," or a check mark.
+_MARKS = "✅✔\ufe0f☑👍"
+_LEFT = rf"(?:^|(?<=[.!?。！？\n,，、—–{_MARKS}])|(?<=\s-)|(?<=\s--))[ \t]*"
+_ZH_AT = _LEFT + "(?:我)?"
 _CLAIMS: Final = tuple(
     re.compile(pattern, re.IGNORECASE)
     for pattern in (
@@ -455,8 +515,38 @@ _CLAIMS: Final = tuple(
         r"\bI(?:'ll| will) remember(?: that)?\s+(?!to\b)(?P<x>.+)",
         r"(?:记下了|记住了)[：:，,]\s*(?P<x>.+)",
         r"已记住[：:]\s*(?P<x>.+)",
+        _ZH_AT
+        + r"(?:已经?(?:记录|保存|记下)|已经记住|(?:记录|保存)(?:下来)?了"
+        + r"|帮你记下(?:来)?了?)[：:，,]\s*(?P<x>.+)",
     )
 )
+# A claim to have saved or noted that names nothing: a sentence of its own ("Saved.",
+# "Got it, noted…", "I've saved it.", "text✅ 已记录"), not a fact that follows it.
+_MEMORY = r"(?: (?:to|in) (?:your |my |melo['’]s )?(?:memory|notes))?"
+# What a claim may name and still name nothing: a pronoun or a generic noun.
+_THING_EN = (
+    r"(?:it|that|this|(?:your|the|that|this|these) "
+    r"(?:preferences?|info|information|details?|requests?|settings?|choices?))"
+)
+_THING_ZH = (
+    r"(?:(?:你|您)的)?(?:偏好|喜好|习惯|信息|要求|设置|内容|这件事|这些|这个|那个)"
+)
+_BARE_EN = (
+    rf"(?:saved(?: {_THING_EN})?{_MEMORY}"
+    rf"|noted(?: {_THING_EN})?"
+    r"(?:[ \t]*[,—–-]+[ \t]*(?:thanks|thank you|thx)(?: a lot| so much| again)?)?"
+    rf"|I(?:['’]ve| have) (?:saved|stored|recorded|noted)(?: {_THING_EN})?{_MEMORY}"
+    rf"|I(?:['’]ll| will) remember {_THING_EN})"
+    rf"(?=[ \t{_MARKS}]*(?:[.!…]+(?:\s|$)|\n|$))"
+)
+_BARE_ZH = (
+    r"(?:我)?(?:已经?(?:记录|记住|保存|记下)了?|(?:记录|保存|记住|记下)(?:下来)?了"
+    rf"|帮你记下(?:来)?了?)(?:{_THING_ZH})?(?:到记忆(?:里|中)?)?"
+    rf"(?=[ \t{_MARKS}]*(?:[。！.!~～…，,、]|\n|$))"
+)
+# A fact that is only such a thing ("Your preferences.") is no fact.
+_GENERIC = re.compile(rf"{_THING_EN}[.!]*|{_THING_ZH}[。！]*", re.IGNORECASE)
+_BARE = re.compile(rf"{_LEFT}(?:{_BARE_EN}|{_BARE_ZH})", re.IGNORECASE)
 _CLAIM_END = re.compile(r"[。！？]+|[.!?]+(?:\s|$)|\n|\s?[(（]")
 _NOTED_TAIL = re.compile(r"[\s,;—–-]*\bnoted\b[.!\s]*$", re.IGNORECASE)
 _TO_USER = re.compile(r"\b(?:you|your|yours)\b|[你您]", re.IGNORECASE)
@@ -475,30 +565,37 @@ def claimed(answer: str) -> str | None:
 
     The first claim counts: ``Remembered: X``, ``Noted — X`` (or ``:``/``,``),
     ``I've noted (that) X``, ``I'll remember (that) X``, ``Got it — X`` with a
-    ``noted`` after it, ``记下了：X``, ``已记住：X``, ``记住了：X``. X ends where its
-    sentence does ("Prof." or "Mrs." does not end it, :data:`_HELD`), or at a
-    ``(``. X must read as a statement: written to the user (``you``, ``your``,
-    ``yours``, ``你``, ``您``) or with a verb, copula or possessive
-    (:data:`_STATEMENT`: "Prof. Duarte's office is in the Atrium Wing."); the
-    facts about another person are notes too. Otherwise X of at least
-    :data:`CLAIM_TERMS` content words is a claim of nothing usable (``""``), and a
-    shorter one ("Noted, thanks!") is no claim.
+    ``noted`` after it, ``记下了：X``, ``已记住：X``, ``记住了：X``, ``已记录：X``,
+    ``已保存：X``. X ends where its sentence does ("Prof." or "Mrs." does not
+    end it, :data:`_HELD`), or at a ``(``. X must read as a statement: written
+    to the user (``you``, ``your``, ``yours``, ``你``, ``您``) or with a verb,
+    copula or possessive (:data:`_STATEMENT`: "Prof. Duarte's office is in the
+    Atrium Wing."); the facts about another person are notes too. Otherwise X
+    of at least :data:`CLAIM_TERMS` content words is a claim of nothing usable
+    (``""``).
+
+    A claim with no fact after it is ``""`` too: a sentence of its own that
+    says it saved or noted ("Saved.", "Noted.", "Noted, thanks!", "Got it,
+    noted…", "I've saved it.", "I'll remember that.", "已记录。", "记住了！",
+    "text✅ 已记录"). An acknowledgement that names no save ("Got it!") is no
+    claim.
     """
     text = answer.replace("**", "").replace("__", "")
     found = [m for pattern in _CLAIMS if (m := pattern.search(text))]
-    if not found:
-        return None
-    rest = _HELD.sub(
-        lambda m: m.group().rstrip() + _JOINER,
-        text[min(found, key=lambda m: m.start()).start("x") :],
-    )
-    fact = rest[: end.start()] if (end := _CLAIM_END.search(rest)) else rest
-    note = finished(_release(_NOTED_TAIL.sub("", fact)))
-    if _TO_USER.search(note):
-        return note
-    if len(note_terms(note)) < CLAIM_TERMS:
-        return None
-    return note if _STATEMENT.search(note) else ""
+    if found:
+        rest = _HELD.sub(
+            lambda m: m.group().rstrip() + _JOINER,
+            text[min(found, key=lambda m: m.start()).start("x") :],
+        )
+        fact = rest[: end.start()] if (end := _CLAIM_END.search(rest)) else rest
+        note = finished(_release(_NOTED_TAIL.sub("", fact)))
+        if _GENERIC.fullmatch(note):
+            return ""
+        if _TO_USER.search(note):
+            return note
+        if len(note_terms(note)) >= CLAIM_TERMS:
+            return note if _STATEMENT.search(note) else ""
+    return "" if _BARE.search(text) else None
 
 
 def candidates(typed: str) -> tuple[list[Candidate], bool]:
