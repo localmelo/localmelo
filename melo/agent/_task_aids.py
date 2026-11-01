@@ -20,7 +20,7 @@ from typing import Final
 FINISH_NOTE: Final = (
     "Two steps are left. Use them to finish what the task asks: if it asks "
     "for a commit, commit your changes now (git add, then git commit), then "
-    "give your final answer. Do not start new checks."
+    "give your final answer with its Ending line. Do not start new checks."
 )
 
 # Error lines at least, and the share of them that must have one cause.

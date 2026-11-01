@@ -339,6 +339,13 @@ button:hover:not(:disabled) {
 .main-card-foot .link-button { padding: 0; font-size: var(--text-small); }
 .main-card-note { color: var(--ink-2); font-size: var(--text-small); }
 .main-card-time { margin-left: auto; color: var(--muted); font-size: var(--text-caption); }
+/* How a task ended, as code decided it (endings.mjs), coloured by meaning: ready green, done but not
+   finished and needs you amber (needs you takes the waiting card's fill), failed red, stopped muted. */
+.main-card[data-ending="blocked"] { border-color: var(--warn); background: var(--warn-tint); }
+.main-card[data-ending="draft"] .main-card-mark, .main-card[data-ending="blocked"] .main-card-mark { background: var(--surface); color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); }
+.main-card[data-ending="failed"] .main-card-mark { background: var(--raised); color: var(--error); }
+.main-card[data-ending="dropped"] .main-card-mark { background: var(--raised); color: var(--muted); }
+.main-card-why { margin: 4px 0 0; color: var(--warn); font-size: var(--text-small); font-weight: 550; overflow-wrap: anywhere; }
 /* A step Auto blocked in a task: the block's amber edge, and the block itself under the heading, unboxed. */
 .main-card[data-state="blocked"] { box-shadow: inset 3px 0 0 var(--warn); }
 .main-card[data-state="blocked"] .main-card-mark { background: var(--warn-tint); color: var(--warn); }
@@ -2044,6 +2051,19 @@ dialog::backdrop {
 .worker-brief {
   white-space: pre-wrap;
 }
+/* A finished task's state and the tests its own run ran, coloured by meaning. */
+.worker-meta dd[data-ending] { font-weight: 600; }
+.worker-meta dd[data-ending="ready"] { color: var(--ok); }
+.worker-meta dd[data-ending="draft"], .worker-meta dd[data-ending="blocked"] { color: var(--warn); }
+.worker-meta dd[data-ending="failed"] { color: var(--error); }
+.worker-meta dd[data-ending="dropped"] { color: var(--muted); }
+.ending-tests { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.ending-tests li { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; }
+.ending-tests code { overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.ending-test-outcome { color: var(--ink-2); font-size: var(--text-small); }
+.ending-tests [data-outcome="passed"] .ending-test-mark { color: var(--ok); }
+.ending-tests [data-outcome="failed"] .ending-test-mark { color: var(--error); }
+.ending-tests [data-outcome="unknown"] .ending-test-mark { color: var(--warn); }
 @media (max-width: 700px) {
   .worker-panel {
     padding: 20px 16px;
@@ -2128,6 +2148,9 @@ dialog::backdrop {
 .activity-title { font-weight: 550; }
 .activity-line { color: var(--ink-3); font-size: var(--text-small); }
 .activity-row[data-state="waiting"] .activity-line { color: var(--warn); }
+.activity-icon[data-icon="draft"], .activity-icon[data-icon="blocked"] { color: var(--warn); }
+.activity-row[data-ending="draft"] .activity-line, .activity-row[data-ending="blocked"] .activity-line { color: var(--warn); }
+.activity-row[data-ending="failed"] .activity-line { color: var(--error); }
 .activity-time { padding-top: 2px; color: var(--ink-3); font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
 .activity-detail { padding: 0 12px 12px 50px; }
 .activity-steps { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; font-size: var(--text-small); }

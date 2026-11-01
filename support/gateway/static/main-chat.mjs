@@ -10,6 +10,7 @@
  * Nothing here fetches; the page passes what a card's Open and an echo's buttons do.
  */
 
+import {ENDING_MARKS, canFinish, endingName, endingWhy, finishLabel, readEnding} from "./endings.mjs";
 import {blockCard, blockFacts, stepLine} from "./blocked.mjs";
 import {formatTime, saidText, t} from "./i18n.mjs";
 import {LEVELS, levelCode, levelLabel, levelMeaning} from "./levels.mjs";
@@ -69,6 +70,8 @@ export function readCard(row) {
     ...(data.request_id ? {requestId: String(data.request_id)} : {}),
     // The card of a reminder's run: its heading is "Reminder: <the person's words>".
     ...(data.reminder === true ? {reminder: true} : {}),
+    // A task's card: how it ended, as code decided it.
+    ...(readEnding(data.ending) ? {ending: readEnding(data.ending)} : {}),
     // A step Auto blocked in a task (#369): the block as the task's page has it, with Allow once.
     ...(state === "blocked" ? {
       stepKey: String(data.step_key ?? ""),
@@ -183,6 +186,15 @@ export function cardWords(card) {
     return {mark: allowed ? "✓" : denied ? "✕" : "·", heading: t("mainChat.card.answered", {title}), action: open};
   }
   if (card.reminder) return {mark: card.state === "failed" || card.state === "stopped" ? "✕" : "✓", heading: t("mainChat.card.reminder", {title}), action: open};
+  // A done task says how code found it ended: ready, done but not finished (Finish it), or needs you.
+  const ending = card.state === "done" ? card.ending : null;
+  if (ending) {
+    const name = endingName(ending);
+    // Its own keys: "blocked" cards are steps Auto blocked, a dropped task reads as stopped.
+    const key = {blocked: "needsYou", dropped: "stopped"}[name] ?? name;
+    const heading = t(`mainChat.card.${key}`, {title});
+    return {mark: ENDING_MARKS[ending.state], heading, action: open, ...(canFinish(ending) ? {more: finishLabel(ending)} : {})};
+  }
   if (card.state === "failed") return {mark: "✕", heading: t("mainChat.card.failed", {title}), action: open};
   // A task that ran out of steps stopped; it can go on from where it was, so Continue comes first.
   if (card.state === "stopped") return {mark: "■", heading: t("mainChat.card.stopped", {title}), action: open, more: t("failure.continue")};
@@ -206,6 +218,7 @@ export function cardNode({doc, card, open, resume = null, approval = null, block
   const words = cardWords(card);
   const node = el("article", "main-card");
   node.dataset.state = card.state;
+  if (card.ending) node.dataset.ending = card.ending.state;
   if (card.state === "answered") node.dataset.answer = words.mark === "✓" ? "allowed" : words.mark === "✕" ? "denied" : "other";
   node.dataset.cardId = String(card.id);
   node.setAttribute("aria-label", words.heading);
@@ -220,6 +233,9 @@ export function cardNode({doc, card, open, resume = null, approval = null, block
   // A blocked step says what and why in its block; its line is for the list and the terminal.
   const line = (card.state === "waiting" && repeats) || facts ? "" : card.line;
   if (line) text.append(el("p", "main-card-line", line));
+  // Why it is not ready: what code found missing, or its question.
+  const why = card.ending && card.state !== "waiting" ? endingWhy(card.ending) : "";
+  if (why) text.append(el("p", "main-card-why", why));
   if (facts) text.append(blockCard(doc, facts, block ?? {}));
   const inline = card.state === "waiting" && approval;
   if (inline) text.append(approval);

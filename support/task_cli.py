@@ -18,6 +18,18 @@ import httpx
 
 from localmelo.support.loopback import is_loopback
 from localmelo.support.task_follow import FollowError, follow
+from localmelo.support.words import t_in
+
+# How code decided a task ended, and the reasons worth saying beside it.
+ENDINGS = ("ready", "draft", "blocked", "failed", "dropped")
+_WHY = (
+    "tests_failed",
+    "tests_still_fail",
+    "tests_missing",
+    "tests_unverified",
+    "commit_missing",
+    "unchecked",
+)
 
 MAX_BRIEF_BYTES = 1024 * 1024
 MAX_OBJECTIVE_CHARS = 100_000
@@ -195,7 +207,28 @@ def _state_word(task: dict[str, Any]) -> str:
 
     ``--json`` keeps the stored state, ``failed``, and says ``out_of_steps``.
     """
-    return "stopped" if task.get("out_of_steps") is True else str(task.get("state", ""))
+    if task.get("out_of_steps") is True:
+        return "stopped"
+    label = ending_words(task.get("ending"))[0]
+    return label.lower() if label else str(task.get("state", ""))
+
+
+def ending_words(ending: Any) -> tuple[str, str]:
+    """``("Done, not finished", "No test ran after the last change; …")``, or ``("", "")``.
+
+    The words of how code decided a task ended: its state, then its question
+    or the reasons its work is not finished.
+    """
+    if not isinstance(ending, dict) or ending.get("state") not in ENDINGS:
+        return "", ""
+    # A worker that dropped its task made it moot: not the person's Stop.
+    moot = ending["state"] == "dropped" and ending.get("proposed") == "dropped"
+    name = "moot" if moot else ending["state"]
+    reasons = ending.get("reasons")
+    reasons = reasons if isinstance(reasons, list) else []
+    why = [str(ending.get("question") or "")]
+    why += [t_in("en", f"ending.reason.{code}") for code in reasons if code in _WHY]
+    return t_in("en", f"ending.state.{name}"), "; ".join(w for w in why if w)
 
 
 def execute(
@@ -348,10 +381,13 @@ def execute(
             approval = _waiting_approval(task)
             wait = task.get("wait_reason")
             reason = task.get("reason") or ("approval" if approval else None)
-            # Reason and Waiting appear only when the task has one. The task
-            # record has no outcome field, so a finished task adds nothing.
+            # Reason and Waiting appear only when the task has one; Why only when
+            # how it ended needs words (a draft's reasons, a question).
+            why = ending_words(task.get("ending"))[1]
             if reason:
                 print(f"  Reason: {_safe(reason)}", file=out)
+            if why:
+                print(f"  Why: {_safe(why)}", file=out)
             if approval:
                 print(f"  {_safe(approval)}", file=out)
             elif task.get("out_of_steps") is True:

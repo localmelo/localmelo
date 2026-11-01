@@ -19,6 +19,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `/memory undo` works in the console and the app too. Undo needs no
   developer mode; a note you reworded since stays, and the line says so. A
   run that changes nothing leaves no line. [#363]
+- A task says honestly how it ended. When its worker finishes, code, not the
+  worker, decides, and only proof makes it **Ready**. It reads **Done, not
+  finished** when its last test failed or its result was not checked, when it
+  changed code and no test ran after the last change, when you asked for a
+  commit (or a push or a pull request) and the changes are not committed, or
+  when its folder could not be checked. **Needs you** means its report still
+  asks you something; **Failed**, **Stopped** and **Not needed** say the rest.
+  Only tests the task's own run started count, and only a plain test command
+  passes on its result; tests a report claims do not count, and work that was
+  in the folder before the task is not blamed on it. Work owed stays owed until
+  the task ends ready, outside git too. Tests that still fail when nothing was
+  changed say so, with nothing to finish. The card, the task page, Activity
+  and the terminal say it in plain words and colour, the task page lists the
+  tests the run ran, and **Finish it: run the tests and commit** continues a
+  task that still owes them with one tap. Part of #377. [#393]
 - In the terminal, **Shift+Tab** switches the chat between Ask and Auto (Tab
   still completes). The bottom line always names the mode with its key,
   `ask · shift+tab` or `auto · shift+tab`, Auto in its own colour (the key
@@ -33,6 +48,22 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   bounded embedding similarity or a word-only fallback without merging different
   known subjects. Reports list selected turns and each model operation's bounded,
   secret-redacted verdict; applied changes carry the same label. [#389]
+- Note tidying keeps a paraphrase out (cosine from 0.85) but never a changed value
+  or the opposite statement (a negation in only one of the two). When two of the
+  user's own active notes say one subject with different values, the older is
+  superseded and the newer kept, without a model call (a model update that names
+  the newer note, or says what it holds, does the same). Each report entry shows the text of the note it targeted and the numbers
+  behind the existing-fact check; a note written from the same message is refused
+  as `self_target`. Notes the tidying writes are recall only: never pinned into
+  every prompt. [#396]
+- A note the tidying keeps now also counts as having replaced the exchanges of
+  the notes it superseded, as a note written to replace another does, so recall
+  stops giving the old value through its exchange (unless you ask about the
+  past); undo takes that back. A model update whose new value a newer active
+  note already holds supersedes the older note and writes no copy. A note the
+  model proposes that says "I", "me" or "my" outside quotes is refused as
+  `first_person`; the model is asked to write "you" for you and "melo" for the
+  assistant. [#396]
 
 - Developer setting `[memory] sleep` (`off` by default; `rules`, `model`
   and `model+tags`; `-X memory.sleep=rules`, listed by
@@ -486,6 +517,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A note's owner has to be a person. A rule you ask melo to remember ("Remember:
+  tests run with -n auto", "记住：开发的代码一律用英文") is filed under About, not
+  People, and the owner check no longer refuses it for naming a language, a
+  tool or a modifier before "'s" or "的" as someone else ("Python's GIL",
+  "开发的代码"). Names that are people ("Marco's studio", "马可的工作室", "妈妈的生日")
+  are still checked, and a request about them is still filed under People.
 - The app's pill says **stopped**, not failed, for a task that used all its
   steps, as the console already does: `status.recent` reads the task's reason. [#365]
 - A Chinese ask that says to change code, run the tests and commit
@@ -3308,3 +3345,5 @@ earlier milestones.
 [#388]: https://github.com/localmelo/localmelo/pull/388
 [#389]: https://github.com/localmelo/localmelo/pull/389
 [#392]: https://github.com/localmelo/localmelo/pull/392
+[#393]: https://github.com/localmelo/localmelo/pull/393
+[#396]: https://github.com/localmelo/localmelo/pull/396

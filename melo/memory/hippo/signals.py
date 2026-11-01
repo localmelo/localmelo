@@ -149,7 +149,7 @@ def _marker_span(sentence: str, marker: str) -> tuple[int, int] | None:
     return None if start < 0 else (start, start + len(marker))
 
 
-def _request_clause(sentence: str) -> str:
+def request_clause(sentence: str) -> str:
     """The fact a remember request carries after its earliest marker."""
     spans = [
         span
@@ -235,7 +235,7 @@ def classify_user_text(text: str) -> UserSignals:
         )
         remember = remember or sentence_remember
         if sentence_remember:
-            clause = _request_clause(stripped)
+            clause = request_clause(stripped)
             if clause and _states_a_declarative_fact(clause):
                 if clause not in request_facts:
                     request_facts.append(clause)

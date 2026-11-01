@@ -863,6 +863,42 @@ class SqliteLongTerm(LongTerm):
         self._index = None
         return changed
 
+    async def set_provenance(self, entry_id: int, changes: dict[str, Any]) -> bool:
+        """Merge *changes* into an active record's provenance; ``False`` when
+        there is none. A ``None`` value removes the key.
+
+        Text, vector, status and every other column stay as they are, and no
+        decision row is written (the caller's own change records why).
+        """
+        conn = await self._ensure_ready()
+        async with self._write_lock:
+            await conn.execute("BEGIN IMMEDIATE")
+            try:
+                async with conn.execute(
+                    "SELECT provenance_json FROM long_term "
+                    "WHERE id = ? AND status = 'active'",
+                    (entry_id,),
+                ) as cur:
+                    row = await cur.fetchone()
+                if row is not None:
+                    provenance = json.loads(row[0])
+                    for key, value in changes.items():
+                        if value is None:
+                            provenance.pop(key, None)
+                        else:
+                            provenance[key] = value
+                    await conn.execute(
+                        "UPDATE long_term SET provenance_json = ? WHERE id = ?",
+                        (json.dumps(provenance, ensure_ascii=False), entry_id),
+                    )
+                await conn.commit()
+            except BaseException:
+                with contextlib.suppress(Exception):
+                    await conn.rollback()
+                raise
+        self._index = None
+        return row is not None
+
     async def set_vector(
         self, entry_id: int, embedding: list[float] | None, embed_model: str
     ) -> None:

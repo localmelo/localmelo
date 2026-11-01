@@ -12,7 +12,10 @@ event, never a turn: no model reads it, and a chat's window never holds it. Its 
 or ``task``) it opens, the source's short ``title`` and its plain ``line``: up
 to two lines of the answer on a done card, the reason on a failed one, what is
 left on a stopped one (a task that ran out of steps, which can continue), what
-is asked on a waiting one.
+is asked on a waiting one. A task's card also keeps its ``ending`` (``state``,
+``proposed``, ``reasons``, ``question``): how code found that end ended, as its
+``sched.finished`` event carries it (:mod:`..task_endings`), which the page reads
+as Ready, Done, not finished or Needs you.
 
 A waiting card carries its ``request_id``. When that approval is answered, a
 card with state ``answered``, the same ``request_id`` and the answer in words as
@@ -56,6 +59,7 @@ from localmelo.support.sessions.store import SessionInfo, StoredEvent
 from ..auto_blocks import blocked_steps
 from ..chore_store import REMINDER_PREFIX, REMINDER_REASON
 from ..finishing import NOT_CONTINUED, is_out_of_steps, not_committed
+from ..task_endings import default_ending
 from ..task_store import TaskStoreError
 from .activity import answer_lines, answer_word, left_line
 
@@ -81,6 +85,7 @@ _READ: Final = (
     "outcome",
     "origin",
     "remember",
+    "ending",
 )
 # What a waiting card needs of an approval's arguments: where, never what.
 _WHERE: Final = ("path", "url")
@@ -359,6 +364,15 @@ class MainChatCards:
             # A task whose commit is all that is left says so, with the command.
             left = await not_committed(last.answer, info.workspace)
             ended = {"line": left} if left else ended
+        if info.kind == "task":
+            # How this end ended, decided by code with its transition (never a later one).
+            found = data.get("ending")
+            if not isinstance(found, dict):
+                record = await self._console.workers.tasks.get_task(info.id)
+                found = default_ending(str(data.get("state")), record.wait_reason)
+            if found is not None:
+                keys = ("state", "proposed", "reasons", "question")
+                card["ending"] = {key: found[key] for key in keys if key in found}
         words = await self._reminder_words(info.id) if info.kind == "task" else None
         if words is not None:
             # A reminder's card shows the person's words even when its run failed.

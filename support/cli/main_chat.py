@@ -77,6 +77,14 @@ RECAP_CARDS: Final = 3
 UNDO_TURNS: Final = 10
 MAIN_TITLE: Final = "Main chat"
 NEW_SIDE: Final = "New side chat"
+# A task card's look by how code decided it ended: (symbol, style).
+_ENDING_LOOK: Final = {
+    "ready": ("ok", "ok"),
+    "draft": ("warn", "warn"),
+    "blocked": ("warn", "warn"),
+    "failed": ("failed", "error"),
+    "dropped": ("stopped", "muted"),
+}
 _CARD_WORDS: Final = {
     "done": ("ok", "ok", "Done"),
     "failed": ("failed", "error", "Not finished"),
@@ -528,6 +536,11 @@ def card_line(card: Mapping[str, Any], symbols: Any, width: int) -> Text:
     )
     title = clean_output(" ".join(str(card.get("title") or "").split()))
     said = clean_output(" ".join(str(card.get("line") or "").split()))
+    label, why = task_cli.ending_words(card.get("ending"))
+    if label and card.get("state") == "done":
+        # Ready, done but not finished, or needs you: as code decided it.
+        symbol, style = _ENDING_LOOK[card["ending"]["state"]]
+        word, said = label, clean_output(why) or said
     source = str(card.get("source_id") or "")
     if card.get("source_kind") == "chat":
         how = "/chats opens it"

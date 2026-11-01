@@ -351,6 +351,12 @@ async def test_worker_context_hooks_bind_execution(
             checked.set()
             return SimpleNamespace(status="completed")
 
+        def cancel(self, *args: Any, **kwargs: Any) -> bool:
+            # The runner stays registered until its run is finalized (the ending's
+            # folder reads included); like SessionRunner's, a cancel after the turn
+            # finished stops nothing.
+            return False
+
         async def close(self, **kwargs: Any) -> None:
             pass
 
