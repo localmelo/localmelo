@@ -48,12 +48,18 @@ NOTICE_MESSAGES: Mapping[str, str] = {
     "unfinished_answer": (
         "The model's reply ended inside its thinking; asking it for its answer."
     ),
+    "tool_call_as_text": (
+        "The model wrote a tool call as text, so it did not run; asking it again."
+    ),
     "no_change": "Nothing has changed in the workspace yet.",
     "brief_items": "Some numbered items of the brief have no edit yet.",
     "brief_check_failed": (
         "The task's check still fails; the run ends completed with failing tests."
     ),
 }
+
+# The same notice for the reply that ends the run: the model is not asked again.
+TOOL_CALL_TEXT_FINAL_MESSAGE = "The model wrote a tool call as text, so it did not run."
 
 # The message of a brief_check notice, by how the check went.
 BRIEF_CHECK_MESSAGES = {
@@ -468,6 +474,19 @@ class _Emitter:
         if self._sink is None:
             return
         self._notice("unfinished_answer", NOTICE_MESSAGES["unfinished_answer"], {})
+
+    def tool_call_as_text(self, count: int, *, final: bool = False) -> None:
+        """A reply wrote a tool call as text; *count* is the replies in a row
+        that were no answer. The model is asked again, unless *final*: the
+        reply ends the run."""
+        if self._sink is None:
+            return
+        message = (
+            TOOL_CALL_TEXT_FINAL_MESSAGE
+            if final
+            else NOTICE_MESSAGES["tool_call_as_text"]
+        )
+        self._notice("tool_call_as_text", message, {"count": count})
 
     def no_change(self, scope: str | None = None) -> None:
         """A brief run found the workspace unchanged: at a boundary, or with

@@ -570,10 +570,25 @@ test('/memory opens the Memory tab; /memory import leaves a hook for the import 
   await ready.slash.handle('/memory import');
   assert.match(lastRow(ready), /Import opened\./);
   await p.slash.handle('/memory nope');
-  assert.match(lastRow(p), /Use \/memory, or \/memory window/);
+  assert.match(lastRow(p), /Use \/memory, \/memory import, \/memory undo, or \/memory window/);
   const developer = page({routes: ROUTES, state: {developer: true}});
   await developer.slash.handle('/memory window');
   assert.deepEqual(moved(developer, 'openDrawer'), ['openDrawer', 'memory']);
+});
+
+test('/memory undo hands the page\'s undo move its answer, or says there is nothing to put back', async () => {
+  const none = page({host: {undoSleep: async () => [{text: 'melo has not tidied your notes lately, so there is nothing to put back.', tone: 'muted'}]}});
+  await none.slash.handle('/memory undo');
+  assert.match(lastRow(none), /nothing to put back/);
+  const done = page({host: {undoSleep: async () => []}});
+  await done.slash.handle('/memory undo');
+  assert.equal(done.rows.children.length, 0, 'no row of its own: the undone line shows in the chat');
+  const failed = page({host: {undoSleep: async () => { throw new Error('No such tidy-up run, or it was undone already.'); }}});
+  await failed.slash.handle('/memory undo');
+  assert.match(lastRow(failed), /No such tidy-up run/);
+  const bare = page();
+  await bare.slash.handle('/memory undo');
+  assert.match(lastRow(bare), /nothing to put back/);
 });
 
 test('/approvals switches the chat\'s mode, forgets a grant, and shows the mode and the grants', async () => {

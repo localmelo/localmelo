@@ -34,7 +34,7 @@ from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.executor.process_gate import PROCESS_RECORD
 from localmelo.melo.executor.sandbox import user_temp_dir
 from localmelo.melo.executor.search_files import SEARCH_FILES_TOOL, rooted_search_files
-from localmelo.melo.schema import Message, ToolDef, split_thinking
+from localmelo.melo.schema import Message, ToolDef, broken_tool_call, split_thinking
 from localmelo.support.config import Config
 from localmelo.support.gateway.auto_blocks import (
     block_to_allow,
@@ -2569,7 +2569,8 @@ class TaskWorkers:
             live["action"] = (str(data.get("name", "")), data.get("arguments"))
         elif event.type == "assistant.message":
             said = split_thinking(str(data.get("content") or ""))[1].strip()
-            if said:
+            # A tool call written as text is not a note of what the task did.
+            if said and not broken_tool_call(said):
                 live["left"] = said
 
     def live(self, task_id: str) -> dict[str, Any]:

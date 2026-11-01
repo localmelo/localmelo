@@ -152,7 +152,7 @@ When the model is not the saved default, a row after the folder gives the server
 | `/copy [turn]` | Copy a stored answer's Markdown; without a number, the latest finished, non-undone turn. |
 | `/usage` | Recorded steps, tool calls, tokens and time per turn, including undone work, with totals; `?` means not recorded. |
 | `/status [all]` | Five rows that say whether melo is ready: the model and its server (`✓ answers`, or why not), the folder, the session, what the approvals do, and how full the context is. `/status all`, and `/status` in developer mode, print every row. |
-| `/memory` | The notes melo keeps about you, as a list: Enter on a note offers `Back`, `Edit it` and `Delete it`; `Forget everything…` asks first. `/memory import` offers the notes other assistants keep (see [First run](#first-run)). `/memory window` inspects the model's working window with no model call. |
+| `/memory` | The notes melo keeps about you, as a list: Enter on a note offers `Back`, `Edit it` and `Delete it`; `Forget everything…` asks first. `/memory import` offers the notes other assistants keep (see [First run](#first-run)). `/memory undo` puts back the notes melo tidied while you were away, in the main chat where the line `· /memory undo` says so. `/memory window` inspects the model's working window with no model call. |
 | `/attach PATH` | Stage one workspace text file; `/attachments` lists them and `/detach N\|all` removes them. |
 | `/verbose [on\|off]` | Verbose rendering: 40 thinking rows, a tool call's arguments, 20 output lines, the reflection's whole rationale. |
 | `/thinking [on\|off]` | The thinking excerpt on, or off (the default, except in developer mode). |

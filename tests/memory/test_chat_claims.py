@@ -108,7 +108,7 @@ REFUSED = [
 # A reply that says it saved or noted and names nothing: the bench's real one
 # first, then the ways a model says it.
 BARE = [
-    "text✅ 已记录",
+    "✅ 已记录",
     "Got it — noted…",
     "Noted.",
     "Noted, thanks!",

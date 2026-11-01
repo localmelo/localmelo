@@ -504,10 +504,14 @@ def kept_lines(quotes: Sequence[str], *, refused: bool = False) -> list[str]:
     return lines + ([NOT_KEPT_LINE] if refused else [])
 
 
-def block(items: Iterable[Item], kept: Sequence[str] = ()) -> tuple[str, list[Item]]:
+def block(
+    items: Iterable[Item], kept: Sequence[str] = (), chars: int = BLOCK_CHARS
+) -> tuple[str, list[Item]]:
     """The recall block a user message carries, and the items that fit in it.
 
     The *kept* lines (:func:`kept_lines`) come first, with or without recall.
+    Items are added while the block stays within *chars*
+    (:data:`BLOCK_CHARS` unless the settings say otherwise).
     """
     lines = [BLOCK_HEADER, *kept]
     used: list[Item] = []
@@ -517,7 +521,7 @@ def block(items: Iterable[Item], kept: Sequence[str] = ()) -> tuple[str, list[It
     same_day = times(candidates)
     for item in candidates:
         line = f"- {item.line(now, timed=item.key in same_day)}"
-        if size + len(line) + 1 > BLOCK_CHARS:
+        if size + len(line) + 1 > chars:
             continue
         lines.append(line)
         used.append(item)

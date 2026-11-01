@@ -55,6 +55,8 @@ class FakeGateway:
         self.turns: dict[str, list[dict[str, Any]]] = {MAIN: []}
         self.pending: dict[str, list[dict[str, Any]]] = {}
         self.requests: list[tuple[str, str, Any]] = []
+        # Tidy-up runs another way back already took: Undo on their lines says so.
+        self.gone_runs: set[str] = set()
         self.closed = False
         self.lose_stream = False
         self.refuse_mode = False
@@ -179,10 +181,12 @@ class FakeGateway:
             turns = self.turns.get(session_id, [])[-limit:]
             cards = [{"id": e["id"], "ts": e["ts"], **e["data"]} for e in self.events
                      if e["session_id"] == session_id and e["type"] == "attention.card"]  # fmt: skip
+            echoes = [{"id": e["id"], "ts": e["ts"], **e["data"]} for e in self.events
+                      if e["session_id"] == session_id and e["type"] == "attention.echo"]  # fmt: skip
             first = next((e["id"] for e in self.events if e["session_id"] == session_id
                           and turns and e["turn"] == turns[0]["turn"]), 1)  # fmt: skip
             return httpx.Response(200, json={"turns": turns, "cards": cards,
-                                  "replay_from": first - 1})  # fmt: skip
+                                  "echoes": echoes, "replay_from": first - 1})  # fmt: skip
         if parts[:2] == ["api", "sessions"] and parts[3:] == ["retry"]:
             turns = self.turns[parts[2]]
             if not turns or turns[-1]["id"] != body["turn_id"]:
@@ -210,6 +214,29 @@ class FakeGateway:
                     self.finish(session_id, number, "completed", "Ran it.")
                     return httpx.Response(200, json={"outcome": outcome})
             return _error(404, "not_found", "Approval not found.")
+        if parts[:3] == ["api", "front", "echoes"] and method == "POST":
+            # A tap on a "melo tidied your notes" line: Undo answers with an undone line.
+            row = next((e for e in self.events if e["id"] == int(parts[3])), None)
+            if (
+                row is None
+                or row["data"].get("echo") != "sleep"
+                or body["do"] != "undo"
+            ):
+                return _error(404, "not_found", "Not found.")
+            if any(e["data"].get("of") == row["id"] for e in self.events):
+                return _error(409, "already_answered", "That line is answered.")
+            gone = row["data"].get("run_id") in self.gone_runs
+            data = {
+                "echo": "undone",
+                "of": row["id"],
+                "line": (
+                    "Those notes were already put back"
+                    if gone
+                    else "Put back the 3 notes melo tidied"
+                ),
+            }
+            echo_id = self.emit(row["session_id"], "attention.echo", data, None)
+            return httpx.Response(200, json={"echo": {"id": echo_id, "ts": 2000.0, **data}})  # fmt: skip
         if parts[:2] == ["api", "turns"] and parts[3:] == ["cancel"]:
             found = self._running.pop(parts[2], None)
             if found is None:
@@ -585,6 +612,125 @@ async def test_a_chats_turn_on_a_tasks_question_shows_its_row_not_its_frame(
     assert session.enter("/retry") is None
     await _until(lambda: "Nothing to retry" in setup.out.text())
     assert not [r for r in gateway.requests if r[1].endswith("/retry")]
+
+
+SLEPT = {"echo": "sleep", "run_id": "r1", "count": 3, "variant": "rules",
+         "line": "While you were away, melo tidied 3 notes"}  # fmt: skip
+
+
+def test_the_line_for_tidied_notes_names_the_command_that_puts_them_back() -> None:
+    line = echo_line(SLEPT, UNICODE, 80)
+    assert line.plain == "→ While you were away, melo tidied 3 notes · /memory undo"
+    assert [span.style for span in line.spans] == ["muted"]
+    narrow = echo_line(SLEPT, UNICODE, 50)
+    assert narrow.plain.endswith(" · /memory undo") and len(narrow.plain) <= 50
+    undone = echo_line(
+        {"echo": "undone", "of": 7, "line": "Put back the 3 notes melo tidied"}, UNICODE, 80
+    )  # fmt: skip
+    assert undone.plain == "→ Put back the 3 notes melo tidied"
+
+
+async def test_a_tidy_up_while_away_draws_as_it_comes_and_undo_puts_it_back(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    session = setup.session
+    gateway.emit(MAIN, "attention.echo", SLEPT, None)
+    await _until(lambda: "melo tidied 3 notes" in setup.out.text())
+    assert (
+        "→ While you were away, melo tidied 3 notes · /memory undo" in setup.out.text()
+    )
+    assert session.enter("/memory undo") is None
+    await setup.idle()
+    await _until(lambda: "Put back the 3 notes melo tidied" in setup.out.text())
+    assert setup.out.text().count("Put back the 3 notes melo tidied") == 1
+    assert ("POST", "/api/front/echoes/1", {"do": "undo"}) in gateway.requests
+    # Undone: there is nothing left to put back.
+    assert session.enter("/memory undo") is None
+    await _until(lambda: "nothing to put back" in setup.out.text())
+    assert len([r for r in gateway.requests if r[1].startswith("/api/front")]) == 1
+
+
+async def test_undo_takes_the_newest_tidy_up_that_is_not_undone(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    first = gateway.emit(MAIN, "attention.echo", {**SLEPT, "run_id": "a"}, None)
+    gateway.emit(MAIN, "attention.echo", {**SLEPT, "run_id": "b"}, None)
+    gateway.emit(MAIN, "attention.echo", {"echo": "undone", "of": first + 1, "line": "x"}, None)  # fmt: skip
+    await _until(lambda: setup.out.text().count("melo tidied 3 notes") == 2)
+    assert setup.session.enter("/memory undo") is None
+    await _until(
+        lambda: ("POST", f"/api/front/echoes/{first}", {"do": "undo"})
+        in gateway.requests
+    )
+
+
+async def test_undo_moves_on_to_an_older_tidy_up_when_the_newest_was_put_back_already(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    older = gateway.emit(MAIN, "attention.echo", {**SLEPT, "run_id": "a"}, None)
+    newer = gateway.emit(MAIN, "attention.echo", {**SLEPT, "run_id": "b"}, None)
+    gateway.gone_runs.add("b")
+    await _until(lambda: setup.out.text().count("melo tidied 3 notes") == 2)
+    assert setup.session.enter("/memory undo") is None
+    await _until(lambda: "Those notes were already put back" in setup.out.text())
+    # The gateway answered the line, so the next /memory undo is for the older one.
+    assert setup.session.enter("/memory undo") is None
+    await _until(lambda: "Put back the 3 notes melo tidied" in setup.out.text())
+    taps = [r[1] for r in gateway.requests if r[1].startswith("/api/front/echoes/")]
+    assert taps == [f"/api/front/echoes/{newer}", f"/api/front/echoes/{older}"]
+    assert setup.session.enter("/memory undo") is None
+    await _until(lambda: "nothing to put back" in setup.out.text())
+
+
+async def test_undo_works_from_a_side_chat_and_says_when_there_is_nothing(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    assert setup.session.enter("/memory undo") is None
+    await _until(lambda: "nothing to put back" in setup.out.text())
+    gateway.emit(MAIN, "attention.echo", SLEPT, None)
+    remote = setup.session.remote
+    assert isinstance(remote, MainChat)
+    await remote.side("")
+    assert not remote.chat.main
+    assert setup.session.enter("/memory undo") is None
+    await _until(lambda: "Put back the 3 notes melo tidied" in setup.out.text())
+
+
+async def test_a_recap_shows_the_tidy_up_since_the_last_turn(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    gateway.turns.setdefault(MAIN, []).append(
+        {"id": f"{MAIN}-t1", "turn": 1, "user_text": "hello there", "status": "completed",
+         "answer": "Hi.", "started_at": 500.0}  # fmt: skip
+    )
+    gateway.emit(MAIN, "attention.echo", SLEPT, None)
+    remote = setup.session.remote
+    assert isinstance(remote, MainChat)
+    remote._cursors.clear()
+    remote._seen.clear()
+    await remote.open(remote.chat)
+    assert setup.out.text().count("melo tidied 3 notes · /memory undo") == 1
+
+
+async def test_a_recap_shows_the_tidy_up_in_a_chat_with_no_turn_yet(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    gateway.emit(MAIN, "attention.echo", SLEPT, None)
+    gateway.emit(
+        MAIN, "attention.echo", {"echo": "undone", "of": 99, "line": "x"}, None
+    )
+    remote = setup.session.remote
+    assert isinstance(remote, MainChat)
+    remote._cursors.clear()
+    remote._seen.clear()
+    await remote.open(remote.chat)
+    assert setup.out.text().count("melo tidied 3 notes · /memory undo") == 1
 
 
 async def test_a_recap_under_a_command_hangs_instead_of_indenting_twice(

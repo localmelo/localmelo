@@ -105,6 +105,14 @@ def test_split_thinking_is_the_cores() -> None:
     assert display.split_thinking("<think>why</think>\nanswer") == ("why", "answer")
 
 
+@pytest.mark.parametrize(("text", "thinking", "answer"), VECTORS["split_thinking"])
+def test_split_thinking_reads_the_shared_cases(
+    text: str, thinking: str, answer: str
+) -> None:
+    # The console's splitThinking reads the same table (test_workspace.mjs).
+    assert schema.split_thinking(text) == (thinking, answer)
+
+
 @pytest.mark.parametrize(
     ("status", "error_category", "approval", "short", "long"),
     VECTORS["approval_tag"],

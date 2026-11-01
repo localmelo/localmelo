@@ -134,6 +134,27 @@ def test_duplicate_event_within_stream_is_emitted_once() -> None:
     assert [record["id"] for record in records if "id" in record] == [1, 2]
 
 
+def test_a_tool_call_written_as_text_is_named_not_shown() -> None:
+    from localmelo.support.task_follow import _emit
+
+    out = io.StringIO()
+    for content in ("<tool_call>\n<function=remember>", "Saved the note."):
+        _emit(
+            out,
+            {
+                "event": {
+                    "type": "assistant.message",
+                    "ts": 1_700_000_000.0,
+                    "data": {"content": content},
+                }
+            },
+            False,
+        )
+    lines = out.getvalue().splitlines()
+    assert "a tool call written as text, not run" in lines[0]
+    assert "tool_call" not in lines[0] and "Saved the note." in lines[1]
+
+
 def test_human_lines_show_time_kind_and_short_summary() -> None:
     from localmelo.support.task_follow import _CAVEAT, _emit
 

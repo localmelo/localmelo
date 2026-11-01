@@ -65,7 +65,11 @@ COMMANDS: Final[tuple[Command, ...]] = (
     Command("title", (), "[text]", "Show or set the chat title", True),
     Command("usage", (), "", "Show recorded tokens, tools and time", True),
     Command(
-        "memory", (), "[window|import]", "See and change the notes melo keeps", True
+        "memory",
+        (),
+        "[window|import|undo]",
+        "See and change the notes melo keeps",
+        True,
     ),
     Command("verbose", (), "[on|off]", "Toggle verbose rendering", True),
     Command("thinking", (), "[on|off]", "Toggle thinking excerpts", True),

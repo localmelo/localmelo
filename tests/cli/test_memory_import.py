@@ -349,7 +349,25 @@ async def test_slash_memory_import_is_a_command_of_the_chat(tmp_path: Path) -> N
             await SessionTools(session).run("memory", "import")
         with pytest.raises(ValueError, match="/memory import"):
             await SessionTools(session).run("memory", "what")
+        with pytest.raises(ValueError, match="/memory undo"):
+            await SessionTools(session).run("memory", "what")
     assert seen == [session]
+
+
+async def test_memory_undo_asks_the_main_chat_and_a_plain_terminal_says_where() -> None:
+    session = mock.MagicMock()
+    session.remote = None
+    with pytest.raises(ValueError, match="works in the main chat"):
+        await SessionTools(session).run("memory", "undo")
+    undone: list[bool] = []
+
+    async def undo_sleep() -> None:
+        undone.append(True)
+
+    session.remote = mock.MagicMock()
+    session.remote.undo_sleep = undo_sleep
+    await SessionTools(session).run("memory", "undo")
+    assert undone == [True]
 
 
 # ── What is printed, and what ends the offer ──

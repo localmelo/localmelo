@@ -9,6 +9,30 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- With `[memory] sleep` set to `rules`, `model` or `model+tags`, the gateway
+  now tidies the notes by itself while the computer is idle: no turn in the
+  gateway's chats for 20 minutes (a terminal chat that runs on its own, with
+  `-c` or `[cli] chat = "local"`, and workers outside the gateway are not
+  seen), no task running or queued, no GPU lock file (looked for only when
+  `[scheduler] gpu_lock_file` is set), on AC power, and at most once every
+  6 hours (the time is kept, so a restart does not run it early, and a clock
+  set back up to a day does not skip it). With `off`, the default, nothing
+  runs. The main chat then says
+  "While you were away, melo tidied 3 notes" with **Undo** and a fold that
+  lists what changed; the terminal's line ends with `· /memory undo`, and
+  `/memory undo` works in the console and the app too. Undo needs no
+  developer mode; a note you reworded since stays, and the line says so. A
+  run that was put back another way already answers "Those notes were already
+  put back", and Undo during a run answers at once to try again in a moment.
+  A run that changes nothing leaves no line. [#363]
+- Developer only, not visible by default: five `[memory]` settings that decide what a chat
+  message's recall block holds, each defaulting to today's recall and set for one run with
+  `-X memory.KEY=VALUE`. `recall_records` (3) and `recall_docs` (2) are the most notes and
+  earlier chat turns it holds, `recall_chars` (900) its size; `recall_notes = "off"`
+  recalls turns only and pins no note (the `remember` and search tools are unchanged);
+  `search_when_empty = "hint"` gives a block that recalled nothing one line telling the
+  model to call the memory search tool first, and the `turn.memory` event then has
+  `search_hint: true`. Out-of-range values are config errors. Part of #349.
 - Developer only: `melo memory ingest FILE` loads past chats from a JSON file as if they
   had happened on their dates (no model call), and `LOCALMELO_NOW` pins the date
   the model and memory recall read, for memory tests.
@@ -514,7 +538,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   it is not this year and its time when another line is from the same day, notes of one subject
   with different values come newest first with the older marked, and an earlier turn reads
   `the user said “…”; melo replied “…”`.
-
+- Tidying notes while idle no longer undoes your Undo, loses a stopped run, or
+  ignores the GPU lock. An Undo sticks: two notes it separated are not merged
+  or replaced again, a note it brought back is not retired again, and a note it
+  removed is not written again from the same turn (a third, newer note can
+  still replace a restored one, and rewording a note yourself ends the reason
+  kept for it). A run that is cancelled or stops early keeps what it changed,
+  so it can still be undone. Every request to a model server first checks the
+  lock, `[memory] sleep_lock` or else the shared GPU lock, and the run stops
+  when another holder takes it (`stopped: gpu_lock`); a chat, task or worker
+  turn that starts during the run stops it too. Part of #363.
 - A note melo writes for you now says "you", and a reply that says "saved" with
   nothing kept is flagged. A note the chat's model wrote in the first person
   ("My flight to Porto is at gate 22.", "The pool gave me a new locker.") is
@@ -537,6 +570,26 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   tool or a modifier before "'s" or "的" as someone else ("Python's GIL",
   "开发的代码"). Names that are people ("Marco's studio", "马可的工作室", "妈妈的生日")
   are still checked, and a request about them is still filed under People.
+- A tool call written as text is no longer taken for the answer. A model's
+  server can swallow a malformed call and leave `text`, or markup such as
+  `<function_calls>`, in the reply with no real tool call, and the person read
+  "text" or a false "recorded" while nothing ran. localmelo now asks the model
+  again and tells it what went wrong; a run whose replies keep doing it ends
+  `failed` with the error `tool call written as text`. The terminal, the
+  console and the app show a quiet notice, never the text, also for the last
+  reply of a failed run and when the turn is loaded again. It looks at the
+  shape only: call markup that starts the reply or a line, a reply that is
+  a call as JSON or code (a tool's name with its arguments), or one that starts
+  with a tool's parameter name and a leftover of a call, or a short reply that
+  is a leaked call id. Prose, code blocks, sentences about such markup and
+  JSON a person asked for are answers. A one-word reply that is just a
+  parameter name is asked again too. The same markup is no longer taken for an
+  answer on stop or for the explanation of a blocked step, nor shown as a
+  task's last note (the task views know the markup only, not the offered
+  tools).
+- The console and the app show a reply that starts with a closed
+  `<thinking>...</thinking>` block as thinking, as the terminal already did,
+  instead of as part of the answer.
 - The app's pill says **stopped**, not failed, for a task that used all its
   steps, as the console already does: `status.recent` reads the task's reason. [#365]
 - A Chinese ask that says to change code, run the tests and commit
