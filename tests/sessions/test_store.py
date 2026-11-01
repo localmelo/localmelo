@@ -795,6 +795,7 @@ def test_the_session_event_keys_are_pinned() -> None:
             "refused",
             "recall",
             "unsaved_claim",
+            "searched",
         },
         "session.title": {"title"},
         "session.updated": {"model", "workspace", "workspace_label", "meta"},
@@ -816,7 +817,10 @@ def test_the_session_event_keys_are_pinned() -> None:
             "remember",
         },
     }
-    assert dict(OPTIONAL_SESSION_EVENT_FIELDS) == {"turn.started": {"origin"}}
+    assert dict(OPTIONAL_SESSION_EVENT_FIELDS) == {
+        "turn.started": {"origin"},
+        "turn.memory": {"searched"},
+    }
     assert RESERVED_EVENT_PREFIXES == ("task.", "sched.", "attention.")
 
 

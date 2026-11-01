@@ -185,6 +185,7 @@ SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
                 "refused",
                 "recall",
                 "unsaved_claim",
+                "searched",
             }
         ),
         "session.title": frozenset({"title"}),
@@ -215,7 +216,11 @@ SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
 # Session event keys an event may lack: turn.started's origin is only on a
 # turn the person did not begin (#369).
 OPTIONAL_SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
-    {"turn.started": frozenset({"origin"})}
+    {
+        "turn.started": frozenset({"origin"}),
+        # Only once a memory search found something in the turn.
+        "turn.memory": frozenset({"searched"}),
+    }
 )
 # The session events that a run's writer may store with its batches; the
 # store writes the others itself.
