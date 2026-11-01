@@ -13,6 +13,7 @@ import {renderMarkdown} from '../../support/gateway/static/markdown.mjs';
 import {formatTime, t} from '../../support/gateway/static/i18n.mjs';
 import {workerHistory} from '../../support/gateway/static/worker-history.mjs';
 import {setupTasks} from '../../support/gateway/static/tasks.mjs';
+import {setupPanel as realSetupPanel} from '../../support/gateway/static/panel.mjs';
 import {plainSegments, setupStatusRow} from '../../support/gateway/static/status-row.mjs';
 import {setupRunning} from '../../support/gateway/static/running.mjs';
 import {setupModelCard} from '../../support/gateway/static/setup-card.mjs';
@@ -603,6 +604,7 @@ function makeElement(tag, id = '') {
     tag, tagName: tag.toUpperCase(), id, value: '', textContent: '', innerHTML: '', title: '', type: '', src: '', alt: '',
     style: {}, dataset: {}, attributes: {}, children: [], listeners: {}, parentElement: null,
     get ownerDocument() { return documentDouble; },
+    get firstChild() { return element.children[0] ?? null; },
     hidden: false, disabled: false, open: false, inert: false, tabIndex: 0,
     scrollHeight: 50, scrollTop: 0, clientHeight: 40,
     classList: {
@@ -621,7 +623,13 @@ function makeElement(tag, id = '') {
     removeAttribute(name) { delete element.attributes[name]; },
     append(...items) { for (const item of items) { item.parentElement = element; element.children.push(item); } },
     prepend(...items) { for (const item of items) item.parentElement = element; element.children.unshift(...items); },
-    replaceChildren(...items) { element.children = []; element.append(...items); },
+    // As in a browser, the focused element leaves the page with the node that held it: focus falls to the body (null here).
+    replaceChildren(...items) {
+      const active = documentDouble?.activeElement;
+      if (active && active !== element && element.contains(active) && !items.includes(active)) documentDouble.activeElement = null;
+      element.children = [];
+      element.append(...items);
+    },
     contains(node) { return node === element || element.children.some((child) => child.contains?.(node)); },
     addEventListener(type, handler) { (element.listeners[type] ||= []).push(handler); },
     removeEventListener() {},
@@ -725,7 +733,7 @@ function gateway(routes) {
   return {fetch, calls, callsTo: (path) => calls.filter((call) => call.path === path)};
 }
 
-function harness(routes, {mobile = false} = {}) {
+function harness(routes, {mobile = false, realPanel = false} = {}) {
   FakeEventSource.reset();
   const elements = new Map();
   const timers = [];
@@ -745,7 +753,9 @@ function harness(routes, {mobile = false} = {}) {
       assert.ok(['.chat', '.composer-area'].includes(selector), 'The DOM double only supports the selectors the page uses');
       return element(selector === '.chat' ? 'chat' : 'composer-area');
     },
-    querySelectorAll: () => [],
+    // Links and buttons by tag, over the elements the page made (the panel looks its controls up this way).
+    querySelectorAll: (selector) => (['a', 'button'].includes(selector)
+      ? [...new Set([...elements.values()].flatMap((node) => findNodes(node, (candidate) => candidate.tag === selector)))] : []),
     createElement: (tag) => makeElement(tag),
   };
   function element(id) {
@@ -800,11 +810,12 @@ function harness(routes, {mobile = false} = {}) {
     // The panel beside the chat has its own tests (test_panel.mjs); here it only hears health.
     // `/memory import` opens its tab and presses "Look for notes": a test sets `notesOn` and reads `notesLooked`.
     // A task is drawn by tasks.mjs, which the real panel owns the place of: the double shows and leaves it the same way.
-    setupPanel: (options) => ({health: [], state: {task: null}, update(body) { this.health.push(body); }, sheetClosed: 0, opened: 0, remembered: [],
+    setupPanel: realPanel ? realSetupPanel : (options) => ({health: [], state: {task: null}, update(body) { this.health.push(body); }, sheetClosed: 0, opened: 0, remembered: [],
       closeSheet() { this.sheetClosed += 1; return false; }, select() {}, openSheet() {},
       remember(key) { this.remembered.push(key); },
       openTask(id) { this.opened += 1; this.state.task = id; options.tasks.show(id); options.tasks.focus(); },
       closeTask() { if (this.state.task === null) return false; this.state.task = null; options.tasks.leave(); return true; },
+      focusOpener() {},
       stepBack() {
         if (this.state.task === null) return false;
         if (!options.tasks.closeDialog()) options.navigate(options.home());
@@ -825,7 +836,8 @@ function harness(routes, {mobile = false} = {}) {
     localStorage: storage(),
     sessionStorage: storage(),
     navigator: {clipboard: {writeText: async (text) => { context.copied = text; }}},
-    matchMedia: () => ({matches: mobile, addEventListener() {}}),
+    // The real panel asks for a window wide enough for it; every other query follows `mobile`.
+    matchMedia: (query) => ({matches: realPanel && /min-width: 900px/.test(query) ? true : mobile, addEventListener() {}}),
     addEventListener(type, handler) {
       (windowListeners[type] ||= []).push(handler);
     },
@@ -3834,6 +3846,37 @@ test('Back to Melo steps back to the chat when the task was opened from it, and 
   h.context.history.state = {meloFrom: '#/workers'};
   press();
   assert.deepEqual([[...h.context.replaced], h.context.history.backs], [['#/s/a'], 1]);
+});
+
+test('Back from a task opened from a chat card puts focus on the card\'s new Open button, after the chat is redrawn', async () => {
+  const done = cardRow(5, {at: NOW - 60, state: 'done', source_id: 't', source_kind: 'task', title: 'Fix CI', line: 'Fixed.'});
+  const h = harness(mainRoutes({
+    'GET /tasks/t': {task: taskRow('t', {state: 'done', title: 'Fix CI'})},
+    'GET /activity?since=0': {since: 0, scope: 'all', rows: [], more: false, unavailable: []},
+  }, {cards: [done]}), {realPanel: true});
+  // As in the page, the task's section is inside the panel.
+  h.element('panel').append(h.element('task-panel'));
+  await h.run('init()');
+  await settle();
+  const openButton = () => findNode(h.element('messages'), (node) => node.dataset?.focusKey === 'card:5');
+  const first = openButton();
+  assert.equal(first.textContent, 'Open task');
+  await first.click();
+  h.context.location.hash = '#/tasks/t';
+  await h.windowListeners.hashchange[0](); await settle();
+  assert.equal(h.element('task-panel').hidden, false);
+  assert.equal(h.element('task-panel').children.length > 0, true);
+  // Back, as a person presses it: the address goes to the chat, and the page follows the address.
+  const back = findNode(h.element('task-panel'), (node) => node.className === 'task-back');
+  back.listeners.click[0]({button: 0, preventDefault() {}});
+  assert.equal(h.context.location.hash, h.run('homeHash()'));
+  await h.windowListeners.hashchange[0](); await settle();
+  assert.equal(h.element('task-panel').hidden, true);
+  const second = openButton();
+  assert.ok(second, 'the chat drew its card again');
+  assert.notEqual(second, first, 'redrawing the chat made a new button');
+  assert.equal(second.dataset.focusKey, first.dataset.focusKey);
+  assert.equal(h.context.document.activeElement, second, 'focus is on the button the chat has now, not lost to the page');
 });
 
 test('the task page opens again for an address the page is on, and a card remembers where Back should go', async () => {

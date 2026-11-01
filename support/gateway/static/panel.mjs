@@ -529,8 +529,21 @@ export function setupPanel({
   }
   // Any link or button of the page, in the panel or beside it (a card in the chat): found again after a redraw.
   const opener = (focusKey) => (focusKey ? [...doc.querySelectorAll('a'), ...doc.querySelectorAll('button')].find((item) => item.dataset.focusKey === focusKey) : null);
-  /** Back to Melo's page, at the control the task was opened from. Returns whether a task was open. */
-  function closeTask() {
+  // Where focus goes once the page behind the task is whole again: a control's `data-focus-key` ('' for the tab).
+  let returnFocusTo = null;
+  /** Focus the control the last closed task was opened from (or the tab), if closing it left that to do. */
+  function focusOpener() {
+    if (returnFocusTo === null) return;
+    const key = returnFocusTo;
+    returnFocusTo = null;
+    (opener(key) ?? tabs.find((tab) => tab.dataset.tab === state.tab))?.focus();
+  }
+  /**
+   * Back to Melo's page, at the control the task was opened from. Returns whether a task was open. A caller that
+   * redraws what is behind the task (a card in the chat) passes `defer` and calls `focusOpener()` after, so the
+   * control focused is the one that is there then.
+   */
+  function closeTask({defer = false} = {}) {
     if (state.task === null) return false;
     const returnTo = state.from;
     const focused = root.contains(doc.activeElement) || doc.activeElement === doc.body || !doc.activeElement;
@@ -539,9 +552,8 @@ export function setupPanel({
     delete root.dataset.view;
     tasks?.leave();
     drawBody();
-    if (focused) {
-      (opener(returnTo) ?? tabs.find((tab) => tab.dataset.tab === state.tab))?.focus();
-    }
+    returnFocusTo = focused ? returnTo : null;
+    if (!defer) focusOpener();
     return true;
   }
   /**
@@ -597,5 +609,5 @@ export function setupPanel({
   drawTabs();
   drawBody();
 
-  return {update, refresh, follow, select, state, openTask, closeTask, stepBack, remember, closeSheet: () => setSheet(false), openSheet: () => setSheet(true), lookForNotes: () => memory.lookForNotes()};
+  return {update, refresh, follow, select, state, openTask, closeTask, focusOpener, stepBack, remember, closeSheet: () => setSheet(false), openSheet: () => setSheet(true), lookForNotes: () => memory.lookForNotes()};
 }

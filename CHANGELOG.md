@@ -296,8 +296,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   Tasks link in the sidebar is gone. The row ends in a `›`; selecting it shows
   the task's page in place of Melo's, and **Back to Melo**, Esc (wherever focus
   is, except in a box or a dialog) or closing the sheet returns to Melo's page
-  with focus on the control it was opened from; the browser's Back does not
-  reopen the task. The task links in the main chat, the **N running** list and
+  with focus on the control it was opened from; after that the browser's Back does
+  not reopen a task you opened from the chat. The task links in the main chat, the **N running** list and
   the Workers tab open the same page, `#/tasks/<id>` still works (also when the
   window was narrowed past the panel), and `#/tasks` opens the panel's list of
   all tasks (the Workers tab's **All tasks** link). **Pause** and the priority

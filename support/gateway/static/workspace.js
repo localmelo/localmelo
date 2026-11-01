@@ -2651,9 +2651,14 @@ function stampArrival(event) {
     globalThis.history.replaceState({ ...(globalThis.history.state ?? {}), meloFrom: was }, "");
   } catch { /* an address or a history this page cannot read */ }
 }
-/** Back to Melo's page; the chat's card for a waiting task takes its approval back from the panel. */
+/**
+ * Back to Melo's page. The chat's card for a waiting task takes its approval back from the panel, which redraws the
+ * chat, so focus returns to the control the task was opened from only after that (a card's button is a new one).
+ */
 function closeTaskPage() {
-  if (panel.closeTask()) renderMessages(false, true);
+  if (!panel.closeTask({ defer: true })) return;
+  renderMessages(false, true);
+  panel.focusOpener();
 }
 const tasks = setupTasks({
   api,

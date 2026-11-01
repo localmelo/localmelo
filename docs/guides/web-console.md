@@ -447,7 +447,7 @@ Activity or Workers; or a task's **Open task** or **Review** in the main chat, a
 were. Above the task's title a link, **Back to Melo**, returns to Melo's page, with focus on the control you came
 from (the row, the card in the chat or the **All tasks** link); so does Esc, wherever focus is, unless you are typing in
 a box or have a menu or a dialog open (the Resume confirmation takes its own Esc first), and so does closing the
-sheet. The browser's Back button does not bring the task up again. Opening a task moves focus to its title, and a
+sheet. After **Back to Melo**, the browser's Back button does not bring up a task you opened from the chat (a task opened from the list of all tasks goes back to the list, as any page does). Opening a task moves focus to its title, and a
 phone's sheet opens for it, also when the window was made narrower while the task was shown. A waiting task's approval
 card is drawn on its page while the panel shows it, and in the task's card in the chat otherwise, never in both.
 

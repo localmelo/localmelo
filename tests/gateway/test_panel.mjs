@@ -755,6 +755,29 @@ test('Back returns focus to the control the task was opened from: a chat card, t
   assert.equal(h.panel.state.from, 'card:c1');
 });
 
+test('a close that defers the focus return leaves it to focusOpener, which finds the control the page drew since', async () => {
+  const h = harness();
+  await h.panel.update(health());
+  const card = () => { const open = h.doc.createElement('button'); open.dataset.focusKey = 'card:c1'; h.chat.replaceChildren(open); return open; };
+  card();
+  h.panel.remember('card:c1');
+  h.panel.openTask('t1');
+  assert.equal(h.panel.closeTask({defer: true}), true);
+  assert.equal(h.doc.activeElement, h.tasks.title, 'nothing is focused yet: the page behind is about to be redrawn');
+  const redrawn = card();
+  h.panel.focusOpener();
+  assert.equal(h.doc.activeElement, redrawn);
+  // Spent: a second call does nothing, and a close with no focus inside the panel returns none.
+  h.doc.activeElement = h.chat;
+  h.panel.focusOpener();
+  assert.equal(h.doc.activeElement, h.chat);
+  h.panel.openTask('t1');
+  h.doc.activeElement = h.chat;
+  h.panel.closeTask({defer: true});
+  h.panel.focusOpener();
+  assert.equal(h.doc.activeElement, h.chat, 'focus was elsewhere when the task closed: it stays there');
+});
+
 test('a task row pressed while the address already names it opens it from the press', async () => {
   const wide = {matches: false, addEventListener() {}};
   const h = harness({rows: [task({state: 'running', icon: 'read'})], wide});
