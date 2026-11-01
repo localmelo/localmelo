@@ -305,7 +305,11 @@ health poll whenever what runs changes, and every 30 seconds:
 
 A result line is always plain words. A run stopped before it answered reads `Stopped before answering`, a picture
 reads `Made a picture`, a file the file's name, and an answer that is code the first sentence around the code (`Wrote
-some code` when there is none).
+some code` when there is none). Markdown marks are removed (code keeps its words, as in `__init__.py`, struck
+text goes, and `x**2` stays), a lead-in such as `In short:` is dropped, and the line ends at the first sentence. A
+chat's line says first what the chat did, then its reply's first sentence: `Offered a task: Visit example.com ·
+I can't open websites myself.`; what it did is `Started a task: …`, `Offered a task: …` or `Kept a note`, and a reply that only says it handed the work to a task is left out. The main
+chat's row is named in the page's language.
 
 A row that asked you for approvals carries them folded under its result line: `1 approval`, or `2 approvals, 1
 waiting`. Select it to list each request in plain words (`Write slides.md`, `Run the tests`, `Run a command`; never
@@ -525,8 +529,13 @@ Tasks link in the sidebar, and the task page is not a view of its own.
   ran** lists the tests the task's own run started, each passed, failed or result
   not checked; a test its answer only mentions is not listed. **Ready** needs
   proof: when a test's result or the folder could not be checked, the task is not
-  ready. **Finish it** continues, with one tap, a task that still owes its tests
-  or its commit. The panel's Activity and Workers rows say the same, and
+  ready. Changed code owes a test; when **Finish it** then finds no test runner
+  for the folder, the task reads **Ready** with **No tests apply**, and when it
+  finds tests it cannot run, **melo found tests here but could not run them**.
+  **Finish it** continues, with one tap, a task that still owes its tests or its
+  commit, and is never offered again after its own run. A
+  folder too large or unreadable to check offers it only while it can still run
+  a test or commit; then it says why: **The folder was too large to check**. The panel's Activity and Workers rows say the same, and
   `GET /api/tasks/<id>` carries it as `ending`.
 
 A button is disabled while its request is in flight. A refusal (a stale
@@ -575,8 +584,10 @@ save carries the revision it read, so a change made elsewhere meanwhile asks you
 - **Chats and folders**: the default folder of a new chat (**Change…** opens the app's
   folder panel, or a path field in a browser), how new chats start (**New chats start in**),
   **Read web pages** (on by default; it lets chats and tasks read public pages with
-  [`web_fetch`](../reference/tools.md#reading-a-public-web-page)), and the recent folders,
-  each with **Make default**.
+  [`web_fetch`](../reference/tools.md#reading-a-public-web-page)), **Other folders melo may
+  read** (the folders you chose **Always allow this folder** for, each with **Remove**; see
+  [Folders outside the workspace](tools-mcp.md#folders-outside-the-workspace)) and the recent
+  folders, each with **Make default**.
 - **Scheduled**: the check-in switch with its next time, and **Open Scheduled** for the chores.
 - **Appearance**: the theme (System, Light, Dark, kept in this browser), the
   [language](#language) (Automatic, English, 简体中文), **Melo on the desktop** in the macOS
@@ -701,6 +712,16 @@ filled button: there is no chat-wide allow, and the line under the buttons
 says so ("A chat-wide allow never covers installs, downloads or changes outside
 ~/demo-project."). A call melo cannot read, or that it asks about for another
 reason, shows the plain card.
+
+When melo wants a file outside the chat's folder, the card asks about that folder
+("Let melo read in ~/Documents/letters?") and shows its real path in a box, with what melo
+wants to do there ("melo wants to read cover-letter.md in this folder."). A read offers **Allow once**,
+**Allow this folder for this chat**, **Always allow this folder** and **Deny**: "this chat"
+ends with the chat, and "always" keeps the folder in Settings, under **Chats and folders**,
+where you can remove it. A write there is a high-impact card with **Allow once** and **Deny**
+only, every time. The folders a chat may read are listed in **Details › Tools**, each with
+**Revoke**. Keys, melo's own data, system folders and your whole home folder are never
+offered (see [Folders outside the workspace](tools-mcp.md#folders-outside-the-workspace)).
 
 A failed turn shows a card with a symbol (✗ for an error, ⚠ for a warning), a
 plain title, the first line of the error and a hint. On the newest turn one next

@@ -173,7 +173,7 @@
 - **Now** 列出正在运行或等待的内容：本控制台的对话、任务、worker 运行和终端对话。每一行用平实的话说明它在做什么（`Reading notes.md`、`Running the tests`、`Waiting for your approval`），并用图标表示工作的类别。等你处理的行是琥珀色。没有任何内容在运行时写 `Nothing running`，画像处于休息状态并会眨眼。
 - **Today** 按从新到旧列出今天完成的内容：标题、一行结果（`All 412 tests passed.`）和时间。先显示八行；**Earlier today (n)** 显示其余的。
 
-结果行始终是平实的话。在回答之前就被停止的运行写 `Stopped before answering`，图片写 `Made a picture`，文件写文件名，而内容是代码的回答写代码周围的第一句话（没有这样的句子时写 `Wrote some code`）。
+结果行始终是平实的话。在回答之前就被停止的运行写 `Stopped before answering`，图片写 `Made a picture`，文件写文件名，而内容是代码的回答写代码周围的第一句话（没有这样的句子时写 `Wrote some code`）。Markdown 标记会去掉（代码保留原样，例如 `__init__.py`；删除线里的文字一起去掉；`x**2` 保持不变），`In short:` 这样的开场白也会去掉，结果行到第一句话为止。对话的结果行先说这个对话做了什么，再接它回答的第一句话：`Offered a task: Visit example.com · I can't open websites myself.`；做了什么写作 `Started a task: …`、`Offered a task: …` 或 `Kept a note`（中文页面上是“开始了任务：…”“提议了任务：…”“记下了一条笔记”）；只说把事情交给了任务的回答不再重复。主对话那一行用页面的语言命名。
 
 请求过审批的行会把审批折叠在结果行下面：`1 approval`，或 `2 approvals, 1 waiting`。选中它，会用平实的话列出每个请求（`Write slides.md`、`Run the tests`、`Run a command`，从不显示命令本身）、它是怎样被回答的（`Allowed once`、`Allowed for this chat`、`Denied`、`No answer in time`）以及请求的时间。等你处理的请求就在那里提供 **Allow once** 和 **Deny**，与对话里审批卡片的回答相同，还有 **Review**，打开带卡片和确切内容的对话或任务。不再有单独的 Approvals 标签页。
 
@@ -249,7 +249,7 @@
 ![无法使用自己文件夹的任务提供 Choose a folder](../../assets/img/task-folder-refused.webp)
 
 - **只差提交。** 步数用完、只剩提交没做的任务，会在卡片和任务页上显示 `Not committed. Run: <command>`。
-- **怎样结束的。** 已结束任务的状态是代码核对出的结局：**Ready**（绿色）、**Done, not finished** 和 **Needs you**（琥珀色）、**Failed**（红色）、**Stopped** 或 **Not needed**（灰色）。**How it ended** 写出原因，**Tests it ran** 列出任务自己这次运行启动的测试，每个标着通过、没通过或结果没核对；回答里只是提到的测试不会列出。**Ready** 需要证据：测试结果或文件夹没能核对时，任务就不算完成。**Finish it** 一点就让还欠着测试或提交的任务继续。面板的 Activity 和 Workers 行也这样显示，`GET /api/tasks/<id>` 以 `ending` 字段给出它。
+- **怎样结束的。** 已结束任务的状态是代码核对出的结局：**Ready**（绿色）、**Done, not finished** 和 **Needs you**（琥珀色）、**Failed**（红色）、**Stopped** 或 **Not needed**（灰色）。**How it ended** 写出原因，**Tests it ran** 列出任务自己这次运行启动的测试，每个标着通过、没通过或结果没核对；回答里只是提到的测试不会列出。**Ready** 需要证据：测试结果或文件夹没能核对时，任务就不算完成。改了代码就欠一次测试；之后 **Finish it** 找不到适用于这个文件夹的测试工具时，任务显示 **Ready** 并注明 **No tests apply**；找到了测试却没法运行时，显示 **melo found tests here but could not run them**。**Finish it** 一点就让还欠着测试或提交的任务继续；它自己的运行结束后不会再提供。文件夹太大或读不了、没法核对时，只有还能跑测试或提交时才提供 **Finish it**；之后直接说明原因，例如 **The folder was too large to check**。面板的 Activity 和 Workers 行也这样显示，`GET /api/tasks/<id>` 以 `ending` 字段给出它。
 
 请求进行中时对应按钮不可用。被拒绝时（确认已过期、任务已结束、Stop 抢先）会显示服务器给出的文字。
 
@@ -284,7 +284,7 @@
 
 - **Model server**：聊天模型和嵌入模型各自的状态（`Connected · <model> · checked 12 s ago`、`Not reachable`、`Off`）、服务器地址、**Test connection**（绝不显示密钥）和 **Change…**。**Change…** 打开的表单用来选择服务器、地址和模型（**Discover models** 会列出模型）；这是唯一用按钮保存的更改，即 **Save connection**，**Cancel** 恢复已保存的内容。
 - **Memory**：**Remember across chats**、Melo 查找笔记的方式（**By words and meaning** 或 **By words only**；开发者模式再加两种，并显示键 `memory.retriever`），以及打开笔记本身的 **Open Memory**。
-- **Chats and folders**：新对话的默认文件夹（**Change…** 在 app 里打开系统的文件夹面板，在浏览器里显示路径输入框）、新对话的开始方式（**New chats start in**）、**Read web pages**（默认开启；让对话和任务用 [`web_fetch`](../reference/tools.md#reading-a-public-web-page) 读取公开网页），以及最近用过的文件夹，每个都有 **Make default**。
+- **Chats and folders**：新对话的默认文件夹（**Change…** 在 app 里打开系统的文件夹面板，在浏览器里显示路径输入框）、新对话的开始方式（**New chats start in**）、**Read web pages**（默认开启；让对话和任务用 [`web_fetch`](../reference/tools.md#reading-a-public-web-page) 读取公开网页）、**melo 可以读取的其他文件夹**（你选了 **总是允许这个文件夹** 的文件夹，每个都有 **移除**；见[工作区之外的文件夹](tools-mcp.md#folders-outside-the-workspace)），以及最近用过的文件夹，每个都有 **Make default**。
 - **Scheduled**：check-in 开关及下一次的时间，以及打开定时事项的 **Open Scheduled**。
 - **Appearance**：主题（System、Light、Dark，记在当前浏览器里）、[语言](#language)（自动、English、简体中文）、macOS app 中的 **Melo on the desktop**（与 app 菜单是同一个选择），以及 **Developer mode**。
 - **Developer**（仅开发者模式）：`melo -h all` 列出的每个设置，按分区分组，显示当前值、小字的 `config.toml` 键、设置它的旧选项，对比实验还标明决定它的 issue；最后是只作用于一次运行的选项。这里只读，用 `melo config set KEY VALUE` 修改。该分区也显示设置文件及其修订版本。
@@ -327,6 +327,8 @@
 卡片用一个简单的问题发问（"Run this command in demo-project?"、"Replace notes.txt?"、"Let melo use <tool>?"），问题下方是工具名和将要运行的确切内容。对已有文本文件的写入会显示它替换的内容：问题下面一行统计行数（"5 lines removed, 1 added"），框里列出有变化的行，每行带行号、− 或 + 符号，以及每侧两行上下文。删除的行标红，添加的行标绿，符号在没有颜色时表达同样的意思。较长的改动先显示前 20 行，**Show all N lines** 显示其余部分。行中的密钥读作 `[redacted]`。melo 无法比较时（文件不是文本、无法读取、超过 200 KB 或含有私钥，或者包括上下文在内的改动超过 1,000 行），卡片用一行文字说明，问题仍带着文件大小（"Replace logo.bin (480 bytes)?"），并只显示新文本。这个比较只供你阅读：下面的回答与其他文件写入的回答规则相同。实心按钮 **Allow once** 只运行这一次调用。**Allow for this chat**（在任务页面上为 **Allow for this task**）让该工具的常规调用在这个对话的其余时间不再询问；按钮下方的一行会说明这一点，对命令或 Python 代码还会补充说明：安装、下载和工作区之外的更改仍会询问。**Deny** 会打开一个可选的输入框 "Tell melo what to do instead"，并连同你写的内容一起发送拒绝；**Back** 或 Escape 回到三个回答。控件需等待 500 毫秒才能使用；请求到达不会移动焦点，也没有单键快捷方式可响应请求。卡片不在视图中时，消息输入框上方的提示条会写 "melo is waiting for your answer"，点按 **Review** 会打开其所在分组并移至 **Allow once**（高影响卡片上移至 **Deny**）。如果无法加载审批详情，或参数被截断或转换，两个允许按钮将不可用；你可以重新加载详情、拒绝或停止运行。
 
 安装软件、下载文件、更改工作区之外的文件或做其他[高影响](tools-mcp.md#high-impact-calls)事情的调用每次都会询问，并使用不同的卡片。它的问题说出调用要做什么（“Install software?”），问题下方一行写着 `python_exec · asks every time`，**Why melo asks** 列出最多三条原因（“Installs playwright with pip into .signin_venv (downloads about 42 MB).”）。**You asked:** 重复发起本轮的那条消息，方便你把它和 melo 将要做的事对照。卡片只有 **Allow once** 和 **Deny**，其中 **Deny** 是实心按钮：没有对整个对话的授权，按钮下方的一行会这样说明（“A chat-wide allow never covers installs, downloads or changes outside ~/demo-project.”）。melo 无法读懂的调用，或出于其他原因询问的调用，显示普通卡片。
+
+melo 想要对话文件夹之外的文件时，卡片会询问那个文件夹（“让 melo 读取 ~/Documents/letters 里的内容？”），在一个框里显示它的真实路径，以及 melo 想在那里做什么（“melo 想读取这个文件夹里的 cover-letter.md。”）。读取提供 **允许一次**、**在这个对话里允许这个文件夹**、**总是允许这个文件夹** 和 **拒绝**：“这个对话”在对话结束时失效，“总是”会把文件夹记在设置的 **对话和文件夹** 里，你可以在那里移除。在那里写入是高影响卡片，每次都只有 **允许一次** 和 **拒绝**。对话可以读取的文件夹列在 **Details › Tools** 里，每个都有 **撤回**。密钥、melo 自己的数据、系统文件夹和你的整个主文件夹从不提供（见[工作区之外的文件夹](tools-mcp.md#folders-outside-the-workspace)）。
 
 失败的轮次会显示一张卡片：符号（错误为 ✗，警告为 ⚠）、简明的标题、错误的第一行和一条提示。最近的轮次用实心按钮给出一个下一步，其余操作以链接显示：模型服务器给出了错误回答（密钥被拒绝、模型不存在）时为 **Open model settings**，步数用尽或超时后为 **Continue**（没有运行过工具时为 **Try again**），卡住、失败或反思后停止时为 **Try again**，工具无法启动时为 **Show tools**，localmelo 内部崩溃后为 **Copy details**。**Try again** 和 **Continue** 只在最近完成的轮次上提供，Continue 还要求该轮次已运行工具。**Copy error** 复制一行文字和运行 ID，便于提交错误报告；技术字段仍放在 **Details** 中。已停止或中断的轮次使用中性提示行（■）。页面连不上网关时，提示条带有 **Try again**。
 

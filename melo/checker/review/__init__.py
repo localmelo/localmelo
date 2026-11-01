@@ -1,9 +1,11 @@
 """Rules v0 of the action review (#279): routine, high-impact or undecided.
 
 Pure standard library: ``shlex`` for shell, ``ast`` for Python. Nothing runs;
-the only I/O is ``stat``/``realpath``, reading the local files a call runs or
-edits (at most 10, 64 KB each, see :mod:`.files`), and, for a runner such as
-``pytest``, a walk of the workspace for code changed in this chat.
+the only I/O is ``stat``/``realpath`` and a lookup-only open that names a
+path (:func:`~localmelo.melo.contracts.folders.canonical_path`), reading the
+local files a call runs or edits (at most 10, 64 KB each, see
+:mod:`.files`), and, for a runner such as ``pytest``, a walk of the
+workspace for code changed in this chat.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from localmelo.melo.checker.review import files as file_rules
 from localmelo.melo.checker.review.paths import Context, Findings, resolve, touch
 from localmelo.melo.checker.review.python import review_python
 from localmelo.melo.checker.review.shell import review_shell
+from localmelo.melo.contracts.folders import canonical_path
 from localmelo.melo.contracts.review import RULED_TOOLS, ActionReview
 
 __all__ = ["RULED_TOOLS", "review_action"]
@@ -24,11 +27,11 @@ __all__ = ["RULED_TOOLS", "review_action"]
 def review_action(payload: ActionReviewPayload) -> ActionReview:
     """Classify one call; a failure of the rules is undecided, never routine."""
     home = payload.home or os.path.expanduser("~")
-    root = os.path.realpath(payload.workspace_root or os.getcwd())
+    root = canonical_path(payload.workspace_root or os.getcwd())
     prefix = os.path.abspath(payload.prefix or sys.prefix)
     ctx = Context(
         root,
-        os.path.realpath(home),
+        canonical_path(home),
         payload.executable or sys.executable,
         prefix,
         since=payload.since,

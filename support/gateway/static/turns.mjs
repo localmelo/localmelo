@@ -463,6 +463,14 @@ export function approvalTag(status, errorCategory, approval) {
     return asked ? {short: t("turns.approval.asked.short"), long: t("turns.approval.asked.long")} : null;
   }
   if (approval.allowed) {
+    // A folder outside the workspace (#405) that a grant or the settings let melo read.
+    const scope = isObject(approval.folder) ? approval.folder.scope : "";
+    if (scope === "always") {
+      return {short: t("turns.approval.folderAlways.short"), long: t("turns.approval.folderAlways.long")};
+    }
+    if (scope === "chat" && origin === "session") {
+      return {short: t("turns.approval.folderChat.short"), long: t("turns.approval.folderChat.long")};
+    }
     if (origin === "session") {
       return {short: t("turns.approval.grant.short"), long: t("turns.approval.grant.long")};
     }

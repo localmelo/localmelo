@@ -97,9 +97,14 @@ def remembered(origin: str, request: ApprovalRequest) -> bool:
 
     A chat's own approval has the origin ``"user"``; a task's is its origin.
     Only the person's own tasks and chats record, and only a step that
-    :func:`~localmelo.support.sessions.approvals.reusable` allows.
+    :func:`~localmelo.support.sessions.approvals.reusable` allows; never a
+    call on a path outside the workspace (#405).
     """
-    return origin == "user" and reusable(request.tool_name, request.review)
+    return (
+        origin == "user"
+        and request.outside is None
+        and reusable(request.tool_name, request.review)
+    )
 
 
 def _clean(text: str) -> str:

@@ -35,7 +35,7 @@ from localmelo.melo.executor.process_gate import PROCESS_RECORD
 from localmelo.melo.executor.sandbox import user_temp_dir
 from localmelo.melo.executor.search_files import SEARCH_FILES_TOOL, rooted_search_files
 from localmelo.melo.schema import Message, ToolDef, broken_tool_call, split_thinking
-from localmelo.support.config import Config
+from localmelo.support.config import Config, SavedFolders
 from localmelo.support.gateway.auto_blocks import (
     block_to_allow,
     blocked_steps,
@@ -54,7 +54,7 @@ from localmelo.support.gateway.finishing import (
     is_out_of_steps,
     not_committed,
 )
-from localmelo.support.gateway.front_rules import asks_commit
+from localmelo.support.gateway.front_rules import asks_commit, asks_tests
 from localmelo.support.gateway.i18n import t as words
 from localmelo.support.gateway.park_card import CARD_START, build_park_card
 from localmelo.support.gateway.park_store import ParkStore
@@ -72,10 +72,12 @@ from localmelo.support.gateway.resume_evidence import (
 from localmelo.support.gateway.resume_tokens import ResumeBinding, ResumeTokens
 from localmelo.support.gateway.startup_recovery import StartupRecovery
 from localmelo.support.gateway.task_endings import (
+    FINISH_TRIED,
     Baseline,
     baseline,
     can_finish,
     finish_message,
+    finish_run,
     shown,
     stash_floor,
 )
@@ -929,10 +931,15 @@ class TaskWorkers:
         ):
             raise TaskStoreError("it is still finishing; try again in a moment")
         self._inboxes.pop(task_id, None)
-        if not await self.store.list_turns(task_id, limit=1):
+        ran = bool(await self.store.list_turns(task_id, limit=1))
+        if not ran:
             # Stopped before it ever ran: the new turn carries the request too.
             text = f"{current.spec.get('objective') or current.title}\n\n{text}"
-        record = await self.tasks.reopen(task_id, text, level=level, reason=reason)
+        # Finish it's run is kept on the task, so a park and resume keeps it.
+        finishing = finish_run([text], continued=True, ran_before=ran)
+        record = await self.tasks.reopen(
+            task_id, text, level=level, reason=reason, finishing=finishing
+        )
         self._register(record)
         self._eligible.add(task_id)
         return record
@@ -2243,7 +2250,14 @@ class TaskWorkers:
                     answer.cancel()
                     await asyncio.gather(answer, return_exceptions=True)
 
-            policy: ApprovalPolicy = RememberingPolicy(runner.observe(paused_ask))
+            # Only a task the person started may ask about a folder outside
+            # its workspace (#405), through its chat, in Ask and in Auto.
+            asking = RememberingPolicy(
+                runner.observe(paused_ask),
+                folders=_remembers(record.origin),
+                saved=SavedFolders(),
+            )
+            policy: ApprovalPolicy = asking
             if task_mode == "auto":
                 # Nobody is asked, so nothing holds the task (#339).
                 policy = self._auto.setdefault(task_id, AutoPolicy(task=True))
@@ -2256,6 +2270,7 @@ class TaskWorkers:
                     lambda: self._owner_chat(task_id),
                     self._earlier,
                     started=self._chat_started,
+                    folders=asking,
                 )
                 owned.append(policy)
             async with self._lock:
@@ -2537,6 +2552,7 @@ class TaskWorkers:
 
     async def _body(self, record: TaskRecord) -> dict:
         body = asdict(record)
+        body.pop("finishing", None)  # the worker's own mark, not part of the body
         body["wait_reason"] = self.gate.held(record.task_id) or body["wait_reason"]
         session = await self.store.get_session(record.task_id)
         body["workspace"] = session.workspace if session else None
@@ -2596,10 +2612,14 @@ class TaskWorkers:
         """How the run ended, from its own tool calls and the folder: never its claim."""
         typed = str(record.spec.get("user_words") or "")
         asked = [str(record.spec.get("objective") or ""), typed]
-        if record.card and not record.card.startswith(CARD_START):
-            asked.append(record.card)  # a continued task's message is asked too
+        said: list[str] = []  # what this run was told after its request
+        # A continued task's message is asked too (a park's card is not one).
+        continued = bool(record.card) and not record.card.startswith(CARD_START)
+        if continued:
+            said.append(record.card)
         inbox = self._inboxes.get(task_id)
-        asked += inbox.read if inbox is not None else []
+        said += inbox.read if inbox is not None else []
+        asked += said
         try:
             # Work this run stashed stays unchecked in later runs, however it ended.
             floor = await stash_floor(workspace, base)
@@ -2607,7 +2627,16 @@ class TaskWorkers:
                 await self.tasks.keep_stash_floor(task_id, floor)
         except Exception:
             log.exception("Could not keep the stash count of task %s", task_id)
+        finishing = False
         try:
+            # A Finish it run: the button's message, or the person's own ask
+            # for the tests continuing a task that ran before (never its first).
+            ran_before = continued and (
+                len(await self.store.list_turns(task_id, limit=2)) > 1
+            )
+            finishing = getattr(record, "finishing", False) or finish_run(
+                said, continued=continued, ran_before=ran_before
+            )
             return await decide_ending(
                 self.store,
                 task_id,
@@ -2616,10 +2645,13 @@ class TaskWorkers:
                 folder=workspace,
                 base=base,
                 asks_commit=any(asks_commit(text) for text in asked),
+                asks_tests=any(asks_tests(text) for text in asked),
+                finishing=finishing,
             )
         except Exception:
             log.exception("Could not check how task %s ended", task_id)
-            unchecked = {"state": "draft", "reasons": ["unchecked"]}
+            reasons = ["unchecked", *([FINISH_TRIED] if finishing else [])]
+            unchecked = {"state": "draft", "reasons": reasons}
             return unchecked if phase == "done" else None
 
     def _observe(self, task_id: str, event: AgentEvent) -> None:

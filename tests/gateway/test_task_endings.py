@@ -8,6 +8,8 @@ closed: ready needs positive proof, any doubt leaves a draft with its reason.
 
 from __future__ import annotations
 
+import itertools
+import os
 import sqlite3
 import subprocess
 from collections.abc import Iterator
@@ -17,14 +19,19 @@ from typing import Any
 
 import pytest
 
+from localmelo.support.gateway import task_endings
 from localmelo.support.gateway.finishing import OUT_OF_STEPS
-from localmelo.support.gateway.front_rules import asks_commit
+from localmelo.support.gateway.front_rules import asks_commit, asks_tests
 from localmelo.support.gateway.task_endings import (
     MAX_STAMPS,
     Baseline,
+    _test_marker,
     baseline,
     can_finish,
     decide,
+    finish_message,
+    finish_run,
+    finishes,
     proposal,
     python_test,
     report_text,
@@ -145,6 +152,8 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     (folder / "app.py").write_text("x = 1\n")
     (folder / "README.md").write_text("# App\n")
     (folder / "CMakeLists.txt").write_text("project(x)\n")
+    (folder / "tests").mkdir()
+    (folder / "tests" / "test_app.py").write_text("def test_x():\n    pass\n")
     git(folder, "add", ".")
     git(folder, "commit", "-qm", "Start")
     yield folder
@@ -168,13 +177,14 @@ class Run:
         call_id: str | None = None,
         run_id: str | None = None,
         finished: bool = True,
+        output: str = "",
     ) -> Run:
         key = call_id or f"call-{len(self.events)}"
         run = run_id or self.run_id
         started = {"call_id": key, "name": name, "arguments": arguments}
         self._add("tool.started", run, started)
         if finished:
-            done = {"call_id": key, "name": name, "status": status}
+            done = {"call_id": key, "name": name, "status": status, "output": output}
             self._add("tool.finished", run, {**done, "exit_code": exit_code})
         return self
 
@@ -219,6 +229,8 @@ async def end(
     phase: str = "done",
     reason: str = "",
     commit: bool = False,
+    tests: bool = False,
+    finishing: bool = False,
 ) -> dict[str, Any]:
     ending = await decide(
         run,  # type: ignore[arg-type]
@@ -228,6 +240,8 @@ async def end(
         folder=str(repo) if repo else None,
         base=base,
         asks_commit=commit,
+        asks_tests=tests,
+        finishing=finishing,
     )
     assert ending is not None
     return ending
@@ -273,6 +287,7 @@ async def test_a_failing_last_test_is_never_ready_even_without_a_change(
     plain = tmp_path / "plain"
     plain.mkdir()
     outside = await baseline(str(plain))
+    (plain / "x.py").write_text("x = 1\n")
     failing = Run().edit("x.py").test(exit_code=1)
     assert why(await end(failing, plain, outside)) == ("draft", ["tests_failed"])
     unknown = Run().test(HIDES)
@@ -424,10 +439,17 @@ async def test_a_folder_git_cannot_read_is_unchecked(
 ) -> None:
     base = await baseline(str(repo))
     (repo / ".git" / "HEAD").write_text("garbage\n")  # git refuses the repository now
+    # A test after the edit: Finish it could do nothing more, so it is not offered.
     ending = await end(Run().edit().test(), repo, base)
-    assert why(ending) == ("draft", ["unchecked"])
+    assert why(ending) == ("draft", ["unreadable"])
+    assert not can_finish(ending)
+    # No test after the edit: Finish it can run one, once.
+    owed = await end(Run().edit(), repo, base)
+    assert why(owed) == ("draft", ["unchecked"]) and can_finish(owed)
+    again = await end(Run().edit(), repo, base, finishing=True)
+    assert why(again) == ("draft", ["unreadable"]) and not can_finish(again)
     broken = Baseline(None, git=True, error=True)
-    assert why(await end(Run(), repo, broken)) == ("draft", ["unchecked"])
+    assert why(await end(Run(), repo, broken)) == ("draft", ["unreadable"])
 
 
 # ── Plain endings ──
@@ -447,7 +469,9 @@ async def test_a_plain_ready_outside_git_and_without_a_proposal(tmp_path: Path) 
 async def test_code_edited_outside_git_still_owes_a_test(tmp_path: Path) -> None:
     folder = tmp_path / "plain"
     folder.mkdir()
+    (folder / "test_x.py").write_text("def test_x():\n    pass\n")
     base = await baseline(str(folder))
+    assert (base.git, base.error, base.tests) == (False, False, True)
     (folder / "x.py").write_text("print(1)\n")
     for run in (
         Run().edit("x.py"),
@@ -455,7 +479,9 @@ async def test_code_edited_outside_git_still_owes_a_test(tmp_path: Path) -> None
         Run().edit("x.py").test().edit("x.py"),
     ):
         assert why(await end(run, folder, base)) == ("draft", ["tests_missing"])
-    assert why(await end(Run().py("print(1)\n"), folder, base)) == ("ready", [])
+    assert why(await end(Run().edit("x.py").test(), folder, base)) == ("ready", [])
+    unchanged = await baseline(str(folder))
+    assert why(await end(Run().py("print(1)\n"), folder, unchanged)) == ("ready", [])
 
 
 async def test_a_docs_only_change_needs_no_test_and_a_build_file_does(
@@ -856,8 +882,9 @@ async def test_the_kept_baseline_holds_changed_files_but_never_the_stash(
     now = await baseline(str(repo))
     assert (now.git, now.error, now.stash) == (True, False, 1)
     kept = now.to_json()
-    assert set(kept) == {"git", "head", "stamps"}, "never the stash"
+    assert set(kept) == {"git", "head", "stamps", "tests"}, "never the stash"
     assert sorted(kept["stamps"]) == ["README.md", "app.py"]
+    assert kept["tests"] is True
 
 
 async def test_docs_an_earlier_run_left_uncommitted_are_still_owed(repo: Path) -> None:
@@ -883,7 +910,8 @@ async def test_work_a_run_stashed_stays_unchecked_until_the_stash_is_back(
     later = (await baseline(str(repo))).since(kept)
     assert await stash_floor(str(repo), later) is None, "this run grew nothing"
     ending = await end(Run().test(), repo, later, commit=True)
-    assert why(ending) == ("draft", ["unchecked"])
+    assert why(ending) == ("draft", ["stashed"]), "a test ran: Finish it cannot help"
+    assert not can_finish(ending)
     git(repo, "stash", "pop", "-q")  # the work is back in sight: the usual rules
     back = (await baseline(str(repo))).since(kept)
     pop = Run().call("shell_exec", {"command": "git stash pop"}, exit_code=0).test()
@@ -894,10 +922,17 @@ async def test_a_folder_with_too_many_changes_is_unchecked(repo: Path) -> None:
     for n in range(MAX_STAMPS + 1):
         (repo / f"f{n}.py").write_text("")
     assert (await baseline(str(repo))).error
-    assert why(await end(Run(), repo, await baseline(str(repo)))) == (
-        "draft",
-        ["unchecked"],
+    base = await baseline(str(repo))
+    ending = await end(Run(), repo, base)
+    assert why(ending) == ("draft", ["too_large"]) and not can_finish(ending)
+    # Asked to commit: Finish it can commit the changes, and asks to.
+    owed = await end(Run(), repo, base, commit=True)
+    assert why(owed) == ("draft", ["commit_missing", "unchecked"])
+    assert can_finish(owed) and finish_message(owed) == finish_message(
+        {"reasons": ["commit_missing"]}
     )
+    again = await end(Run(), repo, base, commit=True, finishing=True)
+    assert why(again) == ("draft", ["too_large"]) and not can_finish(again)
 
 
 def nested(repo: Path) -> Path:
@@ -946,6 +981,754 @@ async def test_a_task_folder_inside_a_repository_sees_only_itself(repo: Path) ->
     git(repo, "commit", "-qm", "Fix", "sub/app.py")
     committed = await end(Run().edit().test(), folder, base, commit=True)
     assert why(committed) == ("ready", [])
+
+
+# ── Outside git: a snapshot of the folder; tests only where they apply ──
+
+# A run that only fetched a page: it ran commands, none of which wrote a file.
+FETCH = "import subprocess, sys\nsubprocess.run([sys.executable, '-c', 'print(1)'])\n"
+
+
+def folder_of(tmp_path: Path, *, tests: bool) -> Path:
+    folder = tmp_path / "work"
+    folder.mkdir()
+    (folder / "notes.md").write_text("# Notes\n")
+    if tests:
+        (folder / "test_x.py").write_text("def test_x():\n    pass\n")
+    return folder
+
+
+@pytest.mark.parametrize("tests", [False, True], ids=["no-tests", "tests"])
+async def test_a_run_that_only_visited_a_website_outside_git_is_ready(
+    tmp_path: Path, tests: bool
+) -> None:
+    folder = folder_of(tmp_path, tests=tests)
+    base = await baseline(str(folder))
+    shell = {"command": "curl -sL https://example.invalid/ -o /dev/null"}
+    run = Run("The site's title is Example.\nEnding: ready").py(FETCH)
+    run.call("shell_exec", shell, exit_code=0)
+    ending = await end(run, folder, base)
+    assert (*why(ending), ending["notes"]) == ("ready", [], [])
+
+
+async def test_code_changed_where_no_test_setup_was_found_still_owes_a_test(
+    tmp_path: Path,
+) -> None:
+    folder = folder_of(tmp_path, tests=False)
+    base = await baseline(str(folder))
+    assert (base.git, base.error, base.tests) == (False, False, False)
+    (folder / "page.py").write_text("print('hi')\n")
+    ending = await end(Run().edit("page.py"), folder, base)
+    assert (*why(ending), ending["notes"]) == ("draft", ["tests_missing"], [])
+    assert can_finish(ending)
+    # Finish it found no runner: it ends Ready, saying no tests apply.
+    done = await end(Run(), folder, base, tests=True, finishing=True)
+    assert (*why(done), done["notes"]) == ("ready", [], ["no_tests"])
+    assert not can_finish(done)
+
+
+async def test_a_write_by_a_shell_command_outside_git_is_seen(tmp_path: Path) -> None:
+    folder = folder_of(tmp_path, tests=True)
+    base = await baseline(str(folder))
+    (folder / "x.py").write_text("x = 9\n")  # what the command below wrote
+    run = Run().call("shell_exec", {"command": "printf 'x = 9' > x.py"}, exit_code=0)
+    assert why(await end(run, folder, base)) == ("draft", ["tests_missing"])
+    gone = await baseline(str(folder))
+    (folder / "x.py").unlink()  # a deletion is a change too
+    removed = Run().call("shell_exec", {"command": "rm x.py"}, exit_code=0)
+    assert why(await end(removed, folder, gone)) == ("draft", ["tests_missing"])
+    edited = Run().call("shell_exec", {"command": "make"}, exit_code=0).test()
+    assert why(await end(edited, folder, base)) == ("ready", [])
+
+
+@pytest.mark.parametrize("ran", ["nothing", "pytest-collects-nothing"])
+async def test_finish_it_with_no_test_that_applies_ends_ready(
+    tmp_path: Path, ran: str
+) -> None:
+    folder = folder_of(tmp_path, tests=False)
+    kept = (await baseline(str(folder))).to_json()
+    (folder / "page.py").write_text("print('hi')\n")  # an earlier run's change
+    base = (await baseline(str(folder))).since(kept)
+    run = Run("Nothing to test here.\nEnding: ready")
+    if ran != "nothing":
+        run.test(exit_code=5)  # pytest exits 5 when it collects no test
+    ending = await end(run, folder, base, tests=True, finishing=True)
+    assert (*why(ending), ending["notes"], ending["tests"]) == (
+        "ready",
+        [],
+        ["no_tests"],
+        [],
+    )
+    # The same run, not Finish it's: the change still owes its test.
+    owed = await end(run, folder, base, tests=True)
+    assert why(owed) == ("draft", ["tests_missing"])
+
+
+async def test_tests_asked_for_are_owed_where_a_setup_applies(repo: Path) -> None:
+    base = await baseline(str(repo))
+    assert why(await end(Run(), repo, base, tests=True)) == ("draft", ["tests_missing"])
+    assert why(await end(Run().test(), repo, base, tests=True)) == ("ready", [])
+    assert why(await end(Run(), repo, base)) == ("ready", [])
+
+
+async def test_a_git_folder_with_no_test_setup_owes_a_test_only_for_changed_code(
+    repo: Path,
+) -> None:
+    git(repo, "rm", "-rq", "tests")
+    git(repo, "commit", "-qm", "No tests")
+    base = await baseline(str(repo))
+    assert base.tests is False
+    asked = await end(Run(), repo, base, tests=True)
+    assert (*why(asked), asked["notes"]) == ("ready", [], ["no_tests"])
+    (repo / "app.py").write_text("x = 2\n")
+    ending = await end(Run().edit(), repo, base)
+    assert (*why(ending), ending["notes"]) == ("draft", ["tests_missing"], [])
+    done = await end(Run(), repo, base, tests=True, finishing=True)
+    assert (*why(done), done["notes"]) == ("ready", [], ["no_tests"])
+
+
+async def test_removing_the_tests_during_the_run_does_not_lift_them(
+    repo: Path, tmp_path: Path
+) -> None:
+    base = await baseline(str(repo))
+    (repo / "app.py").write_text("x = 2\n")
+    git(repo, "rm", "-rq", "tests")
+    assert why(await end(Run().edit(), repo, base)) == ("draft", ["tests_missing"])
+    outside = folder_of(tmp_path, tests=True)
+    plain = await baseline(str(outside))
+    (outside / "test_x.py").unlink()
+    (outside / "x.py").write_text("x = 1\n")
+    assert why(await end(Run().edit("x.py"), outside, plain)) == (
+        "draft",
+        ["tests_missing"],
+    )
+
+
+async def test_a_snapshot_too_large_or_unreadable_is_unchecked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = folder_of(tmp_path, tests=False)
+    monkeypatch.setattr(task_endings, "MAX_STAMPS", 3)
+    monkeypatch.setattr(task_endings, "MAX_SEEN", 8)
+    for n in range(3):
+        (folder / f"f{n}.py").write_text("")
+    assert not (await baseline(str(folder))).error, "three code files fit"
+    (folder / "f3.py").write_text("")
+    assert (await baseline(str(folder))).error, "a fourth code file does not"
+    (folder / "f3.py").unlink()
+    for n in range(6):
+        (folder / f"d{n}.md").write_text("")
+    assert (await baseline(str(folder))).error, "nor ten files in all"
+    for n in range(6):
+        (folder / f"d{n}.md").unlink()
+    base = await baseline(str(folder))
+    venv = folder / ".venv" / "lib"
+    venv.mkdir(parents=True)
+    for n in range(20):
+        (venv / f"m{n}.py").write_text("")
+    assert not (await baseline(str(folder))).error, "environments are not read"
+    assert why(await end(Run(), folder, base)) == ("ready", [])
+    missing = Baseline(None, error=True, tests=False)
+    assert why(await end(Run(), folder, missing)) == ("draft", ["unreadable"])
+    large = Baseline(None, error=True, why="too_large")
+    ending = await end(Run().py(FETCH), folder, large)
+    assert why(ending) == ("draft", ["unchecked"]), "Finish it can run a test once"
+    again = await end(Run().py(FETCH).test(), folder, large, finishing=True)
+    assert why(again) == ("draft", ["too_large"]) and not can_finish(again)
+    tested = await end(Run().py(FETCH).test(), folder, large)
+    assert why(tested) == ("draft", ["too_large"]), "the test already ran"
+
+
+async def test_a_task_kept_before_snapshots_is_judged_from_its_own_start(
+    tmp_path: Path,
+) -> None:
+    folder = folder_of(tmp_path, tests=True)
+    (folder / "x.py").write_text("x = 1\n")
+    old = {"git": False, "head": "", "stamps": {}}  # how a folder outside git was kept
+    base = (await baseline(str(folder))).since(old)
+    assert why(await end(Run(), folder, base)) == ("ready", [])
+
+
+async def test_a_saved_page_or_picture_is_not_code(tmp_path: Path) -> None:
+    folder = folder_of(tmp_path, tests=True)
+    base = await baseline(str(folder))
+    for name in ("page.html", "logo.png", "rows.csv", "paper.pdf", "notes.txt"):
+        (folder / name).write_text("<html></html>")
+    fetch = (
+        "import subprocess\nsubprocess.run(['curl', '-o', 'page.html', 'https://x'])\n"
+    )
+    ending = await end(Run().py(fetch), folder, base)
+    assert why(ending) == ("ready", [])
+    (folder / "build.sh").write_text("make\n")  # a script is code
+    assert why(await end(Run().py(fetch), folder, base)) == ("draft", ["tests_missing"])
+
+
+async def test_a_file_tool_edit_outside_the_folder_counts_outside_git(
+    tmp_path: Path,
+) -> None:
+    folder = folder_of(tmp_path, tests=True)
+    other = tmp_path / "proj"
+    other.mkdir()
+    (other / "lib.py").write_text("z = 1\n")
+    base = await baseline(str(folder))
+    (other / "lib.py").write_text("z = 2\n")
+    edit = Run().edit(str(other / "lib.py"))
+    assert why(await end(edit, folder, base)) == ("draft", ["tests_missing"])
+    page = Run().call("file_write", {"path": str(other / "page.html"), "content": "x"})
+    assert why(await end(page, folder, base)) == ("ready", []), "not code"
+    refused = Run().call(
+        "file_edit", {"path": str(other / "lib.py")}, status="error", exit_code=None
+    )
+    assert why(await end(refused, folder, base)) == ("ready", [])
+
+
+async def test_what_a_snapshot_cannot_see(tmp_path: Path) -> None:
+    """The snapshot's known limits outside git, for unknown commands (docs: for-agents)."""
+    folder = folder_of(tmp_path, tests=True)
+    (folder / "app.py").write_text("x = 1\n")
+    (folder / "venv").mkdir()
+    (folder / "venv" / "lib.py").write_text("y = 1\n")
+    real = tmp_path / "real.py"
+    real.write_text("a = 1\n")
+    (folder / "link.py").symlink_to(real)
+    base = await baseline(str(folder))
+    stat = (folder / "app.py").stat()
+    (folder / "app.py").write_text("x = 2\n")  # same size, time put back
+    os.utime(folder / "app.py", ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    (folder / "venv" / "lib.py").write_text("y = 22\n")  # a skipped folder
+    real.write_text("a = 222\n")  # through a symlink: the link is read, not its file
+    ending = await end(Run().py("open('app.py', 'w').write('x = 2')\n"), folder, base)
+    assert why(ending) == ("ready", [])
+    # A file tool names its file, so the same edits through it count.
+    assert why(await end(Run().edit("venv/lib.py"), folder, base)) == (
+        "draft",
+        ["tests_missing"],
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "text", "marks"),
+    [
+        ("tests.py", "", True),
+        ("parser_tests.py", "", True),
+        ("test.py", "", True),
+        ("util_test.ts", "", True),
+        ("util_test.js", "", True),
+        ("util_test.go", "", True),
+        ("manage.py", "", True),
+        ("phpunit.xml", "", True),
+        ("mix.exs", "", True),
+        ("CMakeLists.txt", "project(x)\nenable_testing()\n", True),
+        ("CMakeLists.txt", "project(x)\nadd_test(NAME t COMMAND t)\n", True),
+        ("CMakeLists.txt", "project(x)\n", False),
+        ("pyproject.toml", "[tool.pytest.ini_options]\naddopts = '-q'\n", True),
+        ("pyproject.toml", "[project]\nname = 'x'\n", False),
+        ("setup.cfg", "[tool:pytest]\naddopts = -q\n", True),
+        ("setup.cfg", "[metadata]\nname = x\n", False),
+        (
+            "App.Tests.csproj",
+            '<PackageReference Include="Microsoft.NET.Test.Sdk" />',
+            True,
+        ),
+        ("App.csproj", '<Project Sdk="Microsoft.NET.Sdk" />', False),
+        ("package.json", '{"scripts": {"test": "vitest run"}}', True),
+        (
+            "package.json",
+            '{\n  "scripts": {\n    "test": "echo \\"Error: no test specified\\" && exit 1"\n  }\n}\n',
+            False,
+        ),
+        ("package.json", '{"scripts": {"build": "tsc"}}', False),
+        ("package.json", "{not json", True),
+    ],
+)
+def test_what_says_a_test_runner_applies(
+    tmp_path: Path, name: str, text: str, marks: bool
+) -> None:
+    (tmp_path / name).write_text(text)
+    assert _test_marker(str(tmp_path), name, False) is marks
+
+
+@pytest.mark.parametrize("build", ["build.gradle", "pom.xml"])
+def test_a_jvm_build_marks_tests_only_with_its_test_sources(
+    tmp_path: Path, build: str
+) -> None:
+    (tmp_path / build).write_text("")
+    assert not _test_marker(str(tmp_path), build, False)
+    (tmp_path / "src" / "test").mkdir(parents=True)
+    assert _test_marker(str(tmp_path), build, False)
+
+
+async def test_an_untested_change_in_a_django_project_is_owed(repo: Path) -> None:
+    git(repo, "rm", "-rq", "tests")
+    (repo / "shop").mkdir()
+    (repo / "manage.py").write_text("x")
+    (repo / "shop" / "views.py").write_text("v = 1\n")
+    (repo / "shop" / "tests.py").write_text("from django.test import TestCase\n")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "Shop")
+    base = await baseline(str(repo))
+    assert base.tests
+    (repo / "shop" / "views.py").write_text("v = 2\n")
+    ending = await end(Run().edit("shop/views.py"), repo, base)
+    assert (*why(ending), ending["notes"]) == ("draft", ["tests_missing"], [])
+    # Finish it ran no test: melo says it found tests it could not run, once.
+    finished = await end(Run(), repo, base, tests=True, finishing=True)
+    assert why(finished) == ("draft", ["no_runner"]) and not can_finish(finished)
+    # Finish it ran Django's own runner: its exit code is the result.
+    django = "import subprocess, sys\nsys.exit(subprocess.run([sys.executable, 'manage.py', 'test']).returncode)\n"
+    tested = await end(Run().py(django), repo, base, tests=True, finishing=True)
+    assert why(tested) == ("ready", [])
+
+
+# ── A Finish it run never offers Finish it again ──
+
+
+# What a run did, as steps of `Run`: every kind of evidence a run leaves.
+SHAPES: dict[str, list[str]] = {
+    "none": [],
+    "edit": ["edit"],
+    "edit+pass": ["edit", "pass"],
+    "edit+fail": ["edit", "fail"],
+    "edit+unknown": ["edit", "unknown"],
+    "edit+empty": ["edit", "empty"],
+    "pass+edit": ["pass", "edit"],
+    "empty": ["empty"],
+    "write": ["write"],
+    "outside": ["outside"],
+    "edit+filtered": ["edit", "filtered"],
+    "edit+zero": ["edit", "zero"],
+}
+FILTERED = (
+    "import subprocess, sys\n"
+    "sys.exit(subprocess.run([sys.executable, '-m', 'pytest', '-q', '-k', 'parser'])"
+    ".returncode)\n"
+)
+
+
+def shaped_run(shape: str, answer: str, elsewhere: Path) -> Run:
+    run = Run(answer)
+    for step in SHAPES[shape]:
+        if step == "edit":
+            run.edit()
+        elif step == "pass":
+            run.test()
+        elif step == "fail":
+            run.test(exit_code=1)
+        elif step == "unknown":
+            run.py(HIDES)
+        elif step == "empty":
+            run.test(exit_code=5)
+        elif step == "write":
+            run.py(FETCH)
+        elif step == "filtered":
+            run.test(FILTERED, exit_code=5)
+        elif step == "zero":
+            run.call(
+                "shell_exec",
+                {"command": "ctest"},
+                exit_code=0,
+                output="No tests were found!!!",
+            )
+        else:
+            run.edit(str(elsewhere))
+    return run
+
+
+async def test_no_evidence_lets_a_finish_it_run_offer_finish_it_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """For every folder state, run and ask, the ending of a Finish it run has no button."""
+    folder = folder_of(tmp_path, tests=True)
+    elsewhere = tmp_path / "elsewhere.py"
+    states = itertools.product(
+        ("", "too_large", "unreadable", "stashed"),
+        (None, [], ["app.py"]),
+        ([], ["app.py"]),
+        (True, False),
+        (False, True),
+    )
+    offered = 0
+    for why_, code, own, tests_apply, crowded in states:
+        seen = task_endings._Seen(why_, code, own, tests_apply, crowded)
+
+        async def fixed(_folder: str | None, _base: Baseline, seen: Any = seen) -> Any:
+            return seen
+
+        monkeypatch.setattr(task_endings, "_changes", fixed)
+        for answer, shape, git_base, asked_tests, asked_commit in itertools.product(
+            ("Done.\nEnding: ready", "Stuck.\nEnding: failed"),
+            SHAPES,
+            (False, True),
+            (False, True),
+            (False, True),
+        ):
+            base = Baseline({}, git=git_base)
+            run = shaped_run(shape, answer, elsewhere)
+            again = await end(
+                run,
+                folder,
+                base,
+                tests=asked_tests,
+                commit=asked_commit,
+                finishing=True,
+            )
+            assert not can_finish(again), (seen, shape, again)
+            first = await end(run, folder, base, tests=asked_tests, commit=asked_commit)
+            offered += can_finish(first)
+            # A run that collected nothing it was filtered to, or a runner that
+            # says it ran none, is no proof: changed code with a suite never ends Ready.
+            if shape in ("edit+filtered", "edit+zero") and code and tests_apply:
+                assert again["state"] != "ready", (seen, shape, again)
+                assert first["state"] != "ready", (seen, shape, first)
+    assert offered, "outside a Finish it run the same evidence does offer it"
+
+
+async def test_a_finish_it_run_that_ran_no_test_with_a_result(tmp_path: Path) -> None:
+    folder = folder_of(tmp_path, tests=False)
+    (folder / "tests").mkdir()  # an empty tests folder: a setup, nothing to collect
+    (folder / "app.py").write_text("x = 1\n")
+    base = await baseline(str(folder))
+    assert base.tests
+    (folder / "app.py").write_text("x = 22\n")
+    first = await end(Run().edit("app.py"), folder, base)
+    assert why(first) == ("draft", ["tests_missing"]) and can_finish(first)
+    # pytest collected nothing: no runner applies after all.
+    empty = Run().edit("app.py").test(exit_code=5)
+    done = await end(empty, folder, base, finishing=True)
+    assert (*why(done), done["notes"]) == ("ready", [], ["no_tests"])
+    # Nothing ran at all: melo says it found tests it could not run.
+    plain = await end(Run().edit("app.py"), folder, base, finishing=True)
+    assert why(plain) == ("draft", ["no_runner"]) and not can_finish(plain)
+    # A test that ran before a later change: still owed, but not offered again.
+    stale = await end(Run().test().edit("app.py"), folder, base, finishing=True)
+    assert why(stale) == ("draft", ["tests_missing", "finish_tried"])
+    assert not can_finish(stale)
+    # A failing test after Finish it: said, not offered again.
+    failed = await end(
+        Run().edit("app.py").test(exit_code=1), folder, base, finishing=True
+    )
+    assert why(failed) == ("draft", ["tests_failed", "finish_tried"])
+    assert not can_finish(failed)
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        "'-k', 'parser'",
+        "'-m', 'slow'",
+        "'--deselect', 'tests/test_app.py::test_x'",
+        "'tests/test_app.py::test_x'",
+        "'tests'",
+        "'-p', 'xdist'",
+    ],
+)
+async def test_a_filtered_run_that_collected_nothing_is_no_result(
+    repo: Path, args: str
+) -> None:
+    base = await baseline(str(repo))
+    (repo / "app.py").write_text("x = 2\n")  # could break the real suite
+    code = (
+        "import subprocess, sys\nsys.exit(subprocess.run([sys.executable, '-m', "
+        f"'pytest', '-q', {args}]).returncode)\n"
+    )
+    run = Run().edit().test(code, exit_code=5)
+    first = await end(run, repo, base)
+    assert why(first) == ("draft", ["tests_missing"]) and can_finish(first)
+    again = await end(run, repo, base, finishing=True)
+    assert why(again) == ("draft", ["tests_missing", "finish_tried"])
+    assert not can_finish(again)
+
+
+@pytest.mark.parametrize(
+    "args", ["", "'-q'", "'-q', '-n', 'auto'", "'-p', 'no:cacheprovider'"]
+)
+async def test_a_whole_run_that_collected_nothing_means_no_tests_apply(
+    repo: Path, args: str
+) -> None:
+    base = await baseline(str(repo))
+    (repo / "app.py").write_text("x = 2\n")
+    code = (
+        "import subprocess, sys\nsys.exit(subprocess.run([sys.executable, '-m', "
+        f"'pytest', {args}]).returncode)\n"
+    )
+    run = Run().edit().test(code, exit_code=5)
+    ending = await end(run, repo, base, finishing=True)
+    assert (*why(ending), ending["notes"]) == ("ready", [], ["no_tests"])
+
+
+async def test_a_run_that_writes_and_collects_nothing_is_still_a_write(
+    repo: Path,
+) -> None:
+    base = await baseline(str(repo))
+    (repo / "app.py").write_text("x = 3\n")
+    sneaky = (
+        "import subprocess, sys\nopen('app.py', 'w').write('x = 3\\n')\n"
+        "sys.exit(subprocess.run([sys.executable, '-m', 'pytest', '-k', 'zzz'])"
+        ".returncode)\n"
+    )
+    run = Run().edit().test().py(sneaky, exit_code=5)
+    assert why(await end(run, repo, base)) == ("draft", ["tests_missing"])
+    # The strict shape alone writes nothing, whatever it collected.
+    plain = Run().edit().test().test(FILTERED, exit_code=5)
+    assert why(await end(plain, repo, base)) == ("ready", [])
+
+
+@pytest.mark.parametrize(
+    ("command", "output"),
+    [
+        ("ctest -R nomatch", "Test project /x\nNo tests were found!!!\n"),
+        ("phpunit --filter NoSuch", "No tests executed!\n"),
+        (
+            "mix test --only nosuchtag",
+            "Finished in 0.01 seconds\n0 tests, 0 failures\n",
+        ),
+        ("mix test --only nosuchtag", "All tests have been excluded.\n"),
+        ("python manage.py test shop.nosuch", "Ran 0 tests in 0.000s\n\nOK\n"),
+    ],
+)
+async def test_a_runner_that_says_it_ran_no_test_is_no_result(
+    repo: Path, command: str, output: str
+) -> None:
+    base = await baseline(str(repo))
+    (repo / "app.py").write_text("x = 2\n")
+    run = (
+        Run()
+        .edit()
+        .call("shell_exec", {"command": command}, exit_code=0, output=output)
+    )
+    assert why(await end(run, repo, base)) == ("draft", ["tests_missing"])
+    again = await end(run, repo, base, finishing=True)
+    assert why(again) == ("draft", ["tests_missing", "finish_tried"])
+    ran = (
+        Run()
+        .edit()
+        .call(
+            "shell_exec",
+            {"command": command},
+            exit_code=0,
+            output="Ran 10 tests\n\nOK\n",
+        )
+    )
+    assert why(await end(ran, repo, base)) == ("ready", [])
+
+
+@pytest.mark.parametrize(
+    ("command", "output", "result"),
+    [
+        ("ctest", "100% tests passed, 0 tests failed out of 5\n", True),
+        ("ctest", "No tests were found!!!\n", False),
+        ("python -m pytest -q", "12 passed, 0 tests skipped\n", True),
+        ("python -m pytest -q", "tests/test_x.py::test_x[0 tests] PASSED\n", True),
+        ("phpunit", "No tests executed!\n", False),
+        ("ctest", "No tests executed\n", True),
+        ("mix test", "Finished in 0.1 seconds\n10 tests, 0 failures\n", True),
+        ("mix test", "Finished in 0.1 seconds\n0 tests, 0 failures\n", False),
+        ("python manage.py test", "Ran 3 tests in 0.1s\n\nOK\n", True),
+        ("python manage.py test", "Ran 0 tests in 0.000s\n\nOK\n", False),
+        ("cargo test", "running 5 tests\ntest a ... ok\nrunning 0 tests\n", True),
+        ("cargo test", "running 0 tests\n\ntest result: ok. 0 passed\n", False),
+        ("mvn test", "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0\n", True),
+        (
+            "mvn test",
+            "[INFO] Tests run: 0, Failures: 0, Errors: 0, Skipped: 0\n",
+            False,
+        ),
+        ("mvn test", "[INFO] No tests to run.\n", False),
+    ],
+)
+async def test_only_a_runners_own_zero_count_means_it_ran_none(
+    repo: Path, command: str, output: str, result: bool
+) -> None:
+    base = await baseline(str(repo))
+    (repo / "app.py").write_text("x = 2\n")
+    run = (
+        Run()
+        .edit()
+        .call("shell_exec", {"command": command}, exit_code=0, output=output)
+    )
+    expected = ("ready", []) if result else ("draft", ["tests_missing"])
+    assert why(await end(run, repo, base)) == expected
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        "['mvn', 'test', '-DskipTests']",
+        "['mvn', 'test', '-DskipTests=true']",
+        "['mvn', 'test', '-q', '-DskipTests']",
+        "['mvn', 'test', '-Dmaven.test.skip']",
+        "['mvn', 'test', '-Dmaven.test.skip=true']",
+        "['ctest', '--show-only']",
+        "['ctest', '--show-only=json-v1']",
+        "['ctest', '-N']",
+        "['gradle', 'test', '-x', 'test']",
+        "['./gradlew', 'test', '-x', ':app:test']",
+        "['gradle', 'test', '--exclude-task', 'test']",
+        "['gradle', 'test', '--exclude-task=test']",
+        "['cabal', 'test', '--dry-run']",
+        "['phpunit', '--list-tests']",
+        "['dotnet', 'test', '--list-tests']",
+    ],
+)
+def test_a_flag_that_skips_or_lists_the_tests_is_no_test(argv: str) -> None:
+    code = f"import subprocess\nsubprocess.run({argv}, check=True)\n"
+    assert python_test(code) == ("", False)
+    assert python_test(code.replace(argv, "['mvn', 'test']"))[1]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "python manage.py test",
+        "./manage.py test",
+        "uv run python manage.py test",
+        "mix test",
+        "phpunit",
+        "vendor/bin/phpunit",
+        "dotnet test",
+        "ctest",
+        "./gradlew test",
+        "gradle test",
+        "mvn test",
+        "make check",
+        "zig build test",
+        "cabal test",
+        "deno test",
+        "just test",
+    ],
+)
+async def test_every_setup_melo_finds_has_a_runner(repo: Path, command: str) -> None:
+    base = await baseline(str(repo))
+    (repo / "app.py").write_text("x = 2\n")
+    run = Run().edit().call("shell_exec", {"command": command}, exit_code=0)
+    assert why(await end(run, repo, base)) == ("ready", [])
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "phpunit --list-tests",
+        "dotnet test --list-tests",
+        "ctest -N",
+        "./gradlew test --dry-run",
+        "mvn test -DskipTests",
+        "deno test --no-run",
+        "just test --dry-run",
+    ],
+)
+async def test_a_runner_that_only_lists_is_not_a_test(repo: Path, command: str) -> None:
+    base = await baseline(str(repo))
+    (repo / "app.py").write_text("x = 2\n")
+    run = Run().edit().call("shell_exec", {"command": command}, exit_code=0)
+    assert why(await end(run, repo, base)) == ("draft", ["tests_missing"])
+
+
+@pytest.mark.parametrize(
+    ("name", "text", "marks"),
+    [
+        ("Makefile", "build:\n\tcc x.c\ncheck: build\n\t./x --self-test\n", True),
+        ("build.zig", "", True),
+        ("app.cabal", "", True),
+        ("deno.json", "{}", True),
+        ("deno.jsonc", "{}", True),
+        ("justfile", "build:\n    cargo build\ntest: build\n    cargo test\n", True),
+        ("Justfile", "@test:\n    go test ./...\n", True),
+        ("justfile", "build:\n    cargo build\n", False),
+    ],
+)
+def test_more_setups_are_found(
+    tmp_path: Path, name: str, text: str, marks: bool
+) -> None:
+    (tmp_path / name).write_text(text)
+    assert _test_marker(str(tmp_path), name, False) is marks
+
+
+@pytest.mark.parametrize(
+    ("said", "continued", "ran_before", "finishing"),
+    [
+        (["Run the tests"], True, True, True),
+        (["跑一下测试"], True, True, True),
+        (["Look at it again"], True, True, False),
+        # The task's first run: parked and resumed, its inbox asked for the tests.
+        (["Run the tests"], False, True, False),
+        # A task stopped before it ever ran, continued: its first run.
+        (["Fix it\n\nRun the tests"], True, False, False),
+        (
+            [
+                "Finish it: run the tests that cover your changes, fix what fails, "
+                "and end your report with its Ending line."
+            ],
+            False,
+            False,
+            True,
+        ),
+    ],
+)
+def test_which_runs_are_finish_it_runs(
+    said: list[str], continued: bool, ran_before: bool, finishing: bool
+) -> None:
+    assert finish_run(said, continued=continued, ran_before=ran_before) is finishing
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Finish it: run the tests that cover your changes, fix what fails, and end "
+        "your report with its Ending line.",
+        "收尾：运行覆盖你改动的测试，修好失败的地方，提交改动，报告最后写上 Ending 行。",
+        "Fix add in calc.py\n\nFinish it: run the tests that cover your changes, fix "
+        "what fails, and end your report with its Ending line.",
+    ],
+)
+def test_finish_its_own_message_is_known_in_every_language(text: str) -> None:
+    assert finishes(text)
+    assert finishes(finish_message({"reasons": ["commit_missing"]}))
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Run the tests", "Finish it", "", "收尾：跑测试", "Finish it: run the tests"],
+)
+def test_other_words_are_not_finish_its_message(text: str) -> None:
+    assert not finishes(text)
+
+
+@pytest.mark.parametrize(
+    ("text", "asks"),
+    [
+        ("Fix the parser and run the tests", True),
+        ("改完跑一下测试", True),
+        ("run pytest on it", True),
+        ("Finish it: run the tests that cover your changes", True),
+        ("收尾：运行覆盖你改动的测试，修好失败的地方", True),
+        ("Don't run the tests, just commit", False),
+        ("不用跑测试", False),
+        ("测试一下这个网站能不能打开", False),
+        ("Visit example.com and tell me its title", False),
+        ("The log says `pytest` failed; why?", False),
+        (
+            "Check the parser handles empty input, and don't forget to run the tests.",
+            True,
+        ),
+        ("Don't forget the tests", True),
+        ("Make sure you don't skip the tests.", True),
+        ("Make sure the tests pass.", True),
+        ("Make sure all the tests still pass", True),
+        ("别忘了跑测试", True),
+        ("不要忘记运行测试", True),
+        ("确保测试都通过", True),
+        ("Don't forget to commit", False),
+        ("别忘了提交", False),
+        ("Make sure the site loads", False),
+        ("先不跑测试", False),
+        ("别忘了测试一下这个网站", False),
+        ("别忘了测试", False),
+        ("Don't forget to check the site", False),
+        ("Make sure the site loads; tests pass already", False),
+    ],
+)
+def test_tests_are_asked_in_plain_words(text: str, asks: bool) -> None:
+    assert asks_tests(text) is asks
 
 
 # ── git that cannot run ──
@@ -1084,6 +1867,39 @@ async def test_the_store_keeps_an_ending_with_its_transition(tmp_path: Path) -> 
         await store.aclose()
 
 
+async def test_a_finish_it_run_is_kept_on_the_task_through_a_park(
+    tmp_path: Path,
+) -> None:
+    store = SessionStore(tmp_path / "sessions.db", writer="gateway")
+    await store.open()
+    try:
+        tasks = TaskStore(store)
+        await tasks.open()
+        record, _ = await tasks.create_task(
+            TaskSpec.from_payload({"objective": "Fix it"}),
+            workspace=str(tmp_path),
+            origin="user",
+        )
+        assert record.finishing is False
+        await tasks.change(record.task_id, state="running", actor="scheduler")
+        draft = {"state": "draft", "reasons": ["tests_missing"]}
+        await tasks.change(record.task_id, state="done", ending=draft)
+        reopened = await tasks.reopen(
+            record.task_id, "Finish it: run the tests", finishing=True
+        )
+        assert reopened.finishing
+        await tasks.change(record.task_id, state="running", actor="scheduler")
+        parked = await tasks.change(record.task_id, state="parked", actor="scheduler")
+        assert parked.finishing, "a park keeps it"
+        await tasks.change(record.task_id, state="running", actor="scheduler")
+        ended = await tasks.change(record.task_id, state="done", ending=draft)
+        assert ended.finishing is False, "its ending closes it"
+        plain = await tasks.reopen(record.task_id, "Look again")
+        assert plain.finishing is False
+    finally:
+        await store.aclose()
+
+
 async def test_an_older_store_gains_the_ending_columns(tmp_path: Path) -> None:
     path = tmp_path / "sessions.db"
     store = SessionStore(path, writer="gateway")
@@ -1096,13 +1912,14 @@ async def test_an_older_store_gains_the_ending_columns(tmp_path: Path) -> None:
     with sqlite3.connect(path) as conn:
         conn.execute("ALTER TABLE tasks DROP COLUMN ending")
         conn.execute("ALTER TABLE tasks DROP COLUMN work_base")
+        conn.execute("ALTER TABLE tasks DROP COLUMN finishing")
     store = SessionStore(path, writer="gateway")
     await store.open()
     try:
         tasks = TaskStore(store)
         await tasks.open()
         again = await tasks.get_task(record.task_id)
-        assert again.ending is None
+        assert again.ending is None and again.finishing is False
         kept = await tasks.keep_work_base(record.task_id, {"git": False})
         assert kept == {"git": False}
     finally:
@@ -1159,6 +1976,8 @@ def test_the_main_chat_reads_how_a_task_ended_in_plain_words() -> None:
     assert _row(record) == "t1 · Fix · needs you (Which port?) · P2"  # type: ignore[arg-type]
     record.ending = {"state": "ready", "reasons": [], "at": 5.0}
     assert _row(record) == "t1 · Fix · ready · P2"  # type: ignore[arg-type]
+    record.ending = {"state": "ready", "reasons": [], "notes": ["no_tests"], "at": 5.0}
+    assert _row(record) == "t1 · Fix · ready (No tests apply) · P2"  # type: ignore[arg-type]
     record.ending = {
         "state": "dropped",
         "proposed": "dropped",

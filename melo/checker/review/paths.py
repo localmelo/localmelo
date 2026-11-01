@@ -9,33 +9,29 @@ import ipaddress
 import os
 import re
 import socket
+import stat
 from dataclasses import dataclass, field, replace
 from urllib.parse import unquote, urlparse
 
 from localmelo.melo.contracts import own_gateway
+from localmelo.melo.contracts.folders import (
+    CREDENTIAL_PLACES,
+    MELO_DATA,
+    SYSTEM_PLACES,
+    canonical_path,
+    is_alias,
+    never_offered,
+)
 from localmelo.melo.contracts.review import TITLES, ActionReview
 
-# Under the home folder. Reads count too: passwords, keys and cookies. An
-# entry that starts with "**/" is a file name, anywhere (shell patterns, any
-# case), that a read through a helper may not name unasked (see secret_name).
+# Under the home folder. Reads count too: passwords, keys and cookies. The
+# places are the ones melo never opens outside the workspace (one list, in
+# melo.contracts.folders). An entry that starts with "**/" is a file name,
+# anywhere (shell patterns, any case), that a read through a helper may not
+# name unasked (see secret_name).
 _CREDENTIALS = [
-    ".ssh",
-    ".aws",
-    ".netrc",
-    ".config/gh",
-    ".docker/config.json",
-    ".gnupg",
-    ".kube",
-    ".pypirc",
-    ".npmrc",
-    ".git-credentials",
-    ".password-store",
-    "Library/Keychains",
-    "Library/Cookies",
-    "Library/Safari",
-    "Library/Application Support/Google/Chrome",
-    "Library/Application Support/Firefox",
-    ".cache/localmelo",
+    *CREDENTIAL_PLACES,
+    MELO_DATA,
     "**/.env*",
     "**/*.pem",
     "**/*.key",
@@ -71,7 +67,7 @@ _PERSISTENCE = [
     ".gitconfig",
     ".config/git",
 ]
-_SYSTEM = ["/etc", "/private/etc", "/System", "/Library", "/usr", "/bin", "/sbin"]
+_SYSTEM = list(SYSTEM_PLACES)
 # Writable without asking: temporary folders, a few devices, the tools' caches.
 _HARMLESS = [
     "/tmp",
@@ -222,14 +218,26 @@ def under(path: str, folder: str) -> bool:
     return path == folder or path.startswith(folder.rstrip("/") + "/")
 
 
+def under_any_case(path: str, folder: str) -> bool:
+    """:func:`under`, without case: a place that matters matches more, never less."""
+    return under(path.casefold(), folder.casefold())
+
+
 def resolve(ctx: Context, raw: str, cwd: str | None = None) -> str | None:
-    """*raw* as an absolute real path, or None when it holds a variable."""
+    """*raw* as an absolute canonical path, or None when it holds a variable.
+
+    The file system names it (see
+    :func:`~localmelo.melo.contracts.folders.canonical_path`: a lookup only,
+    nothing is read, and a FIFO or a device is never opened), so an alias
+    such as macOS ``/.vol`` or another letter case counts as the place it
+    names. One left under an alias is sensitive (see :func:`where`).
+    """
     text = raw.replace("${HOME}", ctx.home).replace("$HOME", ctx.home)
     if text == "~" or text.startswith("~/"):
         text = ctx.home + text[1:]
     if not text or text.startswith("~") or re.search(r"[$`]", text):
         return None
-    return os.path.realpath(os.path.join(cwd or ctx.root, text))
+    return canonical_path(os.path.join(cwd or ctx.root, text))
 
 
 def _running(source: str) -> str:
@@ -276,16 +284,32 @@ def secret_name(text: str) -> bool:
 
 
 def where(ctx: Context, path: str, *, write: bool) -> str:
-    """self, credentials, persistence, system, harmless, root, inside or outside."""
+    """self, credentials, persistence, system, harmless, root, inside or outside.
+
+    The places that matter (melo itself, what runs later, keys) match
+    without case, as a case-insensitive file system does. Outside the
+    workspace, a place a file tool never opens for keys or melo's own data
+    (see :func:`~localmelo.melo.contracts.folders.never_offered`) is
+    credentials too, whatever home the review was given. A path left under
+    a file-system alias, which melo could not name, is credentials.
+    """
     home, root = ctx.home.rstrip("/"), ctx.root
     places = _places(home, root, _SOURCE)
-    if write and any(under(path, p) for p in (ctx.prefix, *places["self"])):
+    if is_alias(path):
+        return "credentials"
+    if write and any(under_any_case(path, p) for p in (ctx.prefix, *places["self"])):
         return "self"
-    if write and any(under(path, p) for p in places["persistence"]):
+    if write and any(under_any_case(path, p) for p in places["persistence"]):
         return "persistence"
     inside = under(path, root)
-    secret = any(under(path, p) for p in places["credentials"])
-    if secret or (os.path.basename(path) == ".env" and not inside):
+    secret = any(under_any_case(path, p) for p in places["credentials"])
+    if not secret and not inside:
+        # The places melo never opens for a file tool, by their canonical
+        # path: key places anywhere, melo's own data folder in any home
+        # and the configured one.
+        reason = never_offered(path, home=home, canonical=True)
+        secret = reason in ("credentials", "melo")
+    if secret or (os.path.basename(path).casefold() == ".env" and not inside):
         return "credentials"
     if inside:
         return "root" if path in (root, f"{root}/.git") else "inside"
@@ -437,8 +461,38 @@ def shown(ctx: Context, path: str) -> str:
     return "~" + path[len(ctx.home.rstrip("/")) :] if under(path, ctx.home) else path
 
 
+# What a hard link to a place means: a write through the link changes it.
+_LINKED = {
+    "credentials": "Links to {}, which holds passwords or keys.",
+    "self": "Links to {}, part of localmelo itself; a write through the link changes it.",
+    "persistence": (
+        "Links to {}, which makes something run later; a write through the link "
+        "changes it."
+    ),
+    "system": "Links to {}, in a system folder; a write through the link changes it.",
+}
+
+
+def _other_name(path: str) -> bool:
+    """Whether *path* is a regular file with another name (a hard link)."""
+    try:
+        info = os.lstat(path)
+    except (OSError, ValueError):
+        return False
+    return stat.S_ISREG(info.st_mode) and info.st_nlink > 1
+
+
 def touch(ctx: Context, f: Findings, raw: str, op: str, cwd: str | None = None) -> None:
-    """Record what a ``read``, ``write`` or ``delete`` (*op*) of *raw* means."""
+    """Record what a ``read``, ``write``, ``delete`` or ``link`` (*op*) of *raw* means.
+
+    ``link`` is the file a hard link is made to: the new name and *raw* are
+    one file, so a later write through the new name (a routine write in the
+    workspace) changes *raw*, and a read through it reads *raw*. It counts
+    as read and written: keys when it holds them, and its own category as a
+    write (localmelo itself, what runs later, a system folder), else a write
+    outside the workspace. A hard link to a file in the workspace, a
+    temporary folder or a cache is routine.
+    """
     if (raw, op, cwd) in f.seen:
         return
     f.seen.add((raw, op, cwd))
@@ -448,6 +502,32 @@ def touch(ctx: Context, f: Findings, raw: str, op: str, cwd: str | None = None) 
             f.doubt(f"Changes a path melo cannot resolve: {raw}")
         return
     kind, name = where(ctx, path, write=op != "read"), shown(ctx, path)
+    if op == "link":
+        # Read through the new name, and written through it.
+        secret = where(ctx, path, write=False) == "credentials"
+        if secret:
+            f.add("credentials", _LINKED["credentials"].format(name))
+        if kind in _LINKED and not (secret and kind == "credentials"):
+            f.add(kind, _LINKED[kind].format(name))
+        elif kind == "outside":
+            f.add(
+                "outside_write",
+                f"Links to {name}, outside {ctx.folder}; a write through the link "
+                "changes it.",
+            )
+        elif not secret:
+            return
+        f.paths.append(path)
+        return
+    if op == "write" and _other_name(path):
+        # Written through one name, the file changes under its other one,
+        # which may be anywhere on the volume (file_write refuses it too).
+        f.add(
+            "outside_write",
+            f"Writes {name}, which has another name (a hard link); the write "
+            "changes the file there too.",
+        )
+        f.paths.append(path)
     if kind == "credentials":
         f.add("credentials", f"Uses {name}, which holds passwords or keys.")
     elif op == "read" or kind in ("harmless", "inside"):

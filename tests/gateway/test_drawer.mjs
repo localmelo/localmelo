@@ -261,3 +261,21 @@ test('the Tools tab lists the steps the person approved in this chat, and Revoke
   assert.deepEqual(h.calls.slice(1), [['/sessions/s%2F1/approvals/e1', 'DELETE'], ['/sessions/s%2F1/tools', 'GET']]);
   assert.doesNotMatch(h.text(), /Steps you approved here/);
 });
+
+test('the folders this chat may read are listed, and Revoke takes one back by its path', async () => {
+  let count = 0;
+  const withFolder = {...emptyTools, folders: [{path: '/Users/me/Documents/letters', label: '~/Documents/letters'}]};
+  const h = harness({
+    'GET /sessions/s%2F1/tools': () => ++count === 1 ? withFolder : emptyTools,
+    'DELETE /sessions/s%2F1/folders?path=%2FUsers%2Fme%2FDocuments%2Fletters': {},
+  });
+  await h.drawer.open();
+  assert.match(h.text(), /Folders this chat may read/);
+  assert.match(h.text(), /~\/Documents\/letters/);
+  assert.ok(h.find('Revoke all grants'), 'a folder is a grant the chat holds');
+  const revoke = h.find('Revoke');
+  assert.equal(revoke.attributes['aria-label'], 'Revoke ~/Documents/letters');
+  await revoke.click();
+  assert.deepEqual(h.calls.slice(1), [['/sessions/s%2F1/folders?path=%2FUsers%2Fme%2FDocuments%2Fletters', 'DELETE'], ['/sessions/s%2F1/tools', 'GET']]);
+  assert.doesNotMatch(h.text(), /Folders this chat may read/);
+});

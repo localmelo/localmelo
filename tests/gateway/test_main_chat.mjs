@@ -117,7 +117,7 @@ test('a done task card says how code found it ended: ready, not finished with Fi
   const base = {id: 5, at: NOON, state: 'done', sourceId: 't5', sourceKind: 'task', title: 'Fix CI', line: 'Fixed the check.'};
   const draft = {state: 'draft', reasons: ['tests_missing', 'commit_missing'], question: ''};
   const card = readCard({id: 5, source_id: 't5', source_kind: 'task', state: 'done', title: 'Fix CI', ending: draft});
-  assert.deepEqual(card.ending, {...draft, proposed: null, tests: []});
+  assert.deepEqual(card.ending, {...draft, proposed: null, notes: [], tests: []});
   assert.deepEqual(cardWords({...base, ending: {state: 'ready', reasons: [], question: '', tests: []}}),
     {mark: '✓', heading: 'Ready: Fix CI', action: 'Open task'});
   assert.deepEqual(cardWords(card), {mark: '◐', heading: 'Done, not finished: Fix CI', action: 'Open task', more: 'Finish it: run the tests and commit'});

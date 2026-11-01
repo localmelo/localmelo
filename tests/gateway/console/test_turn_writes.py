@@ -517,6 +517,7 @@ async def test_an_approval_answers_the_waiting_turn(tmp_path: Path) -> None:
             "request_id": pending["request_id"],
             "outcome": "denied",
             "remember": False,
+            "always": False,
         }
         turn = await _wait_turn(client, session_id)
         assert turn["status"] == "completed"
@@ -562,6 +563,7 @@ async def test_a_chat_wide_answer_to_a_high_impact_call_allows_only_that_call(
             "request_id": "req-high",
             "outcome": "allowed",
             "remember": remember,
+            "always": False,
         }
         assert await waiting == ApprovalDecision(True, remember=remember)
 
@@ -1216,6 +1218,7 @@ async def test_an_allow_once_lets_the_tool_run_and_asks_again(
             "request_id": pending["request_id"],
             "outcome": "allowed",
             "remember": False,
+            "always": False,
         }
         await _wait_turn(client, session_id)
         assert first.read_text() == "1"

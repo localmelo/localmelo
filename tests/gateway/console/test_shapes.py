@@ -113,7 +113,9 @@ def test_a_write_over_a_file_carries_what_it_replaces(tmp_path: Path) -> None:
         "workspace_label",
         "target",
         "review",
+        "outside",
     }
+    assert pending["outside"] is None
     assert pending["arguments"] == {"path": str(path), "content": "abd\n"}
 
 

@@ -13,6 +13,7 @@ from typing import Any
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.approvals import ApprovalRequest
 from localmelo.melo.contracts.events import json_safe_payload
+from localmelo.melo.contracts.folders import OutsideAccess
 from localmelo.melo.contracts.review import ActionReview, review_title
 from localmelo.melo.schema import Message, ToolInfo
 from localmelo.support.sessions import display
@@ -151,12 +152,29 @@ def _review_json(
     }
 
 
+def outside_json(outside: OutsideAccess | None) -> dict[str, Any] | None:
+    """A call's path outside the workspace, as the card reads it (#405), or ``None``.
+
+    The real path and folder, each also as a label (``~/`` for the home
+    folder), whether the call reads or writes, and whether "this chat" and
+    "always" may be offered.
+    """
+    if outside is None:
+        return None
+    return {
+        **outside.to_json(),
+        "path_label": display.home_label(outside.path),
+        "folder_label": display.home_label(outside.folder),
+    }
+
+
 def approval_json(request: ApprovalRequest) -> dict[str, Any]:
     """One pending approval, as the console's card reads it.
 
     ``target`` is the shared ``approval_target`` shape for a ``file_write``
     request, read per response, and ``None`` for every other tool.
     ``review`` is what the checker's rules found, or ``None`` (#279).
+    ``outside`` is set for a path outside the workspace (#405).
     """
     root = request.workspace_root
     arguments = dict(request.arguments)
@@ -178,6 +196,7 @@ def approval_json(request: ApprovalRequest) -> dict[str, Any]:
             }
         ),
         "review": _review_json(request.review, root),
+        "outside": outside_json(request.outside),
     }
 
 

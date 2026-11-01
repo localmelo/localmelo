@@ -86,10 +86,27 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
       }
       content.append(row);
     }
-    if (tools.some((tool) => tool.granted)) content.append(button(t('drawer.tools.revokeAll'), () => revokeGrants()));
+    const folders = Array.isArray(data.folders) ? data.folders : [];
+    if (tools.some((tool) => tool.granted) || folders.length) content.append(button(t('drawer.tools.revokeAll'), () => revokeGrants()));
+    foldersView(folders);
     approvalsView(data.approvals || []);
     if (data.mcp_config_label) content.append(node('p', data.mcp_config_label));
     if (data.mcp_error) content.append(node('p', data.mcp_error));
+  }
+  // The folders outside the workspace this chat may read until it ends (#405), each revocable.
+  function foldersView(folders) {
+    if (!folders.length) return;
+    content.append(node('h3', t('drawer.folders.title'), 'drawer-subhead'), node('p', t('drawer.folders.note')));
+    for (const folder of folders) {
+      const label = String(folder.label || folder.path || '');
+      const row = node('div', undefined, 'drawer-tool drawer-approval');
+      const where = node('code', label, 'drawer-approval-step');
+      where.title = String(folder.path ?? '');
+      const revoke = button(t('drawer.tools.revoke'), () => revokeAt(`folders?path=${encodeURIComponent(String(folder.path ?? ''))}`));
+      revoke.setAttribute('aria-label', t('drawer.folders.revokeOne', {folder: label}));
+      row.append(where, revoke);
+      content.append(row);
+    }
   }
   // The steps the person allowed in this chat, which its tasks run again without asking (#369).
   function approvalsView(approvals) {
