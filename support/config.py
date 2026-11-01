@@ -83,6 +83,11 @@ MEMORY_RECALL_CHARS = (200, 8000)
 # list, and which part of a turn is shown: see MemoryConfig.recall_item_chars.
 MEMORY_RECALL_ITEM_CHARS = (120, 2000)
 MEMORY_RECALL_EXCERPT = ("head", "match")
+# How recall shows earlier chat turns: as excerpts, or as a list of titles the model
+# opens, and the list form's two sizes: see MemoryConfig.recall_form.
+MEMORY_RECALL_FORM = ("excerpt", "list")
+MEMORY_RECALL_LIST_MAX = (1, 50)
+MEMORY_RECALL_OPEN_CHARS = (500, 16000)
 # The bars an item must pass to be recalled, and their bounds (inclusive): see
 # MemoryConfig.recall_min_cosine and recall_min_coverage.
 MEMORY_RECALL_MIN_COSINE = (0.20, 0.95)
@@ -102,6 +107,9 @@ RECALL_KEYS = (
     "recall_min_coverage",
     "recall_item_chars",
     "recall_excerpt",
+    "recall_form",
+    "recall_list_max",
+    "recall_open_chars",
 )
 RECALL_TRIGGERS = ("start", "attempt", "step", "tool")
 RECALL_KINDS = ("note", "draft", "thought", "digest", "reflection", "long")
@@ -365,7 +373,16 @@ class MemoryConfig:
     ``recall_item_chars`` (120-2000), the room one turn takes, and
     ``recall_excerpt``, ``head`` (the start of each part, the default) or
     ``match`` (the sentences of each part that hold most of the question's
-    content words). ``project_instructions = "off"`` stops a task that
+    content words). Three more set how recalled chat turns are shown at all:
+    ``recall_form``, ``excerpt`` (an excerpt of each turn, the default) or
+    ``list`` (one line per turn, with its id, date, chat, a title and its
+    similarity, and a tool, ``open_memory``, with which the model opens the turns
+    it needs in full). Notes are shown as before in both forms. The list form
+    lists every turn that passes the bars, ``recall_list_max`` (1-50) at most, in
+    the block and in the search tool alike, and ``recall_open_chars`` (500-16000)
+    is the room one opened turn takes; ``recall_docs`` and ``recall_chars`` do not
+    bound the list, and ``recall_item_chars`` and ``recall_excerpt`` apply to the
+    excerpt form only. ``project_instructions = "off"`` stops a task that
     the person made from reading the instruction file of its folder (``AGENTS.md``,
     ``CLAUDE.md`` or ``GEMINI.md``, the nearest first) when it starts.
     """
@@ -385,6 +402,9 @@ class MemoryConfig:
     recall_min_coverage: float = 0.6  # Least share of the question's words held.
     recall_item_chars: int = 200  # The room one recalled chat turn takes.
     recall_excerpt: str = "head"  # head | match: which part of a turn is shown.
+    recall_form: str = "excerpt"  # excerpt | list: turns as excerpts, or as a list.
+    recall_list_max: int = 20  # The most turns the list form lists.
+    recall_open_chars: int = 4000  # The room one turn the model opens takes.
     project_instructions: str = "on"  # on | off: a task reads its folder's AGENTS.md.
 
 
@@ -653,6 +673,8 @@ class Config:
             ("recall_docs", MEMORY_RECALL_DOCS),
             ("recall_chars", MEMORY_RECALL_CHARS),
             ("recall_item_chars", MEMORY_RECALL_ITEM_CHARS),
+            ("recall_list_max", MEMORY_RECALL_LIST_MAX),
+            ("recall_open_chars", MEMORY_RECALL_OPEN_CHARS),
         ):
             value = getattr(self.memory, name)
             if not isinstance(value, int) or isinstance(value, bool):
@@ -676,6 +698,7 @@ class Config:
             ("recall_notes", MEMORY_RECALL_NOTES),
             ("search_when_empty", MEMORY_SEARCH_WHEN_EMPTY),
             ("recall_excerpt", MEMORY_RECALL_EXCERPT),
+            ("recall_form", MEMORY_RECALL_FORM),
             ("project_instructions", MEMORY_PROJECT_INSTRUCTIONS),
         ):
             value = getattr(self.memory, name)

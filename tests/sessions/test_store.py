@@ -796,6 +796,7 @@ def test_the_session_event_keys_are_pinned() -> None:
             "recall",
             "unsaved_claim",
             "searched",
+            "opened",
             "search_hint",
         },
         "session.title": {"title"},
@@ -820,7 +821,7 @@ def test_the_session_event_keys_are_pinned() -> None:
     }
     assert dict(OPTIONAL_SESSION_EVENT_FIELDS) == {
         "turn.started": {"origin"},
-        "turn.memory": {"searched", "search_hint"},
+        "turn.memory": {"searched", "opened", "search_hint"},
     }
     assert RESERVED_EVENT_PREFIXES == ("task.", "sched.", "attention.")
 

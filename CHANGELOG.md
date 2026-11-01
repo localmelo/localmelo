@@ -131,6 +131,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   user's words and melo's reply each, the sentences that hold most of the message's words
   instead of the start, with `…` where text is left out. The block still keeps to its size
   bound, and the page is unchanged. Part of #349.
+- Developer only, not visible by default: three `[memory]` settings that let recall show earlier
+  chat turns as a list the model opens instead of as excerpts, set for one run with
+  `-X memory.KEY=VALUE` and defaulting to today's recall. `recall_form = "list"` shows each turn
+  as one line, `[t12] Oct 30 · Main chat · “title” · 0.71` (its id, date, chat, a title of at most
+  80 characters and the similarity to the message, or `words`), under one line that tells the
+  model to open the turns it needs, in the recall block and in the memory search tool alike; notes
+  read as before. Every turn that passes the recall bars is listed, best first, `recall_list_max`
+  (20, 1 to 50) at most, with no limit on turns per chat; `recall_docs`, `recall_chars` and the
+  two excerpt settings do not apply to the list. The model also gets an `open_memory` tool that
+  takes one to five of those ids and returns each whole turn, up to `recall_open_chars` (4000,
+  500 to 16000) characters and cut at a sentence end, and the `turn.memory` event lists what was
+  opened as an optional `opened` list. Out-of-range values are config errors. Part of #428.
 - Developer only: `melo memory ingest FILE` loads past chats from a JSON file as if they
   had happened on their dates (no model call), and `LOCALMELO_NOW` pins the date
   the model and memory recall read, for memory tests.
