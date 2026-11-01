@@ -201,7 +201,9 @@ async def test_without_notes_the_block_holds_turns_and_nothing_is_pinned(
         cfg.memory.recall_notes = "off"
         found = await recall(memory, store)
         assert kinds(found.used) == (0, 8)
-        assert "the user said" not in found.block and BLOCK_HEADER in found.block
+        items = [line for line in found.block.split("\n") if line.startswith("- ")]
+        assert BLOCK_HEADER in found.block and items
+        assert all("; melo replied" in line for line in items)  # chat turns only
         assert found.block.count("\n- ") == 8
         assert await memory.pinned_quotes() == ""
 

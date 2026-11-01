@@ -290,7 +290,7 @@ async def test_search_memory_finds_this_chats_evicted_turns_but_not_the_shown_on
 
 
 def _prompt(typed: str) -> str:
-    return f"User: {typed} melo: Okay."
+    return f"the user said “{typed}”; melo replied “Okay.”"
 
 
 def test_in_view_and_this_chat() -> None:

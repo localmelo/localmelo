@@ -359,7 +359,10 @@ async def test_search_memory_answers_with_sources_and_scopes(
         chats = str(
             await tool.function(query="fix the failing CI test", scope="chats", k=20)
         )
-        assert chats.startswith("1. User: How do I fix the failing CI test")
+        assert chats.startswith(
+            "1. the user said “How do I fix the failing CI test in localmelo?”; "
+            "melo replied “The CI test failed because"
+        )
     finally:
         await memory.aclose()
 
