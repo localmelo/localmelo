@@ -161,10 +161,17 @@ async def test_the_report_names_windows_gate_items_and_routes_by_file_id(
         # Indexes are the exchange's place in the chat as the file gives it, from 0,
         # not the store's turn number.
         assert may["items"] == [
-            {"id": 1, "title": "Home city", "kind": "profile", "sources": [["may", 0]]},
+            {
+                "id": 1,
+                "title": "Home city",
+                "text": PITTSBURGH,
+                "kind": "profile",
+                "sources": [["may", 0]],
+            },
             {
                 "id": 2,
                 "title": "Train book",
+                "text": BOOK,
                 "kind": "episodic",
                 "sources": [["may", 1]],
             },

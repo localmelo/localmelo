@@ -305,8 +305,8 @@ def _chat_report(label: str, encoded: Compressed) -> dict[str, Any]:
 
     ``windows`` (``exchanges``, ``chars``, ``cached``, ``failed``, ``cut``,
     ``dropped``), ``gate`` (``kept``, ``ignored``, ``unmentioned``, ``forced``:
-    exchange indexes), ``items`` (each stored: ``id``, ``title``, ``kind``,
-    ``sources`` as ``[file id, exchange index]``) and ``routes`` (each routed item:
+    exchange indexes), ``items`` (each stored: ``id``, ``title``, ``text``,
+    ``kind``, ``sources`` as ``[file id, exchange index]``) and ``routes`` (each routed item:
     ``item`` (its id, ``null`` when ignored), ``action``, ``target``, ``reason``,
     ``title``).
     """
@@ -323,6 +323,7 @@ def _chat_report(label: str, encoded: Compressed) -> dict[str, Any]:
             {
                 "id": route.item,
                 "title": piece.title,
+                "text": piece.text,
                 "kind": piece.kind,
                 "sources": [[label, n] for n in piece.sources],
             }
