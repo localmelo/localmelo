@@ -405,8 +405,8 @@ still, and all of them come from the same moves. Under
   keeps the calm face, and so does every older reply.
 - **Approval bar.** The bar that reads "melo is waiting for your answer" shows the
   face with the raised paw.
-- **Brand and tab.** The sidebar, the Main chat and the sign-in screen show the calm face, and
-  the browser tab uses it, cut closer, at 16, 32 and 64 px.
+- **Brand and tab.** The sidebar and the sign-in screen show Melo's calm face, and the browser tab uses it, cut
+  closer, at 16, 32 and 64 px. The Main chat shows the smiling face, as the replies do.
 
 The faces are decoration where words already say the state (the live row, the
 work box, the failure card, the approval bar), so they have empty alt text. A
@@ -417,7 +417,7 @@ words.
 
 The moves are served from `/assets/moves/`: one picture per state holding its frames, a still of each state
 (`poster-<state>.webp`), the done, error and offline stills (`poster-done.webp`, `poster-error.webp`,
-`poster-offline.webp`), Melo's head cut from the stills (`face-idle.png`, `face-working.png`, `face-waiting.png`,
+`poster-offline.webp`), Melo's head (`face-idle.png`, `face-brand.png`, `face-working.png`, `face-waiting.png`,
 `face-done.png`, `face-error.png`) and the tab icons (`favicon-16.png`, `-32` and `-64`), and `manifest.json` with
 each frame's duration: 1.6 MB in all, and the app shows the same files. The page loads the moves once, when it opens.
 

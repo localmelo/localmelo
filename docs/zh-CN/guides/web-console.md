@@ -224,11 +224,11 @@
 - **面板。** Melo 的画像在[面板](#the-panel-beside-a-chat)顶部，随它在做的事而动：醒来、工作、思考、有事等你时举起爪子、休息，偶尔玩一会儿。一次运行顺利结束后开心地闭着眼睛几秒，模型服务器无法连接或刚有运行失败时耳朵向后、低着头；这两种是静态图片。页面连不上 localmelo 时，Melo 蜷成一团，颜色变淡。
 - **回答。** 每条回答的 `localmelo` 旁是 Melo 的脸。最新一条回答上，它显示该轮的状态：运行时在笔记本电脑前，等待批准时举起爪子，完成时开心地闭着眼睛，以带警告或错误结束时耳朵向后。你自己停止的一轮不算失败，保持平静的脸；更早的回答也都是平静的脸。
 - **批准栏。** 写着 “melo is waiting for your answer” 的栏显示举起爪子的脸。
-- **品牌和标签页。** 侧边栏、主对话和登录页显示平静的脸，浏览器标签页以 16、32 和 64 px 使用它（裁得更近）。
+- **品牌和标签页。** 侧边栏和登录页显示 Melo 平静的脸，浏览器标签页以 16、32 和 64 px 使用它（裁得更近）。主对话和回答一样显示微笑的脸。
 
 在文字已经说明状态的地方（实时行、工作组、失败卡片、批准栏），这些脸只是装饰，替代文字为空。上方没有工作组的已完成回答，没有别的东西说明它完成了，所以它的脸对屏幕阅读器读作 `Done`。空对话里的 Melo 保留替代文字 `Melo, the localmelo Akita mascot`；面板里会动的画像只是装饰，因为状态行用文字说了同样的内容。
 
-动作由 `/assets/moves/` 提供：每个状态一张包含其所有帧的图片、每个状态的一张静态图（`poster-<state>.webp`）、完成、错误和离线三张静态图（`poster-done.webp`、`poster-error.webp`、`poster-offline.webp`）、从静态图上裁下的 Melo 头像（`face-idle.png`、`face-working.png`、`face-waiting.png`、`face-done.png`、`face-error.png`）、标签页图标（`favicon-16.png`、`-32`、`-64`），以及记录每帧时长的 `manifest.json`：共 1.6 MB，应用显示同样的文件。页面在打开时加载一次动作。
+动作由 `/assets/moves/` 提供：每个状态一张包含其所有帧的图片、每个状态的一张静态图（`poster-<state>.webp`）、完成、错误和离线三张静态图（`poster-done.webp`、`poster-error.webp`、`poster-offline.webp`）、Melo 的头像（`face-idle.png`、`face-brand.png`、`face-working.png`、`face-waiting.png`、`face-done.png`、`face-error.png`）、标签页图标（`favicon-16.png`、`-32`、`-64`），以及记录每帧时长的 `manifest.json`：共 1.6 MB，应用显示同样的文件。页面在打开时加载一次动作。
 
 图片是透明的。在浅色画布上，Melo 身上的深棕色线条让它显现出来（对控制台的浅色表面约 15:1）；在深色画布上靠的是它橙色的毛（对深色表面约 7.5:1，图片的要求是 3:1）。
 
