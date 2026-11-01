@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Make Melo's moves (the animated states of the desktop pet and the console's portrait) from an art pack.
+"""Make Melo's pictures (the moves of the desktop pet and the console's portrait, their stills and Melo's face)
+from an art pack.
 
     uv run --with pillow python scripts/build_moves.py --source <pack folder>
 
@@ -16,7 +17,13 @@ scripts/build_macos_app.py:
 - <state>.webp: the state's frames scaled to CELL pixels (the whole canvas is scaled, never one frame cut on its
   own, so the paws stay on the anchor), in a COLUMNS x ROWS sheet, left to right and top to bottom. Lossy WebP with
   a lossless alpha: macOS 11 and every current browser read it.
-- startup-poster.webp: the startup state's poster frame alone (the sitting dog), for the console's empty chat.
+- poster-<state>.webp: each state's poster frame alone, CELL pixels: the console's still pictures (the empty chat,
+  and the panel's done, error and offline pictures) and the app's start window.
+- face-<name>.png: Melo's head, cut from a state's poster frame by that name's box in FACES (pixels of a 512 px
+  canvas; the box scales with the pack's canvas), FACE_PIXELS square: the reply icons, the approval bar, the
+  brand, the phone's panel chip and the app's activity pill. idle and done are the sitting dog the wake-up ends on,
+  working the dog at its laptop, waiting the raised paw, error the tilted head.
+- favicon-16.png, favicon-32.png, favicon-64.png: the idle head cut closer (FAVICON_BOX), for the browser tab.
 - manifest.json: the canvas, the anchor and the sheet's grid, and per state its file, its pose, once or loop, the
   poster frame and the frame durations; and the cross-fade times between states.
 
@@ -53,6 +60,19 @@ QUALITY = 85
 # Milliseconds of the cross-fade: between two states of one pose, between two poses, into "attention" (it
 # interrupts), and any change while nothing may move.
 FADE_MS = {"same_pose": 160, "pose_change": 220, "attention": 120, "reduced_motion": 80}
+# Melo's head, by name: the state whose poster frame it is cut from and the box (x0, y0, x1, y1) in pixels of a
+# 512 px canvas, square, the head centred with a margin round the ears and cheeks.
+FACES = {
+    "idle": ("startup", (146, 64, 354, 272)),
+    "working": ("working", (148, 0, 388, 240)),
+    "waiting": ("attention", (180, 0, 396, 216)),  # above the raised paw
+    "done": ("startup", (146, 64, 354, 272)),
+    "error": ("thinking", (180, 0, 400, 220)),
+}
+FACE_PIXELS = 96  # twice the largest size a face is shown at (48 pt)
+# The browser tab's icon: the idle head, closer, so it still reads at 16 px.
+FAVICON_BOX = (158, 74, 342, 258)
+FAVICONS = (16, 32, 64)
 MAX_BYTES = 2_000_000
 
 
@@ -117,6 +137,29 @@ def scaled(path: Path, canvas: int, side: int) -> Image.Image:
     )
 
 
+def cut(frame: Image.Image, box: tuple[int, int, int, int], pixels: int) -> Image.Image:
+    """`box` (pixels of a 512 px canvas) cut from a full-size frame and scaled to `pixels`, on premultiplied
+    colour."""
+    unit = frame.width / 512
+    piece = frame.crop(tuple(round(edge * unit) for edge in box))
+    return (
+        piece.convert("RGBa")
+        .resize((pixels, pixels), Image.Resampling.LANCZOS)
+        .convert("RGBA")
+    )
+
+
+def save_png(path: Path, image: Image.Image) -> None:
+    """An RGBA PNG; the colour of a clear pixel is zero, so the bytes do not drift."""
+    pixels = image.load()
+    for y in range(image.height):
+        for x in range(image.width):
+            if pixels[x, y][3] == 0:
+                pixels[x, y] = (0, 0, 0, 0)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(path, "PNG", optimize=True)
+
+
 def save(path: Path, image: Image.Image) -> None:
     """Lossy colour with a lossless alpha; the colour under a clear pixel is the encoder's to choose."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -124,11 +167,12 @@ def save(path: Path, image: Image.Image) -> None:
 
 
 def build(source: Path, out: Path) -> int:
-    """Write the sheets, the poster and the manifest under `out`; the number of bytes written."""
+    """Write the sheets, the posters, the faces, the favicons and the manifest under `out`; the bytes written."""
     pack = read_pack(source)
     side = pack["canvas"]["width"]
     scale = CELL / side
     states: dict[str, dict[str, Any]] = {}
+    posters: dict[str, Image.Image] = {}
     for state, pose in POSES.items():
         entry = pack["states"][state]
         sheet = Image.new("RGBA", (COLUMNS * CELL, ROWS * CELL))
@@ -139,8 +183,9 @@ def build(source: Path, out: Path) -> int:
             )
         save(out / f"{state}.webp", sheet)
         poster = entry.get("poster_frame_index", 0)
-        if state == "startup":
-            save(out / "startup-poster.webp", frames[poster])
+        save(out / f"poster-{state}.webp", frames[poster])
+        with Image.open(source / entry["frames"][poster]) as full:
+            posters[state] = full.convert("RGBA")
         states[state] = {
             "file": f"{state}.webp",
             "pose": pose,
@@ -148,6 +193,12 @@ def build(source: Path, out: Path) -> int:
             "poster": poster,
             "durations_ms": list(entry["frame_durations_ms"]),
         }
+    for name, (state, box) in FACES.items():
+        save_png(out / f"face-{name}.png", cut(posters[state], box, FACE_PIXELS))
+    for pixels in FAVICONS:
+        save_png(
+            out / f"favicon-{pixels}.png", cut(posters["startup"], FAVICON_BOX, pixels)
+        )
     anchor = pack["canvas"]["anchor"]
     document = {
         "version": 1,

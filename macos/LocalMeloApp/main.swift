@@ -87,7 +87,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         // The status view covers the window until the console has loaded, and comes back
         // when it cannot: the window never shows an empty web view.
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 1280, height: 800))
-        statusView = StatusView(pictures: Bundle.main.resourceURL?.appendingPathComponent("akita"))
+        statusView = StatusView(pictures: Bundle.main.resourceURL?.appendingPathComponent("moves"))
         statusView.frame = content.bounds
         statusView.autoresizingMask = [.width, .height]
         statusView.onAction = { [weak self] action in self?.handle(action) }
@@ -131,22 +131,22 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
 
     private func createPet() {
         let home = URL(fileURLWithPath: ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory(), isDirectory: true)
+        let moves = Bundle.main.resourceURL?.appendingPathComponent("moves")
         pet = PetController(settingsURL: home.appendingPathComponent("Library/Application Support/LocalMelo/pet.json"),
-                            pictures: Bundle.main.resourceURL?.appendingPathComponent("akita"),
-                            movesFolder: Bundle.main.resourceURL?.appendingPathComponent("moves"))
+                            movesFolder: moves)
         pet.openWindow = { [weak self] in self?.openWindow() }
         pet.openWaiting = { [weak self] in self?.openWaiting() }
         pet.hiddenChanged = { [weak self] hidden in self?.menuBar.showPetLine.isHidden = !hidden }
         menuBar.showPetLine.isHidden = !pet.hiddenByPerson
         menuBar.offerDesktop(pet.desktop.makeItem())
-        pill = PillController(pictures: Bundle.main.resourceURL?.appendingPathComponent("akita"),
+        pill = PillController(pictures: moves,
                               settings: { [weak self] in self?.pet.settings ?? PetSettings() },
                               remember: { [weak self] key, spot in self?.pet.rememberSpot(screen: key, spot: spot) })
         pill.openWindow = { [weak self] in self?.openWindow() }
         pill.openWaiting = { [weak self] in self?.openWaiting() }
         pill.openRoute = { [weak self] route in self?.open(route: route) }
         pill.view.menu = pet.view.menu
-        pill.showingChanged = { [weak self] showing, wags in self?.pet.pillShowing(showing, wags: wags) }
+        pill.showingChanged = { [weak self] showing, done in self?.pet.pillShowing(showing, showsDone: done) }
         pet.desktopChanged = { [weak self] mode in self?.pill.desktop(mode) }
         pill.desktop(pet.settings.mode)
         updatePet()

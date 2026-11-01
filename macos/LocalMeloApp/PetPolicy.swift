@@ -1,78 +1,13 @@
 import CoreGraphics
 import Foundation
 
-/// Melo the Akita puppy's 14 pictures, named as their files under `Resources/akita` (`scripts/build_pet_assets.py`).
-/// The five sitting ones are the portrait of the starting view and the empty chat; the lying and sleeping nine are
-/// the desktop pet's.
-enum PetState: String, CaseIterable {
-    case sitIdle = "sit-idle", sitWorking = "sit-working", sitWaiting = "sit-waiting"
-    case sitDone = "sit-done", sitError = "sit-error"
-    case lieIdle = "lie-idle", lieWorking = "lie-working", lieWaiting = "lie-waiting"
-    case lieDone = "lie-done", lieError = "lie-error"
-    case restLazy = "rest-lazy", sleepFront = "sleep-front", sleepSide = "sleep-side", sleepBack = "sleep-back"
+/// The still of the app's first window: the end of the wake-up (Melo sitting up, smiling) while the server starts and
+/// once it is ready; the thinking pose when it cannot go on, so a failure never reads as a healthy start. Each is a
+/// state's poster (`poster-<state>.webp` of the moves; the wake-up's poster is its last frame).
+func startPortrait(failed: Bool) -> PetMove { failed ? .thinking : .startup }
 
-    /// The three sleeping poses, in the order the pet turns through them.
-    static let sleepPoses: [PetState] = [.sleepFront, .sleepSide, .sleepBack]
-
-    var isAsleep: Bool { Self.sleepPoses.contains(self) }
-
-    /// The folder of the picture under `Resources/akita`.
-    var folder: String { rawValue.hasPrefix("sit-") ? "portrait" : "pet" }
-
-    /// The file for a screen scale: `lie-idle.png`, and `lie-idle@2x.png` from 2.
-    func fileName(scale: Int) -> String { pieceFile(rawValue, scale: scale) }
-
-    /// A file of the picture's family (`lie-idle-blink`) for a screen scale.
-    func pieceFile(_ name: String, scale: Int) -> String { scale >= 2 ? "\(name)@2x.png" : "\(name).png" }
-
-    /// The eyes-closed patch laid over the picture for a blink, nil where the picture has none. A patch fits only the
-    /// picture it was cut from: the sleeping dogs have their eyes shut already, and the working, waiting, done and
-    /// error faces have no patch.
-    var blinkPatch: String? {
-        switch self {
-        case .sitIdle: return "sit-idle-blink"
-        case .lieIdle: return "lie-idle-blink"
-        case .restLazy: return "rest-lazy-blink"
-        default: return nil
-        }
-    }
-
-    /// The picture without its tail, and the tail alone, for the wag; nil where the picture has no tail to wag.
-    var tailPieces: (body: String, tail: String)? { self == .lieDone ? ("lie-done-body", "lie-done-tail") : nil }
-
-    /// The picture without its right ear, and the ear alone, for the twitch; nil where the picture has no ear piece. Only
-    /// the idle dog has them: the other lying pictures' heads do not lie on its no-ear head (the alignment check of
-    /// `scripts/build_pet_assets.py` fails for them), and the lazy dog's head is another drawing.
-    var earPieces: (body: String, ear: String)? { self == .lieIdle ? ("lie-idle-body", "lie-idle-ear") : nil }
-
-    /// Where a sleeping dog's "z" starts, in points from the top left of the pet's canvas (`z` in anchors.json).
-    var sleepZ: CGPoint? {
-        switch self {
-        case .sleepFront: return CGPoint(x: 86, y: 24)
-        case .sleepSide: return CGPoint(x: 62, y: 22)
-        case .sleepBack: return CGPoint(x: 30, y: 40)
-        default: return nil
-        }
-    }
-}
-
-/// Where the lying dog's tail joins its back, in points from the top left of the pet's canvas: the tail wags about it
-/// (`tail.pivot` of `lie-done` in anchors.json).
-let petTailPivot = CGPoint(x: 101.8, y: 53)
-
-/// Where the idle dog's right ear joins its head, in the same points: the ear twitches about it (`ear.pivot` of
-/// `lie-idle` in anchors.json).
-let petEarPivot = CGPoint(x: 64.98, y: 19.82)
-
-/// The sitting picture of the app's first window: the working puppy while the server starts and signs in, the calm
-/// one once the gateway is ready and the console is on its way, the one with the drooping ear when it cannot go on.
-func startPortrait(failed: Bool, ready: Bool) -> PetState {
-    failed ? .sitError : ready ? .sitIdle : .sitWorking
-}
-
-/// The points the portrait is shown at: the canvas of the sitting pictures (`anchors.json`), so a 2x file is
-/// sharp on a Retina screen and shown whole on any other.
-let portraitSize = CGSize(width: 108, height: 140)
+/// The points the portrait is shown at: the moves' square canvas, so the 256 px poster is sharp on a Retina screen.
+let portraitSize = CGSize(width: 128, height: 128)
 
 /// How the newest finished run or chat turn ended: `done`, `failed` (anything the console words as a warning or an
 /// error) or `stopped` (the person stopped it).
@@ -106,25 +41,13 @@ func recentOutcome(_ data: Data) -> RecentOutcome? {
 /// Seconds a finished run shows as done, and a failed one as an error, before the pet goes back to rest.
 let petDoneFor: TimeInterval = 6
 let petFailedFor: TimeInterval = 10
-/// Seconds of quiet before the pet falls asleep, and between one sleeping pose and the next.
+/// Seconds of quiet before the pet falls asleep.
 let petSleepAfter: TimeInterval = 60
-let petRotateEvery: TimeInterval = 180
 
-/// What the pet is doing. `picture` is what it looks like; the words differ where two moods share a picture.
+/// What the pet is doing. What it looks like is `petMove` (a move) or `petStill` (a still); the words differ where two
+/// moods look the same.
 enum PetMood: Equatable {
-    case unknown, resting, sleeping(PetState), working(Int), waiting, done, failed, stopped
-
-    var picture: PetState {
-        switch self {
-        case .unknown: return .lieIdle
-        case .resting: return .restLazy
-        case .sleeping(let pose): return pose
-        case .working: return .lieWorking
-        case .waiting: return .lieWaiting
-        case .done: return .lieDone
-        case .failed, .stopped: return .lieError
-        }
-    }
+    case unknown, resting, sleeping, working(Int), waiting, done, failed, stopped
 
     /// What VoiceOver reads, and what hovering shows.
     var label: String {
@@ -150,9 +73,8 @@ enum PetMood: Equatable {
 /// The pet's mood from the last health reply (nil: none yet, or the gateway did not answer). First match wins:
 /// the app's own failure, then a wait, then work, then a run that just finished, then rest. `sinceTouch` is the
 /// seconds since the person last touched the pet (hover, click, drag) or since it appeared; the quiet that puts
-/// it to sleep is the shorter of that and the age of the newest finished run, so a touch wakes it into rest and
-/// nothing changes its pose while it is touched. `poseSeed` picks the first sleeping pose of a quiet spell.
-func petMood(health: Data?, stopped: Bool, sinceTouch: TimeInterval, poseSeed: Int) -> PetMood {
+/// it to sleep is the shorter of that and the age of the newest finished run, so a touch wakes it into rest.
+func petMood(health: Data?, stopped: Bool, sinceTouch: TimeInterval) -> PetMood {
     if stopped { return .stopped }
     guard let data = health, let counts = runningCounts(data) else { return .unknown }
     if !waitingItems(data).isEmpty { return .waiting }
@@ -164,9 +86,7 @@ func petMood(health: Data?, stopped: Bool, sinceTouch: TimeInterval, poseSeed: I
     }
     let quiet = min(sinceTouch, recent?.endedAgo ?? .infinity)
     guard !quiet.isNaN, quiet >= petSleepAfter else { return .resting }
-    let turns = Int(min((quiet - petSleepAfter) / petRotateEvery, 1_000_000))
-    let poses = PetState.sleepPoses
-    return .sleeping(poses[((poseSeed % poses.count + turns) % poses.count + poses.count) % poses.count])
+    return .sleeping
 }
 
 /// Melo's moves: the animated states the desktop pet plays (`PetMoves.swift`), the files and the rules the console's
@@ -176,16 +96,27 @@ enum PetMove: String, CaseIterable {
     case idleRest = "idle_rest", idlePlay = "idle_play"
 }
 
-/// The move a mood shows; nil where the pet keeps its still picture and words. A wait raises a paw, work types at
-/// the laptop (the model alone answering, with no tool, approval or hold open: `thinking`), rest and sleep lie
-/// down. Nothing known yet, a run that just ended, a failure and a stopped app have no moves: they keep the
-/// pictures they had, and never look like a healthy rest.
+/// The move a mood shows; nil where the pet shows a still (`petStill`) with its words. A wait raises a paw, work types
+/// at the laptop (the model alone answering, with no tool, approval or hold open: `thinking`), rest and sleep lie
+/// down.
 func petMove(_ mood: PetMood, thinking: Bool) -> PetMove? {
     switch mood {
     case .waiting: return .attention
     case .working: return thinking ? .thinking : .working
     case .resting, .sleeping: return .idleRest
     case .unknown, .done, .failed, .stopped: return nil
+    }
+}
+
+/// The still a mood shows, as the state whose poster it is; nil where the mood has moves. Nothing known yet lies at
+/// rest; a run that just finished is the end of the wake-up (sitting up, smiling); a failure and a stopped app are the
+/// thinking pose, so they never look like a healthy rest. The words and the activity pill's mark say which it is.
+func petStill(_ mood: PetMood) -> PetMove? {
+    switch mood {
+    case .unknown: return .idleRest
+    case .done: return .startup
+    case .failed, .stopped: return .thinking
+    case .resting, .sleeping, .working, .waiting: return nil
     }
 }
 
@@ -240,8 +171,8 @@ struct PetMovePicker: Equatable {
     }
 }
 
-/// Points of the side of the moves' square canvas on the pet's panel: the sitting dog stands about as tall as the
-/// lying pictures, and nothing drawn is cut by the panel (the art keeps a clear margin round the dog).
+/// Points of the side of the moves' square canvas on the pet's panel; nothing drawn is cut by the panel (the art
+/// keeps a clear margin round the dog).
 let petMoveSide: CGFloat = 100
 
 /// The frame of the moves' canvas on a panel of `size` (points, y up): its anchor (`anchor`, in pixels of a canvas
@@ -263,42 +194,22 @@ struct PetEnvironment: Equatable {
     var screenAwake = true
 }
 
-/// Whether the pet's loops (breathing, the sleeping drift) may run. Each stop leaves the state's still picture.
+/// Whether the activity pill's loops (the portrait's breath and the ring's pulse) may run. Each stop leaves the pill
+/// still.
 func shouldAnimate(_ environment: PetEnvironment) -> Bool {
     let hot = environment.thermal == .serious || environment.thermal == .critical
     return !environment.reduceMotion && !environment.lowPower && !hot
         && environment.visible && environment.screenAwake
 }
 
-/// Whether the moves play (else each shows its poster): not under Reduce Motion, Low Power Mode or heat. A pet that
-/// cannot be seen (`petMovesRun`) stops instead, where it is, and goes on from there.
-func petMovesMayMove(_ environment: PetEnvironment) -> Bool {
-    let hot = environment.thermal == .serious || environment.thermal == .critical
-    return !environment.reduceMotion && !environment.lowPower && !hot
-}
+/// Whether the moves play (else each shows its poster): only Reduce Motion stills them. Low Power Mode and heat leave
+/// them playing: a frame is a swap of the part of a decoded sheet that shows, done by Core Animation, so the pet stays
+/// alive in every state that has moves. A pet that cannot be seen (`petMovesRun`) stops instead, where it is, and
+/// goes on from there.
+func petMovesMayMove(_ environment: PetEnvironment) -> Bool { !environment.reduceMotion }
 
 /// Whether the moves' clock runs: the panel can be seen and the screen is on.
 func petMovesRun(_ environment: PetEnvironment) -> Bool { environment.visible && environment.screenAwake }
-
-/// Seconds of the plain cross-fade between two pictures when the pet may not move (Reduce Motion, Low Power Mode, heat):
-/// a change is a dissolve, never a motion.
-let petCrossfade: TimeInterval = 0.2
-
-/// Seconds the change from one picture to the next takes: none for the first picture; a slow 0.9 s between two
-/// sleeping poses while the pet may move, so the turn reads as rolling over; 0.25 s from one pose to another while it
-/// may move (the squash of `petDips` covers it); else the plain cross-fade.
-func petFade(from old: PetState?, to new: PetState, environment: PetEnvironment) -> TimeInterval {
-    guard let old = old, old != new else { return 0 }
-    guard shouldAnimate(environment) else { return petCrossfade }
-    return old.isAsleep && new.isAsleep ? 0.9 : 0.25
-}
-
-/// Whether a change of picture hides in a short squash and rise of the whole pet (the cross-fade centred on its low
-/// point): only while the pet may move, and not for the slow turn between sleeping poses.
-func petDips(from old: PetState?, to new: PetState, environment: PetEnvironment) -> Bool {
-    guard let old = old, old != new, shouldAnimate(environment) else { return false }
-    return !(old.isAsleep && new.isAsleep)
-}
 
 /// Points between the pet's panel and the right edge of the screen's usable area when it first appears.
 let petEdgeInset: CGFloat = 16
@@ -306,8 +217,7 @@ let petEdgeInset: CGFloat = 16
 let petSnapDistance: CGFloat = 12
 
 /// The panel's frame (screen coordinates, y up) at first: at the bottom right of `visible`, the usable area of the
-/// screen, with the paws on its bottom edge. `belowPaws` is the clear strip under the paws on the panel's canvas
-/// (its height minus `ground` in anchors.json).
+/// screen, with the paws on its bottom edge. `belowPaws` is the clear strip under the paws on the panel.
 func petDefaultFrame(size: CGSize, belowPaws: CGFloat, in visible: CGRect) -> CGRect {
     let frame = CGRect(x: visible.maxX - petEdgeInset - size.width, y: visible.minY - belowPaws,
                        width: size.width, height: size.height)
@@ -345,8 +255,8 @@ func petFrame(size: CGSize, spot: PetSpot, belowPaws: CGFloat, on visible: CGRec
                       width: size.width, height: size.height), belowPaws: belowPaws, in: visible)
 }
 
-/// The panel's size in points: the canvas every lying and sleeping picture shares (`canvas` in anchors.json), and
-/// the clear strip under the paws (its height minus `ground`).
+/// The panel's size in points, round the moves' canvas (`petMoveSide`, its anchor on the ground line), and the clear
+/// strip under the paws.
 let petPanelSize = CGSize(width: 132, height: 97)
 let petBelowPaws: CGFloat = 3
 /// A press that moved no further than this many points is a click, not the start of a drag.

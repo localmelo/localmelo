@@ -83,11 +83,9 @@ ASSETS = {
     "MenuBarLogo.png": "MenuBarLogo.png",
     "MenuBarLogo@2x.png": "MenuBarLogo@2x.png",
 }
-# Melo the Akita puppy's pictures (the desktop pet, the portrait, the small faces) are committed in macos/art/akita,
-# made by scripts/build_pet_assets.py when the art changes. The build copies the folder as it is, with its anchors.json.
-PICTURES = "macos/art/akita"
-# Melo's moves (the desktop pet's animated states) are the console's files, made by scripts/build_moves.py: one copy
-# in the repository, which the build puts in the bundle as Resources/moves.
+# Melo's moves (the desktop pet's animated states, its stills, the start window's portrait and the activity pill's
+# faces) are the console's files, made by scripts/build_moves.py: one copy in the repository, which the build puts in
+# the bundle as Resources/moves.
 MOVES = "support/gateway/static/moves"
 # The console's catalogs: their `app.*` keys are the app's words (see L10n.swift).
 CATALOGS = "support/gateway/static/i18n"
@@ -382,7 +380,6 @@ def build(output: Path) -> None:
             name,
         ) in ASSETS.items():  # the app icon, and the logo of the menu-bar item
             shutil.copy2(ROOT / "macos/assets" / asset, contents / "Resources" / name)
-        shutil.copytree(ROOT / PICTURES, contents / "Resources/akita")
         shutil.copytree(ROOT / MOVES, contents / "Resources/moves")
         languages = write_localizations(contents / "Resources")
         verify_links(python)

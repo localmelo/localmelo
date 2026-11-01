@@ -13,6 +13,7 @@ import QuartzCore
 /// - The latest request wins: a state that played once and ends late never brings itself back.
 /// - The same state asked again does not restart. `startup` plays once and holds its last frame.
 /// - When nothing may move (`still`) each state is its poster, and a change is an 80 ms fade.
+/// - A state asked for as a still (`poster`) shows its poster and holds it, with the fade of any other change.
 /// - A pet that cannot be seen stops where it is (`run(false)`) and goes on from there.
 ///
 /// The frames are a key-frame animation of the layer's `contentsRect` over the state's sheet, run by Core Animation;
@@ -115,6 +116,8 @@ final class PetMovePlayer: NSObject, CAAnimationDelegate {
     var onEnded: (PetMove) -> Void = { _ in }
     private(set) var wanted: PetMove?
     private(set) var once = false
+    /// The state asked for shows its poster, held (a still of the pet's).
+    private(set) var poster = false
     private(set) var still = false
     private let incoming = CALayer()
     private let outgoing = CALayer()
@@ -155,16 +158,18 @@ final class PetMovePlayer: NSObject, CAAnimationDelegate {
     }
 
     /// Shows `move`. The state asked for last does nothing (unless `restart`); `once` plays a looping state a single
-    /// time and holds its last frame. False when its sheet cannot be read (the pet keeps what it shows).
+    /// time and holds its last frame; `poster` shows its poster and holds it. False when its sheet cannot be read (the
+    /// pet keeps what it shows).
     @discardableResult
-    func set(_ move: PetMove, once playOnce: Bool = false, restart: Bool = false) -> Bool {
-        guard restart || move != wanted else { return true }
+    func set(_ move: PetMove, once playOnce: Bool = false, poster held: Bool = false, restart: Bool = false) -> Bool {
+        guard restart || move != wanted || held != poster else { return true }
         guard let timeline = manifest.states[move], let image = sheet(move) else { return false }
         let old = wanted
         // What the person sees now, frozen, before any animation is taken off: the next state fades from it.
         let frozen = old == nil ? nil : capture()
         generation += 1
         wanted = move
+        poster = held
         once = playOnce || timeline.once
         for piece in [outgoing, incoming] { piece.removeAllAnimations() }
         let fade = manifest.fade(from: old, to: move, still: still)
@@ -175,9 +180,9 @@ final class PetMovePlayer: NSObject, CAAnimationDelegate {
         outgoing.opacity = 0
         incoming.contents = image
         incoming.opacity = 1
-        // The model value is where the state rests: its poster when still, else the frame it holds at its end (one
-        // that plays once) or starts from.
-        incoming.contentsRect = manifest.cell(still ? timeline.poster : once ? timeline.seconds.count - 1 : 0)
+        // The model value is where the state rests: its poster when still or held, else the frame it holds at its end
+        // (one that plays once) or starts from.
+        incoming.contentsRect = manifest.cell(still || held ? timeline.poster : once ? timeline.seconds.count - 1 : 0)
         CATransaction.commit()
         if fade > 0, frozen != nil {
             for (piece, from, to) in [(outgoing, 1.0, 0.0), (incoming, 0.0, 1.0)] {
@@ -188,6 +193,7 @@ final class PetMovePlayer: NSObject, CAAnimationDelegate {
             }
         }
         let token = generation
+        if held { return true }
         if still {
             // A still state that plays once has ended as soon as it shows: its poster is where it holds.
             if once { DispatchQueue.main.async { [weak self] in self?.ended(move, token) } }
@@ -214,11 +220,13 @@ final class PetMovePlayer: NSObject, CAAnimationDelegate {
         onEnded(move)
     }
 
-    /// Posters only (`true`) or moving: the state shown starts again, after the short fade.
+    /// Posters only (`true`) or moving: the state shown starts again, after the short fade (a held poster stays).
     func setStill(_ value: Bool) {
         guard value != still else { return }
         still = value
-        if let move = wanted { set(move, once: once && manifest.states[move]?.once == false, restart: true) }
+        if let move = wanted, !poster {
+            set(move, once: once && manifest.states[move]?.once == false, restart: true)
+        }
     }
 
     /// Stops the clock where it is (`false`: the pet cannot be seen) or lets it go on from there.

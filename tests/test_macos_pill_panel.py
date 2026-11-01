@@ -24,7 +24,6 @@ FILES = (
     "L10n.swift",
     "MenuWords.swift",
     "PetPolicy.swift",
-    "PetMotion.swift",
     "PetMoves.swift",
     "MotionGate.swift",
     "PetPanel.swift",
@@ -45,8 +44,8 @@ let out = URL(fileURLWithPath: CommandLine.arguments[2], isDirectory: true)
 try! FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
 
 func face(_ portrait: PillPortrait) -> CGImage? {
-    let file = pillPictureFile(portrait, scale: 2) { FileManager.default.fileExists(atPath: pictures.appendingPathComponent($0).path) }
-    guard let source = CGImageSourceCreateWithURL(pictures.appendingPathComponent(file) as CFURL, nil) else { return nil }
+    guard let source = CGImageSourceCreateWithURL(pictures.appendingPathComponent(pillPictureFile(portrait)) as CFURL, nil)
+    else { return nil }
     return CGImageSourceCreateImageAtIndex(source, 0, nil)
 }
 func model(_ state: PillState, _ text: String, _ icon: PillIcon, more: Int = 0, _ portrait: PillPortrait,
@@ -183,7 +182,7 @@ def test_the_pill_is_drawn_in_light_and_dark_for_every_state(tmp_path: Path) -> 
     binary = compile_swift(tmp_path, RENDER)
     shots = SHOTS / "pill"
     subprocess.run(
-        [str(binary), str(ROOT / "macos/art/akita"), str(shots)],
+        [str(binary), str(ROOT / "support/gateway/static/moves"), str(shots)],
         check=True,
         timeout=60,
     )
@@ -309,7 +308,7 @@ precondition(marks(late) == [false, true, false])
 
 // The pet's menu has the choice, and a hidden pet is "Nothing".
 let pet = PetController(settingsURL: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("pill-test-\(getpid())/pet.json"),
-                        pictures: nil)
+                        movesFolder: nil)
 precondition(pet.view.menu?.items.map { $0.title } == ["Open localmelo", "Hide Melo", "On the desktop", "", "Quit localmelo"])
 var told: [DesktopMode] = [], hidden: [Bool] = []
 pet.desktopChanged = { told.append($0) }

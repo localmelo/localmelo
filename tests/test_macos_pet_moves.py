@@ -1,7 +1,8 @@
-"""The desktop pet's moves (PetMoves.swift, and their rules in PetPolicy.swift): which state each mood shows, the
-model's own mark for thinking, the wake-up and the plays now and then, the manifest the app reads, and the player on
-layers built off screen: a key-frame animation of the frames, attention's quick fade, the same state never
-restarting, posters when nothing may move, and a clock that stops while the pet cannot be seen. No window is opened.
+"""The desktop pet's moves (PetMoves.swift, and their rules in PetPolicy.swift): which state or still each mood shows,
+the model's own mark for thinking, the wake-up and the plays now and then, the manifest the app reads, and the player
+on layers built off screen: a key-frame animation of the frames, attention's quick fade, the same state never
+restarting, held posters for the stills, posters when nothing may move, and a clock that stops while the pet cannot be
+seen. No window is opened.
 """
 
 from __future__ import annotations
@@ -49,7 +50,7 @@ POLICY = ["GatewayPolicy.swift", "L10n.swift", "PetPolicy.swift"]
 
 
 @darwin
-def test_each_mood_has_its_move_and_the_ones_without_art_keep_their_pictures(
+def test_each_mood_has_its_move_or_its_still(
     tmp_path: Path,
 ) -> None:
     run_swift(
@@ -61,9 +62,11 @@ precondition(petMove(.waiting, thinking: true) == .attention)  // a wait wins ov
 precondition(petMove(.working(2), thinking: false) == .working)
 precondition(petMove(.working(1), thinking: true) == .thinking)
 precondition(petMove(.resting, thinking: false) == .idleRest)
-precondition(petMove(.sleeping(.sleepSide), thinking: false) == .idleRest)
-// Nothing known, a run that just ended, a failure and a stopped app have no art among the moves: still pictures.
-for mood in [PetMood.unknown, .done, .failed, .stopped] { precondition(petMove(mood, thinking: true) == nil) }
+precondition(petMove(.sleeping, thinking: false) == .idleRest)
+// Nothing known, a run that just ended, a failure and a stopped app show a still: a poster of the moves, held.
+for mood in [PetMood.unknown, .done, .failed, .stopped] {
+    precondition(petMove(mood, thinking: true) == nil && petStill(mood) != nil)
+}
 // Their words stay the mood's.
 precondition(PetMood.working(1).label == "Melo, working. 1 running.")
 precondition(PetMood.waiting.label == "Melo, waiting for your approval.")
@@ -89,12 +92,13 @@ precondition(frame == CGRect(x: 16, y: 3 - 100.0 * 12 / 256, width: 100, height:
 precondition(frame.maxY - 97 < 100.0 * 22 / 512 && -frame.minY < 100.0 * 22 / 512)
 precondition(petMoveSide == 100)
 
-// What may move: the moves show posters under Reduce Motion, Low Power Mode and heat, and stop while unseen.
+// What may move: the moves show posters under Reduce Motion only, keep playing in Low Power Mode and heat, and stop
+// while unseen.
 var env = PetEnvironment()
 precondition(petMovesMayMove(env) && petMovesRun(env))
 env.reduceMotion = true; precondition(!petMovesMayMove(env) && petMovesRun(env))
-env = PetEnvironment(); env.lowPower = true; precondition(!petMovesMayMove(env))
-env = PetEnvironment(); env.thermal = .serious; precondition(!petMovesMayMove(env))
+env = PetEnvironment(); env.lowPower = true; precondition(petMovesMayMove(env))
+env = PetEnvironment(); env.thermal = .serious; precondition(petMovesMayMove(env))
 env = PetEnvironment(); env.visible = false; precondition(petMovesMayMove(env) && !petMovesRun(env))
 env = PetEnvironment(); env.screenAwake = false; precondition(!petMovesRun(env))
 """,
@@ -127,13 +131,13 @@ precondition(picker.pick(.resting, thinking: false, still: false, now: at(58))! 
 precondition(picker.pick(.resting, thinking: false, still: false, now: at(350))! == (.idleRest, false))
 precondition(picker.pick(.resting, thinking: false, still: false, now: at(351))! == (.idlePlay, true))
 // Asleep it only rests, and a play under way gives way.
-precondition(picker.pick(.sleeping(.sleepFront), thinking: false, still: false, now: at(352))! == (.idleRest, false))
+precondition(picker.pick(.sleeping, thinking: false, still: false, now: at(352))! == (.idleRest, false))
 // Work and a wait take over at once; the rest after them starts again from its beginning.
 precondition(picker.pick(.working(1), thinking: false, still: false, now: at(400))! == (.working, false))
 precondition(picker.pick(.waiting, thinking: false, still: false, now: at(401))! == (.attention, false))
 precondition(picker.pick(.resting, thinking: false, still: false, now: at(402))! == (.idleRest, false))
 precondition(picker.pick(.resting, thinking: false, still: false, now: at(700))! == (.idlePlay, true))
-// No moves for an ending: the picker says nothing and keeps its rest.
+// No moves for an ending (a still shows): the picker says nothing.
 precondition(picker.pick(.done, thinking: false, still: false, now: at(701)) == nil)
 
 // A pet that is first seen while work runs never plays the wake-up later.
@@ -251,6 +255,20 @@ player.set(.working)
 precondition(incoming.animation(forKey: "frames") == nil && incoming.animation(forKey: "fade")?.duration == 0.08)
 player.setStill(false)
 precondition(incoming.animation(forKey: "frames") != nil)
+// A still of the pet's: the state's poster, held, with no frames and the fade of any other change; Reduce Motion
+// coming or going leaves it as it is, and asking for the state's moves starts them.
+player.set(.thinking, poster: true)
+precondition(player.wanted == .thinking && player.poster && incoming.animation(forKey: "frames") == nil)
+precondition(incoming.contentsRect == manifest.cell(0) && incoming.animation(forKey: "fade")?.duration == 0.22)
+player.set(.startup, poster: true)
+precondition(incoming.contentsRect == manifest.cell(15) && incoming.animation(forKey: "frames") == nil)
+let held = incoming.animation(forKey: "fade")
+player.setStill(true); player.setStill(false)
+precondition(incoming.animation(forKey: "fade") === held && player.poster)
+player.set(.startup, poster: true)
+precondition(incoming.animation(forKey: "fade") === held)  // the same still again: nothing
+player.set(.startup)
+precondition(!player.poster && incoming.animation(forKey: "frames") != nil)
 // Unseen, the clock stops where it is; seen again, it goes on.
 precondition(player.running)
 player.run(false)
@@ -258,33 +276,32 @@ precondition(!player.running && player.layer.speed == 0)
 player.run(false)
 player.run(true)
 precondition(player.running && player.layer.speed == 1)
-// A folder without the files gives no player: the still pictures stand in.
+// A folder without the files gives no player, and no pet.
 precondition(PetMovePlayer(folder: URL(fileURLWithPath: "/nonexistent"), side: 100) == nil)
 """,
     )
 
 
-def test_one_player_owns_the_pet_layer_and_the_still_pictures_keep_their_words() -> (
-    None
-):
+def test_one_player_draws_the_whole_pet_and_the_stills_keep_their_words() -> None:
     panel = (APP / "PetPanel.swift").read_text()
-    # The moves are decided before the still pictures, and a mood with a move never reaches them.
-    refresh = panel.split("private func refresh()")[1].split(
-        "private func applyMotion"
-    )[0]
-    assert refresh.index("view.describe(mood)") < refresh.index(
-        "if showMove() { return }"
-    )
-    assert refresh.index("if showMove() { return }") < refresh.index("motion.show(")
-    # The moves' layer is added once, and only the swap shows one of the two.
+    # The words are the mood's; then its still, held, or its move.
+    refresh = panel.split("private func refresh()")[1].split("private func applyMoves")[
+        0
+    ]
+    assert refresh.index("view.describe(mood)") < refresh.index("showMoves()")
+    assert refresh.index("petStill(mood)") < refresh.index("picker.pick(")
+    assert "moves.set(poster, poster: true)" in refresh
+    # The moves' layer is the pet: added once, never hidden; no other picture is drawn on the panel.
     assert panel.count("view.layer?.addSublayer(moves.layer)") == 1
-    assert panel.count("moves?.layer.isHidden = !front") == 1
-    assert panel.count("motion.moving.isHidden = front") == 1
-    # The app hands the pet the bundle's moves folder.
+    assert "isHidden" not in panel and "CGImageSource" not in panel
+    # Without the moves there is no pet.
+    assert "guard moves != nil, place() else { return }" in panel
+    # The app hands the pet, the start window and the pill one moves folder.
     main = (APP / "main.swift").read_text()
     assert (
-        'movesFolder: Bundle.main.resourceURL?.appendingPathComponent("moves")' in main
+        'let moves = Bundle.main.resourceURL?.appendingPathComponent("moves")' in main
     )
+    assert "movesFolder: moves" in main and "PillController(pictures: moves," in main
     # No timer drives a frame: Core Animation runs the key frames.
     moves = (APP / "PetMoves.swift").read_text()
     assert "Timer" not in moves and "CADisplayLink" not in moves

@@ -200,11 +200,11 @@ async def test_melo_s_pictures_in_the_shell_are_sharp_and_say_only_what_words_do
     shown = {
         str(image["src"]): image
         for image in tags.images
-        if str(image["src"]).startswith("/assets/akita/")
+        if str(image["src"]).startswith("/assets/moves/face-")
     }
     assert set(shown) == {
-        "/assets/akita/face-idle.png",  # the brand, in the sidebar and on the lock screen
-        "/assets/akita/face-waiting.png",  # the approval bar
+        "/assets/moves/face-idle.png",  # the brand, in the sidebar and on the lock screen
+        "/assets/moves/face-waiting.png",  # the approval bar
     }
     for path, image in shown.items():
         data = (await client.get(path)).content
@@ -214,10 +214,10 @@ async def test_melo_s_pictures_in_the_shell_are_sharp_and_say_only_what_words_do
         assert wide >= 2 * width and wide * height == tall * width, path
         # Words already say it where the face sits.
         assert image["alt"] == "", path
-    assert shown["/assets/akita/face-waiting.png"]["width"] == "24"
+    assert shown["/assets/moves/face-waiting.png"]["width"] == "24"
     # The empty chat's Melo is the sitting dog the moves wake up into, at 2x, and names itself.
     (mascot,) = [i for i in tags.images if i.get("class") == "welcome-mascot"]
-    assert mascot["src"] == "/assets/moves/startup-poster.webp"
+    assert mascot["src"] == "/assets/moves/poster-startup.webp"
     assert (mascot["width"], mascot["height"]) == ("128", "128")
     assert mascot["alt"]
     poster = await client.get(str(mascot["src"]))
@@ -228,9 +228,9 @@ async def test_melo_s_pictures_in_the_shell_are_sharp_and_say_only_what_words_do
     icons = IconLinks()
     icons.feed(page.text)
     assert [(i["sizes"], i["href"]) for i in icons.icons] == [
-        ("16x16", "/assets/akita/favicon-16.png"),
-        ("32x32", "/assets/akita/favicon-32.png"),
-        ("64x64", "/assets/akita/favicon-64.png"),
+        ("16x16", "/assets/moves/favicon-16.png"),
+        ("32x32", "/assets/moves/favicon-32.png"),
+        ("64x64", "/assets/moves/favicon-64.png"),
     ]
 
 
@@ -241,53 +241,12 @@ def test_the_faces_and_the_portrait_are_not_clipped_to_a_rounded_tile() -> None:
             assert "border-radius" not in body, group.strip()
 
 
-def _blink_timeline() -> list[tuple[float, float]]:
-    """The melo-blink keyframes as (seconds into the 11 s loop, opacity), in order."""
-    body = re.search(r"@keyframes melo-blink\s*\{(.*?)\n\}", _stylesheet(), re.S)
-    assert body, "the blink keyframes"
-    points = []
-    for stops, opacity in re.findall(
-        r"([\d.%, ]+)\{\s*opacity:\s*([\d.]+);\s*\}", body.group(1)
-    ):
-        for stop in stops.split(","):
-            points.append((float(stop.strip().rstrip("%")) * 11 / 100, float(opacity)))
-    return sorted(points)
-
-
-def test_the_blink_is_css_only_two_blinks_in_eleven_seconds_and_still_under_reduced_motion() -> (
-    None
-):
+def test_no_picture_blinks_any_more() -> None:
+    # The eyes-closed patches were cut from the old pictures: they would not lie on the new head.
     css = _stylesheet()
-    # The patch is the background of the wrapper's ::after: clear at rest, with one animation over 11 s, for ever.
-    rule = re.search(r"\.blinks::after\s*\{([^}]*)\}", css)
-    assert rule and "opacity: 0;" in rule.group(1)
-    assert re.search(r"animation:\s*melo-blink 11s linear infinite", rule.group(1))
-    for picture in ("sit-idle-blink", "face-idle-blink"):
-        assert f"url(/assets/akita/{picture}.png)" in css
-        assert (webapp._STATIC / "akita" / f"{picture}.png").is_file()
-    # Two blinks, at 4.2 s and 9.6 s: 60 ms in, 30 ms held, 70 ms out (the pet's own timing); clear in between.
-    timeline = _blink_timeline()
-    assert timeline[0] == (0.0, 0.0) and timeline[-1] == (11.0, 0.0)
-    for start in (4.2, 9.6):
-        edges = [
-            (round(s - start, 2), o)
-            for s, o in timeline
-            if start - 0.01 <= s <= start + 0.17
-        ]
-        assert edges == [(0.0, 0.0), (0.06, 1.0), (0.09, 1.0), (0.16, 0.0)], start
-    assert sum(1 for _, o in timeline if o == 1.0) == 4  # no third blink
-    # Reduce Motion removes every animation: the patch stays clear, which is the still picture.
-    reduced = re.search(
-        r"@media \(prefers-reduced-motion: reduce\)\s*\{(.*?)\n\}", css, re.S
-    )
-    assert reduced and "animation: none !important" in reduced.group(1)
-    assert "*::after" in reduced.group(1)
-    # And no script runs the blink: the lines that mention it set up markup and nothing else.
+    assert "blinks" not in css and "melo-blink" not in css
     script = (webapp._STATIC / "workspace.js").read_text(encoding="utf-8")
-    for line in (line for line in script.splitlines() if "blink" in line):
-        assert not re.search(
-            r"setTimeout|setInterval|requestAnimationFrame|animate\(", line
-        )
+    assert "blinks" not in script
 
 
 async def test_the_empty_chat_shows_the_new_sitting_dog_without_the_old_blink_patch(
@@ -296,7 +255,7 @@ async def test_the_empty_chat_shows_the_new_sitting_dog_without_the_old_blink_pa
     page = (await client.get("/")).text
     # The eyes-closed patch was cut from the old sitting picture: it would not lie on the new one.
     assert re.search(
-        r'<img\s+class="welcome-mascot"\s+src="/assets/moves/startup-poster.webp"', page
+        r'<img\s+class="welcome-mascot"\s+src="/assets/moves/poster-startup.webp"', page
     )
     assert "blinks portrait" not in page
     assert ".blinks.portrait" not in _stylesheet()
@@ -411,12 +370,12 @@ async def test_the_shell_loads_the_same_assets_as_before(
     parser = ShellAssets()
     parser.feed(page.text)
     assert set(parser.paths) == {
-        "/assets/akita/face-idle.png",
-        "/assets/akita/face-waiting.png",
-        "/assets/akita/favicon-16.png",
-        "/assets/akita/favicon-32.png",
-        "/assets/akita/favicon-64.png",
-        "/assets/moves/startup-poster.webp",
+        "/assets/moves/face-idle.png",
+        "/assets/moves/face-waiting.png",
+        "/assets/moves/favicon-16.png",
+        "/assets/moves/favicon-32.png",
+        "/assets/moves/favicon-64.png",
+        "/assets/moves/poster-startup.webp",
         "/assets/theme-init.js",
         "/assets/workspace.css",
         "/assets/workspace.js",

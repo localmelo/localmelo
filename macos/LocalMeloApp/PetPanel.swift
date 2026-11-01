@@ -1,8 +1,7 @@
 import AppKit
-import ImageIO
 
-/// What the pet's panel shows and hears: one picture on two layers (`PetMotion`), a press that is a click or a drag,
-/// the pointer coming and going, and VoiceOver. It decides nothing itself.
+/// What the pet's panel shows and hears: the moves' canvas (`PetMovePlayer`), a press that is a click or a drag, the
+/// pointer coming and going, and VoiceOver. It decides nothing itself.
 final class PetView: NSView {
     var onTouch: (() -> Void)?
     var onClick: (() -> Void)?
@@ -11,10 +10,9 @@ final class PetView: NSView {
     private var panelOrigin = NSPoint.zero
     private var dragged = false
 
-    init(motion: PetMotion) {
+    init() {
         super.init(frame: NSRect(origin: .zero, size: petPanelSize))
         wantsLayer = true
-        layer?.addSublayer(motion.moving)
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
     }
@@ -81,13 +79,13 @@ final class PetPanel: NSPanel {
 /// Melo on the desktop. A small borderless panel above other windows, on every Space, that shows while the app's
 /// window is put away (closed, minimized or the app hidden) and the person has not hidden Melo. The app's health
 /// poll feeds it (`update`); it adds no timer: its mood is worked out again on each reply, each touch and each
-/// change of window, and its motion is Core Animation's. A mood with moves (`petMove`) is played by `moves`, the
-/// animated states; the others keep their still pictures, moved by `motion`. One of the two shows at a time.
+/// change of window, and its motion is Core Animation's. Everything it shows is `moves`, the animated states: a mood
+/// with moves (`petMove`) plays them, and only a mood with a still (`petStill`: nothing known yet, a run that just
+/// finished, a failure, the app stopped) or Reduce Motion holds a poster.
 final class PetController: NSObject {
     let panel: PetPanel
     let view: PetView
-    let motion: PetMotion
-    /// The animated states; nil when their files are missing (the still pictures stand in for every mood).
+    /// The animated states; nil when their files are missing, and then the pet never shows.
     let moves: PetMovePlayer?
     /// What a click opens: the window, or the chat or task that waits.
     var openWindow: () -> Void = {}
@@ -101,42 +99,32 @@ final class PetController: NSObject {
     private(set) var settings: PetSettings
     var environment: PetEnvironment { gate.environment }
     private let settingsURL: URL
-    private let pictures: URL?
     private var gate: MotionGate!
-    private var images: [String: CGImage] = [:]
-    private var imageScale = 0
     private var health: Data?
     private var stopped = false
     private var windowShown = true
     private var touched = Date()
-    private var poseSeed = Int.random(in: 0..<PetState.sleepPoses.count)
-    private var shownState: PetState?
-    private var applied: (plan: PetMotionPlan, animate: Bool)?
-    // The activity pill is on the desktop in the pet's place; and until when the pet wags after a "Done" of the pill.
+    private var described = false
+    // The activity pill is on the desktop in the pet's place; and until when the pet shows "done" after a "Done" of
+    // the pill.
     private var pillUp = false
-    private var wagUntil: Date?
-    // Which move shows (the wake-up first, a play now and then), and whether the moves are in front.
+    private var doneUntil: Date?
+    // Which move shows: the wake-up first, a play now and then.
     private var picker = PetMovePicker()
-    private(set) var moving = false
 
     var hiddenByPerson: Bool { settings.hidden }
     var isShown: Bool { panel.isVisible }
 
-    /// `settingsURL` is the file the pet's hidden flag and spots live in; `pictures` is the `akita` folder and
-    /// `movesFolder` the `moves` one.
-    init(settingsURL: URL, pictures: URL?, movesFolder: URL? = nil) {
+    /// `settingsURL` is the file the pet's hidden flag and spots live in; `movesFolder` is the `moves` folder.
+    init(settingsURL: URL, movesFolder: URL?) {
         self.settingsURL = settingsURL
-        self.pictures = pictures
         settings = petSettings(try? Data(contentsOf: settingsURL))
-        let anchor = CGPoint(x: petPanelSize.width / 2, y: petBelowPaws)
-        motion = PetMotion(size: petPanelSize, anchor: anchor)
-        view = PetView(motion: motion)
+        view = PetView()
         moves = movesFolder.flatMap { PetMovePlayer(folder: $0, side: petMoveSide) }
         if let moves = moves {
             let manifest = moves.manifest
             moves.layer.frame = petMoveFrame(side: petMoveSide, anchor: manifest.anchor, pixels: manifest.pixels,
                                              in: petPanelSize, belowPaws: petBelowPaws)
-            moves.layer.isHidden = true
             view.layer?.addSublayer(moves.layer)
         }
         panel = PetPanel(contentRect: NSRect(origin: .zero, size: petPanelSize),
@@ -167,7 +155,6 @@ final class PetController: NSObject {
         gate.changed = { [weak self] _ in
             guard let self = self, self.isShown else { return }
             self.applyMoves()
-            if !self.moving { self.applyMotion(beginning: false) }
         }
         moves?.onEnded = { [weak self] move in
             self?.picker.ended(move)
@@ -217,11 +204,11 @@ final class PetController: NSObject {
         reconcile()
     }
 
-    /// The activity pill appeared or went. While it is there the pet is not; when it goes the pet comes back, and wags
-    /// for a few seconds if the pill's "Done" ran out.
-    func pillShowing(_ showing: Bool, wags: Bool) {
+    /// The activity pill appeared or went. While it is there the pet is not; when it goes the pet comes back, and
+    /// shows "done" for a few seconds if the pill's "Done" ran out.
+    func pillShowing(_ showing: Bool, showsDone: Bool) {
         pillUp = showing
-        if wags { wagUntil = Date().addingTimeInterval(pillWagFor) }
+        if showsDone { doneUntil = Date().addingTimeInterval(petDoneAfterPill) }
         reconcile()
     }
 
@@ -236,133 +223,57 @@ final class PetController: NSObject {
     private func reconcile() {
         let wanted = petShouldShow(windowShown: windowShown, hiddenByPerson: settings.hidden) && !pillUp
         if wanted && !panel.isVisible {
-            guard picture(for: .lieIdle) != nil, place() else { return }
+            guard moves != nil, place() else { return }
             touched = Date()
-            poseSeed = Int.random(in: 0..<PetState.sleepPoses.count)
-            shownState = nil
+            described = false
             panel.orderFrontRegardless()
             gate.refresh()
             refresh()
         } else if !wanted && panel.isVisible {
             panel.orderOut(nil)
-            motion.stop()
             moves?.run(false)
-            applied = nil
             gate.refresh()
         }
     }
 
-    // MARK: Mood and picture
+    // MARK: Mood and moves
 
     private func touch() {
         touched = Date()
-        if case .sleeping(let left) = mood, let index = PetState.sleepPoses.firstIndex(of: left) {
-            poseSeed = (index + Int.random(in: 1..<PetState.sleepPoses.count)) % PetState.sleepPoses.count
-        }
         if isShown { refresh() }
     }
 
     private func refresh() {
         gate.refresh()  // each reply also reads the system again, so a missed notification cannot stick
         let old = mood
-        mood = petMood(health: health, stopped: stopped, sinceTouch: Date().timeIntervalSince(touched),
-                       poseSeed: poseSeed)
-        if let until = wagUntil, mood == .resting { mood = Date() < until ? .done : mood }
-        if let until = wagUntil, Date() >= until { wagUntil = nil }
-        if shownState == nil || mood != old { view.describe(mood) }
-        if showMove() { return }
-        // A beat plays when the mood begins: when the pet appears, and when what it does changes.
-        let beginning = shownState == nil || petMotionPlan(old) != petMotionPlan(mood)
-        // A change of picture waits (0.4 s at most) until the pet is at rest and, while it may move, hides in a squash.
-        var begin = PetBegin()
-        if mood.picture != shownState, let image = picture(for: mood.picture) {
-            begin = PetBegin(wait: shownState != nil && shouldAnimate(environment) ? motion.restWait() : 0,
-                             dip: petDips(from: shownState, to: mood.picture, environment: environment))
-            motion.show(image, parts: parts(for: mood.picture),
-                        fade: petFade(from: shownState, to: mood.picture, environment: environment), begin: begin)
-            shownState = mood.picture
-        }
-        applyMotion(beginning: beginning, begin: begin)
+        mood = petMood(health: health, stopped: stopped, sinceTouch: Date().timeIntervalSince(touched))
+        if let until = doneUntil, mood == .resting { mood = Date() < until ? .done : mood }
+        if let until = doneUntil, Date() >= until { doneUntil = nil }
+        if !described || mood != old { view.describe(mood) }
+        described = true
+        showMoves()
     }
 
-    /// Shows the mood's move, if it has one, in front of the still pictures; else puts the still pictures back in
-    /// front. True when a move shows. The words (`describe`) stay the mood's either way.
-    private func showMove() -> Bool {
-        let environment = self.environment
-        moves?.setStill(!petMovesMayMove(environment))  // before the state, so it starts as it should show
-        let pick = moves == nil ? nil : picker.pick(mood, thinking: health.map(petThinking) ?? false,
-                                                     still: !petMovesMayMove(environment), now: Date())
-        guard let moves = moves, let (move, once) = pick, moves.set(move, once: once) || moves.wanted != nil else {
-            if moving { swapLayers(moves: false) }
-            return false
-        }
-        if !moving {
-            // The still pictures stop where they are; the next one shows afresh, with its beat.
-            motion.stop()
-            applied = nil
-            shownState = nil
-            swapLayers(moves: true)
+    /// Shows what the mood looks like: its still (`petStill`), held, or its move, played. The words (`describe`) are
+    /// the mood's either way.
+    private func showMoves() {
+        guard let moves = moves else { return }
+        let still = !petMovesMayMove(environment)
+        moves.setStill(still)  // before the state, so it starts as it should show
+        if let poster = petStill(mood) {
+            moves.set(poster, poster: true)
+        } else if let (move, once) = picker.pick(mood, thinking: health.map(petThinking) ?? false, still: still,
+                                                 now: Date()) {
+            moves.set(move, once: once)
         }
         applyMoves()
-        return true
     }
 
-    /// The moves in front of the still pictures, or the other way: a short cross-fade of the whole pet.
-    private func swapLayers(moves front: Bool) {
-        moving = front
-        let fade = CATransition()
-        fade.type = .fade
-        fade.duration = petMovesMayMove(environment) ? 0.22 : 0.08
-        view.layer?.add(fade, forKey: kCATransition)
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        moves?.layer.isHidden = !front
-        motion.moving.isHidden = front
-        CATransaction.commit()
-        if !front { moves?.run(false) }
-    }
-
-    /// The moves follow the gate: posters under Reduce Motion, Low Power Mode or heat; stopped where they are while
-    /// the pet cannot be seen.
+    /// The moves follow the gate: posters under Reduce Motion; stopped where they are while the pet cannot be seen.
     private func applyMoves() {
         guard let moves = moves else { return }
         moves.setStill(!petMovesMayMove(environment))
-        moves.run(moving && isShown && petMovesRun(environment))
-    }
-
-    // The animations run on their own; they are started again only when what they should be doing changed, so a
-    // breath is not cut short by each health reply.
-    private func applyMotion(beginning: Bool, begin: PetBegin = PetBegin()) {
-        let plan = petMotionPlan(mood), animate = shouldAnimate(environment)
-        if !beginning, let done = applied, done.plan == plan, done.animate == animate { return }
-        applied = (plan, animate)
-        motion.play(plan, entering: beginning, animate: animate, begin: begin)
-    }
-
-    /// The picture for the panel's screen scale, decoded once; nil when the file is missing.
-    private func picture(for state: PetState) -> CGImage? { piece(state, state.rawValue) }
-
-    /// The pieces that move over a picture (the blink patch, the bodies, the tail and the ear, the "z"'s start); a
-    /// missing file leaves that move out.
-    private func parts(for state: PetState) -> PetParts {
-        PetParts(blink: state.blinkPatch.flatMap { piece(state, $0) },
-                 body: state.tailPieces.flatMap { piece(state, $0.body) },
-                 tail: state.tailPieces.flatMap { piece(state, $0.tail) },
-                 zStart: state.sleepZ,
-                 earBody: state.earPieces.flatMap { piece(state, $0.body) },
-                 ear: state.earPieces.flatMap { piece(state, $0.ear) })
-    }
-
-    private func piece(_ state: PetState, _ name: String) -> CGImage? {
-        let scale = Int((panel.screen ?? NSScreen.main)?.backingScaleFactor ?? 2) >= 2 ? 2 : 1
-        if scale != imageScale { images = [:]; imageScale = scale }
-        let file = "\(state.folder)/\(state.pieceFile(name, scale: scale))"
-        if let image = images[file] { return image }
-        guard let url = pictures?.appendingPathComponent(file),
-              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
-        images[file] = image
-        return image
+        moves.run(isShown && petMovesRun(environment))
     }
 
     // MARK: Clicks, menu, drops

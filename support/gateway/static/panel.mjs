@@ -22,7 +22,7 @@ import {idleMove, startMoves} from './moves.mjs';
  * check-in and the chores that run on a schedule; Memory
  * (memory-tab.mjs) lists the notes melo keeps. Melo's portrait moves (moves.mjs, `portraitMove`): it wakes up on
  * the first load, works, thinks, raises a paw when something waits for the person and rests; a run that just ended,
- * an error and the time before the first health reply keep their still pictures. `update(health)` is called on every health poll: the
+ * an error and the time before the first health reply keep a still poster of the moves. `update(health)` is called on every health poll: the
  * header follows it, and the list is read again when what runs changed, the
  * chat changed, or every REFRESH_MS. Below 900 px the panel is a bottom sheet
  * behind `chip`, closed by Escape (`closeSheet()`), the backdrop, or a drag
@@ -46,6 +46,9 @@ const stateWords = (state) => (STATES.has(state) ? t(`panel.state.${state}`) : '
 const LIVE = new Set(['running', 'waiting', 'held', 'queued', 'paused']);
 const HREF = {chat: '#/s/', task: '#/tasks/', run: '#/workers/', terminal: '#/workers/'};
 const SHOWN = 8;
+// The still picture of each header mood: a poster of Melo's moves (the sitting dog the wake-up ends on for a run
+// that ended well, the tilted head for an error, the resting dog while nothing runs or nothing is known).
+const STILLS = {idle: 'idle_rest', working: 'working', waiting: 'attention', done: 'startup', error: 'thinking'};
 const STEPS = 8;
 const REFRESH_MS = 30000;
 const KEY = 'localmelo-panel-tab';
@@ -166,8 +169,8 @@ export function setupPanel({
   const frame = node('span', 'panel-picture');
   const picture = node('img');
   picture.alt = '';
-  picture.width = 108;
-  picture.height = 140;
+  picture.width = 100;
+  picture.height = 100;
   frame.append(picture);
   // The moves draw on a canvas over the picture; the ring shows one of the two (`data-moves`). The status line
   // says in words what both show.
@@ -278,16 +281,17 @@ export function setupPanel({
     const scoped = state.scope === 'chat' && state.loaded ? state.rows : null;
     const said = headline(state.health, scoped);
     root.dataset.mood = said.mood;
-    const src = `/assets/akita/sit-${said.mood}.png`;
+    const src = `/assets/moves/poster-${STILLS[said.mood] ?? 'idle_rest'}.webp`;
     if (picture.getAttribute?.('src') !== src) picture.setAttribute('src', src);
-    const moving = drawMove(said, scoped);
-    frame.classList.toggle('blinks', said.mood === 'idle' && !moving);
+    // Not connected yet, or the gateway is lost: the resting dog, dimmed.
+    ring.dataset.dim = String(!state.health || state.offline);
+    drawMove(said, scoped);
     const nodes = [node('span', 'panel-dot'), node('span', '', said.text)];
     if (said.fix) nodes.push(button('link-button', t('common.openSettings'), () => openSettings()));
     status.replaceChildren(...nodes);
     const waiting = said.mood === 'waiting';
     chip.dataset.mood = said.mood;
-    chip.replaceChildren(Object.assign(node('img'), {src: `/assets/akita/face-${said.mood}.png`, alt: '', width: 24, height: 24}),
+    chip.replaceChildren(Object.assign(node('img'), {src: `/assets/moves/face-${said.mood}.png`, alt: '', width: 24, height: 24}),
       node('span', '', [said.count || '', waiting ? '!' : ''].filter(Boolean).join(' · ')));
     chip.setAttribute('aria-label', t('panel.chipLabel', {text: said.text}));
   }

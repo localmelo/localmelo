@@ -76,15 +76,16 @@ Close the window, minimize it or hide the app (Command-H) and a small Melo appea
 | Tilting its head | Thinking: the model is answering and no tool runs. |
 | Raising a paw | Waiting for your approval. It shows at once, whatever Melo was doing. |
 | Lying down, eyes closed | Resting: nothing runs. Now and then it gets up and plays with its toy. |
-| Happy closed eyes, tail wagging | Done: a run just ended well (6 seconds). |
-| Sad brows | The last run did not finish (10 seconds), or localmelo stopped. |
+| Sitting up, smiling, still | Done: a run just ended well (6 seconds). |
+| Head tilted, still | The last run did not finish (10 seconds), or localmelo stopped. Hover to read which. |
+| Lying still | localmelo has not answered yet. |
 
 - Click Melo to open the window, or the chat or task that waits for you; drag it anywhere, and it remembers its place on each screen.
 - Right-click (or Control-click) for **Open localmelo**, **Hide Melo**, **On the desktop** and **Quit localmelo**; **Show Melo** in the menu-bar menu brings it back.
 - It stays above other windows and on every Space, is not in the Dock or Command-Tab, and never takes the keyboard.
 - Its state is in `~/Library/Application Support/LocalMelo/pet.json`.
 - Melo plays once, about 20 seconds into a rest, and at most once every 5 minutes.
-- Under Reduce Motion, in Low Power Mode or when the Mac runs hot, each state is a still picture. While Melo is covered or hidden it stops where it is.
+- Melo moves in every state that has moves, in Low Power Mode and when the Mac runs hot too. Under Reduce Motion each state is a still picture. While Melo is covered or hidden it stops where it is.
 
 ## The activity pill
 
@@ -93,7 +94,7 @@ Close the window, minimize it or hide the app (Command-H) and a small Melo appea
 While the window is put away and something runs or waits, a small pill takes Melo's place and says in one line what Melo is doing.
 
 - It says what runs in plain words ("Reading example.com", "Running the tests"); **+1** counts the others that run. While an approval waits it turns amber and says "Waiting for your approval".
-- It shows "Done: …" for 6 seconds and "Stopped: …" for 10, and "Model server not reachable" while the model server is down. Then Melo comes back, wagging after a "Done".
+- It shows "Done: …" for 6 seconds and "Stopped: …" for 10, and "Model server not reachable" while the model server is down. Then Melo comes back, sitting up and smiling for a moment after a "Done".
 - Click it to open the chat or task it names (the one that waits, for an approval). Drag it like Melo: it takes Melo's place and saves it. Point at it and press **×** to hide it until the next task starts.
 - **On the desktop** in the menu-bar menu and in Melo's menu chooses **Melo and the activity pill** (the default), **Melo only** or **Nothing**. **Hide Melo** is the same as **Nothing**, and **Show Melo** brings back what you had.
 - The window's **Settings → Appearance → Melo on the desktop** is the same choice: it shows what the menus show, and a change there is a change in the menus.
@@ -119,18 +120,19 @@ While the window is put away and something runs or waits, a small pill takes Mel
 
 ## For developers
 
-The app icon, the menu-bar logo and the desktop pictures are committed files (`macos/assets`, `macos/art/akita`) that the build copies; make them again on a Mac when a source picture changes:
+The app icon and the menu-bar logo are committed files (`macos/assets`) that the build copies; make them again on a Mac when a source picture changes:
 
 ```bash
 uv run --with pillow python scripts/make_app_icons.py
 ```
 
+Every picture of Melo (the desktop pet, its stills, the start window's portrait and the activity pill's faces) comes from the moves in `support/gateway/static/moves`, the same files the web console shows. Make them again from an art pack:
+
 ```bash
-uv run --with pillow python scripts/build_pet_assets.py --picks /path/to/picks.json
+uv run --with pillow python scripts/build_moves.py --source /path/to/pack
 ```
 
-- `picks.json` is `{"root": "DIR", "picks": {"lie-idle": "path/below/DIR.png", ...}}` for the 14 states named in the script; Pillow is fetched for that run only.
-- The web console shows the same pictures: `--console-only` copies them again into `support/gateway/static/akita`, without the art masters (see [Melo in the page](web-console.md#melo-in-the-page)).
+- The pack stays outside the repository; `--help` says what it holds. Pillow is fetched for that run only.
 - `GET /api/health` also says how the last run ended, in `status.recent` (see the [API reference](../reference/api-v2.md)); Melo reads it.
 
 The WebKit integration tests open native windows and need a graphical macOS session, so they are opt-in; run them with a temporary HOME:

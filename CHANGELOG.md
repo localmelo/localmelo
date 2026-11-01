@@ -16,9 +16,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   up to play now and then (about 20 seconds into a rest, at most once every 5
   minutes). States cross-fade quickly, the newest change wins and the same
   state never starts over. With reduced motion each state is a still picture;
-  a hidden tab or a covered pet stops where it is. A run that just ended, a
-  failure, a stopped app and a console that is still connecting keep their
-  pictures and words. The empty chat shows the new sitting Melo. Health's
+  a hidden tab or a covered pet stops where it is; the pet keeps moving in
+  Low Power Mode and heat. A run that just ended sits up smiling, a failure
+  or a stopped app tilts its head, and a console that is still connecting or
+  cannot reach localmelo lies still (faded when offline), each with its own
+  words. Every picture of Melo now comes from these moves: the empty chat,
+  the reply faces, the approval bar, the sidebar and sign-in brand, the Main
+  chat, the tab icon, the app's start window and the activity pill. Health's
   `status.items` (and the panel's live activity rows) say `answering` when the
   model is answering with no tool, approval or hold open: Melo thinks only
   then. [#419]

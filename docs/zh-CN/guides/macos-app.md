@@ -86,15 +86,16 @@ uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 | 歪着头 | 思考：模型正在作答，没有工具在运行。 |
 | 举起一只爪子 | 在等你批准。无论 Melo 正在做什么，都会立刻显示。 |
 | 趴着，闭着眼睛 | 休息：没有任何东西在运行。它偶尔会起来玩一会儿玩具。 |
-| 开心地闭着眼睛，尾巴摇起来 | 完成：一次运行刚刚顺利结束（持续 6 秒）。 |
-| 眉毛耷拉着 | 上一次运行没有完成（持续 10 秒），或 localmelo 已停止。 |
+| 坐着微笑，一动不动 | 完成：一次运行刚刚顺利结束（持续 6 秒）。 |
+| 歪着头，一动不动 | 上一次运行没有完成（持续 10 秒），或 localmelo 已停止。把指针移上去可以看到是哪一种。 |
+| 静静地趴着 | localmelo 还没有回应。 |
 
 - 点击 Melo 会打开窗口，或打开在等你的那个对话或任务；可以把它拖到任何地方，它会为每块屏幕记住自己的位置。
 - 右键（或按住 Control 点击）会出现 **Open localmelo**、**Hide Melo**、**On the desktop** 和 **Quit localmelo**；菜单栏菜单里的 **Show Melo** 会把它请回来。
 - 它停在其他窗口之上，出现在每一个空间里，不在程序坞和 Command-Tab 中，也从不抢走键盘。
 - 它的状态保存在 `~/Library/Application Support/LocalMelo/pet.json`。
 - 休息大约 20 秒后 Melo 会玩一次，最多每 5 分钟一次。
-- 在“减弱动态效果”下、低电量模式下或 Mac 发热时，每个状态都是一张静态图片。Melo 被遮住或隐藏时，它停在原处。
+- 凡是有动作的状态，Melo 都会动，低电量模式下和 Mac 发热时也一样。在“减弱动态效果”下，每个状态都是一张静态图片。Melo 被遮住或隐藏时，它停在原处。
 
 <a id="the-activity-pill"></a>
 
@@ -105,7 +106,7 @@ uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 窗口收起、而又有东西在运行或在等你时，一个小小的胶囊会取代 Melo，用一行话说 Melo 正在做什么。
 
 - 它用平实的话说正在运行的内容（“Reading example.com”“Running the tests”）；**+1** 表示还有几个在运行。有审批在等你时，它会变成琥珀色，并写着“Waiting for your approval”。
-- 它显示“Done: …” 6 秒、“Stopped: …” 10 秒，模型服务器连不上时显示“Model server not reachable”。然后 Melo 回来，“Done” 之后会摇尾巴。
+- 它显示“Done: …” 6 秒、“Stopped: …” 10 秒，模型服务器连不上时显示“Model server not reachable”。然后 Melo 回来，“Done” 之后会坐着微笑一会儿。
 - 点击它会打开它所说的对话或任务（审批则是在等你的那个）。像拖 Melo 一样拖它：它占用 Melo 的位置并保存。指向它并点 **×**，就在下一个任务开始之前把它隐藏。
 - 菜单栏菜单和 Melo 的菜单里的 **On the desktop** 可选 **Melo and the activity pill**（默认）、**Melo only** 或 **Nothing**。**Hide Melo** 等于 **Nothing**，**Show Melo** 会恢复你原来的选择。
 - 窗口里的 **Settings → Appearance → Melo on the desktop** 是同一个选择：它显示菜单当前的选择，在这里改就是在菜单里改。
@@ -137,18 +138,19 @@ uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 
 ## 开发者
 
-应用图标、菜单栏标志和桌面图片都是提交进仓库的文件（`macos/assets`、`macos/art/akita`），构建只是复制它们；源图片改动后，在 Mac 上重新生成：
+应用图标和菜单栏标志是提交进仓库的文件（`macos/assets`），构建只是复制它们；源图片改动后，在 Mac 上重新生成：
 
 ```bash
 uv run --with pillow python scripts/make_app_icons.py
 ```
 
+Melo 的每一张图片（桌面宠物、它的静态图、启动窗口的肖像和活动胶囊的头像）都来自 `support/gateway/static/moves` 中的动作文件，也就是网页控制台显示的同一批文件。从美术包重新生成它们：
+
 ```bash
-uv run --with pillow python scripts/build_pet_assets.py --picks /path/to/picks.json
+uv run --with pillow python scripts/build_moves.py --source /path/to/pack
 ```
 
-- `picks.json` 的形式是 `{"root": "DIR", "picks": {"lie-idle": "path/below/DIR.png", ...}}`，列出脚本中的 14 个状态；Pillow 只在这一次运行中获取。
-- 网页控制台显示同样的图片：`--console-only` 会不用美术母版，直接把它们再复制到 `support/gateway/static/akita`（见[网页控制台指南](web-console.md#melo-in-the-page)）。
+- 美术包放在仓库之外；`--help` 说明它包含什么。Pillow 只在这一次运行中获取。
 - `GET /api/health` 还在 `status.recent` 中说明上一次运行是怎么结束的（见 [API 参考](../reference/api-v2.md)）；Melo 会读取它。
 
 WebKit 集成测试会打开原生窗口，需要图形化的 macOS 会话，因此默认关闭；请用临时 HOME 运行：

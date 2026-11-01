@@ -1,14 +1,17 @@
 """Melo's moves (support/gateway/static/moves, made by scripts/build_moves.py): the committed files are what the
-manifest says, on one canvas with its anchor, with a real alpha, within their size budget; and the build turns a pack
-into them with the same durations, playback and posters, the same bytes each time, and refuses a pack that does not
-hold what its manifest says. The build's tests make a small pack here, so no art is needed; they and the pixel checks
-need Pillow, which is not a dependency of localmelo: `uv run --with pillow pytest tests/test_moves_assets.py`.
+manifest says, on one canvas with its anchor, with a real alpha, within their size budget, with a poster per state and
+Melo's head cut from the posters; no picture of Melo from before them is left anywhere; and the build turns a pack into
+them with the same durations, playback and posters, the same bytes each time, and refuses a pack that does not hold
+what its manifest says. The build's tests make a small pack here, so no art is needed; they and the pixel checks need
+Pillow, which is not a dependency of localmelo: `uv run --with pillow pytest tests/test_moves_assets.py`.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import json
+import struct
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -19,7 +22,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 MOVES = ROOT / "support/gateway/static/moves"
 STATES = ["startup", "thinking", "working", "attention", "idle_rest", "idle_play"]
-# The moves are one copy, served by the console and copied into the app: about 1.4 MB.
+FACES = ["idle", "working", "waiting", "done", "error"]
+FAVICONS = [16, 32, 64]
+# The moves are one copy, served by the console and read by the app: about 1.6 MB.
 MAX_BYTES = 2_000_000
 
 
@@ -40,11 +45,28 @@ def webp(path: Path) -> tuple[int, int, bool]:
     return width, height, bool(flags & 0x10) and b"ALPH" in data[:64]
 
 
-def test_the_folder_holds_a_sheet_per_state_the_poster_and_the_manifest() -> None:
-    found = {path.name for path in MOVES.iterdir()}
-    assert found == {"manifest.json", "startup-poster.webp"} | {
-        f"{state}.webp" for state in STATES
-    }
+def expected_files() -> set[str]:
+    return (
+        {"manifest.json"}
+        | {f"{state}.webp" for state in STATES}
+        | {f"poster-{state}.webp" for state in STATES}
+        | {f"face-{name}.png" for name in FACES}
+        | {f"favicon-{pixels}.png" for pixels in FAVICONS}
+    )
+
+
+def png(path: Path) -> tuple[int, int, int]:
+    """Width, height and colour type (6: RGBA) of a PNG."""
+    data = path.read_bytes()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n", path
+    width, height = struct.unpack(">II", data[16:24])
+    return width, height, data[25]
+
+
+def test_the_folder_holds_a_sheet_and_a_poster_per_state_the_faces_and_the_manifest() -> (
+    None
+):
+    assert {path.name for path in MOVES.iterdir()} == expected_files()
     assert sum(path.stat().st_size for path in MOVES.iterdir()) <= MAX_BYTES
 
 
@@ -69,10 +91,11 @@ def test_the_manifest_gives_each_state_its_timeline_on_one_canvas() -> None:
         assert 0 <= entry["poster"] < len(durations)
         assert entry["playback"] == ("once" if state == "startup" else "loop")
         assert webp(MOVES / entry["file"]) == (columns * size, rows * size, True)
-    # Startup holds its last, sitting frame; the poster is that frame.
+    # Startup holds its last, sitting frame; the poster is that frame. Every state's poster is a file of its own.
     startup = document["states"]["startup"]
     assert startup["poster"] == len(startup["durations_ms"]) - 1
-    assert webp(MOVES / "startup-poster.webp") == (size, size, True)
+    for state in STATES:
+        assert webp(MOVES / f"poster-{state}.webp") == (size, size, True)
     # One loop of play is 6 s: the rest-or-play rule plays it once.
     assert sum(document["states"]["idle_play"]["durations_ms"]) == 6000
 
@@ -107,6 +130,84 @@ def test_each_frame_is_drawn_clear_round_the_dog_and_the_paws_rest_on_the_anchor
             # The lowest drawn row is the ground the paws rest on, give or take the art's own shadow.
             lowest = int(np.nonzero(cell.max(axis=1) > 128)[0][-1])
             assert abs(lowest - anchor_y) <= 3, (state, index, lowest)
+
+
+def test_the_faces_are_the_head_alone_centred_with_a_margin() -> None:
+    for name in FACES:
+        assert png(MOVES / f"face-{name}.png") == (96, 96, 6), name
+    for pixels in FAVICONS:
+        assert png(MOVES / f"favicon-{pixels}.png") == (pixels, pixels, 6), pixels
+    image = pytest.importorskip("PIL.Image")
+    np = pytest.importorskip("numpy")
+    for path in [MOVES / f"face-{name}.png" for name in FACES] + [
+        MOVES / f"favicon-{pixels}.png" for pixels in FAVICONS
+    ]:
+        with image.open(path) as picture:
+            alpha = np.asarray(picture.convert("RGBA"))[..., 3]
+        side = alpha.shape[0]
+        rows = np.nonzero(alpha.max(axis=1) > 128)[0]
+        columns = np.nonzero(alpha.max(axis=0) > 128)[0]
+        # The head fills most of the square, not cut by more than a sliver at any edge, and sits near the middle.
+        assert (rows[-1] - rows[0] + 1) / side > 0.6 and (
+            columns[-1] - columns[0] + 1
+        ) / side > 0.6, path.name
+        middle = ((columns[0] + columns[-1]) / 2, (rows[0] + rows[-1]) / 2)
+        assert abs(middle[0] - side / 2) < side * 0.12, path.name
+        assert abs(middle[1] - side / 2) < side * 0.15, path.name
+
+
+# What no file may name any more: Melo's pictures from before the moves, their folders, the script that made them,
+# and the moves' own old poster.
+OLD_ART = [
+    "art/akita",
+    "static/akita",
+    "assets/akita",
+    "Resources/akita",
+    "build_pet_assets",
+    "PetMotion",
+    "PetState",
+    "startup-poster",
+    "sit-idle",
+    "sit-working",
+    "sit-waiting",
+    "sit-done",
+    "sit-error",
+    "lie-idle",
+    "lie-working",
+    "lie-waiting",
+    "lie-done",
+    "lie-error",
+    "rest-lazy",
+    "sleep-front",
+    "sleep-side",
+    "sleep-back",
+    "face-idle-blink",
+]
+# Files that tell of the past: the changelog's earlier entries and the site's list of updates.
+HISTORY = {"CHANGELOG.md", "docs/en/updates.html", "docs/zh-CN/updates.html"}
+
+
+def test_no_file_names_a_picture_of_melo_from_before_the_moves() -> None:
+    listed = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, check=True
+    ).stdout.decode()
+    names = [name for name in listed.split("\0") if name]
+    if not names:
+        pytest.skip("not a git checkout")
+    this = Path(__file__).resolve().relative_to(ROOT).as_posix()
+    found = []
+    for name in names:
+        if name in HISTORY or name == this or not (ROOT / name).is_file():
+            continue
+        assert not name.startswith(
+            ("macos/art/", "support/gateway/static/akita/")
+        ), name
+        try:
+            text = (ROOT / name).read_text()
+        except (UnicodeDecodeError, OSError):
+            continue
+        found += [f"{name}: {word}" for word in OLD_ART if word in text]
+    assert not found, found
 
 
 # ── The build, on a small pack made here ──
@@ -200,6 +301,15 @@ def test_the_build_keeps_the_timelines_and_scales_the_whole_canvas(
             if index < 3:
                 rows = np.nonzero(drawn.any(axis=1))[0]
                 assert abs(int(rows[-1]) + 1 - cell * 60 / 64) <= 2
+    # A poster per state at the cell's size; the faces and favicons, cut from the posters.
+    assert {path.name for path in out.iterdir()} == expected_files()
+    for state in STATES:
+        with image.open(out / f"poster-{state}.webp") as poster:
+            assert poster.size == (cell, cell)
+    for name in FACES:
+        assert png(out / f"face-{name}.png")[:2] == (96, 96)
+    for pixels in FAVICONS:
+        assert png(out / f"favicon-{pixels}.png")[:2] == (pixels, pixels)
     # The words of the pack are not copied.
     assert "not copied" not in (out / "manifest.json").read_text()
     # The same pack gives the same bytes.

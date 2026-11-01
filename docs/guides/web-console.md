@@ -384,24 +384,24 @@ In developer mode, **Details** opens in the panel, in place of the tabs, until y
 
 The page shows Melo, the Akita puppy, where it already had a picture, in the
 app and in a browser alike. The panel's portrait moves; the other pictures are
-still, except that the calm (idle) face blinks: an eyes-closed patch, laid over
-the picture, fades in twice every 11 seconds. The blink is CSS only, and under
+still, and all of them come from the same moves. Under
 `prefers-reduced-motion: reduce` the page shows still pictures.
 
 - **Empty chat.** Melo sits above *What would you like to work on?*.
 - **The panel.** Melo's portrait sits at the top of the [panel](#the-panel-beside-a-chat) and moves with what it
   does: it wakes up, works, thinks, raises a paw while something waits for you, rests and plays now and then. It
-  is happy for a few seconds after a run ends well, and has a drooping ear when the model server cannot be reached
-  or a run just failed; those two are still pictures.
+  sits up smiling for a few seconds after a run ends well, and tilts its head when the model server cannot be
+  reached or a run just failed; those two are still pictures. While the page cannot reach localmelo, Melo lies
+  still and faded.
 - **Replies.** Beside `localmelo` on each reply is Melo's face. On the newest
-  reply it shows that turn's state: working (tongue out) while it runs, wide-eyed
-  while an approval waits, happy when it is done, and with a drooping ear when
+  reply it shows that turn's state: at its laptop while it runs, with a raised paw
+  while an approval waits, smiling when it is done, and with its head tilted when
   it ended with a warning or an error. A turn you stopped is not a failure and
-  keeps the calm face, and so does every older reply; the calm face blinks.
+  keeps the calm face, and so does every older reply.
 - **Approval bar.** The bar that reads "melo is waiting for your answer" shows the
-  wide-eyed face.
-- **Brand and tab.** The sidebar and the sign-in screen show the calm face, and
-  the browser tab uses it at 16, 32 and 64 px.
+  face with the raised paw.
+- **Brand and tab.** The sidebar, the Main chat and the sign-in screen show the calm face, and
+  the browser tab uses it, cut closer, at 16, 32 and 64 px.
 
 The faces are decoration where words already say the state (the live row, the
 work box, the failure card, the approval bar), so they have empty alt text. A
@@ -410,19 +410,14 @@ its face reads `Done` to a screen reader. The empty chat's Melo keeps the alt te
 `Melo, the localmelo Akita mascot`; the panel's moving portrait is decoration, as its status line says the same in
 words.
 
-The moves are served from `/assets/moves/`: one picture per state holding its frames, and `manifest.json` with each
-frame's duration (1.4 MB in all, the app plays the same files). The page loads them once, when it opens.
+The moves are served from `/assets/moves/`: one picture per state holding its frames, a still of each state
+(`poster-<state>.webp`), Melo's head cut from the stills (`face-idle.png`, `face-working.png`, `face-waiting.png`,
+`face-done.png`, `face-error.png`) and the tab icons (`favicon-16.png`, `-32` and `-64`), and `manifest.json` with
+each frame's duration: 1.6 MB in all, and the app shows the same files. The page loads the moves once, when it opens.
 
-The pictures are transparent PNGs with a thin cream rim. On the light canvas the
-navy outline sets Melo off (at least 12:1 against the console's light surfaces);
-on the dark canvas the rim does (at least 5.6:1 against the dark ones, 3:1 is the
-bar for a picture). They are served from `/assets/akita/` (`sit-idle.png`,
-`sit-idle-blink.png`, `sit-working.png`, `sit-waiting.png`, `sit-done.png`, `sit-error.png`, `face-idle.png`,
-`face-idle-blink.png`, `face-working.png`, `face-waiting.png`, `face-done.png`,
-`face-error.png` and `favicon-16.png`, `-32` and `-64`): 430 KB in all, of which a page loads the portrait and
-the face its state shows. They are copies of
-the app's own pictures in `macos/art/akita` made by the same script (see the
-[macOS app guide](macos-app.md)).
+The pictures are transparent. On the light canvas the dark brown line round Melo
+sets it off (about 15:1 against the console's light surfaces); on the dark canvas
+its orange fur does (about 7.5:1 against the dark ones; 3:1 is the bar for a picture).
 
 ## Inspect workers
 

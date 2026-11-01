@@ -374,8 +374,8 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
     for logo in ("MenuBarLogo.png", "MenuBarLogo@2x.png"):  # the menu-bar item's logo
         shutil.copy(ROOT / "macos/assets" / logo, bundle / "Resources" / logo)
     shutil.copytree(
-        ROOT / "macos/art/akita", bundle / "Resources/akita"
-    )  # the pet's pictures
+        ROOT / "support/gateway/static/moves", bundle / "Resources/moves"
+    )  # the pet's moves, its stills and the start window's portrait
     source = (ROOT / "macos/LocalMeloApp/main.swift").read_text()
     injections = {
         # The system's panel and Finder cannot run here: the panel answers the folder the test names.
@@ -560,7 +560,8 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
             str(ROOT / "macos/LocalMeloApp/StatusView.swift"),
             str(ROOT / "macos/LocalMeloApp/MenuBar.swift"),
             str(ROOT / "macos/LocalMeloApp/PetPolicy.swift"),
-            str(ROOT / "macos/LocalMeloApp/PetMotion.swift"),
+            str(ROOT / "macos/LocalMeloApp/PetMoves.swift"),
+            str(ROOT / "macos/LocalMeloApp/MenuWords.swift"),
             str(ROOT / "macos/LocalMeloApp/MotionGate.swift"),
             str(ROOT / "macos/LocalMeloApp/PetPanel.swift"),
             str(ROOT / "macos/LocalMeloApp/PillPolicy.swift"),
@@ -1191,19 +1192,19 @@ def test_the_first_window_shows_melo_in_the_mood_of_each_step(
             if line.startswith("step ")
         ]
         assert moods == [
-            ("Starting the local server", "portrait sit-working"),
-            ("Signing in", "portrait sit-working"),
-            ("Opening your workspace", "portrait sit-idle"),
+            ("Starting the local server", "portrait startup"),
+            ("Signing in", "portrait startup"),
+            ("Opening your workspace", "portrait startup"),
         ], events
 
 
-def test_a_start_that_fails_shows_melo_with_the_drooping_ear(
+def test_a_start_that_fails_shows_melo_thinking_not_a_healthy_start(
     app: Path, tmp_path: Path
 ) -> None:
     process = launch(app, tmp_path, "wrong-quit")
     try:
         events = wait_for(tmp_path / "events", "failure-portrait", process)
-        assert "failure-portrait sit-error" in events
+        assert "failure-portrait thinking" in events
         process.wait(timeout=15)  # the host clicks Quit by itself
     finally:
         stop(process, tmp_path)

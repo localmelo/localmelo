@@ -168,13 +168,14 @@ test('the portrait, the status line and the face chip follow health', async () =
   await h.panel.update(health({running: {chats: 0, tasks: 2, runs: 0, terminal: 0}, waiting: [{kind: 'task', id: 't1'}]}));
   assert.equal(h.root.dataset.mood, 'waiting');
   const picture = h.root.find((node) => node.tagName === 'IMG');
-  assert.equal(picture.getAttribute('src'), '/assets/akita/sit-waiting.png');
+  assert.equal(picture.getAttribute('src'), '/assets/moves/poster-attention.webp');
   assert.match(h.root.find((node) => node.attributes.role === 'status').text(), /Waiting for you/);
   assert.equal(h.chip.children[1].textContent, '2 · !');
   assert.equal(h.chip.attributes['aria-label'], 'Activity: Waiting for you');
   await h.panel.update(health());
-  assert.equal(picture.getAttribute('src'), '/assets/akita/sit-idle.png');
-  assert.ok(h.root.find((node) => node.className.includes('blinks')), 'only the resting portrait blinks');
+  assert.equal(picture.getAttribute('src'), '/assets/moves/poster-idle_rest.webp');
+  assert.ok(!h.root.find((node) => node.className.includes('blinks')), 'no picture blinks');
+  assert.equal(h.chip.children[0].src, '/assets/moves/face-idle.png');
 });
 
 test('calm: nothing running, and today newest first with each kind and result', async () => {
@@ -907,10 +908,10 @@ test('the portrait wakes up once, rests, plays now and then, and keeps its still
   assert.equal(player.canvas.tagName, 'CANVAS');
   assert.equal(player.canvas.attributes['aria-hidden'], 'true');
   assert.equal(ring.dataset.moves, 'off', 'before the first health reply the picture shows');
+  assert.equal(ring.dataset.dim, 'true', 'not connected yet: the resting dog, dimmed');
   await h.panel.update(health());
   assert.equal(ring.dataset.moves, 'on');
   assert.deepEqual(player.asked, ['startup']);
-  assert.ok(!h.root.find((node) => node.className.includes('blinks')), 'the still picture behind the moves does not blink');
   // Startup holds until it ends; then Melo rests.
   await h.panel.update(health());
   assert.deepEqual(player.asked, ['startup']);
@@ -943,17 +944,23 @@ test('the portrait wakes up once, rests, plays now and then, and keeps its still
   const asked = player.asked.length;
   await h.panel.update(health({recent: {kind: 'chat', id: 'c1', outcome: 'done', ended_s_ago: 1}}));
   assert.equal(ring.dataset.moves, 'off');
-  assert.equal(h.root.find((node) => node.tagName === 'IMG').getAttribute('src'), '/assets/akita/sit-done.png');
+  // The sitting dog the wake-up ends on, from the moves; an error is the tilted head.
+  assert.equal(h.root.find((node) => node.tagName === 'IMG').getAttribute('src'), '/assets/moves/poster-startup.webp');
+  assert.equal(ring.dataset.dim, 'false');
   assert.ok(player.hidden.has('portrait'));
   assert.equal(player.asked.length, asked);
   await h.panel.update(health({}, {model_server: {reachable: false}}));
   assert.equal(ring.dataset.moves, 'off');
   assert.equal(ring.dataset.move, undefined);
+  assert.equal(h.root.find((node) => node.tagName === 'IMG').getAttribute('src'), '/assets/moves/poster-thinking.webp');
   // The page lost the gateway: the still picture, until it answers again.
   await h.panel.update(health());
   assert.equal(ring.dataset.moves, 'on');
   h.panel.offline(true);
   assert.equal(ring.dataset.moves, 'off');
+  // Lost: the resting dog, dimmed; the words and the ring stay as they were.
+  assert.equal(h.root.find((node) => node.tagName === 'IMG').getAttribute('src'), '/assets/moves/poster-idle_rest.webp');
+  assert.equal(ring.dataset.dim, 'true');
   assert.ok(player.hidden.has('portrait'));
   h.panel.offline(false);
   assert.equal(ring.dataset.moves, 'on');

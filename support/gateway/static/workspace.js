@@ -664,7 +664,7 @@ function mainRow(main, unread) {
   const dot = asking || unread || inSide
     ? `<span class="attention-dot${asking || inSide || unread?.state === "waiting" ? " waits" : ""}" role="img" aria-label="${label}" title="${label}"></span>`
     : "";
-  info.innerHTML = `<img class="main-face" src="/assets/akita/face-idle.png" width="28" height="28" alt="" /><span class="main-text"><span class="session-title">${esc(t("chat.main"))}</span>${meta ? `<span class="session-meta">${esc(meta)}</span>` : ""}</span><span class="main-when">${esc(when)}${dot}</span>`;
+  info.innerHTML = `<img class="main-face" src="/assets/moves/face-idle.png" width="28" height="28" alt="" /><span class="main-text"><span class="session-title">${esc(t("chat.main"))}</span>${meta ? `<span class="session-meta">${esc(meta)}</span>` : ""}</span><span class="main-when">${esc(when)}${dot}</span>`;
   info.addEventListener("click", () => {
     openSession(main.id);
   });
@@ -1411,24 +1411,18 @@ function userNode(turn, newest = false) {
 function assistantNode(turn, newest = false) {
   const article = el("article", "msg assistant");
   const label = el("div", "assistant-label");
-  // The newest reply's face shows its turn's state, a still picture; older replies keep the idle face.
+  // The newest reply's face shows its turn's state, a still head cut from Melo's moves; older replies keep the idle face.
   const face = turnFace(turn, { newest, pending: S.view?.pending.size ?? 0 });
   const icon = document.createElement("img");
   icon.className = "brand-icon";
-  icon.src = `/assets/akita/face-${face}.png`;
+  icon.src = `/assets/moves/face-${face}.png`;
   icon.dataset.face = face;
   icon.width = 28;
   icon.height = 28;
   // The live row, the work box and the failure card word every state, so the face is decoration there. A
   // finished answer with no work box above it has nothing else saying the turn is done.
   icon.alt = face === "done" && shownItems(turn).length === 0 ? t("chat.done") : "";
-  // The idle face blinks (CSS only: an eyes-closed patch fades in over it); the other faces have no patch.
-  let mark = icon;
-  if (face === "idle") {
-    mark = el("span", "blinks face");
-    mark.append(icon);
-  }
-  label.append(mark, el("span", "", "localmelo"));
+  label.append(icon, el("span", "", "localmelo"));
   article.append(label);
   if (!turn.finishedAt || shownItems(turn).length > 0) article.append(workGroup(turn));
   article.append(...blockedCards(turn));
