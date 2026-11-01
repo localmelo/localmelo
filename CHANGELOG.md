@@ -9,6 +9,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A task says honestly how it ended. When its worker finishes, code, not the
+  worker, decides, and only proof makes it **Ready**. It reads **Done, not
+  finished** when its last test failed or its result was not checked, when it
+  changed code and no test ran after the last change, when you asked for a
+  commit (or a push or a pull request) and the changes are not committed, or
+  when its folder could not be checked. **Needs you** means its report still
+  asks you something; **Failed**, **Stopped** and **Not needed** say the rest.
+  Only tests the task's own run started count, and only a plain test command
+  passes on its result; tests a report claims do not count, and work that was
+  in the folder before the task is not blamed on it. Work owed stays owed until
+  the task ends ready, outside git too. Tests that still fail when nothing was
+  changed say so, with nothing to finish. The card, the task page, Activity
+  and the terminal say it in plain words and colour, the task page lists the
+  tests the run ran, and **Finish it: run the tests and commit** continues a
+  task that still owes them with one tap. Part of #377. [#393]
 - In the terminal, **Shift+Tab** switches the chat between Ask and Auto (Tab
   still completes). The bottom line always names the mode with its key,
   `ask · shift+tab` or `auto · shift+tab`, Auto in its own colour (the key
@@ -3304,3 +3319,4 @@ earlier milestones.
 [#388]: https://github.com/localmelo/localmelo/pull/388
 [#389]: https://github.com/localmelo/localmelo/pull/389
 [#392]: https://github.com/localmelo/localmelo/pull/392
+[#393]: https://github.com/localmelo/localmelo/pull/393

@@ -39,6 +39,7 @@
 
 - `Done: Fix the list_files test` 加上回答的前两行：改了什么、测试结果、提交。
 - `Did not finish: Fix CI` 加上它结束的原因。
+- `Ready: Fix CI`、`Done, not finished: Fix CI` 或 `Needs you: Fix CI` 表示任务做完了：这是代码核对出的结局，不是报告里说的（[怎样核对](scheduler.md#tasks-from-the-main-chat)）。没收尾的任务用琥珀色写出原因（`No test ran after the last change · The changes are not committed`），并提供 **Finish it: run the tests and commit**（或 **Finish it: run the tests**），像 **Continue** 一样让它接着做。需要你的任务显示它的问题。
 - `Stopped: Fix CI` 表示任务用完了所有步数还没做完。它显示回答里说明还剩什么的那一句（`Remaining: run the tests and commit.`），并提供 **Continue**，让任务从停下的地方接着做，并记得之前做过什么。同一个任务在它的页面和面板的 Activity、Workers 行里也读作 Stopped，也有 **Continue**。因其他原因失败的任务仍是 `Did not finish`。
 - `Needs your approval: Fix CI` 加上它请求做什么。你回答之后，同一张卡片会写出结果（"Allowed once"、"Allowed for this task"、"Denied"），不再提供 **Review**。
 - 标题是主对话给任务起的标题，否则是你的请求的开头部分，在词的边界处截断。
@@ -244,6 +245,7 @@
 ![无法使用自己文件夹的任务提供 Choose a folder](../../assets/img/task-folder-refused.webp)
 
 - **只差提交。** 步数用完、只剩提交没做的任务，会在卡片和任务页上显示 `Not committed. Run: <command>`。
+- **怎样结束的。** 已结束任务的状态是代码核对出的结局：**Ready**（绿色）、**Done, not finished** 和 **Needs you**（琥珀色）、**Failed**（红色）、**Stopped** 或 **Not needed**（灰色）。**How it ended** 写出原因，**Tests it ran** 列出任务自己这次运行启动的测试，每个标着通过、没通过或结果没核对；回答里只是提到的测试不会列出。**Ready** 需要证据：测试结果或文件夹没能核对时，任务就不算完成。**Finish it** 一点就让还欠着测试或提交的任务继续。面板的 Activity 和 Workers 行也这样显示，`GET /api/tasks/<id>` 以 `ending` 字段给出它。
 
 请求进行中时对应按钮不可用。被拒绝时（确认已过期、任务已结束、Stop 抢先）会显示服务器给出的文字。
 

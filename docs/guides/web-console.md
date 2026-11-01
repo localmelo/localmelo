@@ -143,6 +143,7 @@ come back to that side chat ([below](#side-chats-start-tasks-too)). A card reads
 
 - `Done: Fix the list_files test` with the first two lines of the answer: what changed, the tests, the commit.
 - `Did not finish: Fix CI` with why it ended.
+- `Ready: Fix CI`, `Done, not finished: Fix CI` or `Needs you: Fix CI` for a task that finished: how code found it ended, not what its report says ([how it is checked](scheduler.md#tasks-from-the-main-chat)). A task not finished says why in amber (`No test ran after the last change · The changes are not committed`) and offers **Finish it: run the tests and commit** (or **Finish it: run the tests**), which continues it as **Continue** does. A task that needs you shows its question.
 - `Stopped: Fix CI` for a task that used all its steps before it was done. It shows the sentence of its answer that says what is left (`Remaining: run the tests and commit.`) and offers **Continue**, which picks the task up where it stopped, with what it did before. The same task reads Stopped on its page and in the panel's Activity and Workers rows, each with **Continue**. A task that failed for another reason stays `Did not finish`.
 - `Needs your approval: Fix CI` with what it asks. Once you answer, the same card says how ("Allowed once", "Allowed for this task", "Denied") and no longer offers **Review**.
 - A title is the one the main chat gave the task, or the first part of your request, cut at a word.
@@ -505,6 +506,15 @@ run). Like Workers, the view replaces the chat while it is open. The header says
 
 - **Only the commit left.** A task that ran out of steps before its commit says
   `Not committed. Run: <command>` on its card and its page.
+- **How it ended.** A finished task's state is how code found it ended: **Ready**
+  (green), **Done, not finished** and **Needs you** (amber), **Failed** (red),
+  **Stopped** or **Not needed** (grey). **How it ended** says why, and **Tests it
+  ran** lists the tests the task's own run started, each passed, failed or result
+  not checked; a test its answer only mentions is not listed. **Ready** needs
+  proof: when a test's result or the folder could not be checked, the task is not
+  ready. **Finish it** continues, with one tap, a task that still owes its tests
+  or its commit. The panel's Activity and Workers rows say the same, and
+  `GET /api/tasks/<id>` carries it as `ending`.
 
 A button is disabled while its request is in flight. A refusal (a stale
 confirmation, a finished task, Stop winning the race) shows the server's text.

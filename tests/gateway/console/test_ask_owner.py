@@ -419,9 +419,12 @@ async def test_two_tasks_asking_one_chat_get_one_internal_turn_at_a_time_oldest_
         tasks = [await start(console, "job a"), await start(console, "job b")]
         await until(lambda: all(console.asks.waiting(t) for t in tasks))
         await until(lambda: len(models["main"].requests) == 1)
-        # Both asked; one internal turn runs, the other waits for it.
+        # Both asked; one internal turn runs, the other waits for it. An ask
+        # counts as waiting once its chat is known, but joins the queue only
+        # after its row is written, so wait for the queue to settle.
+        await until(lambda: sum(len(q) for q in console.asks._waiting.values()) == 1)
         assert len(console.asks._busy) == 1
-        assert sum(len(q) for q in console.asks._waiting.values()) == 1
+        assert len(models["main"].requests) == 1
         release.set()
         for task_id in tasks:
             await ended(console, task_id)
