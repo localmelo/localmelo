@@ -9,6 +9,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Developer only: `melo memory ingest FILE` loads past chats from a JSON file as if they
+  had happened on their dates (no model call), and `LOCALMELO_NOW` pins the date
+  the model and memory recall read, for memory tests.
 - A task says honestly how it ended. When its worker finishes, code, not the
   worker, decides, and only proof makes it **Ready**. It reads **Done, not
   finished** when its last test failed or its result was not checked, when it
