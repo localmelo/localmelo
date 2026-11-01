@@ -4,6 +4,7 @@ import {setupMemoryTab} from './memory-tab.mjs';
 import {setupScheduledTab} from './scheduled-tab.mjs';
 import {formatTime, t} from './i18n.mjs';
 import {endingLabel, endingWhy, readEnding} from './endings.mjs';
+import {idleMove, startMoves} from './moves.mjs';
 
 /**
  * The panel beside a chat: Melo's portrait and status, then tabs. It follows
@@ -19,7 +20,9 @@ import {endingLabel, endingWhy, readEnding} from './endings.mjs';
  * address `#/tasks/<id>` names it, so a card in the chat or a row of what runs lands on the same view; `#/tasks`
  * names the list of all tasks, which Activity (today only) does not have. Scheduled (scheduled-tab.mjs) lists the
  * check-in and the chores that run on a schedule; Memory
- * (memory-tab.mjs) lists the notes melo keeps. `update(health)` is called on every health poll: the
+ * (memory-tab.mjs) lists the notes melo keeps. Melo's portrait moves (moves.mjs, `portraitMove`): it wakes up on
+ * the first load, works, thinks, raises a paw when something waits for the person and rests; a run that just ended,
+ * an error and the time before the first health reply keep their still pictures. `update(health)` is called on every health poll: the
  * header follows it, and the list is read again when what runs changed, the
  * chat changed, or every REFRESH_MS. Below 900 px the panel is a bottom sheet
  * behind `chip`, closed by Escape (`closeSheet()`), the backdrop, or a drag
@@ -100,11 +103,36 @@ export function headline(health, scoped = null) {
   return {text, mood, fix: false, count: 0};
 }
 
+/**
+ * Whether every running thing waits on the model: the gateway marks an item `answering` while its newest step is a
+ * model call with no tool, approval or hold open. `scoped` is a side chat's rows (else the whole console's items);
+ * a list that leaves out some of what runs is no answer.
+ */
+export function answering(health, scoped = null) {
+  const items = scoped ? scoped.filter((row) => row.state === 'running' || row.state === 'held') : health?.status?.items ?? [];
+  const count = scoped ? items.length : Object.values(health?.status?.running ?? {}).reduce((sum, n) => sum + (Number(n) || 0), 0);
+  return items.length > 0 && items.length >= count && items.every((item) => item.answering === true);
+}
+
+/**
+ * The move of Melo's portrait for a header (`said`, from `headline`): `attention` while something waits for the
+ * person, `thinking` while everything running waits on the model, `working` while anything else runs, `idle` when
+ * nothing runs (rest or play, chosen over time by the caller). Null keeps the header's still picture: before the
+ * first health reply, an error (no model, an unreachable server) and a run that just ended have no moves.
+ */
+export function portraitMove(health, said, scoped = null) {
+  if (!health || said.mood === 'error' || said.mood === 'done') return null;
+  if (said.mood === 'waiting') return 'attention';
+  if (said.mood === 'working') return answering(health, scoped) ? 'thinking' : 'working';
+  return 'idle';
+}
+
 export function setupPanel({
   root, chip, backdrop, api, developer = () => false, openSettings = () => {}, cover = () => [],
   storage = globalThis.localStorage, clock = Date.now, live: stream = {}, chat = chatOfAddress,
   wide = globalThis.matchMedia?.('(min-width: 900px)'),
   tasks = null, home = () => '#/new', navigate = (hash) => { globalThis.location.hash = hash; }, hasTasks = () => false,
+  moves = startMoves,
 }) {
   const doc = root.ownerDocument;
   const state = {health: null, rows: [], more: false, unavailable: [], loaded: false, error: '', notice: '', noticeFor: '',
@@ -141,7 +169,11 @@ export function setupPanel({
   picture.width = 108;
   picture.height = 140;
   frame.append(picture);
-  ring.append(frame);
+  // The moves draw on a canvas over the picture; the ring shows one of the two (`data-moves`). The status line
+  // says in words what both show.
+  const stage = node('canvas', 'panel-moves');
+  stage.setAttribute('aria-hidden', 'true');
+  ring.append(frame, stage);
   const status = node('p', 'panel-status');
   status.setAttribute('role', 'status');
   const head = node('header', 'panel-head');
@@ -193,12 +225,53 @@ export function setupPanel({
     body.setAttribute('aria-labelledby', `panel-tab-${state.tab}`);
   }
 
+  // ── Melo's moves ──
+
+  // `startup`: the wake-up still to play (the first move of the page, if nothing runs then); `restSince` and
+  // `playedAt`: when the rest began and the last play did (clock ms); `playing`: a play goes on to its end.
+  const motion = {player: null, startup: true, restSince: null, playedAt: -Infinity, playing: false};
+  Promise.resolve(moves(stage, {onComplete: ({state: done}) => {
+    if (done === 'startup') motion.startup = false;
+    if (done === 'idle_play') motion.playing = false;
+    drawHeader();
+  }})).then((player) => {
+    motion.player = player ?? null;
+    if (motion.player) drawHeader();
+  }, () => {});
+  // The state to show for a move, and whether a looping state plays once.
+  function pick(move) {
+    if (move !== 'idle') {
+      Object.assign(motion, {startup: false, restSince: null, playing: false});
+      return {key: move};
+    }
+    if (motion.startup) return {key: 'startup'};
+    const now = clock();
+    motion.restSince ??= now;
+    if (motion.player.inspect().still) return {key: 'idle_rest'};
+    if (!motion.playing && idleMove(now - motion.restSince, now - motion.playedAt) === 'idle_play') {
+      Object.assign(motion, {playing: true, playedAt: now});
+    }
+    return motion.playing ? {key: 'idle_play', once: true} : {key: 'idle_rest'};
+  }
+  function drawMove(said, scoped) {
+    const move = motion.player ? portraitMove(state.health, said, scoped) : null;
+    ring.dataset.moves = move ? 'on' : 'off';
+    // A still picture stops the moves behind it; they go on from where they were.
+    motion.player?.setVisible(Boolean(move), 'portrait');
+    if (!move) return false;
+    const {key, once = false} = pick(move);
+    motion.player.set(key, {once}).catch(() => {});
+    return true;
+  }
+
   function drawHeader() {
-    const said = headline(state.health, state.scope === 'chat' && state.loaded ? state.rows : null);
+    const scoped = state.scope === 'chat' && state.loaded ? state.rows : null;
+    const said = headline(state.health, scoped);
     root.dataset.mood = said.mood;
     const src = `/assets/akita/sit-${said.mood}.png`;
     if (picture.getAttribute?.('src') !== src) picture.setAttribute('src', src);
-    frame.classList.toggle('blinks', said.mood === 'idle');
+    const moving = drawMove(said, scoped);
+    frame.classList.toggle('blinks', said.mood === 'idle' && !moving);
     const nodes = [node('span', 'panel-dot'), node('span', '', said.text)];
     if (said.fix) nodes.push(button('link-button', t('common.openSettings'), () => openSettings()));
     status.replaceChildren(...nodes);
