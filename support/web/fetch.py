@@ -18,8 +18,9 @@ within :data:`TOTAL_S` for the whole fetch.
 from __future__ import annotations
 
 import asyncio
+import re
 import zlib
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from urllib.parse import urljoin
 
@@ -50,6 +51,10 @@ DNS_S = 5.0
 # Addresses of one host tried in turn when a connection fails.
 MAX_ADDRESSES = 3
 REDIRECTS = frozenset({301, 302, 303, 307, 308})
+# A header value that is one plain token (an encoding's name).
+_TOKEN = re.compile(r"[a-z0-9._+-]{1,40}")
+# Asked before a site is looked up: the first address, and a redirect to another site.
+Admit = Callable[[Target], Awaitable[None]]
 
 
 class FetchError(Exception):
@@ -94,8 +99,14 @@ class _Decoder:
             self._zlib = zlib.decompressobj()
             self._raw_tried = False
         elif encoding not in ("", "identity"):
+            # A server's own words never reach the model: a name, or nothing.
+            how = (
+                f"as {encoding!r}"
+                if _TOKEN.fullmatch(encoding)
+                else "in an unknown way"
+            )
             raise FetchError(
-                f"The server sent the page compressed as {encoding!r}, which melo does not read."
+                f"The server sent the page compressed {how}, which melo does not read."
             )
 
     def feed(self, data: bytes, limit: int) -> tuple[bytes, bool]:
@@ -144,27 +155,60 @@ class WebFetcher:
         self._verify = verify
 
     async def fetch(
-        self, url: str, accept: Callable[[str], bool] | None = None
+        self,
+        url: str,
+        accept: Callable[[str], bool] | None = None,
+        admit: Admit | None = None,
     ) -> Response:
         """The page at *url* after redirects; :class:`AddressError` or :class:`FetchError` with why not.
 
         *accept*, when given, says which media types have their body read; a
         page of another type is returned with an empty body, so the caller can
         say what it was without downloading it. A page with no type is read.
+        *admit* is awaited with each address whose site has not been admitted
+        in this fetch, before its name is looked up: the first, and a redirect
+        to another host. It raises to refuse.
         """
         try:
-            async with asyncio.timeout(self.total_s):
-                return await self._follow(url, accept)
+            async with asyncio.timeout(self.total_s) as limit:
+                return await self._follow(url, accept, admit, limit)
         except TimeoutError:
             raise FetchError(
                 f"The page did not finish loading within {self.total_s:g} seconds."
             ) from None
 
-    async def _follow(self, url: str, accept: Callable[[str], bool] | None) -> Response:
+    async def _follow(
+        self,
+        url: str,
+        accept: Callable[[str], bool] | None,
+        admit: Admit | None,
+        limit: asyncio.Timeout,
+    ) -> Response:
         current = url
         redirects: list[str] = []
+        admitted: set[tuple[str, int]] = set()
+        previous: Target | None = None
         while True:
             target = check_url(current)
+            if (
+                previous is not None
+                and previous.scheme == "https"
+                and target.scheme == "http"
+            ):
+                raise FetchError(
+                    f"{previous.host} redirected from https to http ({target.host}); "
+                    "melo does not follow a secure page to an unencrypted address."
+                )
+            # A site is its host and port; an upgrade from http to https is the same site.
+            site = (target.host, target.port if not target.default_port else 0)
+            if admit is not None and site not in admitted:
+                # The time the person takes to answer is not the page's.
+                started = asyncio.get_running_loop().time()
+                await admit(target)
+                when = limit.when()
+                if when is not None:
+                    limit.reschedule(when + asyncio.get_running_loop().time() - started)
+                admitted.add(site)
             addresses = await checked_addresses(
                 target, self._resolver, allow=self._allow, timeout_s=DNS_S
             )
@@ -178,6 +222,7 @@ class WebFetcher:
                     f"The page redirected more than {self.max_redirects} times; melo stopped."
                 )
             redirects.append(target.url)
+            previous = target
             current = urljoin(target.url, location)
 
     async def _get(

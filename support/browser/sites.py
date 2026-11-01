@@ -53,19 +53,27 @@ def host_of(origin: str) -> str:
     return origin.split("://", 1)[-1]
 
 
-async def require_site(origin: str) -> None:
+async def require_site(origin: str, *, via: str = "browser") -> None:
     """Ask about *origin*; :class:`BrowserError` with the sentence for the model if refused.
 
     A "no" is final for the call: the person's answer is not asked twice.
+    *via* ``"web_fetch"`` asks the same question (the same grant name, so one
+    "allow for this chat" covers both tools) worded "read <host>", with
+    ``via`` in its arguments so a surface can say no browser opens.
     """
     ask = TOOL_ASK.get()
     if ask is None:
         return
     host = host_of(origin)
+    reading = via == "web_fetch"
+    arguments = {"site": host, "origin": origin, "access": "read"}
+    if reading:
+        arguments["via"] = "web_fetch"
     decision = await ask(
         PREFIX + origin,
-        {"site": host, "origin": origin, "access": "read"},
-        f"open {host} in Safari and read it",
+        arguments,
+        f"read {host}" if reading else f"open {host} in Safari and read it",
     )
     if not decision.allow:
-        raise BrowserError(f"melo did not open {host}. " + denial_text(decision))
+        verb = "read" if reading else "open"
+        raise BrowserError(f"melo did not {verb} {host}. " + denial_text(decision))

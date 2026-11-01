@@ -17,6 +17,13 @@ Two checks, both before any connection is made:
    documentation ranges are refused, and so are IPv6 unique-local and
    link-local addresses and any IPv6 address that carries an IPv4 one
    (mapped, compatible, NAT64, 6to4, Teredo).
+3. :func:`local_problem` then reads each address from this computer's side,
+   since a public address can still be its own or its neighbour's (a global
+   IPv6 address, or a network of public IPv4 addresses): an address this
+   computer can bind is one of its own; so is one it would send to from
+   itself; and one in the IPv6 /64 (or, for a public IPv4 address, the /24)
+   of the address it would send from is on its local network. Both are
+   found with a UDP socket that is bound or connected and never sends.
 
 The fetcher (:mod:`localmelo.support.web.fetch`) resolves the name itself,
 checks every answer, and connects to an address it checked, so a DNS answer
@@ -31,6 +38,7 @@ import ipaddress
 import re
 import socket
 from collections.abc import Awaitable, Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -42,6 +50,10 @@ Resolver = Callable[[str, int], Awaitable[list[tuple[str, int]]]]
 AllowHook = Callable[[str, IPAddress], bool]
 
 MAX_URL_CHARS = 2048
+# Name lookups run on threads of their own, at most this many at once, so a
+# slow resolver cannot hold the threads the rest of melo shares.
+DNS_THREADS = 4
+_DNS = ThreadPoolExecutor(max_workers=DNS_THREADS, thread_name_prefix="web-fetch-dns")
 SCHEMES = {"http": 80, "https": 443}
 # Names that only ever mean this computer or the local network.
 LOCAL_NAMES = frozenset({"localhost", "localhost.localdomain"})
@@ -265,12 +277,51 @@ def check_url(url: str) -> Target:
 
 
 async def system_resolver(host: str, port: int) -> list[tuple[str, int]]:
-    """The addresses the system's resolver gives for *host*, with their ports."""
+    """The addresses the system's resolver gives for *host*, with their ports.
+
+    It runs on :data:`DNS_THREADS` threads of its own: a lookup that hangs
+    holds one of those, never a thread of the loop's shared executor.
+    """
     loop = asyncio.get_running_loop()
-    infos = await loop.getaddrinfo(
-        host, port, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP
+    infos = await loop.run_in_executor(
+        _DNS, socket.getaddrinfo, host, port, 0, socket.SOCK_STREAM, socket.IPPROTO_TCP
     )
     return [(str(info[4][0]), int(info[4][1])) for info in infos]
+
+
+def local_problem(ip: IPAddress, port: int) -> str | None:
+    """What *ip* is from this computer's side, when it is not somewhere else on the internet.
+
+    One of this computer's own addresses (it can bind it, or it would send to
+    it from itself), or an address on its local network: in the IPv6 /64, or
+    for a public IPv4 address the /24, of the address it would send from.
+    Nothing is sent: the UDP sockets are only bound or connected. An address
+    with no route is left to the connection, which then fails.
+    """
+    family = socket.AF_INET6 if ip.version == 6 else socket.AF_INET
+    text = str(ip)
+    try:
+        with socket.socket(family, socket.SOCK_DGRAM) as probe:
+            probe.bind((text, 0))
+        return "one of this computer's own addresses"
+    except OSError:
+        pass
+    try:
+        with socket.socket(family, socket.SOCK_DGRAM) as probe:
+            probe.connect((text, port or 9))
+            source = ipaddress.ip_address(str(probe.getsockname()[0]).split("%")[0])
+    except (OSError, ValueError):
+        return None
+    if source == ip:
+        return "one of this computer's own addresses"
+    if ip.version == 6:
+        if ip in ipaddress.ip_network(f"{source}/64", strict=False):
+            return "on this computer's local network (the same IPv6 /64)"
+    elif address_problem(source) is None and ip in ipaddress.ip_network(
+        f"{source}/24", strict=False
+    ):
+        return "on this computer's local network (the same /24)"
+    return None
 
 
 async def checked_addresses(
@@ -307,8 +358,13 @@ async def checked_addresses(
                 f"{target.host} resolved to {address!r}, which is not an address."
             ) from None
         problem = address_problem(ip)
-        if problem and not (allow is not None and allow(target.host, ip)):
-            raise _not_public(target.host, f"it resolves to {ip}, {problem}")
+        what = f"it resolves to {ip}, {problem}" if problem else ""
+        if not problem:
+            local = local_problem(ip, port)
+            if local:
+                what = f"{ip} is {local}" if target.ip is None else f"it is {local}"
+        if what and not (allow is not None and allow(target.host, ip)):
+            raise _not_public(target.host, what)
         if (ip, port) not in checked:
             checked.append((ip, port))
     if not checked:
@@ -325,8 +381,10 @@ __all__ = [
     "AddressError",
     "Resolver",
     "Target",
+    "DNS_THREADS",
     "address_problem",
     "check_url",
     "checked_addresses",
+    "local_problem",
     "system_resolver",
 ]

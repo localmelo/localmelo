@@ -299,7 +299,7 @@ async def test_a_page_that_needs_a_login_or_blocks_readers_says_so(
     blocked = _error(await _call(_provider(server, browser=True), f"{URL}/forbidden"))
     assert "refused the request (HTTP 403)" in blocked
     assert "browser_open can try it in Safari" in blocked
-    assert "HTTP 404 Not Found" in _error(
+    assert "answered HTTP 404." in _error(
         await _call(_provider(server), f"{URL}/missing")
     )
 
