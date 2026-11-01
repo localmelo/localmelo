@@ -65,7 +65,10 @@ async def test_fact_embedding_respects_lock_and_activity(
         lock=str(lock),
         is_active=active,
     )
-    assert "sleep lock is held" in report.aborted or "user is active" in report.aborted
+    assert (
+        report.aborted
+        == {"lock": "stopped: gpu_lock", "activity": "stopped: user_active"}[why]
+    )
     assert not report.changes and await memory.stores()[1].meta("sleep_until") == 0
 
 
