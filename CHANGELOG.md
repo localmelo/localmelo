@@ -9,6 +9,26 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- One step replaces every picture of Melo from an art pack, a folder or a zip.
+  `uv run --with pillow==13.0.0 python scripts/art_pack.py check PACK` reads the
+  pack, writes nothing and reports what it replaces, what is missing and used
+  instead, the problems that stop `apply` (exit 1) and the warnings, each rule
+  named in plain words. `apply PACK` then replaces the moves folder, the faces
+  and tab icons, the terminal welcome's mark and, from `brand/` pictures, the
+  app icon, the menu-bar logo, the README emblem and the website's logo; it
+  redraws the guide's two pictures and leaves a preview sheet (`-o DIR`; `-r
+  ROOT` writes elsewhere than the checkout). A pack counts its frames from
+  `frame_00` or `frame_01`; the stills, the heads and the brand pictures are
+  optional, and a still that is missing is written as a copy of the poster that
+  stands in for it. A zip is checked whole before anything is written (no
+  absolute path, `..`, symbolic link, duplicate name, more than 2000 entries,
+  50 MB a file or 300 MB in all), only PNG and JSON are read, and nothing in a
+  pack is run. The same pack gives the same bytes, and the committed moves are
+  reproduced byte for byte. The format, the art rules and the fallbacks are in
+  the new [art pack guide](docs/guides/art-pack.md). `build_moves.py` and
+  `make_app_icons.py` are now importable engines of this command and still run
+  alone. [#426]
+
 - Melo moves. In the console's panel and on the desktop, Melo wakes up when
   the page or the pet first appears, types at its laptop while something
   runs, tilts its head while the model is answering and no tool runs, raises
@@ -3590,3 +3610,4 @@ earlier milestones.
 [#412]: https://github.com/localmelo/localmelo/issues/412
 [#410]: https://github.com/localmelo/localmelo/issues/410
 [#411]: https://github.com/localmelo/localmelo/issues/411
+[#426]: https://github.com/localmelo/localmelo/issues/426

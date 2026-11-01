@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Make Melo's pictures (the moves of the desktop pet and the console's portrait, their stills and Melo's face)
-from an art pack.
+from an art pack. This is the engine of `scripts/art_pack.py`, the one command that checks a pack and replaces
+every picture of Melo (see docs/guides/art-pack.md); run it alone to make only the moves:
 
     uv run --with pillow==13.0.0 python scripts/build_moves.py --source <pack folder> --stills <stills folder>
 
@@ -17,7 +18,8 @@ canvas, the paws on the pack's anchor line and centred like its frames. They are
 a reason: a run that ended well, a failure, and nothing known or no connection. It may also hold head-smile.png and
 head-neutral.png: Melo's front-facing head on the same canvas (the bust fitted in HEAD_BOX), drawn for small sizes.
 Their masters stay out of the repository too. Without the folder those three posters are not written and the faces
-are cut from the pack's posters instead; without a head the face it gives is cut from the pack too.
+are cut from the pack's posters instead; without a head the face it gives is cut from the pack too. (`art_pack.py`
+passes `fill=True`, which writes a missing still as a copy of the poster that stands in for it, as the app does.)
 
 What it writes in support/gateway/static/moves, committed, served by the console and read by the app from the same
 folder inside its bundled package (scripts/build_macos_app.py):
@@ -50,8 +52,12 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
+import shutil
+from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 from PIL import Image  # type: ignore[import-not-found]
 
@@ -91,6 +97,8 @@ STILL_FACES = {
 }
 # The stills, by the names their files have in the stills folder and their posters in the moves.
 STILLS = ("done", "error", "offline")
+# The poster that stands in for a still the pack does not have: the same the app shows (PetStill.standIn).
+STILL_STAND_INS = {"done": "startup", "error": "thinking", "offline": "idle_rest"}
 # The heads drawn for small sizes, when the stills folder has them: the face each gives, and the box the bust is fitted
 # in (512 px canvas: 464 px square, bottom on the anchor line); the tab icon is cut closer, the neck left out.
 HEADS = {"idle": "head-smile", "brand": "head-neutral"}
@@ -101,10 +109,126 @@ FACE_PIXELS = 96  # twice the largest size a face is shown at (48 pt)
 FAVICON_BOX = (158, 74, 342, 258)
 FAVICONS = (16, 32, 64)
 MAX_BYTES = 2_000_000
+# The largest side of any picture of a pack: a canvas, a frame, a still, a head or a brand picture.
+MAX_SIDE = 4096
+
+# Where each file of the moves came from: the pack pictures it is made of, and how.
+Trace = dict[str, tuple[list[Path], str]]
 
 
 class PackError(ValueError):
     """A pack that does not hold what the manifest says, worded for the person who ran the build."""
+
+
+def whole(value: Any) -> TypeGuard[int]:
+    """A whole number (a JSON integer; `true` and `false` are not numbers here)."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def manifest_findings(source: Path, manifest: Any) -> tuple[list[str], list[str]]:
+    """What is wrong with a pack's manifest (problems, which stop a build) and what looks wrong (warnings), each as
+    "rule: what is wrong" with the rule in plain words. It looks at the manifest and at whether each frame is a file
+    of the pack; the pictures themselves are looked at by art_pack.py."""
+    problems: list[str] = []
+    warnings: list[str] = []
+    if not isinstance(manifest, dict):
+        return ["manifest: manifest.json must hold one JSON object"], warnings
+    canvas = manifest.get("canvas") or {}
+    canvas = canvas if isinstance(canvas, dict) else {}
+    width, height = canvas.get("width"), canvas.get("height")
+    anchor = canvas.get("anchor") or {}
+    anchor = anchor if isinstance(anchor, dict) else {}
+    side: int = int(width) if whole(width) and width == height and width > 0 else 0
+    if not side:
+        problems.append(
+            "square canvas: the pack's canvas must be square (canvas.width and canvas.height the same whole number)"
+        )
+    elif side > MAX_SIDE:
+        problems.append(
+            f"sane size: the canvas is {side} px a side, more than {MAX_SIDE}"
+        )
+    elif side < CELL:
+        warnings.append(
+            f"canvas size: the canvas is {side} px a side; the moves are made at {CELL} px, so the pictures "
+            "are scaled up and look soft"
+        )
+    if not all(
+        isinstance(anchor.get(key), int | float)
+        and not isinstance(anchor.get(key), bool)
+        for key in ("x", "y")
+    ):
+        problems.append(
+            "anchor: the pack's canvas has no anchor (canvas.anchor with a number x and y)"
+        )
+    elif side and not (0 <= anchor["x"] <= side and 0 <= anchor["y"] <= side):
+        problems.append(
+            f"anchor: the anchor ({anchor['x']}, {anchor['y']}) is outside the {side} x {side} canvas"
+        )
+    states = manifest.get("states") or {}
+    states = states if isinstance(states, dict) else {}
+    missing = [state for state in POSES if state not in states]
+    if missing:
+        problems.append(f"six states: the pack has no {', '.join(missing)}")
+    extra = [state for state in states if state not in POSES]
+    if extra:
+        warnings.append(
+            f"six states: the manifest also lists {', '.join(map(str, extra))}; only the six are used"
+        )
+    root = source.resolve()
+    for state in POSES:
+        if state not in states:
+            continue
+        entry = states[state]
+        if not isinstance(entry, dict):
+            problems.append(f"six states: {state} must be an object")
+            continue
+        frames, durations = (
+            entry.get("frames") or [],
+            entry.get("frame_durations_ms") or [],
+        )
+        frames = frames if isinstance(frames, list) else []
+        durations = durations if isinstance(durations, list) else []
+        if not 0 < len(frames) <= COLUMNS * ROWS:
+            problems.append(
+                f"frame count: {state}: 1 to {COLUMNS * ROWS} frames, not {len(frames)}"
+            )
+        if len(durations) != len(frames) or not all(
+            whole(ms) and ms > 0 for ms in durations
+        ):
+            problems.append(
+                f"durations: {state}: one positive duration (ms) per frame, as whole numbers"
+            )
+        playback, loops = entry.get("playback"), entry.get("loop_count")
+        if playback not in (None, "once", "loop") or not (
+            loops is None or (whole(loops) and loops >= 0)
+        ):
+            problems.append(
+                f'playback: {state}: playback is "once" or "loop", and loop_count 0 (loops) or 1 (once)'
+            )
+        else:
+            if state == "startup" and not once(entry):
+                warnings.append(
+                    "playback: startup loops; the wake-up is meant to play once and hold its last frame"
+                )
+            if state not in ("startup", "idle_play") and once(entry):
+                warnings.append(
+                    f"playback: {state} plays once and stops on its last frame; it is meant to loop"
+                )
+        poster = entry.get("poster_frame_index", 0)
+        if not (whole(poster) and 0 <= poster < len(frames)):
+            problems.append(
+                f"poster frame: {state}: the poster is not one of its frames"
+            )
+        for name in frames:
+            if not isinstance(name, str):
+                problems.append(f"frame files: {state}: a frame name must be text")
+                continue
+            path = (source / name).resolve()
+            if not path.is_relative_to(root) or not path.is_file():
+                problems.append(
+                    f"frame files: {state}: {name} is not a file of the pack"
+                )
+    return problems, warnings
 
 
 def read_pack(source: Path) -> dict[str, Any]:
@@ -113,36 +237,9 @@ def read_pack(source: Path) -> dict[str, Any]:
         manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
         raise PackError(f"Cannot read {source / 'manifest.json'}: {error}") from error
-    canvas = manifest.get("canvas") or {}
-    width, height = canvas.get("width"), canvas.get("height")
-    anchor = canvas.get("anchor") or {}
-    if not (isinstance(width, int) and width == height and width > 0):
-        raise PackError("The pack's canvas must be square")
-    if not all(isinstance(anchor.get(key), int | float) for key in ("x", "y")):
-        raise PackError("The pack's canvas has no anchor")
-    states = manifest.get("states") or {}
-    missing = [state for state in POSES if state not in states]
-    if missing:
-        raise PackError(f"The pack has no {', '.join(missing)}")
-    for state in POSES:
-        entry = states[state]
-        frames, durations = (
-            entry.get("frames") or [],
-            entry.get("frame_durations_ms") or [],
-        )
-        if not 0 < len(frames) <= COLUMNS * ROWS:
-            raise PackError(f"{state}: 1 to {COLUMNS * ROWS} frames, not {len(frames)}")
-        if len(durations) != len(frames) or not all(
-            isinstance(ms, int) and ms > 0 for ms in durations
-        ):
-            raise PackError(f"{state}: one positive duration (ms) per frame")
-        poster = entry.get("poster_frame_index", 0)
-        if not (isinstance(poster, int) and 0 <= poster < len(frames)):
-            raise PackError(f"{state}: the poster is not one of its frames")
-        for name in frames:
-            path = (source / name).resolve()
-            if not path.is_relative_to(source.resolve()) or not path.is_file():
-                raise PackError(f"{state}: {name} is not a file of the pack")
+    problems, _ = manifest_findings(source, manifest)
+    if problems:
+        raise PackError(problems[0])
     return dict(manifest)
 
 
@@ -203,24 +300,49 @@ def read_stills(folder: Path, canvas: int) -> dict[str, Path]:
             if name in HEADS.values():
                 continue
             raise PackError(f"The stills folder has no {name}.png")
+        found[name] = path
+    return check_pictures(found, canvas)
+
+
+def check_pictures(pictures: Mapping[str, Path], canvas: int) -> dict[str, Path]:
+    """The stills and heads given by name (STILLS and HEADS), each a file on the pack's canvas."""
+    for name, path in pictures.items():
+        if name not in (*STILLS, *HEADS.values()):
+            raise PackError(f"{name} is not a still or a head")
         with Image.open(path) as image:
             if image.size != (canvas, canvas):
                 raise PackError(f"{name}.png is not on the {canvas} x {canvas} canvas")
-        found[name] = path
-    return found
+    return dict(pictures)
 
 
-def build(source: Path, out: Path, stills: Path | None = None) -> int:
+def build(
+    source: Path,
+    out: Path,
+    stills: Path | Mapping[str, Path] | None = None,
+    trace: Trace | None = None,
+    fill: bool = False,
+) -> int:
     """Write the sheets, the posters, the stills, the faces, the favicons and the manifest under `out`; the bytes
-    written."""
+    written.
+
+    `stills` is the stills folder, or the stills and heads by name. `trace` is filled with where each file came from.
+    `fill` writes the poster of a still the pack does not give as a copy of the poster that stands in for it
+    (STILL_STAND_INS), so the folder always holds all nine posters.
+    """
     pack = read_pack(source)
-    pictures = (
-        read_stills(stills, pack["canvas"]["width"]) if stills is not None else {}
-    )
     side = pack["canvas"]["width"]
+    if stills is None:
+        pictures: dict[str, Path] = {}
+    elif isinstance(stills, Path):
+        pictures = read_stills(stills, side)
+    else:
+        pictures = check_pictures(stills, side)
+    notes: Trace = trace if trace is not None else {}
     scale = CELL / side
     states: dict[str, dict[str, Any]] = {}
     posters: dict[str, Image.Image] = {}
+    poster_files: dict[str, Path] = {}
+    encodes: list[tuple[Path, Image.Image]] = []
     for state, pose in POSES.items():
         entry = pack["states"][state]
         sheet = Image.new("RGBA", (COLUMNS * CELL, ROWS * CELL))
@@ -229,10 +351,19 @@ def build(source: Path, out: Path, stills: Path | None = None) -> int:
             sheet.alpha_composite(
                 frame, ((index % COLUMNS) * CELL, (index // COLUMNS) * CELL)
             )
-        save(out / f"{state}.webp", sheet)
+        encodes.append((out / f"{state}.webp", sheet))
+        notes[f"{state}.webp"] = (
+            [source / name for name in entry["frames"]],
+            f"{len(frames)} frames",
+        )
         poster = entry.get("poster_frame_index", 0)
-        save(out / f"poster-{state}.webp", frames[poster])
-        with Image.open(source / entry["frames"][poster]) as full:
+        encodes.append((out / f"poster-{state}.webp", frames[poster]))
+        poster_files[state] = source / entry["frames"][poster]
+        notes[f"poster-{state}.webp"] = (
+            [poster_files[state]],
+            f"poster frame {poster}",
+        )
+        with Image.open(poster_files[state]) as full:
             posters[state] = full.convert("RGBA")
         states[state] = {
             "file": f"{state}.webp",
@@ -244,24 +375,39 @@ def build(source: Path, out: Path, stills: Path | None = None) -> int:
     held: dict[str, Image.Image] = {}
     for name, path in pictures.items():
         if name in STILLS:
-            save(out / f"poster-{name}.webp", scaled(path, side, CELL))
+            encodes.append((out / f"poster-{name}.webp", scaled(path, side, CELL)))
+            notes[f"poster-{name}.webp"] = ([path], "still")
         with Image.open(path) as full:
             held[name] = full.convert("RGBA")
     faces: dict[str, Image.Image] = {}
+    origins: dict[str, tuple[list[Path], str]] = {}
     for name, (state, box) in FACES.items():
         if HEADS.get(name, "") in held:
-            faces[name] = cut(held[HEADS[name]], HEAD_BOX, FACE_PIXELS)
+            head = HEADS[name]
+            faces[name] = cut(held[head], HEAD_BOX, FACE_PIXELS)
+            origins[name] = ([pictures[head]], "head fitted by HEAD_BOX")
         elif name in STILL_FACES and STILL_FACES[name][0] in held:
             still, box = STILL_FACES[name]
             faces[name] = cut(held[still], box, FACE_PIXELS)
+            origins[name] = ([pictures[still]], "head cut from the still")
         else:
             faces[name] = cut(posters[state], box, FACE_PIXELS)
+            origins[name] = (
+                [poster_files[state]],
+                f"head cut from the {state} poster",
+            )
     brand = HEADS["brand"] in held
     faces["brand"] = (
         cut(held[HEADS["brand"]], HEAD_BOX, FACE_PIXELS) if brand else faces["idle"]
     )
+    origins["brand"] = (
+        ([pictures[HEADS["brand"]]], "head fitted by HEAD_BOX")
+        if brand
+        else origins["idle"]
+    )
     for name, face in faces.items():
         save_png(out / f"face-{name}.png", face)
+        notes[f"face-{name}.png"] = origins[name]
     for pixels in FAVICONS:
         icon = (
             cut(held[HEADS["brand"]], HEAD_FAVICON_BOX, pixels)
@@ -269,6 +415,17 @@ def build(source: Path, out: Path, stills: Path | None = None) -> int:
             else cut(posters["startup"], FAVICON_BOX, pixels)
         )
         save_png(out / f"favicon-{pixels}.png", icon)
+        notes[f"favicon-{pixels}.png"] = (
+            (
+                [pictures[HEADS["brand"]]],
+                "head cut closer by HEAD_FAVICON_BOX",
+            )
+            if brand
+            else (
+                [poster_files["startup"]],
+                "head cut from the startup poster by FAVICON_BOX",
+            )
+        )
     anchor = pack["canvas"]["anchor"]
     document = {
         "version": 1,
@@ -280,11 +437,28 @@ def build(source: Path, out: Path, stills: Path | None = None) -> int:
         "fade_ms": FADE_MS,
         "states": states,
     }
+    out.mkdir(parents=True, exist_ok=True)
+    # The WebP encoder is the slow part and works without the interpreter lock: encode the files side by side.
+    # Each file is encoded alone, so the bytes do not depend on the order or the number of workers.
+    workers = max(1, min(4, os.cpu_count() or 1))
+    with ThreadPoolExecutor(workers) as pool:
+        list(pool.map(lambda job: save(*job), encodes))
+    if fill:
+        for name, state in STILL_STAND_INS.items():
+            if name not in pictures:
+                shutil.copyfile(
+                    out / f"poster-{state}.webp", out / f"poster-{name}.webp"
+                )
+                notes[f"poster-{name}.webp"] = (
+                    [poster_files[state]],
+                    f"stand-in: a copy of the {state} poster",
+                )
     (out / "manifest.json").write_text(json.dumps(document, indent=2) + "\n")
+    notes["manifest.json"] = ([source / "manifest.json"], "timelines")
     total = sum(path.stat().st_size for path in out.iterdir() if path.is_file())
     if total > MAX_BYTES:
         raise PackError(
-            f"The moves weigh {total / 1e6:.2f} MB, more than {MAX_BYTES / 1e6:.1f} MB: "
+            f"size budget: the moves weigh {total / 1e6:.2f} MB, more than {MAX_BYTES / 1e6:.1f} MB: "
             "lower QUALITY or CELL"
         )
     return total
@@ -293,7 +467,8 @@ def build(source: Path, out: Path, stills: Path | None = None) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__.split("\n")[0],
-        epilog="The pack is read only; nothing in it is run. Its full-size frames stay out of the repository.",
+        epilog="The pack is read only; nothing in it is run. Its full-size frames stay out of the repository. "
+        "scripts/art_pack.py checks a pack first and replaces every picture of Melo.",
     )
     parser.add_argument(
         "--source",
