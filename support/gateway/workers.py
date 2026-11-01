@@ -875,10 +875,15 @@ class TaskWorkers:
         ):
             raise TaskStoreError("it is still finishing; try again in a moment")
         self._inboxes.pop(task_id, None)
-        if not await self.store.list_turns(task_id, limit=1):
+        ran = bool(await self.store.list_turns(task_id, limit=1))
+        if not ran:
             # Stopped before it ever ran: the new turn carries the request too.
             text = f"{current.spec.get('objective') or current.title}\n\n{text}"
-        record = await self.tasks.reopen(task_id, text, level=level, reason=reason)
+        # Finish it's run is kept on the task, so a park and resume keeps it.
+        finishing = finish_run([text], continued=True, ran_before=ran)
+        record = await self.tasks.reopen(
+            task_id, text, level=level, reason=reason, finishing=finishing
+        )
         self._register(record)
         self._eligible.add(task_id)
         return record
@@ -2475,6 +2480,7 @@ class TaskWorkers:
 
     async def _body(self, record: TaskRecord) -> dict:
         body = asdict(record)
+        body.pop("finishing", None)  # the worker's own mark, not part of the body
         body["wait_reason"] = self.gate.held(record.task_id) or body["wait_reason"]
         session = await self.store.get_session(record.task_id)
         body["workspace"] = session.workspace if session else None
@@ -2556,7 +2562,9 @@ class TaskWorkers:
             ran_before = continued and (
                 len(await self.store.list_turns(task_id, limit=2)) > 1
             )
-            finishing = finish_run(said, continued=continued, ran_before=ran_before)
+            finishing = getattr(record, "finishing", False) or finish_run(
+                said, continued=continued, ran_before=ran_before
+            )
             return await decide_ending(
                 self.store,
                 task_id,

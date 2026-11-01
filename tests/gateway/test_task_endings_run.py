@@ -582,3 +582,48 @@ async def test_a_park_and_resume_inside_a_run_is_not_a_finish_it_run(
     finished = await workers._ending(task_id, "done", None, str(folder), base, resumed)
     assert finished is not None
     assert (finished["state"], finished["notes"]) == ("ready", ["no_tests"]), finished
+
+
+async def test_a_finish_it_run_parked_and_resumed_is_still_finish_its(
+    setup: Setup, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dataclasses import replace
+
+    from localmelo.support.gateway import task_endings
+    from localmelo.support.gateway.park_card import CARD_START
+
+    workers, llm, _ = setup
+    folder = tmp_path / "localmelo-workspace"
+    folder.mkdir()
+    (folder / "page.py").write_text("print('hi')\n")
+    write = call("file_edit", {"path": "page.py", "old": "hi", "new": "hello"})
+    llm.replies = [write, says("Changed the greeting.\nEnding: ready")]
+    task_id = await start(workers, folder, "Say hello instead of hi in page.py")
+    first = (await ended(workers, task_id))["ending"]
+    assert first["reasons"] == ["tests_missing"]
+    # Continuing with Finish it's words or your own ask marks the task.
+    kept: list[bool] = []
+    reopen = workers.tasks.reopen
+
+    async def watch(*args: Any, **kwargs: Any) -> Any:
+        kept.append(bool(kwargs.get("finishing")))
+        return await reopen(*args, **kwargs)
+
+    monkeypatch.setattr(workers.tasks, "reopen", watch)
+    llm.replies = [says("No test runner applies here.\nEnding: ready")]
+    await workers.continue_stopped(task_id)
+    second = (await ended(workers, task_id, turns=2))["ending"]
+    assert kept == [True] and second["notes"] == ["no_tests"]
+    llm.replies = [says("Looked.\nEnding: ready")]
+    await workers.message(task_id, "Look at it once more")
+    await ended(workers, task_id, turns=3)
+    assert kept == [True, False]
+    # A Finish it run resumed after a park: its card is the park's, the mark stays.
+    record = await workers.tasks.get_task(task_id)
+    base = (await task_endings.baseline(str(folder))).since(
+        {"git": False, "snapshot": True, "stamps": {"page.py": [0, 0]}, "tests": False}
+    )
+    resumed = replace(record, card=f"{CARD_START} where it stopped", finishing=True)
+    ending = await workers._ending(task_id, "done", None, str(folder), base, resumed)
+    assert ending is not None
+    assert (ending["state"], ending["notes"]) == ("ready", ["no_tests"])

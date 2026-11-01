@@ -17,8 +17,10 @@ ended ready. Ready needs proof; any doubt leaves ``draft`` with its reason:
   call that could have changed code, with or without a test setup; or the
   person asked for the tests and a test setup applies. A Finish it run
   (:func:`finish_run`) that runs no test with a result owes none: with no
-  setup, or only runs that collected no test, its ending notes ``no_tests``;
-  with a setup it reads ``no_runner`` (never owed). An ask for tests with no
+  setup, or a whole pytest or unittest run that collected no test, its ending
+  notes ``no_tests``; a filtered run that found none, or a runner that says it
+  ran none, is no result (``tests_missing``); with a setup and no runner run
+  it reads ``no_runner`` (never owed). An ask for tests with no
   setup and no change notes ``no_tests`` too. A Finish it run's ending never
   offers Finish it again (:data:`FINISH_TRIED`);
 - ``commit_missing``: a commit was asked and changes since the baseline are not
@@ -143,13 +145,20 @@ _RUNNERS: Final[dict[tuple[str, ...], frozenset[str]]] = {
         (gradle, "test"): _NO_RUN | {"--dry-run", "-m"}
         for gradle in ("gradle", "gradlew")
     },
-    ("mvn", "test"): _NO_RUN | {"-DskipTests", "-Dmaven.test.skip=true"},
+    ("mvn", "test"): _NO_RUN | {"-DskipTests", "-Dmaven.test.skip"},
     ("make", "check"): _NO_RUN | {"-n", "--dry-run", "--just-print", "-q"},
     ("zig", "build", "test"): _NO_RUN,
-    ("cabal", "test"): _NO_RUN,
+    ("cabal", "test"): _NO_RUN | {"--dry-run"},
     ("deno", "test"): _NO_RUN | {"--no-run"},
     ("just", "test"): _NO_RUN | {"-n", "--dry-run"},
 }
+# Flags that run nothing whatever follows them (``-DskipTests=true``,
+# ``--show-only=json-v1``), and the test task a gradle run leaves out.
+_NO_RUN_PREFIXES: Final[dict[tuple[str, ...], tuple[str, ...]]] = {
+    ("mvn", "test"): ("-DskipTests", "-Dmaven.test.skip"),
+    ("ctest",): ("--show-only",),
+}
+_GRADLE: Final = frozenset({("gradle", "test"), ("gradlew", "test")})
 # Only these runners may follow ``uv run`` or ``poetry run``, after its options.
 _PYTHON_RUNNERS: Final = frozenset(
     {
@@ -273,6 +282,20 @@ _NPM_NO_TEST: Final = "no test specified"
 # A test runner's exit code for "no tests were collected" (pytest, unittest).
 _NO_TESTS_RAN: Final = 5
 _COLLECTS: Final = re.compile(r"\b(?:py\.?test|unittest)\b")
+# What a runner that exits 0 says when it ran no test: ctest, phpunit, mix, Django.
+_RAN_NO_TEST: Final = re.compile(
+    r"No tests were found|No tests executed|All tests have been excluded"
+    r"|(?<![\w.])0 tests\b|\bRan 0 tests\b",
+    re.I,
+)
+# Arguments that leave a pytest or unittest run whole: output and speed only.
+# Anything else (-k, -m, --deselect, a path, a node id) could filter its tests.
+_WHOLE_RUN: Final = re.compile(
+    r"-q+|-v+|--quiet|--verbose|-x|--exitfirst|-s|-l|-b|--buffer|-f|--failfast"
+    r"|--no-header|--disable-warnings|-r\w+|--tb=\w+|--color=\w+|-p=?no:[\w.-]+"
+    r"|-n=?\w+|--numprocesses=\w+|discover"
+)
+_WHOLE_RUN_VALUES: Final = frozenset({"-n", "--numprocesses", "-p"})
 # What running code leaves behind is not work: never owed a commit.
 _CACHE: Final = re.compile(
     r"(?:^|/)(?:__pycache__|\.\w+_cache|node_modules|\.tox|\.nox)/|\.py[co]$"
@@ -357,9 +380,48 @@ def _runner(argv: list[str]) -> tuple[bool, bool]:
         if "test" not in rest:
             return False, False
         rest = [word for word in rest if word != "test"]
-    if _RUNNERS[found] & set(rest) or (found == ("go", "test") and _empty_match(rest)):
+    flags = {word.split("=", 1)[0] for word in rest}
+    prefixes = _NO_RUN_PREFIXES.get(found, ())
+    if (
+        _RUNNERS[found] & flags
+        or any(word.startswith(prefixes) for word in rest if prefixes)
+        or (found == ("go", "test") and _empty_match(rest))
+        or (found in _GRADLE and _skips_test(rest))
+    ):
         return False, False
     return True, _here(lead + rest)
+
+
+def _skips_test(words: list[str]) -> bool:
+    """A gradle run that leaves its test task out: ``-x test``, ``--exclude-task=test``."""
+    for at, word in enumerate(words):
+        name, _, value = word.partition("=")
+        if name not in ("-x", "--exclude-task"):
+            continue
+        task = value or (words[at + 1] if at + 1 < len(words) else "")
+        if task.rsplit(":", 1)[-1] == "test":
+            return True
+    return False
+
+
+def _whole(words: Sequence[str]) -> bool:
+    """Whether a pytest or unittest command runs every test it finds (no filter)."""
+    names = [os.path.basename(word) for word in words]
+    at = next(
+        (i for i, w in enumerate(names) if w in ("pytest", "py.test", "unittest")), None
+    )
+    if at is None:
+        return False
+    rest = list(words[at + 1 :])
+    while rest:
+        word = rest.pop(0)
+        if word in _WHOLE_RUN_VALUES:
+            value = rest.pop(0) if rest else ""
+            if word == "-p" and not value.startswith("no:"):
+                return False
+        elif not _WHOLE_RUN.fullmatch(word):
+            return False
+    return True
 
 
 def _words(node: ast.AST) -> list[str] | None:
@@ -636,6 +698,7 @@ class _Call:
     finish: int | None = None
     status: str = ""
     exit_code: int | None = None
+    output: str = ""
 
     def _command(self) -> tuple[str, bool]:
         """``(command, passed on)`` of the test runner this call starts, or ``""``."""
@@ -648,15 +711,43 @@ class _Call:
             return _shell_test(given)
         return "", False
 
-    def collected_none(self) -> bool:
-        """pytest or unittest ran and found no test (exit 5): nothing was tested."""
+    def ran_none(self) -> bool:
+        """A test runner ran no test: pytest or unittest exit 5, or a runner that
+        exits 0 saying so (ctest, phpunit, mix, Django). No test result."""
         command = self._command()[0]
-        return self.exit_code == _NO_TESTS_RAN and bool(_COLLECTS.search(command))
+        if not command:
+            return False
+        if self.exit_code == _NO_TESTS_RAN and _COLLECTS.search(command):
+            return True
+        return self.exit_code in (0, None) and bool(_RAN_NO_TEST.search(self.output))
+
+    def _argv(self) -> list[str] | None:
+        """The words of a test in its strict shape (one plain command), or None."""
+        given = self.arguments.get("code" if self.name == "python_exec" else "command")
+        if not isinstance(given, str) or not self._command()[1]:
+            return None
+        if self.name == "python_exec":
+            try:
+                return _shaped(ast.parse(given))
+            except (SyntaxError, ValueError):
+                return None
+        try:
+            return shlex.split(given)
+        except ValueError:
+            return None
+
+    def collected_none(self) -> bool:
+        """A whole pytest or unittest run, in the strict test shape, collected no
+        test (exit 5): no test applies to the folder."""
+        if self.exit_code != _NO_TESTS_RAN or not self.ran_none():
+            return False
+        words = self._argv()
+        return words is not None and _whole(words)
 
     def test(self) -> tuple[str, str] | None:
         """``(command, outcome)`` of a test run: ``passed``, ``failed`` or ``unknown``."""
         command, passes = self._command()
-        if not command or self.collected_none():
+        if not command or self.ran_none():
             return None
         if self.finish is None:
             return command, "unknown"
@@ -668,7 +759,8 @@ class _Call:
         """Whether this call could have changed code (fail closed: unknown tools could)."""
         if self.status == "blocked" or self.name in _READ_TOOLS:
             return False
-        if self.test() or self.collected_none():
+        # A test, or a run in the strict test shape that ran none, writes nothing.
+        if self.test() or (self.ran_none() and self._command()[1]):
             return False
         if self.name in ("file_write", "file_edit"):
             return self.edits_code()
@@ -944,6 +1036,7 @@ async def _calls(store: SessionStore, task_id: str, turn: Any) -> list[_Call]:
                 code = data.get("exit_code")
                 call.finish, call.status = stored.id, str(data.get("status") or "")
                 call.exit_code = code if type(code) is int else None
+                call.output = str(data.get("output") or "")[-4000:]
         if len(page) < 1000:
             return calls
         after = page[-1].id or after
@@ -1059,12 +1152,17 @@ async def _evidence(
     elif (changed or asks_tests) and not tested:
         if finishing and not tests:
             # Finish it ran no test with a result: no runner applies (none, or
-            # pytest or unittest collected nothing), or one applies that melo
-            # cannot run. A folder not checked says its own reason below.
+            # a whole pytest or unittest run collected nothing), or one applies
+            # that melo cannot run. A folder not checked says its own reason below.
             empty = any(call.collected_none() for call in calls)
             if empty or not seen.tests:
                 notes.append("no_tests")
-            elif not seen.unchecked:
+            elif seen.unchecked:
+                pass
+            elif any(call.ran_none() for call in calls):
+                # A filtered run that found none says nothing of the suite.
+                reasons.append("tests_missing")
+            else:
                 reasons.append(NO_RUNNER)
         elif seen.tests or changed:
             # Changed code owes a test even where no setup was found.

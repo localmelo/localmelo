@@ -540,8 +540,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   picture, table or PDF is not code), so a task that only looked at a website ends Ready; a
   write made by a shell command is still caught, and so is a code file the file tools
   changed outside the folder. Changed code still owes a test; when Finish it then finds no
-  test runner for the folder (or pytest collects no test), the task ends Ready with "No tests
-  apply", and when it finds tests it cannot run, the task says so. Finish it is never offered
+  test runner for the folder (or a whole pytest run collects no test), the task ends Ready
+  with "No tests apply", and when it finds tests it cannot run, the task says so. A run
+  filtered to some tests that finds none, or a runner that says it ran no test, is not a
+  passing test. Finish it is never offered
   again after its own run, so it can no longer loop; asking for the tests yourself when you
   continue a task counts as Finish it. More test setups are recognized, each with its test
   command (Django, pytest settings in `pyproject.toml` or `setup.cfg`, CMake, PHPUnit, Mix,

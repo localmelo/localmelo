@@ -177,13 +177,14 @@ class Run:
         call_id: str | None = None,
         run_id: str | None = None,
         finished: bool = True,
+        output: str = "",
     ) -> Run:
         key = call_id or f"call-{len(self.events)}"
         run = run_id or self.run_id
         started = {"call_id": key, "name": name, "arguments": arguments}
         self._add("tool.started", run, started)
         if finished:
-            done = {"call_id": key, "name": name, "status": status}
+            done = {"call_id": key, "name": name, "status": status, "output": output}
             self._add("tool.finished", run, {**done, "exit_code": exit_code})
         return self
 
@@ -1294,7 +1295,14 @@ SHAPES: dict[str, list[str]] = {
     "empty": ["empty"],
     "write": ["write"],
     "outside": ["outside"],
+    "edit+filtered": ["edit", "filtered"],
+    "edit+zero": ["edit", "zero"],
 }
+FILTERED = (
+    "import subprocess, sys\n"
+    "sys.exit(subprocess.run([sys.executable, '-m', 'pytest', '-q', '-k', 'parser'])"
+    ".returncode)\n"
+)
 
 
 def shaped_run(shape: str, answer: str, elsewhere: Path) -> Run:
@@ -1312,6 +1320,15 @@ def shaped_run(shape: str, answer: str, elsewhere: Path) -> Run:
             run.test(exit_code=5)
         elif step == "write":
             run.py(FETCH)
+        elif step == "filtered":
+            run.test(FILTERED, exit_code=5)
+        elif step == "zero":
+            run.call(
+                "shell_exec",
+                {"command": "ctest"},
+                exit_code=0,
+                output="No tests were found!!!",
+            )
         else:
             run.edit(str(elsewhere))
     return run
@@ -1358,6 +1375,11 @@ async def test_no_evidence_lets_a_finish_it_run_offer_finish_it_again(
             assert not can_finish(again), (seen, shape, again)
             first = await end(run, folder, base, tests=asked_tests, commit=asked_commit)
             offered += can_finish(first)
+            # A run that collected nothing it was filtered to, or a runner that
+            # says it ran none, is no proof: changed code with a suite never ends Ready.
+            if shape in ("edit+filtered", "edit+zero") and code and tests_apply:
+                assert again["state"] != "ready", (seen, shape, again)
+                assert first["state"] != "ready", (seen, shape, first)
     assert offered, "outside a Finish it run the same evidence does offer it"
 
 
@@ -1387,6 +1409,133 @@ async def test_a_finish_it_run_that_ran_no_test_with_a_result(tmp_path: Path) ->
     )
     assert why(failed) == ("draft", ["tests_failed", "finish_tried"])
     assert not can_finish(failed)
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        "'-k', 'parser'",
+        "'-m', 'slow'",
+        "'--deselect', 'tests/test_app.py::test_x'",
+        "'tests/test_app.py::test_x'",
+        "'tests'",
+        "'-p', 'xdist'",
+    ],
+)
+async def test_a_filtered_run_that_collected_nothing_is_no_result(
+    repo: Path, args: str
+) -> None:
+    base = await baseline(str(repo))
+    (repo / "app.py").write_text("x = 2\n")  # could break the real suite
+    code = (
+        "import subprocess, sys\nsys.exit(subprocess.run([sys.executable, '-m', "
+        f"'pytest', '-q', {args}]).returncode)\n"
+    )
+    run = Run().edit().test(code, exit_code=5)
+    first = await end(run, repo, base)
+    assert why(first) == ("draft", ["tests_missing"]) and can_finish(first)
+    again = await end(run, repo, base, finishing=True)
+    assert why(again) == ("draft", ["tests_missing", "finish_tried"])
+    assert not can_finish(again)
+
+
+@pytest.mark.parametrize(
+    "args", ["", "'-q'", "'-q', '-n', 'auto'", "'-p', 'no:cacheprovider'"]
+)
+async def test_a_whole_run_that_collected_nothing_means_no_tests_apply(
+    repo: Path, args: str
+) -> None:
+    base = await baseline(str(repo))
+    (repo / "app.py").write_text("x = 2\n")
+    code = (
+        "import subprocess, sys\nsys.exit(subprocess.run([sys.executable, '-m', "
+        f"'pytest', {args}]).returncode)\n"
+    )
+    run = Run().edit().test(code, exit_code=5)
+    ending = await end(run, repo, base, finishing=True)
+    assert (*why(ending), ending["notes"]) == ("ready", [], ["no_tests"])
+
+
+async def test_a_run_that_writes_and_collects_nothing_is_still_a_write(
+    repo: Path,
+) -> None:
+    base = await baseline(str(repo))
+    (repo / "app.py").write_text("x = 3\n")
+    sneaky = (
+        "import subprocess, sys\nopen('app.py', 'w').write('x = 3\\n')\n"
+        "sys.exit(subprocess.run([sys.executable, '-m', 'pytest', '-k', 'zzz'])"
+        ".returncode)\n"
+    )
+    run = Run().edit().test().py(sneaky, exit_code=5)
+    assert why(await end(run, repo, base)) == ("draft", ["tests_missing"])
+    # The strict shape alone writes nothing, whatever it collected.
+    plain = Run().edit().test().test(FILTERED, exit_code=5)
+    assert why(await end(plain, repo, base)) == ("ready", [])
+
+
+@pytest.mark.parametrize(
+    ("command", "output"),
+    [
+        ("ctest -R nomatch", "Test project /x\nNo tests were found!!!\n"),
+        ("phpunit --filter NoSuch", "No tests executed!\n"),
+        (
+            "mix test --only nosuchtag",
+            "Finished in 0.01 seconds\n0 tests, 0 failures\n",
+        ),
+        ("mix test --only nosuchtag", "All tests have been excluded.\n"),
+        ("python manage.py test shop.nosuch", "Ran 0 tests in 0.000s\n\nOK\n"),
+    ],
+)
+async def test_a_runner_that_says_it_ran_no_test_is_no_result(
+    repo: Path, command: str, output: str
+) -> None:
+    base = await baseline(str(repo))
+    (repo / "app.py").write_text("x = 2\n")
+    run = (
+        Run()
+        .edit()
+        .call("shell_exec", {"command": command}, exit_code=0, output=output)
+    )
+    assert why(await end(run, repo, base)) == ("draft", ["tests_missing"])
+    again = await end(run, repo, base, finishing=True)
+    assert why(again) == ("draft", ["tests_missing", "finish_tried"])
+    ran = (
+        Run()
+        .edit()
+        .call(
+            "shell_exec",
+            {"command": command},
+            exit_code=0,
+            output="Ran 10 tests\n\nOK\n",
+        )
+    )
+    assert why(await end(ran, repo, base)) == ("ready", [])
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        "['mvn', 'test', '-DskipTests']",
+        "['mvn', 'test', '-DskipTests=true']",
+        "['mvn', 'test', '-q', '-DskipTests']",
+        "['mvn', 'test', '-Dmaven.test.skip']",
+        "['mvn', 'test', '-Dmaven.test.skip=true']",
+        "['ctest', '--show-only']",
+        "['ctest', '--show-only=json-v1']",
+        "['ctest', '-N']",
+        "['gradle', 'test', '-x', 'test']",
+        "['./gradlew', 'test', '-x', ':app:test']",
+        "['gradle', 'test', '--exclude-task', 'test']",
+        "['gradle', 'test', '--exclude-task=test']",
+        "['cabal', 'test', '--dry-run']",
+        "['phpunit', '--list-tests']",
+        "['dotnet', 'test', '--list-tests']",
+    ],
+)
+def test_a_flag_that_skips_or_lists_the_tests_is_no_test(argv: str) -> None:
+    code = f"import subprocess\nsubprocess.run({argv}, check=True)\n"
+    assert python_test(code) == ("", False)
+    assert python_test(code.replace(argv, "['mvn', 'test']"))[1]
 
 
 @pytest.mark.parametrize(
@@ -1680,6 +1829,39 @@ async def test_the_store_keeps_an_ending_with_its_transition(tmp_path: Path) -> 
         await store.aclose()
 
 
+async def test_a_finish_it_run_is_kept_on_the_task_through_a_park(
+    tmp_path: Path,
+) -> None:
+    store = SessionStore(tmp_path / "sessions.db", writer="gateway")
+    await store.open()
+    try:
+        tasks = TaskStore(store)
+        await tasks.open()
+        record, _ = await tasks.create_task(
+            TaskSpec.from_payload({"objective": "Fix it"}),
+            workspace=str(tmp_path),
+            origin="user",
+        )
+        assert record.finishing is False
+        await tasks.change(record.task_id, state="running", actor="scheduler")
+        draft = {"state": "draft", "reasons": ["tests_missing"]}
+        await tasks.change(record.task_id, state="done", ending=draft)
+        reopened = await tasks.reopen(
+            record.task_id, "Finish it: run the tests", finishing=True
+        )
+        assert reopened.finishing
+        await tasks.change(record.task_id, state="running", actor="scheduler")
+        parked = await tasks.change(record.task_id, state="parked", actor="scheduler")
+        assert parked.finishing, "a park keeps it"
+        await tasks.change(record.task_id, state="running", actor="scheduler")
+        ended = await tasks.change(record.task_id, state="done", ending=draft)
+        assert ended.finishing is False, "its ending closes it"
+        plain = await tasks.reopen(record.task_id, "Look again")
+        assert plain.finishing is False
+    finally:
+        await store.aclose()
+
+
 async def test_an_older_store_gains_the_ending_columns(tmp_path: Path) -> None:
     path = tmp_path / "sessions.db"
     store = SessionStore(path, writer="gateway")
@@ -1692,13 +1874,14 @@ async def test_an_older_store_gains_the_ending_columns(tmp_path: Path) -> None:
     with sqlite3.connect(path) as conn:
         conn.execute("ALTER TABLE tasks DROP COLUMN ending")
         conn.execute("ALTER TABLE tasks DROP COLUMN work_base")
+        conn.execute("ALTER TABLE tasks DROP COLUMN finishing")
     store = SessionStore(path, writer="gateway")
     await store.open()
     try:
         tasks = TaskStore(store)
         await tasks.open()
         again = await tasks.get_task(record.task_id)
-        assert again.ending is None
+        assert again.ending is None and again.finishing is False
         kept = await tasks.keep_work_base(record.task_id, {"git": False})
         assert kept == {"git": False}
     finally:
