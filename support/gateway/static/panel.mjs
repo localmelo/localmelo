@@ -236,8 +236,12 @@ export function setupPanel({
     drawHeader();
   }})).then((player) => {
     motion.player = player ?? null;
-    if (motion.player) drawHeader();
+    if (!motion.player) return;
+    sheetSeen();
+    drawHeader();
   }, () => {});
+  // Below 900 px the portrait is in the sheet: while the sheet is closed nothing is drawn.
+  const sheetSeen = () => motion.player?.setVisible(!wide || wide.matches || state.sheet, 'sheet');
   // The state to show for a move, and whether a looping state plays once.
   function pick(move) {
     if (move !== 'idle') {
@@ -258,8 +262,13 @@ export function setupPanel({
     ring.dataset.moves = move ? 'on' : 'off';
     // A still picture stops the moves behind it; they go on from where they were.
     motion.player?.setVisible(Boolean(move), 'portrait');
-    if (!move) return false;
+    if (!move) {
+      delete ring.dataset.move;
+      return false;
+    }
     const {key, once = false} = pick(move);
+    // The state asked for, for a look at the page (the canvas itself says nothing).
+    ring.dataset.move = key;
     motion.player.set(key, {once}).catch(() => {});
     return true;
   }
@@ -649,6 +658,7 @@ export function setupPanel({
   function setSheet(open, {keepTask = false} = {}) {
     if (state.sheet === open) return false;
     state.sheet = open;
+    sheetSeen();
     root.classList.toggle('sheet-open', open);
     root.style.transform = '';
     backdrop.hidden = !open;
@@ -662,7 +672,7 @@ export function setupPanel({
   }
   chip.addEventListener('click', () => setSheet(!state.sheet));
   // A window grown past the sheet's width has no chip to close it with: it closes, and the page is usable again.
-  wide?.addEventListener?.('change', () => { if (wide.matches) setSheet(false, {keepTask: true}); });
+  wide?.addEventListener?.('change', () => { if (wide.matches) setSheet(false, {keepTask: true}); sheetSeen(); });
   backdrop.addEventListener('click', () => setSheet(false));
   let drag = null;
   handle.addEventListener('pointerdown', (event) => { drag = {y: event.clientY, moved: 0}; handle.setPointerCapture?.(event.pointerId); });

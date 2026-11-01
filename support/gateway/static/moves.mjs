@@ -98,6 +98,8 @@ export function createPlayer({
     complete: false, index: 0, still, handle: null, timer: null, disposed: false, hiders: new Set(),
   };
 
+  // A decoded image's own width (an <img> may report a laid-out one); the grid's when it says nothing.
+  const sheetWidth = (sheet) => sheet.naturalWidth || sheet.width || side * manifest.sheet.columns;
   function load(key) {
     if (!cache.has(key)) {
       const promise = loadImage(`${base}${manifest.states[key].file}`);
@@ -132,7 +134,7 @@ export function createPlayer({
     const sample = my.still ? {index: entry.poster, complete: my.once, next: Infinity}
       : frameAt(entry, now - my.started, my.once);
     my.index = sample.index;
-    const cell = cellOf(manifest, sample.index, my.sheet.width ?? my.sheet.naturalWidth ?? side * manifest.sheet.columns);
+    const cell = cellOf(manifest, sample.index, sheetWidth(my.sheet));
     ctx.clearRect(0, 0, side, side);
     let mix = 1;
     if (my.blend) {
@@ -190,7 +192,7 @@ export function createPlayer({
       my.pausedAt = now;
       my.blend = null;
       const entry = manifest.states[key];
-      const cell = cellOf(manifest, my.still ? entry.poster : 0, sheet.width ?? side * manifest.sheet.columns);
+      const cell = cellOf(manifest, my.still ? entry.poster : 0, sheetWidth(sheet));
       ctx.clearRect(0, 0, side, side);
       ctx.drawImage(sheet, cell.x, cell.y, cell.size, cell.size, 0, 0, side, side);
       return {changed: true, durationMs: 0};

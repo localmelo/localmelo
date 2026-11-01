@@ -916,6 +916,7 @@ test('the portrait wakes up once, rests, plays now and then, and keeps its still
   assert.deepEqual(player.asked, ['startup']);
   player.complete('startup');
   assert.equal(player.asked.at(-1), 'idle_rest');
+  assert.equal(ring.dataset.move, 'idle_rest');
   // After 20 s of rest it plays once, to the end, and rests again; not again for 5 minutes.
   now += 20_000;
   await h.panel.update(health());
@@ -947,6 +948,7 @@ test('the portrait wakes up once, rests, plays now and then, and keeps its still
   assert.equal(player.asked.length, asked);
   await h.panel.update(health({}, {model_server: {reachable: false}}));
   assert.equal(ring.dataset.moves, 'off');
+  assert.equal(ring.dataset.move, undefined);
   // Back to rest: the wake-up is not played again, and the rest starts over.
   await h.panel.update(health());
   assert.equal(ring.dataset.moves, 'on');
@@ -966,4 +968,17 @@ test('the first move of a busy console skips the wake-up, and reduced motion nev
   now += 600_000;
   await h.panel.update(health());
   assert.equal(player.asked.at(-1), 'idle_rest');
+});
+
+test('on a phone the portrait in the closed sheet draws nothing until the sheet opens', async () => {
+  const {player, moves} = movesDouble();
+  const wide = {matches: false, addEventListener() {}};
+  const h = harness({moves, wide});
+  await settle();
+  await h.panel.update(health());
+  assert.ok(player.hidden.has('sheet'));
+  h.chip.click();
+  assert.ok(!player.hidden.has('sheet'));
+  h.panel.closeSheet();
+  assert.ok(player.hidden.has('sheet'));
 });

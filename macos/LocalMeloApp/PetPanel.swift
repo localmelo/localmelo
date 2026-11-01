@@ -289,6 +289,7 @@ final class PetController: NSObject {
     /// front. True when a move shows. The words (`describe`) stay the mood's either way.
     private func showMove() -> Bool {
         let environment = self.environment
+        moves?.setStill(!petMovesMayMove(environment))  // before the state, so it starts as it should show
         let pick = moves == nil ? nil : picker.pick(mood, thinking: health.map(petThinking) ?? false,
                                                      still: !petMovesMayMove(environment), now: Date())
         guard let moves = moves, let (move, once) = pick, moves.set(move, once: once) || moves.wanted != nil else {
