@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
+from localmelo.melo import clock
 from localmelo.melo.agent._call_budget import CallBudgetError
 from localmelo.melo.agent._context_fit import ContextFitError, FitCut, fit_request
 from localmelo.melo.agent._prefix_diag import (
@@ -108,8 +109,14 @@ PREFIX_VERSION = "fixed-prefix-v2"
 
 
 def local_date_line() -> str:
-    """Snapshot the local calendar day and numeric UTC offset."""
-    now = datetime.now().astimezone()
+    """Snapshot the local calendar day and numeric UTC offset.
+
+    ``LOCALMELO_NOW`` (:mod:`localmelo.melo.clock`) pins the instant it reads.
+    """
+    pinned = clock.pinned()
+    now = (
+        datetime.now() if pinned is None else datetime.fromtimestamp(pinned)
+    ).astimezone()
     zone = now.strftime("%z")
     return f"Date: {now:%Y-%m-%d} (UTC{zone[:3]}:{zone[3:5]})"
 

@@ -40,6 +40,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
+from localmelo.melo import clock
 from localmelo.melo.agent.agent import DEFAULT_MEMORY_DIR
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
@@ -116,6 +117,12 @@ _PACK_RECALL: Final = 12
 ASK_OWNER: Final = "ask_owner"
 NOT_THE_USER: Final = (
     "Not remembered: this turn is a task's question, not the user's words."
+)
+# The refusal of a note that says "I" and "you" at once: who is who is unclear.
+WRITE_IN_YOU: Final = (
+    'Not remembered: write the user as "you" and the assistant as "melo", never '
+    '"I" or "my" (not "I prefer that when you explain …" but "You prefer that '
+    'melo explains …").'
 )
 _BATCH: Final = 16
 _QUERY_CHARS: Final = 2_000
@@ -624,7 +631,7 @@ class ChatMemory:
         vector = unit(embedded.vectors[0]) if embedded.vectors else None
         async with self._lock:
             corpus = await self._sync()
-            now = time.time()
+            now = clock.now()  # LOCALMELO_NOW pins it
             found = ranked(
                 corpus,
                 query,
@@ -841,8 +848,12 @@ class ChatMemory:
         """Keep *text* as a note of the chat turn under way; what the model reads back.
 
         Refused: outside a chat's turn, in a turn the person did not begin
-        (``TurnInfo.origin``), a secret, and words the user did not type in
-        this chat and no finished task's result shown in it holds.
+        (``TurnInfo.origin``), a secret, a note that says "I" and "you", or "I"
+        and "the user" (:data:`WRITE_IN_YOU`: its "I" is melo), and words the
+        user did not type in this chat and no finished task's result shown in it
+        holds. A note that says "I" or "my" and nothing of the user otherwise is
+        kept in the second person (:func:`records.second_person`), as the user's
+        own words are.
         """
         turn = CHAT_TURN.get()
         if not self.enabled or turn is None or turn.memory.recall is None:
@@ -859,6 +870,11 @@ class ChatMemory:
                 f"Not remembered: {records.NOT_KEPT}. Do not write it anywhere "
                 "(no file, no code)."
             )
+        if records.first_person(note):
+            # "I" is the assistant when the note names the user in the third person.
+            if records.addresses_user(note) or records.names_user(note):
+                return WRITE_IN_YOU
+            note = records.second_person(note, protect=True)
         said = [turn.typed, *await self._said(turn)]
         admitted = "user_statement"
         missing = records.unsupported(note, said)
@@ -986,8 +1002,9 @@ class ChatMemory:
         notes (the user's words, no secret, supersedes the old value).
 
         When nothing written to the user is named (a fragment such as "gate 9
-        for Faro"), or ``remember`` refuses, nothing is kept and the turn's
-        ``turn.memory`` event, queued again, has ``unsaved_claim`` true. Nothing
+        for Faro"), the reply claims a save and names nothing ("Saved.",
+        "Noted.", "已记录。"), or ``remember`` refuses, nothing is kept and the
+        turn's ``turn.memory`` event, queued again, has ``unsaved_claim`` true. Nothing
         outside the turn, with memory off, with a note kept, or when the reply
         claims nothing.
         """
@@ -1067,8 +1084,9 @@ class ChatMemory:
         self,
         turns: Sequence[tuple[dict[str, Any], int, str, str, float]],
         timeout: float,
-    ) -> None:
-        """Index turns of ``(source, turn, typed, answer, at)``, embedded as one batch."""
+    ) -> int:
+        """Index turns of ``(source, turn, typed, answer, at)``, embedded as one batch;
+        the characters embedded (0 without a vector)."""
         texts = [
             document_text(
                 typed, answer, title=src["title"] if src["kind"] == "task" else ""
@@ -1090,6 +1108,45 @@ class ChatMemory:
             )
             async with self._lock:
                 await self.stores()[1].add(doc)
+        return sum(map(len, texts)) if vectors else 0
+
+    async def index_turns(
+        self, turns: Sequence[tuple[dict[str, Any], int, str, str, float]]
+    ) -> int:
+        """Index turns of ``(source, turn, typed, answer, at)`` as a reindex does
+        (in batches, embedded when a model is set), each document stamped *at*;
+        the characters embedded. Nothing already indexed is touched."""
+        chars = 0
+        for start in range(0, len(turns), _BATCH):
+            chars += await self._add_documents(
+                turns[start : start + _BATCH], INDEX_EMBED_TIMEOUT_S
+            )
+        return chars
+
+    async def keep_said(
+        self, store: SessionStore, info: TurnInfo, typed: str, at: float
+    ) -> int:
+        """Keep the lasting facts *typed* states (:func:`records.statements`) as
+        notes of the turn *info*, stamped *at*; how many were written.
+
+        The rule path alone, as the chat path keeps a user statement: no model
+        call, no vector (``reindex(None)`` adds them), never a secret. For a
+        turn written after the fact (``melo memory ingest``).
+        """
+        found = records.statements(typed)
+        if not found:
+            return 0
+        source = await self._source(store, info)
+        async with self._lock:
+            written = await records.write(
+                self.stores()[0],
+                found,
+                [None] * len(found),
+                source=source,
+                embed_model="",
+                created_at=at,
+            )
+        return len(written)
 
     async def forget_session(self, session_id: str, turn: int | None = None) -> int:
         """Delete indexed chat text and its inactive sleep negatives; keep active notes."""
@@ -1433,7 +1490,7 @@ class ChatMemory:
                 typed,
                 vector,
                 embedded.model,
-                now=time.time(),
+                now=clock.now(),
                 coverage=0.0,
             )
             return [int(item.key[2:]) for item in found if item.is_record][:6]
@@ -1457,13 +1514,20 @@ class ChatMemory:
                 budget=budget,
                 embed_note=embed_note if self.embedding()[0] is not None else None,
             )
+        # A kept note changed in place (the turns it replaced): read it again.
+        for change in report.changes:
+            if change.replaces_after is not None and change.after_id is not None:
+                self._corpus.remove(f"r:{change.after_id}")
         logger.info("memory.sleep %s", report.to_json())
         return report
 
     async def undo_sleep(self, run_id: str) -> dict[str, Any] | None:
         """Put the sleep run *run_id* back (:func:`sleeping.undo`); ``None`` when unknown."""
         async with self._lock:
-            return await sleeping.undo(*self.stores(), run_id)
+            undone = await sleeping.undo(*self.stores(), run_id)
+            for key in self._corpus.keys("r:"):  # a kept note may have changed
+                self._corpus.remove(key)
+            return undone
 
     # ── Notes brought in from other assistants' files ──
 
@@ -1580,16 +1644,23 @@ class ChatMemory:
             )
 
     async def pinned_quotes(self) -> str:
-        """About you and Preferences in the user's words, newest first, bounded."""
+        """About you and Preferences in the user's words, newest first, bounded.
+
+        Notes brought in from other assistants and notes sleep wrote are recall
+        only: they never ride in every prompt.
+        """
         if not self.enabled:
             return ""
         lines: list[str] = []
         size = 0
         for entry in await self.records():
             quote = str(entry.provenance.get("quote") or "")
+            origin = str(entry.provenance.get("source") or "")
             if (
                 entry.provenance.get("topic") not in ("about", "preferences")
-                or entry.provenance.get("source") == "import"  # recall only
+                or origin == "import"
+                or entry.admitted_by == "sleep"
+                or origin.split(":")[0] == "sleep"
                 or not quote
             ):
                 continue

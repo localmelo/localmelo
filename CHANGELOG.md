@@ -9,6 +9,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Developer only: `melo memory ingest FILE` loads past chats from a JSON file as if they
+  had happened on their dates (no model call), and `LOCALMELO_NOW` pins the date
+  the model and memory recall read, for memory tests.
 - A task says honestly how it ended. When its worker finishes, code, not the
   worker, decides, and only proof makes it **Ready**. It reads **Done, not
   finished** when its last test failed or its result was not checked, when it
@@ -38,6 +41,22 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   bounded embedding similarity or a word-only fallback without merging different
   known subjects. Reports list selected turns and each model operation's bounded,
   secret-redacted verdict; applied changes carry the same label. [#389]
+- Note tidying keeps a paraphrase out (cosine from 0.85) but never a changed value
+  or the opposite statement (a negation in only one of the two). When two of the
+  user's own active notes say one subject with different values, the older is
+  superseded and the newer kept, without a model call (a model update that names
+  the newer note, or says what it holds, does the same). Each report entry shows the text of the note it targeted and the numbers
+  behind the existing-fact check; a note written from the same message is refused
+  as `self_target`. Notes the tidying writes are recall only: never pinned into
+  every prompt. [#396]
+- A note the tidying keeps now also counts as having replaced the exchanges of
+  the notes it superseded, as a note written to replace another does, so recall
+  stops giving the old value through its exchange (unless you ask about the
+  past); undo takes that back. A model update whose new value a newer active
+  note already holds supersedes the older note and writes no copy. A note the
+  model proposes that says "I", "me" or "my" outside quotes is refused as
+  `first_person`; the model is asked to write "you" for you and "melo" for the
+  assistant. [#396]
 
 - Developer setting `[memory] sleep` (`off` by default; `rules`, `model`
   and `model+tags`; `-X memory.sleep=rules`, listed by
@@ -491,6 +510,28 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A note melo writes for you now says "you", and a reply that says "saved" with
+  nothing kept is flagged. A note the chat's model wrote in the first person
+  ("My flight to Porto is at gate 22.", "The pool gave me a new locker.") is
+  kept in the second person, as your own words are, so a newer note of the same
+  subject replaces the older one and recall shows whose note it is. A note that
+  says both "I" and "you" is refused with how to write it (you as "you", melo as
+  "melo"); "we" and quoted words are left alone. A reply that only says it
+  saved or noted ("Saved.", "Noted.", "Got it, noted…", "已记录。") with no note
+  kept now counts as a claim that names nothing, as one that names a fact
+  already did, and `unsaved_claim` is true; so does one that names only a
+  generic thing ("I've saved your preference.", "我已经记录了你的偏好。").
+  "Got it!" is still no claim. A note that says "I" beside "the user" ("The
+  user wants me to answer in Chinese.") is refused too, never turned into "you",
+  because its "I" is melo. A note
+  that restates your words with a relative word ("You have a cousin named Ren
+  who lives in Kyoto.") is no longer refused for the word "who".
+- A note's owner has to be a person. A rule you ask melo to remember ("Remember:
+  tests run with -n auto", "记住：开发的代码一律用英文") is filed under About, not
+  People, and the owner check no longer refuses it for naming a language, a
+  tool or a modifier before "'s" or "的" as someone else ("Python's GIL",
+  "开发的代码"). Names that are people ("Marco's studio", "马可的工作室", "妈妈的生日")
+  are still checked, and a request about them is still filed under People.
 - A tool call written as text is no longer taken for the answer. A model's
   server can swallow a malformed call and leave `text`, or markup such as
   `<function_calls>`, in the reply with no real tool call, and the person read
@@ -3331,3 +3372,4 @@ earlier milestones.
 [#389]: https://github.com/localmelo/localmelo/pull/389
 [#392]: https://github.com/localmelo/localmelo/pull/392
 [#393]: https://github.com/localmelo/localmelo/pull/393
+[#396]: https://github.com/localmelo/localmelo/pull/396

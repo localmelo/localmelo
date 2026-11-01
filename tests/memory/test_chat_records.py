@@ -100,6 +100,45 @@ def test_a_request_to_remember_becomes_a_second_person_record_in_english_and_chi
         assert cand.admitted_by == "user_request"
 
 
+@pytest.mark.parametrize(
+    ("sentence", "topic"),
+    [
+        # A rule or a fact about the work is about the user's setup, not a person.
+        ("Remember: tests run with -n auto", "about"),
+        ("记住：开发的代码一律用英文", "about"),
+        ("Remember to use uv", "about"),
+        ("Remember that Python's GIL is going away", "about"),
+        ("Remember Friday is review day", "about"),
+        ("Remember Everything is in ~/Developer", "about"),
+        ("Remember Tests run with -n auto", "about"),
+        # A fact about a person, with the marker or without it.
+        ("Remember that Marco's studio is on Main St", "people"),
+        ("Marco's studio is on Main St", "people"),
+        ("Remember Marco lives in Berlin", "people"),
+        ("Please remember that Dr. Tanaka works at the clinic", "people"),
+        ("Sam has the lab keys", "people"),
+        ("记住马可住在杭州", "people"),
+        ("记住：马可的工作室在中山路88号", "people"),
+        ("记住：妈妈的生日是5月3日", "people"),
+        ("记住：同事在上海", "people"),
+        # Decisions, preferences and first-person facts keep their topic.
+        ("Remember that we decided to use uv", "decisions"),
+        ("Remember that I prefer tea", "preferences"),
+        ("Remember that my sister Anna lives in Berlin", "about"),
+        ("记住：我的车停在B2层", "about"),
+    ],
+)
+def test_a_request_is_filed_under_people_only_when_its_fact_is_about_a_person(
+    sentence: str, topic: str
+) -> None:
+    assert records.topic_of(sentence, request=True) == topic
+
+
+def test_a_statement_is_never_filed_under_people_by_topic_of() -> None:
+    assert records.topic_of("Marco lives in Berlin", request=False) == "about"
+    assert records.topic_of("Marco's studio is on Main St", request=False) == "about"
+
+
 @pytest.mark.parametrize(("typed", "note", "topic"), STATEMENTS)
 def test_a_plain_statement_is_not_kept_by_rule(
     typed: str, note: str, topic: str
