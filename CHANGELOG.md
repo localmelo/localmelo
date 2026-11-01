@@ -9,6 +9,22 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- With `[memory] sleep` set to `rules`, `model` or `model+tags`, the gateway
+  now tidies the notes by itself while the computer is idle: no turn in the
+  gateway's chats for 20 minutes (a terminal chat that runs on its own, with
+  `-c` or `[cli] chat = "local"`, and workers outside the gateway are not
+  seen), no task running or queued, no GPU lock file (looked for only when
+  `[scheduler] gpu_lock_file` is set), on AC power, and at most once every
+  6 hours (the time is kept, so a restart does not run it early, and a clock
+  set back up to a day does not skip it). With `off`, the default, nothing
+  runs. The main chat then says
+  "While you were away, melo tidied 3 notes" with **Undo** and a fold that
+  lists what changed; the terminal's line ends with `· /memory undo`, and
+  `/memory undo` works in the console and the app too. Undo needs no
+  developer mode; a note you reworded since stays, and the line says so. A
+  run that was put back another way already answers "Those notes were already
+  put back", and Undo during a run answers at once to try again in a moment.
+  A run that changes nothing leaves no line. [#363]
 - Developer only, not visible by default: five `[memory]` settings that decide what a chat
   message's recall block holds, each defaulting to today's recall and set for one run with
   `-X memory.KEY=VALUE`. `recall_records` (3) and `recall_docs` (2) are the most notes and

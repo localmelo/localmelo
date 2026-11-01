@@ -1005,7 +1005,11 @@ with the echo.
   `Remind you on Fri Oct 30 at 9:00?` with `reminder: true`, `text`
   `Reminder: <words>`, `work` (the words), a `once` `schedule` and no
   `level`), `chore_saved` (with `chore_id`),
-  `checkin` (the check-in's note, with `items`), `undone`, `failed`, `earlier`
+  `checkin` (the check-in's note, with `items`), `sleep` (melo tidied notes while the
+  person was away: `run_id`, `count`, `variant`, `items` of at most five
+  `{change, text}` with `change` one of `merged`, `updated`, `added`, `reworded`,
+  `retired`, `changed`, `more` for the changes not listed, `line` `While you were away, melo tidied 3 notes`),
+  `undone`, `failed`, `earlier`
   (a task's step ran on the person's earlier approval: `task_id`, `title`,
   `entry_id`, `approved_at`, `preview`, `line` `Used your approval from 14:02`)
   or `revoked` (that approval was taken back; `of` is the `earlier` echo). A reminder
@@ -1043,8 +1047,14 @@ with the echo.
   200 `{"echo"}`: Undo a `control` or `level` echo (a stop starts the task
   again as a new task) or a `chore_saved` one (the chore is deleted), apply a
   `suggest`, start an `ask`, set a `started` or `level` echo's task to the
-  person's level, or revoke the approval an `earlier` echo used (a `revoked`
-  echo answers). On a `chore` echo, `save` keeps the chore (a `chore_saved`
+  person's level, revoke the approval an `earlier` echo used (a `revoked`
+  echo answers), or Undo a `sleep` echo (the whole run is put back; an `undone`
+  echo answers with `of` and `run_id`, and says how many notes came back; a run
+  that is unknown or undone already changes nothing and is answered 200 with an
+  `undone` echo that says the notes were already put back, so the line is answered
+  and `/memory undo` goes on to an older one; 409 `sleep_running` at once while a
+  sleep is tidying the notes, to tap again in a moment). Undo of a `sleep`
+  echo works in every UI mode. On a `chore` echo, `save` keeps the chore (a `chore_saved`
   echo answers; a reminder is kept at P1, and one whose time passed meanwhile is 400),
   `once` starts its work as one task (not for a reminder: 400) and `cancel` keeps
   nothing (an `undone` echo answers). Each answers once (409
@@ -1323,6 +1333,7 @@ These codes answer on the write routes besides the shared ones above:
 | 409 | `submission_withdrawn` | the `client_request_id` was cancelled before it started |
 | 409 | `turn_not_running` | cancel named a turn that is not running |
 | 409 | `already_answered` | the approval was answered already |
+| 409 | `sleep_running` | Undo on a `sleep` echo while a sleep is tidying the notes |
 | 502 | `agent_start_failed` | the session's Agent could not start; the message is the builder's error |
 
 ### What a turn answers with
@@ -1843,6 +1854,8 @@ panel uses these routes.
 - `POST /api/memory/reindex` rebuilds the chat index from the chats (turns that ended
   before the last "forget everything" stay out) and gives every note a vector of the
   embedding model now set: `{"notes": 0, "turns": 48}`.
+- With `[memory] sleep` not `off`, the gateway also runs a sleep by itself and adds a `sleep` echo to the main
+  chat ([Echoes](#echoes-in-the-main-chat) has Undo); see [Memory across chats](../concepts/memory.md#tidying-notes-while-you-are-away).
 - `POST /api/memory/sleep` (developer mode, `[ui] mode = "developer"`; else 404 `not_found`) runs one sleep and
   answers its report. The optional body `{"variant": "rules"}` names the variant (`off`, `rules`, `model` or
   `model+tags`; anything else is 400); without it `[memory] sleep` decides, and `off` does nothing.

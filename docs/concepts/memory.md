@@ -165,9 +165,23 @@ What a chat is told about memory:
 
 Direct runs (`melo "<task>"`), the terminal chat, workers and the benchmark neither recall nor keep notes, and have no `remember` tool; a task's runner only adds its result to the index.
 
-### Tidying notes while idle (developer setting)
+### Tidying notes while you are away
 
-`[memory] sleep` is off by default. Run a pass explicitly with `melo memory sleep [VARIANT]` (developer mode) or `POST /api/memory/sleep`; `-X memory.sleep=rules` sets it for one run, and `melo -h all` lists it.
+With `[memory] sleep` set to `rules`, `model` or `model+tags` (a developer setting, off by default), melo tidies your notes by itself while the computer is idle, and tells you in the main chat.
+
+- It waits until nothing has happened for 20 minutes, no task is running or queued, the computer is on AC power and the shared GPU lock is free, and runs at most once every 6 hours. A clock set back does not skip the 6 hours: the time of the last run is kept, and a clock up to a day behind it still waits.
+- "Nothing has happened" counts the chats of the gateway: the console, the app, and the terminal's main chat and side chats. A terminal chat that runs on its own (`melo -c`, `-u`, `-r`, `--yolo`, or `[cli] chat = "local"`) and workers outside the gateway are not seen, so melo can start tidying while you work there.
+- The GPU lock gate works only when `[scheduler] gpu_lock_file` names the lock file. With it empty, the default, no lock is looked for.
+- The main chat then says "While you were away, melo tidied 3 notes · Undo". **What changed** lists the first five.
+- **Undo** puts the whole run back. A note you reworded since stays, and the line says so. If the run was put back another way already, the line says "Those notes were already put back" and nothing changes. While a run is tidying, Undo answers "melo is tidying the notes right now. Try again in a moment."
+- In a terminal the line ends with `· /memory undo`; the console and the app take `/memory undo` too.
+- A run that changes nothing leaves no line.
+
+<a id="tidying-notes-while-idle-developer-setting"></a>
+
+### Tidying notes by hand (developer setting)
+
+Run a pass explicitly with `melo memory sleep [VARIANT]` (developer mode) or `POST /api/memory/sleep`; `-X memory.sleep=rules` sets it for one run, and `melo -h all` lists it. The variants are the ones melo uses when it tidies by itself.
 
 - **`rules`** makes no chat-model request: merge duplicate notes, replace a fact with your newer stated value, retire an older note that a newer one replaced, and recover lasting statements no note kept. A note you reworded is never merged away. Two of your own active notes that say one subject with different values (an appointment moved, a new manager beside the old one) are told apart by code: the older is superseded and the newer kept, only when you reworded neither, the older was said earlier and each holds a value the other lacks. Nothing new is written, it counts toward the change limit, and undo restores the older note. The newer note also counts as having replaced the older note's exchange, so recall treats that exchange as older and gives it only when you ask about the past, the same as when a note is written to replace another; undo takes that back too. Before adding a lost fact, it checks whether an active note already holds it. That note must have every value of the fact (a changed value is a new fact, however close in meaning), say it the same way (a negation in both texts or in neither) and not be about a known different subject; then, with comparable embeddings, cosine must reach 0.85, otherwise at least half the stemmed non-value words must overlap. A configured embedding is bounded to 1.5 seconds per candidate and cached within the pass; failure falls back to words.
 - **`model`** runs those rules first, then asks the chat model about selected turns, oldest first, with their previous message and up to six matching active notes. It can add a fact (choosing its topic as the chat's `remember` tool does), update a value or retire an explicitly retracted fact; a separate pass resolves a note's opening pronoun from its source and previous turn. At most 12 chat requests per run, eight seconds each, with temperature zero.
