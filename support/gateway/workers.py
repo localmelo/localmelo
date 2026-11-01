@@ -2394,13 +2394,16 @@ class TaskWorkers:
                 else:
                     if task_id in self._invalid_workspace:
                         phase = "failed"
-                    elif task_id in self._stopping:
+                    elif task_id in self._stopping and not ending_phase:
+                        # A Stop (or a shutdown) after the turn ended, while the
+                        # ending is read, stops nothing: the run's outcome stands.
                         phase = "cancelled"
                     inbox = self._inboxes.pop(task_id, None)
                     if (
                         inbox is not None
                         and phase in ("done", "failed")
                         and task_id not in self._invalid_workspace
+                        and task_id not in self._stopping
                     ):
                         unread = inbox.drain()
                     if not unread:

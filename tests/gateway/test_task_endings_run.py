@@ -416,3 +416,44 @@ async def test_work_a_run_stashed_stays_unchecked_in_the_next_run(
     await workers.continue_stopped(task_id)
     second = (await ended(workers, task_id, turns=2))["ending"]
     assert (second["state"], second["reasons"]) == ("draft", ["unchecked"])
+
+
+@pytest.mark.parametrize("how", ["stop", "shutdown"])
+async def test_a_stop_while_the_ending_is_read_leaves_the_run_as_it_ended(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch, how: str
+) -> None:
+    workers, llm, repo = setup
+    from localmelo.support.gateway import workers as module
+
+    reading, go_on = asyncio.Event(), asyncio.Event()
+    real = module.decide_ending
+
+    async def slow(*args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        reading.set()
+        await go_on.wait()
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(module, "decide_ending", slow)
+    llm.replies = [says("Looked.\nEnding: ready")]
+    task_id = await start(workers, repo, "Look at calc.py")
+    await asyncio.wait_for(reading.wait(), 10)
+    # The finished turn's runner stays registered until the run is finalized;
+    # cancelling it stops nothing, and shutdown waits for the ending.
+    assert task_id in workers._runners
+    if how == "stop":
+        await workers.update(task_id, state="stop")
+        go_on.set()
+    else:
+        closing = asyncio.create_task(workers.aclose())
+        await asyncio.sleep(0.05)
+        assert not closing.done()
+        go_on.set()
+        await asyncio.wait_for(closing, 10)
+
+    async def finished() -> bool:
+        return task_id not in workers._runs
+
+    await until(finished)
+    record = await workers.tasks.get_task(task_id)
+    assert record.state == "done"
+    assert record.ending is not None and record.ending["state"] == "ready"
