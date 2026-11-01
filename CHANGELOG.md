@@ -9,6 +9,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Developer only, not visible by default: five `[memory]` settings that decide what a chat
+  message's recall block holds, each defaulting to today's recall and set for one run with
+  `-X memory.KEY=VALUE`. `recall_records` (3) and `recall_docs` (2) are the most notes and
+  earlier chat turns it holds, `recall_chars` (900) its size; `recall_notes = "off"`
+  recalls turns only and pins no note (the `remember` and search tools are unchanged);
+  `search_when_empty = "hint"` gives a block that recalled nothing one line telling the
+  model to call the memory search tool first, and the `turn.memory` event then has
+  `search_hint: true`. Out-of-range values are config errors. Part of #349.
 - Developer only: `melo memory ingest FILE` loads past chats from a JSON file as if they
   had happened on their dates (no model call), and `LOCALMELO_NOW` pins the date
   the model and memory recall read, for memory tests.

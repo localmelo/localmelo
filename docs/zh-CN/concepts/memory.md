@@ -62,6 +62,7 @@
 - 回答说它记下了某件事（"Remembered: …"、"Noted — …"、"I've noted that …"、"记下了：…"）而没有记下任何笔记时，melo 会按下面同样的检查，把回答里说到的内容记下来，前提是它是一句陈述：对你说的（含 "you"、"your"、"你" 或 "您"），或关于别人的（"Prof. Duarte's office is in the Atrium Wing"）。如果不行（那些词不是你说的，看起来像密钥，或只是 "gate 9 for Faro" 这样没有动词的片段），就什么也不保存，这一轮的 `turn.memory` 事件带有 `unsaved_claim: true`。回答只说记下了或保存了却没有说明内容（"Saved."、"Noted."、"Got it, noted…"、"I've saved it."、"I've saved your preference."、"已记录。"、"我已经记录了你的偏好。"），而又没有记下任何笔记时，也是如此。"Got it!"、"Thanks!" 不算声称。
 - 已经记下的笔记不会重复写入。问题和待办（"remember to buy milk"）不是笔记。
 - `[memory] keep_statements = true`（默认关闭；`-X memory.keep_statements=on` 只对一次运行生效，`melo -h all` 会列出它）是用于比较的开发者设置：模型回答之后，代码也会记下你说出、但模型没有记的明确而长期的事实（"I live in …"、"my advisor is …"、"我的…是…"）；问题、"如果"、"不"、过去、别人的看法和一时的状态（"my build is failing"）从不记。
+- 用于比较的开发者设置，默认都是关闭或今天的取值，用 `-X memory.KEY=VALUE` 只对一次运行生效（`melo -h all` 会列出它们）：`recall_records`（3）和 `recall_docs`（2）是一条消息的召回块最多包含的笔记数和以前的对话轮次数，`recall_chars`（900）是它的字符数上限；`recall_notes = "off"` 只召回对话轮次，也不置顶任何笔记；`search_when_empty = "hint"` 会给没有召回任何内容的块加上一行，告诉模型先调用记忆搜索工具，搜索也没有结果就说不知道。这一轮的 `turn.memory` 事件里会有 `search_hint: true`。见[配置参考](../reference/configuration.md)。
 
 笔记被记下之前，代码会检查：
 
