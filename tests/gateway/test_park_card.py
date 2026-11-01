@@ -71,6 +71,17 @@ def test_latest_nonempty_reply_survives_empty_tool_only_messages() -> None:
     assert "Earlier reply" not in card
 
 
+def test_a_tool_call_written_as_text_is_not_the_last_reply() -> None:
+    events = [
+        event("assistant.message", {"content": "Saved the note."}),
+        event("assistant.message", {"content": "<tool_call>\n<function=remember>"}),
+        event("assistant.message", {"content": "<|python_tag|>{}"}),
+    ]
+    card = build_park_card({}, events)
+    assert "Last reply (reported): Saved the note." in card
+    assert "tool_call" not in card and "python_tag" not in card
+
+
 def test_malformed_inputs_and_missing_evidence_are_unknown() -> None:
     card = build_park_card(
         {"objective": None, "done_when": ["First", 3, "Second"]},

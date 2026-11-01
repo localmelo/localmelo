@@ -79,5 +79,22 @@
     ["blocked", "approval_denied", {"allowed": false, "origin": "timeout", "remember": false}, "not answered in time", "Not approved in time"],
     ["blocked", "approval_denied", {"allowed": false, "origin": "error", "remember": false, "reason": "boom"}, "approval failed", "Approval failed; the call did not run"],
     ["cancelled", "cancelled", {"allowed": false, "origin": "withdrawn", "remember": false}, "not run", "Not run: the turn was stopped"]
+  ],
+  "split_thinking": [
+    ["<think>why</think>What", "why", "What"],
+    ["<think>unfinished", "unfinished", ""],
+    ["before</think>after", "before", "after"],
+    ["  plain  ", "", "plain"],
+    ["<think>plan</think><thinking>x</thinking>Done.", "plan", "<thinking>x</thinking>Done."],
+    ["<thinking>The user works at Acme.\nI will keep it short.</thinking>\nDone.", "The user works at Acme.\nI will keep it short.", "Done."],
+    ["<thinking>用户说他的经理是 Priya。</thinking>已记录。", "用户说他的经理是 Priya。", "已记录。"],
+    ["  \n<THINKING>plan</Thinking>Done.", "plan", "Done."],
+    ["<thinking></thinking>Done.", "", "Done."],
+    ["<thinking>plan</thinking>", "plan", ""],
+    ["<thinking>plan</thinking>\n<think>more</think>Done.", "plan", "<think>more</think>Done."],
+    ["Done. <thinking>plan</thinking>", "", "Done. <thinking>plan</thinking>"],
+    ["Use <thinking> to open a block.", "", "Use <thinking> to open a block."],
+    ["<thinking>never closed", "", "<thinking>never closed"],
+    ["<thinking>never closed. Done.", "", "<thinking>never closed. Done."]
   ]
 }

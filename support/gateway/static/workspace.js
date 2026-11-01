@@ -58,6 +58,7 @@ import {
   statusLine,
   statusMark,
   statusText,
+  TOOL_CALL_TEXT,
   toolState,
   turnDuration,
   turnFace,
@@ -1579,7 +1580,10 @@ function failureHint(turn, can, error) {
     case "budget_exhausted": return sentences(t("failure.budget"));
     case "timeout": return sentences(t("failure.timeout"));
     case "stuck": return t("failure.stuck");
-    case "failed": return t(error === UNFINISHED_ANSWER ? "failure.thinkingOnly" : "failure.failed");
+    case "failed": {
+      if (error === UNFINISHED_ANSWER) return t("failure.thinkingOnly");
+      return t(error === TOOL_CALL_TEXT ? "failure.toolText" : "failure.failed");
+    }
     case "gate_stopped": return t("failure.gate");
     case "context_budget_exceeded": return t("failure.context");
     case "setup_error": return t("failure.setup");
@@ -1629,7 +1633,8 @@ function statusNode(turn) {
   heading.append(statusMarkNode(info.severity, stopped), el("span", "", info.title));
   node.append(heading);
   // An unreachable server's title and hint say all there is to say; its raw error stays under Details.
-  if (!stopped && error && !serverUnreachable(turn.status, error) && error !== info.title) {
+  // So does the title of a tool call written as text.
+  if (!stopped && error && !serverUnreachable(turn.status, error) && error !== info.title && error !== TOOL_CALL_TEXT) {
     node.append(el("p", "failure-error", cleanOutput(error).split("\n")[0]));
   }
   const hint = stopped ? "" : failureHint(turn, can, error);
