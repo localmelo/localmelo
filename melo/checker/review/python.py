@@ -775,11 +775,12 @@ class _Review:
             write = any(set(str(m)) & set("wax+") for m in mode if m)
             self.paths(base if method else first, write, "write" if write else "read")
         elif attr in ("hardlink_to", "symlink_to") and base is not None:
-            # The new link is the receiver; what it points at is read through it.
-            self.paths(first, False, "read")
+            # The new link is the receiver; what it points at is read through
+            # it, and a hard link's target is one file with it (written).
+            self.paths(first, False, "link" if attr == "hardlink_to" else "read")
             self.paths(base, True, "write")
         elif attr == "link_to" and base is not None:
-            self.paths(base, False, "read")
+            self.paths(base, False, "link")
             self.paths(first, True, "write")
         elif attr in _PATH_OPS and base is not None:
             self.paths(base, _PATH_OPS[attr] != "read", _PATH_OPS[attr])
@@ -792,7 +793,8 @@ class _Review:
         elif name in _OS_OPS:
             self.paths(first, "mkdir" not in name, _OS_OPS[name])
         elif name in _COPIES and len(node.args) > 1:
-            self.paths(first, False, "read")
+            # A hard link (os.link) makes the source one file with the copy.
+            self.paths(first, False, "link" if name == "os.link" else "read")
             self.paths(node.args[1], True, "write")
         elif attr in _SAVES and first or "user_data_dir" in kw:
             self.paths(kw.get("user_data_dir", first), False, "write")

@@ -460,8 +460,29 @@ def shown(ctx: Context, path: str) -> str:
     return "~" + path[len(ctx.home.rstrip("/")) :] if under(path, ctx.home) else path
 
 
+# What a hard link to a place means: a write through the link changes it.
+_LINKED = {
+    "credentials": "Links to {}, which holds passwords or keys.",
+    "self": "Links to {}, part of localmelo itself; a write through the link changes it.",
+    "persistence": (
+        "Links to {}, which makes something run later; a write through the link "
+        "changes it."
+    ),
+    "system": "Links to {}, in a system folder; a write through the link changes it.",
+}
+
+
 def touch(ctx: Context, f: Findings, raw: str, op: str, cwd: str | None = None) -> None:
-    """Record what a ``read``, ``write`` or ``delete`` (*op*) of *raw* means."""
+    """Record what a ``read``, ``write``, ``delete`` or ``link`` (*op*) of *raw* means.
+
+    ``link`` is the file a hard link is made to: the new name and *raw* are
+    one file, so a later write through the new name (a routine write in the
+    workspace) changes *raw*, and a read through it reads *raw*. It counts
+    as read and written: keys when it holds them, and its own category as a
+    write (localmelo itself, what runs later, a system folder), else a write
+    outside the workspace. A hard link to a file in the workspace, a
+    temporary folder or a cache is routine.
+    """
     if (raw, op, cwd) in f.seen:
         return
     f.seen.add((raw, op, cwd))
@@ -471,6 +492,23 @@ def touch(ctx: Context, f: Findings, raw: str, op: str, cwd: str | None = None) 
             f.doubt(f"Changes a path melo cannot resolve: {raw}")
         return
     kind, name = where(ctx, path, write=op != "read"), shown(ctx, path)
+    if op == "link":
+        # Read through the new name, and written through it.
+        secret = where(ctx, path, write=False) == "credentials"
+        if secret:
+            f.add("credentials", _LINKED["credentials"].format(name))
+        if kind in _LINKED and not (secret and kind == "credentials"):
+            f.add(kind, _LINKED[kind].format(name))
+        elif kind == "outside":
+            f.add(
+                "outside_write",
+                f"Links to {name}, outside {ctx.folder}; a write through the link "
+                "changes it.",
+            )
+        elif not secret:
+            return
+        f.paths.append(path)
+        return
     if kind == "credentials":
         f.add("credentials", f"Uses {name}, which holds passwords or keys.")
     elif op == "read" or kind in ("harmless", "inside"):

@@ -1347,3 +1347,71 @@ def test_a_key_place_inside_the_workspace_reads_as_before(ws: Path) -> None:
     (ws / ".claude").mkdir()
     (ws / ".claude" / "notes.md").write_text("project notes")
     assert sh(ws, "cat .claude/notes.md").verdict == "routine"
+
+
+# ── Hard links: one file under two names ─────────────────────────────────────
+
+
+@pytest.fixture
+def linked_home(ws: Path) -> Path:
+    home = ws.parent
+    (home / ".zshrc").write_text("# rc")
+    (home / "Library" / "LaunchAgents").mkdir(parents=True)
+    (home / "Library" / "LaunchAgents" / "a.plist").write_text("<plist/>")
+    (home / ".ssh").mkdir(exist_ok=True)
+    (home / ".ssh" / "id_rsa").write_text("key")
+    (home / "notes.txt").write_text("n")
+    (ws / "local.txt").write_text("l")
+    (ws / ".git" / "hooks").mkdir(parents=True)
+    (ws / ".git" / "hooks" / "pre-commit").write_text("#!/bin/sh\n")
+    return home
+
+
+@pytest.mark.parametrize(
+    ("command", "category"),
+    [
+        ("ln ~/.zshrc z", "persistence"),
+        ("ln ~/Library/LaunchAgents/a.plist p", "persistence"),
+        ("cp -l ~/.zshrc z", "persistence"),
+        ("cp --link ~/.zshrc z", "persistence"),
+        ("cp -al ~/.zshrc z", "persistence"),
+        ("link ~/.zshrc z", "persistence"),
+        ("ln -f ~/.zshrc", "persistence"),
+        ("ln .git/hooks/pre-commit hook", "persistence"),
+        ("ln ~/.ssh/id_rsa k", "credentials"),
+        ("ln ~/notes.txt n", "outside_write"),
+    ],
+)
+def test_a_hard_link_to_a_file_outside_takes_its_category(
+    ws: Path, linked_home: Path, command: str, category: str
+) -> None:
+    review = sh(ws, command)
+    assert review.verdict == "high", command
+    assert category in review.categories, (command, review.categories)
+
+
+def test_a_hard_link_inside_the_workspace_and_a_symlink_are_as_before(
+    ws: Path, linked_home: Path
+) -> None:
+    assert sh(ws, "ln local.txt again.txt").verdict == "routine"
+    assert sh(ws, "cp -l local.txt again.txt").verdict == "routine"
+    assert sh(ws, "cp ~/notes.txt copy.txt").verdict == "routine"
+    assert "persistence" not in sh(ws, "ln -s ~/.zshrc z").categories
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "import os\nos.link({rc!r}, 'z')",
+        "from pathlib import Path\nPath('z').hardlink_to({rc!r})",
+    ],
+)
+def test_python_hard_links_take_the_category_too(
+    ws: Path, linked_home: Path, code: str
+) -> None:
+    rc = str(linked_home / ".zshrc")
+    review = rv(ws, "python_exec", {"code": code.format(rc=rc)})
+    assert review.verdict == "high"
+    assert "persistence" in review.categories
+    inside = rv(ws, "python_exec", {"code": "import os\nos.link('local.txt', 'b')"})
+    assert inside.verdict == "routine"

@@ -198,10 +198,27 @@ _VALUED = set(
 )
 # Writes: the last argument (cp …), every argument, or every one but the first.
 _WRITERS = {
-    **dict.fromkeys(["cp", "mv", "ln", "rsync", "install", "ditto"], "last"),
+    **dict.fromkeys(["cp", "mv", "ln", "link", "rsync", "install", "ditto"], "last"),
     **dict.fromkeys(["touch", "mkdir", "tee", "truncate"], "all"),
     **dict.fromkeys(["chmod", "chown", "chgrp"], "rest"),
 }
+
+
+def _hard_link(prog: str, args: list[str]) -> bool:
+    """Whether *prog* with *args* makes hard links: ``link``, ``ln`` without
+    ``-s``, ``cp -l``/``--link``."""
+    shorts = "".join(
+        a[1:] for a in args if a.startswith("-") and not a.startswith("--")
+    )
+    if prog == "link":
+        return True
+    if prog == "ln":
+        return "s" not in shorts and "--symbolic" not in args
+    if prog in ("cp", "gcp"):
+        return "l" in shorts or "--link" in args
+    return False
+
+
 # Programs that run the project's own files: a test runner, a build tool, a
 # package script. With code changed in this chat they are undecided.
 _RUNNERS = set(["pytest", "py.test", "tox", "nox", "make", "gmake", "just"])
@@ -686,6 +703,10 @@ def run_argv(
             touch(ctx, f, arg, "write", cwd)
         for source in words[:-1] if prog == "mv" else []:
             touch(ctx, f, source, "delete", cwd)
+        if _hard_link(prog, args):
+            # One file under two names: the source counts as written.
+            for source in words[:-1] if len(words) > 1 else words:
+                touch(ctx, f, source, "link", cwd)
     elif prog == "sed" and any(a.startswith("-i") for a in args):
         files = [w for w in words if w]
         for arg in files if "-e" in args else files[1:]:

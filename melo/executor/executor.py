@@ -17,6 +17,7 @@ from localmelo.melo.contracts.approvals import (
 from localmelo.melo.contracts.folders import (
     CHECKED_PATH,
     CheckedPath,
+    HardLinkError,
     OutsideAccess,
     PathChangedError,
     asked_text,
@@ -498,9 +499,10 @@ class Executor:
                     output = await fn(**request.arguments)
                 finally:
                     _ENTRY_MARKED.reset(token)
-        except PathChangedError as exc:
+        except (PathChangedError, HardLinkError) as exc:
             # The file opened is not the one checked (a part of the path
-            # was swapped after the check): nothing was read or written.
+            # was swapped after the check), or it has another name (a hard
+            # link) that no check saw: nothing was read or written.
             return ExecutionOutcome(
                 tool_name=request.tool_name,
                 status=ExecutionStatus.ERROR,
