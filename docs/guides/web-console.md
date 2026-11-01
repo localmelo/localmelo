@@ -305,7 +305,11 @@ health poll whenever what runs changes, and every 30 seconds:
 
 A result line is always plain words. A run stopped before it answered reads `Stopped before answering`, a picture
 reads `Made a picture`, a file the file's name, and an answer that is code the first sentence around the code (`Wrote
-some code` when there is none).
+some code` when there is none). Markdown marks are removed (code keeps its words, as in `__init__.py`, struck
+text goes, and `x**2` stays), a lead-in such as `In short:` is dropped, and the line ends at the first sentence. A
+chat's line says first what the chat did, then its reply's first sentence: `Offered a task: Visit example.com ·
+I can't open websites myself.`; what it did is `Started a task: …`, `Offered a task: …` or `Kept a note`, and a reply that only says it handed the work to a task is left out. The main
+chat's row is named in the page's language.
 
 A row that asked you for approvals carries them folded under its result line: `1 approval`, or `2 approvals, 1
 waiting`. Select it to list each request in plain words (`Write slides.md`, `Run the tests`, `Run a command`; never
@@ -525,8 +529,13 @@ Tasks link in the sidebar, and the task page is not a view of its own.
   ran** lists the tests the task's own run started, each passed, failed or result
   not checked; a test its answer only mentions is not listed. **Ready** needs
   proof: when a test's result or the folder could not be checked, the task is not
-  ready. **Finish it** continues, with one tap, a task that still owes its tests
-  or its commit. The panel's Activity and Workers rows say the same, and
+  ready. Changed code owes a test; when **Finish it** then finds no test runner
+  for the folder, the task reads **Ready** with **No tests apply**, and when it
+  finds tests it cannot run, **melo found tests here but could not run them**.
+  **Finish it** continues, with one tap, a task that still owes its tests or its
+  commit, and is never offered again after its own run. A
+  folder too large or unreadable to check offers it only while it can still run
+  a test or commit; then it says why: **The folder was too large to check**. The panel's Activity and Workers rows say the same, and
   `GET /api/tasks/<id>` carries it as `ending`.
 
 A button is disabled while its request is in flight. A refusal (a stale

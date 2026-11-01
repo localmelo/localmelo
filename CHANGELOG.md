@@ -597,6 +597,25 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A task that changed no code is no longer told to run tests. Outside git, melo compares the
+  task folder before and after the run and counts only changed code files (a saved page,
+  picture, table or PDF is not code), so a task that only looked at a website ends Ready; a
+  write made by a shell command is still caught, and so is a code file the file tools
+  changed outside the folder. Changed code still owes a test; when Finish it then finds no
+  test runner for the folder (or a whole pytest run collects no test), the task ends Ready
+  with "No tests apply", and when it finds tests it cannot run, the task says so. A run
+  filtered to some tests that finds none, or a runner that says it ran no test, is not a
+  passing test. Finish it is never offered
+  again after its own run, so it can no longer loop; asking for the tests yourself when you
+  continue a task counts as Finish it. More test setups are recognized, each with its test
+  command (Django, pytest settings in `pyproject.toml` or `setup.cfg`, CMake, PHPUnit, Mix,
+  Gradle, Maven, .NET, Zig, Cabal, Deno, just, `make check`), npm's placeholder test script
+  is not one, and "don't forget the tests" or "make sure the tests pass" asks for them. A folder too large or unreadable to check offers Finish it only while
+  it can still run a test or commit, then says plainly why it was not checked. Fixes #408.
+- Activity's line for a chat says what happened in plain words: what the chat did (started
+  or offered a task, kept a note), then the first sentence of its reply without Markdown or
+  a lead-in such as "In short:", in English and Chinese. Code keeps its words, struck text
+  goes, and `x**2` stays. The main chat's row is named in your language. Fixes #409.
 - With browsing on (`[browser] driver = "safari-automation"`), the main chat
   in the web console and the app now has the browser tools too, as the
   terminal chat and side chats did. A `[browser] driver` that names no

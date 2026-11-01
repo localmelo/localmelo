@@ -259,7 +259,11 @@ Without `session_id` (or with the main chat's) the same call lists the whole day
   says what it does
   (`activity` and `icon`, as in [`status.items`](#get-apihealth)); a finished one
   says how in `result`, one line of at most 140 characters (the turn's digest,
-  else the answer's first sentence, else for a failure why), and its `icon` is
+  else the answer's first sentence without Markdown, else for a failure why; a
+  console chat's row first says what the chat did since its newest turn began,
+  `Started a task: <title>`, `Offered a task: <title>`, `Kept a note`, then its
+  reply's line, joined with ` · `; the main chat's `title` is in the request's
+  language), and its `icon` is
   the kind of its last tool call (`done` without one, `failed` or `stopped`).
   `at` is when it ended (a live row: when it started; a task: its last change),
   `turns` how many of a chat's turns started that day, `level` a task's
