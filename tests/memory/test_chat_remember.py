@@ -551,6 +551,22 @@ async def test_a_note_in_the_first_person_is_kept_in_the_second(
             "我喜欢你用简单的话解释。",
             "你喜欢 melo 用简单的话解释。",
         ),
+        # "I" beside the user in the third person is melo: never rewritten to "you".
+        (
+            "I want you to answer in Chinese.",
+            "The user wants me to answer in Chinese.",
+            "You want melo to answer in Chinese.",
+        ),
+        (
+            "我希望你用中文回答。",
+            "用户希望我用中文回答。",
+            "你希望 melo 用中文回答。",
+        ),
+        (
+            "I prefer that you reply briefly.",
+            "User prefers that I reply briefly.",
+            "You prefer that melo replies briefly.",
+        ),
     ],
 )
 async def test_a_note_that_says_i_and_you_is_refused_with_how_to_write_it(
@@ -572,6 +588,9 @@ async def test_a_note_that_says_i_and_you_is_refused_with_how_to_write_it(
     [
         ("We decided to use uv.", "We decided to use uv."),
         ("我们决定用uv。", "我们决定用uv。"),
+        # The user in the third person, with no "I": as written.
+        ("I want plain words.", "The user wants plain words."),
+        ("My user account is Ray.", "Your user account is Ray."),
         # A quoted "I" is someone's words, not the note's voice.
         ("I prefer tea.", 'You said: "I prefer tea."'),
         ("Your Phase I trial starts Monday.", "Your Phase I trial starts Monday."),
@@ -659,3 +678,23 @@ async def test_a_note_that_adds_who_is_kept_and_one_that_adds_a_value_is_not(
     assert (await memory.remember(kept, "people")).startswith(f"Remembered: {kept} ")
     (entry,) = await memory.records()
     assert entry.text == kept and entry.provenance["quote"] == typed
+
+
+@pytest.mark.parametrize(
+    ("note", "first", "names"),
+    [
+        ("The user wants me to answer in Chinese.", True, True),
+        ("User prefers that I reply briefly.", True, True),
+        ("用户希望我用中文回答。", True, True),
+        ("The person who wants me to wait is Ana.", True, True),
+        ("My flight to Porto is at gate 22.", True, False),
+        ("My user account is Ray.", True, False),
+        ("The person I met is Ana.", True, False),
+        ('The user said "I like tea".', False, True),
+        ("The user wants plain words.", False, True),
+    ],
+)
+def test_a_note_that_names_the_user_and_says_i_is_known_by_its_words(
+    note: str, first: bool, names: bool
+) -> None:
+    assert (records.first_person(note), records.names_user(note)) == (first, names)

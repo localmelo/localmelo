@@ -500,7 +500,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   "melo"); "we" and quoted words are left alone. A reply that only says it
   saved or noted ("Saved.", "Noted.", "Got it, noted…", "已记录。") with no note
   kept now counts as a claim that names nothing, as one that names a fact
-  already did, and `unsaved_claim` is true; "Got it!" is still no claim. A note
+  already did, and `unsaved_claim` is true; so does one that names only a
+  generic thing ("I've saved your preference.", "我已经记录了你的偏好。").
+  "Got it!" is still no claim. A note that says "I" beside "the user" ("The
+  user wants me to answer in Chinese.") is refused too, never turned into "you",
+  because its "I" is melo. A note
   that restates your words with a relative word ("You have a cousin named Ren
   who lives in Kyoto.") is no longer refused for the word "who".
 - The app's pill says **stopped**, not failed, for a task that used all its

@@ -847,11 +847,12 @@ class ChatMemory:
         """Keep *text* as a note of the chat turn under way; what the model reads back.
 
         Refused: outside a chat's turn, in a turn the person did not begin
-        (``TurnInfo.origin``), a secret, a note that says both "I" and "you"
-        (:data:`WRITE_IN_YOU`), and words the user did not type in this chat and
-        no finished task's result shown in it holds. A note that says "I" or
-        "my" and no "you" is kept in the second person
-        (:func:`records.second_person`), as the user's own words are.
+        (``TurnInfo.origin``), a secret, a note that says "I" and "you", or "I"
+        and "the user" (:data:`WRITE_IN_YOU`: its "I" is melo), and words the
+        user did not type in this chat and no finished task's result shown in it
+        holds. A note that says "I" or "my" and nothing of the user otherwise is
+        kept in the second person (:func:`records.second_person`), as the user's
+        own words are.
         """
         turn = CHAT_TURN.get()
         if not self.enabled or turn is None or turn.memory.recall is None:
@@ -869,7 +870,8 @@ class ChatMemory:
                 "(no file, no code)."
             )
         if records.first_person(note):
-            if records.addresses_user(note):
+            # "I" is the assistant when the note names the user in the third person.
+            if records.addresses_user(note) or records.names_user(note):
                 return WRITE_IN_YOU
             note = records.second_person(note, protect=True)
         said = [turn.typed, *await self._said(turn)]

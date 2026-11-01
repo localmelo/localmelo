@@ -331,6 +331,11 @@ _KEPT = re.compile(
     r"|\b(?:Phase|Type|War|Chapter|Volume|Appendix|Category|Tier|Edition) I\b(?!['’])"
 )
 _KEPT_SPLIT = re.compile(f"({_KEPT.pattern})")
+# The user named in the third person (:func:`names_user`); "my user account" is no one.
+_THIRD_USER = re.compile(
+    r"(?<!\bmy )(?<!\byour )(?<!\bour )\buser(?:['’]s)?\b|\bthe person\b(?! I\b)|用户",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -405,6 +410,13 @@ def addresses_user(note: str) -> bool:
     return _TO_USER.search(_KEPT.sub(" ", note)) is not None
 
 
+def names_user(note: str) -> bool:
+    """Whether *note* names the user in the third person (``the user``, ``user``,
+    ``the person``, ``用户``), a quoted span aside. Its "I" is then the assistant:
+    "The user wants me to answer in Chinese."."""
+    return _THIRD_USER.search(_KEPT.sub(" ", note)) is not None
+
+
 def finished(text: str) -> str:
     """*text* as a record reads: one line, a capital, an end mark, bounded."""
     text = " ".join(text.split()).strip(" -—:：,，")
@@ -459,18 +471,29 @@ _CLAIMS: Final = tuple(
 # A claim to have saved or noted that names nothing: a sentence of its own ("Saved.",
 # "Got it, noted…", "I've saved it.", "text✅ 已记录"), not a fact that follows it.
 _MEMORY = r"(?: (?:to|in) (?:your |my |melo['’]s )?(?:memory|notes))?"
+# What a claim may name and still name nothing: a pronoun or a generic noun.
+_THING_EN = (
+    r"(?:it|that|this|(?:your|the|that|this|these) "
+    r"(?:preferences?|info|information|details?|requests?|settings?|choices?))"
+)
+_THING_ZH = (
+    r"(?:(?:你|您)的)?(?:偏好|喜好|习惯|信息|要求|设置|内容|这件事|这些|这个|那个)"
+)
 _BARE_EN = (
-    rf"(?:saved(?: (?:it|that|this))?{_MEMORY}"
-    rf"|noted(?:[ \t]*[,—–-]+[ \t]*(?:thanks|thank you|thx)(?: a lot| so much| again)?)?"
-    rf"|I(?:['’]ve| have) (?:saved|stored|recorded|noted)(?: (?:it|that|this))?{_MEMORY}"
-    r"|I(?:['’]ll| will) remember (?:it|that|this))"
+    rf"(?:saved(?: {_THING_EN})?{_MEMORY}"
+    rf"|noted(?: {_THING_EN})?"
+    r"(?:[ \t]*[,—–-]+[ \t]*(?:thanks|thank you|thx)(?: a lot| so much| again)?)?"
+    rf"|I(?:['’]ve| have) (?:saved|stored|recorded|noted)(?: {_THING_EN})?{_MEMORY}"
+    rf"|I(?:['’]ll| will) remember {_THING_EN})"
     rf"(?=[ \t{_MARKS}]*(?:[.!…]+(?:\s|$)|\n|$))"
 )
 _BARE_ZH = (
     r"(?:我)?(?:已经?(?:记录|记住|保存|记下)了?|(?:记录|保存|记住|记下)(?:下来)?了"
-    r"|帮你记下(?:来)?了?)(?:到记忆(?:里|中)?)?"
+    rf"|帮你记下(?:来)?了?)(?:{_THING_ZH})?(?:到记忆(?:里|中)?)?"
     rf"(?=[ \t{_MARKS}]*(?:[。！.!~～…，,、]|\n|$))"
 )
+# A fact that is only such a thing ("Your preferences.") is no fact.
+_GENERIC = re.compile(rf"{_THING_EN}[.!]*|{_THING_ZH}[。！]*", re.IGNORECASE)
 _BARE = re.compile(rf"{_LEFT}(?:{_BARE_EN}|{_BARE_ZH})", re.IGNORECASE)
 _CLAIM_END = re.compile(r"[。！？]+|[.!?]+(?:\s|$)|\n|\s?[(（]")
 _NOTED_TAIL = re.compile(r"[\s,;—–-]*\bnoted\b[.!\s]*$", re.IGNORECASE)
@@ -514,6 +537,8 @@ def claimed(answer: str) -> str | None:
         )
         fact = rest[: end.start()] if (end := _CLAIM_END.search(rest)) else rest
         note = finished(_release(_NOTED_TAIL.sub("", fact)))
+        if _GENERIC.fullmatch(note):
+            return ""
         if _TO_USER.search(note):
             return note
         if len(note_terms(note)) >= CLAIM_TERMS:
