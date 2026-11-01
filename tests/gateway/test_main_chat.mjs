@@ -59,6 +59,14 @@ test('the timeline orders turns and cards by time, with a divider per day and on
   assert.deepEqual(timeline([], [], NOON), []);
 });
 
+test('melo\'s follow-up row stands just before the turn it began, though written after it started', () => {
+  const turns = [{id: 'chat-t2', turn: 2, startedAt: NOON}];
+  const row = {id: 9, kind: 'followup', echo: 'followup', turn_id: 'chat-t2', at: NOON + 0.2, line: 'melo follows up'};
+  const other = {id: 10, kind: 'started', echo: 'started', at: NOON + 0.3, line: 'Started'};
+  const items = timeline(turns, [], NOON + 1, [other, row]);
+  assert.deepEqual(items.filter((item) => item.kind !== 'day').map((item) => item.kind === 'turn' ? 'turn' : item.echo.id), [9, 'turn', 10]);
+});
+
 test('side chats group newest first under their day', () => {
   const groups = byDay([
     {id: 'old', updated_at: NOON - 2 * DAY},

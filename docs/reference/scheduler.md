@@ -348,6 +348,52 @@ retry cannot start a second turn. A started task with no card, or a
 across retries). The recovery card is rendered with `textContent`, never as
 HTML. Stop is the task API, never `POST /api/turns/{id}/cancel`.
 
+### A chat's follow-up on its tasks
+
+A task a chat starts from the person's message (`Front._start`, through
+`TaskWorkers.create_spec(chat_started=True)`) carries `started_by: "chat"` in
+its session's `meta`. `support/gateway/console/followups.py` hears each
+`sched.finished` and, with `[tasks] follow_up` on, queues one follow-up for the
+owner chat when the task ran out of steps, ended `draft`, `blocked` or `failed`
+by its own report, or failed with a run status the chat can act on (`failed`,
+`gate_stopped`, `stuck`, `context_budget_exceeded`, `timeout`); never for a
+chore's task, one from `POST /api/tasks`, a Stop, a refused folder, a continue
+that could not start, or a provider or setup failure. `meta.followup` keeps
+`person_turn` (the id of the person's newest turn in that chat), `runs`,
+`continued` and `ending_at`: at most two follow-ups per task for one person
+turn, and only the first may continue it.
+
+The follow-up runs in the chat's drain (`OwnerAsks`), after the person's
+queued messages and the tasks' questions, as an internal turn with origin
+`followup` (`turns.origin`), typed text `""` and a request framed as data (the
+request, the task's last answer and its blocked steps fenced with a fresh
+nonce, as a page is); an `attention.echo` of kind `followup` stands for it,
+written once the turn began (`turn_id`), and one of kind `followed` records
+`did` (`continued`, `asked`, `reported`). The turn is offered the task tools
+only. It is skipped when the person's newest turn (`latest_person_turn`) began
+after the task ended, when the task ran or ended again, or when the setting
+went off; one ending is looked at once (a lock per task).
+
+`task_continue` (the follow-up's only way to act) needs the task as it ended
+(finished, same `finished_at`) and `meta.followup.continued` still false, which
+it writes before it sends. It calls `TaskWorkers.message(automatic=True)`,
+which only continues a finished task (never answers its question or reaches a
+running task) with a card that starts with `NOTE_START`: melo's note, read as
+data. That run's words, which a step review reads as the person's, stay the
+task's `user_words`, so the note allows nothing. Once continued, it sets
+`meta.followup_guard`; any other message to the task clears it. A run with the
+guard wraps its policy in `EarlierBlocks`. Each real denial (a person's Deny,
+an auto block, a policy's refusal of the step itself; never a `Withdrawal`,
+such as a question withdrawn when the gateway stops) records
+`approval.call_key`, the tool, the folder and the normalized arguments, and
+`approval.loose_keys`: the whole list of commands alike (spacing, quoting,
+`pip3` or `python -m pip` for `pip`, quiet flags) and, for an install, each
+install part and each install (`install:pip:numpy`), so the rest of a compound
+step still runs.
+A call with the same key, or a loose key in common, is refused before any
+review with origin `policy` and `approval.earlier` (who blocked it). A step the
+person allowed once since is asked again, and so are steps alike to it.
+
 ## S3b.1a foundations
 
 Pause saves the prior level, source, reason and rank in `park_priority` in the

@@ -460,6 +460,19 @@ class ToolsConfig:
 
 
 @dataclass
+class TasksConfig:
+    """The ``[tasks]`` table: what a chat does about the tasks it started.
+
+    ``follow_up``: when a task a chat started fails or stops, that chat gets
+    one turn of its own to continue it once, work around a blocked step, or
+    ask the person one question, then says what got done (#411). On unless
+    the file turns it off; a developer setting.
+    """
+
+    follow_up: bool = True
+
+
+@dataclass
 class Config:
     chat_backend: str = (
         ""  # mlc | ollama | vllm | sglang | openai | gemini | anthropic | nvidia
@@ -503,6 +516,7 @@ class Config:
     browser: BrowserConfig = field(default_factory=BrowserConfig)
     workspace: WorkspaceConfig = field(default_factory=WorkspaceConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
+    tasks: TasksConfig = field(default_factory=TasksConfig)
     # [pricing.<model>]: dollars per million tokens (input, output, and
     # cache_read for cached prompt tokens), for the terminal's session cost.
     # Configuration only: no price is bundled.
@@ -548,6 +562,7 @@ class Config:
         errors.extend(self._validate_scheduler())
         errors.extend(self._validate_browser())
         errors.extend(self._validate_tools())
+        errors.extend(self._validate_tasks())
         # [cli] is a display preference: like [sessions] resume_mode, a bad
         # value warns and falls back in the interactive UI (cli_errors()), so
         # direct mode and the gateway never fail on it.
@@ -685,6 +700,14 @@ class Config:
             f"[tools] {name} must be a bool, got {value!r}"
             for name in ("web_fetch",)
             if not isinstance(value := getattr(self.tools, name), bool)
+        ]
+
+    def _validate_tasks(self) -> list[str]:
+        """``[tasks]`` holds bools."""
+        return [
+            f"[tasks] {name} must be a bool, got {value!r}"
+            for name in ("follow_up",)
+            if not isinstance(value := getattr(self.tasks, name), bool)
         ]
 
     def _validate_scheduler(self) -> list[str]:
@@ -1049,6 +1072,7 @@ class Config:
             *self._validate_scheduler(),
             *self._validate_browser(),
             *self._validate_tools(),
+            *self._validate_tasks(),
             *self._validate_gateway_workspace(),
             *self._validate_cli(),
             *self._validate_ui(),
@@ -1421,6 +1445,11 @@ def _load_file() -> Config:
             if hasattr(cfg.tools, k):
                 setattr(cfg.tools, k, v)
 
+    if isinstance(data.get("tasks"), dict):
+        for k, v in data["tasks"].items():
+            if hasattr(cfg.tasks, k):
+                setattr(cfg.tasks, k, v)
+
     # A bad value is left for Config.validate to report.
     if isinstance(data.get("sessions"), dict):
         cfg.sessions.resume_mode = data["sessions"].get("resume_mode", "pairs")
@@ -1779,6 +1808,9 @@ def save(cfg: Config) -> None:
 
     if cfg.tools != ToolsConfig():
         lines.extend(["[tools]", f"web_fetch = {_toml_value(cfg.tools.web_fetch)}", ""])
+
+    if cfg.tasks != TasksConfig():
+        lines.extend(["[tasks]", f"follow_up = {_toml_value(cfg.tasks.follow_up)}", ""])
 
     if cfg.sessions != SessionsConfig():
         lines.append("[sessions]")

@@ -34,6 +34,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalRequest,
     AutoPolicy,
     ReviewMode,
+    Withdrawal,
     find_auto,
     find_folder_asker,
     review_mode,
@@ -418,9 +419,8 @@ class ApprovalBroker:
             if session_id is not None and entry.session_id != session_id:
                 continue
             if not entry.answer.done():
-                entry.answer.set_result(
-                    ApprovalDecision(False, reason, origin="policy")
-                )
+                # Withdrawn unanswered: nobody denied the step itself.
+                entry.answer.set_result(Withdrawal(False, reason, origin="policy"))
                 denied += 1
         return denied
 

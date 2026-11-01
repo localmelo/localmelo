@@ -24,7 +24,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final, Literal
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
+from localmelo.melo.contracts.approvals import (
+    ApprovalDecision,
+    ApprovalRequest,
+    Withdrawal,
+)
 from localmelo.melo.contracts.review import offers_grant
 from localmelo.melo.contracts.tools import BaseToolProvider
 from localmelo.melo.schema import Message
@@ -550,7 +554,7 @@ class ConsoleSessions:
         async def timed(request: ApprovalRequest) -> ApprovalDecision:
             current = session_id() if callable(session_id) else session_id
             if current is None:
-                return ApprovalDecision(
+                return Withdrawal(
                     False, "The session is not open yet.", origin="policy"
                 )
             decision = await self._broker.asker(current)(request)
