@@ -20,7 +20,12 @@ import pytest
 from localmelo.melo.checker.tiers import tier_of
 from localmelo.support.memory import ChatMemory, records
 from localmelo.support.memory.index import Document, document_text
-from localmelo.support.memory.service import CHAT_TURN, REMEMBER, SEARCH_MEMORY
+from localmelo.support.memory.service import (
+    CHAT_TURN,
+    REMEMBER,
+    SEARCH_MEMORY,
+    WRITE_IN_YOU,
+)
 from localmelo.support.sessions.store import NewSession, SessionStore, TurnInfo
 from localmelo.tests.memory.chat_memory_helpers import FakeEmbedding
 from localmelo.tests.memory.test_chat_records import STATEMENTS
@@ -488,3 +493,169 @@ async def test_a_note_about_the_same_person_is_kept(
     assert (await memory.remember(note, "people")).startswith("Remembered: ")
     (entry,) = await memory.records()
     assert (entry.text, entry.provenance["quote"]) == (note, typed)
+
+
+@pytest.mark.parametrize(
+    ("typed", "note", "kept"),
+    [
+        (
+            "My flight to Porto is at gate 22.",
+            "My flight to Porto is at gate 22.",
+            "Your flight to Porto is at gate 22.",
+        ),
+        (
+            "The pool gave me a new locker, number 58.",
+            "The pool gave me a new locker, number 58.",
+            "The pool gave you a new locker, number 58.",
+        ),
+        (
+            "I prefer plain words.",
+            "I prefer plain words.",
+            "You prefer plain words.",
+        ),
+        ("我的航班在22号登机口。", "我的航班在22号登机口。", "你的航班在22号登机口。"),
+        # The rewrite leaves a quoted span and the numeral of "Phase I" alone.
+        (
+            'My note says "I like tea" and my Phase I trial starts Monday.',
+            'My note says "I like tea" and my Phase I trial starts Monday.',
+            'Your note says "I like tea" and your Phase I trial starts Monday.',
+        ),
+    ],
+)
+async def test_a_note_in_the_first_person_is_kept_in_the_second(
+    memory: ChatMemory, store: SessionStore, typed: str, note: str, kept: str
+) -> None:
+    await memory.before_turn(store, await _turn(store, typed), typed)
+    answer = await memory.remember(note, "about")
+    assert answer == f"Remembered: {kept} The user sees it and can undo it."
+    (entry,) = await memory.records()
+    assert entry.text == kept and entry.admitted_by == "user_statement"
+    assert entry.provenance["quote"] == typed
+
+
+@pytest.mark.parametrize(
+    ("typed", "note", "fixed"),
+    [
+        (
+            "I prefer that when you explain things you use plain words.",
+            "I prefer that when you explain things you use plain words.",
+            "You prefer that melo explains with plain words.",
+        ),
+        (
+            "I prefer that when you explain things you use plain words.",
+            "My assistant says you prefer plain words.",
+            "You prefer that melo explains with plain words.",
+        ),
+        (
+            "我喜欢你用简单的话解释。",
+            "我喜欢你用简单的话解释。",
+            "你喜欢 melo 用简单的话解释。",
+        ),
+    ],
+)
+async def test_a_note_that_says_i_and_you_is_refused_with_how_to_write_it(
+    memory: ChatMemory, store: SessionStore, typed: str, note: str, fixed: str
+) -> None:
+    await memory.before_turn(store, await _turn(store, typed), typed)
+    answer = await memory.remember(note, "preferences")
+    assert answer == WRITE_IN_YOU
+    assert answer.startswith('Not remembered: write the user as "you"')
+    assert await memory.records() == []
+    # Written the way the refusal says, "melo" is no word the user had to type.
+    assert (await memory.remember(fixed, "preferences")).startswith(
+        f"Remembered: {fixed} "
+    )
+
+
+@pytest.mark.parametrize(
+    ("typed", "note"),
+    [
+        ("We decided to use uv.", "We decided to use uv."),
+        ("我们决定用uv。", "我们决定用uv。"),
+        # A quoted "I" is someone's words, not the note's voice.
+        ("I prefer tea.", 'You said: "I prefer tea."'),
+        ("Your Phase I trial starts Monday.", "Your Phase I trial starts Monday."),
+    ],
+)
+async def test_a_note_without_the_first_person_is_left_as_written(
+    memory: ChatMemory, store: SessionStore, typed: str, note: str
+) -> None:
+    assert not records.first_person(note)
+    await memory.before_turn(store, await _turn(store, typed), typed)
+    assert (await memory.remember(note, "about")).startswith(f"Remembered: {note} ")
+    (entry,) = await memory.records()
+    assert entry.text == note
+
+
+async def test_a_rewritten_note_replaces_the_older_value_of_its_subject(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    first = "My locker number at the pool is 31."
+    one = await _turn(store, first)
+    await memory.before_turn(store, one, first)
+    await memory.remember(first, "about")
+    await _finish(store, one)
+    typed = "My locker number at the pool is 58."
+    turn = await _turn(store, typed, one.session_id)
+    await memory.before_turn(store, turn, typed)
+    assert records.subject_key("Your locker number at the pool is 31.") == (
+        records.subject_key(records.second_person(typed))
+    )
+    assert (await memory.remember(typed, "about")).startswith(
+        "Remembered: Your locker number at the pool is 58."
+    )
+    chat = CHAT_TURN.get()
+    assert chat is not None and chat.kept[0].replaced is not None
+    assert [e.text for e in await memory.records()] == [
+        "Your locker number at the pool is 58."
+    ]
+
+
+@pytest.mark.parametrize(
+    ("typed", "note", "refused"),
+    [
+        # A relative or question word is no content word of its own.
+        (
+            "My cousin Ren lives in Kyoto.",
+            "You have a cousin named Ren who lives in Kyoto.",
+            [],
+        ),
+        (
+            "My cousin Ren lives in Kyoto.",
+            "Kyoto is where your cousin Ren lives.",
+            [],
+        ),
+        # A real new word or value is still refused.
+        (
+            "My cousin Ren lives in Kyoto.",
+            "You have a cousin named Ren who lives in Osaka.",
+            ["osaka"],
+        ),
+        (
+            "My cousin Ren lives in Kyoto.",
+            "You have a cousin named Ren who lives in Kyoto and plays chess.",
+            ["play", "chess"],
+        ),
+    ],
+)
+def test_relative_words_are_not_content_words_of_the_evidence_check(
+    typed: str, note: str, refused: list[str]
+) -> None:
+    assert records.unsupported(note, [typed]) == refused
+    for word in ("who", "whom", "whose", "which", "where", "when"):
+        assert word not in records.note_terms(f"You know a person {word} lives there.")
+
+
+async def test_a_note_that_adds_who_is_kept_and_one_that_adds_a_value_is_not(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    typed = "My cousin Ren lives in Kyoto."
+    await memory.before_turn(store, await _turn(store, typed), typed)
+    refused = await memory.remember(
+        "You have a cousin named Ren who lives in Osaka.", "people"
+    )
+    assert refused.startswith(f"{NOT_SAID} osaka: not in what the user typed")
+    kept = "You have a cousin named Ren who lives in Kyoto."
+    assert (await memory.remember(kept, "people")).startswith(f"Remembered: {kept} ")
+    (entry,) = await memory.records()
+    assert entry.text == kept and entry.provenance["quote"] == typed

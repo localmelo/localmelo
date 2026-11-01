@@ -491,6 +491,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A note melo writes for you now says "you", and a reply that says "saved" with
+  nothing kept is flagged. A note the chat's model wrote in the first person
+  ("My flight to Porto is at gate 22.", "The pool gave me a new locker.") is
+  kept in the second person, as your own words are, so a newer note of the same
+  subject replaces the older one and recall shows whose note it is. A note that
+  says both "I" and "you" is refused with how to write it (you as "you", melo as
+  "melo"); "we" and quoted words are left alone. A reply that only says it
+  saved or noted ("Saved.", "Noted.", "Got it, noted…", "已记录。") with no note
+  kept now counts as a claim that names nothing, as one that names a fact
+  already did, and `unsaved_claim` is true; "Got it!" is still no claim. A note
+  that restates your words with a relative word ("You have a cousin named Ren
+  who lives in Kyoto.") is no longer refused for the word "who".
 - The app's pill says **stopped**, not failed, for a task that used all its
   steps, as the console already does: `status.recent` reads the task's reason. [#365]
 - A Chinese ask that says to change code, run the tests and commit

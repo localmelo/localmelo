@@ -117,6 +117,12 @@ ASK_OWNER: Final = "ask_owner"
 NOT_THE_USER: Final = (
     "Not remembered: this turn is a task's question, not the user's words."
 )
+# The refusal of a note that says "I" and "you" at once: who is who is unclear.
+WRITE_IN_YOU: Final = (
+    'Not remembered: write the user as "you" and the assistant as "melo", never '
+    '"I" or "my" (not "I prefer that when you explain …" but "You prefer that '
+    'melo explains …").'
+)
 _BATCH: Final = 16
 _QUERY_CHARS: Final = 2_000
 _TURN_PAGE: Final = 16
@@ -841,8 +847,11 @@ class ChatMemory:
         """Keep *text* as a note of the chat turn under way; what the model reads back.
 
         Refused: outside a chat's turn, in a turn the person did not begin
-        (``TurnInfo.origin``), a secret, and words the user did not type in
-        this chat and no finished task's result shown in it holds.
+        (``TurnInfo.origin``), a secret, a note that says both "I" and "you"
+        (:data:`WRITE_IN_YOU`), and words the user did not type in this chat and
+        no finished task's result shown in it holds. A note that says "I" or
+        "my" and no "you" is kept in the second person
+        (:func:`records.second_person`), as the user's own words are.
         """
         turn = CHAT_TURN.get()
         if not self.enabled or turn is None or turn.memory.recall is None:
@@ -859,6 +868,10 @@ class ChatMemory:
                 f"Not remembered: {records.NOT_KEPT}. Do not write it anywhere "
                 "(no file, no code)."
             )
+        if records.first_person(note):
+            if records.addresses_user(note):
+                return WRITE_IN_YOU
+            note = records.second_person(note, protect=True)
         said = [turn.typed, *await self._said(turn)]
         admitted = "user_statement"
         missing = records.unsupported(note, said)
@@ -986,8 +999,9 @@ class ChatMemory:
         notes (the user's words, no secret, supersedes the old value).
 
         When nothing written to the user is named (a fragment such as "gate 9
-        for Faro"), or ``remember`` refuses, nothing is kept and the turn's
-        ``turn.memory`` event, queued again, has ``unsaved_claim`` true. Nothing
+        for Faro"), the reply claims a save and names nothing ("Saved.",
+        "Noted.", "已记录。"), or ``remember`` refuses, nothing is kept and the
+        turn's ``turn.memory`` event, queued again, has ``unsaved_claim`` true. Nothing
         outside the turn, with memory off, with a note kept, or when the reply
         claims nothing.
         """

@@ -6,10 +6,12 @@ code keeps X through ``remember``'s own path: the user's words, no secret, the
 newer value supersedes the old one. When X is not the user's words, or the
 answer states no fact (a fragment such as "gate 9 for Faro": no verb, no "you"),
 nothing is kept and the turn's ``turn.memory`` event has
-``unsaved_claim`` true; a bare "Noted, thanks!" claims nothing. A turn that
-kept a note, a plain answer, workers, task runners and memory off do nothing. The claims are the real ones
-a guard cell of the benchmark answered with no note kept. End to end on the
-stub model, with words only and with a fake embedding server.
+``unsaved_claim`` true. So does a reply that says it saved or noted and names
+nothing ("Saved.", "Noted.", "text✅ 已记录"); "Got it!" claims no save. A turn
+that kept a note, a plain answer, workers, task runners and memory off do
+nothing. The claims are the real ones a guard cell of the benchmark answered
+with no note kept. End to end on the stub model, with words only and with a fake
+embedding server.
 """
 
 from __future__ import annotations
@@ -39,8 +41,11 @@ PREFERENCE = (
 PREFERENCE_CLAIM = (
     "when explaining a technical topic, you want plain everyday words with one "
     "small step-by-step example before any formal definition, and a clear "
-    "statement up front of whether I'm sure or only fairly confident."
+    "statement up front of whether melo is sure or only fairly confident."
 )
+# The same claim as the model first wrote it, "I'm" for the assistant beside "you"
+# for the user: refused, as the remember tool refuses it.
+PREFERENCE_CLAIM_BOTH = PREFERENCE_CLAIM.replace("melo is", "I'm")
 # (typed, the reply that claims a save, the note it keeps): the benchmark's real
 # claims, then an English one and a Chinese one.
 CLAIMS = [
@@ -91,11 +96,24 @@ REFUSED = [
         "Noted — your flight to Porto departs from gate 22.",
     ),
     ("My password is hunter2.", "Noted — your password is hunter2."),
+    (PREFERENCE, f"Remembered: {PREFERENCE_CLAIM_BOTH}"),
     (
         "My flight to Faro is at gate 9.",
         "Noted — gate 9 for Faro. I've also kept your earlier note about the "
         "Porto flight (gate 22), so both are on record.",
     ),
+]
+
+
+# A reply that says it saved or noted and names nothing: the bench's real one
+# first, then the ways a model says it.
+BARE = [
+    "text✅ 已记录",
+    "Got it — noted…",
+    "Noted.",
+    "Noted, thanks!",
+    "Saved to memory.",
+    "好的，已经记住了！",
 ]
 
 
@@ -113,7 +131,6 @@ def stub() -> Iterator[StubServer]:
     scenarios: dict[str, dict[str, Any]] = {
         "plain": {"replies": [{"content": "Hello Juno, nice to meet you."}]},
         "noted": {"replies": [{"content": "Noted."}]},
-        "thanks": {"replies": [{"content": "Noted, thanks!"}]},
         # The model keeps the note with the tool, then claims one more fact.
         "kept": {
             "replies": [
@@ -125,6 +142,7 @@ def stub() -> Iterator[StubServer]:
         **{f"c{n}": {"replies": [{"content": c[1]}]} for n, c in enumerate(CLAIMS)},
         **{f"r{n}": {"replies": [{"content": r[1]}]} for n, r in enumerate(REFUSED)},
         "pip": {"replies": [{"content": "Remembered: Your name is Juno."}]},
+        **{f"b{n}": {"replies": [{"content": b}]} for n, b in enumerate(BARE)},
     }
     server = StubServer(scenarios=scenarios).start()
     try:
@@ -252,21 +270,30 @@ async def test_a_turn_that_kept_a_note_is_left_alone(
     assert len(await memory.records()) == 2 and events[-1]["unsaved_claim"] is False
 
 
-@pytest.mark.parametrize("scenario", ["plain", "noted", "thanks"])
 async def test_an_answer_that_claims_nothing_does_nothing(
-    memory: ChatMemory,
-    store: SessionStore,
-    stub: StubServer,
-    tmp_path: Path,
-    scenario: str,
+    memory: ChatMemory, store: SessionStore, stub: StubServer, tmp_path: Path
 ) -> None:
     events = memory_events(
         await runner_chat(
-            memory, store, at(stub, scenario), tmp_path / "w", "My name is Juno."
+            memory, store, at(stub, "plain"), tmp_path / "w", "My name is Juno."
         )
     )
     assert await memory.records() == []
     assert [e["unsaved_claim"] for e in events] == [False]
+
+
+@pytest.mark.parametrize("n", range(len(BARE)))
+async def test_a_reply_that_says_saved_and_names_nothing_is_counted(
+    memory: ChatMemory, store: SessionStore, stub: StubServer, tmp_path: Path, n: int
+) -> None:
+    events = memory_events(
+        await runner_chat(
+            memory, store, at(stub, f"b{n}"), tmp_path / "w", "My name is Juno."
+        )
+    )
+    assert await memory.records() == []
+    assert events[0]["unsaved_claim"] is False
+    assert events[-1]["remembered"] == [] and events[-1]["unsaved_claim"] is True
 
 
 async def test_workers_task_runners_and_memory_off_do_nothing(
@@ -389,12 +416,7 @@ def test_claimed_reads_the_fact_a_reply_says_it_noted(answer: str, fact: str) ->
 @pytest.mark.parametrize(
     "answer",
     [
-        "Noted.",
-        "Noted",
         "Noted — .",
-        "Noted, thanks!",
-        "Noted — thanks a lot.",
-        "Got it — noted.",
         "Got it — thanks!",
         "As noted before, Prof. Duarte's office is in the Atrium Wing.",
         "已记住：好的。",
@@ -410,6 +432,148 @@ def test_claimed_reads_the_fact_a_reply_says_it_noted(answer: str, fact: str) ->
 )
 def test_claimed_is_none_when_a_reply_claims_no_save(answer: str) -> None:
     assert records.claimed(answer) is None
+
+
+# Each of these says it saved or noted and names no fact: ``""``, a claim that
+# names nothing usable, not ``None``.
+BARE_CLAIMS = [
+    # Chinese: with or without a check mark or an end mark.
+    "text✅ 已记录",
+    "已记录",
+    "✅ 已记录！",
+    "✔️已记录。",
+    "好的，已记录。",
+    "记录了",
+    "记录下来了。",
+    "已保存",
+    "保存了！",
+    "已记住。",
+    "记住了！",
+    "记下了。",
+    "已记下。",
+    "已经记住",
+    "我已经记住了。",
+    "帮你记下了。",
+    "已保存到记忆中。",
+    "已保存，请查看。",
+    # English.
+    "Saved.",
+    "Saved",
+    "saved!",
+    "Saved to memory",
+    "Saved it to your notes.",
+    "I've saved that.",
+    "I have stored this.",
+    "I’ve recorded it!",
+    "I'll remember that.",
+    "I will remember it.",
+    "Got it, saved",
+    "Sure! Saved. Anything else?",
+    # A bare "noted" form claims a save too.
+    "Noted.",
+    "Noted",
+    "Noted!",
+    "Got it — noted.",
+    "Got it, noted…",
+    "Noted, thanks!",
+    "Noted — thanks a lot.",
+    "Okay, noted. Anything else?",
+]
+
+
+@pytest.mark.parametrize("answer", BARE_CLAIMS)
+def test_claimed_is_empty_for_a_save_claim_that_names_nothing(answer: str) -> None:
+    assert records.claimed(answer) == ""
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "Got it!",
+        "Got it.",
+        "Got it — thanks!",
+        "Thanks!",
+        # A subject before the verb, or something after it: not a claim of its own.
+        "The file was saved.",
+        "文件已保存。",
+        "我记录了你的问题，下面是回答。",
+        "I saved the file to disk.",
+        "I've saved the changes to report.md.",
+        "As noted, saved files stay on disk.",
+        "I'll remember to check.",
+        "已记录你的问题并回答",
+    ],
+)
+def test_claimed_is_none_for_text_that_only_looks_like_a_save_claim(
+    answer: str,
+) -> None:
+    assert records.claimed(answer) is None
+
+
+@pytest.mark.parametrize(
+    ("answer", "fact"),
+    [
+        ("已记录：你的储物柜是58号。", "你的储物柜是58号。"),
+        ("好的，已保存：你的导师是周教授！", "你的导师是周教授。"),
+        ("已记录，你的储物柜是58号。", "你的储物柜是58号。"),
+        ("记录下来了：你住在乌得勒支。", "你住在乌得勒支。"),
+        ("帮你记下了：你的航班在22号登机口。", "你的航班在22号登机口。"),
+        # A bare claim before the fact does not hide it.
+        ("Saved. Noted — you like tea.", "You like tea."),
+    ],
+)
+def test_a_claim_with_a_fact_after_it_still_returns_the_fact(
+    answer: str, fact: str
+) -> None:
+    assert records.claimed(answer) == fact
+
+
+@pytest.mark.parametrize("answer", BARE_CLAIMS)
+async def test_a_bare_save_claim_with_nothing_kept_is_flagged(
+    memory: ChatMemory, store: SessionStore, answer: str
+) -> None:
+    typed = "My name is Juno."
+    turn = await store.begin_turn(
+        None, typed, holder="test:1:claims", title=typed, new_session=NewSession()
+    )
+    await memory.before_turn(store, turn, typed)
+    assert await memory.keep_claims(turn, answer) == []
+    chat = CHAT_TURN.get()
+    assert chat is not None and chat.unsaved_claim is True
+    event = chat.event()
+    assert event is not None and event["unsaved_claim"] is True
+    assert event["remembered"] == [] and await memory.records() == []
+
+
+async def test_a_claimed_fact_in_chinese_is_kept_for_the_first_person_typed(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    typed = "我的储物柜是58号。"
+    turn = await store.begin_turn(
+        None, typed, holder="test:1:claims", title=typed, new_session=NewSession()
+    )
+    await memory.before_turn(store, turn, typed)
+    (kept,) = await memory.keep_claims(turn, "已记录：你的储物柜是58号。")
+    assert kept.text == "你的储物柜是58号。"
+    chat = CHAT_TURN.get()
+    assert chat is not None and chat.unsaved_claim is False
+    (entry,) = await memory.records()
+    assert entry.admitted_by == "user_statement" and entry.provenance["quote"] == typed
+
+
+async def test_a_claim_of_a_note_that_says_i_and_you_is_flagged(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    turn = await store.begin_turn(
+        None, PREFERENCE, holder="test:1:claims", title="p", new_session=NewSession()
+    )
+    await memory.before_turn(store, turn, PREFERENCE)
+    answer = f"Remembered: {PREFERENCE_CLAIM_BOTH}"
+    assert records.claimed(answer) == f"W{PREFERENCE_CLAIM_BOTH[1:]}"
+    assert await memory.keep_claims(turn, answer) == []
+    chat = CHAT_TURN.get()
+    assert chat is not None and chat.unsaved_claim is True
+    assert await memory.records() == []
 
 
 # The seven third-party facts a benchmark reply claimed to have noted, with no
