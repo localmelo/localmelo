@@ -214,7 +214,7 @@ async def test_a_wait_a_hold_an_ask_and_an_unreadable_store_are_never_answering(
             patch.setattr(
                 console.asks,
                 "activity",
-                lambda _owner, icon=asked: ActivityText("Waiting on Plan", icon, None),
+                lambda _owner, icon=asked: ActivityText("Waiting on Plan", icon, {}),
             )
             text, _ = await item_activity(console, "task", owner)
             assert (text.icon, text.answering) == (asked, False)
