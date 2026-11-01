@@ -607,6 +607,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Developer: `melo memory ingest` reads a session that a file repeats word for word once,
+  instead of refusing the file; the same id with other turns is still refused.
 - A task that changed no code is no longer told to run tests. Outside git, melo compares the
   task folder before and after the run and counts only changed code files (a saved page,
   picture, table or PDF is not code), so a task that only looked at a website ends Ready; a
