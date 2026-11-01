@@ -16,10 +16,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   install Auto blocked: use what is installed, or write it without the
   package), or asks you one clear question, then says in one or two lines what
   got done and what did not. A task the chat continued never runs a step that
-  you, Auto or melo's rules blocked before: the same call is refused before it
-  is reviewed. It continues a task at most once per message of yours, never
-  starts a task, approves nothing, waits for your own turn, and is skipped
-  when you write after the task ended. Activity reads `Continued the task: …`
+  you, Auto or melo's rules blocked before, nor one alike (the same command
+  spelt another way, the same install): it is refused before it is reviewed.
+  What the chat tells the task is its own note, never your words, so it allows
+  nothing your request did not. It continues a task at most once per message
+  of yours, only while the task stands as it ended, has only the task tools,
+  never starts a task, approves nothing, waits for your own turn, and is
+  skipped when you write after the task ended. Activity reads `Continued the task: …`
   or `Asked you: …`. Chores, tasks from the task page and other chats' tasks
   keep their card alone. Settings → Chats and folders → **Follow up on tasks**
   (developer mode) or `[tasks] follow_up = false` turns it off. [#411]
@@ -348,10 +351,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   the task's request, and every step inside it still asks you or is blocked in
   Auto. A greeting or a short question it can answer starts nothing, an unclear
   request gets one short question, and the offer stays only where starting
-  would be wrong: a question, words that say not to act ("just explain",
-  "don't change anything"), a message with no words of its own, and a chore or
-  reminder code could not schedule. A polite request ("can you run the tests?") counts as a
-  request. Side chats do the same. [#410]
+  would be wrong: a question, words that say not to act and ask for nothing
+  else ("just explain", "don't change anything"), words that steer a task
+  ("cancel it", "continue the report task"), a message with no words of its
+  own, and a chore or reminder code could not schedule. A polite request that
+  asks for work ("can you run the tests?") counts as a request; "please
+  explain …" and short talk ("thanks") are answered. The task is your message
+  alone: the model only names it. Side chats do the same. [#410]
 
 - A task opens in the side panel next to Melo, from its row in Activity, and the
   Tasks link in the sidebar is gone. The row ends in a `›`; selecting it shows
