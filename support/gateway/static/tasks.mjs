@@ -81,9 +81,9 @@ export function packFold(doc, task) {
 // project_skipped): one line in the facts' style, and nothing when the folder had none.
 export function projectLine(doc, task) {
   const spec = task?.spec ?? {};
-  const size = (chars) => (chars < 1000 ? String(chars) : `${(chars / 1000).toFixed(1)}k`);
-  const files = (spec.project_files ?? []).map((file) => t(file.cut ? 'tasks.project.fileCut' : 'tasks.project.file',
-    {path: file.path, size: size(file.chars)}));
+  // Sizes are developer detail: the line names the files, and says when one was cut.
+  const files = (spec.project_files ?? []).map((file) => (file.cut ? t('tasks.project.fileCut', {path: file.path})
+    : file.path));
   const skipped = spec.project_skipped ?? [];
   const words = [];
   if (files.length) words.push(t('tasks.project.read', {files: files.join(', ')}));

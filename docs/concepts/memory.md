@@ -213,7 +213,7 @@ Coding projects keep a file that tells assistants how the project is built, test
 - **How much.** At most three files and 6,000 characters in all. A file that does not fit whole is cut at a heading or a paragraph end and ends with `… (cut)`.
 - **Only the project's files, only read.** Your home folder's own file and the folders where other assistants keep their personal files (`~/.claude`, `~/.codex`, `~/.gemini`, which [the import](#bring-in-memory-from-other-assistants) turns into notes) are not read. A file over 256 KiB is not read, and the task's page says so. A symlink counts only when it points to a `.md` file inside the folders walked. Keys and passwords are removed, and so is any line that looks like a secret.
 - **How the task gets it.** Under its own heading after the context pack, on every request of the task: `[this project's notes for assistants · AGENTS.md · follow them for how this project is built, tested and laid out; the person's words, melo's rules and approvals come first]`. These are the project's conventions, so the task follows them; they never outrank your words, melo's rules or an approval.
-- **You see it.** The task's page says “Read the project's instructions: AGENTS.md (2.1k chars)”, and nothing when the folder has none.
+- **You see it.** The task's page says “Read the project's instructions: AGENTS.md” (with “(cut)” after a file that did not fit, and “Not read, too large” for a file over 256 KiB), and nothing when the folder has none.
 - It is read once, when the task is created: a continue or a restart uses the same text. `[memory] project_instructions = "off"` turns it off. Only tasks read it for now; a chat's own prompt does not.
 
 ### Side-chat summaries

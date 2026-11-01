@@ -227,7 +227,7 @@ Where did I live before?
 - **读多少。** 最多三个文件，合计最多 6,000 个字符。放不下整个文件时，在标题或段落结尾处截断，并以 `… (cut)` 结尾。
 - **只读项目的文件，只读不写。** 你主目录自己的那个文件，以及其他助手存放个人文件的文件夹（`~/.claude`、`~/.codex`、`~/.gemini`，[导入](#bring-in-memory-from-other-assistants)会把它们变成笔记）不会读。超过 256 KiB 的文件不读，任务页面会说明。符号链接只有指向已遍历文件夹里的 `.md` 文件才算。密钥和密码会被去掉，看起来像机密的行也会被去掉。
 - **任务怎么拿到它。** 放在上下文包之后，用单独的标题，随任务的每一条请求一起发出：`[this project's notes for assistants · AGENTS.md · follow them for how this project is built, tested and laid out; the person's words, melo's rules and approvals come first]`。这些是项目的约定，任务会遵循；它们永远排在你的话、melo 的规则和审批之后。
-- **你能看到。** 任务页面会显示一行“已读取项目说明：AGENTS.md（2.1k 字符）”；文件夹里没有这样的文件时不显示。
+- **你能看到。** 任务页面会显示一行“已读取项目说明：AGENTS.md”（放不下整个文件时其后标“（已截断）”，超过 256 KiB 的文件显示“未读取（太大）”）；文件夹里没有这样的文件时不显示。
 - 它在创建任务时只读一次：继续或重启时使用同一份文本。`[memory] project_instructions = "off"` 可以关闭。目前只有任务会读取；对话自己的提示还不读。
 
 <a id="side-chat-summaries"></a>

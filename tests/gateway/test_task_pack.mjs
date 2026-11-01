@@ -62,28 +62,28 @@ test('a task that read the project\'s instruction files says so in one line, and
 
   const one = projectLine(doc, {spec: {project_files: [{path: 'AGENTS.md', chars: 2140, cut: false}]}});
   assert.equal(one.tag, 'p');
-  assert.equal(one.textContent, "Read the project's instructions: AGENTS.md (2.1k chars)");
+  assert.equal(one.textContent, "Read the project's instructions: AGENTS.md");
 
   const many = projectLine(doc, {spec: {project_files: [
     {path: 'CLAUDE.md', chars: 850, cut: false},
     {path: '../AGENTS.md', chars: 4100, cut: true},
   ]}});
   assert.equal(many.textContent,
-    "Read the project's instructions: CLAUDE.md (850 chars), ../AGENTS.md (4.1k chars, cut)");
+    "Read the project's instructions: CLAUDE.md, ../AGENTS.md (cut)");
 
   const big = projectLine(doc, {spec: {project_skipped: ['AGENTS.md']}});
-  assert.equal(big.textContent, 'Not read, over 256 KiB: AGENTS.md');
+  assert.equal(big.textContent, 'Not read, too large: AGENTS.md');
   const both = projectLine(doc, {spec: {
     project_files: [{path: 'CLAUDE.md', chars: 850, cut: false}], project_skipped: ['AGENTS.md']}});
   assert.equal(both.textContent,
-    "Read the project's instructions: CLAUDE.md (850 chars) · Not read, over 256 KiB: AGENTS.md");
+    "Read the project's instructions: CLAUDE.md · Not read, too large: AGENTS.md");
 });
 
 test('the project line reads in Chinese when the page does', async () => {
   await useLanguage('zh-Hans');
   try {
     const line = projectLine(fakeDoc(), {spec: {project_files: [{path: 'AGENTS.md', chars: 2140, cut: true}]}});
-    assert.equal(line.textContent, '已读取项目说明：AGENTS.md（2.1k 字符，已截断）');
+    assert.equal(line.textContent, '已读取项目说明：AGENTS.md（已截断）');
   } finally {
     await useLanguage('en');
   }
