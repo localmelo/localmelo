@@ -301,6 +301,73 @@ test('a reminder proposal names the time and the words, offers Remind me and Can
   assert.deepEqual(mainChat.echoActions({kind: 'ask', text: 'x'}, false), [['Start as a task', 'start'], ['Not now', 'dismiss']]);
 });
 
+// A tidy-up of the notes while the person was away: one line, what changed, and one Undo.
+const sleepRow = (id, data = {}) => ({id, ts: NOON, data: {
+  echo: 'sleep', run_id: 'r1', count: 3, variant: 'rules', line: 'While you were away, melo tidied 3 notes',
+  items: [{change: 'merged', text: 'You live in Utrecht.'}, {change: 'added', text: 'You prefer short answers.'}], ...data,
+}});
+const fakeNodes = () => {
+  const made = [];
+  const doc = {createElement: (tag) => {
+    const node = {tag, className: '', textContent: '', dataset: {}, children: [], handlers: {}, attributes: {},
+      setAttribute(key, value) { this.attributes[key] = value; }, append(...items) { this.children.push(...items); },
+      replaceChildren(...items) { this.children = items; }, addEventListener(type, fn) { this.handlers[type] = fn; }};
+    made.push(node);
+    return node;
+  }};
+  return {doc, made};
+};
+const flat = (node) => [node.textContent, ...node.children.map(flat)].filter(Boolean).join(' | ');
+
+test('a tidy-up line offers Undo until a later line answers it, and Undo answers with an undone line', () => {
+  const echoes = mainChat.mergeEchoes([], [
+    sleepRow(5),
+    {id: 6, ts: NOON + 5, data: {echo: 'undone', of: 5, run_id: 'r1', line: 'Put back the 3 notes melo tidied'}},
+  ]);
+  assert.deepEqual(echoes.map((echo) => echo.kind), ['sleep', 'undone']);
+  const done = mainChat.answered(echoes);
+  assert.deepEqual([...done], [5]);
+  // It names no task, and still has its button.
+  assert.deepEqual(mainChat.echoActions(echoes[0], false), [['Undo', 'undo']]);
+  assert.deepEqual(mainChat.echoActions(echoes[0], done.has(5)), [], 'undone: no button');
+  assert.deepEqual(mainChat.echoActions(echoes[1], false), []);
+  assert.equal(mainChat.echoDone(echoes[0], done, new Set()), true);
+});
+
+test('a tidy-up line is the sentence, the dot and Undo, with what changed folded under it', () => {
+  const {doc, made} = fakeNodes();
+  const echo = mainChat.readEcho(sleepRow(5, {more: 2}));
+  const acted = [];
+  const [line] = mainChat.echoNodes({doc, echo, act: (...args) => acted.push(args.slice(1))});
+  assert.equal(line.dataset.kind, 'sleep');
+  assert.equal(
+    flat(line),
+    '☾ | While you were away, melo tidied 3 notes | Undo | What changed | Merged | You live in Utrecht. | Added | You prefer short answers. | and 2 more',
+  );
+  const details = made.find((node) => node.tag === 'details');
+  assert.equal(details.className, 'ask-details sleep-details');
+  made.filter((node) => node.tag === 'button').forEach((node) => node.handlers.click());
+  assert.deepEqual(acted, [['undo']]);
+});
+
+test('an undone tidy-up line keeps what changed and loses Undo; its answer is a quiet undone line', () => {
+  const {doc, made} = fakeNodes();
+  const echo = mainChat.readEcho(sleepRow(5));
+  const [line] = mainChat.echoNodes({doc, echo, done: true, act: () => assert.fail('nothing to act on')});
+  assert.equal(made.some((node) => node.tag === 'button'), false);
+  assert.match(flat(line), /^☾ \| While you were away, melo tidied 3 notes \| What changed \|/);
+  const undone = mainChat.readEcho({id: 6, ts: NOON, data: {echo: 'undone', of: 5, line: 'Put back the 3 notes melo tidied'}});
+  const [answer] = mainChat.echoNodes({doc: fakeNodes().doc, echo: undone, act: () => {}});
+  assert.equal(flat(answer), '↺ | Put back the 3 notes melo tidied');
+});
+
+test('a tidy-up line with nothing listed has no folded part', () => {
+  const {doc, made} = fakeNodes();
+  const [line] = mainChat.echoNodes({doc, echo: mainChat.readEcho(sleepRow(5, {items: []})), act: () => {}});
+  assert.equal(made.some((node) => node.tag === 'details'), false);
+  assert.equal(flat(line), '☾ | While you were away, melo tidied 3 notes | Undo');
+});
+
 test('the card of a reminder says Reminder: and the persons words, done or not', () => {
   const base = {id: 1, at: NOON, sourceId: 'a', sourceKind: 'task', title: 'send the report', line: ''};
   const done = readCard({id: 5, ts: NOON, data: {state: 'done', source_id: 't', source_kind: 'task', title: 'send the report', reminder: true}});

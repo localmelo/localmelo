@@ -9,6 +9,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- With `[memory] sleep` set to `rules`, `model` or `model+tags`, the gateway
+  now tidies the notes by itself while the computer is idle: no chat turn for
+  20 minutes, no task running or queued, no GPU lock file, on AC power, and at
+  most once every 6 hours (the time is kept, so a restart does not run it
+  early). With `off`, the default, nothing runs. The main chat then says
+  "While you were away, melo tidied 3 notes" with **Undo** and a fold that
+  lists what changed; the terminal's line ends with `· /memory undo`, and
+  `/memory undo` works in the console and the app too. Undo needs no
+  developer mode; a note you reworded since stays, and the line says so. A
+  run that changes nothing leaves no line. [#363]
 - In the terminal, **Shift+Tab** switches the chat between Ask and Auto (Tab
   still completes). The bottom line always names the mode with its key,
   `ask · shift+tab` or `auto · shift+tab`, Auto in its own colour (the key

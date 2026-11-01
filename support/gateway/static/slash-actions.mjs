@@ -7,7 +7,8 @@
  * `host` is the page (`workspace.js`): `api`, `state()`, and the moves it makes: `send`,
  * `newChat`, `pickChat`, `openChat`, `openMain`, `openSettings`, `openMemory`, `settingsSaved`,
  * `setMode`, `setTitle`, `setNewTitle`, `view`, `reveal`, `writeText`, `isApp`, `canQuit`, `quit`
- * and `memoryImport` (`/memory import`: the Memory tab looks for notes).
+ * `memoryImport` (`/memory import`: the Memory tab looks for notes) and `undoSleep` (`/memory undo`: the
+ * newest "melo tidied your notes" line of the main chat is undone).
  */
 
 import {saidText, t} from './i18n.mjs';
@@ -256,6 +257,7 @@ export function createActions(host) {
         host.openMemory();
         return host.memoryImport ? host.memoryImport() : [say(t('slash.memoryImport'), 'muted')];
       }
+      if (args === 'undo') return host.undoSleep ? host.undoSleep() : [say(t('slash.memoryUndoNone'), 'muted')];
       if (args) throw new Error(t('slash.useMemory'));
       host.openMemory();
     },

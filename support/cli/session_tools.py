@@ -37,9 +37,10 @@ class SessionTools:
 
     async def run(self, name: str, arguments: str) -> None:
         s = self.session
-        if name == "memory" and arguments not in ("", "window", "import"):
+        if name == "memory" and arguments not in ("", "window", "import", "undo"):
             raise ValueError(
-                "Use /memory, /memory import, or /memory window for the model's window."
+                "Use /memory, /memory import, /memory undo, or /memory window "
+                "for the model's window."
             )
         if arguments and name not in ("title", "copy", "memory"):
             raise ValueError(f"Use /{name}.")
@@ -59,6 +60,12 @@ class SessionTools:
             if s.state != "idle":
                 raise ValueError("/memory import opens when the turn ends.")
             await memory_import.bring_in(s)
+        elif name == "memory" and arguments == "undo":
+            if s.remote is None:
+                raise ValueError(
+                    "/memory undo works in the main chat, where melo says what it tidied."
+                )
+            await s.remote.undo_sleep()
         elif name == "memory":
             loaded = s.runner.last_resume if s.runner is not None else None
             s.out.print(

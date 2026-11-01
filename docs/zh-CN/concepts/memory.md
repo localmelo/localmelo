@@ -168,11 +168,25 @@ Where did I live before?
 
 直接运行（`melo "<task>"`）、终端对话、worker 和基准测试既不召回也不记笔记，也没有 `remember` 工具；任务的运行器只把结果加入索引。
 
+<a id="tidying-notes-while-you-are-away"></a>
+
+### 你不在时整理笔记
+
+`[memory] sleep` 设为 `rules`、`model` 或 `model+tags`（开发者设置，默认关闭）后，melo 会在电脑空闲时自己整理你的笔记，并在主对话里告诉你。
+
+- 它等到 20 分钟内没有任何动静、没有任务在运行或排队、电脑接着交流电且共享的 GPU 锁文件不存在时才运行，每 6 小时最多一次。
+- 主对话随后会说“你不在的时候，melo 整理了 3 条笔记 · 撤销”。**改动了什么** 列出前五条。
+- **撤销** 把整次运行放回。之后你改写过的笔记保持原样，这一行会说明。
+- 在终端里，这一行以 `· /memory undo` 结尾；控制台和 App 也支持 `/memory undo`。
+- 没有改动的运行不会留下这一行。
+
 <a id="tidying-notes-while-idle-developer-setting"></a>
 
-### 空闲时整理笔记（开发者设置）
+<a id="tidying-notes-by-hand-developer-setting"></a>
 
-`[memory] sleep` 默认关闭。用 `melo memory sleep [VARIANT]`（开发者模式）或 `POST /api/memory/sleep` 显式运行一次；`-X memory.sleep=rules` 只对一次运行生效，`melo -h all` 会列出它。
+### 手动整理笔记（开发者设置）
+
+用 `melo memory sleep [VARIANT]`（开发者模式）或 `POST /api/memory/sleep` 显式运行一次；`-X memory.sleep=rules` 只对一次运行生效，`melo -h all` 会列出它。方式与 melo 自己整理时用的相同。
 
 - **`rules`** 不调用聊天模型：合并重复笔记、用你较新陈述的值替换旧值、找回没有被记下的长期陈述。你改写过的笔记不会被合并掉。补记前先检查当前笔记是否已包含候选的全部值：有可比的嵌入向量时，余弦相似度须达到 0.9；否则，去掉值以后，至少一半的词干内容词要重合。已知的不同主题不会合并。配置了嵌入模型时，每个候选最多等待 1.5 秒，同一次整理缓存复用，失败回退到词语检查。
 - **`model`** 先运行规则，再按由旧到新的顺序挑选轮次，把该条原话、上一条消息和最多六条匹配的当前笔记交给聊天模型。它可以补记事实、更新值，或停用被你明确否定的事实；另一个步骤会根据来源轮次和上一轮，把笔记开头的代词改成人名。每次整理最多 12 次聊天请求，每次限时八秒，temperature 为零。

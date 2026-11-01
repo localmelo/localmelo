@@ -3139,6 +3139,19 @@ const slash = setupSlash({
   },
   // `/memory import`: the Memory tab is open (above) and looks for notes as its button does; the list is the offer.
   memoryImport: async () => ((await panel.lookForNotes()) ? [] : [{ text: t("slash.memoryImportOff"), tone: "muted" }]),
+  // `/memory undo`: the newest "melo tidied" line of the main chat that is not undone gets its Undo, from any chat.
+  undoSleep: async () => {
+    const main = S.main?.id;
+    const page = main ? await api(`/sessions/${encodeURIComponent(main)}/turns?limit=10`) : {};
+    const echoes = mergeEchoes([], page.echoes ?? []);
+    const done = answered(echoes);
+    const found = echoes.filter((echo) => echo.kind === "sleep" && !done.has(echo.id)).at(-1);
+    if (!found) return [{ text: t("slash.memoryUndoNone"), tone: "muted" }];
+    const body = await api(`/front/echoes/${encodeURIComponent(found.id)}`, { body: { do: "undo" } });
+    if (mainActive() && S.view) S.view.echoes = mergeEchoes(S.view.echoes ?? [], [body.echo]);
+    renderMessages(false);
+    return [];
+  },
   openDrawer: (tab) => drawer.open(tab),
   settingsSaved,
   setMode: setChatMode,

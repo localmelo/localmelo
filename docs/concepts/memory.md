@@ -162,9 +162,21 @@ What a chat is told about memory:
 
 Direct runs (`melo "<task>"`), the terminal chat, workers and the benchmark neither recall nor keep notes, and have no `remember` tool; a task's runner only adds its result to the index.
 
-### Tidying notes while idle (developer setting)
+### Tidying notes while you are away
 
-`[memory] sleep` is off by default. Run a pass explicitly with `melo memory sleep [VARIANT]` (developer mode) or `POST /api/memory/sleep`; `-X memory.sleep=rules` sets it for one run, and `melo -h all` lists it.
+With `[memory] sleep` set to `rules`, `model` or `model+tags` (a developer setting, off by default), melo tidies your notes by itself while the computer is idle, and tells you in the main chat.
+
+- It waits until nothing has happened for 20 minutes, no task is running or queued, the computer is on AC power and the shared GPU lock is free, and runs at most once every 6 hours.
+- The main chat then says "While you were away, melo tidied 3 notes · Undo". **What changed** lists the first five.
+- **Undo** puts the whole run back. A note you reworded since stays, and the line says so.
+- In a terminal the line ends with `· /memory undo`; the console and the app take `/memory undo` too.
+- A run that changes nothing leaves no line.
+
+<a id="tidying-notes-while-idle-developer-setting"></a>
+
+### Tidying notes by hand (developer setting)
+
+Run a pass explicitly with `melo memory sleep [VARIANT]` (developer mode) or `POST /api/memory/sleep`; `-X memory.sleep=rules` sets it for one run, and `melo -h all` lists it. The variants are the ones melo uses when it tidies by itself.
 
 - **`rules`** makes no chat-model request: merge duplicate notes, replace a fact with your newer stated value, and recover lasting statements no note kept. A note you reworded is never merged away. Before adding a lost fact, it checks whether an active note already holds its values: with comparable embeddings, cosine must reach 0.9; otherwise, at least half the stemmed non-value words must overlap. Different known subjects stay separate. A configured embedding is bounded to 1.5 seconds per candidate and cached within the pass; failure falls back to words.
 - **`model`** runs those rules first, then asks the chat model about selected turns, oldest first, with their previous message and up to six matching active notes. It can add a fact, update a value or retire an explicitly retracted fact; a separate pass resolves a note's opening pronoun from its source and previous turn. At most 12 chat requests per run, eight seconds each, with temperature zero.
