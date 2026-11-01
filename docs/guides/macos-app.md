@@ -76,16 +76,16 @@ Close the window, minimize it or hide the app (Command-H) and a small Melo appea
 | Tilting its head | Thinking: the model is answering and no tool runs. |
 | Raising a paw | Waiting for your approval. It shows at once, whatever Melo was doing. |
 | Lying down, eyes closed | Resting: nothing runs. Now and then it gets up and plays with its toy. |
-| Sitting up, smiling, still | Done: a run just ended well (8 seconds). |
-| Head tilted, still | The last run did not finish (8 seconds), localmelo stopped, no model is set up, or the model server is not reachable. Hover to read which. |
-| Lying still | localmelo has not answered yet. |
+| Eyes closed and happy, tail up | Done: a run just ended well (8 seconds). |
+| Ears back, head low | The last run did not finish (8 seconds), localmelo stopped, no model is set up, or the model server is not reachable. Hover to read which. |
+| Curled up, faded | localmelo has not answered yet. |
 
 - Click Melo to open the window, or the chat or task that waits for you; drag it anywhere, and it remembers its place on each screen.
 - Right-click (or Control-click) for **Open localmelo**, **Hide Melo**, **On the desktop** and **Quit localmelo**; **Show Melo** in the menu-bar menu brings it back.
 - It stays above other windows and on every Space, is not in the Dock or Command-Tab, and never takes the keyboard.
 - Its state is in `~/Library/Application Support/LocalMelo/pet.json`.
 - Melo plays once, about 20 seconds into a rest, and at most once every 5 minutes.
-- Melo moves in every state that has moves, in Low Power Mode and when the Mac runs hot too. Under Reduce Motion each state is a still picture. While Melo is covered or hidden it stops where it is.
+- Melo moves in every state that has moves, in Low Power Mode and when the Mac runs hot too, while the activity pill rests then. Under Reduce Motion each state is a still picture. While Melo is covered or hidden it stops where it is.
 
 ## The activity pill
 
@@ -94,7 +94,7 @@ Close the window, minimize it or hide the app (Command-H) and a small Melo appea
 While the window is put away and something runs or waits, a small pill takes Melo's place and says in one line what Melo is doing.
 
 - It says what runs in plain words ("Reading example.com", "Running the tests"); **+1** counts the others that run. While an approval waits it turns amber and says "Waiting for your approval".
-- It shows "Done: …" and "Stopped: …" for 8 seconds each, and "Model server not reachable" while the model server is down. Then Melo comes back, sitting up and smiling for a moment after a "Done".
+- It shows "Done: …" and "Stopped: …" for 8 seconds each, and "Model server not reachable" while the model server is down. Then Melo comes back, eyes closed and happy for a moment after a "Done".
 - Click it to open the chat or task it names (the one that waits, for an approval). Drag it like Melo: it takes Melo's place and saves it. Point at it and press **×** to hide it until the next task starts.
 - **On the desktop** in the menu-bar menu and in Melo's menu chooses **Melo and the activity pill** (the default), **Melo only** or **Nothing**. **Hide Melo** is the same as **Nothing**, and **Show Melo** brings back what you had.
 - The window's **Settings → Appearance → Melo on the desktop** is the same choice: it shows what the menus show, and a change there is a change in the menus.

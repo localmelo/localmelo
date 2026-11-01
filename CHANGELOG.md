@@ -17,10 +17,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   minutes). States cross-fade quickly, the newest change wins and the same
   state never starts over. With reduced motion each state is a still picture;
   a hidden tab or a covered pet stops where it is; the pet keeps moving in
-  Low Power Mode and heat. A run that just ended sits up smiling, a failure
-  or a stopped app tilts its head, and a console that is still connecting or
-  cannot reach localmelo lies still (faded when offline), each with its own
-  words. Every picture of Melo now comes from these moves: the empty chat,
+  Low Power Mode and heat. A run that just ended shows Melo with its eyes
+  closed and happy, a failure or a stopped app with its ears back and head
+  low, and a console that is still connecting or cannot reach localmelo
+  curled up and faded, each with its own words. Every picture of Melo now comes from these moves: the empty chat,
   the reply faces, the approval bar, the sidebar and sign-in brand, the Main
   chat, the tab icon, the app's start window and the activity pill. After
   the wake-up Melo sits for a few seconds, then rests; a run that just ended

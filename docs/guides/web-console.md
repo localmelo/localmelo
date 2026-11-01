@@ -298,8 +298,9 @@ Melo in the portrait moves with what it does:
 | Raising a paw | Something waits for you. It shows at once. |
 | Lying down, eyes closed | Nothing runs. Now and then it gets up and plays (at most every 5 minutes). |
 
-- A run that just ended sits up smiling, and an error tilts its head; both are still pictures. While the console
-  is connecting or cannot reach the gateway, Melo lies still (faded when it cannot reach it).
+- A run that just ended closes its eyes happily with its tail up, and an error puts its ears back and its head
+  low; both are still pictures. While the console is connecting or cannot reach the gateway, Melo is curled up and
+  faded.
 - After three minutes of plain rest Melo lies still until something changes or it is time to play.
 - With reduced motion each state is a still picture, and a hidden tab or a portrait scrolled out of view draws
   nothing.
@@ -394,13 +395,13 @@ still, and all of them come from the same moves. Under
 - **Empty chat.** Melo sits above *What would you like to work on?*.
 - **The panel.** Melo's portrait sits at the top of the [panel](#the-panel-beside-a-chat) and moves with what it
   does: it wakes up, works, thinks, raises a paw while something waits for you, rests and plays now and then. It
-  sits up smiling for a few seconds after a run ends well, and tilts its head when the model server cannot be
-  reached or a run just failed; those two are still pictures. While the page cannot reach localmelo, Melo lies
-  still and faded.
+  closes its eyes happily for a few seconds after a run ends well, and puts its ears back and its head low when the
+  model server cannot be reached or a run just failed; those two are still pictures. While the page cannot reach
+  localmelo, Melo is curled up and faded.
 - **Replies.** Beside `localmelo` on each reply is Melo's face. On the newest
   reply it shows that turn's state: at its laptop while it runs, with a raised paw
-  while an approval waits, smiling when it is done, and with its head tilted when
-  it ended with a warning or an error. A turn you stopped is not a failure and
+  while an approval waits, eyes closed and happy when it is done, and with its ears
+  back when it ended with a warning or an error. A turn you stopped is not a failure and
   keeps the calm face, and so does every older reply.
 - **Approval bar.** The bar that reads "melo is waiting for your answer" shows the
   face with the raised paw.
@@ -415,7 +416,8 @@ its face reads `Done` to a screen reader. The empty chat's Melo keeps the alt te
 words.
 
 The moves are served from `/assets/moves/`: one picture per state holding its frames, a still of each state
-(`poster-<state>.webp`), Melo's head cut from the stills (`face-idle.png`, `face-working.png`, `face-waiting.png`,
+(`poster-<state>.webp`), the done, error and offline stills (`poster-done.webp`, `poster-error.webp`,
+`poster-offline.webp`), Melo's head cut from the stills (`face-idle.png`, `face-working.png`, `face-waiting.png`,
 `face-done.png`, `face-error.png`) and the tab icons (`favicon-16.png`, `-32` and `-64`), and `manifest.json` with
 each frame's duration: 1.6 MB in all, and the app shows the same files. The page loads the moves once, when it opens.
 

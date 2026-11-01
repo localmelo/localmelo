@@ -86,16 +86,16 @@ uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 | 歪着头 | 思考：模型正在作答，没有工具在运行。 |
 | 举起一只爪子 | 在等你批准。无论 Melo 正在做什么，都会立刻显示。 |
 | 趴着，闭着眼睛 | 休息：没有任何东西在运行。它偶尔会起来玩一会儿玩具。 |
-| 坐着微笑，一动不动 | 完成：一次运行刚刚顺利结束（持续 8 秒）。 |
-| 歪着头，一动不动 | 上一次运行没有完成（持续 8 秒）、localmelo 已停止、还没有设置模型，或连不上模型服务器。把指针移上去可以看到是哪一种。 |
-| 静静地趴着 | localmelo 还没有回应。 |
+| 开心地闭着眼睛，尾巴翘起 | 完成：一次运行刚刚顺利结束（持续 8 秒）。 |
+| 耳朵向后，低着头 | 上一次运行没有完成（持续 8 秒）、localmelo 已停止、还没有设置模型，或连不上模型服务器。把指针移上去可以看到是哪一种。 |
+| 蜷成一团，颜色变淡 | localmelo 还没有回应。 |
 
 - 点击 Melo 会打开窗口，或打开在等你的那个对话或任务；可以把它拖到任何地方，它会为每块屏幕记住自己的位置。
 - 右键（或按住 Control 点击）会出现 **Open localmelo**、**Hide Melo**、**On the desktop** 和 **Quit localmelo**；菜单栏菜单里的 **Show Melo** 会把它请回来。
 - 它停在其他窗口之上，出现在每一个空间里，不在程序坞和 Command-Tab 中，也从不抢走键盘。
 - 它的状态保存在 `~/Library/Application Support/LocalMelo/pet.json`。
 - 休息大约 20 秒后 Melo 会玩一次，最多每 5 分钟一次。
-- 凡是有动作的状态，Melo 都会动，低电量模式下和 Mac 发热时也一样。在“减弱动态效果”下，每个状态都是一张静态图片。Melo 被遮住或隐藏时，它停在原处。
+- 凡是有动作的状态，Melo 都会动，低电量模式下和 Mac 发热时也一样，这时活动胶囊保持不动。在“减弱动态效果”下，每个状态都是一张静态图片。Melo 被遮住或隐藏时，它停在原处。
 
 <a id="the-activity-pill"></a>
 
@@ -106,7 +106,7 @@ uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 窗口收起、而又有东西在运行或在等你时，一个小小的胶囊会取代 Melo，用一行话说 Melo 正在做什么。
 
 - 它用平实的话说正在运行的内容（“Reading example.com”“Running the tests”）；**+1** 表示还有几个在运行。有审批在等你时，它会变成琥珀色，并写着“Waiting for your approval”。
-- 它显示“Done: …”和“Stopped: …”各 8 秒，模型服务器连不上时显示“Model server not reachable”。然后 Melo 回来，“Done” 之后会坐着微笑一会儿。
+- 它显示“Done: …”和“Stopped: …”各 8 秒，模型服务器连不上时显示“Model server not reachable”。然后 Melo 回来，“Done” 之后会开心地闭着眼睛一会儿。
 - 点击它会打开它所说的对话或任务（审批则是在等你的那个）。像拖 Melo 一样拖它：它占用 Melo 的位置并保存。指向它并点 **×**，就在下一个任务开始之前把它隐藏。
 - 菜单栏菜单和 Melo 的菜单里的 **On the desktop** 可选 **Melo and the activity pill**（默认）、**Melo only** 或 **Nothing**。**Hide Melo** 等于 **Nothing**，**Show Melo** 会恢复你原来的选择。
 - 窗口里的 **Settings → Appearance → Melo on the desktop** 是同一个选择：它显示菜单当前的选择，在这里改就是在菜单里改。
