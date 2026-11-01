@@ -31,7 +31,7 @@ async def setup(
     llms: list[ScriptedLLM] = []
 
     async def build(settings: Any, workspace: str, mcp: str | None, sid: str) -> Any:
-        llms.append(ScriptedLLM([answer("Noted.")]))
+        llms.append(ScriptedLLM([answer("OK.")]))
         return await started_agent(Path(workspace), llms[-1], mode="gateway")
 
     console = Console(
