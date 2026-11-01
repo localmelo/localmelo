@@ -18,7 +18,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   the gateway, so the console and the app show it too (`/approvals ask|auto`
   now works there as well). The key never reaches Deny or `--yolo`, does
   nothing while a question, a list or an approval is open, and works during
-  a turn, where its line says when it applies. [#NN]
+  a turn, where its line says when it applies. [#392]
 - Note tidying skips facts whose values an active note already holds, using
   bounded embedding similarity or a word-only fallback without merging different
   known subjects. Reports list selected turns and each model operation's bounded,
@@ -3297,3 +3297,4 @@ earlier milestones.
 [#387]: https://github.com/localmelo/localmelo/pull/387
 [#388]: https://github.com/localmelo/localmelo/pull/388
 [#389]: https://github.com/localmelo/localmelo/pull/389
+[#392]: https://github.com/localmelo/localmelo/pull/392
