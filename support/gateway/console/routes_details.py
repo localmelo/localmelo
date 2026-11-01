@@ -133,8 +133,12 @@ def add_routes(app: FastAPI, console: Console) -> None:
         return Response(status_code=204)
 
     @app.delete("/api/sessions/{session_id}/folders")
-    async def forget_folder(session_id: str, path: str) -> Response:
-        """Take back the chat's grant of one folder outside the workspace (#405)."""
+    async def forget_folder(session_id: str, path: str = "") -> Response:
+        """Take back the chat's grant of one folder outside the workspace (#405).
+
+        The folder is the ``path`` query parameter; without one, or for a
+        folder the chat was not granted, the answer is 404.
+        """
         console.require_store()
         await _require_session(console, session_id)
         entry = console.sessions.get(session_id)

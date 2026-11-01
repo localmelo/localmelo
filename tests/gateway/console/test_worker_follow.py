@@ -245,6 +245,7 @@ WRITES: dict[tuple[str, str], dict[str, Any] | None] = {
     ("DELETE", "/api/sessions/{session_id}/grants/{tool}"): None,
     ("DELETE", "/api/sessions/{session_id}/grants"): None,
     ("DELETE", "/api/sessions/{session_id}/approvals/{entry_id}"): None,
+    ("DELETE", "/api/sessions/{session_id}/folders"): None,
     ("POST", "/api/sessions/{session_id}/level"): {"level": 2},
     ("POST", "/api/presence"): {"session_id": "{session_id}"},
     ("POST", "/api/turns/{turn_id}/cancel"): None,
