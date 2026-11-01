@@ -708,6 +708,7 @@ async function refreshList() {
   try {
     const body = await api("/sessions");
     S.online = true;
+    panel.offline(false);
     S.machine = body.machine ?? null;
     S.sessions = body.sessions ?? [];
     S.main = body.main ?? null;
@@ -720,6 +721,7 @@ async function refreshList() {
     if (heldChanged) renderMessages(false);
   } catch {
     S.online = false;
+    panel.offline(true);
     syncUI();
   }
 }

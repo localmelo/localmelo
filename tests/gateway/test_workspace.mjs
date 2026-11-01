@@ -811,6 +811,7 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     // `/memory import` opens its tab and presses "Look for notes": a test sets `notesOn` and reads `notesLooked`.
     // A task is drawn by tasks.mjs, which the real panel owns the place of: the double shows and leaves it the same way.
     setupPanel: realPanel ? realSetupPanel : (options) => ({health: [], state: {task: null}, update(body) { this.health.push(body); }, sheetClosed: 0, opened: 0, remembered: [],
+      lost: [], offline(value) { this.lost.push(value); },
       closeSheet() { this.sheetClosed += 1; return false; }, select() {}, openSheet() {},
       remember(key) { this.remembered.push(key); },
       openTask(id) { this.opened += 1; this.state.task = id; options.tasks.show(id); options.tasks.focus(); },
@@ -2141,9 +2142,12 @@ test('the gateway-offline banner offers Try again, which asks the gateway again'
   up = false;
   await h.run('refreshList()');
   assert.equal(h.element('offline-banner').hidden, false);
+  // Melo's portrait keeps its still picture while the gateway is lost.
+  assert.equal(h.run('panel').lost.at(-1), true);
   up = true;
   await h.element('offline-retry').click();
   assert.equal(h.element('offline-banner').hidden, true, 'the banner goes when the gateway answers');
+  assert.equal(h.run('panel').lost.at(-1), false);
 });
 
 test('earlier turns replay separately without disturbing current cursor or approvals', async () => {

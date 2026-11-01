@@ -298,7 +298,8 @@ Melo in the portrait moves with what it does:
 | Raising a paw | Something waits for you. It shows at once. |
 | Lying down, eyes closed | Nothing runs. Now and then it gets up and plays (at most every 5 minutes). |
 
-- A run that just ended, an error and a console that is still connecting keep their still pictures.
+- A run that just ended, an error, and a console that is connecting or cannot reach the gateway keep their still
+  pictures.
 - With reduced motion each state is a still picture, and a hidden tab draws nothing. Under it are four tabs: **Activity**, **Workers**, **Scheduled** and **Memory**. Arrow keys, Home and
 End move between them, and the panel opens the tab you used last.
 

@@ -949,6 +949,14 @@ test('the portrait wakes up once, rests, plays now and then, and keeps its still
   await h.panel.update(health({}, {model_server: {reachable: false}}));
   assert.equal(ring.dataset.moves, 'off');
   assert.equal(ring.dataset.move, undefined);
+  // The page lost the gateway: the still picture, until it answers again.
+  await h.panel.update(health());
+  assert.equal(ring.dataset.moves, 'on');
+  h.panel.offline(true);
+  assert.equal(ring.dataset.moves, 'off');
+  assert.ok(player.hidden.has('portrait'));
+  h.panel.offline(false);
+  assert.equal(ring.dataset.moves, 'on');
   // Back to rest: the wake-up is not played again, and the rest starts over.
   await h.panel.update(health());
   assert.equal(ring.dataset.moves, 'on');

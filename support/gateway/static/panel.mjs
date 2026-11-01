@@ -137,7 +137,7 @@ export function setupPanel({
   const doc = root.ownerDocument;
   const state = {health: null, rows: [], more: false, unavailable: [], loaded: false, error: '', notice: '', noticeFor: '',
     tab: 'activity', open: null, all: false, sheet: false, busy: '', fetchedAt: 0, seen: null, day: 0,
-    chat: chat(), scope: 'all', folds: new Set(), task: null, from: ''};
+    chat: chat(), scope: 'all', folds: new Set(), task: null, from: '', offline: false};
   try { if (TABS.some(([id]) => id === storage?.getItem(KEY))) state.tab = storage.getItem(KEY); } catch { /* no storage */ }
   // A row's steps are its session's newest turn: a long chat is not read back to its first turn.
   const newest = (path, options) => (/\/turns\?/.test(path)
@@ -258,7 +258,8 @@ export function setupPanel({
     return motion.playing ? {key: 'idle_play', once: true} : {key: 'idle_rest'};
   }
   function drawMove(said, scoped) {
-    const move = motion.player ? portraitMove(state.health, said, scoped) : null;
+    // Offline, the last health reply is old news: the still picture stays until the gateway answers again.
+    const move = motion.player && !state.offline ? portraitMove(state.health, said, scoped) : null;
     ring.dataset.moves = move ? 'on' : 'off';
     // A still picture stops the moves behind it; they go on from where they were.
     motion.player?.setVisible(Boolean(move), 'portrait');
@@ -692,5 +693,12 @@ export function setupPanel({
   drawTabs();
   drawBody();
 
-  return {update, refresh, follow, select, state, openTask, closeTask, focusOpener, stepBack, remember, closeSheet: () => setSheet(false), openSheet: () => setSheet(true), lookForNotes: () => memory.lookForNotes()};
+  /** The page lost the gateway (true) or found it again: the portrait keeps its still picture while it is lost. */
+  function offline(lost) {
+    if (state.offline === Boolean(lost)) return;
+    state.offline = Boolean(lost);
+    drawHeader();
+  }
+
+  return {update, refresh, follow, select, state, offline, openTask, closeTask, focusOpener, stepBack, remember, closeSheet: () => setSheet(false), openSheet: () => setSheet(true), lookForNotes: () => memory.lookForNotes()};
 }
