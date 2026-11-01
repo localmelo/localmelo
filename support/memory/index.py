@@ -97,11 +97,20 @@ def _kept(text: str) -> str:
     return text
 
 
-def document_text(typed: str, answer: str, *, title: str = "") -> str:
-    """What a turn's document holds: a task's title, who said what, bounded."""
+def _document(typed: str, answer: str, title: str) -> str:
     parts = [f"Task: {title.strip()}"] if title.strip() else []
     parts += [f"User: {_kept(typed.strip())}", f"melo: {_kept(answer.strip())}"]
-    return redact_secrets("\n".join(parts)[:DOC_CHARS])[0]
+    return "\n".join(parts)
+
+
+def document_text(typed: str, answer: str, *, title: str = "") -> str:
+    """What a turn's document holds: a task's title, who said what, bounded."""
+    return redact_secrets(_document(typed, answer, title)[:DOC_CHARS])[0]
+
+
+def is_cut(typed: str, answer: str, *, title: str = "") -> bool:
+    """Whether :func:`document_text` leaves part of the turn out, for its length."""
+    return len(_document(typed, answer, title)) > DOC_CHARS
 
 
 def plain_text(text: str) -> str:

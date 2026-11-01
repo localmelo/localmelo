@@ -38,7 +38,7 @@ melo -h all                                  # every option, command and setting
 |---|---|---|
 | `melo setup` | 重新选择模型服务器，然后打开对话。 | |
 | `melo config` | 显示配置文件的位置，以及哪些设置与默认值不同。 | |
-| `melo memory VERB` | 查看和修改 melo 保存的笔记：`list`、`forget`、`status`、`reindex`、`import`（开发者模式下还有 `sleep`）。 | `list -n N`、`forget ID`、`forget -y`、`import --undo BATCH` |
+| `melo memory VERB` | 查看和修改 melo 保存的笔记：`list`、`forget`、`status`、`reindex`、`import`（开发者模式下还有 `sleep`、`ingest`）。 | `list -n N`、`forget ID`、`forget -y`、`import --undo BATCH` |
 | `melo serve [install\|uninstall\|status\|stop]` | 运行网关，把它作为登录服务管理（macOS），或停止正在运行的网关。 | `--host H`, `-p`/`--port N`, `--playground`, `--force` |
 | `melo console [--reset]` | 在浏览器中打开已登录的网页控制台；通过 SSH 或没有浏览器能启动时，改为输出一次性链接。`--reset` 轮换访问令牌。 | `--host H`, `-p`/`--port N` |
 | `melo task VERB` | `melo-task` 客户端。 | 同 `melo-task` |
@@ -123,7 +123,7 @@ melo -h all                                  # every option, command and setting
 
 ### 记忆
 
-`melo memory VERB` 查看和修改 melo 保存的关于你的笔记，也就是控制台 Memory 标签页列出的那些（见[跨对话记忆](../concepts/memory.md#memory-across-chats)）。它读写 `~/.cache/localmelo/memory/`。查看和忘记笔记不调用模型；`reindex` 可为笔记和轮次生成嵌入，开发者模式的 `sleep` 按所选方式使用配置的嵌入模型和聊天模型。
+`melo memory VERB` 查看和修改 melo 保存的关于你的笔记，也就是控制台 Memory 标签页列出的那些（见[跨对话记忆](../concepts/memory.md#memory-across-chats)）。它读写 `~/.cache/localmelo/memory/`。查看和忘记笔记不调用模型；`reindex` 可为笔记和轮次生成嵌入，开发者模式的 `sleep` 按所选方式使用配置的嵌入模型和聊天模型，开发者模式的 `ingest` 可能使用嵌入模型（从不使用聊天模型）。
 
 | 动词 | 作用 |
 |---|---|
@@ -133,6 +133,22 @@ melo -h all                                  # every option, command and setting
 | `melo memory import [-u BATCH]` | 提议导入这台电脑上其他助手保存的关于你的笔记：一个列表，选项是 `Bring in N notes from M files`、`Show what they say` 和 `Not now`（管道输入时是编号问题）。列表默认停在 `Show what they say`。选第一行之前不写入任何内容，选了之后打印批次；Esc、ctrl+c 和输入结束不导入任何内容，也不记录回答（`Nothing brought in.`，Esc 和 ctrl+c 退出码为 130，其他为 0）。`-u BATCH`（`--undo`）收回该批次，并保留你之后编辑过的笔记（`Kept N notes you edited.`）。`--undo` 找不到笔记时退出码为 1。 |
 | `melo memory reindex` | 从对话重建对话索引，并给每条笔记补上当前嵌入模型的向量。上次“忘记全部”之前结束的轮次不会进入。`melo serve` 或应用运行时退出码为 1，因为对话由它们持有。 |
 | `melo memory sleep [VARIANT]` | 仅开发者模式（`[ui] mode = "developer"`，否则退出码 2）。用 `off`、`rules`、`model` 或 `model+tags` 整理笔记（省略时用 `[memory] sleep`），打印运行编号、模型调用次数、中止原因和每处改动（`O1` 合并、`O2` 较新的值、`O3` 找回的事实、`ADD`、`UPDATE`、`RETIRE`、`O4` 人名解析）。模型方式每次最多十二次请求。`melo serve` 或应用运行时退出码为 1。 |
+| `melo memory ingest FILE [-j] [-X notes=none]` | 仅开发者模式（`[ui] mode = "developer"`，否则退出码 2）。从 JSON 文件加载过去的对话，就像它们真的发生在各自的日期：每个会话通过对话存储写成一个普通对话（控制台会列出它），每一轮都进入索引（设置了嵌入模型就用它，否则只按词），除非 `-X notes=none`，用户话语里陈述的长期事实会成为笔记，每条都带上所在轮次自己的时间。不调用聊天模型。打印 `Ingested N sessions, N turns, N documents (...) and N notes in S s.`，加 `-j` 则打印一个 JSON 对象。`melo serve` 或应用运行时退出码为 1，选项或文件有误时为 2。 |
+
+摄入文件：
+
+```json
+{"sessions": [
+  {"id": "s1", "title": "optional", "date": "2023-05-20T13:40:00Z",
+   "turns": [{"role": "user", "text": "...", "date": "optional per-turn time"},
+             {"role": "assistant", "text": "..."}]}
+]}
+```
+
+- `date`（会话上或某一轮上）是 ISO 8601，没有时区就按本地时间，或是纪元秒。没有自己 `date` 的一轮取所在会话的日期，再加上它前面每一轮各一秒，顺序因此保持；没有 `date` 的会话取它第一轮的日期。
+- 会话按从旧到新写入。一条用户消息和它后面的助手消息组成一轮对话。没有回复的用户消息是答案为空的一轮（`melo memory reindex` 会把这样的一轮排除在索引之外）。连续的第二条助手消息接在它前面的回复后面。前面没有用户消息的助手消息和没有文字的消息会被跳过。超过 100000 个字符的用户文字会在那里截断。
+- `id` 只是标签：会话编号由存储自己给。超过 500 MB 的文件会被拒绝。再运行一次会再加载一次这些会话。
+- `-j` 打印 `sessions`、`turns`、`docs`、`notes`、`embedded_chars`（发给嵌入模型的字符数）、`cut`（比索引保留的 2000 个字符更长的轮次，截法与 `reindex` 相同）、`skipped`、`trimmed`、`seconds`、`model`、`error`（最近一次嵌入失败，没有则为空）和 `ids`（文件里每个 `id` 对应的存储编号）。
 
 ```text
 $ melo memory list

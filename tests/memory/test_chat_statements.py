@@ -284,8 +284,9 @@ async def test_a_hypothetical_turn_keeps_no_note_and_says_nothing_more(
     events = await Chat(memory, store, stub, tmp_path)(
         "If I lived in Lisbon, I'd surf."
     )
-    (only,) = events  # no second event: nothing was kept after the run
-    assert only["remembered"] == [] and await memory.records() == []
+    # Nothing was kept; the reply's bare "Noted." is flagged in the last event.
+    assert all(e["remembered"] == [] for e in events)
+    assert events[-1]["unsaved_claim"] is True and await memory.records() == []
 
 
 async def test_workers_and_task_runners_keep_no_statement(
@@ -397,8 +398,8 @@ async def test_by_default_code_keeps_no_statement(
     default_memory: ChatMemory, store: SessionStore, stub: Any, tmp_path: Path
 ) -> None:
     memory = default_memory
-    (only,) = await Chat(memory, store, stub, tmp_path)("I live in Lisbon.")
-    assert only["remembered"] == [] and await memory.records() == []
+    events = await Chat(memory, store, stub, tmp_path)("I live in Lisbon.")
+    assert all(e["remembered"] == [] for e in events) and await memory.records() == []
     typed = "My name is Juno."
     turn = await store.begin_turn(
         None, typed, holder="test:1:statements", title=typed, new_session=NewSession()
