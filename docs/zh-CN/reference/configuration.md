@@ -95,6 +95,7 @@ chat_model = "qwen3:8b"
 | `policy` | `[scheduler]` | `"off"` | 网页工作区的调用如何到达模型服务器：`off` 只记录，`fcfs` 先到先得，`class` 让 P1 先于 P2 得到准入（依此类推）；见[调度器](../guides/scheduler.md#the-gate-on-chats-s2)。 |
 | `driver` | `[browser]` | `"off"` | melo 是否可以在浏览器中读取网页：`off` 不提供浏览工具；`safari-automation` 为终端对话以及网页控制台和 App 的每个对话提供八个只读工具，在 Safari 的自动化窗口中打开网页（每个网站每次对话询问一次；见[用 melo 浏览网页](../guides/browsing.md)）。终端中用 `/browser` 切换；`-X browser.driver=safari-automation` 仅用于一次运行。直接运行、worker 运行和已保存的任务从不获得这些工具。其他任何值都是配置错误。 |
 | `web_fetch` | `[tools]` | `true` | 对话和任务是否可以用 `web_fetch` 工具读取公开网页（只读；从不访问这台电脑或它所在的局域网；你自己最近的消息没有提到的网站每个对话问一次，与浏览器共用；见[工具](tools.md#reading-a-public-web-page)）。`false` 移除这个工具；设置 → 对话和文件夹 → **读取网页** 是同一个开关；`-X tools.web_fetch=off` 仅用于一次运行。直接运行从不获得它。不是布尔值的任何值都是配置错误。 |
+| `follow_up` | `[tasks]` | `true` | 对话开始的任务失败、步数用完、以**做完了，还没收尾**结束或需要你时，这个对话是否跟进：自己走一轮，把任务继续一次、绕开被拦下的步骤或问你一个问题，然后说明做完了什么（见[网页控制台](../guides/web-console.md#when-a-task-it-started-stops-the-chat-follows-up)）。`false` 只留下任务的卡片；设置 → 对话和文件夹 → **跟进任务**（开发者模式）是同一个开关；`-X tasks.follow_up=off` 仅用于一次运行。不是布尔值的任何值都是配置错误。 |
 | `n_srv` | `[scheduler]` | `8` | 模型服务器的槽位数。 |
 | `r_f` | `[scheduler]` | `1` | 为命令行和直接运行保留的槽位数；`n_srv <= 2` 时强制为 0。 |
 | `n_fg` | `[scheduler]` | `1` | 有聊天处于焦点时允许在途的后台调用数。 |
@@ -356,7 +357,7 @@ enable_thinking = false
 - 对 `ollama` 后端，这些字段进入 Ollama `/api/chat` 的请求体。localmelo 默认向 Ollama 请求模型的思考；`extra_body = { think = false }` 会关闭它。
 - `--base-url` 不读取配置文件，因此 `extra_body` 在那里不适用。
 
-驱动为 `off` 的 `[browser]` 表不会写入，`web_fetch` 为 `true` 的 `[tools]` 表也不会。
+驱动为 `off` 的 `[browser]` 表不会写入，`web_fetch` 为 `true` 的 `[tools]` 表和 `follow_up` 为 `true` 的 `[tasks]` 表也不会。
 
 <a id="mcp-servers"></a>
 

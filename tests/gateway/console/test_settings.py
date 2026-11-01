@@ -1127,6 +1127,41 @@ def test_the_settings_carry_whether_melo_reads_web_pages_and_save_it_only_when_s
     assert word.status_code == 400
 
 
+def test_the_settings_carry_the_follow_up_switch_and_save_it_only_when_sent(
+    client: TestClient, isolated_config: Path
+) -> None:
+    """``[tasks] follow_up`` (#411): on by default, so off is written; a developer key."""
+    _saved_cfg()
+    loaded = client.get("/api/settings").json()
+    assert loaded["follow_up"] is True
+    keys = {
+        key["key"]: group["section"]
+        for group in loaded["developer_settings"]
+        for key in group["keys"]
+    }
+    assert keys["tasks.follow_up"] == "tasks"
+    off = client.put(
+        "/api/settings", json=_put_body(loaded["revision"], follow_up=False)
+    )
+    assert off.status_code == 200 and off.json()["follow_up"] is False
+    assert config.load().tasks.follow_up is False
+    assert "[tasks]\nfollow_up = false" in isolated_config.read_text()
+    kept = client.put("/api/settings", json=_put_body(off.json()["revision"]))
+    assert kept.json()["follow_up"] is False, "absent leaves it as it is"
+    on = client.put(
+        "/api/settings", json=_put_body(kept.json()["revision"], follow_up=True)
+    )
+    assert on.status_code == 200 and on.json()["follow_up"] is True
+    assert "[tasks]" not in isolated_config.read_text(), "the default is not written"
+    word = client.put(
+        "/api/settings", json=_put_body(on.json()["revision"], follow_up="off")
+    )
+    assert word.status_code == 400
+    bad = config.Config()
+    bad.tasks.follow_up = "no"  # type: ignore[assignment]
+    assert any("[tasks] follow_up must be a bool" in e for e in bad.setting_errors())
+
+
 def test_the_developer_section_lists_every_key_by_section_with_its_value(
     client: TestClient,
 ) -> None:

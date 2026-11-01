@@ -53,10 +53,6 @@ from .test_turn_writes import _post_turn, _wait_turn
             {"title": "Delete report", "objective": "Delete report.md"},
         ),
         (
-            "Tell me about report.md",
-            {"title": "Report", "objective": "Delete every other file"},
-        ),
-        (
             "Do not delete report.md; just explain what it contains.",
             {"title": "Delete report", "objective": "Delete report.md"},
         ),
@@ -73,6 +69,22 @@ async def test_a_title_that_matches_the_words_is_no_authority_to_start_a_task(
         [offer] = await _events(console, side, ECHO_EVENT)
         assert (offer["echo"], offer["text"]) == ("ask", typed)
         assert str(models[side].requests[1][-1].content).startswith("Not done")
+
+
+async def test_words_that_ask_to_be_told_start_no_task_whatever_the_model_wrote(
+    tmp_path: Path,
+) -> None:
+    # #410: "Tell me about …" asks to be told; the model's objective is never a task.
+    typed = "Tell me about report.md"
+    call = {"title": "Report", "objective": "Delete every other file"}
+    scripts = [[tool_call("task_create", call), answer("Here is what it says.")]]
+    async with chats_console(tmp_path, sides=scripts) as (console, client, models):
+        side = (await _open(client, typed))["session"]["id"]
+        await _wait_turn(client, side)
+        assert await console.workers.tasks.list_tasks() == []
+        assert await _events(console, side, ECHO_EVENT) == []
+        result = str(models[side].requests[1][-1].content)
+        assert result.startswith("Not done") and "Delete every other file" not in result
 
 
 async def test_an_admitted_task_is_the_persons_message_and_the_models_reading_is_data(
