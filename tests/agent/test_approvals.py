@@ -33,6 +33,12 @@ from localmelo.melo.contracts.review import ActionReview, loose_keys
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.schema import CALL_NOT_STARTED, Message, ToolCall, ToolDef
 
+# The keys an event may lack: run.finished's reviews without an approval
+# policy (#339), tool.finished's tool_asks when no question was refused (#431).
+OPTIONAL_KEYS: dict[str, set[str]] = {
+    "run.finished": {"reviews"},
+    "tool.finished": {"tool_asks"},
+}
 # The texts the model reads, pinned literally.
 ENDING = (
     "Do not run it again or reach the same result another way unless the user asks."
@@ -326,8 +332,9 @@ def check_events(recorder: Recorder) -> None:
     """Pinned keys, JSON envelopes, and one tool.finished per tool.started."""
     open_call: str | None = None
     for event in recorder.events:
-        # Only a run with an approval policy has run.finished's reviews (#339).
-        absent = {"reviews"} if event.type == "run.finished" else set()
+        # Only a run with an approval policy has run.finished's reviews (#339),
+        # and only a call whose tool had a question refused has tool_asks (#431).
+        absent = OPTIONAL_KEYS.get(event.type, set())
         assert set(event.data) <= EVENT_FIELDS[event.type], event.type
         assert EVENT_FIELDS[event.type] - set(event.data) <= absent, event.type
         json.dumps(event.to_dict(), allow_nan=False)

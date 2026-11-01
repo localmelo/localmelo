@@ -381,6 +381,17 @@ def call_key(
     return step_key(tool_name, arguments, workspace_root)
 
 
+def question_key(name: str) -> str:
+    """The loose key of a question a running tool asked (``TOOL_ASK``) under *name*.
+
+    A tool asks under a name of its own choosing, such as ``browser:<origin>``
+    for a site, and a grant of that name covers every question with it; so a
+    refusal does too: a later question under the same name (another page of a
+    refused site, by either tool) is a step alike (#431).
+    """
+    return f"ask:{name}"
+
+
 class EarlierBlocks:
     """A policy that refuses again, before any review, a step blocked earlier (#411).
 
@@ -388,10 +399,12 @@ class EarlierBlocks:
     and, for a block auto mode kept, its step key. *loose* maps the same
     call keys to their :func:`~localmelo.melo.contracts.review.loose_keys`,
     so a call alike (the same command spelt another way, the same install)
-    is refused too. The agent's gate asks :meth:`match` first; :meth:`decide`
-    is the *inner* policy's. A block the person allowed once since (its step
-    key has an allowance in the inner :class:`AutoPolicy`) is not refused,
-    nor is a call alike to it. It never allows anything.
+    is refused too. The agent's gate asks :meth:`match` first, and so does
+    a running tool's own question (a site web_fetch or the browser would
+    open, #431); :meth:`decide` is the *inner* policy's. A block the person
+    allowed once since (its step key has an allowance in the inner
+    :class:`AutoPolicy`) is not refused, nor is a call alike to it. It never
+    allows anything.
     """
 
     def __init__(
@@ -417,13 +430,18 @@ class EarlierBlocks:
         tool_name: str,
         arguments: Mapping[str, Any],
         workspace_root: str | None,
+        also: Iterable[str] = (),
     ) -> tuple[str, bool] | None:
-        """Who blocked this call, or one alike, earlier, and whether it was this exact call."""
+        """Who blocked this call, or one alike, earlier, and whether it was this exact call.
+
+        *also* are further loose keys of the call: a tool's own question
+        adds its :func:`question_key`.
+        """
         exact = call_key(tool_name, arguments, workspace_root)
         found = self._blocks.get(exact)
         if found is not None and not self._lifted(found[1]):
             return found[0], True
-        alike = set(loose_keys(tool_name, arguments))
+        alike = set(loose_keys(tool_name, arguments)) | set(also)
         if not alike:
             return None
         for key, keys in self._loose.items():

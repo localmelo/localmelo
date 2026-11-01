@@ -1906,7 +1906,9 @@ class SessionStore:
 
         Their ``approval`` has ``allowed`` false and ``origin`` ``user``,
         ``auto`` or ``policy``; a timeout, a withdrawn prompt or a failed
-        policy is no denial. The newest *limit* (1..1000), in id order.
+        policy is no denial. So are those whose tool had a question of its
+        own refused (``tool_asks``, #431), which the caller reads. The
+        newest *limit* (1..1000), in id order.
         """
         if (
             isinstance(limit, bool)
@@ -1919,10 +1921,12 @@ class SessionStore:
             rows = await _rows(
                 conn,
                 "SELECT id, turn, event FROM events WHERE session_id = ? "
-                "AND type = 'tool.finished' AND "
+                "AND type = 'tool.finished' AND (("
                 "json_extract(event, '$.data.approval.allowed') = 0 AND "
                 "json_extract(event, '$.data.approval.origin') IN "
-                "('user', 'auto', 'policy') ORDER BY id DESC LIMIT ?",
+                "('user', 'auto', 'policy')) OR "
+                "json_array_length(event, '$.data.tool_asks') > 0) "
+                "ORDER BY id DESC LIMIT ?",
                 (session_id, limit),
             )
         return [

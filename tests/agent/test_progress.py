@@ -46,6 +46,13 @@ from localmelo.tests.agent.procedural_helpers import (
     shell,
 )
 
+# The keys an event may lack: run.finished's reviews without an approval
+# policy (#339), tool.finished's tool_asks when no question was refused (#431).
+OPTIONAL_KEYS: dict[str, set[str]] = {
+    "run.finished": {"reviews"},
+    "tool.finished": {"tool_asks"},
+}
+
 
 @pytest.fixture(params=[False, True], ids=["level2-off", "level2-on"])
 def level2(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> bool:
@@ -115,8 +122,9 @@ async def test_every_event_has_exactly_the_pinned_keys() -> None:
     await agent.run_task(QUERY, on_event=recorder, progress=True)
     assert EVENT_FIELDS["run.progress"] == frozenset(PROGRESS_KEYS)
     for event in recorder.events:
-        # No approval policy: run.finished has no reviews key (#339).
-        no_policy = {"reviews"} if event.type == "run.finished" else set()
+        # No approval policy: run.finished has no reviews key (#339); no tool
+        # asked a question: tool.finished has no tool_asks key (#431).
+        no_policy = OPTIONAL_KEYS.get(event.type, set())
         assert set(event.data) == EVENT_FIELDS[event.type] - no_policy
         assert event.to_dict()["v"] == 1
 
