@@ -2,9 +2,8 @@ import {cleanOutput, formatDuration} from './turns.mjs';
 import {taskLive} from './task-live.mjs';
 import {setupMemoryTab} from './memory-tab.mjs';
 import {setupScheduledTab} from './scheduled-tab.mjs';
-import {LEVELS, levelLabel} from './levels.mjs';
 import {formatTime, t} from './i18n.mjs';
-import {canFinish, endingLabel, endingWhy, finishLabel, readEnding} from './endings.mjs';
+import {endingLabel, endingWhy, readEnding} from './endings.mjs';
 
 /**
  * The panel beside a chat: Melo's portrait and status, then tabs. It follows
@@ -15,7 +14,11 @@ import {canFinish, endingLabel, endingWhy, finishLabel, readEnding} from './endi
  * which follows any session's events) with the actions the terminal's task
  * list offers, and carries the approvals it asked for folded under it, where
  * one that waits is answered. Workers lists the tasks and runs of the same
- * scope. Scheduled (scheduled-tab.mjs) lists the check-in and the chores that run on a schedule; Memory
+ * scope. A task's row is a link: it opens the task in the panel in place of Melo's page (`openTask`; the task
+ * view is tasks.mjs, `tasks`), with a link back, and `closeTask` or Escape (`stepBack`) returns to the page. The
+ * address `#/tasks/<id>` names it, so a card in the chat or a row of what runs lands on the same view; `#/tasks`
+ * names the list of all tasks, which Activity (today only) does not have. Scheduled (scheduled-tab.mjs) lists the
+ * check-in and the chores that run on a schedule; Memory
  * (memory-tab.mjs) lists the notes melo keeps. `update(health)` is called on every health poll: the
  * header follows it, and the list is read again when what runs changed, the
  * chat changed, or every REFRESH_MS. Below 900 px the panel is a bottom sheet
@@ -46,6 +49,8 @@ const KEY = 'localmelo-panel-tab';
 const TESTS = /(?:^|[\s;&|(])(?:pytest|py\.test|tox|nox|jest|vitest|(?:npm|pnpm|yarn|bun)(?: run)? test|(?:cargo|go|swift|deno|mix) test|python3? -m (?:pytest|unittest)|make (?:test|check))(?:$|[\s;&|)])/;
 
 const chatOfAddress = () => /^#\/s\/([A-Za-z0-9._:-]+)$/.exec(globalThis.location?.hash ?? '')?.[1] ?? '';
+// A task's address does not name a chat: the panel keeps the chat it was following.
+const onTaskAddress = () => /^#\/tasks(?:\/|$)/.test(globalThis.location?.hash ?? '');
 const base = (path) => String(path ?? '').replace(/\/+$/, '').split('/').pop();
 
 /** A step's plain words, as the server's `activity_text` says them: `Reading notes.md`, or `Read notes.md` once done. */
@@ -99,11 +104,12 @@ export function setupPanel({
   root, chip, backdrop, api, developer = () => false, openSettings = () => {}, cover = () => [],
   storage = globalThis.localStorage, clock = Date.now, live: stream = {}, chat = chatOfAddress,
   wide = globalThis.matchMedia?.('(min-width: 900px)'),
+  tasks = null, home = () => '#/new', navigate = (hash) => { globalThis.location.hash = hash; }, hasTasks = () => false,
 }) {
   const doc = root.ownerDocument;
   const state = {health: null, rows: [], more: false, unavailable: [], loaded: false, error: '', notice: '', noticeFor: '',
     tab: 'activity', open: null, all: false, sheet: false, busy: '', fetchedAt: 0, seen: null, day: 0,
-    chat: chat(), scope: 'all', folds: new Set()};
+    chat: chat(), scope: 'all', folds: new Set(), task: null, from: ''};
   try { if (TABS.some(([id]) => id === storage?.getItem(KEY))) state.tab = storage.getItem(KEY); } catch { /* no storage */ }
   // A row's steps are its session's newest turn: a long chat is not read back to its first turn.
   const newest = (path, options) => (/\/turns\?/.test(path)
@@ -227,10 +233,21 @@ export function setupPanel({
     item.dataset.state = row.state;
     const ending = row.state === 'stopped' ? null : readEnding(row.ending);
     if (ending) item.dataset.ending = ending.state;
-    const open = state.open === key(row);
-    const headButton = button('activity-head', '', () => toggle(row));
+    // A task opens in the panel (a link, so the address names it); the others unfold in place.
+    const opens = row.kind === 'task';
+    const open = !opens && state.open === key(row);
+    const headButton = opens ? node('a', 'activity-head') : button('activity-head', '', () => toggle(row));
+    if (opens) {
+      const address = `${HREF.task}${encodeURIComponent(row.id)}`;
+      headButton.href = address;
+      // A press does not always focus a link (Safari's does not): the row is remembered for the way back.
+      headButton.addEventListener('click', (event) => {
+        remember(key(row));
+        // The address names this task already: no event follows the press, so open it from here.
+        if (globalThis.location?.hash === address) { event.preventDefault?.(); openTask(row.id); }
+      });
+    } else headButton.setAttribute('aria-expanded', String(open));
     headButton.dataset.focusKey = key(row);
-    headButton.setAttribute('aria-expanded', String(open));
     const text = node('span', 'activity-text');
     const said = ending && ending.state !== 'ready' ? endingLine(ending) : row.activity || row.result || '';
     text.append(node('strong', 'activity-title', row.title), node('span', 'activity-line', worker ? workerLine(row) : said));
@@ -240,6 +257,11 @@ export function setupPanel({
     if (row.from) text.append(node('span', 'activity-folder activity-from', t('chat.fromChat', {title: row.from})));
     headButton.append(icon(ENDING_ICONS[ending?.state] ?? row.icon), text);
     if (!LIVE.has(row.state)) headButton.append(node('time', 'activity-time', timeOf(row.at)));
+    if (opens) {
+      const chevron = node('span', 'activity-chevron', '›');
+      chevron.setAttribute('aria-hidden', 'true');
+      headButton.append(chevron);
+    }
     item.append(headButton);
     if (row.approvals?.length) item.append(approvalFold(row));
     if (open) item.append(detail(row));
@@ -275,7 +297,12 @@ export function setupPanel({
         for (const choice of choices) choice.disabled = busy;
         const review = node('a', 'activity-open', t('common.review'));
         review.href = `${HREF[row.kind]}${encodeURIComponent(row.id)}`;
-        review.addEventListener('click', () => setSheet(false));
+        if (row.kind !== 'task') review.addEventListener('click', () => setSheet(false));
+        else {
+          // A task's page opens here: Back returns to this link.
+          review.dataset.focusKey = `review:${key(row)}:${item.id}`;
+          review.addEventListener('click', () => remember(review.dataset.focusKey));
+        }
         const choose = node('span', 'approval-choices');
         choose.append(...choices, review);
         entry.append(choose);
@@ -333,14 +360,6 @@ export function setupPanel({
     }
     if (live.state.error) box.append(node('p', 'panel-note', live.state.error));
     const actions = node('div', 'activity-actions');
-    if (row.kind === 'task' && LIVE.has(row.state)) actions.append(...taskActions(row));
-    // A task that ran out of steps goes on from where it stopped; one not finished finishes.
-    else if (row.kind === 'task' && row.can_continue) {
-      const ending = readEnding(row.ending);
-      const go = button('outline-button', canFinish(ending) && row.state !== 'stopped' ? finishLabel(ending) : t('failure.continue'), () => act(row, null, '/continue'));
-      go.disabled = state.busy === key(row);
-      actions.append(go);
-    }
     const link = node('a', 'activity-open', t(row.state === 'waiting' ? 'common.review' : `panel.open.${row.kind}`));
     link.href = `${HREF[row.kind]}${encodeURIComponent(row.id)}`;
     link.addEventListener('click', () => setSheet(false));
@@ -348,43 +367,6 @@ export function setupPanel({
     box.append(actions);
     if (state.notice && state.noticeFor === key(row)) box.append(node('p', 'panel-note', state.notice));
     return box;
-  }
-  function taskActions(row) {
-    const paused = row.state === 'paused';
-    const busy = state.busy === key(row);
-    const nodes = [
-      button('outline-button', t(paused ? 'common.resume' : 'common.pause'), () => act(row, {state: paused ? 'resume' : 'pause'})),
-      button('outline-button', t('common.stop'), () => act(row, {state: 'stop'})),
-    ];
-    // P0 to P4 run; P5 is on hold, which Pause and Resume set.
-    if (!paused && Number.isInteger(row.level) && row.level < LEVELS.length - 1) {
-      const menu = node('select', 'activity-level');
-      menu.setAttribute('aria-label', t('common.priority'));
-      LEVELS.slice(0, -1).forEach((_, level) => {
-        const option = node('option', '', levelLabel(level));
-        option.value = String(level);
-        option.selected = level === row.level;
-        menu.append(option);
-      });
-      menu.addEventListener('change', () => act(row, {level: Number(menu.value)}));
-      nodes.push(menu);
-    }
-    for (const control of nodes) control.disabled = busy;
-    return nodes;
-  }
-  async function act(row, change, tail = '') {
-    if (state.busy) return;
-    state.busy = key(row);
-    state.notice = '';
-    drawBody();
-    try {
-      await api(`/tasks/${encodeURIComponent(row.id)}${tail}`, tail ? {method: 'POST'} : {method: 'PATCH', body: change});
-    } catch (error) {
-      state.noticeFor = key(row);
-      state.notice = error?.message || t('panel.taskChangeFailed');
-    }
-    state.busy = '';
-    await refresh();
   }
   function toggle(row) {
     if (state.open === key(row)) closeRow();
@@ -396,16 +378,21 @@ export function setupPanel({
     live.leave();
   }
 
-  // The links to the full lists, for the kinds this scope has (all of them in developer mode).
+  // The links to the full lists: `when` says whether this scope has the kind (developer mode: all of them). The
+  // list of all tasks opens in this panel, so it keeps a phone's sheet open; the others leave it.
   function footLinks(links) {
-    const kinds = new Set(state.rows.map((row) => row.kind));
-    return links.filter(([want]) => developer() || want.some((kind) => kinds.has(kind))).map(([, text, href]) => {
-      const link = node('a', 'panel-link', text);
-      link.href = href;
-      link.addEventListener('click', () => setSheet(false));
-      return link;
+    return links.filter((link) => link.when).map((link) => {
+      const anchor = node('a', 'panel-link', link.text);
+      anchor.href = link.href;
+      if (!link.stays) anchor.addEventListener('click', () => setSheet(false));
+      else {
+        anchor.dataset.focusKey = `link:${link.href}`;
+        anchor.addEventListener('click', () => remember(anchor.dataset.focusKey));
+      }
+      return anchor;
     });
   }
+  const kinds = () => new Set(state.rows.map((row) => row.kind));
   // Today's finished rows, folded after SHOWN; the foot says how to see the rest.
   function dayNodes(rows, worker, links) {
     const now = rows.filter((row) => LIVE.has(row.state));
@@ -432,7 +419,11 @@ export function setupPanel({
   function workersNodes() {
     if (!state.loaded) return [node('p', 'panel-note', state.error || t('panel.loadingWorkers'))];
     const workers = state.rows.filter((row) => row.kind === 'task' || row.kind === 'run');
-    const links = [[['task'], t('panel.allTasks'), '#/tasks'], [['run', 'terminal'], t('panel.allRuns'), '#/workers']];
+    const has = kinds();
+    const links = [
+      {when: developer() || has.has('task') || hasTasks(), text: t('panel.allTasks'), href: '#/tasks', stays: true},
+      {when: developer() || has.has('run') || has.has('terminal'), text: t('panel.allRuns'), href: '#/workers'},
+    ];
     if (workers.length) return dayNodes(workers, true, links);
     const foot = node('div', 'panel-foot');
     foot.append(...footLinks(links));
@@ -453,7 +444,7 @@ export function setupPanel({
     const nodes = draw[state.tab]();
     body.replaceChildren(...nodes);
     if (focused && body.contains(doc.activeElement) === false) {
-      const again = [...body.querySelectorAll('button')].find((item) => item.dataset.focusKey === focused);
+      const again = [...body.querySelectorAll('button'), ...body.querySelectorAll('a')].find((item) => item.dataset.focusKey === focused);
       again?.focus();
     }
   }
@@ -488,7 +479,7 @@ export function setupPanel({
 
   // The panel shows the chat that is open: when it changes, the old chat's rows go and the new chat's are read.
   function follow() {
-    const now = chat();
+    const now = onTaskAddress() ? state.chat : chat();
     if (now === state.chat) return undefined;
     Object.assign(state, {chat: now, rows: [], more: false, unavailable: [], loaded: false, error: '', scope: 'all', notice: '', all: false});
     state.folds.clear();
@@ -514,9 +505,75 @@ export function setupPanel({
     return undefined;
   }
 
+  // ── A task, in place of Melo's page ──
+
+  /**
+   * Show a task (`id`) or the list of all tasks (`''`) where Melo's page was. The view is tasks.mjs, drawn in
+   * the panel's task section with a link back; focus moves to its title, and a phone's sheet opens for it.
+   */
+  function openTask(id) {
+    if (!tasks) return;
+    if (state.task === null && !state.from) remember(doc.activeElement?.dataset?.focusKey ?? '');
+    // The address names it again (the page followed it, or a card was pressed twice): it is shown already.
+    if (state.task !== id) {
+      state.task = id;
+      root.dataset.view = 'task';
+      tasks.show(id);
+    }
+    if (wide && !wide.matches) setSheet(true);
+    tasks.focus();
+  }
+  /** The control a task is opened from (its `data-focus-key`), so Back returns focus to it. Only the first opener counts. */
+  function remember(focusKey) {
+    if (state.task === null) state.from = focusKey;
+  }
+  // Any link or button of the page, in the panel or beside it (a card in the chat): found again after a redraw.
+  const opener = (focusKey) => (focusKey ? [...doc.querySelectorAll('a'), ...doc.querySelectorAll('button')].find((item) => item.dataset.focusKey === focusKey) : null);
+  // Where focus goes once the page behind the task is whole again: a control's `data-focus-key` ('' for the tab).
+  let returnFocusTo = null;
+  /** Focus the control the last closed task was opened from (or the tab), if closing it left that to do. */
+  function focusOpener() {
+    if (returnFocusTo === null) return;
+    const key = returnFocusTo;
+    returnFocusTo = null;
+    (opener(key) ?? tabs.find((tab) => tab.dataset.tab === state.tab))?.focus();
+  }
+  /**
+   * Back to Melo's page, at the control the task was opened from. Returns whether a task was open. A caller that
+   * redraws what is behind the task (a card in the chat) passes `defer` and calls `focusOpener()` after, so the
+   * control focused is the one that is there then.
+   */
+  function closeTask({defer = false} = {}) {
+    if (state.task === null) return false;
+    const returnTo = state.from;
+    const focused = root.contains(doc.activeElement) || doc.activeElement === doc.body || !doc.activeElement;
+    state.task = null;
+    state.from = '';
+    delete root.dataset.view;
+    tasks?.leave();
+    drawBody();
+    returnFocusTo = focused ? returnTo : null;
+    if (!defer) focusOpener();
+    return true;
+  }
+  /**
+   * Escape while a task is shown: a confirmation open in it closes first, then the address goes back to the chat
+   * and the page follows it (`closeTask`). It works wherever focus is (a press often leaves it on the page), except
+   * in a box being typed in, a menu being chosen from or another dialog, which keep their own Escape. False when
+   * it is not for the panel.
+   */
+  function stepBack() {
+    if (state.task === null) return false;
+    if (tasks?.closeDialog()) return true;
+    const active = doc.activeElement;
+    if (active && (['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName) || active.closest?.('dialog'))) return false;
+    navigate(home());
+    return true;
+  }
+
   // ── The sheet below 900 px ──
 
-  function setSheet(open) {
+  function setSheet(open, {keepTask = false} = {}) {
     if (state.sheet === open) return false;
     state.sheet = open;
     root.classList.toggle('sheet-open', open);
@@ -526,11 +583,13 @@ export function setupPanel({
     for (const element of cover()) element.inert = open;
     if (open) handle.focus();
     else if (root.contains(doc.activeElement) || doc.activeElement === doc.body) chip.focus();
+    // Closing the sheet leaves the task it showed.
+    if (!open && !keepTask && state.task !== null) navigate(home());
     return true;
   }
   chip.addEventListener('click', () => setSheet(!state.sheet));
   // A window grown past the sheet's width has no chip to close it with: it closes, and the page is usable again.
-  wide?.addEventListener?.('change', () => { if (wide.matches) setSheet(false); });
+  wide?.addEventListener?.('change', () => { if (wide.matches) setSheet(false, {keepTask: true}); });
   backdrop.addEventListener('click', () => setSheet(false));
   let drag = null;
   handle.addEventListener('pointerdown', (event) => { drag = {y: event.clientY, moved: 0}; handle.setPointerCapture?.(event.pointerId); });
@@ -550,5 +609,5 @@ export function setupPanel({
   drawTabs();
   drawBody();
 
-  return {update, refresh, follow, select, state, closeSheet: () => setSheet(false), openSheet: () => setSheet(true), lookForNotes: () => memory.lookForNotes()};
+  return {update, refresh, follow, select, state, openTask, closeTask, focusOpener, stepBack, remember, closeSheet: () => setSheet(false), openSheet: () => setSheet(true), lookForNotes: () => memory.lookForNotes()};
 }

@@ -14,7 +14,7 @@
 
 首次运行时，如果还没有设置模型，欢迎页会用一张卡片代替起始提示。它像终端的首次运行一样，在这台 Mac 上寻找模型服务器，并显示找到的内容：**Found oMLX on this Mac**（或 Ollama，或某个模型服务器）及其模型、**A model server needs an API key**，或 **No model server is running on this Mac**。**Use this model** 会保存该服务器、测试它，并让欢迎页无需打开设置即可使用。如果有多个对话模型而且不知道哪个已加载，卡片会列出它们、标出已加载的那个，并等你选择，绝不会替你选。没有服务器在运行时，卡片会显示启动服务器的命令（Mac 上是 oMLX，其他系统是 Ollama，与[模型服务器指南](model-servers.md)中的一致），放在一个点按一次即可全选的方框里，并提供键盘可用的 **Copy commands** 按钮；卡片在屏幕上且标签页可见时，每三秒再次寻找，服务器一响应，模型就会出现。**Check again** 立即寻找；**Enter a server address…** 会打开连接设置；在设置好模型之前，输入框显示 `Connect a model to start`。已配置的服务器不再响应时也会显示这张卡片，而且只在它显示在屏幕上时才会查找服务器（[`GET /api/setup/detect`](../reference/api-v2.md#get-apisetupdetect)）。
 
-页面以默认模式打开，不显示只有开发者才需要的内容：对话的级别标签、**Details**、GPU 锁状态行、**LOCAL** 徽标、状态行的缓存、步骤、阶段和队列段、运行中标签（[对话旁的面板](#the-panel-beside-a-chat)会显示正在运行的内容），以及任务里的调度优先级。它的措辞也更平实：正在运行的对话在 **Stop** 旁写 `Working…`，设置里把服务器叫 **Model server**、把它的地址叫 **Server address**。页眉显示一个模型标签（模型名称、`Model offline` 或 `No model`），点按它会打开设置。当有任务可看时，**Tasks** 才会出现在侧边栏；worker 运行在面板的 **Workers** 标签页里，空的[主对话](#the-main-chat-and-side-chats)里也有链接。[开发者模式](#developer-mode)显示全部内容。这些元素都保留在页面中，只是隐藏。
+页面以默认模式打开，不显示只有开发者才需要的内容：对话的级别标签、**Details**、GPU 锁状态行、**LOCAL** 徽标、状态行的缓存、步骤、阶段和队列段、运行中标签（[对话旁的面板](#the-panel-beside-a-chat)会显示正在运行的内容），以及任务页面里的优先级一行（运行中任务的优先级菜单仍然保留）。它的措辞也更平实：正在运行的对话在 **Stop** 旁写 `Working…`，设置里把服务器叫 **Model server**、把它的地址叫 **Server address**。页眉显示一个模型标签（模型名称、`Model offline` 或 `No model`），点按它会打开设置。任务在[对话旁的面板](#the-panel-beside-a-chat)里打开，入口是它在 Activity 里的那一行，侧边栏里没有它自己的链接；worker 运行在面板的 **Workers** 标签页里，空的[主对话](#the-main-chat-and-side-chats)里也有链接。[开发者模式](#developer-mode)会在侧边栏显示 Workers 链接。这些元素都保留在页面中，只是隐藏。
 
 新对话在你发送任何内容之前，就会显示 melo 将在哪里工作。输入框里的标签显示 `In localmelo-workspace`，点按它会打开一个面板：默认文件夹（`[gateway] workspace`，没有设置时是 `~/localmelo-workspace`）、最近对话的文件夹（从新到旧，最多四个）、**Choose a folder…**，以及在 [macOS 应用](macos-app.md)中的 **Show in Finder**。在浏览器里，**Choose a folder…** 会打开一个路径输入框（完整路径，或以 `~/` 开头的路径；在其中按回车绝不会发送你的消息），在应用里则打开系统的文件夹面板。文件工具只在该文件夹内活动；shell 命令和 Python 从那里启动。你的选择会随第一条消息作为 `POST /api/sessions` 中的 `workspace` 发出（使用默认文件夹的对话不发送它），并保留给下一个新对话，之后显示在对话的页眉里（`In ~/notes`；开发者模式会把它加在模型之后）。输入框下方有三个单行起始提示（**Summarize the files in this folder**、**Plan a small project with me**、**Explain a piece of code**），会替你填好输入框，可以直接发送或修改，输入内容后它们就让开。
 
@@ -40,7 +40,7 @@
 - `Done: Fix the list_files test` 加上回答的前两行：改了什么、测试结果、提交。
 - `Did not finish: Fix CI` 加上它结束的原因。
 - `Ready: Fix CI`、`Done, not finished: Fix CI` 或 `Needs you: Fix CI` 表示任务做完了：这是代码核对出的结局，不是报告里说的（[怎样核对](scheduler.md#tasks-from-the-main-chat)）。没收尾的任务用琥珀色写出原因（`No test ran after the last change · The changes are not committed`），并提供 **Finish it: run the tests and commit**（或 **Finish it: run the tests**），像 **Continue** 一样让它接着做。需要你的任务显示它的问题。
-- `Stopped: Fix CI` 表示任务用完了所有步数还没做完。它显示回答里说明还剩什么的那一句（`Remaining: run the tests and commit.`），并提供 **Continue**，让任务从停下的地方接着做，并记得之前做过什么。同一个任务在它的页面和面板的 Activity、Workers 行里也读作 Stopped，也有 **Continue**。因其他原因失败的任务仍是 `Did not finish`。
+- `Stopped: Fix CI` 表示任务用完了所有步数还没做完。它显示回答里说明还剩什么的那一句（`Remaining: run the tests and commit.`），并提供 **Continue**，让任务从停下的地方接着做，并记得之前做过什么。同一个任务在它的页面和面板的 Activity、Workers 行里也读作 Stopped；**Continue** 在它的页面上。因其他原因失败的任务仍是 `Did not finish`。
 - `Needs your approval: Fix CI` 加上它请求做什么。你回答之后，同一张卡片会写出结果（"Allowed once"、"Allowed for this task"、"Denied"），不再提供 **Review**。
 - 标题是主对话给任务起的标题，否则是你的请求的开头部分，在词的边界处截断。
 - **Open side chat**、**Open task** 或 **Review** 会前往来源。卡片不是消息：模型从不读取它。
@@ -177,11 +177,11 @@
 
 请求过审批的行会把审批折叠在结果行下面：`1 approval`，或 `2 approvals, 1 waiting`。选中它，会用平实的话列出每个请求（`Write slides.md`、`Run the tests`、`Run a command`，从不显示命令本身）、它是怎样被回答的（`Allowed once`、`Allowed for this chat`、`Denied`、`No answer in time`）以及请求的时间。等你处理的请求就在那里提供 **Allow once** 和 **Deny**，与对话里审批卡片的回答相同，还有 **Review**，打开带卡片和确切内容的对话或任务。不再有单独的 Approvals 标签页。
 
-选中一行会在原处展开。正在运行的行实时显示它的步骤（标记、用文字写出的步骤和用时）、最近一次输出的最后几行；任务还提供 **Pause** 或 **Resume**、**Stop**，以及用代码表示的优先级（`P0` 到 `P4`，各带含义；P5 就是 Pause），与终端的任务列表提供的操作相同。**Open task**、**Open chat** 或 **Open run** 打开完整视图；等待中的行提供 **Review**，打开带审批卡片的对话或任务。同一时间只展开一行；运行期间，它的步骤跟随会话的事件流更新。
+选中任务的那一行（行尾有一个 `›`），任务的详情会在面板里打开，取代 Melo 的页面；见[任务](#tasks)。选中对话、worker 运行或终端对话的行，会在原处展开：正在运行的行实时显示它的步骤（标记、用文字写出的步骤和用时）和最近一次输出的最后几行。**Open chat** 或 **Open run** 打开完整视图；等待中的行提供 **Review**，打开带审批卡片的对话或任务。同一时间只展开一行；运行期间，它的步骤跟随会话的事件流更新。
 
-**Workers** 列出上述范围内的 worker：当前对话启动的任务，运行中的在前，然后是今天完成的。每一行有标题、用文字表示的状态（`Working`、`Waiting for your approval`、`Waiting to start`、`Paused`、`Done`、`Failed`、`Stopped`）、时间，已完成的 worker 还有一行结果。选中一个 worker，会展开它实时的步骤，完成后展开它的历史，并提供 **Pause** 或 **Resume**、**Stop** 和优先级，与 Activity 相同。主对话的 Workers 还会列出记录为会话的 worker 运行，例如 `melo worker`。没有 worker 时，标签页会说明它们何时出现（`This chat has not started any workers. When it hands a task to one, the worker is listed here, running first.`）。底部的 **All tasks** 和 **All worker runs** 打开对应的视图。
+**Workers** 列出上述范围内的 worker：当前对话启动的任务，运行中的在前，然后是今天完成的。每一行有标题、用文字表示的状态（`Working`、`Waiting for your approval`、`Waiting to start`、`Paused`、`Done`、`Failed`、`Stopped`）、时间，已完成的 worker 还有一行结果。选中一个任务，会在面板里打开它，与 Activity 相同；worker 运行则在原处展开。主对话的 Workers 还会列出记录为会话的 worker 运行，例如 `melo worker`。没有 worker 时，标签页会说明它们何时出现（`This chat has not started any workers. When it hands a task to one, the worker is listed here, running first.`）。底部的 **All tasks** 在面板里打开所有任务的列表，包括今天和更早的；**All worker runs** 打开 Workers 视图。
 
-窗口宽度达到 1180 px 时，面板宽 340 px。窗口在 700 到 1180 px 之间时，对话列表变成一列首字母圆标（把指针停在圆标上可看到对话标题），面板保留。窄于 900 px 时，面板变成底部弹出的面板：页眉里的脸部标签（两项在运行、一项在等待时显示 `2 · !`）从底部打开它；按 Esc、点按背景或向下拖动它的把手即可关闭。[macOS 应用](macos-app.md)现在以 1280 × 800 打开，三栏可以并排放下。
+窗口宽度达到 1180 px 时，面板宽 340 px。窗口在 700 到 1180 px 之间时，对话列表变成一列首字母圆标（把指针停在圆标上可看到对话标题），面板保留。窄于 900 px 时，面板变成底部弹出的面板：页眉里的脸部标签（两项在运行、一项在等待时显示 `2 · !`）从底部打开它；按 Esc、点按背景或向下拖动它的把手即可关闭（Esc 会先离开面板里显示的任务）。[macOS 应用](macos-app.md)现在以 1280 × 800 打开，三栏可以并排放下。
 
 **Memory** 列出 melo 记得的关于你的内容：它根据你输入的话保存的笔记（见[跨对话记忆](../concepts/memory.md#memory-across-chats)）。
 
@@ -228,7 +228,11 @@
 
 ## 任务
 
-**Tasks**（`#/tasks`；默认模式下，有任务后才出现在侧边栏）列出调度器的任务，按最近更新排在前面，显示状态、优先级（仅开发者模式）和标题。打开一个任务（`#/tasks/<id>`）可以看到它的状态、保存的恢复卡片（以纯文本显示）、有证据时的证据状态，以及它当前状态允许的操作，还有与对话相同的状态行（任务运行过之前没有这一行）。和 Workers 一样，打开这个视图时它会取代对话。页眉写 **Tasks**；开发者模式再加上 "Scheduler tasks"。
+任务在[对话旁的面板](#the-panel-beside-a-chat)里打开，取代 Melo 的页面。选中它在 Activity 或 Workers 里的那一行；也可以在主对话里点任务的 **Open task** 或 **Review**，点 **N running** 列表里的任务，或在地址栏里用 `#/tasks/<id>`（旧链接和 macOS 应用使用它）。对话和页眉保持原样。任务标题上方有一个链接 **Back to Melo**，回到 Melo 的页面，焦点落在你来时的控件上（那一行、对话里的卡片或 **All tasks** 链接）；按 Esc 也一样，不论焦点在哪里，除非你正在输入框里打字，或打开着菜单或对话框（“继续运行”的确认框先处理它自己的 Esc），关闭弹出的面板也一样。点了 **Back to Melo** 之后，浏览器的“后退”不会再调出你从对话里打开的任务（从全部任务列表里打开的任务，后退会回到列表，和任何页面一样）。打开任务时焦点移到它的标题，手机上面板会随之弹出，窗口在显示任务时被调窄也是如此。等待中任务的批准卡片，在面板显示该任务时画在它的页面上，否则画在对话里该任务的卡片中，不会两处同时出现。
+
+页面显示任务的状态、保存的恢复卡片（以纯文本显示）、有证据时的证据状态，以及它当前状态允许的操作，还有与对话相同的状态行（任务运行过之前没有这一行）。正在运行或等待运行的任务可以暂停（**Pause**），也可以改优先级（`P0` 到 `P4`，各带含义；P5 就是 Pause），与终端的任务列表提供的操作相同；正在运行的任务要到下一个安全点才会停下，所以按 **Pause** 后页面先写 `Pausing…`，停放后改写 `Paused.`，与 Activity 行的说法一致；已暂停的任务提供 **Resume**。默认模式下页面不显示调度器的用语和空的恢复卡片；开发者模式会加上这些，以及优先级一行。
+
+面板 Workers 标签页底部的 **All tasks**（默认模式下有任务后才出现）在同一处打开所有任务的列表：按最近更新排在前面，显示状态、优先级（仅开发者模式）、标题和时间，也包括 Activity 不列出的更早几天。选中一个即可打开。地址栏里的 `#/tasks` 打开这个列表。侧边栏里没有 Tasks 链接，任务页面也不再是单独的视图。
 
 - 已结束的任务以它的回答开头，排版与对话中相同，位于各项信息之上；没有完成的任务在同一处写出原因。它的步骤折叠在 **Steps** 下。
 - **melo 告诉任务的内容** 在任务开始时它所在的对话有笔记的情况下，折叠显示在任务页面上（参见 [记忆指南](memory.md)）：任务拿到的那些行，作为资料而不是指令。没有笔记的任务不显示这个折叠块。
@@ -263,7 +267,7 @@
 
 - **自动**跟随浏览器的语言，在 macOS App 里跟随 Mac 的语言：取第一个是英文或简体中文的语言，否则用英文。繁体中文会显示英文。
 - 要指定一种，打开**设置 → 外观 → 语言**：**自动**、**English** 或 **简体中文**。页面会以它重新载入。在终端里运行 `melo config set console.language zh-Hans`（或 `en`，或 `auto`）效果相同，之后重新载入页面。
-- 每个页面都跟随：主对话和它的卡片、面板的标签页、任务、后台、设置和登录页。
+- 每个页面都跟随：主对话和它的卡片、面板的标签页和它显示的任务、后台、设置和登录页。
 - 网关为页面写的文字也用同一种语言：错误信息、面板里的行、主对话的卡片，以及它在你的消息后面加的行（`Started: …`、`Saved: …`，中文里是“已开始：…”“已保存：…”）。终端和其他 API 客户端保持英文。
 - 时间和日期按页面的语言写，而不是按你电脑的设置：英文是 `2:06 AM`、`Oct 31`，中文是 `上午 2:06`、`10月31日`、`星期五`。英文的钟点跟随你的电脑，所以用 24 小时制的电脑保持 24 小时制。
 - 失败运行的详情和**拷贝详情**拷出的那一行用页面的语言；状态、原因、错误文本和运行 id 原样拷出。状态行里的文字（上下文，开发者模式下还有缓存、步骤和队列）也用页面的语言，终端则用英文打印同样的数字。
@@ -294,11 +298,11 @@
 - Settings 列出 **Developer** 分区（每个设置及其键和值）；
 - **Details** 增加 **Events** 标签页，显示最近一轮保存的原始事件；**Memory** 标签页增加智能体状态和长期记忆后端；
 - **Runs** 标签页增加每次运行记录的计数：请求数、工具调用数、token 用量和缓存数字；
-- 页眉显示对话的级别标签、**Details**、GPU 锁状态行、**N running** 标签，以及显示页面状态（`Ready`、`Working`、`Approval needed`）的标签，侧边栏始终列出 **Workers** 和 **Tasks**；
-- 状态行增加缓存、步骤、阶段和队列段，Tasks 显示每个任务的优先级；
+- 页眉显示对话的级别标签、**Details**、GPU 锁状态行、**N running** 标签，以及显示页面状态（`Ready`、`Working`、`Approval needed`）的标签，侧边栏始终列出 **Workers**；
+- 状态行增加缓存、步骤、阶段和队列段，任务页面写出任务的优先级；
 - 侧边栏显示 **LOCAL** 徽标，正在运行的对话写 `Running on your backend`，连接表单保留它的技术用语（**Chat backend**、**Chat API URL**、`Settings apply to subsequent turns…`）。
 
-关闭时这些内容只是隐藏，不会被删除：再次开启即可看到。对话在等待其他持有者的 GPU 锁时，默认模式会在 GPU 状态行的位置显示一条横幅：“Waiting for this Mac's GPU, your chat starts when it is free.”对话、批准、Workers 和 Tasks 视图，以及设置所保存的内容，在两种模式下的行为相同。
+关闭时这些内容只是隐藏，不会被删除：再次开启即可看到。对话在等待其他持有者的 GPU 锁时，默认模式会在 GPU 状态行的位置显示一条横幅：“Waiting for this Mac's GPU, your chat starts when it is free.”对话、批准、Workers 视图、面板里的任务，以及设置所保存的内容，在两种模式下的行为相同。
 
 <a id="recover-a-send"></a>
 
@@ -312,7 +316,7 @@
 
 在开发者模式下，对话标题栏有一个级别标签（P1 至 P4，默认 P2，菜单里写出各自的含义），用于设置调度器如何相对于其他对话排列该对话的调用；级别只保存在内存中，不会持久化。标题和级别标签旁边的机器状态行会显示其他持有者的 GPU 锁（`GPU lock: <holder> · <purpose>`，附带 `(recorded)` 或 `(chats wait)`）、`GPU lock: yours`、`GPU lock unreadable`、`· ETA passed`，以及电池状态（`Battery 55% · discharging`）。使用交流电且没有锁时不显示任何内容。级别标签是菜单按钮：按 Enter 或向下箭头会打开菜单，焦点落在对话当前的级别上，方向键、Home 和 End 在各级别之间移动，Escape 关闭菜单并回到按钮。调用等待时（等待可用槽位、后台上限或其他持有者的锁），标题栏的状态标签和状态文字会显示 `Waiting: <reason>`，侧边栏显示 `● Waiting`，实时行也显示相同的等待状态；原因使用调度器自身的代码（`Resources`、`Priority` 等），只有等待其他持有者的 GPU 锁（`Reservation`）时显示 "Waiting for this Mac's GPU"，与横幅的说法一致。这些与终端显示的是同一组信息，通过网关共享的同一个门控机制读写：会话上的 `level` 和 `held`、列表上的 `machine`，以及用于设置它们的 `POST /api/sessions/{id}/level` 和 `POST /api/presence`。
 
-停止操作会取消运行；光标在消息输入框内时按 Escape 也会停止，在其他位置按 Escape 只会关闭已打开的内容，在 Tasks 和 Workers 里与在对话中一样。正在进行的模型请求会被放弃，但模型服务器可能仍会完成计算；正在运行的 `python_exec` 子进程会连同其进程组被终止。`python_exec` 代码在子进程中运行，因此网关在其运行期间仍能响应其他请求。工具的限制参见[工具与 MCP](../reference/tools.md)。该轮次以 `cancelled` 状态保存，保存完成后对话即可接收下一条消息。每条消息都能看到该对话先前的回答，与[会话](gateway.md#sessions)相同。
+停止操作会取消运行；光标在消息输入框内时按 Escape 也会停止，在其他位置按 Escape 只会关闭已打开的内容，在 Workers 里与在对话中一样；它会离开面板里显示的任务。正在进行的模型请求会被放弃，但模型服务器可能仍会完成计算；正在运行的 `python_exec` 子进程会连同其进程组被终止。`python_exec` 代码在子进程中运行，因此网关在其运行期间仍能响应其他请求。工具的限制参见[工具与 MCP](../reference/tools.md)。该轮次以 `cancelled` 状态保存，保存完成后对话即可接收下一条消息。每条消息都能看到该对话先前的回答，与[会话](gateway.md#sessions)相同。
 
 <a id="approvals-and-failures"></a>
 
@@ -320,7 +324,7 @@
 
 需要审批的工具调用会在其 `Needs approval` 工具下方显示卡片。控制台会话使用 `RememberingPolicy`，在执行 `file_write` 和 `python_exec` 前请求审批；旧版 `/v1` 没有审批策略。审批不是针对持有 bearer 令牌的人或同一操作系统账户下恶意进程的安全边界，他们可以响应审批请求。
 
-卡片用一个简单的问题发问（"Run this command in demo-project?"、"Replace notes.txt?"、"Let melo use <tool>?"），问题下方是工具名和将要运行的确切内容。对已有文本文件的写入会显示它替换的内容：问题下面一行统计行数（"5 lines removed, 1 added"），框里列出有变化的行，每行带行号、− 或 + 符号，以及每侧两行上下文。删除的行标红，添加的行标绿，符号在没有颜色时表达同样的意思。较长的改动先显示前 20 行，**Show all N lines** 显示其余部分。行中的密钥读作 `[redacted]`。melo 无法比较时（文件不是文本、无法读取、超过 200 KB 或含有私钥，或者包括上下文在内的改动超过 1,000 行），卡片用一行文字说明，问题仍带着文件大小（"Replace logo.bin (480 bytes)?"），并只显示新文本。这个比较只供你阅读：下面的回答与其他文件写入的回答规则相同。实心按钮 **Allow once** 只运行这一次调用。**Allow for this chat**（在 Tasks 中为 **Allow for this task**）让该工具的常规调用在这个对话的其余时间不再询问；按钮下方的一行会说明这一点，对命令或 Python 代码还会补充说明：安装、下载和工作区之外的更改仍会询问。**Deny** 会打开一个可选的输入框 "Tell melo what to do instead"，并连同你写的内容一起发送拒绝；**Back** 或 Escape 回到三个回答。控件需等待 500 毫秒才能使用；请求到达不会移动焦点，也没有单键快捷方式可响应请求。卡片不在视图中时，消息输入框上方的提示条会写 "melo is waiting for your answer"，点按 **Review** 会打开其所在分组并移至 **Allow once**（高影响卡片上移至 **Deny**）。如果无法加载审批详情，或参数被截断或转换，两个允许按钮将不可用；你可以重新加载详情、拒绝或停止运行。
+卡片用一个简单的问题发问（"Run this command in demo-project?"、"Replace notes.txt?"、"Let melo use <tool>?"），问题下方是工具名和将要运行的确切内容。对已有文本文件的写入会显示它替换的内容：问题下面一行统计行数（"5 lines removed, 1 added"），框里列出有变化的行，每行带行号、− 或 + 符号，以及每侧两行上下文。删除的行标红，添加的行标绿，符号在没有颜色时表达同样的意思。较长的改动先显示前 20 行，**Show all N lines** 显示其余部分。行中的密钥读作 `[redacted]`。melo 无法比较时（文件不是文本、无法读取、超过 200 KB 或含有私钥，或者包括上下文在内的改动超过 1,000 行），卡片用一行文字说明，问题仍带着文件大小（"Replace logo.bin (480 bytes)?"），并只显示新文本。这个比较只供你阅读：下面的回答与其他文件写入的回答规则相同。实心按钮 **Allow once** 只运行这一次调用。**Allow for this chat**（在任务页面上为 **Allow for this task**）让该工具的常规调用在这个对话的其余时间不再询问；按钮下方的一行会说明这一点，对命令或 Python 代码还会补充说明：安装、下载和工作区之外的更改仍会询问。**Deny** 会打开一个可选的输入框 "Tell melo what to do instead"，并连同你写的内容一起发送拒绝；**Back** 或 Escape 回到三个回答。控件需等待 500 毫秒才能使用；请求到达不会移动焦点，也没有单键快捷方式可响应请求。卡片不在视图中时，消息输入框上方的提示条会写 "melo is waiting for your answer"，点按 **Review** 会打开其所在分组并移至 **Allow once**（高影响卡片上移至 **Deny**）。如果无法加载审批详情，或参数被截断或转换，两个允许按钮将不可用；你可以重新加载详情、拒绝或停止运行。
 
 安装软件、下载文件、更改工作区之外的文件或做其他[高影响](tools-mcp.md#high-impact-calls)事情的调用每次都会询问，并使用不同的卡片。它的问题说出调用要做什么（“Install software?”），问题下方一行写着 `python_exec · asks every time`，**Why melo asks** 列出最多三条原因（“Installs playwright with pip into .signin_venv (downloads about 42 MB).”）。**You asked:** 重复发起本轮的那条消息，方便你把它和 melo 将要做的事对照。卡片只有 **Allow once** 和 **Deny**，其中 **Deny** 是实心按钮：没有对整个对话的授权，按钮下方的一行会这样说明（“A chat-wide allow never covers installs, downloads or changes outside ~/demo-project.”）。melo 无法读懂的调用，或出于其他原因询问的调用，显示普通卡片。
 
