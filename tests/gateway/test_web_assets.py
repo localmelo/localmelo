@@ -468,7 +468,7 @@ async def test_the_shell_keeps_the_machine_line_between_the_title_and_the_level(
     assert text.index('id="machine-state"') < text.index('id="level-btn"')
 
 
-async def test_tasks_module_is_served_and_the_shell_links_the_task_view(
+async def test_tasks_module_is_served_and_the_panel_holds_the_task_view(
     client: httpx.AsyncClient,
 ) -> None:
     response = await client.get("/assets/tasks.mjs")
@@ -476,8 +476,12 @@ async def test_tasks_module_is_served_and_the_shell_links_the_task_view(
     assert "javascript" in response.headers["content-type"]
     assert "setupTasks" in response.text
     page = await client.get("/")
-    assert 'href="#/tasks" id="tasks-link"' in page.text
-    assert re.search(r'<section\b[^>]*\bid="task-panel"[^>]*\bhidden\b', page.text)
+    # A task opens in the panel beside the chat; the sidebar has no Tasks link of its own.
+    assert "tasks-link" not in page.text
+    assert 'href="#/tasks"' not in page.text
+    panel = re.search(r'<aside\b[^>]*\bid="panel"[^>]*>.*?</aside>', page.text, re.S)
+    assert panel is not None
+    assert re.search(r'<section\b[^>]*\bid="task-panel"[^>]*\bhidden\b', panel.group(0))
 
 
 async def test_task_live_module_is_served(client: httpx.AsyncClient) -> None:
@@ -718,7 +722,6 @@ async def test_the_shell_has_every_id_default_mode_hides(
         "details-trigger",
         "machine-state",
         "workers-link",
-        "tasks-link",
         "section-nav",
         "composer-note",
         "lock-banner",
