@@ -504,6 +504,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- A file with more than one name (a hard link) is one file in two places,
+  so `file_write` and `file_edit` now refuse it, in the workspace too, and a
+  read outside the workspace refuses one as well. A command that makes a
+  hard link to a file outside the workspace (`ln`, `cp -l`, `install -l`,
+  `rsync --link-dest`, `os.link` and others) counts as a change to that
+  file, and a command that writes to a file with another name counts as a
+  change outside the folder; neither is routine.
+
 - The file tools and the action review now compare a path as the file
   system names it: another letter case of the workspace counts as inside,
   and a macOS alias such as `/.vol` counts as the place it names, so it no

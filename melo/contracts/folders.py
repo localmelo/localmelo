@@ -305,6 +305,22 @@ class PathChangedError(OSError):
         self.path = path
 
 
+class HardLinkError(OSError):
+    """The file has another name (a hard link) than the one melo checked: it does not run.
+
+    A write through it would change the file under its other name too,
+    which may be anywhere on the same volume, and a read outside the
+    workspace may be reading a file that is never offered.
+    """
+
+    def __init__(self, path: str) -> None:
+        super().__init__(
+            f"Path '{path}': this file has another name outside what melo checked "
+            "(a hard link); the call did not run."
+        )
+        self.path = path
+
+
 def checked_for(target: str) -> CheckedPath | None:
     """The executor's check of *target*, when the running call checked that path."""
     checked = CHECKED_PATH.get()
@@ -476,6 +492,7 @@ __all__ = [
     "WRITE_TOOLS",
     "Access",
     "CheckedPath",
+    "HardLinkError",
     "NeverReason",
     "OutsideAccess",
     "PathChangedError",
