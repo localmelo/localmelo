@@ -384,12 +384,18 @@ _CALL_TOKENS = (
     "<function_call>",
     "<\uff5ctool\u2581calls\u2581begin\uff5c>",
     "<|tool_calls_section_begin|>",
-    "to=functions.",
 )
 _CALL_TOKEN_AT_LINE_START = re.compile(
     r"^[ \t]*(?:" + "|".join(re.escape(token) for token in _CALL_TOKENS) + ")",
     re.IGNORECASE | re.MULTILINE,
 )
+# The recipient of a call in the harmony format: ``to=functions.remember``.
+_CALL_RECIPIENT = re.compile(r"to=functions\.\w", re.IGNORECASE)
+# What follows the ``(`` of a call written as code: a keyword argument, a
+# string, an object, a list, or nothing.
+_CALL_ARGUMENTS = re.compile(r"[ \t]*(?:\w+[ \t]*=|[\"'{\[)])")
+# A line that may start a JSON call object.
+_JSON_LINE = re.compile(r"^[ \t]*[\[{]", re.MULTILINE)
 _CODE_FENCE = re.compile(r"\s{0,3}(`{3,}|~{3,})")
 _INLINE_CODE = re.compile(r"(`+)(?!`).+?(?<!`)\1(?!`)")
 # A whole reply that is one fenced block of JSON, or of a call as code.
@@ -398,6 +404,11 @@ _CALL_BLOCK = re.compile(
 )
 # A parameter or tool name shorter than this is too likely a plain word or letter.
 _MIN_CALL_NAME = 3
+# A tool call's id that leaked into the text: ``call_00_CfS77joytXzYfQlV455l3697``
+# or ``call_`` and 20 letters or digits. It is no answer when the reply is
+# short, or starts with a parameter name (``text call_00_...``).
+_CALL_ID = re.compile(r"\bcall_[0-9]{2}_[A-Za-z0-9]{16,}\b|\bcall_[A-Za-z0-9]{20,}\b")
+_SHORT_REPLY = 80
 
 
 def _outside_code(text: str) -> str:
@@ -426,9 +437,10 @@ def _call_markup(body: str) -> bool:
 
     A tag counts at the start of the text or of a line, or when ``{``, ``<``,
     a line break or the end of the text follows it. A token counts at the
-    start of the text or of a line only.
+    start of the text or of a line only. ``to=functions.`` followed by a name
+    counts anywhere.
     """
-    if _CALL_TOKEN_AT_LINE_START.search(body):
+    if _CALL_TOKEN_AT_LINE_START.search(body) or _CALL_RECIPIENT.search(body):
         return True
     for tag in _CALL_TAG.finditer(body):
         line_start = body.rfind("\n", 0, tag.start()) + 1
@@ -457,28 +469,65 @@ def _call_index(tools: Iterable[ToolDef]) -> dict[str, frozenset[str]]:
     return index
 
 
+def _is_call(data: object, index: Mapping[str, frozenset[str]]) -> bool:
+    """Whether *data* is a call object, or a non-empty list of them.
+
+    A call object has an offered tool as its ``name`` and an ``arguments`` or
+    ``parameters`` key: JSON that only holds a tool's parameter names, or
+    names a tool and says nothing of a call, is a person's data.
+    """
+    if isinstance(data, list):
+        return bool(data) and all(_is_call(item, index) for item in data)
+    if not isinstance(data, dict):
+        return False
+    name = data.get("name")
+    return (
+        isinstance(name, str)
+        and name in index
+        and ("arguments" in data or "parameters" in data)
+    )
+
+
 def _json_call(text: str, index: Mapping[str, frozenset[str]]) -> bool:
-    """Whether *text* is one JSON object that names an offered tool, or whose
-    keys are all parameters of one offered tool."""
+    """Whether *text* is JSON that is a call object or a list of them."""
     try:
         data = json.loads(text)
     except (ValueError, RecursionError):
         return False
-    if not isinstance(data, dict) or not data:
-        return False
-    name = data.get("name")
-    if isinstance(name, str) and name in index:
-        return True
-    keys = set(data)
-    return any(keys <= names for names in index.values())
+    return _is_call(data, index)
+
+
+def _call_line(body: str, index: Mapping[str, frozenset[str]]) -> bool:
+    """Whether a line of *body* is wholly a JSON call object (or a list of them).
+
+    The object starts the line and nothing but spaces follows its end; it may
+    run over several lines.
+    """
+    decoder = json.JSONDecoder()
+    for found in _JSON_LINE.finditer(body):
+        try:
+            data, end = decoder.raw_decode(body, found.end() - 1)
+        except (ValueError, RecursionError):
+            continue
+        if not body[end:].split("\n", 1)[0].strip() and _is_call(data, index):
+            return True
+    return False
 
 
 def _starts_with_tool_call(text: str, index: Mapping[str, frozenset[str]]) -> bool:
-    """Whether *text* starts with an offered tool's name and ``(``, in a list or not."""
+    """Whether *text* starts with a call as code: an offered tool's name, ``(``,
+    and an argument (``name=``, a quote, ``{`` or ``[``) or ``)``; in a list or not.
+
+    ``file_read(path) reads a file`` is a sentence about a tool, not a call.
+    """
     body = text.lstrip()
     if body.startswith("["):
         body = body[1:].lstrip()
-    return any(body.startswith(name + "(") for name in index)
+    return any(
+        body.startswith(name + "(")
+        and _CALL_ARGUMENTS.match(body, len(name) + 1) is not None
+        for name in index
+    )
 
 
 def _call_remnant(after: str) -> bool:
@@ -512,26 +561,35 @@ def broken_tool_call(text: str, tools: Iterable[ToolDef] = ()) -> bool:
       line, or followed by ``{``, ``<``, a line break or the end of the text
       (never in the middle of a sentence); or one of the tokens
       ``<|python_tag|>``, ``[TOOL_CALLS]``, ``<|tool_call|>``,
-      ``<function_call>``, ``<｜tool▁calls▁begin｜>``,
-      ``<|tool_calls_section_begin|>`` and ``to=functions.`` at the start of
-      the text or of a line; or
+      ``<function_call>``, ``<｜tool▁calls▁begin｜>`` and
+      ``<|tool_calls_section_begin|>`` at the start of the text or of a line;
+      or ``to=functions.`` and a name anywhere; or
 
     - needs the tools offered on this step (*tools*; names of three
-      characters or more) and is, as a whole, one JSON object (or one
-      fenced ``json`` or ``tool_code`` block) that has an offered tool as its
-      ``name`` or has only parameters of one offered tool as its keys; or
-      starts with an offered tool's name and ``(``; or starts, after
-      whitespace, with the name of a parameter of an offered tool
-      (case-sensitive) followed by nothing, ``=``, ``<``, a line break, a
-      colon with no space after it, or an emoji. So ``text``,
-      ``text=My manager is Priya.``, ``text:Priya``, ``text\nMy manager…``
-      and ``text✅ Saved`` are broken, and ``text is short``, ``Text
-      messages…``, ``text-based``, ``text: here`` and ``text ✅`` are answers.
+      characters or more) and is, as a whole, a JSON call object or a list of
+      them (or one fenced ``json`` or ``tool_code`` block), or holds a line
+      that is wholly one: an offered tool as its ``name`` and an ``arguments``
+      or ``parameters`` key (JSON that only holds parameter names, or a
+      ``name`` and a description, is data, not a call); or starts with an
+      offered tool's name, ``(`` and an argument (``text=``, a quote, ``{``,
+      ``[``) or ``)``; or starts, after whitespace, with the name of a
+      parameter of an offered tool (case-sensitive) followed by nothing,
+      ``=``, ``<``, a line break, a colon with no space after it, or an
+      emoji. So ``text``, ``text=My manager is Priya.``, ``text:Priya``,
+      ``text\nMy manager…`` and ``text✅ Saved`` are broken, and ``text is
+      short``, ``Text messages…``, ``text-based``, ``text: here``, ``text ✅``
+      and ``file_read(path) reads a file`` are answers.
+
+    - holds a tool call's id that leaked into the text (``call_`` and two
+      digits, ``_`` and 16 letters or digits; or ``call_`` and 20 letters or
+      digits) and is shorter than 80 characters, or starts with the name of a
+      parameter of an offered tool (``text call_00_CfS77joytXzYfQlV455l3697``);
+      a long answer that mentions an id, or ``call_abc``, is an answer.
 
     A one-word reply that is the name of a parameter (``path``) is broken
     too: it is the shape the failure takes, and the model is asked once
     more. A reply with real tool calls is not judged: its text accompanies
-    them.
+    them. Without *tools* only the markup and the leaked-id rules apply.
     """
     index = _call_index(tools)
     answer = split_thinking(text)[1]
@@ -544,17 +602,22 @@ def broken_tool_call(text: str, tools: Iterable[ToolDef] = ()) -> bool:
         ):
             return True
     body = _outside_code(answer)
-    if _call_markup(body):
+    if _call_markup(body) or (index and _call_line(body, index)):
         return True
     lead = body.strip()
-    if not lead or not index:
+    if not lead:
+        return False
+    names = [name for found in index.values() for name in found]
+    if _CALL_ID.search(lead) and (
+        len(lead) < _SHORT_REPLY or any(lead.startswith(name) for name in names)
+    ):
+        return True
+    if not index:
         return False
     if _starts_with_tool_call(lead, index):
         return True
     return any(
-        lead.startswith(name) and _call_remnant(lead[len(name) :])
-        for names in index.values()
-        for name in names
+        lead.startswith(name) and _call_remnant(lead[len(name) :]) for name in names
     )
 
 

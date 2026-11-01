@@ -143,17 +143,36 @@ XML_CALL = (
         "<|tool_calls_section_begin|><|tool_call_begin|>functions.remember:0",
         "to=functions.remember <|constrain|>json",
         "Saving it.\n[TOOL_CALLS]",
+        # The harmony shape names its recipient anywhere in the text.
+        '<|channel|>commentary to=functions.remember <|constrain|>json<|message|>{"text":"x"}',
+        "I will save it to=functions.remember now",
         # A call as JSON or as code, as the whole reply.
         '{"name": "remember", "arguments": {"text": "My manager is Priya Shah."}}',
-        '{"name": "remember"}',
-        '{"text": "My manager is Priya Shah.", "topic": "people"}',
-        '{"query": "notes"}',
+        '{"name": "remember", "parameters": {"text": "x"}}',
+        '[{"name": "remember", "arguments": {"text": "x"}}]',
+        '[{"name": "remember", "arguments": {}}, {"name": "search_files", "parameters": {}}]',
+        '{\n  "name": "remember",\n  "arguments": {"text": "x"}\n}',
         '```json\n{"name": "remember", "arguments": {"text": "x"}}\n```',
+        '```json\n[{"name": "remember", "arguments": {"text": "x"}}]\n```',
         '```tool_code\nremember(text="x")\n```',
-        '```json\n{"text": "x"}\n```',
         'remember(text="My manager is Priya Shah.", topic="people")',
         '[remember(text="My manager is Priya Shah.", topic="people")]',
         "search_files(query='notes')",
+        'remember("My manager is Priya Shah.")',
+        'remember({"text": "x"})',
+        "remember()",
+        "remember( text = 'x')",
+        # A call id that leaked into the text: short, or after a parameter name.
+        "text call_00_CfS77joytXzYfQlV455l3697",
+        "call_00_CfS77joytXzYfQlV455l3697",
+        "call_abcdefghijklmnopqrstuvwxyz0123",
+        "Done. call_00_CfS77joytXzYfQlV455l3697",
+        "query call_01_ABCDEFGHIJKLMNOPQRSTUV and then a long explanation that runs well past"
+        " eighty characters in all, so only the start decides",
+        # Prose, then a call that is wholly a line.
+        'Let me save that.\n{"name": "remember", "arguments": {"text": "x"}}',
+        'Saving it.\n\n{\n  "name": "remember",\n  "arguments": {"text": "x"}\n}\n',
+        'Saving it.\n[{"name": "remember", "arguments": {"text": "x"}}]\nDone.',
     ],
 )
 def test_a_tool_call_written_as_text_is_broken(text: str) -> None:
@@ -218,14 +237,13 @@ def test_a_tool_call_written_as_text_is_broken(text: str) -> None:
         "A chat template writes <function=name> and <parameter=x> blocks.",
         "Some models start with [TOOL_CALLS] and end with a closing tag.",
         "The model emits <|python_tag|> before a call.",
-        "It says to=functions.remember when it calls a tool.",
+        "It says to= when it calls a tool.",
         # A space before the emoji, and a line that is not the name's.
         "text ✅ 已记录",
         "text ✅",
         # JSON and calls that are not a call of an offered tool.
         '{"manager": "Priya Shah"}',
         '{"name": "Priya Shah"}',
-        '{"text": "x", "path": "a.py"}',
         '{"name": "other_tool", "arguments": {}}',
         '[{"name": "remember"}]',
         'Here is the JSON: {"text": "x"}',
@@ -234,6 +252,35 @@ def test_a_tool_call_written_as_text_is_broken(text: str) -> None:
         '```tool_code\nprint("hi")\n```',
         "I would call remember(text) for that.",
         "remember that your manager is Priya Shah.",
+        # JSON that a person asked for: parameter names or a tool's name are data.
+        '{"text": "hello"}',
+        '{"query": "weather in Pittsburgh"}',
+        '{"path": "/tmp/x", "depth": 2}',
+        '{"text": "x", "path": "a.py"}',
+        '{"text": "My manager is Priya Shah.", "topic": "people"}',
+        '```json\n{"text": "hello", "topic": "greeting"}\n```',
+        '```json\n{"title": "Weekly report", "objective": "Summarize the week"}\n```',
+        '{"name": "remember", "description": "Keep a note about the user"}',
+        '[{"name": "remember", "description": "Keep a note"}, {"name": "search_memory"}]',
+        'Here it is:\n{"name": "remember", "description": "Keep a note"}',
+        '```json\n{"name": "remember", "arguments": {"text": "x"}}\n```\nThat is the shape.',
+        'The call looks like {"name": "remember", "arguments": {"text": "x"}} in the log.',
+        'Here:\n```json\n{"name": "remember", "arguments": {}}\n```',
+        # A call id named in a sentence, or too short to be one.
+        "The id looks like call_abc in the log.",
+        "Tool call ids look like call_abc in the trace, and the agent matches each"
+        " result to its call by that id.",
+        "The log shows call_00_CfS77joytXzYfQlV455l3697 as the id of the failing call,"
+        " so the retry ran twice.",
+        "call_00_short",
+        "`call_00_CfS77joytXzYfQlV455l3697`",
+        "Use call_id to match a result.",
+        # A tool's name and a parenthesis in a sentence.
+        "file_read(path) reads a file and returns numbered lines.",
+        "remember(text, topic) keeps a note for later chats.",
+        "remember (text) is the tool.",
+        "remember(see below)",
+        "remember(42)",
         # Reasoning that mentions a call is not the answer.
         "<think>I will call <function_calls> now.</think>Done.",
         "<thinking>text</thinking>Done.",
@@ -285,6 +332,19 @@ def test_prose_that_starts_with_a_parameter_name_is_not_broken(text: str) -> Non
 )
 def test_an_emoji_right_after_a_parameter_name_is_broken(text: str) -> None:
     assert broken_tool_call(text, [REMEMBER, SEARCH, EXTRAS]) is True
+
+
+def test_a_leaked_call_id_is_judged_without_tools_too() -> None:
+    # The views that do not know the offered tools still drop a short reply
+    # that is a call id, never a long answer that mentions one.
+    leaked = "text call_00_CfS77joytXzYfQlV455l3697"
+    assert broken_tool_call(leaked) is True
+    assert broken_tool_call("The id is call_abc, as the log says.") is False
+    long_answer = (
+        "The failing call had the id call_00_CfS77joytXzYfQlV455l3697, so I"
+        " looked it up in the trace and found the retry."
+    )
+    assert broken_tool_call(long_answer) is False
 
 
 @pytest.mark.parametrize("word", ["path", "text", "query", "topic", "title", "code"])
@@ -533,6 +593,12 @@ async def test_a_run_that_keeps_writing_the_call_fails_honestly() -> None:
     assert _notices(events) == ["tool_call_as_text", "tool_call_as_text"]
     counts = [e.data["detail"]["count"] for e in events if e.type == "notice"]
     assert counts == [1, 2]
+    # The reply that ends the run does not say the model is asked again.
+    messages = [e.data["message"] for e in events if e.type == "notice"]
+    assert messages == [
+        "The model wrote a tool call as text, so it did not run; asking it again.",
+        "The model wrote a tool call as text, so it did not run.",
+    ]
     assert [e.type for e in events][-2:] == ["notice", "run.finished"]
 
 

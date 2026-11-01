@@ -5423,7 +5423,10 @@ class Agent:
                 if broken:
                     # Before the row's limit: the reply that ends the run is
                     # dropped from the displays too, never shown as text.
-                    run.events.tool_call_as_text(run.empty_replies)
+                    run.events.tool_call_as_text(
+                        run.empty_replies,
+                        final=run.empty_replies >= MAX_EMPTY_REPLIES,
+                    )
                 if run.empty_replies >= MAX_EMPTY_REPLIES:
                     run.end(
                         "failed",
