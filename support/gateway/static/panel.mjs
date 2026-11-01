@@ -238,9 +238,14 @@ export function setupPanel({
     const open = !opens && state.open === key(row);
     const headButton = opens ? node('a', 'activity-head') : button('activity-head', '', () => toggle(row));
     if (opens) {
-      headButton.href = `${HREF.task}${encodeURIComponent(row.id)}`;
+      const address = `${HREF.task}${encodeURIComponent(row.id)}`;
+      headButton.href = address;
       // A press does not always focus a link (Safari's does not): the row is remembered for the way back.
-      headButton.addEventListener('click', () => { state.from = key(row); });
+      headButton.addEventListener('click', (event) => {
+        remember(key(row));
+        // The address names this task already: no event follows the press, so open it from here.
+        if (globalThis.location?.hash === address) { event.preventDefault?.(); openTask(row.id); }
+      });
     } else headButton.setAttribute('aria-expanded', String(open));
     headButton.dataset.focusKey = key(row);
     const text = node('span', 'activity-text');
@@ -293,6 +298,11 @@ export function setupPanel({
         const review = node('a', 'activity-open', t('common.review'));
         review.href = `${HREF[row.kind]}${encodeURIComponent(row.id)}`;
         if (row.kind !== 'task') review.addEventListener('click', () => setSheet(false));
+        else {
+          // A task's page opens here: Back returns to this link.
+          review.dataset.focusKey = `review:${key(row)}:${item.id}`;
+          review.addEventListener('click', () => remember(review.dataset.focusKey));
+        }
         const choose = node('span', 'approval-choices');
         choose.append(...choices, review);
         entry.append(choose);
@@ -375,6 +385,10 @@ export function setupPanel({
       const anchor = node('a', 'panel-link', link.text);
       anchor.href = link.href;
       if (!link.stays) anchor.addEventListener('click', () => setSheet(false));
+      else {
+        anchor.dataset.focusKey = `link:${link.href}`;
+        anchor.addEventListener('click', () => remember(anchor.dataset.focusKey));
+      }
       return anchor;
     });
   }
@@ -499,7 +513,7 @@ export function setupPanel({
    */
   function openTask(id) {
     if (!tasks) return;
-    if (state.task === null && !state.from) state.from = doc.activeElement?.dataset?.focusKey ?? '';
+    if (state.task === null && !state.from) remember(doc.activeElement?.dataset?.focusKey ?? '');
     // The address names it again (the page followed it, or a card was pressed twice): it is shown already.
     if (state.task !== id) {
       state.task = id;
@@ -509,7 +523,13 @@ export function setupPanel({
     if (wide && !wide.matches) setSheet(true);
     tasks.focus();
   }
-  /** Back to Melo's page, at the row the task was opened from. Returns whether a task was open. */
+  /** The control a task is opened from (its `data-focus-key`), so Back returns focus to it. Only the first opener counts. */
+  function remember(focusKey) {
+    if (state.task === null) state.from = focusKey;
+  }
+  // Any link or button of the page, in the panel or beside it (a card in the chat): found again after a redraw.
+  const opener = (focusKey) => (focusKey ? [...doc.querySelectorAll('a'), ...doc.querySelectorAll('button')].find((item) => item.dataset.focusKey === focusKey) : null);
+  /** Back to Melo's page, at the control the task was opened from. Returns whether a task was open. */
   function closeTask() {
     if (state.task === null) return false;
     const returnTo = state.from;
@@ -520,18 +540,21 @@ export function setupPanel({
     tasks?.leave();
     drawBody();
     if (focused) {
-      const again = [...body.querySelectorAll('a'), ...body.querySelectorAll('button')].find((item) => returnTo && item.dataset.focusKey === returnTo);
-      (again ?? tabs.find((tab) => tab.dataset.tab === state.tab))?.focus();
+      (opener(returnTo) ?? tabs.find((tab) => tab.dataset.tab === state.tab))?.focus();
     }
     return true;
   }
   /**
-   * Escape, or leaving a phone's sheet, while a task is shown: a confirmation open in it closes first, then
-   * the address goes back to the chat, and the page follows it (`closeTask`). False when it is not for the panel.
+   * Escape while a task is shown: a confirmation open in it closes first, then the address goes back to the chat
+   * and the page follows it (`closeTask`). It works wherever focus is (a press often leaves it on the page), except
+   * in a box being typed in, a menu being chosen from or another dialog, which keep their own Escape. False when
+   * it is not for the panel.
    */
   function stepBack() {
-    if (state.task === null || (!state.sheet && !root.contains(doc.activeElement))) return false;
+    if (state.task === null) return false;
     if (tasks?.closeDialog()) return true;
+    const active = doc.activeElement;
+    if (active && (['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName) || active.closest?.('dialog'))) return false;
     navigate(home());
     return true;
   }
@@ -574,5 +597,5 @@ export function setupPanel({
   drawTabs();
   drawBody();
 
-  return {update, refresh, follow, select, state, openTask, closeTask, stepBack, closeSheet: () => setSheet(false), openSheet: () => setSheet(true), lookForNotes: () => memory.lookForNotes()};
+  return {update, refresh, follow, select, state, openTask, closeTask, stepBack, remember, closeSheet: () => setSheet(false), openSheet: () => setSheet(true), lookForNotes: () => memory.lookForNotes()};
 }

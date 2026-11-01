@@ -800,18 +800,27 @@ function harness(routes, {mobile = false} = {}) {
     // The panel beside the chat has its own tests (test_panel.mjs); here it only hears health.
     // `/memory import` opens its tab and presses "Look for notes": a test sets `notesOn` and reads `notesLooked`.
     // A task is drawn by tasks.mjs, which the real panel owns the place of: the double shows and leaves it the same way.
-    setupPanel: (options) => ({health: [], state: {task: null}, update(body) { this.health.push(body); }, closeSheet: () => false, select() {}, openSheet() {},
-      openTask(id) { this.state.task = id; options.tasks.show(id); options.tasks.focus(); },
+    setupPanel: (options) => ({health: [], state: {task: null}, update(body) { this.health.push(body); }, sheetClosed: 0, opened: 0, remembered: [],
+      closeSheet() { this.sheetClosed += 1; return false; }, select() {}, openSheet() {},
+      remember(key) { this.remembered.push(key); },
+      openTask(id) { this.opened += 1; this.state.task = id; options.tasks.show(id); options.tasks.focus(); },
       closeTask() { if (this.state.task === null) return false; this.state.task = null; options.tasks.leave(); return true; },
       stepBack() {
         if (this.state.task === null) return false;
-        if (!options.tasks.closeDialog()) context.location.hash = options.home();
+        if (!options.tasks.closeDialog()) options.navigate(options.home());
         return true;
       },
       lookForNotes: async () => { context.notesLooked = (context.notesLooked ?? 0) + 1; return context.notesOn !== false; }}),
     document,
-    location: {hash: '', pathname: '/', search: ''},
-    history: {replaceState(_state, _title, url) { context.location.hash = ''; context.replacedUrl = url; }},
+    location: {hash: '', pathname: '/', search: '', replace(hash) { context.replaced.push(hash); this.hash = hash; }},
+    // A state set without an address is the entry's own; one with an address cleans the sign-in code from it.
+    history: {state: null, backs: 0, back() { this.backs += 1; },
+      replaceState(state, _title, url) {
+        if (url === undefined) this.state = state;
+        else { context.location.hash = ''; context.replacedUrl = url; }
+      }},
+    replaced: [],
+    URL,
     URLSearchParams,
     localStorage: storage(),
     sessionStorage: storage(),
@@ -3765,6 +3774,102 @@ test('a chat card pressed again while the panel names its task shows the task fr
   h.run('openCard({sourceKind: "task", sourceId: "t1"})'); await settle();
   assert.equal(h.element('task-panel').hidden, false, 'no hashchange comes for the same address; the card shows it directly');
 });
+test('an Escape the task\'s own confirmation took closes only it: the task and the phone\'s sheet stay', async () => {
+  const h = await openTask({'GET /tasks/t1': {task: taskRow('t1')}});
+  const panel = h.run('panel');
+  const press = (extra = {}) => h.documentListeners.keydown[0]({key: 'Escape', isComposing: false, keyCode: 27, preventDefault() {}, ...extra});
+  press({defaultPrevented: true});
+  assert.deepEqual([panel.state.task, panel.sheetClosed, h.context.replaced], ['t1', 0, []], 'a handled Escape reaches nothing behind it');
+  press();
+  assert.deepEqual([h.context.replaced, panel.sheetClosed], [['#/s/a'], 0], 'an unhandled one steps back to the chat');
+  // With no task, the guard sits in front of the sheet: a handled Escape does not close it, an unhandled one does.
+  h.run('panel.closeTask()');
+  press({defaultPrevented: true});
+  assert.equal(panel.sheetClosed, 0);
+  press();
+  assert.equal(panel.sheetClosed, 1);
+});
+
+test('a waiting task shown in the panel draws its approval card there only, and the chat\'s card has it back when the panel leaves', async () => {
+  const request = {request_id: 'r1', tool_name: 'python_exec', arguments: {code: 'print(1)'}, arguments_complete: true, workspace_label: '~/w', target: null};
+  const waiting = taskRow('t', {state: 'held', wait_reason: 'approval', pending_approvals: [request]});
+  const h = harness(mainRoutes({
+    'GET /approvals/r1': () => taskApproval({state: 'ready', text: 'It prints a number.'}),
+    'GET /tasks/t': {task: waiting},
+  }, {cards: [waitingCard]}));
+  await h.run('init()');
+  await settle();
+  const copies = () => [h.element('messages'), h.element('task-panel')].flatMap((root) => findNodes(root, (node) => node.id === 'approval-card-r1'));
+  assert.equal(copies().length, 1, 'the chat\'s card holds it');
+  assert.ok(findNode(h.element('messages'), (node) => node.id === 'approval-card-r1'));
+  h.context.location.hash = '#/tasks/t';
+  await h.windowListeners.hashchange[0](); await settle();
+  assert.equal(copies().length, 1, 'one request, one card id in the page');
+  assert.ok(findNode(h.element('task-panel'), (node) => node.id === 'approval-card-r1'), 'the panel\'s page has it');
+  assert.match(flatten(findNode(h.element('messages'), (node) => node.dataset?.cardId === '5')), /Review/, 'the card keeps its link to the task');
+  h.context.location.hash = h.run('homeHash()');
+  await h.windowListeners.hashchange[0](); await settle();
+  assert.equal(copies().length, 1);
+  assert.ok(findNode(h.element('messages'), (node) => node.id === 'approval-card-r1'), 'back in the chat\'s card');
+});
+
+test('Back to Melo steps back to the chat when the task was opened from it, and else replaces the task\'s entry', async () => {
+  const h = await openTask({'GET /tasks/t1': {task: taskRow('t1')}});
+  const back = () => findNode(h.element('task-panel'), (node) => node.className === 'task-back');
+  const press = (extra = {}) => { let prevented = false; back().listeners.click[0]({button: 0, preventDefault() { prevented = true; }, ...extra}); return prevented; };
+  // The first arrival at the entry keeps the address it came from; a later arrival leaves that alone.
+  assert.equal(h.context.history.state, null, 'an arrival with no previous address is not stamped');
+  assert.equal(press(), true);
+  assert.deepEqual([[...h.context.replaced], h.context.history.backs], [['#/s/a'], 0], 'unknown history: the entry is replaced');
+  h.context.replaced.length = 0;
+  h.context.location.hash = '#/tasks/t1';
+  await h.windowListeners.hashchange[0]({oldURL: 'http://localhost/#/s/a', newURL: 'http://localhost/#/tasks/t1'}); await settle();
+  assert.equal(h.context.history.state.meloFrom, '#/s/a');
+  await h.windowListeners.hashchange[0]({oldURL: 'http://localhost/#/workers', newURL: 'http://localhost/#/tasks/t1'}); await settle();
+  assert.equal(h.context.history.state.meloFrom, '#/s/a', 'the first arrival wins');
+  assert.equal(press(), true);
+  assert.deepEqual([[...h.context.replaced], h.context.history.backs], [[], 1], 'the entry before was the chat: one step back');
+  // A press with a modifier is the browser\'s own (a new tab), and a task opened from elsewhere is replaced.
+  assert.equal(press({ctrlKey: true}), false);
+  h.context.history.state = {meloFrom: '#/workers'};
+  press();
+  assert.deepEqual([[...h.context.replaced], h.context.history.backs], [['#/s/a'], 1]);
+});
+
+test('the task page opens again for an address the page is on, and a card remembers where Back should go', async () => {
+  const h = await openTask({'GET /tasks/t1': {task: taskRow('t1')}});
+  const panel = h.run('panel');
+  assert.equal(panel.opened, 1);
+  // The macOS app fires the event itself when the address already names the task.
+  await h.windowListeners.hashchange[0](); await settle();
+  assert.deepEqual([panel.opened, panel.state.task], [2, 't1']);
+  h.run('openCard({id: 7, sourceKind: "task", sourceId: "t1"})'); await settle();
+  assert.deepEqual([panel.remembered, panel.opened], [['card:7'], 3]);
+});
+
+test('Pause says Pausing… until the task parks, then the word the Activity row uses', async () => {
+  let state = 'running';
+  const h = await openTask({
+    'GET /tasks/t1': () => ({task: taskRow('t1', state === 'running' ? {state, level_eff: 5, level: 5} : {state, level: 5, level_eff: 5})}),
+    'PATCH /tasks/t1': () => ({task: taskRow('t1', {state: 'running', level: 5, level_eff: 5})}),
+  });
+  labelled(h, 'Pause').click(); await settle();
+  const text = () => flatten(h.element('task-panel'));
+  assert.match(text(), /Pausing…/);
+  assert.doesNotMatch(text(), /Paused\./);
+  assert.equal(labelled(h, 'Pause').disabled, true, 'pressing it again does nothing more');
+  // Still running at the next poll: unchanged.
+  const poll = h.timers.find((timer) => timer.interval && timer.ms === 3000);
+  await poll.handler(); await settle();
+  assert.match(text(), /Pausing…/);
+  state = 'parked';
+  await poll.handler(); await settle();
+  assert.match(text(), /Paused\./);
+  assert.doesNotMatch(text(), /Pausing…/);
+  assert.match(text(), /State paused/, 'the state reads as the Activity row does');
+  assert.ok(labelled(h, 'Resume'));
+});
+
 test('a Workers page gives way to a task in the panel, and the chat is back behind it', async () => {
   const h = harness(baseRoutes({'GET /tasks': {tasks: [taskRow('t1')]}, 'GET /tasks/t1': {task: taskRow('t1')}, 'GET /sessions?kind=worker&limit=50': {sessions: [], next_cursor: null}}));
   await h.run('init()');
@@ -4191,10 +4296,10 @@ test('the task list and card name the priority in developer mode only', async ()
     return [list, h.text('task-panel')];
   };
   const [plainList, plainCard] = await text(defaultMode);
-  assert.match(plainList, /parked · updated/);
+  assert.match(plainList, /paused · updated/);
   assert.doesNotMatch(plainCard, /Priority|P3/);
   const [devList, devCard] = await text(baseRoutes);
-  assert.match(devList, /parked · P3 · updated/);
+  assert.match(devList, /paused · P3 · updated/);
   assert.match(devCard, /Priority P3 · when there is time/);
 });
 

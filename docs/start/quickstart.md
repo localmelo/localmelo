@@ -353,7 +353,8 @@ is `held` until you answer it. The task waits once for each tool the model
 asks to use: a model that runs its own check asks for `python_exec` too, and
 the task is `held` again until you answer that. `melo-task show` names the
 tool it waits for. Run `melo console` in a terminal to open the console,
-and answer the request in the Tasks view. Then show the
+and answer the request on the task's page: select the task's row in the
+Activity list beside Melo. Then show the
 task:
 
 ```shell

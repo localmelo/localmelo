@@ -1060,8 +1060,9 @@ function viewSnapshot() {
     // Allow once (#339): a request under way, and each allowance still open or run out.
     S.allowing,
     Object.entries(S.cardAllows).map(([id, {until, used}]) => [id, used, until > nowSeconds()]),
-    // A task's approval drawn in its chat's card, as last read (#369).
+    // A task's approval drawn in its chat's card, as last read (#369), unless the panel shows that task.
     showsItems(view) ? [...taskApprovals.entries()] : null,
+    panel.state.task,
     Object.entries(view?.session?.allowances ?? {}).map(([key, until]) => [key, until > nowSeconds()]),
     developerMode,
     prefs,
@@ -1283,6 +1284,8 @@ const EXPLAIN_TRIES = 16;
 /** The approval card a waiting task's card holds, or null until it is read (or when there is none). */
 function taskApprovalNode(card) {
   if (card.state !== "waiting" || card.sourceKind !== "task" || !card.requestId || workerMode) return null;
+  // The panel beside the chat shows this task, with its approval: one card answers a request, not two with the same id.
+  if (panel.state.task === card.sourceId) return null;
   const found = taskApprovals.get(card.requestId);
   if (!found) {
     readTaskApproval(card.requestId);
@@ -1377,6 +1380,7 @@ function openCard(card) {
     return;
   }
   const hash = `#/tasks/${encodeURIComponent(card.sourceId)}`;
+  panel.remember(`card:${card.id}`);
   // The address names it already (the panel was closed another way): no event comes, so show it from here.
   if (globalThis.location.hash === hash) showTask(card.sourceId);
   else globalThis.location.hash = hash;
@@ -2628,6 +2632,29 @@ const workers = workerHistory(api, () => { if (workerMode) renderWorkers(); }, (
 function homeHash() {
   return S.activeId ? `#/s/${S.activeId}` : "#/new";
 }
+/**
+ * Leave the task shown in the panel for the chat's address. A task opened from the chat sits in the browser's history
+ * right after it, so the step is a step back (the browser's own Back then does not reopen the task); any other entry
+ * is replaced by the chat's address instead of adding one.
+ */
+function leaveTask(hash = homeHash()) {
+  const here = globalThis.location;
+  if (hash === homeHash() && globalThis.history?.state?.meloFrom === hash) globalThis.history.back();
+  else if (here.replace) here.replace(hash);
+  else here.hash = hash;
+}
+/** The first time a task's history entry is reached, it keeps the address it was reached from. */
+function stampArrival(event) {
+  try {
+    const was = event?.oldURL ? new URL(event.oldURL).hash : "";
+    if (!was || globalThis.history.state?.meloFrom !== undefined) return;
+    globalThis.history.replaceState({ ...(globalThis.history.state ?? {}), meloFrom: was }, "");
+  } catch { /* an address or a history this page cannot read */ }
+}
+/** Back to Melo's page; the chat's card for a waiting task takes its approval back from the panel. */
+function closeTaskPage() {
+  if (panel.closeTask()) renderMessages(false, true);
+}
 const tasks = setupTasks({
   api,
   statusRow: setupStatusRow({ api, root: statusRowNode(), filter: rowFilter }),
@@ -2644,6 +2671,7 @@ const tasks = setupTasks({
   root: $("task-panel"),
   titleTag: "h2",
   home: homeHash,
+  back: () => leaveTask(),
   newId: newClientRequestId,
   navigate: (hash) => { globalThis.location.hash = hash; },
   // The macOS app's folder panel; a browser has none, so the task asks for a path.
@@ -2677,6 +2705,8 @@ async function showTask(id) {
   }
   drawer.close();
   panel.openTask(id);
+  // A waiting task's approval is the panel's now, not the chat card's.
+  renderMessages(false, true);
 }
 
 function workerRoute() {
@@ -2688,7 +2718,7 @@ function workerRoute() {
 
 function showWorkers(id) {
   const previousWorker = workers.state.selectedId;
-  panel.closeTask();
+  closeTaskPage();
   if (!workerMode) {
     saveDraft();
     closeStream();
@@ -2942,6 +2972,7 @@ const panel = setupPanel({
   cover: () => [$("sidebar"), document.querySelector(".chat")],
   tasks,
   home: homeHash,
+  navigate: leaveTask,
   hasTasks: () => sections.tasks,
   live: {
     open: (url) => (typeof EventSource === "function" ? new EventSource(url) : null),
@@ -3349,7 +3380,7 @@ $("close-settings").addEventListener("click", () => {
 $("details-trigger").addEventListener("click", async () => {
   if (workerMode) return;
   // Details takes the place of the tabs below Melo; a task shown there goes back to the chat first.
-  if (panel.state.task !== null) globalThis.location.hash = homeHash();
+  if (panel.state.task !== null) leaveTask();
   if (drawer.close()) return;
   // A config written by hand wins: read the mode again as the drawer opens.
   await refreshMode();
@@ -3417,11 +3448,11 @@ $("sidebar-toggle").addEventListener("click", () =>
 $("sidebar-backdrop").addEventListener("click", () => sidebar(false));
 matchMedia("(max-width: 700px)").addEventListener?.("change", () => sidebar(false));
 // Back and Forward move the hash; the chat follows it, as a reload would.
-globalThis.addEventListener?.("hashchange", async () => {
+globalThis.addEventListener?.("hashchange", async (event) => {
   if (!S.authenticated) return;
   const task = taskRoute();
-  if (task !== null) { await showTask(task); return; }
-  panel.closeTask();
+  if (task !== null) { stampArrival(event); await showTask(task); return; }
+  closeTaskPage();
   const worker = workerRoute();
   if (worker !== null) { showWorkers(worker); return; }
   if (scheduledRoute()) { await showScheduled(); return; }
@@ -3456,6 +3487,8 @@ document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   // An open picture closes itself (a modal dialog); nothing behind it reacts.
   if ($("picture-box")?.open) return;
+  // Something nearer took this Escape (the task's confirmation closes itself): nothing behind it reacts either.
+  if (event.defaultPrevented) return;
   // Close what is open first, in every view; a stop is the last thing Escape does.
   if (running.isOpen()) {
     running.toggle(false);
@@ -3484,7 +3517,7 @@ document.addEventListener("keydown", (event) => {
   }
   if (drawer.close()) return;
   // A task shown in the panel goes back to the chat first; the sheet closes on the next Escape.
-  if (!event.defaultPrevented && panel.stepBack()) return;
+  if (panel.stepBack()) return;
   if (panel.closeSheet()) return;
   if ($("app").classList.contains("sidebar-open")) {
     sidebar(false);

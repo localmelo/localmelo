@@ -39,8 +39,10 @@ const isStopped = (task) => task.out_of_steps === true;
  * (P2), its words and a Recovery card with nothing in it are shown only then.
  * The view sits in the panel beside the chat, so it is a page of that panel: every
  * view starts with a link back (`home()` gives its address, the page the panel's
- * Melo page lives at), and its title is a `titleTag` heading (an h2 under the
- * panel's own h1-less header, with h3 for the sections inside).
+ * Melo page lives at; a plain press goes through `back()` when there is one, so
+ * the page can leave without a history entry of its own), and its title is a
+ * `titleTag` heading (an h2 under the panel's own h1-less header, with h3 for
+ * the sections inside).
  * `chooseFolder()` (optional) asks the macOS app's folder panel for a path and
  * resolves it, or null; without it, Choose a folder opens a path field. A task
  * that could not use its folder offers it, and starts again in the folder chosen.
@@ -76,12 +78,12 @@ export function packFold(doc, task) {
 }
 
 export function setupTasks({api, root, newId, navigate, approvalCard, every = defaultEvery, statusRow = null, live: liveOptions = null, developer = () => true, chooseFolder = null,
-  home = () => '#/new', titleTag = 'h1'}) {
+  home = () => '#/new', back = null, titleTag = 'h1'}) {
   const doc = root.ownerDocument;
   const sectionTag = titleTag === 'h1' ? 'h2' : 'h3';
   const state = {mode: 'list', epoch: 0, tasks: [], task: null, error: '', notice: '',
     busy: '', evidence: '', dialog: null, pending: null, again: null, stepsOpen: false, folderField: false, folderText: '',
-    openBlock: '', blockError: {}};
+    openBlock: '', blockError: {}, pausing: false};
   let active = false;
   let stopPolling = null;
   let titleNode = null;
@@ -221,7 +223,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     }
     // A task that runs or waits to run can be put on hold and given another priority from here.
     if (ACTIVE.has(task.state)) {
-      actions.append(button(t('common.pause'), () => change({state: 'pause'}, 'tasks.pauseAccepted'), Boolean(state.busy)));
+      actions.append(button(t('common.pause'), () => change({state: 'pause'}, 'tasks.pauseAccepted'), Boolean(state.busy) || state.pausing));
       const menu = levelMenu(task);
       if (menu) actions.append(menu);
     }
@@ -288,7 +290,9 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     element.addEventListener('cancel', (event) => { event.preventDefault?.(); if (state.busy !== 'resume') closeDialog(); });
     element.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape') return;
+      // This Escape is the dialog's: the page behind it (the panel, a phone's sheet) does not hear it.
       event.preventDefault?.();
+      event.stopPropagation?.();
       if (state.busy !== 'resume') closeDialog();
     });
     return {element, cancel};
@@ -296,12 +300,20 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
 
   function render() {
     if (!active) return;
-    const back = node('a', t('tasks.back'), 'task-back');
-    back.href = home();
+    const link = node('a', t('tasks.back'), 'task-back');
+    link.href = home();
+    // A plain press leaves through the page (which keeps the browser's own Back from reopening the task).
+    if (back) {
+      link.addEventListener('click', (event) => {
+        if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault?.();
+        back();
+      });
+    }
     const title = node(titleTag, state.mode === 'list' ? t('tasks.title') : state.task?.title || t('tasks.task'), 'task-title');
     title.tabIndex = -1;
     titleNode = title;
-    const nodes = [back, title];
+    const nodes = [link, title];
     for (const [text, role] of [[state.error, 'alert'], [state.notice, 'status']]) {
       if (!text) continue;
       const line = node('p', text, role === 'alert' ? 'task-error' : 'muted');
@@ -338,7 +350,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const epoch = ++state.epoch;
     live?.leave();
     Object.assign(state, {mode: id ? 'card' : 'list', error: '', notice: '', busy: '', evidence: '',
-      dialog: null, pending: null, again: null, task: null, stepsOpen: false});
+      dialog: null, pending: null, again: null, task: null, stepsOpen: false, pausing: false});
     root.hidden = false;
     render();
     if (id) statusRow?.follow(id);
@@ -379,7 +391,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     if (!id) return;
     try {
       const data = await api(path(id));
-      if (epoch === state.epoch && state.task?.task_id === id) { state.task = data.task; live?.sync(data.task); }
+      if (epoch === state.epoch && state.task?.task_id === id) { state.task = data.task; settlePause(); live?.sync(data.task); }
     } catch (error) {
       if (epoch === state.epoch) state.error = errorText(error);
     }
@@ -409,6 +421,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       live?.sync(data.task);
       if (same(data.task, state.task)) return;
       state.task = data.task;
+      settlePause();
     } else {
       const tasks = data.tasks || [];
       if (same(tasks, state.tasks)) return;
@@ -446,7 +459,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       {method: 'POST', body: {operation_id: operation, ...(token ? {confirmation_token: token} : {})}}));
     if (!outcome || epoch !== state.epoch) return;
     if (outcome.data) {
-      Object.assign(state, {task: outcome.data.task, dialog: null, pending: null, evidence: '', notice: t('tasks.resumeAccepted', {state: stateWord(outcome.data.task.state)})});
+      Object.assign(state, {task: outcome.data.task, dialog: null, pending: null, evidence: '', notice: t('tasks.resumeAccepted', {state: stateWord(outcome.data.task.state)}), pausing: false});
       live?.sync(outcome.data.task);
     } else {
       const error = outcome.error;
@@ -471,7 +484,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const outcome = await act('continue', (id) => api(`${path(id)}/continue`, {method: 'POST'}));
     if (!outcome || epoch !== state.epoch) return;
     if (outcome.data) {
-      Object.assign(state, {task: outcome.data.task, notice: t('tasks.continueAccepted')});
+      Object.assign(state, {task: outcome.data.task, notice: t('tasks.continueAccepted'), pausing: false});
       live?.sync(outcome.data.task);
     } else state.error = errorText(outcome.error);
     render();
@@ -494,14 +507,25 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     return menu;
   }
 
+  // The task parked (or ended) since Pause was pressed: "Pausing…" gives way to the word the Activity row uses.
+  function settlePause() {
+    if (!state.pausing || ACTIVE.has(state.task?.state)) return;
+    state.pausing = false;
+    state.notice = RESUMABLE.has(state.task?.state) ? t('tasks.pauseAccepted') : '';
+  }
+
   // Pause or a new priority: the task's own route, its next state read back.
   async function change(body, notice) {
     const epoch = state.epoch;
     const outcome = await act('change', (id) => api(path(id), {method: 'PATCH', body}));
     if (!outcome || epoch !== state.epoch) return;
     if (outcome.data) {
-      Object.assign(state, {task: outcome.data.task, notice: t(notice)});
-      live?.sync(outcome.data.task);
+      const next = outcome.data.task;
+      Object.assign(state, {task: next, notice: t(notice)});
+      // A running task stops at its next safe point: until it is parked it is being paused, not paused.
+      state.pausing = body.state === 'pause' && !RESUMABLE.has(next.state) && ACTIVE.has(next.state);
+      if (state.pausing) state.notice = t('tasks.pausing');
+      live?.sync(next);
     } else state.error = errorText(outcome.error);
     render();
   }
@@ -511,7 +535,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const outcome = await act('stop', (id) => api(path(id), {method: 'PATCH', body: {state: 'stop'}}));
     if (!outcome || epoch !== state.epoch) return;
     if (outcome.data) {
-      Object.assign(state, {task: outcome.data.task, dialog: null, pending: null, evidence: '', notice: t('tasks.stopAccepted', {state: stateWord(outcome.data.task.state)})});
+      Object.assign(state, {task: outcome.data.task, dialog: null, pending: null, evidence: '', notice: t('tasks.stopAccepted', {state: stateWord(outcome.data.task.state)}), pausing: false});
       live?.sync(outcome.data.task);
     } else state.error = errorText(outcome.error);
     render();

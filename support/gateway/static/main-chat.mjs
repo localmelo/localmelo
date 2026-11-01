@@ -241,6 +241,8 @@ export function cardNode({doc, card, open, resume = null, approval = null, block
   if (inline) text.append(approval);
   const action = el("button", card.state === "waiting" && !inline ? "outline-button" : "link-button", inline ? t("mainChat.openTask") : words.action);
   action.type = "button";
+  // The panel returns focus here when a task opened from this card is closed.
+  action.dataset.focusKey = `card:${card.id}`;
   action.addEventListener("click", () => open(card));
   const foot = el("div", "main-card-foot");
   if (words.more && resume) {

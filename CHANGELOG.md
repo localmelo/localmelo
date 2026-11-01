@@ -294,13 +294,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 - A task opens in the side panel next to Melo, from its row in Activity, and the
   Tasks link in the sidebar is gone. The row ends in a `›`; selecting it shows
-  the task's page in place of Melo's, and **Back to Melo**, Esc or closing the
-  sheet returns to Melo's page with focus on the row. The task links in the
-  main chat, the **N running** list and the Workers tab open the same page,
-  `#/tasks/<id>` still works, and `#/tasks` opens the panel's list of all
-  tasks (the Workers tab's **All tasks** link). **Pause** and the priority menu
-  moved from the Activity row to the task's page. Phones open the sheet for it.
-  [#412]
+  the task's page in place of Melo's, and **Back to Melo**, Esc (wherever focus
+  is, except in a box or a dialog) or closing the sheet returns to Melo's page
+  with focus on the control it was opened from; the browser's Back does not
+  reopen the task. The task links in the main chat, the **N running** list and
+  the Workers tab open the same page, `#/tasks/<id>` still works (also when the
+  window was narrowed past the panel), and `#/tasks` opens the panel's list of
+  all tasks (the Workers tab's **All tasks** link). **Pause** and the priority
+  menu moved from the Activity row to the task's page, where Pause says
+  `Pausing…` until the task parks and `Paused.` after. A waiting task's
+  approval card is drawn once: on its page while the panel shows it. Phones
+  open the sheet for it. [#412]
 - A task the model proposes starts only when your message is a request for
   work, and then your own message is the task; otherwise the chat shows `Start
   this as a task?` with your own message, in the main chat and in side chats.

@@ -444,14 +444,19 @@ redacted.
 A task opens in the [panel beside the chat](#the-panel-beside-a-chat), in place of Melo's page. Select its row in
 Activity or Workers; or a task's **Open task** or **Review** in the main chat, a task in the **N running** list, or
 `#/tasks/<id>` in the address (old links and the macOS app use it). The chat and its header stay as they
-were. Above the task's title a link, **Back to Melo**, returns to Melo's page, with focus on the row you came from;
-so does Esc while focus is in the panel (on a phone, while the sheet is open), and so does closing the sheet. Opening
-a task moves focus to its title, and a phone's sheet opens for it.
+were. Above the task's title a link, **Back to Melo**, returns to Melo's page, with focus on the control you came
+from (the row, the card in the chat or the **All tasks** link); so does Esc, wherever focus is, unless you are typing in
+a box or have a menu or a dialog open (the Resume confirmation takes its own Esc first), and so does closing the
+sheet. The browser's Back button does not bring the task up again. Opening a task moves focus to its title, and a
+phone's sheet opens for it, also when the window was made narrower while the task was shown. A waiting task's approval
+card is drawn on its page while the panel shows it, and in the task's card in the chat otherwise, never in both.
 
 The page shows the task's state, the saved recovery card (shown as plain text), the evidence status when there is
 some and the actions its state allows, and the same status row as a chat (a task has no row until it has run). A task
 that runs or waits to run can be paused (**Pause**) and given another priority (`P0` to `P4`, each with its meaning;
-P5 is Pause), as the terminal's task list offers; a paused one offers **Resume**. In default mode the page leaves out
+P5 is Pause), as the terminal's task list offers. A task that is running stops at its next safe point, so after
+**Pause** the page says `Pausing…` until it is parked, and then `Paused.`, as the Activity row reads; a paused one
+offers **Resume**. In default mode the page leaves out
 the scheduler's words and an empty recovery card; developer mode adds them, with the priority line.
 
 **All tasks**, at the foot of the panel's Workers tab (in default mode once a task exists), opens the list of every
@@ -636,7 +641,7 @@ written to the one gate the gateway shares:
 `POST /api/sessions/{id}/level` and `POST /api/presence` to set them.
 
 Stop cancels the run, and so does Escape while the cursor is in the message
-box; Escape anywhere else only closes what is open, in Workers as in a chat; with focus in the panel it leaves a task shown there. A model request in flight is abandoned, although the
+box; Escape anywhere else only closes what is open, in Workers as in a chat; it leaves a task shown in the panel. A model request in flight is abandoned, although the
 model server may finish computing it, and a running `python_exec` child is
 killed with its process group. `python_exec` code runs
 in a child process, so the gateway keeps answering other requests while it
@@ -667,7 +672,7 @@ key, or the change runs past 1,000 rows) the card says so in one line, asks
 alone. The comparison is for you to read: the answers below work as they do for
 any other file write. **Allow once**, the filled button, runs this call only.
 **Allow for this
-chat** (**Allow for this task** in Tasks) stops asking about the routine calls
+chat** (**Allow for this task** on a task's page) stops asking about the routine calls
 of that tool for the rest of the chat; the line under the buttons says so, and
 for a command or Python code it adds that installs, downloads and changes
 outside the workspace still ask. **Deny**

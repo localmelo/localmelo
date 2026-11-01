@@ -29,6 +29,7 @@ function dom() {
     prepend(...nodes) { for (const item of nodes) item.parent = this; this.children.unshift(...nodes); }
     replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
     contains(node) { return node === this || this.children.some((child) => child.contains(node)); }
+    closest(selector) { for (let at = this; at; at = at.parent) if (at.tagName === selector.toUpperCase()) return at; return null; }
     addEventListener(type, fn) { (this.handlers[type] ||= []).push(fn); }
     dispatch(type, event = {}) { for (const fn of this.handlers[type] ?? []) fn({target: this, preventDefault() {}, ...event}); }
     click() { if (!this.disabled) this.dispatch('click'); }
@@ -43,6 +44,7 @@ function dom() {
   }
   doc.createElement = (tag) => new Element(tag);
   doc.body = new Element('body');
+  doc.querySelectorAll = (selector) => doc.body.querySelectorAll(selector);
   return {doc, Element};
 }
 
@@ -68,6 +70,7 @@ function harness({rows = [], turns = null, storage = null, failActivity = false,
   const chip = new Element('button');
   const backdrop = new Element('button');
   const chat = new Element('main');
+  doc.body.append(root, chat);
   // tasks.mjs in a double: what the panel asks of it is written down.
   const shown = [];
   const section = new Element('section');
@@ -684,9 +687,94 @@ test('Escape steps back from a task: its confirmation closes first, then the add
   assert.deepEqual([h.tasks.dialog, h.went], [false, []]);
   assert.equal(h.panel.stepBack(), true);
   assert.deepEqual(h.went, ['#/s/side-1']);
-  // Focus in the composer, not in the panel, and no sheet: Escape is not for the panel.
-  h.doc.activeElement = h.chat;
-  assert.equal(h.panel.stepBack(), false);
+});
+
+test('Escape leaves a task wherever focus is, except in a box, a menu or a dialog, which keep it', async () => {
+  const h = harness({openChat: 'side-1'});
+  await h.panel.update(health());
+  h.panel.openTask('t1');
+  // A press often leaves focus on the page itself, or on a control outside the panel.
+  for (const where of [h.doc.body, h.chat, h.chip, null]) {
+    h.doc.activeElement = where;
+    assert.equal(h.panel.stepBack(), true, `focus on ${where?.tagName ?? 'nothing'}`);
+  }
+  assert.deepEqual(h.went, Array(4).fill('#/s/side-1'));
+  h.went.length = 0;
+  const typing = (tag) => { const field = h.doc.createElement(tag); h.chat.append(field); h.doc.activeElement = field; return field; };
+  for (const tag of ['textarea', 'input', 'select']) {
+    typing(tag);
+    assert.equal(h.panel.stepBack(), false, `${tag} keeps its Escape`);
+  }
+  const dialog = h.doc.createElement('dialog');
+  const inside = h.doc.createElement('button');
+  dialog.append(inside);
+  h.chat.append(dialog);
+  h.doc.activeElement = inside;
+  assert.equal(h.panel.stepBack(), false, 'another dialog keeps its Escape');
+  assert.deepEqual(h.went, []);
+  // The task's own confirmation closes first, even with focus away from it.
+  h.doc.activeElement = h.doc.body;
+  h.tasks.dialog = true;
+  assert.equal(h.panel.stepBack(), true);
+  assert.deepEqual([h.tasks.dialog, h.went], [false, []]);
+});
+
+test('Back returns focus to the control the task was opened from: a chat card, the All tasks link, a Review link', async () => {
+  const ask = {id: 'a1', what: 'Run: rm -rf build', at: 1000, answer: 'waiting'};
+  const h = harness({rows: [task({state: 'waiting', icon: 'wait', approvals: [ask]})], hasTasks: true});
+  await h.panel.update(health());
+  // A card in the chat: a press remembers it (Safari leaves focus where it was); the chat redraws it before Back.
+  const card = () => { const open = h.doc.createElement('button'); open.dataset.focusKey = 'card:c1'; h.chat.replaceChildren(open); return open; };
+  card();
+  h.panel.remember('card:c1');
+  h.panel.openTask('t1');
+  assert.equal(h.doc.activeElement, h.tasks.title);
+  const redrawn = card();
+  h.panel.closeTask();
+  assert.equal(h.doc.activeElement, redrawn, 'the card button the chat drew since');
+  // The first opener counts: opening the list and then a task from it still returns to the link.
+  h.tabs()[1].click();
+  const all = h.root.find((node) => node.className === 'panel-link');
+  all.click();
+  h.panel.openTask('');
+  h.panel.openTask('t1');
+  h.panel.closeTask();
+  assert.equal(h.doc.activeElement, h.root.find((node) => node.className === 'panel-link'), 'back at the All tasks link');
+  assert.equal(h.panel.state.from, '');
+  // A task's Review link, in the approvals folded under its row.
+  h.tabs()[0].click();
+  h.root.find((node) => node.className === 'approval-toggle').click();
+  h.root.find((node) => node.className === 'activity-open').click();
+  h.panel.openTask('t1');
+  h.panel.closeTask();
+  assert.equal(h.doc.activeElement, h.root.find((node) => node.className === 'activity-open'));
+  // Nothing remembered while a task is open: a press elsewhere does not move the way back.
+  h.panel.remember('card:c1');
+  h.panel.openTask('t1');
+  h.panel.remember('task:other');
+  assert.equal(h.panel.state.from, 'card:c1');
+});
+
+test('a task row pressed while the address already names it opens it from the press', async () => {
+  const wide = {matches: false, addEventListener() {}};
+  const h = harness({rows: [task({state: 'running', icon: 'read'})], wide});
+  await h.panel.update(health());
+  const press = (hash) => {
+    let prevented = 0;
+    globalThis.location = {hash};
+    try { h.heads()[0].dispatch('click', {preventDefault() { prevented += 1; }}); } finally { delete globalThis.location; }
+    return prevented;
+  };
+  // The address names another page: the link does its own work, and the address change opens the task.
+  assert.equal(press('#/s/side-1'), 0);
+  assert.deepEqual([h.tasks.shown, h.root.classList.contains('sheet-open')], [[], false]);
+  // The task is shown, the window has since been narrowed past the panel (its sheet is closed) and the address
+  // still names it: no event follows the press, so it opens from here.
+  h.panel.openTask('t1');
+  h.panel.closeSheet();
+  assert.deepEqual([h.root.classList.contains('sheet-open'), h.panel.state.task], [false, 't1']);
+  assert.equal(press('#/tasks/t1'), 1, 'the press is handled here');
+  assert.deepEqual([h.root.classList.contains('sheet-open'), h.tasks.shown, h.panel.state.task], [true, ['t1'], 't1']);
 });
 
 test('on a phone a task opens the sheet, and closing the sheet leaves the task; a wider window keeps it', async () => {
