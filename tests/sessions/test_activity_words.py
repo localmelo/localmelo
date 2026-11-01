@@ -158,6 +158,29 @@ def test_the_newest_events_say_what_a_turn_does() -> None:
     assert event_activity([]) == ActivityText("Thinking", "think")
 
 
+def test_only_a_model_call_under_way_is_the_model_answering() -> None:
+    started = event(
+        "tool.started", call_id="c1", name="file_read", arguments={"path": "a.md"}
+    )
+    finished = event("tool.finished", call_id="c1", name="file_read")
+
+    def answering(events: list[dict[str, Any]]) -> bool:
+        found = event_activity(events)
+        return found is not None and found.answering
+
+    assert answering([event("step.started", step=2), finished, started])
+    assert answering([event("turn.started")])
+    assert answering([event("reflection.started")])
+    # A tool, an approval, a reply that is in, or no events at all: not the model answering.
+    assert not answering([started, event("step.started", step=1)])
+    assert not answering([event("approval.requested", request_id="r1")])
+    assert not answering([event("assistant.message"), event("step.started", step=1)])
+    assert not answering([event("recall")])
+    assert not answering([])
+    # The mark does not change what a row says or how it compares.
+    assert event_activity([event("step.started")]) == ActivityText("Thinking", "think")
+
+
 @pytest.mark.parametrize(
     "tool, arguments, words",
     [

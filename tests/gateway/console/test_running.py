@@ -24,7 +24,15 @@ from localmelo.support.sessions.store import (
     SessionStoreError,
 )
 
-from .conftest import HOLDER, FakeBuilder, FakeProbe, make_cfg, open_session, seed_turn
+from .conftest import (
+    HOLDER,
+    FakeBuilder,
+    FakeProbe,
+    core_event,
+    make_cfg,
+    open_session,
+    seed_turn,
+)
 
 
 @pytest.fixture()
@@ -123,12 +131,55 @@ async def test_a_running_chat_is_counted_and_listed_by_title(
     found = status(client)
     assert found["running"]["chats"] == 1
     item = {"kind": "chat", "id": turn.session_id, "title": "Fix the build"}
-    assert found["items"] == [{**item, "activity": "Thinking", "icon": "think"}]
+    # The model's answer is in and nothing started after it: "Thinking" in words, but no model call under way.
+    thinking = {"activity": "Thinking", "icon": "think", "answering": False}
+    assert found["items"] == [{**item, **thinking}]
     assert client.get("/api/health").json()["sessions"]["running"] == 1
     # The app's pill reads these words: in the language it asks for, English for a client that asks for none.
     asked = client.get("/api/health", headers={"X-LocalMelo-Language": "zh-Hans"})
     assert asked.json()["status"]["items"][0]["activity"] == "正在思考"
     assert asked.json()["status"]["focus"]["activity"] == "正在思考"
+    monkeypatch.undo()
+
+
+async def test_an_item_whose_newest_step_is_a_model_call_is_answering(
+    client: TestClient,
+    console: Console,
+    workspace: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The desktop pet and the console's portrait think only on this mark, never on the word "Thinking"."""
+    turn = await seed_turn(console.store, workspace, status="running", title="Plan")
+    entry = await open_session(console.sessions, turn.session_id)
+    monkeypatch.setattr(entry.runner, "_active", object())
+    await console.store.append_events(
+        turn.session_id,
+        turn.turn,
+        [core_event("step.started", seq=2)],
+        holder=HOLDER,
+    )
+    found = status(client)
+    assert found["items"][0]["answering"] is True
+    assert found["focus"]["answering"] is True
+    await console.store.append_events(
+        turn.session_id,
+        turn.turn,
+        [
+            core_event(
+                "tool.started",
+                seq=3,
+                call_id="c1",
+                name="file_read",
+                arguments={"path": "a.md"},
+            )
+        ],
+        holder=HOLDER,
+    )
+    found = status(client)
+    assert (found["items"][0]["icon"], found["items"][0]["answering"]) == (
+        "read",
+        False,
+    )
     monkeypatch.undo()
 
 
@@ -195,7 +246,8 @@ async def test_running_tasks_are_counted_with_the_queue(
     found = status(client)
     assert found["running"]["tasks"] == 2
     assert found["tasks"] == {"running": 2, "queued": 1, "held": 1, "top_level": 1}
-    thinking = {"activity": "Thinking", "icon": "think"}
+    # No events to read: "Thinking" for want of them, which is not the model answering.
+    thinking = {"activity": "Thinking", "icon": "think", "answering": False}
     assert found["items"] == [
         {"kind": "task", "id": "t1", "title": "Index the repo", **thinking},
         {"kind": "task", "id": "t2", "title": "Summarize", **thinking},
