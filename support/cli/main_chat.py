@@ -616,6 +616,12 @@ def echo_line(echo: Mapping[str, Any], symbols: Any, width: int) -> Text:
     if not said:
         return Text("")
     kind = echo.get("echo")
+    if kind == "followup":
+        # melo's own follow-up on a task that stopped (#411): quiet, and says melo began it.
+        head = cut_cells(f"↻ {said}", max(8, width - 22), symbols.ellipsis)
+        line = Text(head, style="muted")
+        line.append(f"  {t_in('en', 'followup.marker')}", style="muted")
+        return line
     style = "error" if kind == "failed" else "accent"
     # What melo tidied while the person was away says how to put it back.
     hint = f" {symbols.dot} /memory undo" if kind == "sleep" else ""
@@ -627,6 +633,9 @@ def echo_line(echo: Mapping[str, Any], symbols: Any, width: int) -> Text:
         line.append(hint, style="muted")
     if kind == "ask":
         line.append("  /task and your message starts it", style="muted")
+    if kind == "started" and echo.get("task_id"):
+        # A task the chat started at once (#410) stops from here too.
+        line.append(f"  melo task stop {echo['task_id']}", style="muted")
     owner = "Main chat" if echo.get("from_main") else echo.get("from_chat")
     if owner:  # a task of another chat says whose it is
         line.append(f"  from {clean_output(str(owner))}", style="muted")

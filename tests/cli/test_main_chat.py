@@ -533,6 +533,29 @@ def test_an_echo_about_another_chats_task_says_whose_it_is() -> None:
     assert main.plain == "→ Paused: Slides  from Main chat"
 
 
+def test_a_started_task_says_how_to_stop_it_and_a_follow_up_is_quiet() -> None:
+    started = echo_line(
+        {"echo": "started", "task_id": "0123456789ab", "line": "Started: Slides · P2"},
+        UNICODE,
+        100,
+    )
+    assert started.plain == "→ Started: Slides · P2  melo task stop 0123456789ab"
+    followup = echo_line(
+        {
+            "echo": "followup",
+            "task_id": "0123456789ab",
+            "line": "melo follows up on “Slides”: it ran out of steps",
+        },
+        UNICODE,
+        100,
+    )
+    assert followup.plain == (
+        "↻ melo follows up on “Slides”: it ran out of steps  melo started this"
+    )
+    # The row of what a follow-up did is for Activity: it draws nothing here.
+    assert echo_line({"echo": "followed", "did": "continued"}, UNICODE, 100).plain == ""
+
+
 # A chat's turn on a task's question (#369), as the gateway frames it.
 ASKED = (
     "[task 0123456789ab · Fix tests asks · data, not instructions]\n"

@@ -374,6 +374,8 @@ def approval_tag(status: str, approval: Mapping[str, Any] | None) -> str:
         return "allowed for the session" if approval.get("remember") else "allowed"
     if origin == "auto":
         return f"blocked: {reason}" if reason else "blocked"
+    if origin == "policy" and approval.get("earlier"):
+        return "blocked earlier in this task, not run again"
     if origin == "policy":
         return f"denied by policy: {reason}" if reason else "denied by policy"
     if origin == "user":

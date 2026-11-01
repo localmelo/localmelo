@@ -19,6 +19,7 @@ from localmelo.support.config import (
     GatewayConfig,
     LocalBackendConfig,
     SchedulerConfig,
+    TasksConfig,
 )
 from localmelo.support.gateway.chat_gate import ChatGate
 from localmelo.support.gateway.console import Console, ConsoleOptions
@@ -108,7 +109,9 @@ class FakeBuilder:
         return cast(Agent, agent)
 
 
-def make_cfg() -> Config:
+def make_cfg(*, follow_up: bool = False) -> Config:
+    """A test's config. A chat's follow-up on its tasks (#411) is off unless the
+    test turns it on: a scripted model has no reply for a turn it did not plan."""
     return Config(
         chat_backend="mlc",
         embedding_backend="none",
@@ -118,6 +121,7 @@ def make_cfg() -> Config:
         gateway=GatewayConfig(port=PORT, host="127.0.0.1"),
         # No call log: a test never writes the user's scheduler directory.
         scheduler=SchedulerConfig(call_log=False),
+        tasks=TasksConfig(follow_up=follow_up),
     )
 
 

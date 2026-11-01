@@ -53,10 +53,6 @@ from .test_turn_writes import _post_turn, _wait_turn
             {"title": "Delete report", "objective": "Delete report.md"},
         ),
         (
-            "Tell me about report.md",
-            {"title": "Report", "objective": "Delete every other file"},
-        ),
-        (
             "Do not delete report.md; just explain what it contains.",
             {"title": "Delete report", "objective": "Delete report.md"},
         ),
@@ -73,6 +69,23 @@ async def test_a_title_that_matches_the_words_is_no_authority_to_start_a_task(
         [offer] = await _events(console, side, ECHO_EVENT)
         assert (offer["echo"], offer["text"]) == ("ask", typed)
         assert str(models[side].requests[1][-1].content).startswith("Not done")
+
+
+async def test_a_request_starts_as_the_persons_words_whatever_the_model_wrote(
+    tmp_path: Path,
+) -> None:
+    # #410: a request starts at once, but the model's objective is never the task.
+    typed = "Tell me about report.md"
+    call = {"title": "Report", "objective": "Delete every other file"}
+    scripts = [[tool_call("task_create", call), answer("Started it.")]]
+    async with chats_console(tmp_path, sides=scripts) as (console, client, _):
+        side = (await _open(client, typed))["session"]["id"]
+        await _wait_turn(client, side)
+        [record] = await console.workers.tasks.list_tasks()
+        assert (record.title, record.spec["user_words"]) == ("Report", typed)
+        assert record.spec["objective"] == (
+            f"{typed}\n\n{READING_HEAD}\nDelete every other file"
+        )
 
 
 async def test_an_admitted_task_is_the_persons_message_and_the_models_reading_is_data(

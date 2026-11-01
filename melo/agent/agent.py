@@ -103,6 +103,7 @@ from localmelo.melo.checker.tiers import tier_of, tier_requires_approval
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN, _sanitize_images
 from localmelo.melo.contracts.approvals import (
     ALLOWED_ONCE,
+    BLOCKED_EARLIER,
     STOPPED_NOTE,
     TOOL_ASK,
     ApprovalDecision,
@@ -111,7 +112,9 @@ from localmelo.melo.contracts.approvals import (
     AutoPolicy,
     ReviewMode,
     block_note,
+    call_key,
     find_auto,
+    find_earlier,
     find_folder_asker,
     review_mode,
 )
@@ -1595,6 +1598,9 @@ class _ApprovalGate:
         return self._run.from_person and find_folder_asker(self._policy) is not None
 
     async def __call__(self, request: ExecutionRequest) -> ApprovalDecision:
+        earlier = self._earlier(request)
+        if earlier is not None:
+            return earlier
         if request.outside is not None:
             return await self._folder(request, request.outside)
         run, call = self._run, self._call
@@ -1738,6 +1744,40 @@ class _ApprovalGate:
                 decided, reason=self._block(asking, auto, decided.reason)
             )
         return decided
+
+    def _earlier(self, request: ExecutionRequest) -> ApprovalDecision | None:
+        """A refusal of a step blocked earlier in this task, before any review (#411).
+
+        Only a policy with :class:`~localmelo.melo.contracts.approvals.EarlierBlocks`
+        in it refuses: a task the chat continued on its own. The record says
+        who blocked the step first (``approval.earlier``).
+        """
+        blocks = find_earlier(self._policy)
+        who = (
+            None
+            if blocks is None
+            else blocks.blocked(
+                request.tool_name, request.arguments, self._workspace_root
+            )
+        )
+        if who is None:
+            return None
+        asking = ApprovalRequest(
+            request_id=uuid.uuid4().hex,
+            run_id=self._run.task_id,
+            call_id=self._call.id,
+            tool_name=request.tool_name,
+            arguments=copy.deepcopy(request.arguments),
+            preview=call_preview(request.tool_name, request.arguments),
+            workspace_root=self._workspace_root,
+            tier=self._tier,
+            outside=request.outside,
+        )
+        reason = BLOCKED_EARLIER.format(who=who)
+        self._record(asking, origin="policy", reason=reason)
+        assert self.asked is not None
+        self.asked["earlier"] = who
+        return ApprovalDecision(False, reason, origin="policy")
 
     async def _folder(
         self, request: ExecutionRequest, outside: OutsideAccess
@@ -1883,6 +1923,12 @@ class _ApprovalGate:
                 self.asked["step_key"] = self._key
         if self._allowance:
             self.asked["allowance"] = "once"
+        if not allowed and origin in ("user", "auto", "policy"):
+            # What makes a later call the same step: a task the chat continues
+            # on its own never runs it again (#411).
+            self.asked["call_key"] = call_key(
+                asking.tool_name, asking.arguments, self._workspace_root
+            )
 
 
 # Why a path outside the workspace was refused when no person could be

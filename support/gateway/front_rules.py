@@ -480,6 +480,66 @@ def is_question(typed: str) -> bool:
     )
 
 
+# A polite request is a request, not a question: "can you run the tests?", "请帮我…".
+_REQUEST: Final = re.compile(
+    r"^(?:please\b|(?:can|could|would|will)\s+you\b)|^(?:请|能不能|你能|麻烦你?|帮我)"
+)
+
+
+def polite_request(typed: str) -> bool:
+    """Whether *typed* asks melo to do something, however politely: "can you …?", "请…"."""
+    return bool(_REQUEST.match(norm(typed)))
+
+
+def asks_only(typed: str) -> bool:
+    """Whether *typed* is a question to answer, not a request to act (a polite request acts)."""
+    return is_question(typed) and not polite_request(typed)
+
+
+# The person says not to act: explain, describe or answer only, start nothing.
+_HANDS_OFF: Final = re.compile(
+    r"\b(?:just|only)\s+(?:tell|explain|describe|answer|say|show)\b"
+    r"|\b(?:don['’]t|do\s+not|no\s+need\s+to|without)\s+(?:\w+\s+){0,2}?"
+    r"(?:start(?:ing)?|run(?:ning)?|chang(?:e|ing)|touch(?:ing)?|do(?:ing)?)\s+"
+    r"(?:a\s+task|anything|any\s+(?:code|files?)|it)\b"
+    r"|只(?:是)?(?:说|讲|解释|回答|告诉我|介绍)|不要(?:开始|开)?任务|先别(?:动手|做|改)|不用(?:动手|做|改)|别(?:动手|改)"
+)
+
+
+def hands_off(typed: str) -> bool:
+    """Whether the person's words say not to act: "just explain", "don't change anything", "只解释"."""
+    return bool(_HANDS_OFF.search(norm(_QUOTED.sub(" ", typed or ""))))
+
+
+# The routes a model's task_create starts at once: the person asked for work.
+START_ROUTES: Final = frozenset({"delegate", "work", "plan"})
+StartRule = Literal["start", "answer", "offer"]
+
+
+def start_rule(typed: str) -> StartRule:
+    """What a chat's ``task_create`` does with the person's own words *typed* (#410).
+
+    ``start``: a request (a polite one too) starts at once; the person's
+    message is its objective. ``answer``: nothing starts and nothing is
+    offered, the chat answers itself: a greeting, a brief question or a short
+    question that names nothing to work on (:func:`route`'s ``answer``).
+    ``offer``: the person sees "Start this as a task?" instead, where starting
+    on the model's word would be wrong: a question (:func:`asks_only`), which
+    asks to know, not to act; words that say not to act (:func:`hands_off`);
+    no typed words (an attachment alone, a retry); and words code read as
+    something else (a chore or a reminder it could not read, a task named to
+    control, continue or follow).
+    """
+    if not typed.strip():
+        return "offer"
+    found = route(typed).route
+    if found == "answer":
+        return "answer"
+    if found not in START_ROUTES or asks_only(typed) or hands_off(typed):
+        return "offer"
+    return "start"
+
+
 # ── Replies that only say what they will do ──
 
 _COURTESY: Final = re.compile(
@@ -941,16 +1001,19 @@ __all__ = [
     "STARTED_TEXT_ZH",
     "LEVEL_MEANINGS",
     "LEVEL_WORDS",
+    "START_ROUTES",
     "Routed",
     "TaskRef",
     "allows",
     "allows_level",
     "allows_message",
     "asks_commit",
+    "asks_only",
     "brief_question",
     "continue_name",
     "control_action",
     "follow_cue",
+    "hands_off",
     "intention_only",
     "is_chinese",
     "is_question",
@@ -962,9 +1025,11 @@ __all__ = [
     "named_task",
     "named_tasks",
     "names_files",
+    "polite_request",
     "reply_language",
     "route",
     "short_title",
+    "start_rule",
     "title_matches",
     "triage",
     "work_request",

@@ -121,6 +121,9 @@ class SettingsPutBody(_SettingsBaseBody):
     extra_folders: list[StrictStr] | None = None
     # ``[tools] web_fetch``: whether chats and tasks read public web pages; absent leaves it.
     web_fetch: StrictBool | None = None
+    # ``[tasks] follow_up``: whether a chat follows up on a task it started that
+    # stopped (#411, a developer setting); absent leaves it.
+    follow_up: StrictBool | None = None
 
 
 def _check_single_line(field: str, value: str) -> None:
@@ -400,6 +403,7 @@ def settings_json() -> dict[str, Any]:
         "browser": cfg.browser.driver != "off",
         "extra_folders": _extra_folders(cfg),
         "web_fetch": cfg.tools.web_fetch is True,
+        "follow_up": cfg.tasks.follow_up is True,
         "advanced_options": _advanced_options(),
         "developer_settings": _developer_settings(cfg),
         "run_options": _run_options(),
@@ -548,6 +552,9 @@ def _build_candidate(
     web_fetch = getattr(body, "web_fetch", None)
     if web_fetch is not None:
         candidate.tools.web_fetch = web_fetch
+    follow_up = getattr(body, "follow_up", None)
+    if follow_up is not None:
+        candidate.tasks.follow_up = follow_up
     for sec_name, sec_fields in body.sections.items():
         target = getattr(candidate, sec_name)
         for field_name, field_val in sec_fields.items():
@@ -623,6 +630,8 @@ def _changed_fields(before: config.Config, after: config.Config) -> list[str]:
         changed.append("extra_folders")
     if before.tools.web_fetch != after.tools.web_fetch:
         changed.append("web_fetch")
+    if before.tasks.follow_up != after.tasks.follow_up:
+        changed.append("follow_up")
     for sec_name in config._LOCAL_SECTIONS:
         b_sec = getattr(before, sec_name)
         a_sec = getattr(after, sec_name)

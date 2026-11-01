@@ -21,6 +21,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalPolicy,
     ApprovalRequest,
     AutoPolicy,
+    EarlierBlocks,
 )
 from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.contracts.providers import (
@@ -39,6 +40,7 @@ from localmelo.support.config import Config, SavedFolders
 from localmelo.support.gateway.auto_blocks import (
     block_to_allow,
     blocked_steps,
+    denied_steps,
     go_ahead_text,
 )
 from localmelo.support.gateway.chat_gate import (
@@ -624,6 +626,7 @@ class TaskWorkers:
         request_key: str | None = None,
         create_key: str | None = None,
         origin: Origin = "user",
+        chat_started: bool = False,
     ) -> tuple[dict, bool]:
         """Create a task from a spec trusted code made (the main chat's, or a chore's).
 
@@ -641,6 +644,10 @@ class TaskWorkers:
         an inherited one that is refused (outside the allowed roots) still
         makes the task, failed with ``invalid_workspace`` before it starts,
         so its card says why: it never runs in another folder.
+
+        *chat_started*: a chat started it from the person's message, so that
+        chat follows up when it stops (#411); its session's ``meta`` says
+        ``started_by: chat``.
         """
         front, key = front_id, request_key
         task_id = uuid.uuid4().hex[:12]
@@ -691,7 +698,10 @@ class TaskWorkers:
                 create_key=create_key,
                 task_id=task_id,
                 front_id=front or self.front_id,
-                meta={"approvals": mode},
+                meta={
+                    "approvals": mode,
+                    **({"started_by": "chat"} if chat_started else {}),
+                },
                 _recovery_proof=True,
             )
             if not repeated and refused:
@@ -779,7 +789,13 @@ class TaskWorkers:
         return body
 
     async def message(
-        self, task_id: str, text: str, *, level: int | None = None, reason: str = ""
+        self,
+        task_id: str,
+        text: str,
+        *,
+        level: int | None = None,
+        reason: str = "",
+        automatic: bool = False,
     ) -> tuple[dict, str]:
         """Give *task_id* the person's message; the task's body and what happened.
 
@@ -789,6 +805,11 @@ class TaskWorkers:
         turn after the earlier ones; *level* (from the person's words)
         replaces its old level. A message the run never read continues the
         task once the run ends.
+
+        *automatic*: the message is its chat's own, in its follow-up (#411):
+        until the person speaks to the task again, its runs refuse every step
+        blocked earlier in it (``meta.followup_guard``, see :meth:`_guard`).
+        Any other message is the person's, and lifts that.
         """
         text = text.strip()
         if not text:
@@ -799,9 +820,13 @@ class TaskWorkers:
             raise SessionStoreError("store unavailable")
         if task_id in self._quarantined:
             raise TaskStoreError("worker cleanup failed; slot held until restart")
+        if not automatic:
+            await self._set_guard(task_id, False)
         if self.owner is not None and await self.owner.reply(task_id, text):
             # It waited on an answer: the person's words are the answer.
             return await self.get(task_id), "answered"
+        if automatic:
+            await self._set_guard(task_id, True)
         async with self._lock:
             if self._closed:
                 raise RuntimeError("workers are closed")
@@ -818,6 +843,38 @@ class TaskWorkers:
                 )
             self._inboxes.setdefault(task_id, TaskInbox()).put(text)
             return await self._body(current), "queued"
+
+    async def _set_guard(self, task_id: str, on: bool) -> None:
+        """Turn the refusal of steps blocked earlier on or off for *task_id*'s next runs."""
+        session = await self.store.get_session(task_id)
+        held = bool((session.meta or {}).get("followup_guard")) if session else False
+        if session is not None and held != on:
+            await self.store.update_session(
+                task_id, meta_update={"followup_guard": True if on else None}
+            )
+
+    async def _guard(
+        self, task_id: str, meta: Mapping[str, Any] | None, policy: ApprovalPolicy
+    ) -> ApprovalPolicy:
+        """*policy*, refusing the steps blocked earlier in *task_id* when its chat continued it (#411).
+
+        Each blocked call's key is kept with its record (``approval.call_key``);
+        a call with the same key is refused before any review, saying who
+        blocked it. Nothing is refused while the person's own message (or
+        Allow once) continued the task last.
+        """
+        if not (meta or {}).get("followup_guard"):
+            return policy
+        try:
+            blocks = await denied_steps(self.store, task_id, limit=200)
+        except Exception:
+            log.exception("Could not read the blocked steps of task %s", task_id)
+            return policy
+        if not blocks:
+            return policy
+        return EarlierBlocks(
+            policy, {b["call_key"]: (b["who"], b["step_key"]) for b in blocks}
+        )
 
     async def allow_once(self, task_id: str, request_id: str) -> tuple[dict, str]:
         """Allow once a step auto mode blocked in *task_id*, and ask it to go ahead.
@@ -2217,6 +2274,10 @@ class TaskWorkers:
                     folders=asking,
                 )
                 owned.append(policy)
+            # A run its chat continued on its own never repeats a blocked step (#411).
+            policy = await self._guard(
+                task_id, task_session.meta if task_session else None, policy
+            )
             async with self._lock:
                 self._runners[task_id] = runner
                 if (

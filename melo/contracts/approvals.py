@@ -344,6 +344,68 @@ class AutoPolicy:
         )
 
 
+# Why a call is refused that was blocked before in the same task (#411);
+# {who} is who blocked it: "Auto mode", "the user" or "melo's rules".
+BLOCKED_EARLIER: Final = (
+    "{who} blocked this exact step earlier in this task, so it does not run "
+    "again; find another way that does not need it"
+)
+
+
+def call_key(
+    tool_name: str, arguments: Mapping[str, Any], workspace_root: str | None
+) -> str:
+    """What makes two calls the same step: the tool, the folder and the call's
+    normalized arguments (Python as its syntax tree, a command as its text)."""
+    return step_key(tool_name, arguments, workspace_root)
+
+
+class EarlierBlocks:
+    """A policy that refuses again, before any review, a step blocked earlier (#411).
+
+    *blocks* maps a :func:`call_key` to ``(who, step_key)``: who blocked it
+    and, for a block auto mode kept, its step key. The agent's gate asks
+    :meth:`blocked` first; :meth:`decide` is the *inner* policy's. A block
+    the person allowed once since (its step key has an allowance in the
+    inner :class:`AutoPolicy`) is not refused. It never allows anything.
+    """
+
+    def __init__(
+        self, inner: ApprovalPolicy, blocks: Mapping[str, tuple[str, str]]
+    ) -> None:
+        self.inner = inner
+        self._blocks = dict(blocks)
+
+    def blocked(
+        self,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+        workspace_root: str | None,
+    ) -> str | None:
+        """Who blocked this exact call earlier, or ``None`` when it may be asked."""
+        found = self._blocks.get(call_key(tool_name, arguments, workspace_root))
+        if found is None:
+            return None
+        who, key = found
+        auto = find_auto(self.inner)
+        if key and auto is not None and (auto.allowed_once(key) or key in auto.given):
+            return None
+        return who
+
+    async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
+        return await self.inner.decide(request)
+
+
+def find_earlier(policy: object) -> EarlierBlocks | None:
+    """The :class:`EarlierBlocks` in *policy* or behind its ``inner`` wrappers."""
+    layer, depth = policy, 0
+    while layer is not None and depth < 8:
+        if isinstance(layer, EarlierBlocks):
+            return layer
+        layer, depth = getattr(layer, "inner", None), depth + 1
+    return None
+
+
 class AllowAllPolicy:
     """Allows every call."""
 

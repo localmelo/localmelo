@@ -25,6 +25,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     ApprovalRequest,
     DenyAllPolicy,
+    call_key,
 )
 from localmelo.melo.contracts.events import EVENT_FIELDS, AgentEvent
 from localmelo.melo.contracts.providers import BaseLLMProvider
@@ -301,14 +302,23 @@ def _approval(
     reason: str = "",
     remember: bool = False,
 ) -> dict[str, Any]:
-    """The ``approval`` of a tool.finished event for *request*."""
-    return {
+    """The ``approval`` of a tool.finished event for *request*.
+
+    A denial by the person or a policy keeps the call's key, so a task its
+    chat continues never runs the same step again (#411).
+    """
+    approval: dict[str, Any] = {
         "request_id": request.request_id,
         "allowed": allowed,
         "reason": reason,
         "remember": remember,
         "origin": origin,
     }
+    if not allowed and origin in ("user", "auto", "policy"):
+        approval["call_key"] = call_key(
+            request.tool_name, request.arguments, request.workspace_root
+        )
+    return approval
 
 
 def check_events(recorder: Recorder) -> None:

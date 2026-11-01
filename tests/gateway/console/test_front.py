@@ -277,14 +277,14 @@ async def test_the_started_lines_change_sets_the_persons_level(tmp_path: Path) -
 # ── The front's own step, with task tools ──
 
 
-async def test_the_front_offers_a_task_the_words_did_not_ask_for_and_starts_it_on_a_tap(
+async def test_a_request_the_chat_cannot_do_starts_a_task_at_once(
     tmp_path: Path,
 ) -> None:
-    # The model's task_create starts a task only for a work request code reads; a
-    # request it reads otherwise is offered, and the person's tap starts their own words.
+    # #410: the model's task_create starts the task, not an offer; the person's
+    # message is its request, the model's objective only its reading.
     replies = (
         tool_call("task_create", {"title": "Slides", "objective": "Make 6 slides"}),
-        answer("I offered to start it; tap to confirm."),
+        answer("Started it as a task."),
     )
     typed = "can you make slides from my notes today, urgent"
     async with front_console(tmp_path, *replies) as (console, client, llm):
@@ -292,6 +292,37 @@ async def test_the_front_offers_a_task_the_words_did_not_ask_for_and_starts_it_o
         assert response.status_code == 202, response.text
         turn = await _wait_turn(client, str(console.main_id))
         assert turn["status"] == "completed"
+        [started] = await _echoes(console)
+        assert (started["echo"], started["title"]) == ("started", "Slides")
+        record = await _task(console, started["task_id"])
+        assert (record.level, record.front_id) == (1, console.main_id)
+        assert record.spec["user_words"] == typed
+        assert record.spec["objective"].startswith(typed), "the person's words first"
+        assert "Make 6 slides" in record.spec["objective"]
+        # The tools the front offers: the task tools and two read-only file tools.
+        offered = {tool.name for tool in llm_tools(console)}
+        assert {
+            "task_create",
+            "task_list",
+            "task_control",
+            "file_read",
+            "list_files",
+        } <= offered
+        assert not offered & {"file_write", "python_exec", "shell_exec"}
+
+
+async def test_words_that_say_not_to_act_are_offered_and_start_on_a_tap(
+    tmp_path: Path,
+) -> None:
+    replies = (
+        tool_call("task_create", {"title": "Slides", "objective": "Make 6 slides"}),
+        answer("I offered to start it; tap to confirm."),
+    )
+    typed = "just explain how you would make slides from my notes, don't start a task"
+    async with front_console(tmp_path, *replies) as (console, client, llm):
+        response = await _say(client, console, typed)
+        assert response.status_code == 202, response.text
+        await _wait_turn(client, str(console.main_id))
         [offer] = await _echoes(console)
         assert (offer["echo"], offer["line"], offer["text"]) == (
             "ask",
@@ -303,20 +334,8 @@ async def test_the_front_offers_a_task_the_words_did_not_ask_for_and_starts_it_o
             f"/api/front/echoes/{offer['id']}", json={"do": "start"}
         )
         assert tapped.status_code == 200, tapped.text
-        started = tapped.json()["echo"]
-        record = await _task(console, started["task_id"])
-        assert (record.level, record.front_id) == (1, console.main_id)
+        record = await _task(console, tapped.json()["echo"]["task_id"])
         assert record.spec["objective"] == typed, "the person's words, not the model's"
-        # The tools the front offers: the task tools and two read-only file tools.
-        offered = {tool.name for tool in llm_tools(console)}
-        assert {
-            "task_create",
-            "task_list",
-            "task_control",
-            "file_read",
-            "list_files",
-        } <= offered
-        assert not offered & {"file_write", "python_exec", "shell_exec"}
 
 
 def llm_tools(console: Console) -> list[Any]:

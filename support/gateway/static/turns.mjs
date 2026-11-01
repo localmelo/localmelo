@@ -486,6 +486,10 @@ export function approvalTag(status, errorCategory, approval) {
     }
     return {short: t("turns.approval.once.short"), long: t("turns.approval.once.long")};
   }
+  // A step blocked earlier in a task its chat continued on its own does not run again (#411).
+  if (origin === "policy" && approval.earlier) {
+    return {short: t("turns.approval.earlier.blockedShort"), long: t("turns.approval.earlier.blockedLong")};
+  }
   if (origin === "policy") {
     return reason
       ? {short: t("turns.approval.policy.shortReason", {reason}), long: t("turns.approval.policy.longReason", {reason})}

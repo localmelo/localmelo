@@ -146,8 +146,9 @@ WRITER_BATCH_MAX: Final = 200
 # The version of the tables below, in PRAGMA user_version.
 SCHEMA_VERSION: Final = 3
 # Who began a turn other than the person: ``ask_owner`` is a chat's internal
-# turn that answers a task's question (``turns.origin``; ``""`` the person).
-TURN_ORIGINS: Final = frozenset({"", "ask_owner"})
+# turn that answers a task's question, ``followup`` its turn on a task it
+# started that stopped (#411) (``turns.origin``; ``""`` the person).
+TURN_ORIGINS: Final = frozenset({"", "ask_owner", "followup"})
 
 # The statuses a RunResult can have (docs/run-results.md, "Statuses").
 RUN_STATUSES: Final = frozenset(
@@ -448,7 +449,8 @@ class TurnInfo:
     client_request_id: str | None
     typed_text: str
     attachments: tuple[TextAttachment, ...] | None = None
-    # ``""``: the person's turn; ``"ask_owner"``: the chat answers a task (#369).
+    # ``""``: the person's turn; ``"ask_owner"``: the chat answers a task (#369);
+    # ``"followup"``: the chat follows up on a task it started that stopped (#411).
     origin: str = ""
 
 
@@ -1874,6 +1876,37 @@ class SessionStore:
                 "json_extract(event, '$.data.approval.allowed') = 0) OR "
                 "json_extract(event, '$.data.approval.allowance') = 'once') "
                 "ORDER BY id DESC LIMIT ?",
+                (session_id, limit),
+            )
+        return [
+            StoredEvent(row[0], session_id, row[1], json.loads(row[2]))
+            for row in reversed(rows)
+        ]
+
+    async def denied_records(
+        self, session_id: str, *, limit: int = 100
+    ) -> list[StoredEvent]:
+        """The ``tool.finished`` events of calls a person, auto mode or a policy denied (#411).
+
+        Their ``approval`` has ``allowed`` false and ``origin`` ``user``,
+        ``auto`` or ``policy``; a timeout, a withdrawn prompt or a failed
+        policy is no denial. The newest *limit* (1..1000), in id order.
+        """
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 1000
+        ):
+            raise ValueError(f"limit must be an int from 1 to 1000, got {limit!r}")
+        async with self._lock:
+            conn = await self._ready()
+            rows = await _rows(
+                conn,
+                "SELECT id, turn, event FROM events WHERE session_id = ? "
+                "AND type = 'tool.finished' AND "
+                "json_extract(event, '$.data.approval.allowed') = 0 AND "
+                "json_extract(event, '$.data.approval.origin') IN "
+                "('user', 'auto', 'policy') ORDER BY id DESC LIMIT ?",
                 (session_id, limit),
             )
         return [

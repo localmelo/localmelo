@@ -16,7 +16,7 @@ from typing import Any
 
 from localmelo.melo.contracts.approvals import ApprovalRequest
 from localmelo.support.gateway.console import Console
-from localmelo.support.gateway.console.front import ECHO_EVENT, NEWS_ROWS
+from localmelo.support.gateway.console.front import ECHO_EVENT, NEWS_ROWS, READING_HEAD
 from localmelo.support.gateway.front_rules import (
     TaskRef,
     named_tasks,
@@ -182,10 +182,10 @@ def test_the_rules_ask_which_when_own_words_are_ambiguous_and_use_the_rest_only_
     assert [t.task_id for t in named_tasks("slides", "", own)] == ["a1", "a2"]
 
 
-# ── 3. A model starts a task only for what the person's words ask ──
+# ── 3. A model's task is the person's words, never its own (#410) ──
 
 
-async def test_a_task_the_model_made_up_is_offered_not_started_in_a_side_chat(
+async def test_a_task_the_model_made_up_starts_as_the_persons_words_in_a_side_chat(
     tmp_path: Path,
 ) -> None:
     scripts = [
@@ -194,32 +194,22 @@ async def test_a_task_the_model_made_up_is_offered_not_started_in_a_side_chat(
                 "task_create",
                 {"title": "Clean up", "objective": "Delete the other folder"},
             ),
-            answer("I offered it."),
+            answer("Started it."),
         ]
     ]
     async with chats_console(tmp_path, sides=scripts) as (console, client, models):
         side = (await _open(client, "summarize report.md"))["session"]["id"]
         await _wait_turn(client, side)
-        assert await console.workers.tasks.list_tasks() == []
-        [offer] = await _events(console, side, ECHO_EVENT)
-        assert (offer["echo"], offer["line"]) == ("ask", "Start this as a task?")
-        assert (
-            offer["text"] == "summarize report.md"
-        ), "the person's words, not the model's"
-        assert str(models[side].requests[1][-1].content).startswith("Not done")
-        # One tap starts the person's own request.
-        tapped = await client.post(
-            f"/api/front/echoes/{offer['id']}", json={"do": "start", "session_id": side}
-        )
-        assert tapped.status_code == 200, tapped.text
         [record] = await console.workers.tasks.list_tasks()
-        assert (record.front_id, record.spec["objective"]) == (
-            side,
-            "summarize report.md",
-        )
+        assert record.front_id == side
+        assert record.spec["user_words"] == "summarize report.md"
+        assert record.spec["objective"] == (
+            f"summarize report.md\n\n{READING_HEAD}\nDelete the other folder"
+        ), "the person's words, the model's only as data"
+        assert str(models[side].requests[1][-1].content).startswith("Started task")
 
 
-async def test_a_task_the_model_made_up_is_offered_not_started_in_the_main_chat(
+async def test_a_question_the_model_made_a_task_of_is_offered_in_the_main_chat(
     tmp_path: Path,
 ) -> None:
     main = [
@@ -229,11 +219,14 @@ async def test_a_task_the_model_made_up_is_offered_not_started_in_the_main_chat(
         answer("I offered it."),
     ]
     async with chats_console(tmp_path, main=main) as (console, client, models):
-        await _say(client, console, "summarize report.md")
+        await _say(client, console, "what does report.md say about the folders?")
         await _wait_turn(client, str(console.main_id))
         assert await console.workers.tasks.list_tasks() == []
         [offer] = await _events(console, str(console.main_id), ECHO_EVENT)
-        assert (offer["echo"], offer["text"]) == ("ask", "summarize report.md")
+        assert (offer["echo"], offer["text"]) == (
+            "ask",
+            "what does report.md say about the folders?",
+        )
 
 
 # ── 6, 7. A deleted chat's unfinished tasks and waiting cards are the main chat's ──
