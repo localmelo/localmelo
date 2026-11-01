@@ -2326,9 +2326,16 @@ def _same_request(
     request_key: str,
     deadline: float | None,
 ) -> bool:
-    # The context pack is made once, when the task is created: a repeat of the
-    # request does not make it again, so it is not part of what the key repeats.
-    skipped = ("task_id", "context_pack")
+    # The context pack and the project's instructions are made once, when the
+    # task is created: a repeat of the request does not make them again, so they
+    # are not part of what the key repeats.
+    skipped = (
+        "task_id",
+        "context_pack",
+        "project_instructions",
+        "project_files",
+        "project_skipped",
+    )
     stored = {key: value for key, value in record.spec.items() if key not in skipped}
     stored.setdefault("deadline", None)
     expected = {

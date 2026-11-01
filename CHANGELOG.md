@@ -9,6 +9,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A task you start, and a saved chore, reads its project's own instruction file
+  when it starts: the first of `AGENTS.md`, `CLAUDE.md` and `GEMINI.md` in the
+  task's folder and in each folder above it up to your home folder, nearest
+  first, at most three files and 6,000 characters. It is read-only, secrets are
+  removed, a file over 256 KiB is skipped, and your home folder's own file and
+  the folders where other assistants keep their personal files are never read.
+  The text goes after the context pack under its own heading and never outranks
+  your words, melo's rules or an approval, and the task's page says which files
+  it read. `[memory] project_instructions = "off"` turns it off. Chats do not
+  read it yet. [#364]
 - When melo needs a file outside the chat's folder, it asks instead of
   refusing, in a chat or task you started. The card in the console and the
   app, and the option list in the terminal, name the real folder and offer
@@ -503,6 +513,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   beside `level` ([#343]).
 
 ### Security
+
+- A file with more than one name (a hard link) is one file in two places,
+  so `file_write` and `file_edit` now refuse it, in the workspace too, and a
+  read outside the workspace refuses one as well. A command that makes a
+  hard link to a file outside the workspace (`ln`, `cp -l`, `install -l`,
+  `rsync --link-dest`, `os.link` and others) counts as a change to that
+  file, and a command that writes to a file with another name counts as a
+  change outside the folder; neither is routine.
 
 - The file tools and the action review now compare a path as the file
   system names it: another letter case of the workspace counts as inside,

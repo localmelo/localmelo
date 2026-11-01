@@ -198,10 +198,87 @@ _VALUED = set(
 )
 # Writes: the last argument (cp …), every argument, or every one but the first.
 _WRITERS = {
-    **dict.fromkeys(["cp", "mv", "ln", "rsync", "install", "ditto"], "last"),
+    **dict.fromkeys(["cp", "mv", "ln", "link", "rsync", "install", "ditto"], "last"),
     **dict.fromkeys(["touch", "mkdir", "tee", "truncate"], "all"),
     **dict.fromkeys(["chmod", "chown", "chgrp"], "rest"),
 }
+
+
+# GNU tools under the names a package manager gives them (``gln``…).
+_GNU_NAMES = {"gln": "ln", "gcp": "cp", "ginstall": "install", "glink": "link"}
+
+
+def _link_sources(
+    ctx: Context, f: Findings, prog: str, args: list[str], cwd: str
+) -> None:
+    """Record the files a command makes hard links to (``touch(..., "link")``).
+
+    ``link``; ``ln`` without ``-s``; ``cp -l``/``--link``; BSD ``install -l``
+    with ``h`` or ``m``; ``pax -rwl``; ``cpio -pl``, whose names come from
+    its input (its folder stands for them); ``rsync --link-dest DIR`` (a
+    relative DIR is below the destination). A hard link and its source are
+    one file, so the source counts as read and written.
+    """
+    shorts = "".join(a[1:] for a in args if a[:1] == "-" and a[:2] != "--")
+    words = [a for a in args if not a.startswith("-")]
+    target_dir = _valued(args, "-t", "--target-directory")
+    if target_dir is not None and target_dir in words:
+        words.remove(target_dir)
+    sources: list[str] = []
+    named = words[:-1] if len(words) > 1 and target_dir is None else words
+    symbolic = "s" in shorts or "--symbolic" in args
+    linking_cp = prog == "cp" and ("l" in shorts or "--link" in args)
+    if prog == "link" or prog == "ln" and not symbolic or linking_cp:
+        sources = named
+    elif prog == "install":
+        how = _valued(args, "-l", None, joined=True)
+        if how is not None and set(how) & set("hm"):
+            if how in words:
+                words.remove(how)
+            sources = words[:-1]
+    elif prog == "pax" and {"r", "w", "l"} <= set(shorts):
+        sources = words[:-1]
+        if not sources:
+            _named_by_input(ctx, f, prog, cwd)
+    elif prog == "cpio" and {"p", "l"} <= set(shorts):
+        _named_by_input(ctx, f, prog, cwd)
+    elif prog == "rsync":
+        folder = _valued(args, None, "--link-dest")
+        if folder is not None and folder in words:
+            words.remove(folder)
+        if folder is not None and words:
+            if not folder.startswith(("/", "~", "$")):
+                # rsync reads a relative one below the destination.
+                folder = os.path.join(words[-1], folder)
+            sources = [folder]
+    for source in sources:
+        touch(ctx, f, source, "link", cwd)
+
+
+def _named_by_input(ctx: Context, f: Findings, prog: str, cwd: str) -> None:
+    """Hard links to files its input names: melo cannot see them; their folder counts."""
+    touch(ctx, f, cwd, "link", cwd)
+    f.doubt(f"Makes hard links ({prog}) to files its input names.")
+
+
+def _valued(
+    args: list[str], short: str | None, long: str | None, *, joined: bool = False
+) -> str | None:
+    """The value of the option *short* (``-t DIR``; with *joined*, ``-tDIR`` too)
+    or *long* (``--opt DIR``, ``--opt=DIR``) in *args*, else ``None``."""
+    for i, arg in enumerate(args):
+        nxt = args[i + 1] if i + 1 < len(args) else None
+        if short is not None and arg == short:
+            return nxt
+        if short is not None and joined and arg.startswith(short) and len(arg) > 2:
+            return arg[len(short) :]
+        if long is not None and arg == long:
+            return nxt
+        if long is not None and arg.startswith(long + "="):
+            return arg[len(long) + 1 :]
+    return None
+
+
 # Programs that run the project's own files: a test runner, a build tool, a
 # package script. With code changed in this chat they are undecided.
 _RUNNERS = set(["pytest", "py.test", "tox", "nox", "make", "gmake", "just"])
@@ -474,6 +551,9 @@ def _unwrap(f: Findings, argv: list[str]) -> list[str]:
             local = local or _local_path(argv[0])
             argv = argv[1:]
             continue
+        if prog == "busybox" and argv[1:]:
+            argv = argv[1:]  # busybox ln …: the applet is the program
+            continue
         if prog in ("sudo", "doas"):
             f.add("system", "Runs a command as the administrator.")
         elif prog in ("nohup", "setsid", "disown"):
@@ -618,8 +698,11 @@ def run_argv(
     interpreter with no program of its own runs that input.
     """
     prog, args = os.path.basename(argv[0]), argv[1:]
+    prog = _GNU_NAMES.get(prog, prog)
     if re.search(r"[$`]", argv[0]):
         f.doubt("Runs a program melo could not name.")
+    # Hard links: one file under two names, so the source counts as written.
+    _link_sources(ctx, f, prog, args, cwd)
     words = [a for a in args if not a.startswith("-")]
     for arg in words:
         path = None if "://" in arg else resolve(ctx, arg.lstrip("@"), cwd)

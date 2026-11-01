@@ -20,6 +20,7 @@ from typing import Any
 from localmelo.melo.checker.tiers import BUILTIN_TIERS, tier_requires_approval
 from localmelo.melo.checker.validators import MAX_OUTPUT_LEN
 from localmelo.melo.contracts.folders import (
+    HardLinkError,
     PathChangedError,
     checked_for,
     never_offered,
@@ -295,12 +296,18 @@ async def _file_read(
 ) -> str:
     start = _line_range(start_line, end_line)
     loop = asyncio.get_event_loop()
-    expect = _expected(path)
-    if expect is not None:
+    checked = checked_for(path)
+    if checked is not None:
         # The executor fenced it: open the checked file only, as the
         # rooted tool does.
         return await loop.run_in_executor(
-            None, _read_regular_file, path, start, end_line, expect
+            None,
+            _read_regular_file,
+            path,
+            start,
+            end_line,
+            checked.path,
+            checked.outside,
         )
     text = await loop.run_in_executor(None, lambda: open(path).read())
     if start == 1 and end_line is None and len(text) <= MAX_OUTPUT_LEN:
@@ -780,10 +787,12 @@ def _rooted_file_read(root: str) -> ToolFunction:
     ) -> str:
         target = os.path.join(root, path)
         start = _line_range(start_line, end_line)
-        expect = _expected(target)
+        checked = checked_for(target)
+        expect = None if checked is None else checked.path
+        outside = checked is not None and checked.outside
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            None, _read_regular_file, target, start, end_line, expect
+            None, _read_regular_file, target, start, end_line, expect, outside
         )
 
     return file_read
@@ -910,11 +919,14 @@ def _read_editable(path: str, expect: str | None = None) -> str:
     """The text of the regular UTF-8 file *path*, which an edit may change.
 
     With *expect*, the file opened must be that checked path
-    (:func:`~localmelo.melo.contracts.folders.open_checked`).
+    (:func:`~localmelo.melo.contracts.folders.open_checked`). A file with
+    another name (a hard link) is refused: the edit would change it there
+    too (:class:`~localmelo.melo.contracts.folders.HardLinkError`).
     """
     fd = open_checked(path, os.O_RDONLY | os.O_NONBLOCK, expect)
     try:
         _require_regular_file(fd, path)
+        _require_one_name(fd, path)
         if os.fstat(fd).st_size > MAX_EDIT_BYTES:
             raise ValueError(f"{path} is over {MAX_EDIT_BYTES} bytes; not edited")
         chunks = []
@@ -934,18 +946,27 @@ def _edit_regular_file(path: str, old: str, new: str, expect: str | None = None)
 
 
 def _read_regular_file(
-    path: str, start: int = 1, end: int | None = None, expect: str | None = None
+    path: str,
+    start: int = 1,
+    end: int | None = None,
+    expect: str | None = None,
+    outside: bool = False,
 ) -> str:
     """The text of the regular file *path*, cut as :func:`rooted_builtins` says.
 
     *start* and *end* are the first and last line wanted (see
     :func:`_line_range`). With *expect*, the file opened must be that
     checked path (:func:`~localmelo.melo.contracts.folders.open_checked`).
+    With *outside* (a path outside the workspace a person allowed), a file
+    with another name (a hard link) is refused: that name may be a place
+    melo never opens.
     """
     limit = MAX_FILE_READ_BYTES
     fd = open_checked(path, os.O_RDONLY | os.O_NONBLOCK, expect)
     try:
         _require_regular_file(fd, path)
+        if outside:
+            _require_one_name(fd, path)
         # The file is read line by line: the lines wanted are kept, up to
         # the byte cap, and the others are only counted (up to a scan cap).
         picked: list[bytes] = []
@@ -1176,14 +1197,18 @@ def _write_regular_file(path: str, content: str, expect: str | None = None) -> N
     With *expect* (the checked path), the folder that holds the file is
     opened first and must be the checked one
     (:func:`~localmelo.melo.contracts.folders.open_checked`); the file is
-    then opened by its name in that folder's descriptor.
+    then opened by its name in that folder's descriptor. A new file is
+    made with ``O_EXCL``; an existing one is opened without emptying it,
+    never through a symlink, and must be a regular file with no other name
+    (a hard link would carry the write to that name too:
+    :class:`~localmelo.melo.contracts.folders.HardLinkError`). Only then is
+    it emptied and written.
     """
     # Encoded first, so a text that UTF-8 cannot encode (a lone surrogate)
     # fails before the file is emptied.
     data = content.encode("utf-8")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW | os.O_NONBLOCK
     if expect is None:
-        fd = os.open(path, flags, 0o666)
+        fd = _open_for_write(path, None, None)
     else:
         folder = open_checked(
             os.path.dirname(path),
@@ -1191,15 +1216,13 @@ def _write_regular_file(path: str, content: str, expect: str | None = None) -> N
             os.path.dirname(expect),
         )
         try:
-            fd = os.open(os.path.basename(path), flags, 0o666, dir_fd=folder)
-        except OSError as exc:
-            if exc.errno == errno.ELOOP:  # a symlink took the file's place
-                raise PathChangedError(expect) from exc
-            raise
+            fd = _open_for_write(os.path.basename(path), folder, expect)
         finally:
             os.close(folder)
     try:
         _require_regular_file(fd, path)
+        _require_one_name(fd, path)
+        os.ftruncate(fd, 0)
         view = memoryview(data)
         while view:
             view = view[os.write(fd, view) :]
@@ -1207,6 +1230,36 @@ def _write_regular_file(path: str, content: str, expect: str | None = None) -> N
         os.close(fd)
 
 
+def _open_for_write(name: str, folder: int | None, expect: str | None) -> int:
+    """A descriptor to write *name* (in the folder open at *folder*), not emptied yet.
+
+    A new file is made with ``O_EXCL``; an existing one is opened as it is.
+    Neither follows a symlink in the last part: with *expect*, one that took
+    the file's place is :class:`~localmelo.melo.contracts.folders.PathChangedError`.
+    """
+    flags = os.O_WRONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+    for _ in range(3):
+        try:
+            return os.open(name, flags | os.O_CREAT | os.O_EXCL, 0o666, dir_fd=folder)
+        except FileExistsError:
+            pass
+        try:
+            return os.open(name, flags, dir_fd=folder)
+        except FileNotFoundError:
+            continue  # removed between the two opens: make it anew
+        except OSError as exc:
+            if expect is not None and exc.errno == errno.ELOOP:
+                raise PathChangedError(expect) from exc
+            raise
+    raise PathChangedError(expect or name)
+
+
 def _require_regular_file(fd: int, path: str) -> None:
     if not stat.S_ISREG(os.fstat(fd).st_mode):
         raise ValueError(f"Not a regular file: {path}")
+
+
+def _require_one_name(fd: int, path: str) -> None:
+    """:class:`~localmelo.melo.contracts.folders.HardLinkError` when the open file has another name."""
+    if os.fstat(fd).st_nlink > 1:
+        raise HardLinkError(path)
