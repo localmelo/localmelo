@@ -69,6 +69,20 @@ RETRIEVAL_MODES = ("auto", "off", "bm25", "llm", "embedding")
 MEMORY_RETRIEVERS = ("auto", "bm25", "embedding", "llm")
 # How notes are tidied while melo is idle: see MemoryConfig.sleep.
 MEMORY_SLEEP = ("off", "rules", "model", "model+tags")
+# The recall budget and its bounds (inclusive): see MemoryConfig.recall_records.
+MEMORY_RECALL_RECORDS = (0, 20)
+MEMORY_RECALL_DOCS = (0, 20)
+MEMORY_RECALL_CHARS = (200, 8000)
+# Whether recall carries notes, and what a turn that recalls nothing is told.
+MEMORY_RECALL_NOTES = ("on", "off")
+MEMORY_SEARCH_WHEN_EMPTY = ("off", "hint")
+RECALL_KEYS = (
+    "recall_records",
+    "recall_docs",
+    "recall_chars",
+    "recall_notes",
+    "search_when_empty",
+)
 RECALL_TRIGGERS = ("start", "attempt", "step", "tool")
 RECALL_KINDS = ("note", "draft", "thought", "digest", "reflection", "long")
 RECALL_PLACEMENTS = ("tool", "message")
@@ -315,7 +329,14 @@ class MemoryConfig:
     setting, tidies the notes while melo is idle: ``off`` (the default) or
     ``rules`` (no model call), ``model`` (rules then a bounded model pass), or
     ``model+tags`` (the same call limit, tagged turns first). ``sleep_lock`` is
-    an optional path whose presence prevents model requests.
+    an optional path whose presence prevents model requests. Five more developer
+    settings, each defaulting to today's behaviour, shape the recall block a chat
+    message carries: ``recall_records`` notes and ``recall_docs`` chat turns at
+    most (0-20 each) in a block of at most ``recall_chars`` characters
+    (200-8000); ``recall_notes = "off"`` leaves notes out of the block and the
+    pinned lines, so only turns are recalled; and ``search_when_empty = "hint"``
+    adds one line to a block that recalls nothing, telling the model to call the
+    memory search tool first.
     """
 
     admit_on_outcome: bool = False
@@ -324,6 +345,11 @@ class MemoryConfig:
     keep_statements: bool = False
     sleep: str = "off"  # off | rules | model | model+tags
     sleep_lock: str = ""  # Optional lock path: no model calls while it exists.
+    recall_records: int = 3  # Most notes a chat message's recall block holds.
+    recall_docs: int = 2  # Most chat turns it holds.
+    recall_chars: int = 900  # Its size bound, in characters.
+    recall_notes: str = "on"  # on | off: no notes in the block or the pinned lines.
+    search_when_empty: str = "off"  # off | hint: a line when nothing was recalled.
 
 
 @dataclass
@@ -539,6 +565,28 @@ class Config:
             or "\x00" in self.memory.sleep_lock
         ):
             errors.append("[memory] sleep_lock must be a path string without NUL")
+        for name, (low, high) in (
+            ("recall_records", MEMORY_RECALL_RECORDS),
+            ("recall_docs", MEMORY_RECALL_DOCS),
+            ("recall_chars", MEMORY_RECALL_CHARS),
+        ):
+            value = getattr(self.memory, name)
+            if not isinstance(value, int) or isinstance(value, bool):
+                errors.append(f"[memory] {name} must be a whole number, got {value!r}")
+            elif not low <= value <= high:
+                errors.append(
+                    f"[memory] {name} must be from {low} to {high}, got {value}"
+                )
+        for name, allowed in (
+            ("recall_notes", MEMORY_RECALL_NOTES),
+            ("search_when_empty", MEMORY_SEARCH_WHEN_EMPTY),
+        ):
+            value = getattr(self.memory, name)
+            if value not in allowed:
+                errors.append(
+                    f"[memory] {name} {value!r} is not recognised. "
+                    f"Must be one of {allowed}."
+                )
         return errors
 
     def _validate_browser(self) -> list[str]:
@@ -1506,6 +1554,9 @@ def save(cfg: Config) -> None:
             lines.append(f"sleep = {_toml_string(cfg.memory.sleep)}")
         if cfg.memory.sleep_lock:
             lines.append(f"sleep_lock = {_toml_string(cfg.memory.sleep_lock)}")
+        for name in RECALL_KEYS:
+            if getattr(cfg.memory, name) != getattr(MemoryConfig(), name):
+                lines.append(f"{name} = {_toml_value(getattr(cfg.memory, name))}")
         lines.append("")
 
     if cfg.browser != BrowserConfig():

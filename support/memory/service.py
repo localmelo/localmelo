@@ -45,12 +45,18 @@ from localmelo.melo.agent.agent import DEFAULT_MEMORY_DIR
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.memory._sqlite import make_private_dir
+from localmelo.melo.memory.block import BLOCK_HEADER
 from localmelo.melo.memory.hippo.policy import normalise
 from localmelo.melo.memory.long import StoredEntry
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.memory.retrieval import Doc, LLMRetriever, send_from_provider
 from localmelo.melo.memory.retrieval.base import elapsed_ms
 from localmelo.melo.schema import EMPTY_REPLY_NUDGE, Message, ToolDef, split_thinking
+from localmelo.support.config import (
+    MEMORY_RECALL_CHARS,
+    MEMORY_RECALL_DOCS,
+    MEMORY_RECALL_RECORDS,
+)
 from localmelo.support.memory import records
 from localmelo.support.memory import sleep as sleeping
 from localmelo.support.memory.importer import (
@@ -73,6 +79,7 @@ from localmelo.support.memory.recall import (
     AGENT_EXCHANGE,
     AUTO_DOCS,
     AUTO_RECORDS,
+    BLOCK_CHARS,
     SIDE_SUMMARY,
     Corpus,
     Item,
@@ -107,6 +114,13 @@ _SELECT_FAILURES: Final = {
     "parse": "unreadable",
 }
 PINNED_CHARS: Final = 600
+# The one line a block carries when nothing was recalled and ``[memory]
+# search_when_empty`` is ``hint``; the model decides whether to search.
+SEARCH_HINT: Final = (
+    "Nothing from earlier chats matched this message. If it asks about the person "
+    "or something said before, call the memory search tool first; if that finds "
+    "nothing, say you don't know."
+)
 # A task's start: the header, and what is looked up for its objective.
 PACK_HEADER: Final = (
     "[melo's memory for this task · about the person and this project; "
@@ -172,6 +186,22 @@ def _resolve(mode: str, failure: str) -> tuple[str, str]:
     return "embedding", failure or "none"
 
 
+class RecallSettings(NamedTuple):
+    """The ``[memory]`` settings that shape a chat message's recall block.
+
+    *records* and *docs* are the most notes and chat turns it holds, *chars* its
+    size bound, *notes* whether notes are recalled and pinned at all, and *hint*
+    whether a block that recalls nothing carries :data:`SEARCH_HINT`. The
+    defaults are what recall did before these were settings.
+    """
+
+    records: int = AUTO_RECORDS
+    docs: int = AUTO_DOCS
+    chars: int = BLOCK_CHARS
+    notes: bool = True
+    hint: bool = False
+
+
 class Embedded(NamedTuple):
     """The vectors of one embedding call (``None`` if none came) and why not."""
 
@@ -189,18 +219,26 @@ class TurnMemory:
     remembered: tuple[records.Written, ...] = ()
     refused: bool = False
     recall: Recall | None = None
+    # The block carries :data:`SEARCH_HINT` (``[memory] search_when_empty``).
+    search_hint: bool = False
 
     def event(self) -> dict[str, Any] | None:
-        """The ``turn.memory`` data (without the turn's keys); ``None`` with memory off."""
+        """The ``turn.memory`` data (without the turn's keys); ``None`` with memory off.
+
+        ``search_hint`` is there, ``true``, only when the block carried the hint.
+        """
         if self.recall is None:
             return None
-        return {
+        data: dict[str, Any] = {
             "used": [item.to_json() for item in self.used],
             "remembered": [record.to_json() for record in self.remembered],
             "refused": records.NOT_KEPT if self.refused else "",
             "recall": self.recall.to_json(),
             "unsaved_claim": False,
         }
+        if self.search_hint:
+            data["search_hint"] = True
+        return data
 
 
 @dataclass
@@ -481,6 +519,30 @@ class ChatMemory:
         mode = cfg.memory.retriever if cfg is not None else "auto"
         return mode if mode in ("bm25", "embedding", "llm") else "auto"
 
+    def recall_settings(self) -> RecallSettings:
+        """The recall settings of the settings now.
+
+        A value out of its bounds or of the wrong type (a file :meth:`Config.validate`
+        would refuse) reads as its default, as an unknown retriever reads as ``auto``.
+        """
+        cfg = self._settings()
+        if cfg is None:
+            return RecallSettings()
+        memory = cfg.memory
+
+        def bounded(name: str, default: int, bounds: tuple[int, int]) -> int:
+            value = getattr(memory, name, default)
+            fits = isinstance(value, int) and not isinstance(value, bool)
+            return value if fits and bounds[0] <= value <= bounds[1] else default
+
+        return RecallSettings(
+            bounded("recall_records", AUTO_RECORDS, MEMORY_RECALL_RECORDS),
+            bounded("recall_docs", AUTO_DOCS, MEMORY_RECALL_DOCS),
+            bounded("recall_chars", BLOCK_CHARS, MEMORY_RECALL_CHARS),
+            getattr(memory, "recall_notes", "on") != "off",
+            getattr(memory, "search_when_empty", "off") == "hint",
+        )
+
     def chat_provider(self) -> BaseLLMProvider | None:
         """The chat model of the settings now, for ``llm`` recall; ``None`` if not set up."""
         cfg = self._settings()
@@ -569,9 +631,11 @@ class ChatMemory:
             corpus.add(_doc_item(doc))
         return corpus
 
-    def _replaced(self, corpus: Corpus) -> dict[tuple[str, int], Item]:
+    def _replaced(
+        self, corpus: Corpus, notes: bool = True
+    ) -> dict[tuple[str, int], Item]:
         """The turns a newer note or turn replaced, each to the newer one; a
-        note's replacement wins over a turn's."""
+        note's replacement wins over a turn's. Without *notes*, a turn's only."""
         cached = self._newer
         if cached is None or cached[0] is not corpus or cached[1] != corpus.version:
             cached = (
@@ -580,7 +644,7 @@ class ChatMemory:
                 records.newer_turns(corpus.items.values()),
             )
             self._newer = cached
-        return {**cached[2], **replaced_turns(corpus)}
+        return {**cached[2], **(replaced_turns(corpus) if notes else {})}
 
     async def search(
         self,
@@ -623,8 +687,13 @@ class ChatMemory:
         docs_k: int,
         exclude_session: str,
         keep_from_turn: int | None = None,
+        notes: bool = True,
     ) -> list[Item]:
-        """Rank for *query* as the retriever says; the numbers go to *recall*."""
+        """Rank for *query* as the retriever says; the numbers go to *recall*.
+
+        Without *notes* (``[memory] recall_notes = "off"``) only turns come out,
+        and no note's replacement of a turn counts.
+        """
         mode = self.retriever()
         recall.retriever, recall.fallback = _resolve(mode, embedded.failure)
         started = time.perf_counter()
@@ -655,12 +724,15 @@ class ChatMemory:
                 if mode == "llm"
                 else []
             )
-            replaced = self._replaced(corpus)
+            replaced = self._replaced(corpus, notes)
+        if not notes:
+            found = [item for item in found if not item.is_record]
+            loose = [item for item in loose if not item.is_record]
         recall.search_ms = elapsed_ms(started)
         recall.candidates = len(loose) if mode == "llm" else len(found)
-        if loose:
+        if loose and records_k + docs_k:
             found = await self._select(
-                query, loose, found, recall, k=records_k + docs_k
+                query, loose, found, recall, k=(records_k if notes else 0) + docs_k
             )
         # A turn whose fact a newer note or turn replaced comes after it.
         newer = newer_first(
@@ -806,21 +878,27 @@ class ChatMemory:
             [query, *(cand.text for cand in found)], EMBED_TIMEOUT_S, query=True
         )
         recall.embed_ms = elapsed_ms(started)
+        budget = self.recall_settings()
         used = await self._find(
             query,
             embedded,
             recall,
-            records_k=AUTO_RECORDS,
-            docs_k=AUTO_DOCS,
+            records_k=budget.records,
+            docs_k=budget.docs,
             exclude_session=info.session_id,
             keep_from_turn=keep_from,
+            notes=budget.notes,
         )
         # The block gives the current value only: a turn a newer note replaced
         # stays out unless the message asks about the past.
         text, used = block(
             current_only(used, typed),
             kept_lines([cand.quote for cand in found], refused=refused),
+            budget.chars,
         )
+        hinted = budget.hint and not used
+        if hinted:
+            text = f"{text or BLOCK_HEADER}\n{SEARCH_HINT}"
         recall.used = len(used)
         appended = "\n\n" + text if text else ""
         recall.block_chars = len(appended)
@@ -842,6 +920,7 @@ class ChatMemory:
             tuple(written),
             refused,
             recall,
+            hinted,
         )
 
     async def remember(self, text: str, topic: str = "") -> str:
@@ -1647,9 +1726,10 @@ class ChatMemory:
         """About you and Preferences in the user's words, newest first, bounded.
 
         Notes brought in from other assistants and notes sleep wrote are recall
-        only: they never ride in every prompt.
+        only: they never ride in every prompt. With ``[memory] recall_notes = "off"``
+        none is pinned.
         """
-        if not self.enabled:
+        if not self.enabled or not self.recall_settings().notes:
             return ""
         lines: list[str] = []
         size = 0
