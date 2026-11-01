@@ -15,9 +15,14 @@ from fastapi.testclient import TestClient
 from localmelo.melo.checker.redaction import REDACTED
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.support.gateway.console import Console, ConsoleOptions
-from localmelo.support.gateway.console.running import MAX_ITEMS, task_counts
+from localmelo.support.gateway.console.running import (
+    MAX_ITEMS,
+    item_activity,
+    task_counts,
+)
 from localmelo.support.gateway.console.worker_reader import WorkerReader
 from localmelo.support.gateway.finishing import OUT_OF_STEPS
+from localmelo.support.sessions.display import ActivityText
 from localmelo.support.sessions.store import (
     NewSession,
     SessionStore,
@@ -181,6 +186,48 @@ async def test_an_item_whose_newest_step_is_a_model_call_is_answering(
         False,
     )
     monkeypatch.undo()
+
+
+async def test_a_wait_a_hold_an_ask_and_an_unreadable_store_are_never_answering(
+    console: Console, workspace: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Whatever the newest step, an item that waits on a person, a slot or a chat is not the model answering."""
+    turn = await seed_turn(console.store, workspace, status="running", title="Plan")
+    owner = turn.session_id
+    await console.store.append_events(
+        owner, turn.turn, [core_event("step.started", seq=2)], holder=HOLDER
+    )
+    text, _ = await item_activity(console, "chat", owner)
+    assert (text.icon, text.answering) == ("think", True)
+    with monkeypatch.context() as patch:  # an approval waits
+        patch.setattr(console.broker, "pending", lambda _owner: True)
+        text, _ = await item_activity(console, "chat", owner)
+        assert (text.icon, text.answering) == ("wait", False)
+    with monkeypatch.context() as patch:  # held for a model slot
+        patch.setattr(console.gate, "held", lambda _owner: "Priority")
+        text, _ = await item_activity(console, "chat", owner)
+        assert (text.icon, text.answering) == ("held", False)
+    with (
+        monkeypatch.context() as patch
+    ):  # a task waits on its chat's answer, or the person's
+        for asked in ("held", "wait"):
+            patch.setattr(
+                console.asks,
+                "activity",
+                lambda _owner, icon=asked: ActivityText("Waiting on Plan", icon, None),
+            )
+            text, _ = await item_activity(console, "task", owner)
+            assert (text.icon, text.answering) == (asked, False)
+
+    async def unreadable(*_args: Any, **_kwargs: Any) -> Any:
+        raise SessionStoreError("locked")
+
+    with (
+        monkeypatch.context() as patch
+    ):  # the store cannot be read: "Thinking" in words only
+        patch.setattr(console.store, "latest_events", unreadable)
+        text, changed = await item_activity(console, "chat", owner)
+        assert (text.icon, text.answering, changed) == ("think", False, 0.0)
 
 
 def ask(console: Console, owner: str, request_id: str) -> Any:
