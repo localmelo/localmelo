@@ -613,6 +613,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- A site that a task's `web_fetch` or browser asked about, and that you, Auto
+  or melo's rules refused, is now a blocked step like any other. When the chat
+  continues that task on its own, the same address, the same address with other
+  spacing or capitals, and every other page of that site are refused before
+  anyone is asked or anything is reviewed. [#431]
+
 - A file with more than one name (a hard link) is one file in two places,
   so `file_write` and `file_edit` now refuse it, in the workspace too, and a
   read outside the workspace refuses one as well. A command that makes a
@@ -706,6 +712,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A task the chat started keeps **Stop** on its row while the task, or the
+  chat's follow-up on it, can still run; Stop then ends a follow-up that waits
+  or runs, so it never continues the task. A follow-up still waiting when melo
+  stops runs after the restart, still once per ending and at most one continue
+  per message of yours, and is dropped when you wrote after the task ended. An
+  older **Did not finish** card shows the report of its own run, not the newest
+  one. [#431]
 - Developer: `melo memory ingest` reads a session that a file repeats word for word once,
   instead of refusing the file; the same id with other turns is still refused.
 - A task that changed no code is no longer told to run tests. Outside git, melo compares the
@@ -3622,4 +3635,5 @@ earlier milestones.
 [#412]: https://github.com/localmelo/localmelo/issues/412
 [#410]: https://github.com/localmelo/localmelo/issues/410
 [#411]: https://github.com/localmelo/localmelo/issues/411
+[#431]: https://github.com/localmelo/localmelo/issues/431
 [#426]: https://github.com/localmelo/localmelo/issues/426

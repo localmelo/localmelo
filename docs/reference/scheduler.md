@@ -360,8 +360,15 @@ by its own report, or failed with a run status the chat can act on (`failed`,
 chore's task, one from `POST /api/tasks`, a Stop, a refused folder, a continue
 that could not start, or a provider or setup failure. `meta.followup` keeps
 `person_turn` (the id of the person's newest turn in that chat), `runs`,
-`continued` and `ending_at`: at most two follow-ups per task for one person
-turn, and only the first may continue it.
+`continued`, `ending_at` and `stage`: at most two follow-ups per task for one
+person turn, and only the first may continue it. `stage` is `queued` until the
+turn begins (`began`, written before it starts and put back on a busy chat;
+`told` once its `followed` row is written), or `stopped` or `skipped`. That
+record is the queue across a restart: at start, `TaskFollowups.restore`
+queues again each follow-up whose `ending_at` is still the task's
+`finished_at` and whose `stage` is `queued` (a record with no `stage`, from
+before stages, never), with the same limits; one with `stage` `began` was cut
+off and is never run twice: its row says `skipped`.
 
 The follow-up runs in the chat's drain (`OwnerAsks`), after the person's
 queued messages and the tasks' questions, as an internal turn with origin
@@ -369,10 +376,20 @@ queued messages and the tasks' questions, as an internal turn with origin
 request, the task's last answer and its blocked steps fenced with a fresh
 nonce, as a page is); an `attention.echo` of kind `followup` stands for it,
 written once the turn began (`turn_id`), and one of kind `followed` records
-`did` (`continued`, `asked`, `reported`). The turn is offered the task tools
-only. It is skipped when the person's newest turn (`latest_person_turn`) began
-after the task ended, when the task ran or ended again, or when the setting
-went off; one ending is looked at once (a lock per task).
+`did` (`continued`, `asked`, `reported`, or `skipped` and `stopped` for one
+whose turn never ran; Activity leaves those two out). The turn is offered the
+task tools only. It is skipped when the person's newest turn
+(`latest_person_turn`) began after the task ended, when the task ran or ended
+again, or when the setting went off; one ending is looked at once (a lock per
+task). The card of an end a follow-up was queued for has `follow_up: true`
+(the cards wait until every end heard was looked at); the page keeps the
+task's rows live, the `started` row's Stop included, until a `followed` row
+newer than that card has a `did` other than `continued`. Stop on the `started` row
+(`POST /api/front/echoes/{id}` `{"do": "stop"}`) first stops the follow-up
+(`TaskFollowups.stop`: a waiting one leaves the queue, a running turn is
+cancelled with cause `user_stop` and its `task_continue` refused; `stage`
+`stopped`), then the task while it runs; on a finished task it answers the
+row with `Stopped: …`.
 
 `task_continue` (the follow-up's only way to act) needs the task as it ended
 (finished, same `finished_at`) and `meta.followup.continued` still false, which
@@ -392,7 +409,14 @@ install part and each install (`install:pip:numpy`), so the rest of a compound
 step still runs.
 A call with the same key, or a loose key in common, is refused before any
 review with origin `policy` and `approval.earlier` (who blocked it). A step the
-person allowed once since is asked again, and so are steps alike to it.
+person allowed once since is asked again, and so are steps alike to it. A
+question a tool asks itself while it runs (`TOOL_ASK`: a site `web_fetch` or
+the browser would open, `browser:<origin>`) is a step too: a refused one is
+kept in `tool.finished`'s `tool_asks` with its `call_key` and `loose_keys`
+(`question_key`: `ask:browser:<origin>`), `SessionStore.denied_records` and
+`denied_steps` read it, and `_ToolAsk` asks `EarlierBlocks.match` first, so
+the continued run neither reviews nor asks about that address again (spacing
+and case do not matter) or any other page of that site.
 
 ## S3b.1a foundations
 
