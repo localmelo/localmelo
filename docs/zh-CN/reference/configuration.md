@@ -73,6 +73,8 @@ chat_model = "qwen3:8b"
 | `recall_chars` | `[memory]` | `900` | 用于比较的开发者设置。该召回块的字符数上限，200 到 8000；放进去会超出上限的条目会被略去。没有召回任何内容、只带有 melo 记下了什么的那几行的块不会被截断。`-X memory.recall_chars=4000` 只对一次运行生效。 |
 | `recall_notes` | `[memory]` | `"on"` | 用于比较的开发者设置。`"off"`：召回块里没有笔记，提示里也不置顶任何笔记，因此只召回以前的对话轮次，也不会因为某条笔记而认定某一轮已被取代。`remember` 工具、搜索工具和记忆页不变。`-X memory.recall_notes=off` 只对一次运行生效。 |
 | `search_when_empty` | `[memory]` | `"off"` | 用于比较的开发者设置。`"hint"`：当召回块没有为某条消息召回任何条目时，块里带有一行固定的话（如果有 melo 记下了什么的几行，则放在其后），说明没有匹配的内容，并告诉模型：如果消息问的是这个人或以前说过的事，先调用记忆搜索工具；搜索也没有结果就说不知道。代码不判断消息，由模型决定。这一轮的 `turn.memory` 事件里会有 `search_hint: true`。`-X memory.search_when_empty=hint` 只对一次运行生效。见[跨对话记忆](../concepts/memory.md#memory-across-chats)。 |
+| `recall_min_cosine` | `[memory]` | `0.55` | 用于比较的开发者设置。一条笔记或对话轮次要靠语义被召回，在语义上至少要有多相近（余弦值，0.20 到 0.95），召回块和记忆搜索工具都按它来；数值越低，放进来的越多，条目仍可以靠字词被召回。默认值就是召回一直以来用的门槛。`-X memory.recall_min_cosine=0.45` 只对一次运行生效。 |
+| `recall_min_coverage` | `[memory]` | `0.6` | 用于比较的开发者设置。一条笔记或对话轮次要靠字词被召回，至少要包含消息中实词的多大比例（0.10 到 1.00），召回块和记忆搜索工具都按它来；数值越低，放进来的越多，条目仍可以靠语义被召回。默认值就是召回一直以来用的门槛。`-X memory.recall_min_coverage=0.4` 只对一次运行生效。 |
 | `admit_on_outcome` | `[memory]` | `false` | R6-lite：只在运行结束时准入最后一次尝试的摘要，并在其来源中带上最终状态。`--admit-on-outcome` 旗标对一次运行优先；直接模式会读这张表，交互式界面和网关不读，且在 `legacy` 中被接受但不生效。 |
 | `api_key_env` | 云端后端 | 未设置 | 保存 API 密钥的环境变量名称。 |
 | `base_url` | 云端后端 | 厂商的 URL | API 的 URL。 |

@@ -79,6 +79,10 @@ MEMORY_SLEEP = ("off", "rules", "model", "model+tags")
 MEMORY_RECALL_RECORDS = (0, 20)
 MEMORY_RECALL_DOCS = (0, 20)
 MEMORY_RECALL_CHARS = (200, 8000)
+# The bars an item must pass to be recalled, and their bounds (inclusive): see
+# MemoryConfig.recall_min_cosine and recall_min_coverage.
+MEMORY_RECALL_MIN_COSINE = (0.20, 0.95)
+MEMORY_RECALL_MIN_COVERAGE = (0.10, 1.00)
 # Whether recall carries notes, and what a turn that recalls nothing is told.
 MEMORY_RECALL_NOTES = ("on", "off")
 MEMORY_SEARCH_WHEN_EMPTY = ("off", "hint")
@@ -88,6 +92,8 @@ RECALL_KEYS = (
     "recall_chars",
     "recall_notes",
     "search_when_empty",
+    "recall_min_cosine",
+    "recall_min_coverage",
 )
 RECALL_TRIGGERS = ("start", "attempt", "step", "tool")
 RECALL_KINDS = ("note", "draft", "thought", "digest", "reflection", "long")
@@ -342,7 +348,11 @@ class MemoryConfig:
     (200-8000); ``recall_notes = "off"`` leaves notes out of the block and the
     pinned lines, so only turns are recalled; and ``search_when_empty = "hint"``
     adds one line to a block that recalls nothing, telling the model to call the
-    memory search tool first.
+    memory search tool first. Two more set the bars an item must pass to be
+    recalled at all, in the block and in the memory search tool:
+    ``recall_min_cosine`` (0.20-0.95), the least similarity of meaning, and
+    ``recall_min_coverage`` (0.10-1.00), the least share of the question's
+    content words that a note or turn must hold.
     """
 
     admit_on_outcome: bool = False
@@ -356,6 +366,8 @@ class MemoryConfig:
     recall_chars: int = 900  # Its size bound, in characters.
     recall_notes: str = "on"  # on | off: no notes in the block or the pinned lines.
     search_when_empty: str = "off"  # off | hint: a line when nothing was recalled.
+    recall_min_cosine: float = 0.55  # Least similarity of meaning to be recalled.
+    recall_min_coverage: float = 0.6  # Least share of the question's words held.
 
 
 @dataclass
@@ -614,6 +626,17 @@ class Config:
             elif not low <= value <= high:
                 errors.append(
                     f"[memory] {name} must be from {low} to {high}, got {value}"
+                )
+        for name, (floor, ceiling) in (
+            ("recall_min_cosine", MEMORY_RECALL_MIN_COSINE),
+            ("recall_min_coverage", MEMORY_RECALL_MIN_COVERAGE),
+        ):
+            value = getattr(self.memory, name)
+            if not isinstance(value, int | float) or isinstance(value, bool):
+                errors.append(f"[memory] {name} must be a number, got {value!r}")
+            elif not floor <= value <= ceiling:
+                errors.append(
+                    f"[memory] {name} must be from {floor} to {ceiling}, got {value}"
                 )
         for name, allowed in (
             ("recall_notes", MEMORY_RECALL_NOTES),

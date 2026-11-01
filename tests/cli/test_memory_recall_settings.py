@@ -1,9 +1,10 @@
 """``[memory]`` recall settings: developer settings that default to today's recall.
 
-``recall_records``, ``recall_docs``, ``recall_chars``, ``recall_notes`` and
-``search_when_empty`` are saved only when they differ from the default, checked
-against their bounds and values, set for one run with ``-X``, and listed by the
-developer help only, each with the issue that decides it.
+``recall_records``, ``recall_docs``, ``recall_chars``, ``recall_notes``,
+``search_when_empty``, ``recall_min_cosine`` and ``recall_min_coverage`` are
+saved only when they differ from the default, checked against their bounds and
+values, set for one run with ``-X``, and listed by the developer help only, each
+with the issue that decides it.
 """
 
 from __future__ import annotations
@@ -23,6 +24,8 @@ CHANGED = {
     "recall_chars": 4000,
     "recall_notes": "off",
     "search_when_empty": "hint",
+    "recall_min_cosine": 0.45,
+    "recall_min_coverage": 0.4,
 }
 
 
@@ -44,7 +47,9 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
         assert (
             "recall_" not in path.read_text() and "search_when" not in path.read_text()
         )
-        cfg.memory = MemoryConfig(recall_records=3, recall_notes="on")  # the defaults
+        cfg.memory = MemoryConfig(  # the defaults
+            recall_records=3, recall_notes="on", recall_min_cosine=0.55
+        )
         save(cfg)
         assert "[memory]" not in path.read_text()
         cfg.memory = MemoryConfig(**CHANGED)  # type: ignore[arg-type]
@@ -53,6 +58,7 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
         assert (
             "[memory]\nrecall_records = 8\nrecall_docs = 0\nrecall_chars = 4000\n"
             'recall_notes = "off"\nsearch_when_empty = "hint"\n'
+            "recall_min_cosine = 0.45\nrecall_min_coverage = 0.4\n"
         ) in text
         assert config.load().memory == MemoryConfig(**CHANGED)  # type: ignore[arg-type]
         for name, value in CHANGED.items():  # each alone
@@ -76,6 +82,12 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
         ("recall_notes", "off"),
         ("search_when_empty", "off"),
         ("search_when_empty", "hint"),
+        ("recall_min_cosine", 0.2),
+        ("recall_min_cosine", 0.95),
+        ("recall_min_cosine", 0.55),
+        ("recall_min_coverage", 0.1),
+        ("recall_min_coverage", 1.0),
+        ("recall_min_coverage", 1),  # a whole number is a number
     ],
 )
 def test_the_bounds_and_values_are_accepted(name: str, value: object) -> None:
@@ -123,6 +135,51 @@ def test_the_bounds_and_values_are_accepted(name: str, value: object) -> None:
             "[memory] search_when_empty 'always' is not recognised. "
             "Must be one of ('off', 'hint').",
         ),
+        (
+            "recall_min_cosine",
+            0.19,
+            "[memory] recall_min_cosine must be from 0.2 to 0.95, got 0.19",
+        ),
+        (
+            "recall_min_cosine",
+            0.96,
+            "[memory] recall_min_cosine must be from 0.2 to 0.95, got 0.96",
+        ),
+        (
+            "recall_min_coverage",
+            0.09,
+            "[memory] recall_min_coverage must be from 0.1 to 1.0, got 0.09",
+        ),
+        (
+            "recall_min_coverage",
+            1.01,
+            "[memory] recall_min_coverage must be from 0.1 to 1.0, got 1.01",
+        ),
+        (
+            "recall_min_coverage",
+            2,
+            "[memory] recall_min_coverage must be from 0.1 to 1.0, got 2",
+        ),
+        (
+            "recall_min_cosine",
+            True,
+            "[memory] recall_min_cosine must be a number, got True",
+        ),
+        (
+            "recall_min_coverage",
+            False,
+            "[memory] recall_min_coverage must be a number, got False",
+        ),
+        (
+            "recall_min_cosine",
+            "0.5",
+            "[memory] recall_min_cosine must be a number, got '0.5'",
+        ),
+        (
+            "recall_min_coverage",
+            float("nan"),
+            "[memory] recall_min_coverage must be from 0.1 to 1.0, got nan",
+        ),
     ],
 )
 def test_a_value_out_of_range_is_a_config_error_that_says_why(
@@ -161,6 +218,10 @@ def test_x_sets_each_for_one_run_and_only_the_developer_help_lists_them(
         "memory.recall_docs=two",
         "memory.recall_notes=maybe",
         "memory.search_when_empty=always",
+        "memory.recall_min_cosine=0.1",
+        "memory.recall_min_cosine=high",
+        "memory.recall_min_cosine=true",
+        "memory.recall_min_coverage=1.5",
     ],
 )
 def test_x_refuses_a_bad_value_with_a_clear_message(
@@ -170,3 +231,31 @@ def test_x_refuses_a_bad_value_with_a_clear_message(
         cli._parse(["-X", setting, "--base-url", "http://127.0.0.1:1/v1", "q"])
     assert exit_.value.code == 2
     assert setting.partition("=")[0] in capsys.readouterr().err
+
+
+def test_a_whole_number_bar_is_saved_and_read_back_and_x_reads_it_as_a_number(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "config.toml"
+    cfg = Config(chat_backend="vllm", embedding_backend="none")
+    with (
+        mock.patch.object(config, "CONFIG_PATH", str(path)),
+        mock.patch.object(config, "CONFIG_DIR", str(tmp_path)),
+    ):
+        path.write_text("[memory]\nrecall_min_coverage = 1\n")
+        assert config.load().memory.recall_min_coverage == 1
+        assert not errors(recall_min_coverage=config.load().memory.recall_min_coverage)
+        cfg.memory = MemoryConfig(recall_min_coverage=1)
+        save(cfg)
+        assert "recall_min_coverage = 1\n" in path.read_text()
+        cli._parse(
+            [
+                "-X",
+                "memory.recall_min_coverage=1",
+                "--base-url",
+                "http://127.0.0.1:1/v1",
+                "q",
+            ]
+        )
+        assert config.overrides() == {"memory.recall_min_coverage": 1.0}
+        assert isinstance(config.overrides()["memory.recall_min_coverage"], float)

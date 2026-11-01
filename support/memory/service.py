@@ -60,6 +60,8 @@ from localmelo.melo.schema import (
 from localmelo.support.config import (
     MEMORY_RECALL_CHARS,
     MEMORY_RECALL_DOCS,
+    MEMORY_RECALL_MIN_COSINE,
+    MEMORY_RECALL_MIN_COVERAGE,
     MEMORY_RECALL_RECORDS,
 )
 from localmelo.support.memory import records
@@ -85,6 +87,8 @@ from localmelo.support.memory.recall import (
     AUTO_DOCS,
     AUTO_RECORDS,
     BLOCK_CHARS,
+    MIN_COSINE,
+    MIN_COVERAGE,
     SIDE_SUMMARY,
     Corpus,
     Item,
@@ -196,8 +200,10 @@ class RecallSettings(NamedTuple):
 
     *records* and *docs* are the most notes and chat turns it holds, *chars* its
     size bound, *notes* whether notes are recalled and pinned at all, and *hint*
-    whether a block that recalls nothing carries :data:`SEARCH_HINT`. The
-    defaults are what recall did before these were settings.
+    whether a block that recalls nothing carries :data:`SEARCH_HINT`.
+    *min_cosine* and *min_coverage* are the bars an item must pass to be
+    recalled (the block and the search tool alike). The defaults are what
+    recall did before these were settings.
     """
 
     records: int = AUTO_RECORDS
@@ -205,6 +211,8 @@ class RecallSettings(NamedTuple):
     chars: int = BLOCK_CHARS
     notes: bool = True
     hint: bool = False
+    min_cosine: float = MIN_COSINE
+    min_coverage: float = MIN_COVERAGE
 
 
 class Embedded(NamedTuple):
@@ -558,12 +566,19 @@ class ChatMemory:
             fits = isinstance(value, int) and not isinstance(value, bool)
             return value if fits and bounds[0] <= value <= bounds[1] else default
 
+        def bar(name: str, default: float, bounds: tuple[float, float]) -> float:
+            value = getattr(memory, name, default)
+            fits = isinstance(value, int | float) and not isinstance(value, bool)
+            return float(value) if fits and bounds[0] <= value <= bounds[1] else default
+
         return RecallSettings(
             bounded("recall_records", AUTO_RECORDS, MEMORY_RECALL_RECORDS),
             bounded("recall_docs", AUTO_DOCS, MEMORY_RECALL_DOCS),
             bounded("recall_chars", BLOCK_CHARS, MEMORY_RECALL_CHARS),
             getattr(memory, "recall_notes", "on") != "off",
             getattr(memory, "search_when_empty", "off") == "hint",
+            bar("recall_min_cosine", MIN_COSINE, MEMORY_RECALL_MIN_COSINE),
+            bar("recall_min_coverage", MIN_COVERAGE, MEMORY_RECALL_MIN_COVERAGE),
         )
 
     def chat_provider(self) -> BaseLLMProvider | None:
@@ -690,6 +705,7 @@ class ChatMemory:
         started = time.perf_counter()
         embedded = await self._embed([query], EMBED_TIMEOUT_S, query=True)
         recall.embed_ms = elapsed_ms(started)
+        bars = self.recall_settings()
         return await self._find(
             query,
             embedded,
@@ -698,6 +714,8 @@ class ChatMemory:
             docs_k=docs_k,
             exclude_session=exclude_session,
             keep_from_turn=keep_from_turn,
+            min_cosine=bars.min_cosine,
+            min_coverage=bars.min_coverage,
         )
 
     async def _find(
@@ -711,11 +729,15 @@ class ChatMemory:
         exclude_session: str,
         keep_from_turn: int | None = None,
         notes: bool = True,
+        min_cosine: float = MIN_COSINE,
+        min_coverage: float = MIN_COVERAGE,
     ) -> list[Item]:
         """Rank for *query* as the retriever says; the numbers go to *recall*.
 
         Without *notes* (``[memory] recall_notes = "off"``) only turns come out,
-        and no note's replacement of a turn counts.
+        and no note's replacement of a turn counts. *min_cosine* and
+        *min_coverage* are the bars of the ranking; the loose candidates of the
+        ``llm`` retriever take no coverage bar and no vectors.
         """
         mode = self.retriever()
         recall.retriever, recall.fallback = _resolve(mode, embedded.failure)
@@ -732,6 +754,8 @@ class ChatMemory:
                 now=now,
                 exclude_session=exclude_session,
                 keep_from_turn=keep_from_turn,
+                coverage=min_coverage,
+                min_cosine=min_cosine,
             )
             loose = (
                 ranked(
@@ -911,6 +935,8 @@ class ChatMemory:
             exclude_session=info.session_id,
             keep_from_turn=keep_from,
             notes=budget.notes,
+            min_cosine=budget.min_cosine,
+            min_coverage=budget.min_coverage,
         )
         # The block gives the current value only: a turn a newer note replaced
         # stays out unless the message asks about the past. Notes of one subject

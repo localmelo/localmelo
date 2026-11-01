@@ -5,8 +5,9 @@ model, cosine similarity over the vectors joins it, and reciprocal rank fusion
 (k = :data:`RRF_K`) merges the two lists (:func:`ranked`; :func:`pick` keeps the
 best few). The ``llm`` retriever asks :func:`ranked` for loose BM25 candidates
 and lets the chat model choose among them. An item takes part in a list only
-above that list's bar: most of the question's content words for BM25,
-:data:`MIN_COSINE` for vectors, so most turns recall nothing. Documents (not
+above that list's bar: most of the question's content words for BM25
+(:data:`MIN_COVERAGE`), :data:`MIN_COSINE` for vectors, so most turns recall
+nothing; both bars are developer settings. Documents (not
 records) decay with a :data:`HALF_LIFE_DAYS` half-life, records rank first at
 an equal score, and at most :data:`PER_SESSION` documents come from one chat.
 A long turn is indexed as several chunks (:mod:`.index`); a list holds at most
@@ -369,13 +370,15 @@ def ranked(
     exclude_session: str = "",
     keep_from_turn: int | None = None,
     coverage: float = MIN_COVERAGE,
+    min_cosine: float = MIN_COSINE,
 ) -> list[Item]:
     """The items that pass the bars for *query*, best first.
 
     *coverage* is the share of the question's content words an item must hold
-    to join the BM25 list; a small one lets loose candidates through. The
-    turns of *exclude_session* from *keep_from_turn* on (all of them without
-    one) are left out (:func:`in_view`).
+    to join the BM25 list; a small one lets loose candidates through.
+    *min_cosine* is the least similarity a vector needs to join the vector
+    list. The turns of *exclude_session* from *keep_from_turn* on (all of them
+    without one) are left out (:func:`in_view`).
     """
     wanted = gate_terms(query)
     lists: list[list[str]] = []
@@ -391,7 +394,7 @@ def ranked(
             and item.embed_model == embed_model
             and item.vector.shape == query_vector.shape
         ]
-        lists.append([k for c, k in sorted(scored, reverse=True) if c >= MIN_COSINE])
+        lists.append([k for c, k in sorted(scored, reverse=True) if c >= min_cosine])
     fused: dict[str, float] = {}
     for keys in lists:
         for position, key in enumerate(keys):
