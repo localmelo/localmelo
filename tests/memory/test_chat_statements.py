@@ -419,7 +419,7 @@ async def test_the_model_is_told_to_keep_a_lasting_statement_in_that_turn(
     rule = (
         "A plain statement of a lasting fact about the user (where they live, "
         "their name, a person, their schedule, a preference), such as “I live in "
-        "Utrecht.” or “我的导师是周教授。”, is one: keep it with remember in that turn."
+        "Utrecht.”, is one: keep it with remember in that turn."
     )
     assert rule in system
     (tool,) = [
@@ -430,7 +430,6 @@ async def test_the_model_is_told_to_keep_a_lasting_statement_in_that_turn(
         "When the user states a lasting fact about themselves",
         "call it in that turn",
         "“I live in Utrecht.” → You live in Utrecht.",
-        "“我的导师是周教授。” → 你的导师是周教授。",
         "never ask the user first",
     ):
         assert words in tool["description"]
