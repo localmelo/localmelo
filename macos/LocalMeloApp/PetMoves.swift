@@ -2,8 +2,8 @@ import AppKit
 import ImageIO
 import QuartzCore
 
-/// Melo's moves on the desktop: the animated states of `Resources/moves`, the console's own files
-/// (`scripts/build_moves.py`). Each state is a sheet of its frames (`columns` x `rows` cells of one square canvas, left
+/// Melo's moves on the desktop: the animated states the bundled gateway serves (`runtimeMovesFolder`), the console's
+/// own files (`scripts/build_moves.py`). Each state is a sheet of its frames (`columns` x `rows` cells of one square canvas, left
 /// to right and top to bottom) with a duration per frame; `manifest.json` says which plays once, the frame that stands
 /// for it when nothing may move (its poster) and its pose.
 ///
@@ -14,6 +14,8 @@ import QuartzCore
 /// - The same state asked again does not restart. `startup` plays once and holds its last frame.
 /// - When nothing may move (`still`) each state is its poster, and a change is an 80 ms fade.
 /// - A state asked for as a still (`poster`) shows its poster and holds it, with the fade of any other change.
+/// - A state whose sheet cannot be read shows its poster file (`poster-<state>.webp`) instead, held; with neither the
+///   pet keeps what it shows.
 /// - A pet that cannot be seen stops where it is (`run(false)`) and goes on from there.
 ///
 /// The frames are a key-frame animation of the layer's `contentsRect` over the state's sheet, run by Core Animation;
@@ -108,6 +110,12 @@ func petFramesAnimation(_ timeline: PetMoveTimeline, manifest: PetMovesManifest,
     return animation
 }
 
+/// A WebP (or any image) decoded in full now, so drawing it later costs nothing; nil when it cannot be read.
+func petDecoded(_ url: URL) -> CGImage? {
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+    return CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
+}
+
 /// Plays the moves on one layer (`layer`, the canvas, placed by its owner). Only this player draws on it.
 final class PetMovePlayer: NSObject, CAAnimationDelegate {
     let layer = CALayer()
@@ -123,10 +131,12 @@ final class PetMovePlayer: NSObject, CAAnimationDelegate {
     private let outgoing = CALayer()
     private let folder: URL
     private var sheets: [PetMove: CGImage] = [:]
+    private var posters: [PetMove: CGImage] = [:]
     private var generation = 0
 
-    /// `folder` holds manifest.json and the sheets; nil when the manifest cannot be read or `attention`'s sheet is
-    /// missing. `attention` is decoded at once, so the state that interrupts never waits on the disk.
+    /// `folder` holds manifest.json, the sheets and the posters; nil when the manifest cannot be read or `attention`'s
+    /// sheet cannot be decoded. `attention` is decoded at once, so the state that interrupts never waits on the disk;
+    /// the other five are decoded off the main thread right after, so asking for one later costs no hitch.
     init?(folder: URL, side: CGFloat) {
         guard let data = try? Data(contentsOf: folder.appendingPathComponent("manifest.json")),
               let manifest = petMovesManifest(data) else { return nil }
@@ -144,16 +154,35 @@ final class PetMovePlayer: NSObject, CAAnimationDelegate {
         }
         outgoing.opacity = 0
         guard sheet(.attention) != nil else { return nil }
+        let files = PetMove.allCases.filter { $0 != .attention }.compactMap { move in
+            manifest.states[move].map { (move, folder.appendingPathComponent($0.file)) }
+        }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let decoded = files.compactMap { move, url in petDecoded(url).map { (move, $0) } }
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                for (move, image) in decoded where self.sheets[move] == nil { self.sheets[move] = image }
+            }
+        }
     }
 
-    /// The sheet of `move`, decoded once.
+    /// Whether the sheet of `move` is decoded and ready (the background decode, or a first request, did it).
+    func isReady(_ move: PetMove) -> Bool { sheets[move] != nil }
+
+    /// The sheet of `move`, decoded once: by the background decode, or here if it is asked for first.
     private func sheet(_ move: PetMove) -> CGImage? {
         if let image = sheets[move] { return image }
-        guard let timeline = manifest.states[move],
-              let source = CGImageSourceCreateWithURL(folder.appendingPathComponent(timeline.file) as CFURL, nil),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
+        guard let timeline = manifest.states[move], let image = petDecoded(folder.appendingPathComponent(timeline.file))
         else { return nil }
         sheets[move] = image
+        return image
+    }
+
+    /// The poster of `move` alone (`poster-<state>.webp`), for a state whose sheet cannot be read.
+    private func posterFile(_ move: PetMove) -> CGImage? {
+        if let image = posters[move] { return image }
+        guard let image = petDecoded(folder.appendingPathComponent("poster-\(move.rawValue).webp")) else { return nil }
+        posters[move] = image
         return image
     }
 
@@ -163,7 +192,11 @@ final class PetMovePlayer: NSObject, CAAnimationDelegate {
     @discardableResult
     func set(_ move: PetMove, once playOnce: Bool = false, poster held: Bool = false, restart: Bool = false) -> Bool {
         guard restart || move != wanted || held != poster else { return true }
-        guard let timeline = manifest.states[move], let image = sheet(move) else { return false }
+        guard let timeline = manifest.states[move] else { return false }
+        // A sheet that cannot be read gives way to the state's poster file, shown whole and held.
+        let sheetImage = sheet(move)
+        guard let image = sheetImage ?? posterFile(move) else { return false }
+        let whole = sheetImage == nil
         let old = wanted
         // What the person sees now, frozen, before any animation is taken off: the next state fades from it.
         let frozen = old == nil ? nil : capture()
@@ -181,8 +214,9 @@ final class PetMovePlayer: NSObject, CAAnimationDelegate {
         incoming.contents = image
         incoming.opacity = 1
         // The model value is where the state rests: its poster when still or held, else the frame it holds at its end
-        // (one that plays once) or starts from.
-        incoming.contentsRect = manifest.cell(still || held ? timeline.poster : once ? timeline.seconds.count - 1 : 0)
+        // (one that plays once) or starts from; the whole picture for a poster file.
+        incoming.contentsRect = whole ? CGRect(x: 0, y: 0, width: 1, height: 1)
+            : manifest.cell(still || held ? timeline.poster : once ? timeline.seconds.count - 1 : 0)
         CATransaction.commit()
         if fade > 0, frozen != nil {
             for (piece, from, to) in [(outgoing, 1.0, 0.0), (incoming, 0.0, 1.0)] {
@@ -194,7 +228,7 @@ final class PetMovePlayer: NSObject, CAAnimationDelegate {
         }
         let token = generation
         if held { return true }
-        if still {
+        if still || whole {
             // A still state that plays once has ended as soon as it shows: its poster is where it holds.
             if once { DispatchQueue.main.async { [weak self] in self?.ended(move, token) } }
             return true

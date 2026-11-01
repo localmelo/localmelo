@@ -373,9 +373,12 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
     python.chmod(0o755)
     for logo in ("MenuBarLogo.png", "MenuBarLogo@2x.png"):  # the menu-bar item's logo
         shutil.copy(ROOT / "macos/assets" / logo, bundle / "Resources" / logo)
+    # The pet's moves, its stills and the start window's portrait: where the bundled gateway serves them.
     shutil.copytree(
-        ROOT / "support/gateway/static/moves", bundle / "Resources/moves"
-    )  # the pet's moves, its stills and the start window's portrait
+        ROOT / "support/gateway/static/moves",
+        python.parent.parent
+        / "lib/python3.11/site-packages/localmelo/support/gateway/static/moves",
+    )
     source = (ROOT / "macos/LocalMeloApp/main.swift").read_text()
     injections = {
         # The system's panel and Finder cannot run here: the panel answers the folder the test names.
@@ -554,18 +557,12 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
         [
             "/usr/bin/xcrun",
             "swiftc",
-            str(ROOT / "macos/LocalMeloApp/GatewayPolicy.swift"),
-            str(ROOT / "macos/LocalMeloApp/L10n.swift"),
-            str(ROOT / "macos/LocalMeloApp/FolderBridge.swift"),
-            str(ROOT / "macos/LocalMeloApp/StatusView.swift"),
-            str(ROOT / "macos/LocalMeloApp/MenuBar.swift"),
-            str(ROOT / "macos/LocalMeloApp/PetPolicy.swift"),
-            str(ROOT / "macos/LocalMeloApp/PetMoves.swift"),
-            str(ROOT / "macos/LocalMeloApp/MenuWords.swift"),
-            str(ROOT / "macos/LocalMeloApp/MotionGate.swift"),
-            str(ROOT / "macos/LocalMeloApp/PetPanel.swift"),
-            str(ROOT / "macos/LocalMeloApp/PillPolicy.swift"),
-            str(ROOT / "macos/LocalMeloApp/PillPanel.swift"),
+            # Every source of the app but its own main, which the test's copy above replaces.
+            *(
+                str(path)
+                for path in sorted((ROOT / "macos/LocalMeloApp").glob("*.swift"))
+                if path.name != "main.swift"
+            ),
             str(main),
             "-o",
             str(executable),

@@ -121,16 +121,17 @@ precondition(snap(health(server: #"{"reachable":false}"#)) == nil)
 precondition(snap(health(items: [reading], server: #"{"reachable":true}"#))!.model.state == .working)
 precondition(snap(health(items: [reading], server: #"{"reachable":null}"#))!.model.state == .working)
 
-// A finished run: "Done: <title>" for 6 s, "Stopped: <title>" for 10 s, counted from when it ended and the age of the reply.
+// A finished run: "Done: <title>" and "Stopped: <title>" for 8 s each (the pet's and the console's), counted from when it
+// ended and the age of the reply.
 let done = snap(health(recent: ended("done", "1.5")), age: 0.5)!
 precondition(done.model.state == .done && done.model.text == "Done: Slides" && done.model.glyph == "\u{2713}")
-precondition(done.model.portrait == .done && done.model.click == .route("#/s/c9") && abs(done.expiresIn! - 4) < 1e-9)
-precondition(snap(health(recent: ended("done", "5.9")))!.expiresIn! > 0 && snap(health(recent: ended("done", "6.0"))) == nil)
-precondition(snap(health(recent: ended("done", "5.0")), age: 1.5) == nil)  // the reply is old: the 6 s are used up
-let failed = snap(health(recent: ended("failed", "9.9", title: "Fix CI", kind: "task", id: "t4")))!
+precondition(done.model.portrait == .done && done.model.click == .route("#/s/c9") && abs(done.expiresIn! - 6) < 1e-9)
+precondition(snap(health(recent: ended("done", "7.9")))!.expiresIn! > 0 && snap(health(recent: ended("done", "8.0"))) == nil)
+precondition(snap(health(recent: ended("done", "7.0")), age: 1.5) == nil)  // the reply is old: the 8 s are used up
+let failed = snap(health(recent: ended("failed", "7.9", title: "Fix CI", kind: "task", id: "t4")))!
 precondition(failed.model.state == .failed && failed.model.text == "Stopped: Fix CI" && failed.model.glyph == "\u{2717}")
 precondition(failed.model.portrait == .error && failed.model.click == .route("#/tasks/t4"))
-precondition(snap(health(recent: ended("failed", "10.0"))) == nil)
+precondition(snap(health(recent: ended("failed", "8.0"))) == nil)
 // A run the person stopped shows nothing; a title that is missing leaves the bare word; a run's end has no page.
 precondition(snap(health(recent: ended("stopped", "1"))) == nil)
 precondition(snap(health(recent: ended("done", "1", title: "")))!.model.text == "Done")
@@ -192,22 +193,22 @@ precondition(d.pill?.state == .waiting && d.pill?.text == "Waiting for your appr
 d = ask(health(items: [tests]), reply: 12.4, now: 12.4)
 precondition(d.pill?.state == .working && d.pill?.text == "Running the tests")
 
-// The end: "Done: <title>" for 6 s counted from when the run ended; then the pet comes back showing "done", once.
+// The end: "Done: <title>" for 8 s counted from when the run ended; then the pet comes back showing "done", once.
 d = ask(health(recent: ended("done", "0.5")), reply: 20, now: 20)
 precondition(d.pill?.state == .done && d.pill?.text == "Done: Slides" && d.pill?.more == 0)
-precondition(d.recheckIn == 5.5)
-d = ask(health(recent: ended("done", "0.5")), reply: 20, now: 25.25)
+precondition(d.recheckIn == 7.5)
+d = ask(health(recent: ended("done", "0.5")), reply: 20, now: 27.25)
 precondition(d.pill?.state == .done && !d.petShowsDone && d.recheckIn == 0.25)
-d = ask(health(recent: ended("done", "0.5")), reply: 20, now: 25.5)
+d = ask(health(recent: ended("done", "0.5")), reply: 20, now: 27.5)
 precondition(d.pill == nil && d.petShowsDone && d.recheckIn == nil)
-d = ask(health(recent: ended("done", "2.4")), reply: 22, now: 26)
+d = ask(health(recent: ended("done", "2.4")), reply: 22, now: 28)
 precondition(d.pill == nil && !d.petShowsDone)  // asked again: it was told once
-// A failed end shows 10 s and the pet comes back without "done".
+// A failed end shows 8 s and the pet comes back without "done".
 d = ask(health(recent: ended("failed", "1", title: "Fix CI")), reply: 30, now: 30)
 precondition(d.pill?.state == .failed && d.pill?.text == "Stopped: Fix CI")
-d = ask(health(recent: ended("failed", "1", title: "Fix CI")), reply: 30, now: 38.5)
+d = ask(health(recent: ended("failed", "1", title: "Fix CI")), reply: 30, now: 36.5)
 precondition(d.pill?.state == .failed)
-d = ask(health(recent: ended("failed", "1", title: "Fix CI")), reply: 30, now: 39)
+d = ask(health(recent: ended("failed", "1", title: "Fix CI")), reply: 30, now: 37)
 precondition(d.pill == nil && !d.petShowsDone)
 // Work that starts during the "Done" takes the pill over at once.
 d = ask(health(recent: ended("done", "1")), reply: 40, now: 40)

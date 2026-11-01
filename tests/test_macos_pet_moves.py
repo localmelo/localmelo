@@ -113,32 +113,49 @@ def test_the_pet_wakes_up_once_and_plays_now_and_then_while_it_rests(
         tmp_path,
         POLICY,
         r"""
-precondition(petPlayAfter == 20 && petPlayEvery == 300)
+precondition(petPlayAfter == 20 && petPlayEvery == 300 && petSitFor == 8)
 let start = Date(timeIntervalSince1970: 1_000_000)
 func at(_ seconds: Double) -> Date { start.addingTimeInterval(seconds) }
 var picker = PetMovePicker()
-// The first move at rest is the wake-up, held until it ends.
+// The first move at rest is the wake-up, held until it ends; then Melo sits on its last frame for 8 s, and rests.
 precondition(picker.pick(.resting, thinking: false, still: false, now: at(0))! == (.startup, false))
 precondition(picker.pick(.resting, thinking: false, still: false, now: at(30))! == (.startup, false))
-picker.ended(.startup)
-precondition(picker.pick(.resting, thinking: false, still: false, now: at(31))! == (.idleRest, false))
+picker.ended(.startup, now: at(31))
+precondition(picker.pick(.resting, thinking: false, still: false, now: at(31))! == (.startup, false))
+precondition(picker.pick(.resting, thinking: false, still: false, now: at(38.9))! == (.startup, false))
+precondition(picker.pick(.resting, thinking: false, still: false, now: at(39))! == (.idleRest, false))
+picker.ended(.startup, now: at(40))  // a late end of the wake-up never sits again
+precondition(picker.pick(.resting, thinking: false, still: false, now: at(41))! == (.idleRest, false))
 // 20 s into the rest: one play, to its end, then rest; not again for 5 minutes.
-precondition(picker.pick(.resting, thinking: false, still: false, now: at(50))! == (.idleRest, false))
-precondition(picker.pick(.resting, thinking: false, still: false, now: at(51))! == (.idlePlay, true))
-precondition(picker.pick(.resting, thinking: false, still: false, now: at(55))! == (.idlePlay, true))
-picker.ended(.idlePlay)
 precondition(picker.pick(.resting, thinking: false, still: false, now: at(58))! == (.idleRest, false))
-precondition(picker.pick(.resting, thinking: false, still: false, now: at(350))! == (.idleRest, false))
-precondition(picker.pick(.resting, thinking: false, still: false, now: at(351))! == (.idlePlay, true))
+precondition(picker.pick(.resting, thinking: false, still: false, now: at(59))! == (.idlePlay, true))
+precondition(picker.pick(.resting, thinking: false, still: false, now: at(60))! == (.idlePlay, true))
+picker.ended(.idlePlay, now: at(65))
+precondition(picker.pick(.resting, thinking: false, still: false, now: at(66))! == (.idleRest, false))
+precondition(picker.pick(.resting, thinking: false, still: false, now: at(358))! == (.idleRest, false))
+precondition(picker.pick(.resting, thinking: false, still: false, now: at(359))! == (.idlePlay, true))
 // Asleep it only rests, and a play under way gives way.
-precondition(picker.pick(.sleeping, thinking: false, still: false, now: at(352))! == (.idleRest, false))
+precondition(picker.pick(.sleeping, thinking: false, still: false, now: at(360))! == (.idleRest, false))
 // Work and a wait take over at once; the rest after them starts again from its beginning.
 precondition(picker.pick(.working(1), thinking: false, still: false, now: at(400))! == (.working, false))
 precondition(picker.pick(.waiting, thinking: false, still: false, now: at(401))! == (.attention, false))
 precondition(picker.pick(.resting, thinking: false, still: false, now: at(402))! == (.idleRest, false))
 precondition(picker.pick(.resting, thinking: false, still: false, now: at(700))! == (.idlePlay, true))
-// No moves for an ending (a still shows): the picker says nothing.
+// No moves for an ending (a still shows): the picker says nothing, and the rest after it starts over.
 precondition(picker.pick(.done, thinking: false, still: false, now: at(701)) == nil)
+precondition(picker.restSince == nil && !picker.playing)
+// A still ends the sitting after the wake-up at once: back at rest the pet lies down.
+var sitting = PetMovePicker()
+_ = sitting.pick(.resting, thinking: false, still: false, now: at(0))
+sitting.ended(.startup, now: at(3))
+precondition(sitting.pick(.failed, thinking: false, still: false, now: at(4)) == nil)
+precondition(sitting.pick(.resting, thinking: false, still: false, now: at(5))! == (.idleRest, false))
+// So does work: no sitting is left over after it.
+var busy2 = PetMovePicker()
+_ = busy2.pick(.resting, thinking: false, still: false, now: at(0))
+busy2.ended(.startup, now: at(3))
+precondition(busy2.pick(.working(1), thinking: false, still: false, now: at(4))! == (.working, false))
+precondition(busy2.pick(.resting, thinking: false, still: false, now: at(5))! == (.idleRest, false))
 
 // A pet that is first seen while work runs never plays the wake-up later.
 var busy = PetMovePicker()
@@ -146,7 +163,7 @@ precondition(busy.pick(.working(1), thinking: true, still: false, now: at(0))! =
 precondition(busy.pick(.resting, thinking: false, still: false, now: at(1))! == (.idleRest, false))
 // When nothing may move there is no play.
 var still = PetMovePicker()
-still.ended(.startup)
+still.ended(.startup, now: at(-100))
 precondition(still.pick(.resting, thinking: false, still: true, now: at(0))! == (.idleRest, false))
 precondition(still.pick(.resting, thinking: false, still: true, now: at(1000))! == (.idleRest, false))
 """,
@@ -278,30 +295,66 @@ player.run(true)
 precondition(player.running && player.layer.speed == 1)
 // A folder without the files gives no player, and no pet.
 precondition(PetMovePlayer(folder: URL(fileURLWithPath: "/nonexistent"), side: 100) == nil)
+// A sheet that cannot be read: its poster file stands in, whole and held; without that either, nothing changes.
+let unreadable = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("moves-unreadable-\(getpid())")
+try? FileManager.default.removeItem(at: unreadable)
+try! FileManager.default.copyItem(at: folder, to: unreadable)
+try! Data("not a picture".utf8).write(to: unreadable.appendingPathComponent("working.webp"))
+let fallback = PetMovePlayer(folder: unreadable, side: 100)!
+let standIn = fallback.layer.sublayers![1]
+precondition(fallback.set(.working) && fallback.wanted == .working)
+precondition(standIn.animation(forKey: "frames") == nil && standIn.contents != nil)
+precondition(standIn.contentsRect == CGRect(x: 0, y: 0, width: 1, height: 1))
+try! FileManager.default.removeItem(at: unreadable.appendingPathComponent("poster-working.webp"))
+let bare = PetMovePlayer(folder: unreadable, side: 100)!
+precondition(bare.set(.idleRest) && !bare.set(.working) && bare.wanted == .idleRest)
+try? FileManager.default.removeItem(at: unreadable)
+// The other five sheets decode off the main thread, soon after the player is made.
+let early = PetMovePlayer(folder: folder, side: 100)!
+precondition(early.isReady(.attention))
+let deadline = Date().addingTimeInterval(10)
+while !PetMove.allCases.allSatisfy({{ early.isReady($0) }}) && Date() < deadline {{
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+}}
+precondition(PetMove.allCases.allSatisfy {{ early.isReady($0) }})
+// The app reads the moves where the bundled gateway serves them.
+let resources = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("resources-\(getpid())")
+let served = resources.appendingPathComponent("runtime/bin/python/lib/python3.11/site-packages/localmelo/support/gateway/static/moves")
+precondition(runtimeMovesFolder(resources: resources) == nil)
+try! FileManager.default.createDirectory(at: served, withIntermediateDirectories: true)
+precondition(runtimeMovesFolder(resources: resources) == nil)  // no manifest: not the moves
+try! Data("{{}}".utf8).write(to: served.appendingPathComponent("manifest.json"))
+precondition(runtimeMovesFolder(resources: resources)?.path == served.path)
+try? FileManager.default.removeItem(at: resources)
 """,
     )
 
 
 def test_one_player_draws_the_whole_pet_and_the_stills_keep_their_words() -> None:
     panel = (APP / "PetPanel.swift").read_text()
-    # The words are the mood's; then its still, held, or its move.
+    # The words are the mood's, written when the mood or the language changes; then its still, held, or its move.
     refresh = panel.split("private func refresh()")[1].split("private func applyMoves")[
         0
     ]
     assert refresh.index("view.describe(mood)") < refresh.index("showMoves()")
-    assert refresh.index("petStill(mood)") < refresh.index("picker.pick(")
+    assert "if !described || mood != old { view.describe(mood) }" in refresh
+    assert "described = false\n        if isShown { refresh() }" in panel
+    # The picker hears every mood (a still ends a rest, a play and the sitting), then the still wins.
+    assert refresh.index("picker.pick(") < refresh.index("petStill(mood)")
     assert "moves.set(poster, poster: true)" in refresh
     # The moves' layer is the pet: added once, never hidden; no other picture is drawn on the panel.
     assert panel.count("view.layer?.addSublayer(moves.layer)") == 1
     assert "isHidden" not in panel and "CGImageSource" not in panel
     # Without the moves there is no pet.
     assert "guard moves != nil, place() else { return }" in panel
-    # The app hands the pet, the start window and the pill one moves folder.
+    # The app hands the pet, the start window and the pill one moves folder: the one the bundled gateway serves.
     main = (APP / "main.swift").read_text()
+    runtime = "Bundle.main.resourceURL.flatMap(runtimeMovesFolder(resources:))"
     assert (
-        'let moves = Bundle.main.resourceURL?.appendingPathComponent("moves")' in main
+        f"let moves = {runtime}" in main and f"StatusView(pictures: {runtime})" in main
     )
     assert "movesFolder: moves" in main and "PillController(pictures: moves," in main
+    assert 'appendingPathComponent("moves")' not in main
     # No timer drives a frame: Core Animation runs the key frames.
     moves = (APP / "PetMoves.swift").read_text()
     assert "Timer" not in moves and "CADisplayLink" not in moves

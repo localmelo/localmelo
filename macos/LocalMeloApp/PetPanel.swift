@@ -157,8 +157,14 @@ final class PetController: NSObject {
             self.applyMoves()
         }
         moves?.onEnded = { [weak self] move in
-            self?.picker.ended(move)
+            self?.picker.ended(move, now: Date())
             if self?.isShown == true { self?.refresh() }
+            // The pet sits after the wake-up, then lies down: the next look comes when the sitting ends.
+            if move == .startup {
+                DispatchQueue.main.asyncAfter(deadline: .now() + petSitFor + 0.05) { [weak self] in
+                    if self?.isShown == true { self?.refresh() }
+                }
+            }
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                object: nil, queue: .main) { [weak self] _ in
@@ -183,6 +189,7 @@ final class PetController: NSObject {
 
     /// The console's language changed: the pet's label is written again.
     func languageChanged() {
+        described = false
         if isShown { refresh() }
     }
 
@@ -249,21 +256,22 @@ final class PetController: NSObject {
         mood = petMood(health: health, stopped: stopped, sinceTouch: Date().timeIntervalSince(touched))
         if let until = doneUntil, mood == .resting { mood = Date() < until ? .done : mood }
         if let until = doneUntil, Date() >= until { doneUntil = nil }
+        // The words are written when the mood or the language changes, not on every reply.
         if !described || mood != old { view.describe(mood) }
         described = true
         showMoves()
     }
 
     /// Shows what the mood looks like: its still (`petStill`), held, or its move, played. The words (`describe`) are
-    /// the mood's either way.
+    /// the mood's either way. The picker hears every mood, so a still ends a rest, a play and the sitting.
     private func showMoves() {
         guard let moves = moves else { return }
         let still = !petMovesMayMove(environment)
         moves.setStill(still)  // before the state, so it starts as it should show
+        let pick = picker.pick(mood, thinking: health.map(petThinking) ?? false, still: still, now: Date())
         if let poster = petStill(mood) {
             moves.set(poster, poster: true)
-        } else if let (move, once) = picker.pick(mood, thinking: health.map(petThinking) ?? false, still: still,
-                                                 now: Date()) {
+        } else if let (move, once) = pick {
             moves.set(move, once: once)
         }
         applyMoves()

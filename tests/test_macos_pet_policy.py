@@ -98,12 +98,23 @@ precondition(mood(health(running: 2, waiting: waits)) == .waiting)
 precondition(mood(health(waiting: waits, recent: ended("done", "1.0"))) == .waiting)
 precondition(mood(health(running: 3)) == .working(3))
 precondition(mood(health(running: 1, recent: ended("done", "0.5"))) == .working(1))
-// A finished run shows for a short time: done for 6 s, an error for 10 s, then rest.
+// A finished run shows for a short time, 8 s as in the console's header, done or failed; then rest.
+precondition(petDoneFor == 8 && petFailedFor == 8)
 precondition(mood(health(recent: ended("done", "0.0"))) == .done)
-precondition(mood(health(recent: ended("done", "5.9"))) == .done)
-precondition(mood(health(recent: ended("done", "6.0"))) == .resting)
-precondition(mood(health(recent: ended("failed", "9.9", kind: "task"))) == .failed)
-precondition(mood(health(recent: ended("failed", "10.0"))) == .resting)
+precondition(mood(health(recent: ended("done", "7.9"))) == .done)
+precondition(mood(health(recent: ended("done", "8.0"))) == .resting)
+precondition(mood(health(recent: ended("failed", "7.9", kind: "task"))) == .failed)
+precondition(mood(health(recent: ended("failed", "8.0"))) == .resting)
+// No model set up, or a model server that does not answer: as the console's header says, before a wait or work.
+func model(_ fields: String, running: Int = 0, waiting: String = "[]") -> Data {
+    Data(#"{"api":2,\#(fields),"status":{"running":{"chats":\#(running),"tasks":0,"runs":0,"terminal":0},"waiting":\#(waiting),"recent":null}}"#.utf8)
+}
+precondition(mood(model(#""configured":false"#)) == .noModel)
+precondition(mood(model(#""configured":false,"model_server":{"reachable":false}"#, waiting: waits)) == .noModel)
+precondition(mood(model(#""configured":true,"model_server":{"reachable":false}"#, running: 2)) == .unreachable)
+precondition(mood(model(#""configured":true,"model_server":{"reachable":true}"#, running: 2)) == .working(2))
+precondition(mood(model(#""model_server":{"reachable":null}"#)) == .resting)  // not known: nothing wrong
+precondition(mood(model(#""configured":false"#), stopped: true) == .stopped)
 // A run the person stopped, or an outcome this app does not know, changes nothing.
 precondition(mood(health(recent: ended("stopped", "1.0"))) == .resting)
 precondition(mood(health(recent: ended("exploded", "1.0"))) == .resting)
@@ -140,6 +151,8 @@ precondition(PetMood.waiting.label == "Melo, waiting for your approval.")
 precondition(PetMood.done.label == "Melo, done.")
 precondition(PetMood.failed.label == "Melo, the last run did not finish.")
 precondition(PetMood.stopped.label == "Melo, localmelo stopped.")
+precondition(PetMood.noModel.label == "Melo, no model is set up yet.")
+precondition(PetMood.unreachable.label == "Melo, the model server is not reachable.")
 precondition(PetMood.waiting.help == "Opens what waits for your approval")
 precondition(PetMood.resting.help == "Opens localmelo" && PetMood.stopped.help == "Opens localmelo")
 
@@ -244,7 +257,8 @@ def test_each_mood_shows_moves_or_a_still_never_both(tmp_path: Path) -> None:
     run_swift(
         tmp_path,
         r"""
-let moods: [PetMood] = [.unknown, .resting, .sleeping, .working(1), .waiting, .done, .failed, .stopped]
+let moods: [PetMood] = [.unknown, .resting, .sleeping, .working(1), .waiting, .done, .failed, .stopped, .noModel,
+                        .unreachable]
 // Exactly one of the two for every mood, thinking or not.
 for mood in moods {
     for thinking in [false, true] {
@@ -255,6 +269,7 @@ for mood in moods {
 // and a stopped app are the thinking pose, never a healthy rest.
 precondition(petStill(.unknown) == .idleRest && petStill(.done) == .startup)
 precondition(petStill(.failed) == .thinking && petStill(.stopped) == .thinking)
+precondition(petStill(.noModel) == .thinking && petStill(.unreachable) == .thinking)
 // Every other mood plays: work types, the model alone thinks, a wait raises a paw, rest and sleep lie down.
 precondition(petMove(.working(2), thinking: false) == .working && petMove(.working(2), thinking: true) == .thinking)
 precondition(petMove(.waiting, thinking: true) == .attention)

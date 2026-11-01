@@ -361,9 +361,14 @@ def test_build_assembles_locked_runtime_and_swift(
     assert (resources / "MenuBarLogo@2x.png").read_bytes() == b"MenuBarLogo@2x.png"
     # No other pictures of Melo ride along: the moves are the only ones.
     assert not (resources / "akita").exists()
-    # Melo's moves are the console's files, under Resources/moves, where the pet reads them.
+    # Melo's moves are the console's files, once: inside the package the gateway serves, where the app reads them.
+    served = (
+        runtime
+        / "python/lib/python3.11/site-packages/localmelo/support/gateway/static/moves"
+    )
     for name in ("manifest.json", "working.webp"):
-        assert (resources / "moves" / name).read_bytes() == name.encode()
+        assert (served / name).read_bytes() == name.encode()
+    assert not (resources / "moves").exists()
     assert (
         runtime / "python/lib/python3.11/site-packages/localmelo/support/__init__.py"
     ).is_file()

@@ -38,9 +38,10 @@ func recentOutcome(_ data: Data) -> RecentOutcome? {
                          title: plainLine(entry["title"] as? String, limit: 200))
 }
 
-/// Seconds a finished run shows as done, and a failed one as an error, before the pet goes back to rest.
-let petDoneFor: TimeInterval = 6
-let petFailedFor: TimeInterval = 10
+/// Seconds a finished run shows as done, and a failed one as an error, before the pet goes back to rest: the console
+/// panel's 8 s for both.
+let petDoneFor: TimeInterval = 8
+let petFailedFor: TimeInterval = 8
 /// Seconds of quiet before the pet falls asleep.
 let petSleepAfter: TimeInterval = 60
 
@@ -48,6 +49,9 @@ let petSleepAfter: TimeInterval = 60
 /// moods look the same.
 enum PetMood: Equatable {
     case unknown, resting, sleeping, working(Int), waiting, done, failed, stopped
+    /// No model is set up (`configured` false), or the model server does not answer (`model_server.reachable`
+    /// false): the console's header says the same and shows its error picture.
+    case noModel, unreachable
 
     /// What VoiceOver reads, and what hovering shows.
     var label: String {
@@ -60,6 +64,8 @@ enum PetMood: Equatable {
         case .done: return L10n.t("app.pet.done", "Melo, done.")
         case .failed: return L10n.t("app.pet.failed", "Melo, the last run did not finish.")
         case .stopped: return L10n.t("app.pet.stopped", "Melo, localmelo stopped.")
+        case .noModel: return L10n.t("app.pet.noModel", "Melo, no model is set up yet.")
+        case .unreachable: return L10n.t("app.pet.unreachable", "Melo, the model server is not reachable.")
         }
     }
 
@@ -70,13 +76,16 @@ enum PetMood: Equatable {
     }
 }
 
-/// The pet's mood from the last health reply (nil: none yet, or the gateway did not answer). First match wins:
-/// the app's own failure, then a wait, then work, then a run that just finished, then rest. `sinceTouch` is the
+/// The pet's mood from the last health reply (nil: none yet, or the gateway did not answer). First match wins, in the
+/// console header's order: the app's own failure, then no model or a model server that does not answer, then a wait,
+/// then work, then a run that just finished, then rest. `sinceTouch` is the
 /// seconds since the person last touched the pet (hover, click, drag) or since it appeared; the quiet that puts
 /// it to sleep is the shorter of that and the age of the newest finished run, so a touch wakes it into rest.
 func petMood(health: Data?, stopped: Bool, sinceTouch: TimeInterval) -> PetMood {
     if stopped { return .stopped }
     guard let data = health, let counts = runningCounts(data) else { return .unknown }
+    if healthConfigured(data) == false { return .noModel }
+    if modelServerReachable(data) == false { return .unreachable }
     if !waitingItems(data).isEmpty { return .waiting }
     if counts.total > 0 { return .working(counts.total) }
     let recent = recentOutcome(data)
@@ -87,6 +96,12 @@ func petMood(health: Data?, stopped: Bool, sinceTouch: TimeInterval) -> PetMood 
     let quiet = min(sinceTouch, recent?.endedAgo ?? .infinity)
     guard !quiet.isNaN, quiet >= petSleepAfter else { return .resting }
     return .sleeping
+}
+
+/// `configured` of `GET /api/health`: false while no model is set up, nil when the reply does not say.
+func healthConfigured(_ data: Data) -> Bool? {
+    guard let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+    return body["configured"] as? Bool
 }
 
 /// Melo's moves: the animated states the desktop pet plays (`PetMoves.swift`), the files and the rules the console's
@@ -104,18 +119,19 @@ func petMove(_ mood: PetMood, thinking: Bool) -> PetMove? {
     case .waiting: return .attention
     case .working: return thinking ? .thinking : .working
     case .resting, .sleeping: return .idleRest
-    case .unknown, .done, .failed, .stopped: return nil
+    case .unknown, .done, .failed, .stopped, .noModel, .unreachable: return nil
     }
 }
 
 /// The still a mood shows, as the state whose poster it is; nil where the mood has moves. Nothing known yet lies at
-/// rest; a run that just finished is the end of the wake-up (sitting up, smiling); a failure and a stopped app are the
-/// thinking pose, so they never look like a healthy rest. The words and the activity pill's mark say which it is.
+/// rest; a run that just finished is the end of the wake-up (sitting up, smiling); a failure, a stopped app, no model
+/// and a model server that does not answer are the thinking pose, so they never look like a healthy rest. The words
+/// say which it is.
 func petStill(_ mood: PetMood) -> PetMove? {
     switch mood {
     case .unknown: return .idleRest
     case .done: return .startup
-    case .failed, .stopped: return .thinking
+    case .failed, .stopped, .noModel, .unreachable: return .thinking
     case .resting, .sleeping, .working, .waiting: return nil
     }
 }
@@ -135,24 +151,35 @@ func petThinking(_ data: Data) -> Bool {
 /// once every `petPlayEvery`; asleep it only rests. The console's portrait plays by the same numbers.
 let petPlayAfter: TimeInterval = 20
 let petPlayEvery: TimeInterval = 300
+/// Seconds the pet sits after the wake-up, on its last frame, before it lies down to rest (`SIT_MS` of the console).
+let petSitFor: TimeInterval = 8
 
 /// The state a move shows, and whether a looping state plays once. The app's first move is the wake-up (`startup`,
-/// once, holding its sitting end) if the pet is at rest then; a play begins by the rule above and goes on to its
-/// end. `ended` hears a state that played once reach its end.
+/// once) if the pet is at rest then; it sits on its last frame for `petSitFor` seconds, then rests; a play begins by
+/// the rule above and goes on to its end. Any other mood ends the wake-up, the sitting, the rest and a play at once.
+/// `ended` hears a state that played once reach its end.
 struct PetMovePicker: Equatable {
     private(set) var startup = true
+    private(set) var sitUntil: Date?
     private(set) var restSince: Date?
     private(set) var playedAt = Date.distantPast
     private(set) var playing = false
 
-    /// `still`: nothing may move (posters only), so there is no play.
+    /// `still`: nothing may move (posters only), so there is no play. Nil for a mood without moves (a still).
     mutating func pick(_ mood: PetMood, thinking: Bool, still: Bool, now: Date) -> (move: PetMove, once: Bool)? {
-        guard let move = petMove(mood, thinking: thinking) else { return nil }
+        guard let move = petMove(mood, thinking: thinking) else {
+            (sitUntil, restSince, playing) = (nil, nil, false)
+            return nil
+        }
         guard move == .idleRest else {
-            (startup, restSince, playing) = (false, nil, false)
+            (startup, sitUntil, restSince, playing) = (false, nil, nil, false)
             return (move, false)
         }
         if startup { return (.startup, false) }
+        if let until = sitUntil {
+            if now < until { return (.startup, false) }
+            sitUntil = nil
+        }
         let since = restSince ?? now
         restSince = since
         guard mood == .resting, !still else {
@@ -165,8 +192,8 @@ struct PetMovePicker: Equatable {
         return playing ? (.idlePlay, true) : (.idleRest, false)
     }
 
-    mutating func ended(_ move: PetMove) {
-        if move == .startup { startup = false }
+    mutating func ended(_ move: PetMove, now: Date) {
+        if move == .startup && startup { (startup, sitUntil) = (false, now.addingTimeInterval(petSitFor)) }
         if move == .idlePlay { playing = false }
     }
 }
@@ -181,6 +208,18 @@ let petMoveSide: CGFloat = 100
 func petMoveFrame(side: CGFloat, anchor: CGPoint, pixels: CGFloat, in size: CGSize, belowPaws: CGFloat) -> CGRect {
     let unit = side / pixels
     return CGRect(x: size.width / 2 - anchor.x * unit, y: belowPaws - (pixels - anchor.y) * unit, width: side, height: side)
+}
+
+/// The moves the bundled gateway serves (`static/moves` of the localmelo package in the bundle's Python, under
+/// `resources`), so the pet, the start window, the pill and the console show the same files; nil when there are none.
+func runtimeMovesFolder(resources: URL) -> URL? {
+    let lib = resources.appendingPathComponent("runtime/bin/python/lib")
+    guard let names = try? FileManager.default.contentsOfDirectory(atPath: lib.path) else { return nil }
+    for name in names.sorted() where name.hasPrefix("python3.") {
+        let folder = lib.appendingPathComponent("\(name)/site-packages/localmelo/support/gateway/static/moves")
+        if FileManager.default.fileExists(atPath: folder.appendingPathComponent("manifest.json").path) { return folder }
+    }
+    return nil
 }
 
 /// What the system says that decides whether the pet may move.

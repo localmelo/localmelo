@@ -87,7 +87,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         // The status view covers the window until the console has loaded, and comes back
         // when it cannot: the window never shows an empty web view.
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 1280, height: 800))
-        statusView = StatusView(pictures: Bundle.main.resourceURL?.appendingPathComponent("moves"))
+        statusView = StatusView(pictures: Bundle.main.resourceURL.flatMap(runtimeMovesFolder(resources:)))
         statusView.frame = content.bounds
         statusView.autoresizingMask = [.width, .height]
         statusView.onAction = { [weak self] action in self?.handle(action) }
@@ -131,7 +131,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
 
     private func createPet() {
         let home = URL(fileURLWithPath: ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory(), isDirectory: true)
-        let moves = Bundle.main.resourceURL?.appendingPathComponent("moves")
+        let moves = Bundle.main.resourceURL.flatMap(runtimeMovesFolder(resources:))
         pet = PetController(settingsURL: home.appendingPathComponent("Library/Application Support/LocalMelo/pet.json"),
                             movesFolder: moves)
         pet.openWindow = { [weak self] in self?.openWindow() }
