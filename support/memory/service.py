@@ -261,6 +261,8 @@ class ChatTurn:
     unsaved_claim: bool = False
     # The oldest turn of this chat the model's window holds (None: not known).
     keep_from_turn: int | None = None
+    # What the model's memory searches found in this turn, first found first.
+    searched: list[Item] = field(default_factory=list)
 
     def event(self) -> dict[str, Any] | None:
         data = self.memory.event()
@@ -273,7 +275,21 @@ class ChatTurn:
         if self.refused:
             data["refused"] = records.NOT_KEPT
         data["unsaved_claim"] = self.unsaved_claim
+        if self.searched:
+            data["searched"] = [item.to_json() for item in self.searched]
         return data
+
+    def add_searched(self, items: Sequence[Item]) -> None:
+        """Note what a search found in this turn; refresh the event if it is new."""
+        known = {item.key for item in self.searched}
+        fresh: list[Item] = []
+        for item in items:
+            if item.key not in known:
+                known.add(item.key)
+                fresh.append(item)
+        if fresh:
+            self.searched.extend(fresh)
+            self.publish()
 
     def publish(self) -> None:
         data = self.event()
@@ -1956,7 +1972,10 @@ class MemoryTools(BaseToolProvider):
         )
         if not items:
             return "Nothing in melo's memory matches that."
-        return "\n".join(f"{n}. {item.prompt}" for n, item in enumerate(items[:k], 1))
+        shown = items[:k]
+        if chat is not None:
+            chat.add_searched(shown)
+        return "\n".join(f"{n}. {item.prompt}" for n, item in enumerate(shown, 1))
 
     async def close(self) -> None:
         return None
