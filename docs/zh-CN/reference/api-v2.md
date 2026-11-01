@@ -499,7 +499,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - 对话会把它已告知的新闻记成一个 `attention.news` 事件（轮次为 `null`；含 `floor`、`tasks`、`sides`），客户端忽略它。
 - 一轮的回执存在被说话的那个对话里。关于别的对话的任务的回执带 `from_main: true` 或 `from_chat`（那个对话的标题）。
 - 主对话的每一页另带 `echoes`，分页方式与 `cards` 相同。
-- `POST /api/front/echoes/{id}` 带 `{"do": "undo" | "apply" | "start" | "level" | "save" | "once" | "cancel" | "revoke", "level"?: "P1" | 1 | "Today"}`，返回 200 `{"echo"}`：撤销 `control` 或 `level` 回执（停止的撤销会以新任务重新开始它）或 `chore_saved` 回执（定时事项被删除）、应用 `suggest`、开始 `ask`、把 `started` 或 `level` 回执的任务设为本人的级别，撤回 `earlier` 回执用到的批准（以 `revoked` 回执答复），或撤销 `sleep` 回执（整次运行被放回；以带 `of` 和 `run_id` 的 `undone` 回执答复，并说明放回了多少条笔记；运行未知或已撤销时为 404 `not_found`）。撤销 `sleep` 回执在每种界面模式下都可用。对 `chore` 回执，`save` 保存定时事项（以 `chore_saved` 回执答复；提醒以 P1 保存，保存前时间已过则为 400），`once` 把它的工作作为一个任务开始（提醒不行：400），`cancel` 什么也不保存（以 `undone` 回执答复）。每个只答复一次（409 `already_answered`）；未知的回执或任务为 404，已保存 50 个事项时 `save` 为 409 `invalid_transition`，与回执不符的 `do` 为 400 `invalid_request`。请求体可带 `session_id`，指明回执在哪个旁支对话里（未知的对话或不是旁支对话为 404）；缺失时是主对话的。
+- `POST /api/front/echoes/{id}` 带 `{"do": "undo" | "apply" | "start" | "level" | "save" | "once" | "cancel" | "revoke", "level"?: "P1" | 1 | "Today"}`，返回 200 `{"echo"}`：撤销 `control` 或 `level` 回执（停止的撤销会以新任务重新开始它）或 `chore_saved` 回执（定时事项被删除）、应用 `suggest`、开始 `ask`、把 `started` 或 `level` 回执的任务设为本人的级别，撤回 `earlier` 回执用到的批准（以 `revoked` 回执答复），或撤销 `sleep` 回执（整次运行被放回；以带 `of` 和 `run_id` 的 `undone` 回执答复，并说明放回了多少条笔记；运行未知或已撤销时什么也不改动，以 200 返回一条说明笔记已经放回去的 `undone` 回执，这一行随之被答复，`/memory undo` 接着处理更早的一条；整理正在进行时立刻返回 409 `sleep_running`，稍后再点即可）。撤销 `sleep` 回执在每种界面模式下都可用。对 `chore` 回执，`save` 保存定时事项（以 `chore_saved` 回执答复；提醒以 P1 保存，保存前时间已过则为 400），`once` 把它的工作作为一个任务开始（提醒不行：400），`cancel` 什么也不保存（以 `undone` 回执答复）。每个只答复一次（409 `already_answered`）；未知的回执或任务为 404，已保存 50 个事项时 `save` 为 409 `invalid_transition`，与回执不符的 `do` 为 400 `invalid_request`。请求体可带 `session_id`，指明回执在哪个旁支对话里（未知的对话或不是旁支对话为 404）；缺失时是主对话的。
 
 
 <a id="a-tasks-question"></a>
@@ -658,6 +658,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 | 409 | `submission_withdrawn` | 该 `client_request_id` 在开始之前已被取消 |
 | 409 | `turn_not_running` | 取消所指的轮次并未在运行 |
 | 409 | `already_answered` | 该审批已经答复 |
+| 409 | `sleep_running` | 整理正在处理笔记时撤销 `sleep` 回执 |
 | 502 | `agent_start_failed` | 会话的智能体无法启动；消息为构建器的错误 |
 
 <a id="what-a-turn-answers-with"></a>

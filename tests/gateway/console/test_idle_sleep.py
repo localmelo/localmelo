@@ -24,6 +24,7 @@ from fastapi import FastAPI
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.console.front import ECHO_EVENT
 from localmelo.support.gateway.console.idle_sleep import (
+    CLOCK_BACK_S,
     META_KEY,
     SHOWN,
     SPACING_S,
@@ -285,6 +286,40 @@ async def test_a_run_is_six_hours_after_the_last(tmp_path: Path) -> None:
         assert len(w.runs) == 2
 
 
+async def test_a_clock_set_back_does_not_skip_the_spacing(tmp_path: Path) -> None:
+    async with world(tmp_path) as w:
+        await w.note()
+        start = w.machine.now
+        assert await w.console.idle_sleep.tick() is not None
+        # An hour back, and a day back: the stored time is ahead of the clock, and still blocks.
+        for back in (HOUR, CLOCK_BACK_S):
+            w.machine.now = start - back
+            assert await w.console.idle_sleep.tick() is None
+            assert w.console.idle_sleep.blocked == "spacing"
+            assert await stamped(w) == start, "a blocked look never writes the time"
+        # The clock catches up and passes the time: the spacing counts from the run, as ever.
+        w.machine.now = start + SPACING_S - 1
+        assert await w.console.idle_sleep.tick() is None
+        assert w.console.idle_sleep.blocked == "spacing"
+        assert len(w.runs) == 1
+
+
+async def test_a_stored_time_far_ahead_is_a_wrong_clock_and_is_replaced(
+    tmp_path: Path,
+) -> None:
+    async with world(tmp_path) as w:
+        await w.note()
+        # Far enough ahead that the chats still look idle after the clock goes back a day.
+        w.machine.now = time.time() + 3 * CLOCK_BACK_S
+        start = w.machine.now
+        assert await w.console.idle_sleep.tick() is not None
+        # More than a day back: the stored time cannot be trusted, so the run is not starved.
+        w.machine.now = start - CLOCK_BACK_S - 1
+        assert await w.console.idle_sleep.tick() is not None
+        assert len(w.runs) == 2
+        assert await stamped(w) == w.machine.now
+
+
 async def test_the_spacing_survives_a_restart(tmp_path: Path) -> None:
     async with world(tmp_path) as w:
         await w.note()
@@ -416,7 +451,7 @@ async def test_undo_puts_the_notes_back_in_the_default_mode(tmp_path: Path) -> N
         )
 
 
-async def test_undo_of_a_run_that_is_gone_says_so(tmp_path: Path) -> None:
+async def test_undo_of_a_run_that_is_gone_settles_the_line(tmp_path: Path) -> None:
     async with world(tmp_path) as w:
         await w.note()
         report = await w.console.idle_sleep.tick()
@@ -424,14 +459,80 @@ async def test_undo_of_a_run_that_is_gone_says_so(tmp_path: Path) -> None:
         (row,) = await w.echoes()
         # Another way back (the developer route) took the run first.
         assert await w.console.memory.undo_sleep(report.run_id) is not None
+        notes = await w.notes()
         gone = await w.tap(row["id"])
-        assert gone.status_code == 404
-        error = gone.json()["error"]
-        assert error["code"] == "not_found"
-        assert error["message"] == "No such tidy-up run, or it was undone already."
-        chinese = await w.tap(row["id"], **{"X-LocalMelo-Language": "zh-Hans"})
-        assert chinese.json()["error"]["message"] == "没有这次整理，或者它已经撤销了。"
+        assert gone.status_code == 200
+        echo = gone.json()["echo"]
+        assert (echo["echo"], echo["of"], echo["run_id"]) == (
+            "undone",
+            row["id"],
+            report.run_id,
+        )
+        assert echo["line"] == "Those notes were already put back"
+        assert await w.notes() == notes, "nothing was changed"
+        # The line is answered now: it loses its button, and a second tap is refused.
+        assert [e["echo"] for e in await w.echoes()] == ["sleep", "undone"]
+        again = await w.tap(row["id"])
+        assert (again.status_code, again.json()["error"]["code"]) == (
+            409,
+            "already_answered",
+        )
+
+
+async def test_the_gone_line_is_worded_in_the_readers_language(tmp_path: Path) -> None:
+    async with world(tmp_path) as w:
+        await w.note()
+        report = await w.console.idle_sleep.tick()
+        assert report is not None
+        (row,) = await w.echoes()
+        assert await w.console.memory.undo_sleep(report.run_id) is not None
+        gone = await w.tap(row["id"], **{"X-LocalMelo-Language": "zh-Hans"})
+        assert gone.status_code == 200
+        assert gone.json()["echo"]["line"] == "这些笔记已经放回去了"
+
+
+async def test_an_undo_tapped_during_a_run_is_answered_at_once(
+    tmp_path: Path,
+) -> None:
+    async with world(tmp_path) as w:
+        await w.note()
+        first = await w.console.idle_sleep.tick()
+        assert first is not None
+        (row,) = await w.echoes()
+        # The next run is slow: it holds the notes while the person taps the older line.
+        running, release = asyncio.Event(), asyncio.Event()
+        original = w.console.memory.sleep
+
+        async def slow(variant: str | None = None, **kwargs: Any) -> SleepReport:
+            running.set()
+            await release.wait()
+            return await original(variant, **kwargs)
+
+        w.console.memory.sleep = slow  # type: ignore[method-assign]
+        w.machine.now += SPACING_S + 1
+        tick = asyncio.create_task(w.console.idle_sleep.tick())
+        await asyncio.wait_for(running.wait(), 5)
+        assert w.console.idle_sleep.running
+        busy = await asyncio.wait_for(w.tap(row["id"]), 5)
+        assert busy.status_code == 409
+        error = busy.json()["error"]
+        assert error["code"] == "sleep_running"
+        assert error["message"] == (
+            "melo is tidying the notes right now. Try again in a moment."
+        )
+        chinese = await asyncio.wait_for(
+            w.tap(row["id"], **{"X-LocalMelo-Language": "zh-Hans"}), 5
+        )
+        assert chinese.json()["error"]["message"] == "melo 正在整理笔记，过一会儿再试。"
+        # Nothing was answered or changed; other taps are not held either.
         assert [e["echo"] for e in await w.echoes()] == ["sleep"]
+        release.set()
+        await tick
+        assert not w.console.idle_sleep.running
+        # Once the run is over the same tap works.
+        done = await w.tap(row["id"])
+        assert done.status_code == 200
+        assert done.json()["echo"]["echo"] == "undone"
 
 
 async def test_a_note_the_person_reworded_since_stays_and_the_line_says_so(

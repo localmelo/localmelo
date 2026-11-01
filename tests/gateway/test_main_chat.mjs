@@ -347,6 +347,18 @@ const fakeNodes = () => {
 };
 const flat = (node) => [node.textContent, ...node.children.map(flat)].filter(Boolean).join(' | ');
 
+test('/memory undo goes to the newest tidy-up line no line has answered, also past one that was put back already', () => {
+  const rows = [sleepRow(5, {run_id: 'a'}), sleepRow(7, {run_id: 'b'})];
+  const echoes = (more = []) => mainChat.mergeEchoes([], [...rows, ...more]);
+  assert.equal(mainChat.unansweredSleep(echoes()).id, 7);
+  // The gateway answered the newest with "already put back": it is settled, and the older one is next.
+  const gone = {id: 8, ts: NOON + 9, data: {echo: 'undone', of: 7, run_id: 'b', line: 'Those notes were already put back'}};
+  assert.equal(mainChat.unansweredSleep(echoes([gone])).id, 5);
+  const both = {id: 9, ts: NOON + 12, data: {echo: 'undone', of: 5, run_id: 'a', line: 'Put back the 3 notes melo tidied'}};
+  assert.equal(mainChat.unansweredSleep(echoes([gone, both])), undefined);
+  assert.equal(mainChat.unansweredSleep([]), undefined);
+});
+
 test('a tidy-up line offers Undo until a later line answers it, and Undo answers with an undone line', () => {
   const echoes = mainChat.mergeEchoes([], [
     sleepRow(5),

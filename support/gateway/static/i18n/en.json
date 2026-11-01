@@ -531,6 +531,7 @@
   "errors.sessionNotFound": "Session not found.",
   "errors.sincePast": "since must be a past time.",
   "errors.sleepGone": "No such tidy-up run, or it was undone already.",
+  "errors.sleepRunning": "melo is tidying the notes right now. Try again in a moment.",
   "errors.sleepVariant": "variant: must be one of {choices}.",
   "errors.storeUnavailable": "The session store is not available.",
   "errors.taskAsChat": "A task session cannot run as a chat.",
@@ -618,6 +619,7 @@
     "one": "Put back the {n} note melo tidied",
     "other": "Put back the {n} notes melo tidied"
   },
+  "front.echo.sleptGone": "Those notes were already put back",
   "front.echo.sleptNone": "Nothing was put back: the notes melo tidied have changed since.",
   "front.echo.sleptSome": "Put back {n} of the {total} notes melo tidied. The rest changed since, so they stay.",
   "front.echo.startFailed": "Could not start a task: {problem}",

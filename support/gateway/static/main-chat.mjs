@@ -299,6 +299,15 @@ export function answered(echoes) {
 }
 
 /**
+ * The newest "melo tidied" line of *echoes* that no later echo answered, or undefined: `/memory undo`
+ * taps it. A line the gateway answered, even with "already put back", is passed over for an older one.
+ */
+export function unansweredSleep(echoes) {
+  const done = answered(echoes);
+  return echoes.filter((echo) => echo.kind === "sleep" && !done.has(echo.id)).at(-1);
+}
+
+/**
  * Whether *echo*'s buttons go: a later echo answered it (ids in *done*), or its task ended (ids in
  * *ended*). A step that ran on the person's earlier approval keeps Revoke after its task ends: the
  * approval is the chat's, and later tasks could use it.

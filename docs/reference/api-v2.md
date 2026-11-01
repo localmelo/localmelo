@@ -1049,8 +1049,11 @@ with the echo.
   `suggest`, start an `ask`, set a `started` or `level` echo's task to the
   person's level, revoke the approval an `earlier` echo used (a `revoked`
   echo answers), or Undo a `sleep` echo (the whole run is put back; an `undone`
-  echo answers with `of` and `run_id`, and says how many notes came back; 404
-  `not_found` when the run is unknown or undone already). Undo of a `sleep`
+  echo answers with `of` and `run_id`, and says how many notes came back; a run
+  that is unknown or undone already changes nothing and is answered 200 with an
+  `undone` echo that says the notes were already put back, so the line is answered
+  and `/memory undo` goes on to an older one; 409 `sleep_running` at once while a
+  sleep is tidying the notes, to tap again in a moment). Undo of a `sleep`
   echo works in every UI mode. On a `chore` echo, `save` keeps the chore (a `chore_saved`
   echo answers; a reminder is kept at P1, and one whose time passed meanwhile is 400),
   `once` starts its work as one task (not for a reminder: 400) and `cancel` keeps
@@ -1330,6 +1333,7 @@ These codes answer on the write routes besides the shared ones above:
 | 409 | `submission_withdrawn` | the `client_request_id` was cancelled before it started |
 | 409 | `turn_not_running` | cancel named a turn that is not running |
 | 409 | `already_answered` | the approval was answered already |
+| 409 | `sleep_running` | Undo on a `sleep` echo while a sleep is tidying the notes |
 | 502 | `agent_start_failed` | the session's Agent could not start; the message is the builder's error |
 
 ### What a turn answers with

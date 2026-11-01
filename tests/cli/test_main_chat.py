@@ -55,6 +55,8 @@ class FakeGateway:
         self.turns: dict[str, list[dict[str, Any]]] = {MAIN: []}
         self.pending: dict[str, list[dict[str, Any]]] = {}
         self.requests: list[tuple[str, str, Any]] = []
+        # Tidy-up runs another way back already took: Undo on their lines says so.
+        self.gone_runs: set[str] = set()
         self.closed = False
         self.lose_stream = False
         self.refuse_mode = False
@@ -223,10 +225,15 @@ class FakeGateway:
                 return _error(404, "not_found", "Not found.")
             if any(e["data"].get("of") == row["id"] for e in self.events):
                 return _error(409, "already_answered", "That line is answered.")
+            gone = row["data"].get("run_id") in self.gone_runs
             data = {
                 "echo": "undone",
                 "of": row["id"],
-                "line": "Put back the 3 notes melo tidied",
+                "line": (
+                    "Those notes were already put back"
+                    if gone
+                    else "Put back the 3 notes melo tidied"
+                ),
             }
             echo_id = self.emit(row["session_id"], "attention.echo", data, None)
             return httpx.Response(200, json={"echo": {"id": echo_id, "ts": 2000.0, **data}})  # fmt: skip
@@ -657,6 +664,25 @@ async def test_undo_takes_the_newest_tidy_up_that_is_not_undone(
         lambda: ("POST", f"/api/front/echoes/{first}", {"do": "undo"})
         in gateway.requests
     )
+
+
+async def test_undo_moves_on_to_an_older_tidy_up_when_the_newest_was_put_back_already(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    older = gateway.emit(MAIN, "attention.echo", {**SLEPT, "run_id": "a"}, None)
+    newer = gateway.emit(MAIN, "attention.echo", {**SLEPT, "run_id": "b"}, None)
+    gateway.gone_runs.add("b")
+    await _until(lambda: setup.out.text().count("melo tidied 3 notes") == 2)
+    assert setup.session.enter("/memory undo") is None
+    await _until(lambda: "Those notes were already put back" in setup.out.text())
+    # The gateway answered the line, so the next /memory undo is for the older one.
+    assert setup.session.enter("/memory undo") is None
+    await _until(lambda: "Put back the 3 notes melo tidied" in setup.out.text())
+    taps = [r[1] for r in gateway.requests if r[1].startswith("/api/front/echoes/")]
+    assert taps == [f"/api/front/echoes/{newer}", f"/api/front/echoes/{older}"]
+    assert setup.session.enter("/memory undo") is None
+    await _until(lambda: "nothing to put back" in setup.out.text())
 
 
 async def test_undo_works_from_a_side_chat_and_says_when_there_is_nothing(

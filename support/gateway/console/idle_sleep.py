@@ -7,10 +7,14 @@ never touches the notes otherwise:
 
 - the setting is not ``off`` and memory across chats is on (with ``off`` the loop reads nothing);
 - the last idle run began at least :data:`SPACING_S` (6 hours) ago; its time is kept in the
-  memory index's ``meta`` table (``idle_sleep_at``), so a restart does not run it early;
+  memory index's ``meta`` table (``idle_sleep_at``), so a restart does not run it early. A
+  clock set back does not skip the spacing: a stored time up to :data:`CLOCK_BACK_S` (a day)
+  ahead of the clock still blocks, and nothing writes the time while a run is blocked; a time
+  further ahead than that is taken as a clock that was wrong, and the next run replaces it;
 - the shared GPU lock file is absent (read only, never written);
-- no chat or main-chat turn started or ended, and no session was changed, in the last
-  :data:`IDLE_S` (20 minutes), and no turn runs now;
+- no turn started or ended, and no session was changed, in the last :data:`IDLE_S` (20
+  minutes) in the gateway's chats, and no turn runs now (a terminal chat that runs on its own,
+  and workers outside the gateway, are not seen);
 - no worker task is queued, running, held or parked;
 - the computer is on AC power (an unreadable or unnamed power source counts as no).
 
@@ -52,6 +56,8 @@ logger = logging.getLogger(__name__)
 POLL_S: Final = 60.0
 IDLE_S: Final = 20 * 60.0
 SPACING_S: Final = 6 * 3600.0
+# A stored run time this far ahead of the clock means the clock was set back: the spacing holds.
+CLOCK_BACK_S: Final = 24 * 3600.0
 META_KEY: Final = "idle_sleep_at"
 # The newest sessions looked at for a running turn.
 SESSIONS_SEEN: Final = 100
@@ -111,6 +117,12 @@ class IdleSleep:
         self.blocked = ""
         self._task: asyncio.Task[None] | None = None
         self._busy = asyncio.Lock()
+        self._running = False
+
+    @property
+    def running(self) -> bool:
+        """Whether a sleep is tidying the notes now (they are locked until it ends)."""
+        return self._running
 
     # ── Lifecycle ──
 
@@ -154,7 +166,7 @@ class IdleSleep:
         if console.store_state() != "ok" or console.main_id is None:
             return "store"
         last = await console.memory.stores()[1].meta(META_KEY)
-        if 0 <= now - last < self.options.spacing_s:
+        if -CLOCK_BACK_S <= now - last < self.options.spacing_s:
             return "spacing"
         if self._lock_present():
             return "lock"
@@ -216,11 +228,14 @@ class IdleSleep:
         # The time is kept before the run, so a run that fails is not tried again for hours.
         await memory.stores()[1].set_meta(META_KEY, self.clock())
         pinned = await memory.pinned_quotes()
+        self._running = True
         try:
             report = await memory.sleep(None, chats=console.store)
         except Exception:
             logger.exception("The idle sleep could not tidy the notes")
             return None
+        finally:
+            self._running = False
         await identity_changed(console, pinned)
         logger.info(
             "Idle sleep %s: %d changes%s",

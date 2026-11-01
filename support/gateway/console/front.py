@@ -1849,14 +1849,26 @@ class Front:
     async def _act_sleep(
         self, echo_id: int, echo: dict[str, Any], do: str
     ) -> dict[str, Any]:
-        """The person's Undo on "melo tidied N notes": the whole run is put back."""
+        """The person's Undo on "melo tidied N notes": the whole run is put back.
+
+        While a sleep tidies the notes they are locked, and a wait here would hold every
+        other tap: the answer is at once, 409 ``sleep_running``. A run that is gone (put back
+        another way, or dropped with its notes) changes nothing: the line is answered with an
+        ``undone`` line that says so, 200, so it loses its button and ``/memory undo`` goes on
+        to an older line.
+        """
         if do != "undo":
             raise ApiError(400, "invalid_request", f"{do} does not apply to this line.")
+        if self.console.idle_sleep.running:
+            raise ApiError(409, "sleep_running", t("errors.sleepRunning"))
         memory = self.console.memory
         pinned = await memory.pinned_quotes()
         undone = await memory.undo_sleep(str(echo.get("run_id", "")))
         if undone is None:
-            raise ApiError(404, "not_found", t("errors.sleepGone"))
+            return await self.echo(
+                {"echo": "undone", "of": echo_id, "run_id": echo.get("run_id"),
+                 "line": t_in("en", "front.echo.sleptGone"), "said": said("front.echo.sleptGone")}
+            )  # fmt: skip
         await identity_changed(self.console, pinned)
         total = int(echo.get("count") or 0)
         kept = min(int(undone.get("kept") or 0), total)

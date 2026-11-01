@@ -166,9 +166,11 @@ Direct runs (`melo "<task>"`), the terminal chat, workers and the benchmark neit
 
 With `[memory] sleep` set to `rules`, `model` or `model+tags` (a developer setting, off by default), melo tidies your notes by itself while the computer is idle, and tells you in the main chat.
 
-- It waits until nothing has happened for 20 minutes, no task is running or queued, the computer is on AC power and the shared GPU lock is free, and runs at most once every 6 hours.
+- It waits until nothing has happened for 20 minutes, no task is running or queued, the computer is on AC power and the shared GPU lock is free, and runs at most once every 6 hours. A clock set back does not skip the 6 hours: the time of the last run is kept, and a clock up to a day behind it still waits.
+- "Nothing has happened" counts the chats of the gateway: the console, the app, and the terminal's main chat and side chats. A terminal chat that runs on its own (`melo -c`, `-u`, `-r`, `--yolo`, or `[cli] chat = "local"`) and workers outside the gateway are not seen, so melo can start tidying while you work there.
+- The GPU lock gate works only when `[scheduler] gpu_lock_file` names the lock file. With it empty, the default, no lock is looked for.
 - The main chat then says "While you were away, melo tidied 3 notes · Undo". **What changed** lists the first five.
-- **Undo** puts the whole run back. A note you reworded since stays, and the line says so.
+- **Undo** puts the whole run back. A note you reworded since stays, and the line says so. If the run was put back another way already, the line says "Those notes were already put back" and nothing changes. While a run is tidying, Undo answers "melo is tidying the notes right now. Try again in a moment."
 - In a terminal the line ends with `· /memory undo`; the console and the app take `/memory undo` too.
 - A run that changes nothing leaves no line.
 
