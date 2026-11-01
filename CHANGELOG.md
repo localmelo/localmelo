@@ -491,6 +491,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A note's owner has to be a person. A rule you ask melo to remember ("Remember:
+  tests run with -n auto", "记住：开发的代码一律用英文") is filed under About, not
+  People, and the owner check no longer refuses it for naming a language, a
+  tool or a modifier before "'s" or "的" as someone else ("Python's GIL",
+  "开发的代码"). Names that are people ("Marco's studio", "马可的工作室", "妈妈的生日")
+  are still checked, and a request about them is still filed under People.
 - The app's pill says **stopped**, not failed, for a task that used all its
   steps, as the console already does: `status.recent` reads the task's reason. [#365]
 - A Chinese ask that says to change code, run the tests and commit

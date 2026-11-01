@@ -264,6 +264,10 @@ def test_a_request_with_a_title_is_kept_whole() -> None:
             "Tom Briggs",
             "Tom Briggs's …",
         ),
+        # A reduplicated nickname and a relative are people without a surname.
+        ("你的猫叫豆豆。", "思思的猫叫豆豆。", "思思", "思思的…"),
+        ("你的猫叫豆豆。", "小明的猫叫豆豆。", "小明", "小明的…"),
+        ("你的生日是5月3日。", "妈妈的生日是5月3日。", "妈妈", "妈妈的…"),
     ],
 )
 def test_a_note_about_someone_else_may_not_become_one_about_the_user(
@@ -297,6 +301,53 @@ def test_a_note_about_someone_else_may_not_become_one_about_the_user(
 )
 def test_the_same_owner_or_none_is_no_mix_up(note: str, typed: str) -> None:
     assert records.wrong_owner(note, typed) == ""
+
+
+@pytest.mark.parametrize(
+    ("note", "typed"),
+    [
+        # What comes before 的 or 's is a modifier, a language or a tool, not a person.
+        ("你的代码一律用英文。", "开发的代码一律用英文。"),
+        ("你的环境变量写进 .envrc。", "项目需要的环境变量写进 .envrc。"),
+        ("你的服务一律用本地模型。", "本地的服务一律用本地模型。"),
+        ("你的模型默认用小一点的。", "默认的模型默认用小一点的。"),
+        ("Your GIL is going away.", "Python's GIL is going away."),
+        ("Your index is in .git.", "Git's index is in .git."),
+        ("Your plan is ready.", "Everything's ready."),
+        ("你的代码放在 src 下。", "小程序的代码放在 src 下。"),
+        ("你的版本放在 src 下。", "老版本的版本放在 src 下。"),
+    ],
+)
+def test_a_rule_about_the_work_is_not_refused_as_someone_elses_fact(
+    note: str, typed: str
+) -> None:
+    assert records.wrong_owner(note, typed) == ""
+
+
+def test_the_owner_of_a_sentence_is_the_user_a_person_or_none() -> None:
+    assert records._owner("你的代码一律用英文") == "user"
+    assert records._owner("Your GIL is going away.") == "user"
+    assert records._owner("马可的工作室在中山路88号") == "马可"
+    assert records._owner("Marco's studio is on Main St") == "Marco"
+    assert records._owner("Dr. Tanaka's office is in room 4") == "Dr. Tanaka"
+    assert records._owner("思思的猫叫豆豆") == "思思"
+    assert records._owner("妈妈的生日是5月3日") == "妈妈"
+    assert records._owner("小明的猫叫豆豆") == "小明"
+    assert records._owner("小程序的代码放在 src 下") is None
+    assert records._owner("开发的代码一律用英文") is None
+    assert records._owner("项目需要的环境变量写进 .envrc") is None
+    assert records._owner("Python's GIL is going away") is None
+    assert records._owner("GitHub's API is rate limited") is None
+
+
+def test_a_given_name_without_a_surname_is_not_an_owner_so_its_mix_up_passes() -> None:
+    # The trade-off of the owner check (see ``records._owner``): this is
+    # let through to keep the user's own rules from being refused.
+    assert records._owner("嘉怡的工作室在中山路88号") is None
+    assert (
+        records.wrong_owner("你的工作室在中山路88号。", "嘉怡的工作室在中山路88号。")
+        == ""
+    )
 
 
 def test_the_user_typed_about_themselves_and_the_note_names_someone_else() -> None:
