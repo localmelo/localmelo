@@ -567,3 +567,24 @@ def test_a_resumption_card_is_not_the_person_s_words() -> None:
         card,
         "Find a way to sign in daily.",
     )
+
+
+def test_a_tool_call_written_as_text_is_not_a_running_tasks_last_note() -> None:
+    from localmelo.melo.contracts.events import AgentEvent
+
+    workers = SimpleNamespace(_live={})
+
+    def said(content: str) -> None:
+        event = AgentEvent(
+            type="assistant.message",
+            run_id="r",
+            seq=1,
+            ts=0.0,
+            data={"content": content},
+        )
+        TaskWorkers._observe(cast(Any, workers), "task", event)
+
+    said("Reading the file first.")
+    said("<tool_call>\n<function=remember>\n<parameter=text>\nx")
+    said("<think>no call</think>[TOOL_CALLS][{}]")
+    assert workers._live["task"]["left"] == "Reading the file first."

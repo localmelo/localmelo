@@ -95,6 +95,7 @@ JS_ENGLISH = {
     "Tab",
     "Reservation",
     "melo did not finish an answer",
+    "tool call written as text",
     "cannot reach the model server at",
     "noopener noreferrer",
     # Class lists of one word each.

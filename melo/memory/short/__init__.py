@@ -8,7 +8,11 @@ from typing import TYPE_CHECKING
 
 from localmelo.melo.memory.notes import RECALL_START
 from localmelo.melo.memory.short.note_store import NoteStore
-from localmelo.melo.schema import EMPTY_REPLY_LABEL, EMPTY_REPLY_NUDGE, Message
+from localmelo.melo.schema import (
+    Message,
+    is_reply_label,
+    starts_with_reply_nudge,
+)
 
 if TYPE_CHECKING:
     from localmelo.melo.schema import ReflectionEntry
@@ -19,17 +23,16 @@ def _opens_tool_turn(msg: Message) -> bool:
 
 
 def _is_empty_reply_label(msg: Message, empty_prefix: bool = False) -> bool:
-    """Whether *msg* is the agent's stand-in for an empty planning reply.
+    """Whether *msg* is the agent's stand-in for a planning reply that was no answer.
 
+    That is the label of an empty reply or of a tool call written as text.
     With *empty_prefix*, a label that carries the reply's note after a
     line break (the compress modes) still counts, by prefix; ``legacy``
     keeps the exact match.
     """
     if msg.role != "assistant" or msg.tool_calls:
         return False
-    if msg.content == EMPTY_REPLY_LABEL:
-        return True
-    return empty_prefix and msg.content.startswith(EMPTY_REPLY_LABEL + "\n")
+    return is_reply_label(msg.content, with_note=empty_prefix)
 
 
 def _joins(unit: Sequence[Message], msg: Message, empty_prefix: bool = False) -> bool:
@@ -46,10 +49,7 @@ def _joins(unit: Sequence[Message], msg: Message, empty_prefix: bool = False) ->
         and _is_empty_reply_label(unit[0], empty_prefix)
         and msg.role == "user"
         # R5 appends a recall block to the nudge; the unit still holds.
-        and (
-            msg.content == EMPTY_REPLY_NUDGE
-            or msg.content.startswith(EMPTY_REPLY_NUDGE + "\n")
-        )
+        and starts_with_reply_nudge(msg.content)
     )
 
 
@@ -60,9 +60,10 @@ def group_turns(
 
     An assistant message with tool calls opens a unit that also owns the
     ``role="tool"`` messages directly after it. The agent's stand-in for
-    an empty reply (``EMPTY_REPLY_LABEL``, an assistant message) opens a
-    unit that also owns the nudge directly after it (``EMPTY_REPLY_NUDGE``,
-    a user message). Every other message is a unit of its own. Trimming
+    an empty reply (``EMPTY_REPLY_LABEL``, an assistant message; likewise
+    ``TOOL_CALL_TEXT_LABEL``) opens a unit that also owns the nudge directly
+    after it (``EMPTY_REPLY_NUDGE``, a user message). Every other message is
+    a unit of its own. Trimming
     whole units never separates a tool call from its results, which
     OpenAI-compatible servers reject, nor a nudge from its label: left at
     the start of the window, the nudge would follow the task query, which

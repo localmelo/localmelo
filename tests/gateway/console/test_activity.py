@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from localmelo.melo.checker.redaction import REDACTED
 from localmelo.melo.contracts.approvals import ApprovalRequest
 from localmelo.support.gateway.console import Console
+from localmelo.support.gateway.console import activity as activity_module
 from localmelo.support.gateway.console.activity import (
     MAX_ROWS,
     MAX_SPAN_S,
@@ -32,6 +33,20 @@ from localmelo.support.sessions.store import (
 )
 
 from .conftest import HOLDER, core_event, open_session, run_result, seed_turn
+
+# How long ago "today" starts in these tests: their events sit minutes before
+# now, which must not fall on yesterday when a run passes midnight.
+DAY_SO_FAR_S = 6 * 3600.0
+
+
+@pytest.fixture(autouse=True)
+def _day_started_hours_ago(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if request.node.name.startswith("test_since_is_today_by_default"):
+        return  # that test checks the real local midnight
+    start = time.time() - DAY_SO_FAR_S  # one fixed start, as midnight is
+    monkeypatch.setattr(activity_module, "local_midnight", lambda now: start)
 
 
 @pytest.fixture()

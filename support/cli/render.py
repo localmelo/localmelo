@@ -45,6 +45,7 @@ from rich.theme import Theme
 
 from localmelo.melo.checker.tiers import BUILTIN_TIERS
 from localmelo.melo.schema import (
+    TOOL_CALL_TEXT_ERROR,
     UNFINISHED_ANSWER_ERROR,
     ReasoningTags,
     RunResult,
@@ -473,6 +474,9 @@ def run_end(
         headline, action = "The model returned only empty replies", _ACTIONS["failed"]
     elif status == "failed" and error == UNFINISHED_ANSWER_ERROR:
         headline, action = UNFINISHED_ANSWER_ERROR, _ACTIONS["failed"]
+    elif status == "failed" and error == TOOL_CALL_TEXT_ERROR:
+        headline = "The model wrote a tool call as text instead of running it"
+        action = _ACTIONS["failed"]
     else:
         headline, action = status_text(status, cause).title, _ACTIONS.get(status, "")
         if status == "budget_exhausted" and steps:
@@ -1081,7 +1085,13 @@ class TurnRenderer:
                 self.live.activity = "Retrying"
                 self.live.retry_until = self._clock() + delay if delay > 0 else 0.0
             return
-        if kind in ("empty_reply", "unfinished_answer"):
+        if kind == "tool_call_as_text":
+            # The reply's text was a call that did not run, not an answer: it
+            # is neither held nor kept as provisional text (the stored event
+            # still has it), and the notice below says what happened.
+            self._held = ""
+            self._claim_stream(data.get("step"))
+        if kind in ("empty_reply", "unfinished_answer", "tool_call_as_text"):
             line = Text(f"{self.symbols.dot} {message}", style="muted")
         else:
             line = Text(f"{self.symbols.warn} {message}", style="warn")
