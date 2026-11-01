@@ -5,9 +5,10 @@ trained with. The chat surfaces (the terminal chat, the console and the app)
 therefore give their Agent one paragraph for its system prompt
 (``AgentOptions.identity``): melo from localmelo, the model it runs on, the
 server that serves it and whether that server is on this computer, what it
-remembers, and to answer in the user's language and script. The builders here
-make the paragraph from the backend and the memory settings an Agent is built
-on, so a model switch (a new Agent) names the new model from the next turn.
+remembers, and to answer in the language and script of the user's latest
+message. The builders here make the paragraph from the backend and the memory
+settings an Agent is built on, so a model switch (a new Agent) names the new
+model from the next turn.
 """
 
 from __future__ import annotations
@@ -27,6 +28,15 @@ if TYPE_CHECKING:
 # the terminal's banner calls them; every other backend is a cloud provider.
 LOCAL_BACKENDS: Final = frozenset({"mlc", "ollama", "vllm", "sglang"})
 
+# The one place the reply language is set: every chat turn (the terminal chat,
+# the main chat and the side chats) gets this paragraph, so the rule is not
+# repeated elsewhere. It names the user's latest message because tool results
+# and recalled memory can be in another language and must not pull the reply.
+LANGUAGE_RULE: Final = (
+    "Reply in the language and script of the user's latest message, whatever "
+    "language tool results or memory text are in."
+)
+
 IDENTITY_TEXT: Final = (
     "You are melo, the assistant built into localmelo: an open-source agent "
     "that runs on the user's own computer, works in their folder with tools, "
@@ -36,9 +46,9 @@ IDENTITY_TEXT: Final = (
     "localmelo and name {named}. The model only powers you: never present "
     "yourself as the model's own assistant or as made by its maker.\n"
     "{memory}\n"
-    "Reply in the language and script the user writes in (for example "
-    "simplified or traditional Chinese). For a greeting or a question you can "
-    "answer directly, reply without using tools."
+    + LANGUAGE_RULE
+    + " For a greeting or a question you can answer directly, reply without "
+    "using tools."
 )
 
 # What a chat remembers: its own messages, and across chats only what the

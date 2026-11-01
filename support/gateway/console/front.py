@@ -150,21 +150,22 @@ FRONT_STEPS: Final = 4
 # A brief question's step cap: BRIEF_NOTE asks for one or two steps.
 BRIEF_STEPS: Final = 2
 HANDOFF_STATUSES: Final = frozenset({"budget_exhausted", "stuck"})
-# What the main chat is told about itself, after melo's identity.
+# What the main chat is told about itself, after melo's identity. The language
+# of the reply is set once, in that identity (sessions/identity.py LANGUAGE_RULE).
 FRONT_TEXT: Final = (
     "You are the main chat. Answer a question yourself when a step or two "
     "does it: search_files finds where something is in the user's folder. "
     "Work that changes files, runs commands or takes many steps goes to a "
     "task with task_create; a follow-up on a task goes to it with "
     "task_message. Never reply with only what you are about to do: do it, or "
-    "hand it to a task. Answer in the language of the user's latest message."
+    "hand it to a task."
 )
 # What a side chat is told about itself, after melo's identity.
 SIDE_TEXT: Final = (
     "You are a side chat. Answer and work in this chat yourself. Work that takes "
     "many steps or runs long can go to a task with task_create; a follow-up on a "
     "task goes to it with task_message. A task you start reports back to this "
-    "chat. Answer in the language of the user's latest message."
+    "chat."
 )
 # What the main chat is told when the person asks to be answered briefly.
 BRIEF_NOTE: Final = (

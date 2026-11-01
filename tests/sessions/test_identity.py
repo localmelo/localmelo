@@ -16,15 +16,23 @@ from pathlib import Path
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.support.backends import discovery
 from localmelo.support.cli.agents import AgentFactory, config_backend, url_backend
 from localmelo.support.config import CloudVendorConfig, Config, LocalBackendConfig
+from localmelo.support.gateway.console.front import (
+    FRONT_TEXT,
+    SIDE_TEXT,
+    SideAgent,
+    build_front_agent,
+)
 from localmelo.support.gateway.console.registry import default_builder
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 from localmelo.support.sessions.agents import build_session_agent
 from localmelo.support.sessions.identity import (
     KEPT_LEGACY,
     KEPT_TYPED,
+    LANGUAGE_RULE,
     config_identity,
     host_of,
     identity_text,
@@ -61,12 +69,11 @@ def test_the_text_says_who_melo_is_and_how_to_answer() -> None:
     assert "say that you are melo from localmelo and name the model you run on" in text
     assert "never present yourself as the model's own assistant" in text
     assert "or as made by its maker" in text
-    assert "Reply in the language and script the user writes in (for example" in text
-    assert "simplified or traditional Chinese)." in text
+    assert LANGUAGE_RULE in text
     assert text.endswith(
         "For a greeting or a question you can answer directly, reply without using tools."
     )
-    assert len(text) < 1200
+    assert len(text) < 1100
 
 
 @pytest.mark.parametrize(
@@ -254,6 +261,88 @@ async def test_the_terminals_factory_names_the_model_it_builds_on(
         await factory.close(second)
 
 
+def test_the_reply_language_rule_follows_the_latest_message_not_tool_output() -> None:
+    assert LANGUAGE_RULE == (
+        "Reply in the language and script of the user's latest message, whatever "
+        "language tool results or memory text are in."
+    )
+    # Neither the rule nor the paragraph around it names a language or a locale
+    # that could pull a reply toward one.
+    for word in ("Chinese", "English", "locale"):
+        assert word not in config_identity(local())
+        assert word not in config_identity(local(), notes="")
+
+
+@pytest.mark.parametrize("notes", [None, "", "- “I prefer tea”"])
+def test_the_rule_is_in_every_identity_once(notes: str | None) -> None:
+    for text in (
+        config_identity(local(), notes=notes),
+        url_identity(URL, MODEL, KEPT_TYPED, notes),
+        identity_text(None, "Local Server", local=True, notes=notes),
+        identity_text("big-model", "Cloud", local=False, notes=notes),
+    ):
+        assert text.count(LANGUAGE_RULE) == 1
+        assert text.count("Reply in the language") == 1
+
+
+class NoTools(BaseToolProvider):
+    """A tool provider with no tools, for a chat that needs one to be built."""
+
+    async def start(self) -> list[ProvidedTool]:
+        return []
+
+    async def close(self) -> None:
+        pass
+
+
+async def say_hello(surface: str, url: str, workspace: str) -> None:
+    """Build a *surface* chat on the server at *url* and send it one message."""
+    cfg = local(url)
+    if surface == "terminal":
+        factory = AgentFactory(
+            backend=config_backend(cfg, None),
+            cfg=cfg,
+            options=AgentOptions(),
+            workspace=workspace,
+            saves=False,
+        )
+        agent = await factory.build()
+        try:
+            await agent.run_task("hello")
+        finally:
+            await factory.close(agent)
+    else:
+        if surface == "main":
+            agent = await build_front_agent(cfg, workspace, "s1", tools=NoTools())
+        else:
+            agent = await default_builder(
+                cfg, workspace, None, "s2", tools=[NoTools()], agent_class=SideAgent
+            )
+        try:
+            await agent.run_task("hello")
+        finally:
+            await agent.close()
+
+
+@pytest.mark.parametrize("surface", ["terminal", "main", "side"])
+async def test_each_chats_system_prompt_has_the_language_rule_once(
+    tmp_path: Path, surface: str
+) -> None:
+    stub = StubServer().start()
+    try:
+        url = stub.base_url.rsplit("/v1", 1)[0] + "/s/answer/v1"
+        await say_hello(surface, url, str(tmp_path))
+        [request] = stub.requests
+        system = request["messages"][0]["content"]
+    finally:
+        stub.close()
+    assert system.count(LANGUAGE_RULE) == 1
+    assert system.count("Reply in the language") == 1
+    assert "latest message" not in system.replace(LANGUAGE_RULE, "")
+    assert (FRONT_TEXT in system) is (surface == "main")
+    assert (SIDE_TEXT in system) is (surface == "side")
+
+
 def test_the_option_must_be_a_text() -> None:
     assert AgentOptions().identity is None
     for bad in ("", "  \n", 3):
@@ -414,7 +503,7 @@ async def test_the_stub_sees_the_memory_words_in_chat_requests_and_not_in_direct
     assert len(systems) == 2
     chat_system, direct_system = systems
     assert ALONE in chat_system and NO_NOTES in chat_system
-    assert "Reply in the language and script the user writes in" in chat_system
+    assert chat_system.count(LANGUAGE_RULE) == 1
     for words in ("You remember", "no notes", "Reply in the language", "melo from"):
         assert words not in direct_system
 

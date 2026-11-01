@@ -95,7 +95,7 @@ async def test_a_preamble_with_no_tool_call_hands_the_work_off(tmp_path: Path) -
         entry = console.sessions.get(str(console.main_id))
         assert entry is not None and entry.agent is not None
         assert entry.agent.conversation()[-1].content == STARTED_TEXT
-        # The main chat is told to act, not announce, in the message's language.
+        # The main chat is told to act, not announce.
         assert FRONT_TEXT in llm.requests[0][0].content
 
 

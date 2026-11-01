@@ -607,6 +607,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A chat replies in the language of your latest message even after tool results or
+  memory text in another language. The rule is set once, in the paragraph every chat
+  (terminal, main chat, side chats) starts with.
 - Developer: `melo memory ingest` reads a session that a file repeats word for word once,
   instead of refusing the file; the same id with other turns is still refused.
 - A task that changed no code is no longer told to run tests. Outside git, melo compares the
