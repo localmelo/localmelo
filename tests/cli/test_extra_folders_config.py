@@ -8,6 +8,7 @@ HOME is a temporary folder.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -94,3 +95,26 @@ def test_a_folder_that_became_a_symlink_covers_nothing_new(home: Path) -> None:
 def test_the_setting_is_a_known_key() -> None:
     key = settings.catalog()["workspace.extra_folders"]
     assert key.section == "workspace" and key.file
+
+
+@pytest.mark.skipif(
+    not (sys.platform == "darwin" and os.path.isdir("/.vol")),
+    reason="no file-system aliases here",
+)
+def test_a_file_system_alias_is_never_kept(home: Path) -> None:
+    folder = home / "developer" / "career"
+    folder.mkdir(parents=True)
+    info = os.stat(folder)
+    parent = os.stat(folder.parent)
+    for alias in (
+        f"/.vol/{info.st_dev}/{info.st_ino}",
+        f"/.vol/{parent.st_dev}/{parent.st_ino}/career",
+        f"/.resolve/1{folder}",
+        f"/.nofollow{folder}",
+        f"/.VOL/{info.st_dev}/{info.st_ino}",
+        f"/.vol/{info.st_dev}",
+    ):
+        assert config.extra_folder_problem(alias) is not None, alias
+    assert config.extra_folder_problem(str(folder)) is None
+    with pytest.raises(config.ConfigError):
+        config.add_extra_folder(f"/.vol/{info.st_dev}")

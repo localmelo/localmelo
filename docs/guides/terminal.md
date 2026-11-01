@@ -361,7 +361,8 @@ In auto mode nothing asks: routine steps run, and a risky step or one you did no
 ### The workspace
 
 - melo works in the current folder, or in `--workspace DIR`.
-- File tools (`file_read`, `file_write`, `list_files`) stay in this folder, and ask before they open a folder outside it; commands and Python can reach other files, so melo asks first. `/approvals` lists the folders this chat may read.
+- File tools (`file_read`, `file_write`, `list_files`) stay in this folder, and ask before they open a folder outside it; key folders, melo's own data, system folders and your whole home folder are never offered. `/approvals` lists the folders this chat may read.
+- Commands and Python can reach other files. In Ask, melo asks first; in Auto, a routine command or script that only reads outside the folder runs without asking, while one that touches keys or passwords counts as high-impact.
 - The banner warns when the workspace is your home folder or `/`.
 - `shell_exec` and `python_exec` stop after 10 minutes in the UI (30 and 60 seconds for a task).
 

@@ -467,6 +467,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- The file tools and the action review now compare a path as the file
+  system names it: another letter case of the workspace counts as inside,
+  and a macOS alias such as `/.vol` counts as the place it names, so it no
+  longer gets past the workspace check or the key folders. A file tool
+  opens only the file that was checked. [#405]
+
 - The approval card says why melo asks, and never offers a chat-wide allow for
   a high-impact call. In the web console and the macOS app, a call that
   installs software, downloads files, changes files outside the workspace or

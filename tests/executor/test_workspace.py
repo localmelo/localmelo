@@ -373,20 +373,25 @@ async def test_a_tilde_is_not_expanded(root: Path) -> None:
     assert [a.path for a in outcome.artifacts] == [str(root / "~" / "notes.txt")]
 
 
-async def test_a_path_in_another_case_than_the_root_is_refused(
+async def test_a_path_in_another_case_than_the_root_is_the_file_it_names(
     tmp_path: Path,
 ) -> None:
-    # On a case-insensitive file system this names the same file, but the
-    # fence compares the spelling, so it fails closed.
+    # The file system names the path: on a case-insensitive one it is the
+    # file in the root, and the tool gets its own spelling; on a
+    # case-sensitive one it is another path, outside.
     root = Path(os.path.realpath(tmp_path)) / "Root"
     root.mkdir()
     (root / "notes.txt").write_text("hello")
     executor = _executor(root)
-    other_case = str(root.parent / "root" / "notes.txt")
+    other_case = str(root.parent / "root" / "NOTES.txt")
 
     outcome = await _run(executor, "file_read", path=other_case)
 
-    assert outcome.error_category == ErrorCategory.PATH_POLICY_VIOLATION
+    if os.path.exists(other_case):
+        assert (outcome.status, outcome.output) == (ExecutionStatus.SUCCESS, "hello")
+        assert [a.path for a in outcome.artifacts] == [str(root / "notes.txt")]
+    else:
+        assert outcome.error_category == ErrorCategory.PATH_POLICY_VIOLATION
 
 
 def test_the_policy_compares_whole_components() -> None:
@@ -542,8 +547,10 @@ async def test_a_final_symlink_created_after_resolution_is_refused(
 
     outcome = await _run(executor, tool, **arguments)
 
+    # The open does not follow it: the checked path changed, nothing runs.
     assert outcome.status == ExecutionStatus.ERROR
-    assert outcome.error_category == ErrorCategory.RUNTIME_ERROR
+    assert outcome.error_category == ErrorCategory.PATH_POLICY_VIOLATION
+    assert "changed before it was opened" in outcome.error
     assert "secret" not in outcome.output
     assert secret.read_text() == "secret"
 

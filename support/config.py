@@ -15,7 +15,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Final
 
-from localmelo.melo.contracts.folders import above_home, never_offered
+from localmelo.melo.contracts.folders import (
+    above_home,
+    canonical_path,
+    is_alias,
+    never_offered,
+)
 from localmelo.melo.schema import (
     LOCAL_WINDOW_MESSAGES,
     SHORT_TERM_MAX,
@@ -1062,8 +1067,10 @@ def extra_folder_problem(value: object) -> str | None:
     """Why *value* cannot be an entry of ``[workspace] extra_folders``, or ``None``.
 
     An entry is an absolute path or one that starts with ``~/``, on one
-    line. Its real path must not be a place melo never opens (keys, its own
-    data, system folders) nor the home folder or a folder above it.
+    line, and no file-system alias (macOS ``/.vol``, ``/.resolve``,
+    ``/.nofollow``). The folder the file system names for it must not be a
+    place melo never opens (keys, its own data, system folders) nor the
+    home folder or a folder above it.
     """
     if not isinstance(value, str):
         return f"must be a string, got {value!r}"
@@ -1071,7 +1078,9 @@ def extra_folder_problem(value: object) -> str | None:
         return "Must be a single line with no control characters."
     if not (os.path.isabs(value) or value.startswith("~/")):
         return "Must be an absolute path or start with ~/."
-    real = os.path.realpath(os.path.expanduser(value))
+    if is_alias(os.path.realpath(os.path.expanduser(value))):
+        return "Must not be a file-system alias (/.vol, /.resolve, /.nofollow)."
+    real = canonical_path(os.path.expanduser(value))
     if above_home(real):
         return "Must not be /, the home folder or a folder above it."
     if never_offered(real) is not None:
@@ -1095,7 +1104,7 @@ def extra_folders_errors(value: object) -> list[str]:
 
 def folder_label(path: str) -> str:
     """*path* as ``extra_folders`` keeps it: ``~/`` for the home folder, else absolute."""
-    home = os.path.realpath(os.path.expanduser("~"))
+    home = canonical_path(os.path.expanduser("~"))
     if path.startswith(home + "/"):
         return "~/" + path[len(home) + 1 :]
     return path
@@ -1126,7 +1135,7 @@ def add_extra_folder(folder: str) -> bool:
     Whether it was added: ``False`` when it is there already. ``ConfigError``
     when it may not be kept (see :func:`extra_folder_problem`).
     """
-    real = os.path.realpath(folder)
+    real = canonical_path(folder)
     label = folder_label(real)
     problem = extra_folder_problem(label)
     if problem is not None:

@@ -9,8 +9,9 @@ as before. HOME is a temporary folder.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
@@ -268,3 +269,54 @@ async def test_always_survives_a_new_chat(root: Path, career: Path) -> None:
     assert asker.requests == []
     [finished] = recorder.of("tool.finished")
     assert finished.data["approval"]["folder"]["scope"] == "always"
+
+
+@pytest.mark.skipif(
+    not (sys.platform == "darwin" and os.path.isdir("/.vol")),
+    reason="no file-system aliases here",
+)
+@pytest.mark.parametrize("mode", ["ask", "auto"])
+async def test_a_chat_grant_never_reaches_keys_through_an_alias(
+    root: Path, home: Path, mode: Literal["ask", "auto"]
+) -> None:
+    """One "this chat" answer, then numbered aliases of a key and the gateway token."""
+
+    def vol(path: Path) -> str:
+        info = os.stat(path)
+        return f"/.vol/{info.st_dev}/{info.st_ino}"
+
+    (home / ".ssh").mkdir()
+    (home / ".ssh" / "id_rsa").write_text("PRIVATE-KEY-123")
+    auth = home / ".cache" / "localmelo" / "gateway" / "auth"
+    auth.mkdir(parents=True)
+    (auth / "token").write_text("GATEWAY-TOKEN-456")
+    (home / "notes").mkdir()
+    (home / "notes" / "a.txt").write_text("benign")
+    (home / "notes" / "b.txt").write_text("also benign")
+    reads = [
+        str(home / "notes" / "a.txt"),
+        vol(home / "notes" / "b.txt"),
+        vol(home / ".ssh" / "id_rsa"),
+        f"{vol(home / '.ssh')}/id_rsa",
+        vol(auth / "token"),
+        f"/.vol/{os.stat(home).st_dev}/2{home}/.ssh/id_rsa",
+    ]
+    llm = ScriptedLLM(
+        [
+            *(_calls(("file_read", {"path": p}, f"c{i}")) for i, p in enumerate(reads)),
+            _answer("done"),
+        ]
+    )
+    agent = _files_agent(llm, root)
+    asker = Asker(ApprovalDecision(True, remember=True))
+
+    await agent.run_task("look at my notes", approval=ChatPolicy(asker, mode))
+
+    assert [r.outside.folder for r in asker.requests if r.outside] == [
+        str(home / "notes")
+    ]
+    seen = " ".join(" ".join(llm.tool_messages(i + 1)) for i in range(len(reads)))
+    assert "benign" in seen
+    assert "PRIVATE-KEY-123" not in seen and "GATEWAY-TOKEN-456" not in seen
+    for i in range(1, len(reads)):
+        assert "melo never opens it" in llm.tool_messages(i + 1)[-1], reads[i]

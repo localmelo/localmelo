@@ -8,6 +8,7 @@ other spellings of the same place, and the home folder as such.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -17,15 +18,43 @@ from localmelo.melo.contracts.folders import (
     CREDENTIAL_PLACES,
     MELO_DATA,
     SYSTEM_PLACES,
+    PathChangedError,
     above_home,
     asked_text,
+    canonical_path,
     covers,
+    fd_path,
     home_label,
+    is_alias,
     melo_data_folders,
     never_offered,
     never_text,
+    open_checked,
     outside_access,
 )
+
+# macOS names a file by number under /.vol, and a path another way under
+# /.resolve and /.nofollow; realpath leaves each as it is.
+ALIASES = os.path.isdir("/.vol") and sys.platform == "darwin"
+needs_aliases = pytest.mark.skipif(not ALIASES, reason="no file-system aliases here")
+
+
+def vol(path: Path) -> str:
+    """``/.vol/<device>/<inode>``: *path* named by number."""
+    info = os.stat(path)
+    return f"/.vol/{info.st_dev}/{info.st_ino}"
+
+
+def alias_forms(folder: Path, name: str) -> list[str]:
+    """The four alias forms of *folder*/*name*, and one in another case."""
+    path = folder / name
+    return [
+        vol(path),
+        f"{vol(folder)}/{name}",
+        f"/.resolve/1{path}",
+        f"/.nofollow{path}",
+        "/.VOL" + vol(path)[len("/.vol") :],
+    ]
 
 
 @pytest.fixture
@@ -218,3 +247,121 @@ def test_a_path_below_home_reads_with_a_tilde(home: Path) -> None:
     assert home_label(str(home)) == "~"
     assert home_label(str(home) + "-other/x") == str(home) + "-other/x"
     assert home_label("/opt/data/x") == "/opt/data/x"
+
+
+# ── Canonical paths and aliases ──────────────────────────────────────────────
+
+
+def test_a_case_variant_is_named_as_the_file_system_keeps_it(tmp_path: Path) -> None:
+    real = Path(os.path.realpath(tmp_path)) / "Career"
+    (real / "Notes").mkdir(parents=True)
+    (real / "Notes" / "cv.md").write_text("x")
+    other = str(real.parent / "CAREER" / "notes" / "CV.md")
+    if os.path.exists(other):  # a case-insensitive file system
+        assert canonical_path(other) == str(real / "Notes" / "cv.md")
+    # A part that does not exist yet keeps its spelling below the named folder.
+    assert canonical_path(str(real / "Notes" / "New" / "a.md")) == str(
+        real / "Notes" / "New" / "a.md"
+    )
+
+
+def test_a_fifo_is_never_opened_to_name_it(tmp_path: Path) -> None:
+    folder = Path(os.path.realpath(tmp_path))
+    os.mkfifo(folder / "pipe")
+    # Opening a FIFO to read would wait for a writer; it is named by its folder.
+    assert canonical_path(str(folder / "pipe")) == str(folder / "pipe")
+
+
+@needs_aliases
+@pytest.mark.parametrize("form", range(5))
+def test_an_alias_into_a_key_folder_is_named_and_refused(home: Path, form: int) -> None:
+    (home / ".ssh").mkdir()
+    (home / ".ssh" / "id_rsa").write_text("key")
+    alias = alias_forms(home / ".ssh", "id_rsa")[form]
+    assert is_alias(alias)
+    assert never_offered(alias) is not None
+    assert never_offered(canonical_path(alias)) is not None
+
+
+@needs_aliases
+@pytest.mark.parametrize("form", range(5))
+def test_an_alias_is_never_offered_even_to_a_harmless_folder(
+    home: Path, form: int
+) -> None:
+    (home / "notes").mkdir()
+    (home / "notes" / "a.txt").write_text("a")
+    alias = alias_forms(home / "notes", "a.txt")[form]
+    assert never_offered(alias) == "system"
+    if form < 4:  # the file system names the four real forms
+        assert canonical_path(alias) == str(home / "notes" / "a.txt")
+    access = outside_access("file_read", alias)
+    if is_alias(access.folder):
+        assert not access.grantable
+    assert not covers(os.path.dirname(alias), alias)
+
+
+@needs_aliases
+def test_a_volume_alias_folder_covers_nothing(home: Path) -> None:
+    (home / ".ssh").mkdir()
+    (home / ".ssh" / "id_rsa").write_text("key")
+    device = os.stat(home).st_dev
+    assert not covers(f"/.vol/{device}", vol(home / ".ssh" / "id_rsa"))
+    assert not covers(f"/.vol/{device}", str(home / ".ssh" / "id_rsa"))
+    assert is_alias(f"/.Vol/{device}") and not is_alias("/volumes/x")
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        "Library/Application Support/Arc/User Data",
+        "Library/Application Support/Chromium/Default",
+        "Library/Application Support/Vivaldi",
+        "Library/Application Support/com.operasoftware.Opera",
+        "Library/Application Support/Slack/Cookies",
+        ".config/github-copilot/hosts.json",
+        ".claude/.credentials.json",
+        ".codex/auth.json",
+        ".gemini/oauth_creds.json",
+        ".terraform.d/credentials.tfrc.json",
+        ".cargo/credentials.toml",
+        ".vault-token",
+        ".oci/config",
+        ".config/cloudflared/cert.pem",
+    ],
+)
+def test_more_sign_in_places_are_never_offered(home: Path, relative: str) -> None:
+    assert never_offered(str(home / relative)) == "credentials"
+
+
+def test_fd_path_names_the_open_file(tmp_path: Path) -> None:
+    path = Path(os.path.realpath(tmp_path)) / "a.txt"
+    path.write_text("x")
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        named = fd_path(fd)
+    finally:
+        os.close(fd)
+    assert named in (str(path), None)  # None where the system cannot say
+
+
+def test_open_checked_refuses_a_folder_swapped_after_the_check(
+    tmp_path: Path,
+) -> None:
+    root = Path(os.path.realpath(tmp_path))
+    (root / "career").mkdir()
+    (root / "career" / "cv.md").write_text("cv")
+    (root / "keys").mkdir()
+    (root / "keys" / "cv.md").write_text("key")
+    checked = canonical_path(str(root / "career" / "cv.md"))
+    fd = os.open(root / "career" / "cv.md", os.O_RDONLY)
+    nameable = fd_path(fd) is not None
+    os.close(fd)
+    # A part of the path is swapped for a symlink after the check.
+    (root / "career").rename(root / "career-old")
+    (root / "career").symlink_to(root / "keys")
+    if not nameable:
+        pytest.skip("this system cannot name a descriptor")
+    with pytest.raises(PathChangedError, match="changed before it was opened"):
+        open_checked(str(root / "career" / "cv.md"), os.O_RDONLY, checked)
+    # Without a check to keep, the open stands as it always did.
+    os.close(open_checked(str(root / "career" / "cv.md"), os.O_RDONLY, None))

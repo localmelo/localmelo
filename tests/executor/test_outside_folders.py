@@ -3,12 +3,16 @@
 Today's refusal stays word for word unless the approval gate can ask a
 person (``asks_folders``). When it can, a place melo never opens is still
 refused, with its own text and nobody asked; any other outside path asks
-the gate, with ``outside`` on the request, whatever the tool's tier.
+the gate, with ``outside`` on the request, whatever the tool's tier. Paths
+are named by the file system: a macOS alias (``/.vol`` and others) or
+another letter case counts as what it names, and the tool opens only the
+file that was checked.
 """
 
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -16,8 +20,9 @@ import pytest
 
 from localmelo.melo.checker import Checker
 from localmelo.melo.contracts.approvals import ApprovalDecision
-from localmelo.melo.contracts.folders import OutsideAccess
+from localmelo.melo.contracts.folders import OutsideAccess, fd_path
 from localmelo.melo.executor import Executor, builtin_names, register_builtins
+from localmelo.melo.executor import executor as executor_module
 from localmelo.melo.executor.models import (
     ErrorCategory,
     ExecutionOutcome,
@@ -200,7 +205,21 @@ async def test_a_place_never_offered_is_refused_and_nobody_is_asked(
 
     assert outcome.error_category == ErrorCategory.PATH_POLICY_VIOLATION
     assert "melo never opens it, and the user is not asked" in outcome.error
-    assert gate.requests == [] and gate.asked_about == []
+    assert gate.requests == []
+
+
+async def test_a_gate_that_cannot_ask_keeps_the_old_refusal_for_every_place(
+    root: Path, home: Path
+) -> None:
+    (home / ".ssh").mkdir()
+    (home / ".ssh" / "id_rsa").write_text("key")
+    executor = _executor(root)
+    gate = FolderGate(asks=False)
+
+    for path in (str(home / ".ssh" / "id_rsa"), str(home / "x.txt"), "/etc/hosts"):
+        outcome = await _run(executor, "file_read", {"path": path}, gate)
+        assert outcome.error == PLAIN.format(path=path)
+    assert gate.requests == []
 
 
 async def test_a_symlink_and_dot_dot_into_a_never_offered_place_are_refused(
@@ -269,3 +288,160 @@ async def test_a_path_swapped_while_the_person_decides_does_not_run(
 
     assert outcome.error_category == ErrorCategory.PATH_POLICY_VIOLATION
     assert "changed while waiting for approval" in outcome.error
+
+
+async def test_a_part_swapped_after_the_last_check_is_not_opened(
+    root: Path, home: Path, career: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The tool's own descriptor must name the checked file, after every check."""
+    (home / "keys").mkdir()
+    (home / "keys" / "cv.md").write_text("PRIVATE")
+    probe = os.open(career / "cv.md", os.O_RDONLY)
+    nameable = fd_path(probe) is not None
+    os.close(probe)
+    if not nameable:
+        pytest.skip("this system cannot name a descriptor")
+    # Step 9's check passes: the swap lands between it and the open.
+    monkeypatch.setattr(
+        executor_module, "_resolved_again", lambda policy, resolved, outside: resolved
+    )
+
+    class Swap(FolderGate):
+        async def __call__(self, request: ExecutionRequest) -> ApprovalDecision:
+            career.rename(career.parent / "career-old")
+            career.symlink_to(home / "keys")
+            return await super().__call__(request)
+
+    outcome = await _run(
+        _executor(root), "file_read", {"path": str(career / "cv.md")}, Swap()
+    )
+
+    assert outcome.error_category == ErrorCategory.PATH_POLICY_VIOLATION
+    assert "changed before it was opened" in outcome.error
+    assert "PRIVATE" not in (outcome.output or "")
+
+
+async def test_a_write_opens_the_checked_folder_only(
+    root: Path, home: Path, career: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (home / "elsewhere").mkdir()
+    probe = os.open(career, os.O_RDONLY)
+    nameable = fd_path(probe) is not None
+    os.close(probe)
+    if not nameable:
+        pytest.skip("this system cannot name a descriptor")
+    monkeypatch.setattr(
+        executor_module, "_resolved_again", lambda policy, resolved, outside: resolved
+    )
+
+    class Swap(FolderGate):
+        async def __call__(self, request: ExecutionRequest) -> ApprovalDecision:
+            career.rename(career.parent / "career-old")
+            career.symlink_to(home / "elsewhere")
+            return await super().__call__(request)
+
+    outcome = await _run(
+        _executor(root),
+        "file_write",
+        {"path": str(career / "new.md"), "content": "x"},
+        Swap(),
+    )
+
+    assert outcome.error_category == ErrorCategory.PATH_POLICY_VIOLATION
+    assert "changed before it was opened" in outcome.error
+    assert not (home / "elsewhere" / "new.md").exists()
+
+
+async def test_listing_an_outside_folder_never_enters_a_place_never_offered(
+    root: Path, home: Path
+) -> None:
+    library = home / "Library"
+    (library / "Keychains").mkdir(parents=True)
+    (library / "Keychains" / "login.keychain-db").write_text("k")
+    (library / "Recipes").mkdir()
+    (library / "Recipes" / "soup.md").write_text("s")
+    executor = _executor(root)
+
+    outcome = await _run(
+        executor, "list_files", {"path": str(library), "depth": 2}, FolderGate()
+    )
+
+    assert outcome.status == ExecutionStatus.SUCCESS, outcome.error
+    lines = outcome.output.splitlines()
+    assert "Keychains/ (not offered)" in lines
+    assert "login.keychain-db" not in outcome.output
+    assert "Recipes/" in lines and any("soup.md" in line for line in lines)
+
+
+async def test_listing_inside_the_workspace_is_as_before(root: Path) -> None:
+    (root / ".ssh").mkdir()
+    (root / ".ssh" / "known.txt").write_text("k")
+    executor = _executor(root)
+
+    outcome = await _run(executor, "list_files", {"path": ".", "depth": 2}, None)
+
+    assert ".ssh/" in outcome.output.splitlines()
+    assert "known.txt" in outcome.output
+
+
+# ── Aliases (macOS) ──────────────────────────────────────────────────────────
+
+needs_aliases = pytest.mark.skipif(
+    not (sys.platform == "darwin" and os.path.isdir("/.vol")),
+    reason="no file-system aliases here",
+)
+
+
+def _vol(path: Path) -> str:
+    info = os.stat(path)
+    return f"/.vol/{info.st_dev}/{info.st_ino}"
+
+
+def _forms(folder: Path, name: str) -> list[str]:
+    path = folder / name
+    return [
+        _vol(path),
+        f"{_vol(folder)}/{name}",
+        f"/.resolve/1{path}",
+        f"/.nofollow{path}",
+        "/.VOL" + _vol(path)[len("/.vol") :],
+    ]
+
+
+@needs_aliases
+@pytest.mark.parametrize("form", range(5))
+@pytest.mark.parametrize("tool", ["file_read", "file_write", "list_files"])
+async def test_an_alias_is_refused_and_nobody_is_asked(
+    root: Path, home: Path, career: Path, form: int, tool: str
+) -> None:
+    (home / ".ssh").mkdir()
+    (home / ".ssh" / "id_rsa").write_text("PRIVATE")
+    executor = _executor(root)
+    gate = FolderGate()
+    if tool == "list_files":
+        paths = [_forms(home, ".ssh")[form], _forms(career.parent, "career")[form]]
+    else:
+        paths = [_forms(home / ".ssh", "id_rsa")[form], _forms(career, "cv.md")[form]]
+    arguments: dict[str, Any] = {"content": "x"} if tool == "file_write" else {}
+
+    for path in paths:
+        outcome = await _run(executor, tool, {"path": path, **arguments}, gate)
+        assert outcome.error_category == ErrorCategory.PATH_POLICY_VIOLATION, path
+        assert "melo never opens it" in outcome.error
+        assert "PRIVATE" not in (outcome.output or "")
+    assert gate.requests == []
+    assert (home / ".ssh" / "id_rsa").read_text() == "PRIVATE"
+    assert (career / "cv.md").read_text() == "my cv\n"
+
+
+@needs_aliases
+async def test_an_alias_into_the_workspace_is_the_workspace(root: Path) -> None:
+    (root / "notes.txt").write_text("inside")
+    executor = _executor(root)
+
+    outcome = await _run(
+        executor, "file_read", {"path": _vol(root / "notes.txt")}, None
+    )
+
+    assert (outcome.status, outcome.output) == (ExecutionStatus.SUCCESS, "inside")
+    assert [a.path for a in outcome.artifacts] == [str(root / "notes.txt")]

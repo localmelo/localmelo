@@ -13,7 +13,14 @@ from dataclasses import dataclass, field, replace
 from urllib.parse import unquote, urlparse
 
 from localmelo.melo.contracts import own_gateway
-from localmelo.melo.contracts.folders import CREDENTIAL_PLACES, MELO_DATA, SYSTEM_PLACES
+from localmelo.melo.contracts.folders import (
+    CREDENTIAL_PLACES,
+    MELO_DATA,
+    SYSTEM_PLACES,
+    canonical_path,
+    is_alias,
+    never_offered,
+)
 from localmelo.melo.contracts.review import TITLES, ActionReview
 
 # Under the home folder. Reads count too: passwords, keys and cookies. The
@@ -210,14 +217,26 @@ def under(path: str, folder: str) -> bool:
     return path == folder or path.startswith(folder.rstrip("/") + "/")
 
 
+def under_any_case(path: str, folder: str) -> bool:
+    """:func:`under`, without case: a place that matters matches more, never less."""
+    return under(path.casefold(), folder.casefold())
+
+
 def resolve(ctx: Context, raw: str, cwd: str | None = None) -> str | None:
-    """*raw* as an absolute real path, or None when it holds a variable."""
+    """*raw* as an absolute canonical path, or None when it holds a variable.
+
+    The file system names it (see
+    :func:`~localmelo.melo.contracts.folders.canonical_path`: a lookup only,
+    nothing is read, and a FIFO or a device is never opened), so an alias
+    such as macOS ``/.vol`` or another letter case counts as the place it
+    names. One left under an alias is sensitive (see :func:`where`).
+    """
     text = raw.replace("${HOME}", ctx.home).replace("$HOME", ctx.home)
     if text == "~" or text.startswith("~/"):
         text = ctx.home + text[1:]
     if not text or text.startswith("~") or re.search(r"[$`]", text):
         return None
-    return os.path.realpath(os.path.join(cwd or ctx.root, text))
+    return canonical_path(os.path.join(cwd or ctx.root, text))
 
 
 def _running(source: str) -> str:
@@ -264,16 +283,32 @@ def secret_name(text: str) -> bool:
 
 
 def where(ctx: Context, path: str, *, write: bool) -> str:
-    """self, credentials, persistence, system, harmless, root, inside or outside."""
+    """self, credentials, persistence, system, harmless, root, inside or outside.
+
+    The places that matter (melo itself, what runs later, keys) match
+    without case, as a case-insensitive file system does. Outside the
+    workspace, a place a file tool never opens for keys or melo's own data
+    (see :func:`~localmelo.melo.contracts.folders.never_offered`) is
+    credentials too, whatever home the review was given. A path left under
+    a file-system alias, which melo could not name, is credentials.
+    """
     home, root = ctx.home.rstrip("/"), ctx.root
     places = _places(home, root, _SOURCE)
-    if write and any(under(path, p) for p in (ctx.prefix, *places["self"])):
+    if is_alias(path):
+        return "credentials"
+    if write and any(under_any_case(path, p) for p in (ctx.prefix, *places["self"])):
         return "self"
-    if write and any(under(path, p) for p in places["persistence"]):
+    if write and any(under_any_case(path, p) for p in places["persistence"]):
         return "persistence"
     inside = under(path, root)
-    secret = any(under(path, p) for p in places["credentials"])
-    if secret or (os.path.basename(path) == ".env" and not inside):
+    secret = any(under_any_case(path, p) for p in places["credentials"])
+    if not secret and not inside:
+        # The places melo never opens for a file tool, by their canonical
+        # path: key places anywhere, melo's own data folder in any home
+        # and the configured one.
+        reason = never_offered(path, home=home, canonical=True)
+        secret = reason in ("credentials", "melo")
+    if secret or (os.path.basename(path).casefold() == ".env" and not inside):
         return "credentials"
     if inside:
         return "root" if path in (root, f"{root}/.git") else "inside"

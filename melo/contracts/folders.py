@@ -7,20 +7,33 @@ and the :class:`OutsideAccess` an approval request carries. The list of
 places melo never opens lives here and nowhere else; the action review
 reads its key and credential places from it too.
 
-Paths are real paths (``os.path.realpath``): a symlink counts as its
-target and ``..`` is resolved before anything here looks at it. The
-never-offered check compares without case and in one Unicode form, so a
-case-insensitive file system cannot spell its way past it; a grant
-compares exactly, or by the file system's own answer that two spellings
-name the same folder. This module imports only the standard library.
+Paths are canonical (:func:`canonical_path`): a symlink counts as its
+target, ``..`` is resolved, and the file system itself names what a path
+reaches, so neither another letter case nor an alias that names a file by
+number (macOS ``/.vol``, ``/.resolve``, ``/.nofollow``) gets past a check.
+A file tool opens what was checked through :func:`open_checked`, which
+makes sure the descriptor it reads or writes with is that file. The
+never-offered check also compares without case and in one Unicode form; a
+grant compares exactly, or by the file system's own answer that two
+spellings name the same folder. This module imports only the standard
+library.
 """
 
 from __future__ import annotations
 
+import errno
 import os
+import stat
+import sys
 import unicodedata
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Final, Literal
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - not a POSIX system
+    fcntl = None  # type: ignore[assignment]
 
 Access = Literal["read", "write"]
 # Why a place is never offered: keys or passwords, melo's own data, a
@@ -58,6 +71,25 @@ CREDENTIAL_PLACES: Final = (
     "Library/Application Support/Firefox",
     "Library/Application Support/BraveSoftware",
     "Library/Application Support/Microsoft Edge",
+    "Library/Application Support/Arc",
+    "Library/Application Support/Chromium",
+    "Library/Application Support/Vivaldi",
+    "Library/Application Support/com.operasoftware.Opera",
+    "Library/Application Support/Slack",
+    "Library/Containers/com.tinyspeck.slackmacgap",
+    ".config/github-copilot",
+    ".config/cloudflared",
+    # Sign-ins of command-line coding agents.
+    ".claude",
+    ".claude.json",
+    ".codex",
+    ".gemini",
+    ".cursor",
+    ".terraform.d",
+    ".cargo/credentials",
+    ".cargo/credentials.toml",
+    ".vault-token",
+    ".oci",
 )
 # melo's own data folder, under the home folder. ``LOCALMELO_MEMORY_DIR``
 # names another one when it is set.
@@ -79,6 +111,12 @@ SYSTEM_OPEN: Final = ("/usr/local",)
 # environment holds keys): never offered either. Reading a device can block
 # for ever.
 DEVICE_PLACES: Final = ("/dev", "/private/var/db", "/proc", "/sys")
+# File-system aliases (macOS): ``/.vol/<device>/<inode>`` names a file by
+# number, ``/.resolve/1/<path>`` and ``/.nofollow/<path>`` another way to a
+# path. ``os.path.realpath`` leaves them as they are, so a path under one
+# that the file system cannot name (:func:`canonical_path`) is never
+# offered, granted or kept.
+ALIAS_PLACES: Final = ("/.vol", "/.resolve", "/.nofollow")
 
 # What the model reads for a place never offered; {path} is the path it gave.
 NEVER_TEXT: Final[dict[str, str]] = {
@@ -143,7 +181,163 @@ def _under(path: str, folder: str) -> bool:
 
 
 def _home(home: str | None) -> str:
-    return os.path.realpath(home or os.path.expanduser("~"))
+    return canonical_path(home or os.path.expanduser("~"))
+
+
+def is_alias(path: str) -> bool:
+    """Whether *path* lies under a file-system alias (:data:`ALIAS_PLACES`), in any case."""
+    key = _key(path)
+    return any(_under(key, place) for place in ALIAS_PLACES)
+
+
+# macOS: fcntl F_GETPATH and the longest path it writes (MAXPATHLEN).
+_F_GETPATH: Final = 50
+_PATH_MAX: Final = 1024
+# Opened for a lookup only: no read access on macOS (O_EVTONLY) or Linux
+# (O_PATH), never a terminal, never waiting on a FIFO, never through a
+# symlink that took the place of the last part.
+_LOOKUP: Final = (
+    (0x8000 if sys.platform == "darwin" else getattr(os, "O_PATH", 0))
+    | os.O_NONBLOCK
+    | getattr(os, "O_NOCTTY", 0)
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+)
+
+
+def fd_path(fd: int) -> str | None:
+    """The path the file system gives for the open descriptor *fd*, or ``None``.
+
+    ``fcntl(F_GETPATH)`` on macOS, ``/proc/self/fd`` on Linux: the real
+    path in the case the file system keeps, whatever path opened it (an
+    alias, another letter case). ``None`` where the system cannot say.
+    """
+    if sys.platform == "darwin" and fcntl is not None:
+        try:
+            raw = fcntl.fcntl(fd, _F_GETPATH, bytes(_PATH_MAX))
+        except (OSError, ValueError):
+            return None
+        path = os.fsdecode(raw.split(b"\0", 1)[0])
+    elif os.path.isdir("/proc/self/fd"):
+        try:
+            path = os.readlink(f"/proc/self/fd/{fd}")
+        except OSError:
+            return None
+        if path.endswith(" (deleted)"):
+            return None
+    else:
+        return None
+    return path if path.startswith("/") else None
+
+
+def canonical_path(path: str) -> str:
+    """*path* as the file system names it: real, alias-free, in its own case.
+
+    ``os.path.realpath`` first (symlinks and ``..``). Then the deepest part
+    of that path that exists as a folder or a regular file is opened for a
+    lookup only (see :data:`_LOOKUP`: nothing is read, and a FIFO or a
+    device is never opened) and named by the file system
+    (:func:`fd_path`); the parts below it are joined back as given. Where
+    nothing can be named, the real path stands; one still under an alias
+    is never offered (:func:`never_offered`).
+    """
+    real = os.path.realpath(path)
+    head = real
+    rest: list[str] = []
+    while True:
+        named = _named(head)
+        if named is not None:
+            return os.path.join(named, *reversed(rest)) if rest else named
+        parent = os.path.dirname(head)
+        if parent == head:
+            return real
+        rest.append(os.path.basename(head))
+        head = parent
+
+
+def _named(path: str) -> str | None:
+    """The file system's name for the folder or regular file *path*, else ``None``."""
+    try:
+        info = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+        return None
+    try:
+        fd = os.open(path, _LOOKUP)
+    except OSError:
+        return None
+    try:
+        opened = os.fstat(fd)
+        if (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
+            return None  # swapped between the two looks
+        return fd_path(fd)
+    finally:
+        os.close(fd)
+
+
+@dataclass(frozen=True)
+class CheckedPath:
+    """The path the executor checked for one file tool call.
+
+    ``path`` is canonical; ``outside`` says it is outside the workspace (a
+    person allowed it), so a listing does not enter a place never offered.
+    """
+
+    path: str
+    outside: bool = False
+
+
+# The path a file tool's call was checked with, while the call runs (set
+# by the executor, read by the file tools; see :func:`open_checked`).
+CHECKED_PATH: ContextVar[CheckedPath | None] = ContextVar(
+    "localmelo_checked_path", default=None
+)
+
+
+class PathChangedError(OSError):
+    """The file a tool opened is not the one that was checked: it does not run."""
+
+    def __init__(self, path: str) -> None:
+        super().__init__(
+            f"Path '{path}' changed before it was opened; the call did not run."
+        )
+        self.path = path
+
+
+def checked_for(target: str) -> CheckedPath | None:
+    """The executor's check of *target*, when the running call checked that path."""
+    checked = CHECKED_PATH.get()
+    return checked if checked is not None and checked.path == target else None
+
+
+def open_checked(path: str, flags: int, expect: str | None, mode: int = 0o666) -> int:
+    """``os.open(path, flags)`` without following a symlink in its last part.
+
+    With *expect* (the canonical path a check let through), the descriptor
+    must name that file (:func:`fd_path`), or it is closed and
+    :class:`PathChangedError` raised: whatever took a part of the path's place
+    after the check, the tool reads or writes only the file that was
+    checked, through this descriptor. Where the system cannot name a
+    descriptor, the open stands as it is.
+    """
+    flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    try:
+        fd = os.open(path, flags, mode)
+    except OSError as exc:
+        # A symlink took the checked last part's place (ELOOP, or ENOTDIR
+        # for a folder on macOS).
+        swapped = exc.errno in (errno.ELOOP, errno.ENOTDIR) and os.path.islink(path)
+        if expect is not None and swapped:
+            raise PathChangedError(expect) from exc
+        raise
+    if expect is None:
+        return fd
+    named = fd_path(fd)
+    if named is not None and named != expect:
+        os.close(fd)
+        raise PathChangedError(expect)
+    return fd
 
 
 def _has_place(path_key: str, place: str) -> bool:
@@ -156,19 +350,28 @@ def melo_data_folders(home: str | None = None) -> tuple[str, ...]:
     folders = [os.path.join(_home(home), MELO_DATA)]
     other = os.environ.get(MELO_DATA_ENV, "")
     if other:
-        folders.append(os.path.realpath(os.path.expanduser(other)))
+        folders.append(canonical_path(os.path.expanduser(other)))
     return tuple(folders)
 
 
-def never_offered(path: str, *, home: str | None = None) -> NeverReason | None:
-    """Why the real path *path* is never offered, or ``None`` when it may be.
+def never_offered(
+    path: str, *, home: str | None = None, canonical: bool = False
+) -> NeverReason | None:
+    """Why *path* is never offered, or ``None`` when it may be.
 
     Key and credential places (anywhere, see :data:`CREDENTIAL_PLACES`),
     melo's own data, system folders and devices (``/usr/local`` excepted),
     ``/``, and the person's home folder itself or a folder above it. A
-    folder below the home folder is fine. Compared without case.
+    folder below the home folder is fine. A path given under a file-system
+    alias (:data:`ALIAS_PLACES`) counts as a system folder, whatever it
+    names. Compared without case, on the canonical path
+    (:func:`canonical_path`); with *canonical*, *path* is one already.
     """
-    real = os.path.realpath(path)
+    if is_alias(os.path.realpath(path)):
+        return "system"
+    real = path if canonical else canonical_path(path)
+    if is_alias(real):
+        return "system"
     key = _key(real)
     home_key = _key(_home(home))
     if any(_has_place(key, place) for place in CREDENTIAL_PLACES):
@@ -189,7 +392,7 @@ def never_offered(path: str, *, home: str | None = None) -> NeverReason | None:
 
 def above_home(folder: str, *, home: str | None = None) -> bool:
     """Whether *folder* is the home folder or a folder above it (``/`` too)."""
-    return _under(_key(_home(home)), _key(os.path.realpath(folder)))
+    return _under(_key(_home(home)), _key(canonical_path(folder)))
 
 
 def home_label(path: str, *, home: str | None = None) -> str:
@@ -216,19 +419,22 @@ def asked_text(outside: OutsideAccess) -> str:
 def outside_access(
     tool_name: str, path: str, *, home: str | None = None
 ) -> OutsideAccess:
-    """The :class:`OutsideAccess` of a call of *tool_name* on the real path *path*.
+    """The :class:`OutsideAccess` of a call of *tool_name* on *path*.
 
-    ``list_files`` of a folder is offered that folder; any other call the
-    folder that holds its path. A write is never grantable, nor is a folder
-    that is the home folder or above it.
+    The path is made canonical (:func:`canonical_path`). ``list_files`` of
+    a folder is offered that folder; any other call the folder that holds
+    its path. A write is never grantable, nor is a folder that is the home
+    folder or above it, nor one under a file-system alias.
     """
-    real = os.path.realpath(path)
+    real = canonical_path(path)
     if tool_name == "list_files" and os.path.isdir(real):
         folder = real
     else:
         folder = os.path.dirname(real) or "/"
     access: Access = "write" if tool_name in WRITE_TOOLS else "read"
-    grantable = access == "read" and not above_home(folder, home=home)
+    grantable = (
+        access == "read" and not is_alias(folder) and not above_home(folder, home=home)
+    )
     return OutsideAccess(real, folder, access, grantable)
 
 
@@ -238,10 +444,11 @@ def covers(folder: str, path: str) -> bool:
     That is *folder* itself or a path below it, on a path boundary:
     ``/a/b`` covers ``/a/b/c`` but not ``/a/bc``. A different spelling of
     the same folder counts only when the file system says it is the same
-    folder (a case-insensitive file system). ``/`` and ``""`` cover nothing.
+    folder (a case-insensitive file system). ``/``, ``""`` and a folder
+    under a file-system alias cover nothing.
     """
     folder = folder.rstrip("/")
-    if not folder or not path.startswith("/"):
+    if not folder or not path.startswith("/") or is_alias(folder) or is_alias(path):
         return False
     if path == folder or path.startswith(folder + "/"):
         return True
@@ -257,7 +464,9 @@ def covers(folder: str, path: str) -> bool:
 
 
 __all__ = [
+    "ALIAS_PLACES",
     "ASKED_TEXT",
+    "CHECKED_PATH",
     "CREDENTIAL_PLACES",
     "DEVICE_PLACES",
     "MELO_DATA",
@@ -266,14 +475,21 @@ __all__ = [
     "SYSTEM_PLACES",
     "WRITE_TOOLS",
     "Access",
+    "CheckedPath",
     "NeverReason",
     "OutsideAccess",
+    "PathChangedError",
     "above_home",
     "asked_text",
+    "canonical_path",
+    "checked_for",
     "covers",
+    "fd_path",
     "home_label",
+    "is_alias",
     "melo_data_folders",
     "never_offered",
     "never_text",
+    "open_checked",
     "outside_access",
 ]

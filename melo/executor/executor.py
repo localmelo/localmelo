@@ -15,8 +15,12 @@ from localmelo.melo.contracts.approvals import (
     denial_text,
 )
 from localmelo.melo.contracts.folders import (
+    CHECKED_PATH,
+    CheckedPath,
     OutsideAccess,
+    PathChangedError,
     asked_text,
+    canonical_path,
     never_offered,
     never_text,
     outside_access,
@@ -216,7 +220,29 @@ class Executor:
         check: it also finds the tools of :meth:`register_harness_tool`, and
         the checker's refusal of an ``exec`` tool that the mode does not
         offer the model does not apply. Every other check still does.
+
+        A file tool opens what was checked: the executor sets
+        :data:`~localmelo.melo.contracts.folders.CHECKED_PATH` while the
+        call runs, and the tool's descriptor must name that path (see
+        :func:`~localmelo.melo.contracts.folders.open_checked`), or the call
+        is refused with ``PATH_POLICY_VIOLATION``.
         """
+        token = CHECKED_PATH.set(None)
+        try:
+            return await self._execute(
+                request, allowed=allowed, approve=approve, harness=harness
+            )
+        finally:
+            CHECKED_PATH.reset(token)
+
+    async def _execute(
+        self,
+        request: ExecutionRequest,
+        *,
+        allowed: Collection[str] | None,
+        approve: ApprovalGate | None,
+        harness: bool,
+    ) -> ExecutionOutcome:
         tool_call = ToolCall(tool_name=request.tool_name, arguments=request.arguments)
 
         # 1. Authoritative registry resolution
@@ -356,6 +382,8 @@ class Executor:
                     arguments={**request.arguments, "path": resolved},
                     outside=outside,
                 )
+                # The tool opens this path and nothing else (open_checked).
+                CHECKED_PATH.set(CheckedPath(resolved, outside is not None))
 
         # 8. Approval, for a tool that requires it, and for any call on a
         #    path outside the root (#405): asked only about a call that
@@ -470,6 +498,16 @@ class Executor:
                     output = await fn(**request.arguments)
                 finally:
                     _ENTRY_MARKED.reset(token)
+        except PathChangedError as exc:
+            # The file opened is not the one checked (a part of the path
+            # was swapped after the check): nothing was read or written.
+            return ExecutionOutcome(
+                tool_name=request.tool_name,
+                status=ExecutionStatus.ERROR,
+                error=str(exc),
+                error_category=ErrorCategory.PATH_POLICY_VIOLATION,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
         except TimeoutError as exc:
             duration = (time.perf_counter() - start) * 1000
             if deadline.expired():
@@ -560,23 +598,27 @@ def _outside(
     """The outside access to ask about for *path*, or ``None`` and the refusal.
 
     Asked about only when *approve* can ask a person (``asks_folders``);
-    a place never offered is refused first, with its own text. Any other
-    case keeps the refusal it always had, word for word.
+    when it cannot, the refusal is the one it always was, word for word,
+    whatever the path. When it can, a place never offered (a path given
+    under a file-system alias too) is refused with its own text, and nobody
+    is asked.
     """
     plain = f"Path '{path}' is outside allowed workspace root"
     asks = getattr(approve, "asks_folders", None) if approve is not None else None
     if not callable(asks):
         return None, plain
-    real = os.path.realpath(os.path.join(root, path))
-    reason = never_offered(real)
+    joined = os.path.join(root, path)
+    access = outside_access(tool_name, joined)
+    try:
+        can_ask = asks(access) is True
+    except Exception:
+        can_ask = False
+    if not can_ask:
+        return None, plain
+    reason = never_offered(joined)
     if reason is not None:
         return None, never_text(path, reason)
-    access = outside_access(tool_name, real)
-    try:
-        allowed = asks(access) is True
-    except Exception:
-        allowed = False
-    return (access, "") if allowed else (None, plain)
+    return access, ""
 
 
 def _resolved_again(
@@ -585,8 +627,8 @@ def _resolved_again(
     """*resolved* resolved again after the wait: under the root, or outside it as allowed."""
     if outside is None:
         return policy.resolve(resolved)
-    real = os.path.realpath(resolved)
-    return real if never_offered(real) is None else None
+    real = canonical_path(resolved)
+    return real if never_offered(real, canonical=True) is None else None
 
 
 def _parameter_mismatch(fn: ToolCallable, arguments: Mapping[str, Any]) -> str:
