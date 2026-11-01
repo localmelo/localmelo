@@ -171,6 +171,9 @@ async def test_a_write_after_a_read_grant_still_asks(root: Path, career: Path) -
     write = asker.requests[1]
     assert write.review is not None and write.review.verdict == "high"
     assert "outside_write" in write.review.categories
+    assert "Writes ~/developer/career/cv.md, outside the workspace." in (
+        write.review.reasons
+    )
     assert (career / "cv.md").read_text() == "Engineer, 2020-2026\n"
 
 

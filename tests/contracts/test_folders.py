@@ -20,6 +20,7 @@ from localmelo.melo.contracts.folders import (
     above_home,
     asked_text,
     covers,
+    home_label,
     melo_data_folders,
     never_offered,
     never_text,
@@ -210,3 +211,10 @@ def test_the_line_the_model_reads_names_the_folder(home: Path) -> None:
     )
     write = outside_access("file_write", str(home / "career" / "cv.md"))
     assert asked_text(write).startswith(f"Writing to {home / 'career'} outside")
+
+
+def test_a_path_below_home_reads_with_a_tilde(home: Path) -> None:
+    assert home_label(str(home / "developer" / "cv.md")) == "~/developer/cv.md"
+    assert home_label(str(home)) == "~"
+    assert home_label(str(home) + "-other/x") == str(home) + "-other/x"
+    assert home_label("/opt/data/x") == "/opt/data/x"

@@ -116,7 +116,7 @@ from localmelo.melo.contracts.approvals import (
     review_mode,
 )
 from localmelo.melo.contracts.events import EventSink
-from localmelo.melo.contracts.folders import OutsideAccess
+from localmelo.melo.contracts.folders import OutsideAccess, home_label
 from localmelo.melo.contracts.inbox import InboxError, InboxSource
 from localmelo.melo.contracts.providers import (
     BaseEmbeddingProvider,
@@ -1902,7 +1902,10 @@ def _outside_write(review: ActionReview | None, outside: OutsideAccess) -> Actio
         categories.append("outside_write")
     order = list(TITLES)
     categories.sort(key=lambda name: order.index(name) if name in order else len(order))
-    reasons = (*found.reasons, f"Writes {outside.path}, outside the workspace.")
+    reasons = (
+        *found.reasons,
+        f"Writes {home_label(outside.path)}, outside the workspace.",
+    )
     return dataclasses.replace(
         found, verdict="high", categories=tuple(categories), reasons=reasons[:3]
     )

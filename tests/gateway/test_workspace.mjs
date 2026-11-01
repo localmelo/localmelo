@@ -5352,7 +5352,7 @@ test('a write outside the workspace is a high-impact card: once or deny, deny fi
   h.context.request = outsideRead({request_id: 'w', tool_name: 'file_write',
     arguments: {path: '/Users/me/developer/career/new.md', content: 'hello\n'},
     target: {path_label: '~/developer/career/new.md', exists: false, size_bytes: 0},
-    review: {verdict: 'high', title: 'Change files outside melo_test_workspace?', reasons: ['Writes /Users/me/developer/career/new.md, outside the workspace.'], categories: ['outside_write']},
+    review: {verdict: 'high', title: 'Change files outside melo_test_workspace?', reasons: ['Writes ~/developer/career/new.md, outside the workspace.'], categories: ['outside_write']},
     outside: {path: '/Users/me/developer/career/new.md', folder: '/Users/me/developer/career', access: 'write', grantable: false,
       path_label: '~/developer/career/new.md', folder_label: '~/developer/career'}});
   const card = h.run('approvalCard(request)');

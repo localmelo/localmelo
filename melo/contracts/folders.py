@@ -192,6 +192,16 @@ def above_home(folder: str, *, home: str | None = None) -> bool:
     return _under(_key(_home(home)), _key(os.path.realpath(folder)))
 
 
+def home_label(path: str, *, home: str | None = None) -> str:
+    """*path* as the person reads it: ``~/...`` below the home folder, else as it is."""
+    root = _home(home).rstrip("/")
+    if path == root:
+        return "~"
+    if path.startswith(root + "/"):
+        return "~" + path[len(root) :]
+    return path
+
+
 def never_text(path: str, reason: NeverReason) -> str:
     """What the model reads for *path* (as it gave it), never offered for *reason*."""
     return NEVER_TEXT[reason].format(path=path)
@@ -261,6 +271,7 @@ __all__ = [
     "above_home",
     "asked_text",
     "covers",
+    "home_label",
     "melo_data_folders",
     "never_offered",
     "never_text",
