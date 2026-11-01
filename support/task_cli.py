@@ -29,6 +29,9 @@ _WHY = (
     "tests_unverified",
     "commit_missing",
     "unchecked",
+    "too_large",
+    "unreadable",
+    "stashed",
 )
 _NOTES = ("no_tests",)
 

@@ -679,8 +679,23 @@ def asks_commit(text: str) -> bool:
 # What asks for the tests to be run, beyond naming them: run, re-run, pytest, 跑测试.
 _ASKS_TESTS: Final = re.compile(
     r"\b(?:run|re-?run|execute)\s+(?:\w+\s+){0,4}?(?:unit\s+)?tests?\b|\bpytest\b"
-    r"|\bunit\s?tests?\b|(?:跑|运行|执行)[^，。；,;！？\n]{0,12}?测试|单元测试|单测",
+    r"|\bunit\s?tests?\b|(?:跑|运行|执行)[^，。；,;！？\n]{0,12}?测试|单元测试|单测"
+    r"|\b(?:make\s+sure|ensure|check|verify|confirm)\s+(?:that\s+)?(?:all\s+)?(?:of\s+)?"
+    r"(?:the\s+)?(?:unit\s+)?tests?\s+(?:all\s+)?(?:still\s+)?pass"
+    r"|(?:确保|确认|保证)[^，。；,;！？\n]{0,6}?测试[^，。；,;！？\n]{0,4}?(?:通过|能过|都过)",
     re.IGNORECASE,
+)
+# A negated negation is an ask: "don't forget to run the tests", "make sure you
+# don't skip the tests", "别忘了跑测试". It reads as "run" / "跑" before the
+# negations go.
+_KEEP_TESTS: Final = re.compile(
+    r"\b(?:don['’]t|do\s+not|never)\s+forget\s+(?:to\s+)?(?:run\s+)?"
+    r"|\b(?:make\s+sure|be\s+sure|ensure)\s+(?:that\s+)?(?:you\s+)?"
+    r"(?:don['’]t|do\s+not|never)\s+(?:skip|forget)(?:ping)?\s+(?:to\s+)?(?:run\s+)?",
+    re.IGNORECASE,
+)
+_KEEP_TESTS_ZH: Final = re.compile(
+    r"(?:别|不要|不能|千万别)忘(?:了|记)?(?:要)?(?:跑|运行|执行)?"
 )
 # The ask negated: "don't run the tests", "skip the tests", "不用跑测试".
 _NO_TESTS: Final = re.compile(
@@ -695,12 +710,14 @@ def asks_tests(text: str) -> bool:
     """Whether *text* asks for the tests to be run, once quoted and forbidden spans are dropped.
 
     "fix the parser and run the tests", "Finish it: run the tests that cover
-    your changes", "改完跑一下测试" ask; "don't run the tests", "不用测试",
+    your changes", "改完跑一下测试", "make sure the tests pass", "don't forget
+    to run the tests" and "别忘了跑测试" ask; "don't run the tests", "不用测试",
     "测试一下这个网站" (try the site out) and "the log says `pytest` failed" do
     not.
     """
-    bare = _NO_TESTS.sub(" ", _PIPELINE_NO.sub(" ", _QUOTED.sub(" ", text or "")))
-    return bool(_ASKS_TESTS.search(bare))
+    bare = _PIPELINE_NO.sub(" ", _QUOTED.sub(" ", text or ""))
+    bare = _KEEP_TESTS_ZH.sub("跑", _KEEP_TESTS.sub(" run ", bare))
+    return bool(_ASKS_TESTS.search(_NO_TESTS.sub(" ", bare)))
 
 
 def work_request(typed: str) -> bool:

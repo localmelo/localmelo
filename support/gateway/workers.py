@@ -76,6 +76,7 @@ from localmelo.support.gateway.task_endings import (
     baseline,
     can_finish,
     finish_message,
+    finishes,
     shown,
     stash_floor,
 )
@@ -2532,10 +2533,12 @@ class TaskWorkers:
         """How the run ended, from its own tool calls and the folder: never its claim."""
         typed = str(record.spec.get("user_words") or "")
         asked = [str(record.spec.get("objective") or ""), typed]
+        said: list[str] = []  # what this run was told after its request
         if record.card and not record.card.startswith(CARD_START):
-            asked.append(record.card)  # a continued task's message is asked too
+            said.append(record.card)  # a continued task's message is asked too
         inbox = self._inboxes.get(task_id)
-        asked += inbox.read if inbox is not None else []
+        said += inbox.read if inbox is not None else []
+        asked += said
         try:
             # Work this run stashed stays unchecked in later runs, however it ended.
             floor = await stash_floor(workspace, base)
@@ -2553,6 +2556,7 @@ class TaskWorkers:
                 base=base,
                 asks_commit=any(asks_commit(text) for text in asked),
                 asks_tests=any(asks_tests(text) for text in asked),
+                finishing=any(finishes(text) for text in said),
             )
         except Exception:
             log.exception("Could not check how task %s ended", task_id)

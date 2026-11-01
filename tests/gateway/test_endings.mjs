@@ -78,3 +78,19 @@ test('a ready task whose folder has no tests says so, with nothing to finish', (
   assert.equal(endingWhy(ready), 'No tests apply');
   assert.equal(canFinish(ready), false);
 });
+
+test('a folder that could not be checked says why plainly, with nothing to finish', async () => {
+  const large = readEnding({state: 'draft', reasons: ['too_large']});
+  assert.equal(endingWhy(large), 'The folder was too large to check');
+  assert.equal(canFinish(large), false);
+  assert.equal(endingWhy(readEnding({state: 'draft', reasons: ['unreadable']})), 'The folder could not be read to check it');
+  assert.equal(endingWhy(readEnding({state: 'draft', reasons: ['stashed']})), 'Work was stashed, so it could not be checked');
+  // Finish it still runs the test it can run, once.
+  assert.equal(canFinish(readEnding({state: 'draft', reasons: ['unchecked']})), true);
+  await useLanguage('zh-Hans');
+  try {
+    assert.equal(endingWhy(large), '文件夹太大，没能核对');
+  } finally {
+    await useLanguage('en');
+  }
+});

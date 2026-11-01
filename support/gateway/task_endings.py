@@ -12,15 +12,21 @@ ended ready. Ready needs proof; any doubt leaves ``draft`` with its reason:
   result is unknown (in git or not);
 - ``tests_still_fail``: the last test failed and nothing was changed, so there
   is nothing to finish;
-- ``tests_missing``: code changed since the baseline, or the person asked for
-  the tests, a test setup applies to the folder, and no test started after the
-  latest call that could have changed code. With no test setup the task owes
-  none; its ending notes ``no_tests`` when code changed or tests were asked;
+- ``tests_missing``: code changed since the baseline (outside git also a code
+  file a file tool wrote, wherever it is) and no test started after the latest
+  call that could have changed code, with or without a test setup; or the
+  person asked for the tests and a test setup applies. A Finish it run
+  (:func:`finishes`) that finds no setup and runs no test owes none: its
+  ending notes ``no_tests``, as does an ask for tests with no setup and no
+  change;
 - ``commit_missing``: a commit was asked and changes since the baseline are not
   committed;
 - ``unchecked``: git or the snapshot could not be read, the folder lists too
-  many changes (or files), or ``git stash list`` grew in this run (or in an earlier one, while it stays
-  above the count that run started with).
+  many changes (or files), or ``git stash list`` grew in this run (or in an
+  earlier one, while it stays above the count that run started with), and a
+  Finish it can still run a test or commit. When it cannot, or after a Finish
+  it, the reason is the cause instead, never owed: ``too_large``,
+  ``unreadable`` or ``stashed``.
 
 A test is one shape only: a plain test-runner command (no shell operators) or a
 ``python_exec`` that is imports plus one ``sys.exit(subprocess.run([...]).
@@ -36,6 +42,8 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import functools
+import json
 import os
 import re
 import shlex
@@ -47,6 +55,7 @@ from typing import Any, Final
 from localmelo.melo.agent._brief_aids import FileStamp, edited_files
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.support.sessions.store import SessionStore
+from localmelo.support.words import LANGUAGES, t_in
 
 from .finishing import OUT_OF_STEPS
 from .i18n import t
@@ -57,6 +66,9 @@ STATES: Final = ("ready", "draft", "blocked", "failed", "dropped")
 OWED: Final = frozenset(
     {"tests_failed", "tests_missing", "tests_unverified", "commit_missing", "unchecked"}
 )
+# Why a folder could not be checked, when a Finish it could not help: too many
+# files or changes, unreadable, or work stashed. Said plainly, never owed.
+NOT_CHECKED: Final = ("too_large", "unreadable", "stashed")
 # Changed files a baseline keeps at most; a folder with more is not checked.
 MAX_STAMPS: Final = 2000
 _KEPT: Final = 5
@@ -185,17 +197,49 @@ _SKIP_DIRS: Final = re.compile(
 )
 # Files a folder outside git may hold for a snapshot to read it whole (docs included).
 MAX_SEEN: Final = 20 * MAX_STAMPS
+# What a snapshot outside git counts as code: source files by their extension,
+# build files by name. A saved page, picture, table or PDF is not code.
+_CODE_EXTENSIONS: Final = frozenset(
+    {"py", "pyi", "pyx", "pxd", "js", "mjs", "cjs", "jsx", "ts", "mts", "cts", "tsx"}
+    | {"vue", "svelte", "go", "rs", "rb", "php", "java", "kt", "kts", "scala"}
+    | {"groovy", "gradle", "swift", "m", "mm", "c", "h", "cc", "cpp", "cxx", "hpp"}
+    | {"hh", "hxx", "cs", "fs", "vb", "sh", "bash", "zsh", "fish", "ps1", "lua"}
+    | {"pl", "pm", "r", "jl", "dart", "ex", "exs", "erl", "hrl", "clj", "cljs"}
+    | {"hs", "ml", "mli", "elm", "nim", "zig", "sql", "css", "scss", "sass", "less"}
+    | {"cmake"}
+)
+_CODE_NAMES: Final = frozenset(
+    {"Makefile", "makefile", "GNUmakefile", "Dockerfile", "CMakeLists.txt"}
+    | {"Rakefile"}
+)
 # What says a test runner applies to a folder: its configuration, a tests
 # folder, or a test file.
 _TEST_FILES: Final = frozenset(
     {"pytest.ini", "tox.ini", "noxfile.py", "conftest.py", "Cargo.toml", "go.mod"}
-    | {"Package.swift"}
+    | {"Package.swift", "manage.py", "tests.py", "test.py", "mix.exs"}
+    | {"phpunit.xml", "phpunit.xml.dist"}
 )
 _TEST_DIRS: Final = frozenset({"tests", "test", "__tests__", "spec"})
 _TEST_NAME: Final = re.compile(
-    r"test_\w+\.py|\w+_test\.(?:py|go)|.+\.(?:test|spec)\.[cm]?[jt]sx?"
-    r"|\w+Tests?\.(?:swift|java|kt)|\w+_spec\.rb"
+    r"test_\w+\.py|\w+_tests?\.py|\w+_test\.(?:go|[cm]?[jt]sx?)"
+    r"|.+\.(?:test|spec)\.[cm]?[jt]sx?|\w+Tests?\.(?:swift|java|kt)|\w+_spec\.rb"
 )
+# Files that say a runner applies by what they hold: pytest's section, CMake's
+# tests, a make target.
+_TEST_CONTENT: Final = {
+    "pyproject.toml": re.compile(r"^\s*\[tool\.pytest", re.M),
+    "setup.cfg": re.compile(r"^\s*\[tool:pytest\]", re.M),
+    "CMakeLists.txt": re.compile(r"\b(?:enable_testing|add_test)\s*\(", re.I),
+    **dict.fromkeys(
+        ("Makefile", "makefile", "GNUmakefile"), re.compile(r"^test\s*:", re.M)
+    ),
+}
+# A .NET test project.
+_CSPROJ_TEST: Final = re.compile(
+    r"Microsoft\.NET\.Test\.Sdk|<IsTestProject>\s*true|\b(?:xunit|nunit|MSTest)\b", re.I
+)
+# Build files whose tests live in src/test.
+_JVM_BUILDS: Final = frozenset({"build.gradle", "build.gradle.kts", "pom.xml"})
 # The default test script `npm init` writes: no test.
 _NPM_NO_TEST: Final = "no test specified"
 # A test runner's exit code for "no tests were collected" (pytest, unittest).
@@ -606,6 +650,23 @@ class _Call:
             return self.status not in ("blocked", "error") and not _DOC.search(path)
         return self.name == "python_exec" and self.writes()
 
+    def writes_code_file(self) -> bool:
+        """A file tool's write to a code file, wherever the file is (outside the folder too)."""
+        path = str(self.arguments.get("path") or "")
+        return (
+            self.name in ("file_write", "file_edit")
+            and self.edits_code()
+            and _is_code(path)
+        )
+
+
+def _is_code(path: str) -> bool:
+    """Whether *path* names a code file: a source extension or a build file's name."""
+    name = path.replace(os.sep, "/").rsplit("/", 1)[-1]
+    extension = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    known = name in _CODE_NAMES or extension in _CODE_EXTENSIONS
+    return known and not _CACHE.search(path)
+
 
 @dataclass(frozen=True)
 class Baseline:
@@ -615,6 +676,8 @@ class Baseline:
     *floor*: the stash count an earlier run grew past; later runs stay unchecked
     while the stash is above it (kept until the task ends ready). *tests*: a
     test setup applies to the folder (true when that could not be told).
+    *why*: with ``error``, ``too_large`` (too many files or changes) or
+    ``unreadable``.
     """
 
     stamps: Mapping[str, FileStamp] | None
@@ -624,6 +687,7 @@ class Baseline:
     error: bool = False
     floor: int | None = None
     tests: bool = True
+    why: str = ""
 
     def to_json(self) -> dict[str, Any]:
         """What is kept until the task ends ready: its files, HEAD and test setup, no stash."""
@@ -654,7 +718,8 @@ class Baseline:
         )
 
 
-_ERROR: Final = Baseline(None, git=True, error=True)
+_ERROR: Final = Baseline(None, git=True, error=True, why="unreadable")
+_CROWDED: Final = Baseline(None, git=True, error=True, why="too_large")
 
 
 def _git(folder: str, *args: str) -> tuple[int, str, str] | None:
@@ -680,17 +745,34 @@ def _test_marker(folder: str, name: str, is_dir: bool) -> bool:
         return name in _TEST_DIRS or name.endswith((".xcodeproj", ".xcworkspace"))
     if name in _TEST_FILES or _TEST_NAME.fullmatch(name):
         return True
-    if name not in ("package.json", "Makefile", "makefile", "GNUmakefile"):
+    if name in _JVM_BUILDS:
+        return os.path.isdir(os.path.join(folder, "src", "test"))
+    pattern = _TEST_CONTENT.get(name)
+    if pattern is None and name.endswith(".csproj"):
+        pattern = _CSPROJ_TEST
+    if pattern is None and name != "package.json":
         return False
     try:
         with open(os.path.join(folder, name), encoding="utf-8", errors="replace") as f:
             text = f.read(256 * 1024)
     except OSError:
         return True  # unreadable: a runner may apply
-    if name == "package.json":
-        found = re.search(r'"test"\s*:\s*"([^"]*)"', text)
-        return found is not None and _NPM_NO_TEST not in found.group(1)
-    return re.search(r"^test\s*:", text, re.M) is not None
+    if pattern is None:
+        return _npm_tests(text)
+    return pattern.search(text) is not None
+
+
+def _npm_tests(text: str) -> bool:
+    """Whether a package.json has a test script, other than the one `npm init` writes."""
+    try:
+        package = json.loads(text)
+    except ValueError:
+        return True  # unreadable: a runner may apply
+    scripts = package.get("scripts") if isinstance(package, dict) else None
+    script = scripts.get("test") if isinstance(scripts, dict) else None
+    return (
+        isinstance(script, str) and bool(script.strip()) and _NPM_NO_TEST not in script
+    )
 
 
 def _walk(folder: str) -> Any:
@@ -732,8 +814,11 @@ def _tests_apply(folder: str, *, top: str = "") -> bool:
 def _snapshot(folder: str) -> Baseline:
     """A folder outside git: its code files' size and time, and whether tests apply.
 
-    At most :data:`MAX_STAMPS` code files and :data:`MAX_SEEN` files in all;
-    a larger folder, or one that cannot be read, gives ``error``.
+    Code files are known by extension or name (:func:`_is_code`). At most
+    :data:`MAX_STAMPS` code files and :data:`MAX_SEEN` files in all; a larger
+    folder gives ``error`` (``too_large``), one that cannot be read
+    ``unreadable``. A symlink is read as the link (never followed), and
+    environment and cache folders are skipped.
     """
     stamps: dict[str, FileStamp] = {}
     seen, tests = 0, False
@@ -741,20 +826,20 @@ def _snapshot(folder: str) -> Baseline:
         for root, dirs, files in _walk(folder):
             seen += len(files)
             if seen > MAX_SEEN:
-                return Baseline(None, error=True)
+                return Baseline(None, error=True, why="too_large")
             tests = tests or any(_test_marker(root, d, True) for d in dirs)
             for name in files:
                 tests = tests or _test_marker(root, name, False)
                 path = os.path.join(root, name)
                 relative = os.path.relpath(path, folder).replace(os.sep, "/")
-                if _DOC.search(relative) or _CACHE.search(relative):
+                if not _is_code(relative):
                     continue
                 info = os.lstat(path)
                 stamps[relative] = (info.st_size, info.st_mtime_ns)
                 if len(stamps) > MAX_STAMPS:
-                    return Baseline(None, error=True)
+                    return Baseline(None, error=True, why="too_large")
     except OSError:
-        return Baseline(None, error=True)
+        return Baseline(None, error=True, why="unreadable")
     return Baseline(stamps, tests=tests)
 
 
@@ -787,7 +872,7 @@ def _look(folder: str) -> Baseline:
         except OSError:
             stamps[name[len(prefix) :]] = (-1, -1)
         if len(stamps) > MAX_STAMPS:
-            return _ERROR
+            return _CROWDED
     tests = _tests_apply(folder, top=top)
     head_id = head[1].strip()
     return Baseline(stamps, head_id, len(stash[1].splitlines()), True, tests=tests)
@@ -832,14 +917,18 @@ async def _calls(store: SessionStore, task_id: str, turn: Any) -> list[_Call]:
 class _Seen:
     """What the folder says since a baseline.
 
-    ``code`` is ``None`` when there is no folder to look at (the run's calls
-    say what changed); ``own`` holds a git folder's uncommitted changes.
+    ``unchecked`` is why it could not be checked (``too_large``, ``unreadable``
+    or ``stashed``), ``""`` when it was. ``code`` is ``None`` when there is no
+    folder to look at (the run's calls say what changed); ``own`` holds a git
+    folder's uncommitted changes. ``crowded``: a git folder lists too many
+    uncommitted changes now, so a commit is owed when one was asked.
     """
 
-    unchecked: bool
+    unchecked: str
     code: list[str] | None
     own: list[str]
     tests: bool
+    crowded: bool = False
 
 
 async def _changes(folder: str | None, base: Baseline) -> _Seen:
@@ -847,14 +936,16 @@ async def _changes(folder: str | None, base: Baseline) -> _Seen:
     now = await baseline(folder)
     tests = base.tests or now.tests
     if base.error or now.error or (base.git and not now.git):
-        return _Seen(True, [], [], True)
+        why = (now.why if now.error else base.why if base.error else "") or "unreadable"
+        crowded = now.git and now.why == "too_large"
+        return _Seen(why, [], [], True, crowded)
     if not now.git:
         if folder is None or base.stamps is None or now.stamps is None:
-            return _Seen(False, None, [], tests)
+            return _Seen("", None, [], tests)
         before, after = base.stamps, now.stamps
         gone = {name for name in before if name not in after}
         moved = {name for name, stamp in after.items() if before.get(name) != stamp}
-        return _Seen(False, sorted(gone | moved), [], tests)
+        return _Seen("", sorted(gone | moved), [], tests)
     before = base.stamps if base.git and base.stamps is not None else {}
     own = sorted(edited_files(before, now.stamps or {}))
     committed: list[str] = []
@@ -871,13 +962,13 @@ async def _changes(folder: str | None, base: Baseline) -> _Seen:
             now.head,
         )
         if names is None or names[0]:
-            return _Seen(True, [], own, True)
+            return _Seen("unreadable", [], own, True)
         committed = [name for name in names[1].split("\0") if name]
     code = sorted(p for p in {*own, *committed} if not _DOC.search(p))
     stashed = now.stash > (
         base.stash if base.floor is None else min(base.floor, base.stash)
     )
-    return _Seen(stashed, code, own, tests)
+    return _Seen("stashed" if stashed else "", code, own, tests)
 
 
 async def stash_floor(folder: str | None, base: Baseline) -> int | None:
@@ -900,7 +991,10 @@ async def _evidence(
     turn: Any,
     folder: str | None,
     base: Baseline,
+    *,
     asks_tests: bool,
+    asks_commit: bool,
+    finishing: bool,
 ) -> tuple[list[str], list[tuple[_Call, tuple[str, str]]], list[str], list[str]]:
     """Reasons about the run's tests and folder; its tests; its own changes; notes."""
     calls = await _calls(store, task_id, turn) if turn is not None else []
@@ -910,25 +1004,40 @@ async def _evidence(
     if seen.code is None:
         changed = any(c.edits_code() for c in calls)
     else:
-        changed = bool(seen.code)
+        # Outside git a file tool's write to code the snapshot cannot see (a
+        # file outside the folder) counts too; an unknown command does not.
+        outside = not base.git and any(c.writes_code_file() for c in calls)
+        changed = bool(seen.code) or outside
+    # A test must start after every call that could have changed code.
+    writers = [call.finish for call in calls if call.writes()]
+    latest = max((float("inf") if w is None else w for w in writers), default=0.0)
+    tested = any(call.start > latest for call, _ in tests)
     last = tests[-1][1][1] if tests else "passed"
     reasons: list[str] = []
     notes: list[str] = []
     if last == "failed":
-        owed = changed or seen.unchecked
+        owed = changed or bool(seen.unchecked)
         reasons.append("tests_failed" if owed else "tests_still_fail")
     elif last == "unknown":
         reasons.append("tests_unverified")
-    elif (changed or asks_tests) and not seen.tests:
-        notes.append("no_tests")  # no test setup applies: none is owed
-    elif changed or asks_tests:
-        # A test must start after every call that could have changed code.
-        writers = [call.finish for call in calls if call.writes()]
-        latest = max((float("inf") if w is None else w for w in writers), default=0.0)
-        if not any(call.start > latest for call, _ in tests):
+    elif (changed or asks_tests) and not tested:
+        # Changed code owes a test even where no setup was found; a Finish it
+        # that then ran none (no runner applies) ends it with no_tests.
+        if seen.tests or (changed and not (finishing and not tests)):
             reasons.append("tests_missing")
-    unchecked = ["unchecked"] if seen.unchecked else []
-    return [*reasons, *unchecked], tests, seen.own, notes
+        else:
+            notes.append("no_tests")
+    if seen.unchecked:
+        # Finish it is offered only when it can do something: run an applicable
+        # test, or commit; never twice. Otherwise the ending says why plainly.
+        can_test = seen.tests and (bool(writers) or asks_tests) and not tested
+        can_commit = asks_commit and seen.crowded
+        if finishing or not (can_test or can_commit):
+            reasons.append(seen.unchecked)
+        else:
+            reasons += ["commit_missing"] if can_commit else []
+            reasons.append("unchecked")
+    return reasons, tests, seen.own, notes
 
 
 async def decide(
@@ -941,11 +1050,14 @@ async def decide(
     base: Baseline,
     asks_commit: bool,
     asks_tests: bool = False,
+    finishing: bool = False,
 ) -> dict[str, Any] | None:
     """The ending of a run that ended in *phase*, or ``None`` for its state's default.
 
     *asks_tests*: the person asked for the tests, so they are owed (where a
-    test setup applies) even when no code changed.
+    test setup applies) even when no code changed. *finishing*: the run was
+    Finish it's (:func:`finishes`), so a folder with no runner ends with
+    ``no_tests``, and one still not checked is not offered Finish it again.
     """
     out_of_steps = phase == "failed" and failure_reason == OUT_OF_STEPS
     if phase != "done" and not out_of_steps:
@@ -954,9 +1066,16 @@ async def decide(
     turn = turns[-1] if turns else None
     proposed, question = proposal(turn.answer if turn is not None else "")
     reasons, tests, own, notes = await _evidence(
-        store, task_id, turn, folder, base, asks_tests
+        store,
+        task_id,
+        turn,
+        folder,
+        base,
+        asks_tests=asks_tests,
+        asks_commit=asks_commit,
+        finishing=finishing,
     )
-    if asks_commit and own:
+    if asks_commit and own and "commit_missing" not in reasons:
         reasons.append("commit_missing")
     if out_of_steps:
         state, reasons = "draft", ["out_of_steps", *reasons]
@@ -993,6 +1112,20 @@ def can_finish(ending: Mapping[str, Any] | None) -> bool:
     state = (ending or {}).get("state")
     owed = bool(reasons & OWED) and "out_of_steps" not in reasons
     return owed and state in ("draft", "failed", "dropped")
+
+
+@functools.cache
+def _finish_texts() -> frozenset[str]:
+    keys = ("ending.finishMessage", "ending.finishCommitMessage")
+    return frozenset(
+        " ".join(t_in(lang, key).split()) for lang in LANGUAGES for key in keys
+    )
+
+
+def finishes(text: str) -> bool:
+    """Whether *text* is Finish it's own message (:func:`finish_message`), in any language."""
+    said = " ".join((text or "").split())
+    return any(said.endswith(finish) for finish in _finish_texts())
 
 
 def finish_message(ending: Mapping[str, Any]) -> str:

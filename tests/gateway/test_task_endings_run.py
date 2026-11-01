@@ -390,7 +390,8 @@ async def test_a_folder_unreadable_at_the_start_is_not_kept(
     llm.replies = [says("Looked.\nEnding: ready")]
     task_id = await start(workers, repo, "Look at calc.py")
     first = (await ended(workers, task_id))["ending"]
-    assert (first["state"], first["reasons"]) == ("draft", ["unchecked"])
+    # Nothing a Finish it could run or commit: it says so, with no Finish it.
+    assert (first["state"], first["reasons"]) == ("draft", ["unreadable"])
     # The next run reads the folder again: nothing changed, so it is ready.
     llm.replies = [says("Looked again.\nEnding: ready")]
     await workers.message(task_id, "Look at it once more")
@@ -415,7 +416,10 @@ async def test_work_a_run_stashed_stays_unchecked_in_the_next_run(
     llm.replies = [EDIT, RUN_TEST, says("Tested.\nEnding: ready")]
     await workers.continue_stopped(task_id)
     second = (await ended(workers, task_id, turns=2))["ending"]
-    assert (second["state"], second["reasons"]) == ("draft", ["unchecked"])
+    # Finish it ran and the work is still stashed: said plainly, not offered again.
+    assert (second["state"], second["reasons"]) == ("draft", ["stashed"])
+    with pytest.raises(TaskStoreError):
+        await workers.continue_stopped(task_id)
 
 
 @pytest.mark.parametrize("how", ["stop", "shutdown"])
@@ -477,3 +481,33 @@ async def test_a_website_visit_in_a_folder_without_git_ends_ready(
     task = await ended(workers, await start(workers, folder, "Visit example.com"))
     ending = task["ending"]
     assert (ending["state"], ending["reasons"], ending["notes"]) == ("ready", [], [])
+
+
+async def test_finish_it_in_a_folder_where_no_tests_apply_ends_ready(
+    setup: Setup, tmp_path: Path
+) -> None:
+    workers, llm, _ = setup
+    folder = tmp_path / "localmelo-workspace"
+    folder.mkdir()
+    (folder / "page.py").write_text("print('hi')\n")
+    write = call("file_edit", {"path": "page.py", "old": "hi", "new": "hello"})
+    llm.replies = [write, says("Changed the greeting.\nEnding: ready")]
+    task_id = await start(workers, folder, "Say hello instead of hi in page.py")
+    first = (await ended(workers, task_id))["ending"]
+    # Changed code owes a test even where no test setup was found.
+    assert (first["state"], first["reasons"], first["notes"]) == (
+        "draft",
+        ["tests_missing"],
+        [],
+    )
+    # Finish it looks for a runner and finds none: Ready, saying no tests apply.
+    llm.replies = [says("No test runner applies to this folder.\nEnding: ready")]
+    await workers.continue_stopped(task_id)
+    second = (await ended(workers, task_id, turns=2))["ending"]
+    assert (second["state"], second["reasons"], second["notes"]) == (
+        "ready",
+        [],
+        ["no_tests"],
+    )
+    with pytest.raises(TaskStoreError):
+        await workers.continue_stopped(task_id)

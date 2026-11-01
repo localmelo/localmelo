@@ -78,13 +78,21 @@ TASK_STATES: Final = {
 # another one), as its row says it and, in English, its card.
 FOLDER_REFUSED: Final = t_in("en", "activity.folderRefused")
 _MARKUP: Final = re.compile(r"^[\s#>*_`-]+")
-# Inline Markdown a line drops, keeping the words: links and images, strong,
-# emphasis, struck and code marks.
+# Inline Markdown a line drops, keeping the words: links and images, strong and
+# emphasis marks paired around words (not ``x**2``), code marks (the code itself
+# stays as it is). Struck text goes with its marks.
+_CODE_SPAN: Final = re.compile(r"`([^`\n]+)`")
+_KEPT_CODE: Final = re.compile(r"\x00(\d+)\x00")
 _LINK: Final = re.compile(r"!?\[([^\]\n]*)\]\([^)\s]*\)")
-_STRONG: Final = re.compile(r"(\*\*|__|~~)(?=\S)(.+?)(?<=\S)\1")
-_STAR: Final = re.compile(r"(?<![\w*])\*(?=\S)([^*\n]+?)(?<=\S)\*(?![\w*])")
+_STRUCK: Final = re.compile(r"[ \t]*~~(?=\S)(.+?)(?<=\S)~~")
+_STRONG: Final = re.compile(
+    r"(?<![A-Za-z0-9])(\*\*|__)(?=\S)(.+?)(?<=\S)\1(?![A-Za-z0-9])"
+)
+_STAR: Final = re.compile(
+    r"(?<![A-Za-z0-9*])\*(?=\S)([^*\n]+?)(?<=\S)\*(?![A-Za-z0-9*])"
+)
 _UNDER: Final = re.compile(r"(?<![\w_])_(?=\S)([^_\n]+?)(?<=\S)_(?![\w_])")
-_STRAY: Final = re.compile(r"\*\*|~~|`")
+_STRAY: Final = re.compile(r"(?<![A-Za-z0-9])(?:\*\*|~~)|(?:\*\*|~~)(?![A-Za-z0-9])|`")
 # A short lead-in that only says how the reply is laid out: "In short:", "分两层说：".
 _LEAD_IN: Final = re.compile(
     r"^(?:in short|short answer|in brief|tl;?dr|to sum up|in two parts|two parts|"
@@ -157,14 +165,25 @@ def _no_paths(text: str) -> str:
 def plain_text(text: str) -> str:
     """*text* without inline Markdown, and without a lead-in that only announces its layout.
 
-    ``分两层说: **我(主聊天)自己**:没有联网工具。`` reads ``我(主聊天)自己:没有联网工具。``.
+    ``分两层说: **我(主聊天)自己**:没有联网工具。`` reads ``我(主聊天)自己:没有联网工具。``;
+    code keeps its words (``Edited `__init__.py`.`` reads ``Edited __init__.py.``),
+    struck text goes, and ``x**2`` stays.
     """
+    code: list[str] = []
+
+    def keep(found: re.Match[str]) -> str:
+        code.append(found.group(1))
+        return f"\x00{len(code) - 1}\x00"
+
+    text = _CODE_SPAN.sub(keep, text.replace("\x00", ""))
     text = _LINK.sub(r"\1", text)
+    text = _STRUCK.sub("", text)
     text = _STRONG.sub(r"\2", text)
     text = _UNDER.sub(r"\1", _STAR.sub(r"\1", text))
     text = _STRAY.sub("", text)
+    text = _KEPT_CODE.sub(lambda found: code[int(found.group(1))], text)
     rest = _LEAD_IN.sub("", text.strip(), count=1)
-    return rest if rest.strip() else text
+    return rest if rest.strip() else text.strip()
 
 
 def _marker_words(marker: str) -> str:
@@ -383,16 +402,19 @@ async def _session_rows(
     rows = []
     for turn in turns:
         kind = kind_of[turn.kind]
+        # The main chat is named in the reader's language, whatever was stored.
+        title = t("chat.main") if turn.kind == "front" else turn.title
         if turn.status == "running" and turn.live:
-            row = _row(kind, turn.session_id, turn.title, "running", turn.started_at)
+            row = _row(kind, turn.session_id, title, "running", turn.started_at)
             await _live(row, console)
         else:
             state, icon, result = _ended(turn)
             at = turn.finished_at or turn.started_at
-            row = _row(kind, turn.session_id, turn.title, state, at, icon=icon)
-            # A console chat says what it did before what its reply says.
+            row = _row(kind, turn.session_id, title, state, at, icon=icon)
+            # A console chat says what it did, then what its reply says.
             did = await chat_did(console, turn) if kind == "chat" else ""
-            row["result"] = did or result
+            said = " · ".join(part for part in (did, result) if part)
+            row["result"] = _cut(said, RESULT_CHARS) if did else result
         row["turns"] = turn.turns
         row["_chat"] = turn.session_id if kind == "chat" else ""
         rows.append(row)

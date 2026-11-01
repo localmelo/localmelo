@@ -1054,7 +1054,15 @@ def test_approvals_of_reads_the_events_oldest_first_and_keeps_the_newest_twenty(
             "Renamed my_var to new_var in `app.py`.",
             "Renamed my_var to new_var in app.py.",
         ),
-        ("~~Old plan~~ The __new__ plan works.", "Old plan The new plan works."),
+        ("~~Old plan~~ The __new__ plan works.", "The new plan works."),
+        ("Edited `__init__.py`.", "Edited __init__.py."),
+        ("The bug is ~~fixed~~ still open.", "The bug is still open."),
+        ("Computed x**2 + y**2.", "Computed x**2 + y**2."),
+        ("这是**重点**内容。", "这是重点内容。"),
+        (
+            "Kept snake_case_names and 2*3*4 as they are.",
+            "Kept snake_case_names and 2*3*4 as they are.",
+        ),
     ],
 )
 def test_a_result_line_drops_markdown_and_a_lead_in(answer: str, line: str) -> None:
@@ -1087,7 +1095,7 @@ def kept_note(ok: bool = True) -> dict[str, Any]:
 
 
 @pytest.mark.parametrize("language", ["en", "zh-Hans"])
-async def test_a_chat_row_says_what_the_chat_did_before_its_reply(
+async def test_a_chat_row_says_what_the_chat_did_then_its_reply(
     client: TestClient,
     console: Console,
     workspace: str,
@@ -1109,12 +1117,13 @@ async def test_a_chat_row_says_what_the_chat_did_before_its_reply(
         ),
         "zh-Hans": ("提议了任务：Visit example.com", "开始了任务：Visit example.com"),
     }[language]
-    assert activity(client)["rows"][0]["result"] == words[0]
+    plain = " · 我(主聊天)自己:没有联网工具。"
+    assert activity(client)["rows"][0]["result"] == words[0] + plain
     # Started after the offer: the row says it once, as started.
     await console.store.append_session_event(
         chat, "attention.echo", {**offer, "echo": "started"}
     )
-    assert activity(client)["rows"][0]["result"] == words[1]
+    assert activity(client)["rows"][0]["result"] == words[1] + plain
 
 
 async def test_a_chat_row_says_it_kept_a_note(
@@ -1125,5 +1134,26 @@ async def test_a_chat_row_says_it_kept_a_note(
 ) -> None:
     tasks(monkeypatch, console)
     events = [kept_note(), kept_note(ok=False)]
-    await finished_chat(console, workspace, "**Noted.** You live in Utrecht.", events)
-    assert activity(client)["rows"][0]["result"] == "Kept a note"
+    await finished_chat(
+        console, workspace, "I'll remember that you live in Utrecht.", events
+    )
+    assert activity(client)["rows"][0]["result"] == (
+        "Kept a note · I'll remember that you live in Utrecht."
+    )
+
+
+@pytest.mark.parametrize(
+    ("language", "title"), [("en", "Main chat"), ("zh-Hans", "主对话")]
+)
+async def test_the_main_chat_row_is_named_in_the_readers_language(
+    client: TestClient,
+    console: Console,
+    workspace: str,
+    monkeypatch: pytest.MonkeyPatch,
+    language: str,
+    title: str,
+) -> None:
+    tasks(monkeypatch, console)
+    await front_chat(console, workspace, kind="front")
+    client.cookies.set("localmelo_language", language)
+    assert [row["title"] for row in activity(client)["rows"]] == [title]

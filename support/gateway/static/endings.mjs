@@ -9,7 +9,8 @@ import {t} from './i18n.mjs';
 
 const STATES = new Set(['ready', 'draft', 'blocked', 'failed', 'dropped']);
 // The reasons worth words beside the state; the others restate it.
-const WHY = new Set(['tests_failed', 'tests_still_fail', 'tests_missing', 'tests_unverified', 'commit_missing', 'unchecked']);
+const WHY = new Set(['tests_failed', 'tests_still_fail', 'tests_missing', 'tests_unverified', 'commit_missing', 'unchecked',
+  'too_large', 'unreadable', 'stashed']);
 // The reasons a Finish it settles; tests that still fail with nothing changed have nothing to finish.
 const OWED = new Set(['tests_failed', 'tests_missing', 'tests_unverified', 'commit_missing', 'unchecked']);
 // What an ending notes beside its state, such as that no tests apply to the folder.
