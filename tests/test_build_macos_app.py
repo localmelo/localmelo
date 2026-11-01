@@ -307,6 +307,10 @@ def test_build_assembles_locked_runtime_and_swift(
     for name in ("anchors.json", "pet/rest-lazy.png", "portrait/sit-idle@2x.png"):
         (root / "macos/art/akita" / name).parent.mkdir(parents=True, exist_ok=True)
         (root / "macos/art/akita" / name).write_bytes(name.encode())
+    moves = root / "support/gateway/static/moves"
+    moves.mkdir(parents=True)
+    for name in ("manifest.json", "working.webp"):
+        (moves / name).write_bytes(name.encode())
     # The console's catalogs: their app.* keys become the bundle's strings.
     catalogs = root / "support/gateway/static/i18n"
     catalogs.mkdir(parents=True)
@@ -362,6 +366,9 @@ def test_build_assembles_locked_runtime_and_swift(
     akita = resources / "akita"
     for name in ("anchors.json", "pet/rest-lazy.png", "portrait/sit-idle@2x.png"):
         assert (akita / name).read_bytes() == name.encode()
+    # Melo's moves are the console's files, under Resources/moves, where the pet reads them.
+    for name in ("manifest.json", "working.webp"):
+        assert (resources / "moves" / name).read_bytes() == name.encode()
     assert (
         runtime / "python/lib/python3.11/site-packages/localmelo/support/__init__.py"
     ).is_file()

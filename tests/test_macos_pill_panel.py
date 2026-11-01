@@ -25,6 +25,7 @@ FILES = (
     "MenuWords.swift",
     "PetPolicy.swift",
     "PetMotion.swift",
+    "PetMoves.swift",
     "MotionGate.swift",
     "PetPanel.swift",
     "StatusView.swift",

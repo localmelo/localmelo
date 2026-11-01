@@ -132,7 +132,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     private func createPet() {
         let home = URL(fileURLWithPath: ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory(), isDirectory: true)
         pet = PetController(settingsURL: home.appendingPathComponent("Library/Application Support/LocalMelo/pet.json"),
-                            pictures: Bundle.main.resourceURL?.appendingPathComponent("akita"))
+                            pictures: Bundle.main.resourceURL?.appendingPathComponent("akita"),
+                            movesFolder: Bundle.main.resourceURL?.appendingPathComponent("moves"))
         pet.openWindow = { [weak self] in self?.openWindow() }
         pet.openWaiting = { [weak self] in self?.openWaiting() }
         pet.hiddenChanged = { [weak self] hidden in self?.menuBar.showPetLine.isHidden = !hidden }

@@ -169,6 +169,89 @@ func petMood(health: Data?, stopped: Bool, sinceTouch: TimeInterval, poseSeed: I
     return .sleeping(poses[((poseSeed % poses.count + turns) % poses.count + poses.count) % poses.count])
 }
 
+/// Melo's moves: the animated states the desktop pet plays (`PetMoves.swift`), the files and the rules the console's
+/// portrait shares (`support/gateway/static/moves`, `moves.mjs`).
+enum PetMove: String, CaseIterable {
+    case startup, thinking, working, attention
+    case idleRest = "idle_rest", idlePlay = "idle_play"
+}
+
+/// The move a mood shows; nil where the pet keeps its still picture and words. A wait raises a paw, work types at
+/// the laptop (the model alone answering, with no tool, approval or hold open: `thinking`), rest and sleep lie
+/// down. Nothing known yet, a run that just ended, a failure and a stopped app have no moves: they keep the
+/// pictures they had, and never look like a healthy rest.
+func petMove(_ mood: PetMood, thinking: Bool) -> PetMove? {
+    switch mood {
+    case .waiting: return .attention
+    case .working: return thinking ? .thinking : .working
+    case .resting, .sleeping: return .idleRest
+    case .unknown, .done, .failed, .stopped: return nil
+    }
+}
+
+/// Whether everything that runs waits on the model: every item of `status.items` is `answering` (its newest step
+/// is a model call, with no tool, approval or hold open), and the list leaves nothing out. False for an older
+/// gateway without the mark: the pet never guesses that it thinks.
+func petThinking(_ data: Data) -> Bool {
+    guard let counts = runningCounts(data), counts.total > 0,
+          let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let status = body["status"] as? [String: Any],
+          let items = status["items"] as? [[String: Any]] else { return false }
+    return items.count >= counts.total && items.allSatisfy { ($0["answering"] as? Bool) == true }
+}
+
+/// While the pet rests it plays once (one loop of `idle_play`, 6 s) after `petPlayAfter` seconds of rest, at most
+/// once every `petPlayEvery`; asleep it only rests. The console's portrait plays by the same numbers.
+let petPlayAfter: TimeInterval = 20
+let petPlayEvery: TimeInterval = 300
+
+/// The state a move shows, and whether a looping state plays once. The app's first move is the wake-up (`startup`,
+/// once, holding its sitting end) if the pet is at rest then; a play begins by the rule above and goes on to its
+/// end. `ended` hears a state that played once reach its end.
+struct PetMovePicker: Equatable {
+    private(set) var startup = true
+    private(set) var restSince: Date?
+    private(set) var playedAt = Date.distantPast
+    private(set) var playing = false
+
+    /// `still`: nothing may move (posters only), so there is no play.
+    mutating func pick(_ mood: PetMood, thinking: Bool, still: Bool, now: Date) -> (move: PetMove, once: Bool)? {
+        guard let move = petMove(mood, thinking: thinking) else { return nil }
+        guard move == .idleRest else {
+            (startup, restSince, playing) = (false, nil, false)
+            return (move, false)
+        }
+        if startup { return (.startup, false) }
+        let since = restSince ?? now
+        restSince = since
+        guard mood == .resting, !still else {
+            playing = false
+            return (.idleRest, false)
+        }
+        if !playing && now.timeIntervalSince(since) >= petPlayAfter && now.timeIntervalSince(playedAt) >= petPlayEvery {
+            (playing, playedAt) = (true, now)
+        }
+        return playing ? (.idlePlay, true) : (.idleRest, false)
+    }
+
+    mutating func ended(_ move: PetMove) {
+        if move == .startup { startup = false }
+        if move == .idlePlay { playing = false }
+    }
+}
+
+/// Points of the side of the moves' square canvas on the pet's panel: the sitting dog stands about as tall as the
+/// lying pictures, and nothing drawn is cut by the panel (the art keeps a clear margin round the dog).
+let petMoveSide: CGFloat = 100
+
+/// The frame of the moves' canvas on a panel of `size` (points, y up): its anchor (`anchor`, in pixels of a canvas
+/// `pixels` wide, from the top left: where the paws rest) on the panel's ground line, `belowPaws` above the bottom,
+/// at the middle.
+func petMoveFrame(side: CGFloat, anchor: CGPoint, pixels: CGFloat, in size: CGSize, belowPaws: CGFloat) -> CGRect {
+    let unit = side / pixels
+    return CGRect(x: size.width / 2 - anchor.x * unit, y: belowPaws - (pixels - anchor.y) * unit, width: side, height: side)
+}
+
 /// What the system says that decides whether the pet may move.
 struct PetEnvironment: Equatable {
     var reduceMotion = false
@@ -186,6 +269,16 @@ func shouldAnimate(_ environment: PetEnvironment) -> Bool {
     return !environment.reduceMotion && !environment.lowPower && !hot
         && environment.visible && environment.screenAwake
 }
+
+/// Whether the moves play (else each shows its poster): not under Reduce Motion, Low Power Mode or heat. A pet that
+/// cannot be seen (`petMovesRun`) stops instead, where it is, and goes on from there.
+func petMovesMayMove(_ environment: PetEnvironment) -> Bool {
+    let hot = environment.thermal == .serious || environment.thermal == .critical
+    return !environment.reduceMotion && !environment.lowPower && !hot
+}
+
+/// Whether the moves' clock runs: the panel can be seen and the screen is on.
+func petMovesRun(_ environment: PetEnvironment) -> Bool { environment.visible && environment.screenAwake }
 
 /// Seconds of the plain cross-fade between two pictures when the pet may not move (Reduce Motion, Low Power Mode, heat):
 /// a change is a dissolve, never a motion.
