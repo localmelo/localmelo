@@ -57,6 +57,7 @@ class FakeGateway:
         self.requests: list[tuple[str, str, Any]] = []
         self.closed = False
         self.lose_stream = False
+        self.refuse_mode = False
         self._running: dict[str, tuple[str, int]] = {}  # turn id -> session, number
 
     # ── Events ──
@@ -129,6 +130,7 @@ class FakeGateway:
             session_id = f"side{len(self.sessions):08d}"
             self.sessions[session_id] = {"id": session_id, "kind": "chat", "main": False,
                                          "title": body["turn"]["text"],
+                                         "approvals": body.get("approvals", "ask"),
                                          "workspace_label": "~/w"}  # fmt: skip
             started = self.start_turn(session_id, body["turn"]["text"],
                                       body["turn"]["client_request_id"])  # fmt: skip
@@ -140,7 +142,12 @@ class FakeGateway:
             if session_id not in self.sessions:
                 return _error(404, "not_found", "Session not found.")
             if method == "PATCH":
-                self.sessions[session_id]["title"] = body["title"]
+                if "approvals" in body:
+                    if self.refuse_mode:
+                        return _error(409, "not_a_chat", "A task's mode is fixed.")
+                    self.sessions[session_id]["approvals"] = body["approvals"]
+                if "title" in body:
+                    self.sessions[session_id]["title"] = body["title"]
                 return httpx.Response(200, json={"session": self.sessions[session_id]})
             last = max(
                 (e["id"] for e in self.events if e["session_id"] == session_id),

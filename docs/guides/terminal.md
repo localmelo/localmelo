@@ -61,7 +61,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 - An approval that a turn asks for is the usual list, answered through the gateway; one answered in the console closes here.
 - A card is one coloured line: a side chat or a task that finished, did not finish or waits for you, and how to open it. `/task …` starts a task in the open chat, as in the console; an echo about another chat's task ends with `from` and that chat's name.
 - When a task asks the chat for help, a muted line reads `Task “Fix tests” asks: <problem>` and melo's answer follows, with no message of yours above it. Then `→ melo answered “Fix tests” · <answer>`, or `! “Fix tests” needs your answer: <question>`: when only that task waits, answer it in a message here (`→ Sent to “Fix tests” as your answer`; **Undo** is in `melo console` for 10 seconds); when several wait, the line says `several wait: /answer Fix tests …`.
-- `/model`, `/backend`, `/undo`, `/copy`, `/sessions`, `/resume`, `/title`, `/usage`, `/attach`, `/approvals`, `/browser` and `/mcp` work in the terminal's own chat. `melo -X cli.chat=local` (or `[cli] chat = "local"`) opens it, as `-u URL`, `-c`, `-r` and `--yolo` do.
+- `/model`, `/backend`, `/undo`, `/copy`, `/sessions`, `/resume`, `/title`, `/usage`, `/attach`, `/browser` and `/mcp` work in the terminal's own chat. `/approvals ask` and `/approvals auto` work in every chat. `melo -X cli.chat=local` (or `[cli] chat = "local"`) opens it, as `-u URL`, `-c`, `-r` and `--yolo` do.
 
 ### Which model server
 
@@ -106,9 +106,11 @@ When the model is not the saved default, a row after the folder gives the server
 | Ctrl+O | List the turn's steps (during a turn, or the last one after it); Esc closes the list. |
 | Ctrl+T | List the tasks beside the chat (the gateway's); Enter on one lists its actions. |
 | Tab | Complete a command or a listed model; ↑ ↓ pick in the menu, and Enter takes the one picked. |
+| Shift+Tab | Switch this chat between [Ask and Auto](#auto-mode): Ask becomes Auto, Auto becomes Ask, and Deny becomes Ask. With the completion menu open it moves back in the menu, as before. |
 | Ctrl+L | Clear the screen. |
 | Ctrl+Z | Nothing (melo does not suspend in this version). |
 
+- **Shift+Tab** does what `/approvals ask` and `/approvals auto` do, in one key: the status bar names the mode (`ask · shift+tab` or `auto · shift+tab`, Auto in its own colour) and one quiet line says what changed, `Auto: routine steps run; risky ones are blocked with the reason.` or `Ask: melo asks before running commands or changing files.` It does nothing while a question or a list is open (it never answers one), but it works during a turn: the bar changes at once and the line says when it applies, `from your next message` in the terminal's own chat (a turn keeps the policy it started with) and `from the next step` in the main chat and the side chats. It never reaches Deny, and with `--yolo` it only says that YOLO is on and that restarting without `--yolo` turns prompts on; `/approvals ask` says the same, because `/approvals` does not leave YOLO either.
 - **The queue.** One message waits at a time, shown as `↳ Queued for the next turn: …`; when the turn ends any other way than `completed`, it goes back into the input box unsent.
 - **Stopping.** Esc stops the turn at once (`■ Stopped`); after the answer has printed, melo spends up to 2 seconds recording the run's steps (see [Procedural memory](../concepts/procedures.md)), and the next message waits for it.
 - **History.** Messages and commands are kept in `~/.cache/localmelo/cli_history` (mode 0600, the newest 1,000 once it passes 1 MB), never the files' text; if the file cannot be opened, the session keeps its history in memory and says so.
@@ -267,7 +269,7 @@ The bar under the input box answers "how much has this used" and "what runs besi
 
 - Ctrl+T lists the tasks; Enter on one offers Pause or Resume, Raise to, Lower to and Stop (which asks first), exactly as `melo task pause|resume|level|stop` do.
 - melo asks the gateway for its tasks every 5 seconds, and only when a gateway token exists (`~/.cache/localmelo/gateway/auth`).
-- On a narrow terminal the details go first, then the figures; the bar never wraps. The mode shows at the right edge only when it is not `ask`.
+- On a narrow terminal the details go first, then the figures; the bar never wraps. The mode always shows at the right edge, with the key that switches it (`ask · shift+tab`, `auto · shift+tab`); below 60 columns the key goes and the mode stays. Auto has its own colour, and `NO_COLOR` or ASCII (`auto - shift+tab`) keeps it readable by weight.
 - The figures come from events melo already received; nothing asks the model server. `[cli] status_line = "off"` keeps only the run zone, the title and the last request's context.
 - With `NO_COLOR` or `LOCALMELO_ASCII=1` the zones are still apart (`│` or `|`) and ASCII says `in 3.0k out 15`.
 
@@ -335,7 +337,7 @@ A call that installs software, downloads files, changes files outside the folder
 
 In auto mode nothing asks: routine steps run, and a risky step or one you did not ask for is blocked and explained.
 
-- **Switch:** `/approvals auto` turns it on for this chat, `/approvals ask` turns it off. `[approvals] mode` (the console's **New chats start in**, or `-X approvals.mode=auto` for one run) starts the terminal's own chat in it.
+- **Switch:** press Shift+Tab (see [Keys](#keys)), or type `/approvals auto` to turn it on for this chat and `/approvals ask` to turn it off. In the main chat and the side chats the switch goes to the chat on the gateway, so the console and the app show it too; `deny` and `forget` stay in the terminal's own chat. `[approvals] mode` (the console's **New chats start in**, or `-X approvals.mode=auto` for one run) starts the terminal's own chat in it.
 - **What runs:** steps inside the folder that install, download, send or delete nothing; a step melo cannot judge goes to your model first. Its `shell_exec` and `python_exec` calls run in the write sandbox, so a write outside the folder fails even when no rule caught it, and they can neither read melo's sign-in token nor reach melo's own API. Auto is a reviewer, not a wall: a step that hands work to another app or program is judged by the review (blocked, or checked by your model), not walled off by the sandbox.
 - **What is blocked:** installs, downloads, changes outside the folder, deletes, passwords and keys, system settings and code from the internet, unless your own words ask for them; a change to localmelo itself never runs. The row says why (`⊘ … · blocked: installs software`), and melo explains in its answer what it wanted and the other ways.
 - **Allow it:** say "go ahead" and melo tries again; your model checks that your words ask for it. A step only a click can allow (passwords or keys, system settings, something that runs later, code from the internet or code melo cannot check) needs the console's **Allow once**.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -42,7 +43,8 @@ def test_the_bar_says_the_tokens_and_the_context(
     term.see("ctx ")
     bar = _bar(term, columns)
     assert len(bar) <= columns
-    assert USAGE.search(bar) and bar.endswith("│ hello"), bar
+    assert USAGE.search(bar) and "│ hello" in bar, bar
+    assert bar.endswith("ask · shift+tab"), bar  # the mode and its key, always
     # The welcome and /status name the model and the folder; a cache the
     # server did not report is not shown at all.
     assert "stub-model" not in bar and "demo" not in bar and "cache" not in bar
@@ -86,4 +88,63 @@ def test_a_cloud_bar_says_the_cost_and_the_limit_its_response_reported(
     assert bar.startswith("  $0.02 · ctx 12k"), bar
     assert re.search(r"limit 42% ▮▮▯▯▯ ↻[56]m", bar), bar
     assert "↑" not in bar  # priced: the cost, not the tokens
+    assert term.quit() == 0
+
+
+@pytest.mark.parametrize("no_color", ["1", ""], ids=["NO_COLOR", "colors"])
+def test_shift_tab_switches_ask_and_auto_and_the_bar_follows(
+    melo: Callable[..., Melo], no_color: str
+) -> None:
+    term = melo(columns=100, env={"NO_COLOR": no_color})
+    term.see("Ask melo")
+    assert _bar(term, 100).endswith("ask · shift+tab")
+    term.type(b"\x1b[Z")  # Shift+Tab
+    term.see("Auto: routine steps run; risky ones are blocked with the reason.")
+    assert _bar(term, 100).endswith("auto · shift+tab")
+    term.type(b"\x1b[Z")
+    term.see("Ask: melo asks before running commands or changing files.")
+    assert _bar(term, 100).endswith("ask · shift+tab")
+    # Tab still completes: the key did not type or complete anything.
+    term.type("/hel\t")
+    term.see("/help")
+    term.type(b"\x03")  # Ctrl+C clears the draft; Ctrl+D quits an empty one
+    assert term.quit() == 0
+
+
+def test_a_narrow_bar_keeps_the_mode_and_drops_the_key(
+    melo: Callable[..., Melo],
+) -> None:
+    term = melo(columns=50)
+    term.see("Ask melo")
+    term.type(b"\x1b[Z")
+    term.see("Auto: routine steps run")
+    bar = _bar(term, 50)
+    assert bar.endswith("auto") and "shift+tab" not in bar, bar
+    assert term.quit() == 0
+
+
+def test_ascii_draws_the_mode_and_its_key_in_ascii(melo: Callable[..., Melo]) -> None:
+    term = melo(columns=100, env={"LOCALMELO_ASCII": "1"})
+    term.see("Ask melo")
+    assert _bar(term, 100).endswith("ask - shift+tab")
+    term.type(b"\x1b[Z")
+    term.see("Auto: routine steps run")
+    assert _bar(term, 100).endswith("auto - shift+tab")
+    assert term.quit() == 0
+    term.output.decode("ascii")  # nothing else reached the terminal
+
+
+def test_shift_tab_during_a_turn_switches_at_once_and_says_when_it_applies(
+    melo: Callable[..., Melo],
+) -> None:
+    term = melo(columns=120)
+    term.see("Ask melo")
+    term.type("hold on\r")
+    term.see("esc to stop")
+    term.type(b"\x1b[Z")  # not refused: the turn runs on under its own policy
+    term.see("blocked with the reason, from your next message.")
+    assert _bar(term, 120).endswith("auto · shift+tab")
+    term.type(b"\x1b")
+    term.see("Stopped")
+    time.sleep(1)  # the turn wraps up
     assert term.quit() == 0
