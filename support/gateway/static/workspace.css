@@ -1934,6 +1934,7 @@ dialog::backdrop {
 .task-pack > summary { cursor: pointer; font-weight: 600; min-height: 24px; }
 .task-pack[open] > summary { margin-bottom: 8px; }
 .task-pack ul { margin: 8px 0 0; padding-left: 20px; }
+.task-project { margin: 8px 0; }
 .task-actions {
   display: flex;
   flex-wrap: wrap;

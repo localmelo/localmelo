@@ -151,8 +151,8 @@ def test_a_session_without_a_date_takes_its_first_messages() -> None:
             "session a, turn 1: text must be a string",
         ),
         (
-            {"sessions": [EN, EN]},
-            "session en: the id is used twice",
+            {"sessions": [EN, {**EN, "title": "another"}]},
+            "session en: the id is used twice, with different turns",
         ),
     ],
 )
@@ -472,3 +472,8 @@ def test_chat_and_report_shapes() -> None:
     assert report.summary().startswith(
         "Ingested 1 session, 2 turns, 2 documents (by words only) and 1 note in "
     )
+
+
+def test_a_session_repeated_word_for_word_is_read_once() -> None:
+    chats = ingest.parse({"sessions": [EN, ZH, EN]})
+    assert [chat.label for chat in chats] == ["en", "zh"]
