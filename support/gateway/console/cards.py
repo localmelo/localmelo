@@ -371,7 +371,7 @@ class MainChatCards:
                 record = await self._console.workers.tasks.get_task(info.id)
                 found = default_ending(str(data.get("state")), record.wait_reason)
             if found is not None:
-                keys = ("state", "proposed", "reasons", "question")
+                keys = ("state", "proposed", "reasons", "question", "notes")
                 card["ending"] = {key: found[key] for key in keys if key in found}
         words = await self._reminder_words(info.id) if info.kind == "task" else None
         if words is not None:

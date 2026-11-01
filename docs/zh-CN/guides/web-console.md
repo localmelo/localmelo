@@ -173,7 +173,7 @@
 - **Now** 列出正在运行或等待的内容：本控制台的对话、任务、worker 运行和终端对话。每一行用平实的话说明它在做什么（`Reading notes.md`、`Running the tests`、`Waiting for your approval`），并用图标表示工作的类别。等你处理的行是琥珀色。没有任何内容在运行时写 `Nothing running`，画像处于休息状态并会眨眼。
 - **Today** 按从新到旧列出今天完成的内容：标题、一行结果（`All 412 tests passed.`）和时间。先显示八行；**Earlier today (n)** 显示其余的。
 
-结果行始终是平实的话。在回答之前就被停止的运行写 `Stopped before answering`，图片写 `Made a picture`，文件写文件名，而内容是代码的回答写代码周围的第一句话（没有这样的句子时写 `Wrote some code`）。
+结果行始终是平实的话。在回答之前就被停止的运行写 `Stopped before answering`，图片写 `Made a picture`，文件写文件名，而内容是代码的回答写代码周围的第一句话（没有这样的句子时写 `Wrote some code`）。Markdown 标记会去掉（代码保留原样，例如 `__init__.py`；删除线里的文字一起去掉；`x**2` 保持不变），`In short:` 这样的开场白也会去掉，结果行到第一句话为止。对话的结果行先说这个对话做了什么，再接它回答的第一句话：`Offered a task: Visit example.com · I can't open websites myself.`；做了什么写作 `Started a task: …`、`Offered a task: …` 或 `Kept a note`（中文页面上是“开始了任务：…”“提议了任务：…”“记下了一条笔记”）；只说把事情交给了任务的回答不再重复。主对话那一行用页面的语言命名。
 
 请求过审批的行会把审批折叠在结果行下面：`1 approval`，或 `2 approvals, 1 waiting`。选中它，会用平实的话列出每个请求（`Write slides.md`、`Run the tests`、`Run a command`，从不显示命令本身）、它是怎样被回答的（`Allowed once`、`Allowed for this chat`、`Denied`、`No answer in time`）以及请求的时间。等你处理的请求就在那里提供 **Allow once** 和 **Deny**，与对话里审批卡片的回答相同，还有 **Review**，打开带卡片和确切内容的对话或任务。不再有单独的 Approvals 标签页。
 
@@ -249,7 +249,7 @@
 ![无法使用自己文件夹的任务提供 Choose a folder](../../assets/img/task-folder-refused.webp)
 
 - **只差提交。** 步数用完、只剩提交没做的任务，会在卡片和任务页上显示 `Not committed. Run: <command>`。
-- **怎样结束的。** 已结束任务的状态是代码核对出的结局：**Ready**（绿色）、**Done, not finished** 和 **Needs you**（琥珀色）、**Failed**（红色）、**Stopped** 或 **Not needed**（灰色）。**How it ended** 写出原因，**Tests it ran** 列出任务自己这次运行启动的测试，每个标着通过、没通过或结果没核对；回答里只是提到的测试不会列出。**Ready** 需要证据：测试结果或文件夹没能核对时，任务就不算完成。**Finish it** 一点就让还欠着测试或提交的任务继续。面板的 Activity 和 Workers 行也这样显示，`GET /api/tasks/<id>` 以 `ending` 字段给出它。
+- **怎样结束的。** 已结束任务的状态是代码核对出的结局：**Ready**（绿色）、**Done, not finished** 和 **Needs you**（琥珀色）、**Failed**（红色）、**Stopped** 或 **Not needed**（灰色）。**How it ended** 写出原因，**Tests it ran** 列出任务自己这次运行启动的测试，每个标着通过、没通过或结果没核对；回答里只是提到的测试不会列出。**Ready** 需要证据：测试结果或文件夹没能核对时，任务就不算完成。改了代码就欠一次测试；之后 **Finish it** 找不到适用于这个文件夹的测试工具时，任务显示 **Ready** 并注明 **No tests apply**；找到了测试却没法运行时，显示 **melo found tests here but could not run them**。**Finish it** 一点就让还欠着测试或提交的任务继续；它自己的运行结束后不会再提供。文件夹太大或读不了、没法核对时，只有还能跑测试或提交时才提供 **Finish it**；之后直接说明原因，例如 **The folder was too large to check**。面板的 Activity 和 Workers 行也这样显示，`GET /api/tasks/<id>` 以 `ending` 字段给出它。
 
 请求进行中时对应按钮不可用。被拒绝时（确认已过期、任务已结束、Stop 抢先）会显示服务器给出的文字。
 
