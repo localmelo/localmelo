@@ -9,6 +9,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The `turn.memory` event records the exact text the model read. Each entry of
+  `used` (the recall block's items) and `searched` (what `search_memory`
+  returned) has a new `shown` key: the line as the recall block or the search
+  result worded it, without the list number, whatever `recall_item_chars`,
+  `recall_excerpt` and `recall_form` made of it. `text` is unchanged, and an
+  item left out of the block for room has no entry. The text of an opened turn
+  stays in the `open_memory` result, so `opened` keeps its shape. What the model
+  reads and the defaults do not change.
+
 - One step replaces every picture of Melo from an art pack, a folder or a zip.
   `uv run --with pillow==13.0.0 python scripts/art_pack.py check PACK` reads the
   pack, writes nothing and reports what it replaces, what is missing and used
