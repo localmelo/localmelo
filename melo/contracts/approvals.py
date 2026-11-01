@@ -31,7 +31,7 @@ module, so the executor can use it without an import cycle.
 from __future__ import annotations
 
 import time
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Final, Literal, Protocol, get_args, runtime_checkable
@@ -42,6 +42,7 @@ from localmelo.melo.contracts.review import (
     ActionReview,
     because,
     block_words,
+    loose_keys,
     step_key,
 )
 from localmelo.melo.schema import ToolTier
@@ -171,6 +172,21 @@ class ApprovalDecision:
                 "ApprovalDecision.origin 'timeout' needs allow=False: "
                 "a timeout only denies"
             )
+
+
+class Withdrawal(ApprovalDecision):
+    """A refusal that is nobody's denial of the step (#411).
+
+    The question was withdrawn unanswered (the gateway stops) or could not be
+    asked (the chat is not open yet): the call does not run, but nothing
+    blocked the step itself, so a task its chat continues may try it again.
+    Always a denial.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.allow:
+            raise ValueError("a Withdrawal never allows")
 
 
 @runtime_checkable
@@ -350,6 +366,11 @@ BLOCKED_EARLIER: Final = (
     "{who} blocked this exact step earlier in this task, so it does not run "
     "again; find another way that does not need it"
 )
+# A step alike (the same command spelt another way, the same install): refused too.
+BLOCKED_ALIKE: Final = (
+    "{who} blocked a step like this one earlier in this task (the same command "
+    "or install), so it does not run again; find another way that does not need it"
+)
 
 
 def call_key(
@@ -364,17 +385,52 @@ class EarlierBlocks:
     """A policy that refuses again, before any review, a step blocked earlier (#411).
 
     *blocks* maps a :func:`call_key` to ``(who, step_key)``: who blocked it
-    and, for a block auto mode kept, its step key. The agent's gate asks
-    :meth:`blocked` first; :meth:`decide` is the *inner* policy's. A block
-    the person allowed once since (its step key has an allowance in the
-    inner :class:`AutoPolicy`) is not refused. It never allows anything.
+    and, for a block auto mode kept, its step key. *loose* maps the same
+    call keys to their :func:`~localmelo.melo.contracts.review.loose_keys`,
+    so a call alike (the same command spelt another way, the same install)
+    is refused too. The agent's gate asks :meth:`match` first; :meth:`decide`
+    is the *inner* policy's. A block the person allowed once since (its step
+    key has an allowance in the inner :class:`AutoPolicy`) is not refused,
+    nor is a call alike to it. It never allows anything.
     """
 
     def __init__(
-        self, inner: ApprovalPolicy, blocks: Mapping[str, tuple[str, str]]
+        self,
+        inner: ApprovalPolicy,
+        blocks: Mapping[str, tuple[str, str]],
+        loose: Mapping[str, Sequence[str]] | None = None,
     ) -> None:
         self.inner = inner
         self._blocks = dict(blocks)
+        self._loose = {key: frozenset(keys) for key, keys in (loose or {}).items()}
+
+    def _lifted(self, key: str) -> bool:
+        auto = find_auto(self.inner)
+        return (
+            bool(key)
+            and auto is not None
+            and (auto.allowed_once(key) or key in auto.given)
+        )
+
+    def match(
+        self,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+        workspace_root: str | None,
+    ) -> tuple[str, bool] | None:
+        """Who blocked this call, or one alike, earlier, and whether it was this exact call."""
+        exact = call_key(tool_name, arguments, workspace_root)
+        found = self._blocks.get(exact)
+        if found is not None and not self._lifted(found[1]):
+            return found[0], True
+        alike = set(loose_keys(tool_name, arguments))
+        if not alike:
+            return None
+        for key, keys in self._loose.items():
+            kept = self._blocks.get(key)
+            if kept is not None and keys & alike and not self._lifted(kept[1]):
+                return kept[0], False
+        return None
 
     def blocked(
         self,
@@ -382,15 +438,9 @@ class EarlierBlocks:
         arguments: Mapping[str, Any],
         workspace_root: str | None,
     ) -> str | None:
-        """Who blocked this exact call earlier, or ``None`` when it may be asked."""
-        found = self._blocks.get(call_key(tool_name, arguments, workspace_root))
-        if found is None:
-            return None
-        who, key = found
-        auto = find_auto(self.inner)
-        if key and auto is not None and (auto.allowed_once(key) or key in auto.given):
-            return None
-        return who
+        """Who blocked this call, or one alike, earlier, or ``None`` when it may be asked."""
+        found = self.match(tool_name, arguments, workspace_root)
+        return None if found is None else found[0]
 
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
         return await self.inner.decide(request)

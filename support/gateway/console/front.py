@@ -500,8 +500,14 @@ class FrontAgent(Agent):
 
         At most FOLLOWUP_STEPS steps, never handed off and no news: the
         request carries the task's ending, which the next turn's news does not
-        tell again.
+        tell again. Only the task tools are offered (no web, browser, file or
+        shell tool), and the executor refuses any other.
         """
+        keep = {definition.name for definition in TASK_TOOLS}
+        hidden = {tool.name for tool in self.hippo.list_tools()} - keep
+        kwargs["hide_tools"] = tuple(
+            sorted(set(kwargs.get("hide_tools") or ()) | hidden)
+        )
         saved = self.options
         self.options = dataclasses.replace(
             saved, max_steps=FOLLOWUP_STEPS, answer_on_stop=True
@@ -721,9 +727,8 @@ class TaskTools(BaseToolProvider):
                 "Not done: one task per message. Tell the user what else could start."
             )
         # Only the person's own words start a task (#410). A request starts it at
-        # once: the person's message is the objective, the model's title only
-        # names it, and the model's own objective rides along as its reading,
-        # data and not instructions. A question code answers, or small talk,
+        # once: the person's message is the objective and the model's title only
+        # names it. A question code answers, or small talk,
         # starts nothing; words that say not to act, or that code read as
         # something else, are offered (front_rules.start_rule).
         typed = front.typed()
@@ -733,9 +738,13 @@ class TaskTools(BaseToolProvider):
         if rule == "offer":
             await front.ask_to_start(turn)
             return _NOT_ASKED
+        # The model's reading rides along only where code read the words as
+        # work it hands over as they are (/task, a change to named files); any
+        # other start is the person's words alone, the model's title naming it.
         reading = str(objective).strip()[:READING_CHARS]
         work = turn.user_text
-        if reading and norm(reading) != norm(work):
+        carries = route(typed).route in ("delegate", "work")
+        if carries and reading and norm(reading) != norm(work):
             work = f"{work}\n\n{READING_HEAD}\n{reading}"
         echo = await front.delegate(work, typed=typed, title=str(title), turn=turn)
         if echo.get("echo") != "started":

@@ -45,6 +45,7 @@ import contextlib
 import contextvars
 import logging
 import re
+import secrets
 from collections.abc import Coroutine
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final
@@ -83,8 +84,6 @@ REQUEST_CHARS: Final = 400
 ANSWER_CHARS: Final = 800
 MAX_BLOCKS: Final = 5
 CONTINUE_CHARS: Final = 1200
-# The person's turns read back to find the newest one.
-PERSON_TURNS: Final = 20
 # Run statuses of a failed run the chat can act on; a provider, setup or code
 # failure is not one (the same model would fail the same way).
 ACTIONABLE: Final = frozenset(
@@ -98,6 +97,11 @@ WHY_KEYS: Final = {
     "failed": "followup.why.failed",
 }
 _QUESTION: Final = re.compile(r"[^.!?。！？\n]*[?？]")
+_CONTINUED_ONCE: Final = (
+    "Not done: this task was continued once already since the user's last "
+    "message, and it stopped again. Do not continue it: tell the user in one "
+    "or two lines what got done and what did not, and ask one clear question."
+)
 
 
 @dataclass(eq=False)
@@ -144,6 +148,12 @@ def why_follow(record: TaskRecord, status: str | None) -> str | None:
     return "failed" if status in ACTIONABLE else None
 
 
+def _fence(name: str, body: str, nonce: str) -> list[str]:
+    """*body* between markers with *nonce*, as a page block is; ``<<`` in it escaped."""
+    data = body.replace("<<", "‹‹")
+    return [f"<<{name} nonce={nonce}>>", data, f"<<end {name} nonce={nonce}>>"]
+
+
 def _line(text: str, chars: int) -> str:
     flat = " ".join(redact_secrets(text or "")[0].split())
     return flat if len(flat) <= chars else flat[: chars - 1].rstrip() + "…"
@@ -166,6 +176,9 @@ class TaskFollowups:
         self._running: dict[str, FollowUp] = {}
         self._turns: dict[str, FollowUp] = {}
         self._jobs: set[asyncio.Task[Any]] = set()
+        # One look at a task's endings at a time, and each ending looked at once.
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._seen: set[tuple[str, float]] = set()
         self._listening = False
         self._closed = False
 
@@ -200,7 +213,14 @@ class TaskFollowups:
             logger.exception("Could not look at a task that ended")
         return None
 
+    def _lock(self, task_id: str) -> asyncio.Lock:
+        return self._locks.setdefault(task_id, asyncio.Lock())
+
     async def _consider(self, task_id: str) -> FollowUp | None:
+        async with self._lock(task_id):
+            return await self._consider_locked(task_id)
+
+    async def _consider_locked(self, task_id: str) -> FollowUp | None:
         if not self.on() or self._closed:
             return None
         console, store = self.console, self.console.store
@@ -218,8 +238,10 @@ class TaskFollowups:
             return None
         found = meta.get("followup")
         kept: dict[str, Any] = found if isinstance(found, dict) else {}
-        if kept.get("ending_at") == record.finished_at:
+        ending = (task_id, float(record.finished_at or 0.0))
+        if ending in self._seen or kept.get("ending_at") == record.finished_at:
             return None  # this ending was looked at already
+        self._seen.add(ending)
         person = await self._person_turn(chat)
         same = kept.get("person_turn") == person[0]
         runs = int(kept.get("runs") or 0) if same else 0
@@ -251,11 +273,8 @@ class TaskFollowups:
 
     async def _person_turn(self, chat_id: str) -> tuple[str, float]:
         """The id and start of the person's newest turn in *chat_id* (``("", 0)`` without one)."""
-        turns = await self.console.store.list_turns(chat_id, limit=PERSON_TURNS)
-        for turn in reversed(turns):
-            if not turn.origin:
-                return turn.id, turn.started_at
-        return "", 0.0
+        turn = await self.console.store.latest_person_turn(chat_id)
+        return ("", 0.0) if turn is None else (turn.id, turn.started_at)
 
     # ── The chat's turn ──
 
@@ -289,15 +308,6 @@ class TaskFollowups:
         timer: asyncio.Task[None] | None = None
         try:
             text, lead = await self._request(item, record)
-            words = said("followup.row", title=item.title, why=said(WHY_KEYS[item.why]))
-            row = await front.echo(
-                {"echo": FOLLOWUP_ECHO, "task_id": item.task_id, "title": item.title,
-                 "why": item.why, "lead": lead, "may_continue": item.may_continue,
-                 "line": t_in("en", "followup.row", title=item.title,
-                              why=t_in("en", WHY_KEYS[item.why])),
-                 "said": words}
-            )  # fmt: skip
-            item.row = row.get("id")
             try:
                 turn = await sessions.start_internal(chat_id, text, FOLLOWUP_ORIGIN)
             except SessionBusyError:
@@ -305,6 +315,18 @@ class TaskFollowups:
                 return
             item.turn_id = turn.id
             self._turns[turn.id] = item
+            # The row only once its turn began, so a busy chat leaves none
+            # behind; the page shows it just before that turn (turn_id).
+            words = said("followup.row", title=item.title, why=said(WHY_KEYS[item.why]))
+            row = await front.echo(
+                {"echo": FOLLOWUP_ECHO, "task_id": item.task_id, "title": item.title,
+                 "why": item.why, "lead": lead, "may_continue": item.may_continue,
+                 "turn_id": turn.id,
+                 "line": t_in("en", "followup.row", title=item.title,
+                              why=t_in("en", WHY_KEYS[item.why])),
+                 "said": words}
+            )  # fmt: skip
+            item.row = row.get("id")
             with contextlib.suppress(Exception):
                 await front.mark_told(record)  # the next turn's news leaves it out
             timer = asyncio.create_task(self._time_out(item))
@@ -350,17 +372,22 @@ class TaskFollowups:
         label, why = ending_words(shown(record))
         how = t_in("en", WHY_KEYS[item.why])
         lines = [lead, f"How it ended: {how}" + (f" ({label}: {why})" if why else "")]
+        # What the task and the person wrote is fenced with a fresh nonce, as a
+        # page is: nothing in it can close its block or pose as melo's words.
+        nonce = secrets.token_hex(4)
         asked = str(record.spec.get("user_words") or record.spec.get("objective") or "")
         if asked:
-            lines.append(f"What the user asked: {_line(asked, REQUEST_CHARS)}")
+            lines.append("What the user asked:")
+            lines += _fence("request", _line(asked, REQUEST_CHARS), nonce)
         front = self.console.front_for(item.chat_id)
         answer = await front.answer(record, ANSWER_CHARS)
         if answer:
-            lines.append(f"Its last answer: {answer}")
+            lines.append("Its last answer:")
+            lines += _fence("answer", answer, nonce)
         blocks = await self.blocked(item.task_id)
         if blocks:
             lines.append("Steps blocked in it (never run them again):")
-            lines += [f"- {block}" for block in blocks]
+            lines += _fence("blocked", "\n".join(f"- {b}" for b in blocks), nonce)
         if item.may_continue:
             lines.append(
                 "[localmelo · this chat started the task, so its outcome is yours. "
@@ -423,7 +450,15 @@ class TaskFollowups:
     # ── The follow-up's tool ──
 
     async def continue_task(self, front: Front, task_id: str, message: str) -> str:
-        """``task_continue``: the follow-up continues its task once, with its own words."""
+        """``task_continue``: the follow-up continues its task once, with its own note.
+
+        Only the task the follow-up is about, only while it stands as it ended
+        (finished, and not ended again or continued by the person since), and
+        only once since the person's message: that is written on the task
+        before the note goes, under the task's lock, so two follow-ups never
+        both continue it. The note and the steps blocked in the task reach it
+        as melo's note, data and never the person's words.
+        """
         turn = front.current_turn()
         item = (
             self._turns.get(turn.id)
@@ -442,40 +477,53 @@ class TaskFollowups:
         if item.continued:
             return "Not done: you continued it already in this follow-up."
         if not item.may_continue:
-            return (
-                "Not done: this task was continued once already since the user's last "
-                "message, and it stopped again. Do not continue it: tell the user in one "
-                "or two lines what got done and what did not, and ask one clear question."
-            )
+            return _CONTINUED_ONCE
         text = " ".join(message.split())
         if not 1 <= len(text) <= CONTINUE_CHARS:
             return f"Not done: a message has 1 to {CONTINUE_CHARS} characters."
-        record = await front.record(task_id)
-        if record is None:
-            return f"No task has id {task_id}."
-        blocks = await self.blocked(task_id)
-        if blocks:
-            text += "\n\nBlocked earlier in this task, so they do not run again:\n"
-            text += "\n".join(f"- {block}" for block in blocks)
-        echo = await front.follow(record, text, typed="", turn=turn, automatic=True)
-        if echo.get("echo") != "sent":
-            return f"Not done: {echo.get('line', '')}"
+        async with self._lock(task_id):
+            record = await front.record(task_id)
+            if record is None:
+                return f"No task has id {task_id}."
+            if (
+                record.state not in FINISHED
+                or float(record.finished_at or 0.0) != item.finished_at
+            ):
+                return (
+                    "Not done: the task changed since it stopped (it runs again, or "
+                    "the user continued it). Tell the user what you saw; do not "
+                    "continue it."
+                )
+            kept = await self._kept(task_id)
+            if kept.get("continued"):
+                return _CONTINUED_ONCE
+            blocks = await self.blocked(task_id)
+            if blocks:
+                text += (
+                    "\n\nSteps blocked earlier in this task (never run them again):\n"
+                )
+                text += "\n".join(f"- {block}" for block in blocks)
+            await self._keep(task_id, {**kept, "continued": True})
+            echo = await front.follow(record, text, typed="", turn=turn, automatic=True)
+            if echo.get("echo") != "sent":
+                await self._keep(task_id, kept)  # it did not go: as it was
+                return f"Not done: {echo.get('line', '')}"
         item.continued = True
-        await self._note_continued(task_id)
         return (
-            f"Continued task {task_id} once with your message; a step blocked before "
-            "does not run again, and its result comes back to this chat as a card. "
-            "Now tell the user in one or two lines what got done and what did not."
+            f"Continued task {task_id} once with your note; a step blocked before, or "
+            "one like it, does not run again, and its result comes back to this chat "
+            "as a card. Now tell the user in one or two lines what got done and what "
+            "did not."
         )
 
-    async def _note_continued(self, task_id: str) -> None:
-        """Keep on the task that its chat continued it for the person's last message."""
-        store = self.console.store
-        info = await store.get_session(task_id)
+    async def _kept(self, task_id: str) -> dict[str, Any]:
+        """What the task keeps of its follow-ups (``meta.followup``), read now."""
+        info = await self.console.store.get_session(task_id)
         kept = (info.meta or {}).get("followup") if info is not None else None
-        kept = dict(kept) if isinstance(kept, dict) else {}
-        kept["continued"] = True
-        await store.update_session(task_id, meta_update={"followup": kept})
+        return dict(kept) if isinstance(kept, dict) else {}
+
+    async def _keep(self, task_id: str, kept: dict[str, Any]) -> None:
+        await self.console.store.update_session(task_id, meta_update={"followup": kept})
 
     # ── Life ──
 

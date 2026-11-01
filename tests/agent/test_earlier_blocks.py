@@ -16,10 +16,12 @@ from localmelo.melo.contracts.approvals import (
     AutoPolicy,
     DenyAllPolicy,
     EarlierBlocks,
+    Withdrawal,
     call_key,
     find_auto,
     find_earlier,
 )
+from localmelo.melo.contracts.review import loose_keys
 
 from .test_approvals import Policy, Recorder, ScriptedLLM, _agent, _answer, _deploy
 
@@ -46,7 +48,7 @@ async def test_a_call_blocked_earlier_is_refused_before_the_policy_is_asked() ->
     first, second = [event.data for event in recorder.of("tool.finished")]
     assert (first["status"], first["approval"]["origin"]) == ("blocked", "policy")
     assert first["approval"]["earlier"] == "Auto mode"
-    assert first["approval"]["call_key"] == blocked
+    assert "call_key" not in first["approval"], "a refusal of a repeat is no new block"
     assert "review" not in first["approval"], "refused before any review"
     assert second["approval"]["allowed"] is True
 
@@ -70,3 +72,59 @@ async def test_a_denial_keeps_its_call_key_and_an_allowance_lifts_the_block() ->
     auto.allow_once("step-1", ["install"], "deploy")
     assert policy.blocked("deploy", {"target": "prod"}, root) is None
     assert find_earlier(AllowAllPolicy()) is None
+
+
+@pytest.mark.asyncio
+async def test_a_withdrawn_question_is_no_block_of_the_step() -> None:
+    # The gateway stopping withdraws the question: nobody denied the step itself.
+    llm = ScriptedLLM([_deploy(), _answer("Stopped.")])
+    agent, _ = _agent(llm)
+    recorder = Recorder()
+    withdrawn = Policy(Withdrawal(False, "The gateway is stopping", origin="policy"))
+    await agent.run_task("deploy", on_event=recorder, approval=withdrawn)
+    [finished] = recorder.of("tool.finished")
+    assert finished.data["approval"]["allowed"] is False
+    assert "call_key" not in finished.data["approval"]
+    with pytest.raises(ValueError):
+        Withdrawal(True, origin="policy")
+
+
+PIP = 'import subprocess\nsubprocess.run(["pip", "install", "requests"], check=True)'
+
+
+@pytest.mark.parametrize(
+    ("tool", "arguments"),
+    [
+        ("shell_exec", {"command": "pip  install requests "}),
+        ("shell_exec", {"command": "pip3 install 'requests'"}),
+        ("shell_exec", {"command": "python -m pip install -q requests"}),
+        ("shell_exec", {"command": "python3 -m pip install --quiet requests"}),
+        ("python_exec", {"code": 'import os\nos.system("pip install requests")'}),
+        ("shell_exec", {"command": "pip3 install --user requests"}),
+    ],
+)
+def test_a_step_alike_is_refused_too(tool: str, arguments: dict[str, str]) -> None:
+    blocked = call_key("python_exec", {"code": PIP}, "/w")
+    loose = {blocked: loose_keys("python_exec", {"code": PIP}, ("install",))}
+    policy = EarlierBlocks(AllowAllPolicy(), {blocked: ("Auto mode", "")}, loose)
+    assert policy.match("python_exec", {"code": PIP}, "/w") == ("Auto mode", True)
+    reflowed = {"code": PIP.replace("check=True", "check = True")}
+    assert policy.match("python_exec", reflowed, "/w") == ("Auto mode", True)
+    assert policy.match(tool, arguments, "/w") == ("Auto mode", False)
+    # Another program, or another package, is another step.
+    assert policy.match("shell_exec", {"command": "pip install numpy"}, "/w") is None
+    assert policy.match("shell_exec", {"command": "ls -la"}, "/w") is None
+
+
+def test_an_allowance_of_the_blocked_step_lifts_its_steps_alike() -> None:
+    auto = AutoPolicy(task=True)
+    blocked = call_key("python_exec", {"code": PIP}, "/w")
+    policy = EarlierBlocks(
+        auto,
+        {blocked: ("Auto mode", "step-1")},
+        {blocked: loose_keys("python_exec", {"code": PIP}, ("install",))},
+    )
+    alike = {"command": "pip3 install requests"}
+    assert policy.match("shell_exec", alike, "/w") == ("Auto mode", False)
+    auto.allow_once("step-1", ["install"], "python_exec")
+    assert policy.match("shell_exec", alike, "/w") is None

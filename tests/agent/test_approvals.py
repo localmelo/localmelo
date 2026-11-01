@@ -29,7 +29,7 @@ from localmelo.melo.contracts.approvals import (
 )
 from localmelo.melo.contracts.events import EVENT_FIELDS, AgentEvent
 from localmelo.melo.contracts.providers import BaseLLMProvider
-from localmelo.melo.contracts.review import ActionReview
+from localmelo.melo.contracts.review import ActionReview, loose_keys
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.schema import CALL_NOT_STARTED, Message, ToolCall, ToolDef
 
@@ -318,6 +318,7 @@ def _approval(
         approval["call_key"] = call_key(
             request.tool_name, request.arguments, request.workspace_root
         )
+        approval["loose_keys"] = loose_keys(request.tool_name, request.arguments)
     return approval
 
 

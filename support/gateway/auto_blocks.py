@@ -196,8 +196,9 @@ async def denied_steps(
     """The steps blocked in *session_id* by the person, auto mode or melo's rules (#411).
 
     Newest last, each with its ``call_key`` (what makes a later call the same
-    step), ``who`` blocked it, its ``reason``, the ``step_key`` of an auto
-    block, its tool ``name`` and its ``preview``. A call a stopped turn never
+    step), its ``loose_keys`` (what makes one alike), ``who`` blocked it, its
+    ``reason``, the ``step_key`` of an auto block, its tool ``name`` and its
+    ``preview``. Only real denials carry a call key. A call a stopped turn never
     reviewed, a refusal of a repeat, and a record from before call keys were
     kept are left out.
     """
@@ -214,9 +215,13 @@ async def denied_steps(
             or approval.get("reason") == _STOPPED
         ):
             continue
+        loose = approval.get("loose_keys")
         out.append(
             {
                 "call_key": key,
+                "loose_keys": (
+                    [str(k) for k in loose] if isinstance(loose, list) else []
+                ),
                 "who": BLOCKERS.get(str(approval.get("origin")), "melo's rules"),
                 "reason": str(approval.get("reason") or ""),
                 "step_key": str(approval.get("step_key") or ""),

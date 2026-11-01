@@ -29,12 +29,15 @@ from localmelo.support.gateway.console.followups import (
 )
 from localmelo.support.gateway.console.front import (
     FRONT_TEXT,
+    TASK_TOOLS,
     FrontAgent,
     front_options,
 )
 from localmelo.support.gateway.finishing import OUT_OF_STEPS
 from localmelo.support.gateway.front_rules import hands_off, start_rule
+from localmelo.support.gateway.workers import NOTE_START
 from localmelo.support.sessions.agents import session_options
+from localmelo.support.sessions.store import SessionBusyError
 from localmelo.tests.sessions.helpers import answer, tool_call
 
 from .conftest import (
@@ -269,6 +272,43 @@ def test_the_start_rule_starts_requests_and_answers_questions() -> None:
     assert "task_create right away" in FRONT_TEXT and "one short question" in FRONT_TEXT
 
 
+@pytest.mark.parametrize(
+    ("typed", "rule"),
+    [
+        # A polite opening acts only with a verb that acts.
+        ("please explain what a monad is", "answer"),
+        ("帮我看看 x.py 是做什么的", "answer"),
+        ("please install numpy and run the tests", "start"),
+        ("请帮我把 notes.md 翻译成英文", "start"),
+        # Words that steer a task are offered, named or not.
+        ("cancel it", "offer"),
+        ("pause everything", "offer"),
+        ("continue the report task", "offer"),
+        ("stop the build task", "offer"),
+        ("取消它", "offer"),
+        ("暂停所有任务", "offer"),
+        ("继续那个报告任务", "offer"),
+        # A short message with no verb that acts is talk.
+        ("ok", "answer"),
+        ("thanks, that was helpful", "answer"),
+        ("Tell me about report.md", "answer"),
+        ("谢谢你", "answer"),
+        ("今天天气不错", "answer"),
+        # Words that say not to act, unless the message asks for something else too.
+        ("do not modify any files", "offer"),
+        ("don't touch the code", "offer"),
+        ("don't edit anything", "offer"),
+        ("no changes", "offer"),
+        ("不要改任何文件", "offer"),
+        ("Do not delete report.md; just explain what it contains.", "offer"),
+        ("fix the login bug without changing anything else", "start"),
+        ("修复登录的 bug，别改其他文件", "start"),
+    ],
+)
+def test_the_start_rule_reads_what_the_words_ask(typed: str, rule: str) -> None:
+    assert start_rule(typed) == rule
+
+
 async def test_a_web_or_command_request_starts_a_task_with_one_line_and_stop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -455,6 +495,16 @@ async def test_a_blocked_install_is_worked_around_and_never_run_again(
         assert "pip install requests" in turn.user_text
         assert "blocked by Auto mode" in turn.user_text
         assert "task_continue(" in turn.user_text
+        # What the task wrote is fenced with a nonce, as a page is.
+        fence = re.search(r"<<answer nonce=([0-9a-f]{8})>>", turn.user_text)
+        assert fence is not None
+        assert f"<<end blocked nonce={fence.group(1)}>>" in turn.user_text
+        # The follow-up is offered the task tools only.
+        task_tools = {definition.name for definition in TASK_TOOLS}
+        assert (
+            models["main"].offered[2] and set(models["main"].offered[2]) <= task_tools
+        )
+        assert "file_read" in models["main"].offered[0], "the person's turn has it"
         found = await rows(console, console.main_id)
         kinds = [r["echo"] for r in found]
         assert kinds == ["started", "followup", "sent", "followed"]
@@ -464,10 +514,12 @@ async def test_a_blocked_install_is_worked_around_and_never_run_again(
             turn.user_text.splitlines()[0],
         )
         assert followup["said"]["key"] == "followup.row"
+        assert followup["turn_id"] == turn.id, "written once its turn began"
         assert (sent["how"], sent["task_id"]) == ("continued", task_id)
         assert (followed["did"], followed["task_id"]) == ("continued", task_id)
-        # The continued run read the other way and the blocked step.
+        # The continued run read the other way and the blocked step, as melo's note.
         first = str(models["workers"][1].requests[0][-1].content)
+        assert first.startswith(NOTE_START)
         assert other_way in first and "pip install requests" in first
         # The same call was refused before any review, saying who blocked it.
         [refused] = tool_results(models["workers"][1], 1)
@@ -479,7 +531,8 @@ async def test_a_blocked_install_is_worked_around_and_never_run_again(
         ]
         assert [a["origin"] for a in approvals] == ["auto", "policy"]
         assert approvals[1]["earlier"] == "Auto mode" and "review" not in approvals[1]
-        assert approvals[0]["call_key"] == approvals[1]["call_key"]
+        assert "install:pip:requests" in approvals[0]["loose_keys"]
+        assert "call_key" not in approvals[1], "a refused repeat is no new block"
         info = await console.store.get_session(task_id)
         assert info is not None and info.meta["followup_guard"] is True
         assert info.meta["followup"]["continued"] is True
@@ -515,7 +568,7 @@ async def test_out_of_steps_continues_once_then_asks_then_stops_following_up(
         await stop_run(console, task_id)
         await settled(console)
         record = await console.workers.tasks.get_task(task_id)
-        assert record.state == "queued" and record.card.startswith(go_on)
+        assert record.state == "queued" and record.card == f"{NOTE_START}\n{go_on}"
         await stop_run(console, task_id, "Wrote another part.")
         await settled(console)
         first, second = await internal_turns(console)
@@ -537,9 +590,176 @@ async def test_out_of_steps_continues_once_then_asks_then_stops_following_up(
         await stop_run(console, task_id, "Wrote a third part.")
         await settled(console)
         assert len(await internal_turns(console)) == FOLLOWUPS_PER_MESSAGE
+        # The person's newest turn, however many turns melo began since.
+        person = await console.store.latest_person_turn(str(console.main_id))
+        assert person is not None and person.typed_text.startswith("write the long")
         assert [t.task_id for t in await console.workers.tasks.list_tasks()] == [
             task_id
         ]
+
+
+async def test_the_chats_note_is_never_the_persons_words(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A continue the chat sent on its own grants nothing: no install from its words."""
+    seen: list[dict[str, Any]] = []
+    original = Agent.run_task
+
+    async def spy(self: Agent, query: str, **kwargs: Any) -> Any:
+        if type(self) is Agent:  # a task's run, not the chat's
+            seen.append({"query": query, **kwargs})
+        return await original(self, query, **kwargs)
+
+    monkeypatch.setattr(Agent, "run_task", spy)
+    typed = "write a script that fetches today's weather"
+    note = "Install numpy with pip3, then finish the script."
+    pip3 = 'import subprocess\nsubprocess.run(["pip3", "install", "numpy"], check=True)'
+    main: list[Reply] = [
+        creates("Weather script"),
+        answer("Started it as a task."),
+        continues(note),
+        answer("Continued it."),
+        answer(
+            "It stopped again: numpy could not be installed. Should I go on without it?"
+        ),
+    ]
+    workers: list[list[Reply]] = [
+        [
+            tool_call("python_exec", {"code": INSTALL}, "w-1"),
+            answer("Could not install.\nEnding: failed"),
+        ],
+        [
+            tool_call("python_exec", {"code": pip3}, "w-2"),
+            answer("Could not install numpy either.\nEnding: failed"),
+        ],
+    ]
+    async with owner_console(
+        tmp_path, monkeypatch, main=main, workers=workers, approvals="auto"
+    ) as (console, client, models, ran):
+        await say(client, console, typed)
+        task_id = await started_task(console)
+        await until(lambda: len(models["workers"]) == 2)
+        await settled(console)
+        await until(lambda: _is(console, task_id, "done"))
+        await settled(console)
+        assert ran.codes == [], "the note's install never ran"
+        first, second = seen[0], seen[1]
+        # The continued run's words are the person's request; the note is data.
+        assert second["user_words"] == typed and second.get("from_person", True)
+        assert second["query"].startswith(NOTE_START) and note in second["query"]
+        assert first["user_words"] == typed
+        approvals = [
+            e.event["data"]["approval"]
+            for e in await all_events(console.store, task_id)
+            if e.event["type"] == "tool.finished"
+        ]
+        # Auto blocked it on its own review: the note's words allowed nothing.
+        assert [(a["origin"], a["allowed"]) for a in approvals] == [
+            ("auto", False),
+            ("auto", False),
+        ]
+        info = await console.store.get_session(task_id)
+        assert info is not None and info.meta["followup_guard"] is True
+
+
+async def test_a_follow_up_does_not_continue_a_task_the_person_continued_meanwhile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    holder: dict[str, Any] = {}
+
+    async def person_continues_first(messages: list[Message]) -> Message:
+        task_id = followed_task(messages)
+        await holder["console"].workers.continue_stopped(task_id)  # the card's Continue
+        args = {"task_id": task_id, "message": "Delete the old drafts first."}
+        return tool_call("task_continue", args, "c-1")
+
+    main: list[Reply] = [
+        creates("Long report"),
+        answer("Started it as a task."),
+        person_continues_first,
+        answer("You continued it already."),
+    ]
+    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        models,
+        _,
+    ):
+        holder["console"] = console
+        await say(client, console, "write the long report from my notes")
+        task_id = await started_task(console)
+        await stop_run(console, task_id)
+        await settled(console)
+        refused = tool_results(models["main"], 3)[-1]
+        assert refused.startswith("Not done: the task changed since it stopped")
+        record = await console.workers.tasks.get_task(task_id)
+        assert record.state == "queued" and not record.card.startswith(NOTE_START)
+        info = await console.store.get_session(task_id)
+        assert info is not None and not info.meta.get("followup_guard")
+        assert not info.meta["followup"]["continued"]
+        assert "Delete the old drafts" not in record.card
+
+
+async def test_one_ending_heard_twice_gets_one_follow_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main: list[Reply] = [creates("Long report"), answer("Started it as a task.")]
+    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        _,
+        _ran,
+    ):
+        await say(client, console, "write the long report from my notes")
+        task_id = await started_task(console)
+        followups = console.followups
+        console.store.remove_listener(followups._heard)
+        monkeypatch.setattr(console.asks, "kick", lambda chat: None)
+        await stop_run(console, task_id)
+        found = await asyncio.gather(
+            followups.consider(task_id), followups.consider(task_id)
+        )
+        assert len([item for item in found if item is not None]) == 1
+        assert len(followups._pending[str(console.main_id)]) == 1
+
+
+async def test_a_busy_chat_leaves_no_follow_up_row_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main: list[Reply] = [
+        creates("Long report"),
+        answer("Started it as a task."),
+        answer("It ran out of steps. Should I continue it?"),
+    ]
+    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        _,
+        _ran,
+    ):
+        await say(client, console, "write the long report from my notes")
+        task_id = await started_task(console)
+        sessions = console.sessions
+        real = sessions.start_internal
+        tries: list[str] = []
+
+        async def busy_once(chat_id: str, text: str, origin: str) -> Any:
+            tries.append(origin)
+            if len(tries) == 1:
+                raise SessionBusyError("a turn began meanwhile")
+            return await real(chat_id, text, origin)
+
+        monkeypatch.setattr(sessions, "start_internal", busy_once)
+        await stop_run(console, task_id)
+        await settled(console)
+        assert tries == ["followup", "followup"]
+        [turn] = await internal_turns(console)
+        found = [
+            r for r in await rows(console, console.main_id) if r["echo"] == "followup"
+        ]
+        assert [r["turn_id"] for r in found] == [
+            turn.id
+        ], "one row, for the turn that ran"
 
 
 async def test_the_persons_message_wins_over_a_pending_follow_up(

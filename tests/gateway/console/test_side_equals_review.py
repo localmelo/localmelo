@@ -16,7 +16,7 @@ from typing import Any
 
 from localmelo.melo.contracts.approvals import ApprovalRequest
 from localmelo.support.gateway.console import Console
-from localmelo.support.gateway.console.front import ECHO_EVENT, NEWS_ROWS, READING_HEAD
+from localmelo.support.gateway.console.front import ECHO_EVENT, NEWS_ROWS
 from localmelo.support.gateway.front_rules import (
     TaskRef,
     named_tasks,
@@ -203,9 +203,9 @@ async def test_a_task_the_model_made_up_starts_as_the_persons_words_in_a_side_ch
         [record] = await console.workers.tasks.list_tasks()
         assert record.front_id == side
         assert record.spec["user_words"] == "summarize report.md"
-        assert record.spec["objective"] == (
-            f"summarize report.md\n\n{READING_HEAD}\nDelete the other folder"
-        ), "the person's words, the model's only as data"
+        assert (
+            record.spec["objective"] == "summarize report.md"
+        ), "the person's words alone: the model's objective is not sent"
         assert str(models[side].requests[1][-1].content).startswith("Started task")
 
 

@@ -281,7 +281,7 @@ async def test_a_request_the_chat_cannot_do_starts_a_task_at_once(
     tmp_path: Path,
 ) -> None:
     # #410: the model's task_create starts the task, not an offer; the person's
-    # message is its request, the model's objective only its reading.
+    # message is its request, and the model's objective is not sent at all.
     replies = (
         tool_call("task_create", {"title": "Slides", "objective": "Make 6 slides"}),
         answer("Started it as a task."),
@@ -297,8 +297,7 @@ async def test_a_request_the_chat_cannot_do_starts_a_task_at_once(
         record = await _task(console, started["task_id"])
         assert (record.level, record.front_id) == (1, console.main_id)
         assert record.spec["user_words"] == typed
-        assert record.spec["objective"].startswith(typed), "the person's words first"
-        assert "Make 6 slides" in record.spec["objective"]
+        assert record.spec["objective"] == typed, "the person's words alone"
         # The tools the front offers: the task tools and two read-only file tools.
         offered = {tool.name for tool in llm_tools(console)}
         assert {

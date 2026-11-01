@@ -484,11 +484,69 @@ def is_question(typed: str) -> bool:
 _REQUEST: Final = re.compile(
     r"^(?:please\b|(?:can|could|would|will)\s+you\b)|^(?:请|能不能|你能|麻烦你?|帮我)"
 )
+# The verbs that ask melo to do something, not to explain it (#410): a polite
+# request acts only with one of them, and a short message without one is talk.
+# Explaining, telling, describing and looking (解释, 说说, 看看) are not among them.
+_DOES: Final = re.compile(
+    r"\b(?:fix|make|build|write|rewrite|create|run|rerun|install|uninstall|open|fetch|"
+    r"download|generate|draw|plot|convert|refactor|update|upgrade|add|remove|delete|"
+    r"rename|move|copy|edit|change|modify|implement|set\s+up|deploy|test|debug|clean|"
+    r"organi[sz]e|sort|summari[sz]e|translate|compile|train|scrape|crawl|send|upload|"
+    r"commit|push|merge|format|lint|migrate|export|import|save|collect|draft|prepare|"
+    r"launch|book|replace|research|search|find|look\s+up|check|review|compare|"
+    r"analy[sz]e|benchmark|profile|split|combine|extract|back\s+up|backup|archive|"
+    r"resize|compress|record|schedule|code)\b"
+    r"|修复|修好|修一下|修改|改成|改一下|改掉|改好|改写|写(?!的)|生成|画|安装|装(?:一下|个|上|好)"
+    r"|跑(?:一下|一遍|完)?|运行|执行|打开|下载|创建|新建|删除|删掉|移动|复制|重命名|整理|转换|转成"
+    r"|翻译|总结|部署|测试|构建|编译|提交|推送|上传|发送|发给|实现|添加|加上|更新|升级|配置|设置"
+    r"|清理|导出|导入|保存|抓取|爬取|训练|起草|重构|合并|格式化|搜索|查找|查一下|对比|比较|分析"
+    r"|调研|备份|压缩|提取|做(?:一个|个|成|好|一下|出|张|份|页)"
+)
+# A message that opens by asking to be told, shown or explained something.
+_EXPLAINS: Final = re.compile(
+    r"^(?:(?:please|pls|can you|could you|would you)\s+)?"
+    r"(?:explain|tell me|describe|show me|walk me through|remind me what)\b"
+    r"|^(?:请|帮我|麻烦你?)?(?:解释|说说|讲讲|介绍|看看|告诉我)"
+)
+# Control, continue and follow words at the start: what a named task is told.
+_STEERS: Final = re.compile(
+    r"^(?:(?:please|pls|ok|okay|now|then)[\s,]+)*"
+    r"(?:cancel|stop|pause|resume|unpause|continue|carry on|keep going|abort|kill|"
+    r"halt|retry|restart|follow up on)\b"
+    r"|^(?:请|麻烦你?)?(?:取消|停止|停下|停掉|暂停|继续|接着|恢复|重试|中止|终止|跟进)"
+)
+# A message this short with no verb that acts is talk: "ok", "thanks", "今天天气不错".
+TALK_CHARS: Final = 40
+# Asking to be told something: what follows, to the end of its clause, is the
+# subject ("just explain how you would make slides"), not work asked for.
+_TELLS: Final = re.compile(
+    r"\b(?:(?:just|only)\s+)?(?:explain|tell\s+me|describe|walk\s+me\s+through)\b"
+    r"|\b(?:just|only)\s+(?:tell|answer|say|show)\b"
+    r"|只(?:是)?(?:说|讲|解释|回答|告诉我|介绍)|解释|说说|讲讲|介绍|告诉我|看看"
+)
+_CLAUSE_END: Final = re.compile(r"[;,.!?，。；！？]|\s(?:and|then)\s|然后|并且")
+
+
+def acts(typed: str) -> bool:
+    """Whether *typed* asks melo to do something: a verb that acts, not under a
+    negation ("do not delete", "不要删除"), not inside quotation marks, and not
+    in what the person asks to be told ("explain how you would fix it")."""
+    text = norm(_QUOTED.sub(" ", typed or ""))
+    while (tells := _TELLS.search(text)) is not None:
+        end = _CLAUSE_END.search(text, tells.end())
+        text = text[: tells.start()] + " " + (text[end.start() :] if end else "")
+    text = _HANDS_OFF.sub(" ", text)
+    for found in _DOES.finditer(text):
+        if not _NEGATION.search(text[: found.start()]):
+            return True
+    return False
 
 
 def polite_request(typed: str) -> bool:
-    """Whether *typed* asks melo to do something, however politely: "can you …?", "请…"."""
-    return bool(_REQUEST.match(norm(typed)))
+    """Whether *typed* asks melo to do something, however politely: "can you run …?",
+    "请帮我装…". A polite opening with no verb that acts ("please explain …",
+    "帮我看看 …") asks to be told, not for work."""
+    return bool(_REQUEST.match(norm(typed))) and acts(typed)
 
 
 def asks_only(typed: str) -> bool:
@@ -496,13 +554,17 @@ def asks_only(typed: str) -> bool:
     return is_question(typed) and not polite_request(typed)
 
 
-# The person says not to act: explain, describe or answer only, start nothing.
+# The person says not to act: explain, describe or answer only, change nothing, start nothing.
 _HANDS_OFF: Final = re.compile(
     r"\b(?:just|only)\s+(?:tell|explain|describe|answer|say|show)\b"
-    r"|\b(?:don['’]t|do\s+not|no\s+need\s+to|without)\s+(?:\w+\s+){0,2}?"
-    r"(?:start(?:ing)?|run(?:ning)?|chang(?:e|ing)|touch(?:ing)?|do(?:ing)?)\s+"
-    r"(?:a\s+task|anything|any\s+(?:code|files?)|it)\b"
-    r"|只(?:是)?(?:说|讲|解释|回答|告诉我|介绍)|不要(?:开始|开)?任务|先别(?:动手|做|改)|不用(?:动手|做|改)|别(?:动手|改)"
+    r"|\b(?:don['’]?t|do\s+not|no\s+need\s+to|never|without)\s+(?:\w+\s+){0,2}?"
+    r"(?:start(?:ing)?|run(?:ning)?|chang(?:e|ing)|touch(?:ing)?|do(?:ing)?|"
+    r"modify(?:ing)?|edit(?:ing)?|alter(?:ing)?|writ(?:e|ing)|delet(?:e|ing))\s+"
+    r"(?:a\s+task|anything(?:\s+else)?|any\s+(?:other\s+)?(?:code|files?)|it|"
+    r"(?:the|my|this|other)\s+(?:code|files?|repo(?:sitory)?|project|folder))\b"
+    r"|\b(?:make\s+)?no\s+changes?\b"
+    r"|只(?:是)?(?:说|讲|解释|回答|告诉我|介绍)|不要(?:开始|开)?任务|先别(?:动手|做|改)"
+    r"|不用(?:动手|做|改)|别(?:动手|改|动|碰)|不要(?:改|动|修改|碰|删)"
 )
 
 
@@ -519,24 +581,40 @@ StartRule = Literal["start", "answer", "offer"]
 def start_rule(typed: str) -> StartRule:
     """What a chat's ``task_create`` does with the person's own words *typed* (#410).
 
-    ``start``: a request (a polite one too) starts at once; the person's
-    message is its objective. ``answer``: nothing starts and nothing is
-    offered, the chat answers itself: a greeting, a brief question or a short
-    question that names nothing to work on (:func:`route`'s ``answer``).
-    ``offer``: the person sees "Start this as a task?" instead, where starting
-    on the model's word would be wrong: a question (:func:`asks_only`), which
-    asks to know, not to act; words that say not to act (:func:`hands_off`);
-    no typed words (an attachment alone, a retry); and words code read as
-    something else (a chore or a reminder it could not read, a task named to
-    control, continue or follow).
+    In this order:
+
+    - ``offer`` for no typed words (an attachment alone, a retry), and for
+      words that steer a task (cancel, stop, pause, continue, follow up on …),
+      whether or not they name one;
+    - ``offer`` for words that say not to act (:func:`hands_off`) and ask for
+      nothing else (:func:`acts`): "fix the bug without changing anything
+      else" asks for the fix;
+    - ``answer`` for a polite opening, or one that asks to be told, with no
+      verb that acts ("please explain …", "帮我看看 …"), and for what
+      :func:`route` answers (a greeting, a brief or short plain question);
+    - ``offer`` for words code read as something else (a chore, a reminder,
+      a task named) and for a question (:func:`asks_only`);
+    - ``answer`` for a short message with no verb that acts ("ok", "thanks",
+      "谢谢你", "今天天气不错");
+    - else ``start``: a request starts at once, the person's message its objective.
     """
     if not typed.strip():
         return "offer"
+    text = norm(typed)
+    if _STEERS.match(text):
+        return "offer"
+    doing = acts(typed)
+    if hands_off(typed) and not doing:
+        return "offer"
+    if not doing and (_REQUEST.match(text) or _EXPLAINS.match(text)):
+        return "answer"
     found = route(typed).route
     if found == "answer":
         return "answer"
-    if found not in START_ROUTES or asks_only(typed) or hands_off(typed):
+    if found not in START_ROUTES or asks_only(typed):
         return "offer"
+    if not doing and len(text) <= TALK_CHARS:
+        return "answer"
     return "start"
 
 
@@ -1002,8 +1080,10 @@ __all__ = [
     "LEVEL_MEANINGS",
     "LEVEL_WORDS",
     "START_ROUTES",
+    "TALK_CHARS",
     "Routed",
     "TaskRef",
+    "acts",
     "allows",
     "allows_level",
     "allows_message",

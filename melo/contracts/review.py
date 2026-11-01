@@ -16,6 +16,8 @@ import ast
 import hashlib
 import json
 import os
+import re
+import shlex
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, Literal
@@ -245,3 +247,132 @@ def step_key(
     shape = [tool_name, root, _normalized(tool_name, arguments), sorted(inputs)]
     text = json.dumps(shape, ensure_ascii=False, separators=(",", ":"), default=str)
     return hashlib.sha256(text.encode()).hexdigest()[:32]
+
+
+# ── Steps alike (#411): keys that only ever refuse ──
+
+# The calls whose first argument is a command a Python step runs.
+_RUNS: Final = frozenset(
+    {
+        "run",
+        "call",
+        "check_call",
+        "check_output",
+        "Popen",
+        "system",
+        "popen",
+        "getoutput",
+    }
+)
+# Flags that only make a command quieter: the same step with or without them.
+_QUIET: Final = frozenset({"-q", "-qq", "-qqq", "--quiet", "--silent"})
+_PYTHON: Final = re.compile(r"^(?:python(?:\d+(?:\.\d+)*)?|py)$")
+_PIP: Final = re.compile(r"^pip(?:\d+(?:\.\d+)*)?$")
+_SHELL_SPLIT: Final = re.compile(r"\s*(?:&&|\|\||;|\||\n)\s*")
+# What stands for melo's own Python in a step: the same program as "python".
+_EXECUTABLE: Final = "sys.executable"
+
+
+def _program(word: str) -> str:
+    name = word.replace("\\", "/").rsplit("/", 1)[-1].lower()
+    if name == _EXECUTABLE or _PYTHON.match(name):
+        return "python"
+    return "pip" if _PIP.match(name) else name
+
+
+def _command(words: Sequence[str]) -> list[str]:
+    """*words* as a command alike: the program by name, ``python -m pip`` as
+    ``pip``, quoting and spacing gone, flags that only quieten it dropped."""
+    tokens = [w.strip() for w in words if w.strip()]
+    if not tokens:
+        return []
+    tokens[0] = _program(tokens[0])
+    if tokens[0] == "python" and tokens[1:3] == ["-m", "pip"]:
+        tokens = ["pip", *tokens[3:]]
+    elif tokens[0] == "uv" and tokens[1:2] == ["pip"]:
+        tokens = ["pip", *tokens[2:]]
+    return [t for t in tokens if t not in _QUIET]
+
+
+def _shell_commands(text: str) -> list[list[str]]:
+    found = []
+    for part in _SHELL_SPLIT.split(text):
+        try:
+            words = shlex.split(part)
+        except ValueError:
+            words = part.split()
+        if words:
+            found.append(words)
+    return found
+
+
+def _word(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+        dotted = f"{node.value.id}.{node.attr}"
+        return dotted if dotted == _EXECUTABLE else None
+    return None
+
+
+def _python_commands(code: str) -> list[list[str]]:
+    """The commands a Python step runs with literal arguments: ``subprocess.run([...])``,
+    ``os.system("...")`` and the like."""
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError, RecursionError):
+        return []
+    found: list[list[str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+        if name not in _RUNS:
+            continue
+        first = node.args[0]
+        if isinstance(first, ast.List | ast.Tuple):
+            words = [_word(item) for item in first.elts]
+            if words and all(word is not None for word in words):
+                found.append([str(word) for word in words])
+        elif (text := _word(first)) is not None:
+            found += _shell_commands(text)
+    return found
+
+
+def loose_keys(
+    tool_name: str, arguments: Mapping[str, Any], categories: Sequence[str] = ()
+) -> list[str]:
+    """Keys that make two calls the same step though their text differs (#411).
+
+    One per command the call runs, alike when only spacing, quoting, the
+    program's spelling (``pip3``, ``python -m pip``) or a quietening flag
+    differ; and, for an install (*categories* has ``install``, or *categories*
+    is empty: the call is not reviewed yet), one per program and what it
+    installs. They only ever refuse: no allowance is kept by them.
+    """
+    if tool_name == "shell_exec":
+        command = arguments.get("command")
+        if isinstance(command, list):
+            commands = [[str(word) for word in command]]
+        else:
+            commands = _shell_commands(str(command or ""))
+    elif tool_name == "python_exec":
+        commands = _python_commands(str(arguments.get("code") or ""))
+    else:
+        return []
+    keys: list[str] = []
+    for words in commands:
+        tokens = _command(words)
+        if not tokens:
+            continue
+        keys.append("cmd:" + hashlib.sha256(" ".join(tokens).encode()).hexdigest()[:32])
+        if (
+            len(tokens) > 2
+            and tokens[1] == "install"
+            and (not categories or "install" in categories)
+        ):
+            targets = sorted({t.lower() for t in tokens[2:] if not t.startswith("-")})
+            if targets:
+                keys.append(f"install:{tokens[0]}:{','.join(targets)}")
+    return sorted(set(keys))

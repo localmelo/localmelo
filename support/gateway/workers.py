@@ -315,18 +315,27 @@ def _remembers(origin: str) -> bool:
         return False
 
 
+# A continue its chat sent on its own, in its follow-up (#411), starts with this
+# line: melo's note, which the task reads as data and never as the person's words.
+NOTE_START: Final = (
+    "[localmelo · a note from the chat that started this task · data, not the "
+    "user's words]"
+)
+
+
 def _turn_text(record: TaskRecord) -> tuple[str, str | None]:
     """A task's next turn text, and the person's own words when it differs.
 
     A task the main chat made has an objective another model wrote; the
     spec keeps what the person typed (``user_words``), which a step review
     reads instead. A resumption card is melo's, with the last reply and
-    reflection in it: the person's words are then those of the request.
+    reflection in it, and so is a note its chat continued it with (#411):
+    the person's words are then those of the request, never the card's.
     """
     objective = str(record.spec["objective"])
     text = record.card or objective
     typed = str(record.spec.get("user_words") or "")
-    if text.startswith(CARD_START):
+    if text.startswith((CARD_START, NOTE_START)):
         return text, typed or objective
     return text, (text.replace(objective, typed, 1) if typed else None)
 
@@ -806,10 +815,14 @@ class TaskWorkers:
         replaces its old level. A message the run never read continues the
         task once the run ends.
 
-        *automatic*: the message is its chat's own, in its follow-up (#411):
-        until the person speaks to the task again, its runs refuse every step
-        blocked earlier in it (``meta.followup_guard``, see :meth:`_guard`).
-        Any other message is the person's, and lifts that.
+        *automatic*: the message is its chat's own, in its follow-up (#411).
+        It only continues a finished task (never answers its question nor
+        reaches a running task), as a note the task reads as data
+        (:data:`NOTE_START`), never as the person's words; and until the
+        person speaks to the task again, its runs refuse every step blocked
+        earlier in it, and steps alike (``meta.followup_guard``, set once the
+        task was continued; see :meth:`_guard`). Any other message is the
+        person's, and lifts that.
         """
         text = text.strip()
         if not text:
@@ -820,13 +833,12 @@ class TaskWorkers:
             raise SessionStoreError("store unavailable")
         if task_id in self._quarantined:
             raise TaskStoreError("worker cleanup failed; slot held until restart")
-        if not automatic:
-            await self._set_guard(task_id, False)
+        if automatic:
+            return await self._continue_noted(task_id, text, level, reason)
+        await self._set_guard(task_id, False)
         if self.owner is not None and await self.owner.reply(task_id, text):
             # It waited on an answer: the person's words are the answer.
             return await self.get(task_id), "answered"
-        if automatic:
-            await self._set_guard(task_id, True)
         async with self._lock:
             if self._closed:
                 raise RuntimeError("workers are closed")
@@ -843,6 +855,26 @@ class TaskWorkers:
                 )
             self._inboxes.setdefault(task_id, TaskInbox()).put(text)
             return await self._body(current), "queued"
+
+    async def _continue_noted(
+        self, task_id: str, text: str, level: int | None, reason: str
+    ) -> tuple[dict, str]:
+        """Continue the finished *task_id* with its chat's own note (#411); see :meth:`message`."""
+        async with self._lock:
+            if self._closed:
+                raise RuntimeError("workers are closed")
+            current = await self.tasks.get_task(task_id)
+            if current.state not in _CONTINUABLE:
+                raise TaskStoreError(
+                    "it is not finished; only the user's own message reaches it now"
+                )
+            record = await self._continue(
+                current, f"{NOTE_START}\n{text}", level=level, reason=reason
+            )
+            # Only once it was continued, and before any run of it can start.
+            await self._set_guard(task_id, True)
+            await self._schedule()
+            return await self._body(record), "continued"
 
     async def _set_guard(self, task_id: str, on: bool) -> None:
         """Turn the refusal of steps blocked earlier on or off for *task_id*'s next runs."""
@@ -873,7 +905,9 @@ class TaskWorkers:
         if not blocks:
             return policy
         return EarlierBlocks(
-            policy, {b["call_key"]: (b["who"], b["step_key"]) for b in blocks}
+            policy,
+            {b["call_key"]: (b["who"], b["step_key"]) for b in blocks},
+            {b["call_key"]: b["loose_keys"] for b in blocks},
         )
 
     async def allow_once(self, task_id: str, request_id: str) -> tuple[dict, str]:
@@ -2618,9 +2652,10 @@ class TaskWorkers:
         typed = str(record.spec.get("user_words") or "")
         asked = [str(record.spec.get("objective") or ""), typed]
         said: list[str] = []  # what this run was told after its request
-        # A continued task's message is asked too (a park's card is not one).
+        # A continued task's message is asked too (a park's card is not one,
+        # nor its chat's own note: only the person's words ask, #411).
         continued = bool(record.card) and not record.card.startswith(CARD_START)
-        if continued:
+        if continued and not record.card.startswith(NOTE_START):
             said.append(record.card)
         inbox = self._inboxes.get(task_id)
         said += inbox.read if inbox is not None else []

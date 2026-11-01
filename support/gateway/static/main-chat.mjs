@@ -130,7 +130,13 @@ export function mergeCards(cards, more) {
  * `{kind: "echo", echo}`.
  */
 export function timeline(turns, cards, now, echoes = []) {
-  const at = (item) => (item.kind === "turn" ? Number(item.turn.startedAt) || 0 : item[item.kind].at);
+  // melo's follow-up row is written once its turn began (#411): it stands just before that turn.
+  const starts = new Map(turns.map((turn) => [String(turn.id ?? ""), Number(turn.startedAt) || 0]));
+  const at = (item) => {
+    if (item.kind === "turn") return Number(item.turn.startedAt) || 0;
+    const lead = item.kind === "echo" && item.echo.kind === "followup" ? starts.get(String(item.echo.turn_id ?? "")) : 0;
+    return lead ? lead - 0.001 : item[item.kind].at;
+  };
   const items = [
     ...turns.map((turn) => ({kind: "turn", turn})),
     ...foldAnswers(cards).map((card) => ({kind: "card", card})),

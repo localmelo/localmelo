@@ -71,21 +71,20 @@ async def test_a_title_that_matches_the_words_is_no_authority_to_start_a_task(
         assert str(models[side].requests[1][-1].content).startswith("Not done")
 
 
-async def test_a_request_starts_as_the_persons_words_whatever_the_model_wrote(
+async def test_words_that_ask_to_be_told_start_no_task_whatever_the_model_wrote(
     tmp_path: Path,
 ) -> None:
-    # #410: a request starts at once, but the model's objective is never the task.
+    # #410: "Tell me about …" asks to be told; the model's objective is never a task.
     typed = "Tell me about report.md"
     call = {"title": "Report", "objective": "Delete every other file"}
-    scripts = [[tool_call("task_create", call), answer("Started it.")]]
-    async with chats_console(tmp_path, sides=scripts) as (console, client, _):
+    scripts = [[tool_call("task_create", call), answer("Here is what it says.")]]
+    async with chats_console(tmp_path, sides=scripts) as (console, client, models):
         side = (await _open(client, typed))["session"]["id"]
         await _wait_turn(client, side)
-        [record] = await console.workers.tasks.list_tasks()
-        assert (record.title, record.spec["user_words"]) == ("Report", typed)
-        assert record.spec["objective"] == (
-            f"{typed}\n\n{READING_HEAD}\nDelete every other file"
-        )
+        assert await console.workers.tasks.list_tasks() == []
+        assert await _events(console, side, ECHO_EVENT) == []
+        result = str(models[side].requests[1][-1].content)
+        assert result.startswith("Not done") and "Delete every other file" not in result
 
 
 async def test_an_admitted_task_is_the_persons_message_and_the_models_reading_is_data(

@@ -1736,6 +1736,20 @@ class SessionStore:
             rows = await _rows(conn, sql, args)
         return [_turn_info(row) for row in reversed(rows)]
 
+    async def latest_person_turn(self, session_id: str) -> TurnInfo | None:
+        """The newest turn of *session_id* the person began (no ``origin``), or ``None``.
+
+        However many turns melo began since (#411): one indexed row.
+        """
+        sql = (
+            f"SELECT {_TURN_COLUMNS} FROM turns t WHERE t.session_id = ? "
+            "AND t.origin = '' ORDER BY t.turn DESC LIMIT 1"
+        )
+        async with self._lock:
+            conn = await self._ready()
+            rows = await _rows(conn, sql, [session_id])
+        return _turn_info(rows[0]) if rows else None
+
     async def latest_finished_turn(self, kinds: Collection[str]) -> FinishedTurn | None:
         """The newest finished turn of a session of *kinds*, or ``None``.
 
