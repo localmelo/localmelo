@@ -144,13 +144,14 @@ uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 uv run --with pillow python scripts/make_app_icons.py
 ```
 
-Melo 的每一张图片（桌面宠物、它的静态图、启动窗口的肖像和活动胶囊的头像）都来自 `support/gateway/static/moves` 中的动作文件，也就是网页控制台显示的同一批文件。从美术包重新生成它们：
+Melo 的每一张图片（桌面宠物、它的静态图、启动窗口的肖像和活动胶囊的头像）都来自 `support/gateway/static/moves` 中的动作文件，也就是网页控制台显示的同一批文件。一条命令就能用一个美术包替换所有这些图片，以及图标和标志；[美术包指南](art-pack.md)说明美术包里要有什么：
 
 ```bash
-uv run --with pillow==13.0.0 python scripts/build_moves.py --source /path/to/pack
+uv run --with pillow==13.0.0 python scripts/art_pack.py apply /path/to/pack
 ```
 
-- 美术包放在仓库之外；`--help` 说明它包含什么。Pillow 13.0.0（及其自带的 libwebp 1.6.0）只在这一次运行中获取：固定版本让生成的字节保持一致。
+- 美术包（文件夹或 zip）放在仓库之外；`check` 会先报告它的问题，并且不写入任何东西。Pillow 13.0.0（及其自带的 libwebp 1.6.0）只在这一次运行中获取：固定版本让生成的字节保持一致。
+- `make_app_icons.py` 和 `build_moves.py` 是它背后的引擎，仍然可以单独运行：前者用已提交的图片重新生成图标和标志，后者只生成动作文件。
 - `GET /api/health` 还在 `status.recent` 中说明上一次运行是怎么结束的（见 [API 参考](../reference/api-v2.md)）；Melo 会读取它。
 
 WebKit 集成测试会打开原生窗口，需要图形化的 macOS 会话，因此默认关闭；请用临时 HOME 运行：

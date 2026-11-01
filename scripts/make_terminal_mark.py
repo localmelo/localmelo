@@ -5,7 +5,8 @@ picture changes:
     uv run python scripts/make_terminal_mark.py
 
 It reads support/gateway/static/moves/face-brand.png (Melo's brand head, ears up) and rewrites the PIXELS block of
-support/cli/mark.py; nothing is drawn by hand. tests/cli/test_mark.py runs the same downsampling and fails when the
+support/cli/mark.py; nothing is drawn by hand. `scripts/art_pack.py apply` does the same after it replaces the
+moves. tests/cli/test_mark.py runs the same downsampling and fails when the
 committed block and the picture disagree. Only the standard library is used (zlib for the PNG), so the test needs
 nothing more.
 
@@ -201,14 +202,24 @@ def block(rows: tuple[str, ...]) -> str:
     return f"PIXELS: Final = (\n{body})\n"
 
 
-def main() -> int:
-    source = MODULE.read_text(encoding="utf-8")
+def rewrite(module: Path = MODULE, face: Path = FACE) -> tuple[str, ...]:
+    """Rewrite the PIXELS block of `module` from the head in `face`; the rows. Raises ValueError when the module has
+    no PIXELS block or the picture has no head to sample."""
+    source = module.read_text(encoding="utf-8")
     pattern = re.compile(r"PIXELS: Final = \(\n(?:    \"[.ockb]+\",\n)+\)\n")
     if not pattern.search(source):
-        print(f"no PIXELS block in {MODULE}", file=sys.stderr)
+        raise ValueError(f"no PIXELS block in {module}")
+    rows = pixels(face)
+    module.write_text(pattern.sub(lambda _: block(rows), source), encoding="utf-8")
+    return rows
+
+
+def main() -> int:
+    try:
+        rows = rewrite()
+    except ValueError as error:
+        print(error, file=sys.stderr)
         return 1
-    rows = pixels()
-    MODULE.write_text(pattern.sub(lambda _: block(rows), source), encoding="utf-8")
     print(*rows, sep="\n")
     return 0
 

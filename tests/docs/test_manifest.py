@@ -494,6 +494,7 @@ def test_local_links_and_anchors() -> None:
         "docs/guides/gateway.md",
         "docs/guides/web-console.md",
         "docs/guides/macos-app.md",
+        "docs/guides/art-pack.md",
         "docs/guides/scheduler.md",
         "docs/concepts/how-it-works.md",
         "docs/concepts/memory.md",

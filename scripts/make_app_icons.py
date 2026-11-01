@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
-"""Make the macOS app's icon files from the logo art in docs/assets. Run it by hand, on a Mac, when the art changes:
+"""Make the macOS app's icon files from the logo art. This is the engine of `scripts/art_pack.py`, which hands it the
+pack's brand pictures (docs/guides/art-pack.md); run it alone to make the files again from the committed pictures in
+docs/assets, on a Mac:
 
     uv run --with pillow python scripts/make_app_icons.py
 
 Pillow is not a dependency of localmelo: `--with` fetches it for this one run, and nothing is added to
 pyproject.toml or uv.lock. The files it writes are committed, and scripts/build_macos_app.py only copies
-them into the app, so swapping the art is: replace the pictures below, run this, commit macos/assets.
+them into the app.
 
 - macos/assets/AppIcon.icns: Melo, the localmelo mascot, as the README shows the emblem (docs/assets/melo.png),
   on a rounded tile of the macOS icon grid: 824 of 1024 px, with 185 px corners. The emblem is scaled to the
   tile's height, and the tile is filled with the emblem's own paper colour (the mean of its four corners).
   The paper differs a little along each edge, so a flat tile shows a rectangle: the emblem fades into the tile
-  over ICON_FEATHER px at its edges. Every size is resampled from the source with a Lanczos filter. The source
-  is 534 px tall, so the 1024 px size shows it about 1.5 times larger than it is: those pixels are upscaled
-  until larger artwork arrives.
+  over ICON_FEATHER px at its edges. Every size is resampled from the source with a Lanczos filter, so a source
+  smaller than 1024 px is upscaled for the largest size. A picture with transparent pixels is laid on white first.
 - macos/assets/MenuBarLogo.png and MenuBarLogo@2x.png: the round logo (docs/assets/icon_small.png) at 18 points,
   18 and 36 px, with rounded corners, for the menu-bar item.
 """
@@ -29,6 +30,7 @@ from PIL import Image, PngImagePlugin  # type: ignore[import-not-found]
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "macos/assets"
+ICONUTIL = Path("/usr/bin/iconutil")
 ICON_GRID, ICON_TILE, ICON_RADIUS, ICON_FEATHER = (
     1024,
     824,
@@ -96,23 +98,67 @@ def draw_menu_bar_logo(logo: np.ndarray, scale: int) -> tuple[np.ndarray, np.nda
     return resize(logo, size, size), coverage(size, size, MENU_BAR_RADIUS * scale)
 
 
+def flatten(image: Image.Image) -> np.ndarray:
+    """A picture as (h, w, 3) colours; where it is transparent it is laid on white first."""
+    rgba = image.convert("RGBA")
+    page = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+    page.alpha_composite(rgba)
+    flat: np.ndarray = np.asarray(page.convert("RGB"))
+    return flat
+
+
+def load(path: Path) -> np.ndarray:
+    """A picture file as (h, w, 3) colours (see `flatten`)."""
+    with Image.open(path) as image:
+        return flatten(image)
+
+
+def icon_image(emblem: np.ndarray, size: int) -> Image.Image:
+    """The app icon at one size as a picture (what AppIcon.icns holds at that size)."""
+    rgb, alpha = draw_icon(emblem, size)
+    pixels = np.rint(np.dstack([rgb, alpha * 255]).clip(0, 255)).astype(np.uint8)
+    return Image.fromarray(pixels)
+
+
+def build_icons(
+    out: Path, emblem: np.ndarray | None = None, logo: np.ndarray | None = None
+) -> list[str]:
+    """Write the icon from `emblem` and the menu-bar logo from `logo` into `out`; each is skipped when it is None.
+    The names written. The icon needs macOS's iconutil."""
+    out.mkdir(parents=True, exist_ok=True)
+    written: list[str] = []
+    if emblem is not None:
+        with tempfile.TemporaryDirectory() as temp:
+            iconset = Path(temp) / "AppIcon.iconset"
+            iconset.mkdir()
+            for name, size in ICONSET.items():
+                save(iconset / name, *draw_icon(emblem, size))
+            subprocess.run(
+                [
+                    str(ICONUTIL),
+                    "-c",
+                    "icns",
+                    str(iconset),
+                    "-o",
+                    str(out / "AppIcon.icns"),
+                ],
+                check=True,
+            )
+        written.append("AppIcon.icns")
+    if logo is not None:
+        for scale, name in ((1, "MenuBarLogo.png"), (2, "MenuBarLogo@2x.png")):
+            save(out / name, *draw_menu_bar_logo(logo, scale))
+            written.append(name)
+    return written
+
+
 def main() -> None:
-    emblem = np.asarray(Image.open(ROOT / "docs/assets/melo.png").convert("RGB"))
-    logo = np.asarray(Image.open(ROOT / "docs/assets/icon_small.png").convert("RGB"))
-    ASSETS.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory() as temp:
-        iconset = Path(temp) / "AppIcon.iconset"
-        iconset.mkdir()
-        for name, size in ICONSET.items():
-            save(iconset / name, *draw_icon(emblem, size))
-        icns = ASSETS / "AppIcon.icns"
-        subprocess.run(
-            ["/usr/bin/iconutil", "-c", "icns", str(iconset), "-o", str(icns)],
-            check=True,
-        )
-    for scale, name in ((1, "MenuBarLogo.png"), (2, "MenuBarLogo@2x.png")):
-        save(ASSETS / name, *draw_menu_bar_logo(logo, scale))
-    print(f"Wrote AppIcon.icns, MenuBarLogo.png and MenuBarLogo@2x.png in {ASSETS}")
+    written = build_icons(
+        ASSETS,
+        load(ROOT / "docs/assets/melo.png"),
+        load(ROOT / "docs/assets/icon_small.png"),
+    )
+    print(f"Wrote {', '.join(written)} in {ASSETS}")
 
 
 if __name__ == "__main__":
