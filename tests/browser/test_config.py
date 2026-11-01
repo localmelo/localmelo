@@ -9,6 +9,7 @@ import pytest
 
 import localmelo.__main__ as cli
 from localmelo.melo.agent import AgentOptions
+from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.support import config, settings
 from localmelo.support.cli.agents import AgentFactory, url_backend
 from localmelo.support.gateway.console import registry
@@ -107,7 +108,47 @@ async def test_the_terminal_and_the_console_pass_the_configured_driver(
     cfg = config.Config(chat_backend="vllm", embedding_backend="none")
     cfg.browser.driver = "safari-automation"
     await registry.default_builder(cfg, "/w", None, "s1")
-    assert seen == ["safari-automation", "safari-automation"]
+    monkeypatch.setattr(
+        "localmelo.support.gateway.console.front.build_session_agent", fake_build
+    )
+    from localmelo.support.gateway.console import front
+
+    await front.build_front_agent(cfg, "/w", "main", tools=_NoTools())
+    assert seen == ["safari-automation"] * 3
+
+
+class _NoTools(BaseToolProvider):
+    async def start(self) -> list[ProvidedTool]:
+        return []
+
+    async def close(self) -> None:
+        pass
+
+
+@pytest.mark.parametrize(
+    ("driver", "count"), [("safari-automation", 8), ("off", 0), ("chrome", 0)]
+)
+async def test_every_console_chat_has_the_browser_tools_the_setting_names(
+    driver: str, count: int
+) -> None:
+    """The main chat (the app's), and a side chat; a driver that is not one is off."""
+    from localmelo.support.gateway.console import front
+
+    cfg = config.Config(chat_backend="vllm", embedding_backend="none")
+    cfg.vllm.chat_url = "http://127.0.0.1:9/v1"
+    cfg.browser.driver = driver
+    main = await front.build_front_agent(cfg, str(Path.cwd()), "main", tools=_NoTools())
+    side = await registry.default_builder(cfg, str(Path.cwd()), None, "side")
+    try:
+        for agent in (main, side):
+            names = [
+                t.name for t in agent.list_tools() if t.name.startswith("browser_")
+            ]
+            assert len(names) == count
+            assert all(t.tier == "read" for t in agent.list_tools() if t.name in names)
+    finally:
+        await main.close()
+        await side.close()
 
 
 def test_direct_runs_and_workers_never_name_a_driver() -> None:

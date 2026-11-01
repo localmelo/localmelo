@@ -33,6 +33,7 @@ def call_preview(tool_name: str, arguments: Mapping[str, Any]) -> str:
     - ``file_write``: ``<path> (<n> chars)``, where ``n`` counts the content;
     - ``file_edit``: ``<path> (edit)``;
     - ``git_status``: ``git <command>``, then the revision when there is one;
+    - ``web_fetch``: the address, then `` (part <n>)`` for a part after the first;
     - any other tool, or an argument above that is missing or not a ``str``:
       the arguments as compact JSON, keys sorted.
 
@@ -78,6 +79,11 @@ def _summary(tool_name: str, arguments: Mapping[str, Any]) -> str:
         command, rev = arguments.get("command"), arguments.get("rev") or ""
         if isinstance(command, str) and isinstance(rev, str):
             return " ".join(["git", command, rev]).strip()
+    elif tool_name == "web_fetch":
+        url, part = arguments.get("url"), arguments.get("part")
+        if isinstance(url, str):
+            more = isinstance(part, int) and not isinstance(part, bool) and part > 1
+            return f"{url.strip()} (part {part})" if more else url.strip()
     return _as_json(arguments)
 
 

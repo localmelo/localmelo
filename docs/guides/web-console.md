@@ -573,7 +573,10 @@ save carries the revision it read, so a change made elsewhere meanwhile asks you
   **By words only**; developer mode adds the other two ways, with the key
   `memory.retriever`), and **Open Memory** for the notes themselves.
 - **Chats and folders**: the default folder of a new chat (**Change…** opens the app's
-  folder panel, or a path field in a browser) and the recent folders, each with **Make default**.
+  folder panel, or a path field in a browser), how new chats start (**New chats start in**),
+  **Read web pages** (on by default; it lets chats and tasks read public pages with
+  [`web_fetch`](../reference/tools.md#reading-a-public-web-page)), and the recent folders,
+  each with **Make default**.
 - **Scheduled**: the check-in switch with its next time, and **Open Scheduled** for the chores.
 - **Appearance**: the theme (System, Light, Dark, kept in this browser), the
   [language](#language) (Automatic, English, 简体中文), **Melo on the desktop** in the macOS

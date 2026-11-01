@@ -1860,13 +1860,21 @@ function approvalCard(request, view = chatApproval, asked = "") {
     title = !target ? t("approval.write", { path }) : !target.exists ? t("approval.create", { path })
       : diff ? t("approval.replace", { path }) : t("approval.replaceSize", { path, size: formatBytes(target.size_bytes) });
   } else if (tool.startsWith("browser:")) {
-    // A site melo wants to open in Safari: one question per site and chat.
+    // A site melo wants to open in Safari, or read with web_fetch: one question per site and chat,
+    // and one answer covers both tools.
     const site = String(args.site || tool.slice(8));
+    const reading = args.via === "web_fetch";
     what = t("approval.willDo");
-    title = t("approval.openSite", { site });
-    caption = t("approval.browserCaption");
-    rule = t("approval.rule.open", { site, scope });
-    content = t("approval.siteContent", { site });
+    title = t(reading ? "approval.readSite" : "approval.openSite", { site });
+    caption = t(reading ? "approval.readCaption" : "approval.browserCaption");
+    rule = t(reading ? "approval.rule.read" : "approval.rule.open", { site, scope });
+    content = t(reading ? "approval.readContent" : "approval.siteContent", { site });
+    if (reading && args.url) {
+      // The whole address reaches the site, path and query too: the card shows it.
+      why = content;
+      content = String(args.url);
+      what = t("approval.readAddress");
+    }
   }
   // A high-impact call (installs, downloads, changes outside the folder) asks every time: the
   // card says why, offers no chat-wide allow, and starts on Deny.

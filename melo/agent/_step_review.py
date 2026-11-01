@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import ipaddress
 import os
 import re
 import time
@@ -31,6 +32,7 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Final, Literal
+from urllib.parse import urlsplit
 
 from localmelo.melo.checker.review.model import (
     EARLIER_REQUESTS,
@@ -71,18 +73,101 @@ RUNNER_REVIEWS_PER_TURN: Final = 3
 BLOCKS_KEPT: Final = 20
 
 Purpose = Literal["undecided", "consent"]
-_HOST: Final = re.compile(
-    r"(?<![a-z0-9_.-])((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})"
+
+# The last label of a bare word that names a file, not a site: ``README.md``,
+# ``run.sh`` or ``package.json`` in a message names no host. A full
+# ``http://`` or ``https://`` address names its host whatever it ends in.
+_FILE_EXTENSION_GROUPS: Final = (
+    "md markdown mdx rst txt adoc tex bib log out tmp bak orig swp diff patch",
+    "sh bash zsh fish bat cmd ps",
+    "py pyi pyc pyx pxd ipynb js mjs cjs jsx ts mts cts tsx vue svelte",
+    "go mod sum rs rb pl pm php java kt kts scala swift cs fs lua jl dart ex exs",
+    "erl hs elm clj cljs nim zig sol ml mli cc cpp cxx hh hpp hxx mm proto",
+    "gql graphql mk cmake gradle tf tfvars hcl nix wasm",
+    "html htm xhtml xml xsl xslt xsd svg css scss sass less",
+    "json jsonl ndjson geojson yaml yml toml ini cfg conf env properties lock plist",
+    "csv tsv parquet arrow feather avro sql db sqlite pkl pickle npy npz pth ckpt",
+    "safetensors gguf onnx mlmodel mlpackage",
+    "png jpg jpeg gif webp bmp ico icns tif tiff heic heif psd",
+    "wav flac ogg aac mov avi mkv webm",
+    "pdf doc docx xls xlsx ppt pptx odt ods odp rtf epub key pages numbers",
+    "zip tar gz tgz bz xz zst rar dmg pkg deb rpm whl egg jar war exe dll so dylib",
+    "bin dat pem crt cer csr pub asc gpg sig ics vcf eml srt vtt ttf otf woff eot map",
 )
+FILE_EXTENSIONS: Final = frozenset(" ".join(_FILE_EXTENSION_GROUPS).split())
+# Scripts written without spaces between words (Thai, Lao, Myanmar, Khmer,
+# Japanese kana, Chinese, Korean), as ``re`` ranges: a host right after one
+# of their characters, as in "打开example.com看看", is still a word of its own.
+_NO_SPACES: Final = (
+    r"\u0e00-\u0eff\u1000-\u109f\u1780-\u17ff\u3040-\u30ff\u3100-\u312f"
+    r"\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff\uff66-\uff9f"
+)
+# A letter, digit or "_" that carries a word on: one before a host makes it
+# part of a longer word ("cher.de" in "bücher.de" is not a host).
+_JOINS: Final = rf"[^\W{_NO_SPACES}]"
+_HOST: Final = re.compile(
+    rf"(?<![.\-])(?<!{_JOINS})"
+    r"((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})"
+    rf"(?!-|{_JOINS})"
+)
+_URL: Final = re.compile(r"https?://[^\s<>\"'`]+", re.IGNORECASE)
 
 
-def _bare_host(text: str) -> str:
-    """*text* (a host or a URL) as a lower-case host, without ``www.`` or a port."""
-    host = text.strip().lower()
-    if "://" in host:
-        host = host.split("://", 1)[1]
-    host = host.split("/", 1)[0].split("@")[-1].split(":", 1)[0].rstrip(".")
+def _plain_host(host: str) -> str:
+    """*host* compared as a name: lower case, in ASCII, without one ``www.``."""
+    host = host.strip().strip("[]").lower().rstrip(".")
+    try:
+        return str(ipaddress.ip_address(host))
+    except ValueError:
+        pass
+    if not host.isascii():
+        try:
+            host = host.encode("idna").decode("ascii")
+        except UnicodeError:
+            return ""
     return host.removeprefix("www.")
+
+
+def _site_host(text: str) -> str:
+    """The host of *text* (a host, ``host:port`` or a URL), as :func:`_plain_host` has it."""
+    text = text.strip()
+    try:
+        return str(ipaddress.ip_address(text.strip("[]")))
+    except ValueError:
+        pass
+    try:
+        host = urlsplit(text if "://" in text else "//" + text).hostname
+    except ValueError:
+        return ""
+    return _plain_host(host or "")
+
+
+def named_sites(text: str) -> set[str]:
+    """The hosts *text* names (as :func:`_plain_host` has them).
+
+    The host of each full ``http://`` or ``https://`` address, and each
+    bare word shaped as a host (``example.com``) whose last label is not a
+    common file extension (:data:`FILE_EXTENSIONS`). A word inside a longer
+    one is not a host: ``bücher.de`` does not name ``cher.de``.
+    """
+    names: set[str] = set()
+    for address in _URL.findall(text):
+        try:
+            host = urlsplit(address).hostname or ""
+        except ValueError:
+            continue
+        if ":" not in host:
+            # The host as far as it is one word: "https://example.com)." is
+            # example.com.
+            word = re.match(r"[\w.-]*", host)
+            host = word.group(0) if word else ""
+        if host := _plain_host(host):
+            names.add(host)
+    for word in _HOST.findall(text.lower()):
+        if word.rsplit(".", 1)[-1] not in FILE_EXTENSIONS:
+            names.add(_plain_host(word))
+    names.discard("")
+    return names
 
 
 @dataclass
@@ -173,20 +258,17 @@ class StepReviewer:
         return tuple(self._requests)
 
     def names_host(self, host: str) -> bool:
-        """Whether a user message names *host*, or a site *host* belongs to.
+        """Whether the user's recent messages name *host* itself.
 
-        Whole host names only (``www.`` aside): ``docs.example.com`` is
-        named by ``example.com``, but ``t.co`` is not by ``microsoft.com``.
+        The same host, or it with ``www.`` added or removed, and nothing
+        under it: naming ``example.com`` does not name ``docs.example.com``,
+        so a site under a shared domain (``vercel.app``) is not named by
+        it. See :func:`named_sites` for what counts as naming.
         """
-        bare = _bare_host(host)
-        if not bare:
-            return False
-        named = {
-            _bare_host(found)
-            for text in self._requests
-            for found in _HOST.findall(text.lower())
-        }
-        return any(bare == name or bare.endswith("." + name) for name in named)
+        wanted = _site_host(host)
+        return bool(wanted) and any(
+            wanted in named_sites(text) for text in self._requests
+        )
 
     # ── Reviews ──
 

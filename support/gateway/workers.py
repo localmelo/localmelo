@@ -128,6 +128,7 @@ from localmelo.support.sessions.approvals import (
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.runner import SessionRunner
 from localmelo.support.sessions.store import SessionStore, SessionStoreError
+from localmelo.support.web import WebFetchProvider
 
 log = logging.getLogger(__name__)
 MAX_WORKERS = 4
@@ -2131,6 +2132,13 @@ class TaskWorkers:
                     tools=[
                         WorkerSearch(workspace),
                         AskOwner(task_id, lambda: self.owner),
+                        # A task reads public pages too (it has no browser); a
+                        # site its words do not name asks the chat that owns it.
+                        *(
+                            [WebFetchProvider(task=True)]
+                            if self.settings().tools.web_fetch is True
+                            else []
+                        ),
                     ],
                 )
             except BaseException:

@@ -239,8 +239,10 @@ async def test_a_worker_searches_its_task_folder_without_asking(setup: Setup) ->
     await workers.create({"objective": "find it", "workspace": str(project)})
     await eventually(lambda: len(built) == 1)
     # The second provider is ask_owner (#369): the worker asks its chat, never its folder.
-    provider, asks = built[0]["tools"]
+    # The third reads public web pages (#406), on by default.
+    provider, asks, web = built[0]["tools"]
     assert [t.definition.name for t in await asks.start()] == ["ask_owner"]
+    assert [t.definition.name for t in await web.start()] == ["web_fetch"]
     [tool] = await provider.start()
     assert tool.definition.name == "search_files"
     assert tool.requires_approval is False

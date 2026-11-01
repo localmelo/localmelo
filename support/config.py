@@ -395,6 +395,17 @@ class BrowserConfig:
 
 
 @dataclass
+class ToolsConfig:
+    """The ``[tools]`` table: tools a chat may use, each on or off.
+
+    ``web_fetch`` reads a public web page as text (on unless the file turns it
+    off). The chats and the console's tasks offer it; direct runs never do.
+    """
+
+    web_fetch: bool = True
+
+
+@dataclass
 class Config:
     chat_backend: str = (
         ""  # mlc | ollama | vllm | sglang | openai | gemini | anthropic | nvidia
@@ -436,6 +447,7 @@ class Config:
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     browser: BrowserConfig = field(default_factory=BrowserConfig)
+    tools: ToolsConfig = field(default_factory=ToolsConfig)
     # [pricing.<model>]: dollars per million tokens (input, output, and
     # cache_read for cached prompt tokens), for the terminal's session cost.
     # Configuration only: no price is bundled.
@@ -480,6 +492,7 @@ class Config:
         errors.extend(self._validate_memory())
         errors.extend(self._validate_scheduler())
         errors.extend(self._validate_browser())
+        errors.extend(self._validate_tools())
         # [cli] is a display preference: like [sessions] resume_mode, a bad
         # value warns and falls back in the interactive UI (cli_errors()), so
         # direct mode and the gateway never fail on it.
@@ -595,6 +608,14 @@ class Config:
             return []
         return [
             f"[browser] driver={self.browser.driver!r} is not one of {BROWSER_DRIVERS}"
+        ]
+
+    def _validate_tools(self) -> list[str]:
+        """``[tools]`` holds bools."""
+        return [
+            f"[tools] {name} must be a bool, got {value!r}"
+            for name in ("web_fetch",)
+            if not isinstance(value := getattr(self.tools, name), bool)
         ]
 
     def _validate_scheduler(self) -> list[str]:
@@ -954,6 +975,7 @@ class Config:
             *self._validate_memory(),
             *self._validate_scheduler(),
             *self._validate_browser(),
+            *self._validate_tools(),
             *self._validate_gateway_workspace(),
             *self._validate_cli(),
             *self._validate_ui(),
@@ -1213,6 +1235,11 @@ def _load_file() -> Config:
         for k, v in data["browser"].items():
             if hasattr(cfg.browser, k):
                 setattr(cfg.browser, k, v)
+
+    if isinstance(data.get("tools"), dict):
+        for k, v in data["tools"].items():
+            if hasattr(cfg.tools, k):
+                setattr(cfg.tools, k, v)
 
     # A bad value is left for Config.validate to report.
     if isinstance(data.get("sessions"), dict):
@@ -1561,6 +1588,9 @@ def save(cfg: Config) -> None:
 
     if cfg.browser != BrowserConfig():
         lines.extend(["[browser]", f"driver = {_toml_string(cfg.browser.driver)}", ""])
+
+    if cfg.tools != ToolsConfig():
+        lines.extend(["[tools]", f"web_fetch = {_toml_value(cfg.tools.web_fetch)}", ""])
 
     if cfg.sessions != SessionsConfig():
         lines.append("[sessions]")

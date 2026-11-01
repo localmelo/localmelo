@@ -284,7 +284,7 @@
 
 - **Model server**：聊天模型和嵌入模型各自的状态（`Connected · <model> · checked 12 s ago`、`Not reachable`、`Off`）、服务器地址、**Test connection**（绝不显示密钥）和 **Change…**。**Change…** 打开的表单用来选择服务器、地址和模型（**Discover models** 会列出模型）；这是唯一用按钮保存的更改，即 **Save connection**，**Cancel** 恢复已保存的内容。
 - **Memory**：**Remember across chats**、Melo 查找笔记的方式（**By words and meaning** 或 **By words only**；开发者模式再加两种，并显示键 `memory.retriever`），以及打开笔记本身的 **Open Memory**。
-- **Chats and folders**：新对话的默认文件夹（**Change…** 在 app 里打开系统的文件夹面板，在浏览器里显示路径输入框），以及最近用过的文件夹，每个都有 **Make default**。
+- **Chats and folders**：新对话的默认文件夹（**Change…** 在 app 里打开系统的文件夹面板，在浏览器里显示路径输入框）、新对话的开始方式（**New chats start in**）、**Read web pages**（默认开启；让对话和任务用 [`web_fetch`](../reference/tools.md#reading-a-public-web-page) 读取公开网页），以及最近用过的文件夹，每个都有 **Make default**。
 - **Scheduled**：check-in 开关及下一次的时间，以及打开定时事项的 **Open Scheduled**。
 - **Appearance**：主题（System、Light、Dark，记在当前浏览器里）、[语言](#language)（自动、English、简体中文）、macOS app 中的 **Melo on the desktop**（与 app 菜单是同一个选择），以及 **Developer mode**。
 - **Developer**（仅开发者模式）：`melo -h all` 列出的每个设置，按分区分组，显示当前值、小字的 `config.toml` 键、设置它的旧选项，对比实验还标明决定它的 issue；最后是只作用于一次运行的选项。这里只读，用 `melo config set KEY VALUE` 修改。该分区也显示设置文件及其修订版本。

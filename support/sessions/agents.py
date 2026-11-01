@@ -267,6 +267,7 @@ async def build_session_agent(
     retrieval_extra_body: Mapping[str, Any] | None = None,
     mcp_config: str | None = None,
     browser_driver: str = "off",
+    web_fetch: bool = False,
     wrap_llm: LLMWrapper | None = None,
     wrap_embedding: EmbeddingWrapper | None = None,
     identify: bool = False,
@@ -291,6 +292,9 @@ async def build_session_agent(
     *browser_driver* names the browser the Agent may read web pages in (see
     :mod:`localmelo.support.browser`); ``off`` gives it no browser tools. Only
     the surfaces that ask a person (the terminal chat and the console) pass it.
+    *web_fetch* gives it the ``web_fetch`` tool (see
+    :mod:`localmelo.support.web`): the chats and the console's tasks pass
+    ``[tools] web_fetch``; direct runs pass nothing, so they never have it.
 
     *wrap_llm* and *wrap_embedding* are called with the provider the builder
     made, and the Agent is made with what they return, so the provider its
@@ -339,6 +343,10 @@ async def build_session_agent(
         browser = provider_for(browser_driver)
         if browser is not None:
             providers.append(browser)
+    if web_fetch:
+        from localmelo.support.web import WebFetchProvider
+
+        providers.append(WebFetchProvider(browser=browser_driver != "off"))
     llm: BaseLLMProvider | None = None
     embedding: BaseEmbeddingProvider | None = None
     from_config = False

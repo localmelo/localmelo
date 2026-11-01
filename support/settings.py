@@ -37,6 +37,7 @@ SECTIONS = (
     "approvals",
     "scheduler",
     "browser",
+    "tools",
     "gateway",
 )
 
