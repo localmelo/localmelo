@@ -645,3 +645,24 @@ def test_levels_print_as_p_codes_and_words_still_set_them() -> None:
 )
 def test_old_words_and_codes_name_the_same_level(typed: str, code: str) -> None:
     assert parser().parse_args(["level", "abc", typed]).level == code
+
+
+def test_show_and_list_say_how_code_found_a_task_ended() -> None:
+    ending = {"state": "draft", "reasons": ["tests_missing", "commit_missing"]}
+    task = {
+        "task_id": "abc",
+        "state": "done",
+        "title": "Fix it",
+        "level": 2,
+        "ending": ending,
+    }
+    text = _run(["show", "abc"], {"task": task})
+    assert text.startswith("abc  done, not finished\n")
+    assert (
+        "  Why: No test ran after the last change; The changes are not committed\n"
+        in text
+    )
+    listed = _run(
+        ["list"], {"tasks": [task, {**task, "task_id": "def", "ending": None}]}
+    )
+    assert "done, not finished" in listed and "def  P2     done" in listed

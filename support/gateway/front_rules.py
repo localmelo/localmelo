@@ -654,6 +654,28 @@ def _pipeline(text: str) -> bool:
     )
 
 
+# What asks for a commit beyond the word: a push, a pull request, checking it in.
+_ASKS_COMMIT: Final = re.compile(
+    r"提交|推送|\bpush\b|\bcommits?\b|\bpull request\b|\bPR\b|\bcheck(?:ed)? (?:\w+ )?in\b",
+    re.IGNORECASE,
+)
+_NO_PUSH: Final = re.compile(
+    r"(?:不要|不用|别|先不)\s*推送|\b(?:don['’]t|do\s+not|never)\s+push\w*",
+    re.IGNORECASE,
+)
+
+
+def asks_commit(text: str) -> bool:
+    """Whether *text* asks for a commit, once quoted and forbidden spans are dropped.
+
+    "fix the router, run the tests and commit", "push it", "open a PR",
+    "check it in" and "don't push, just commit" ask; "don't commit yet",
+    "先不要提交" and "the log says `git commit` failed" do not.
+    """
+    bare = _NO_PUSH.sub(" ", _PIPELINE_NO.sub(" ", _QUOTED.sub(" ", text or "")))
+    return bool(_ASKS_COMMIT.search(bare))
+
+
 def work_request(typed: str) -> bool:
     """An imperative change to named files or paths: code starts it as a task at once.
 
@@ -867,6 +889,7 @@ __all__ = [
     "allows",
     "allows_level",
     "allows_message",
+    "asks_commit",
     "brief_question",
     "continue_name",
     "control_action",
