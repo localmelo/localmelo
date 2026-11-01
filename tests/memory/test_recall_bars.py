@@ -217,9 +217,11 @@ def test_the_settings_read_the_bars_each_time_and_a_bad_one_is_the_default(
         assert memory.recall_settings().min_coverage == MIN_COVERAGE, bad
     # The bounds themselves are allowed.
     cfg.memory.recall_min_cosine, cfg.memory.recall_min_coverage = 0.2, 0.1
-    assert memory.recall_settings()[-2:] == (0.2, 0.1)
+    bars = memory.recall_settings()
+    assert (bars.min_cosine, bars.min_coverage) == (0.2, 0.1)
     cfg.memory.recall_min_cosine, cfg.memory.recall_min_coverage = 0.95, 1.0
-    assert memory.recall_settings()[-2:] == (0.95, 1.0)
+    bars = memory.recall_settings()
+    assert (bars.min_cosine, bars.min_coverage) == (0.95, 1.0)
 
 
 async def test_a_turn_at_cosine_half_joins_the_block_only_under_a_lower_bar(

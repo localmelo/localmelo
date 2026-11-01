@@ -60,6 +60,7 @@ from localmelo.melo.schema import (
 from localmelo.support.config import (
     MEMORY_RECALL_CHARS,
     MEMORY_RECALL_DOCS,
+    MEMORY_RECALL_ITEM_CHARS,
     MEMORY_RECALL_MIN_COSINE,
     MEMORY_RECALL_MIN_COVERAGE,
     MEMORY_RECALL_RECORDS,
@@ -90,8 +91,10 @@ from localmelo.support.memory.recall import (
     MIN_COSINE,
     MIN_COVERAGE,
     SIDE_SUMMARY,
+    TURN_CHARS,
     Corpus,
     Item,
+    Shown,
     block,
     chat_label,
     current_only,
@@ -202,8 +205,10 @@ class RecallSettings(NamedTuple):
     size bound, *notes* whether notes are recalled and pinned at all, and *hint*
     whether a block that recalls nothing carries :data:`SEARCH_HINT`.
     *min_cosine* and *min_coverage* are the bars an item must pass to be
-    recalled (the block and the search tool alike). The defaults are what
-    recall did before these were settings.
+    recalled (the block and the search tool alike). *item_chars* is the room one
+    chat turn takes in the block and in the search tool's list, and *match* says
+    each part of a turn shows the sentences that match the question instead of
+    its start. The defaults are what recall did before these were settings.
     """
 
     records: int = AUTO_RECORDS
@@ -213,6 +218,12 @@ class RecallSettings(NamedTuple):
     hint: bool = False
     min_cosine: float = MIN_COSINE
     min_coverage: float = MIN_COVERAGE
+    item_chars: int = TURN_CHARS
+    match: bool = False
+
+    def shown(self, question: str) -> Shown:
+        """How a recalled turn is shown for *question* under these settings."""
+        return Shown.of(self.item_chars, question if self.match else None)
 
 
 class Embedded(NamedTuple):
@@ -579,6 +590,8 @@ class ChatMemory:
             getattr(memory, "search_when_empty", "off") == "hint",
             bar("recall_min_cosine", MIN_COSINE, MEMORY_RECALL_MIN_COSINE),
             bar("recall_min_coverage", MIN_COVERAGE, MEMORY_RECALL_MIN_COVERAGE),
+            bounded("recall_item_chars", TURN_CHARS, MEMORY_RECALL_ITEM_CHARS),
+            getattr(memory, "recall_excerpt", "head") == "match",
         )
 
     def chat_provider(self) -> BaseLLMProvider | None:
@@ -945,6 +958,7 @@ class ChatMemory:
             records.newer_values_first(current_only(used, typed)),
             kept_lines([cand.quote for cand in found], refused=refused),
             budget.chars,
+            budget.shown(query),
         )
         hinted = budget.hint and not used
         if hinted:
@@ -1995,6 +2009,7 @@ class MemoryTools(BaseToolProvider):
         # The turns of this chat its model still shows are left out; the rest
         # of them read as this chat's. Without the window, nothing is left out.
         own = chat if chat is not None and chat.keep_from_turn is not None else None
+        settings = self._memory.recall_settings()
         items = await self._memory.search(
             str(query),
             records_k=0 if scope == "chats" else k,
@@ -2007,7 +2022,10 @@ class MemoryTools(BaseToolProvider):
         shown = items[:k]
         if chat is not None:
             chat.add_searched(shown)
-        return "\n".join(f"{n}. {item.prompt}" for n, item in enumerate(shown, 1))
+        how = settings.shown(str(query))
+        return "\n".join(
+            f"{n}. {item.line(show=how)}" for n, item in enumerate(shown, 1)
+        )
 
     async def close(self) -> None:
         return None

@@ -29,7 +29,7 @@ import time
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any, Final, NamedTuple
 
 import numpy as np
 
@@ -37,6 +37,7 @@ from localmelo.melo import clock
 from localmelo.melo.memory.block import BLOCK_HEADER
 from localmelo.melo.memory.bm25 import BM25Index, tokenize
 from localmelo.melo.memory.hippo.policy import STOPWORDS, normalise
+from localmelo.melo.memory.notes import split_sentences
 
 RRF_K: Final = 60
 MIN_COVERAGE: Final = 0.6
@@ -69,8 +70,11 @@ _LINE_CHARS: Final = 240
 # What a turn's two parts may take together in the block (the words that say who
 # spoke are extra, so a turn line stays about as long as it was), and the least
 # melo's reply keeps when the user's words are long.
-_TURN_CHARS: Final = _LINE_CHARS - 40
+TURN_CHARS: Final = _LINE_CHARS - 40
 _REPLY_CHARS: Final = 60
+# With ``recall_excerpt = "match"``, the share of a turn's room the user's words
+# keep when they are long; the rest is melo's reply's.
+_USER_SHARE: Final = 0.4
 _TITLE_CHARS: Final = 40
 # Words that ask rather than say what is asked about; never a content word. The
 # last five ask for an older value (:func:`asks_about_past`).
@@ -90,6 +94,29 @@ _PAST: Final = re.compile(
     r"|(?<!how )old(?:er)?)\b|以前|之前|原来|过去|曾经",
     re.IGNORECASE,
 )
+
+
+class Shown(NamedTuple):
+    """How much of a recalled turn the model reads, and which part of it.
+
+    *chars* is the room one turn takes (:data:`TURN_CHARS`), in the recall block
+    and in the memory search tool's list; text that is no turn takes *chars* plus
+    the 40 characters that say who spoke. With *terms*, the question's content
+    terms (``[memory] recall_excerpt = "match"``), each part of a turn shows the
+    sentences that hold most of them rather than its head (:func:`turn_said`).
+    The defaults are the head of every turn, as it always was.
+    """
+
+    chars: int = TURN_CHARS
+    terms: frozenset[str] = frozenset()
+
+    @classmethod
+    def of(cls, chars: int = TURN_CHARS, question: str | None = None) -> Shown:
+        """*chars* of room, and the best matching sentences of *question* if given."""
+        return cls(chars, frozenset(gate_terms(question)) if question else frozenset())
+
+
+HEADS: Final = Shown()  # the head of every turn, in :data:`TURN_CHARS`
 
 
 @dataclass
@@ -133,7 +160,9 @@ class Item:
         """The item as the model reads it, with where it came from."""
         return self.line()
 
-    def line(self, now: float | None = None, *, timed: bool = False) -> str:
+    def line(
+        self, now: float | None = None, *, timed: bool = False, show: Shown = HEADS
+    ) -> str:
         """The item as the model reads it, with where and when it came from.
 
         A record reads as the user's words when it has them; without, a note in
@@ -141,12 +170,12 @@ class Item:
         and one in the first person says it is the user's own. A turn says who
         spoke (:func:`turn_said`). The date has the year when it is not *now*'s
         (the pinned or real time by default), and the time of day with *timed*
-        (:func:`times`).
+        (:func:`times`). *show* says how much of a turn is shown (:class:`Shown`).
         """
         where = self._dated(clock.now() if now is None else now, timed)
         older = f" ({self.older})" if self.older else ""
         if not self.is_record:
-            return f"{turn_said(self.text)} ({where}){older}"
+            return f"{turn_said(self.text, show)} ({where}){older}"
         if self.quote:
             said = f"the user said “{self.quote}”"
         elif _FIRST_PERSON.match(self.text):
@@ -254,26 +283,123 @@ def snippet(text: str, limit: int = _LINE_CHARS) -> str:
     return flat if len(flat) <= limit else flat[: limit - 1] + "…"
 
 
-def turn_said(text: str) -> str:
+def turn_said(text: str, show: Shown = HEADS) -> str:
     """A turn's document text as the model reads it: ``the user said “…”; melo
     replied “…”``, so a past reply of melo's is never read as the user's own
-    statement. Both parts are bounded together (:data:`_TURN_CHARS`); the user's
-    words come first and stay whole when they fit, and melo's reply keeps at
-    least :data:`_REPLY_CHARS` of the room. Text that is no turn (a summary, a
-    task's question) is a plain :func:`snippet`.
+    statement. Both parts are bounded together (``show.chars``, :data:`TURN_CHARS`
+    by default); the user's words come first and stay whole when they fit, and
+    melo's reply keeps at least :data:`_REPLY_CHARS` of the room. Text that is no
+    turn (a summary, a task's question) is a plain :func:`snippet`.
+
+    With ``show.terms`` a part that does not fit shows the window that holds the
+    most of them instead (:func:`_matching`).
     """
+    plain = show.chars + _LINE_CHARS - TURN_CHARS
     body = text.partition("\n")[2] if text.startswith("Task: ") else text
     if not body.startswith("User: "):
-        return snippet(text)
+        return snippet(text, plain)
     typed, marker, answer = body[len("User: ") :].partition("\nmelo: ")
     if not marker:
-        return snippet(text)
+        return snippet(text, plain)
     typed, answer = " ".join(typed.split()), " ".join(answer.split())
-    if len(typed) + len(answer) > _TURN_CHARS:
-        typed = snippet(typed, _TURN_CHARS - _REPLY_CHARS if answer else _TURN_CHARS)
-        answer = snippet(answer, _TURN_CHARS - len(typed)) if answer else ""
+    if len(typed) + len(answer) > show.chars:
+        picked = _matching(typed, answer, show) if show.terms else None
+        if picked is not None:
+            typed, answer = picked
+        else:
+            typed = snippet(typed, show.chars - _REPLY_CHARS if answer else show.chars)
+            answer = snippet(answer, show.chars - len(typed)) if answer else ""
     said = [f"the user said “{typed}”"] if typed else []
     return "; ".join(said + ([f"melo replied “{answer}”"] if answer else []))
+
+
+def _matching(typed: str, answer: str, show: Shown) -> tuple[str, str] | None:
+    """The two parts of a turn too long for *show*, each as the window that holds
+    the most of ``show.terms``; ``None`` when neither part holds one.
+
+    The user's words stay whole when they fit in :data:`_USER_SHARE` of the room
+    and melo's reply has the rest; a part that is short leaves its room to the
+    other. A part with no term shows its head.
+    """
+    room = show.chars
+    own = int(room * _USER_SHARE)
+    if not answer:
+        shares = (room, 0)
+    elif not typed:
+        shares = (0, room)
+    elif len(typed) <= own:
+        shares = (len(typed), room - len(typed))
+    elif len(answer) <= room - own:
+        shares = (room - len(answer), len(answer))
+    else:
+        shares = (own, room - own)
+    first, found_first = _window(typed, show.terms, shares[0])
+    second, found_second = _window(answer, show.terms, shares[1])
+    return (first, second) if found_first or found_second else None
+
+
+def _stems(text: str) -> frozenset[str]:
+    """The stemmed terms of *text*, as :func:`gate_terms` stems a question's."""
+    return frozenset(stem(term) for term in tokenize(normalise(text)))
+
+
+def _spans(text: str, limit: int) -> list[tuple[int, int]]:
+    """The sentences of flat *text* as (start, end) offsets; a sentence longer than
+    *limit* is cut into pieces at spaces (anywhere, for text without them)."""
+    spans: list[tuple[int, int]] = []
+    for start, sentence in split_sentences(text):
+        end = start + len(sentence)
+        while end - start > limit:
+            cut = text.rfind(" ", start + 1, start + limit + 1)
+            cut = cut if cut > start else start + limit
+            spans.append((start, cut))
+            start = cut
+            while start < end and text[start] == " ":
+                start += 1
+        if start < end:
+            spans.append((start, end))
+    return spans
+
+
+def _window(text: str, terms: frozenset[str], room: int) -> tuple[str, bool]:
+    """*text* if it fits in *room* characters, else the sentence that holds the most
+    of *terms* grown to its neighbours (the better one first) while the window, with
+    a ``…`` where text is left out, fits; and whether a term was found. With no term
+    in the text, its head."""
+    if len(text) <= room:
+        return text, False
+    spans = _spans(text, room - 2)  # a window may need a … at each end
+    scores = [len(terms & _stems(text[start:end])) for start, end in spans]
+    if not spans or not max(scores):
+        return snippet(text, room), False
+    last = len(spans) - 1
+
+    def ends(low: int, high: int) -> tuple[int, int]:
+        return (0 if low == 0 else spans[low][0]), (
+            len(text) if high == last else spans[high][1]
+        )
+
+    def size(low: int, high: int) -> int:
+        begin, end = ends(low, high)
+        return end - begin + (begin > 0) + (end < len(text))
+
+    low = high = max(range(len(spans)), key=lambda n: (scores[n], -n))
+    grown = True
+    while grown:
+        grown = False
+        for n in sorted(
+            (n for n in (high + 1, low - 1) if 0 <= n <= last),
+            key=lambda n: -scores[n],
+        ):
+            wider = (low, n) if n > high else (n, high)
+            if size(*wider) <= room:
+                low, high = wider
+                grown = True
+                break
+    begin, end = ends(low, high)
+    return ("…" if begin else "") + text[begin:end] + (
+        "…" if end < len(text) else ""
+    ), True
 
 
 def _undoubled(base: str) -> str:
@@ -528,13 +654,17 @@ def kept_lines(quotes: Sequence[str], *, refused: bool = False) -> list[str]:
 
 
 def block(
-    items: Iterable[Item], kept: Sequence[str] = (), chars: int = BLOCK_CHARS
+    items: Iterable[Item],
+    kept: Sequence[str] = (),
+    chars: int = BLOCK_CHARS,
+    show: Shown = HEADS,
 ) -> tuple[str, list[Item]]:
     """The recall block a user message carries, and the items that fit in it.
 
     The *kept* lines (:func:`kept_lines`) come first, with or without recall.
     Items are added while the block stays within *chars*
-    (:data:`BLOCK_CHARS` unless the settings say otherwise).
+    (:data:`BLOCK_CHARS` unless the settings say otherwise); *show* says how much
+    of each turn they hold (:class:`Shown`).
     """
     lines = [BLOCK_HEADER, *kept]
     used: list[Item] = []
@@ -543,7 +673,7 @@ def block(
     candidates = list(items)
     same_day = times(candidates)
     for item in candidates:
-        line = f"- {item.line(now, timed=item.key in same_day)}"
+        line = f"- {item.line(now, timed=item.key in same_day, show=show)}"
         if size + len(line) + 1 > chars:
             continue
         lines.append(line)
@@ -553,6 +683,9 @@ def block(
     same_day = times(used)
     lines = [
         *lines[: len(lines) - len(used)],
-        *(f"- {item.line(now, timed=item.key in same_day)}" for item in used),
+        *(
+            f"- {item.line(now, timed=item.key in same_day, show=show)}"
+            for item in used
+        ),
     ]
     return ("\n".join(lines) if used or kept else ""), used

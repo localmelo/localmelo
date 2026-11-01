@@ -1,8 +1,8 @@
 """``[memory]`` recall settings: developer settings that default to today's recall.
 
 ``recall_records``, ``recall_docs``, ``recall_chars``, ``recall_notes``,
-``search_when_empty``, ``recall_min_cosine`` and ``recall_min_coverage`` are
-saved only when they differ from the default, checked against their bounds and
+``search_when_empty``, ``recall_min_cosine``, ``recall_min_coverage``,
+``recall_item_chars`` and ``recall_excerpt`` are saved only when they differ from the default, checked against their bounds and
 values, set for one run with ``-X``, and listed by the developer help only, each
 with the issue that decides it.
 """
@@ -26,6 +26,8 @@ CHANGED = {
     "search_when_empty": "hint",
     "recall_min_cosine": 0.45,
     "recall_min_coverage": 0.4,
+    "recall_item_chars": 800,
+    "recall_excerpt": "match",
 }
 
 
@@ -59,6 +61,7 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
             "[memory]\nrecall_records = 8\nrecall_docs = 0\nrecall_chars = 4000\n"
             'recall_notes = "off"\nsearch_when_empty = "hint"\n'
             "recall_min_cosine = 0.45\nrecall_min_coverage = 0.4\n"
+            'recall_item_chars = 800\nrecall_excerpt = "match"\n'
         ) in text
         assert config.load().memory == MemoryConfig(**CHANGED)  # type: ignore[arg-type]
         for name, value in CHANGED.items():  # each alone
@@ -88,6 +91,10 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
         ("recall_min_coverage", 0.1),
         ("recall_min_coverage", 1.0),
         ("recall_min_coverage", 1),  # a whole number is a number
+        ("recall_item_chars", 120),
+        ("recall_item_chars", 2000),
+        ("recall_excerpt", "head"),
+        ("recall_excerpt", "match"),
     ],
 )
 def test_the_bounds_and_values_are_accepted(name: str, value: object) -> None:
@@ -161,6 +168,38 @@ def test_the_bounds_and_values_are_accepted(name: str, value: object) -> None:
             "[memory] recall_min_coverage must be from 0.1 to 1.0, got 2",
         ),
         (
+            "recall_item_chars",
+            119,
+            "[memory] recall_item_chars must be from 120 to 2000, got 119",
+        ),
+        (
+            "recall_item_chars",
+            2001,
+            "[memory] recall_item_chars must be from 120 to 2000, got 2001",
+        ),
+        (
+            "recall_item_chars",
+            250.5,
+            "[memory] recall_item_chars must be a whole number, got 250.5",
+        ),
+        (
+            "recall_item_chars",
+            True,
+            "[memory] recall_item_chars must be a whole number, got True",
+        ),
+        (
+            "recall_excerpt",
+            "tail",
+            "[memory] recall_excerpt 'tail' is not recognised. "
+            "Must be one of ('head', 'match').",
+        ),
+        (
+            "recall_excerpt",
+            True,
+            "[memory] recall_excerpt True is not recognised. "
+            "Must be one of ('head', 'match').",
+        ),
+        (
             "recall_min_cosine",
             True,
             "[memory] recall_min_cosine must be a number, got True",
@@ -222,6 +261,9 @@ def test_x_sets_each_for_one_run_and_only_the_developer_help_lists_them(
         "memory.recall_min_cosine=high",
         "memory.recall_min_cosine=true",
         "memory.recall_min_coverage=1.5",
+        "memory.recall_item_chars=100",
+        "memory.recall_item_chars=wide",
+        "memory.recall_excerpt=tail",
     ],
 )
 def test_x_refuses_a_bad_value_with_a_clear_message(

@@ -319,6 +319,8 @@ def test_keys_lists_value_default_and_source(
         "memory.recall_notes": ['"on"', '"on"', "default"],
         "memory.recall_min_cosine": ["0.55", "0.55", "default"],
         "memory.recall_min_coverage": ["0.6", "0.6", "default"],
+        "memory.recall_item_chars": ["200", "200", "default"],
+        "memory.recall_excerpt": ['"head"', '"head"', "default"],
     }
 
 

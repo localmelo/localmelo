@@ -79,6 +79,10 @@ MEMORY_SLEEP = ("off", "rules", "model", "model+tags")
 MEMORY_RECALL_RECORDS = (0, 20)
 MEMORY_RECALL_DOCS = (0, 20)
 MEMORY_RECALL_CHARS = (200, 8000)
+# The room one recalled chat turn takes in the block and in the search tool's
+# list, and which part of a turn is shown: see MemoryConfig.recall_item_chars.
+MEMORY_RECALL_ITEM_CHARS = (120, 2000)
+MEMORY_RECALL_EXCERPT = ("head", "match")
 # The bars an item must pass to be recalled, and their bounds (inclusive): see
 # MemoryConfig.recall_min_cosine and recall_min_coverage.
 MEMORY_RECALL_MIN_COSINE = (0.20, 0.95)
@@ -94,6 +98,8 @@ RECALL_KEYS = (
     "search_when_empty",
     "recall_min_cosine",
     "recall_min_coverage",
+    "recall_item_chars",
+    "recall_excerpt",
 )
 RECALL_TRIGGERS = ("start", "attempt", "step", "tool")
 RECALL_KINDS = ("note", "draft", "thought", "digest", "reflection", "long")
@@ -352,7 +358,12 @@ class MemoryConfig:
     recalled at all, in the block and in the memory search tool:
     ``recall_min_cosine`` (0.20-0.95), the least similarity of meaning, and
     ``recall_min_coverage`` (0.10-1.00), the least share of the question's
-    content words that a note or turn must hold.
+    content words that a note or turn must hold. Two more set how much of a
+    recalled chat turn is shown, in the block and in the search tool:
+    ``recall_item_chars`` (120-2000), the room one turn takes, and
+    ``recall_excerpt``, ``head`` (the start of each part, the default) or
+    ``match`` (the sentences of each part that hold most of the question's
+    content words).
     """
 
     admit_on_outcome: bool = False
@@ -368,6 +379,8 @@ class MemoryConfig:
     search_when_empty: str = "off"  # off | hint: a line when nothing was recalled.
     recall_min_cosine: float = 0.55  # Least similarity of meaning to be recalled.
     recall_min_coverage: float = 0.6  # Least share of the question's words held.
+    recall_item_chars: int = 200  # The room one recalled chat turn takes.
+    recall_excerpt: str = "head"  # head | match: which part of a turn is shown.
 
 
 @dataclass
@@ -619,6 +632,7 @@ class Config:
             ("recall_records", MEMORY_RECALL_RECORDS),
             ("recall_docs", MEMORY_RECALL_DOCS),
             ("recall_chars", MEMORY_RECALL_CHARS),
+            ("recall_item_chars", MEMORY_RECALL_ITEM_CHARS),
         ):
             value = getattr(self.memory, name)
             if not isinstance(value, int) or isinstance(value, bool):
@@ -641,6 +655,7 @@ class Config:
         for name, allowed in (
             ("recall_notes", MEMORY_RECALL_NOTES),
             ("search_when_empty", MEMORY_SEARCH_WHEN_EMPTY),
+            ("recall_excerpt", MEMORY_RECALL_EXCERPT),
         ):
             value = getattr(self.memory, name)
             if value not in allowed:

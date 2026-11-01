@@ -25,6 +25,7 @@ from localmelo.support.memory.recall import (
     BLOCK_HEADER,
     MIN_COSINE,
     MIN_COVERAGE,
+    TURN_CHARS,
     Corpus,
     Item,
 )
@@ -128,9 +129,13 @@ def test_the_defaults_are_the_numbers_recall_always_used() -> None:
         False,
         MIN_COSINE,
         MIN_COVERAGE,
+        TURN_CHARS,
+        False,
     )
     assert (cfg.recall_min_cosine, cfg.recall_min_coverage) == (0.55, 0.6)
     assert (MIN_COSINE, MIN_COVERAGE) == (0.55, 0.6)
+    assert (cfg.recall_item_chars, cfg.recall_excerpt) == (200, "head")
+    assert TURN_CHARS == 200
 
 
 async def test_the_defaults_give_three_notes_and_two_turns_in_900_characters(
