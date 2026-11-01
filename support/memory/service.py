@@ -45,12 +45,18 @@ from localmelo.melo.agent.agent import DEFAULT_MEMORY_DIR
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.memory._sqlite import make_private_dir
+from localmelo.melo.memory.block import BLOCK_HEADER
 from localmelo.melo.memory.hippo.policy import normalise
 from localmelo.melo.memory.long import StoredEntry
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.memory.retrieval import Doc, LLMRetriever, send_from_provider
 from localmelo.melo.memory.retrieval.base import elapsed_ms
 from localmelo.melo.schema import EMPTY_REPLY_NUDGE, Message, ToolDef, split_thinking
+from localmelo.support.config import (
+    MEMORY_RECALL_CHARS,
+    MEMORY_RECALL_DOCS,
+    MEMORY_RECALL_RECORDS,
+)
 from localmelo.support.memory import records
 from localmelo.support.memory import sleep as sleeping
 from localmelo.support.memory.importer import (
@@ -65,7 +71,7 @@ from localmelo.support.memory.index import (
     SUMMARY_TURN,
     ConversationIndex,
     Document,
-    document_text,
+    document_chunks,
     plain_text,
     typed_of,
 )
@@ -73,6 +79,7 @@ from localmelo.support.memory.recall import (
     AGENT_EXCHANGE,
     AUTO_DOCS,
     AUTO_RECORDS,
+    BLOCK_CHARS,
     SIDE_SUMMARY,
     Corpus,
     Item,
@@ -107,6 +114,13 @@ _SELECT_FAILURES: Final = {
     "parse": "unreadable",
 }
 PINNED_CHARS: Final = 600
+# The one line a block carries when nothing was recalled and ``[memory]
+# search_when_empty`` is ``hint``; the model decides whether to search.
+SEARCH_HINT: Final = (
+    "Nothing from earlier chats matched this message. If it asks about the person "
+    "or something said before, call the memory search tool first; if that finds "
+    "nothing, say you don't know."
+)
 # A task's start: the header, and what is looked up for its objective.
 PACK_HEADER: Final = (
     "[melo's memory for this task · about the person and this project; "
@@ -172,6 +186,22 @@ def _resolve(mode: str, failure: str) -> tuple[str, str]:
     return "embedding", failure or "none"
 
 
+class RecallSettings(NamedTuple):
+    """The ``[memory]`` settings that shape a chat message's recall block.
+
+    *records* and *docs* are the most notes and chat turns it holds, *chars* its
+    size bound, *notes* whether notes are recalled and pinned at all, and *hint*
+    whether a block that recalls nothing carries :data:`SEARCH_HINT`. The
+    defaults are what recall did before these were settings.
+    """
+
+    records: int = AUTO_RECORDS
+    docs: int = AUTO_DOCS
+    chars: int = BLOCK_CHARS
+    notes: bool = True
+    hint: bool = False
+
+
 class Embedded(NamedTuple):
     """The vectors of one embedding call (``None`` if none came) and why not."""
 
@@ -189,18 +219,26 @@ class TurnMemory:
     remembered: tuple[records.Written, ...] = ()
     refused: bool = False
     recall: Recall | None = None
+    # The block carries :data:`SEARCH_HINT` (``[memory] search_when_empty``).
+    search_hint: bool = False
 
     def event(self) -> dict[str, Any] | None:
-        """The ``turn.memory`` data (without the turn's keys); ``None`` with memory off."""
+        """The ``turn.memory`` data (without the turn's keys); ``None`` with memory off.
+
+        ``search_hint`` is there, ``true``, only when the block carried the hint.
+        """
         if self.recall is None:
             return None
-        return {
+        data: dict[str, Any] = {
             "used": [item.to_json() for item in self.used],
             "remembered": [record.to_json() for record in self.remembered],
             "refused": records.NOT_KEPT if self.refused else "",
             "recall": self.recall.to_json(),
             "unsaved_claim": False,
         }
+        if self.search_hint:
+            data["search_hint"] = True
+        return data
 
 
 @dataclass
@@ -312,10 +350,11 @@ def _record_item(entry: StoredEntry) -> Item:
 
 
 def _doc_item(doc: Document) -> Item:
-    # What the user typed in a chat (not a task's prompt) states about them.
+    # What the user typed in a chat (not a task's prompt) states about them. A
+    # later chunk only repeats the head of it: chunk 0 holds the statements.
     typed = (
         ""
-        if doc.kind in (*_TASK_KINDS, SIDE_SUMMARY, AGENT_EXCHANGE)
+        if doc.kind in (*_TASK_KINDS, SIDE_SUMMARY, AGENT_EXCHANGE) or doc.chunk
         else typed_of(doc.text)
     )
     return Item(
@@ -497,6 +536,30 @@ class ChatMemory:
         mode = cfg.memory.retriever if cfg is not None else "auto"
         return mode if mode in ("bm25", "embedding", "llm") else "auto"
 
+    def recall_settings(self) -> RecallSettings:
+        """The recall settings of the settings now.
+
+        A value out of its bounds or of the wrong type (a file :meth:`Config.validate`
+        would refuse) reads as its default, as an unknown retriever reads as ``auto``.
+        """
+        cfg = self._settings()
+        if cfg is None:
+            return RecallSettings()
+        memory = cfg.memory
+
+        def bounded(name: str, default: int, bounds: tuple[int, int]) -> int:
+            value = getattr(memory, name, default)
+            fits = isinstance(value, int) and not isinstance(value, bool)
+            return value if fits and bounds[0] <= value <= bounds[1] else default
+
+        return RecallSettings(
+            bounded("recall_records", AUTO_RECORDS, MEMORY_RECALL_RECORDS),
+            bounded("recall_docs", AUTO_DOCS, MEMORY_RECALL_DOCS),
+            bounded("recall_chars", BLOCK_CHARS, MEMORY_RECALL_CHARS),
+            getattr(memory, "recall_notes", "on") != "off",
+            getattr(memory, "search_when_empty", "off") == "hint",
+        )
+
     def chat_provider(self) -> BaseLLMProvider | None:
         """The chat model of the settings now, for ``llm`` recall; ``None`` if not set up."""
         cfg = self._settings()
@@ -585,9 +648,11 @@ class ChatMemory:
             corpus.add(_doc_item(doc))
         return corpus
 
-    def _replaced(self, corpus: Corpus) -> dict[tuple[str, int], Item]:
+    def _replaced(
+        self, corpus: Corpus, notes: bool = True
+    ) -> dict[tuple[str, int], Item]:
         """The turns a newer note or turn replaced, each to the newer one; a
-        note's replacement wins over a turn's."""
+        note's replacement wins over a turn's. Without *notes*, a turn's only."""
         cached = self._newer
         if cached is None or cached[0] is not corpus or cached[1] != corpus.version:
             cached = (
@@ -596,7 +661,7 @@ class ChatMemory:
                 records.newer_turns(corpus.items.values()),
             )
             self._newer = cached
-        return {**cached[2], **replaced_turns(corpus)}
+        return {**cached[2], **(replaced_turns(corpus) if notes else {})}
 
     async def search(
         self,
@@ -639,8 +704,13 @@ class ChatMemory:
         docs_k: int,
         exclude_session: str,
         keep_from_turn: int | None = None,
+        notes: bool = True,
     ) -> list[Item]:
-        """Rank for *query* as the retriever says; the numbers go to *recall*."""
+        """Rank for *query* as the retriever says; the numbers go to *recall*.
+
+        Without *notes* (``[memory] recall_notes = "off"``) only turns come out,
+        and no note's replacement of a turn counts.
+        """
         mode = self.retriever()
         recall.retriever, recall.fallback = _resolve(mode, embedded.failure)
         started = time.perf_counter()
@@ -671,12 +741,15 @@ class ChatMemory:
                 if mode == "llm"
                 else []
             )
-            replaced = self._replaced(corpus)
+            replaced = self._replaced(corpus, notes)
+        if not notes:
+            found = [item for item in found if not item.is_record]
+            loose = [item for item in loose if not item.is_record]
         recall.search_ms = elapsed_ms(started)
         recall.candidates = len(loose) if mode == "llm" else len(found)
-        if loose:
+        if loose and records_k + docs_k:
             found = await self._select(
-                query, loose, found, recall, k=records_k + docs_k
+                query, loose, found, recall, k=(records_k if notes else 0) + docs_k
             )
         # A turn whose fact a newer note or turn replaced comes after it.
         newer = newer_first(
@@ -822,21 +895,28 @@ class ChatMemory:
             [query, *(cand.text for cand in found)], EMBED_TIMEOUT_S, query=True
         )
         recall.embed_ms = elapsed_ms(started)
+        budget = self.recall_settings()
         used = await self._find(
             query,
             embedded,
             recall,
-            records_k=AUTO_RECORDS,
-            docs_k=AUTO_DOCS,
+            records_k=budget.records,
+            docs_k=budget.docs,
             exclude_session=info.session_id,
             keep_from_turn=keep_from,
+            notes=budget.notes,
         )
         # The block gives the current value only: a turn a newer note replaced
-        # stays out unless the message asks about the past.
+        # stays out unless the message asks about the past. Notes of one subject
+        # with different values are listed newest first, the older marked.
         text, used = block(
-            current_only(used, typed),
+            records.newer_values_first(current_only(used, typed)),
             kept_lines([cand.quote for cand in found], refused=refused),
+            budget.chars,
         )
+        hinted = budget.hint and not used
+        if hinted:
+            text = f"{text or BLOCK_HEADER}\n{SEARCH_HINT}"
         recall.used = len(used)
         appended = "\n\n" + text if text else ""
         recall.block_chars = len(appended)
@@ -858,6 +938,7 @@ class ChatMemory:
             tuple(written),
             refused,
             recall,
+            hinted,
         )
 
     async def remember(self, text: str, topic: str = "") -> str:
@@ -1100,44 +1181,69 @@ class ChatMemory:
         self,
         turns: Sequence[tuple[dict[str, Any], int, str, str, float]],
         timeout: float,
-    ) -> int:
-        """Index turns of ``(source, turn, typed, answer, at)``, embedded as one batch;
-        the characters embedded (0 without a vector)."""
-        texts = [
-            document_text(
+    ) -> tuple[int, int]:
+        """Index turns of ``(source, turn, typed, answer, at)``: a document for each
+        chunk of each turn (:func:`document_chunks`), embedded _BATCH at a time, and
+        a turn's stored in place of the ones it had. Returns the documents stored
+        and the characters embedded (0 without a vector)."""
+        chunked = [
+            document_chunks(
                 typed, answer, title=src["title"] if src["kind"] == "task" else ""
             )
             for src, _, typed, answer, _ in turns
         ]
-        vectors, model, _ = await self._embed(texts, timeout, query=False)
-        for number, (src, turn, _, _, at) in enumerate(turns):
-            doc = Document(
-                session_id=str(src["session_id"]),
-                turn=turn,
-                surface=self.surface,
-                kind=str(src["kind"]),
-                title=str(src["title"]),
-                text=texts[number],
-                created_at=at,
-                vector=tuple(vectors[number]) if vectors else None,
-                embed_model=model,
+        texts = [text for chunks in chunked for text in chunks]
+        vectors: list[Sequence[float] | None] = [None] * len(texts)
+        model = ""
+        for start in range(0, len(texts), _BATCH):
+            got, found, _ = await self._embed(
+                texts[start : start + _BATCH], timeout, query=False
             )
+            if not got:
+                break  # a failed batch: the rest is not tried, and is words only
+            vectors[start : start + len(got)] = got
+            model = found
+        number = 0
+        for (src, turn, _, _, at), chunks in zip(turns, chunked, strict=True):
+            docs = [
+                Document(
+                    session_id=str(src["session_id"]),
+                    turn=turn,
+                    surface=self.surface,
+                    kind=str(src["kind"]),
+                    title=str(src["title"]),
+                    text=text,
+                    created_at=at,
+                    vector=None if vec is None else tuple(vec),
+                    embed_model=model,
+                    chunk=chunk,
+                )
+                for chunk, (text, vec) in enumerate(
+                    zip(chunks, vectors[number : number + len(chunks)], strict=True)
+                )
+            ]
+            number += len(chunks)
             async with self._lock:
-                await self.stores()[1].add(doc)
-        return sum(map(len, texts)) if vectors else 0
+                await self.stores()[1].add_many(docs)
+        embedded = sum(
+            len(t) for t, vec in zip(texts, vectors, strict=True) if vec is not None
+        )
+        return len(texts), embedded
 
     async def index_turns(
         self, turns: Sequence[tuple[dict[str, Any], int, str, str, float]]
-    ) -> int:
+    ) -> tuple[int, int]:
         """Index turns of ``(source, turn, typed, answer, at)`` as a reindex does
         (in batches, embedded when a model is set), each document stamped *at*;
-        the characters embedded. Nothing already indexed is touched."""
-        chars = 0
+        the documents stored and the characters embedded. Nothing already indexed
+        is touched."""
+        docs = chars = 0
         for start in range(0, len(turns), _BATCH):
-            chars += await self._add_documents(
+            more, embedded = await self._add_documents(
                 turns[start : start + _BATCH], INDEX_EMBED_TIMEOUT_S
             )
-        return chars
+            docs, chars = docs + more, chars + embedded
+        return docs, chars
 
     async def keep_said(
         self, store: SessionStore, info: TurnInfo, typed: str, at: float
@@ -1438,6 +1544,8 @@ class ChatMemory:
             )
             if not done:
                 return None
+            # The user changed it: the reasons an undo kept it apart expire.
+            await sleeping.clear_kept_apart(store, record_id)
             self._corpus.remove(
                 f"r:{record_id}"
             )  # the next search reads the new wording
@@ -1452,15 +1560,20 @@ class ChatMemory:
         now: float | None = None,
         chats: SessionStore | None = None,
         budget: int | None = None,
+        began: float | None = None,
     ) -> sleeping.SleepReport:
         """Tidy the notes with sleep *variant* (``[memory] sleep`` when ``None``);
         what it changed. *chats* gives it the turns to replay (without them,
         only duplicates are merged). Model variants share a twelve-call limit;
-        each call checks the optional sleep lock and new chat activity.
-        Nothing happens with memory off or ``off``.
+        each request to a model server first checks the lock (``[memory]
+        sleep_lock``, else the shared GPU lock ``[scheduler] gpu_lock_file``,
+        where a lock of ``lock_self`` is ours) and new activity: a chat, main
+        chat, task or worker turn that started after *began*, the time the
+        caller took before its own idle checks (``None``: now). The run then
+        stops, saved and undoable. Nothing happens with memory off or ``off``.
         """
         cfg = self._settings()
-        began = time.time()
+        began = time.time() if began is None else began
         variant = variant or (cfg.memory.sleep if cfg is not None else "off")
         store, index = self.stores()
         variant = variant if self.enabled else "off"
@@ -1489,9 +1602,8 @@ class ChatMemory:
             if not self.enabled:
                 return True
             if chats is not None:
-                for session in await chats.list_sessions(
-                    limit=100_000, kinds=("chat", "front")
-                ):
+                # Every kind: a task or a worker that starts also needs the model.
+                for session in await chats.list_sessions(limit=100_000, kinds=None):
                     if session.updated_at > began and any(
                         t.started_at > began for t in await chats.list_turns(session.id)
                     ):
@@ -1515,21 +1627,35 @@ class ChatMemory:
             embedded = await self._embed([text], EMBED_TIMEOUT_S, query=False)
             return (embedded.vectors[0] if embedded.vectors else None, embedded.model)
 
-        async with self._lock:
-            report = await sleeping.run(
-                store,
-                index,
-                turns,
-                variant=variant,
-                now=now,
-                until=max(until, forgotten),
-                provider=self.chat_provider() if variant.startswith("model") else None,
-                notes_for=notes_for,
-                is_active=active,
-                lock=cfg.memory.sleep_lock if cfg is not None else "",
-                budget=budget,
-                embed_note=embed_note if self.embedding()[0] is not None else None,
-            )
+        lock, lock_self = "", ""
+        if cfg is not None:
+            lock = cfg.memory.sleep_lock
+            if not lock:  # the shared GPU lock, which a benchmark may take mid-run
+                lock, lock_self = cfg.scheduler.gpu_lock_file, cfg.scheduler.lock_self
+        try:
+            async with self._lock:
+                report = await sleeping.run(
+                    store,
+                    index,
+                    turns,
+                    variant=variant,
+                    now=now,
+                    until=max(until, forgotten),
+                    provider=(
+                        self.chat_provider() if variant.startswith("model") else None
+                    ),
+                    notes_for=notes_for,
+                    is_active=active,
+                    lock=lock,
+                    budget=budget,
+                    embed_note=embed_note if self.embedding()[0] is not None else None,
+                    lock_self=lock_self,
+                )
+        except asyncio.CancelledError:
+            # The run saved what it changed; a kept note may have changed in place.
+            for key in self._corpus.keys("r:"):
+                self._corpus.remove(key)
+            raise
         # A kept note changed in place (the turns it replaced): read it again.
         for change in report.changes:
             if change.replaces_after is not None and change.after_id is not None:
@@ -1663,9 +1789,10 @@ class ChatMemory:
         """About you and Preferences in the user's words, newest first, bounded.
 
         Notes brought in from other assistants and notes sleep wrote are recall
-        only: they never ride in every prompt.
+        only: they never ride in every prompt. With ``[memory] recall_notes = "off"``
+        none is pinned.
         """
-        if not self.enabled:
+        if not self.enabled or not self.recall_settings().notes:
             return ""
         lines: list[str] = []
         size = 0

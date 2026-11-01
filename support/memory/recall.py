@@ -9,6 +9,8 @@ above that list's bar: most of the question's content words for BM25,
 :data:`MIN_COSINE` for vectors, so most turns recall nothing. Documents (not
 records) decay with a :data:`HALF_LIFE_DAYS` half-life, records rank first at
 an equal score, and at most :data:`PER_SESSION` documents come from one chat.
+A long turn is indexed as several chunks (:mod:`.index`); a list holds at most
+one chunk of a turn, the best, whatever the chats' cap.
 A turn whose fact a newer note or a newer turn replaced comes after the rest,
 below the newer one, and reads as older (:func:`newer_first`); the recall block
 leaves such a turn out unless the message asks about the past
@@ -30,6 +32,7 @@ from typing import Any, Final
 
 import numpy as np
 
+from localmelo.melo import clock
 from localmelo.melo.memory.block import BLOCK_HEADER
 from localmelo.melo.memory.bm25 import BM25Index, tokenize
 from localmelo.melo.memory.hippo.policy import STOPWORDS, normalise
@@ -62,6 +65,11 @@ SIDE_SUMMARY: Final = "side_summary"
 AGENT_EXCHANGE: Final = "agent_exchange"
 _KEPT_CHARS: Final = 120
 _LINE_CHARS: Final = 240
+# What a turn's two parts may take together in the block (the words that say who
+# spoke are extra, so a turn line stays about as long as it was), and the least
+# melo's reply keeps when the user's words are long.
+_TURN_CHARS: Final = _LINE_CHARS - 40
+_REPLY_CHARS: Final = 60
 _TITLE_CHARS: Final = 40
 # Words that ask rather than say what is asked about; never a content word. The
 # last five ask for an older value (:func:`asks_about_past`).
@@ -121,22 +129,38 @@ class Item:
 
     @property
     def prompt(self) -> str:
-        """The item as the model reads it, with where it came from.
+        """The item as the model reads it, with where it came from."""
+        return self.line()
+
+    def line(self, now: float | None = None, *, timed: bool = False) -> str:
+        """The item as the model reads it, with where and when it came from.
 
         A record reads as the user's words when it has them; without, a note in
         the second person says it is written to the user ("you" is the user),
-        and one in the first person says it is the user's own.
+        and one in the first person says it is the user's own. A turn says who
+        spoke (:func:`turn_said`). The date has the year when it is not *now*'s
+        (the pinned or real time by default), and the time of day with *timed*
+        (:func:`times`).
         """
+        where = self._dated(clock.now() if now is None else now, timed)
+        older = f" ({self.older})" if self.older else ""
         if not self.is_record:
-            older = f" ({self.older})" if self.older else ""
-            return f"{snippet(self.text)} ({self.where}){older}"
+            return f"{turn_said(self.text)} ({where}){older}"
         if self.quote:
             said = f"the user said “{self.quote}”"
         elif _FIRST_PERSON.match(self.text):
             said = f"the user's note “{self.text}”"
         else:
             said = f"a note to the user “{self.text}”"
-        return f"{said} ({self.where})"
+        return f"{said} ({where}){older}"
+
+    def _dated(self, now: float, timed: bool) -> str:
+        """:attr:`where` with its date as :func:`day` writes it for *now*; a
+        ``where`` that does not end in the item's own day is left as it is."""
+        plain = day(self.created_at)
+        if not self.where.endswith(f", {plain}"):
+            return self.where
+        return self.where[: -len(plain)] + day(self.created_at, now, timed=timed)
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -179,9 +203,23 @@ def chat_label(kind: str, title: str, surface: str) -> str:
     return f"{name} “{title}”" if title else f"a {name}"
 
 
-def day(at: float) -> str:
+def day(at: float, now: float | None = None, *, timed: bool = False) -> str:
+    """The day of *at*: ``Oct 30``. Given *now*, the year follows when *at* is not
+    in *now*'s year (``May 20, 2023``); with *timed*, the time of day ends it
+    (``Oct 30, 14:05``)."""
     local = time.localtime(at)
-    return f"{time.strftime('%b', local)} {local.tm_mday}"
+    text = f"{time.strftime('%b', local)} {local.tm_mday}"
+    if now is not None and local.tm_year != time.localtime(now).tm_year:
+        text += f", {local.tm_year}"
+    return f"{text}, {time.strftime('%H:%M', local)}" if timed else text
+
+
+def times(items: Iterable[Item]) -> set[str]:
+    """The keys of the *items* that are from the same day as another of them:
+    their dates show the time too, so a reader can tell which is newer."""
+    items = list(items)
+    days = Counter(time.localtime(item.created_at)[:3] for item in items)
+    return {item.key for item in items if days[time.localtime(item.created_at)[:3]] > 1}
 
 
 def in_view(item: Item, session_id: str, keep_from_turn: int | None) -> bool:
@@ -213,6 +251,28 @@ def origin(chat: str, gone: bool, at: float) -> str:
 def snippet(text: str, limit: int = _LINE_CHARS) -> str:
     flat = " ".join(text.split())
     return flat if len(flat) <= limit else flat[: limit - 1] + "…"
+
+
+def turn_said(text: str) -> str:
+    """A turn's document text as the model reads it: ``the user said “…”; melo
+    replied “…”``, so a past reply of melo's is never read as the user's own
+    statement. Both parts are bounded together (:data:`_TURN_CHARS`); the user's
+    words come first and stay whole when they fit, and melo's reply keeps at
+    least :data:`_REPLY_CHARS` of the room. Text that is no turn (a summary, a
+    task's question) is a plain :func:`snippet`.
+    """
+    body = text.partition("\n")[2] if text.startswith("Task: ") else text
+    if not body.startswith("User: "):
+        return snippet(text)
+    typed, marker, answer = body[len("User: ") :].partition("\nmelo: ")
+    if not marker:
+        return snippet(text)
+    typed, answer = " ".join(typed.split()), " ".join(answer.split())
+    if len(typed) + len(answer) > _TURN_CHARS:
+        typed = snippet(typed, _TURN_CHARS - _REPLY_CHARS if answer else _TURN_CHARS)
+        answer = snippet(answer, _TURN_CHARS - len(typed)) if answer else ""
+    said = [f"the user said “{typed}”"] if typed else []
+    return "; ".join(said + ([f"melo replied “{answer}”"] if answer else []))
 
 
 def _undoubled(base: str) -> str:
@@ -346,7 +406,22 @@ def ranked(
             score *= 0.5 ** (age_days / HALF_LIFE_DAYS)
         rows.append((score, item.is_record, item))
     rows.sort(key=lambda row: (row[0], row[1]), reverse=True)
-    return [item for _, _, item in rows]
+    return one_per_turn([item for _, _, item in rows])
+
+
+def one_per_turn(items: Sequence[Item]) -> list[Item]:
+    """*items* with only the first (the best) document of each turn kept: a long
+    turn's chunks (:mod:`.index`) share their session and turn. Records stay."""
+    seen: set[tuple[str, int]] = set()
+    kept: list[Item] = []
+    for item in items:
+        if not item.is_record:
+            turn = (item.session_id, item.turn)
+            if turn in seen:
+                continue
+            seen.add(turn)
+        kept.append(item)
+    return kept
 
 
 def replaced_turns(corpus: Corpus) -> dict[tuple[str, int], Item]:
@@ -414,7 +489,10 @@ def current_only(items: Sequence[Item], message: str) -> list[Item]:
 
 
 def pick(items: Sequence[Item], *, records: int, docs: int) -> list[Item]:
-    """From *items*, best first: at most *records* records and *docs* documents."""
+    """From *items*, best first: at most *records* records and *docs* documents,
+    one chunk of a turn at most (the best), then at most :data:`PER_SESSION`
+    documents of a chat."""
+    items = one_per_turn(items)
     kept = [item for item in items if item.is_record][:records]
     # A record already says what the turn it came from said.
     said = {(item.session_id, item.turn) for item in kept}
@@ -446,19 +524,32 @@ def kept_lines(quotes: Sequence[str], *, refused: bool = False) -> list[str]:
     return lines + ([NOT_KEPT_LINE] if refused else [])
 
 
-def block(items: Iterable[Item], kept: Sequence[str] = ()) -> tuple[str, list[Item]]:
+def block(
+    items: Iterable[Item], kept: Sequence[str] = (), chars: int = BLOCK_CHARS
+) -> tuple[str, list[Item]]:
     """The recall block a user message carries, and the items that fit in it.
 
     The *kept* lines (:func:`kept_lines`) come first, with or without recall.
+    Items are added while the block stays within *chars*
+    (:data:`BLOCK_CHARS` unless the settings say otherwise).
     """
     lines = [BLOCK_HEADER, *kept]
     used: list[Item] = []
+    now = clock.now()
     size = sum(len(line) + 1 for line in lines) - 1
-    for item in items:
-        line = f"- {item.prompt}"
-        if size + len(line) + 1 > BLOCK_CHARS:
+    candidates = list(items)
+    same_day = times(candidates)
+    for item in candidates:
+        line = f"- {item.line(now, timed=item.key in same_day)}"
+        if size + len(line) + 1 > chars:
             continue
         lines.append(line)
         used.append(item)
         size += len(line) + 1
+    # An item whose same-day partner did not fit needs no time: shorter, so it fits.
+    same_day = times(used)
+    lines = [
+        *lines[: len(lines) - len(used)],
+        *(f"- {item.line(now, timed=item.key in same_day)}" for item in used),
+    ]
     return ("\n".join(lines) if used or kept else ""), used

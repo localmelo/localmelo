@@ -35,6 +35,7 @@ the newer (:func:`newer_turns`), with or without a note.
 
 from __future__ import annotations
 
+import dataclasses
 import re
 import time
 from collections.abc import Iterable, Sequence
@@ -58,7 +59,7 @@ from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.memory.notes import split_sentences
 from localmelo.melo.schema import new_record_id
 from localmelo.support.memory import people
-from localmelo.support.memory.recall import Item, stem, unit
+from localmelo.support.memory.recall import OLDER, Item, stem, unit
 
 TOPICS: Final = ("about", "preferences", "people", "projects", "decisions")
 TOPIC_LABELS: Final = {
@@ -1219,6 +1220,42 @@ def newer_turns(items: Iterable[Item]) -> dict[tuple[str, int], Item]:
                 if value_apart(text, value):
                     out[where] = newer
     return out
+
+
+def newer_values_first(items: Sequence[Item]) -> list[Item]:
+    """*items* with the records of one subject (:func:`subject_key`) that state
+    different values listed newest first, each older one marked
+    :data:`~localmelo.support.memory.recall.OLDER` and kept, so a reader of the
+    recall block can tell which value is the current one when the question asks
+    about the past too.
+
+    The records of a subject take the places they had, the newest in the first;
+    a record that says the newest value again is not marked. Other items stay
+    where they were.
+    """
+    groups: dict[str, list[int]] = {}
+    for at, item in enumerate(items):
+        if item.is_record and (key := subject_key(item.text)):
+            groups.setdefault(key, []).append(at)
+    out = list(items)
+    for slots in groups.values():
+        newest, *rest = sorted(
+            (items[at] for at in slots),
+            key=lambda item: (item.created_at, _record_number(item.key)),
+            reverse=True,
+        )
+        current = normalise(newest.text)
+        if len(slots) < 2 or all(normalise(item.text) == current for item in rest):
+            continue
+        for at, item in zip(slots, [newest, *rest], strict=True):
+            same = normalise(item.text) == current
+            out[at] = item if same else dataclasses.replace(item, older=OLDER)
+    return out
+
+
+def _record_number(key: str) -> int:
+    """The number in a record item's key (``r:12``); 0 for none."""
+    return int(key[2:]) if key[2:].isdigit() else 0
 
 
 def _replaces(old: StoredEntry, source: dict[str, Any]) -> list[list[Any]]:

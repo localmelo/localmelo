@@ -13,8 +13,8 @@ from rich.text import Text
 
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.schema import (
-    EMPTY_REPLY_NUDGE,
     Message,
+    is_reply_nudge,
     split_thinking,
 )
 from localmelo.support.cli.text import cut_cells, expand_tabs
@@ -140,7 +140,7 @@ def memory_view(
     names: dict[str, str] = {}
     rows: list[str] = []
     for message in messages:
-        if message.role == "user" and message.content != EMPTY_REPLY_NUDGE:
+        if message.role == "user" and not is_reply_nudge(message.content):
             turns += 1
         if message.role == "tool" and turns:
             with_tools.add(turns)

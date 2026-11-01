@@ -1,12 +1,17 @@
-"""The conversation index: one document per finished turn of every session.
+"""The conversation index: the documents of every finished turn of every session.
 
-A document is the user's typed text and the answer without its thinking, cut
-to :data:`DOC_CHARS` and passed through ``redact_secrets``; a task's carries
-its title too. Tool output, page text and attachments are never indexed. The
-file is ``index.db`` in the memory folder, mode 0600, shared by every surface;
-deleting a chat deletes its documents. It can be rebuilt from the session files.
-Its ``meta`` table also holds the sleep watermark (``sleep_until``), and
-``sleep_runs`` what each sleep run changed, by id, for its undo.
+A turn's text is the user's typed words and the answer without its thinking,
+passed through ``redact_secrets``; a task's carries its title too. A turn that
+fits in :data:`DOC_CHARS` is one document. A longer one becomes up to
+:data:`MAX_CHUNKS` documents of the same session and turn (:func:`document_chunks`):
+chunk 0 is its head, each later chunk repeats a short head of what the user
+typed and then the next window of the text, overlapping the one before; what is
+left after the last chunk is not indexed. Tool output, page text and attachments
+are never indexed. The file is ``index.db`` in the memory folder, mode 0600,
+shared by every surface; deleting a chat or a turn deletes all its documents. It
+can be rebuilt from the session files, which re-chunks every turn. Its ``meta``
+table also holds the sleep watermark (``sleep_until``), and ``sleep_runs`` what
+each sleep run changed, by id, for its undo.
 """
 
 from __future__ import annotations
@@ -14,8 +19,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import re
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -33,6 +39,14 @@ from localmelo.melo.memory.notes import split_sentences
 from localmelo.support.memory.records import sensitive
 
 DOC_CHARS: Final = 2_000
+# A turn's text over DOC_CHARS becomes at most this many chunks, each at most
+# DOC_CHARS long; a later chunk starts CHUNK_OVERLAP characters before the one
+# before it ended, and repeats the first USER_HEAD_CHARS of what the user typed.
+MAX_CHUNKS: Final = 8
+CHUNK_OVERLAP: Final = 200
+USER_HEAD_CHARS: Final = 200
+# How far before a window's edge a chunk looks for a paragraph, line or sentence end.
+_BREAK_REACH: Final = 400
 # A side chat's summary is the one document at this turn of its session; a
 # task's exchanges take the turns below it.
 SUMMARY_TURN: Final = -1
@@ -49,7 +63,8 @@ CREATE TABLE IF NOT EXISTS documents (
     created_at  REAL NOT NULL,
     vector      BLOB,
     embed_model TEXT NOT NULL DEFAULT '',
-    UNIQUE (session_id, turn)
+    chunk       INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (session_id, turn, chunk)
 );
 CREATE INDEX IF NOT EXISTS documents_session ON documents(session_id);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value REAL NOT NULL);
@@ -69,13 +84,18 @@ CREATE TABLE IF NOT EXISTS sleep_runs (
 );
 """
 _COLUMNS: Final = (
-    "id, session_id, turn, surface, kind, title, text, created_at, vector, embed_model"
+    "id, session_id, turn, surface, kind, title, text, created_at, vector, "
+    "embed_model, chunk"
 )
 
 
 @dataclass(frozen=True)
 class Document:
-    """One indexed turn; ``id`` is 0 until it is stored."""
+    """One indexed piece of a turn; ``id`` is 0 until it is stored.
+
+    ``chunk`` is 0 for a turn's head (its only document when it fits), 1 and up
+    for the windows after it (:func:`document_chunks`).
+    """
 
     session_id: str
     turn: int
@@ -87,6 +107,7 @@ class Document:
     vector: tuple[float, ...] | None = None
     embed_model: str = ""
     id: int = 0
+    chunk: int = 0
 
 
 def _kept(text: str) -> str:
@@ -97,20 +118,151 @@ def _kept(text: str) -> str:
     return text
 
 
-def _document(typed: str, answer: str, title: str) -> str:
-    parts = [f"Task: {title.strip()}"] if title.strip() else []
-    parts += [f"User: {_kept(typed.strip())}", f"melo: {_kept(answer.strip())}"]
-    return "\n".join(parts)
+def _clean(text: str) -> str:
+    """*text* without its secrets: a sentence a note would refuse is left out, the
+    rest redacted. A private key block is redacted whole first: left out line by
+    line, its header would go and its body stay."""
+    text = text.strip()
+    if "PRIVATE KEY" in text:
+        text = redact_secrets(text)[0]
+    return redact_secrets(_kept(text))[0]
+
+
+def _parts(typed: str, answer: str, title: str) -> tuple[str, str, str]:
+    """A turn's task line (``""`` for a chat), typed text and answer, each cleaned
+    (:func:`_clean`). Each is cleaned whole, before any cut, so no half of a key
+    or key block is left at a chunk's edge."""
+    lead = f"Task: {title.strip()}\n" if title.strip() else ""
+    return redact_secrets(lead)[0], _clean(typed), _clean(answer)
+
+
+def _fences(text: str) -> list[tuple[int, int]]:
+    """The ``(start, end)`` of each fenced code block of *text*: from its opening
+    fence line to the end of its closing one (to the end of *text* when there
+    is none)."""
+    spans: list[tuple[int, int]] = []
+    opened = -1
+    at = 0
+    for line in text.split("\n"):
+        if line.lstrip().startswith("```"):
+            if opened < 0:
+                opened = at
+            else:
+                spans.append((opened, at + len(line)))
+                opened = -1
+        at += len(line) + 1
+    if opened >= 0:
+        spans.append((opened, len(text)))
+    return spans
+
+
+_SENTENCE_END: Final = re.compile(r"""[.!?]["')\]]*(?=\s)|[。！？]""")
+
+
+def _break(text: str, start: int, edge: int, reach: int) -> int:
+    """Where a window of *text* that starts at *start* and may run to *edge* ends:
+    at the last paragraph, line or sentence end, or else word end, within *reach*
+    of *edge*; *edge* itself when there is none."""
+    low = max(start + 1, edge - reach)
+    for mark in ("\n\n", "\n"):
+        found = text.rfind(mark, low, edge)
+        if found >= 0:
+            return found
+    sentence = [m.end() for m in _SENTENCE_END.finditer(text, low, edge)]
+    if sentence:
+        return sentence[-1]
+    found = text.rfind(" ", low, edge)
+    return found if found >= 0 else edge
+
+
+def _end(
+    text: str, start: int, room: int, overlap: int, spans: Sequence[tuple[int, int]]
+) -> int:
+    """Where the window of *text* from *start*, at most *room* long, ends.
+
+    A break (:func:`_break`), moved out of a fenced code block: past its end when
+    that is inside the window, else before it when the block fits in a later
+    window with the overlap. A block too long for that is split at the break.
+    """
+    edge = start + room
+    if edge >= len(text):
+        return len(text)
+    end = _break(text, start, edge, min(_BREAK_REACH, room // 4))
+    for opened, closed in spans:
+        if opened < end < closed:
+            if closed <= edge:
+                return closed
+            if closed - opened <= room - overlap and opened - start >= room // 4:
+                return opened
+            break
+    return end
+
+
+def _user_head(typed: str, limit: int) -> str:
+    """What a later chunk repeats of the user's words: all of them when they fit
+    in *limit* characters, else the first words and ``…``."""
+    flat = " ".join(typed.split())
+    if len(flat) <= limit:
+        return flat
+    cut = flat.rfind(" ", limit * 3 // 4, limit)
+    return flat[: cut if cut > 0 else limit] + "…"
+
+
+def _split(typed: str, answer: str, title: str) -> tuple[list[str], bool]:
+    """A turn's chunks (:func:`document_chunks`) and whether text was left out."""
+    lead, typed, answer = _parts(typed, answer, title)
+    text = f"{lead}User: {typed}\nmelo: {answer}"
+    if len(text) <= DOC_CHARS:
+        return [text], False
+    typed_at = len(lead) + len("User: ")
+    typed_end = typed_at + len(typed)
+    answer_at = typed_end + len("\nmelo: ")
+    head = f"User: {_user_head(typed, min(USER_HEAD_CHARS, DOC_CHARS // 8))}\nmelo: "
+    spans = _fences(text)
+    chunks: list[str] = []
+    start = 0
+    while True:
+        if answer_at > start >= typed_end:
+            start = answer_at  # not in the middle of the "melo: " label
+        prefix = ""
+        if start >= answer_at:
+            prefix = head
+        elif start >= typed_at:
+            prefix = "User: "
+        room = DOC_CHARS - len(prefix)
+        overlap = min(CHUNK_OVERLAP, room // 8)
+        end = _end(text, start, room, overlap, spans)
+        chunks.append(redact_secrets(prefix + text[start:end].rstrip())[0])
+        if end >= len(text) or len(chunks) == MAX_CHUNKS:
+            return chunks, end < len(text)
+        # The next window starts inside the overlap, at the start of a word.
+        back = max(start + 1, end - overlap)
+        gap = re.search(r"\s", text[back:end])
+        start = back + gap.end() if gap else back
+
+
+def document_chunks(typed: str, answer: str, *, title: str = "") -> list[str]:
+    """What a turn's documents hold, chunk 0 first: a task's title, who said
+    what, redacted, each at most :data:`DOC_CHARS` long.
+
+    A turn that fits is one chunk. A longer one is cut at a paragraph, line or
+    sentence end near each window's edge, and never inside a fenced code block
+    that fits in a window. Chunk 0 is the turn's head; each later one starts
+    ``User: <the first words the user typed>…`` and ``melo: `` and goes on with
+    the text where the one before ended, overlapping it by about
+    :data:`CHUNK_OVERLAP` characters. At most :data:`MAX_CHUNKS` come out.
+    """
+    return _split(typed, answer, title)[0]
 
 
 def document_text(typed: str, answer: str, *, title: str = "") -> str:
-    """What a turn's document holds: a task's title, who said what, bounded."""
-    return redact_secrets(_document(typed, answer, title)[:DOC_CHARS])[0]
+    """The head of a turn's text (chunk 0 of :func:`document_chunks`)."""
+    return document_chunks(typed, answer, title=title)[0]
 
 
 def is_cut(typed: str, answer: str, *, title: str = "") -> bool:
-    """Whether :func:`document_text` leaves part of the turn out, for its length."""
-    return len(_document(typed, answer, title)) > DOC_CHARS
+    """Whether :func:`document_chunks` leaves part of the turn out, for its length."""
+    return _split(typed, answer, title)[1]
 
 
 def plain_text(text: str) -> str:
@@ -119,9 +271,45 @@ def plain_text(text: str) -> str:
 
 
 def typed_of(text: str) -> str:
-    """What the user typed, in a chat turn's document text (:func:`document_text`)."""
+    """What the user typed, in a chat turn's document text (:func:`document_text`);
+    for a later chunk, the head of it that the chunk repeats."""
     head = text.split("\nmelo: ", 1)[0]
     return head.removeprefix("User: ") if head.startswith("User: ") else ""
+
+
+# An index.db from before chunks has UNIQUE (session_id, turn), which SQLite cannot
+# change in place: its rows move to a table with a chunk column, ids kept (a
+# vector, a recalled source and a sleep run all name a document by its id).
+_REBUILD: Final = (
+    "ALTER TABLE documents RENAME TO documents_old",
+    _SCHEMA.split(";", 1)[0] + ";",
+    "INSERT INTO documents (id, session_id, turn, surface, kind, title, text, "
+    "created_at, vector, embed_model) SELECT id, session_id, turn, surface, kind, "
+    "title, text, created_at, vector, embed_model FROM documents_old",
+    "DELETE FROM sqlite_sequence WHERE name = 'documents'",
+    "UPDATE sqlite_sequence SET name = 'documents' WHERE name = 'documents_old'",
+    "DROP TABLE documents_old",
+    "CREATE INDEX IF NOT EXISTS documents_session ON documents(session_id)",
+)
+
+
+async def _add_chunks(conn: aiosqlite.Connection) -> None:
+    """Move an index.db made before chunks to the table with a ``chunk`` column."""
+    async with conn.execute("PRAGMA table_info(documents)") as cur:
+        if any(row[1] == "chunk" for row in await cur.fetchall()):
+            return
+    await conn.execute("BEGIN IMMEDIATE")
+    try:
+        async with conn.execute("PRAGMA table_info(documents)") as cur:
+            if any(row[1] == "chunk" for row in await cur.fetchall()):
+                await conn.rollback()  # another process moved it first
+                return
+        for statement in _REBUILD:
+            await conn.execute(statement)
+        await conn.commit()
+    except BaseException:
+        await conn.rollback()
+        raise
 
 
 class ConversationIndex:
@@ -139,6 +327,7 @@ class ConversationIndex:
                 conn = await aiosqlite.connect(self._path)
                 try:
                     await prepare_connection(conn, _SCHEMA)
+                    await _add_chunks(conn)
                 except BaseException:
                     with contextlib.suppress(Exception):
                         await conn.close()
@@ -147,26 +336,44 @@ class ConversationIndex:
             return self._conn
 
     async def add(self, doc: Document) -> None:
-        """Store *doc*, in place of an earlier document of the same turn."""
+        """Store *doc*, in place of the documents of the same turn."""
+        await self.add_many([doc])
+
+    async def add_many(self, docs: Sequence[Document]) -> None:
+        """Store *docs*, the chunks of one or more turns, each turn's in place of
+        every document it had (a turn that is now shorter keeps no old chunk)."""
         conn = await self._ready()
-        vector = None if doc.vector is None else np.asarray(doc.vector, np.float32)
-        await conn.execute(
-            "INSERT OR REPLACE INTO documents (session_id, turn, surface, kind, "
-            "title, text, created_at, vector, embed_model) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                doc.session_id,
-                doc.turn,
-                doc.surface,
-                doc.kind,
-                doc.title,
-                doc.text,
-                doc.created_at or time.time(),
-                None if vector is None else vector.tobytes(),
-                doc.embed_model if vector is not None else "",
-            ),
-        )
-        await conn.commit()
+        try:
+            for session_id, turn in {(d.session_id, d.turn) for d in docs}:
+                await conn.execute(
+                    "DELETE FROM documents WHERE session_id = ? AND turn = ?",
+                    (session_id, turn),
+                )
+            for doc in docs:
+                vector = (
+                    None if doc.vector is None else np.asarray(doc.vector, np.float32)
+                )
+                await conn.execute(
+                    "INSERT INTO documents (session_id, turn, surface, kind, "
+                    "title, text, created_at, vector, embed_model, chunk) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        doc.session_id,
+                        doc.turn,
+                        doc.surface,
+                        doc.kind,
+                        doc.title,
+                        doc.text,
+                        doc.created_at or time.time(),
+                        None if vector is None else vector.tobytes(),
+                        doc.embed_model if vector is not None else "",
+                        doc.chunk,
+                    ),
+                )
+            await conn.commit()
+        except BaseException:
+            await conn.rollback()
+            raise
 
     async def next_special_turn(self, session_id: str) -> int:
         """The next free turn number below 0 of a session, for an exchange
@@ -185,15 +392,15 @@ class ConversationIndex:
             return {int(row[0]) for row in await cur.fetchall()}
 
     async def fetch(self, ids: Iterable[int]) -> list[Document]:
-        """The documents with these ids (in chunks; SQLite caps the parameters)."""
+        """The documents with these ids (in batches; SQLite caps the parameters)."""
         conn = await self._ready()
         wanted = sorted(ids)
         out: list[Document] = []
         for start in range(0, len(wanted), 500):
-            chunk = wanted[start : start + 500]
-            marks = ", ".join("?" * len(chunk))
+            batch = wanted[start : start + 500]
+            marks = ", ".join("?" * len(batch))
             async with conn.execute(
-                f"SELECT {_COLUMNS} FROM documents WHERE id IN ({marks})", chunk
+                f"SELECT {_COLUMNS} FROM documents WHERE id IN ({marks})", batch
             ) as cur:
                 for row in await cur.fetchall():
                     blob = row[8]
@@ -214,40 +421,50 @@ class ConversationIndex:
                             vector=vector,
                             embed_model=str(row[9]),
                             id=int(row[0]),
+                            chunk=int(row[10]),
                         )
                     )
         return out
 
     async def count(self) -> int:
+        """How many turns are indexed (a turn's chunks count once)."""
         conn = await self._ready()
-        async with conn.execute("SELECT COUNT(*) FROM documents") as cur:
+        async with conn.execute(
+            "SELECT COUNT(*) FROM documents WHERE chunk = 0"
+        ) as cur:
             row = await cur.fetchone()
         return int(row[0]) if row else 0
 
     async def delete(self, session_id: str, turn: int | None = None) -> int:
-        """Delete a session's documents (one turn's with *turn*); returns how many."""
+        """Delete a session's documents, every chunk of them (one turn's with
+        *turn*); returns how many turns."""
         conn = await self._ready()
-        sql = "DELETE FROM documents WHERE session_id = ?"
+        where = " WHERE session_id = ?"
         args: list[object] = [session_id]
         if turn is not None:
-            sql += " AND turn = ?"
+            where += " AND turn = ?"
             args.append(turn)
+        async with conn.execute(
+            f"SELECT COUNT(*) FROM documents{where} AND chunk = 0", args
+        ) as cur:
+            row = await cur.fetchone()
         async with secure_deletes(conn):
-            cur = await conn.execute(sql, args)
+            await conn.execute(f"DELETE FROM documents{where}", args)
             await conn.execute(
                 "DELETE FROM sleep_processed WHERE session_id = ?"
                 + (" AND turn = ?" if turn is not None else ""),
                 args,
             )
             await conn.commit()
-        return int(cur.rowcount or 0)
+        return int(row[0]) if row else 0
 
     async def forget_all(self, *, mark: bool = True) -> int:
-        """Delete every document; returns how many. With *mark*, a turn that ended
-        before now is not indexed again (:meth:`forgotten_at`)."""
+        """Delete every document; returns how many turns. With *mark*, a turn that
+        ended before now is not indexed again (:meth:`forgotten_at`)."""
         conn = await self._ready()
+        turns = await self.count()
         async with secure_deletes(conn):
-            cur = await conn.execute("DELETE FROM documents")
+            await conn.execute("DELETE FROM documents")
             if mark:
                 await conn.execute("DELETE FROM sleep_runs")
                 await conn.execute("DELETE FROM sleep_processed")
@@ -257,7 +474,7 @@ class ConversationIndex:
                 )
             await conn.commit()
         await checkpoint_wal(conn)
-        return int(cur.rowcount or 0)
+        return turns
 
     async def forgotten_at(self) -> float:
         """When the user last forgot everything; 0 for never."""

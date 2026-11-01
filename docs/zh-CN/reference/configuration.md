@@ -66,8 +66,13 @@ chat_model = "qwen3:8b"
 | `across_chats` | `[memory]` | `true` | 网页控制台和 App 中的跨对话记忆：你请 melo 记住的事，以及它判断值得记的你告诉它的事，它会记成笔记；它为每个完成的对话轮次和任务结果建立索引，并在每条新消息时带回相关内容，注明出处。`false` 全部关闭。直接运行和 worker 从不使用它。见[跨对话记忆](../concepts/memory.md#memory-across-chats)。 |
 | `retriever` | `[memory]` | `"auto"` | 网页控制台或 App 中的对话如何为一条消息找到笔记：`"auto"`（按词搜索；设置了嵌入模型时也按语义搜索）、`"bm25"`（只按词，不向模型发请求）、`"embedding"`（有模型时与 `auto` 相同；没有嵌入模型时 `melo serve` 拒绝启动）或 `"llm"`（先按词挑出最多 20 个候选，再由对话模型在 4 秒内从中选择；超时、出错或回复无法读取时只按词搜索；不调用嵌入模型）。这是用于比较各种方式的开发者设置：`-X memory.retriever=llm` 只对一次运行生效，`melo -h all` 会列出它。每次召回的耗时在 `turn.memory` 的 `recall` 对象里。见[召回如何找到笔记](../concepts/memory.md#memory-across-chats)。 |
 | `keep_statements` | `[memory]` | `false` | 用于比较的开发者设置。`true`：网页控制台或 App 的一轮对话之后，代码会把用户说出、但模型没有用 `remember` 记下的每个关于自己的明确、长期的事实记成笔记（"I live in …"、"my advisor is …"、"call me …"、"我的…是…"），同样显示 `Remembered · Undo`；问题、待办、"如果"、"不"、过去、别人的看法、一时的状态和密钥从不记。默认只有模型的判断和你自己的要求会记笔记；例外是你明确说出的对已有笔记的改动（已有周三的笔记时说 "My weekly sync is on Friday."）：只要这一轮聊天没有保存任何笔记，它就会替换旧笔记，不受此设置影响。`-X memory.keep_statements=on` 只对一次运行生效，`melo -h all` 会列出它。见[跨对话记忆](../concepts/memory.md#memory-across-chats)。 |
-| `sleep` | `[memory]` | `"off"` | 用于比较的开发者设置：把上次整理以来的对话和笔记整理一遍。`"rules"` 合并重复的笔记、写入某条笔记主题的较新值、找回没有被记下的长期陈述，不调用聊天模型，一次最多 20 处改动，都可撤销；已有事实检查可使用配置的嵌入模型，每个候选限时 1.5 秒，失败回退到词语检查；`"model"` 增加逐项检查证据的模型整理和代词解析；`"model+tags"` 在相同的十二次请求上限内优先处理带标记的轮次。每次请求限时八秒，遇到新聊天活动或配置的 `sleep_lock` 时停止。用 `melo memory sleep`（开发者模式）或 `POST /api/memory/sleep` 运行。只在不是 `"off"` 时保存；`-X memory.sleep=rules` 只对一次运行生效，`melo -h all` 会列出它。见[跨对话记忆](../concepts/memory.md#memory-across-chats)。 |
-| `sleep_lock` | `[memory]` | `""` | 整理请求使用的可选锁文件路径。文件存在时不启动聊天或嵌入请求，每次请求前重新检查；留空则跳过此检查。不联网的规则仍可运行；遇到被阻止的请求时停止这次整理，保留已完成的改动。 |
+| `sleep` | `[memory]` | `"off"` | 用于比较的开发者设置：把上次整理以来的对话和笔记整理一遍。`"rules"` 合并重复的笔记、写入某条笔记主题的较新值、找回没有被记下的长期陈述，不调用聊天模型，一次最多 20 处改动，都可撤销；已有事实检查可使用配置的嵌入模型，每个候选限时 1.5 秒，失败回退到词语检查；`"model"` 增加逐项检查证据的模型整理和代词解析；`"model+tags"` 在相同的十二次请求上限内优先处理带标记的轮次。每次请求限时八秒，遇到新的活动或被占用的锁（`sleep_lock`，否则是共享的 GPU 锁）时停止。不是 `"off"` 时，melo 还会在电脑空闲时自己运行（网关里的对话 20 分钟内没有轮次、没有任务在运行或排队、设置了 `[scheduler] gpu_lock_file` 时没有 GPU 锁文件、接着交流电，且每 6 小时最多一次；独立运行的终端对话和网关之外的 worker 看不到），并在主对话里说明，带“撤销”。也可以用 `melo memory sleep`（开发者模式）或 `POST /api/memory/sleep` 手动运行。只在不是 `"off"` 时保存；`-X memory.sleep=rules` 只对一次运行生效，`melo -h all` 会列出它。见[跨对话记忆](../concepts/memory.md#memory-across-chats)。 |
+| `sleep_lock` | `[memory]` | `""` | 整理请求使用的可选锁文件路径。文件存在时不启动聊天或嵌入请求，每次请求前重新检查。留空则改读共享的 GPU 锁 `[scheduler] gpu_lock_file`，其中由 `[scheduler] lock_self` 持有的锁算自己的，不会使整理停止。不发出请求的规则仍可运行；遇到被阻止的请求时停止这次整理（`aborted` 为 `stopped: gpu_lock`），保留已完成的改动，这些改动仍可撤销。整理只读取锁，从不写入或删除它。 |
+| `recall_records` | `[memory]` | `3` | 用于比较的开发者设置。网页控制台或 App 的对话消息所带召回块最多包含的笔记数，0 到 20。默认值就是召回一直以来的数量。`-X memory.recall_records=8` 只对一次运行生效，`melo -h all` 会列出它。 |
+| `recall_docs` | `[memory]` | `2` | 用于比较的开发者设置。该召回块最多包含的对话轮次数，0 到 20（同一个对话最多两条）。`-X memory.recall_docs=8` 只对一次运行生效。 |
+| `recall_chars` | `[memory]` | `900` | 用于比较的开发者设置。该召回块的字符数上限，200 到 8000；放进去会超出上限的条目会被略去。没有召回任何内容、只带有 melo 记下了什么的那几行的块不会被截断。`-X memory.recall_chars=4000` 只对一次运行生效。 |
+| `recall_notes` | `[memory]` | `"on"` | 用于比较的开发者设置。`"off"`：召回块里没有笔记，提示里也不置顶任何笔记，因此只召回以前的对话轮次，也不会因为某条笔记而认定某一轮已被取代。`remember` 工具、搜索工具和记忆页不变。`-X memory.recall_notes=off` 只对一次运行生效。 |
+| `search_when_empty` | `[memory]` | `"off"` | 用于比较的开发者设置。`"hint"`：当召回块没有为某条消息召回任何条目时，块里带有一行固定的话（如果有 melo 记下了什么的几行，则放在其后），说明没有匹配的内容，并告诉模型：如果消息问的是这个人或以前说过的事，先调用记忆搜索工具；搜索也没有结果就说不知道。代码不判断消息，由模型决定。这一轮的 `turn.memory` 事件里会有 `search_hint: true`。`-X memory.search_when_empty=hint` 只对一次运行生效。见[跨对话记忆](../concepts/memory.md#memory-across-chats)。 |
 | `admit_on_outcome` | `[memory]` | `false` | R6-lite：只在运行结束时准入最后一次尝试的摘要，并在其来源中带上最终状态。`--admit-on-outcome` 旗标对一次运行优先；直接模式会读这张表，交互式界面和网关不读，且在 `legacy` 中被接受但不生效。 |
 | `api_key_env` | 云端后端 | 未设置 | 保存 API 密钥的环境变量名称。 |
 | `base_url` | 云端后端 | 厂商的 URL | API 的 URL。 |
@@ -93,7 +98,7 @@ chat_model = "qwen3:8b"
 | `focus_s` | `[scheduler]` | `10` | 聊天在最后一次模型调用或按键之后保持焦点的秒数（其本轮的调用运行期间也算焦点）；已打开但没有轮次在运行的聊天会把空闲槽位留给任务。须为大于 0 的数。 |
 | `call_log` | `[scheduler]` | `true` | 每次网关运行写一份 JSONL 调用日志。 |
 | `call_log_dir` | `[scheduler]` | `""` | 日志的父目录；默认为 `~/.cache/localmelo/scheduler`。 |
-| `gpu_lock_file` | `[scheduler]` | `""` | 要读取的共享 GPU 锁；为空表示不读取锁。网关中的电池读取器始终开启。 |
+| `gpu_lock_file` | `[scheduler]` | `""` | 要读取的共享 GPU 锁；为空表示不读取锁（空闲整理也就不检查锁）。网关中的电池读取器始终开启。 |
 | `lock_self` | `[scheduler]` | `""` | 这个 bench 自己的持有者：确切的 `holder:` 值，或锁带有 `run:` 行时的 `holder:run`。匹配是精确且区分大小写的。 |
 | `lock_gate` | `[scheduler]` | `"record"` | `record` 从不改变请求；`wait` 在存在外部锁时扣住每一次工作区调用，包括嵌入。见[调度器](../guides/scheduler.md#the-gpu-lock-and-the-battery-s2b)。 |
 

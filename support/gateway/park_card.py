@@ -7,6 +7,7 @@ from typing import Any
 
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.memory.procedures.mask import mask_credentials
+from localmelo.melo.schema import broken_tool_call
 from localmelo.support.gateway.task_policy import TaskSpec
 from localmelo.support.sessions.store import StoredEvent
 
@@ -54,7 +55,10 @@ def build_park_card(
         data = event["data"]
         kind = event.get("type")
         if kind == "assistant.message":
-            reply = _text(data.get("content"), 250) or reply
+            said = data.get("content")
+            # A tool call written as text is not what the task last said.
+            if not (isinstance(said, str) and broken_tool_call(said)):
+                reply = _text(said, 250) or reply
         elif kind == "reflection":
             reflection = _text(data.get("summary"), 250)
         elif kind in ("tool.started", "tool.finished"):

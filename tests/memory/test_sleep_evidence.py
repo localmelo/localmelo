@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from localmelo.support.memory import ChatMemory, sleep
@@ -91,7 +93,11 @@ async def test_mixed_run_reports_evidence_and_retains_rows_through_undo_redo(
     await memory.undo_sleep(report.run_id)
     assert {n.id: n.text for n in await memory.records()} == before
     assert {i for i, _, _ in rules.rows(memory)} == all_ids
-    redone = await sleep.run(*memory.stores(), turns, variant="rules")
+    # The undo sticks: the same pairs stay apart and the same notes are not written.
+    assert not (await sleep.run(*memory.stores(), turns, variant="rules")).changes
+    # Said again in new turns, the user's words are new evidence.
+    said_again = [replace(t, turn=t.turn + 100) for t in turns]
+    redone = await sleep.run(*memory.stores(), said_again, variant="rules")
     assert redone.changes
     assert all_ids <= {i for i, _, _ in rules.rows(memory)}
     assert before_ids <= {i for i, _, _ in rules.rows(memory)}

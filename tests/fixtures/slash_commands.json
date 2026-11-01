@@ -209,7 +209,7 @@
     {
       "name": "memory",
       "aliases": [],
-      "args": "[window|import]",
+      "args": "[window|import|undo]",
       "help": {
         "en": "See and change the notes melo keeps",
         "zh-Hans": "查看并修改 melo 保存的笔记"

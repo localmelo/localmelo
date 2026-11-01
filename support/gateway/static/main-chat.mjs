@@ -5,7 +5,8 @@
  * its side chats. When a side chat's run ends, the main chat gets a card (an `attention.card` event,
  * never a turn); when a task finishes, fails or waits for an approval, the chat that started it (the
  * main chat or a side chat) does. What a chat did with a task (started, paused, a suggestion, "Start
- * this as a task?") is an echo line (an `attention.echo` event) in that chat.
+ * this as a task?") is an echo line (an `attention.echo` event) in that chat; so is "While you were away,
+ * melo tidied 3 notes" with its Undo, in the main chat.
  * Nothing here fetches; the page passes what a card's Open and an echo's buttons do.
  */
 
@@ -255,9 +256,9 @@ export function cardNode({doc, card, open, resume = null, approval = null, block
 
 // ── Echoes: what the main chat did with a task ──
 
-const ECHO_KINDS = new Set(["started", "control", "level", "suggest", "ask", "undone", "failed", "sent", "chore", "chore_saved", "checkin",
+const ECHO_KINDS = new Set(["started", "control", "level", "suggest", "ask", "undone", "failed", "sent", "chore", "chore_saved", "checkin", "sleep",
   "task_ask", "task_answered", "task_escalate", "ask_end", "queued", "dequeued", "answer_sent", "answer_delivered", "earlier", "revoked"]);
-const MARKS = {started: "+", level: "↕", suggest: "?", ask: "?", undone: "↺", failed: "!", sent: "→", chore: "◷", chore_saved: "◷", checkin: "◷",
+const MARKS = {started: "+", level: "↕", suggest: "?", ask: "?", undone: "↺", failed: "!", sent: "→", chore: "◷", chore_saved: "◷", checkin: "◷", sleep: "☾",
   stop: "■", pause: "‖", resume: "▶", first: "↑", send: "→", task_ask: "?", task_answered: "↩", task_escalate: "!", ask_end: "·", queued: "…", answer_sent: "↩",
   earlier: "✓", revoked: "↺"};
 // A task's question (#369): its seven fields, and the five parts of a question to the person.
@@ -298,6 +299,15 @@ export function answered(echoes) {
 }
 
 /**
+ * The newest "melo tidied" line of *echoes* that no later echo answered, or undefined: `/memory undo`
+ * taps it. A line the gateway answered, even with "already put back", is passed over for an older one.
+ */
+export function unansweredSleep(echoes) {
+  const done = answered(echoes);
+  return echoes.filter((echo) => echo.kind === "sleep" && !done.has(echo.id)).at(-1);
+}
+
+/**
  * Whether *echo*'s buttons go: a later echo answered it (ids in *done*), or its task ended (ids in
  * *ended*). A step that ran on the person's earlier approval keeps Revoke after its task ends: the
  * approval is the chat's, and later tasks could use it.
@@ -308,14 +318,14 @@ export function echoDone(echo, done, ended) {
 
 /** An echo's buttons: `[label, do]`; a level change opens the level list. */
 export function echoActions(echo, done) {
-  if (done || !echo.task_id && !["ask", "chore", "chore_saved"].includes(echo.kind)) return [];
+  if (done || !echo.task_id && !["ask", "chore", "chore_saved", "sleep"].includes(echo.kind)) return [];
   const undo = [t("mainChat.echo.undo"), "undo"];
   // A step ran on the person's earlier approval (#369): Revoke takes the approval back.
   if (echo.kind === "earlier") return [[t("approvals.revoke"), "revoke"]];
   // A reminder runs once, at its time: there is no "just once" for it.
   if (echo.kind === "chore" && echo.reminder) return [[t("mainChat.echo.remind"), "save"], [t("common.cancel"), "cancel"]];
   if (echo.kind === "chore") return [[t("mainChat.echo.saveChore"), "save"], [t("mainChat.echo.once"), "once"], [t("common.cancel"), "cancel"]];
-  if (echo.kind === "chore_saved") return [undo];
+  if (echo.kind === "chore_saved" || echo.kind === "sleep") return [undo];
   if (echo.kind === "started" || echo.kind === "level") {
     return echo.kind === "started" ? [[t("mainChat.echo.change"), "level"]] : [undo];
   }
@@ -395,8 +405,23 @@ export function echoNodes({doc, echo, done = false, act}) {
     buttons.append(button);
   }
   if (buttons.children.length) body.append(buttons);
+  body.append(...sleepNodes({el, echo}));
   nodes.push(line);
   return nodes;
+}
+
+/** What a tidy-up of the notes changed, folded under its row: a word for each change, then the note. */
+function sleepNodes({el, echo}) {
+  if (echo.kind !== "sleep" || !Array.isArray(echo.items) || !echo.items.length) return [];
+  const list = el("dl", "ask-fields");
+  for (const item of echo.items) {
+    list.append(el("dt", "", t(`mainChat.echo.sleepOp.${item.change}`)), el("dd", "", String(item.text ?? "")));
+  }
+  const more = Number(echo.more);
+  if (more > 0) list.append(el("dt", ""), el("dd", "sleep-more", t("running.more", {n: more})));
+  const details = el("details", "ask-details sleep-details");
+  details.append(el("summary", "", t("mainChat.echo.sleepChanged")), list);
+  return [details];
 }
 
 /** A task's question folded under its row, an answer quoted, or a question to the person with its reply box. */
