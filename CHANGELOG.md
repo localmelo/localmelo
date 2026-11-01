@@ -96,6 +96,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `search_when_empty = "hint"` gives a block that recalled nothing one line telling the
   model to call the memory search tool first, and the `turn.memory` event then has
   `search_hint: true`. Out-of-range values are config errors. Part of #349.
+- Developer only, not visible by default: two `[memory]` settings for the bars an item must
+  pass to be recalled, set for one run with `-X memory.KEY=VALUE` and defaulting to today's
+  recall. `recall_min_cosine` (0.55, 0.20 to 0.95) is the least similarity of meaning and
+  `recall_min_coverage` (0.6, 0.10 to 1.00) the least share of the message's content words;
+  both apply to the recall block and to the memory search tool, and lowering them lets more
+  notes and chat turns through. Out-of-range values are config errors. Part of #349.
+- Developer only, not visible by default: two `[memory]` settings for how much of a recalled
+  chat turn is shown, set for one run with `-X memory.KEY=VALUE` and defaulting to today's
+  reading. `recall_item_chars` (200, 120 to 2000) is the room one turn takes in the recall
+  block and in the memory search tool's list, and `recall_excerpt = "match"` shows, for the
+  user's words and melo's reply each, the sentences that hold most of the message's words
+  instead of the start, with `…` where text is left out. The block still keeps to its size
+  bound, and the page is unchanged. Part of #349.
 - Developer only: `melo memory ingest FILE` loads past chats from a JSON file as if they
   had happened on their dates (no model call), and `LOCALMELO_NOW` pins the date
   the model and memory recall read, for memory tests.
