@@ -1675,6 +1675,12 @@ dialog::backdrop {
   font: var(--text-caption)/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .approval-note { margin: 0 0 8px; color: var(--ink-2); line-height: 1.5; }
+/* A folder outside the workspace (#405): its real path is the question, so it reads first, set in
+   the card's warn colour on its edge. */
+.approval-folder { margin: 0 0 10px; padding: 8px 12px; border-radius: var(--radius-control); background: var(--raised); box-shadow: inset 3px 0 0 var(--warn); }
+.approval-folder-label { margin: 0; color: var(--ink-2); font-size: var(--text-caption); }
+.approval-folder-path { margin: 2px 0 0; color: var(--ink); font: var(--text-body)/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; overflow-wrap: anywhere; }
+.approval-folder-what { margin: 4px 0 0; color: var(--ink-2); line-height: 1.5; }
 /* A high-impact call: a heavier edge, the reasons melo asks, and what the person asked for. */
 .approval-card[data-impact="high"] { border-left-width: 4px; }
 .approval-why { margin: 0 0 2px; font-weight: 600; }
@@ -2371,6 +2377,9 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .st-value { flex: none; max-width: 45%; color: var(--ink); font-size: var(--text-small); text-align: right; }
 .st-value[data-default="true"] { color: var(--ink-3); }
 .st-empty { padding: var(--space-4); color: var(--ink-3); font-size: var(--text-small); }
+/* The hint of a list sits between its title and the list (the extra folders, #405). */
+.st-group-hint { max-width: 62ch; margin: 0 0 var(--space-2); }
+.st-row[data-valid="false"] .st-mono { text-decoration: line-through; text-decoration-color: var(--ink-3); }
 /* "Saved · Undo" after a change, at the foot of the section. */
 .st-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); min-height: 44px; padding: var(--space-2) var(--space-7); border-top: 1px solid var(--line); color: var(--ink-3); font-size: var(--text-small); }
 .st-foot > p { margin: 0; }

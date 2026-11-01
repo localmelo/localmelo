@@ -1,7 +1,10 @@
 """Approval policies for the surfaces: session grants, and a broker for the web.
 
 :class:`RememberingPolicy` asks a person, through an ask function, and
-keeps "allow this tool for the session" as a grant of the tool's name.
+keeps "allow this tool for the session" as a grant of the tool's name,
+and "allow this folder for this chat" as a grant of a folder outside the
+workspace (#405), which only reads use; "always" keeps the folder in the
+settings (:class:`SavedFolders`).
 :class:`ApprovalBroker` gives each session an ask function that waits for
 an answer from elsewhere, such as the web console's approval route.
 :class:`ApprovalLedger` keeps the approvals the person gave in each chat,
@@ -20,9 +23,9 @@ import os
 import time
 import uuid
 from collections import OrderedDict, deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, Final, Literal
+from typing import Any, Final, Literal, Protocol
 
 from localmelo.melo.contracts.approvals import (
     ALLOWED_ONCE,
@@ -32,8 +35,10 @@ from localmelo.melo.contracts.approvals import (
     AutoPolicy,
     ReviewMode,
     find_auto,
+    find_folder_asker,
     review_mode,
 )
+from localmelo.melo.contracts.folders import covers
 from localmelo.melo.contracts.review import (
     RULED_TOOLS,
     ActionReview,
@@ -51,6 +56,27 @@ AskFunction = Callable[[ApprovalRequest], Awaitable[ApprovalDecision]]
 RESOLVED_IDS_KEPT: Final = 256
 
 
+# The reasons of a read that a folder grant let run without asking (#405).
+FOLDER_FOR_CHAT: Final = "folder allowed for this chat"
+FOLDER_SAVED: Final = "folder in the extra folders"
+
+
+class SavedFolders(Protocol):
+    """The folders "Always allow this folder" keeps (``[workspace] extra_folders``)."""
+
+    def folders(self) -> Sequence[str]:
+        """The folders kept now, as absolute paths."""
+        ...
+
+    def add(self, folder: str) -> bool:
+        """Keep one more folder; whether it was new. Raises when it cannot be kept."""
+        ...
+
+
+def _covered(folders: Iterable[str], path: str) -> bool:
+    return any(covers(folder, path) for folder in folders)
+
+
 class RememberingPolicy:
     """An approval policy that asks through *ask* and keeps session grants.
 
@@ -64,22 +90,111 @@ class RememberingPolicy:
     gate first lets the user's model review an undecided call
     (:meth:`silent_for`); one it finds routine then runs on the grant.
     Grants are per tool name and per policy object, and never stored.
+
+    With *folders*, it is also asked about a file tool's path outside the
+    workspace (:meth:`decide_folder`, #405); *saved* holds the folders kept
+    by "always". A policy without *folders* is never asked about one (a
+    task the person did not start), so such a path is refused.
     """
 
-    def __init__(self, ask: AskFunction) -> None:
+    def __init__(
+        self,
+        ask: AskFunction,
+        *,
+        folders: bool = False,
+        saved: SavedFolders | None = None,
+    ) -> None:
         self._ask = ask
         self._granted: set[str] = set()
+        self.asks_folders = folders
+        self._saved = saved
+        # The folders allowed for reading in this chat, as real paths.
+        self._folders: list[str] = []
 
     @property
     def allowed_tools(self) -> frozenset[str]:
         return frozenset(self._granted)
 
+    @property
+    def allowed_folders(self) -> tuple[str, ...]:
+        """The folders outside the workspace allowed for reading in this chat."""
+        return tuple(self._folders)
+
     def forget(self, tool_name: str | None = None) -> None:
-        """Take back the grant of *tool_name*, or every grant with ``None``."""
+        """Take back the grant of *tool_name*, or every grant with ``None``.
+
+        ``None`` takes back the chat's folder grants too.
+        """
         if tool_name is None:
             self._granted.clear()
+            self._folders.clear()
         else:
             self._granted.discard(tool_name)
+
+    def forget_folder(self, folder: str) -> bool:
+        """Take back the chat's grant of *folder*; whether there was one."""
+        if folder not in self._folders:
+            return False
+        self._folders.remove(folder)
+        return True
+
+    def covered(self, path: str) -> str:
+        """What lets the read of *path* run unasked: :data:`FOLDER_FOR_CHAT`, :data:`FOLDER_SAVED` or ``""``."""
+        if _covered(self._folders, path):
+            return FOLDER_FOR_CHAT
+        if self._saved is not None:
+            try:
+                saved = self._saved.folders()
+            except Exception:
+                logger.warning("Could not read the extra folders", exc_info=True)
+                saved = ()
+            if _covered(saved, path):
+                return FOLDER_SAVED
+        return ""
+
+    async def decide_folder(self, request: ApprovalRequest) -> ApprovalDecision:
+        """Decide a call on a path outside the workspace (#405).
+
+        A read in a folder allowed for this chat, or kept in the extra
+        folders, runs unasked; anything else asks the person. A write asks
+        every time, and an answer for it grants nothing; so does an answer
+        for a folder that may not be granted (the home folder). "This chat"
+        (``remember``) keeps the folder for the chat; "always" also keeps it
+        in the settings, and a failure to save it still allows the call.
+        """
+        outside = request.outside
+        if outside is None:
+            raise ValueError("decide_folder takes a request with outside set")
+        if outside.access == "read":
+            found = self.covered(outside.path)
+            if found == FOLDER_FOR_CHAT:
+                return ApprovalDecision(True, found, origin="session")
+            if found:
+                return ApprovalDecision(True, found, origin="policy")
+        decision = await self._ask(request)
+        if not isinstance(decision, ApprovalDecision):
+            return decision
+        if not outside.grantable:
+            decision = dataclasses.replace(decision, remember=False, always=False)
+        if decision.allow and decision.always:
+            if self._saved is not None:
+                try:
+                    await asyncio.to_thread(self._saved.add, outside.folder)
+                except Exception:
+                    logger.warning(
+                        "Could not keep %s in the extra folders",
+                        outside.folder,
+                        exc_info=True,
+                    )
+            else:
+                decision = dataclasses.replace(decision, always=False)
+        if (
+            decision.allow
+            and (decision.remember or decision.always)
+            and outside.folder not in self._folders
+        ):
+            self._folders.append(outside.folder)
+        return decision
 
     def silent_for(self, request: ApprovalRequest) -> bool:
         """Whether a grant would let *request* run unasked: the gate then lets
@@ -87,6 +202,13 @@ class RememberingPolicy:
         return request.tool_name in self._granted
 
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
+        if request.outside is not None:
+            # A folder outside the workspace is only ever decided by decide_folder.
+            return ApprovalDecision(
+                False,
+                "a folder outside the workspace needs its own question",
+                origin="policy",
+            )
         if request.tool_name in self._granted and covered_by_grant(request.review):
             return ApprovalDecision(True, origin="session")
         decision = await self._ask(request)
@@ -124,12 +246,22 @@ class ChatPolicy:
     The Ask policy keeps its grants and the :class:`AutoPolicy` its
     allowances across switches. ``inner`` is the policy of the mode now,
     for :func:`~localmelo.melo.contracts.approvals.find_auto`.
+
+    The person is asked about a folder outside the workspace in either
+    mode (:meth:`decide_folder`): auto mode never decides it.
     """
 
-    def __init__(self, ask: AskFunction, mode: ChatMode = "ask") -> None:
+    def __init__(
+        self,
+        ask: AskFunction,
+        mode: ChatMode = "ask",
+        *,
+        saved: SavedFolders | None = None,
+    ) -> None:
         self.mode: ChatMode = mode
-        self.ask = RememberingPolicy(ask)
+        self.ask = RememberingPolicy(ask, folders=True, saved=saved)
         self.auto = AutoPolicy()
+        self.asks_folders = True
 
     @property
     def inner(self) -> ApprovalPolicy:
@@ -139,12 +271,22 @@ class ChatPolicy:
     def allowed_tools(self) -> frozenset[str]:
         return self.ask.allowed_tools
 
+    @property
+    def allowed_folders(self) -> tuple[str, ...]:
+        return self.ask.allowed_folders
+
     def forget(self, tool_name: str | None = None) -> None:
-        """Take back one grant, or every grant (allowances stay)."""
+        """Take back one grant, or every grant and folder (allowances stay)."""
         self.ask.forget(tool_name)
+
+    def forget_folder(self, folder: str) -> bool:
+        return self.ask.forget_folder(folder)
 
     def review_mode(self, request: ApprovalRequest) -> ReviewMode:
         return "auto" if self.mode == "auto" else review_mode(self.ask, request)
+
+    async def decide_folder(self, request: ApprovalRequest) -> ApprovalDecision:
+        return await self.ask.decide_folder(request)
 
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
         return await self.inner.decide(request)
@@ -378,11 +520,21 @@ class ApprovalLedger:
         self._uses: deque[ApprovalUse] = deque(maxlen=USES_KEPT)
         # The tools chat *id* holds a grant of now; the console sets it.
         self.grants_of: Callable[[str], frozenset[str]] = lambda chat_id: frozenset()
+        # The folders outside the workspace chat *id* allowed for reading (#405).
+        self.folders_of: Callable[[str], tuple[str, ...]] = lambda chat_id: ()
 
     def record(self, chat_id: str, request: ApprovalRequest) -> RecordedApproval | None:
-        """Keep the person's Allow of *request*; ``None`` when it may never be used again."""
+        """Keep the person's Allow of *request*; ``None`` when it may never be used again.
+
+        A call on a path outside the workspace is never kept (#405): its
+        folder grant is the chat's, and a write asks every time.
+        """
         review = request.review
-        if review is None or not reusable(request.tool_name, review):
+        if (
+            review is None
+            or request.outside is not None
+            or not reusable(request.tool_name, review)
+        ):
             return None
         key = request_step(request)
         entries = self._entries.setdefault(chat_id, OrderedDict())
@@ -406,7 +558,9 @@ class ApprovalLedger:
 
     def match(self, chat_id: str, request: ApprovalRequest) -> RecordedApproval | None:
         """The entry of chat *chat_id* that allowed exactly *request*'s step, else ``None``."""
-        if not reusable(request.tool_name, request.review):
+        if request.outside is not None or not reusable(
+            request.tool_name, request.review
+        ):
             return None
         key, folder = request_step(request), _folder(request.workspace_root)
         for entry in self._entries.get(chat_id, {}).values():
@@ -487,6 +641,11 @@ class OwnedTaskPolicy:
     that chat began, so code an earlier task of the chat planted is read
     before the chat's approval covers a step. Without that start, the
     person is asked.
+
+    A path outside the workspace (#405) is asked about through *folders*
+    (the task's asking policy, also in Auto, which asks nobody), or the
+    folder layer of *inner*: a read in a folder its owner chat allowed
+    runs unasked.
     """
 
     def __init__(
@@ -498,8 +657,10 @@ class OwnedTaskPolicy:
         on_use: Callable[[ApprovalUse], Awaitable[None]] | None = None,
         *,
         started: Callable[[str], Awaitable[float | None]] | None = None,
+        folders: ApprovalPolicy | None = None,
     ) -> None:
         self.inner = inner
+        self._folders = folders
         self._ledger = ledger
         self._task_id = task_id
         self._owner = owner
@@ -513,6 +674,27 @@ class OwnedTaskPolicy:
 
     def _auto(self) -> bool:
         return find_auto(self.inner) is not None
+
+    def _folder_asker(self) -> Any:
+        found = find_folder_asker(self._folders)
+        return found if found is not None else find_folder_asker(self.inner)
+
+    @property
+    def asks_folders(self) -> bool:
+        return self._folder_asker() is not None
+
+    async def decide_folder(self, request: ApprovalRequest) -> ApprovalDecision:
+        """A read in a folder the owner chat allowed runs; anything else asks (#405)."""
+        outside = request.outside
+        asker = self._folder_asker()
+        if outside is None or asker is None:
+            raise ValueError("decide_folder needs an outside request and an asker")
+        if outside.access == "read":
+            chat = await self._owner()
+            if chat and _covered(self._ledger.folders_of(chat), outside.path):
+                return ApprovalDecision(True, FOLDER_FOR_CHAT, origin="session")
+        decision: ApprovalDecision = await asker.decide_folder(request)
+        return decision
 
     async def review_window(self) -> float | None:
         """When the task's review window starts: its owner chat's start.

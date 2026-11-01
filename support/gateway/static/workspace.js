@@ -1833,6 +1833,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
   let what = t("approval.arguments");
   let diff = null; // What a file write replaces, when the gateway could compare.
   let why = ""; // Why it could not, in words.
+  let noBox = false; // A read outside the workspace shows its folder, not its arguments.
   if (tool === "shell_exec") {
     what = t("approval.command");
     title = t("approval.runCommand", { folder });
@@ -1874,7 +1875,20 @@ function approvalCard(request, view = chatApproval, asked = "") {
     title = reviewed.title || title;
     caption = t("approval.asksEveryTime", { tool });
   }
+  // A path outside the workspace (#405): the card names the real folder. A read may be allowed for
+  // the chat or always; a write asks every time and is a high-impact card.
+  const outside = outsideOf(request);
+  const outsideFolder = outside ? String(outside.folder_label || outside.folder || "") : "";
+  const grantable = outside?.access === "read" && outside.grantable === true;
+  if (outside) {
+    card.dataset.outside = outside.access;
+    const asked = outside.access === "write" ? "write" : tool === "list_files" ? "list" : "read";
+    title = t(`approval.outside.${asked}`, { folder: outsideFolder });
+    caption = t(`approval.outside.caption.${outside.access === "write" ? "write" : "read"}`, { tool, workspace });
+    if (outside.access === "read") { content = ""; noBox = true; }
+  }
   card.append(el("p", "approval-title", title), el("p", "approval-caption", caption));
+  if (outside) card.append(folderBox(outside, tool, outsideFolder));
   if (high && reviewed.reasons.length) {
     card.append(el("p", "approval-why", t("approval.why")));
     const reasons = el("ul", "approval-reasons");
@@ -1886,7 +1900,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
     card.append(el("p", "approval-asked", t("approval.youAsked", { text })));
   }
   if (why) card.append(el("p", "approval-note", why));
-  const lines = diff ? diff.rows : content.split("\n");
+  const lines = diff ? diff.rows : noBox ? [] : content.split("\n");
   const canFold = tool === "python_exec" || tool === "file_write";
   const shown = !canFold || state.showAll ? lines : lines.slice(0, 20);
   // A long command scrolls inside its box: make the box reachable and named for a keyboard user.
@@ -1909,8 +1923,12 @@ function approvalCard(request, view = chatApproval, asked = "") {
   const once = button(high ? "outline-button" : "primary-button", t("common.allowOnce"), () => view.answer(request, state, "once"));
   once.dataset.approvalOnce = "";
   once.dataset.approvalFocus = "once";
-  const session = button("outline-button", t("approval.allowFor", { scope }), () => view.answer(request, state, "session"));
+  const session = button("outline-button", outside ? t("approval.outside.chat", { scope }) : t("approval.allowFor", { scope }),
+    () => view.answer(request, state, "session"));
   session.dataset.approvalFocus = "session";
+  const always = button("outline-button", t("approval.outside.always"), () => view.answer(request, state, "always"));
+  always.dataset.approvalFocus = "always";
+  always.dataset.approvalAlways = "";
   const deny = button(high ? "primary-button" : "quiet-button", t("common.deny"), () => {
     state.deny = true;
     actions.hidden = true;
@@ -1921,15 +1939,20 @@ function approvalCard(request, view = chatApproval, asked = "") {
   });
   deny.dataset.approvalDeny = "";
   deny.dataset.approvalFocus = "deny";
-  if (high) actions.append(once, deny);
-  else actions.append(once, session, deny);
+  // The answers offered: a folder outside the workspace that may be kept has four.
+  const offered = high ? [once, deny] : outside ? (grantable ? [once, session, always, deny] : [once, deny]) : [once, session, deny];
+  actions.append(...offered);
   card.append(actions);
   const command = tool === "shell_exec" || tool === "python_exec";
-  if (high) rule = t("approval.rule.high", { scope, workspace });
+  if (outside) {
+    rule = outside.access === "write" ? t("approval.rule.outsideWrite", { workspace })
+      : grantable ? t("approval.rule.outsideRead", { scope, folder: outsideFolder }) : t("approval.rule.outsideOnce");
+  } else if (high) rule = t("approval.rule.high", { scope, workspace });
   else if (command) rule = t(tool === "shell_exec" ? "approval.rule.shell" : "approval.rule.python", { scope, workspace });
   const grant = el("p", "approval-warning", rule);
   grant.id = `approval-scope-${id}`;
-  if (!high) session.setAttribute("aria-describedby", grant.id);
+  if (offered.includes(session)) session.setAttribute("aria-describedby", grant.id);
+  if (offered.includes(always)) always.setAttribute("aria-describedby", grant.id);
   card.append(grant);
   // The server says, by code, when the person's Allow is kept for the chat's later tasks (#369).
   const kept = !high && request.remembered === true
@@ -1990,15 +2013,36 @@ function approvalCard(request, view = chatApproval, asked = "") {
   if (request.arguments_complete !== true || (tool === "file_write" && !request.target)) {
     card.append(button("link-button", t("approval.reload"), () => view.reload(id)));
   }
-  const controls = [once, ...(high ? [] : [session]), deny, confirm];
+  const controls = [...offered, confirm];
   const enable = () => {
     const waiting = approvalNow() - state.mountedAt < 500;
     const unavailable = request.arguments_complete !== true || (tool === "file_write" && !request.target);
-    for (const control of controls) control.disabled = waiting || state.submitting || (unavailable && (control === once || control === session));
+    for (const control of controls) control.disabled = waiting || state.submitting || (unavailable && control !== deny && control !== confirm);
   };
   enable();
   setTimeout(enable, Math.max(0, 500 - (approvalNow() - state.mountedAt)));
   return card;
+}
+
+/** The request's path outside the workspace (#405), or null. */
+function outsideOf(request) {
+  const outside = request?.outside;
+  return outside && typeof outside === "object" && (outside.access === "read" || outside.access === "write") ? outside : null;
+}
+
+/** The folder a call outside the workspace opens: its real path, and what melo wants to do there. */
+function folderBox(outside, tool, folderLabel) {
+  const box = el("div", "approval-folder");
+  box.setAttribute("role", "group");
+  box.setAttribute("aria-label", t("approval.outside.folder"));
+  const path = String(outside.path || "");
+  const name = path.replace(/\/+$/, "").split("/").pop() || path;
+  const what = outside.access === "write" ? t("approval.outside.writes", { name })
+    : tool === "list_files" ? t("approval.outside.lists") : t("approval.outside.reads", { name });
+  const where = el("p", "approval-folder-path", folderLabel);
+  where.title = String(outside.folder || folderLabel);
+  box.append(el("p", "approval-folder-label", t("approval.outside.folder")), where, el("p", "approval-folder-what", what));
+  return box;
 }
 
 /**

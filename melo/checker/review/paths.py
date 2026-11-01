@@ -13,29 +13,17 @@ from dataclasses import dataclass, field, replace
 from urllib.parse import unquote, urlparse
 
 from localmelo.melo.contracts import own_gateway
+from localmelo.melo.contracts.folders import CREDENTIAL_PLACES, MELO_DATA, SYSTEM_PLACES
 from localmelo.melo.contracts.review import TITLES, ActionReview
 
-# Under the home folder. Reads count too: passwords, keys and cookies. An
-# entry that starts with "**/" is a file name, anywhere (shell patterns, any
-# case), that a read through a helper may not name unasked (see secret_name).
+# Under the home folder. Reads count too: passwords, keys and cookies. The
+# places are the ones melo never opens outside the workspace (one list, in
+# melo.contracts.folders). An entry that starts with "**/" is a file name,
+# anywhere (shell patterns, any case), that a read through a helper may not
+# name unasked (see secret_name).
 _CREDENTIALS = [
-    ".ssh",
-    ".aws",
-    ".netrc",
-    ".config/gh",
-    ".docker/config.json",
-    ".gnupg",
-    ".kube",
-    ".pypirc",
-    ".npmrc",
-    ".git-credentials",
-    ".password-store",
-    "Library/Keychains",
-    "Library/Cookies",
-    "Library/Safari",
-    "Library/Application Support/Google/Chrome",
-    "Library/Application Support/Firefox",
-    ".cache/localmelo",
+    *CREDENTIAL_PLACES,
+    MELO_DATA,
     "**/.env*",
     "**/*.pem",
     "**/*.key",
@@ -71,7 +59,7 @@ _PERSISTENCE = [
     ".gitconfig",
     ".config/git",
 ]
-_SYSTEM = ["/etc", "/private/etc", "/System", "/Library", "/usr", "/bin", "/sbin"]
+_SYSTEM = list(SYSTEM_PLACES)
 # Writable without asking: temporary folders, a few devices, the tools' caches.
 _HARMLESS = [
     "/tmp",

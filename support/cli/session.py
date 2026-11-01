@@ -1584,9 +1584,13 @@ class CliSession:
                 )
                 return
         grants = ", ".join(sorted(approvals.allowed_tools)) or "none"
+        # Folders outside the workspace allowed for reading in this chat (#405).
+        folders = ", ".join(home_label(f) for f in approvals.allowed_folders)
+        shown = f" · folders: {folders}" if folders else ""
         self.out.print(
             self._text(
-                f"Approvals: {approvals.mode} · grants: {grants}{self._effect_note()}"
+                f"Approvals: {approvals.mode} · grants: {grants}{shown}"
+                f"{self._effect_note()}"
             )
         )
 

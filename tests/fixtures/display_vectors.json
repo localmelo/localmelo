@@ -67,6 +67,9 @@
     ["cancelled", "park", "Parked", "stopped", "Parked"]
   ],
   "approval_tag": [
+    ["success", "none", {"allowed": true, "origin": "policy", "remember": false, "folder": {"scope": "always"}}, "allowed: a folder you always allow", "Allowed: the folder is in Settings, under Other folders melo may read"],
+    ["success", "none", {"allowed": true, "origin": "session", "remember": false, "folder": {"scope": "chat"}}, "allowed: folder allowed for this chat", "Allowed: you allowed this folder for this chat"],
+    ["success", "none", {"allowed": true, "origin": "user", "remember": true, "folder": {"scope": "always"}}, "allowed: a folder you always allow", "Allowed: the folder is in Settings, under Other folders melo may read"],
     ["success", "none", {"allowed": true, "origin": "user", "remember": false}, "allowed", "Allowed once by you"],
     ["success", "none", {"allowed": true, "origin": "user", "remember": true}, "allowed for the session", "Allowed by you for this session"],
     ["success", "none", {"allowed": true, "origin": "session", "remember": false}, "allowed by a session grant", "Allowed by a grant for this session"],
