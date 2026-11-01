@@ -51,7 +51,12 @@ from localmelo.melo.memory.long import StoredEntry
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.memory.retrieval import Doc, LLMRetriever, send_from_provider
 from localmelo.melo.memory.retrieval.base import elapsed_ms
-from localmelo.melo.schema import EMPTY_REPLY_NUDGE, Message, ToolDef, split_thinking
+from localmelo.melo.schema import (
+    Message,
+    ToolDef,
+    split_thinking,
+    starts_with_reply_nudge,
+)
 from localmelo.support.config import (
     MEMORY_RECALL_CHARS,
     MEMORY_RECALL_DOCS,
@@ -261,6 +266,8 @@ class ChatTurn:
     unsaved_claim: bool = False
     # The oldest turn of this chat the model's window holds (None: not known).
     keep_from_turn: int | None = None
+    # What the model's memory searches found in this turn, first found first.
+    searched: list[Item] = field(default_factory=list)
 
     def event(self) -> dict[str, Any] | None:
         data = self.memory.event()
@@ -273,7 +280,21 @@ class ChatTurn:
         if self.refused:
             data["refused"] = records.NOT_KEPT
         data["unsaved_claim"] = self.unsaved_claim
+        if self.searched:
+            data["searched"] = [item.to_json() for item in self.searched]
         return data
+
+    def add_searched(self, items: Sequence[Item]) -> None:
+        """Note what a search found in this turn; refresh the event if it is new."""
+        known = {item.key for item in self.searched}
+        fresh: list[Item] = []
+        for item in items:
+            if item.key not in known:
+                known.add(item.key)
+                fresh.append(item)
+        if fresh:
+            self.searched.extend(fresh)
+            self.publish()
 
     def publish(self) -> None:
         data = self.event()
@@ -361,8 +382,9 @@ async def window_start(
 
     A message is stamped when it is made, inside its turn; a turn loaded back
     from the store is stamped with the turn's own start. So the turn of the
-    window's first user message (the empty-reply nudge is no message of the
-    user's), the one that began last before that stamp, is the oldest one the
+    window's first user message (a nudge the agent sends after a reply that was
+    no answer is no message of the user's, :func:`starts_with_reply_nudge`), the
+    one that began last before that stamp, is the oldest one the
     model still sees; later turns are in the window too. A window without a
     user message holds none: that is this turn. Counting messages would not
     do: a run adds user messages of its own (nudges, notes, a reflection),
@@ -372,7 +394,7 @@ async def window_start(
         (
             msg.timestamp
             for msg in window
-            if msg.role == "user" and msg.content != EMPTY_REPLY_NUDGE
+            if msg.role == "user" and not starts_with_reply_nudge(msg.content)
         ),
         None,
     )
@@ -1956,7 +1978,10 @@ class MemoryTools(BaseToolProvider):
         )
         if not items:
             return "Nothing in melo's memory matches that."
-        return "\n".join(f"{n}. {item.prompt}" for n, item in enumerate(items[:k], 1))
+        shown = items[:k]
+        if chat is not None:
+            chat.add_searched(shown)
+        return "\n".join(f"{n}. {item.prompt}" for n, item in enumerate(shown, 1))
 
     async def close(self) -> None:
         return None
