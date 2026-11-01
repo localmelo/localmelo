@@ -324,8 +324,7 @@ async def run(
                 report.notes += await memory.keep_said(
                     chats, info, typed, exchange.asked_at
                 )
-    report.embedded_chars = await memory.index_turns(turns)
-    report.docs = len(turns)
+    report.docs, report.embedded_chars = await memory.index_turns(turns)
     if notes == "rules":
         await memory.reindex(None)  # a vector for each note, when a model is set
     report.model = memory.embedding()[1]

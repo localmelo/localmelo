@@ -9,6 +9,8 @@ above that list's bar: most of the question's content words for BM25,
 :data:`MIN_COSINE` for vectors, so most turns recall nothing. Documents (not
 records) decay with a :data:`HALF_LIFE_DAYS` half-life, records rank first at
 an equal score, and at most :data:`PER_SESSION` documents come from one chat.
+A long turn is indexed as several chunks (:mod:`.index`); a list holds at most
+one chunk of a turn, the best, whatever the chats' cap.
 A turn whose fact a newer note or a newer turn replaced comes after the rest,
 below the newer one, and reads as older (:func:`newer_first`); the recall block
 leaves such a turn out unless the message asks about the past
@@ -346,7 +348,22 @@ def ranked(
             score *= 0.5 ** (age_days / HALF_LIFE_DAYS)
         rows.append((score, item.is_record, item))
     rows.sort(key=lambda row: (row[0], row[1]), reverse=True)
-    return [item for _, _, item in rows]
+    return one_per_turn([item for _, _, item in rows])
+
+
+def one_per_turn(items: Sequence[Item]) -> list[Item]:
+    """*items* with only the first (the best) document of each turn kept: a long
+    turn's chunks (:mod:`.index`) share their session and turn. Records stay."""
+    seen: set[tuple[str, int]] = set()
+    kept: list[Item] = []
+    for item in items:
+        if not item.is_record:
+            turn = (item.session_id, item.turn)
+            if turn in seen:
+                continue
+            seen.add(turn)
+        kept.append(item)
+    return kept
 
 
 def replaced_turns(corpus: Corpus) -> dict[tuple[str, int], Item]:
@@ -414,7 +431,10 @@ def current_only(items: Sequence[Item], message: str) -> list[Item]:
 
 
 def pick(items: Sequence[Item], *, records: int, docs: int) -> list[Item]:
-    """From *items*, best first: at most *records* records and *docs* documents."""
+    """From *items*, best first: at most *records* records and *docs* documents,
+    one chunk of a turn at most (the best), then at most :data:`PER_SESSION`
+    documents of a chat."""
+    items = one_per_turn(items)
     kept = [item for item in items if item.is_record][:records]
     # A record already says what the turn it came from said.
     said = {(item.session_id, item.turn) for item in kept}
