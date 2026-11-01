@@ -15,16 +15,29 @@ from fastapi.testclient import TestClient
 from localmelo.melo.checker.redaction import REDACTED
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.support.gateway.console import Console, ConsoleOptions
-from localmelo.support.gateway.console.running import MAX_ITEMS, task_counts
+from localmelo.support.gateway.console.running import (
+    MAX_ITEMS,
+    item_activity,
+    task_counts,
+)
 from localmelo.support.gateway.console.worker_reader import WorkerReader
 from localmelo.support.gateway.finishing import OUT_OF_STEPS
+from localmelo.support.sessions.display import ActivityText
 from localmelo.support.sessions.store import (
     NewSession,
     SessionStore,
     SessionStoreError,
 )
 
-from .conftest import HOLDER, FakeBuilder, FakeProbe, make_cfg, open_session, seed_turn
+from .conftest import (
+    HOLDER,
+    FakeBuilder,
+    FakeProbe,
+    core_event,
+    make_cfg,
+    open_session,
+    seed_turn,
+)
 
 
 @pytest.fixture()
@@ -123,13 +136,98 @@ async def test_a_running_chat_is_counted_and_listed_by_title(
     found = status(client)
     assert found["running"]["chats"] == 1
     item = {"kind": "chat", "id": turn.session_id, "title": "Fix the build"}
-    assert found["items"] == [{**item, "activity": "Thinking", "icon": "think"}]
+    # The model's answer is in and nothing started after it: "Thinking" in words, but no model call under way.
+    thinking = {"activity": "Thinking", "icon": "think", "answering": False}
+    assert found["items"] == [{**item, **thinking}]
     assert client.get("/api/health").json()["sessions"]["running"] == 1
     # The app's pill reads these words: in the language it asks for, English for a client that asks for none.
     asked = client.get("/api/health", headers={"X-LocalMelo-Language": "zh-Hans"})
     assert asked.json()["status"]["items"][0]["activity"] == "正在思考"
     assert asked.json()["status"]["focus"]["activity"] == "正在思考"
     monkeypatch.undo()
+
+
+async def test_an_item_whose_newest_step_is_a_model_call_is_answering(
+    client: TestClient,
+    console: Console,
+    workspace: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The desktop pet and the console's portrait think only on this mark, never on the word "Thinking"."""
+    turn = await seed_turn(console.store, workspace, status="running", title="Plan")
+    entry = await open_session(console.sessions, turn.session_id)
+    monkeypatch.setattr(entry.runner, "_active", object())
+    await console.store.append_events(
+        turn.session_id,
+        turn.turn,
+        [core_event("step.started", seq=2)],
+        holder=HOLDER,
+    )
+    found = status(client)
+    assert found["items"][0]["answering"] is True
+    assert found["focus"]["answering"] is True
+    await console.store.append_events(
+        turn.session_id,
+        turn.turn,
+        [
+            core_event(
+                "tool.started",
+                seq=3,
+                call_id="c1",
+                name="file_read",
+                arguments={"path": "a.md"},
+            )
+        ],
+        holder=HOLDER,
+    )
+    found = status(client)
+    assert (found["items"][0]["icon"], found["items"][0]["answering"]) == (
+        "read",
+        False,
+    )
+    monkeypatch.undo()
+
+
+async def test_a_wait_a_hold_an_ask_and_an_unreadable_store_are_never_answering(
+    console: Console, workspace: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Whatever the newest step, an item that waits on a person, a slot or a chat is not the model answering."""
+    turn = await seed_turn(console.store, workspace, status="running", title="Plan")
+    owner = turn.session_id
+    await console.store.append_events(
+        owner, turn.turn, [core_event("step.started", seq=2)], holder=HOLDER
+    )
+    text, _ = await item_activity(console, "chat", owner)
+    assert (text.icon, text.answering) == ("think", True)
+    with monkeypatch.context() as patch:  # an approval waits
+        patch.setattr(console.broker, "pending", lambda _owner: True)
+        text, _ = await item_activity(console, "chat", owner)
+        assert (text.icon, text.answering) == ("wait", False)
+    with monkeypatch.context() as patch:  # held for a model slot
+        patch.setattr(console.gate, "held", lambda _owner: "Priority")
+        text, _ = await item_activity(console, "chat", owner)
+        assert (text.icon, text.answering) == ("held", False)
+    with (
+        monkeypatch.context() as patch
+    ):  # a task waits on its chat's answer, or the person's
+        for asked in ("held", "wait"):
+            patch.setattr(
+                console.asks,
+                "activity",
+                lambda _owner, icon=asked: ActivityText("Waiting on Plan", icon, {}),
+            )
+            text, _ = await item_activity(console, "task", owner)
+            assert (text.icon, text.answering) == (asked, False)
+
+    async def unreadable(*_args: Any, **_kwargs: Any) -> Any:
+        raise SessionStoreError("locked")
+
+    with (
+        monkeypatch.context() as patch
+    ):  # the store cannot be read: "Thinking" in words only
+        patch.setattr(console.store, "latest_events", unreadable)
+        text, changed = await item_activity(console, "chat", owner)
+        assert (text.icon, text.answering, changed) == ("think", False, 0.0)
 
 
 def ask(console: Console, owner: str, request_id: str) -> Any:
@@ -195,7 +293,8 @@ async def test_running_tasks_are_counted_with_the_queue(
     found = status(client)
     assert found["running"]["tasks"] == 2
     assert found["tasks"] == {"running": 2, "queued": 1, "held": 1, "top_level": 1}
-    thinking = {"activity": "Thinking", "icon": "think"}
+    # No events to read: "Thinking" for want of them, which is not the model answering.
+    thinking = {"activity": "Thinking", "icon": "think", "answering": False}
     assert found["items"] == [
         {"kind": "task", "id": "t1", "title": "Index the repo", **thinking},
         {"kind": "task", "id": "t2", "title": "Summarize", **thinking},

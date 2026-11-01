@@ -5,10 +5,10 @@ import Foundation
 /// runs or waits, and says in one plain line what Melo is doing. Like `PetPolicy.swift`, this file decides everything:
 /// what it shows from the health reply, when it is hidden, when the pet comes back, and where its panel goes.
 
-/// Seconds a line stays before another may replace it; seconds the pet wags when it comes back after "Done"; and how old
-/// a health reply may be before the pill stops believing it (the gateway may have hung).
+/// Seconds a line stays before another may replace it; seconds the pet shows "done" when it comes back after "Done";
+/// and how old a health reply may be before the pill stops believing it (the gateway may have hung).
 let pillTextEvery: TimeInterval = 1.5
-let pillWagFor: TimeInterval = 3
+let petDoneAfterPill: TimeInterval = 3
 let pillStaleAfter: TimeInterval = 12
 
 enum PillState: Equatable {
@@ -33,17 +33,10 @@ enum PillIcon: String {
     }
 }
 
-/// Which picture of Melo the pill's round portrait shows. The four working and waiting ones are new art, still to be
-/// made (`slot`, a file under `pill/` of the pictures folder); until a file is there each falls back to today's face
-/// (`face`, a file under `face/`).
+/// Which picture of Melo the pill's round portrait shows: what Melo does, as one of the head pictures of the moves
+/// (`face`, the console's own faces).
 enum PillPortrait: Equatable, Hashable {
     case workLaptop, workRead, workThink, waitAlert, done, error
-
-    var slot: String? {
-        let slots: [PillPortrait: String] = [.workLaptop: "work-laptop", .workRead: "work-read",
-                                             .workThink: "work-think", .waitAlert: "wait-alert"]
-        return slots[self]
-    }
 
     var face: String {
         switch self {
@@ -64,13 +57,9 @@ enum PillPortrait: Equatable, Hashable {
     }
 }
 
-/// The file of a portrait for a screen scale, relative to the pictures folder: the new art's slot if `exists` says it
-/// is there, else today's face.
-func pillPictureFile(_ portrait: PillPortrait, scale: Int, exists: (String) -> Bool) -> String {
-    func file(_ folder: String, _ name: String) -> String { "\(folder)/\(name)\(scale >= 2 ? "@2x" : "").png" }
-    if let slot = portrait.slot, exists(file("pill", slot)) { return file("pill", slot) }
-    return file("face", portrait.face)
-}
+/// The file of a portrait in the moves folder: Melo's head cut from the state's poster, 96 px, sharp at any scale on
+/// the 32-point disc.
+func pillPictureFile(_ portrait: PillPortrait) -> String { "face-\(portrait.face).png" }
 
 /// Where a press on the pill goes: to the chat or task that waits, to the console route of the focus chat or task, or
 /// just to the window (a run or terminal chat has no page of its own).
@@ -191,8 +180,8 @@ func pillSnapshot(health data: Data, age: TimeInterval) -> PillSnapshot? {
 struct PillDecision: Equatable {
     /// What to show; nil: no pill, and the pet lies there.
     var pill: PillModel?
-    /// The pill's "Done" just ended: the pet comes back wagging.
-    var petWags = false
+    /// The pill's "Done" just ended: the pet comes back showing "done".
+    var petShowsDone = false
     /// Seconds until the policy wants to be asked again (an ended run's time is up, a held line may change).
     var recheckIn: TimeInterval?
 }
@@ -223,9 +212,9 @@ struct PillPolicy {
         let previous = shown
         guard mode == .pill, !windowShown, hidden == nil, var model = live?.model else {
             shown = nil
-            // The wag is for a "Done" that ran out on the desktop, not one the person's window or choice cut short.
-            let wags = previous?.state == .done && mode == .pill && !windowShown && hidden == nil && !stopped
-            return PillDecision(pill: nil, petWags: wags)
+            // "Done" goes on for a "Done" that ran out on the desktop, not one the person's window or choice cut short.
+            let done = previous?.state == .done && mode == .pill && !windowShown && hidden == nil && !stopped
+            return PillDecision(pill: nil, petShowsDone: done)
         }
         var waits = [live?.expiresIn, pillStaleAfter - age].compactMap { $0 }
         if let held = previous, held.state == model.state, held.text != model.text, now - changedAt < pillTextEvery {

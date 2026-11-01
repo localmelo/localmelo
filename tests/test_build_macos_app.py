@@ -304,9 +304,10 @@ def test_build_assembles_locked_runtime_and_swift(
     # Each asset holds its own name, so a copy under the wrong name shows.
     for name in ("AppIcon.icns", "MenuBarLogo.png", "MenuBarLogo@2x.png"):
         (root / "macos/assets" / name).write_bytes(name.encode())
-    for name in ("anchors.json", "pet/rest-lazy.png", "portrait/sit-idle@2x.png"):
-        (root / "macos/art/akita" / name).parent.mkdir(parents=True, exist_ok=True)
-        (root / "macos/art/akita" / name).write_bytes(name.encode())
+    moves = root / "support/gateway/static/moves"
+    moves.mkdir(parents=True)
+    for name in ("manifest.json", "working.webp"):
+        (moves / name).write_bytes(name.encode())
     # The console's catalogs: their app.* keys become the bundle's strings.
     catalogs = root / "support/gateway/static/i18n"
     catalogs.mkdir(parents=True)
@@ -358,10 +359,16 @@ def test_build_assembles_locked_runtime_and_swift(
     assert (resources / "LocalMelo.icns").read_bytes() == b"AppIcon.icns"
     assert (resources / "MenuBarLogo.png").read_bytes() == b"MenuBarLogo.png"
     assert (resources / "MenuBarLogo@2x.png").read_bytes() == b"MenuBarLogo@2x.png"
-    # Melo's pictures keep their folders: the app finds them under Resources/akita.
-    akita = resources / "akita"
-    for name in ("anchors.json", "pet/rest-lazy.png", "portrait/sit-idle@2x.png"):
-        assert (akita / name).read_bytes() == name.encode()
+    # No other pictures of Melo ride along: the moves are the only ones.
+    assert not (resources / "akita").exists()
+    # Melo's moves are the console's files, once: inside the package the gateway serves, where the app reads them.
+    served = (
+        runtime
+        / "python/lib/python3.11/site-packages/localmelo/support/gateway/static/moves"
+    )
+    for name in ("manifest.json", "working.webp"):
+        assert (served / name).read_bytes() == name.encode()
+    assert not (resources / "moves").exists()
     assert (
         runtime / "python/lib/python3.11/site-packages/localmelo/support/__init__.py"
     ).is_file()

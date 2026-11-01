@@ -345,7 +345,8 @@ async def _live(row: dict[str, Any], console: Console) -> None:
     text, _ = await item_activity(console, row["kind"], row["id"])
     if text.icon in ("wait", "held"):
         row["state"] = "waiting" if text.icon == "wait" else "held"
-    row.update(activity=spoken(text), icon=text.icon)
+    # Whether the model is answering, as health's items say it (the portrait thinks).
+    row.update(activity=spoken(text), icon=text.icon, answering=text.answering)
 
 
 async def chat_did(console: Console, turn: DayTurn) -> str:

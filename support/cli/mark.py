@@ -1,7 +1,7 @@
 """Melo's head beside the welcome: rows of half blocks from the pet's face picture.
 
 The pixels are not drawn by hand: ``scripts/make_terminal_mark.py`` computes
-them by downsampling ``macos/art/akita/face/idle@2x.png`` and writes the
+them by downsampling ``support/gateway/static/moves/face-brand.png`` and writes the
 PIXELS block below (``tests/cli/test_mark.py`` checks that it still matches
 the picture). Each terminal cell holds two pixels, the upper as
 the foreground of ``▀`` and the lower as its background (a cell of one colour
@@ -19,23 +19,23 @@ from rich.text import Text
 from localmelo.support.cli.theme import ASCII, Palette, Symbols
 
 # Written by scripts/make_terminal_mark.py: ``.`` empty, ``o`` fur, ``c``
-# cream, ``b`` the inner ears, ``k`` the eyes, nose and mouth.
+# cream, ``b`` shade, ``k`` the eyes, nose and mouth.
 PIXELS: Final = (
-    ".oo......oo.",
-    ".oboooooobo.",
-    ".oboooooobo.",
-    ".oooooooooo.",
-    ".ooocoocooo.",
-    "ooookcckoooo",
-    "occcckkcccco",
-    "occcccccccco",
+    ".cc......cc.",
+    ".coco..ococ.",
+    ".cocoooococ.",
+    ".cooooooooc.",
+    "ccooccccoocc",
+    "cccckcckcccc",
+    "ccccckkccccc",
+    "ccccckkccccc",
     ".cccccccccc.",
-    "..cccccccc..",
+    ".occcccccco.",
 )
 # The mark's own colours (artwork, not roles), on a dark and a light terminal.
 COLOURS: Final = {
-    "dark": {"o": "#d4893a", "c": "#f3e9d2", "b": "#8f5220", "k": "#182836"},
-    "light": {"o": "#c17626", "c": "#efe1c2", "b": "#7a4518", "k": "#182836"},
+    "dark": {"o": "#f09e51", "c": "#faecdd", "b": "#92583f", "k": "#341e15"},
+    "light": {"o": "#d98a3e", "c": "#f3e2cc", "b": "#7e4a33", "k": "#341e15"},
 }
 # Narrower, the welcome is its rows alone: three rows of half blocks lose
 # the ears, and five leave the rows too little room.

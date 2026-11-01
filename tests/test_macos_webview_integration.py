@@ -373,9 +373,12 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
     python.chmod(0o755)
     for logo in ("MenuBarLogo.png", "MenuBarLogo@2x.png"):  # the menu-bar item's logo
         shutil.copy(ROOT / "macos/assets" / logo, bundle / "Resources" / logo)
+    # The pet's moves, its stills and the start window's portrait: where the bundled gateway serves them.
     shutil.copytree(
-        ROOT / "macos/art/akita", bundle / "Resources/akita"
-    )  # the pet's pictures
+        ROOT / "support/gateway/static/moves",
+        python.parent.parent
+        / "lib/python3.11/site-packages/localmelo/support/gateway/static/moves",
+    )
     source = (ROOT / "macos/LocalMeloApp/main.swift").read_text()
     injections = {
         # The system's panel and Finder cannot run here: the panel answers the folder the test names.
@@ -554,17 +557,12 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
         [
             "/usr/bin/xcrun",
             "swiftc",
-            str(ROOT / "macos/LocalMeloApp/GatewayPolicy.swift"),
-            str(ROOT / "macos/LocalMeloApp/L10n.swift"),
-            str(ROOT / "macos/LocalMeloApp/FolderBridge.swift"),
-            str(ROOT / "macos/LocalMeloApp/StatusView.swift"),
-            str(ROOT / "macos/LocalMeloApp/MenuBar.swift"),
-            str(ROOT / "macos/LocalMeloApp/PetPolicy.swift"),
-            str(ROOT / "macos/LocalMeloApp/PetMotion.swift"),
-            str(ROOT / "macos/LocalMeloApp/MotionGate.swift"),
-            str(ROOT / "macos/LocalMeloApp/PetPanel.swift"),
-            str(ROOT / "macos/LocalMeloApp/PillPolicy.swift"),
-            str(ROOT / "macos/LocalMeloApp/PillPanel.swift"),
+            # Every source of the app but its own main, which the test's copy above replaces.
+            *(
+                str(path)
+                for path in sorted((ROOT / "macos/LocalMeloApp").glob("*.swift"))
+                if path.name != "main.swift"
+            ),
             str(main),
             "-o",
             str(executable),
@@ -1191,19 +1189,19 @@ def test_the_first_window_shows_melo_in_the_mood_of_each_step(
             if line.startswith("step ")
         ]
         assert moods == [
-            ("Starting the local server", "portrait sit-working"),
-            ("Signing in", "portrait sit-working"),
-            ("Opening your workspace", "portrait sit-idle"),
+            ("Starting the local server", "portrait startup"),
+            ("Signing in", "portrait startup"),
+            ("Opening your workspace", "portrait startup"),
         ], events
 
 
-def test_a_start_that_fails_shows_melo_with_the_drooping_ear(
+def test_a_start_that_fails_shows_melo_thinking_not_a_healthy_start(
     app: Path, tmp_path: Path
 ) -> None:
     process = launch(app, tmp_path, "wrong-quit")
     try:
         events = wait_for(tmp_path / "events", "failure-portrait", process)
-        assert "failure-portrait sit-error" in events
+        assert "failure-portrait error" in events
         process.wait(timeout=15)  # the host clicks Quit by itself
     finally:
         stop(process, tmp_path)

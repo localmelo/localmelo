@@ -121,16 +121,17 @@ precondition(snap(health(server: #"{"reachable":false}"#)) == nil)
 precondition(snap(health(items: [reading], server: #"{"reachable":true}"#))!.model.state == .working)
 precondition(snap(health(items: [reading], server: #"{"reachable":null}"#))!.model.state == .working)
 
-// A finished run: "Done: <title>" for 6 s, "Stopped: <title>" for 10 s, counted from when it ended and the age of the reply.
+// A finished run: "Done: <title>" and "Stopped: <title>" for 8 s each (the pet's and the console's), counted from when it
+// ended and the age of the reply.
 let done = snap(health(recent: ended("done", "1.5")), age: 0.5)!
 precondition(done.model.state == .done && done.model.text == "Done: Slides" && done.model.glyph == "\u{2713}")
-precondition(done.model.portrait == .done && done.model.click == .route("#/s/c9") && abs(done.expiresIn! - 4) < 1e-9)
-precondition(snap(health(recent: ended("done", "5.9")))!.expiresIn! > 0 && snap(health(recent: ended("done", "6.0"))) == nil)
-precondition(snap(health(recent: ended("done", "5.0")), age: 1.5) == nil)  // the reply is old: the 6 s are used up
-let failed = snap(health(recent: ended("failed", "9.9", title: "Fix CI", kind: "task", id: "t4")))!
+precondition(done.model.portrait == .done && done.model.click == .route("#/s/c9") && abs(done.expiresIn! - 6) < 1e-9)
+precondition(snap(health(recent: ended("done", "7.9")))!.expiresIn! > 0 && snap(health(recent: ended("done", "8.0"))) == nil)
+precondition(snap(health(recent: ended("done", "7.0")), age: 1.5) == nil)  // the reply is old: the 8 s are used up
+let failed = snap(health(recent: ended("failed", "7.9", title: "Fix CI", kind: "task", id: "t4")))!
 precondition(failed.model.state == .failed && failed.model.text == "Stopped: Fix CI" && failed.model.glyph == "\u{2717}")
 precondition(failed.model.portrait == .error && failed.model.click == .route("#/tasks/t4"))
-precondition(snap(health(recent: ended("failed", "10.0"))) == nil)
+precondition(snap(health(recent: ended("failed", "8.0"))) == nil)
 // A run the person stopped shows nothing; a title that is missing leaves the bare word; a run's end has no page.
 precondition(snap(health(recent: ended("stopped", "1"))) == nil)
 precondition(snap(health(recent: ended("done", "1", title: "")))!.model.text == "Done")
@@ -146,16 +147,10 @@ precondition(done.model.label == "Melo is done: Slides. Opens the chat.")
 precondition(failed.model.label == "Melo stopped: Fix CI. Opens the task.")
 precondition(down.label == "Melo: model server not reachable. Opens the chat.")
 
-// The picture: the new art's file when it is there, else today's face, at the screen's scale.
-precondition(pillPictureFile(.workRead, scale: 2, exists: { _ in true }) == "pill/work-read@2x.png")
-precondition(pillPictureFile(.workRead, scale: 1, exists: { _ in true }) == "pill/work-read.png")
-precondition(pillPictureFile(.workRead, scale: 2, exists: { _ in false }) == "face/working@2x.png")
-precondition(pillPictureFile(.workLaptop, scale: 1, exists: { _ in false }) == "face/working.png")
-precondition(pillPictureFile(.waitAlert, scale: 2, exists: { _ in false }) == "face/waiting@2x.png")
-precondition(pillPictureFile(.done, scale: 2, exists: { _ in true }) == "face/done@2x.png")  // no new art for it
-precondition(pillPictureFile(.error, scale: 1, exists: { _ in true }) == "face/error.png")
-precondition(pillPictureFile(.workThink, scale: 2, exists: { $0 == "pill/work-think@2x.png" }) == "pill/work-think@2x.png")
-precondition(pillPictureFile(.workRead, scale: 2, exists: { $0 == "pill/work-think@2x.png" }) == "face/working@2x.png")
+// The picture: Melo's head from the moves folder, one 96 px file for every screen scale.
+precondition(pillPictureFile(.workRead) == "face-working.png" && pillPictureFile(.workLaptop) == "face-working.png")
+precondition(pillPictureFile(.workThink) == "face-working.png" && pillPictureFile(.waitAlert) == "face-waiting.png")
+precondition(pillPictureFile(.done) == "face-done.png" && pillPictureFile(.error) == "face-error.png")
 """,
     )
 
@@ -173,12 +168,12 @@ func ask(_ data: Data?, reply: Double, now: Double, window: Bool = false, mode: 
 let idle = health()
 let writing = item("chat", "c1", "Writing slides.md", "write")
 
-// Quiet: nothing to show, and nothing to wag about.
+// Quiet: nothing to show, and no "done" to pass on.
 var d = ask(idle, reply: 0, now: 0)
-precondition(d.pill == nil && !d.petWags && d.recheckIn == nil)
+precondition(d.pill == nil && !d.petShowsDone && d.recheckIn == nil)
 // Work starts: the pill appears with the line, and asks to be asked again before the reply goes stale.
 d = ask(health(items: [reading]), reply: 10, now: 10)
-precondition(d.pill?.text == "Reading example.com" && d.pill?.state == .working && !d.petWags)
+precondition(d.pill?.text == "Reading example.com" && d.pill?.state == .working && !d.petShowsDone)
 precondition(d.recheckIn == 12)
 // The line changes at most once per 1.5 s: a newer one waits until then, and the pill asks to be asked again then.
 d = ask(health(items: [tests]), reply: 10.5, now: 10.5)
@@ -198,28 +193,28 @@ precondition(d.pill?.state == .waiting && d.pill?.text == "Waiting for your appr
 d = ask(health(items: [tests]), reply: 12.4, now: 12.4)
 precondition(d.pill?.state == .working && d.pill?.text == "Running the tests")
 
-// The end: "Done: <title>" for 6 s counted from when the run ended; then the pet comes back wagging, once.
+// The end: "Done: <title>" for 8 s counted from when the run ended; then the pet comes back showing "done", once.
 d = ask(health(recent: ended("done", "0.5")), reply: 20, now: 20)
 precondition(d.pill?.state == .done && d.pill?.text == "Done: Slides" && d.pill?.more == 0)
-precondition(d.recheckIn == 5.5)
-d = ask(health(recent: ended("done", "0.5")), reply: 20, now: 25.25)
-precondition(d.pill?.state == .done && !d.petWags && d.recheckIn == 0.25)
-d = ask(health(recent: ended("done", "0.5")), reply: 20, now: 25.5)
-precondition(d.pill == nil && d.petWags && d.recheckIn == nil)
-d = ask(health(recent: ended("done", "2.4")), reply: 22, now: 26)
-precondition(d.pill == nil && !d.petWags)  // asked again: the wag was told once
-// A failed end shows 10 s and the pet comes back without a wag.
+precondition(d.recheckIn == 7.5)
+d = ask(health(recent: ended("done", "0.5")), reply: 20, now: 27.25)
+precondition(d.pill?.state == .done && !d.petShowsDone && d.recheckIn == 0.25)
+d = ask(health(recent: ended("done", "0.5")), reply: 20, now: 27.5)
+precondition(d.pill == nil && d.petShowsDone && d.recheckIn == nil)
+d = ask(health(recent: ended("done", "2.4")), reply: 22, now: 28)
+precondition(d.pill == nil && !d.petShowsDone)  // asked again: it was told once
+// A failed end shows 8 s and the pet comes back without "done".
 d = ask(health(recent: ended("failed", "1", title: "Fix CI")), reply: 30, now: 30)
 precondition(d.pill?.state == .failed && d.pill?.text == "Stopped: Fix CI")
-d = ask(health(recent: ended("failed", "1", title: "Fix CI")), reply: 30, now: 38.5)
+d = ask(health(recent: ended("failed", "1", title: "Fix CI")), reply: 30, now: 36.5)
 precondition(d.pill?.state == .failed)
-d = ask(health(recent: ended("failed", "1", title: "Fix CI")), reply: 30, now: 39)
-precondition(d.pill == nil && !d.petWags)
+d = ask(health(recent: ended("failed", "1", title: "Fix CI")), reply: 30, now: 37)
+precondition(d.pill == nil && !d.petShowsDone)
 // Work that starts during the "Done" takes the pill over at once.
 d = ask(health(recent: ended("done", "1")), reply: 40, now: 40)
 precondition(d.pill?.state == .done)
 d = ask(health(items: [reading], recent: ended("done", "3")), reply: 42, now: 42)
-precondition(d.pill?.state == .working && !d.petWags)
+precondition(d.pill?.state == .working && !d.petShowsDone)
 
 // A reply that is not renewed is not believed for ever: after 12 s the pill goes (the gateway may have hung).
 d = ask(health(items: [reading]), reply: 50, now: 50)
@@ -235,22 +230,22 @@ precondition(d.pill == nil)  // no reply yet
 d = ask(health(items: [reading]), reply: 70, now: 70)
 precondition(d.pill != nil)
 d = ask(health(items: [reading]), reply: 70, now: 70, window: true)
-precondition(d.pill == nil && !d.petWags)
+precondition(d.pill == nil && !d.petShowsDone)
 d = ask(health(items: [reading]), reply: 70, now: 70, mode: .pet)
 precondition(d.pill == nil)
 d = ask(health(items: [reading]), reply: 70, now: 70, mode: .nothing)
 precondition(d.pill == nil)
 d = ask(health(items: [reading]), reply: 70, now: 70, stopped: true)
 precondition(d.pill == nil)
-// A "Done" cut short by the window opening, or by a new choice, is no wag.
+// A "Done" cut short by the window opening, or by a new choice, is no "done" for the pet.
 d = ask(health(recent: ended("done", "1")), reply: 80, now: 80)
 precondition(d.pill?.state == .done)
 d = ask(health(recent: ended("done", "1")), reply: 80, now: 81, window: true)
-precondition(d.pill == nil && !d.petWags)
+precondition(d.pill == nil && !d.petShowsDone)
 d = ask(health(recent: ended("done", "1")), reply: 80, now: 82)
 precondition(d.pill?.state == .done)
 d = ask(health(recent: ended("done", "1")), reply: 80, now: 82.5, mode: .pet)
-precondition(d.pill == nil && !d.petWags)
+precondition(d.pill == nil && !d.petShowsDone)
 
 // "×" hides the pill until the next task starts. The same work stays hidden, whatever it does next.
 policy = PillPolicy()
@@ -258,7 +253,7 @@ d = ask(health(items: [reading, tests], focus: reading), reply: 100, now: 100)
 precondition(d.pill != nil)
 policy.dismiss()
 d = ask(health(items: [reading, tests], focus: reading), reply: 100, now: 100.1)
-precondition(d.pill == nil && !d.petWags)
+precondition(d.pill == nil && !d.petShowsDone)
 d = ask(health(items: [reading, tests], focus: tests), reply: 102, now: 102)
 precondition(d.pill == nil)
 d = ask(health(items: [tests], waiting: ["t1"]), reply: 104, now: 104)
@@ -281,10 +276,10 @@ precondition(d.pill?.text == "Reading a page")
 policy.dismiss()
 d = ask(health(recent: ended("done", "1", id: "c7")), reply: 116, now: 116)
 precondition(d.pill?.state == .done && d.pill?.text == "Done: Slides")
-// "×" on the pill that says "Done" hides it at once, without a wag.
+// "×" on the pill that says "Done" hides it at once, without "done" for the pet.
 policy.dismiss()
 d = ask(health(recent: ended("done", "2", id: "c7")), reply: 118, now: 118)
-precondition(d.pill == nil && !d.petWags)
+precondition(d.pill == nil && !d.petShowsDone)
 // Dismissing before anything was seen hides nothing for long: what comes next is new.
 policy = PillPolicy()
 policy.dismiss()

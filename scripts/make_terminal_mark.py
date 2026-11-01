@@ -4,17 +4,17 @@ picture changes:
 
     uv run python scripts/make_terminal_mark.py
 
-It reads macos/art/akita/face/idle@2x.png (Melo's idle face, ears up) and rewrites the PIXELS block of
+It reads support/gateway/static/moves/face-brand.png (Melo's brand head, ears up) and rewrites the PIXELS block of
 support/cli/mark.py; nothing is drawn by hand. tests/cli/test_mark.py runs the same downsampling and fails when the
 committed block and the picture disagree. Only the standard library is used (zlib for the PNG), so the test needs
 nothing more.
 
 How the head is found and sampled:
 - Each pixel is sorted in OKLab: empty (alpha under half), dark (L < 0.45: the outline, eyes, nose and mouth),
-  cream (L > 0.8, or chroma < 0.05: the muzzle, the brows and the halo), shade (L < 0.58: the inner ears) or fur.
-- Outside is what the picture's edge reaches without crossing a dark pixel; the outline is the dark pixels joined to
-  it. Inside is the rest above the collar (HEAD_BOTTOM of the picture's height), so the halo and the body drop out;
-  the dark pixels inside are the eyes, nose and mouth. The mark covers the inside's bounding box.
+  cream (L > 0.8, or chroma < 0.05: the muzzle, the cheeks and the inner ears), shade (L < 0.58) or fur.
+- Outside is the clear background the picture's edge reaches; the outline is the dark pixels next to it. Inside is
+  the rest above HEAD_BOTTOM of the picture's height, so the chest drops out; the dark pixels inside are the eyes,
+  nose and mouth. The mark covers the inside's bounding box.
 - The box is cut into 12 x 10 cells, five rows of text (a cell's share of each pixel is its overlap); fewer rows
   lose the ears. The picture is symmetric, so each cell's counts are averaged with its mirror cell, which cancels
   the antialiasing's left-right noise.
@@ -32,13 +32,13 @@ import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-FACE = ROOT / "macos/art/akita/face/idle@2x.png"
+FACE = ROOT / "support/gateway/static/moves/face-brand.png"
 MODULE = ROOT / "support/cli/mark.py"
 # Pixels (columns, rows): two rows of pixels make one row of text.
 COLUMNS, LINES = 12, 10
 HEAD_SHARE, DARK_SHARE = 0.4, 0.3
-# Where the collar begins, as a share of the picture's height.
-HEAD_BOTTOM = 0.86
+# Where the neck begins under the head, as a share of the picture's height (the brand head is a bust).
+HEAD_BOTTOM = 0.65
 
 RGB = tuple[int, int, int]
 RGBA = tuple[int, int, int, int]
@@ -151,7 +151,7 @@ def pixels(path: Path = FACE) -> tuple[str, ...]:
     height, width = len(image), len(image[0])
     kinds = {(x, y): classify(image[y][x]) for y in range(height) for x in range(width)}
     edge = [p for p in kinds if p[0] in (0, width - 1) or p[1] in (0, height - 1)]
-    outside = _flood(edge, {p for p, kind in kinds.items() if kind != "k"})
+    outside = _flood(edge, {p for p, kind in kinds.items() if kind == " "})
     dark = {p for p, kind in kinds.items() if kind == "k"}
     touching = [p for p in dark if any(q in outside for q in _near(p))]
     bottom = HEAD_BOTTOM * height

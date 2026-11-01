@@ -178,13 +178,29 @@
 <a id="the-panel-beside-a-chat"></a>
 ## 对话旁的面板
 
-对话右侧是 Melo 的面板。最上方是 Melo 的画像，外圈的颜色表示它在做什么（工作时为绿色，有事等你时为琥珀色），下面是名字和一行状态：`Connected · <model> on <server>`、`Working on 2 things`、`Waiting for you`，或带 **Open settings** 的 `Model server not reachable`。再往下是四个标签页：**Activity**、**Workers**、**Scheduled** 和 **Memory**。方向键、Home 和 End 在它们之间切换，面板会打开你上次用的标签页。
+对话右侧是 Melo 的面板。最上方是 Melo 的画像，外圈的颜色表示它在做什么（工作时为绿色，有事等你时为琥珀色），下面是名字和一行状态：`Connected · <model> on <server>`、`Working on 2 things`、`Waiting for you`，或带 **Open settings** 的 `Model server not reachable`。
+
+画像里的 Melo 随它在做的事而动：
+
+| Melo | 含义 |
+|---|---|
+| 醒来，抖抖毛，坐好 | 页面刚打开。它坐几秒钟，然后休息。 |
+| 在笔记本电脑前打字 | 有内容在运行。 |
+| 歪着头 | 模型正在作答，没有工具在运行。 |
+| 举起一只爪子 | 有事等你。会立刻显示。 |
+| 趴着，闭着眼睛 | 没有内容在运行。它偶尔会起来玩一会儿（最多每 5 分钟一次）。 |
+
+- 刚结束的运行让 Melo 开心地闭上眼睛、尾巴翘起，错误让它耳朵向后、低着头；这两种都是静态图片。控制台正在连接或连不上网关时，Melo 蜷成一团，颜色变淡。
+- 单纯休息三分钟后，Melo 静静地趴着，直到有变化或到了玩耍的时候。
+- 在减弱动态效果下，每个状态都是一张静态图片；隐藏的标签页或滚出视野的画像什么也不绘制。
+
+再往下是四个标签页：**Activity**、**Workers**、**Scheduled** 和 **Memory**。方向键、Home 和 End 在它们之间切换，面板会打开你上次用的标签页。
 
 面板显示属于当前打开的对话的内容。侧边对话的面板列出这个对话自己的活动和它启动的 worker；主对话的面板，以及没有打开任何对话时的面板，列出今天的全部内容。Melo 的状态行也跟随对话：在侧边对话里，它说明这个对话在做什么。打开另一个对话会重新读取列表。
 
 **Activity** 分为两部分，读取自 [`GET /api/activity`](../../reference/api-v2.md#get-apiactivity)（英文）：页面的健康轮询发现正在运行的内容有变化时读取，此外每 30 秒读取一次。
 
-- **Now** 列出正在运行或等待的内容：本控制台的对话、任务、worker 运行和终端对话。每一行用平实的话说明它在做什么（`Reading notes.md`、`Running the tests`、`Waiting for your approval`），并用图标表示工作的类别。等你处理的行是琥珀色。没有任何内容在运行时写 `Nothing running`，画像处于休息状态并会眨眼。
+- **Now** 列出正在运行或等待的内容：本控制台的对话、任务、worker 运行和终端对话。每一行用平实的话说明它在做什么（`Reading notes.md`、`Running the tests`、`Waiting for your approval`），并用图标表示工作的类别。等你处理的行是琥珀色。没有任何内容在运行时写 `Nothing running`，Melo 在休息。
 - **Today** 按从新到旧列出今天完成的内容：标题、一行结果（`All 412 tests passed.`）和时间。先显示八行；**Earlier today (n)** 显示其余的。
 
 结果行始终是平实的话。在回答之前就被停止的运行写 `Stopped before answering`，图片写 `Made a picture`，文件写文件名，而内容是代码的回答写代码周围的第一句话（没有这样的句子时写 `Wrote some code`）。Markdown 标记会去掉（代码保留原样，例如 `__init__.py`；删除线里的文字一起去掉；`x**2` 保持不变），`In short:` 这样的开场白也会去掉，结果行到第一句话为止。对话的结果行先说这个对话做了什么，再接它回答的第一句话：`Offered a task: Visit example.com · I can't open websites myself.`；做了什么写作 `Started a task: …`、`Offered a task: …` 或 `Kept a note`（中文页面上是“开始了任务：…”“提议了任务：…”“记下了一条笔记”）；只说把事情交给了任务的回答不再重复。主对话那一行用页面的语言命名。
@@ -216,17 +232,19 @@
 <a id="melo-in-the-page"></a>
 ## 页面里的 Melo
 
-页面在原来就有 Melo 图片的位置显示 Melo，这只秋田犬幼崽，在应用和浏览器里一样。图片都是静止的，只有平静的画像和平静（idle）的脸会眨眼：一张闭眼的补丁图盖在图片上，每 11 秒淡入两次。这只用 CSS，没有脚本；在 `prefers-reduced-motion: reduce` 下页面显示静态图片。
+页面在原来就有 Melo 图片的位置显示 Melo，这只秋田犬幼崽，在应用和浏览器里一样。面板的画像会动；其他图片是静止的，它们都来自同一套动作。在 `prefers-reduced-motion: reduce` 下页面显示静态图片。
 
-- **空对话。** Melo 坐在 *What would you like to work on?* 上方，神情平静，会眨眼。
-- **面板。** Melo 的画像在[面板](#the-panel-beside-a-chat)顶部：没有内容运行时休息（并会眨眼），运行时在工作，有事等你时睁大眼睛，一次运行顺利结束后开心几秒，模型服务器无法连接或刚有运行失败时耷拉着一只耳朵。
-- **回答。** 每条回答的 `localmelo` 旁是 Melo 的脸。最新一条回答上，它显示该轮的状态：运行时在工作（吐着舌头），等待批准时睁大眼睛，完成时开心，以带警告或错误结束时耷拉着一只耳朵。你自己停止的一轮不算失败，保持平静的脸；更早的回答也都是平静的脸；平静的脸会眨眼。
-- **批准栏。** 写着 “melo is waiting for your answer” 的栏显示睁大眼睛的脸。
-- **品牌和标签页。** 侧边栏和登录页显示平静的脸，浏览器标签页以 16、32 和 64 px 使用它。
+- **空对话。** Melo 坐在 *What would you like to work on?* 上方。
+- **面板。** Melo 的画像在[面板](#the-panel-beside-a-chat)顶部，随它在做的事而动：醒来、工作、思考、有事等你时举起爪子、休息，偶尔玩一会儿。一次运行顺利结束后开心地闭着眼睛几秒，模型服务器无法连接或刚有运行失败时耳朵向后、低着头；这两种是静态图片。页面连不上 localmelo 时，Melo 蜷成一团，颜色变淡。
+- **回答。** 每条回答的 `localmelo` 旁是 Melo 的脸。最新一条回答上，它显示该轮的状态：运行时在笔记本电脑前，等待批准时举起爪子，完成时开心地闭着眼睛，以带警告或错误结束时耳朵向后。你自己停止的一轮不算失败，保持平静的脸；更早的回答也都是平静的脸。
+- **批准栏。** 写着 “melo is waiting for your answer” 的栏显示举起爪子的脸。
+- **品牌和标签页。** 侧边栏和登录页显示 Melo 平静的脸，浏览器标签页以 16、32 和 64 px 使用它（裁得更近）。主对话和回答一样显示微笑的脸。
 
-在文字已经说明状态的地方（实时行、工作组、失败卡片、批准栏），这些脸只是装饰，替代文字为空。上方没有工作组的已完成回答，没有别的东西说明它完成了，所以它的脸对屏幕阅读器读作 `Done`。画像保留替代文字 `Melo, the localmelo Akita mascot`。
+在文字已经说明状态的地方（实时行、工作组、失败卡片、批准栏），这些脸只是装饰，替代文字为空。上方没有工作组的已完成回答，没有别的东西说明它完成了，所以它的脸对屏幕阅读器读作 `Done`。空对话里的 Melo 保留替代文字 `Melo, the localmelo Akita mascot`；面板里会动的画像只是装饰，因为状态行用文字说了同样的内容。
 
-图片是带一圈很细奶油色外沿的透明 PNG。在浅色画布上，深蓝轮廓让 Melo 显现出来（对控制台的浅色表面至少 12:1）；在深色画布上靠的是外沿（对深色表面至少 5.6:1，图片的要求是 3:1）。它们由 `/assets/akita/` 提供（`sit-idle.png`、`sit-idle-blink.png`、`sit-working.png`、`sit-waiting.png`、`sit-done.png`、`sit-error.png`、`face-idle.png`、`face-idle-blink.png`、`face-working.png`、`face-waiting.png`、`face-done.png`、`face-error.png`，以及 `favicon-16.png`、`-32`、`-64`），共 430 KB，页面只加载当前状态对应的画像和脸。它们是应用自己在 `macos/art/akita` 的图片的副本，由同一个脚本生成（见 [macOS 应用指南](macos-app.md)）。
+动作由 `/assets/moves/` 提供：每个状态一张包含其所有帧的图片、每个状态的一张静态图（`poster-<state>.webp`）、完成、错误和离线三张静态图（`poster-done.webp`、`poster-error.webp`、`poster-offline.webp`）、Melo 的头像（`face-idle.png`、`face-brand.png`、`face-working.png`、`face-waiting.png`、`face-done.png`、`face-error.png`）、标签页图标（`favicon-16.png`、`-32`、`-64`），以及记录每帧时长的 `manifest.json`：共 1.6 MB，应用显示同样的文件。页面在打开时加载一次动作。
+
+图片是透明的。在浅色画布上，Melo 身上的深棕色线条让它显现出来（对控制台的浅色表面约 15:1）；在深色画布上靠的是它橙色的毛（对深色表面约 7.5:1，图片的要求是 3:1）。
 
 <a id="inspect-workers"></a>
 

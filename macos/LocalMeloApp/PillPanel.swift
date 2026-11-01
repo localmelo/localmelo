@@ -338,8 +338,8 @@ final class PillController: NSObject {
     var openWindow: () -> Void = {}
     var openWaiting: () -> Void = {}
     var openRoute: (String) -> Void = { _ in }
-    /// Told when the pill appears or goes, and whether the pet that takes its place wags (a "Done" ran out).
-    var showingChanged: (_ showing: Bool, _ wags: Bool) -> Void = { _, _ in }
+    /// Told when the pill appears or goes, and whether the pet that takes its place shows "done" (a "Done" ran out).
+    var showingChanged: (_ showing: Bool, _ showsDone: Bool) -> Void = { _, _ in }
     var environment: PetEnvironment { gate.environment }
     var isShown: Bool { panel.isVisible }
     private var policy = PillPolicy()
@@ -358,7 +358,7 @@ final class PillController: NSObject {
     private let remember: (String, PetSpot) -> Void
     private let clock: () -> TimeInterval
 
-    /// `pictures` is the `akita` folder; `settings` and `remember` are the pet's saved spots, which the pill shares.
+    /// `pictures` is the `moves` folder; `settings` and `remember` are the pet's saved spots, which the pill shares.
     init(pictures: URL?, settings: @escaping () -> PetSettings, remember: @escaping (String, PetSpot) -> Void,
          clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.pictures = pictures
@@ -439,7 +439,7 @@ final class PillController: NSObject {
                 applied = nil
                 gate.refresh()
             }
-            if was || decision.petWags { showingChanged(false, decision.petWags) }
+            if was || decision.petShowsDone { showingChanged(false, decision.petShowsDone) }
             return
         }
         let before = model
@@ -468,10 +468,7 @@ final class PillController: NSObject {
     }
 
     private func picture(for portrait: PillPortrait) -> CGImage? {
-        let scale = Int((panel.screen ?? NSScreen.main)?.backingScaleFactor ?? 2) >= 2 ? 2 : 1
-        let file = pillPictureFile(portrait, scale: scale) { name in
-            pictures.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent(name).path) } ?? false
-        }
+        let file = pillPictureFile(portrait)
         if let image = images[file] { return image }
         guard let url = pictures?.appendingPathComponent(file),
               let source = CGImageSourceCreateWithURL(url as CFURL, nil),

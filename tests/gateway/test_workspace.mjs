@@ -811,6 +811,7 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     // `/memory import` opens its tab and presses "Look for notes": a test sets `notesOn` and reads `notesLooked`.
     // A task is drawn by tasks.mjs, which the real panel owns the place of: the double shows and leaves it the same way.
     setupPanel: realPanel ? realSetupPanel : (options) => ({health: [], state: {task: null}, update(body) { this.health.push(body); }, sheetClosed: 0, opened: 0, remembered: [],
+      lost: [], offline(value) { this.lost.push(value); },
       closeSheet() { this.sheetClosed += 1; return false; }, select() {}, openSheet() {},
       remember(key) { this.remembered.push(key); },
       openTask(id) { this.opened += 1; this.state.task = id; options.tasks.show(id); options.tasks.focus(); },
@@ -2080,12 +2081,12 @@ test('the newest reply shows its turn\'s face, older replies the idle face, and 
     const icon = findNode(section, (node) => node.tag === 'img');
     return [icon.dataset.face, icon.src, icon.alt];
   });
-  const idle = ['idle', '/assets/akita/face-idle.png', ''];
-  assert.deepEqual(faces(), [idle, ['error', '/assets/akita/face-error.png', '']]);
+  const idle = ['idle', '/assets/moves/face-idle.png', ''];
+  assert.deepEqual(faces(), [idle, ['error', '/assets/moves/face-error.png', '']]);
 
   const emit = (id, turn, type, data) => h.stream().emit({id, turn, ts: 50 + id, type, data});
   emit(20, 3, 'turn.started', {turn: 3, turn_id: 'three', user_text: 'Run', client_request_id: 'k3'});
-  assert.deepEqual(faces(), [idle, idle, ['working', '/assets/akita/face-working.png', '']], 'only the newest reply follows its turn');
+  assert.deepEqual(faces(), [idle, idle, ['working', '/assets/moves/face-working.png', '']], 'only the newest reply follows its turn');
   emit(21, 3, 'tool.started', {call_id: 'c', name: 'shell_exec', arguments: {command: 'pwd'}});
   emit(22, 3, 'approval.requested', {request_id: 'go', call_id: 'c', tool_name: 'shell_exec', arguments: {command: 'pwd'}});
   assert.equal(faces()[2][0], 'waiting');
@@ -2094,17 +2095,17 @@ test('the newest reply shows its turn\'s face, older replies the idle face, and 
   emit(24, 3, 'tool.finished', {call_id: 'c', name: 'shell_exec', status: 'success', output: '/tmp'});
   emit(25, 3, 'run.finished', {result: {status: 'completed', result: 'Done here.', duration_s: 1, n_tool: 1, steps: 1}});
   emit(26, 3, 'turn.finished', {turn: 3, turn_id: 'three', status: 'completed', cause: 'run', error: ''});
-  assert.deepEqual(faces()[2], ['done', '/assets/akita/face-done.png', ''], 'the work box says the turn is done');
+  assert.deepEqual(faces()[2], ['done', '/assets/moves/face-done.png', ''], 'the work box says the turn is done');
 
   emit(30, 4, 'turn.started', {turn: 4, turn_id: 'four', user_text: 'Hi', client_request_id: 'k4'});
   emit(31, 4, 'run.finished', {result: {status: 'completed', result: 'Hello.', duration_s: 1, n_tool: 0, steps: 1}});
   emit(32, 4, 'turn.finished', {turn: 4, turn_id: 'four', status: 'completed', cause: 'run', error: ''});
   const [, , third, fourth] = faces();
   assert.equal(third[0], 'idle', 'the previous newest reply goes back to the idle face');
-  assert.deepEqual(fourth, ['done', '/assets/akita/face-done.png', 'Done'], 'a bare answer has no words for the state, so its face has them');
+  assert.deepEqual(fourth, ['done', '/assets/moves/face-done.png', 'Done'], 'a bare answer has no words for the state, so its face has them');
 });
 
-test('only the idle face blinks: it sits in a wrapper whose CSS fades the eyes-closed patch in, and the other faces stay still', async () => {
+test('every reply face is a plain picture of the new head: no blink wrapper, the face before the name', async () => {
   const h = harness(baseRoutes({
     'GET /sessions/a/turns?limit=10': {
       turns: [turnRow({id: 'one', turn: 1}), turnRow({id: 'two', turn: 2, status: 'provider_error', answer: '', result: {error: 'e'}})],
@@ -2112,15 +2113,12 @@ test('only the idle face blinks: it sits in a wrapper whose CSS fades the eyes-c
     },
   }));
   await h.run('init()');
-  const [older, newest] = Array.from(h.element('messages').children);
-  const wrapper = findNode(older, (node) => node.className === 'blinks face');
-  assert.ok(wrapper, 'an older reply keeps the idle face, and it blinks');
-  assert.equal(wrapper.children.length, 1, 'the wrapper holds the face and nothing else: the patch is CSS');
-  assert.equal(wrapper.children[0].dataset.face, 'idle');
-  assert.equal(wrapper.children[0].src, '/assets/akita/face-idle.png');
-  assert.equal(findNode(newest, (node) => String(node.className).includes('blinks')), null, 'an error face has no patch');
-  const label = findNode(older, (node) => node.className === 'assistant-label');
-  assert.equal(label.children[0], wrapper, 'the face keeps its place before the name');
+  for (const section of Array.from(h.element('messages').children)) {
+    assert.equal(findNode(section, (node) => String(node.className).includes('blinks')), null);
+    const label = findNode(section, (node) => node.className === 'assistant-label');
+    assert.equal(label.children[0].tag, 'img');
+    assert.match(label.children[0].src, /^\/assets\/moves\/face-(idle|error)\.png$/);
+  }
 });
 
 test('a finished run in a read-only view carries its severity, so Done is not drawn as a warning', async () => {
@@ -2141,9 +2139,12 @@ test('the gateway-offline banner offers Try again, which asks the gateway again'
   up = false;
   await h.run('refreshList()');
   assert.equal(h.element('offline-banner').hidden, false);
+  // Melo's portrait keeps its still picture while the gateway is lost.
+  assert.equal(h.run('panel').lost.at(-1), true);
   up = true;
   await h.element('offline-retry').click();
   assert.equal(h.element('offline-banner').hidden, true, 'the banner goes when the gateway answers');
+  assert.equal(h.run('panel').lost.at(-1), false);
 });
 
 test('earlier turns replay separately without disturbing current cursor or approvals', async () => {
