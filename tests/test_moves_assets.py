@@ -22,7 +22,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 MOVES = ROOT / "support/gateway/static/moves"
 STATES = ["startup", "thinking", "working", "attention", "idle_rest", "idle_play"]
-FACES = ["idle", "working", "waiting", "done", "error"]
+FACES = ["idle", "working", "waiting", "done", "error", "brand"]
 # What Melo holds when nothing moves for a reason: a run that ended well, a failure, nothing known or no connection.
 HELD = ["done", "error", "offline"]
 FAVICONS = [16, 32, 64]
@@ -367,6 +367,28 @@ def test_the_build_writes_the_stills_and_cuts_the_done_and_error_faces_from_them
             plain / f"face-{name}.png"
         ).read_bytes()
         assert same == (name not in ("done", "error")), name
+    # With the heads drawn for small sizes: the idle face is head-smile, the brand and the tab icons head-neutral.
+    folder = tmp_path / "stills"
+    for number, name in enumerate(("head-smile", "head-neutral")):
+        head = image.new("RGBA", (64, 64))
+        head.paste((200, 40 + 100 * number, 60, 255), (12, 8, 52, 61))
+        head.save(folder / f"{name}.png")
+    heads = tmp_path / "heads"
+    build.build(source, heads, folder)
+    assert {path.name for path in heads.iterdir()} == expected_files()
+    changed = {
+        path.name
+        for path in heads.iterdir()
+        if path.read_bytes() != (out / path.name).read_bytes()
+    }
+    assert changed == {
+        "face-idle.png",
+        "face-brand.png",
+        *(f"favicon-{pixels}.png" for pixels in FAVICONS),
+    }
+    assert (heads / "face-idle.png").read_bytes() != (
+        heads / "face-brand.png"
+    ).read_bytes()
     # A stills folder that is missing one, or has one off the canvas, is refused.
     for broken, words in (
         ({"error": None}, "no error.png"),

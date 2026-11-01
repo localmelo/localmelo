@@ -14,9 +14,10 @@ stands for it when nothing may move (`poster_frame_index`), and the canvas with 
 
 The stills folder (optional) holds done.png, error.png and offline.png: one transparent picture each on the pack's
 canvas, the paws on the pack's anchor line and centred like its frames. They are what Melo holds when nothing moves for
-a reason: a run that ended well, a failure, and nothing known or no connection. Their masters stay out of the
-repository too. Without the folder those three posters are not written and the done and error faces are cut from the
-pack's posters instead.
+a reason: a run that ended well, a failure, and nothing known or no connection. It may also hold head-smile.png and
+head-neutral.png: Melo's front-facing head on the same canvas (the bust fitted in HEAD_BOX), drawn for small sizes.
+Their masters stay out of the repository too. Without the folder those three posters are not written and the faces
+are cut from the pack's posters instead; without a head the face it gives is cut from the pack too.
 
 What it writes in support/gateway/static/moves, committed, served by the console and read by the app from the same
 folder inside its bundled package (scripts/build_macos_app.py):
@@ -32,9 +33,12 @@ folder inside its bundled package (scripts/build_macos_app.py):
 - face-<name>.png: Melo's head, cut from a state's poster frame by that name's box in FACES (pixels of a 512 px
   canvas; the box scales with the pack's canvas), FACE_PIXELS square: the reply icons, the approval bar, the
   brand, the phone's panel chip and the app's activity pill. idle is the sitting dog the wake-up ends on, working the
-  dog at its laptop, waiting the raised paw; done and error are cut from those stills by STILL_FACES (eyes closed and
-  happy; ears back), or from the wake-up's end and the thinking poster when there are no stills.
-- favicon-16.png, favicon-32.png, favicon-64.png: the idle head cut closer (FAVICON_BOX), for the browser tab.
+  dog at its laptop, waiting the raised paw; done and error are cut from those stills by STILL_FACES, or from the
+  wake-up's end and the thinking poster when there are no stills. With the heads, idle is head-smile (the reply
+  avatar, the Main chat, the phone chip), and face-brand.png is head-neutral (the sidebar and sign-in brand); without
+  them face-brand is the idle face.
+- favicon-16.png, favicon-32.png, favicon-64.png: the brand's head cut closer, for the browser tab: head-neutral by
+  HEAD_FAVICON_BOX, or the wake-up's end by FAVICON_BOX without the heads.
 - manifest.json: the canvas, the anchor and the sheet's grid, and per state its file, its pose, once or loop, the
   poster frame and the frame durations; and the cross-fade times between states.
 
@@ -82,11 +86,16 @@ FACES = {
 }
 # The faces cut from the stills instead, when they are given: the still and its box, as above.
 STILL_FACES = {
-    "done": ("done", (160, 58, 364, 262)),
-    "error": ("error", (182, 40, 402, 260)),
+    "done": ("done", (172, 58, 368, 254)),
+    "error": ("error", (177, 52, 397, 272)),
 }
 # The stills, by the names their files have in the stills folder and their posters in the moves.
 STILLS = ("done", "error", "offline")
+# The heads drawn for small sizes, when the stills folder has them: the face each gives, and the box the bust is fitted
+# in (512 px canvas: 464 px square, bottom on the anchor line); the tab icon is cut closer, the neck left out.
+HEADS = {"idle": "head-smile", "brand": "head-neutral"}
+HEAD_BOX = (24, 24, 488, 488)
+HEAD_FAVICON_BOX = (56, 24, 456, 424)
 FACE_PIXELS = 96  # twice the largest size a face is shown at (48 pt)
 # The browser tab's icon: the idle head, closer, so it still reads at 16 px.
 FAVICON_BOX = (158, 74, 342, 258)
@@ -185,11 +194,14 @@ def save(path: Path, image: Image.Image) -> None:
 
 
 def read_stills(folder: Path, canvas: int) -> dict[str, Path]:
-    """The stills folder, checked: done.png, error.png and offline.png, each a file on the pack's canvas."""
+    """The stills folder, checked: done.png, error.png and offline.png, each a file on the pack's canvas, and the
+    heads (HEADS) it may hold, on the same canvas."""
     found: dict[str, Path] = {}
-    for name in STILLS:
+    for name in (*STILLS, *HEADS.values()):
         path = folder / f"{name}.png"
         if not path.is_file():
+            if name in HEADS.values():
+                continue
             raise PackError(f"The stills folder has no {name}.png")
         with Image.open(path) as image:
             if image.size != (canvas, canvas):
@@ -231,19 +243,32 @@ def build(source: Path, out: Path, stills: Path | None = None) -> int:
         }
     held: dict[str, Image.Image] = {}
     for name, path in pictures.items():
-        save(out / f"poster-{name}.webp", scaled(path, side, CELL))
+        if name in STILLS:
+            save(out / f"poster-{name}.webp", scaled(path, side, CELL))
         with Image.open(path) as full:
             held[name] = full.convert("RGBA")
+    faces: dict[str, Image.Image] = {}
     for name, (state, box) in FACES.items():
-        if name in STILL_FACES and held:
+        if HEADS.get(name, "") in held:
+            faces[name] = cut(held[HEADS[name]], HEAD_BOX, FACE_PIXELS)
+        elif name in STILL_FACES and STILL_FACES[name][0] in held:
             still, box = STILL_FACES[name]
-            save_png(out / f"face-{name}.png", cut(held[still], box, FACE_PIXELS))
+            faces[name] = cut(held[still], box, FACE_PIXELS)
         else:
-            save_png(out / f"face-{name}.png", cut(posters[state], box, FACE_PIXELS))
+            faces[name] = cut(posters[state], box, FACE_PIXELS)
+    brand = HEADS["brand"] in held
+    faces["brand"] = (
+        cut(held[HEADS["brand"]], HEAD_BOX, FACE_PIXELS) if brand else faces["idle"]
+    )
+    for name, face in faces.items():
+        save_png(out / f"face-{name}.png", face)
     for pixels in FAVICONS:
-        save_png(
-            out / f"favicon-{pixels}.png", cut(posters["startup"], FAVICON_BOX, pixels)
+        icon = (
+            cut(held[HEADS["brand"]], HEAD_FAVICON_BOX, pixels)
+            if brand
+            else cut(posters["startup"], FAVICON_BOX, pixels)
         )
+        save_png(out / f"favicon-{pixels}.png", icon)
     anchor = pack["canvas"]["anchor"]
     document = {
         "version": 1,
@@ -279,7 +304,8 @@ def main() -> None:
     parser.add_argument(
         "--stills",
         type=Path,
-        help="the stills' folder: done.png, error.png and offline.png on the pack's canvas",
+        help="the stills' folder: done.png, error.png and offline.png on the pack's canvas, and maybe "
+        "head-smile.png and head-neutral.png",
     )
     parser.add_argument(
         "--out", type=Path, default=OUT, help=f"where to write (default {OUT})"

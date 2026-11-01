@@ -4,7 +4,7 @@ picture changes:
 
     uv run python scripts/make_terminal_mark.py
 
-It reads support/gateway/static/moves/face-idle.png (Melo's idle face, ears up) and rewrites the PIXELS block of
+It reads support/gateway/static/moves/face-brand.png (Melo's brand head, ears up) and rewrites the PIXELS block of
 support/cli/mark.py; nothing is drawn by hand. tests/cli/test_mark.py runs the same downsampling and fails when the
 committed block and the picture disagree. Only the standard library is used (zlib for the PNG), so the test needs
 nothing more.
@@ -32,13 +32,13 @@ import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-FACE = ROOT / "support/gateway/static/moves/face-idle.png"
+FACE = ROOT / "support/gateway/static/moves/face-brand.png"
 MODULE = ROOT / "support/cli/mark.py"
 # Pixels (columns, rows): two rows of pixels make one row of text.
 COLUMNS, LINES = 12, 10
 HEAD_SHARE, DARK_SHARE = 0.4, 0.3
-# Where the collar begins, as a share of the picture's height.
-HEAD_BOTTOM = 0.86
+# Where the neck begins under the head, as a share of the picture's height (the brand head is a bust).
+HEAD_BOTTOM = 0.65
 
 RGB = tuple[int, int, int]
 RGBA = tuple[int, int, int, int]

@@ -1,7 +1,7 @@
 """Melo's head beside the welcome: rows of half blocks from the pet's face picture.
 
 The pixels are not drawn by hand: ``scripts/make_terminal_mark.py`` computes
-them by downsampling ``support/gateway/static/moves/face-idle.png`` and writes the
+them by downsampling ``support/gateway/static/moves/face-brand.png`` and writes the
 PIXELS block below (``tests/cli/test_mark.py`` checks that it still matches
 the picture). Each terminal cell holds two pixels, the upper as
 the foreground of ``▀`` and the lower as its background (a cell of one colour
@@ -21,16 +21,16 @@ from localmelo.support.cli.theme import ASCII, Palette, Symbols
 # Written by scripts/make_terminal_mark.py: ``.`` empty, ``o`` fur, ``c``
 # cream, ``b`` shade, ``k`` the eyes, nose and mouth.
 PIXELS: Final = (
-    "..oc....co..",
-    ".cooo..oooc.",
+    ".cc......cc.",
+    ".coco..ococ.",
     ".cocoooococ.",
     ".cooooooooc.",
-    ".cooccccooc.",
+    "ccooccccoocc",
     "cccckcckcccc",
     "ccccckkccccc",
-    ".cccckkcccc.",
-    ".occcooccco.",
+    "ccccckkccccc",
     ".cccccccccc.",
+    ".occcccccco.",
 )
 # The mark's own colours (artwork, not roles), on a dark and a light terminal.
 COLOURS: Final = {

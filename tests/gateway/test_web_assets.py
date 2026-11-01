@@ -203,7 +203,7 @@ async def test_melo_s_pictures_in_the_shell_are_sharp_and_say_only_what_words_do
         if str(image["src"]).startswith("/assets/moves/face-")
     }
     assert set(shown) == {
-        "/assets/moves/face-idle.png",  # the brand, in the sidebar and on the lock screen
+        "/assets/moves/face-brand.png",  # the brand, in the sidebar and on the lock screen
         "/assets/moves/face-waiting.png",  # the approval bar
     }
     for path, image in shown.items():
@@ -370,7 +370,7 @@ async def test_the_shell_loads_the_same_assets_as_before(
     parser = ShellAssets()
     parser.feed(page.text)
     assert set(parser.paths) == {
-        "/assets/moves/face-idle.png",
+        "/assets/moves/face-brand.png",
         "/assets/moves/face-waiting.png",
         "/assets/moves/favicon-16.png",
         "/assets/moves/favicon-32.png",

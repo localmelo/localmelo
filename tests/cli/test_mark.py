@@ -49,7 +49,7 @@ def test_the_png_reader_reads_rgb_and_alpha() -> None:
     # An RGB picture is opaque; the logo's page is a warm white.
     red, green, blue, alpha = image[0][0]
     assert min(red, green, blue) > 220 and red >= blue and alpha == 255
-    face = _script().read_png(ROOT / "support/gateway/static/moves/face-idle.png")
+    face = _script().read_png(ROOT / "support/gateway/static/moves/face-brand.png")
     assert (len(face), len(face[0])) == (96, 96)
     assert face[0][0][3] == 0  # the face's corner is transparent
 
