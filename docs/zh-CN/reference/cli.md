@@ -123,7 +123,7 @@ melo -h all                                  # every option, command and setting
 
 ### 记忆
 
-`melo memory VERB` 查看和修改 melo 保存的关于你的笔记，也就是控制台 Memory 标签页列出的那些（见[跨对话记忆](../concepts/memory.md#memory-across-chats)）。它读写 `~/.cache/localmelo/memory/`。查看和忘记笔记不调用模型；`reindex` 可为笔记和轮次生成嵌入，开发者模式的 `sleep` 按所选方式使用配置的嵌入模型和聊天模型，开发者模式的 `ingest` 可能使用嵌入模型（从不使用聊天模型）。
+`melo memory VERB` 查看和修改 melo 保存的关于你的笔记，也就是控制台 Memory 标签页列出的那些（见[跨对话记忆](../concepts/memory.md#memory-across-chats)）。它读写 `~/.cache/localmelo/memory/`。查看和忘记笔记不调用模型；`reindex` 可为笔记和轮次生成嵌入，开发者模式的 `sleep` 按所选方式使用配置的嵌入模型和聊天模型，开发者模式的 `ingest` 可能使用嵌入模型（只有加 `-X ingest=compress` 时才使用聊天模型）。
 
 | 动词 | 作用 |
 |---|---|
@@ -133,7 +133,7 @@ melo -h all                                  # every option, command and setting
 | `melo memory import [-u BATCH]` | 提议导入这台电脑上其他助手保存的关于你的笔记：一个列表，选项是 `Bring in N notes from M files`、`Show what they say` 和 `Not now`（管道输入时是编号问题）。列表默认停在 `Show what they say`。选第一行之前不写入任何内容，选了之后打印批次；Esc、ctrl+c 和输入结束不导入任何内容，也不记录回答（`Nothing brought in.`，Esc 和 ctrl+c 退出码为 130，其他为 0）。`-u BATCH`（`--undo`）收回该批次，并保留你之后编辑过的笔记（`Kept N notes you edited.`）。`--undo` 找不到笔记时退出码为 1。 |
 | `melo memory reindex` | 从对话重建对话索引，并给每条笔记补上当前嵌入模型的向量。上次“忘记全部”之前结束的轮次不会进入。`melo serve` 或应用运行时退出码为 1，因为对话由它们持有。 |
 | `melo memory sleep [VARIANT]` | 仅开发者模式（`[ui] mode = "developer"`，否则退出码 2）。用 `off`、`rules`、`model` 或 `model+tags` 整理笔记（省略时用 `[memory] sleep`），打印运行编号、模型调用次数、中止原因和每处改动（`O1` 合并、`O2` 较新的值、`O3` 找回的事实、`ADD`、`UPDATE`、`RETIRE`、`O4` 人名解析）。模型方式每次最多十二次请求。`melo serve` 或应用运行时退出码为 1。 |
-| `melo memory ingest FILE [-j] [-X notes=none]` | 仅开发者模式（`[ui] mode = "developer"`，否则退出码 2）。从 JSON 文件加载过去的对话，就像它们真的发生在各自的日期：每个会话通过对话存储写成一个普通对话（控制台会列出它），每一轮都进入索引（设置了嵌入模型就用它，否则只按词），除非 `-X notes=none`，用户话语里陈述的长期事实会成为笔记，每条都带上所在轮次自己的时间。不调用聊天模型。打印 `Ingested N sessions, N turns, N documents (...) and N notes in S s.`，加 `-j` 则打印一个 JSON 对象。`melo serve` 或应用运行时退出码为 1，选项或文件有误时为 2。 |
+| `melo memory ingest FILE [-j] [-X notes=none] [-X ingest=compress]` | 仅开发者模式（`[ui] mode = "developer"`，否则退出码 2）。从 JSON 文件加载过去的对话，就像它们真的发生在各自的日期：每个会话通过对话存储写成一个普通对话（控制台会列出它），每一轮都进入索引（设置了嵌入模型就用它，否则只按词），除非 `-X notes=none`，用户话语里陈述的长期事实会成为笔记，每条都带上所在轮次自己的时间。默认（`-X ingest=turns`）不调用聊天模型；加 `-X ingest=compress` 后，聊天模型还会按窗口读每个对话，把它编码成记忆条目，并与已有条目比对后入库（见[记忆条目](../concepts/memory.md#memory-across-chats)）。这会让每个 `[memory] compress_at_chars` 字符的窗口发起一次聊天模型请求（缓存里已有回复的窗口不请求），不检查 GPU 锁；没有设置聊天模型时以退出码 2 结束，只输出一行，也不写入任何内容。打印 `Ingested N sessions, N turns, N documents (...) and N notes in S s.`，compress 运行还会接着打印 `Encoded N items from N chats (N model calls, N from the cache).`，加 `-j` 则打印一个 JSON 对象；compress 运行会增加 `ingest`、`model_calls`、`cache_hits`、`input_tokens`、`output_tokens`（后两项只在服务器报告用量时出现）和 `compress`，后者把每个对话在文件里的 id 映射到它的 `windows`、`gate`、`items` 和 `routes`，其中轮次序号按文件给出的对话从 0 开始计。`melo serve` 或应用运行时退出码为 1，选项或文件有误时为 2。 |
 
 摄入文件：
 

@@ -3,7 +3,8 @@
 A developer tool for memory tests (``melo memory ingest FILE``): a file of
 timestamped chats goes through the real session store as ordinary chat sessions,
 each turn stamped with its own time, and the turns are indexed and their notes
-kept as the chat path does. No chat model is ever called. The file::
+kept as the chat path does. The chat model is not called, unless the developer
+option ``-X ingest=compress`` asks for it (below). The file::
 
     {"sessions": [
       {"id": "s1", "title": "optional", "date": "2023-05-20T13:40:00Z",
@@ -25,6 +26,14 @@ message right after a reply continues that reply. An assistant message with no
 user message before it, and a message with no text, are skipped and counted.
 A user message over :data:`~localmelo.melo.checker.validators.MAX_QUERY_LEN`
 characters is cut there and counted as ``trimmed``.
+
+With ``ingest=compress`` (:data:`MODES`) everything above happens first, so one ingest
+serves every way of recalling, and then each chat is encoded into memory items by the
+chat model (:meth:`~localmelo.support.memory.service.ChatMemory.compress_chat`):
+windows of the chat, one model request each, then the items routed against the ones
+kept, the chats oldest first as they were written. The report says, for each chat by
+its id in the file, what became of every exchange. It does not check the GPU lock:
+it is an explicit developer command, for whoever holds the GPU.
 """
 
 from __future__ import annotations
@@ -38,8 +47,10 @@ from typing import Any, Final
 
 from localmelo.melo import clock
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
-from localmelo.support.memory import ChatMemory
+from localmelo.support.memory import ChatMemory, hippo_encode
+from localmelo.support.memory.hippo_route import Router
 from localmelo.support.memory.index import is_cut
+from localmelo.support.memory.service import Compressed
 from localmelo.support.sessions.store import (
     NewSession,
     SessionStore,
@@ -48,6 +59,10 @@ from localmelo.support.sessions.store import (
 
 MAX_FILE_BYTES: Final = 500 * 1024 * 1024
 NOTES = ("rules", "none")
+# What ingest does with the chats besides storing and indexing the turns: nothing
+# (``turns``), or encode each chat into memory items with the chat model
+# (``compress``).
+MODES = ("turns", "compress")
 ROLES = ("user", "assistant")
 
 
@@ -104,8 +119,25 @@ class Report:
     model: str = ""
     error: str = ""
     ids: dict[str, str] = field(default_factory=dict)
+    # Only with ``ingest=compress``: the model's totals and, for each chat by its id
+    # in the file, windows, gate, items and routes (:func:`_chat_report`).
+    compress: dict[str, dict[str, Any]] | None = None
+    stats: hippo_encode.Stats = field(default_factory=hippo_encode.Stats)
+    items: int = 0
 
     def to_json(self) -> dict[str, Any]:
+        data = self._turns_json()
+        if self.compress is not None:
+            data["ingest"] = "compress"
+            data["model_calls"] = self.stats.calls
+            data["cache_hits"] = self.stats.cache_hits
+            if self.stats.reported:
+                data["input_tokens"] = self.stats.prompt_tokens
+                data["output_tokens"] = self.stats.completion_tokens
+            data["compress"] = self.compress
+        return data
+
+    def _turns_json(self) -> dict[str, Any]:
         return {
             "sessions": self.sessions,
             "turns": self.turns,
@@ -130,6 +162,13 @@ class Report:
             f"{self.notes} note{'s' if self.notes != 1 else ''} "
             f"in {self.seconds:.1f} s."
         )
+        if self.compress is not None:
+            line += (
+                f" Encoded {self.items} item{'s' if self.items != 1 else ''} "
+                f"from {len(self.compress)} chat{'s' if len(self.compress) != 1 else ''} "
+                f"({self.stats.calls} model call{'s' if self.stats.calls != 1 else ''}, "
+                f"{self.stats.cache_hits} from the cache)."
+            )
         return (
             f"{line} The embedding model failed: {self.error}" if self.error else line
         )
@@ -260,6 +299,42 @@ def exchanges(messages: Sequence[Message]) -> tuple[list[Exchange], int]:
     return out, skipped
 
 
+def _chat_report(label: str, encoded: Compressed) -> dict[str, Any]:
+    """One chat's part of the compress report, by exchange index (0-based in the
+    chat as the file gives it) and file id *label*.
+
+    ``windows`` (``exchanges``, ``chars``, ``cached``, ``failed``, ``cut``,
+    ``dropped``), ``gate`` (``kept``, ``ignored``, ``unmentioned``, ``forced``:
+    exchange indexes), ``items`` (each stored: ``id``, ``title``, ``kind``,
+    ``sources`` as ``[file id, exchange index]``) and ``routes`` (each routed item:
+    ``item`` (its id, ``null`` when ignored), ``action``, ``target``, ``reason``,
+    ``title``).
+    """
+    encoding = encoded.encoding
+    return {
+        "windows": [window.to_json() for window in encoding.windows],
+        "gate": {
+            "kept": encoding.kept,
+            "ignored": encoding.ignored,
+            "unmentioned": encoding.unmentioned,
+            "forced": encoding.forced,
+        },
+        "items": [
+            {
+                "id": route.item,
+                "title": piece.title,
+                "kind": piece.kind,
+                "sources": [[label, n] for n in piece.sources],
+            }
+            for piece, route in encoded.routed
+            if route.item is not None
+        ],
+        "routes": [
+            {**route.to_json(), "title": piece.title} for piece, route in encoded.routed
+        ],
+    }
+
+
 async def run(
     memory: ChatMemory,
     chats: SessionStore,
@@ -267,23 +342,37 @@ async def run(
     found: Sequence[Chat],
     *,
     notes: str = "rules",
+    mode: str = "turns",
 ) -> Report:
     """Write *found* to *chats* (opened with *pin* as its clock), index it and keep its notes.
 
     *notes* is ``rules`` (the notes the rule path keeps from each user message,
-    no model call) or ``none``. Never calls the chat model.
+    no model call) or ``none``. *mode* is ``turns`` (the chat model is never
+    called) or ``compress``: after all that, each chat is encoded into memory items
+    and the items are routed (see the module's text); it needs a chat model, and
+    :class:`IngestError` says so before anything is written when there is none.
     """
     if notes not in NOTES:
         raise IngestError(f"notes must be one of {', '.join(NOTES)}, got {notes!r}")
+    if mode not in MODES:
+        raise IngestError(f"ingest must be one of {', '.join(MODES)}, got {mode!r}")
+    if mode == "compress" and memory.chat_provider() is None:
+        raise IngestError(
+            "ingest=compress needs a chat model: "
+            f"{memory.last_error or 'none is set up'}"
+        )
     started = time.perf_counter()
     report = Report()
     holder = process_holder("gateway")
     turns: list[tuple[dict[str, Any], int, str, str, float]] = []
+    # Each chat of the file, for compress: its id, store id, title and exchanges.
+    encode: list[tuple[str, str, str, list[hippo_encode.Turn]]] = []
     for chat in sorted(found, key=lambda c: c.at):  # stable: the file's order ties
         pairs, skipped = exchanges(chat.messages)
         report.skipped += skipped
         session_id = ""
         source: dict[str, Any] = {}
+        mine: list[hippo_encode.Turn] = []
         for exchange in pairs:
             typed = exchange.typed
             if len(typed) > MAX_QUERY_LEN:
@@ -323,13 +412,41 @@ async def run(
             turns.append(
                 (source, info.turn, typed, exchange.answer, exchange.answered_at)
             )
+            mine.append(
+                hippo_encode.Turn(
+                    info.turn,
+                    exchange.asked_at,
+                    exchange.answered_at,
+                    typed,
+                    exchange.answer,
+                )
+            )
             if notes == "rules":
                 report.notes += await memory.keep_said(
                     chats, info, typed, exchange.asked_at
                 )
+        if session_id:
+            encode.append((chat.label, session_id, str(source["title"]), mine))
     report.docs, report.embedded_chars = await memory.index_turns(turns)
     if notes == "rules":
         await memory.reindex(None)  # a vector for each note, when a model is set
+    if mode == "compress":
+        report.compress = {}
+        router = Router(memory.stores()[1])
+        cache = memory.compress_cache()
+        for label, session_id, title, mine in encode:
+            encoded = await memory.compress_chat(
+                session_id,
+                title,
+                mine,
+                stats=report.stats,
+                router=router,
+                cache=cache,
+            )
+            report.compress[label] = _chat_report(label, encoded)
+            report.items += sum(
+                1 for _, route in encoded.routed if route.item is not None
+            )
     report.model = memory.embedding()[1]
     report.error = memory.last_error
     report.seconds = time.perf_counter() - started

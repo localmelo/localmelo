@@ -163,6 +163,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   takes one to five of those ids and returns each whole turn, up to `recall_open_chars` (4000,
   500 to 16000) characters and cut at a sentence end, and the `turn.memory` event lists what was
   opened as an optional `opened` list. Out-of-range values are config errors. Part of #428.
+- Developer only, not visible by default: memory items written from chats. `melo memory ingest
+  FILE -X ingest=compress` has the chat model read each ingested chat, a window of
+  `compress_at_chars` (12000, 4000 to 60000) characters at a time, and write short items (a
+  title, a text, a kind and the exchanges they came from); a lasting statement the model left out
+  is made into an item by the rules. Each item is compared by rules with the items kept of its
+  kind and is stored as new, as an update (the older item reads as replaced), as related, as a
+  conflict (both are marked) or not at all when it repeats one. The replies are cached in
+  `compress_cache`, so the same window asks the model once; the report names each chat's
+  windows, items and what became of each, and the model calls. `recall_source = "items"` recalls
+  these items in place of earlier chat turns (shown as a title and text, or as list lines such as
+  `[m12] …` that `open_memory` opens), and `open_sources = "on"` brings the turns an opened item
+  came from. The default, `recall_source = "turns"`, changes nothing. Deleting a chat deletes the
+  items made only from it. Part of #428.
 - Developer only: `melo memory ingest FILE` loads past chats from a JSON file as if they
   had happened on their dates (no model call), and `LOCALMELO_NOW` pins the date
   the model and memory recall read, for memory tests.

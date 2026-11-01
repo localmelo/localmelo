@@ -7,7 +7,8 @@ the embedding model now set; ``import`` offers the notes other assistants keep
 (``--undo BATCH`` takes a batch back). The files are shared with the web console and the app.
 ``sleep [VARIANT]`` (developer mode only) tidies the notes by the ``[memory] sleep``
 variant and prints what it changed; ``ingest FILE`` (developer mode only) loads
-past chats from a file as if they had happened on their dates
+past chats from a file as if they had happened on their dates, and with ``-X
+ingest=compress`` encodes each into memory items with the chat model
 (:mod:`localmelo.support.memory.ingest`).
 """
 
@@ -212,22 +213,24 @@ async def _sleep(variant: str | None) -> int:
 
 
 async def _ingest(path: str, options: Sequence[str], as_json: bool) -> int:
-    settings: dict[str, str] = {"notes": "rules"}
+    settings: dict[str, str] = {"notes": "rules", "ingest": "turns"}
     for option in options:
         key, equals, value = option.partition("=")
         if not equals or key not in settings:
             print(
-                f"melo: -X takes notes=rules or notes=none, got {option!r}",
+                "melo: -X takes notes=rules or notes=none, and ingest=turns or "
+                f"ingest=compress, got {option!r}",
                 file=sys.stderr,
             )
             return 2
         settings[key] = value
-    if settings["notes"] not in ingest.NOTES:
-        print(
-            f"melo: -X notes takes rules or none, got {settings['notes']!r}",
-            file=sys.stderr,
-        )
-        return 2
+    for key, allowed in (("notes", ingest.NOTES), ("ingest", ingest.MODES)):
+        if settings[key] not in allowed:
+            print(
+                f"melo: -X {key} takes {' or '.join(allowed)}, got {settings[key]!r}",
+                file=sys.stderr,
+            )
+            return 2
     try:
         found = ingest.load(path)
     except ingest.IngestError as exc:
@@ -240,7 +243,18 @@ async def _ingest(path: str, options: Sequence[str], as_json: bool) -> int:
         if isinstance(chats, int):
             return chats
         assert chats is not None
-        report = await ingest.run(memory, chats, pin, found, notes=settings["notes"])
+        try:
+            report = await ingest.run(
+                memory,
+                chats,
+                pin,
+                found,
+                notes=settings["notes"],
+                mode=settings["ingest"],
+            )
+        except ingest.IngestError as exc:
+            print(f"melo: {exc}", file=sys.stderr)
+            return 2
         print(json.dumps(report.to_json()) if as_json else report.summary())
         return 0
     finally:
@@ -292,7 +306,11 @@ def main(argv: Sequence[str], prog: str = "melo memory") -> int:
             action="append",
             default=[],
             metavar="KEY=VALUE",
-            help="developer option: notes=rules (the default) or notes=none",
+            help=(
+                "developer options: notes=rules (the default) or notes=none; "
+                "ingest=turns (the default) or ingest=compress (encode each chat "
+                "into memory items with the chat model)"
+            ),
         )
     elif rest[:1] and rest[0] in DEVELOPER_VERBS:
         print(
