@@ -26,6 +26,10 @@ export const MOVES = ['startup', 'thinking', 'working', 'attention', 'idle_rest'
  * once every PLAY_EVERY_MS. The desktop pet uses the same two numbers (`petPlayAfter`, `petPlayEvery`). */
 export const PLAY_AFTER_MS = 20_000;
 export const PLAY_EVERY_MS = 300_000;
+/** After the wake-up Melo sits on its last frame this long before it lies down to rest (`petSitFor` of the app). */
+export const SIT_MS = 8_000;
+/** A rest this long with nothing else shows the resting poster and stops drawing, until anything changes. */
+export const REST_STILL_AFTER_MS = 180_000;
 
 /** `idle_play` once rest has lasted PLAY_AFTER_MS and the last play began PLAY_EVERY_MS ago or more; else
  * `idle_rest`. */
@@ -126,8 +130,8 @@ export function createPlayer({
 
   function draw(token) {
     if (token !== my.generation || my.disposed || my.pausedAt !== null || !my.shown) return;
-    my.handle = null;
-    my.timer = null;
+    // One chain of frames at a time: whatever was waiting to draw is dropped.
+    stop();
     const now = clock();
     const entry = manifest.states[my.shown];
     // A still state that plays once has ended as soon as it shows: its poster is where it holds.
@@ -159,10 +163,10 @@ export function createPlayer({
 
   /**
    * Show `key`. The same state as the one asked for last does nothing (unless `restart`). `once` plays a looping
-   * state a single time and holds its last frame. Resolves `{changed}`; a request overtaken by a later one
-   * resolves `{superseded: true}`.
+   * state a single time and holds its last frame; `cut` shows it without the cross-fade (the canvas was not on show).
+   * Resolves `{changed}`; a request overtaken by a later one resolves `{superseded: true}`.
    */
-  async function set(key, {once = false, restart = false} = {}) {
+  async function set(key, {once = false, restart = false, cut = false} = {}) {
     if (my.disposed) return {changed: false};
     if (!manifest.states[key]) throw new Error(`Unknown move: ${key}`);
     if (!restart && my.wanted === key) return {changed: false};
@@ -179,13 +183,15 @@ export function createPlayer({
       if (token !== my.generation || my.disposed) return {superseded: true};
       my.wanted = my.shown;
       onError(error);
+      // The state that was shown goes on where it was: its timeline stopped for the load.
+      if (my.shown && my.pausedAt === null) draw(token);
       return {changed: false, error};
     }
     if (token !== my.generation || my.disposed) return {superseded: true};
     const now = clock();
     Object.assign(my, {shown: key, sheet, once: once || manifest.states[key].playback === 'once', complete: false,
       started: now});
-    const duration = fadeMs(manifest, previous, key, my.still);
+    const duration = cut ? 0 : fadeMs(manifest, previous, key, my.still);
     my.blend = frozen && duration > 0 && previous ? {image: frozen, started: now, duration} : null;
     if (my.pausedAt !== null) {
       // Hidden: the new state starts when the page is shown again; its first frame is ready for that moment.
@@ -280,11 +286,19 @@ export async function startMoves(canvas, {
     player.dispose();
     return null;
   }
-  reduce?.addEventListener?.('change', (event) => player.setStill(event.matches));
+  const still = (event) => player.setStill(event.matches);
+  reduce?.addEventListener?.('change', still);
+  const follow = () => player.setVisible(doc.visibilityState !== 'hidden');
   if (doc) {
-    const follow = () => player.setVisible(doc.visibilityState !== 'hidden');
     doc.addEventListener?.('visibilitychange', follow);
     follow();
   }
+  // Disposing of the player lets go of the page's events too.
+  const dispose = player.dispose;
+  player.dispose = () => {
+    reduce?.removeEventListener?.('change', still);
+    doc?.removeEventListener?.('visibilitychange', follow);
+    dispose();
+  };
   return player;
 }

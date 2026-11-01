@@ -4,7 +4,7 @@ import {setupMemoryTab} from './memory-tab.mjs';
 import {setupScheduledTab} from './scheduled-tab.mjs';
 import {formatTime, t} from './i18n.mjs';
 import {endingLabel, endingWhy, readEnding} from './endings.mjs';
-import {idleMove, startMoves} from './moves.mjs';
+import {REST_STILL_AFTER_MS, SIT_MS, idleMove, startMoves} from './moves.mjs';
 
 /**
  * The panel beside a chat: Melo's portrait and status, then tabs. It follows
@@ -136,6 +136,8 @@ export function setupPanel({
   wide = globalThis.matchMedia?.('(min-width: 900px)'),
   tasks = null, home = () => '#/new', navigate = (hash) => { globalThis.location.hash = hash; }, hasTasks = () => false,
   moves = startMoves,
+  // The header's own timer (the end of the sitting, a long rest turning still): it never keeps a process alive.
+  wait = (fn, ms) => { const id = setTimeout(fn, ms); id?.unref?.(); return id; }, cancelWait = (id) => clearTimeout(id),
 }) {
   const doc = root.ownerDocument;
   const state = {health: null, rows: [], more: false, unavailable: [], loaded: false, error: '', notice: '', noticeFor: '',
@@ -230,12 +232,22 @@ export function setupPanel({
 
   // ── Melo's moves ──
 
-  // `startup`: the wake-up still to play (the first move of the page, if nothing runs then); `restSince` and
-  // `playedAt`: when the rest began and the last play did (clock ms); `playing`: a play goes on to its end.
-  const motion = {player: null, startup: true, restSince: null, playedAt: -Infinity, playing: false};
+  // `startup`: the wake-up still to play (the first move of the page, if nothing runs then); `sitUntil`: the end of
+  // the sitting after it (clock ms); `restSince` and `playedAt`: when the rest began and the last play did;
+  // `playing`: a play goes on to its end; `quietSince`: when the plain rest on show began (a long one is a still).
+  const motion = {player: null, startup: true, sitUntil: null, restSince: null, playedAt: -Infinity, playing: false,
+    quietSince: null, timer: null};
+  // The next look at the header, when the sitting ends or a long rest turns still; one at a time.
+  const lookAt = (at) => {
+    if (motion.timer !== null) cancelWait(motion.timer);
+    motion.timer = wait(() => { motion.timer = null; drawHeader(); }, Math.max(0, at - clock()) + 50);
+  };
   Promise.resolve(moves(stage, {onComplete: ({state: done}) => {
-    if (done === 'startup') motion.startup = false;
-    if (done === 'idle_play') motion.playing = false;
+    if (done === 'startup' && motion.startup) {
+      Object.assign(motion, {startup: false, sitUntil: clock() + SIT_MS});
+      lookAt(motion.sitUntil);
+    }
+    if (done === 'idle_play') Object.assign(motion, {playing: false, quietSince: null});
     drawHeader();
   }})).then((player) => {
     motion.player = player ?? null;
@@ -245,35 +257,63 @@ export function setupPanel({
   }, () => {});
   // Below 900 px the portrait is in the sheet: while the sheet is closed nothing is drawn.
   const sheetSeen = () => motion.player?.setVisible(!wide || wide.matches || state.sheet, 'sheet');
-  // The state to show for a move, and whether a looping state plays once.
+  // A portrait scrolled out of view draws nothing either.
+  if (typeof globalThis.IntersectionObserver === 'function') {
+    new globalThis.IntersectionObserver((entries) => {
+      const last = entries[entries.length - 1];
+      if (last) motion.player?.setVisible(last.isIntersecting, 'scroll');
+    }).observe(ring);
+  }
+  // A tab shown again looks at the header at once: a sitting or a rest may have ended while it was hidden.
+  doc.addEventListener?.('visibilitychange', () => { if (doc.visibilityState !== 'hidden') drawHeader(); });
+  // The state to show for a move, and whether a looping state plays once; `still` for a rest that has gone on long
+  // enough to show the resting poster.
   function pick(move) {
     if (move !== 'idle') {
-      Object.assign(motion, {startup: false, restSince: null, playing: false});
+      Object.assign(motion, {startup: false, sitUntil: null, restSince: null, playing: false, quietSince: null});
       return {key: move};
     }
     if (motion.startup) return {key: 'startup'};
     const now = clock();
+    if (motion.sitUntil !== null) {
+      if (now < motion.sitUntil) return {key: 'startup'};
+      motion.sitUntil = null;
+    }
     motion.restSince ??= now;
     if (motion.player.inspect().still) return {key: 'idle_rest'};
     if (!motion.playing && idleMove(now - motion.restSince, now - motion.playedAt) === 'idle_play') {
-      Object.assign(motion, {playing: true, playedAt: now});
+      Object.assign(motion, {playing: true, playedAt: now, quietSince: null});
     }
-    return motion.playing ? {key: 'idle_play', once: true} : {key: 'idle_rest'};
+    if (motion.playing) return {key: 'idle_play', once: true};
+    motion.quietSince ??= now;
+    if (now - motion.quietSince >= REST_STILL_AFTER_MS) return {key: 'idle_rest', still: true};
+    lookAt(motion.quietSince + REST_STILL_AFTER_MS);
+    return {key: 'idle_rest'};
   }
   function drawMove(said, scoped) {
     // Offline, the last health reply is old news: the still picture stays until the gateway answers again.
     const move = motion.player && !state.offline ? portraitMove(state.health, said, scoped) : null;
-    ring.dataset.moves = move ? 'on' : 'off';
-    // A still picture stops the moves behind it; they go on from where they were.
-    motion.player?.setVisible(Boolean(move), 'portrait');
-    if (!move) {
-      delete ring.dataset.move;
+    const picked = move ? pick(move) : null;
+    // A still ends a rest, a play and the sitting after the wake-up.
+    if (!move) Object.assign(motion, {sitUntil: null, restSince: null, playing: false, quietSince: null});
+    if (!picked || picked.still) {
+      ring.dataset.moves = 'off';
+      // A still picture stops the moves behind it; they go on from where they were.
+      motion.player?.setVisible(false, 'portrait');
+      if (picked) ring.dataset.move = picked.key;
+      else delete ring.dataset.move;
       return false;
     }
-    const {key, once = false} = pick(move);
+    const {key, once = false} = picked;
     // The state asked for, for a look at the page (the canvas itself says nothing).
     ring.dataset.move = key;
-    motion.player.set(key, {once}).catch(() => {});
+    // Back from a still picture the canvas was not on show: the new state cuts in under the picture's fade.
+    const cut = ring.dataset.moves !== 'on';
+    motion.player.setVisible(true, 'portrait');
+    // The canvas shows once its state is drawn, never an old frame first.
+    motion.player.set(key, {once, cut}).then((result) => {
+      if (!result?.superseded && !result?.error && ring.dataset.move === key) ring.dataset.moves = 'on';
+    }, () => {});
     return true;
   }
 

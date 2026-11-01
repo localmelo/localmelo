@@ -25,7 +25,7 @@ function canvasDouble(label = 'screen') {
 }
 
 /** A player on a fake clock: `tick(ms)` moves time and runs the frame callbacks and timers that are due. */
-function rig({still = false, slow = {}} = {}) {
+function rig({still = false, slow = {}, broken = []} = {}) {
   let now = 1000;
   let next = 1;
   const pending = new Map();
@@ -43,6 +43,7 @@ function rig({still = false, slow = {}} = {}) {
     loadImage: (src) => {
       loads.push(src);
       const sheet = {label: src, width: 1024};
+      if (broken.some((name) => src.endsWith(`${name}.webp`))) return Promise.reject(new Error(`Cannot load ${src}`));
       const key = Object.keys(slow).find((name) => src.endsWith(`${name}.webp`));
       return key ? slow[key].then(() => sheet) : Promise.resolve(sheet);
     },
@@ -245,10 +246,12 @@ test('a page without a canvas or without the files keeps its pictures', async ()
   assert.equal(failing, null);
 });
 
-test('a page follows its visibility and the reduced-motion setting', async () => {
+test('a page follows its visibility and the reduced-motion setting, and lets go of both when disposed', async () => {
   const listeners = {};
-  const doc = {visibilityState: 'visible', addEventListener: (type, fn) => { listeners[type] = fn; }};
-  const media = {matches: true, addEventListener: (type, fn) => { listeners.motion = fn; }};
+  const doc = {visibilityState: 'visible', addEventListener: (type, fn) => { listeners[type] = fn; },
+    removeEventListener: (type, fn) => { if (listeners[type] === fn) delete listeners[type]; }};
+  const media = {matches: true, addEventListener: (type, fn) => { listeners.motion = fn; },
+    removeEventListener: (type, fn) => { if (listeners.motion === fn) delete listeners.motion; }};
   const player = await startMoves(canvasDouble(), {fetchJson: async () => MANIFEST, doc, media: () => media,
     loadImage: async (src) => ({label: src, width: 1024}), clock: () => 0, frame: () => 1, cancelFrame() {},
     wait: () => 1, cancelWait() {}, makeCanvas: () => canvasDouble('snapshot')});
@@ -258,4 +261,49 @@ test('a page follows its visibility and the reduced-motion setting', async () =>
   assert.equal(player.inspect().paused, true);
   listeners.motion({matches: false});
   assert.equal(player.inspect().still, false);
+  player.dispose();
+  assert.deepEqual(Object.keys(listeners), []);
+});
+
+test('a sheet that cannot load leaves the state shown going on where it was', async () => {
+  const r = rig({broken: ['working']});
+  r.player.set('idle_rest');
+  await settle();
+  await r.tick(500);
+  const frame = r.player.inspect().frame;
+  const result = await r.player.set('working');
+  assert.ok(result.error);
+  const after = r.player.inspect();
+  assert.equal(after.wanted, 'idle_rest');
+  assert.equal(after.shown, 'idle_rest');
+  assert.equal(after.drawing, true, 'its timeline goes on');
+  assert.equal(after.frame, frame);
+  await r.tick(2000);
+  assert.notEqual(r.player.inspect().frame, frame);
+});
+
+test('one chain of frames at a time, whatever was asked in between', async () => {
+  const r = rig();
+  r.player.set('working');
+  await settle();
+  r.player.setVisible(false, 'page');
+  r.player.setVisible(true, 'page');
+  r.player.setVisible(true, 'page');
+  r.player.set('attention');
+  await settle();
+  r.player.set('attention', {restart: true});
+  await settle();
+  assert.ok(r.pending.size <= 1, `${r.pending.size} chains`);
+  await r.tick(100);
+  assert.ok(r.pending.size <= 1);
+});
+
+test('a state may cut in with no fade when the canvas was not on show', async () => {
+  const r = rig();
+  r.player.set('idle_rest');
+  await settle();
+  await r.tick(300);
+  const result = await r.player.set('idle_play', {cut: true});
+  assert.equal(result.durationMs, 0);
+  assert.equal(r.player.inspect().fading, false);
 });

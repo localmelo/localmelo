@@ -8,6 +8,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {answering, headline, portraitMove, setupPanel, stepWords} from '../../support/gateway/static/panel.mjs';
+import {REST_STILL_AFTER_MS, SIT_MS} from '../../support/gateway/static/moves.mjs';
 
 function dom() {
   const doc = {activeElement: null, listeners: {}, visibilityState: 'visible',
@@ -63,7 +64,7 @@ const started = {id: 1, turn: 1, type: 'turn.started', data: {turn: 1, user_text
 const tool = (id, call, type, data = {}) => ({id, turn: 1, ts: id, type, data: {step: 1, call_id: call, ...data}});
 
 function harness({rows = [], turns = null, storage = null, failActivity = false, wide = null, openChat = '', developer = false, hasTasks = false,
-  moves = undefined, clock = () => 86400 * 1000 * 400} = {}) {
+  moves = undefined, clock = () => 86400 * 1000 * 400, wait = undefined} = {}) {
   const {doc, Element} = dom();
   const root = new Element('aside');
   const drawer = new Element('section');
@@ -108,7 +109,7 @@ function harness({rows = [], turns = null, storage = null, failActivity = false,
   };
   h.panel = setupPanel({
     root, chip, backdrop, api, cover: () => [chat], chat: () => h.open, developer: () => developer, storage: storage ?? {getItem: () => null, setItem: () => {}},
-    clock, ...(moves ? {moves} : {}),
+    clock, ...(moves ? {moves} : {}), ...(wait ? {wait, cancelWait: () => {}} : {}),
     wide, tasks, hasTasks: () => hasTasks, home: () => `#/s/${h.open || 'main'}`, navigate: (hash) => h.went.push(hash),
     live: {
       doc,
@@ -862,11 +863,11 @@ test("the panel keeps following its chat while the address names a task", async 
 /** A player double: each change the panel asks of it is written down (the same state asked again is no change, as
  * in the player); `complete(state)` plays a state's end. */
 function movesDouble({still = false} = {}) {
-  const player = {asked: [], hidden: new Set(), still, onComplete: null,
-    set(key, {once = false} = {}) {
+  const player = {asked: [], cuts: [], hidden: new Set(), still, onComplete: null, fail: false,
+    set(key, {once = false, cut = false} = {}) {
       const label = once ? `${key} once` : key;
-      if (this.asked.at(-1) !== label) this.asked.push(label);
-      return Promise.resolve({changed: true});
+      if (this.asked.at(-1) !== label) { this.asked.push(label); this.cuts.push(cut); }
+      return Promise.resolve(this.fail ? {changed: false, error: new Error('no sheet')} : {changed: true});
     },
     setVisible(visible, reason) { if (visible) this.hidden.delete(reason); else this.hidden.add(reason); },
     inspect() { return {still: this.still}; },
@@ -899,10 +900,11 @@ test('the portrait moves: waits raise a paw, work works, the model alone thinks,
   assert.equal(answering(health(running()), []), false);
 });
 
-test('the portrait wakes up once, rests, plays now and then, and keeps its still pictures for an ending and an error', async () => {
+test('the portrait wakes up once, sits, rests, plays now and then, and keeps its still pictures for an ending and an error', async () => {
   let now = 1_000_000;
   const {player, moves} = movesDouble();
-  const h = harness({moves, clock: () => now});
+  const timers = [];
+  const h = harness({moves, clock: () => now, wait: (fn, ms) => { timers.push({fn, at: now + ms}); return timers.length; }});
   await settle();
   const ring = h.root.find((node) => node.className === 'panel-portrait');
   assert.equal(player.canvas.tagName, 'CANVAS');
@@ -910,12 +912,21 @@ test('the portrait wakes up once, rests, plays now and then, and keeps its still
   assert.equal(ring.dataset.moves, 'off', 'before the first health reply the picture shows');
   assert.equal(ring.dataset.dim, 'true', 'not connected yet: the resting dog, dimmed');
   await h.panel.update(health());
-  assert.equal(ring.dataset.moves, 'on');
+  await settle();
+  assert.equal(ring.dataset.moves, 'on', 'the canvas shows once its state is drawn');
   assert.deepEqual(player.asked, ['startup']);
-  // Startup holds until it ends; then Melo rests.
+  // Startup holds until it ends; then Melo sits on its last frame for 8 s, and lies down to rest.
   await h.panel.update(health());
   assert.deepEqual(player.asked, ['startup']);
   player.complete('startup');
+  assert.equal(player.asked.at(-1), 'startup');
+  assert.equal(SIT_MS, 8000);
+  assert.ok(timers.some((timer) => timer.at >= now + SIT_MS), 'the header looks again when the sitting ends');
+  now += 7_000;
+  await h.panel.update(health());
+  assert.equal(player.asked.at(-1), 'startup');
+  now += 1_000;
+  timers.at(-1).fn();
   assert.equal(player.asked.at(-1), 'idle_rest');
   assert.equal(ring.dataset.move, 'idle_rest');
   // After 20 s of rest it plays once, to the end, and rests again; not again for 5 minutes.
@@ -927,15 +938,30 @@ test('the portrait wakes up once, rests, plays now and then, and keeps its still
   assert.equal(player.asked.at(-1), 'idle_play once', 'a play goes on to its end');
   player.complete('idle_play');
   assert.equal(player.asked.at(-1), 'idle_rest');
-  now += 200_000;
+  // Three minutes of plain rest: the resting poster, and nothing draws, until the next play.
+  now += 179_000;
   await h.panel.update(health());
+  await settle();
+  assert.equal(ring.dataset.moves, 'on');
+  now += 21_000;
+  await h.panel.update(health());
+  assert.equal(REST_STILL_AFTER_MS, 180_000);
+  assert.equal(ring.dataset.moves, 'off');
+  assert.equal(ring.dataset.move, 'idle_rest');
+  assert.ok(player.hidden.has('portrait'));
+  assert.equal(h.root.find((node) => node.tagName === 'IMG').getAttribute('src'), '/assets/moves/poster-idle_rest.webp');
   assert.equal(player.asked.at(-1), 'idle_rest');
   now += 100_000;
   await h.panel.update(health());
+  await settle();
   assert.equal(player.asked.at(-1), 'idle_play once');
+  assert.equal(player.cuts.at(-1), true, 'back from the still picture the play cuts in under its fade');
+  assert.equal(ring.dataset.moves, 'on');
+  assert.ok(!player.hidden.has('portrait'));
   // Work, a wait and the model answering each take over at once.
   await h.panel.update(health({...running(), items: [item({icon: 'run'})]}));
   assert.equal(player.asked.at(-1), 'working');
+  assert.equal(player.cuts.at(-1), false, 'a change on show cross-fades');
   await h.panel.update(health({...running(), items: [item({answering: true})], waiting: [{kind: 'chat', id: 'c1'}]}));
   assert.equal(player.asked.at(-1), 'attention');
   await h.panel.update(health({...running(), items: [item({answering: true})]}));
@@ -955,6 +981,7 @@ test('the portrait wakes up once, rests, plays now and then, and keeps its still
   assert.equal(h.root.find((node) => node.tagName === 'IMG').getAttribute('src'), '/assets/moves/poster-thinking.webp');
   // The page lost the gateway: the still picture, until it answers again.
   await h.panel.update(health());
+  await settle();
   assert.equal(ring.dataset.moves, 'on');
   h.panel.offline(true);
   assert.equal(ring.dataset.moves, 'off');
@@ -963,12 +990,36 @@ test('the portrait wakes up once, rests, plays now and then, and keeps its still
   assert.equal(ring.dataset.dim, 'true');
   assert.ok(player.hidden.has('portrait'));
   h.panel.offline(false);
+  await settle();
   assert.equal(ring.dataset.moves, 'on');
   // Back to rest: the wake-up is not played again, and the rest starts over.
   await h.panel.update(health());
   assert.equal(ring.dataset.moves, 'on');
   assert.ok(!player.hidden.has('portrait'));
   assert.equal(player.asked.at(-1), 'idle_rest');
+  // A state that cannot be drawn leaves the still picture in front.
+  h.panel.offline(true);
+  player.fail = true;
+  await h.panel.update(health({...running(), items: [item({icon: 'run'})]}));
+  h.panel.offline(false);
+  await settle();
+  assert.equal(player.asked.at(-1), 'working');
+  assert.equal(ring.dataset.moves, 'off');
+});
+
+test('a still ends the sitting after the wake-up and the rest: back at rest Melo lies down at once', async () => {
+  let now = 0;
+  const {player, moves} = movesDouble();
+  const h = harness({moves, clock: () => now, wait: () => 1});
+  await settle();
+  await h.panel.update(health());
+  player.complete('startup');
+  assert.equal(player.asked.at(-1), 'startup');
+  now += 1_000;
+  await h.panel.update(health({recent: {kind: 'chat', id: 'c1', outcome: 'done', ended_s_ago: 0}}));
+  now += 1_000;
+  await h.panel.update(health());
+  assert.equal(player.asked.at(-1), 'idle_rest', 'no sitting left over from before the ending');
 });
 
 test('the first move of a busy console skips the wake-up, and reduced motion never plays', async () => {
