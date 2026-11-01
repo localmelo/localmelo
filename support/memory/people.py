@@ -31,11 +31,17 @@ _ZH_RELATIVES = re.compile(
     "妈妈|爸爸|哥哥|姐姐|弟弟|妹妹|妻子|丈夫|女儿|儿子|父母|家人|女朋友|男朋友"
     "|导师|同事|同学|朋友|室友|医生|教授"
 )
-# Common surnames, less the ones that start everyday words (高效, 方法, 文件, 金融).
+# A nickname is 小, 老 or 阿 and one character (小明, 老王, 阿强); a name is a common
+# surname and one or two (王小明), less the surnames that start everyday words (高效,
+# 方法, 文件, 金融).
 _ZH_NAME = re.compile(
-    "(?:[小老阿]|[王李张刘陈杨黄赵周吴徐孙胡朱林郭马罗梁宋郑谢韩唐冯董萧程曹袁邓傅沈彭吕苏卢"
-    "蒋蔡贾丁魏薛叶阎潘杜戴汪姜谭廖邹熊陆郝崔邱秦邵孟侯赖龚顾])[\u4e00-\u9fff]{1,2}"
+    "(?:[小老阿][\u4e00-\u9fff]"
+    "|[王李张刘陈杨黄赵周吴徐孙胡朱林郭马罗梁宋郑谢韩唐冯董萧程曹袁邓傅沈彭吕苏卢"
+    "蒋蔡贾丁魏薛叶阎潘杜戴汪姜谭廖邹熊陆郝崔邱秦邵孟侯赖龚顾][\u4e00-\u9fff]{1,2})"
 )
+# Everyday two-character words that start with 小, 老 or 阿 and are no one's nickname
+# (小时, 小说, 老家, 阿里); 老师, 老板 and 阿姨 stay people.
+_ZH_NOT_NAMES = re.compile("小时|小说|小组|小区|小心|小型|小数|小学|老家|老式|阿里")
 
 
 def _word_of_name(word: str) -> bool:
@@ -53,10 +59,14 @@ def person(owner: str) -> bool:
 
     A capitalised name that is no language, tool, command, file or code
     identifier ("Python's", "Git's", "Makefile's", "GitHub's" are not people); a
-    Chinese name with a surname or 小/老/阿, or a relative or colleague ("妈妈", "同事").
+    Chinese name with a surname or 小/老/阿 and one character ("小明", "老王"; not
+    "小程序" or "小时"), or a relative or colleague ("妈妈", "同事").
     """
     if re.search("[\u4e00-\u9fff]", owner):
-        return bool(_ZH_RELATIVES.fullmatch(owner) or _ZH_NAME.fullmatch(owner))
+        return bool(
+            _ZH_RELATIVES.fullmatch(owner)
+            or (_ZH_NAME.fullmatch(owner) and not _ZH_NOT_NAMES.fullmatch(owner))
+        )
     words = re.sub(r"^(?:Dr|Mr|Mrs|Ms|Mx|Prof)\.\s+", "", owner).split()
     return bool(words) and all(
         _word_of_name(w) and not _NOT_PEOPLE.fullmatch(w) for w in words
