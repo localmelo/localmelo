@@ -46,7 +46,7 @@ from ..finishing import NOT_CONTINUED, is_out_of_steps
 from ..front_rules import HANDOFF_TEXTS
 from ..task_endings import can_finish, report_text, shown
 from .errors import ApiError
-from .followups import FOLLOWED_ECHO, followed_words
+from .followups import FOLLOWED_ECHO, QUIET_DIDS, followed_words
 from .running import (
     TASK_OUTCOMES,
     TITLE_CHARS,
@@ -373,6 +373,8 @@ async def chat_did(console: Console, turn: DayTurn) -> str:
         data = data if isinstance(data, Mapping) else {}
         kind = data.get("echo")
         if kind == FOLLOWED_ECHO:
+            if data.get("did") in QUIET_DIDS:
+                continue  # skipped or stopped: the follow-up did nothing (#431)
             title = " ".join(str(data.get("title") or "").split())
             key, params = followed_words(
                 str(data.get("did") or ""),

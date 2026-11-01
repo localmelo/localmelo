@@ -496,6 +496,8 @@ class Console:
             try:
                 await self.asks.expire_stale()
                 await self.asks.restore_queued()
+                # The follow-ups queued when the last run stopped (#431).
+                await self.followups.restore()
             except Exception:
                 logger.exception(
                     "Could not end the asks or run the queue of the last run"

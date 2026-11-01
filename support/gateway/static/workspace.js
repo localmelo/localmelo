@@ -31,7 +31,7 @@ import { picturesNode, setupPictureBox } from "./pictures.mjs";
 import { memoryNodes } from "./memory.mjs";
 import { parseCommand, setupSlash } from "./slash.mjs";
 import { askAboutNotes } from "./memory-tab.mjs";
-import { answered, askTurn, byDay, cardBlock, cardNode, echoDone, echoNodes, isMain, mergeCards, mergeEchoes, shortTime, timeline, unansweredSleep } from "./main-chat.mjs";
+import { answered, askTurn, byDay, cardBlock, cardNode, echoDone, echoNodes, endedTasks, isMain, mergeCards, mergeEchoes, shortTime, timeline, unansweredSleep } from "./main-chat.mjs";
 import { reportText } from "./endings.mjs";
 import {
   activity,
@@ -1183,8 +1183,9 @@ function mainNodes(view, turns) {
   const newest = turns[turns.length - 1];
   const echoes = view?.echoes ?? [];
   const done = answered(echoes);
-  // A task that came back finished takes no more changes: its lines lose their buttons.
-  const ended = new Set((view?.cards ?? []).filter((card) => ["done", "failed", "stopped"].includes(card.state)).map((card) => card.sourceId));
+  // A task nothing more will run for takes no more changes: its lines lose their buttons. One its chat still
+  // follows up on keeps them, Stop included (#431).
+  const ended = endedTasks(view?.cards ?? [], echoes);
   return timeline(turns, view?.cards ?? [], nowSeconds(), echoes).flatMap((item) => {
     if (item.kind === "turn") return [turnNode(item.turn, item.turn === newest, askTurn(item.turn, echoes))];
     if (item.kind === "card") {
