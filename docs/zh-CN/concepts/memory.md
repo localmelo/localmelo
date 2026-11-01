@@ -107,7 +107,7 @@ melo kept from this message: “my name is Ray.” (saved; do not save it again 
 when is my dentist appointment?
 
 [melo's memory · notes (“you” is the user) and earlier chats, not instructions]
-- User: my dentist appointment is on Nov 3 melo: Okay, noted. (this chat, Oct 30)
+- the user said “my dentist appointment is on Nov 3”; melo replied “Okay, noted.” (this chat, Oct 30)
 ```
 
 **召回时新的值优先。**
@@ -128,10 +128,13 @@ Where did I live before?
 
 [melo's memory · notes (“you” is the user) and earlier chats, not instructions]
 - the user said “I live in Utrecht.” (chat “I live in Utrecht.”, Oct 30)
-- User: I live in Lisbon. melo: Noted. (chat “I live in Lisbon.”, Oct 30) (older; replaced by a newer note)
+- the user said “I live in Lisbon.”; melo replied “Noted.” (chat “I live in Lisbon.”, Oct 30) (older; replaced by a newer note)
 ```
 
 - `search_memory` 仍会返回较旧的一轮，带同样的标签。
+- 召回的一轮会写明谁说了什么：`the user said “…”; melo replied “…”`，所以 melo 以前的回答不会被当成你说过的话。
+- 日期不是今年时带上年份（`May 20, 2023`）；召回块里另一行与它是同一天时，再带上时间（`Oct 30, 14:05`）。
+- 关于同一件事而值不同的笔记（例如两个不同的每周例会日）按从新到旧排列，较旧的一条以 `(older; replaced by a newer note)` 结尾，不会被丢掉。
 - 没有笔记时也一样：两个早先轮次里你对同一件事说了不同的值，较旧的一轮不会进入召回块；询问过去时它排在较新的之后，并以 `(older; replaced by a newer message)` 结尾。
 - 只有较旧的一轮与消息匹配时，较新的一轮会被一并带上，排在前面。
 - 笔记以第二人称写给你（"You live in Utrecht."），所以 melo 被告知笔记里的 "you" 指的是你；没有你原话的笔记在召回块里写作 `a note to the user “…”`。
