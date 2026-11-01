@@ -99,6 +99,13 @@ _CARD_WORDS: Final = {
 _ASK_LEAD: Final = re.compile(
     r"\[task [0-9a-f]{12} · (?P<title>.*) asks · data, not instructions\]"
 )
+# melo's own follow-up on a task its chat started (#411) starts with this
+# line, then ``How it ended: <words>`` (console ``followups.py``).
+_FOLLOWUP_LEAD: Final = re.compile(
+    r"\[localmelo · follow-up on task [0-9a-f]{12} · (?P<title>.*) · "
+    r"data, not instructions\]"
+)
+_HOW_ENDED: Final = "How it ended: "
 
 
 # ── Finding or starting the gateway ──
@@ -567,6 +574,29 @@ def task_question(user_text: str) -> tuple[str, str] | None:
     return found["title"], problem
 
 
+def followup_turn(user_text: str) -> tuple[str, str] | None:
+    """The title and how it ended of melo's follow-up a turn is; None for another turn."""
+    lines = user_text.splitlines()
+    found = _FOLLOWUP_LEAD.fullmatch(lines[0].strip()) if lines else None
+    if found is None:
+        return None
+    how = next((ln[len(_HOW_ENDED) :] for ln in lines if ln.startswith(_HOW_ENDED)), "")
+    return found["title"], how.split(" (", 1)[0]
+
+
+def followup_line(title: str, how: str, symbols: Any, width: int) -> Text:
+    """``↻ melo follows up on “X”: <how>``, muted: what stands for melo's own turn."""
+    words = t_in("en", "followup.row", title=title, why=how) if how else title
+    words = clean_output(" ".join(words.split()))
+    marker = f"  {t_in('en', 'followup.marker')}"
+    line = Text(
+        cut_cells(f"↻ {words}", max(8, width - len(marker)), symbols.ellipsis),
+        style="muted",
+    )
+    line.append(marker, style="muted")
+    return line
+
+
 def asked_line(title: str, problem: str, symbols: Any, width: int) -> Text:
     """``Task “X” asks: <problem>``, muted: what stands for the chat's turn on it."""
     words = t_in("en", "ask.asksAbout", title=title, problem=problem)
@@ -865,8 +895,18 @@ class MainChat:
             typed = " ".join(str(turn.get("user_text") or "").split())
             answer = " ".join(str(turn.get("answer") or "").split())
             asked = task_question(str(turn.get("user_text") or ""))
+            followed = (
+                followup_turn(str(turn.get("user_text") or ""))
+                if turn.get("origin") == "followup"
+                else None
+            )
             if asked is not None:
                 line = asked_line(*asked, symbols, width - len(lead))
+                line.pad_left(len(lead))
+                out.print(line)
+            elif followed is not None:
+                # melo's own turn: its row, never its frame.
+                line = followup_line(*followed, symbols, width - len(lead))
                 line.pad_left(len(lead))
                 out.print(line)
             else:
