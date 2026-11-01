@@ -348,6 +348,36 @@ retry cannot start a second turn. A started task with no card, or a
 across retries). The recovery card is rendered with `textContent`, never as
 HTML. Stop is the task API, never `POST /api/turns/{id}/cancel`.
 
+### A chat's follow-up on its tasks
+
+A task a chat starts from the person's message (`Front._start`, through
+`TaskWorkers.create_spec(chat_started=True)`) carries `started_by: "chat"` in
+its session's `meta`. `support/gateway/console/followups.py` hears each
+`sched.finished` and, with `[tasks] follow_up` on, queues one follow-up for the
+owner chat when the task ran out of steps, ended `draft`, `blocked` or `failed`
+by its own report, or failed with a run status the chat can act on (`failed`,
+`gate_stopped`, `stuck`, `context_budget_exceeded`, `timeout`); never for a
+chore's task, one from `POST /api/tasks`, a Stop, a refused folder, a continue
+that could not start, or a provider or setup failure. `meta.followup` keeps
+`person_turn` (the id of the person's newest turn in that chat), `runs`,
+`continued` and `ending_at`: at most two follow-ups per task for one person
+turn, and only the first may continue it.
+
+The follow-up runs in the chat's drain (`OwnerAsks`), after the person's
+queued messages and the tasks' questions, as an internal turn with origin
+`followup` (`turns.origin`), typed text `""` and a request framed as data; an
+`attention.echo` of kind `followup` stands for it, and one of kind `followed`
+records `did` (`continued`, `asked`, `reported`). It is skipped when the
+person's newest turn began after the task ended, when the task ran or ended
+again, or when the setting went off. `task_continue` (the follow-up's only way
+to act) calls `TaskWorkers.message(automatic=True)`, which sets
+`meta.followup_guard`; any other message to the task clears it. A run with the
+guard wraps its policy in `EarlierBlocks`: every denial (origin `user`, `auto`
+or `policy`) records `approval.call_key`, the tool, the folder and the
+normalized arguments, and a call with the same key is refused before any
+review with origin `policy` and `approval.earlier` (who blocked it). A step the
+person allowed once since is asked again.
+
 ## S3b.1a foundations
 
 Pause saves the prior level, source, reason and rank in `park_priority` in the

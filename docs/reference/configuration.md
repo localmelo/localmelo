@@ -103,6 +103,7 @@ tables of the chosen backends.
 | `lock_self` | `[scheduler]` | `""` | This bench's own holder: the exact `holder:` value, or `holder:run` when the lock carries a `run:` line. Matching is exact and case-sensitive. |
 | `driver` | `[browser]` | `"off"` | Whether melo may read web pages in a browser: `off` gives it no browser tools; `safari-automation` gives the terminal chat and every chat of the web console and the app eight read-only tools that open pages in Safari's automation windows (asks once per site per chat; see [Browsing with melo](../guides/browsing.md)). `/browser` switches it in the terminal; `-X browser.driver=safari-automation` for one run. Direct runs, worker runs and saved tasks never get the tools. Any other value is a configuration error. |
 | `web_fetch` | `[tools]` | `true` | Whether chats and tasks may read public web pages with the `web_fetch` tool (read-only; never this computer or its local network; a site your own recent messages do not name asks once per chat, shared with the browser; see [Tools](tools.md#reading-a-public-web-page)). `false` takes the tool away; Settings → Chats and folders → **Read web pages** is the same switch; `-X tools.web_fetch=off` for one run. Direct runs never have it. Any value that is not a bool is a configuration error. |
+| `follow_up` | `[tasks]` | `true` | Whether a chat follows up on a task it started when the task fails, runs out of steps, ends **Done, not finished** or needs you: one turn of its own that continues the task once, works around a blocked step or asks you one question, then says what got done (see [Web console](../guides/web-console.md#when-a-task-it-started-stops-the-chat-follows-up)). `false` leaves only the task's card; Settings → Chats and folders → **Follow up on tasks** (developer mode) is the same switch; `-X tasks.follow_up=off` for one run. Any value that is not a bool is a configuration error. |
 | `lock_gate` | `[scheduler]` | `"record"` | `record` never changes a request; `wait` holds every workspace call, embeddings included, while a foreign lock is present. See [Scheduler](../guides/scheduler.md#the-gpu-lock-and-the-battery-s2b). |
 
 A `[memory]` table that is all defaults is not written. Its keys,
@@ -523,7 +524,7 @@ enable_thinking = false
 - `--base-url` does not read the config file, so `extra_body` does not apply
   there.
 
-A `[browser]` table whose driver is `off` is not written, nor a `[tools]` table whose `web_fetch` is `true`.
+A `[browser]` table whose driver is `off` is not written, nor a `[tools]` table whose `web_fetch` is `true`, nor a `[tasks]` table whose `follow_up` is `true`.
 
 ## MCP servers
 
