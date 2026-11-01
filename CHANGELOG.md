@@ -25,6 +25,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   run that was put back another way already answers "Those notes were already
   put back", and Undo during a run answers at once to try again in a moment.
   A run that changes nothing leaves no line. [#363]
+- Developer only: `melo memory ingest FILE` loads past chats from a JSON file as if they
+  had happened on their dates (no model call), and `LOCALMELO_NOW` pins the date
+  the model and memory recall read, for memory tests.
 - A task says honestly how it ended. When its worker finishes, code, not the
   worker, decides, and only proof makes it **Ready**. It reads **Done, not
   finished** when its last test failed or its result was not checked, when it
@@ -523,6 +526,32 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Tidying notes while idle no longer undoes your Undo, loses a stopped run, or
+  ignores the GPU lock. An Undo sticks: two notes it separated are not merged
+  or replaced again, a note it brought back is not retired again, and a note it
+  removed is not written again from the same turn (a third, newer note can
+  still replace a restored one, and rewording a note yourself ends the reason
+  kept for it). A run that is cancelled or stops early keeps what it changed,
+  so it can still be undone. Every request to a model server first checks the
+  lock, `[memory] sleep_lock` or else the shared GPU lock, and the run stops
+  when another holder takes it (`stopped: gpu_lock`); a chat, task or worker
+  turn that starts during the run stops it too. Part of #363.
+- A note melo writes for you now says "you", and a reply that says "saved" with
+  nothing kept is flagged. A note the chat's model wrote in the first person
+  ("My flight to Porto is at gate 22.", "The pool gave me a new locker.") is
+  kept in the second person, as your own words are, so a newer note of the same
+  subject replaces the older one and recall shows whose note it is. A note that
+  says both "I" and "you" is refused with how to write it (you as "you", melo as
+  "melo"); "we" and quoted words are left alone. A reply that only says it
+  saved or noted ("Saved.", "Noted.", "Got it, noted…", "已记录。") with no note
+  kept now counts as a claim that names nothing, as one that names a fact
+  already did, and `unsaved_claim` is true; so does one that names only a
+  generic thing ("I've saved your preference.", "我已经记录了你的偏好。").
+  "Got it!" is still no claim. A note that says "I" beside "the user" ("The
+  user wants me to answer in Chinese.") is refused too, never turned into "you",
+  because its "I" is melo. A note
+  that restates your words with a relative word ("You have a cousin named Ren
+  who lives in Kyoto.") is no longer refused for the word "who".
 - A note's owner has to be a person. A rule you ask melo to remember ("Remember:
   tests run with -n auto", "记住：开发的代码一律用英文") is filed under About, not
   People, and the owner check no longer refuses it for naming a language, a

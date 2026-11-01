@@ -40,6 +40,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
+from localmelo.melo import clock
 from localmelo.melo.agent.agent import DEFAULT_MEMORY_DIR
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
@@ -116,6 +117,12 @@ _PACK_RECALL: Final = 12
 ASK_OWNER: Final = "ask_owner"
 NOT_THE_USER: Final = (
     "Not remembered: this turn is a task's question, not the user's words."
+)
+# The refusal of a note that says "I" and "you" at once: who is who is unclear.
+WRITE_IN_YOU: Final = (
+    'Not remembered: write the user as "you" and the assistant as "melo", never '
+    '"I" or "my" (not "I prefer that when you explain …" but "You prefer that '
+    'melo explains …").'
 )
 _BATCH: Final = 16
 _QUERY_CHARS: Final = 2_000
@@ -624,7 +631,7 @@ class ChatMemory:
         vector = unit(embedded.vectors[0]) if embedded.vectors else None
         async with self._lock:
             corpus = await self._sync()
-            now = time.time()
+            now = clock.now()  # LOCALMELO_NOW pins it
             found = ranked(
                 corpus,
                 query,
@@ -841,8 +848,12 @@ class ChatMemory:
         """Keep *text* as a note of the chat turn under way; what the model reads back.
 
         Refused: outside a chat's turn, in a turn the person did not begin
-        (``TurnInfo.origin``), a secret, and words the user did not type in
-        this chat and no finished task's result shown in it holds.
+        (``TurnInfo.origin``), a secret, a note that says "I" and "you", or "I"
+        and "the user" (:data:`WRITE_IN_YOU`: its "I" is melo), and words the
+        user did not type in this chat and no finished task's result shown in it
+        holds. A note that says "I" or "my" and nothing of the user otherwise is
+        kept in the second person (:func:`records.second_person`), as the user's
+        own words are.
         """
         turn = CHAT_TURN.get()
         if not self.enabled or turn is None or turn.memory.recall is None:
@@ -859,6 +870,11 @@ class ChatMemory:
                 f"Not remembered: {records.NOT_KEPT}. Do not write it anywhere "
                 "(no file, no code)."
             )
+        if records.first_person(note):
+            # "I" is the assistant when the note names the user in the third person.
+            if records.addresses_user(note) or records.names_user(note):
+                return WRITE_IN_YOU
+            note = records.second_person(note, protect=True)
         said = [turn.typed, *await self._said(turn)]
         admitted = "user_statement"
         missing = records.unsupported(note, said)
@@ -986,8 +1002,9 @@ class ChatMemory:
         notes (the user's words, no secret, supersedes the old value).
 
         When nothing written to the user is named (a fragment such as "gate 9
-        for Faro"), or ``remember`` refuses, nothing is kept and the turn's
-        ``turn.memory`` event, queued again, has ``unsaved_claim`` true. Nothing
+        for Faro"), the reply claims a save and names nothing ("Saved.",
+        "Noted.", "已记录。"), or ``remember`` refuses, nothing is kept and the
+        turn's ``turn.memory`` event, queued again, has ``unsaved_claim`` true. Nothing
         outside the turn, with memory off, with a note kept, or when the reply
         claims nothing.
         """
@@ -1067,8 +1084,9 @@ class ChatMemory:
         self,
         turns: Sequence[tuple[dict[str, Any], int, str, str, float]],
         timeout: float,
-    ) -> None:
-        """Index turns of ``(source, turn, typed, answer, at)``, embedded as one batch."""
+    ) -> int:
+        """Index turns of ``(source, turn, typed, answer, at)``, embedded as one batch;
+        the characters embedded (0 without a vector)."""
         texts = [
             document_text(
                 typed, answer, title=src["title"] if src["kind"] == "task" else ""
@@ -1090,6 +1108,45 @@ class ChatMemory:
             )
             async with self._lock:
                 await self.stores()[1].add(doc)
+        return sum(map(len, texts)) if vectors else 0
+
+    async def index_turns(
+        self, turns: Sequence[tuple[dict[str, Any], int, str, str, float]]
+    ) -> int:
+        """Index turns of ``(source, turn, typed, answer, at)`` as a reindex does
+        (in batches, embedded when a model is set), each document stamped *at*;
+        the characters embedded. Nothing already indexed is touched."""
+        chars = 0
+        for start in range(0, len(turns), _BATCH):
+            chars += await self._add_documents(
+                turns[start : start + _BATCH], INDEX_EMBED_TIMEOUT_S
+            )
+        return chars
+
+    async def keep_said(
+        self, store: SessionStore, info: TurnInfo, typed: str, at: float
+    ) -> int:
+        """Keep the lasting facts *typed* states (:func:`records.statements`) as
+        notes of the turn *info*, stamped *at*; how many were written.
+
+        The rule path alone, as the chat path keeps a user statement: no model
+        call, no vector (``reindex(None)`` adds them), never a secret. For a
+        turn written after the fact (``melo memory ingest``).
+        """
+        found = records.statements(typed)
+        if not found:
+            return 0
+        source = await self._source(store, info)
+        async with self._lock:
+            written = await records.write(
+                self.stores()[0],
+                found,
+                [None] * len(found),
+                source=source,
+                embed_model="",
+                created_at=at,
+            )
+        return len(written)
 
     async def forget_session(self, session_id: str, turn: int | None = None) -> int:
         """Delete indexed chat text and its inactive sleep negatives; keep active notes."""
@@ -1365,6 +1422,8 @@ class ChatMemory:
             )
             if not done:
                 return None
+            # The user changed it: the reasons an undo kept it apart expire.
+            await sleeping.clear_kept_apart(store, record_id)
             self._corpus.remove(
                 f"r:{record_id}"
             )  # the next search reads the new wording
@@ -1379,15 +1438,20 @@ class ChatMemory:
         now: float | None = None,
         chats: SessionStore | None = None,
         budget: int | None = None,
+        began: float | None = None,
     ) -> sleeping.SleepReport:
         """Tidy the notes with sleep *variant* (``[memory] sleep`` when ``None``);
         what it changed. *chats* gives it the turns to replay (without them,
         only duplicates are merged). Model variants share a twelve-call limit;
-        each call checks the optional sleep lock and new chat activity.
-        Nothing happens with memory off or ``off``.
+        each request to a model server first checks the lock (``[memory]
+        sleep_lock``, else the shared GPU lock ``[scheduler] gpu_lock_file``,
+        where a lock of ``lock_self`` is ours) and new activity: a chat, main
+        chat, task or worker turn that started after *began*, the time the
+        caller took before its own idle checks (``None``: now). The run then
+        stops, saved and undoable. Nothing happens with memory off or ``off``.
         """
         cfg = self._settings()
-        began = time.time()
+        began = time.time() if began is None else began
         variant = variant or (cfg.memory.sleep if cfg is not None else "off")
         store, index = self.stores()
         variant = variant if self.enabled else "off"
@@ -1416,9 +1480,8 @@ class ChatMemory:
             if not self.enabled:
                 return True
             if chats is not None:
-                for session in await chats.list_sessions(
-                    limit=100_000, kinds=("chat", "front")
-                ):
+                # Every kind: a task or a worker that starts also needs the model.
+                for session in await chats.list_sessions(limit=100_000, kinds=None):
                     if session.updated_at > began and any(
                         t.started_at > began for t in await chats.list_turns(session.id)
                     ):
@@ -1433,7 +1496,7 @@ class ChatMemory:
                 typed,
                 vector,
                 embedded.model,
-                now=time.time(),
+                now=clock.now(),
                 coverage=0.0,
             )
             return [int(item.key[2:]) for item in found if item.is_record][:6]
@@ -1442,21 +1505,35 @@ class ChatMemory:
             embedded = await self._embed([text], EMBED_TIMEOUT_S, query=False)
             return (embedded.vectors[0] if embedded.vectors else None, embedded.model)
 
-        async with self._lock:
-            report = await sleeping.run(
-                store,
-                index,
-                turns,
-                variant=variant,
-                now=now,
-                until=max(until, forgotten),
-                provider=self.chat_provider() if variant.startswith("model") else None,
-                notes_for=notes_for,
-                is_active=active,
-                lock=cfg.memory.sleep_lock if cfg is not None else "",
-                budget=budget,
-                embed_note=embed_note if self.embedding()[0] is not None else None,
-            )
+        lock, lock_self = "", ""
+        if cfg is not None:
+            lock = cfg.memory.sleep_lock
+            if not lock:  # the shared GPU lock, which a benchmark may take mid-run
+                lock, lock_self = cfg.scheduler.gpu_lock_file, cfg.scheduler.lock_self
+        try:
+            async with self._lock:
+                report = await sleeping.run(
+                    store,
+                    index,
+                    turns,
+                    variant=variant,
+                    now=now,
+                    until=max(until, forgotten),
+                    provider=(
+                        self.chat_provider() if variant.startswith("model") else None
+                    ),
+                    notes_for=notes_for,
+                    is_active=active,
+                    lock=lock,
+                    budget=budget,
+                    embed_note=embed_note if self.embedding()[0] is not None else None,
+                    lock_self=lock_self,
+                )
+        except asyncio.CancelledError:
+            # The run saved what it changed; a kept note may have changed in place.
+            for key in self._corpus.keys("r:"):
+                self._corpus.remove(key)
+            raise
         # A kept note changed in place (the turns it replaced): read it again.
         for change in report.changes:
             if change.replaces_after is not None and change.after_id is not None:
