@@ -25,6 +25,12 @@ from localmelo.support.gateway.console.activity import (
 )
 from localmelo.support.gateway.console.worker_reader import WorkerReader
 from localmelo.support.gateway.finishing import OUT_OF_STEPS
+from localmelo.support.gateway.front_rules import (
+    ASK_TEXT,
+    ASK_TEXT_ZH,
+    STARTED_TEXT,
+    STARTED_TEXT_ZH,
+)
 from localmelo.support.sessions.store import (
     NewSession,
     SessionStore,
@@ -1124,6 +1130,31 @@ async def test_a_chat_row_says_what_the_chat_did_then_its_reply(
         chat, "attention.echo", {**offer, "echo": "started"}
     )
     assert activity(client)["rows"][0]["result"] == words[1] + plain
+
+
+@pytest.mark.parametrize(
+    ("reply", "echo", "line"),
+    [
+        (STARTED_TEXT, "started", "Started a task: Visit example.com"),
+        (ASK_TEXT, "suggest", "Offered a task: Visit example.com"),
+        (STARTED_TEXT_ZH, "started", "Started a task: Visit example.com"),
+        (ASK_TEXT_ZH, "suggest", "Offered a task: Visit example.com"),
+    ],
+)
+async def test_a_hand_off_reply_is_not_repeated_after_what_the_chat_did(
+    client: TestClient,
+    console: Console,
+    workspace: str,
+    monkeypatch: pytest.MonkeyPatch,
+    reply: str,
+    echo: str,
+    line: str,
+) -> None:
+    tasks(monkeypatch, console)
+    chat = await finished_chat(console, workspace, reply)
+    data = {"echo": echo, "task_id": "t1", "title": "Visit example.com"}
+    await console.store.append_session_event(chat, "attention.echo", data)
+    assert activity(client)["rows"][0]["result"] == line
 
 
 async def test_a_chat_row_says_it_kept_a_note(

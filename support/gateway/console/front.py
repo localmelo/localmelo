@@ -76,7 +76,11 @@ from localmelo.support.gateway.chore_schedule import (
 from localmelo.support.gateway.chore_store import REMINDER_PREFIX, ChoreError
 from localmelo.support.gateway.finishing import is_out_of_steps
 from localmelo.support.gateway.front_rules import (
+    ASK_TEXT,
+    ASK_TEXT_ZH,
     FINISHED,
+    STARTED_TEXT,
+    STARTED_TEXT_ZH,
     TITLE_CHARS,
     TITLE_CHARS_ZH,
     Action,
@@ -145,10 +149,6 @@ FRONT_STEPS: Final = 4
 # A brief question's step cap: BRIEF_NOTE asks for one or two steps.
 BRIEF_STEPS: Final = 2
 HANDOFF_STATUSES: Final = frozenset({"budget_exhausted", "stuck"})
-STARTED_TEXT: Final = "This needs more than a quick answer, so I started it as a task."
-ASK_TEXT: Final = "This needs more than a quick answer. Start this as a task?"
-STARTED_TEXT_ZH: Final = "这件事不是一句话能答完的，我已把它作为任务开始。"
-ASK_TEXT_ZH: Final = "这件事不是一句话能答完的。要把它作为任务开始吗？"
 # What the main chat is told about itself, after melo's identity.
 FRONT_TEXT: Final = (
     "You are the main chat. Answer a question yourself when a step or two "

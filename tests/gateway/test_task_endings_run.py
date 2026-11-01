@@ -511,3 +511,35 @@ async def test_finish_it_in_a_folder_where_no_tests_apply_ends_ready(
     )
     with pytest.raises(TaskStoreError):
         await workers.continue_stopped(task_id)
+
+
+@pytest.mark.parametrize(
+    "asked", ["Please run the tests on it", "跑一下测试"], ids=["en", "zh"]
+)
+async def test_your_own_ask_for_the_tests_after_a_run_finishes_it_like_the_button(
+    setup: Setup, tmp_path: Path, asked: str
+) -> None:
+    workers, llm, _ = setup
+    folder = tmp_path / "localmelo-workspace"
+    folder.mkdir()
+    (folder / "page.py").write_text("print('hi')\n")
+    write = call("file_edit", {"path": "page.py", "old": "hi", "new": "hello"})
+    # The task's first message asks for the tests too: that does not finish it.
+    llm.replies = [write, says("Changed the greeting.\nEnding: ready")]
+    task_id = await start(workers, folder, "Say hello in page.py and run the tests")
+    first = (await ended(workers, task_id))["ending"]
+    assert (first["state"], first["reasons"]) == ("draft", ["tests_missing"])
+    # A message that does not ask for the tests leaves the test owed.
+    llm.replies = [says("Looked again.\nEnding: ready")]
+    await workers.message(task_id, "Look at it once more")
+    second = (await ended(workers, task_id, turns=2))["ending"]
+    assert (second["state"], second["reasons"]) == ("draft", ["tests_missing"])
+    # Your own words asking for the tests: no runner applies, so it is Ready.
+    llm.replies = [says("No test runner applies to this folder.\nEnding: ready")]
+    await workers.message(task_id, asked)
+    third = (await ended(workers, task_id, turns=3))["ending"]
+    assert (third["state"], third["reasons"], third["notes"]) == (
+        "ready",
+        [],
+        ["no_tests"],
+    )

@@ -771,6 +771,13 @@ _TITLE_TAIL: Final = frozenset(
 _IN_FOLDER: Final = re.compile(r"(?:~/|\.{0,2}/)?(?:[\w.-]+/)+([\w-]+\.\w+)")
 TITLE_CHARS: Final = 48
 TITLE_CHARS_ZH: Final = 24
+# What a chat's turn answers when it hands the work to a task (the front's
+# ``handoff_text``): started, or asked whether to start; English and Chinese.
+STARTED_TEXT: Final = "This needs more than a quick answer, so I started it as a task."
+ASK_TEXT: Final = "This needs more than a quick answer. Start this as a task?"
+STARTED_TEXT_ZH: Final = "这件事不是一句话能答完的，我已把它作为任务开始。"
+ASK_TEXT_ZH: Final = "这件事不是一句话能答完的。要把它作为任务开始吗？"
+HANDOFF_TEXTS: Final = frozenset({STARTED_TEXT, ASK_TEXT, STARTED_TEXT_ZH, ASK_TEXT_ZH})
 
 
 def _without_level_cue(text: str) -> str:
@@ -926,6 +933,11 @@ def route(
 
 
 __all__ = [
+    "ASK_TEXT",
+    "ASK_TEXT_ZH",
+    "HANDOFF_TEXTS",
+    "STARTED_TEXT",
+    "STARTED_TEXT_ZH",
     "LEVEL_MEANINGS",
     "LEVEL_WORDS",
     "Routed",

@@ -308,7 +308,7 @@ reads `Made a picture`, a file the file's name, and an answer that is code the f
 some code` when there is none). Markdown marks are removed (code keeps its words, as in `__init__.py`, struck
 text goes, and `x**2` stays), a lead-in such as `In short:` is dropped, and the line ends at the first sentence. A
 chat's line says first what the chat did, then its reply's first sentence: `Offered a task: Visit example.com ·
-I can't open websites myself.`; what it did is `Started a task: …`, `Offered a task: …` or `Kept a note`. The main
+I can't open websites myself.`; what it did is `Started a task: …`, `Offered a task: …` or `Kept a note`, and a reply that only says it handed the work to a task is left out. The main
 chat's row is named in the page's language.
 
 A row that asked you for approvals carries them folded under its result line: `1 approval`, or `2 approvals, 1

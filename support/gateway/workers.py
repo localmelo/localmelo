@@ -2547,6 +2547,11 @@ class TaskWorkers:
         except Exception:
             log.exception("Could not keep the stash count of task %s", task_id)
         try:
+            # A Finish it run: the button's message, or the person's own message
+            # asking for the tests on a task that already ran (never its first).
+            finishing = any(finishes(text) for text in said)
+            if not finishing and any(asks_tests(text) for text in said):
+                finishing = len(await self.store.list_turns(task_id, limit=2)) > 1
             return await decide_ending(
                 self.store,
                 task_id,
@@ -2556,7 +2561,7 @@ class TaskWorkers:
                 base=base,
                 asks_commit=any(asks_commit(text) for text in asked),
                 asks_tests=any(asks_tests(text) for text in asked),
-                finishing=any(finishes(text) for text in said),
+                finishing=finishing,
             )
         except Exception:
             log.exception("Could not check how task %s ended", task_id)

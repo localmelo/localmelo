@@ -15,8 +15,9 @@ ended ready. Ready needs proof; any doubt leaves ``draft`` with its reason:
 - ``tests_missing``: code changed since the baseline (outside git also a code
   file a file tool wrote, wherever it is) and no test started after the latest
   call that could have changed code, with or without a test setup; or the
-  person asked for the tests and a test setup applies. A Finish it run
-  (:func:`finishes`) that finds no setup and runs no test owes none: its
+  person asked for the tests and a test setup applies. A Finish it run (its
+  message, :func:`finishes`, or the person's own ask for the tests on a task
+  that already ran) that finds no setup and runs no test owes none: its
   ending notes ``no_tests``, as does an ask for tests with no setup and no
   change;
 - ``commit_missing``: a commit was asked and changes since the baseline are not
@@ -1056,7 +1057,8 @@ async def decide(
 
     *asks_tests*: the person asked for the tests, so they are owed (where a
     test setup applies) even when no code changed. *finishing*: the run was
-    Finish it's (:func:`finishes`), so a folder with no runner ends with
+    Finish it's (its message, :func:`finishes`, or the person's own ask for the
+    tests on a task that already ran), so a folder with no runner ends with
     ``no_tests``, and one still not checked is not offered Finish it again.
     """
     out_of_steps = phase == "failed" and failure_reason == OUT_OF_STEPS

@@ -43,6 +43,7 @@ from localmelo.support.sessions.store import (
 )
 
 from ..finishing import NOT_CONTINUED, is_out_of_steps
+from ..front_rules import HANDOFF_TEXTS
 from ..task_endings import can_finish, report_text, shown
 from .errors import ApiError
 from .running import (
@@ -411,8 +412,11 @@ async def _session_rows(
             state, icon, result = _ended(turn)
             at = turn.finished_at or turn.started_at
             row = _row(kind, turn.session_id, title, state, at, icon=icon)
-            # A console chat says what it did, then what its reply says.
+            # A console chat says what it did, then what its reply says; a reply
+            # that is only the hand-off sentence repeats what it did.
             did = await chat_did(console, turn) if kind == "chat" else ""
+            if did and turn.answer.strip() in HANDOFF_TEXTS:
+                result = ""
             said = " · ".join(part for part in (did, result) if part)
             row["result"] = _cut(said, RESULT_CHARS) if did else result
         row["turns"] = turn.turns
