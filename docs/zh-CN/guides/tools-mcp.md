@@ -152,9 +152,11 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 
 - 在终端聊天里用 `/browser on` 打开它，或用 `melo -X browser.driver=safari-automation` 只对一次运行生效。
 - 在 Safari 里打开“设置 > 开发者”，把 “Allow remote automation” 打开一次。
-- 之后终端聊天和网页控制台会得到八个工具：`browser_open`、`browser_read`、`browser_find`、`browser_follow`、`browser_back`、`browser_tabs`、`browser_wait` 和 `browser_screenshot`。
+- 之后终端聊天以及网页控制台和 App 的每个聊天会得到八个工具：`browser_open`、`browser_read`、`browser_find`、`browser_follow`、`browser_back`、`browser_tabs`、`browser_wait` 和 `browser_screenshot`。
 - 它们在 Safari 自己的自动化窗口里工作，这些窗口启动时不带你的任何登录状态。
 - melo 加载网页之前会问 “Open a website?”，每个网站在一个聊天里问一次（`auto` 模式同样会问）；它不会点击、输入、登录或发布。直接运行、worker 和保存的任务从不会得到这些工具。
+
+不用 Safari 时，每个聊天和任务都可以用 `web_fetch` 读取公开网页，它默认开启（见[不用浏览器读取网页](browsing.md#read-a-page-without-the-browser)）。
 
 <a id="what-the-checks-do"></a>
 
@@ -216,6 +218,7 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 | `network` | 向本机外的对象发送数据或对其执行操作：HTTP API、聊天、支付、图形界面等。 | 是。 |
 
 - 内置工具的级别按名称固定：`file_read` 和 `list_files` 是 `read`，`file_write` 是 `write`，`shell_exec` 和 `python_exec` 是 `exec`。
+- `web_fetch` 和浏览工具虽然会访问互联网，但有意定为 `read`：它们不在任何地方做更改，除了地址之外不发送你的任何东西。`web_fetch` 从不访问这台电脑或它的局域网；浏览工具则改为每个网站询问一次。
 - 该表优先于工具自身的声明，因此复用内置工具名称的提供的工具或自定义工具会继承该级别。
 - 模式决定实际提供哪些内置工具（见[选择内置工具](#choose-the-built-in-tools)）；网关或控制台会话在通常的三个之外还获得 `list_files`。
 - 除交互式界面外，各模式都不注册 `shell_exec`，因此模型仍然调用它时会收到 `shell_exec is not available in this run. Available tools: …`，其中列出本次运行的工具（未知的非内置名称仍使用 `Tool not found in registry` 消息）。

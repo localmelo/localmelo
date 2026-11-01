@@ -9,6 +9,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- melo reads a public web page in the chat: ask about a website or paste its
+  address, and it reads the page as text (title, headings, main text and
+  links; plain text and JSON as they are) with the new `web_fetch` tool. It is
+  on in every chat, the console's and the app's included, and in tasks, and is
+  turned off in Settings → Chats and folders → **Read web pages** or with
+  `[tools] web_fetch = false`. It only reads: one request, no cookies, no
+  sign-ins, no forms, at most 2 MB, 30 seconds and 5 redirects, and PDFs and
+  other files are refused for now. It never reaches this computer or its
+  local network: `localhost`, private, link-local and cloud metadata
+  addresses, `.local` names, numbers written in odd forms, and a redirect or
+  DNS answer that points to any of them are refused, and melo connects to the
+  address it checked. The page reaches the model marked as data, never
+  instructions, and the model is told to use the tool instead of `curl`.
+  Direct runs do not get it. [#406]
 - With `[memory] sleep` set to `rules`, `model` or `model+tags`, the gateway
   now tidies the notes by itself while the computer is idle: no turn in the
   gateway's chats for 20 minutes (a terminal chat that runs on its own, with
@@ -534,6 +548,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- With browsing on (`[browser] driver = "safari-automation"`), the main chat
+  in the web console and the app now has the browser tools too, as the
+  terminal chat and side chats did. A `[browser] driver` that names no
+  browser now turns browsing off with a warning instead of stopping a console
+  chat from opening. [#406]
 - A long turn is kept in the memory index as up to 8 overlapping pieces instead of
   being cut at 2,000 characters, and a search shows a turn once, by its best piece.
   `melo memory reindex` re-cuts turns indexed before.
@@ -3413,3 +3432,4 @@ earlier milestones.
 [#392]: https://github.com/localmelo/localmelo/pull/392
 [#393]: https://github.com/localmelo/localmelo/pull/393
 [#396]: https://github.com/localmelo/localmelo/pull/396
+[#406]: https://github.com/localmelo/localmelo/issues/406

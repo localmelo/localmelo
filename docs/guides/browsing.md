@@ -8,6 +8,18 @@ Let melo read web pages in Safari, on a Mac, from the terminal or the web consol
 - melo opens pages in Safari's *automation windows*, follows links and reads what it finds.
 - It does not click buttons, fill in forms, sign in, post or buy; those come later (see [What is coming](#what-is-coming)).
 
+## Read a page without the browser
+
+Every chat can read a public page without Safari, with the `web_fetch` tool. It is **on by default** and needs no setup.
+
+- Ask about a website or paste its address: melo reads the page as text (title, headings, main text and links). Plain text and JSON come back as they are.
+- It only reads: one request, no cookies, no sign-ins, no forms. PDFs and other files are refused for now.
+- It never reaches this Mac or your local network. `localhost`, private and link-local addresses, `.local` names, and a redirect or DNS answer that points to one of them are refused.
+- A page that needs a sign-in, blocks automated readers or is built by scripts says so. With browsing on, melo can try it in Safari instead.
+- Tasks have it too. Turn it off in Settings → Chats and folders → **Read web pages**, or with `melo config set tools.web_fetch false`. The limits and the exact rules are in [Tools](../reference/tools.md#reading-a-public-web-page).
+
+The rest of this page is about browsing in Safari, which also follows links and runs a page's scripts.
+
 ## What you need
 
 - A Mac with Safari 27 or later. melo uses the automation server that Safari ships, `/usr/bin/safaridriver --mcp`; nothing is installed.
@@ -39,7 +51,7 @@ In the config file:
 driver = "safari-automation"
 ```
 
-`"off"` is the default. The web console reads the same setting when it opens a chat: change it with `melo config set browser.driver safari-automation` and open a new chat.
+`"off"` is the default. The web console and the app read the same setting when they open a chat, the main chat included: change it with `/browser on` there, or `melo config set browser.driver safari-automation`, and open a new chat.
 
 ## Set up Safari
 

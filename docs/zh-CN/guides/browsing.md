@@ -10,6 +10,20 @@
 - melo 在 Safari 的*自动化窗口*中打开网页、跟随链接并读取内容。
 - 它不会点击按钮、填写表单、登录、发帖或购买；这些留到后面（见[后续计划](#what-is-coming)）。
 
+<a id="read-a-page-without-the-browser"></a>
+
+## 不用浏览器读取网页
+
+每个对话都可以不经过 Safari、用 `web_fetch` 工具读取公开网页。它**默认开启**，不需要任何设置。
+
+- 问一个网站或贴上它的地址：melo 把网页读成文字（标题、各级标题、正文和链接）。纯文本和 JSON 原样返回。
+- 它只读：一次请求，不带 cookie，不登录，不填表。PDF 和其他文件暂时不读。
+- 它从不访问这台 Mac 或你的局域网。`localhost`、私有和链路本地地址、`.local` 名字，以及指向它们的重定向或 DNS 结果都会被拒绝。
+- 需要登录、拦截自动读取或由脚本生成的网页，会说明这一点。开启浏览时，melo 可以改用 Safari 试试。
+- 任务也有它。在设置 → 对话和文件夹 → **读取网页** 中关闭，或用 `melo config set tools.web_fetch false`。限制和具体规则见[工具](../reference/tools.md#reading-a-public-web-page)。
+
+本页其余部分讲的是在 Safari 中浏览，它还能跟随链接并运行网页的脚本。
+
 <a id="what-you-need"></a>
 
 ## 需要什么
@@ -45,7 +59,7 @@ melo -X browser.driver=safari-automation
 driver = "safari-automation"
 ```
 
-默认是 `"off"`。网页控制台在打开每个对话时读取同一个设置：用 `melo config set browser.driver safari-automation` 修改，然后打开新对话。
+默认是 `"off"`。网页控制台和 App 在打开每个对话（包括主对话）时读取同一个设置：在那里用 `/browser on`，或用 `melo config set browser.driver safari-automation` 修改，然后打开新对话。
 
 <a id="set-up-safari"></a>
 

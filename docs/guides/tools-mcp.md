@@ -140,9 +140,11 @@ On a Mac, melo can read web pages in Safari. It is off by default and read-only;
 
 - Turn it on with `/browser on` in the terminal chat, or `melo -X browser.driver=safari-automation` for one run.
 - In Safari, open Settings > Developer and turn on "Allow remote automation" once.
-- The terminal chat and the web console then get eight tools: `browser_open`, `browser_read`, `browser_find`, `browser_follow`, `browser_back`, `browser_tabs`, `browser_wait` and `browser_screenshot`.
+- The terminal chat and every chat of the web console and the app then get eight tools: `browser_open`, `browser_read`, `browser_find`, `browser_follow`, `browser_back`, `browser_tabs`, `browser_wait` and `browser_screenshot`.
 - They work in Safari's own automation windows, which start without any of your sign-ins.
 - melo asks "Open a website?" before it loads a page, once per site and chat (`auto` mode still asks); it does not click, type, sign in or post. Direct runs, workers and saved tasks never get these tools.
+
+Without Safari, every chat and task can read a public page with `web_fetch`, which is on by default (see [Read a page without the browser](browsing.md#read-a-page-without-the-browser)).
 
 ## What the checks do
 
@@ -201,6 +203,7 @@ Every tool has one of four tiers: what a call can reach, not a denial. For a bui
 
 - The built-ins are fixed by name: `file_read` and `list_files` are `read`, `file_write` is `write`, and `shell_exec` and `python_exec` are `exec`.
 - The table wins over a tool's own claims, so a provided or custom tool that reuses a built-in's name inherits that tier.
+- `web_fetch` and the browser tools are `read` on purpose, though they reach the internet: they change nothing anywhere and send nothing of yours but the address. `web_fetch` never reaches this machine or its local network; the browser tools ask once per site instead.
 - The mode decides which built-ins are offered at all (see [Choose the built-in tools](#choose-the-built-in-tools)); a gateway or console session gets `list_files` as well as the usual three.
 - In every mode but the interactive UI, `shell_exec` is not registered, so a model that calls it gets `shell_exec is not available in this run. Available tools: …`, naming the run's tools (an unknown non-built-in name keeps the `Tool not found in registry` message).
 - `AgentOptions(builtins=…)` or `--builtins` always wins over the mode's default set, except in gateway mode.
