@@ -1,6 +1,6 @@
 """How much of a recalled chat turn is shown, and which part of it.
 
-``[memory] recall_item_chars`` (default 200, the room one turn takes in the
+``[memory] recall_item_chars`` (default 234, the room one turn takes in the
 block and in the search tool's list) and ``recall_excerpt`` (``head``, the start
 of each part, or ``match``, the sentences of each part that hold most of the
 question's content words). The defaults read exactly as a turn always did.
@@ -77,19 +77,28 @@ def parts(said: str) -> tuple[str, str]:
 
 
 def legacy_turn_said(text: str) -> str:
-    """``turn_said`` before the room was a setting (200 characters, 60 for the reply)."""
+    """``turn_said`` at the default room: the user's words first, as many as the plain
+    240-character head ``User: …`` showed, then melo's reply in what is left (20 at least).
+    """
     body = text.partition("\n")[2] if text.startswith("Task: ") else text
     if not body.startswith("User: "):
-        return snippet(text)
+        return snippet(text, 240)
     typed, marker, answer = body[len("User: ") :].partition("\nmelo: ")
     if not marker:
-        return snippet(text)
+        return snippet(text, 240)
     typed, answer = " ".join(typed.split()), " ".join(answer.split())
-    if len(typed) + len(answer) > 200:
-        typed = snippet(typed, 200 - 60 if answer else 200)
-        answer = snippet(answer, 200 - len(typed)) if answer else ""
+    if len(typed) + len(answer) > 234:
+        typed = snippet(typed, 234 if answer else 234)
+        answer = snippet(answer, 234 - len(typed)) if 234 - len(typed) >= 20 else ""
     said = [f"the user said “{typed}”"] if typed else []
     return "; ".join(said + ([f"melo replied “{answer}”"] if answer else []))
+
+
+def head_user_words(text: str) -> str:
+    """The user's words the plain 240-character head ``User: …`` showed, without a
+    closing ``…``."""
+    shown = snippet(text, 240)[len("User: ") :]
+    return shown.partition(" melo:")[0].removesuffix("…")
 
 
 def words(size: int, tag: str) -> str:
@@ -101,14 +110,14 @@ def words(size: int, tag: str) -> str:
 
 
 def test_the_defaults_read_a_turn_exactly_as_it_always_did() -> None:
-    assert TURN_CHARS == 200
-    assert Shown(200, frozenset()) == HEADS
-    assert Shown.of() == HEADS and Shown.of(200, None) == HEADS
-    assert Shown.of(200, "") == HEADS
+    assert TURN_CHARS == 234
+    assert Shown(234, frozenset()) == HEADS
+    assert Shown.of() == HEADS and Shown.of(234, None) == HEADS
+    assert Shown.of(234, "") == HEADS
     texts = [
         document_text(words(n, "u"), words(m, "r"))
-        for n in (0, 1, 50, 120, 139, 140, 141, 200, 201, 600)
-        for m in (0, 1, 59, 60, 61, 90, 200, 900)
+        for n in (0, 1, 50, 120, 139, 140, 141, 200, 201, 213, 214, 215, 233, 234, 600)
+        for m in (0, 1, 19, 20, 21, 59, 60, 61, 90, 200, 900)
     ]
     texts += [
         f"Task: Plan\n{texts[40]}",
@@ -122,15 +131,29 @@ def test_the_defaults_read_a_turn_exactly_as_it_always_did() -> None:
         assert turn_said(text, HEADS) == legacy_turn_said(text), text
         assert turn_said(text, Shown.of(TURN_CHARS)) == legacy_turn_said(text), text
         # A question alone changes nothing: the head is shown unless "match" is set.
-        assert turn_said(text, Shown.of(200, None)) == legacy_turn_said(text), text
+        assert turn_said(text, Shown.of(234, None)) == legacy_turn_said(text), text
 
 
-def test_a_plain_snippet_takes_the_room_plus_forty() -> None:
+def test_a_long_message_shows_as_many_of_the_users_words_as_the_plain_head() -> None:
+    # The value a person states late in a long message must stay in view: the
+    # turn reads as at least the user's words the plain 240-character head showed.
+    for n in (150, 200, 233, 234, 235, 400, 2000):
+        for m in (30, 400):
+            text = document_text(words(n, "u"), words(m, "r"))
+            said = turn_said(text)
+            if said.startswith("User: "):  # no reply in the document: the plain head
+                assert said == snippet(text, 240), (n, m)
+                continue
+            user = said.partition("the user said “")[2].partition("”")[0]
+            assert user.removesuffix("…").startswith(head_user_words(text)), (n, m)
+
+
+def test_a_plain_snippet_takes_the_room_plus_six() -> None:
     summary = "Summary of chat “Fix CI”: " + words(900, "s")
     assert turn_said(summary) == snippet(summary, 240) == snippet(summary)
-    assert turn_said(summary, Shown.of(800)) == snippet(summary, 840)
-    assert turn_said(summary, Shown.of(120)) == snippet(summary, 160)
-    assert len(turn_said(summary, Shown.of(800))) == 840
+    assert turn_said(summary, Shown.of(800)) == snippet(summary, 806)
+    assert turn_said(summary, Shown.of(120)) == snippet(summary, 126)
+    assert len(turn_said(summary, Shown.of(800))) == 806
 
 
 def test_a_larger_room_shows_more_of_a_turn() -> None:
@@ -203,7 +226,7 @@ def test_match_finds_the_sentence_in_chinese() -> None:
 def test_with_no_match_at_all_the_head_is_shown() -> None:
     text = document_text(TYPED, english())
     for question in ("zebra yodel quokka", "what is the", "", "？？"):
-        shown = Shown.of(200, question)
+        shown = Shown.of(TURN_CHARS, question)
         assert turn_said(text, shown) == turn_said(text) == legacy_turn_said(text)
         assert turn_said(text, Shown.of(800, question)) == turn_said(
             text, Shown.of(800)
@@ -370,7 +393,7 @@ async def test_the_search_tool_follows_the_two_settings_too(
         assert TARGET in await tools.search(query=QUESTION)
         assert len(await tools.search(query=QUESTION)) > len(match) + 300
         # The default room and the head: the list reads as it did.
-        cfg.memory.recall_item_chars = 200
+        cfg.memory.recall_item_chars = TURN_CHARS
         cfg.memory.recall_excerpt = "head"
         assert await tools.search(query=QUESTION) == head
         # The items found and the page's text are the same whatever the settings.
