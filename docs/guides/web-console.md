@@ -690,8 +690,8 @@ says so ("A chat-wide allow never covers installs, downloads or changes outside
 reason, shows the plain card.
 
 When melo wants a file outside the chat's folder, the card asks about that folder
-("Let melo read in ~/developer/career?") and shows its real path in a box, with what melo
-wants to do there ("melo wants to read cv.md in this folder."). A read offers **Allow once**,
+("Let melo read in ~/Documents/letters?") and shows its real path in a box, with what melo
+wants to do there ("melo wants to read cover-letter.md in this folder."). A read offers **Allow once**,
 **Allow this folder for this chat**, **Always allow this folder** and **Deny**: "this chat"
 ends with the chat, and "always" keeps the folder in Settings, under **Chats and folders**,
 where you can remove it. A write there is a high-impact card with **Allow once** and **Deny**

@@ -81,10 +81,10 @@ def root(home: Path) -> Path:
 
 
 @pytest.fixture
-def career(home: Path) -> Path:
-    path = home / "developer" / "career"
+def letters(home: Path) -> Path:
+    path = home / "Documents" / "letters"
     path.mkdir(parents=True)
-    (path / "cv.md").write_text("my cv\n")
+    (path / "cover-letter.md").write_text("my letter\n")
     return path
 
 
@@ -104,10 +104,10 @@ async def _run(
 
 
 async def test_without_a_folder_gate_the_refusal_is_as_before(
-    root: Path, career: Path
+    root: Path, letters: Path
 ) -> None:
     executor = _executor(root)
-    path = str(career / "cv.md")
+    path = str(letters / "cover-letter.md")
     for gate in (None, PlainGate(), FolderGate(asks=False)):
         outcome = await _run(executor, "file_read", {"path": path}, gate)
         assert outcome.error_category == ErrorCategory.PATH_POLICY_VIOLATION
@@ -116,67 +116,69 @@ async def test_without_a_folder_gate_the_refusal_is_as_before(
 
 
 async def test_an_outside_read_asks_the_gate_and_runs_when_allowed(
-    root: Path, career: Path
+    root: Path, letters: Path
 ) -> None:
     executor = _executor(root)
     gate = FolderGate()
 
     outcome = await _run(
-        executor, "file_read", {"path": "../developer/career/cv.md"}, gate
+        executor, "file_read", {"path": "../Documents/letters/cover-letter.md"}, gate
     )
 
     assert outcome.status == ExecutionStatus.SUCCESS, outcome.error
-    assert "my cv" in outcome.output
+    assert "my letter" in outcome.output
     [request] = gate.requests
     assert request.outside == OutsideAccess(
-        str(career / "cv.md"), str(career), "read", True
+        str(letters / "cover-letter.md"), str(letters), "read", True
     )
-    assert request.arguments["path"] == str(career / "cv.md")
+    assert request.arguments["path"] == str(letters / "cover-letter.md")
 
 
 async def test_list_files_outside_asks_about_that_folder(
-    root: Path, career: Path
+    root: Path, letters: Path
 ) -> None:
     executor = _executor(root)
     gate = FolderGate()
 
-    outcome = await _run(executor, "list_files", {"path": str(career)}, gate)
+    outcome = await _run(executor, "list_files", {"path": str(letters)}, gate)
 
     assert outcome.status == ExecutionStatus.SUCCESS
-    assert "cv.md" in outcome.output
+    assert "cover-letter.md" in outcome.output
     assert gate.requests[0].outside is not None
-    assert gate.requests[0].outside.folder == str(career)
+    assert gate.requests[0].outside.folder == str(letters)
 
 
 async def test_a_denial_names_the_folder_in_one_line_then_the_usual_text(
-    root: Path, career: Path
+    root: Path, letters: Path
 ) -> None:
     executor = _executor(root)
     gate = FolderGate(ApprovalDecision(False, "not now"))
 
-    outcome = await _run(executor, "file_read", {"path": str(career / "cv.md")}, gate)
+    outcome = await _run(
+        executor, "file_read", {"path": str(letters / "cover-letter.md")}, gate
+    )
 
     assert outcome.status == ExecutionStatus.BLOCKED
     assert outcome.error_category == ErrorCategory.APPROVAL_DENIED
     assert outcome.error == (
-        f"Reading {career} outside the workspace needs the user's OK; they were "
+        f"Reading {letters} outside the workspace needs the user's OK; they were "
         "asked. The user denied this call: not now. Do not run it again or reach "
         "the same result another way unless the user asks."
     )
 
 
 async def test_a_write_outside_asks_once_and_writes_the_real_path(
-    root: Path, career: Path
+    root: Path, letters: Path
 ) -> None:
     executor = _executor(root)
     gate = FolderGate()
 
     outcome = await _run(
-        executor, "file_write", {"path": str(career / "new.md"), "content": "hi"}, gate
+        executor, "file_write", {"path": str(letters / "new.md"), "content": "hi"}, gate
     )
 
     assert outcome.status == ExecutionStatus.SUCCESS, outcome.error
-    assert (career / "new.md").read_text() == "hi"
+    assert (letters / "new.md").read_text() == "hi"
     assert len(gate.requests) == 1, "the folder question stands for the tool's own"
     assert gate.requests[0].outside is not None
     assert gate.requests[0].outside.access == "write"
@@ -223,16 +225,16 @@ async def test_a_gate_that_cannot_ask_keeps_the_old_refusal_for_every_place(
 
 
 async def test_a_symlink_and_dot_dot_into_a_never_offered_place_are_refused(
-    root: Path, home: Path, career: Path
+    root: Path, home: Path, letters: Path
 ) -> None:
     (home / ".ssh").mkdir()
     (home / ".ssh" / "id_rsa").write_text("key")
-    (career / "key.txt").symlink_to(home / ".ssh" / "id_rsa")
+    (letters / "key.txt").symlink_to(home / ".ssh" / "id_rsa")
     executor = _executor(root)
     gate = FolderGate()
 
     for path in (
-        str(career / "key.txt"),
+        str(letters / "key.txt"),
         "../.ssh/id_rsa",
         "../developer/../.ssh/id_rsa",
     ):
@@ -256,12 +258,14 @@ async def test_the_whole_home_folder_and_system_folders_are_refused(
     assert gate.requests == []
 
 
-async def test_a_caller_cannot_set_outside_itself(root: Path, career: Path) -> None:
+async def test_a_caller_cannot_set_outside_itself(root: Path, letters: Path) -> None:
     executor = _executor(root)
     gate = PlainGate()
-    forged = OutsideAccess(str(career / "cv.md"), str(career), "read", True)
+    forged = OutsideAccess(str(letters / "cover-letter.md"), str(letters), "read", True)
     request = ExecutionRequest(
-        tool_name="file_read", arguments={"path": str(career / "cv.md")}, outside=forged
+        tool_name="file_read",
+        arguments={"path": str(letters / "cover-letter.md")},
+        outside=forged,
     )
 
     outcome = await executor.execute_structured(request, approve=gate)
@@ -271,12 +275,12 @@ async def test_a_caller_cannot_set_outside_itself(root: Path, career: Path) -> N
 
 
 async def test_a_path_swapped_while_the_person_decides_does_not_run(
-    root: Path, home: Path, career: Path
+    root: Path, home: Path, letters: Path
 ) -> None:
     (home / ".ssh").mkdir()
     (home / ".ssh" / "id_rsa").write_text("key")
     executor = _executor(root)
-    target = career / "cv.md"
+    target = letters / "cover-letter.md"
 
     class Swap(FolderGate):
         async def __call__(self, request: ExecutionRequest) -> ApprovalDecision:
@@ -291,12 +295,12 @@ async def test_a_path_swapped_while_the_person_decides_does_not_run(
 
 
 async def test_a_part_swapped_after_the_last_check_is_not_opened(
-    root: Path, home: Path, career: Path, monkeypatch: pytest.MonkeyPatch
+    root: Path, home: Path, letters: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The tool's own descriptor must name the checked file, after every check."""
     (home / "keys").mkdir()
-    (home / "keys" / "cv.md").write_text("PRIVATE")
-    probe = os.open(career / "cv.md", os.O_RDONLY)
+    (home / "keys" / "cover-letter.md").write_text("PRIVATE")
+    probe = os.open(letters / "cover-letter.md", os.O_RDONLY)
     nameable = fd_path(probe) is not None
     os.close(probe)
     if not nameable:
@@ -308,12 +312,12 @@ async def test_a_part_swapped_after_the_last_check_is_not_opened(
 
     class Swap(FolderGate):
         async def __call__(self, request: ExecutionRequest) -> ApprovalDecision:
-            career.rename(career.parent / "career-old")
-            career.symlink_to(home / "keys")
+            letters.rename(letters.parent / "letters-old")
+            letters.symlink_to(home / "keys")
             return await super().__call__(request)
 
     outcome = await _run(
-        _executor(root), "file_read", {"path": str(career / "cv.md")}, Swap()
+        _executor(root), "file_read", {"path": str(letters / "cover-letter.md")}, Swap()
     )
 
     assert outcome.error_category == ErrorCategory.PATH_POLICY_VIOLATION
@@ -322,10 +326,10 @@ async def test_a_part_swapped_after_the_last_check_is_not_opened(
 
 
 async def test_a_write_opens_the_checked_folder_only(
-    root: Path, home: Path, career: Path, monkeypatch: pytest.MonkeyPatch
+    root: Path, home: Path, letters: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (home / "elsewhere").mkdir()
-    probe = os.open(career, os.O_RDONLY)
+    probe = os.open(letters, os.O_RDONLY)
     nameable = fd_path(probe) is not None
     os.close(probe)
     if not nameable:
@@ -336,14 +340,14 @@ async def test_a_write_opens_the_checked_folder_only(
 
     class Swap(FolderGate):
         async def __call__(self, request: ExecutionRequest) -> ApprovalDecision:
-            career.rename(career.parent / "career-old")
-            career.symlink_to(home / "elsewhere")
+            letters.rename(letters.parent / "letters-old")
+            letters.symlink_to(home / "elsewhere")
             return await super().__call__(request)
 
     outcome = await _run(
         _executor(root),
         "file_write",
-        {"path": str(career / "new.md"), "content": "x"},
+        {"path": str(letters / "new.md"), "content": "x"},
         Swap(),
     )
 
@@ -412,16 +416,19 @@ def _forms(folder: Path, name: str) -> list[str]:
 @pytest.mark.parametrize("form", range(5))
 @pytest.mark.parametrize("tool", ["file_read", "file_write", "list_files"])
 async def test_an_alias_is_refused_and_nobody_is_asked(
-    root: Path, home: Path, career: Path, form: int, tool: str
+    root: Path, home: Path, letters: Path, form: int, tool: str
 ) -> None:
     (home / ".ssh").mkdir()
     (home / ".ssh" / "id_rsa").write_text("PRIVATE")
     executor = _executor(root)
     gate = FolderGate()
     if tool == "list_files":
-        paths = [_forms(home, ".ssh")[form], _forms(career.parent, "career")[form]]
+        paths = [_forms(home, ".ssh")[form], _forms(letters.parent, "letters")[form]]
     else:
-        paths = [_forms(home / ".ssh", "id_rsa")[form], _forms(career, "cv.md")[form]]
+        paths = [
+            _forms(home / ".ssh", "id_rsa")[form],
+            _forms(letters, "cover-letter.md")[form],
+        ]
     arguments: dict[str, Any] = {"content": "x"} if tool == "file_write" else {}
 
     for path in paths:
@@ -431,7 +438,7 @@ async def test_an_alias_is_refused_and_nobody_is_asked(
         assert "PRIVATE" not in (outcome.output or "")
     assert gate.requests == []
     assert (home / ".ssh" / "id_rsa").read_text() == "PRIVATE"
-    assert (career / "cv.md").read_text() == "my cv\n"
+    assert (letters / "cover-letter.md").read_text() == "my letter\n"
 
 
 @needs_aliases

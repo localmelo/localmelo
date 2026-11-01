@@ -5280,10 +5280,10 @@ test('/exit in the app asks first and then asks the app to quit; in a tab it say
 // ── A folder outside the workspace (#405) ──
 
 const outsideRead = (extra = {}) => ({
-  request_id: 'out', tool_name: 'file_read', arguments: {path: '/Users/me/developer/career/cv.md'}, arguments_complete: true,
+  request_id: 'out', tool_name: 'file_read', arguments: {path: '/Users/me/Documents/letters/cover-letter.md'}, arguments_complete: true,
   workspace_label: '~/melo_test_workspace', review: null,
-  outside: {path: '/Users/me/developer/career/cv.md', folder: '/Users/me/developer/career', access: 'read', grantable: true,
-    path_label: '~/developer/career/cv.md', folder_label: '~/developer/career'},
+  outside: {path: '/Users/me/Documents/letters/cover-letter.md', folder: '/Users/me/Documents/letters', access: 'read', grantable: true,
+    path_label: '~/Documents/letters/cover-letter.md', folder_label: '~/Documents/letters'},
   ...extra,
 });
 
@@ -5295,14 +5295,14 @@ test('a read outside the workspace names the real folder and offers once, this c
   const text = (name) => findNode(card, (node) => node.className === name)?.textContent;
   assert.equal(card.dataset.outside, 'read');
   assert.equal(card.dataset.impact, undefined);
-  assert.equal(text('approval-title'), 'Let melo read in ~/developer/career?');
+  assert.equal(text('approval-title'), 'Let melo read in ~/Documents/letters?');
   assert.equal(text('approval-caption'), 'file_read · outside ~/melo_test_workspace · read only');
   const box = findNode(card, (node) => node.className === 'approval-folder');
   assert.equal(box.attributes.role, 'group');
   assert.equal(box.attributes['aria-label'], 'Folder outside the workspace');
-  assert.equal(text('approval-folder-path'), '~/developer/career');
-  assert.equal(findNode(card, (node) => node.className === 'approval-folder-path').title, '/Users/me/developer/career');
-  assert.equal(text('approval-folder-what'), 'melo wants to read cv.md in this folder.');
+  assert.equal(text('approval-folder-path'), '~/Documents/letters');
+  assert.equal(findNode(card, (node) => node.className === 'approval-folder-path').title, '/Users/me/Documents/letters');
+  assert.equal(text('approval-folder-what'), 'melo wants to read cover-letter.md in this folder.');
   assert.equal(findNode(card, (node) => node.className === 'approval-content'), null, 'the folder, not the arguments');
   const actions = findNode(card, (node) => node.className === 'approval-actions');
   assert.deepEqual(actions.children.map((node) => [node.textContent, node.className.split(' ')[0]]), [
@@ -5310,7 +5310,7 @@ test('a read outside the workspace names the real folder and offers once, this c
     ['Always allow this folder', 'outline-button'], ['Deny', 'quiet-button'],
   ]);
   assert.equal(findNode(card, (node) => node.id === 'approval-scope-out').textContent,
-    '“This chat” ends with the chat. “Always” keeps ~/developer/career in Settings, under Chats and folders, where you can remove it. Writing there still asks every time.');
+    '“This chat” ends with the chat. “Always” keeps ~/Documents/letters in Settings, under Chats and folders, where you can remove it. Writing there still asks every time.');
 });
 
 test('each answer to a folder posts its own choice', async () => {
@@ -5332,10 +5332,10 @@ test('each answer to a folder posts its own choice', async () => {
 test('listing a folder outside says so, and a file directly in the home folder is allowed once only', async () => {
   const h = harness(baseRoutes());
   await h.run('init()');
-  h.context.request = outsideRead({tool_name: 'list_files', arguments: {path: '/Users/me/developer/career'},
-    outside: {...outsideRead().outside, path: '/Users/me/developer/career'}});
+  h.context.request = outsideRead({tool_name: 'list_files', arguments: {path: '/Users/me/Documents/letters'},
+    outside: {...outsideRead().outside, path: '/Users/me/Documents/letters'}});
   const listed = h.run('approvalCard(request)');
-  assert.equal(findNode(listed, (node) => node.className === 'approval-title').textContent, 'Let melo look in ~/developer/career?');
+  assert.equal(findNode(listed, (node) => node.className === 'approval-title').textContent, 'Let melo look in ~/Documents/letters?');
   assert.equal(findNode(listed, (node) => node.className === 'approval-folder-what').textContent, 'melo wants to see what is in this folder.');
   h.context.request = outsideRead({request_id: 'home', outside: {path: '/Users/me/todo.txt', folder: '/Users/me', access: 'read', grantable: false,
     path_label: '~/todo.txt', folder_label: '~'}});
@@ -5350,15 +5350,15 @@ test('a write outside the workspace is a high-impact card: once or deny, deny fi
   const h = harness(baseRoutes());
   await h.run('init()');
   h.context.request = outsideRead({request_id: 'w', tool_name: 'file_write',
-    arguments: {path: '/Users/me/developer/career/new.md', content: 'hello\n'},
-    target: {path_label: '~/developer/career/new.md', exists: false, size_bytes: 0},
-    review: {verdict: 'high', title: 'Change files outside melo_test_workspace?', reasons: ['Writes ~/developer/career/new.md, outside the workspace.'], categories: ['outside_write']},
-    outside: {path: '/Users/me/developer/career/new.md', folder: '/Users/me/developer/career', access: 'write', grantable: false,
-      path_label: '~/developer/career/new.md', folder_label: '~/developer/career'}});
+    arguments: {path: '/Users/me/Documents/letters/new.md', content: 'hello\n'},
+    target: {path_label: '~/Documents/letters/new.md', exists: false, size_bytes: 0},
+    review: {verdict: 'high', title: 'Change files outside melo_test_workspace?', reasons: ['Writes ~/Documents/letters/new.md, outside the workspace.'], categories: ['outside_write']},
+    outside: {path: '/Users/me/Documents/letters/new.md', folder: '/Users/me/Documents/letters', access: 'write', grantable: false,
+      path_label: '~/Documents/letters/new.md', folder_label: '~/Documents/letters'}});
   const card = h.run('approvalCard(request)');
   assert.equal(card.dataset.impact, 'high');
   assert.equal(card.dataset.outside, 'write');
-  assert.equal(findNode(card, (node) => node.className === 'approval-title').textContent, 'Let melo write in ~/developer/career?');
+  assert.equal(findNode(card, (node) => node.className === 'approval-title').textContent, 'Let melo write in ~/Documents/letters?');
   assert.equal(findNode(card, (node) => node.className === 'approval-caption').textContent, 'file_write · outside ~/melo_test_workspace · asks every time');
   assert.equal(findNode(card, (node) => node.className === 'approval-folder-what').textContent, 'melo wants to write new.md in this folder.');
   assert.match(flatten(findNode(card, (node) => node.className === 'approval-content')), /hello/);
@@ -5380,7 +5380,7 @@ test('the folder card in a task says this task, and reads in Simplified Chinese'
   try {
     h.context.request = outsideRead({request_id: 'zh'});
     const card = h.run('approvalCard(request)');
-    assert.equal(findNode(card, (node) => node.className === 'approval-title').textContent, '让 melo 读取 ~/developer/career 里的内容？');
+    assert.equal(findNode(card, (node) => node.className === 'approval-title').textContent, '让 melo 读取 ~/Documents/letters 里的内容？');
     const actions = findNode(card, (node) => node.className === 'approval-actions');
     assert.deepEqual(actions.children.map((node) => node.textContent), ['允许一次', '在这个对话里允许这个文件夹', '总是允许这个文件夹', '拒绝']);
   } finally {

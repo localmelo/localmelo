@@ -31,15 +31,15 @@ def test_an_empty_list_writes_no_table() -> None:
 
 
 def test_a_kept_folder_round_trips(home: Path) -> None:
-    (home / "developer" / "career").mkdir(parents=True)
-    assert config.add_extra_folder(str(home / "developer" / "career")) is True
-    assert config.add_extra_folder(str(home / "developer" / "career")) is False
+    (home / "Documents" / "letters").mkdir(parents=True)
+    assert config.add_extra_folder(str(home / "Documents" / "letters")) is True
+    assert config.add_extra_folder(str(home / "Documents" / "letters")) is False
     text = Path(config.config_path()).read_text()
-    assert '[workspace]\nextra_folders = ["~/developer/career"]\n' in text
+    assert '[workspace]\nextra_folders = ["~/Documents/letters"]\n' in text
     cfg = config.load()
-    assert cfg.workspace.extra_folders == ["~/developer/career"]
-    assert config.extra_folders(cfg) == [str(home / "developer" / "career")]
-    assert config.SavedFolders().folders() == [str(home / "developer" / "career")]
+    assert cfg.workspace.extra_folders == ["~/Documents/letters"]
+    assert config.extra_folders(cfg) == [str(home / "Documents" / "letters")]
+    assert config.SavedFolders().folders() == [str(home / "Documents" / "letters")]
 
 
 @pytest.mark.parametrize(
@@ -81,15 +81,15 @@ def test_not_a_list_is_reported(home: Path) -> None:
 
 
 def test_a_folder_that_became_a_symlink_covers_nothing_new(home: Path) -> None:
-    career = home / "career"
-    career.mkdir()
-    config.add_extra_folder(str(career))
-    career.rmdir()
+    letters = home / "letters"
+    letters.mkdir()
+    config.add_extra_folder(str(letters))
+    letters.rmdir()
     (home / "private").mkdir()
-    career.symlink_to(home / "private")
+    letters.symlink_to(home / "private")
     # The kept path is compared as kept: the link's target is another folder.
-    assert config.extra_folders(config.load()) == [str(career)]
-    assert os.path.realpath(career) == str(home / "private")
+    assert config.extra_folders(config.load()) == [str(letters)]
+    assert os.path.realpath(letters) == str(home / "private")
 
 
 def test_the_setting_is_a_known_key() -> None:
@@ -102,13 +102,13 @@ def test_the_setting_is_a_known_key() -> None:
     reason="no file-system aliases here",
 )
 def test_a_file_system_alias_is_never_kept(home: Path) -> None:
-    folder = home / "developer" / "career"
+    folder = home / "Documents" / "letters"
     folder.mkdir(parents=True)
     info = os.stat(folder)
     parent = os.stat(folder.parent)
     for alias in (
         f"/.vol/{info.st_dev}/{info.st_ino}",
-        f"/.vol/{parent.st_dev}/{parent.st_ino}/career",
+        f"/.vol/{parent.st_dev}/{parent.st_ino}/letters",
         f"/.resolve/1{folder}",
         f"/.nofollow{folder}",
         f"/.VOL/{info.st_dev}/{info.st_ino}",

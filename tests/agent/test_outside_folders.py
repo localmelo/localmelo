@@ -62,10 +62,10 @@ def root(home: Path) -> Path:
 
 
 @pytest.fixture
-def career(home: Path) -> Path:
-    path = home / "developer" / "career"
+def letters(home: Path) -> Path:
+    path = home / "Documents" / "letters"
     path.mkdir(parents=True)
-    (path / "cv.md").write_text("Engineer, 2020-2026\n")
+    (path / "cover-letter.md").write_text("Engineer, 2020-2026\n")
     return path
 
 
@@ -83,21 +83,23 @@ def _files_agent(llm: ScriptedLLM, root: Path) -> Any:
 
 
 async def test_an_outside_read_asks_and_runs_with_no_new_model_turn(
-    root: Path, career: Path
+    root: Path, letters: Path
 ) -> None:
-    llm = ScriptedLLM([_read(career / "cv.md"), _answer("Your CV says engineer.")])
+    llm = ScriptedLLM(
+        [_read(letters / "cover-letter.md"), _answer("Your letter says engineer.")]
+    )
     agent = _files_agent(llm, root)
     asker = Asker(ApprovalDecision(True))
     recorder = Recorder()
 
     result = await agent.run_task(
-        "look at my career folder", on_event=recorder, approval=ChatPolicy(asker)
+        "look at my letters folder", on_event=recorder, approval=ChatPolicy(asker)
     )
 
     assert result.status == "completed"
     [request] = asker.requests
     assert request.outside is not None
-    assert (request.outside.folder, request.outside.access) == (str(career), "read")
+    assert (request.outside.folder, request.outside.access) == (str(letters), "read")
     assert request.tier == "read"
     # The model's next request carries the file, not a refusal.
     assert any("Engineer, 2020-2026" in text for text in llm.tool_messages(1))
@@ -105,13 +107,13 @@ async def test_an_outside_read_asks_and_runs_with_no_new_model_turn(
     approval = finished.data["approval"]
     assert approval["allowed"] is True and approval["origin"] == "user"
     assert approval["folder"]["scope"] == "once"
-    assert approval["folder"]["folder"] == str(career)
+    assert approval["folder"]["folder"] == str(letters)
 
 
 async def test_a_denial_gives_the_model_one_line_and_the_usual_denial(
-    root: Path, career: Path
+    root: Path, letters: Path
 ) -> None:
-    llm = ScriptedLLM([_read(career / "cv.md"), _answer("ok")])
+    llm = ScriptedLLM([_read(letters / "cover-letter.md"), _answer("ok")])
     agent = _files_agent(llm, root)
 
     await agent.run_task(
@@ -120,20 +122,20 @@ async def test_a_denial_gives_the_model_one_line_and_the_usual_denial(
 
     [text] = llm.tool_messages(1)
     assert (
-        f"Reading {career} outside the workspace needs the user's OK; they were asked."
+        f"Reading {letters} outside the workspace needs the user's OK; they were asked."
         in text
     )
     assert f"The user denied this call: private. {ENDING}" in text
 
 
 async def test_this_chat_lets_a_second_read_run_unasked(
-    root: Path, career: Path
+    root: Path, letters: Path
 ) -> None:
-    (career / "letter.md").write_text("Dear team")
+    (letters / "letter.md").write_text("Dear team")
     llm = ScriptedLLM(
         [
-            _read(career / "cv.md", "c1"),
-            _read(career / "letter.md", "c2"),
+            _read(letters / "cover-letter.md", "c1"),
+            _read(letters / "letter.md", "c2"),
             _answer("done"),
         ]
     )
@@ -151,12 +153,16 @@ async def test_this_chat_lets_a_second_read_run_unasked(
     assert recorder.of("tool.finished")[1].data["approval"]["origin"] == "session"
 
 
-async def test_a_write_after_a_read_grant_still_asks(root: Path, career: Path) -> None:
+async def test_a_write_after_a_read_grant_still_asks(root: Path, letters: Path) -> None:
     llm = ScriptedLLM(
         [
-            _read(career / "cv.md", "c1"),
+            _read(letters / "cover-letter.md", "c1"),
             _calls(
-                ("file_write", {"path": str(career / "cv.md"), "content": "x"}, "c2")
+                (
+                    "file_write",
+                    {"path": str(letters / "cover-letter.md"), "content": "x"},
+                    "c2",
+                )
             ),
             _answer("done"),
         ]
@@ -166,20 +172,20 @@ async def test_a_write_after_a_read_grant_still_asks(root: Path, career: Path) -
         ApprovalDecision(True, remember=True), ApprovalDecision(False, "read only")
     )
 
-    await agent.run_task("edit my cv", approval=ChatPolicy(asker))
+    await agent.run_task("edit my letter", approval=ChatPolicy(asker))
 
     assert [r.outside.access for r in asker.requests if r.outside] == ["read", "write"]
     write = asker.requests[1]
     assert write.review is not None and write.review.verdict == "high"
     assert "outside_write" in write.review.categories
-    assert "Writes ~/developer/career/cv.md, outside the workspace." in (
+    assert "Writes ~/Documents/letters/cover-letter.md, outside the workspace." in (
         write.review.reasons
     )
-    assert (career / "cv.md").read_text() == "Engineer, 2020-2026\n"
+    assert (letters / "cover-letter.md").read_text() == "Engineer, 2020-2026\n"
 
 
-async def test_auto_mode_still_asks_the_person(root: Path, career: Path) -> None:
-    llm = ScriptedLLM([_read(career / "cv.md"), _answer("done")])
+async def test_auto_mode_still_asks_the_person(root: Path, letters: Path) -> None:
+    llm = ScriptedLLM([_read(letters / "cover-letter.md"), _answer("done")])
     agent = _files_agent(llm, root)
     asker = Asker(ApprovalDecision(True))
 
@@ -189,21 +195,21 @@ async def test_auto_mode_still_asks_the_person(root: Path, career: Path) -> None
     assert any("Engineer" in text for text in llm.tool_messages(1))
 
 
-async def test_auto_mode_never_allows_on_its_own(root: Path, career: Path) -> None:
+async def test_auto_mode_never_allows_on_its_own(root: Path, letters: Path) -> None:
     """Auto's own policy has no folder layer: the path is refused, not run."""
-    llm = ScriptedLLM([_read(career / "cv.md"), _answer("done")])
+    llm = ScriptedLLM([_read(letters / "cover-letter.md"), _answer("done")])
     agent = _files_agent(llm, root)
 
     await agent.run_task("look", approval=AutoPolicy())
 
     [text] = llm.tool_messages(1)
-    assert PLAIN.format(path=career / "cv.md") in text
+    assert PLAIN.format(path=letters / "cover-letter.md") in text
 
 
 async def test_a_task_nobody_owns_is_refused_as_before(
-    root: Path, career: Path
+    root: Path, letters: Path
 ) -> None:
-    llm = ScriptedLLM([_read(career / "cv.md"), _answer("done")])
+    llm = ScriptedLLM([_read(letters / "cover-letter.md"), _answer("done")])
     agent = _files_agent(llm, root)
     asker = Asker()
 
@@ -211,13 +217,13 @@ async def test_a_task_nobody_owns_is_refused_as_before(
 
     assert asker.requests == []
     [text] = llm.tool_messages(1)
-    assert PLAIN.format(path=career / "cv.md") in text
+    assert PLAIN.format(path=letters / "cover-letter.md") in text
 
 
 async def test_a_turn_the_person_did_not_start_is_refused_as_before(
-    root: Path, career: Path
+    root: Path, letters: Path
 ) -> None:
-    llm = ScriptedLLM([_read(career / "cv.md"), _answer("done")])
+    llm = ScriptedLLM([_read(letters / "cover-letter.md"), _answer("done")])
     agent = _files_agent(llm, root)
     asker = Asker()
 
@@ -227,7 +233,7 @@ async def test_a_turn_the_person_did_not_start_is_refused_as_before(
 
     assert asker.requests == []
     [text] = llm.tool_messages(1)
-    assert PLAIN.format(path=career / "cv.md") in text
+    assert PLAIN.format(path=letters / "cover-letter.md") in text
 
 
 async def test_a_never_offered_place_is_refused_with_the_reason(
@@ -246,8 +252,8 @@ async def test_a_never_offered_place_is_refused_with_the_reason(
     assert "holds keys or passwords. melo never opens it" in text
 
 
-async def test_always_survives_a_new_chat(root: Path, career: Path) -> None:
-    first = ScriptedLLM([_read(career / "cv.md"), _answer("done")])
+async def test_always_survives_a_new_chat(root: Path, letters: Path) -> None:
+    first = ScriptedLLM([_read(letters / "cover-letter.md"), _answer("done")])
     await _files_agent(first, root).run_task(
         "look",
         approval=ChatPolicy(
@@ -255,9 +261,9 @@ async def test_always_survives_a_new_chat(root: Path, career: Path) -> None:
             saved=config.SavedFolders(),
         ),
     )
-    assert config.load().workspace.extra_folders == ["~/developer/career"]
+    assert config.load().workspace.extra_folders == ["~/Documents/letters"]
 
-    second = ScriptedLLM([_read(career / "cv.md"), _answer("done")])
+    second = ScriptedLLM([_read(letters / "cover-letter.md"), _answer("done")])
     asker = Asker()
     recorder = Recorder()
     await _files_agent(second, root).run_task(

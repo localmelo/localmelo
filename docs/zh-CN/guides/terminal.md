@@ -359,13 +359,13 @@ from-the-child
 文件夹之外的文件会得到一个写明其真实文件夹的面板。读取可以在这个对话里或总是允许那个文件夹（记在设置里），写入每次都会询问，只有“是”和“否”，并且选中“否”（见[工作区之外的文件夹](tools-mcp.md#folders-outside-the-workspace)）：
 
 ```text
-╭─ Let melo read in ~/developer/career? ─────────────────────────────────────╮
+╭─ Let melo read in ~/Documents/letters? ────────────────────────────────────╮
 │ file_read · outside ~/demo-project · read only                             │
-│   melo wants to read ~/developer/career/cv.md.                             │
+│   melo wants to read ~/Documents/letters/cover-letter.md.                  │
 ╰────────────────────────────────────────────────────────────────────────────╯
 ❯ 1. Yes
-  2. Yes, and allow ~/developer/career for this chat
-  3. Yes, and always allow ~/developer/career (kept in Settings)
+  2. Yes, and allow ~/Documents/letters for this chat
+  3. Yes, and always allow ~/Documents/letters (kept in Settings)
   4. No, and tell melo why
   Always keeps the folder in Settings, where you can remove it. Writing outside
   the workspace still asks every time.

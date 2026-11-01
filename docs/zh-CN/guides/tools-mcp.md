@@ -297,7 +297,7 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 | **拒绝** | 什么都不运行；模型会读到一行写明文件夹的话，然后是通常的拒绝说明。 |
 
 - **读取和写入分开。** 文件夹授权只包括读取。在工作区之外写入属于高影响操作：每次都会询问，只提供 **允许一次** 和 **拒绝**，任何授权都不包括它。
-- **授权按文件系统给出的路径覆盖一个文件夹，** 以路径边界为准：`~/developer/career` 包括 `~/developer/career/cv.md`，但不包括 `~/developer/career-old`。符号链接按它指向的目标计算，所以允许的文件夹里指向别处的链接会再次询问。文件系统别名（macOS 的 `/.vol`、`/.resolve`、`/.nofollow`）无论指向哪里，都从不提供、授权或记住。
+- **授权按文件系统给出的路径覆盖一个文件夹，** 以路径边界为准：`~/Documents/letters` 包括 `~/Documents/letters/cover-letter.md`，但不包括 `~/Documents/letters-old`。符号链接按它指向的目标计算，所以允许的文件夹里指向别处的链接会再次询问。文件系统别名（macOS 的 `/.vol`、`/.resolve`、`/.nofollow`）无论指向哪里，都从不提供、授权或记住。
 - **从不提供：** 密钥和凭据所在的位置（`~/.ssh`、`~/.gnupg`、`~/Library/Keychains`、`~/.aws`、`~/.config/gcloud`、`~/.kube`、`~/.docker/config.json`、`~/.netrc`、`~/.oci`、`~/.terraform.d`、`~/.cargo/credentials`、`~/.vault-token`、`~/.config/cloudflared`、密码库、浏览器配置、聊天应用的数据和命令行编程代理的登录信息）、melo 自己的数据文件夹（`~/.cache/localmelo`）、系统文件夹（`/System`、`/Library`、`/etc`、`/bin`、`/sbin`、除 `/usr/local` 以外的 `/usr`、`/dev`），以及你的整个主文件夹或 `/`。这些位置会直接拒绝并说明原因，不询问任何人。直接位于主文件夹里的文件可以允许一次，但不会记住它的文件夹。列出一个允许的文件夹时，这样的位置显示为 `name/ (not offered)`，不会进入。
 - **自动模式从不自行允许这样的路径：** 在 Auto 中卡片也会询问你。
 - **没有人可以询问时：** 直接运行、`--yolo`、deny 模式、不是你发起的任务（定时杂务、其他代理发起的任务），以及回答任务的对话轮次，都会像以前一样拒绝这个路径，对任何路径都是同一句 `Path '<path>' is outside allowed workspace root`。

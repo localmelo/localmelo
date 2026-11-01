@@ -46,8 +46,8 @@ def now() -> list[float]:
 def _request(
     home: Path, tool: str = "file_read", access: str = "read"
 ) -> ApprovalRequest:
-    career = home / "developer" / "career"
-    path = career / ("cv.md" if tool != "list_files" else "")
+    letters = home / "Documents" / "letters"
+    path = letters / ("cover-letter.md" if tool != "list_files" else "")
     grantable = access == "read"
     arguments = {"path": str(path)}
     if tool == "file_write":
@@ -62,7 +62,7 @@ def _request(
         workspace_root=str(home / "workspace"),
         tier="read" if access == "read" else "write",
         outside=OutsideAccess(
-            str(path).rstrip("/"), str(career), access, grantable  # type: ignore[arg-type]
+            str(path).rstrip("/"), str(letters), access, grantable  # type: ignore[arg-type]
         ),
     )
 
@@ -70,16 +70,16 @@ def _request(
 def test_a_read_panel_names_the_folder_and_says_read_only(home: Path) -> None:
     text = panel_text(_request(home), width=80, show_tier=False)
 
-    assert text.title == "Let melo read in ~/developer/career?"
+    assert text.title == "Let melo read in ~/Documents/letters?"
     assert text.header == "file_read · outside ~/workspace · read only"
     assert [line for _, line in text.body] == [
-        "melo wants to read ~/developer/career/cv.md."
+        "melo wants to read ~/Documents/letters/cover-letter.md."
     ]
 
 
 def test_a_list_panel_says_look_in(home: Path) -> None:
     text = panel_text(_request(home, "list_files"), width=80, show_tier=False)
-    assert text.title == "Let melo look in ~/developer/career?"
+    assert text.title == "Let melo look in ~/Documents/letters?"
 
 
 def test_a_write_panel_keeps_the_file_body_and_says_it_asks_every_time(
@@ -87,9 +87,9 @@ def test_a_write_panel_keeps_the_file_body_and_says_it_asks_every_time(
 ) -> None:
     text = panel_text(_request(home, "file_write", "write"), width=80, show_tier=False)
 
-    assert text.title == "Write outside the workspace, in ~/developer/career?"
+    assert text.title == "Write outside the workspace, in ~/Documents/letters?"
     assert text.notes == (
-        "~/developer/career/cv.md is outside ~/workspace. A write there asks every "
+        "~/Documents/letters/cover-letter.md is outside ~/workspace. A write there asks every "
         "time.",
     )
     assert any("new line" in line for _, line in text.body)
@@ -97,8 +97,8 @@ def test_a_write_panel_keeps_the_file_body_and_says_it_asks_every_time(
 
 def test_the_labels_of_the_folder_options(home: Path) -> None:
     assert folder_options(_request(home)) == (
-        "Yes, and allow ~/developer/career for this chat",
-        "Yes, and always allow ~/developer/career (kept in Settings)",
+        "Yes, and allow ~/Documents/letters for this chat",
+        "Yes, and always allow ~/Documents/letters (kept in Settings)",
     )
 
 
@@ -143,11 +143,11 @@ async def test_the_option_list_on_screen_and_key_three_keeps_the_folder(
     approver = TerminalApprover(clock=lambda: now[0])
     async with running_app(approver=approver, clock=lambda: now[0]) as app:
         asking = asyncio.ensure_future(approver.ask(_request(home)))
-        await app.wait(lambda: "Let melo read in ~/developer/career?" in app.text())
+        await app.wait(lambda: "Let melo read in ~/Documents/letters?" in app.text())
         text = app.text()
         assert "❯ 1. Yes" in text
-        assert "2. Yes, and allow ~/developer/career for this chat" in text
-        assert "3. Yes, and always allow ~/developer/career (kept in Settings)" in text
+        assert "2. Yes, and allow ~/Documents/letters for this chat" in text
+        assert "3. Yes, and always allow ~/Documents/letters (kept in Settings)" in text
         assert "4. No, and tell melo why" in text
         assert "Always keeps the folder in Settings" in text
         assert "still asks every time." in text
@@ -207,20 +207,22 @@ def test_the_main_chat_reads_the_folder_from_the_gateway(home: Path) -> None:
     pending = {
         "request_id": "r1",
         "tool_name": "file_read",
-        "arguments": {"path": "/x/y/cv.md"},
+        "arguments": {"path": "/x/y/cover-letter.md"},
         "workspace_root": "/w",
         "outside": {
-            "path": "/x/y/cv.md",
+            "path": "/x/y/cover-letter.md",
             "folder": "/x/y",
             "access": "read",
             "grantable": True,
         },
     }
     request = approval_request(pending)
-    assert request.outside == OutsideAccess("/x/y/cv.md", "/x/y", "read", True)
+    assert request.outside == OutsideAccess(
+        "/x/y/cover-letter.md", "/x/y", "read", True
+    )
     # A write is never grantable, whatever the gateway says.
     pending["outside"] = {**pending["outside"], "access": "write"}  # type: ignore[dict-item]
     assert approval_request(pending).outside == OutsideAccess(
-        "/x/y/cv.md", "/x/y", "write", False
+        "/x/y/cover-letter.md", "/x/y", "write", False
     )
     assert approval_request({"request_id": "r2"}).outside is None

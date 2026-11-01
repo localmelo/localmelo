@@ -33,38 +33,40 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
 
 
 @pytest.fixture
-def career(home: Path) -> Path:
-    path = home / "developer" / "career"
+def letters(home: Path) -> Path:
+    path = home / "Documents" / "letters"
     path.mkdir(parents=True)
-    (path / "cv.md").write_text("Engineer\n")
+    (path / "cover-letter.md").write_text("Engineer\n")
     return path
 
 
-async def _ask(client: Any, tmp_path: Path, career: Path) -> tuple[str, dict[str, Any]]:
-    body = await _create(client, tmp_path, "Look at my career folder")
+async def _ask(
+    client: Any, tmp_path: Path, letters: Path
+) -> tuple[str, dict[str, Any]]:
+    body = await _create(client, tmp_path, "Look at my letters folder")
     session_id = body["session"]["id"]
     [pending] = await _wait_pending(client, session_id)
     return session_id, pending
 
 
 async def test_the_card_names_the_folder_and_this_chat_is_a_grant_to_take_back(
-    tmp_path: Path, career: Path
+    tmp_path: Path, letters: Path
 ) -> None:
     async with console_with(
         tmp_path,
-        tool_call("file_read", {"path": str(career / "cv.md")}),
+        tool_call("file_read", {"path": str(letters / "cover-letter.md")}),
         answer("It says engineer."),
     ) as (_console, client, _):
-        session_id, pending = await _ask(client, tmp_path, career)
+        session_id, pending = await _ask(client, tmp_path, letters)
 
         assert pending["tool_name"] == "file_read"
         assert pending["outside"] == {
-            "path": str(career / "cv.md"),
-            "folder": str(career),
+            "path": str(letters / "cover-letter.md"),
+            "folder": str(letters),
             "access": "read",
             "grantable": True,
-            "path_label": "~/developer/career/cv.md",
-            "folder_label": "~/developer/career",
+            "path_label": "~/Documents/letters/cover-letter.md",
+            "folder_label": "~/Documents/letters",
         }
         answered = await client.post(
             f"/api/approvals/{pending['request_id']}", json={"choice": "session"}
@@ -76,17 +78,17 @@ async def test_the_card_names_the_folder_and_this_chat_is_a_grant_to_take_back(
 
         listed = (await client.get(f"/api/sessions/{session_id}/tools")).json()
         assert listed["folders"] == [
-            {"path": str(career), "label": "~/developer/career"}
+            {"path": str(letters), "label": "~/Documents/letters"}
         ]
         # A folder grant is no grant of the tool.
         detail = (await client.get(f"/api/sessions/{session_id}")).json()
         assert detail["grants"] == [] and detail["granted_at"] == {}
 
         gone = await client.delete(
-            f"/api/sessions/{session_id}/folders", params={"path": str(career)}
+            f"/api/sessions/{session_id}/folders", params={"path": str(letters)}
         )
         again = await client.delete(
-            f"/api/sessions/{session_id}/folders", params={"path": str(career)}
+            f"/api/sessions/{session_id}/folders", params={"path": str(letters)}
         )
         assert (gone.status_code, again.status_code) == (204, 404)
         listed = (await client.get(f"/api/sessions/{session_id}/tools")).json()
@@ -94,14 +96,14 @@ async def test_the_card_names_the_folder_and_this_chat_is_a_grant_to_take_back(
 
 
 async def test_always_keeps_the_folder_in_the_settings(
-    tmp_path: Path, career: Path
+    tmp_path: Path, letters: Path
 ) -> None:
     async with console_with(
         tmp_path,
-        tool_call("file_read", {"path": str(career / "cv.md")}),
+        tool_call("file_read", {"path": str(letters / "cover-letter.md")}),
         answer("done"),
     ) as (_console, client, _):
-        session_id, pending = await _ask(client, tmp_path, career)
+        session_id, pending = await _ask(client, tmp_path, letters)
 
         answered = await client.post(
             f"/api/approvals/{pending['request_id']}", json={"choice": "always"}
@@ -109,7 +111,7 @@ async def test_always_keeps_the_folder_in_the_settings(
         await _wait_turn(client, session_id)
 
         assert answered.json()["always"] is True
-        assert config.load().workspace.extra_folders == ["~/developer/career"]
+        assert config.load().workspace.extra_folders == ["~/Documents/letters"]
 
 
 async def test_always_is_refused_for_an_ordinary_call(tmp_path: Path) -> None:
@@ -135,14 +137,14 @@ async def test_always_is_refused_for_an_ordinary_call(tmp_path: Path) -> None:
 
 
 async def test_a_write_outside_is_allowed_once_whatever_the_answer(
-    tmp_path: Path, career: Path
+    tmp_path: Path, letters: Path
 ) -> None:
     async with console_with(
         tmp_path,
-        tool_call("file_write", {"path": str(career / "new.md"), "content": "x"}),
+        tool_call("file_write", {"path": str(letters / "new.md"), "content": "x"}),
         answer("done"),
     ) as (_console, client, _):
-        session_id, pending = await _ask(client, tmp_path, career)
+        session_id, pending = await _ask(client, tmp_path, letters)
         assert pending["outside"]["access"] == "write"
         assert pending["outside"]["grantable"] is False
 
@@ -153,7 +155,7 @@ async def test_a_write_outside_is_allowed_once_whatever_the_answer(
 
         assert answered.json()["remember"] is False
         assert answered.json()["always"] is False
-        assert (career / "new.md").read_text() == "x"
+        assert (letters / "new.md").read_text() == "x"
         assert config.load().workspace.extra_folders == []
 
 
@@ -182,11 +184,11 @@ def _put(revision: str, **extra: Any) -> dict[str, Any]:
 
 
 def test_settings_list_the_extra_folders_and_remove_one(client: TestClient) -> None:
-    _saved(folders=["~/developer/career", "~/.ssh"])
+    _saved(folders=["~/Documents/letters", "~/.ssh"])
 
     body = client.get("/api/settings").json()
     assert body["extra_folders"] == [
-        {"path": "~/developer/career", "name": "career", "valid": True},
+        {"path": "~/Documents/letters", "name": "letters", "valid": True},
         {"path": "~/.ssh", "name": ".ssh", "valid": False},
     ]
 
@@ -198,10 +200,10 @@ def test_settings_list_the_extra_folders_and_remove_one(client: TestClient) -> N
 
     kept = client.put(
         "/api/settings",
-        json=_put(body["revision"], extra_folders=["~/developer/career"]),
+        json=_put(body["revision"], extra_folders=["~/Documents/letters"]),
     )
     assert kept.status_code == 200, kept.text
-    assert [f["path"] for f in kept.json()["extra_folders"]] == ["~/developer/career"]
+    assert [f["path"] for f in kept.json()["extra_folders"]] == ["~/Documents/letters"]
     # Absent leaves it; an empty list removes the table.
     same = client.put("/api/settings", json=_put(kept.json()["revision"]))
     assert len(same.json()["extra_folders"]) == 1

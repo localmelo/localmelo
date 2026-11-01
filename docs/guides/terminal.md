@@ -331,13 +331,13 @@ A call that installs software, downloads files, changes files outside the folder
 A file outside the folder gets a panel that names its real folder. A read offers that folder for this chat or always (kept in Settings), and a write asks every time with Yes and No only, starting on No (see [Folders outside the workspace](tools-mcp.md#folders-outside-the-workspace)):
 
 ```text
-╭─ Let melo read in ~/developer/career? ─────────────────────────────────────╮
+╭─ Let melo read in ~/Documents/letters? ────────────────────────────────────╮
 │ file_read · outside ~/demo-project · read only                             │
-│   melo wants to read ~/developer/career/cv.md.                             │
+│   melo wants to read ~/Documents/letters/cover-letter.md.                  │
 ╰────────────────────────────────────────────────────────────────────────────╯
 ❯ 1. Yes
-  2. Yes, and allow ~/developer/career for this chat
-  3. Yes, and always allow ~/developer/career (kept in Settings)
+  2. Yes, and allow ~/Documents/letters for this chat
+  3. Yes, and always allow ~/Documents/letters (kept in Settings)
   4. No, and tell melo why
   Always keeps the folder in Settings, where you can remove it. Writing outside
   the workspace still asks every time.

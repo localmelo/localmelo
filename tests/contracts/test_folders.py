@@ -127,7 +127,7 @@ def test_the_whole_home_folder_and_above_are_never_offered(home: Path) -> None:
     assert never_offered(str(home)) == "home"
     assert never_offered(str(home.parent)) == "home"
     # A folder inside it is fine.
-    assert never_offered(str(home / "developer" / "career")) is None
+    assert never_offered(str(home / "Documents" / "letters")) is None
     assert above_home(str(home)) and above_home("/")
     assert not above_home(str(home / "developer"))
 
@@ -192,32 +192,32 @@ def test_a_grant_covers_its_folder_and_below_on_a_path_boundary() -> None:
 def test_another_spelling_counts_only_when_it_is_the_same_folder(
     tmp_path: Path,
 ) -> None:
-    real = Path(os.path.realpath(tmp_path)) / "Career"
+    real = Path(os.path.realpath(tmp_path)) / "Letters"
     real.mkdir()
-    (real / "cv.md").write_text("x")
-    other = str(real.parent / "career" / "cv.md")
+    (real / "cover-letter.md").write_text("x")
+    other = str(real.parent / "letters" / "cover-letter.md")
     same = os.path.exists(other)  # a case-insensitive file system
     assert covers(str(real), other) is same
     # A folder that does not exist under the other spelling never matches.
-    assert not covers(str(real), str(real.parent / "CAREERS" / "cv.md"))
+    assert not covers(str(real), str(real.parent / "LETTER-BOX" / "cover-letter.md"))
 
 
 # ── The outside access of a call ─────────────────────────────────────────────
 
 
 def test_a_read_offers_the_folder_that_holds_the_file(home: Path) -> None:
-    career = home / "developer" / "career"
-    career.mkdir(parents=True)
-    (career / "cv.md").write_text("x")
-    access = outside_access("file_read", str(career / "cv.md"))
+    letters = home / "Documents" / "letters"
+    letters.mkdir(parents=True)
+    (letters / "cover-letter.md").write_text("x")
+    access = outside_access("file_read", str(letters / "cover-letter.md"))
     assert (access.path, access.folder, access.access, access.grantable) == (
-        str(career / "cv.md"),
-        str(career),
+        str(letters / "cover-letter.md"),
+        str(letters),
         "read",
         True,
     )
-    listed = outside_access("list_files", str(career))
-    assert listed.folder == str(career)
+    listed = outside_access("list_files", str(letters))
+    assert listed.folder == str(letters)
 
 
 def test_a_write_is_never_grantable(home: Path) -> None:
@@ -233,17 +233,20 @@ def test_a_file_directly_in_home_is_asked_once_only(home: Path) -> None:
 
 
 def test_the_line_the_model_reads_names_the_folder(home: Path) -> None:
-    read = outside_access("file_read", str(home / "career" / "cv.md"))
+    read = outside_access("file_read", str(home / "letters" / "cover-letter.md"))
     assert asked_text(read) == (
-        f"Reading {home / 'career'} outside the workspace needs the user's OK; "
+        f"Reading {home / 'letters'} outside the workspace needs the user's OK; "
         "they were asked."
     )
-    write = outside_access("file_write", str(home / "career" / "cv.md"))
-    assert asked_text(write).startswith(f"Writing to {home / 'career'} outside")
+    write = outside_access("file_write", str(home / "letters" / "cover-letter.md"))
+    assert asked_text(write).startswith(f"Writing to {home / 'letters'} outside")
 
 
 def test_a_path_below_home_reads_with_a_tilde(home: Path) -> None:
-    assert home_label(str(home / "developer" / "cv.md")) == "~/developer/cv.md"
+    assert (
+        home_label(str(home / "developer" / "cover-letter.md"))
+        == "~/developer/cover-letter.md"
+    )
     assert home_label(str(home)) == "~"
     assert home_label(str(home) + "-other/x") == str(home) + "-other/x"
     assert home_label("/opt/data/x") == "/opt/data/x"
@@ -253,12 +256,12 @@ def test_a_path_below_home_reads_with_a_tilde(home: Path) -> None:
 
 
 def test_a_case_variant_is_named_as_the_file_system_keeps_it(tmp_path: Path) -> None:
-    real = Path(os.path.realpath(tmp_path)) / "Career"
+    real = Path(os.path.realpath(tmp_path)) / "Letters"
     (real / "Notes").mkdir(parents=True)
-    (real / "Notes" / "cv.md").write_text("x")
-    other = str(real.parent / "CAREER" / "notes" / "CV.md")
+    (real / "Notes" / "cover-letter.md").write_text("x")
+    other = str(real.parent / "LETTERS" / "notes" / "COVER-LETTER.md")
     if os.path.exists(other):  # a case-insensitive file system
-        assert canonical_path(other) == str(real / "Notes" / "cv.md")
+        assert canonical_path(other) == str(real / "Notes" / "cover-letter.md")
     # A part that does not exist yet keeps its spelling below the named folder.
     assert canonical_path(str(real / "Notes" / "New" / "a.md")) == str(
         real / "Notes" / "New" / "a.md"
@@ -348,20 +351,20 @@ def test_open_checked_refuses_a_folder_swapped_after_the_check(
     tmp_path: Path,
 ) -> None:
     root = Path(os.path.realpath(tmp_path))
-    (root / "career").mkdir()
-    (root / "career" / "cv.md").write_text("cv")
+    (root / "letters").mkdir()
+    (root / "letters" / "cover-letter.md").write_text("letter")
     (root / "keys").mkdir()
-    (root / "keys" / "cv.md").write_text("key")
-    checked = canonical_path(str(root / "career" / "cv.md"))
-    fd = os.open(root / "career" / "cv.md", os.O_RDONLY)
+    (root / "keys" / "cover-letter.md").write_text("key")
+    checked = canonical_path(str(root / "letters" / "cover-letter.md"))
+    fd = os.open(root / "letters" / "cover-letter.md", os.O_RDONLY)
     nameable = fd_path(fd) is not None
     os.close(fd)
     # A part of the path is swapped for a symlink after the check.
-    (root / "career").rename(root / "career-old")
-    (root / "career").symlink_to(root / "keys")
+    (root / "letters").rename(root / "letters-old")
+    (root / "letters").symlink_to(root / "keys")
     if not nameable:
         pytest.skip("this system cannot name a descriptor")
     with pytest.raises(PathChangedError, match="changed before it was opened"):
-        open_checked(str(root / "career" / "cv.md"), os.O_RDONLY, checked)
+        open_checked(str(root / "letters" / "cover-letter.md"), os.O_RDONLY, checked)
     # Without a check to keep, the open stands as it always did.
-    os.close(open_checked(str(root / "career" / "cv.md"), os.O_RDONLY, None))
+    os.close(open_checked(str(root / "letters" / "cover-letter.md"), os.O_RDONLY, None))

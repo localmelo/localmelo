@@ -879,7 +879,7 @@ test('after Undo the form opens on the connection as it is saved again', async (
 // ── The folders melo may read outside a chat's own folder (#405) ──
 
 const EXTRA = [
-  {path: '~/developer/career', name: 'career', valid: true},
+  {path: '~/Documents/letters', name: 'letters', valid: true},
   {path: '~/.ssh', name: '.ssh', valid: false},
 ];
 
@@ -897,23 +897,23 @@ test('Chats and folders lists the extra folders, and Remove saves the list witho
   const list = h.element('s-extra');
   assert.equal(list.hidden, false);
   assert.equal(h.element('s-extra-title').hidden, false);
-  const [career, ssh] = list.children;
-  assert.equal(career.dataset.valid, 'true');
-  assert.equal(words(career), 'career ~/developer/career Remove');
+  const [letters, ssh] = list.children;
+  assert.equal(letters.dataset.valid, 'true');
+  assert.equal(words(letters), 'letters ~/Documents/letters Remove');
   assert.equal(ssh.dataset.valid, 'false');
   assert.match(words(ssh), /Not used: melo never opens this folder\./);
-  const remove = career.children[1].children[0];
-  assert.equal(remove.attributes['aria-label'], 'Remove ~/developer/career from the folders melo may read');
+  const remove = letters.children[1].children[0];
+  assert.equal(remove.attributes['aria-label'], 'Remove ~/Documents/letters from the folders melo may read');
   await remove.emit('click');
   await flush();
   assert.deepEqual(bodies[0].extra_folders, ['~/.ssh']);
   assert.equal(bodies[0].revision, 'rev1');
-  assert.equal(h.element('settings-saved-text').textContent, 'Saved: melo asks again before reading in ~/developer/career.');
+  assert.equal(h.element('settings-saved-text').textContent, 'Saved: melo asks again before reading in ~/Documents/letters.');
   assert.deepEqual(h.element('s-extra').children.map((row) => row.children[0].children[1].textContent), ['~/.ssh']);
   await h.element('settings-undo').emit('click');
   await flush();
-  assert.deepEqual(bodies[1].extra_folders, ['~/developer/career', '~/.ssh']);
-  assert.equal(h.element('settings-saved-text').textContent, 'Undone: melo may read in ~/developer/career again.');
+  assert.deepEqual(bodies[1].extra_folders, ['~/Documents/letters', '~/.ssh']);
+  assert.equal(h.element('settings-saved-text').textContent, 'Undone: melo may read in ~/Documents/letters again.');
 });
 
 test('with no extra folder the list says how one is added, and an older gateway hides it', async () => {
@@ -933,8 +933,8 @@ test('the extra folders read in Simplified Chinese', async () => {
   try {
     const h = harness({'GET /settings': fixture({extra_folders: EXTRA})});
     await h.open('chats');
-    const [career, ssh] = h.element('s-extra').children;
-    assert.equal(words(career), 'career ~/developer/career 移除');
+    const [letters, ssh] = h.element('s-extra').children;
+    assert.equal(words(letters), 'letters ~/Documents/letters 移除');
     assert.match(words(ssh), /未使用：melo 从不打开这个文件夹。/);
     const empty = harness({'GET /settings': fixture({extra_folders: []})});
     await empty.open('chats');
