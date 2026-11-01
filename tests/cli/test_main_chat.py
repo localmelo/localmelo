@@ -691,6 +691,22 @@ async def test_a_recap_shows_the_tidy_up_since_the_last_turn(
     assert setup.out.text().count("melo tidied 3 notes · /memory undo") == 1
 
 
+async def test_a_recap_shows_the_tidy_up_in_a_chat_with_no_turn_yet(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    gateway.emit(MAIN, "attention.echo", SLEPT, None)
+    gateway.emit(
+        MAIN, "attention.echo", {"echo": "undone", "of": 99, "line": "x"}, None
+    )
+    remote = setup.session.remote
+    assert isinstance(remote, MainChat)
+    remote._cursors.clear()
+    remote._seen.clear()
+    await remote.open(remote.chat)
+    assert setup.out.text().count("melo tidied 3 notes · /memory undo") == 1
+
+
 async def test_a_recap_under_a_command_hangs_instead_of_indenting_twice(
     chat: tuple[Setup, FakeGateway],
 ) -> None:

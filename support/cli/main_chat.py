@@ -817,7 +817,10 @@ class MainChat:
             self.host.out.width,
         )
         finished = [t for t in turns if not t.get("undone")]
-        if not finished:
+        since = float(finished[-1].get("started_at") or 0) if finished else 0.0
+        # What melo tidied since the last turn (or ever, with no turn) and nobody put back.
+        sleeps = [e for e in _sleeps(echoes) if float(e.get("ts") or 0) > since]
+        if not finished and not sleeps:
             return
         # Under a command's echo the connector and the hang indent already
         # set the rows in; at the start they are indented by two.
@@ -846,19 +849,18 @@ class MainChat:
                         style="muted",
                     )
                 )
-        since = float(finished[-1].get("started_at") or 0)
         newer = [
-            c for c in cards if isinstance(c, dict) and float(c.get("ts") or 0) > since
+            c
+            for c in cards
+            if finished and isinstance(c, dict) and float(c.get("ts") or 0) > since
         ]
         for card in newer[-RECAP_CARDS:]:
             if isinstance(card.get("id"), int):
                 self._seen.add(card["id"])
             out.print(card_line(card, symbols, width))
-        # What melo tidied since the last turn and nobody put back.
-        for echo in _sleeps(echoes):
-            if float(echo.get("ts") or 0) > since:
-                self._seen.add(int(echo["id"]))
-                out.print(echo_line(echo, symbols, width))
+        for echo in sleeps:
+            self._seen.add(int(echo["id"]))
+            out.print(echo_line(echo, symbols, width))
         out.print(Text(""))
 
     # ── The stream ──
