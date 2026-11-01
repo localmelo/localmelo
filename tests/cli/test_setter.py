@@ -312,6 +312,11 @@ def test_keys_lists_value_default_and_source(
         "retrieval.kinds": ["[]", "[]", "default"],
         "retrieval.placement": ['"tool"', '"tool"', "file"],  # save() writes the table
         "retrieval.min_score": ["0.5", "0.35", "-X"],
+        # The memory recall settings (#349) have "recall" in their names too.
+        "memory.recall_records": ["3", "3", "default"],
+        "memory.recall_docs": ["2", "2", "default"],
+        "memory.recall_chars": ["900", "900", "default"],
+        "memory.recall_notes": ['"on"', '"on"', "default"],
     }
 
 

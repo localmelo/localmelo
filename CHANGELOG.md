@@ -9,6 +9,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Developer only, not visible by default: five `[memory]` settings that decide what a chat
+  message's recall block holds, each defaulting to today's recall and set for one run with
+  `-X memory.KEY=VALUE`. `recall_records` (3) and `recall_docs` (2) are the most notes and
+  earlier chat turns it holds, `recall_chars` (900) its size; `recall_notes = "off"`
+  recalls turns only and pins no note (the `remember` and search tools are unchanged);
+  `search_when_empty = "hint"` gives a block that recalled nothing one line telling the
+  model to call the memory search tool first, and the `turn.memory` event then has
+  `search_hint: true`. Out-of-range values are config errors. Part of #349.
 - Developer only: `melo memory ingest FILE` loads past chats from a JSON file as if they
   had happened on their dates (no model call), and `LOCALMELO_NOW` pins the date
   the model and memory recall read, for memory tests.
@@ -510,6 +518,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Tidying notes while idle no longer undoes your Undo, loses a stopped run, or
+  ignores the GPU lock. An Undo sticks: two notes it separated are not merged
+  or replaced again, a note it brought back is not retired again, and a note it
+  removed is not written again from the same turn (a third, newer note can
+  still replace a restored one, and rewording a note yourself ends the reason
+  kept for it). A run that is cancelled or stops early keeps what it changed,
+  so it can still be undone. Every request to a model server first checks the
+  lock, `[memory] sleep_lock` or else the shared GPU lock, and the run stops
+  when another holder takes it (`stopped: gpu_lock`); a chat, task or worker
+  turn that starts during the run stops it too. Part of #363.
 - A note melo writes for you now says "you", and a reply that says "saved" with
   nothing kept is flagged. A note the chat's model wrote in the first person
   ("My flight to Porto is at gate 22.", "The pool gave me a new locker.") is

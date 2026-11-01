@@ -1873,10 +1873,13 @@ panel uses these routes.
   An unreadable reply or timeout stays pending once; a second failure completes it and adds
   `{"session_id", "turn", "reason": "parse"}` to `refusals` (plus `note_id` for a pronoun rewrite).
   `capped` is true when the change limit was reached (at most 20 per run). There is no turn to carry a
-  `memory.sleep` event, so the report is this answer; the run's ids are kept in the memory folder for the undo.
+  `memory.sleep` event, so the report is this answer; the run's ids are kept in the memory folder for the undo,
+  also when the run is cancelled or stops early (none when it changed nothing). `aborted` is empty, `sleep is off`,
+  `stopped: gpu_lock` (another holder took the lock), `stopped: user_active` (a turn started during the run), or the error that ended it.
 - `DELETE /api/memory/sleep/{run_id}` (developer mode) puts that run back: what it superseded is current again
   and what it wrote is removed, `{"run_id", "restored", "removed", "kept"}` (`kept`: a note a later note replaced or
-  you reworded, left as it is). An unknown or undone run is 404.
+  you reworded, left as it is). An unknown or undone run is 404. The undo sticks: the notes it separated, a retired
+  note it brought back and a note it removed are not merged, replaced, retired or written again by a later run.
 
 ## Bring in memory from other assistants
 
