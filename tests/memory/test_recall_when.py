@@ -10,7 +10,6 @@ is never taken for the user's own statement. Synthetic items only.
 from __future__ import annotations
 
 import re
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -288,11 +287,14 @@ async def put(memory: ChatMemory, text: str, when: float) -> None:
 
 
 async def test_the_block_a_message_gets_orders_two_values_of_one_day(
-    tmp_path: Path, store: SessionStore
+    tmp_path: Path, store: SessionStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Noon, so an hour earlier is the same local day whenever the test runs.
+    noon = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
+    monkeypatch.setenv(clock.ENV, noon.isoformat())
     memory = ChatMemory(lambda: None, directory=str(tmp_path / "memory"))
     try:
-        now = time.time()
+        now = noon.timestamp()
         await put(memory, SYNC_OLD, now - 3_600)
         await put(memory, SYNC_NEW, now - 60)
         question = "Which day is my weekly sync?"
