@@ -150,6 +150,36 @@ test('a turn that never finished an answer says so plainly and offers Try again 
   assert.equal(nextAction('failed', 'run', turns.UNFINISHED_ANSWER), 'retry');
 });
 
+// A local model's server can leave a tool call in the reply's content (`text`, `<function_calls>...`); the agent
+// asks again with a `tool_call_as_text` notice, and the broken text is never shown as the answer.
+test('a tool call written as text is replaced by its notice, and the answer is the next reply', () => {
+  const {turn, push} = fullTurn();
+  push('assistant.message', {step: 1, content: 'text', tool_calls: []});
+  assert.equal(turn.heldText, 'text', 'the stored reply still holds what the model sent');
+  push('notice', {kind: 'tool_call_as_text', message: 'The model wrote a tool call as text, so it did not run; asking it again.', step: 1, attempt: 1, detail: {count: 1}});
+  assert.equal(turn.heldText, '');
+  push('step.started', {step: 2, attempt: 1});
+  push('assistant.message', {step: 2, content: 'Noted: your manager is Priya Shah.', tool_calls: []});
+  push('run.finished', {result: {status: 'completed', result: 'Noted: your manager is Priya Shah.', duration_s: 3, n_tool: 0, steps: 2}});
+  assert.deepEqual(turn.items.map((item) => item.kind), ['notice']);
+  assert.equal(turn.items[0].noticeKind, 'tool_call_as_text');
+  assert.ok(!turn.items.some((item) => item.kind === 'assistant_text' && item.text === 'text'));
+  assert.equal(turn.answer, 'Noted: your manager is Priya Shah.');
+});
+
+test('a turn that kept writing its tool call as text says so plainly', () => {
+  const {turn, push} = fullTurn();
+  push('assistant.message', {step: 1, content: 'text✅ Saved', tool_calls: []});
+  push('notice', {kind: 'tool_call_as_text', message: 'asking again', step: 1, attempt: 1, detail: {count: 1}});
+  push('step.started', {step: 2, attempt: 1});
+  push('assistant.message', {step: 2, content: 'text', tool_calls: []});
+  push('run.finished', {result: {status: 'failed', result: '', error: turns.TOOL_CALL_TEXT, duration_s: 3, n_tool: 0, steps: 2}});
+  assert.equal(turn.answer, '', 'the broken text is not the answer');
+  assert.equal(turns.TOOL_CALL_TEXT, 'tool call written as text');
+  assert.deepEqual(statusText('failed', 'run', turns.TOOL_CALL_TEXT), {word: 'Failed', severity: 'warn', title: 'The model wrote a tool call as text'});
+  assert.equal(nextAction('failed', 'run', turns.TOOL_CALL_TEXT), 'retry');
+});
+
 test('a tool call runs, asks for approval and finishes', () => {
   const {view, turn, push} = fullTurn();
   push('assistant.message', {step: 1, content: '', tool_calls: [{id: 'call-1', name: 'shell_exec', arguments: {command: 'ls'}, preview: 'ls'}]});
@@ -1951,6 +1981,20 @@ test('a turn that never finished an answer has a plain title, no repeated error 
   assert.equal(findNode(card, (node) => node.className === 'primary-button').textContent, 'Try again');
 });
 
+test('a turn that kept writing its tool call as text has a plain title, a hint and Try again first', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const turn = turns.newTurn(turnRow({status: 'failed', result: {error: turns.TOOL_CALL_TEXT, n_tool: 0}}));
+  h.state().view.turns = [turn];
+  h.context.turn = turn;
+  const card = h.run('statusNode(turn)');
+  const part = (name) => findNode(card, (node) => node.className === name);
+  assert.equal(flatten(part('failure-title')), '⚠ The model wrote a tool call as text');
+  assert.equal(part('failure-error'), null, 'the title already says it');
+  assert.equal(part('failure-hint').textContent, 'The model wrote a tool call as text instead of running it. Try again, or try another model.');
+  assert.equal(findNode(card, (node) => node.className === 'primary-button').textContent, 'Try again');
+});
+
 test('the work box of a failed turn has no retry line, and no box at all when that was all it held', async () => {
   const h = harness(baseRoutes());
   await h.run('init()');
@@ -2405,6 +2449,9 @@ test('the page words every pair in the shared display vectors', () => {
       {word: read.word, severity: read.severity, title: read.title},
       {word, severity, title}, `status_text(${status}, ${JSON.stringify(cause)})`,
     );
+  }
+  for (const [input, thinking, answer] of vectors.split_thinking) {
+    assert.deepEqual(splitThinking(input), [thinking, answer], `split_thinking(${JSON.stringify(input)})`);
   }
   for (const [status, errorCategory, approval, short, long] of vectors.approval_tag) {
     const read = approvalTag(status, errorCategory, approval);

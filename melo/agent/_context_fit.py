@@ -8,7 +8,7 @@ from collections.abc import Callable
 
 from localmelo.melo.memory.notes import RECALL_END, RECALL_START
 from localmelo.melo.memory.short import group_turns
-from localmelo.melo.schema import EMPTY_REPLY_LABEL, Message, ToolDef
+from localmelo.melo.schema import Message, ToolDef, starts_with_reply_label
 
 
 class ContextFitError(Exception):
@@ -71,7 +71,7 @@ def _removable(unit: list[Message]) -> bool:
         return _complete_tool_unit(unit)
     return (
         first.role == "assistant"
-        and first.content.startswith(EMPTY_REPLY_LABEL)
+        and starts_with_reply_label(first.content)
         and len(unit) == 2
     )
 
@@ -143,7 +143,7 @@ def fit_request(
         # is the agent's own empty-reply/nudge pair.
         return not (
             any(m.role == "user" for m in unit)
-            and not unit[0].content.startswith(EMPTY_REPLY_LABEL)
+            and not starts_with_reply_label(unit[0].content)
         )
 
     def held() -> tuple[object, ...] | None:

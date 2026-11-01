@@ -26,12 +26,13 @@ The run has a budget:
 - With the default `reflect` policy, steps come in attempts of up to 10 steps, and a run has at most 5 attempts.
 - With `--attempt-policy none`, the run is one attempt of up to `--steps` steps; the same tool calls, or the same errors, three steps in a row end it as `stuck`.
 
-Two kinds of reply are not answers:
+Three kinds of reply are not answers:
 
 - A reply with neither text nor a tool call is an empty reply, and so is one with only dots, dashes or emoji (no letter or digit): localmelo asks the model to continue, the step still counts, and two in a row end the run as `failed`.
 - A reply that is only the model's unfinished thinking is never the answer. localmelo tells it by facts, never by wording: a `<think>` that is never closed, no answer once the thinking is set aside, a streamed reply that repeats the server's reasoning, or, for a model whose thinking ends with a mark (`</think>`), no thinking and no mark. The model's format is the one `[cli.reasoning_tags]` declares (in the terminal), else the one its earlier replies showed.
 - Such a reply becomes its thinking and goes on as an empty reply: localmelo asks once more, and a second reply without an answer ends the run as `failed` with the error `melo did not finish an answer`.
 - A model that was told not to think (`enable_thinking = false` in the request) has no thinking to send. For it, a plain reply is the answer, and so are the words a server puts in its reasoning field when the reply has no other text. Only a `<think>` that is never closed, or reasoning tokens the server counted, still make a reply unfinished.
+- A reply that writes a tool call out as text is never the answer either. A model's server can swallow a malformed call and leave `text` (the first argument's name), or markup such as `<function_calls>`, in the reply with no real tool call. localmelo tells it by shape: markup outside code, or a parameter name of a tool offered on the step at the start of the reply, followed by nothing, `=`, `<`, a colon with no space, or a symbol. It goes on as an empty reply, with a message of its own that tells the model what went wrong; a second one in a row ends the run as `failed` with the error `tool call written as text`. A reply that discusses such markup in a code block is an answer.
 
 With `--reasoning compress`, each reply is compressed into a short note before the next step:
 

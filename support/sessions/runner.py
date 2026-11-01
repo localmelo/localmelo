@@ -43,12 +43,12 @@ from localmelo.melo.contracts.events import (
 )
 from localmelo.melo.contracts.inbox import InboxSource
 from localmelo.melo.schema import (
-    EMPTY_REPLY_NUDGE,
     ImagePart,
     Message,
     RunResult,
     answer_text,
     clip_session_text,
+    is_reply_nudge,
     split_thinking,
 )
 from localmelo.support.sessions import pictures as turn_pictures
@@ -132,7 +132,7 @@ class ResumeInfo:
 
     mode: ResumeMode  # the arm that loaded the window
     fell_back: bool  # True when "window" was asked for and pairs were loaded
-    turns: int  # user queries the load kept (EMPTY_REPLY_NUDGE not counted)
+    turns: int  # user queries the load kept (the agent's nudges not counted)
     checkpoint_turns: int  # of those, the window checkpoint's (0 for "pairs")
     messages: int  # load_conversation's return value
     chars: int  # characters of content loaded
@@ -1624,7 +1624,7 @@ def _uncancel(task: asyncio.Task[Any], times: int) -> None:
 
 
 def _is_query(msg: Message) -> bool:
-    return msg.role == "user" and msg.content != EMPTY_REPLY_NUDGE
+    return msg.role == "user" and not is_reply_nudge(msg.content)
 
 
 def _being_cancelled() -> bool:

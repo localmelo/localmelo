@@ -245,6 +245,9 @@ from localmelo.melo.schema import (
     MAX_REFLECTION_CHARS,
     MIN_AGENT_STEPS,
     SHORT_TERM_MAX,
+    TOOL_CALL_TEXT_ERROR,
+    TOOL_CALL_TEXT_LABEL,
+    TOOL_CALL_TEXT_NUDGE,
     UNFINISHED_ANSWER_ERROR,
     WINDOW_EVICT_CHUNK,
     WINDOW_FIT_TARGET,
@@ -263,6 +266,7 @@ from localmelo.melo.schema import (
     ToolResult,
     ToolTier,
     answer_text,
+    broken_tool_call,
     clip_session_text,
     describe_images,
     has_content,
@@ -886,10 +890,11 @@ def _within_turn_budget(
     return fitted
 
 
-# Empty replies in a row that end the run as failed ("empty replies").
-# Until then, working memory records each one as EMPTY_REPLY_LABEL
-# followed by EMPTY_REPLY_NUDGE (see melo.schema), and the model plans
-# again (see Agent._run_attempt).
+# Empty replies in a row that end the run as failed ("empty replies"). A
+# reply that writes a tool call as text counts as one. Until then, working
+# memory records each one as EMPTY_REPLY_LABEL followed by EMPTY_REPLY_NUDGE
+# (TOOL_CALL_TEXT_LABEL and TOOL_CALL_TEXT_NUDGE for a tool call written as
+# text; see melo.schema), and the model plans again (see Agent._run_attempt).
 MAX_EMPTY_REPLIES = 2
 
 # The utility (see _utility) that reflection_gate="utility" requires for
@@ -1226,10 +1231,12 @@ class _RunState:
     reflection_thinking: str = ""
     # The thinking of the reply that gave the result, once the run ends.
     answer_thinking: str = ""
-    # Planning replies in a row with neither a tool call nor text, and
-    # whether one of them was only unfinished thinking (#278).
+    # Planning replies in a row that are no answer (neither a tool call nor
+    # text, or a tool call written as text), and whether one of them was only
+    # unfinished thinking (#278) or a tool call written as text.
     empty_replies: int = 0
     unfinished_row: bool = False
+    broken_row: bool = False
     # The run's task id ("" for a call without a task record).
     task_id: str = ""
     # The query Message this run appended to the window, for replay scope.
@@ -5227,6 +5234,15 @@ class Agent:
         goes the same way with an ``unfinished_answer`` notice: the model is
         asked once more, and a row that held such a reply ends the run with
         :data:`~localmelo.melo.schema.UNFINISHED_ANSWER_ERROR` instead.
+
+        A reply with no tool call that writes one out as text
+        (:func:`~localmelo.melo.schema.broken_tool_call`; a local model's
+        server can leave ``text`` or ``<function_calls>`` in the content) is
+        no answer either, and counts as an empty reply with a label, a nudge
+        and a ``tool_call_as_text`` notice of its own. Its text is never the
+        run's latest text, and a row that held one ends the run with the error
+        :data:`~localmelo.melo.schema.TOOL_CALL_TEXT_ERROR`. The step's
+        ``assistant.message`` event still has what the model sent.
         """
         fingerprints: list[tuple[str, str, str]] = []
         reflections = (
@@ -5339,13 +5355,16 @@ class Agent:
             thought_aliases: list[str] = []
             if self._notes_mode and "thought" in self._effective_kinds:
                 thought_aliases = await self._store_thought_chunks(response, run)
+            # A tool call written as text is no answer, and never the latest
+            # text: no fallback may show it as one.
+            broken = not response.tool_calls and broken_tool_call(rest, tools)
             # Dots, dashes or emoji alone say nothing: the text is blank.
-            if has_content(rest):
+            if has_content(rest) and not broken:
                 run.last_text = rest
                 run.last_text_thinking = response.thinking
 
             if not response.tool_calls:
-                if has_content(rest):
+                if has_content(rest) and not broken:
                     # No tool call → direct answer. In the compress modes
                     # the note is stored first and the answer is the text
                     # without its <note> block.
@@ -5374,12 +5393,19 @@ class Agent:
                         answer, [Message(role="user", content=retry)]
                     )
                     continue
-                # An empty reply is no answer: ask for one and plan again.
-                label_content = EMPTY_REPLY_LABEL
+                # An empty reply is no answer: ask for one and plan again. So
+                # is a tool call written as text, with a label and nudge that
+                # say so; its text is no note either.
+                label_text = TOOL_CALL_TEXT_LABEL if broken else EMPTY_REPLY_LABEL
+                label_content = label_text
                 entry = None
                 if self._notes_mode:
                     note, _ = self._reply_note(
-                        response,
+                        (
+                            dataclasses.replace(response, content="")
+                            if broken
+                            else response
+                        ),
                         (),
                         kind="empty",
                         task_id=task.task_id,
@@ -5387,16 +5413,21 @@ class Agent:
                     )
                     entry = self._store_note(note, run, source="reasoning_note")
                     if entry is not None:
-                        label_content = f"{EMPTY_REPLY_LABEL}\n{entry.text}"
+                        label_content = f"{label_text}\n{entry.text}"
                 run.empty_replies += 1
                 run.unfinished_row = run.unfinished_row or unfinished
+                run.broken_row = run.broken_row or broken
                 if run.empty_replies >= MAX_EMPTY_REPLIES:
                     run.end(
                         "failed",
                         error=(
                             UNFINISHED_ANSWER_ERROR
                             if run.unfinished_row
-                            else "empty replies"
+                            else (
+                                TOOL_CALL_TEXT_ERROR
+                                if run.broken_row
+                                else "empty replies"
+                            )
                         ),
                     )
                     return step + 1, ""
@@ -5406,13 +5437,13 @@ class Agent:
                 label = Message(role="assistant", content=label_content)
                 if self.options.reasoning not in ("legacy", "compress"):
                     label = dataclasses.replace(label, thinking=response.thinking)
-                nudge = EMPTY_REPLY_NUDGE
+                nudge = TOOL_CALL_TEXT_NUDGE if broken else EMPTY_REPLY_NUDGE
                 aliases: set[str] = set(thought_aliases)
                 block, _hits = await self._step_recall(
                     run,
                     entry,
                     (),
-                    fallback=EMPTY_REPLY_LABEL,
+                    fallback=label_text,
                     exclude={
                         *self.hippo.working.shown_aliases(),
                         *({entry.alias} if entry is not None else set()),
@@ -5431,11 +5462,14 @@ class Agent:
                 )
                 if unfinished:
                     run.events.unfinished_answer()
+                elif broken:
+                    run.events.tool_call_as_text(run.empty_replies)
                 else:
                     run.events.empty_reply(run.empty_replies)
                 continue
             run.empty_replies = 0
             run.unfinished_row = False
+            run.broken_row = False
 
             # Execute every call in order, each through the executor boundary,
             # which runs only the tools this planning call offered. Until the

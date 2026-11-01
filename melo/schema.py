@@ -7,7 +7,7 @@ import re
 import time
 import unicodedata
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
@@ -59,6 +59,52 @@ EMPTY_REPLY_NUDGE = (
 # thinking and it goes the way of an empty reply. The run's error when the
 # reply that ends it, or one before it in the row, was such a reply.
 UNFINISHED_ANSWER_ERROR = "melo did not finish an answer"
+# A planning reply that writes a tool call out as text, with no real tool
+# call (see broken_tool_call), is no answer either. It goes the way of an
+# empty reply with a label, nudge and error of its own, so the model learns
+# what went wrong and the person never reads the broken text as the answer.
+TOOL_CALL_TEXT_LABEL = "[tool call written as text]"
+TOOL_CALL_TEXT_NUDGE = (
+    "Your last reply wrote a tool call as text, so it did not run. Call the "
+    "tool through the tool interface, or give your final answer in plain words."
+)
+TOOL_CALL_TEXT_ERROR = "tool call written as text"
+# The stand-ins for a reply that is no answer, and the nudges after them.
+REPLY_LABELS = (EMPTY_REPLY_LABEL, TOOL_CALL_TEXT_LABEL)
+REPLY_NUDGES = (EMPTY_REPLY_NUDGE, TOOL_CALL_TEXT_NUDGE)
+
+
+def is_reply_nudge(content: str) -> bool:
+    """Whether *content* is the agent's own nudge after a reply that was no answer.
+
+    Such a user message is no message of the person's.
+    """
+    return content in REPLY_NUDGES
+
+
+def starts_with_reply_nudge(content: str) -> bool:
+    """Whether *content* is a nudge, or a nudge followed by a recall block."""
+    return any(
+        content == nudge or content.startswith(nudge + "\n") for nudge in REPLY_NUDGES
+    )
+
+
+def starts_with_reply_label(content: str) -> bool:
+    """Whether *content* starts with the label of a reply that was no answer."""
+    return content.startswith(REPLY_LABELS)
+
+
+def is_reply_label(content: str, *, with_note: bool = False) -> bool:
+    """Whether *content* is the label of a reply that was no answer.
+
+    With *with_note*, a label that carries the reply's note after a line
+    break (the compress modes) counts too.
+    """
+    return any(
+        content == label or (with_note and content.startswith(label + "\n"))
+        for label in REPLY_LABELS
+    )
+
 
 # ── Stopped tool calls ──
 
@@ -319,6 +365,98 @@ def unfinished_as_thinking(content: str, thinking: str) -> str:
     if not _same_words(text, thinking):
         parts.append(text)
     return "\n\n".join(part for part in parts if part)
+
+
+# Markup in which a model writes a tool call out as text, in any letter case.
+_CALL_MARKUP = re.compile(
+    r"<(?:function_calls\s*>|invoke\s+name\s*=|function\s+invoke\b"
+    r"|tool_call\s*>|function\s*=|parameter\s*=|arg_key\s*>)",
+    re.IGNORECASE,
+)
+_CODE_FENCE = re.compile(r"\s{0,3}(`{3,}|~{3,})")
+_INLINE_CODE = re.compile(r"(`+)(?!`).+?(?<!`)\1(?!`)")
+# A parameter name shorter than this is too likely a plain word or letter.
+_MIN_PARAMETER_NAME = 3
+
+
+def _outside_code(text: str) -> str:
+    """*text* without its fenced code blocks and inline code spans.
+
+    An unclosed fence runs to the end of the text.
+    """
+    kept: list[str] = []
+    fence = ""
+    for line in text.splitlines():
+        if fence:
+            rule = line.strip()
+            if len(rule) >= len(fence) and set(rule) == {fence[0]}:
+                fence = ""
+            continue
+        opening = _CODE_FENCE.match(line)
+        if opening is not None:
+            fence = opening.group(1)
+            continue
+        kept.append(line)
+    return _INLINE_CODE.sub(" ", "\n".join(kept))
+
+
+def _call_remnant(after: str) -> bool:
+    """Whether *after*, what follows a leading parameter name, is a call's remnant.
+
+    That is: nothing; ``=``; ``<``; a colon with no space after it; or a
+    symbol or emoji such as ``✅``. A letter, a digit, a space and ordinary
+    punctuation (``text is short``, ``text-based``, ``text.``) are prose.
+    """
+    if not after:
+        return True
+    first = after[0]
+    if first in ":：":
+        return len(after) == 1 or not after[1].isspace()
+    return first in "=<" or unicodedata.category(first).startswith("S")
+
+
+def broken_tool_call(text: str, tools: Iterable[ToolDef] = ()) -> bool:
+    """Whether the reply *text* is a tool call written out as text.
+
+    A server's tool-call parser can swallow a malformed call and leave
+    the first argument's name, or the call's markup, in the reply's content.
+    *text* is judged after the reasoning is split off
+    (:func:`split_thinking`), and outside fenced code blocks and inline
+    code, so an answer that discusses such markup is not flagged. It is
+    broken when it:
+
+    - holds tool-call markup, in any letter case: ``<function_calls>``,
+      ``<invoke name=``, ``<function invoke``, ``<tool_call>``,
+      ``<function=``, ``<parameter=`` or ``<arg_key>``; or
+    - starts, after whitespace, with the name of a parameter of one of
+      *tools* (the tools offered on this step; names of three characters
+      or more, case-sensitive) that is followed by nothing, ``=``, ``<``,
+      a colon with no space after it, or a symbol or emoji. So ``text``,
+      ``text=My manager is Priya.`` and ``text✅ Saved`` are broken, and
+      ``text is short``, ``Text messages are…``, ``text-based`` and
+      ``topic of the day`` are answers.
+
+    A reply with real tool calls is not judged: its text accompanies them.
+    """
+    body = _outside_code(split_thinking(text)[1])
+    if _CALL_MARKUP.search(body):
+        return True
+    lead = body.strip()
+    if not lead:
+        return False
+    for tool in tools:
+        properties = tool.parameters.get("properties")
+        if not isinstance(properties, Mapping):
+            continue
+        for name in properties:
+            if (
+                isinstance(name, str)
+                and len(name) >= _MIN_PARAMETER_NAME
+                and lead.startswith(name)
+                and _call_remnant(lead[len(name) :])
+            ):
+                return True
+    return False
 
 
 # ── Data types ──

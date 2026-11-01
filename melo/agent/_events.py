@@ -48,6 +48,9 @@ NOTICE_MESSAGES: Mapping[str, str] = {
     "unfinished_answer": (
         "The model's reply ended inside its thinking; asking it for its answer."
     ),
+    "tool_call_as_text": (
+        "The model wrote a tool call as text, so it did not run; asking it again."
+    ),
     "no_change": "Nothing has changed in the workspace yet.",
     "brief_items": "Some numbered items of the brief have no edit yet.",
     "brief_check_failed": (
@@ -468,6 +471,15 @@ class _Emitter:
         if self._sink is None:
             return
         self._notice("unfinished_answer", NOTICE_MESSAGES["unfinished_answer"], {})
+
+    def tool_call_as_text(self, count: int) -> None:
+        """A reply wrote a tool call as text; *count* is the replies in a row
+        that were no answer, and the model is asked again."""
+        if self._sink is None:
+            return
+        self._notice(
+            "tool_call_as_text", NOTICE_MESSAGES["tool_call_as_text"], {"count": count}
+        )
 
     def no_change(self, scope: str | None = None) -> None:
         """A brief run found the workspace unchanged: at a boundary, or with

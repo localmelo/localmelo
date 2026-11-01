@@ -34,6 +34,11 @@ Details:
   [How it works](../concepts/how-it-works.md)) is stored as thinking and
   counts as an empty reply; a row that held one ends with the error
   `melo did not finish an answer`, and the thinking is never the `result`.
+  A reply with no tool call that writes one out as text (a server's parser can
+  leave `text`, or markup such as `<function_calls>`, in the content) is no
+  answer either: localmelo asks the model again, it counts as an empty reply,
+  and a row that held one ends with the error `tool call written as text`.
+  The broken text is never the `result`.
 - **`gate_stopped`.** The reflection chose `stop` or `decompose`, or its
   decision to continue did not pass the continuation gate (see
   [Reflection](../concepts/how-it-works.md#reflection)). `result` holds the reflection's

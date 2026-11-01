@@ -610,6 +610,13 @@ _UNREACHABLE = (
         ),
         (
             "failed",
+            "tool call written as text",
+            "⚠",
+            "The model wrote a tool call as text instead of running it.",
+            "/retry, or try another model.",
+        ),
+        (
+            "failed",
             "post_plan refused",
             "⚠",
             "A check stopped the run: post_plan refused.",
@@ -1461,6 +1468,98 @@ def test_an_empty_reply_is_a_dim_notice() -> None:
         attempt=1,
     )
     assert "· The model returned an empty reply; asking it to continue." in turn.text()
+
+
+def test_a_tool_call_written_as_text_is_a_dim_notice_and_never_shown_as_text() -> None:
+    """The reply's text was a call that did not run: it is neither held nor kept
+    as provisional text, the notice says what happened, and the next reply is
+    the answer."""
+    turn = Turn()
+    feed = turn.renderer.stream_feed()
+    feed.step(1)
+    feed.opened()
+    feed.content("text✅ 已记录")
+    feed.closed()
+    turn.event(
+        "assistant.message",
+        step=1,
+        content="text✅ 已记录",
+        thinking="",
+        tool_calls=[],
+        usage=None,
+        prefix=None,
+        duration_s=1.0,
+    )
+    assert turn.renderer._held == "text✅ 已记录"
+    turn.event(
+        "notice",
+        kind="tool_call_as_text",
+        message="The model wrote a tool call as text, so it did not run; asking it again.",
+        detail={"count": 1},
+        step=1,
+        attempt=1,
+    )
+    assert turn.renderer._held == "" and turn.renderer._stream_texts == {}
+    assert turn.renderer.live is not None and turn.renderer.live.stream_text == ""
+    turn.event("step.started", step=2, attempt=1)
+    turn.event(
+        "assistant.message",
+        step=2,
+        content="Noted: your manager is Priya Shah.",
+        thinking="",
+        tool_calls=[],
+        usage=None,
+        prefix=None,
+        duration_s=1.0,
+    )
+    turn.finish(result="Noted: your manager is Priya Shah.")
+    text = turn.text()
+    assert (
+        "· The model wrote a tool call as text, so it did not run; asking it again."
+        in text
+    )
+    assert "text✅" not in text and "已记录" not in text
+    assert text.count("Noted: your manager is Priya Shah.") == 1
+
+
+def test_a_failed_run_of_broken_calls_shows_no_broken_text() -> None:
+    turn = Turn()
+    turn.event(
+        "assistant.message",
+        step=1,
+        content="text",
+        thinking="",
+        tool_calls=[],
+        usage=None,
+        prefix=None,
+        duration_s=1.0,
+    )
+    turn.event(
+        "notice",
+        kind="tool_call_as_text",
+        message="The model wrote a tool call as text, so it did not run; asking it again.",
+        detail={"count": 1},
+        step=1,
+        attempt=1,
+    )
+    turn.event("step.started", step=2, attempt=1)
+    turn.event(
+        "assistant.message",
+        step=2,
+        content="text",
+        thinking="",
+        tool_calls=[],
+        usage=None,
+        prefix=None,
+        duration_s=1.0,
+    )
+    turn.finish("failed", result="", error="tool call written as text")
+    lines = [line.strip() for line in turn.text().splitlines()]
+    assert "· text" not in lines and "text" not in lines
+    assert any(
+        "The model wrote a tool call as text instead of running it." in line
+        for line in lines
+    )
 
 
 def test_unfinished_thinking_is_folded_and_its_notice_is_dim() -> None:

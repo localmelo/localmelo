@@ -491,6 +491,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A tool call written as text is no longer taken for the answer. A model's
+  server can swallow a malformed call and leave `text`, or markup such as
+  `<function_calls>`, in the reply with no real tool call, and the person read
+  "text" or a false "recorded" while nothing ran. localmelo now asks the model
+  again and tells it what went wrong; a run whose replies keep doing it ends
+  `failed` with the error `tool call written as text`. The terminal, the
+  console and the app show a quiet notice, never the text.
+- The console and the app show a reply that starts with a closed
+  `<thinking>...</thinking>` block as thinking, as the terminal already did,
+  instead of as part of the answer.
 - The app's pill says **stopped**, not failed, for a task that used all its
   steps, as the console already does: `status.recent` reads the task's reason. [#365]
 - A Chinese ask that says to change code, run the tests and commit
