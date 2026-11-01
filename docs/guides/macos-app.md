@@ -126,13 +126,14 @@ The app icon and the menu-bar logo are committed files (`macos/assets`) that the
 uv run --with pillow python scripts/make_app_icons.py
 ```
 
-Every picture of Melo (the desktop pet, its stills, the start window's portrait and the activity pill's faces) comes from the moves in `support/gateway/static/moves`, the same files the web console shows. Make them again from an art pack:
+Every picture of Melo (the desktop pet, its stills, the start window's portrait and the activity pill's faces) comes from the moves in `support/gateway/static/moves`, the same files the web console shows. One command replaces all of them, and the icon and the logo, from an art pack; the [art pack guide](art-pack.md) says what the pack holds:
 
 ```bash
-uv run --with pillow==13.0.0 python scripts/build_moves.py --source /path/to/pack
+uv run --with pillow==13.0.0 python scripts/art_pack.py apply /path/to/pack
 ```
 
-- The pack stays outside the repository; `--help` says what it holds. Pillow 13.0.0 (with its libwebp 1.6.0) is fetched for that run only: the pin keeps the bytes the same.
+- The pack, a folder or a zip, stays outside the repository; `check` reports its problems first and writes nothing. Pillow 13.0.0 (with its libwebp 1.6.0) is fetched for that run only: the pin keeps the bytes the same.
+- `make_app_icons.py` and `build_moves.py` are the engines behind it and still run alone: the first makes the icon and the logo again from the committed pictures, the second only the moves.
 - `GET /api/health` also says how the last run ended, in `status.recent` (see the [API reference](../reference/api-v2.md)); Melo reads it.
 
 The WebKit integration tests open native windows and need a graphical macOS session, so they are opt-in; run them with a temporary HOME:

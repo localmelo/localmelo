@@ -39,6 +39,29 @@ def test_a_command_splits_into_name_subcommand_flags_values_and_strings() -> Non
     ]
 
 
+def test_uv_run_options_come_before_the_command_it_runs() -> None:
+    assert roles(
+        "uv run --with pillow==13.0.0 python scripts/art_pack.py check x.zip"
+    ) == [
+        ("c", "uv"),
+        ("s", "run"),
+        ("f", "--with"),
+        ("a", "pillow==13.0.0"),
+        ("c", "python"),
+        ("a", "scripts/art_pack.py"),
+        ("a", "check"),
+        ("a", "x.zip"),
+    ]
+    assert roles("uv run --locked pytest -q") == [
+        ("c", "uv"),
+        ("s", "run"),
+        ("f", "--locked"),
+        ("c", "pytest"),
+        ("f", "-q"),
+    ]
+    assert roles("uv run melo --serve")[2] == ("c", "melo")
+
+
 def test_a_flag_with_equals_and_a_setting_split_at_the_equals() -> None:
     assert roles("curl --max-time=5 -X request_timeout_s=600") == [
         ("c", "curl"),

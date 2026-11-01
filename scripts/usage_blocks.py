@@ -74,6 +74,10 @@ SUBCOMMANDS = frozenset(
 _SUBCOMMAND = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*")
 _ASSIGN = re.compile(r"([A-Za-z_][A-Za-z0-9_.]*)=(.*)", re.S)
 _CHAIN = frozenset({"|", "||", "&&", ";", "{", "("})
+# The `uv run` options that take a value in the next word (`--with pillow==13.0.0`).
+UV_VALUE_OPTIONS = frozenset(
+    {"--with", "--extra", "--group", "--project", "--directory", "--python", "-p"}
+)
 _LEX = re.compile(
     r"""(?P<sp>[ \t]+)
     |(?P<com>\#.*)
@@ -111,9 +115,13 @@ class _Command:
     expect_command: bool = True
     name: str = ""
     subcommands: bool = False
+    # After `uv run`: the options that come before the command it runs, and whether the next word is an option's value.
+    options: bool = False
+    value_next: bool = False
 
     def chain(self) -> None:
         self.expect_command, self.name, self.subcommands = True, "", False
+        self.options = self.value_next = False
 
 
 def _assignment(word: str) -> list[Token]:
@@ -123,7 +131,27 @@ def _assignment(word: str) -> list[Token]:
     return [("f", name), ("x", "="), *([("a", value)] if value else [])]
 
 
+def _run_option(word: str, state: _Command) -> list[Token] | None:
+    """A word between `uv run` and the command it runs: an option, or the value of one that takes a value; None
+    when the command itself begins."""
+    if state.value_next:
+        state.value_next = False
+        return [("a", word)]
+    if word.startswith("-") and len(word) > 1 and not word[1].isdigit():
+        name, equals, value = word.partition("=")
+        state.value_next = not equals and name in UV_VALUE_OPTIONS
+        return [
+            ("f", name),
+            *([("x", "=")] if equals else []),
+            *([("a", value)] if value else []),
+        ]
+    state.options = False
+    return None
+
+
 def _word(word: str, state: _Command) -> list[Token]:
+    if state.options and (option := _run_option(word, state)) is not None:
+        return option
     if state.expect_command:
         if _ASSIGN.fullmatch(word):
             return _assignment(word)
@@ -143,6 +171,7 @@ def _word(word: str, state: _Command) -> list[Token]:
     if state.subcommands and _SUBCOMMAND.fullmatch(word):
         if state.name == "uv" and word == "run":  # `uv run melo ...` runs a command
             state.chain()
+            state.options = True
         return [("s", word)]
     state.subcommands = False
     return [("a", word)]
