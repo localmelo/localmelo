@@ -223,7 +223,7 @@ A direct run with `--workspace DIR` and an agent built in Python with `AgentOpti
 
 | Topic | What happens |
 |---|---|
-| The fence | `file_read` and `file_write` resolve a relative path against the root and reach only files whose real path is inside it, after `..` and symlinks are resolved. A path outside is refused with `Path '<path>' is outside allowed workspace root`; an empty path, or one with a NUL character, with `Argument 'path' for <tool> must be a non-empty string without NUL characters.` The tool gets the resolved path. |
+| The fence | `file_read` and `file_write` resolve a relative path against the root and reach only files whose real path is inside it, after `..` and symlinks are resolved. A path outside is refused with `Path '<path>' is outside allowed workspace root`, unless a person can be asked about it (see [Folders outside the workspace](#folders-outside-the-workspace)); an empty path, or one with a NUL character, with `Argument 'path' for <tool> must be a non-empty string without NUL characters.` The tool gets the resolved path. |
 | What the fence misses | `~` is not expanded, a path spelled in another letter case than the root is refused, and hard links are not detected. |
 | `list_files` | Fenced the same way; no path (or an empty one) lists the root. It opens a folder without following a symlink and never enters a link inside it, so a link that points out of the root shows as `name@` and its target stays unlisted. |
 | Opening files | The file tools open the resolved path without following symlinks, so a symlink that takes the file's place after the check is refused. Anything but a regular file, such as a FIFO, is refused with `Not a regular file: <path>`. |
@@ -262,6 +262,23 @@ A custom tool's tier is only a label: it asks when its `register` call sets the 
 | A denial | Refuses the call. The model reads why, for example `The user denied this call. Do not run it again or reach the same result another way unless the user asks.` |
 | It fails closed | A policy that raises an error, or returns no decision, refuses the call with `Approval failed, so the call did not run: <ExceptionType>: <message>`. |
 | The re-check | Once the policy allows a file tool's call under a workspace root, the path is resolved again. A path that now resolves elsewhere, as when a symlink took the file's place while the policy decided, is refused with `Path '<path>' changed while waiting for approval; the call did not run.` |
+
+### Folders outside the workspace
+
+When a file tool's path is outside the workspace, in a chat or task you started, melo asks you instead of refusing. The card and the terminal panel name the real folder (after symlinks and `..`) and whether the call reads or writes.
+
+| Answer | What it allows |
+|---|---|
+| **Allow once** | This call only. |
+| **Allow this folder for this chat** | Reads in that folder and below it, until the chat ends (in a task: until the task ends). A task the chat started uses its chat's folders too. |
+| **Always allow this folder** | Reads there in every chat and task you start; the folder is kept in Settings, under **Chats and folders**, where you can remove it (`[workspace] extra_folders`). |
+| **Deny** | Nothing runs; the model reads one line naming the folder, then the usual denial. |
+
+- **Reads and writes are separate.** A folder grant covers reads only. A write outside the workspace is high-impact: it asks every time, offers only **Allow once** and **Deny**, and no grant covers it.
+- **A grant covers a folder by its real path,** on a path boundary: `~/developer/career` covers `~/developer/career/cv.md` but not `~/developer/career-old`. A symlink counts as its target, so a link inside an allowed folder that points elsewhere asks again.
+- **Never offered:** key and credential places (`~/.ssh`, `~/.gnupg`, `~/Library/Keychains`, `~/.aws`, `~/.config/gcloud`, `~/.kube`, `~/.docker/config.json`, `~/.netrc`, password stores and browser cookie stores), melo's own data folder (`~/.cache/localmelo`), system folders (`/System`, `/Library`, `/etc`, `/bin`, `/sbin`, `/usr` except `/usr/local`, `/dev`) and your whole home folder or `/`. These are refused with the reason, and nobody is asked. A file directly in your home folder can be allowed once, but its folder is never kept.
+- **Auto mode never allows such a path by itself:** in Auto too, the card asks you.
+- **No one to ask:** a direct run, `--yolo`, deny mode, a task you did not start (a chore, another agent's) and a chat turn that answers a task refuse the path as before.
 
 ### High-impact calls
 

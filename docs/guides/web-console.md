@@ -560,7 +560,10 @@ save carries the revision it read, so a change made elsewhere meanwhile asks you
   **By words only**; developer mode adds the other two ways, with the key
   `memory.retriever`), and **Open Memory** for the notes themselves.
 - **Chats and folders**: the default folder of a new chat (**Change…** opens the app's
-  folder panel, or a path field in a browser) and the recent folders, each with **Make default**.
+  folder panel, or a path field in a browser), **Other folders melo may read** (the folders you
+  chose **Always allow this folder** for, each with **Remove**; see
+  [Folders outside the workspace](tools-mcp.md#folders-outside-the-workspace)) and the recent
+  folders, each with **Make default**.
 - **Scheduled**: the check-in switch with its next time, and **Open Scheduled** for the chores.
 - **Appearance**: the theme (System, Light, Dark, kept in this browser), the
   [language](#language) (Automatic, English, 简体中文), **Melo on the desktop** in the macOS
@@ -685,6 +688,16 @@ filled button: there is no chat-wide allow, and the line under the buttons
 says so ("A chat-wide allow never covers installs, downloads or changes outside
 ~/demo-project."). A call melo cannot read, or that it asks about for another
 reason, shows the plain card.
+
+When melo wants a file outside the chat's folder, the card asks about that folder
+("Let melo read in ~/developer/career?") and shows its real path in a box, with what melo
+wants to do there ("melo wants to read cv.md in this folder."). A read offers **Allow once**,
+**Allow this folder for this chat**, **Always allow this folder** and **Deny**: "this chat"
+ends with the chat, and "always" keeps the folder in Settings, under **Chats and folders**,
+where you can remove it. A write there is a high-impact card with **Allow once** and **Deny**
+only, every time. The folders a chat may read are listed in **Details › Tools**, each with
+**Revoke**. Keys, melo's own data, system folders and your whole home folder are never
+offered (see [Folders outside the workspace](tools-mcp.md#folders-outside-the-workspace)).
 
 A failed turn shows a card with a symbol (✗ for an error, ⚠ for a warning), a
 plain title, the first line of the error and a hint. On the newest turn one next

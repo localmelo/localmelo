@@ -9,6 +9,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- When melo needs a file outside the chat's folder, it asks instead of
+  refusing, in a chat or task you started. The card in the console and the
+  app, and the option list in the terminal, name the real folder and offer
+  **Allow once**, **Allow this folder for this chat**, **Always allow this
+  folder** and **Deny**. "Always" keeps the folder in Settings, under
+  **Chats and folders**, where you can remove it (`[workspace]
+  extra_folders`). A grant covers reading only: writing outside the folder
+  asks every time. Key and credential folders, melo's own data, system
+  folders and your whole home folder are never offered. Auto mode never
+  allows such a folder by itself, and a run with no one to ask refuses it as
+  before. [#405]
+
 - With `[memory] sleep` set to `rules`, `model` or `model+tags`, the gateway
   now tidies the notes by itself while the computer is idle: no turn in the
   gateway's chats for 20 minutes (a terminal chat that runs on its own, with

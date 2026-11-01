@@ -241,7 +241,7 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 
 | 主题 | 行为 |
 |---|---|
-| 范围限制 | `file_read` 和 `file_write` 相对于根目录解析相对路径，在解析 `..` 和符号链接后，只能访问真实路径位于根目录内的文件。外部路径会以 `Path '<path>' is outside allowed workspace root` 拒绝；空路径或包含 NUL 字符的路径以 `Argument 'path' for <tool> must be a non-empty string without NUL characters.` 拒绝。工具获得解析后的路径。 |
+| 范围限制 | `file_read` 和 `file_write` 相对于根目录解析相对路径，在解析 `..` 和符号链接后，只能访问真实路径位于根目录内的文件。外部路径会以 `Path '<path>' is outside allowed workspace root` 拒绝，除非可以询问一个人（见[工作区之外的文件夹](#folders-outside-the-workspace)）；空路径或包含 NUL 字符的路径以 `Argument 'path' for <tool> must be a non-empty string without NUL characters.` 拒绝。工具获得解析后的路径。 |
 | 限制不覆盖的情况 | `~` 不会展开，与根目录字母大小写不同的路径会被拒绝，硬链接不会被检测。 |
 | `list_files` | 受同样的限制；不带路径（或路径为空）时列出根目录。它打开文件夹时不跟随符号链接，也不会进入其中的链接，因此指向根目录之外的链接显示为 `name@`，其目标不会被列出。 |
 | 打开文件 | 文件工具打开解析后的路径时不跟随符号链接，因此检查后取代文件的符号链接会被拒绝。非普通文件，例如 FIFO，会以 `Not a regular file: <path>` 拒绝。 |
@@ -282,6 +282,25 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 | 拒绝 | 会阻止调用。模型读取拒绝原因，例如 `The user denied this call. Do not run it again or reach the same result another way unless the user asks.` |
 | 故障时默认拒绝 | 引发错误或不返回决策的策略会以 `Approval failed, so the call did not run: <ExceptionType>: <message>` 拒绝调用。 |
 | 再次检查 | 在工作区根目录下，策略允许文件工具调用后会再次解析路径。如果此时路径解析到其他位置，例如策略决策期间符号链接取代了文件，会以 `Path '<path>' changed while waiting for approval; the call did not run.` 拒绝。 |
+
+<a id="folders-outside-the-workspace"></a>
+
+### 工作区之外的文件夹
+
+在你发起的对话或任务里，文件工具的路径在工作区之外时，melo 会询问你，而不是拒绝。卡片和终端面板会写出真实的文件夹（解析符号链接和 `..` 之后），以及这次调用是读取还是写入。
+
+| 回答 | 允许什么 |
+|---|---|
+| **允许一次** | 只有这一次调用。 |
+| **在这个对话里允许这个文件夹** | 在对话结束之前，读取这个文件夹及其下的内容（在任务里：到任务结束）。这个对话发起的任务也使用它允许的文件夹。 |
+| **总是允许这个文件夹** | 在你发起的每个对话和任务里都可以读取；这个文件夹记在设置的 **对话和文件夹** 里，你可以在那里移除（`[workspace] extra_folders`）。 |
+| **拒绝** | 什么都不运行；模型会读到一行写明文件夹的话，然后是通常的拒绝说明。 |
+
+- **读取和写入分开。** 文件夹授权只包括读取。在工作区之外写入属于高影响操作：每次都会询问，只提供 **允许一次** 和 **拒绝**，任何授权都不包括它。
+- **授权按真实路径覆盖一个文件夹，** 以路径边界为准：`~/developer/career` 包括 `~/developer/career/cv.md`，但不包括 `~/developer/career-old`。符号链接按它指向的目标计算，所以允许的文件夹里指向别处的链接会再次询问。
+- **从不提供：** 密钥和凭据所在的位置（`~/.ssh`、`~/.gnupg`、`~/Library/Keychains`、`~/.aws`、`~/.config/gcloud`、`~/.kube`、`~/.docker/config.json`、`~/.netrc`、密码库和浏览器的 cookie 存储）、melo 自己的数据文件夹（`~/.cache/localmelo`）、系统文件夹（`/System`、`/Library`、`/etc`、`/bin`、`/sbin`、除 `/usr/local` 以外的 `/usr`、`/dev`），以及你的整个主文件夹或 `/`。这些位置会直接拒绝并说明原因，不询问任何人。直接位于主文件夹里的文件可以允许一次，但不会记住它的文件夹。
+- **自动模式从不自行允许这样的路径：** 在 Auto 中卡片也会询问你。
+- **没有人可以询问时：** 直接运行、`--yolo`、deny 模式、不是你发起的任务（定时杂务、其他代理发起的任务），以及回答任务的对话轮次，都会像以前一样拒绝这个路径。
 
 <a id="high-impact-calls"></a>
 
