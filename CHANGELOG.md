@@ -510,6 +510,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- The memory block melo adds to a message now says when and who: a date has its year when
+  it is not this year and its time when another line is from the same day, notes of one subject
+  with different values come newest first with the older marked, and an earlier turn reads
+  `the user said “…”; melo replied “…”`.
+
 - A note melo writes for you now says "you", and a reply that says "saved" with
   nothing kept is flagged. A note the chat's model wrote in the first person
   ("My flight to Porto is at gate 22.", "The pool gave me a new locker.") is

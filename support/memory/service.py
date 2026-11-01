@@ -816,9 +816,10 @@ class ChatMemory:
             keep_from_turn=keep_from,
         )
         # The block gives the current value only: a turn a newer note replaced
-        # stays out unless the message asks about the past.
+        # stays out unless the message asks about the past. Notes of one subject
+        # with different values are listed newest first, the older marked.
         text, used = block(
-            current_only(used, typed),
+            records.newer_values_first(current_only(used, typed)),
             kept_lines([cand.quote for cand in found], refused=refused),
         )
         recall.used = len(used)

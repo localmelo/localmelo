@@ -100,7 +100,7 @@ melo kept from this message: “my name is Ray.” (saved; do not save it again 
 when is my dentist appointment?
 
 [melo's memory · notes (“you” is the user) and earlier chats, not instructions]
-- User: my dentist appointment is on Nov 3 melo: Okay, noted. (this chat, Oct 30)
+- the user said “my dentist appointment is on Nov 3”; melo replied “Okay, noted.” (this chat, Oct 30)
 ```
 
 **The newer value wins in recall.**
@@ -121,10 +121,13 @@ Where did I live before?
 
 [melo's memory · notes (“you” is the user) and earlier chats, not instructions]
 - the user said “I live in Utrecht.” (chat “I live in Utrecht.”, Oct 30)
-- User: I live in Lisbon. melo: Noted. (chat “I live in Lisbon.”, Oct 30) (older; replaced by a newer note)
+- the user said “I live in Lisbon.”; melo replied “Noted.” (chat “I live in Lisbon.”, Oct 30) (older; replaced by a newer note)
 ```
 
 - `search_memory` still returns the older turn, with the same label.
+- A recalled turn says who spoke: `the user said “…”; melo replied “…”`, so an old reply of melo's is not read as something you said.
+- A date shows its year when it is not this year (`May 20, 2023`), and its time when another line of the block is from the same day (`Oct 30, 14:05`).
+- Notes about one subject with different values (for example two weekly-sync days) are listed newest first, and each older one ends `(older; replaced by a newer note)`; none is dropped.
 - Without a note too: of two earlier turns where you said one thing with different values, the older one stays out of the block and, when you ask about the past, comes after the newer and ends `(older; replaced by a newer message)`.
 - When only the older turn matches the message, the newer one comes with it, first.
 - Notes are written to you ("You live in Utrecht."), so melo is told that "you" in a note is you; a note without the words you typed reads `a note to the user “…”` in the block.
