@@ -1,8 +1,9 @@
 """What a security review of web_fetch found, as tests.
 
-- This computer's own addresses, and its IPv6 network, are refused even when
-  they are global: through the real code path (no resolver, no allow hook)
-  against a server on ``[::]:0``, directly and through a redirect.
+- This computer's own addresses, and its IPv6 network (the /64 and the /56
+  around its address), are refused even when they are global: through the
+  real code path (no resolver, no allow hook) against a server on
+  ``[::]:0``, directly and through a redirect.
 - Text a server puts in its status line or headers never reaches the model.
 - Runs of ``<`` or ``>`` cannot rebuild a page marker.
 - A charset that is not a text encoding falls back to UTF-8.
@@ -21,6 +22,7 @@ import socket
 import threading
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote
 
@@ -149,8 +151,60 @@ def test_this_computers_global_ipv6_and_its_network_are_local() -> None:
     neighbour = network.network_address + 0x1234
     assert neighbour != own
     assert "local network" in (local_problem(neighbour, 80) or "")
-    # Outside the /64 is the internet.
+    # Another /64 of the same /56 (a guest or device network) is still at home.
+    sibling = ipaddress.IPv6Address(int(neighbour) ^ (1 << 64))
+    assert "/56" in (local_problem(sibling, 80) or "")
+    # Outside them is the internet.
     assert local_problem(ipaddress.IPv6Address("2606:4700:4700::1111"), 80) is None
+
+
+def _sends_from(source: str) -> SimpleNamespace:
+    """A ``socket`` module for :func:`local_problem` on a computer whose address is *source*."""
+
+    class Probe:
+        def __init__(self, family: int, kind: int) -> None:
+            pass
+
+        def __enter__(self) -> Probe:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+        def bind(self, address: tuple[str, int]) -> None:
+            if address[0] != source:
+                raise OSError("not an address of this computer")
+
+        def connect(self, address: tuple[str, int]) -> None:
+            pass
+
+        def getsockname(self) -> tuple[str, int, int, int]:
+            return (source, 0, 0, 0)
+
+    return SimpleNamespace(
+        socket=Probe,
+        AF_INET=socket.AF_INET,
+        AF_INET6=socket.AF_INET6,
+        SOCK_DGRAM=socket.SOCK_DGRAM,
+    )
+
+
+def test_the_whole_ipv6_56_around_this_computer_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(guard, "socket", _sends_from("2001:db8:500:33d1::2b6c"))
+
+    def problem(address: str) -> str:
+        return local_problem(ipaddress.IPv6Address(address), 443) or ""
+
+    assert "this computer's own" in problem("2001:db8:500:33d1::2b6c")
+    assert "(the same IPv6 /64)" in problem("2001:db8:500:33d1::1")
+    # A guest or device network next to this one: another /64 of the /56.
+    assert "(the same IPv6 /56)" in problem("2001:db8:500:33d2::1")
+    assert "(the same IPv6 /56)" in problem("2001:db8:500:33ff::1")
+    # The next /56 belongs to someone else.
+    assert problem("2001:db8:500:3400::1") == ""
+    assert problem("2001:db8:500:32ff::1") == ""
 
 
 @needs_v6

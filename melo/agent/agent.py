@@ -1802,7 +1802,7 @@ class _ToolAsk:
         self._reviewer = reviewer
 
     def names_host(self, host: str) -> bool:
-        """Whether the user's own messages name *host*, or a site it belongs to."""
+        """Whether the user's recent messages name *host* itself (``www.`` aside)."""
         return self._reviewer is not None and self._reviewer.names_host(host)
 
     async def __call__(

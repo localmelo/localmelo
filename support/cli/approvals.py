@@ -245,6 +245,8 @@ def _tool_panel(
         )
         note = "The address it asks for is sent to that site."
         body = [("", row) for row in _wrapped([said], width)]
+        if url := arguments.get("url"):
+            body += [("", row) for row in _wrapped([shown(str(url))], width)]
         body += [("muted", row) for row in _wrapped([note], width)]
         return PanelText(
             "Read a website?",

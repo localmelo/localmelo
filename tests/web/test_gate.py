@@ -1,11 +1,12 @@
 """web_fetch's site gate: which sites read without a question, and which ask first.
 
-A site the person's own message names (or a parent domain of it) reads
-without a question in every mode. Any other site asks once per chat through
-the browser's site question (``browser:<origin>``), so one "allow for this
-chat" covers both tools. The gate runs before the name is looked up, on the
-first address and on a redirect to another site. A task with nobody to ask
-is refused.
+A host the person's recent messages name (itself, ``www.`` aside) reads
+without a question in every mode; a subdomain of it does not. Any other site
+asks once per chat through the browser's site question
+(``browser:<origin>``, carrying the address), so one "allow for this chat"
+covers both tools. The gate runs before the name is looked up, on the first
+address and on a redirect to another site. A task with nobody to ask is
+refused.
 """
 
 from __future__ import annotations
@@ -17,10 +18,12 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.agent._step_review import StepReviewer
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.schema import Message, ToolCall, ToolDef
+from localmelo.support.browser.sites import URL_SHOWN
 from localmelo.support.sessions.approvals import ChatPolicy, RememberingPolicy
 from localmelo.support.web.fetch import WebFetcher
 from localmelo.support.web.tool import WebFetchProvider
@@ -117,16 +120,20 @@ async def test_a_site_the_person_named_reads_without_a_question(
     assert "# Tomatoes" in _results(llm)[0]
 
 
-async def test_a_parent_domain_names_its_subdomains(server: dict[str, Any]) -> None:
+async def test_a_subdomain_of_a_named_site_asks_once(server: dict[str, Any]) -> None:
+    # Naming a shared domain (vercel.app, workers.dev) must not name every
+    # site under it, nor a subdomain that carries data in its name.
     person = Person()
-    resolver = pages.resolver_for(
-        int(server["port"]), {"docs.pages.test": [("127.0.0.1", int(server["port"]))]}
-    )
+    port = int(server["port"])
+    sub = "docs.pages.test"
+    resolver = pages.resolver_for(port, {sub: [("127.0.0.1", port)]})
 
     def allow(host: str, ip: Any) -> bool:
-        return host == "docs.pages.test" and str(ip) == "127.0.0.1"
+        return host == sub and str(ip) == "127.0.0.1"
 
-    llm = ScriptedLLM([_fetch("http://docs.pages.test/page"), _say("ok")])
+    llm = ScriptedLLM(
+        [_fetch(f"http://{sub}/page"), _fetch(f"http://{sub}/page"), _say("ok")]
+    )
     agent = Agent(
         llm=llm,
         options=AgentOptions(builtins=frozenset(), tool_exposure="all"),
@@ -140,7 +147,65 @@ async def test_a_parent_domain_names_its_subdomains(server: dict[str, Any]) -> N
         )
     finally:
         await agent.close()
-    assert person.asked == []
+    assert [r.tool_name for r in person.asked] == [f"browser:http://{sub}"]
+    assert all("# Tomatoes" in text for text in _results(llm))
+
+
+async def test_a_redirect_to_a_subdomain_of_a_named_site_asks_first(
+    server: dict[str, Any],
+) -> None:
+    person = Person(refuse=True)
+    port = int(server["port"])
+    leak = "c2VjcmV0.pages.test"
+    resolver = pages.resolver_for(port, {leak.lower(): [("127.0.0.1", port)]})
+    llm = ScriptedLLM(
+        [_fetch(f"http://{pages.HOST}/to?u=http://{leak}/page"), _say("ok")]
+    )
+    agent = _agent(llm, resolver)
+    try:
+        await agent.run_task(
+            "what does pages.test say?", approval=RememberingPolicy(person.ask)
+        )
+    finally:
+        await agent.close()
+    assert [r.tool_name for r in person.asked] == [f"browser:http://{leak.lower()}"]
+    assert resolver.calls == [pages.HOST]  # the subdomain was never looked up
+
+
+@pytest.mark.parametrize(
+    ("said", "host", "named"),
+    [
+        ("what's on pages.test?", "pages.test", True),
+        ("what's on pages.test?", "www.pages.test", True),
+        ("open www.pages.test", "pages.test", True),
+        ("what's on pages.test?", "docs.pages.test", False),
+        ("read vercel.app and workers.dev", "attacker.vercel.app", False),
+        ("read docs.pages.test", "pages.test", False),
+        # A file name is not a site; a full address always names its host.
+        ("please fix README.md", "readme.md", False),
+        ("run build.sh, then check config.yaml", "build.sh", False),
+        ("see https://readme.md/intro", "readme.md", True),
+        # A word inside a longer one is not a host.
+        ("bücher.de", "cher.de", False),
+        ("https://bücher.de/", "xn--bcher-kva.de", True),
+        ("打开pages.test看看", "pages.test", True),
+        ("pages.test.evil.example", "pages.test", False),
+    ],
+)
+def test_which_sites_a_message_names(said: str, host: str, named: bool) -> None:
+    reviewer = StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+    reviewer.user_message(said)
+    assert reviewer.names_host(host) is named
+
+
+def test_only_the_last_three_messages_name_a_site() -> None:
+    reviewer = StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+    reviewer.user_message("read pages.test")
+    for text in ("one", "two", "three"):
+        reviewer.user_message(text)
+    assert not reviewer.names_host("pages.test")
+    reviewer.user_message("x" * 800 + " other.test")
+    assert not reviewer.names_host("other.test")  # past the first 800 characters
 
 
 async def test_an_unnamed_site_asks_once_per_chat_as_the_browser_does(
@@ -158,14 +223,33 @@ async def test_an_unnamed_site_asks_once_per_chat_as_the_browser_does(
         await agent.close()
     assert [r.tool_name for r in person.asked] == [f"browser:http://{pages.HOST}"]
     request = person.asked[0]
-    assert request.preview == f"read {pages.HOST}"
+    assert request.preview == f"read {PAGE}"
     assert dict(request.arguments) == {
         "site": pages.HOST,
         "origin": f"http://{pages.HOST}",
         "access": "read",
         "via": "web_fetch",
+        "url": PAGE,
     }
     assert "# Tomatoes" in _results(llm)[0]
+
+
+async def test_the_question_shows_a_long_address_cut_short(
+    server: dict[str, Any],
+) -> None:
+    person = Person(refuse=True)
+    address = f"{PAGE}?d=" + "a" * 400
+    llm = ScriptedLLM([_fetch(address), _say("ok")])
+    agent = _agent(llm, _resolver(server))
+    try:
+        await agent.run_task("garden notes?", approval=RememberingPolicy(person.ask))
+    finally:
+        await agent.close()
+    [request] = person.asked
+    assert request.tool_name == f"browser:http://{pages.HOST}"
+    shown = request.arguments["url"]
+    assert len(shown) == URL_SHOWN and shown == address[: URL_SHOWN - 1] + "…"
+    assert request.preview == f"read {shown}"
 
 
 async def test_a_browser_grant_covers_web_fetch(server: dict[str, Any]) -> None:

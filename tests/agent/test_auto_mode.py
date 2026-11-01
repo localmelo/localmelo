@@ -765,11 +765,13 @@ async def test_a_new_chat_starts_the_review_over(tmp_path: Path) -> None:
     assert len(llm.review_requests) == 1
 
 
-def test_a_named_site_is_a_whole_host_or_its_subdomain() -> None:
+def test_a_named_site_is_that_whole_host_not_its_subdomains() -> None:
     reviewer = _step_review.StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
     reviewer.user_message("summarize https://www.microsoft.com/news and docs")
     assert reviewer.names_host("microsoft.com")
-    assert reviewer.names_host("https://learn.microsoft.com/x")
+    assert reviewer.names_host("https://www.microsoft.com/x")
+    # A site under it is reviewed: naming a shared domain names none of its sites.
+    assert not reviewer.names_host("https://learn.microsoft.com/x")
     assert not reviewer.names_host("oft.com")
     assert not reviewer.names_host("t.co")
     assert not reviewer.names_host("microsoft.com.evil.example")

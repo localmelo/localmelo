@@ -120,6 +120,7 @@
   "approval.needed": "需要批准",
   "approval.openSite": "让 melo 打开 {site}？",
   "approval.pythonCode": "Python 代码",
+  "approval.readAddress": "melo 请求的地址",
   "approval.readCaption": "web_fetch · 只读",
   "approval.readContent": "melo 想以文本形式读取 {site}：一次请求，不用登录信息，也不带 cookie。它请求的地址会发送给这个网站。",
   "approval.readSite": "让 melo 读取 {site}？",

@@ -21,8 +21,9 @@ Two checks, both before any connection is made:
    since a public address can still be its own or its neighbour's (a global
    IPv6 address, or a network of public IPv4 addresses): an address this
    computer can bind is one of its own; so is one it would send to from
-   itself; and one in the IPv6 /64 (or, for a public IPv4 address, the /24)
-   of the address it would send from is on its local network. Both are
+   itself; and one in the IPv6 /64 or /56 (or, for a public IPv4 address,
+   the /24) of the address it would send from is on its network. A
+   router's outside address that leads back in (hairpin NAT) is not caught. Both are
    found with a UDP socket that is bound or connected and never sends.
 
 The fetcher (:mod:`localmelo.support.web.fetch`) resolves the name itself,
@@ -293,8 +294,10 @@ def local_problem(ip: IPAddress, port: int) -> str | None:
     """What *ip* is from this computer's side, when it is not somewhere else on the internet.
 
     One of this computer's own addresses (it can bind it, or it would send to
-    it from itself), or an address on its local network: in the IPv6 /64, or
-    for a public IPv4 address the /24, of the address it would send from.
+    it from itself), or an address on the network it is on: in the IPv6 /64
+    or /56, or for a public IPv4 address the /24, of the address it would
+    send from. A router's outside address reached back from inside (hairpin
+    NAT) is none of these, and is not refused here.
     Nothing is sent: the UDP sockets are only bound or connected. An address
     with no route is left to the connection, which then fails.
     """
@@ -317,6 +320,10 @@ def local_problem(ip: IPAddress, port: int) -> str | None:
     if ip.version == 6:
         if ip in ipaddress.ip_network(f"{source}/64", strict=False):
             return "on this computer's local network (the same IPv6 /64)"
+        # A home or office is often given a /56 and splits it into /64s: a
+        # guest or device network next to this one is still at home.
+        if ip in ipaddress.ip_network(f"{source}/56", strict=False):
+            return "on this computer's network (the same IPv6 /56)"
     elif address_problem(source) is None and ip in ipaddress.ip_network(
         f"{source}/24", strict=False
     ):

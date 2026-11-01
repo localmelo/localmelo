@@ -157,6 +157,13 @@ def test_a_site_web_fetch_would_read_asks_to_read_it_not_to_open_it() -> None:
     assert read.header.startswith("example.com") and "web_fetch" in read.header
     words = " ".join(line for _, line in read.body)
     assert "read example.com as text" in words and "Safari" not in words
+    # The address it asks for, query and all, is on the panel.
+    address = "https://example.com/search?q=tomatoes"
+    with_url = panel_text(
+        _request("browser:https://example.com", **args, via="web_fetch", url=address),
+        width=80,
+    )
+    assert ("", address) in with_url.body
     opened = panel_text(_request("browser:https://example.com", **args), width=80)
     assert opened.title == "Open a website?" and "Safari" in " ".join(
         line for _, line in opened.body

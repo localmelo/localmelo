@@ -1091,6 +1091,15 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
   const box = findNode(h.run('approvalCard(request)'), (node) => node.className === 'approval-content');
   assert.equal(box.tabIndex, 0, 'a long command scrolls, so a keyboard reaches it');
   assert.equal(box.attributes['aria-label'], 'Command');
+  // web_fetch's question shows the address it asks for, query and all.
+  const url = 'https://example.com/search?q=tomatoes';
+  h.context.request = {request_id: 'read-url', tool_name: 'browser:https://example.com',
+    arguments: {site: 'example.com', access: 'read', via: 'web_fetch', url}, workspace_label: '~/w'};
+  const card = h.run('approvalCard(request)');
+  const address = findNode(card, (node) => node.className === 'approval-content');
+  assert.equal(address.textContent, url);
+  assert.equal(address.attributes['aria-label'], 'The address melo asks for');
+  assert.match(findNode(card, (node) => node.className === 'approval-note').textContent, /read example\.com as text/);
 });
 
 // A file write over a file, as the gateway reports it: `target.diff` (docs/reference/api-v2.md).

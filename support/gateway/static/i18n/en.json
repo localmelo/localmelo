@@ -132,6 +132,7 @@
   "approval.needed": "Approval needed",
   "approval.openSite": "Let melo open {site}?",
   "approval.pythonCode": "Python code",
+  "approval.readAddress": "The address melo asks for",
   "approval.readCaption": "web_fetch · read only",
   "approval.readContent": "melo wants to read {site} as text: one request, with no sign-ins and no cookies. The address it asks for is sent to that site.",
   "approval.readSite": "Let melo read {site}?",

@@ -1865,6 +1865,12 @@ function approvalCard(request, view = chatApproval, asked = "") {
     caption = t(reading ? "approval.readCaption" : "approval.browserCaption");
     rule = t(reading ? "approval.rule.read" : "approval.rule.open", { site, scope });
     content = t(reading ? "approval.readContent" : "approval.siteContent", { site });
+    if (reading && args.url) {
+      // The whole address reaches the site, path and query too: the card shows it.
+      why = content;
+      content = String(args.url);
+      what = t("approval.readAddress");
+    }
   }
   // A high-impact call (installs, downloads, changes outside the folder) asks every time: the
   // card says why, offers no chat-wide allow, and starts on Deny.
