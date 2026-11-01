@@ -52,8 +52,9 @@
         <p>第一个版本 v0.1.0 计划于 2026-12-20 发布。</p>
         <div class="board">
           <div class="board-col now">
-            <h3>现在 <small>4</small></h3>
+            <h3>现在 <small>5</small></h3>
             <ul>
+              <li class="board-card"><strong>电脑空闲时整理笔记</strong><span>已做好，测试期间默认关闭：你不在时，melo 整理最近的笔记，并在对话里说明，一键即可撤销。</span><span class="chip testing">测试中</span></li>
               <li class="board-card"><strong>任务页面用平实的话</strong><span>任务页面用平实的话说明发生了什么，不带 melo 内部的标签。</span><span class="chip building">开发中</span></li>
               <li class="board-card"><strong>把活干完的 worker 运行</strong><span>运行尽早动手，检查自己的结果，并说明为什么停下。</span><span class="chip testing">测试中</span></li>
               <li class="board-card"><strong>不看文档也能完成首次运行</strong><span>连接模型、回答 melo 的问题，无需阅读任何说明。</span><span class="chip testing">测试中</span></li>
@@ -61,7 +62,7 @@
             </ul>
           </div>
           <div class="board-col">
-            <h3>接下来 <small>7</small></h3>
+            <h3>接下来 <small>6</small></h3>
             <ul>
               <li class="board-card"><strong>浏览器里的计算机操作</strong><span>melo 在你能看到的窗口里操作网页，重要的操作先问你。</span></li>
               <li class="board-card"><strong>Melo 工作时的更多姿势</strong><span>胶囊和桌面宠物为 melo 工作的时刻画出更多姿势。</span></li>
@@ -69,7 +70,6 @@
               <li class="board-card"><strong>其他智能体把工作交给 melo</strong><span>任务 API 上的 worker，以及供编程智能体使用的 MCP 服务器。</span></li>
               <li class="board-card"><strong>共享同一项目的 worker</strong><span>并行的 worker 共用一段已缓存的开头；每个任务彼此独立。</span></li>
               <li class="board-card"><strong>melo 参与开发 melo</strong><span>在托管模型上做真实的开发任务，并与其他 worker 对比评分。</span></li>
-              <li class="board-card"><strong>电脑空闲时整理笔记</strong><span>计划中：melo 离线回顾最近的对话，合并重复的笔记、保留较新的值，可撤销。</span></li>
             </ul>
           </div>
           <div class="board-col later">
@@ -108,6 +108,14 @@
       <section class="section" id="updates">
         <h2>更新</h2>
         <p class="more-link">每一项变化的细节见<a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>。</p>
+        <section class="day" id="day-2026-11-01">
+          <h3><time datetime="2026-11-01">11 月 1 日</time></h3>
+          <ul class="day-points">
+            <li>你不在时整理笔记已经做好，测试期间默认关闭。运行后主对话会说明整理了什么，点一下或输入 <code class="wrap">/memory undo</code> 就全部放回。</li>
+            <li>本地模型把工具调用写成文字而没有运行时，melo 会让它再试一次，不再显示 “text” 这样的损坏回复。</li>
+            <li>完成的任务如实说明怎么结束的：只有拿出证据才算“已就绪”，否则是“完成但未收尾”，附上原因和一键“收尾”。</li>
+          </ul>
+        </section>
         <section class="day" id="day-2026-10-31">
           <h3><time datetime="2026-10-31">10 月 31 日</time></h3>
           <figure class="shot"><a href="../assets/img/auto-menu-zh.webp"><img src="../assets/img/auto-menu-zh.webp" alt="输入框下模型旁边的“询问”和“自动”菜单，已选“自动”，上方是一个被拦下的安装步骤的卡片，带“允许一次”按钮。" width="1280" height="800" loading="lazy"></a></figure>
