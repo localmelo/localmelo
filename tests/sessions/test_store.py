@@ -796,6 +796,7 @@ def test_the_session_event_keys_are_pinned() -> None:
             "recall",
             "unsaved_claim",
             "searched",
+            "search_hint",
         },
         "session.title": {"title"},
         "session.updated": {"model", "workspace", "workspace_label", "meta"},
@@ -819,7 +820,7 @@ def test_the_session_event_keys_are_pinned() -> None:
     }
     assert dict(OPTIONAL_SESSION_EVENT_FIELDS) == {
         "turn.started": {"origin"},
-        "turn.memory": {"searched"},
+        "turn.memory": {"searched", "search_hint"},
     }
     assert RESERVED_EVENT_PREFIXES == ("task.", "sched.", "attention.")
 
@@ -1463,6 +1464,41 @@ async def test_append_events_refuses_events_it_must_not_store(tmp_path: Path) ->
         "turn.started",
         "session.title",
     ]
+    await store.aclose()
+
+
+async def test_a_memory_event_is_stored_with_or_without_its_search_hint(
+    tmp_path: Path,
+) -> None:
+    store = cli(tmp_path / "s.db")
+    turn = await store.begin_turn(None, "hi", holder=HOLDER, new_session=NewSession())
+    data: dict[str, Any] = {
+        "turn": 1,
+        "turn_id": "t1",
+        "used": [],
+        "remembered": [],
+        "refused": "",
+        "recall": {},
+        "unsaved_claim": False,
+    }
+    hinted = {**data, "search_hint": True}
+    for event in (data, hinted):
+        await store.append_events(
+            turn.session_id, 1, [{"type": "turn.memory", "data": event}], holder=HOLDER
+        )
+    with pytest.raises(ValueError):  # an unknown key is still refused
+        await store.append_events(
+            turn.session_id,
+            1,
+            [{"type": "turn.memory", "data": {**data, "other": 1}}],
+            holder=HOLDER,
+        )
+    stored = [
+        e.event["data"]
+        for e in await store.list_events(turn.session_id)
+        if e.event["type"] == "turn.memory"
+    ]
+    assert [d.get("search_hint") for d in stored] == [None, True]
     await store.aclose()
 
 

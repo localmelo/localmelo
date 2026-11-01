@@ -186,6 +186,7 @@ SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
                 "recall",
                 "unsaved_claim",
                 "searched",
+                "search_hint",
             }
         ),
         "session.title": frozenset({"title"}),
@@ -214,12 +215,13 @@ SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
     }
 )
 # Session event keys an event may lack: turn.started's origin is only on a
-# turn the person did not begin (#369).
+# turn the person did not begin (#369), and turn.memory's search_hint only
+# when the recall block carried the hint.
 OPTIONAL_SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
     {
         "turn.started": frozenset({"origin"}),
-        # Only once a memory search found something in the turn.
-        "turn.memory": frozenset({"searched"}),
+        # searched: only once a memory search found something in the turn.
+        "turn.memory": frozenset({"searched", "search_hint"}),
     }
 )
 # The session events that a run's writer may store with its batches; the
@@ -2404,7 +2406,10 @@ class SessionStore:
         ):
             pinned = SESSION_EVENT_FIELDS[type_]
         if pinned is not None:
-            optional = OPTIONAL_EVENT_FIELDS.get(type_, frozenset())
+            # A run event's optional keys, or a session event's.
+            optional = OPTIONAL_EVENT_FIELDS.get(
+                type_, OPTIONAL_SESSION_EVENT_FIELDS.get(type_, frozenset())
+            )
             if not pinned - optional <= set(data) <= pinned:
                 raise ValueError(f"a {type_} event has the keys {sorted(pinned)}")
         elif type_.startswith(
