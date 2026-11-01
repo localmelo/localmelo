@@ -1422,6 +1422,8 @@ class ChatMemory:
             )
             if not done:
                 return None
+            # The user changed it: the reasons an undo kept it apart expire.
+            await sleeping.clear_kept_apart(store, record_id)
             self._corpus.remove(
                 f"r:{record_id}"
             )  # the next search reads the new wording
@@ -1436,15 +1438,20 @@ class ChatMemory:
         now: float | None = None,
         chats: SessionStore | None = None,
         budget: int | None = None,
+        began: float | None = None,
     ) -> sleeping.SleepReport:
         """Tidy the notes with sleep *variant* (``[memory] sleep`` when ``None``);
         what it changed. *chats* gives it the turns to replay (without them,
         only duplicates are merged). Model variants share a twelve-call limit;
-        each call checks the optional sleep lock and new chat activity.
-        Nothing happens with memory off or ``off``.
+        each request to a model server first checks the lock (``[memory]
+        sleep_lock``, else the shared GPU lock ``[scheduler] gpu_lock_file``,
+        where a lock of ``lock_self`` is ours) and new activity: a chat, main
+        chat, task or worker turn that started after *began*, the time the
+        caller took before its own idle checks (``None``: now). The run then
+        stops, saved and undoable. Nothing happens with memory off or ``off``.
         """
         cfg = self._settings()
-        began = time.time()
+        began = time.time() if began is None else began
         variant = variant or (cfg.memory.sleep if cfg is not None else "off")
         store, index = self.stores()
         variant = variant if self.enabled else "off"
@@ -1473,9 +1480,8 @@ class ChatMemory:
             if not self.enabled:
                 return True
             if chats is not None:
-                for session in await chats.list_sessions(
-                    limit=100_000, kinds=("chat", "front")
-                ):
+                # Every kind: a task or a worker that starts also needs the model.
+                for session in await chats.list_sessions(limit=100_000, kinds=None):
                     if session.updated_at > began and any(
                         t.started_at > began for t in await chats.list_turns(session.id)
                     ):
@@ -1499,21 +1505,35 @@ class ChatMemory:
             embedded = await self._embed([text], EMBED_TIMEOUT_S, query=False)
             return (embedded.vectors[0] if embedded.vectors else None, embedded.model)
 
-        async with self._lock:
-            report = await sleeping.run(
-                store,
-                index,
-                turns,
-                variant=variant,
-                now=now,
-                until=max(until, forgotten),
-                provider=self.chat_provider() if variant.startswith("model") else None,
-                notes_for=notes_for,
-                is_active=active,
-                lock=cfg.memory.sleep_lock if cfg is not None else "",
-                budget=budget,
-                embed_note=embed_note if self.embedding()[0] is not None else None,
-            )
+        lock, lock_self = "", ""
+        if cfg is not None:
+            lock = cfg.memory.sleep_lock
+            if not lock:  # the shared GPU lock, which a benchmark may take mid-run
+                lock, lock_self = cfg.scheduler.gpu_lock_file, cfg.scheduler.lock_self
+        try:
+            async with self._lock:
+                report = await sleeping.run(
+                    store,
+                    index,
+                    turns,
+                    variant=variant,
+                    now=now,
+                    until=max(until, forgotten),
+                    provider=(
+                        self.chat_provider() if variant.startswith("model") else None
+                    ),
+                    notes_for=notes_for,
+                    is_active=active,
+                    lock=lock,
+                    budget=budget,
+                    embed_note=embed_note if self.embedding()[0] is not None else None,
+                    lock_self=lock_self,
+                )
+        except asyncio.CancelledError:
+            # The run saved what it changed; a kept note may have changed in place.
+            for key in self._corpus.keys("r:"):
+                self._corpus.remove(key)
+            raise
         # A kept note changed in place (the turns it replaced): read it again.
         for change in report.changes:
             if change.replaces_after is not None and change.after_id is not None:
