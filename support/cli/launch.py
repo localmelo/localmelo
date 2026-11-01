@@ -711,7 +711,12 @@ async def main_async(
             )
             if isinstance(found, main_chat.Link):
                 session.remote = main_chat.MainChat(
-                    session, main_chat.GatewayClient(found.url), found
+                    session,
+                    main_chat.GatewayClient(found.url),
+                    found,
+                    new_mode=(
+                        "auto" if session_config.approvals.mode == "auto" else "ask"
+                    ),
                 )
                 session.title = main_chat.MAIN_TITLE
                 url = found.url

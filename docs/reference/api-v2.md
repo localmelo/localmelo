@@ -1890,7 +1890,7 @@ scan's `batch_id` and the sources the user chose.
 ```
 
 ```json
-{"batch_id": "e86b19186930", "sources": [{"id": "claude-35bc414c", "harness": "claude", "path": "/home/me/.claude/CLAUDE.md", "scope": "user", "workspace": "", "items_found": 3, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 1}, "sample": ["Use uv for new Python projects.", "Keep commits small and focused on one change."]}, {"id": "hermes-2e22e64e", "harness": "hermes", "path": "/home/me/.hermes/memories/USER.md", "scope": "user", "workspace": "", "items_found": 2, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 0}, "sample": ["Prefers concise replies.", "The user is a PhD student in robotics."]}], "partial": false, "home": "/home/me"}
+{"batch_id": "e86b19186930", "sources": [{"id": "claude-35bc414c", "harness": "claude", "path": "/home/me/.claude/CLAUDE.md", "scope": "user", "workspace": "", "items_found": 3, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 1, "capped": 0}, "sample": ["Use uv for new Python projects.", "Keep commits small and focused on one change."]}, {"id": "hermes-2e22e64e", "harness": "hermes", "path": "/home/me/.hermes/memories/USER.md", "scope": "user", "workspace": "", "items_found": 2, "items_kept": 2, "filtered": {"secret": 0, "third_party": 0, "wrong_owner": 0, "duplicate": 0, "mechanics": 0, "capped": 0}, "sample": ["Prefers concise replies.", "The user is a PhD student in robotics."]}], "partial": false, "home": "/home/me"}
 ```
 
 ```bash
@@ -1907,7 +1907,9 @@ scan's `batch_id` and the sources the user chose.
   `workspace` the project folder a folder of notes belongs to (`""` otherwise). `items_found`
   counts the lines, `items_kept` those that would become notes (at most 60), and `filtered`
   those left out, by reason: `secret`, `third_party` (private data of other people),
-  `wrong_owner`, `duplicate` and `mechanics` (lines about the other tool itself). `sample`
+  `wrong_owner`, `duplicate`, `mechanics` (lines about the other tool itself) and `capped`
+  (kept by every check but over the 60). A folder of notes fills its 60 round by round, the
+  first line of every file (its `description`) before the second of any. `sample`
   has up to 3 notes. `partial` is true when the scan stopped at its 2 s limit. `home` is the
   user's home folder, so a client can write a `path` as `~/…`.
 - `POST /api/memory/import` writes the notes of the chosen `source_ids` (at most 300 in a

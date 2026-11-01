@@ -245,12 +245,12 @@ What it reads, only inside your home folder and never through a link that leaves
 
 What it leaves out:
 
-- Secrets, and private data of other people: addresses other than the one in your git config, account and Apple ID lines, phone numbers, a named person with an ID.
-- Lines about the other tool itself: its tool calls, slash commands, hooks and settings files.
+- Secrets (SSH key fingerprints and key material included), and private data of other people: addresses other than the one in your git config, account and Apple ID lines, phone numbers, a named person with an ID.
+- Lines about the other tool itself: its tool calls, slash commands, hooks and settings files, and which setting wins over which.
 - Lines you already have as notes, and lines two sources share (the first one counts).
-- Files over 256 KB, credential files, histories and transcripts are never opened; at most 60 notes come from one source and 300 from one batch.
+- Files over 256 KB, credential files, histories and transcripts are never opened; at most 60 notes come from one source and 300 from one batch. A folder of note files fills its 60 round by round, each file's one-line summary first, so a long file cannot crowd out the others; what does not fit is shown as left out (over the limit).
 
-A note is the line itself, tidied, in your words and language (a first-person line reads in the second person, as your own notes do). No model is involved; the notes show the file and line they came from. The routes are in the [API reference](../reference/api-v2.md#bring-in-memory-from-other-assistants).
+A note is the line itself, tidied, in your words and language (a first-person line you wrote reads in the second person, as your own notes do; in a note an assistant wrote, "the user" reads as "you" and its own "I" stays). A bullet that wraps over several lines is one note. No model is involved; the notes show the file and line they came from. The routes are in the [API reference](../reference/api-v2.md#bring-in-memory-from-other-assistants).
 
 ## Reasoning notes
 

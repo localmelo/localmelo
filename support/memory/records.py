@@ -52,11 +52,12 @@ from localmelo.melo.memory.hippo.policy import (
     normalise,
     overlap,
 )
-from localmelo.melo.memory.hippo.signals import classify_user_text
+from localmelo.melo.memory.hippo.signals import classify_user_text, request_clause
 from localmelo.melo.memory.long import StoredEntry
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.memory.notes import split_sentences
 from localmelo.melo.schema import new_record_id
+from localmelo.support.memory import people
 from localmelo.support.memory.recall import Item, stem, unit
 
 TOPICS: Final = ("about", "preferences", "people", "projects", "decisions")
@@ -376,14 +377,65 @@ def finished(text: str) -> str:
 
 
 def topic_of(sentence: str, *, request: bool) -> str:
-    """The topic of a fact the user stated (*request*: after "remember that")."""
+    """The topic of a fact the user stated (*request*: after "remember that").
+
+    A request is filed under ``people`` only when its fact is about a person
+    (:func:`_about_a_person`): "Marco's studio is on Main St", "Marco lives in
+    Berlin". A rule or a fact about the work ("tests run with -n auto",
+    "开发的代码一律用英文") is ``about``.
+    """
     if _DECISION.search(sentence):
         return "decisions"
     if _PREFERENCE.search(sentence):
         return "preferences"
     if _FIRST_PERSON.search(sentence):
         return "about"
-    return "people" if request else "about"
+    return "people" if request and _about_a_person(sentence) else "about"
+
+
+# What a fact starts with when a person is its subject: "Marco lives in Berlin",
+# "马可住在杭州". The name must be followed by a verb, so a sentence's first
+# capitalised word ("Tests run with -n auto") is not read as a name.
+_SUBJECT_EN = re.compile(
+    r"((?:(?:Dr|Mr|Mrs|Ms|Mx|Prof)\.\s+)?[A-Z][A-Za-z-]+(?:\s+[A-Z][A-Za-z-]+){0,2})"
+    r"\s+(?:is|was|has|had|lives|lived|works|worked|studies|likes|loves|prefers|hates"
+    r"|wants|needs|moved|moves|plays|teaches|coaches|manages|leads|speaks|uses|owns"
+    r"|drives|goes|will|can|does|isn['’]t|doesn['’]t)\b"
+)
+_SUBJECT_ZH = re.compile("住|在|是|叫|姓|有|喜欢|爱|来自")
+# A month is no subject even before a verb ("May is the deadline"), though some
+# are names too.
+_MONTH = re.compile(
+    r"january|february|march|april|may|june|july|august|september|october"
+    r"|november|december"
+)
+
+
+def _about_a_person(sentence: str) -> bool:
+    """Whether the fact in *sentence* is about a person other than the user: its
+    owner is a third party ("Marco's studio …", "妈妈的生日 …"), or a person is its
+    subject ("Marco lives in Berlin", "马可住在杭州"). *sentence* may still start
+    with the request's marker ("Remember that …", "记住：…"); the marker is not
+    part of the fact."""
+    fact = (request_clause(sentence) or sentence).strip()
+    if (owner := _owner(fact)) is not None:
+        return owner != "user"
+    if found := _SUBJECT_EN.match(fact):
+        name = found.group(1)
+        low = name.split()[0].lower()
+        if not (
+            _NOT_OWNERS.fullmatch(low)
+            or _VALUE_WORD.fullmatch(low)
+            or _MONTH.fullmatch(low)
+        ):
+            return people.person(name)
+    for size in range(1, 5):  # 马, 马可, 王小明: a Chinese name, then its verb
+        name = fact[:size]
+        if not re.fullmatch("[\u4e00-\u9fff]+", name):
+            break
+        if _SUBJECT_ZH.match(fact, size) and people.person(name):
+            return True
+    return False
 
 
 # How a reply says it kept a note (:func:`claimed`); group ``x`` starts the fact.
@@ -778,19 +830,36 @@ _OWNER_EN = re.compile(
 _OWNER_ZH = re.compile(
     r"(?:(?P<user>(?:我|咱|你|您)们?|用户)|(?P<name>[^\s的，,。！？]{1,6}?))的"
 )
-# What "Name's" is not a name: a contraction ("That's why …") or a time word.
+# What "Name's" is not a name: a contraction ("That's why …", "Everything's
+# ready") or a time word.
 _NOT_OWNERS = re.compile(
     r"it|that|there|here|what|who|where|when|why|how|let|this|he|she"
-    r"|today|tomorrow|yesterday|tonight"
+    r"|everything|everyone|everybody|nothing|nobody|something|someone|somebody"
+    r"|anything|anyone|anybody|today|tomorrow|yesterday|tonight"
 )
 _NOT_NAME_ZH = re.compile(
     "[我你您他她它咱这那在是有和与把被让从到每]|^(?:今|明|昨|周末|现在)"
 )
 
 
+def _named(name: str) -> bool:
+    """Whether *name*, before a possessive, is a person's: :func:`people.person`, or
+    a Chinese nickname of one character twice ("思思", "豆豆")."""
+    return people.person(name) or re.fullmatch("([\u4e00-\u9fff])\\1", name) is not None
+
+
 def _owner(sentence: str) -> str | None:
     """Whose *sentence* is: ``"user"``, a third party's name, or ``None`` when its
-    first words say none (or not clearly: a contraction, a time word)."""
+    first words say none (or not clearly: a contraction, a time word, a word that is
+    no person's name such as "Python's" or "开发的").
+
+    A name before a possessive counts as a third party only when it is a person's
+    (:func:`_named`). The trade-off: a Chinese given name without a listed surname,
+    小, 老 or 阿, and that is no relative word and no reduplication ("嘉怡") is not
+    seen as an owner, so a mix-up about that person is not refused by
+    :func:`wrong_owner`. Losing the user's own rule to a false refusal ("开发的代码
+    一律用英文" kept as "你的代码一律用英文") was the more common case.
+    """
     text = sentence.strip()
     if found := _OWNER_EN.match(text):
         name = found["name"]
@@ -798,10 +867,12 @@ def _owner(sentence: str) -> str | None:
             return "user"
         low = name.lower()
         bad = _NOT_OWNERS.fullmatch(low) or _VALUE_WORD.fullmatch(low)
-        return None if bad else name
+        return None if bad or not _named(name) else name
     if found := _OWNER_ZH.match(text):
         name = found["name"]
-        return "user" if found["user"] else None if _NOT_NAME_ZH.search(name) else name
+        if found["user"]:
+            return "user"
+        return None if _NOT_NAME_ZH.search(name) or not _named(name) else name
     return None
 
 
@@ -1078,6 +1149,9 @@ async def write(
 ) -> list[Written]:
     """Write each candidate as a record of *source* (session, turn, chat, surface).
 
+    A project note also keeps the chat's folder (``source["workspace"]``), as an
+    imported one does, so a task in that folder gets it. No other topic does.
+
     *origin* and *created_at* are what the store keeps as the row's source and
     time; sleep writes as ``sleep``, at the time of the turn it read.
     """
@@ -1090,11 +1164,13 @@ async def write(
         if action == "IGNORE":
             continue
         provenance = {
-            **source,
+            **{k: v for k, v in source.items() if k != "workspace"},
             "topic": cand.topic,
             "quote": cand.quote,
             "embed_model": embed_model if vector is not None else "",
         }
+        if cand.topic == "projects" and source.get("workspace"):
+            provenance["workspace"] = source["workspace"]
         old = next((e for e in active if e.id == target), None)
         if old is not None and (replaces := _replaces(old, source)):
             provenance["replaces"] = replaces

@@ -9,6 +9,31 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A task says honestly how it ended. When its worker finishes, code, not the
+  worker, decides, and only proof makes it **Ready**. It reads **Done, not
+  finished** when its last test failed or its result was not checked, when it
+  changed code and no test ran after the last change, when you asked for a
+  commit (or a push or a pull request) and the changes are not committed, or
+  when its folder could not be checked. **Needs you** means its report still
+  asks you something; **Failed**, **Stopped** and **Not needed** say the rest.
+  Only tests the task's own run started count, and only a plain test command
+  passes on its result; tests a report claims do not count, and work that was
+  in the folder before the task is not blamed on it. Work owed stays owed until
+  the task ends ready, outside git too. Tests that still fail when nothing was
+  changed say so, with nothing to finish. The card, the task page, Activity
+  and the terminal say it in plain words and colour, the task page lists the
+  tests the run ran, and **Finish it: run the tests and commit** continues a
+  task that still owes them with one tap. Part of #377. [#393]
+- In the terminal, **Shift+Tab** switches the chat between Ask and Auto (Tab
+  still completes). The bottom line always names the mode with its key,
+  `ask · shift+tab` or `auto · shift+tab`, Auto in its own colour (the key
+  goes below 60 columns, the mode stays), and one quiet line says what
+  changed. It is the same switch as `/approvals ask` and `/approvals auto`:
+  per chat, and in the main chat and the side chats it goes to the chat on
+  the gateway, so the console and the app show it too (`/approvals ask|auto`
+  now works there as well). The key never reaches Deny or `--yolo`, does
+  nothing while a question, a list or an approval is open, and works during
+  a turn, where its line says when it applies. [#392]
 - Note tidying skips facts whose values an active note already holds, using
   bounded embedding similarity or a word-only fallback without merging different
   known subjects. Reports list selected turns and each model operation's bounded,
@@ -482,6 +507,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A note's owner has to be a person. A rule you ask melo to remember ("Remember:
+  tests run with -n auto", "记住：开发的代码一律用英文") is filed under About, not
+  People, and the owner check no longer refuses it for naming a language, a
+  tool or a modifier before "'s" or "的" as someone else ("Python's GIL",
+  "开发的代码"). Names that are people ("Marco's studio", "马可的工作室", "妈妈的生日")
+  are still checked, and a request about them is still filed under People.
 - The app's pill says **stopped**, not failed, for a task that used all its
   steps, as the console already does: `status.recent` reads the task's reason. [#365]
 - A Chinese ask that says to change code, run the tests and commit
@@ -3303,3 +3334,5 @@ earlier milestones.
 [#387]: https://github.com/localmelo/localmelo/pull/387
 [#388]: https://github.com/localmelo/localmelo/pull/388
 [#389]: https://github.com/localmelo/localmelo/pull/389
+[#392]: https://github.com/localmelo/localmelo/pull/392
+[#393]: https://github.com/localmelo/localmelo/pull/393

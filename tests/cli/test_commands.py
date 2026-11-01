@@ -161,6 +161,7 @@ def test_help_starts_with_the_everyday_commands_in_three_groups() -> None:
     ]
     text = "\n".join(rows)
     assert "! command runs it in your shell" in text and "esc stop the turn" not in text
+    assert "shift+tab switches between Ask and Auto" in text
     assert rows[-1] == "  /help all lists every command and key."
     assert "/backend" not in text and len(rows) <= 14  # one screen
 
@@ -172,7 +173,7 @@ def test_help_all_and_developer_mode_list_every_command_and_the_keys(
     text = "\n".join(_help(topic, everything=everything))
     assert all(f"/{command.name} " in text for command in COMMANDS)
     assert "More\n" in text and "Input\n  enter send" in text
-    assert "esc stop the turn" in text
+    assert "esc stop the turn" in text and "shift+tab switches between" in text
 
 
 def test_one_commands_details_and_the_unknown_one() -> None:

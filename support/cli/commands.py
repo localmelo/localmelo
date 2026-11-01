@@ -76,7 +76,7 @@ COMMANDS: Final[tuple[Command, ...]] = (
         (),
         "[ask|auto|deny|forget [tool]]",
         "Show or switch approvals: ask, auto, deny, forget",
-        "show",
+        True,
     ),
     Command("progress", (), "", "Show this turn's progress facts", True),
     Command("browser", (), "[on|off]", "Show or switch web browsing in Safari", "show"),
@@ -103,7 +103,6 @@ LOCAL_ONLY: Final = frozenset(
         "resume",
         "title",
         "usage",
-        "approvals",
         "browser",
         "mcp",
     }
@@ -123,11 +122,17 @@ MAIN_HELP_GROUPS: Final = (
     ("Help", ("help", "exit")),
 )
 
+# The last two lines are the keys the everyday /help names; /help all lists all.
+MODE_KEY_LINE: Final = "shift+tab switches between Ask and Auto (the bar shows which)"
+SHELL_KEY_LINE: Final = (
+    "! command runs it in your shell, not through the model (! alone: details)"
+)
 KEYS: Final = (
     "enter send (queues during a turn) · alt+enter, ctrl+j or \\ enter: new line",
     "{arrows} history · ctrl+r search · tab complete",
     "esc stop the turn · ctrl+c clear, stop or quit · ctrl+d quit",
-    "! command runs it in your shell, not through the model (! alone: details)",
+    MODE_KEY_LINE,
+    SHELL_KEY_LINE,
 )
 
 _COMMAND: Final = re.compile(r"/([a-z][a-z-]*)(?:\s+(.*))?\Z", re.DOTALL)
@@ -201,7 +206,7 @@ def help_text(
     if everything:
         lines.append(Text("Input", style="bold"))
     else:
-        keys = [keys[-1], "/help all lists every command and key."]
+        keys = [*keys[-2:], "/help all lists every command and key."]
     lines += [hang("", Text(key), width, 2) for key in keys]
     return Group(*lines)
 

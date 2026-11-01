@@ -274,7 +274,7 @@
         "en": "Show or switch approvals: ask, auto, deny, forget",
         "zh-Hans": "查看或切换审批：ask、auto、deny、forget"
       },
-      "during_turn": "show",
+      "during_turn": true,
       "keys": "",
       "action": "approvals"
     },

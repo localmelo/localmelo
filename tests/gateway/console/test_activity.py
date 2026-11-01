@@ -93,6 +93,7 @@ class Task:
         self.wait_reason = more.get("wait_reason", "")
         self.finished_at = more.get("finished_at")
         self.updated_at = more.get("updated_at", now)
+        self.ending = more.get("ending")
 
 
 def tasks(monkeypatch: pytest.MonkeyPatch, console: Console, *rows: Task) -> None:
@@ -424,6 +425,34 @@ async def test_a_task_that_ran_out_of_steps_reads_stopped_and_can_continue(
     # A real failure stays failed, with its reason and no Continue.
     assert (rows["Broke"]["state"], rows["Broke"]["result"]) == ("failed", "no disk")
     assert "can_continue" not in rows["Broke"]
+
+
+def test_a_task_code_found_not_finished_says_so_and_can_finish(
+    monkeypatch: pytest.MonkeyPatch, console: Console, client: TestClient
+) -> None:
+    now = time.time()
+    draft = {"state": "draft", "reasons": ["tests_missing"], "at": now}
+    tasks(
+        monkeypatch,
+        console,
+        Task("t-draft", "done", "Fix", finished_at=now, ending=draft),
+        Task(
+            "t-ready",
+            "done",
+            "Notes",
+            finished_at=now - 1,
+            ending={"state": "ready", "at": now - 1},
+        ),
+        Task(
+            "t-old", "done", "Old", finished_at=now - 2, ending={**draft, "at": now - 9}
+        ),
+    )
+    rows = {row["title"]: row for row in activity(client)["rows"]}
+    assert rows["Fix"]["ending"] == draft and rows["Fix"]["can_continue"] is True
+    assert rows["Notes"]["ending"]["state"] == "ready"
+    assert "can_continue" not in rows["Notes"]
+    # An ending decided at another transition is not this one's.
+    assert rows["Old"]["ending"] is None
 
 
 @pytest.mark.parametrize(

@@ -57,6 +57,7 @@ class FakeGateway:
         self.requests: list[tuple[str, str, Any]] = []
         self.closed = False
         self.lose_stream = False
+        self.refuse_mode = False
         self._running: dict[str, tuple[str, int]] = {}  # turn id -> session, number
 
     # ── Events ──
@@ -129,6 +130,7 @@ class FakeGateway:
             session_id = f"side{len(self.sessions):08d}"
             self.sessions[session_id] = {"id": session_id, "kind": "chat", "main": False,
                                          "title": body["turn"]["text"],
+                                         "approvals": body.get("approvals", "ask"),
                                          "workspace_label": "~/w"}  # fmt: skip
             started = self.start_turn(session_id, body["turn"]["text"],
                                       body["turn"]["client_request_id"])  # fmt: skip
@@ -140,7 +142,12 @@ class FakeGateway:
             if session_id not in self.sessions:
                 return _error(404, "not_found", "Session not found.")
             if method == "PATCH":
-                self.sessions[session_id]["title"] = body["title"]
+                if "approvals" in body:
+                    if self.refuse_mode:
+                        return _error(409, "not_a_chat", "A task's mode is fixed.")
+                    self.sessions[session_id]["approvals"] = body["approvals"]
+                if "title" in body:
+                    self.sessions[session_id]["title"] = body["title"]
                 return httpx.Response(200, json={"session": self.sessions[session_id]})
             last = max(
                 (e["id"] for e in self.events if e["session_id"] == session_id),
@@ -657,6 +664,19 @@ def test_a_task_that_ran_out_of_steps_is_a_stopped_card_not_a_failed_one() -> No
     assert line.plain.startswith("■ Stopped: Fix it")
     assert line.plain.endswith("Remaining: run the tests  melo task show t1")
     assert "Not finished" not in line.plain
+
+
+def test_a_done_task_card_says_how_code_found_it_ended() -> None:
+    card = {"state": "done", "source_id": "t1", "source_kind": "task", "title": "Fix it",
+            "line": "Fixed it.", "ending": {"state": "draft", "reasons": ["tests_failed", "commit_missing"]}}  # fmt: skip
+    line = card_line(card, UNICODE, 120)
+    assert line.plain.startswith(
+        "⚠ Done, not finished: Fix it · The last test run failed; The changes are not committed"
+    )
+    ready = card_line(
+        {**card, "ending": {"state": "ready", "reasons": []}}, UNICODE, 120
+    )
+    assert ready.plain.startswith("✓ Ready: Fix it · Fixed it.")
 
 
 def test_an_approval_request_from_the_gateways_list() -> None:

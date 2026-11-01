@@ -318,10 +318,10 @@ test('a command that is not for a turn in progress says so and keeps the draft',
   assert.equal(await p.slash.handle('/new'), 'keep');
   assert.match(lastRow(p), /\/new is not available while a turn runs \(Esc stops it\)\./);
   assert.deepEqual(p.events.filter(([name]) => name === 'newChat'), []);
-  // Some run during a turn; /approvals does only to show.
+  // Some run during a turn; /approvals does too: the mode applies from the chat's next step.
   assert.equal(await p.slash.handle('/help'), true);
-  assert.equal(await p.slash.handle('/approvals ask'), 'keep');
-  assert.match(lastRow(p), /\/approvals is not available while a turn runs/);
+  assert.equal(await p.slash.handle('/approvals auto'), true);
+  assert.deepEqual(moved(p, 'setMode'), ['setMode', 'auto']);
   assert.equal(await p.slash.handle('/approvals'), true);
   assert.match(lastRow(p), /Approvals: Ask · grants: none/);
 });
@@ -435,7 +435,7 @@ test('/help lists the everyday commands, every command with "all", or one comman
   assert.equal(all(p.rows.children[1], 'local-table').length, 1, 'One table, so the columns line up');
   await p.slash.handle('/help exit');
   assert.match(lastRow(p), /^\/help exit \/exit Quit also \/quit, ctrl\+d During a turn: yes$/);
-  await p.slash.handle('/help /approvals');
+  await p.slash.handle('/help /browser');
   assert.match(lastRow(p), /During a turn: only without arguments/);
   await p.slash.handle('/help nope');
   assert.match(lastRow(p), /Unknown command \/nope — \/help lists them/);

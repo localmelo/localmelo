@@ -30,6 +30,7 @@ CTRL_D = "\x04"
 CTRL_J = "\n"
 ENTER = "\r"
 UP = "\x1b[A"
+SHIFT_TAB = "\x1b[Z"
 
 
 @dataclass
@@ -42,6 +43,8 @@ class FakeController:
     entered: list[str] = field(default_factory=list)
     stops: int = 0
     title: str = "New session"
+    # Shift+Tab: how many times it was pressed.
+    mode_presses: int = 0
 
     def enter(self, text: str) -> str | None:
         if self.state == "idle":
@@ -71,6 +74,9 @@ class FakeController:
 
     def tick(self) -> None:
         pass
+
+    def cycle_mode(self) -> None:
+        self.mode_presses += 1
 
     def status_bar(self) -> StatusBar:
         return StatusBar(self.title, "ask")

@@ -182,7 +182,9 @@ async def test_auto_memory_files_keep_their_type_and_their_folder(
         == project["workspace"]
     )
     assert kept["Open bugs are tracked on the team board."].topic == "projects"
-    assert kept["The user is a robotics researcher."].topic == "about"
+    assert (
+        kept["You are a robotics researcher."].topic == "about"
+    )  # the note's own voice
     assert "workspace" not in kept["Keep answers short and plain."].provenance
     assert not any("](user_role.md)" in n.provenance["quote"] for n in kept.values())
 
