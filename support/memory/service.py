@@ -40,6 +40,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
+from localmelo.melo import clock
 from localmelo.melo.agent.agent import DEFAULT_MEMORY_DIR
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
@@ -630,7 +631,7 @@ class ChatMemory:
         vector = unit(embedded.vectors[0]) if embedded.vectors else None
         async with self._lock:
             corpus = await self._sync()
-            now = time.time()
+            now = clock.now()  # LOCALMELO_NOW pins it
             found = ranked(
                 corpus,
                 query,
@@ -1083,8 +1084,9 @@ class ChatMemory:
         self,
         turns: Sequence[tuple[dict[str, Any], int, str, str, float]],
         timeout: float,
-    ) -> None:
-        """Index turns of ``(source, turn, typed, answer, at)``, embedded as one batch."""
+    ) -> int:
+        """Index turns of ``(source, turn, typed, answer, at)``, embedded as one batch;
+        the characters embedded (0 without a vector)."""
         texts = [
             document_text(
                 typed, answer, title=src["title"] if src["kind"] == "task" else ""
@@ -1106,6 +1108,45 @@ class ChatMemory:
             )
             async with self._lock:
                 await self.stores()[1].add(doc)
+        return sum(map(len, texts)) if vectors else 0
+
+    async def index_turns(
+        self, turns: Sequence[tuple[dict[str, Any], int, str, str, float]]
+    ) -> int:
+        """Index turns of ``(source, turn, typed, answer, at)`` as a reindex does
+        (in batches, embedded when a model is set), each document stamped *at*;
+        the characters embedded. Nothing already indexed is touched."""
+        chars = 0
+        for start in range(0, len(turns), _BATCH):
+            chars += await self._add_documents(
+                turns[start : start + _BATCH], INDEX_EMBED_TIMEOUT_S
+            )
+        return chars
+
+    async def keep_said(
+        self, store: SessionStore, info: TurnInfo, typed: str, at: float
+    ) -> int:
+        """Keep the lasting facts *typed* states (:func:`records.statements`) as
+        notes of the turn *info*, stamped *at*; how many were written.
+
+        The rule path alone, as the chat path keeps a user statement: no model
+        call, no vector (``reindex(None)`` adds them), never a secret. For a
+        turn written after the fact (``melo memory ingest``).
+        """
+        found = records.statements(typed)
+        if not found:
+            return 0
+        source = await self._source(store, info)
+        async with self._lock:
+            written = await records.write(
+                self.stores()[0],
+                found,
+                [None] * len(found),
+                source=source,
+                embed_model="",
+                created_at=at,
+            )
+        return len(written)
 
     async def forget_session(self, session_id: str, turn: int | None = None) -> int:
         """Delete indexed chat text and its inactive sleep negatives; keep active notes."""
@@ -1449,7 +1490,7 @@ class ChatMemory:
                 typed,
                 vector,
                 embedded.model,
-                now=time.time(),
+                now=clock.now(),
                 coverage=0.0,
             )
             return [int(item.key[2:]) for item in found if item.is_record][:6]

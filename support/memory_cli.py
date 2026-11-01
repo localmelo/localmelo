@@ -6,20 +6,24 @@ much is kept; ``reindex`` rebuilds the chat index and gives every note a vector 
 the embedding model now set; ``import`` offers the notes other assistants keep
 (``--undo BATCH`` takes a batch back). The files are shared with the web console and the app.
 ``sleep [VARIANT]`` (developer mode only) tidies the notes by the ``[memory] sleep``
-variant and prints what it changed.
+variant and prints what it changed; ``ingest FILE`` (developer mode only) loads
+past chats from a file as if they had happened on their dates
+(:mod:`localmelo.support.memory.ingest`).
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import sys
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 
 from localmelo.melo.memory.long import StoredEntry
 from localmelo.support import command_words, config, onboard
-from localmelo.support.memory import ChatMemory, records
+from localmelo.support.memory import ChatMemory, ingest, records
 from localmelo.support.memory.recall import origin
 from localmelo.support.sessions.store import (
     SessionStore,
@@ -28,7 +32,8 @@ from localmelo.support.sessions.store import (
     default_path,
 )
 
-VERBS = ("list", "forget", "status", "reindex", "import", "sleep")
+VERBS = ("list", "forget", "status", "reindex", "import", "sleep", "ingest")
+DEVELOPER_VERBS = ("sleep", "ingest")
 
 
 def note_origin(entry: StoredEntry) -> str:
@@ -135,11 +140,14 @@ async def _status() -> int:
     return 0
 
 
-async def _open_chats() -> SessionStore | int | None:
-    """The chat file (``None`` when there is none), or the exit code when it cannot be read."""
-    if not os.path.isfile(default_path("gateway")):
+async def _open_chats(
+    *, create: bool = False, clock: Callable[[], float] = time.time
+) -> SessionStore | int | None:
+    """The chat file (``None`` when there is none and *create* is off), or the exit
+    code when it cannot be read or the console or the app owns it."""
+    if not create and not os.path.isfile(default_path("gateway")):
         return None
-    chats = SessionStore(writer="gateway")
+    chats = SessionStore(writer="gateway", clock=clock)
     try:
         await chats.open()
     except StoreOwnedError:
@@ -203,6 +211,44 @@ async def _sleep(variant: str | None) -> int:
         await memory.aclose()
 
 
+async def _ingest(path: str, options: Sequence[str], as_json: bool) -> int:
+    settings: dict[str, str] = {"notes": "rules"}
+    for option in options:
+        key, equals, value = option.partition("=")
+        if not equals or key not in settings:
+            print(
+                f"melo: -X takes notes=rules or notes=none, got {option!r}",
+                file=sys.stderr,
+            )
+            return 2
+        settings[key] = value
+    if settings["notes"] not in ingest.NOTES:
+        print(
+            f"melo: -X notes takes rules or none, got {settings['notes']!r}",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        found = ingest.load(path)
+    except ingest.IngestError as exc:
+        print(f"melo: {exc}", file=sys.stderr)
+        return 2
+    pin = ingest.Clock()
+    memory = ChatMemory(config.load)
+    chats = await _open_chats(create=True, clock=pin)
+    try:
+        if isinstance(chats, int):
+            return chats
+        assert chats is not None
+        report = await ingest.run(memory, chats, pin, found, notes=settings["notes"])
+        print(json.dumps(report.to_json()) if as_json else report.summary())
+        return 0
+    finally:
+        if isinstance(chats, SessionStore):
+            await chats.aclose()
+        await memory.aclose()
+
+
 def main(argv: Sequence[str], prog: str = "melo memory") -> int:
     rest = list(argv)
     if rest and not rest[0].startswith("-") and rest[0] not in VERBS:
@@ -234,8 +280,24 @@ def main(argv: Sequence[str], prog: str = "melo memory") -> int:
     if developer:
         tidy = verbs.add_parser("sleep", help="tidy the notes (developer mode)")
         tidy.add_argument("variant", nargs="?", choices=config.MEMORY_SLEEP)
-    elif rest[:1] == ["sleep"]:
-        print('melo: "memory sleep" needs [ui] mode = "developer"', file=sys.stderr)
+        load = verbs.add_parser(
+            "ingest", help="load past chats from a JSON file (developer mode)"
+        )
+        load.add_argument("file", help="the chats: see docs/reference/cli.md")
+        load.add_argument(
+            "-j", "--json", action="store_true", help="print the summary as JSON"
+        )
+        load.add_argument(
+            "-X",
+            action="append",
+            default=[],
+            metavar="KEY=VALUE",
+            help="developer option: notes=rules (the default) or notes=none",
+        )
+    elif rest[:1] and rest[0] in DEVELOPER_VERBS:
+        print(
+            f'melo: "memory {rest[0]}" needs [ui] mode = "developer"', file=sys.stderr
+        )
         return 2
     args = parser.parse_args(rest)
     if args.verb == "list":
@@ -246,6 +308,8 @@ def main(argv: Sequence[str], prog: str = "melo memory") -> int:
         return asyncio.run(_status())
     if args.verb == "sleep":
         return asyncio.run(_sleep(args.variant))
+    if args.verb == "ingest":
+        return asyncio.run(_ingest(args.file, args.X, args.json))
     if args.verb == "import":
         from localmelo.support.cli import memory_import
 
