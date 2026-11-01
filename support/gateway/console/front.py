@@ -25,7 +25,9 @@ task in its own session, as a new turn after the earlier ones.
 
 What a chat says about tasks is an ``attention.echo`` event in that chat,
 never a turn: ``data.echo`` is ``started``, ``control``, ``level``,
-``suggest``, ``ask``, ``undone`` or ``failed``, with a plain ``line``. A change
+``suggest``, ``ask``, ``undone`` or ``failed``, with a plain ``line``. The main
+chat also says when melo tidied the notes while the person was away (``sleep``,
+see :mod:`.idle_sleep`) and offers Undo for the whole run. A change
 to a task counts as the person's only when their own typed message asks for it
 (:func:`~localmelo.support.gateway.front_rules.allows`); a tool call that page
 text, a file or a task's report prompted becomes a ``suggest`` echo the person
@@ -124,6 +126,7 @@ from .asks import ASK_ORIGIN, ASK_STEPS, PERSON_PARTS
 from .bodies import Body
 from .cards import CARD_EVENT, card_json, card_title
 from .errors import ApiError
+from .routes_memory import identity_changed
 
 if TYPE_CHECKING:
     from localmelo.support.config import Config
@@ -1787,6 +1790,8 @@ class Front:
         ):
             raise ApiError(409, "already_answered", t("errors.echoAnswered"))
         kind = echo.get("echo")
+        if kind == "sleep":
+            return await self._act_sleep(echo_id, echo, do)
         if kind in ("chore", "chore_saved"):
             return await self._act_chore(echo_id, echo, do)
         if do == "reply" and kind == "task_escalate":
@@ -1840,6 +1845,44 @@ class Front:
         if do == "undo" and kind in ("control", "level"):
             return await self._undo(record, echo.get("undo") or {}, echo_id)
         raise ApiError(400, "invalid_request", f"{do} does not apply to this line.")
+
+    async def _act_sleep(
+        self, echo_id: int, echo: dict[str, Any], do: str
+    ) -> dict[str, Any]:
+        """The person's Undo on "melo tidied N notes": the whole run is put back.
+
+        While a sleep tidies the notes they are locked, and a wait here would hold every
+        other tap: the answer is at once, 409 ``sleep_running``. A run that is gone (put back
+        another way, or dropped with its notes) changes nothing: the line is answered with an
+        ``undone`` line that says so, 200, so it loses its button and ``/memory undo`` goes on
+        to an older line.
+        """
+        if do != "undo":
+            raise ApiError(400, "invalid_request", f"{do} does not apply to this line.")
+        if self.console.idle_sleep.running:
+            raise ApiError(409, "sleep_running", t("errors.sleepRunning"))
+        memory = self.console.memory
+        pinned = await memory.pinned_quotes()
+        undone = await memory.undo_sleep(str(echo.get("run_id", "")))
+        if undone is None:
+            return await self.echo(
+                {"echo": "undone", "of": echo_id, "run_id": echo.get("run_id"),
+                 "line": t_in("en", "front.echo.sleptGone"), "said": said("front.echo.sleptGone")}
+            )  # fmt: skip
+        await identity_changed(self.console, pinned)
+        total = int(echo.get("count") or 0)
+        kept = min(int(undone.get("kept") or 0), total)
+        # A note the person reworded since, or a later note replaced, stays as it is.
+        params: dict[str, int] = {"n": total - kept, "total": total}
+        key = "front.echo.sleptSome"
+        if kept == 0:
+            key = "front.echo.sleptBack"
+        elif kept >= total:
+            key = "front.echo.sleptNone"
+        return await self.echo(
+            {"echo": "undone", "of": echo_id, "run_id": echo.get("run_id"),
+             "line": t_in("en", key, **params), "said": said(key, **params)}
+        )  # fmt: skip
 
     async def _act_chore(
         self, echo_id: int, echo: dict[str, Any], do: str

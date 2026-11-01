@@ -78,6 +78,7 @@ from .chores import ChoreOptions, ChoreRunner
 from .errors import ApiError
 from .explain import Explainer, Explanations
 from .front import Front, FrontAgent, SideAgent, build_front_agent
+from .idle_sleep import IdleSleep, IdleSleepOptions
 from .probe import ModelServerProbe, Probe
 from .registry import SWEEP_INTERVAL_S, AgentBuilder, ConsoleSessions, default_builder
 from .shapes import session_json
@@ -148,6 +149,8 @@ class ConsoleOptions:
     # Writes melo's explanation of a task's approval; None asks the model.
     # A test passes one, so no request leaves the machine.
     explainer: Explainer | None = None
+    # The idle sleep's clock, beats and readers of the GPU lock and the power; a test replaces them.
+    idle_sleep: IdleSleepOptions | None = None
 
 
 class Console:
@@ -218,6 +221,8 @@ class Console:
         # Called each time the store opens (the gateway's endpoint file).
         self.on_store_open: Callable[[], None] | None = None
         self.chore_runner = ChoreRunner(self, self.options.chores)
+        # Tidies the notes while the computer is idle (``[memory] sleep``, off by default).
+        self.idle_sleep = IdleSleep(self, self.options.idle_sleep)
         self._started_at = time.time()
         self._store_ok = False
         self._store_error = ""
@@ -492,6 +497,7 @@ class Console:
                     "Could not end the asks or run the queue of the last run"
                 )
             self.chore_runner.start()
+            self.idle_sleep.start()
         except SessionStoreError as exc:
             self._store_ok = False
             self._store_open_reason = (
@@ -561,6 +567,7 @@ class Console:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         await self.chore_runner.aclose()
+        await self.idle_sleep.aclose()
         await self.explanations.aclose()
         for each in (self.front, *self._side_fronts.values()):
             await each.aclose()

@@ -1037,7 +1037,9 @@ async def test_undo_restores_the_kept_notes_provenance_exactly(
     assert await kept_replaces(memory, newer) == [["o", 1]]
     assert await memory.undo_sleep(report.run_id) is not None
     after = await store.entry(newer)
-    assert after is not None and after.provenance == before
+    # The undo sticks: the pair it separated is the only thing it adds.
+    assert after is not None
+    assert after.provenance == {**before, "kept_apart": [older]}
 
 
 async def test_a_kept_notes_earlier_replaces_stay_and_the_older_ones_join_them(

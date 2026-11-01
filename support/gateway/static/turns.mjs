@@ -59,9 +59,15 @@ export function readPictures(list) {
 
 // ── Text mirrors (support/sessions/display.py, support/progress_line.py) ──
 
-/** `split_thinking`: the reasoning in a `<think>` block, and the text. */
+/**
+ * `split_thinking`: the reasoning in a `<think>` block, and the text. A closed `<thinking>...</thinking>`
+ * block that starts the text (after whitespace, any letter case) is the thinking first; a later or an
+ * unclosed one stays text. `tests/fixtures/display_vectors.json` holds the cases both sides must read alike.
+ */
 export function splitThinking(text) {
   const value = String(text ?? "");
+  const spelled = /^\s*<thinking>(.*?)<\/thinking>/is.exec(value);
+  if (spelled !== null) return [spelled[1].trim(), value.slice(spelled[0].length).trim()];
   const block = /<think>(.*?)<\/think>/is.exec(value);
   if (block !== null) {
     const rest = value.slice(0, block.index) + value.slice(block.index + block[0].length);
@@ -326,6 +332,8 @@ export function serverAddress(url) {
 
 // The error of a run whose replies stayed unfinished thinking (`UNFINISHED_ANSWER_ERROR` in `melo/schema.py`).
 export const UNFINISHED_ANSWER = "melo did not finish an answer";
+// The error of a run whose replies wrote a tool call as text (`TOOL_CALL_TEXT_ERROR` in `melo/schema.py`).
+export const TOOL_CALL_TEXT = "tool call written as text";
 
 /** `status_text`: the word, severity and title of a run's end. `error` tells an unreachable server apart. */
 export function statusText(status, cause = "", error = "") {
@@ -334,6 +342,9 @@ export function statusText(status, cause = "", error = "") {
   }
   if (status === "failed" && error === UNFINISHED_ANSWER) {
     return {...statusWords(STATUS_TEXT.failed), title: t("turns.status.unfinished")};
+  }
+  if (status === "failed" && error === TOOL_CALL_TEXT) {
+    return {...statusWords(STATUS_TEXT.failed), title: t("turns.status.toolText")};
   }
   const found =
     STATUS_TEXT[`${status}|${cause}`] ?? STATUS_TEXT[status] ?? null;
@@ -861,6 +872,8 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
         }
         break;
       }
+      // A tool call written as text did not run and is no answer: the notice says so in its place.
+      if (data.kind === "tool_call_as_text") turn.heldText = "";
       turn.items.push({
         kind: "notice",
         noticeKind: String(data.kind ?? ""),

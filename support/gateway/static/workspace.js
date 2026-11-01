@@ -31,7 +31,7 @@ import { picturesNode, setupPictureBox } from "./pictures.mjs";
 import { memoryNodes } from "./memory.mjs";
 import { parseCommand, setupSlash } from "./slash.mjs";
 import { askAboutNotes } from "./memory-tab.mjs";
-import { answered, askTurn, byDay, cardBlock, cardNode, echoDone, echoNodes, isMain, mergeCards, mergeEchoes, shortTime, timeline } from "./main-chat.mjs";
+import { answered, askTurn, byDay, cardBlock, cardNode, echoDone, echoNodes, isMain, mergeCards, mergeEchoes, shortTime, timeline, unansweredSleep } from "./main-chat.mjs";
 import { reportText } from "./endings.mjs";
 import {
   activity,
@@ -58,6 +58,7 @@ import {
   statusLine,
   statusMark,
   statusText,
+  TOOL_CALL_TEXT,
   toolState,
   turnDuration,
   turnFace,
@@ -1579,7 +1580,10 @@ function failureHint(turn, can, error) {
     case "budget_exhausted": return sentences(t("failure.budget"));
     case "timeout": return sentences(t("failure.timeout"));
     case "stuck": return t("failure.stuck");
-    case "failed": return t(error === UNFINISHED_ANSWER ? "failure.thinkingOnly" : "failure.failed");
+    case "failed": {
+      if (error === UNFINISHED_ANSWER) return t("failure.thinkingOnly");
+      return t(error === TOOL_CALL_TEXT ? "failure.toolText" : "failure.failed");
+    }
     case "gate_stopped": return t("failure.gate");
     case "context_budget_exceeded": return t("failure.context");
     case "setup_error": return t("failure.setup");
@@ -1629,7 +1633,8 @@ function statusNode(turn) {
   heading.append(statusMarkNode(info.severity, stopped), el("span", "", info.title));
   node.append(heading);
   // An unreachable server's title and hint say all there is to say; its raw error stays under Details.
-  if (!stopped && error && !serverUnreachable(turn.status, error) && error !== info.title) {
+  // So does the title of a tool call written as text.
+  if (!stopped && error && !serverUnreachable(turn.status, error) && error !== info.title && error !== TOOL_CALL_TEXT) {
     node.append(el("p", "failure-error", cleanOutput(error).split("\n")[0]));
   }
   const hint = stopped ? "" : failureHint(turn, can, error);
@@ -3141,6 +3146,18 @@ const slash = setupSlash({
   },
   // `/memory import`: the Memory tab is open (above) and looks for notes as its button does; the list is the offer.
   memoryImport: async () => ((await panel.lookForNotes()) ? [] : [{ text: t("slash.memoryImportOff"), tone: "muted" }]),
+  // `/memory undo`: the newest "melo tidied" line of the main chat that is not answered gets its Undo, from any chat.
+  // A busy gateway answers 409 and the page says so; a run put back already answers with a line that settles it.
+  undoSleep: async () => {
+    const main = S.main?.id;
+    const page = main ? await api(`/sessions/${encodeURIComponent(main)}/turns?limit=10`) : {};
+    const found = unansweredSleep(mergeEchoes([], page.echoes ?? []));
+    if (!found) return [{ text: t("slash.memoryUndoNone"), tone: "muted" }];
+    const body = await api(`/front/echoes/${encodeURIComponent(found.id)}`, { body: { do: "undo" } });
+    if (mainActive() && S.view) S.view.echoes = mergeEchoes(S.view.echoes ?? [], [body.echo]);
+    renderMessages(false);
+    return [];
+  },
   openDrawer: (tab) => drawer.open(tab),
   settingsSaved,
   setMode: setChatMode,

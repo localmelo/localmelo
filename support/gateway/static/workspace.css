@@ -365,6 +365,11 @@ button:hover:not(:disabled) {
 .echo[data-kind="failed"] { color: var(--error); }
 .echo[data-kind="suggest"] .echo-mark, .echo[data-kind="ask"] .echo-mark { background: var(--warn-tint); color: var(--warn); }
 .echo[data-kind="chore"] .echo-mark, .echo[data-kind="chore_saved"] .echo-mark, .echo[data-kind="checkin"] .echo-mark { background: var(--tint); color: var(--accent); }
+/* "While you were away, melo tidied 3 notes · Undo": the dot is part of the line, and what changed folds under it. */
+.echo[data-kind="sleep"] .echo-mark { background: var(--tint); color: var(--accent); }
+.echo[data-kind="sleep"] .echo-actions { column-gap: 8px; }
+.echo[data-kind="sleep"] .echo-actions::before { content: "·"; color: var(--ink-3); }
+.sleep-more { color: var(--ink-3); }
 .echo-sub { flex: 1 0 100%; margin: 0; color: var(--ink-3); overflow-wrap: anywhere; }
 .echo-text { flex: 0 1 auto; min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .echo-level { display: inline-block; padding: 0 8px; border-radius: var(--radius-pill); background: var(--raised); color: var(--ink-3); font-size: var(--text-caption); font-weight: 600; line-height: 20px; white-space: nowrap; }

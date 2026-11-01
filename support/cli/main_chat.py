@@ -73,6 +73,8 @@ RETRY_S: Final = 2.0
 # Finished turns the first look at a chat shows, and cards after them.
 RECAP_TURNS: Final = 3
 RECAP_CARDS: Final = 3
+# How many turns back /memory undo looks for the line that says melo tidied the notes.
+UNDO_TURNS: Final = 10
 MAIN_TITLE: Final = "Main chat"
 NEW_SIDE: Final = "New side chat"
 # A task card's look by how code decided it ended: (symbol, style).
@@ -474,6 +476,12 @@ class GatewayClient:
         session = body.get("session")
         return session if isinstance(session, dict) else {}
 
+    async def tap(self, echo_id: int, do: str) -> dict[str, Any]:
+        """The person's tap on a main chat echo (``undo``); the echo the gateway answers with."""
+        body = await self.call("POST", f"/api/front/echoes/{echo_id}", json={"do": do})
+        echo = body.get("echo")
+        return echo if isinstance(echo, dict) else {}
+
     async def cancel(self, turn_id: str) -> None:
         await self.call(
             "POST", "/".join(["/api/turns", quote(turn_id, safe=""), "cancel"])
@@ -608,15 +616,27 @@ def echo_line(echo: Mapping[str, Any], symbols: Any, width: int) -> Text:
         return Text("")
     kind = echo.get("echo")
     style = "error" if kind == "failed" else "accent"
+    # What melo tidied while the person was away says how to put it back.
+    hint = f" {symbols.dot} /memory undo" if kind == "sleep" else ""
     line = Text(
-        cut_cells(f"→ {said}", max(8, width - 2), symbols.ellipsis), style=style
+        cut_cells(f"→ {said}", max(8, width - 2 - len(hint)), symbols.ellipsis),
+        style=style,
     )
+    if hint:
+        line.append(hint, style="muted")
     if kind == "ask":
         line.append("  /task and your message starts it", style="muted")
     owner = "Main chat" if echo.get("from_main") else echo.get("from_chat")
     if owner:  # a task of another chat says whose it is
         line.append(f"  from {clean_output(str(owner))}", style="muted")
     return line
+
+
+def _sleeps(echoes: Sequence[Any]) -> list[dict[str, Any]]:
+    """The "melo tidied your notes" lines among *echoes* that no later line undid, oldest first."""
+    rows = [e for e in echoes if isinstance(e, dict) and isinstance(e.get("id"), int)]
+    undone = {e.get("of") for e in rows}
+    return [e for e in rows if e.get("echo") == "sleep" and e["id"] not in undone]
 
 
 def approval_request(pending: Mapping[str, Any]) -> ApprovalRequest:
@@ -798,17 +818,22 @@ class MainChat:
             running = await self.client.turns(chat_id, 1)
             after = int(running.get("replay_from") or 0)
             turns = turns[:-1]
-        self._recap(turns, page.get("cards") or [])
+        self._recap(turns, page.get("cards") or [], page.get("echoes") or [])
         return after
 
-    def _recap(self, turns: list[dict[str, Any]], cards: list[Any]) -> None:
+    def _recap(
+        self, turns: list[dict[str, Any]], cards: list[Any], echoes: Sequence[Any] = ()
+    ) -> None:
         out, symbols, width = (
             self.host.out,
             self.host.renderer.symbols,
             self.host.out.width,
         )
         finished = [t for t in turns if not t.get("undone")]
-        if not finished:
+        since = float(finished[-1].get("started_at") or 0) if finished else 0.0
+        # What melo tidied since the last turn (or ever, with no turn) and nobody put back.
+        sleeps = [e for e in _sleeps(echoes) if float(e.get("ts") or 0) > since]
+        if not finished and not sleeps:
             return
         # Under a command's echo the connector and the hang indent already
         # set the rows in; at the start they are indented by two.
@@ -837,14 +862,18 @@ class MainChat:
                         style="muted",
                     )
                 )
-        since = float(finished[-1].get("started_at") or 0)
         newer = [
-            c for c in cards if isinstance(c, dict) and float(c.get("ts") or 0) > since
+            c
+            for c in cards
+            if finished and isinstance(c, dict) and float(c.get("ts") or 0) > since
         ]
         for card in newer[-RECAP_CARDS:]:
             if isinstance(card.get("id"), int):
                 self._seen.add(card["id"])
             out.print(card_line(card, symbols, width))
+        for echo in sleeps:
+            self._seen.add(int(echo["id"]))
+            out.print(echo_line(echo, symbols, width))
         out.print(Text(""))
 
     # ── The stream ──
@@ -1092,6 +1121,29 @@ class MainChat:
             await self.client.cancel(turn_id)
 
     # ── Commands ──
+
+    async def undo_sleep(self) -> None:
+        """/memory undo: put back the newest tidy-up the main chat shows that is not undone.
+
+        The gateway does it as it does for the console's Undo, and answers with
+        the line that says what was put back; ``ValueError`` when there is none.
+        """
+        await self._ready.wait()
+        if not self.main_id:
+            raise GatewayError("the main chat did not open")
+        page = await self.client.turns(self.main_id, UNDO_TURNS)
+        shown = _sleeps(page.get("echoes") or [])
+        if not shown:
+            raise ValueError(t_in("en", "slash.memoryUndoNone"))
+        echo = await self.client.tap(int(shown[-1]["id"]), "undo")
+        event_id = echo.get("id")
+        # The stream may have drawn it already; a side chat's stream is not the main chat's.
+        if isinstance(event_id, int) and event_id in self._seen:
+            return
+        if isinstance(event_id, int):
+            self._seen.add(event_id)
+        symbols, width = self.host.renderer.symbols, self.host.out.width
+        self.host.out.print(echo_line(echo, symbols, width))
 
     @property
     def mode(self) -> ChatMode:

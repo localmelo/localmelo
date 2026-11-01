@@ -160,7 +160,7 @@ def _row(
     }
 
 
-async def _identity_changed(console: Console, pinned: str) -> None:
+async def identity_changed(console: Console, pinned: str) -> None:
     """Rebuild idle chats' Agents when the notes their instructions pin changed.
 
     A chat's instructions list the user's About-you and Preferences notes in
@@ -211,7 +211,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             raise ApiError(400, "invalid_request", str(exc)) from exc
         if entry is None:
             raise ApiError(404, "not_found", t("errors.noteGone"))
-        await _identity_changed(console, pinned)
+        await identity_changed(console, pinned)
         chats = await _chats(console, {entry.session_id})
         return _row(entry, console, chats if console.store_state() == "ok" else None)
 
@@ -222,7 +222,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         pinned = await console.memory.pinned_quotes()
         if not await console.memory.delete_record(record_id, undo=undo):
             raise ApiError(404, "not_found", t("errors.noteGone"))
-        await _identity_changed(console, pinned)
+        await identity_changed(console, pinned)
         return Response(status_code=204)
 
     @app.delete("/api/memory/records")
@@ -233,7 +233,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             raise ApiError(400, "invalid_request", t("errors.forgetAllFlag"))
         pinned = await console.memory.pinned_quotes()
         notes, turns = await console.memory.forget_all()
-        await _identity_changed(console, pinned)
+        await identity_changed(console, pinned)
         return {"notes": notes, "turns": turns}
 
     @app.get("/api/memory/import/scan")
@@ -314,7 +314,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             )
         except NotImplementedError as exc:
             raise ApiError(501, "not_built", str(exc)) from exc
-        await _identity_changed(console, pinned)
+        await identity_changed(console, pinned)
         return report.to_json()
 
     @app.delete("/api/memory/sleep/{run_id}")
@@ -324,7 +324,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         undone = await console.memory.undo_sleep(run_id)
         if undone is None:
             raise ApiError(404, "not_found", t("errors.sleepGone"))
-        await _identity_changed(console, pinned)
+        await identity_changed(console, pinned)
         return undone
 
 
