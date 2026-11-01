@@ -23,7 +23,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   changed say so, with nothing to finish. The card, the task page, Activity
   and the terminal say it in plain words and colour, the task page lists the
   tests the run ran, and **Finish it: run the tests and commit** continues a
-  task that still owes them with one tap. Part of #377. [#NN]
+  task that still owes them with one tap. Part of #377. [#393]
 - In the terminal, **Shift+Tab** switches the chat between Ask and Auto (Tab
   still completes). The bottom line always names the mode with its key,
   `ask · shift+tab` or `auto · shift+tab`, Auto in its own colour (the key
@@ -3313,3 +3313,4 @@ earlier milestones.
 [#388]: https://github.com/localmelo/localmelo/pull/388
 [#389]: https://github.com/localmelo/localmelo/pull/389
 [#392]: https://github.com/localmelo/localmelo/pull/392
+[#393]: https://github.com/localmelo/localmelo/pull/393
