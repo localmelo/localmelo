@@ -567,6 +567,7 @@ async def main_async(
             mcp_servers=mcp_servers,
             saves=choice.saves,
             browser_driver=browser_driver,
+            web_fetch=loaded.tools.web_fetch is True,
         )
         try:
             agent = await factory.build()

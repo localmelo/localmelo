@@ -149,6 +149,7 @@ async def default_builder(
         workspace=workspace,
         options=configured_session_options(settings, AgentOptions(mode="gateway")),
         browser_driver=configured_driver(settings),
+        web_fetch=settings.tools.web_fetch is True,
         wrap_llm=None if llm is None else (lambda inner: GatedLLM(inner, llm)),
         wrap_embedding=(
             None if llm is None else (lambda inner: GatedEmbedding(inner, llm))

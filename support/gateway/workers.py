@@ -2132,6 +2132,8 @@ class TaskWorkers:
                         WorkerSearch(workspace),
                         AskOwner(task_id, lambda: self.owner),
                     ],
+                    # A task reads public pages too; it has no browser.
+                    web_fetch=self.settings().tools.web_fetch is True,
                 )
             except BaseException:
                 self._homes.discard(home)
