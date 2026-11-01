@@ -203,7 +203,7 @@ Every tool has one of four tiers: what a call can reach, not a denial. For a bui
 
 - The built-ins are fixed by name: `file_read` and `list_files` are `read`, `file_write` is `write`, and `shell_exec` and `python_exec` are `exec`.
 - The table wins over a tool's own claims, so a provided or custom tool that reuses a built-in's name inherits that tier.
-- `web_fetch` and the browser tools are `read` on purpose, though they reach the internet: they change nothing anywhere and send nothing of yours but the address. `web_fetch` never reaches this machine or its local network; the browser tools ask once per site instead.
+- `web_fetch` and the browser tools are `read` on purpose, though they reach the internet: they change nothing anywhere, and the call itself asks nothing. The address they request can still carry data out, so a site gate asks instead: the browser asks once per site and chat; `web_fetch` reads a site your own messages name at once and asks once per chat about any other, sharing the browser's answer. `web_fetch` never reaches this machine or its local network.
 - The mode decides which built-ins are offered at all (see [Choose the built-in tools](#choose-the-built-in-tools)); a gateway or console session gets `list_files` as well as the usual three.
 - In every mode but the interactive UI, `shell_exec` is not registered, so a model that calls it gets `shell_exec is not available in this run. Available tools: …`, naming the run's tools (an unknown non-built-in name keeps the `Tool not found in registry` message).
 - `AgentOptions(builtins=…)` or `--builtins` always wins over the mode's default set, except in gateway mode.

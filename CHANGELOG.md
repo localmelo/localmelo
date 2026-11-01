@@ -15,14 +15,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   on in every chat, the console's and the app's included, and in tasks, and is
   turned off in Settings → Chats and folders → **Read web pages** or with
   `[tools] web_fetch = false`. It only reads: one request, no cookies, no
-  sign-ins, no forms, at most 2 MB, 30 seconds and 5 redirects, and PDFs and
-  other files are refused for now. It never reaches this computer or its
-  local network: `localhost`, private, link-local and cloud metadata
-  addresses, `.local` names, numbers written in odd forms, and a redirect or
-  DNS answer that points to any of them are refused, and melo connects to the
-  address it checked. The page reaches the model marked as data, never
-  instructions, and the model is told to use the tool instead of `curl`.
-  Direct runs do not get it. [#406]
+  sign-ins, no forms, at most 2 MB, 30 seconds and 5 redirects (never from
+  https to http), and PDFs and other files are refused for now. A site your
+  own message names reads at once; any other asks once per chat ("Let melo
+  read example.com?") before its name is even looked up, and one "allow for
+  this chat" covers the browser too; a task asks the chat that owns it. It
+  never reaches this computer or its local network: `localhost`, private,
+  link-local and cloud metadata addresses, `.local` names, numbers written in
+  odd forms, this computer's own addresses (a public IPv6 one included) and
+  its network, and a redirect or DNS answer that points to any of them are
+  refused, and melo connects to the address it checked. The page reaches the
+  model marked as data, never instructions, nothing a server writes in its
+  status line or headers reaches it, and the model is told to use the tool
+  instead of `curl`. Direct runs do not get it. [#406]
 - With `[memory] sleep` set to `rules`, `model` or `model+tags`, the gateway
   now tidies the notes by itself while the computer is idle: no turn in the
   gateway's chats for 20 minutes (a terminal chat that runs on its own, with
@@ -553,6 +558,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   terminal chat and side chats did. A `[browser] driver` that names no
   browser now turns browsing off with a warning instead of stopping a console
   chat from opening. [#406]
+- Page text with three or more `<` or `>` in a row can no longer form a page
+  marker in what the browser tools return: every such run is spaced out.
+  [#406]
 - A long turn is kept in the memory index as up to 8 overlapping pieces instead of
   being cut at 2,000 characters, and a search shows a turn once, by its best piece.
   `melo memory reindex` re-cuts turns indexed before.
