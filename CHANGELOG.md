@@ -507,6 +507,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Tidying notes while idle no longer undoes your Undo, loses a stopped run, or
+  ignores the GPU lock. An Undo sticks: two notes it separated are not merged
+  or replaced again, a note it brought back is not retired again, and a note it
+  removed is not written again from the same turn (a third, newer note can
+  still replace a restored one, and rewording a note yourself ends the reason
+  kept for it). A run that is cancelled or stops early keeps what it changed,
+  so it can still be undone. Every request to a model server first checks the
+  lock, `[memory] sleep_lock` or else the shared GPU lock, and the run stops
+  when another holder takes it (`stopped: gpu_lock`); a chat, task or worker
+  turn that starts during the run stops it too. Part of #363.
 - A note's owner has to be a person. A rule you ask melo to remember ("Remember:
   tests run with -n auto", "记住：开发的代码一律用英文") is filed under About, not
   People, and the owner check no longer refuses it for naming a language, a
