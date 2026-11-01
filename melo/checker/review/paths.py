@@ -9,6 +9,7 @@ import ipaddress
 import os
 import re
 import socket
+import stat
 from dataclasses import dataclass, field, replace
 from urllib.parse import unquote, urlparse
 
@@ -472,6 +473,15 @@ _LINKED = {
 }
 
 
+def _other_name(path: str) -> bool:
+    """Whether *path* is a regular file with another name (a hard link)."""
+    try:
+        info = os.lstat(path)
+    except (OSError, ValueError):
+        return False
+    return stat.S_ISREG(info.st_mode) and info.st_nlink > 1
+
+
 def touch(ctx: Context, f: Findings, raw: str, op: str, cwd: str | None = None) -> None:
     """Record what a ``read``, ``write``, ``delete`` or ``link`` (*op*) of *raw* means.
 
@@ -509,6 +519,15 @@ def touch(ctx: Context, f: Findings, raw: str, op: str, cwd: str | None = None) 
             return
         f.paths.append(path)
         return
+    if op == "write" and _other_name(path):
+        # Written through one name, the file changes under its other one,
+        # which may be anywhere on the volume (file_write refuses it too).
+        f.add(
+            "outside_write",
+            f"Writes {name}, which has another name (a hard link); the write "
+            "changes the file there too.",
+        )
+        f.paths.append(path)
     if kind == "credentials":
         f.add("credentials", f"Uses {name}, which holds passwords or keys.")
     elif op == "read" or kind in ("harmless", "inside"):
