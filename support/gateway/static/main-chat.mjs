@@ -130,7 +130,13 @@ export function mergeCards(cards, more) {
  * `{kind: "echo", echo}`.
  */
 export function timeline(turns, cards, now, echoes = []) {
-  const at = (item) => (item.kind === "turn" ? Number(item.turn.startedAt) || 0 : item[item.kind].at);
+  // melo's follow-up row is written once its turn began (#411): it stands just before that turn.
+  const starts = new Map(turns.map((turn) => [String(turn.id ?? ""), Number(turn.startedAt) || 0]));
+  const at = (item) => {
+    if (item.kind === "turn") return Number(item.turn.startedAt) || 0;
+    const lead = item.kind === "echo" && item.echo.kind === "followup" ? starts.get(String(item.echo.turn_id ?? "")) : 0;
+    return lead ? lead - 0.001 : item[item.kind].at;
+  };
   const items = [
     ...turns.map((turn) => ({kind: "turn", turn})),
     ...foldAnswers(cards).map((card) => ({kind: "card", card})),
@@ -259,10 +265,11 @@ export function cardNode({doc, card, open, resume = null, approval = null, block
 // ── Echoes: what the main chat did with a task ──
 
 const ECHO_KINDS = new Set(["started", "control", "level", "suggest", "ask", "undone", "failed", "sent", "chore", "chore_saved", "checkin", "sleep",
-  "task_ask", "task_answered", "task_escalate", "ask_end", "queued", "dequeued", "answer_sent", "answer_delivered", "earlier", "revoked"]);
+  "task_ask", "task_answered", "task_escalate", "ask_end", "queued", "dequeued", "answer_sent", "answer_delivered", "earlier", "revoked",
+  "followup"]);
 const MARKS = {started: "+", level: "↕", suggest: "?", ask: "?", undone: "↺", failed: "!", sent: "→", chore: "◷", chore_saved: "◷", checkin: "◷", sleep: "☾",
   stop: "■", pause: "‖", resume: "▶", first: "↑", send: "→", task_ask: "?", task_answered: "↩", task_escalate: "!", ask_end: "·", queued: "…", answer_sent: "↩",
-  earlier: "✓", revoked: "↺"};
+  earlier: "✓", revoked: "↺", followup: "↻"};
 // A task's question (#369): its seven fields, and the five parts of a question to the person.
 const ASK_FIELDS = ["background", "situation", "problem", "likely_causes", "options", "help_needed", "if_unsolvable"];
 const PERSON_PARTS = ["background", "what_happened", "tried", "choices", "question"];
@@ -270,11 +277,14 @@ const camel = (name) => name.replace(/_(\w)/g, (_, letter) => letter.toUpperCase
 // What the person typed in a reply box, by row: a redraw of the chat keeps it.
 const replyDrafts = new Map();
 
-/** Whether *turn* is the chat's internal turn on a task's question: its row stands in for the person's bubble. */
+/**
+ * Whether *turn* is a turn melo began itself, on a task's question (#369) or its follow-up on a task that stopped
+ * (#411): its row stands in for the person's bubble.
+ */
 export function askTurn(turn, echoes = []) {
-  if (turn?.origin === "ask_owner") return true;
+  if (turn?.origin === "ask_owner" || turn?.origin === "followup") return true;
   const text = String(turn?.userText ?? "");
-  return echoes.some((echo) => echo.kind === "task_ask" && echo.lead && text.startsWith(echo.lead));
+  return echoes.some((echo) => (echo.kind === "task_ask" || echo.kind === "followup") && echo.lead && text.startsWith(echo.lead));
 }
 
 /** An echo as the page keeps it, from an `echoes` row or an `attention.echo` frame; null if unusable. */
@@ -329,7 +339,8 @@ export function echoActions(echo, done) {
   if (echo.kind === "chore") return [[t("mainChat.echo.saveChore"), "save"], [t("mainChat.echo.once"), "once"], [t("common.cancel"), "cancel"]];
   if (echo.kind === "chore_saved" || echo.kind === "sleep") return [undo];
   if (echo.kind === "started" || echo.kind === "level") {
-    return echo.kind === "started" ? [[t("mainChat.echo.change"), "level"]] : [undo];
+    // A task the chat started (#410): its priority, and Stop until it ends.
+    return echo.kind === "started" ? [[t("mainChat.echo.change"), "level"], [t("common.stop"), "stop"]] : [undo];
   }
   if (echo.kind === "control") return [undo];
   // A message sent as a task's answer can be taken back until it is delivered.
@@ -390,6 +401,8 @@ export function echoNodes({doc, echo, done = false, act}) {
   if (echo.kind === "chore" && (echo.work || echo.text)) body.append(el("p", "echo-sub", echo.work || echo.text));
   // The step that ran on an earlier approval, and the task that ran it.
   if (echo.kind === "earlier" && echo.preview) body.append(el("p", "echo-sub", t("approvals.ran", {title: echo.title ?? "", step: stepLine(echo.preview)})));
+  // A follow-up melo began on its own says so, quietly (#411).
+  if (echo.kind === "followup") body.append(el("p", "echo-sub", t("followup.marker")));
   // A task of another chat says whose it is (a side chat's title, or the main chat).
   const owner = echo.from_main ? t("chat.main") : echo.from_chat;
   if (owner) body.append(el("p", "echo-sub", t("chat.fromChat", {title: owner})));

@@ -136,6 +136,10 @@ EXPERIMENTAL_KEYS: dict[str, str] = {
     "memory.recall_chars": "#349",
     "memory.recall_notes": "#349",
     "memory.search_when_empty": "#349",
+    "memory.recall_min_cosine": "#349",
+    "memory.recall_min_coverage": "#349",
+    "memory.recall_item_chars": "#349",
+    "memory.recall_excerpt": "#349",
 }
 
 # Long option name -> tier, for every option the parser has.
@@ -298,7 +302,7 @@ def help_all() -> str:
             default if isinstance(default, str) and default else settings.show(default)
         )
         issue = EXPERIMENTAL_ISSUES.get(key.flag) or EXPERIMENTAL_KEYS.get(key.name)
-        row = f"  {key.name:<27}{shown:<12}{key.flag}" + (
+        row = f"  {key.name:<29}{shown:<12}{key.flag}" + (
             f" ({issue})" if issue else ""
         )
         rows.append(row.rstrip())

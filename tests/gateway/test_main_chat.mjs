@@ -59,6 +59,14 @@ test('the timeline orders turns and cards by time, with a divider per day and on
   assert.deepEqual(timeline([], [], NOON), []);
 });
 
+test('melo\'s follow-up row stands just before the turn it began, though written after it started', () => {
+  const turns = [{id: 'chat-t2', turn: 2, startedAt: NOON}];
+  const row = {id: 9, kind: 'followup', echo: 'followup', turn_id: 'chat-t2', at: NOON + 0.2, line: 'melo follows up'};
+  const other = {id: 10, kind: 'started', echo: 'started', at: NOON + 0.3, line: 'Started'};
+  const items = timeline(turns, [], NOON + 1, [other, row]);
+  assert.deepEqual(items.filter((item) => item.kind !== 'day').map((item) => item.kind === 'turn' ? 'turn' : item.echo.id), [9, 'turn', 10]);
+});
+
 test('side chats group newest first under their day', () => {
   const groups = byDay([
     {id: 'old', updated_at: NOON - 2 * DAY},
@@ -117,7 +125,7 @@ test('a done task card says how code found it ended: ready, not finished with Fi
   const base = {id: 5, at: NOON, state: 'done', sourceId: 't5', sourceKind: 'task', title: 'Fix CI', line: 'Fixed the check.'};
   const draft = {state: 'draft', reasons: ['tests_missing', 'commit_missing'], question: ''};
   const card = readCard({id: 5, source_id: 't5', source_kind: 'task', state: 'done', title: 'Fix CI', ending: draft});
-  assert.deepEqual(card.ending, {...draft, proposed: null, tests: []});
+  assert.deepEqual(card.ending, {...draft, proposed: null, notes: [], tests: []});
   assert.deepEqual(cardWords({...base, ending: {state: 'ready', reasons: [], question: '', tests: []}}),
     {mark: '✓', heading: 'Ready: Fix CI', action: 'Open task'});
   assert.deepEqual(cardWords(card), {mark: '◐', heading: 'Done, not finished: Fix CI', action: 'Open task', more: 'Finish it: run the tests and commit'});

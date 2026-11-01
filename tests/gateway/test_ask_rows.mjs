@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {useLanguage} from '../../support/gateway/static/i18n.mjs';
-import {answered, askTurn, echoNodes, mergeEchoes, readEcho} from '../../support/gateway/static/main-chat.mjs';
+import {answered, askTurn, echoActions, echoNodes, mergeEchoes, readEcho} from '../../support/gateway/static/main-chat.mjs';
 import {canContinue, canRetry} from '../../support/gateway/static/turns.mjs';
 
 const NOON = new Date(2026, 9, 31, 12, 0, 0).getTime() / 1000;
@@ -199,4 +199,36 @@ test('a question to you says how to answer it: a message when only it waits, /an
   };
   assert.equal(hint(1), 'Answer in the box, or send your answer as a message.');
   assert.equal(hint(2), 'Several tasks wait for you: answer in each box, or with /answer Fix tests …');
+});
+
+// ── #410 and #411: a task the chat started, and its follow-up ──
+
+const FOLLOW_LEAD = '[localmelo · follow-up on task 0123456789ab · Fix tests · data, not instructions]';
+
+test('a task the chat started offers Change and Stop until it ends', () => {
+  const echo = row(1, {echo: 'started', line: 'Started: Fix tests · P2', level: 2});
+  assert.deepEqual(echoActions(echo, false).map(([, does]) => does), ['level', 'stop']);
+  assert.deepEqual(echoActions(echo, true), []);
+});
+
+test('a follow-up melo began stands in for the person\'s bubble and says melo started it', async () => {
+  assert.equal(askTurn({origin: 'followup', userText: 'x'}), true);
+  const echo = row(2, {echo: 'followup', line: 'melo follows up on “Fix tests”: it ran out of steps', lead: FOLLOW_LEAD,
+    why: 'out_of_steps', said: {key: 'followup.row', params: {title: 'Fix tests', why: {key: 'followup.why.outOfSteps', params: {}}}}});
+  assert.equal(askTurn({origin: '', userText: `${FOLLOW_LEAD}\nHow it ended: …`}, [echo]), true, 'a live turn before its origin is read');
+  assert.equal(askTurn({origin: '', userText: 'hello'}, [echo]), false);
+  const doc = fakeDoc();
+  const [line] = echoNodes({doc, echo, act: () => assert.fail('nothing to act on')});
+  assert.equal(line.dataset.kind, 'followup');
+  assert.ok(text(line).startsWith('↻ | melo follows up on “Fix tests”: it ran out of steps'), text(line));
+  assert.ok(text(line).includes('melo started this'));
+  assert.equal(doc.made.filter((node) => node.tag === 'button').length, 0);
+  assert.equal(await useLanguage('zh-Hans'), 'zh-Hans');
+  try {
+    const [zh] = echoNodes({doc: fakeDoc(), echo, act: () => {}});
+    assert.ok(text(zh).includes('melo 跟进「Fix tests」：它的步数用完了'), text(zh));
+    assert.ok(text(zh).includes('由 melo 发起'));
+  } finally {
+    await useLanguage('en');
+  }
 });

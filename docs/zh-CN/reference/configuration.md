@@ -73,6 +73,11 @@ chat_model = "qwen3:8b"
 | `recall_chars` | `[memory]` | `900` | 用于比较的开发者设置。该召回块的字符数上限，200 到 8000；放进去会超出上限的条目会被略去。没有召回任何内容、只带有 melo 记下了什么的那几行的块不会被截断。`-X memory.recall_chars=4000` 只对一次运行生效。 |
 | `recall_notes` | `[memory]` | `"on"` | 用于比较的开发者设置。`"off"`：召回块里没有笔记，提示里也不置顶任何笔记，因此只召回以前的对话轮次，也不会因为某条笔记而认定某一轮已被取代。`remember` 工具、搜索工具和记忆页不变。`-X memory.recall_notes=off` 只对一次运行生效。 |
 | `search_when_empty` | `[memory]` | `"off"` | 用于比较的开发者设置。`"hint"`：当召回块没有为某条消息召回任何条目时，块里带有一行固定的话（如果有 melo 记下了什么的几行，则放在其后），说明没有匹配的内容，并告诉模型：如果消息问的是这个人或以前说过的事，先调用记忆搜索工具；搜索也没有结果就说不知道。代码不判断消息，由模型决定。这一轮的 `turn.memory` 事件里会有 `search_hint: true`。`-X memory.search_when_empty=hint` 只对一次运行生效。见[跨对话记忆](../concepts/memory.md#memory-across-chats)。 |
+| `recall_min_cosine` | `[memory]` | `0.55` | 用于比较的开发者设置。一条笔记或对话轮次要靠语义被召回，在语义上至少要有多相近（余弦值，0.20 到 0.95），召回块和记忆搜索工具都按它来；数值越低，放进来的越多，条目仍可以靠字词被召回。默认值就是召回一直以来用的门槛。`-X memory.recall_min_cosine=0.45` 只对一次运行生效。 |
+| `recall_min_coverage` | `[memory]` | `0.6` | 用于比较的开发者设置。一条笔记或对话轮次要靠字词被召回，至少要包含消息中实词的多大比例（0.10 到 1.00），召回块和记忆搜索工具都按它来；数值越低，放进来的越多，条目仍可以靠语义被召回。默认值就是召回一直以来用的门槛。`-X memory.recall_min_coverage=0.4` 只对一次运行生效。 |
+| `recall_item_chars` | `[memory]` | `200` | 用于比较的开发者设置。一条被召回的对话轮次占用的字符数，120 到 2000：用户的话和 melo 的回复合计，召回块和记忆搜索工具的列表都按它来（不是对话轮次的文本，例如对话摘要，占用此数再加 40）。默认值就是一轮对话一直以来的篇幅；更大的数值会显示更多内容，而召回块仍然遵守 `recall_chars`，放不下的条目会被略去。`-X memory.recall_item_chars=800` 只对一次运行生效。 |
+| `recall_excerpt` | `[memory]` | `"head"` | 用于比较的开发者设置。被召回的对话轮次放不进 `recall_item_chars` 时显示哪一部分：`"head"` 是每一部分的开头，一直如此；`"match"` 对每一部分（用户的话、melo 的回复）显示包含消息中最多实词的那些句子，省略的地方用 `…` 表示。用户的话能放进篇幅的 40% 时保持完整，没有任何匹配词的部分显示开头，网页和召回条目的 JSON 不变。`-X memory.recall_excerpt=match` 只对一次运行生效。 |
+| `project_instructions` | `[memory]` | `"on"` | `"on"`：你发起的任务或已保存的例行任务，在开始时读取项目自己的说明文件：它所在文件夹以及上面每一级文件夹（直到你的主目录）里，`AGENTS.md`、`CLAUDE.md`、`GEMINI.md` 中第一个存在的，最近的在前，最多三个文件、6,000 个字符，只读，并去掉机密内容。它们放在上下文包之后，用单独的标题，永远排在你的话、melo 的规则和审批之后。`"off"`：什么都不读。只有 `"off"` 时才会保存；`-X memory.project_instructions=off` 只对一次运行生效。见[任务读取项目自己的说明文件](../concepts/memory.md#a-task-reads-its-projects-own-instruction-file)。 |
 | `admit_on_outcome` | `[memory]` | `false` | R6-lite：只在运行结束时准入最后一次尝试的摘要，并在其来源中带上最终状态。`--admit-on-outcome` 旗标对一次运行优先；直接模式会读这张表，交互式界面和网关不读，且在 `legacy` 中被接受但不生效。 |
 | `api_key_env` | 云端后端 | 未设置 | 保存 API 密钥的环境变量名称。 |
 | `base_url` | 云端后端 | 厂商的 URL | API 的 URL。 |
@@ -94,6 +99,7 @@ chat_model = "qwen3:8b"
 | `policy` | `[scheduler]` | `"off"` | 网页工作区的调用如何到达模型服务器：`off` 只记录，`fcfs` 先到先得，`class` 让 P1 先于 P2 得到准入（依此类推）；见[调度器](../guides/scheduler.md#the-gate-on-chats-s2)。 |
 | `driver` | `[browser]` | `"off"` | melo 是否可以在浏览器中读取网页：`off` 不提供浏览工具；`safari-automation` 为终端对话以及网页控制台和 App 的每个对话提供八个只读工具，在 Safari 的自动化窗口中打开网页（每个网站每次对话询问一次；见[用 melo 浏览网页](../guides/browsing.md)）。终端中用 `/browser` 切换；`-X browser.driver=safari-automation` 仅用于一次运行。直接运行、worker 运行和已保存的任务从不获得这些工具。其他任何值都是配置错误。 |
 | `web_fetch` | `[tools]` | `true` | 对话和任务是否可以用 `web_fetch` 工具读取公开网页（只读；从不访问这台电脑或它所在的局域网；你自己最近的消息没有提到的网站每个对话问一次，与浏览器共用；见[工具](tools.md#reading-a-public-web-page)）。`false` 移除这个工具；设置 → 对话和文件夹 → **读取网页** 是同一个开关；`-X tools.web_fetch=off` 仅用于一次运行。直接运行从不获得它。不是布尔值的任何值都是配置错误。 |
+| `follow_up` | `[tasks]` | `true` | 对话开始的任务失败、步数用完、以**做完了，还没收尾**结束或需要你时，这个对话是否跟进：自己走一轮，把任务继续一次、绕开被拦下的步骤或问你一个问题，然后说明做完了什么（见[网页控制台](../guides/web-console.md#when-a-task-it-started-stops-the-chat-follows-up)）。`false` 只留下任务的卡片；设置 → 对话和文件夹 → **跟进任务**（开发者模式）是同一个开关；`-X tasks.follow_up=off` 仅用于一次运行。不是布尔值的任何值都是配置错误。 |
 | `n_srv` | `[scheduler]` | `8` | 模型服务器的槽位数。 |
 | `r_f` | `[scheduler]` | `1` | 为命令行和直接运行保留的槽位数；`n_srv <= 2` 时强制为 0。 |
 | `n_fg` | `[scheduler]` | `1` | 有聊天处于焦点时允许在途的后台调用数。 |
@@ -355,7 +361,7 @@ enable_thinking = false
 - 对 `ollama` 后端，这些字段进入 Ollama `/api/chat` 的请求体。localmelo 默认向 Ollama 请求模型的思考；`extra_body = { think = false }` 会关闭它。
 - `--base-url` 不读取配置文件，因此 `extra_body` 在那里不适用。
 
-驱动为 `off` 的 `[browser]` 表不会写入，`web_fetch` 为 `true` 的 `[tools]` 表也不会。
+驱动为 `off` 的 `[browser]` 表不会写入，`web_fetch` 为 `true` 的 `[tools]` 表和 `follow_up` 为 `true` 的 `[tasks]` 表也不会。
 
 <a id="mcp-servers"></a>
 

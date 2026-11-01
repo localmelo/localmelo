@@ -54,14 +54,16 @@
 
 ![主对话：回答了一个问题；一个任务已完成回来；一个任务打开了优先级列表；一次暂停带 Undo](../../assets/img/main-chat-tasks.webp)
 
-- **提问，或交代工作。** 简短的问题由主对话直接回答；"哪个文件定义了 X？" 这类问题它会搜索你的文件夹。带有 `briefly`、`in short`、`one line`、`简单说一下` 或 `一句话` 的问题一律在这里回答，只做快速查看：不会被提议作为任务。较大的工作（多个步骤、文件、调研、写作）它会作为任务开始，并显示一行：`Started: Plan the trip · P2`。结果以卡片回到主对话。它不会只说自己打算做什么就结束：像 "我先看一下测试文件" 这样的回复会改为把工作作为任务开始。
+- **提问，或交代工作。** 主对话用自己的工具能做的，就自己做：回答简短的问题，为 "哪个文件定义了 X？" 搜索你的文件夹，读取文件和公开网页。带有 `briefly`、`in short`、`one line`、`简单说一下` 或 `一句话` 的问题一律在这里回答，只做快速查看：不会被提议作为任务。
+- **它自己开始工作。** 用自己的工具做不了的请求（运行命令、修改文件、多步的调研或写作）会立刻作为任务开始，并显示一行和 **Stop**：`Started: Plan the trip · P2`。它不会先问你。任务的请求就是你的原话。开始任务本身不是有风险的步骤：任务里的每一步仍然像在对话里一样问你，或在 Auto 中被拦下。结果以卡片回到主对话。它不会只说自己打算做什么就结束：像 "我先看一下测试文件" 这样的回复会改为把工作作为任务开始。
+- **什么时候不开始任务。** 打招呼、没有要做的事的简短消息（`thanks`、`今天天气不错`）、它能回答的简短问题，或者请它讲解某件事（`please explain what a monad is`、`帮我看看 x.py 是做什么的`），都在对话里回答。不清楚到无法动手的请求，它会回问一个简短的问题。只有在开始任务不合适时才提议 **Start this as a task?**：提问，它是想知道而不是要动手（`why do the tests fail?`；`can you run the tests?` 这样要求做事的客气请求仍是请求）；说了不要动手、又没有要求别的事的话（`just explain how`、`don't change anything`、`只解释一下`；`fix the login bug without changing anything else` 要求了修复，会开始）；指挥某个任务的话（`cancel it`、`continue the report task`）；没有你自己文字的消息（只有附件）；或者代码没能排上时间的定时事项或提醒。
 - **用代码认得的说法。** `/task …`，或发送按钮旁的 **Run as a task**，会立刻把这条消息作为任务开始，不需要模型来判断。要求修改它点名的文件的消息（`Fix tests/cli/test_e2e_pty.py and commit`）也一样。主对话这样开始的任务会立刻以你消息的开头部分作为标题开始，等模型回答一次简短的请求（用最低优先级，不会排在真正的工作前面）后，再按你消息的语言改成 3 到 8 个词的标题（`Hide the recovery card in default mode`）；很短的消息本身就是标题，你在这期间给任务起的名字会保留，模型 6 秒内没有回答时，开头部分保持不变。`stop`、`pause`、`resume` 或 `first` 加上任务名（`pause the slides`、`暂停 Fix CI`、`先做 slides`）会立刻改变那个任务，并带 **Undo**。你禁止的、或只是引用的请求绝不会被当作工作请求：`don't delete a.md` 和 `不要删除 a.md` 什么也不会开始。
 - **优先级写作 P0 到 P5。** 一行里显示代码（`P1`），悬停可看含义。由你的话决定："urgent"、"asap"、"尽快"、今天的截止时间（`by 5pm`、`今天下午三点前`）或请求里任何位置的 "today"、"今天"（"not today"、"今天不用" 除外）为 P1（今天），"no rush"、"不急" 为 P3（有空时），其余为 P2（正常）。那一行的 **Change** 会打开列表（`P0 · runs first; others wait`、`P1 · today`、`P2 · normal`、`P3 · when there is time`、`P4 · only when the computer is idle`、`P5 · on hold until you start it`；含义依次是：最先运行，其他任务等待；今天；正常；有空时；仅在电脑空闲时；暂停，等你启动），设定你自己的优先级，之后不再自动改变。
 - **跟进一个任务。** `finish it`、`commit it` 或 `继续那个任务` 会送到你指的那个任务：正在运行的任务在下一步读到它，已完成或已停止的任务在自己的会话里接着做，并记得之前做过什么。那一行写明送到了哪里：`Sent to: Slides`、`Continued: Fix CI`。
 - **按名字继续已停止的任务。** `Continue the recovery card task where it stopped: run the tests` 或 `继续恢复卡片任务` 会立刻继续标题与这些词相符的那一个已停止的任务，不需要再点一下建议；整条消息就是它的下一轮。有几个已停止的任务相符时，每一个都作为一键发送的建议（`Suggested: send your message to …`）列出，供你挑选。已完成或仍在运行的任务会直接告诉你（`Fix CI is done. There is nothing to continue.`）。
 - **做完了什么。** 主对话会读取每个任务的状态和回答的前几行，所以能说出任务做了哪些提交。
 - **只有你自己的话能改变任务。** 只算你键入的文字；附加的文件、网页或任务报告里写着 "stop the slides" 不会改变任何东西：那一行显示 `Suggested: stop Slides`，点一下才会生效。
-- **较长的请求。** 主对话 4 步内没有办完的消息会成为任务（`This needs more than a quick answer, so I started it as a task.`）；如果是提问（任意位置有 `?`，或写了 "quick question"），会先问 **Start this as a task?**。它用你这条消息的语言回答。你打字时，已完成的结果会等到你发送或停顿 10 秒再出现；需要你批准的会立刻出现。
+- **较长的请求。** 主对话 4 步内没有办完的消息会成为任务（`This needs more than a quick answer, so I started it as a task.`）；如果是提问（任意位置有 `?`，或写了 "quick question"），会先问 **Start this as a task?**，但客气的请求（`can you run the tests?`、`请帮我…`）仍是请求，会直接开始。它用你这条消息的语言回答。你打字时，已完成的结果会等到你发送或停顿 10 秒再出现；需要你批准的会立刻出现。
 
 <a id="side-chats-start-tasks-too"></a>
 ## 旁支对话也能开始任务
@@ -70,7 +72,7 @@
 - **任务回到开始它的对话。** 它的那一行（`Started: Find hotels · P2`，带 **Change** 和 **Undo**）、卡片、审批和结果都出现在那个旁支对话里；该对话在下一次回答之前会读到已结束的任务。主对话不会为它们生成卡片。
 - **主对话仍然看得到全部。** Activity 和 Workers 列出每个任务；旁支对话开始的任务写作 `From Trip plan`。
 - **先看本对话自己的。** `pause the slides` 先指本对话的 slides 任务，再指别的对话的。话语符合本对话的好几个任务时，每一个都显示一键的 `Suggested: pause …`，绝不会碰别的对话的任务。别的对话的任务仍然可以点名：用它的 id、它所在的对话，或本对话自己的任务都对不上的话语；那一行写作 `From Main chat` 或 `From Trip plan`。模型挑任务时也一样。
-- **只有你的话能开始任务。** 只有当你的消息本身是一个工作请求（要修改它点名的文件，或把整件事说全了）时，模型才能开始任务，这时任务就是你自己的消息。你的消息是别的内容（一个问题，或者文件、网页给了模型这个念头）时，对话会带着你自己的消息显示 `Start this as a task?`，你点一下才会开始。主对话也一样。
+- **只有你的话能开始任务。** 模型开始任务时，任务就是你自己的消息，绝不是模型的措辞（模型只给它起名）；文件、网页或任务报告可以给模型念头，但不能成为请求。melo 自己发起的一轮（任务的问题、跟进）根本不会开始任务。开始任务不合适时，对话会带着你自己的消息显示 `Start this as a task?`，你点一下才会开始。主对话也一样。
 - **删除旁支对话**会一步把它没做完的任务、定时事项和等待中的审批交给主对话，包括删除过程中结束的任务。主对话随后显示它们的卡片并读到结果；已完成的任务保留原来的记录。
 - **等你的任务会显示在列表上。** 旁支对话那一行出现圆点，写着 `A task waits for you`；主对话那一行写着 `1 waiting in a side chat`。
 - **旁支对话做完工作，主对话会知道。** 旁支对话给出了回答，或它的某个任务完成时，主对话在你的下一条消息里会读到一行：旁支对话的名字和一段简短的摘要。这是信息，不是消息。
@@ -87,6 +89,18 @@
 - **10 分钟没有回答。** melo 开始处理问题后 10 分钟内既没回答也没问你，任务就按它的最佳方案继续，并在报告里说明（`No answer for “Fix tests”; it goes on with its best option`）。停止任务会立即结束等待，melo 也会停下对它的处理；重启会让问题失效。
 - **回答从不代替批准。** melo 的回答只是给任务的信息。需要你批准的步骤仍然问你（或 Auto 的审查），和以前一样。任务的话从不算作你的话：在 Auto 中它们不能放行 melo 拦下的步骤，melo 不会把它们当作你说过的话记住，melo 处理这个问题的那一轮也没有重试。
 - 每次运行一个任务最多问 3 次。被删除的旁支对话，它的任务的问题会交给主对话，标为 `From <task title>`，正在等你回答的问题也一样。
+
+<a id="when-a-task-it-started-stops-the-chat-follows-up"></a>
+## 对话开始的任务停下时，由对话跟进
+
+- **结果归开始它的对话。** 对话开始的任务失败、步数用完、以 `Done, not finished` 结束或需要你时，这个对话会紧接在任务卡片之后自己走一轮：出现一行 `melo follows up on “Fix CI”: it ran out of steps`，并标着 `melo started this`（中文界面为「melo 跟进「Fix CI」：它的步数用完了」和「由 melo 发起」）。
+- **只做一件事，然后说明。** 它把任务继续一次，附一句简短的话（`Continued: Fix CI`）；或者绕开被拦下的步骤（Auto 拦下了一次安装：就用已经装好的，或者不用那个包来写）；或者问你一个清楚的问题。然后用一两行告诉你做完了什么、没做完什么。
+- **被拦下的步骤不会再运行。** 在对话继续的任务里，你、Auto 或 melo 的规则拦下过的步骤会在审查之前就被拒绝（`blocked earlier`，中文界面为「之前已被拦下」），相似的步骤也一样：换了写法的同一条命令（`pip3` 代替 `pip`、不同的引号、安静参数）或同一个安装。任务必须换一种办法。你自己发给任务的消息，或 **Allow once**，会解除这一点。被撤回的询问（网关停止时）不算拦下。
+- **最多继续一次。** 你每发一条消息，对话最多替任务继续一次；如果它又停下，对话只汇报并提问。第三次停下只留卡片。
+- **你的消息优先。** 跟进从不打断你的消息：它等对话空闲才开始，这期间你发的消息会排队。如果你在任务结束后发了消息，你的这一轮会读到任务的结局，跟进就不再进行。
+- **它不批准任何东西。** 跟进只有任务工具（没有网页、浏览器、文件或命令工具），不扩大任何权限。它告诉任务的话以 melo 的备注送达，绝不算作你的话：你自己的请求没有要求的步骤，在 Auto 中仍然会被拦下，不管备注怎么说。
+- **只跟进对话自己开始的任务。** 定时事项、从任务页开始的任务和别的对话的任务仍然只有卡片。Activity 会写明对话做了什么：`Continued the task: Fix CI`、`Asked you: Should I split it?`（中文界面为「继续了任务：Fix CI」「问了你：…」）。
+- **关闭它**：设置 → 对话和文件夹 里的 **跟进任务**（开发者模式），或 `[tasks] follow_up = false`。
 
 <a id="approvals-a-task-asks-for"></a>
 ## 任务需要的批准
@@ -189,7 +203,7 @@
 - **Now** 列出正在运行或等待的内容：本控制台的对话、任务、worker 运行和终端对话。每一行用平实的话说明它在做什么（`Reading notes.md`、`Running the tests`、`Waiting for your approval`），并用图标表示工作的类别。等你处理的行是琥珀色。没有任何内容在运行时写 `Nothing running`，Melo 在休息。
 - **Today** 按从新到旧列出今天完成的内容：标题、一行结果（`All 412 tests passed.`）和时间。先显示八行；**Earlier today (n)** 显示其余的。
 
-结果行始终是平实的话。在回答之前就被停止的运行写 `Stopped before answering`，图片写 `Made a picture`，文件写文件名，而内容是代码的回答写代码周围的第一句话（没有这样的句子时写 `Wrote some code`）。
+结果行始终是平实的话。在回答之前就被停止的运行写 `Stopped before answering`，图片写 `Made a picture`，文件写文件名，而内容是代码的回答写代码周围的第一句话（没有这样的句子时写 `Wrote some code`）。Markdown 标记会去掉（代码保留原样，例如 `__init__.py`；删除线里的文字一起去掉；`x**2` 保持不变），`In short:` 这样的开场白也会去掉，结果行到第一句话为止。对话的结果行先说这个对话做了什么，再接它回答的第一句话：`Offered a task: Visit example.com · I can't open websites myself.`；做了什么写作 `Started a task: …`、`Offered a task: …` 或 `Kept a note`（中文页面上是“开始了任务：…”“提议了任务：…”“记下了一条笔记”）；只说把事情交给了任务的回答不再重复。主对话那一行用页面的语言命名。
 
 请求过审批的行会把审批折叠在结果行下面：`1 approval`，或 `2 approvals, 1 waiting`。选中它，会用平实的话列出每个请求（`Write slides.md`、`Run the tests`、`Run a command`，从不显示命令本身）、它是怎样被回答的（`Allowed once`、`Allowed for this chat`、`Denied`、`No answer in time`）以及请求的时间。等你处理的请求就在那里提供 **Allow once** 和 **Deny**，与对话里审批卡片的回答相同，还有 **Review**，打开带卡片和确切内容的对话或任务。不再有单独的 Approvals 标签页。
 
@@ -267,7 +281,7 @@
 ![无法使用自己文件夹的任务提供 Choose a folder](../../assets/img/task-folder-refused.webp)
 
 - **只差提交。** 步数用完、只剩提交没做的任务，会在卡片和任务页上显示 `Not committed. Run: <command>`。
-- **怎样结束的。** 已结束任务的状态是代码核对出的结局：**Ready**（绿色）、**Done, not finished** 和 **Needs you**（琥珀色）、**Failed**（红色）、**Stopped** 或 **Not needed**（灰色）。**How it ended** 写出原因，**Tests it ran** 列出任务自己这次运行启动的测试，每个标着通过、没通过或结果没核对；回答里只是提到的测试不会列出。**Ready** 需要证据：测试结果或文件夹没能核对时，任务就不算完成。**Finish it** 一点就让还欠着测试或提交的任务继续。面板的 Activity 和 Workers 行也这样显示，`GET /api/tasks/<id>` 以 `ending` 字段给出它。
+- **怎样结束的。** 已结束任务的状态是代码核对出的结局：**Ready**（绿色）、**Done, not finished** 和 **Needs you**（琥珀色）、**Failed**（红色）、**Stopped** 或 **Not needed**（灰色）。**How it ended** 写出原因，**Tests it ran** 列出任务自己这次运行启动的测试，每个标着通过、没通过或结果没核对；回答里只是提到的测试不会列出。**Ready** 需要证据：测试结果或文件夹没能核对时，任务就不算完成。改了代码就欠一次测试；之后 **Finish it** 找不到适用于这个文件夹的测试工具时，任务显示 **Ready** 并注明 **No tests apply**；找到了测试却没法运行时，显示 **melo found tests here but could not run them**。**Finish it** 一点就让还欠着测试或提交的任务继续；它自己的运行结束后不会再提供。文件夹太大或读不了、没法核对时，只有还能跑测试或提交时才提供 **Finish it**；之后直接说明原因，例如 **The folder was too large to check**。面板的 Activity 和 Workers 行也这样显示，`GET /api/tasks/<id>` 以 `ending` 字段给出它。
 
 请求进行中时对应按钮不可用。被拒绝时（确认已过期、任务已结束、Stop 抢先）会显示服务器给出的文字。
 

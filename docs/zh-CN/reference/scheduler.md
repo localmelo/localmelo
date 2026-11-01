@@ -107,6 +107,16 @@ Stop 总是获胜且始终可用。它与恢复在共享的停放身份上串行
 
 控制台的任务页面（`#/tasks/<id>`，显示在侧边面板里；所有任务的列表在 `#/tasks`）是上述路由的客户端：`GET /api/tasks`、`GET /api/tasks/{id}`、`POST /api/tasks/{id}/resume`，以及带 `{"state": "stop"}` 的 `PATCH /api/tasks/{id}`。它先不带令牌发送 Resume，只有收到 `confirmation_required` 时才打开确认对话框，然后用同一个 `operation_id` 带上 `details.confirmation_token` 重试。收到其他带状态的回答后，操作 id 会被丢弃，所以过期或被拒绝的尝试绝不会复用授权；网络失败后则保留它，所以重试不会启动第二个回合。已经开始但没有卡片的任务，或者收到 `missing_card` 拒绝时，Resume 会换成 **Start again as a new task**（用目标、标题、工作区和一个跨重试保留的请求键调用 `POST /api/tasks`）。恢复卡片用 `textContent` 渲染，从不作为 HTML。Stop 走任务 API，从不调用 `POST /api/turns/{id}/cancel`。
 
+<a id="a-chats-follow-up-on-its-tasks"></a>
+
+### 对话对自己任务的跟进
+
+对话根据你的消息开始的任务（`Front._start`，经由 `TaskWorkers.create_spec(chat_started=True)`）在会话的 `meta` 里带有 `started_by: "chat"`。`support/gateway/console/followups.py` 监听每个 `sched.finished`；在 `[tasks] follow_up` 打开时，任务步数用完、以 `draft`、`blocked` 或报告自称的 `failed` 结束，或以对话能处理的运行状态（`failed`、`gate_stopped`、`stuck`、`context_budget_exceeded`、`timeout`）失败时，会为拥有它的对话排一次跟进；定时事项的任务、来自 `POST /api/tasks` 的任务、Stop、被拒的文件夹、没能开始的继续，以及提供方或设置的失败都不会。`meta.followup` 记录 `person_turn`（这个对话里你最新一轮的 id）、`runs`、`continued` 和 `ending_at`：对你的同一轮，每个任务最多跟进两次，只有第一次可以继续它。
+
+跟进在对话的排队流程（`OwnerAsks`）里运行，排在你排队的消息和任务的问题之后，是一轮 origin 为 `followup`（`turns.origin`）的内部回合，键入文字为 `""`，请求以数据的形式给出（你的请求、任务最后的回答和被拦下的步骤都用新的随机 nonce 围起来，和网页一样）；一条 `followup` 类型的 `attention.echo` 代替它显示，在这一轮开始之后才写入（`turn_id`），另一条 `followed` 类型的记录 `did`（`continued`、`asked`、`reported`）。这一轮只提供任务工具。你最新的一轮（`latest_person_turn`）在任务结束之后才开始、任务又运行或又结束了、或设置被关闭时，跟进就跳过；同一个结局只看一次（每个任务一把锁）。
+
+`task_continue`（跟进唯一的动手方式）要求任务仍是结束时的样子（已结束，`finished_at` 相同），且 `meta.followup.continued` 仍为 false，并在发送之前就写上它。它调用 `TaskWorkers.message(automatic=True)`：只会继续已结束的任务（绝不回答它的问题，也不会送进正在运行的任务），卡片以 `NOTE_START` 开头，即 melo 的备注，作为数据读取。那一轮中步骤审查当作你的话来读的内容，仍是任务的 `user_words`，所以备注什么也不允许。继续之后才设置 `meta.followup_guard`；发给任务的其他任何消息都会清除它。带着这个标记的运行会把策略包在 `EarlierBlocks` 里。每次真正的拒绝（你的 Deny、Auto 的拦截、策略对这一步本身的拒绝；绝不是 `Withdrawal`，比如网关停止时撤回的询问）都记录 `approval.call_key`，即工具、文件夹和规整后的参数，以及 `approval.loose_keys`：相似的整串命令（空格、引号、用 `pip3` 或 `python -m pip` 代替 `pip`、安静参数），以及对安装而言的每个安装部分和每个安装（`install:pip:numpy`），所以组合步骤里其余的部分仍能运行。键相同、或有共同宽松键的调用会在任何审查之前被拒绝，origin 为 `policy`，并带 `approval.earlier`（谁拦下的）。之后你 Allow once 过的步骤会重新询问，与它相似的步骤也一样。
+
 <a id="import-bench-traces"></a>
 
 ## 导入 bench 轨迹

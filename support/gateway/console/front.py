@@ -77,7 +77,11 @@ from localmelo.support.gateway.chore_schedule import (
 from localmelo.support.gateway.chore_store import REMINDER_PREFIX, ChoreError
 from localmelo.support.gateway.finishing import is_out_of_steps
 from localmelo.support.gateway.front_rules import (
+    ASK_TEXT,
+    ASK_TEXT_ZH,
     FINISHED,
+    STARTED_TEXT,
+    STARTED_TEXT_ZH,
     TITLE_CHARS,
     TITLE_CHARS_ZH,
     Action,
@@ -99,6 +103,7 @@ from localmelo.support.gateway.front_rules import (
     reply_language,
     route,
     short_title,
+    start_rule,
     triage,
     work_request,
 )
@@ -123,7 +128,7 @@ from localmelo.support.sessions.store import (
 )
 from localmelo.support.task_cli import ending_words
 
-from .asks import ASK_ORIGIN, ASK_STEPS, PERSON_PARTS
+from .asks import ASK_ORIGIN, ASK_STEPS, FOLLOWUP_ORIGIN, PERSON_PARTS
 from .bodies import Body
 from .cards import CARD_EVENT, card_json, card_title
 from .errors import ApiError
@@ -145,26 +150,28 @@ SIDE_SUMMARY_EVENT: Final = "side.summary"
 FRONT_STEPS: Final = 4
 # A brief question's step cap: BRIEF_NOTE asks for one or two steps.
 BRIEF_STEPS: Final = 2
+# A follow-up turn's step cap (#411): look, continue once or ask, then report.
+FOLLOWUP_STEPS: Final = 4
 HANDOFF_STATUSES: Final = frozenset({"budget_exhausted", "stuck"})
-STARTED_TEXT: Final = "This needs more than a quick answer, so I started it as a task."
-ASK_TEXT: Final = "This needs more than a quick answer. Start this as a task?"
-STARTED_TEXT_ZH: Final = "这件事不是一句话能答完的，我已把它作为任务开始。"
-ASK_TEXT_ZH: Final = "这件事不是一句话能答完的。要把它作为任务开始吗？"
 # What the main chat is told about itself, after melo's identity.
 FRONT_TEXT: Final = (
-    "You are the main chat. Answer a question yourself when a step or two "
-    "does it: search_files finds where something is in the user's folder. "
-    "Work that changes files, runs commands or takes many steps goes to a "
-    "task with task_create; a follow-up on a task goes to it with "
-    "task_message. Never reply with only what you are about to do: do it, or "
-    "hand it to a task. Answer in the language of the user's latest message."
+    "You are the main chat. Do what you can with your own tools: search_files "
+    "finds where something is in the user's folder, and you can read files "
+    "and public web pages. When a request needs what you cannot do here "
+    "(running commands, changing files, many steps), start it with "
+    "task_create right away; do not ask whether to. Answer a question you "
+    "can answer, and ask one short question when a request is too unclear to "
+    "act on. A follow-up on a task goes to it with task_message. Never reply "
+    "with only what you are about to do: do it, or start the task. Answer in "
+    "the language of the user's latest message."
 )
 # What a side chat is told about itself, after melo's identity.
 SIDE_TEXT: Final = (
     "You are a side chat. Answer and work in this chat yourself. Work that takes "
-    "many steps or runs long can go to a task with task_create; a follow-up on a "
-    "task goes to it with task_message. A task you start reports back to this "
-    "chat. Answer in the language of the user's latest message."
+    "many steps or runs long can go to a task with task_create, started right "
+    "away; a follow-up on a task goes to it with task_message. A task you start "
+    "reports back to this chat. Answer in the language of the user's latest "
+    "message."
 )
 # What the main chat is told when the person asks to be answered briefly.
 BRIEF_NOTE: Final = (
@@ -233,6 +240,18 @@ _WHICH: Final = (
 _NOT_ASKED: Final = (
     "Not done: the user's words did not ask for this task. The user sees a one-tap "
     "Start this as a task? line instead; say so in one short sentence."
+)
+_ANSWER_HERE: Final = (
+    "Not done: this is a question or small talk you answer yourself in the chat; "
+    "no task starts for it. Answer it now, or ask one short question if it is unclear."
+)
+_NOT_PERSONS: Final = (
+    "Not done: only the user's own message starts a task, and this turn is not "
+    "one. Answer in the chat instead."
+)
+_IN_FOLLOWUP: Final = (
+    "Not done: while you follow up on a task, continue it once with task_continue, "
+    "or ask the user one clear question in your reply."
 )
 
 
@@ -376,10 +395,16 @@ class FrontAgent(Agent):
         turn = front.current_turn() if front is not None else None
         if turn is not None and turn.origin == ASK_ORIGIN:
             return await self.answer_ask(query, on_event=on_event, **kwargs)
+        if front is not None and turn is not None and turn.origin == FOLLOWUP_ORIGIN:
+            return await self.follow_up(query, on_event=on_event, **kwargs)
         if front is None or turn is None or on_event is None:
             return await super().run_task(query, on_event=on_event, **kwargs)
         words = turn.typed_text or turn.user_text
-        asks = is_question(turn.typed_text)
+        # What the chat could not settle is handed off as start_rule says: a
+        # request starts, anything else (a question, words that say not to act
+        # and ask nothing else) is offered. Words that are not typed (an
+        # attachment alone) are handed off as they are.
+        asks = bool(turn.typed_text.strip()) and start_rule(turn.typed_text) != "start"
         # A question that asks for a short answer is answered here, never handed off.
         quick = brief_question(turn.typed_text)
         handed: list[tuple[str, str, bool]] = []
@@ -470,6 +495,28 @@ class FrontAgent(Agent):
         finally:
             self.options = saved
 
+    async def follow_up(self, query: str, **kwargs: Any) -> RunResult:
+        """The chat's follow-up on a task it started that stopped (#411).
+
+        At most FOLLOWUP_STEPS steps, never handed off and no news: the
+        request carries the task's ending, which the next turn's news does not
+        tell again. Only the task tools are offered (no web, browser, file or
+        shell tool), and the executor refuses any other.
+        """
+        keep = {definition.name for definition in TASK_TOOLS}
+        hidden = {tool.name for tool in self.hippo.list_tools()} - keep
+        kwargs["hide_tools"] = tuple(
+            sorted(set(kwargs.get("hide_tools") or ()) | hidden)
+        )
+        saved = self.options
+        self.options = dataclasses.replace(
+            saved, max_steps=FOLLOWUP_STEPS, answer_on_stop=True
+        )
+        try:
+            return await Agent.run_task(self, query, **kwargs)
+        finally:
+            self.options = saved
+
 
 class SideAgent(FrontAgent):
     """A side chat's Agent: the full agent loop with the task tools, and its tasks' news.
@@ -486,6 +533,8 @@ class SideAgent(FrontAgent):
         turn = self.front.current_turn() if self.front is not None else None
         if turn is not None and turn.origin == ASK_ORIGIN:
             return await self.answer_ask(query, on_event=on_event, **kwargs)
+        if turn is not None and turn.origin == FOLLOWUP_ORIGIN:
+            return await self.follow_up(query, on_event=on_event, **kwargs)
         news = ""
         if self.front is not None:
             try:
@@ -554,9 +603,11 @@ _ID: Final = {"type": "string", "description": "The task's id, from task_list."}
 TASK_TOOLS: Final = (
     _tool(
         "task_create",
-        "Start a task for work that needs more than a quick answer: several steps, "
-        "files, research or writing. It runs in the background and its result comes "
-        "back to this chat. Code sets its priority from the user's own words.",
+        "Start a task right away for a request you cannot do with your own tools: "
+        "running commands, changing files, or many steps of research or writing. It "
+        "runs in the background, its steps ask or are blocked as this chat's Ask or "
+        "Auto says, and its result comes back to this chat. The user's own message "
+        "is its request; code sets its priority from their words.",
         {
             "title": {"type": "string", "description": TITLE_HINT},
             "objective": {
@@ -612,6 +663,19 @@ TASK_TOOLS: Final = (
         "question is the exact question. The task waits for the user's reply.",
         {"task_id": _ID, **{name: {"type": "string"} for name in PERSON_PARTS}},
     ),
+    _tool(
+        "task_continue",
+        "Only while you follow up on a task that stopped: continue it once with a "
+        "short message of your own, such as what is left to do, or another way that "
+        "needs none of the blocked steps.",
+        {
+            "task_id": _ID,
+            "message": {
+                "type": "string",
+                "description": "What the task does next, in one to three sentences.",
+            },
+        },
+    ),
 )
 
 
@@ -635,6 +699,7 @@ class TaskTools(BaseToolProvider):
             "task_message": self.message,
             "task_answer": self.answer_task,
             "ask_person": self.ask_person,
+            "task_continue": self.continue_task,
         }
         return [
             ProvidedTool(definition=d, function=functions[d.name]) for d in TASK_TOOLS
@@ -653,21 +718,33 @@ class TaskTools(BaseToolProvider):
                 "Not done: a task's question starts no task; answer it with "
                 "task_answer, or ask the user with ask_person."
             )
+        if turn.origin:
+            # A turn melo began itself (a follow-up) never starts a task: its
+            # text is melo's, not the person's.
+            return _NOT_PERSONS
         if front.made.get(turn.id, 0) >= TASKS_PER_TURN:
             return (
                 "Not done: one task per message. Tell the user what else could start."
             )
-        # Only the person's own words start a task. A message code reads as a work
-        # request starts it as it is: the person's message is the objective, the
-        # model's title only names it, and the model's own objective rides along
-        # as its reading, data and not instructions. Anything else is offered.
+        # Only the person's own words start a task (#410). A request starts it at
+        # once: the person's message is the objective and the model's title only
+        # names it. A question code answers, or small talk,
+        # starts nothing; words that say not to act, or that code read as
+        # something else, are offered (front_rules.start_rule).
         typed = front.typed()
-        if route(typed).route not in ("delegate", "work"):
+        rule = start_rule(typed)
+        if rule == "answer":
+            return _ANSWER_HERE
+        if rule == "offer":
             await front.ask_to_start(turn)
             return _NOT_ASKED
+        # The model's reading rides along only where code read the words as
+        # work it hands over as they are (/task, a change to named files); any
+        # other start is the person's words alone, the model's title naming it.
         reading = str(objective).strip()[:READING_CHARS]
         work = turn.user_text
-        if reading and norm(reading) != norm(work):
+        carries = route(typed).route in ("delegate", "work")
+        if carries and reading and norm(reading) != norm(work):
             work = f"{work}\n\n{READING_HEAD}\n{reading}"
         echo = await front.delegate(work, typed=typed, title=str(title), turn=turn)
         if echo.get("echo") != "started":
@@ -709,6 +786,8 @@ class TaskTools(BaseToolProvider):
 
     async def set_priority(self, task_id: str = "", level: str = "", **_: Any) -> str:
         front = self._front
+        if front.following():
+            return _IN_FOLLOWUP
         record = await front.record(str(task_id))
         number = level_number(level)
         if record is None or number is None:
@@ -728,6 +807,8 @@ class TaskTools(BaseToolProvider):
 
     async def control(self, task_id: str = "", action: str = "", **_: Any) -> str:
         front = self._front
+        if front.following():
+            return _IN_FOLLOWUP
         record = await front.record(str(task_id))
         if record is None or action not in _DONE_WORDS:
             return "Not done: name a task from task_list and stop, pause or resume."
@@ -744,6 +825,8 @@ class TaskTools(BaseToolProvider):
 
     async def message(self, task_id: str = "", **_: Any) -> str:
         front = self._front
+        if front.following():
+            return _IN_FOLLOWUP
         record = await front.record(str(task_id))
         if record is None:
             return f"No task has id {task_id}."
@@ -777,8 +860,16 @@ class TaskTools(BaseToolProvider):
         return await asks.answer(self._front, str(task_id), str(answer))
 
     async def ask_person(self, task_id: str = "", **parts: Any) -> str:
+        if self._front.following():
+            return _IN_FOLLOWUP
         asks = self._front.console.asks
         return await asks.ask_person(self._front, str(task_id), parts)
+
+    async def continue_task(
+        self, task_id: str = "", message: str = "", **_: Any
+    ) -> str:
+        followups = self._front.console.followups
+        return await followups.continue_task(self._front, str(task_id), str(message))
 
 
 def _live_lines(front: Front, task_id: str) -> list[str]:
@@ -957,6 +1048,17 @@ class Front:
         chat = self.chat_id
         entry = self.console.sessions.get(chat) if chat is not None else None
         return entry.runner.current_turn if entry is not None else None
+
+    def following(self) -> bool:
+        """Whether this chat's running turn is its follow-up on a task that stopped (#411)."""
+        turn = self.current_turn()
+        return turn is not None and turn.origin == FOLLOWUP_ORIGIN
+
+    async def mark_told(self, record: TaskRecord) -> None:
+        """*record*'s ending is told (a follow-up told it): the next turn's news leaves it out."""
+        await self._load()
+        self._told.add((record.task_id, record.finished_at or 0.0))
+        await self._keep_note()
 
     async def records(self) -> list[TaskRecord]:
         """Every task, each with the chat that owns it as things stand (a task of a chat that is gone is the main chat's)."""
@@ -1479,8 +1581,13 @@ class Front:
         create_key: str | None = None,
     ) -> dict[str, Any]:
         try:
+            # A task a chat starts is the chat's to follow up on (#411).
             task, repeated = await self.console.workers.create_spec(
-                spec, front_id=front_id, request_key=key, create_key=create_key
+                spec,
+                front_id=front_id,
+                request_key=key,
+                create_key=create_key,
+                chat_started=True,
             )
         except (TaskPolicyError, ValueError, TaskStoreError) as exc:
             return await self._failed(show, "front.echo.startFailed", problem=str(exc))
@@ -1523,11 +1630,14 @@ class Front:
         show: str | None = None,
         of: int | None = None,
         turn: TurnInfo | None = None,
+        automatic: bool = False,
     ) -> dict[str, Any]:
         """Send the person's *text* to *record*: read at its next step, or a new turn if it ended.
 
         The level of a task that continues comes from the person's own words
-        (*typed*) when they give one; else it keeps its own.
+        (*typed*) when they give one; else it keeps its own. *automatic*: the
+        text is the chat's own, in its follow-up on the task (#411), so the
+        task never runs a step that was blocked before.
         """
         level, why = triage(typed)
         try:
@@ -1536,6 +1646,7 @@ class Front:
                 text,
                 level=None if level == 2 else level,
                 reason=why,
+                automatic=automatic,
             )
         except (SessionStoreError, TaskPolicyError, ValueError, RuntimeError) as exc:
             return await self._failed(
@@ -1831,6 +1942,9 @@ class Front:
         record = await self.record(str(echo.get("task_id", "")))
         if record is None:
             raise ApiError(404, "not_found", t("front.echo.gone"))
+        if do == "stop" and kind == "started":
+            # The Stop of a task the chat started (#410): the person's own tap.
+            return await self.control(_ref(record), "stop", of=echo_id)
         if do == "level" and kind in ("started", "level"):
             number = level_number(level)
             if number is None:
@@ -2003,7 +2117,16 @@ def _plain(exc: Exception) -> str:
 
 class EchoAction(Body):
     do: Literal[
-        "undo", "apply", "start", "level", "save", "once", "cancel", "reply", "revoke"
+        "undo",
+        "apply",
+        "start",
+        "level",
+        "save",
+        "once",
+        "cancel",
+        "reply",
+        "revoke",
+        "stop",
     ]
     level: str | int | None = None
     # A reply's words (``do: reply``, a task's question to the person).
@@ -2033,6 +2156,7 @@ __all__ = [
     "ASK_TEXT_ZH",
     "BRIEF_STEPS",
     "ECHO_EVENT",
+    "FOLLOWUP_STEPS",
     "FRONT_STEPS",
     "FRONT_TEXT",
     "STARTED_TEXT",

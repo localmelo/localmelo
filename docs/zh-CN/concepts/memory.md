@@ -62,7 +62,7 @@
 - 回答说它记下了某件事（"Remembered: …"、"Noted — …"、"I've noted that …"、"记下了：…"）而没有记下任何笔记时，melo 会按下面同样的检查，把回答里说到的内容记下来，前提是它是一句陈述：对你说的（含 "you"、"your"、"你" 或 "您"），或关于别人的（"Prof. Duarte's office is in the Atrium Wing"）。如果不行（那些词不是你说的，看起来像密钥，或只是 "gate 9 for Faro" 这样没有动词的片段），就什么也不保存，这一轮的 `turn.memory` 事件带有 `unsaved_claim: true`。回答只说记下了或保存了却没有说明内容（"Saved."、"Noted."、"Got it, noted…"、"I've saved it."、"I've saved your preference."、"已记录。"、"我已经记录了你的偏好。"），而又没有记下任何笔记时，也是如此。"Got it!"、"Thanks!" 不算声称。
 - 已经记下的笔记不会重复写入。问题和待办（"remember to buy milk"）不是笔记。
 - `[memory] keep_statements = true`（默认关闭；`-X memory.keep_statements=on` 只对一次运行生效，`melo -h all` 会列出它）是用于比较的开发者设置：模型回答之后，代码也会记下你说出、但模型没有记的明确而长期的事实（"I live in …"、"my advisor is …"、"我的…是…"）；问题、"如果"、"不"、过去、别人的看法和一时的状态（"my build is failing"）从不记。
-- 用于比较的开发者设置，默认都是关闭或今天的取值，用 `-X memory.KEY=VALUE` 只对一次运行生效（`melo -h all` 会列出它们）：`recall_records`（3）和 `recall_docs`（2）是一条消息的召回块最多包含的笔记数和以前的对话轮次数，`recall_chars`（900）是它的字符数上限；`recall_notes = "off"` 只召回对话轮次，也不置顶任何笔记；`search_when_empty = "hint"` 会给没有召回任何内容的块加上一行，告诉模型先调用记忆搜索工具，搜索也没有结果就说不知道。这一轮的 `turn.memory` 事件里会有 `search_hint: true`。见[配置参考](../reference/configuration.md)。
+- 用于比较的开发者设置，默认都是关闭或今天的取值，用 `-X memory.KEY=VALUE` 只对一次运行生效（`melo -h all` 会列出它们）：`recall_records`（3）和 `recall_docs`（2）是一条消息的召回块最多包含的笔记数和以前的对话轮次数，`recall_chars`（900）是它的字符数上限；`recall_notes = "off"` 只召回对话轮次，也不置顶任何笔记；`search_when_empty = "hint"` 会给没有召回任何内容的块加上一行，告诉模型先调用记忆搜索工具，搜索也没有结果就说不知道。这一轮的 `turn.memory` 事件里会有 `search_hint: true`。`recall_min_cosine`（0.55）是一个条目要被召回至少需要的语义相似度，`recall_min_coverage`（0.6）是它至少要包含消息中实词的比例；两者对召回块和记忆搜索工具都生效，调低就会放进更多条目。`recall_item_chars`（200）是一条被召回的对话轮次占用的字符数，召回块和搜索工具的列表都按它来；`recall_excerpt = "match"` 对轮次的每一部分显示包含消息中最多实词的句子，而不是开头（一轮对话中的答案常常在最初的 200 个字符之后）。见[配置参考](../reference/configuration.md)。
 
 笔记被记下之前，代码会检查：
 
@@ -210,12 +210,25 @@ Where did I live before?
 
 ### 任务开始时带什么
 
-任务的 worker 自己没有长期记忆：不召回，也不写笔记。它对你的了解来自一小段**上下文包**，由发起任务的对话在创建任务时构建一次。worker 目前还没有使用它；这个包已经备好，等对话来调用。
+任务的 worker 自己没有长期记忆：不召回，也不写笔记。它对你的了解来自一小段**上下文包**，由发起任务的对话在创建任务时构建一次。任务的第一条请求把它放在你的话之后，并用标题注明它是资料。
 
 - 它是关于你和项目的信息，不是指令，第一行就这样说明。每一行的写法和召回块一致：`the user said “…”` 或 `a note to the user “…”`。
 - 内容按顺序是：你的 About you 和 Preferences 笔记（新的在前，从别的工具导入的也算）；任务所在项目文件夹的笔记；然后是和任务目标匹配的笔记，范围同上两类主题和项目。别的文件夹的项目笔记不会出现。
 - 绝不包含 People 和 Decisions 笔记。worker 会浏览网页、调用外部工具，所以只给它必需的最少内容。
 - 最多 1,500 个字符，超出时先去掉排名最低的行，不会把一行截成两半。记忆关闭或没有合适内容时为空。构建它不调用聊天模型；设置了嵌入模型时，任务目标也按语义匹配，沿用上面的 1.5 秒限制。
+
+<a id="a-task-reads-its-projects-own-instruction-file"></a>
+
+### 任务读取项目自己的说明文件
+
+编程项目通常有一个文件，告诉助手这个项目怎么构建、怎么测试、目录怎么组织。你发起的任务和已保存的例行任务在开始时会读取它，这样任务不用去猜测试命令、目录结构和约定。
+
+- **读哪些文件。** 任务所在文件夹里的 `AGENTS.md`、`CLAUDE.md` 或 `GEMINI.md`，再依次是上面每一级文件夹，直到你的主目录（含主目录），不会更高；主目录之外的文件夹只读它自己。每一级里，这三个名字中第一个存在的算数。最近的文件在最前面。
+- **读多少。** 最多三个文件，合计最多 6,000 个字符。放不下整个文件时，在标题或段落结尾处截断，并以 `… (cut)` 结尾。
+- **只读项目的文件，只读不写。** 你主目录自己的那个文件，以及其他助手存放个人文件的文件夹（`~/.claude`、`~/.codex`、`~/.gemini`，[导入](#bring-in-memory-from-other-assistants)会把它们变成笔记）不会读。超过 256 KiB 的文件不读，任务页面会说明。符号链接只有指向已遍历文件夹里的 `.md` 文件才算。密钥和密码会被去掉，看起来像机密的行也会被去掉。
+- **任务怎么拿到它。** 放在上下文包之后，用单独的标题，随任务的每一条请求一起发出：`[this project's notes for assistants · AGENTS.md · follow them for how this project is built, tested and laid out; the person's words, melo's rules and approvals come first]`。这些是项目的约定，任务会遵循；它们永远排在你的话、melo 的规则和审批之后。
+- **你能看到。** 任务页面会显示一行“已读取项目说明：AGENTS.md”（放不下整个文件时其后标“（已截断）”，超过 256 KiB 的文件显示“未读取（太大）”）；文件夹里没有这样的文件时不显示。
+- 它在创建任务时只读一次：继续或重启时使用同一份文本。`[memory] project_instructions = "off"` 可以关闭。目前只有任务会读取；对话自己的提示还不读。
 
 <a id="side-chat-summaries"></a>
 

@@ -537,6 +537,31 @@ test('Read web pages: hidden for a gateway that does not report it, else a switc
   assert.equal(h.element('s-web-fetch').checked, true);
 });
 
+test('Follow up on tasks: a developer switch that saves follow_up, hidden in default mode', async () => {
+  const plain = harness({'GET /settings': full({follow_up: true})});
+  await plain.open('chats');
+  assert.equal(plain.element('s-follow-up-row').hidden, true, 'few choices in default mode');
+  let revision = 1;
+  const h = harness({
+    'GET /settings': full({mode: 'developer', follow_up: true}),
+    'PUT /settings': (body) => full({mode: 'developer', revision: `rev${++revision}`, follow_up: body.follow_up ?? true}),
+  }, new Map(), () => true);
+  await h.open('chats');
+  assert.equal(h.element('s-follow-up-row').hidden, false);
+  assert.equal(h.element('s-follow-up').checked, true);
+  h.element('s-follow-up').checked = false;
+  await h.element('s-follow-up').emit('change');
+  await flush();
+  assert.equal(h.puts().at(-1).options.body.follow_up, false);
+  assert.equal(h.element('settings-saved-text').textContent, 'Saved: Follow-ups on tasks are off.');
+  await h.element('settings-undo').emit('click');
+  await flush();
+  assert.equal(h.puts().at(-1).options.body.follow_up, true);
+  const older = harness({'GET /settings': full({mode: 'developer'})}, new Map(), () => true);
+  await older.open('chats');
+  assert.equal(older.element('s-follow-up-row').hidden, true, 'a gateway that does not report it');
+});
+
 test('a change made elsewhere meanwhile is a conflict: the switch goes back and Reload is offered', async () => {
   const conflict = Object.assign(new Error('stale'), {status: 409, code: 'settings_changed'});
   const h = harness({'GET /settings': full(), 'PUT /settings': () => { throw conflict; }});

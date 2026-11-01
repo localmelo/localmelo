@@ -75,6 +75,7 @@ _SCHEMA: Final = (
   card TEXT NOT NULL DEFAULT '',
   created_at REAL NOT NULL, started_at REAL, finished_at REAL,
   updated_at REAL NOT NULL, expires_at REAL, ending TEXT, work_base TEXT,
+  finishing TEXT,
   UNIQUE (origin, request_key))""",
     """CREATE TABLE IF NOT EXISTS task_deps (
   task_id TEXT NOT NULL, waits_on TEXT NOT NULL,
@@ -172,6 +173,7 @@ _TASK_COLUMNS: Final = (
     "updated_at",
     "expires_at",
     "ending",
+    "finishing",
 )
 _SELECT_TASK: Final = "SELECT " + ", ".join(_TASK_COLUMNS) + " FROM tasks"
 
@@ -230,6 +232,8 @@ class TaskRecord:
     expires_at: float | None
     # How its last run ended, as code decided it (``task_endings``), or None.
     ending: Mapping[str, Any] | None = None
+    # Its next run is Finish it's (``task_endings.finish_run``), until it ends.
+    finishing: bool = False
 
     @classmethod
     def from_row(cls, row: Sequence[Any]) -> TaskRecord:
@@ -247,6 +251,7 @@ def _json_columns(values: Mapping[str, Any]) -> dict[str, Any]:
         "pgids": tuple(json.loads(values["pgids"])),
         "level_pinned": bool(values["level_pinned"]),
         "ending": json.loads(values["ending"]) if values["ending"] else None,
+        "finishing": bool(values["finishing"]),
     }
 
 
@@ -442,9 +447,10 @@ class TaskStore:
 
     @staticmethod
     async def _ensure_ending_column(conn: Any) -> None:
-        """Keep each task's ending and owed baseline beside it (idempotent; older rows read None)."""
+        """Keep each task's ending, owed baseline and Finish it mark beside it
+        (idempotent; older rows read None)."""
         columns = {row[1] for row in await _rows(conn, "PRAGMA table_info(tasks)")}
-        for name in ("ending", "work_base"):
+        for name in ("ending", "work_base", "finishing"):
             if name not in columns:
                 await conn.execute(f"ALTER TABLE tasks ADD COLUMN {name} TEXT")
 
@@ -1455,9 +1461,10 @@ class TaskStore:
                 )
                 if ending is not None:
                     # A ready ending owes nothing: the next run starts a new baseline.
+                    # Any ending closes a Finish it run.
                     await conn.execute(
-                        "UPDATE tasks SET ending = ?, work_base = CASE WHEN ? "
-                        "THEN NULL ELSE work_base END WHERE task_id = ?",
+                        "UPDATE tasks SET ending = ?, finishing = NULL, work_base = CASE "
+                        "WHEN ? THEN NULL ELSE work_base END WHERE task_id = ?",
                         (
                             json.dumps({**ending, "at": now}),
                             ending.get("state") == "ready",
@@ -1963,8 +1970,12 @@ class TaskStore:
         level: int | None = None,
         reason: str = "",
         actor: str = "user",
+        finishing: bool = False,
     ) -> TaskRecord:
         """Queue a done, failed or stopped task again, *instruction* as its next turn.
+
+        *finishing*: the instruction is Finish it's, kept on the task until its
+        next ending, through a park and resume.
 
         The task keeps its id, session and conversation: its card holds the
         instruction, which the worker's next turn runs after loading the
@@ -2039,8 +2050,9 @@ class TaskStore:
                 )
             await conn.execute(
                 "UPDATE tasks SET state = 'queued', card = ?, wait_reason = '', "
-                "hold_site = '', finished_at = NULL, updated_at = ? WHERE task_id = ?",
-                (text, now, task_id),
+                "hold_site = '', finished_at = NULL, finishing = ?, updated_at = ? "
+                "WHERE task_id = ?",
+                (text, "1" if finishing else None, now, task_id),
             )
             request = _resume_request(
                 int(before[0]) if before else None,
@@ -2314,9 +2326,16 @@ def _same_request(
     request_key: str,
     deadline: float | None,
 ) -> bool:
-    # The context pack is made once, when the task is created: a repeat of the
-    # request does not make it again, so it is not part of what the key repeats.
-    skipped = ("task_id", "context_pack")
+    # The context pack and the project's instructions are made once, when the
+    # task is created: a repeat of the request does not make them again, so they
+    # are not part of what the key repeats.
+    skipped = (
+        "task_id",
+        "context_pack",
+        "project_instructions",
+        "project_files",
+        "project_skipped",
+    )
     stored = {key: value for key, value in record.spec.items() if key not in skipped}
     stored.setdefault("deadline", None)
     expected = {

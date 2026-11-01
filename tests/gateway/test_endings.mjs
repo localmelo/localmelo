@@ -14,7 +14,7 @@ const DRAFT = {state: 'draft', proposed: 'ready', reasons: ['tests_missing', 'co
 test('an ending is kept only when its state is one code decides', () => {
   assert.equal(readEnding(null), null);
   assert.equal(readEnding({state: 'done'}), null, 'a scheduler state is not an ending');
-  assert.deepEqual(readEnding({state: 'ready'}), {state: 'ready', proposed: null, reasons: [], question: '', tests: []});
+  assert.deepEqual(readEnding({state: 'ready'}), {state: 'ready', proposed: null, reasons: [], notes: [], question: '', tests: []});
   const kept = readEnding({...DRAFT, tests: [...DRAFT.tests, {command: 'x', outcome: 'claimed'}, null]});
   assert.deepEqual(kept.tests, DRAFT.tests, 'a test without a known outcome is dropped');
 });
@@ -70,4 +70,42 @@ test('in Chinese, the state, the reasons and Finish it read in Chinese', async (
   assert.equal(finishLabel(draft), '收尾：跑测试并提交');
   assert.equal(endingLabel(readEnding({state: 'blocked'})), '需要你');
   await useLanguage('en');
+});
+
+test('a ready task whose folder has no tests says so, with nothing to finish', () => {
+  const ready = readEnding({state: 'ready', reasons: [], notes: ['no_tests', 'made_up']});
+  assert.deepEqual(ready.notes, ['no_tests'], 'only notes it knows');
+  assert.equal(endingWhy(ready), 'No tests apply');
+  assert.equal(canFinish(ready), false);
+});
+
+test('a folder that could not be checked says why plainly, with nothing to finish', async () => {
+  const large = readEnding({state: 'draft', reasons: ['too_large']});
+  assert.equal(endingWhy(large), 'The folder was too large to check');
+  assert.equal(canFinish(large), false);
+  assert.equal(endingWhy(readEnding({state: 'draft', reasons: ['unreadable']})), 'The folder could not be read to check it');
+  assert.equal(endingWhy(readEnding({state: 'draft', reasons: ['stashed']})), 'Work was stashed, so it could not be checked');
+  // Finish it still runs the test it can run, once.
+  assert.equal(canFinish(readEnding({state: 'draft', reasons: ['unchecked']})), true);
+  await useLanguage('zh-Hans');
+  try {
+    assert.equal(endingWhy(large), '文件夹太大，没能核对');
+  } finally {
+    await useLanguage('en');
+  }
+});
+
+test('a Finish it run that found tests it could not run says so, and never offers Finish it again', async () => {
+  const none = readEnding({state: 'draft', reasons: ['no_runner']});
+  assert.equal(endingWhy(none), 'melo found tests here but could not run them');
+  assert.equal(canFinish(none), false);
+  const failed = readEnding({state: 'draft', reasons: ['tests_failed', 'finish_tried']});
+  assert.equal(endingWhy(failed), 'The last test run failed', 'the marker has no words');
+  assert.equal(canFinish(failed), false);
+  await useLanguage('zh-Hans');
+  try {
+    assert.equal(endingWhy(none), '找到了测试，但没能运行');
+  } finally {
+    await useLanguage('en');
+  }
 });

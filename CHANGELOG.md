@@ -31,6 +31,34 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `status.items` (and the panel's live activity rows) say `answering` when the
   model is answering with no tool, approval or hold open: Melo thinks only
   then. [#419]
+- When a task a chat started fails, runs out of steps, ends **Done, not
+  finished** or needs you, that chat follows up by itself instead of leaving
+  it to you: one turn of its own, shown in the chat with `melo started this`,
+  that continues the task once, works around a step that was blocked (for an
+  install Auto blocked: use what is installed, or write it without the
+  package), or asks you one clear question, then says in one or two lines what
+  got done and what did not. A task the chat continued never runs a step that
+  you, Auto or melo's rules blocked before, nor one alike (the same command
+  spelt another way, the same install): it is refused before it is reviewed.
+  What the chat tells the task is its own note, never your words, so it allows
+  nothing your request did not. It continues a task at most once per message
+  of yours, only while the task stands as it ended, has only the task tools,
+  never starts a task, approves nothing, waits for your own turn, and is
+  skipped when you write after the task ended. Activity reads `Continued the task: …`
+  or `Asked you: …`. Chores, tasks from the task page and other chats' tasks
+  keep their card alone. Settings → Chats and folders → **Follow up on tasks**
+  (developer mode) or `[tasks] follow_up = false` turns it off. [#411]
+
+- A task you start, and a saved chore, reads its project's own instruction file
+  when it starts: the first of `AGENTS.md`, `CLAUDE.md` and `GEMINI.md` in the
+  task's folder and in each folder above it up to your home folder, nearest
+  first, at most three files and 6,000 characters. It is read-only, secrets are
+  removed, a file over 256 KiB is skipped, and your home folder's own file and
+  the folders where other assistants keep their personal files are never read.
+  The text goes after the context pack under its own heading and never outranks
+  your words, melo's rules or an approval, and the task's page says which files
+  it read. `[memory] project_instructions = "off"` turns it off. Chats do not
+  read it yet. [#364]
 - When melo needs a file outside the chat's folder, it asks instead of
   refusing, in a chat or task you started. The card in the console and the
   app, and the option list in the terminal, name the real folder and offer
@@ -90,6 +118,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `search_when_empty = "hint"` gives a block that recalled nothing one line telling the
   model to call the memory search tool first, and the `turn.memory` event then has
   `search_hint: true`. Out-of-range values are config errors. Part of #349.
+- Developer only, not visible by default: two `[memory]` settings for the bars an item must
+  pass to be recalled, set for one run with `-X memory.KEY=VALUE` and defaulting to today's
+  recall. `recall_min_cosine` (0.55, 0.20 to 0.95) is the least similarity of meaning and
+  `recall_min_coverage` (0.6, 0.10 to 1.00) the least share of the message's content words;
+  both apply to the recall block and to the memory search tool, and lowering them lets more
+  notes and chat turns through. Out-of-range values are config errors. Part of #349.
+- Developer only, not visible by default: two `[memory]` settings for how much of a recalled
+  chat turn is shown, set for one run with `-X memory.KEY=VALUE` and defaulting to today's
+  reading. `recall_item_chars` (200, 120 to 2000) is the room one turn takes in the recall
+  block and in the memory search tool's list, and `recall_excerpt = "match"` shows, for the
+  user's words and melo's reply each, the sentences that hold most of the message's words
+  instead of the start, with `…` where text is left out. The block still keeps to its size
+  bound, and the page is unchanged. Part of #349.
 - Developer only: `melo memory ingest FILE` loads past chats from a JSON file as if they
   had happened on their dates (no model call), and `LOCALMELO_NOW` pins the date
   the model and memory recall read, for memory tests.
@@ -349,6 +390,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The main chat starts a task itself when your request needs tools it lacks
+  (running commands, changing files, many steps), with one line, **Change** and
+  **Stop**, instead of offering "Start this as a task?". Your message is still
+  the task's request, and every step inside it still asks you or is blocked in
+  Auto. A greeting or a short question it can answer starts nothing, an unclear
+  request gets one short question, and the offer stays only where starting
+  would be wrong: a question, words that say not to act and ask for nothing
+  else ("just explain", "don't change anything"), words that steer a task
+  ("cancel it", "continue the report task"), a message with no words of its
+  own, and a chore or reminder code could not schedule. A polite request that
+  asks for work ("can you run the tests?") counts as a request; "please
+  explain …" and short talk ("thanks") are answered. The task is your message
+  alone: the model only names it. Side chats do the same. [#410]
+
 - A task opens in the side panel next to Melo, from its row in Activity, and the
   Tasks link in the sidebar is gone. The row ends in a `›`; selecting it shows
   the task's page in place of Melo's, and **Back to Melo**, Esc (wherever focus
@@ -526,6 +581,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- A file with more than one name (a hard link) is one file in two places,
+  so `file_write` and `file_edit` now refuse it, in the workspace too, and a
+  read outside the workspace refuses one as well. A command that makes a
+  hard link to a file outside the workspace (`ln`, `cp -l`, `install -l`,
+  `rsync --link-dest`, `os.link` and others) counts as a change to that
+  file, and a command that writes to a file with another name counts as a
+  change outside the folder; neither is routine.
+
 - The file tools and the action review now compare a path as the file
   system names it: another letter case of the workspace counts as inside,
   and a macOS alias such as `/.vol` counts as the place it names, so it no
@@ -611,6 +674,27 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Developer: `melo memory ingest` reads a session that a file repeats word for word once,
+  instead of refusing the file; the same id with other turns is still refused.
+- A task that changed no code is no longer told to run tests. Outside git, melo compares the
+  task folder before and after the run and counts only changed code files (a saved page,
+  picture, table or PDF is not code), so a task that only looked at a website ends Ready; a
+  write made by a shell command is still caught, and so is a code file the file tools
+  changed outside the folder. Changed code still owes a test; when Finish it then finds no
+  test runner for the folder (or a whole pytest run collects no test), the task ends Ready
+  with "No tests apply", and when it finds tests it cannot run, the task says so. A run
+  filtered to some tests that finds none, or a runner that says it ran no test, is not a
+  passing test. Finish it is never offered
+  again after its own run, so it can no longer loop; asking for the tests yourself when you
+  continue a task counts as Finish it. More test setups are recognized, each with its test
+  command (Django, pytest settings in `pyproject.toml` or `setup.cfg`, CMake, PHPUnit, Mix,
+  Gradle, Maven, .NET, Zig, Cabal, Deno, just, `make check`), npm's placeholder test script
+  is not one, and "don't forget the tests" or "make sure the tests pass" asks for them. A folder too large or unreadable to check offers Finish it only while
+  it can still run a test or commit, then says plainly why it was not checked. Fixes #408.
+- Activity's line for a chat says what happened in plain words: what the chat did (started
+  or offered a task, kept a note), then the first sentence of its reply without Markdown or
+  a lead-in such as "In short:", in English and Chinese. Code keeps its words, struck text
+  goes, and `x**2` stays. The main chat's row is named in your language. Fixes #409.
 - With browsing on (`[browser] driver = "safari-automation"`), the main chat
   in the web console and the app now has the browser tools too, as the
   terminal chat and side chats did. A `[browser] driver` that names no
@@ -3504,3 +3588,5 @@ earlier milestones.
 [#396]: https://github.com/localmelo/localmelo/pull/396
 [#406]: https://github.com/localmelo/localmelo/issues/406
 [#412]: https://github.com/localmelo/localmelo/issues/412
+[#410]: https://github.com/localmelo/localmelo/issues/410
+[#411]: https://github.com/localmelo/localmelo/issues/411
