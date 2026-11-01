@@ -463,6 +463,7 @@
   "ending.outcome.passed": "通过",
   "ending.outcome.unknown": "结果没核对",
   "ending.reason.commit_missing": "改动还没提交",
+  "ending.reason.no_runner": "找到了测试，但没能运行",
   "ending.reason.out_of_steps": "步数用完了",
   "ending.reason.question": "它有问题要问你",
   "ending.reason.run_failed": "运行失败了",

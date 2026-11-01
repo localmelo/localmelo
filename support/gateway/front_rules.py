@@ -687,7 +687,8 @@ _ASKS_TESTS: Final = re.compile(
 )
 # A negated negation is an ask: "don't forget to run the tests", "make sure you
 # don't skip the tests", "别忘了跑测试". It reads as "run" / "跑" before the
-# negations go.
+# negations go; in Chinese only before 跑, 运行 or 执行 ("别忘了测试一下这个网站"
+# is trying the site out).
 _KEEP_TESTS: Final = re.compile(
     r"\b(?:don['’]t|do\s+not|never)\s+forget\s+(?:to\s+)?(?:run\s+)?"
     r"|\b(?:make\s+sure|be\s+sure|ensure)\s+(?:that\s+)?(?:you\s+)?"
@@ -695,7 +696,7 @@ _KEEP_TESTS: Final = re.compile(
     re.IGNORECASE,
 )
 _KEEP_TESTS_ZH: Final = re.compile(
-    r"(?:别|不要|不能|千万别)忘(?:了|记)?(?:要)?(?:跑|运行|执行)?"
+    r"(?:别|不要|不能|千万别)忘(?:了|记)?(?:要)?(?=跑|运行|执行)"
 )
 # The ask negated: "don't run the tests", "skip the tests", "不用跑测试".
 _NO_TESTS: Final = re.compile(
@@ -716,7 +717,7 @@ def asks_tests(text: str) -> bool:
     not.
     """
     bare = _PIPELINE_NO.sub(" ", _QUOTED.sub(" ", text or ""))
-    bare = _KEEP_TESTS_ZH.sub("跑", _KEEP_TESTS.sub(" run ", bare))
+    bare = _KEEP_TESTS_ZH.sub("", _KEEP_TESTS.sub(" run ", bare))
     return bool(_ASKS_TESTS.search(_NO_TESTS.sub(" ", bare)))
 
 

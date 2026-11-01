@@ -245,7 +245,7 @@
 ![无法使用自己文件夹的任务提供 Choose a folder](../../assets/img/task-folder-refused.webp)
 
 - **只差提交。** 步数用完、只剩提交没做的任务，会在卡片和任务页上显示 `Not committed. Run: <command>`。
-- **怎样结束的。** 已结束任务的状态是代码核对出的结局：**Ready**（绿色）、**Done, not finished** 和 **Needs you**（琥珀色）、**Failed**（红色）、**Stopped** 或 **Not needed**（灰色）。**How it ended** 写出原因，**Tests it ran** 列出任务自己这次运行启动的测试，每个标着通过、没通过或结果没核对；回答里只是提到的测试不会列出。**Ready** 需要证据：测试结果或文件夹没能核对时，任务就不算完成。改了代码就欠一次测试；之后 **Finish it** 找不到适用于这个文件夹的测试工具时，任务显示 **Ready** 并注明 **No tests apply**。**Finish it** 一点就让还欠着测试或提交的任务继续。文件夹太大或读不了、没法核对时，只有还能跑测试或提交时才提供 **Finish it**；之后直接说明原因，例如 **The folder was too large to check**。面板的 Activity 和 Workers 行也这样显示，`GET /api/tasks/<id>` 以 `ending` 字段给出它。
+- **怎样结束的。** 已结束任务的状态是代码核对出的结局：**Ready**（绿色）、**Done, not finished** 和 **Needs you**（琥珀色）、**Failed**（红色）、**Stopped** 或 **Not needed**（灰色）。**How it ended** 写出原因，**Tests it ran** 列出任务自己这次运行启动的测试，每个标着通过、没通过或结果没核对；回答里只是提到的测试不会列出。**Ready** 需要证据：测试结果或文件夹没能核对时，任务就不算完成。改了代码就欠一次测试；之后 **Finish it** 找不到适用于这个文件夹的测试工具时，任务显示 **Ready** 并注明 **No tests apply**；找到了测试却没法运行时，显示 **melo found tests here but could not run them**。**Finish it** 一点就让还欠着测试或提交的任务继续；它自己的运行结束后不会再提供。文件夹太大或读不了、没法核对时，只有还能跑测试或提交时才提供 **Finish it**；之后直接说明原因，例如 **The folder was too large to check**。面板的 Activity 和 Workers 行也这样显示，`GET /api/tasks/<id>` 以 `ending` 字段给出它。
 
 请求进行中时对应按钮不可用。被拒绝时（确认已过期、任务已结束、Stop 抢先）会显示服务器给出的文字。
 

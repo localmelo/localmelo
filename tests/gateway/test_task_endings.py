@@ -8,6 +8,7 @@ closed: ready needs positive proof, any doubt leaves a draft with its reason.
 
 from __future__ import annotations
 
+import itertools
 import os
 import sqlite3
 import subprocess
@@ -29,6 +30,7 @@ from localmelo.support.gateway.task_endings import (
     can_finish,
     decide,
     finish_message,
+    finish_run,
     finishes,
     proposal,
     python_test,
@@ -1268,9 +1270,217 @@ async def test_an_untested_change_in_a_django_project_is_owed(repo: Path) -> Non
     (repo / "shop" / "views.py").write_text("v = 2\n")
     ending = await end(Run().edit("shop/views.py"), repo, base)
     assert (*why(ending), ending["notes"]) == ("draft", ["tests_missing"], [])
-    # Finish it's run in a folder where tests apply still owes a test that ran.
+    # Finish it ran no test: melo says it found tests it could not run, once.
     finished = await end(Run(), repo, base, tests=True, finishing=True)
-    assert why(finished) == ("draft", ["tests_missing"])
+    assert why(finished) == ("draft", ["no_runner"]) and not can_finish(finished)
+    # Finish it ran Django's own runner: its exit code is the result.
+    django = "import subprocess, sys\nsys.exit(subprocess.run([sys.executable, 'manage.py', 'test']).returncode)\n"
+    tested = await end(Run().py(django), repo, base, tests=True, finishing=True)
+    assert why(tested) == ("ready", [])
+
+
+# ── A Finish it run never offers Finish it again ──
+
+
+# What a run did, as steps of `Run`: every kind of evidence a run leaves.
+SHAPES: dict[str, list[str]] = {
+    "none": [],
+    "edit": ["edit"],
+    "edit+pass": ["edit", "pass"],
+    "edit+fail": ["edit", "fail"],
+    "edit+unknown": ["edit", "unknown"],
+    "edit+empty": ["edit", "empty"],
+    "pass+edit": ["pass", "edit"],
+    "empty": ["empty"],
+    "write": ["write"],
+    "outside": ["outside"],
+}
+
+
+def shaped_run(shape: str, answer: str, elsewhere: Path) -> Run:
+    run = Run(answer)
+    for step in SHAPES[shape]:
+        if step == "edit":
+            run.edit()
+        elif step == "pass":
+            run.test()
+        elif step == "fail":
+            run.test(exit_code=1)
+        elif step == "unknown":
+            run.py(HIDES)
+        elif step == "empty":
+            run.test(exit_code=5)
+        elif step == "write":
+            run.py(FETCH)
+        else:
+            run.edit(str(elsewhere))
+    return run
+
+
+async def test_no_evidence_lets_a_finish_it_run_offer_finish_it_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """For every folder state, run and ask, the ending of a Finish it run has no button."""
+    folder = folder_of(tmp_path, tests=True)
+    elsewhere = tmp_path / "elsewhere.py"
+    states = itertools.product(
+        ("", "too_large", "unreadable", "stashed"),
+        (None, [], ["app.py"]),
+        ([], ["app.py"]),
+        (True, False),
+        (False, True),
+    )
+    offered = 0
+    for why_, code, own, tests_apply, crowded in states:
+        seen = task_endings._Seen(why_, code, own, tests_apply, crowded)
+
+        async def fixed(_folder: str | None, _base: Baseline, seen: Any = seen) -> Any:
+            return seen
+
+        monkeypatch.setattr(task_endings, "_changes", fixed)
+        for answer, shape, git_base, asked_tests, asked_commit in itertools.product(
+            ("Done.\nEnding: ready", "Stuck.\nEnding: failed"),
+            SHAPES,
+            (False, True),
+            (False, True),
+            (False, True),
+        ):
+            base = Baseline({}, git=git_base)
+            run = shaped_run(shape, answer, elsewhere)
+            again = await end(
+                run,
+                folder,
+                base,
+                tests=asked_tests,
+                commit=asked_commit,
+                finishing=True,
+            )
+            assert not can_finish(again), (seen, shape, again)
+            first = await end(run, folder, base, tests=asked_tests, commit=asked_commit)
+            offered += can_finish(first)
+    assert offered, "outside a Finish it run the same evidence does offer it"
+
+
+async def test_a_finish_it_run_that_ran_no_test_with_a_result(tmp_path: Path) -> None:
+    folder = folder_of(tmp_path, tests=False)
+    (folder / "tests").mkdir()  # an empty tests folder: a setup, nothing to collect
+    (folder / "app.py").write_text("x = 1\n")
+    base = await baseline(str(folder))
+    assert base.tests
+    (folder / "app.py").write_text("x = 22\n")
+    first = await end(Run().edit("app.py"), folder, base)
+    assert why(first) == ("draft", ["tests_missing"]) and can_finish(first)
+    # pytest collected nothing: no runner applies after all.
+    empty = Run().edit("app.py").test(exit_code=5)
+    done = await end(empty, folder, base, finishing=True)
+    assert (*why(done), done["notes"]) == ("ready", [], ["no_tests"])
+    # Nothing ran at all: melo says it found tests it could not run.
+    plain = await end(Run().edit("app.py"), folder, base, finishing=True)
+    assert why(plain) == ("draft", ["no_runner"]) and not can_finish(plain)
+    # A test that ran before a later change: still owed, but not offered again.
+    stale = await end(Run().test().edit("app.py"), folder, base, finishing=True)
+    assert why(stale) == ("draft", ["tests_missing", "finish_tried"])
+    assert not can_finish(stale)
+    # A failing test after Finish it: said, not offered again.
+    failed = await end(
+        Run().edit("app.py").test(exit_code=1), folder, base, finishing=True
+    )
+    assert why(failed) == ("draft", ["tests_failed", "finish_tried"])
+    assert not can_finish(failed)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "python manage.py test",
+        "./manage.py test",
+        "uv run python manage.py test",
+        "mix test",
+        "phpunit",
+        "vendor/bin/phpunit",
+        "dotnet test",
+        "ctest",
+        "./gradlew test",
+        "gradle test",
+        "mvn test",
+        "make check",
+        "zig build test",
+        "cabal test",
+        "deno test",
+        "just test",
+    ],
+)
+async def test_every_setup_melo_finds_has_a_runner(repo: Path, command: str) -> None:
+    base = await baseline(str(repo))
+    (repo / "app.py").write_text("x = 2\n")
+    run = Run().edit().call("shell_exec", {"command": command}, exit_code=0)
+    assert why(await end(run, repo, base)) == ("ready", [])
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "phpunit --list-tests",
+        "dotnet test --list-tests",
+        "ctest -N",
+        "./gradlew test --dry-run",
+        "mvn test -DskipTests",
+        "deno test --no-run",
+        "just test --dry-run",
+    ],
+)
+async def test_a_runner_that_only_lists_is_not_a_test(repo: Path, command: str) -> None:
+    base = await baseline(str(repo))
+    (repo / "app.py").write_text("x = 2\n")
+    run = Run().edit().call("shell_exec", {"command": command}, exit_code=0)
+    assert why(await end(run, repo, base)) == ("draft", ["tests_missing"])
+
+
+@pytest.mark.parametrize(
+    ("name", "text", "marks"),
+    [
+        ("Makefile", "build:\n\tcc x.c\ncheck: build\n\t./x --self-test\n", True),
+        ("build.zig", "", True),
+        ("app.cabal", "", True),
+        ("deno.json", "{}", True),
+        ("deno.jsonc", "{}", True),
+        ("justfile", "build:\n    cargo build\ntest: build\n    cargo test\n", True),
+        ("Justfile", "@test:\n    go test ./...\n", True),
+        ("justfile", "build:\n    cargo build\n", False),
+    ],
+)
+def test_more_setups_are_found(
+    tmp_path: Path, name: str, text: str, marks: bool
+) -> None:
+    (tmp_path / name).write_text(text)
+    assert _test_marker(str(tmp_path), name, False) is marks
+
+
+@pytest.mark.parametrize(
+    ("said", "continued", "ran_before", "finishing"),
+    [
+        (["Run the tests"], True, True, True),
+        (["跑一下测试"], True, True, True),
+        (["Look at it again"], True, True, False),
+        # The task's first run: parked and resumed, its inbox asked for the tests.
+        (["Run the tests"], False, True, False),
+        # A task stopped before it ever ran, continued: its first run.
+        (["Fix it\n\nRun the tests"], True, False, False),
+        (
+            [
+                "Finish it: run the tests that cover your changes, fix what fails, "
+                "and end your report with its Ending line."
+            ],
+            False,
+            False,
+            True,
+        ),
+    ],
+)
+def test_which_runs_are_finish_it_runs(
+    said: list[str], continued: bool, ran_before: bool, finishing: bool
+) -> None:
+    assert finish_run(said, continued=continued, ran_before=ran_before) is finishing
 
 
 @pytest.mark.parametrize(
@@ -1324,6 +1534,10 @@ def test_other_words_are_not_finish_its_message(text: str) -> None:
         ("别忘了提交", False),
         ("Make sure the site loads", False),
         ("先不跑测试", False),
+        ("别忘了测试一下这个网站", False),
+        ("别忘了测试", False),
+        ("Don't forget to check the site", False),
+        ("Make sure the site loads; tests pass already", False),
     ],
 )
 def test_tests_are_asked_in_plain_words(text: str, asks: bool) -> None:

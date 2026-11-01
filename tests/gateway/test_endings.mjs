@@ -94,3 +94,18 @@ test('a folder that could not be checked says why plainly, with nothing to finis
     await useLanguage('en');
   }
 });
+
+test('a Finish it run that found tests it could not run says so, and never offers Finish it again', async () => {
+  const none = readEnding({state: 'draft', reasons: ['no_runner']});
+  assert.equal(endingWhy(none), 'melo found tests here but could not run them');
+  assert.equal(canFinish(none), false);
+  const failed = readEnding({state: 'draft', reasons: ['tests_failed', 'finish_tried']});
+  assert.equal(endingWhy(failed), 'The last test run failed', 'the marker has no words');
+  assert.equal(canFinish(failed), false);
+  await useLanguage('zh-Hans');
+  try {
+    assert.equal(endingWhy(none), '找到了测试，但没能运行');
+  } finally {
+    await useLanguage('en');
+  }
+});

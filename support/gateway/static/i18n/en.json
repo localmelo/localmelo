@@ -480,6 +480,7 @@
   "ending.outcome.passed": "passed",
   "ending.outcome.unknown": "result not checked",
   "ending.reason.commit_missing": "The changes are not committed",
+  "ending.reason.no_runner": "melo found tests here but could not run them",
   "ending.reason.out_of_steps": "It ran out of steps",
   "ending.reason.question": "It asks you something",
   "ending.reason.run_failed": "The run failed",

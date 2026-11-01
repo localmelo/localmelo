@@ -15,11 +15,12 @@ ended ready. Ready needs proof; any doubt leaves ``draft`` with its reason:
 - ``tests_missing``: code changed since the baseline (outside git also a code
   file a file tool wrote, wherever it is) and no test started after the latest
   call that could have changed code, with or without a test setup; or the
-  person asked for the tests and a test setup applies. A Finish it run (its
-  message, :func:`finishes`, or the person's own ask for the tests on a task
-  that already ran) that finds no setup and runs no test owes none: its
-  ending notes ``no_tests``, as does an ask for tests with no setup and no
-  change;
+  person asked for the tests and a test setup applies. A Finish it run
+  (:func:`finish_run`) that runs no test with a result owes none: with no
+  setup, or only runs that collected no test, its ending notes ``no_tests``;
+  with a setup it reads ``no_runner`` (never owed). An ask for tests with no
+  setup and no change notes ``no_tests`` too. A Finish it run's ending never
+  offers Finish it again (:data:`FINISH_TRIED`);
 - ``commit_missing``: a commit was asked and changes since the baseline are not
   committed;
 - ``unchecked``: git or the snapshot could not be read, the folder lists too
@@ -55,6 +56,7 @@ from typing import Any, Final
 
 from localmelo.melo.agent._brief_aids import FileStamp, edited_files
 from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.support.gateway.front_rules import asks_tests
 from localmelo.support.sessions.store import SessionStore
 from localmelo.support.words import LANGUAGES, t_in
 
@@ -70,6 +72,10 @@ OWED: Final = frozenset(
 # Why a folder could not be checked, when a Finish it could not help: too many
 # files or changes, unreadable, or work stashed. Said plainly, never owed.
 NOT_CHECKED: Final = ("too_large", "unreadable", "stashed")
+# A Finish it run found tests but ran none with a result: said plainly, never owed.
+NO_RUNNER: Final = "no_runner"
+# Marks the ending of a Finish it run: it never offers Finish it again (no words).
+FINISH_TRIED: Final = "finish_tried"
 # Changed files a baseline keeps at most; a folder with more is not checked.
 MAX_STAMPS: Final = 2000
 _KEPT: Final = 5
@@ -127,6 +133,22 @@ _RUNNERS: Final[dict[tuple[str, ...], frozenset[str]]] = {
     ("xcodebuild",): _NO_RUN
     | {"-list", "-showBuildSettings", "-version", "-showdestinations"}
     | {"-showTestPlans", "-showsdks", "-help", "-usage"},
+    ("python", "manage.py", "test"): _NO_RUN,
+    ("manage.py", "test"): _NO_RUN,
+    ("mix", "test"): _NO_RUN,
+    ("phpunit",): _NO_RUN | {"--list-tests", "--list-suites", "--list-groups"},
+    ("dotnet", "test"): _NO_RUN | {"--list-tests", "-t"},
+    ("ctest",): _NO_RUN | {"-N", "--show-only"},
+    **{
+        (gradle, "test"): _NO_RUN | {"--dry-run", "-m"}
+        for gradle in ("gradle", "gradlew")
+    },
+    ("mvn", "test"): _NO_RUN | {"-DskipTests", "-Dmaven.test.skip=true"},
+    ("make", "check"): _NO_RUN | {"-n", "--dry-run", "--just-print", "-q"},
+    ("zig", "build", "test"): _NO_RUN,
+    ("cabal", "test"): _NO_RUN,
+    ("deno", "test"): _NO_RUN | {"--no-run"},
+    ("just", "test"): _NO_RUN | {"-n", "--dry-run"},
 }
 # Only these runners may follow ``uv run`` or ``poetry run``, after its options.
 _PYTHON_RUNNERS: Final = frozenset(
@@ -135,6 +157,7 @@ _PYTHON_RUNNERS: Final = frozenset(
         ("py.test",),
         ("python", "-m", "pytest"),
         ("python", "-m", "unittest"),
+        ("python", "manage.py", "test"),
     }
 )
 _RUN_VALUES: Final = frozenset(
@@ -218,7 +241,7 @@ _CODE_NAMES: Final = frozenset(
 _TEST_FILES: Final = frozenset(
     {"pytest.ini", "tox.ini", "noxfile.py", "conftest.py", "Cargo.toml", "go.mod"}
     | {"Package.swift", "manage.py", "tests.py", "test.py", "mix.exs"}
-    | {"phpunit.xml", "phpunit.xml.dist"}
+    | {"phpunit.xml", "phpunit.xml.dist", "build.zig", "deno.json", "deno.jsonc"}
 )
 _TEST_DIRS: Final = frozenset({"tests", "test", "__tests__", "spec"})
 _TEST_NAME: Final = re.compile(
@@ -232,7 +255,11 @@ _TEST_CONTENT: Final = {
     "setup.cfg": re.compile(r"^\s*\[tool:pytest\]", re.M),
     "CMakeLists.txt": re.compile(r"\b(?:enable_testing|add_test)\s*\(", re.I),
     **dict.fromkeys(
-        ("Makefile", "makefile", "GNUmakefile"), re.compile(r"^test\s*:", re.M)
+        ("Makefile", "makefile", "GNUmakefile"),
+        re.compile(r"^(?:test|check)\s*:", re.M),
+    ),
+    **dict.fromkeys(
+        ("justfile", "Justfile", ".justfile"), re.compile(r"^@?test\b[^\n=]*:", re.M)
     ),
 }
 # A .NET test project.
@@ -610,21 +637,27 @@ class _Call:
     status: str = ""
     exit_code: int | None = None
 
-    def test(self) -> tuple[str, str] | None:
-        """``(command, outcome)`` of a test run: ``passed``, ``failed`` or ``unknown``."""
+    def _command(self) -> tuple[str, bool]:
+        """``(command, passed on)`` of the test runner this call starts, or ``""``."""
         given = self.arguments.get("code" if self.name == "python_exec" else "command")
         if self.status == "blocked" or not isinstance(given, str):
-            return None
+            return "", False
         if self.name == "python_exec":
-            command, passes = python_test(given)
-        elif self.name == "shell_exec":
-            command, passes = _shell_test(given)
-        else:
+            return python_test(given)
+        if self.name == "shell_exec":
+            return _shell_test(given)
+        return "", False
+
+    def collected_none(self) -> bool:
+        """pytest or unittest ran and found no test (exit 5): nothing was tested."""
+        command = self._command()[0]
+        return self.exit_code == _NO_TESTS_RAN and bool(_COLLECTS.search(command))
+
+    def test(self) -> tuple[str, str] | None:
+        """``(command, outcome)`` of a test run: ``passed``, ``failed`` or ``unknown``."""
+        command, passes = self._command()
+        if not command or self.collected_none():
             return None
-        if not command:
-            return None
-        if self.exit_code == _NO_TESTS_RAN and _COLLECTS.search(command):
-            return None  # pytest or unittest found no test: nothing was tested
         if self.finish is None:
             return command, "unknown"
         if self.status != "success" or self.exit_code not in (0, None):
@@ -633,7 +666,9 @@ class _Call:
 
     def writes(self) -> bool:
         """Whether this call could have changed code (fail closed: unknown tools could)."""
-        if self.status == "blocked" or self.name in _READ_TOOLS or self.test():
+        if self.status == "blocked" or self.name in _READ_TOOLS:
+            return False
+        if self.test() or self.collected_none():
             return False
         if self.name in ("file_write", "file_edit"):
             return self.edits_code()
@@ -744,7 +779,7 @@ def _test_marker(folder: str, name: str, is_dir: bool) -> bool:
     """Whether *name* in *folder* says a test runner applies there."""
     if is_dir:
         return name in _TEST_DIRS or name.endswith((".xcodeproj", ".xcworkspace"))
-    if name in _TEST_FILES or _TEST_NAME.fullmatch(name):
+    if name in _TEST_FILES or _TEST_NAME.fullmatch(name) or name.endswith(".cabal"):
         return True
     if name in _JVM_BUILDS:
         return os.path.isdir(os.path.join(folder, "src", "test"))
@@ -1022,9 +1057,17 @@ async def _evidence(
     elif last == "unknown":
         reasons.append("tests_unverified")
     elif (changed or asks_tests) and not tested:
-        # Changed code owes a test even where no setup was found; a Finish it
-        # that then ran none (no runner applies) ends it with no_tests.
-        if seen.tests or (changed and not (finishing and not tests)):
+        if finishing and not tests:
+            # Finish it ran no test with a result: no runner applies (none, or
+            # pytest or unittest collected nothing), or one applies that melo
+            # cannot run. A folder not checked says its own reason below.
+            empty = any(call.collected_none() for call in calls)
+            if empty or not seen.tests:
+                notes.append("no_tests")
+            elif not seen.unchecked:
+                reasons.append(NO_RUNNER)
+        elif seen.tests or changed:
+            # Changed code owes a test even where no setup was found.
             reasons.append("tests_missing")
         else:
             notes.append("no_tests")
@@ -1087,6 +1130,8 @@ async def decide(
         state, reasons = "blocked", ["question", *reasons]
     else:
         state = "draft" if reasons else "ready"
+    if finishing and set(reasons) & OWED:
+        reasons.append(FINISH_TRIED)  # Finish it ran: never offered again
     kept = [
         {
             "command": redact_secrets(command)[0],
@@ -1109,10 +1154,11 @@ async def decide(
 
 
 def can_finish(ending: Mapping[str, Any] | None) -> bool:
-    """Whether Finish it settles this ending: work owed, and not a run out of steps."""
+    """Whether Finish it settles this ending: work owed, not a run out of steps,
+    and not the ending of a Finish it run (:data:`FINISH_TRIED`)."""
     reasons = set((ending or {}).get("reasons") or ())
     state = (ending or {}).get("state")
-    owed = bool(reasons & OWED) and "out_of_steps" not in reasons
+    owed = bool(reasons & OWED) and not reasons & {"out_of_steps", FINISH_TRIED}
     return owed and state in ("draft", "failed", "dropped")
 
 
@@ -1128,6 +1174,20 @@ def finishes(text: str) -> bool:
     """Whether *text* is Finish it's own message (:func:`finish_message`), in any language."""
     said = " ".join((text or "").split())
     return any(said.endswith(finish) for finish in _finish_texts())
+
+
+def finish_run(said: Sequence[str], *, continued: bool, ran_before: bool) -> bool:
+    """Whether a run is Finish it's: its message (:func:`finishes`), or the
+    person's own ask for the tests (``asks_tests``) in a run that continues a
+    task that ended before (*continued*, with an earlier turn, *ran_before*).
+
+    *said*: the messages the run was given after its request (the continue
+    message, the inbox). A task's first run never counts, nor a run resumed
+    after a park.
+    """
+    if any(finishes(text) for text in said):
+        return True
+    return continued and ran_before and any(asks_tests(text) for text in said)
 
 
 def finish_message(ending: Mapping[str, Any]) -> str:

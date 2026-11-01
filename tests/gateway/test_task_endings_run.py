@@ -543,3 +543,42 @@ async def test_your_own_ask_for_the_tests_after_a_run_finishes_it_like_the_butto
         [],
         ["no_tests"],
     )
+
+
+async def test_a_park_and_resume_inside_a_run_is_not_a_finish_it_run(
+    setup: Setup, tmp_path: Path
+) -> None:
+    """A resumed run's card is the park's, not a continue message: an ask read
+    from its inbox leaves the test owed, though the task has an earlier turn."""
+    from dataclasses import replace
+
+    from localmelo.support.gateway import task_endings
+    from localmelo.support.gateway.park_card import CARD_START
+
+    workers, llm, _ = setup
+    folder = tmp_path / "localmelo-workspace"
+    folder.mkdir()
+    (folder / "page.py").write_text("print('hi')\n")
+    write = call("file_edit", {"path": "page.py", "old": "hi", "new": "hello"})
+    llm.replies = [write, says("Changed the greeting.\nEnding: ready")]
+    task_id = await start(workers, folder, "Say hello instead of hi in page.py")
+    await ended(workers, task_id)
+    llm.replies = [says("Looked again.\nEnding: ready")]
+    await workers.message(task_id, "Look at it once more")
+    await ended(workers, task_id, turns=2)
+    record = await workers.tasks.get_task(task_id)
+    base = (await task_endings.baseline(str(folder))).since(
+        {"git": False, "snapshot": True, "stamps": {"page.py": [0, 0]}, "tests": False}
+    )
+    inbox = TaskInbox()
+    inbox.read.append("Please run the tests")
+    workers._inboxes[task_id] = inbox
+    parked = replace(record, card=f"{CARD_START} where it stopped")
+    ending = await workers._ending(task_id, "done", None, str(folder), base, parked)
+    assert ending is not None
+    assert (ending["state"], ending["reasons"]) == ("draft", ["tests_missing"])
+    # The same ask in a run that continues the ended task finishes it.
+    resumed = replace(record, card="Please run the tests")
+    finished = await workers._ending(task_id, "done", None, str(folder), base, resumed)
+    assert finished is not None
+    assert (finished["state"], finished["notes"]) == ("ready", ["no_tests"]), finished

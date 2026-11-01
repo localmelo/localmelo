@@ -32,6 +32,7 @@ _WHY = (
     "too_large",
     "unreadable",
     "stashed",
+    "no_runner",
 )
 _NOTES = ("no_tests",)
 

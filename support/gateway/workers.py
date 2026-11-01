@@ -72,11 +72,12 @@ from localmelo.support.gateway.resume_evidence import (
 from localmelo.support.gateway.resume_tokens import ResumeBinding, ResumeTokens
 from localmelo.support.gateway.startup_recovery import StartupRecovery
 from localmelo.support.gateway.task_endings import (
+    FINISH_TRIED,
     Baseline,
     baseline,
     can_finish,
     finish_message,
-    finishes,
+    finish_run,
     shown,
     stash_floor,
 )
@@ -2534,8 +2535,10 @@ class TaskWorkers:
         typed = str(record.spec.get("user_words") or "")
         asked = [str(record.spec.get("objective") or ""), typed]
         said: list[str] = []  # what this run was told after its request
-        if record.card and not record.card.startswith(CARD_START):
-            said.append(record.card)  # a continued task's message is asked too
+        # A continued task's message is asked too (a park's card is not one).
+        continued = bool(record.card) and not record.card.startswith(CARD_START)
+        if continued:
+            said.append(record.card)
         inbox = self._inboxes.get(task_id)
         said += inbox.read if inbox is not None else []
         asked += said
@@ -2546,12 +2549,14 @@ class TaskWorkers:
                 await self.tasks.keep_stash_floor(task_id, floor)
         except Exception:
             log.exception("Could not keep the stash count of task %s", task_id)
+        finishing = False
         try:
-            # A Finish it run: the button's message, or the person's own message
-            # asking for the tests on a task that already ran (never its first).
-            finishing = any(finishes(text) for text in said)
-            if not finishing and any(asks_tests(text) for text in said):
-                finishing = len(await self.store.list_turns(task_id, limit=2)) > 1
+            # A Finish it run: the button's message, or the person's own ask
+            # for the tests continuing a task that ran before (never its first).
+            ran_before = continued and (
+                len(await self.store.list_turns(task_id, limit=2)) > 1
+            )
+            finishing = finish_run(said, continued=continued, ran_before=ran_before)
             return await decide_ending(
                 self.store,
                 task_id,
@@ -2565,7 +2570,8 @@ class TaskWorkers:
             )
         except Exception:
             log.exception("Could not check how task %s ended", task_id)
-            unchecked = {"state": "draft", "reasons": ["unchecked"]}
+            reasons = ["unchecked", *([FINISH_TRIED] if finishing else [])]
+            unchecked = {"state": "draft", "reasons": reasons}
             return unchecked if phase == "done" else None
 
     def _observe(self, task_id: str, event: AgentEvent) -> None:

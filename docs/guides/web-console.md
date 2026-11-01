@@ -517,8 +517,10 @@ run). Like Workers, the view replaces the chat while it is open. The header says
   not checked; a test its answer only mentions is not listed. **Ready** needs
   proof: when a test's result or the folder could not be checked, the task is not
   ready. Changed code owes a test; when **Finish it** then finds no test runner
-  for the folder, the task reads **Ready** with **No tests apply**. **Finish it**
-  continues, with one tap, a task that still owes its tests or its commit. A
+  for the folder, the task reads **Ready** with **No tests apply**, and when it
+  finds tests it cannot run, **melo found tests here but could not run them**.
+  **Finish it** continues, with one tap, a task that still owes its tests or its
+  commit, and is never offered again after its own run. A
   folder too large or unreadable to check offers it only while it can still run
   a test or commit; then it says why: **The folder was too large to check**. The panel's Activity and Workers rows say the same, and
   `GET /api/tasks/<id>` carries it as `ending`.
