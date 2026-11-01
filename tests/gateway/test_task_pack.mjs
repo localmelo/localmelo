@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {packFold} from '../../support/gateway/static/tasks.mjs';
+import {packFold, projectLine} from '../../support/gateway/static/tasks.mjs';
 import {useLanguage} from '../../support/gateway/static/i18n.mjs';
 
 /** A small DOM double: elements with a tag, a class, text and children. */
@@ -48,6 +48,42 @@ test('the fold reads in Chinese when the page does', async () => {
     const fold = packFold(fakeDoc(), {spec: {context_pack: PACK}});
     assert.equal(fold.children[0].textContent, 'melo 告诉任务的内容');
     assert.match(fold.children[1].textContent, /资料，不是指令/);
+  } finally {
+    await useLanguage('en');
+  }
+});
+
+test('a task that read the project\'s instruction files says so in one line, and a task that did not says nothing', async () => {
+  await useLanguage('en');
+  const doc = fakeDoc();
+  assert.equal(projectLine(doc, {}), null);
+  assert.equal(projectLine(doc, {spec: {}}), null);
+  assert.equal(projectLine(doc, {spec: {project_files: [], project_skipped: []}}), null);
+
+  const one = projectLine(doc, {spec: {project_files: [{path: 'AGENTS.md', chars: 2140, cut: false}]}});
+  assert.equal(one.tag, 'p');
+  assert.equal(one.textContent, "Read the project's instructions: AGENTS.md (2.1k chars)");
+
+  const many = projectLine(doc, {spec: {project_files: [
+    {path: 'CLAUDE.md', chars: 850, cut: false},
+    {path: '../AGENTS.md', chars: 4100, cut: true},
+  ]}});
+  assert.equal(many.textContent,
+    "Read the project's instructions: CLAUDE.md (850 chars), ../AGENTS.md (4.1k chars, cut)");
+
+  const big = projectLine(doc, {spec: {project_skipped: ['AGENTS.md']}});
+  assert.equal(big.textContent, 'Not read, over 256 KiB: AGENTS.md');
+  const both = projectLine(doc, {spec: {
+    project_files: [{path: 'CLAUDE.md', chars: 850, cut: false}], project_skipped: ['AGENTS.md']}});
+  assert.equal(both.textContent,
+    "Read the project's instructions: CLAUDE.md (850 chars) · Not read, over 256 KiB: AGENTS.md");
+});
+
+test('the project line reads in Chinese when the page does', async () => {
+  await useLanguage('zh-Hans');
+  try {
+    const line = projectLine(fakeDoc(), {spec: {project_files: [{path: 'AGENTS.md', chars: 2140, cut: true}]}});
+    assert.equal(line.textContent, '已读取项目说明：AGENTS.md（2.1k 字符，已截断）');
   } finally {
     await useLanguage('en');
   }

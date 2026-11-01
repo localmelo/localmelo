@@ -9,6 +9,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A task you start, and a saved chore, reads its project's own instruction file
+  when it starts: the first of `AGENTS.md`, `CLAUDE.md` and `GEMINI.md` in the
+  task's folder and in each folder above it up to your home folder, nearest
+  first, at most three files and 6,000 characters. It is read-only, secrets are
+  removed, a file over 256 KiB is skipped, and your home folder's own file and
+  the folders where other assistants keep their personal files are never read.
+  The text goes after the context pack under its own heading and never outranks
+  your words, melo's rules or an approval, and the task's page says which files
+  it read. `[memory] project_instructions = "off"` turns it off. Chats do not
+  read it yet. [#364]
 - melo reads a public web page in the chat: ask about a website or paste its
   address, and it reads the page as text (title, headings, main text and
   links; plain text and JSON as they are) with the new `web_fetch` tool. It is

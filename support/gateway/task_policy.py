@@ -104,6 +104,11 @@ class TaskSpec:
     and a step review reads it as the person's words.
     ``context_pack`` is what the owner chat's notes said about the person and
     the folder when the task was made; only trusted code sets it.
+    ``project_instructions`` is the text of the project's own instruction
+    files found in the folder then (``AGENTS.md``, ``CLAUDE.md``,
+    ``GEMINI.md``); ``project_files`` lists what was read as (path, characters,
+    cut) and ``project_skipped`` the files too big to read. Only trusted code
+    sets them.
     """
 
     title: str
@@ -114,6 +119,9 @@ class TaskSpec:
     reason: str = ""
     user_words: str = ""
     context_pack: str = ""
+    project_instructions: str = ""
+    project_files: tuple[tuple[str, int, bool], ...] = ()
+    project_skipped: tuple[str, ...] = ()
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> TaskSpec:
@@ -172,7 +180,10 @@ class TaskSpec:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        """The JSON object ``tasks.spec`` holds (``user_words`` and ``context_pack`` only when set)."""
+        """The JSON object ``tasks.spec`` holds.
+
+        ``user_words``, ``context_pack`` and the ``project_*`` fields are in it only when set.
+        """
         out: dict[str, Any] = {
             "title": self.title,
             "objective": self.objective,
@@ -185,6 +196,15 @@ class TaskSpec:
             out["user_words"] = self.user_words
         if self.context_pack:
             out["context_pack"] = self.context_pack
+        if self.project_instructions:
+            out["project_instructions"] = self.project_instructions
+        if self.project_files:
+            out["project_files"] = [
+                {"path": path, "chars": chars, "cut": cut}
+                for path, chars, cut in self.project_files
+            ]
+        if self.project_skipped:
+            out["project_skipped"] = list(self.project_skipped)
         return out
 
 

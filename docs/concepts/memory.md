@@ -198,12 +198,23 @@ The report lists `selected` turns in request order and each model operation in `
 
 ### What a task starts with
 
-A task's worker has no long-term memory of its own: it neither recalls nor keeps notes. What it knows about you comes in one short **context pack** that the chat that started it builds once, when the task is created. Workers do not use it yet; the pack is ready for the chat to call.
+A task's worker has no long-term memory of its own: it neither recalls nor keeps notes. What it knows about you comes in one short **context pack** that the chat that started it builds once, when the task is created. The task's first request carries it after your words, under a heading that marks it as data.
 
 - It is information about you and the project, not instructions, and it says so in its first line. Each line reads as in the recall block: `the user said “…”` or `a note to the user “…”`.
 - In it, in this order: your About you and Preferences notes, newest first (notes imported from another tool too); the notes of the task's project folder; then the notes that match the task's objective, among the same topics and projects. A project note of another folder is left out.
 - Never in it: People and Decisions notes. A worker browses and calls outside tools, so it gets the least that it needs.
 - At most 1,500 characters. The lowest-ranked lines go first, and a line is never cut in half. It is empty when memory is off or nothing qualifies. Building it asks no chat model; with an embedding model set up, the objective is matched by meaning too, with the 1.5 s limit above.
+
+### A task reads its project's own instruction file
+
+Coding projects keep a file that tells assistants how the project is built, tested and laid out. A task you start, and a saved chore, reads it when it starts, so it does not guess the test command, the layout or the conventions.
+
+- **Which files.** `AGENTS.md`, `CLAUDE.md` or `GEMINI.md` in the task's folder, then in each folder above it up to and including your home folder, never higher; a folder outside your home reads only itself. At each level the first of those names that exists counts. The nearest file comes first.
+- **How much.** At most three files and 6,000 characters in all. A file that does not fit whole is cut at a heading or a paragraph end and ends with `… (cut)`.
+- **Only the project's files, only read.** Your home folder's own file and the folders where other assistants keep their personal files (`~/.claude`, `~/.codex`, `~/.gemini`, which [the import](#bring-in-memory-from-other-assistants) turns into notes) are not read. A file over 256 KiB is not read, and the task's page says so. A symlink counts only when it points to a `.md` file inside the folders walked. Keys and passwords are removed, and so is any line that looks like a secret.
+- **How the task gets it.** Under its own heading after the context pack, on every request of the task: `[this project's notes for assistants · AGENTS.md · follow them for how this project is built, tested and laid out; the person's words, melo's rules and approvals come first]`. These are the project's conventions, so the task follows them; they never outrank your words, melo's rules or an approval.
+- **You see it.** The task's page says “Read the project's instructions: AGENTS.md (2.1k chars)”, and nothing when the folder has none.
+- It is read once, when the task is created: a continue or a restart uses the same text. `[memory] project_instructions = "off"` turns it off. Only tasks read it for now; a chat's own prompt does not.
 
 ### Side-chat summaries
 

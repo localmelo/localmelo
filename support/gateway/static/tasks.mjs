@@ -77,6 +77,24 @@ export function packFold(doc, task) {
   return fold;
 }
 
+// The project's own instruction files a task read when it began (its spec's project_files and
+// project_skipped): one line in the facts' style, and nothing when the folder had none.
+export function projectLine(doc, task) {
+  const spec = task?.spec ?? {};
+  const size = (chars) => (chars < 1000 ? String(chars) : `${(chars / 1000).toFixed(1)}k`);
+  const files = (spec.project_files ?? []).map((file) => t(file.cut ? 'tasks.project.fileCut' : 'tasks.project.file',
+    {path: file.path, size: size(file.chars)}));
+  const skipped = spec.project_skipped ?? [];
+  const words = [];
+  if (files.length) words.push(t('tasks.project.read', {files: files.join(', ')}));
+  if (skipped.length) words.push(t('tasks.project.skipped', {files: skipped.join(', ')}));
+  if (!words.length) return null;
+  const line = doc.createElement('p');
+  line.className = 'task-project muted';
+  line.textContent = words.join(' · ');
+  return line;
+}
+
 export function setupTasks({api, root, newId, navigate, approvalCard, every = defaultEvery, statusRow = null, live: liveOptions = null, developer = () => true, chooseFolder = null,
   home = () => '#/new', back = null, titleTag = 'h1'}) {
   const doc = root.ownerDocument;
@@ -205,6 +223,8 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     if (earlierOf(task).length) nodes.push(earlierBox(task));
     const pack = packFold(doc, task);
     if (pack) nodes.push(pack);
+    const project = projectLine(doc, task);
+    if (project) nodes.push(project);
     if (live) nodes.push(liveBox);
     // The card is a developer's recovery note: default mode shows it only when there is one to read.
     if (hasCard(task) || developer()) {
