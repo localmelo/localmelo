@@ -71,7 +71,7 @@ from localmelo.support.memory.index import (
     SUMMARY_TURN,
     ConversationIndex,
     Document,
-    document_text,
+    document_chunks,
     plain_text,
     typed_of,
 )
@@ -334,10 +334,11 @@ def _record_item(entry: StoredEntry) -> Item:
 
 
 def _doc_item(doc: Document) -> Item:
-    # What the user typed in a chat (not a task's prompt) states about them.
+    # What the user typed in a chat (not a task's prompt) states about them. A
+    # later chunk only repeats the head of it: chunk 0 holds the statements.
     typed = (
         ""
-        if doc.kind in (*_TASK_KINDS, SIDE_SUMMARY, AGENT_EXCHANGE)
+        if doc.kind in (*_TASK_KINDS, SIDE_SUMMARY, AGENT_EXCHANGE) or doc.chunk
         else typed_of(doc.text)
     )
     return Item(
@@ -1164,44 +1165,69 @@ class ChatMemory:
         self,
         turns: Sequence[tuple[dict[str, Any], int, str, str, float]],
         timeout: float,
-    ) -> int:
-        """Index turns of ``(source, turn, typed, answer, at)``, embedded as one batch;
-        the characters embedded (0 without a vector)."""
-        texts = [
-            document_text(
+    ) -> tuple[int, int]:
+        """Index turns of ``(source, turn, typed, answer, at)``: a document for each
+        chunk of each turn (:func:`document_chunks`), embedded _BATCH at a time, and
+        a turn's stored in place of the ones it had. Returns the documents stored
+        and the characters embedded (0 without a vector)."""
+        chunked = [
+            document_chunks(
                 typed, answer, title=src["title"] if src["kind"] == "task" else ""
             )
             for src, _, typed, answer, _ in turns
         ]
-        vectors, model, _ = await self._embed(texts, timeout, query=False)
-        for number, (src, turn, _, _, at) in enumerate(turns):
-            doc = Document(
-                session_id=str(src["session_id"]),
-                turn=turn,
-                surface=self.surface,
-                kind=str(src["kind"]),
-                title=str(src["title"]),
-                text=texts[number],
-                created_at=at,
-                vector=tuple(vectors[number]) if vectors else None,
-                embed_model=model,
+        texts = [text for chunks in chunked for text in chunks]
+        vectors: list[Sequence[float] | None] = [None] * len(texts)
+        model = ""
+        for start in range(0, len(texts), _BATCH):
+            got, found, _ = await self._embed(
+                texts[start : start + _BATCH], timeout, query=False
             )
+            if not got:
+                break  # a failed batch: the rest is not tried, and is words only
+            vectors[start : start + len(got)] = got
+            model = found
+        number = 0
+        for (src, turn, _, _, at), chunks in zip(turns, chunked, strict=True):
+            docs = [
+                Document(
+                    session_id=str(src["session_id"]),
+                    turn=turn,
+                    surface=self.surface,
+                    kind=str(src["kind"]),
+                    title=str(src["title"]),
+                    text=text,
+                    created_at=at,
+                    vector=None if vec is None else tuple(vec),
+                    embed_model=model,
+                    chunk=chunk,
+                )
+                for chunk, (text, vec) in enumerate(
+                    zip(chunks, vectors[number : number + len(chunks)], strict=True)
+                )
+            ]
+            number += len(chunks)
             async with self._lock:
-                await self.stores()[1].add(doc)
-        return sum(map(len, texts)) if vectors else 0
+                await self.stores()[1].add_many(docs)
+        embedded = sum(
+            len(t) for t, vec in zip(texts, vectors, strict=True) if vec is not None
+        )
+        return len(texts), embedded
 
     async def index_turns(
         self, turns: Sequence[tuple[dict[str, Any], int, str, str, float]]
-    ) -> int:
+    ) -> tuple[int, int]:
         """Index turns of ``(source, turn, typed, answer, at)`` as a reindex does
         (in batches, embedded when a model is set), each document stamped *at*;
-        the characters embedded. Nothing already indexed is touched."""
-        chars = 0
+        the documents stored and the characters embedded. Nothing already indexed
+        is touched."""
+        docs = chars = 0
         for start in range(0, len(turns), _BATCH):
-            chars += await self._add_documents(
+            more, embedded = await self._add_documents(
                 turns[start : start + _BATCH], INDEX_EMBED_TIMEOUT_S
             )
-        return chars
+            docs, chars = docs + more, chars + embedded
+        return docs, chars
 
     async def keep_said(
         self, store: SessionStore, info: TurnInfo, typed: str, at: float

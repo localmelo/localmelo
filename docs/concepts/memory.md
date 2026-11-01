@@ -35,7 +35,7 @@ In the web console and the app, melo remembers across chats.
 | File | What it holds |
 |---|---|
 | `records.db` | **Notes about you.** |
-| `index.db` | **An index of every chat.** Each chat turn that completes adds one document: what you typed and melo's answer, without its thinking, at most 2,000 characters, with secrets redacted. A task adds its title and result. Tool output and attachments are never indexed. Deleting a chat deletes its documents, and a turn you retry leaves none. |
+| `index.db` | **An index of every chat.** Each chat turn that completes adds a document: what you typed and melo's answer, without its thinking, with secrets redacted. A long turn is kept in several overlapping pieces (up to 8 of at most 2,000 characters), so a detail late in a long answer can still be found; a search finds a turn once, by its best piece. A task adds its title and result. Tool output and attachments are never indexed. Deleting a chat deletes its documents, and a turn you retry leaves none. |
 
 **Notes about you.** melo keeps a note two ways, and never asks you to confirm one:
 

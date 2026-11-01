@@ -18,7 +18,7 @@ import pytest
 
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
 from localmelo.support.memory import ChatMemory, ingest
-from localmelo.support.memory.index import DOC_CHARS
+from localmelo.support.memory.index import DOC_CHARS, MAX_CHUNKS, document_chunks
 from localmelo.support.memory.ingest import Chat, Exchange, IngestError, Message
 from localmelo.support.sessions.store import SessionStore
 from localmelo.tests.memory.chat_memory_helpers import FakeEmbedding
@@ -371,10 +371,11 @@ async def test_a_failing_embedding_model_indexes_words_and_says_so(
         await close(chats, memory)
 
 
-async def test_a_long_turn_is_cut_as_a_reindex_cuts_it_and_counted(
+async def test_a_long_turn_is_indexed_in_chunks_and_one_past_the_last_is_counted(
     tmp_path: Path,
 ) -> None:
     long = "word " * (DOC_CHARS // 2)
+    huge = "word " * (DOC_CHARS * MAX_CHUNKS)
     data = {
         "sessions": [
             chat(
@@ -384,15 +385,30 @@ async def test_a_long_turn_is_cut_as_a_reindex_cuts_it_and_counted(
                 ("assistant", "short answer"),
                 ("user", "tell me everything"),
                 ("assistant", long),
+                ("user", "tell me even more"),
+                ("assistant", huge),
             )
         ]
     }
     report, chats, memory = await ingest_file(tmp_path, data)
     try:
-        assert (report.turns, report.cut) == (2, 1)
+        assert (report.turns, report.cut) == (3, 1)
+        expected = [
+            document_chunks("short question", "short answer"),
+            document_chunks("tell me everything", long),
+            document_chunks("tell me even more", huge),
+        ]
+        assert [len(chunks) for chunks in expected] == [1, 3, MAX_CHUNKS]
+        assert report.docs == sum(map(len, expected))
         _, index = memory.stores()
-        lengths = sorted(len(d.text) for d in await index.fetch(await index.ids()))
-        assert lengths[-1] == DOC_CHARS
+        docs = await index.fetch(await index.ids())
+        assert sorted((d.turn, d.chunk) for d in docs) == [
+            (turn, chunk)
+            for turn, chunks in enumerate(expected, start=1)
+            for chunk in range(len(chunks))
+        ]
+        assert max(len(d.text) for d in docs) <= DOC_CHARS
+        assert await index.count() == 3  # turns, not chunks
         (session,) = await chats.list_sessions(limit=10, kinds=None)
         assert len((await chats.list_turns(session.id))[1].answer) == len(
             long
