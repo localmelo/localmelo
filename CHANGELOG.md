@@ -9,6 +9,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The `turn.memory` event lists what the model's own memory search found in the turn, as an optional `searched` list (the same item shape as `used`).
 - With `[memory] sleep` set to `rules`, `model` or `model+tags`, the gateway
   now tidies the notes by itself while the computer is idle: no turn in the
   gateway's chats for 20 minutes (a terminal chat that runs on its own, with

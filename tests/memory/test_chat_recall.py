@@ -12,6 +12,7 @@ import logging
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -27,6 +28,7 @@ from localmelo.support.memory.recall import (
     chat_label,
     kept_lines,
 )
+from localmelo.support.memory.service import CHAT_TURN
 from localmelo.support.sessions.store import NewSession, SessionStore
 from localmelo.tests.memory.chat_memory_helpers import FakeEmbedding, teach
 
@@ -427,4 +429,97 @@ async def test_a_statement_the_model_keeps_is_found_by_words_in_a_new_chat(
         found = await memory.before_turn(store, await _turn(store, "Asking"), asked)
         assert [item.text for item in found.used] == [note]
     finally:
+        await memory.aclose()
+
+
+async def test_the_turn_event_lists_what_the_models_searches_found(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    memory, keys = await build(tmp_path, store, None)
+    try:
+        emitted: list[dict[str, Any]] = []
+        typed = "hi there"  # nothing here recalls automatically
+        turn = await _turn(store, typed)
+        await memory.before_turn(store, turn, typed, emit=emitted.append)
+        records_ = {entry.text: entry for entry in await memory.records()}
+        sam = records_["Sam has the robotics lab keys."]
+        # The first search: its item is listed with where it was found.
+        reply = await memory.tools().search(query="robotics lab keys")
+        assert str(reply).startswith("1. the user said")
+        (data,) = emitted
+        (found,) = data["searched"]
+        assert found["kind"] == "record"
+        assert found["id"] == int(keys["sam"][2:])
+        assert found["session_id"] == sam.session_id
+        assert found["turn"] == sam.provenance["turn"]
+        assert data["used"] == [] and data["remembered"] == []
+    finally:
+        await memory.aclose()
+
+
+async def test_searches_in_one_turn_accumulate_without_repeats(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    memory, keys = await build(tmp_path, store, None)
+    try:
+        emitted: list[dict[str, Any]] = []
+        typed = "Tell me about my group and my lab."
+        await memory.before_turn(
+            store, await _turn(store, typed), typed, emit=emitted.append
+        )
+        search = memory.tools().search
+        await search(query="robotics lab keys")
+        await search(query="my group meeting on Thursdays")
+        assert [item["id"] for item in emitted[-1]["searched"]] == [
+            int(keys["sam"][2:]),
+            int(keys["meeting"][2:]),
+        ]
+        refreshed = len(emitted)
+        # Found again: nothing new, so the event is not sent again.
+        await search(query="robotics lab keys")
+        assert len(emitted) == refreshed
+        assert [item["id"] for item in emitted[-1]["searched"]] == [
+            int(keys["sam"][2:]),
+            int(keys["meeting"][2:]),
+        ]
+    finally:
+        await memory.aclose()
+
+
+async def test_no_search_means_no_searched_key(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    memory, _ = await build(tmp_path, store, None)
+    try:
+        typed = "hi there"
+        await memory.before_turn(store, await _turn(store, typed), typed)
+        chat = CHAT_TURN.get()
+        assert chat is not None
+        data = chat.event()
+        assert data is not None and "searched" not in data
+        # A search that finds nothing adds no key either.
+        assert "Nothing" in str(await memory.tools().search(query="zebra saxophone"))
+        later = chat.event()
+        assert later is not None and "searched" not in later
+    finally:
+        CHAT_TURN.set(None)
+        await memory.aclose()
+
+
+async def test_a_search_outside_a_turn_changes_no_event(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    memory, _ = await build(tmp_path, store, None)
+    try:
+        emitted: list[dict[str, Any]] = []
+        typed = "hi there"
+        await memory.before_turn(
+            store, await _turn(store, typed), typed, emit=emitted.append
+        )
+        CHAT_TURN.set(None)
+        reply = await memory.tools().search(query="robotics lab keys")
+        assert str(reply).startswith("1. the user said")
+        assert emitted == []
+    finally:
+        CHAT_TURN.set(None)
         await memory.aclose()
