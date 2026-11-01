@@ -35,7 +35,7 @@ from localmelo.support.gateway.console.front import (
 )
 from localmelo.support.gateway.finishing import OUT_OF_STEPS
 from localmelo.support.gateway.front_rules import hands_off, start_rule
-from localmelo.support.gateway.workers import NOTE_START
+from localmelo.support.gateway.workers import NOTE_START, _turn_text
 from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.store import SessionBusyError
 from localmelo.tests.sessions.helpers import answer, tool_call
@@ -303,6 +303,12 @@ def test_the_start_rule_starts_requests_and_answers_questions() -> None:
         ("Do not delete report.md; just explain what it contains.", "offer"),
         ("fix the login bug without changing anything else", "start"),
         ("修复登录的 bug，别改其他文件", "start"),
+        # A short polite request for work starts, though code would answer it.
+        ("can you commit this?", "start"),
+        ("could you push the branch?", "start"),
+        ("can you test the login page?", "start"),
+        ("can you check if the tests pass?", "start"),
+        ("can you see if numpy is installed?", "start"),
     ],
 )
 def test_the_start_rule_reads_what_the_words_ask(typed: str, rule: str) -> None:
@@ -698,6 +704,40 @@ async def test_a_follow_up_does_not_continue_a_task_the_person_continued_meanwhi
         assert info is not None and not info.meta.get("followup_guard")
         assert not info.meta["followup"]["continued"]
         assert "Delete the old drafts" not in record.card
+
+
+async def test_a_note_on_a_task_that_never_ran_is_still_not_the_persons_words(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    note = "Install numpy with pip3 first."
+    typed = "write the long report from my notes"
+    main: list[Reply] = [
+        creates("Long report"),
+        answer("Started it as a task."),
+        continues(note),
+        answer("Continued it."),
+    ]
+    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        _,
+        _ran,
+    ):
+        await say(client, console, typed)
+        task_id = await started_task(console)
+        # Out of steps before any turn was stored.
+        await console.workers.tasks.change(
+            task_id, state="failed", actor="scheduler", failure_reason=OUT_OF_STEPS
+        )
+        console.gate.finish_task(task_id, "failed")
+        await settled(console)
+        record = await console.workers.tasks.get_task(task_id)
+        assert record.state == "queued" and record.card.startswith(NOTE_START)
+        assert (
+            typed in record.card and note in record.card
+        ), "the request, then the note"
+        text, words = _turn_text(record)
+        assert text == record.card and words == typed
 
 
 async def test_one_ending_heard_twice_gets_one_follow_up(

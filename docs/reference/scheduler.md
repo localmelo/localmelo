@@ -386,8 +386,10 @@ guard wraps its policy in `EarlierBlocks`. Each real denial (a person's Deny,
 an auto block, a policy's refusal of the step itself; never a `Withdrawal`,
 such as a question withdrawn when the gateway stops) records
 `approval.call_key`, the tool, the folder and the normalized arguments, and
-`approval.loose_keys`: each command alike (spacing, quoting, `pip3` or
-`python -m pip` for `pip`, quiet flags) and each install (`install:pip:numpy`).
+`approval.loose_keys`: the whole list of commands alike (spacing, quoting,
+`pip3` or `python -m pip` for `pip`, quiet flags) and, for an install, each
+install part and each install (`install:pip:numpy`), so the rest of a compound
+step still runs.
 A call with the same key, or a loose key in common, is refused before any
 review with origin `policy` and `approval.earlier` (who blocked it). A step the
 person allowed once since is asked again, and so are steps alike to it.

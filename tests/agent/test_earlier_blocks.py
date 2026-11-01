@@ -128,3 +128,61 @@ def test_an_allowance_of_the_blocked_step_lifts_its_steps_alike() -> None:
     assert policy.match("shell_exec", alike, "/w") == ("Auto mode", False)
     auto.allow_once("step-1", ["install"], "python_exec")
     assert policy.match("shell_exec", alike, "/w") is None
+
+
+def _blocked(
+    tool: str, arguments: dict[str, str], categories: tuple[str, ...]
+) -> EarlierBlocks:
+    key = call_key(tool, arguments, "/w")
+    return EarlierBlocks(
+        AllowAllPolicy(),
+        {key: ("Auto mode", "")},
+        {key: loose_keys(tool, arguments, categories)},
+    )
+
+
+TWO_CALLS = (
+    "import subprocess\n"
+    'subprocess.run(["pip", "install", "numpy"])\n'
+    'subprocess.run(["python", "fetch.py"])'
+)
+
+
+@pytest.mark.parametrize(
+    ("tool", "arguments", "workaround"),
+    [
+        (
+            "shell_exec",
+            {"command": "pip install numpy && python fetch.py"},
+            ("shell_exec", {"command": "python fetch.py"}),
+        ),
+        (
+            "shell_exec",
+            {"command": "cd /w/app && pip install numpy"},
+            ("shell_exec", {"command": "cd /w/app && pytest -q"}),
+        ),
+        (
+            "python_exec",
+            {"code": TWO_CALLS},
+            (
+                "python_exec",
+                {"code": 'import subprocess\nsubprocess.run(["python", "fetch.py"])'},
+            ),
+        ),
+    ],
+)
+def test_only_the_blocked_part_of_a_compound_step_is_refused_again(
+    tool: str, arguments: dict[str, str], workaround: tuple[str, dict[str, str]]
+) -> None:
+    policy = _blocked(tool, arguments, ("install",))
+    # The way around it runs; the install alone, however it is spelt, does not.
+    assert policy.match(*workaround, "/w") is None
+    alone = {"command": "pip3 install -q numpy"}
+    assert policy.match("shell_exec", alone, "/w") == ("Auto mode", False)
+
+
+def test_a_block_of_another_kind_keys_the_whole_command_only() -> None:
+    policy = _blocked("shell_exec", {"command": "rm -rf build && make"}, ("delete",))
+    assert policy.match("shell_exec", {"command": "make"}, "/w") is None
+    spaced = {"command": "rm  -rf build  &&  make"}
+    assert policy.match("shell_exec", spaced, "/w") == ("Auto mode", False)

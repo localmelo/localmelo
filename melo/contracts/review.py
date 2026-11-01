@@ -340,16 +340,23 @@ def _python_commands(code: str) -> list[list[str]]:
     return found
 
 
+def _installs(tokens: Sequence[str]) -> bool:
+    return len(tokens) > 2 and tokens[1] == "install"
+
+
 def loose_keys(
     tool_name: str, arguments: Mapping[str, Any], categories: Sequence[str] = ()
 ) -> list[str]:
     """Keys that make two calls the same step though their text differs (#411).
 
-    One per command the call runs, alike when only spacing, quoting, the
-    program's spelling (``pip3``, ``python -m pip``) or a quietening flag
-    differ; and, for an install (*categories* has ``install``, or *categories*
-    is empty: the call is not reviewed yet), one per program and what it
-    installs. They only ever refuse: no allowance is kept by them.
+    One for the whole list of commands the call runs, alike when only
+    spacing, quoting, the program's spelling (``pip3``, ``python -m pip``) or a
+    quietening flag differ. A part of it has keys of its own only when it is
+    what was blocked: for an install (*categories* has ``install``, or is
+    empty: the call is not reviewed yet), each install part, and one key per
+    program and what it installs. So a blocked ``pip install numpy && python
+    fetch.py`` refuses a later ``pip3 install numpy`` but not ``python
+    fetch.py``. They only ever refuse: no allowance is kept by them.
     """
     if tool_name == "shell_exec":
         command = arguments.get("command")
@@ -361,18 +368,18 @@ def loose_keys(
         commands = _python_commands(str(arguments.get("code") or ""))
     else:
         return []
-    keys: list[str] = []
-    for words in commands:
-        tokens = _command(words)
-        if not tokens:
-            continue
-        keys.append("cmd:" + hashlib.sha256(" ".join(tokens).encode()).hexdigest()[:32])
-        if (
-            len(tokens) > 2
-            and tokens[1] == "install"
-            and (not categories or "install" in categories)
-        ):
+    parts = [tokens for tokens in (_command(words) for words in commands) if tokens]
+    if not parts:
+        return []
+
+    def key(text: str) -> str:
+        return "cmd:" + hashlib.sha256(text.encode()).hexdigest()[:32]
+
+    keys = {key(" && ".join(" ".join(tokens) for tokens in parts))}
+    if not categories or "install" in categories:
+        for tokens in filter(_installs, parts):
+            keys.add(key(" ".join(tokens)))
             targets = sorted({t.lower() for t in tokens[2:] if not t.startswith("-")})
             if targets:
-                keys.append(f"install:{tokens[0]}:{','.join(targets)}")
-    return sorted(set(keys))
+                keys.add(f"install:{tokens[0]}:{','.join(targets)}")
+    return sorted(keys)

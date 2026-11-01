@@ -335,7 +335,8 @@ def _turn_text(record: TaskRecord) -> tuple[str, str | None]:
     objective = str(record.spec["objective"])
     text = record.card or objective
     typed = str(record.spec.get("user_words") or "")
-    if text.startswith((CARD_START, NOTE_START)):
+    # A note may follow the request in a task that never ran: anywhere in the card.
+    if text.startswith(CARD_START) or NOTE_START in text:
         return text, typed or objective
     return text, (text.replace(objective, typed, 1) if typed else None)
 
@@ -969,8 +970,13 @@ class TaskWorkers:
         self._inboxes.pop(task_id, None)
         ran = bool(await self.store.list_turns(task_id, limit=1))
         if not ran:
-            # Stopped before it ever ran: the new turn carries the request too.
-            text = f"{current.spec.get('objective') or current.title}\n\n{text}"
+            # Stopped before it ever ran: the new turn carries the request too,
+            # after the lead of a chat's note, which stays first.
+            request = str(current.spec.get("objective") or current.title)
+            if text.startswith(NOTE_START):
+                text = f"{NOTE_START}\n{request}\n\n{text[len(NOTE_START) :].lstrip()}"
+            else:
+                text = f"{request}\n\n{text}"
         # Finish it's run is kept on the task, so a park and resume keeps it.
         finishing = finish_run([text], continued=True, ran_before=ran)
         record = await self.tasks.reopen(
@@ -2655,7 +2661,7 @@ class TaskWorkers:
         # A continued task's message is asked too (a park's card is not one,
         # nor its chat's own note: only the person's words ask, #411).
         continued = bool(record.card) and not record.card.startswith(CARD_START)
-        if continued and not record.card.startswith(NOTE_START):
+        if continued and NOTE_START not in record.card:
             said.append(record.card)
         inbox = self._inboxes.get(task_id)
         said += inbox.read if inbox is not None else []

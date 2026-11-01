@@ -90,10 +90,8 @@ from localmelo.support.gateway.front_rules import (
     allows,
     allows_level,
     allows_message,
-    asks_only,
     brief_question,
     control_action,
-    hands_off,
     intention_only,
     is_chinese,
     is_question,
@@ -402,9 +400,11 @@ class FrontAgent(Agent):
         if front is None or turn is None or on_event is None:
             return await super().run_task(query, on_event=on_event, **kwargs)
         words = turn.typed_text or turn.user_text
-        # A question is offered as a task, not started (a polite request is no
-        # question); so are words that say not to act.
-        asks = asks_only(turn.typed_text) or hands_off(turn.typed_text)
+        # What the chat could not settle is handed off as start_rule says: a
+        # request starts, anything else (a question, words that say not to act
+        # and ask nothing else) is offered. Words that are not typed (an
+        # attachment alone) are handed off as they are.
+        asks = bool(turn.typed_text.strip()) and start_rule(turn.typed_text) != "start"
         # A question that asks for a short answer is answered here, never handed off.
         quick = brief_question(turn.typed_text)
         handed: list[tuple[str, str, bool]] = []

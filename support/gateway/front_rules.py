@@ -495,7 +495,7 @@ _DOES: Final = re.compile(
     r"commit|push|merge|format|lint|migrate|export|import|save|collect|draft|prepare|"
     r"launch|book|replace|research|search|find|look\s+up|check|review|compare|"
     r"analy[sz]e|benchmark|profile|split|combine|extract|back\s+up|backup|archive|"
-    r"resize|compress|record|schedule|code)\b"
+    r"resize|compress|record|schedule|code|see\s+(?:if|whether)|find\s+out)\b"
     r"|修复|修好|修一下|修改|改成|改一下|改掉|改好|改写|写(?!的)|生成|画|安装|装(?:一下|个|上|好)"
     r"|跑(?:一下|一遍|完)?|运行|执行|打开|下载|创建|新建|删除|删掉|移动|复制|重命名|整理|转换|转成"
     r"|翻译|总结|部署|测试|构建|编译|提交|推送|上传|发送|发给|实现|添加|加上|更新|升级|配置|设置"
@@ -591,7 +591,8 @@ def start_rule(typed: str) -> StartRule:
       else" asks for the fix;
     - ``answer`` for a polite opening, or one that asks to be told, with no
       verb that acts ("please explain …", "帮我看看 …"), and for what
-      :func:`route` answers (a greeting, a brief or short plain question);
+      :func:`route` answers (a greeting, a brief or short plain question),
+      unless it is a polite request for work ("can you commit this?");
     - ``offer`` for words code read as something else (a chore, a reminder,
       a task named) and for a question (:func:`asks_only`);
     - ``answer`` for a short message with no verb that acts ("ok", "thanks",
@@ -609,6 +610,9 @@ def start_rule(typed: str) -> StartRule:
     if not doing and (_REQUEST.match(text) or _EXPLAINS.match(text)):
         return "answer"
     found = route(typed).route
+    # A polite request for work is a request, however short ("can you commit this?").
+    if polite_request(typed) and found == "answer":
+        found = "plan"
     if found == "answer":
         return "answer"
     if found not in START_ROUTES or asks_only(typed):

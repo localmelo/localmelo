@@ -111,6 +111,21 @@ async def test_a_chinese_preamble_hands_off_in_chinese(tmp_path: Path) -> None:
         assert [e["echo"] for e in await _echoes(console)] == ["started"]
 
 
+async def test_a_request_that_keeps_the_rest_unchanged_hands_off_as_a_task(
+    tmp_path: Path,
+) -> None:
+    # The hand-off reads the words as start_rule does: the fix is asked for.
+    async with front_console(tmp_path, answer("Let me look at the login code.")) as (
+        console,
+        client,
+        _,
+    ):
+        await _say(client, console, "fix the login bug without changing anything else")
+        turn = await _wait_turn(client, str(console.main_id))
+        assert turn["answer"] == STARTED_TEXT
+        assert [e["echo"] for e in await _echoes(console)] == ["started"]
+
+
 async def test_a_question_answered_with_a_preamble_asks(tmp_path: Path) -> None:
     async with front_console(tmp_path, answer("Let me look into it.")) as (
         console,
