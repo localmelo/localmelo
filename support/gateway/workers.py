@@ -35,7 +35,7 @@ from localmelo.melo.executor.process_gate import PROCESS_RECORD
 from localmelo.melo.executor.sandbox import user_temp_dir
 from localmelo.melo.executor.search_files import SEARCH_FILES_TOOL, rooted_search_files
 from localmelo.melo.schema import Message, ToolDef, broken_tool_call, split_thinking
-from localmelo.support.config import Config
+from localmelo.support.config import Config, SavedFolders
 from localmelo.support.gateway.auto_blocks import (
     block_to_allow,
     blocked_steps,
@@ -2187,7 +2187,14 @@ class TaskWorkers:
                     answer.cancel()
                     await asyncio.gather(answer, return_exceptions=True)
 
-            policy: ApprovalPolicy = RememberingPolicy(runner.observe(paused_ask))
+            # Only a task the person started may ask about a folder outside
+            # its workspace (#405), through its chat, in Ask and in Auto.
+            asking = RememberingPolicy(
+                runner.observe(paused_ask),
+                folders=_remembers(record.origin),
+                saved=SavedFolders(),
+            )
+            policy: ApprovalPolicy = asking
             if task_mode == "auto":
                 # Nobody is asked, so nothing holds the task (#339).
                 policy = self._auto.setdefault(task_id, AutoPolicy(task=True))
@@ -2200,6 +2207,7 @@ class TaskWorkers:
                     lambda: self._owner_chat(task_id),
                     self._earlier,
                     started=self._chat_started,
+                    folders=asking,
                 )
                 owned.append(policy)
             async with self._lock:

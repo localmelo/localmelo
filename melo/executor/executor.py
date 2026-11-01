@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import inspect
+import os
 import time
 from collections.abc import Awaitable, Callable, Collection, Coroutine, Mapping
 from typing import TYPE_CHECKING, Any
@@ -12,6 +13,17 @@ from localmelo.melo.contracts.approvals import (
     APPROVAL_FAILED,
     ApprovalDecision,
     denial_text,
+)
+from localmelo.melo.contracts.folders import (
+    CHECKED_PATH,
+    CheckedPath,
+    OutsideAccess,
+    PathChangedError,
+    asked_text,
+    canonical_path,
+    never_offered,
+    never_text,
+    outside_access,
 )
 from localmelo.melo.contracts.tool_capture import _ENTRY_MARKED, TOOL_ENTRY
 from localmelo.melo.executor.builtins import builtin_names
@@ -42,6 +54,9 @@ ToolCallable = Callable[..., Coroutine[Any, Any, "str | ToolOutput"]]
 
 # Asked before a call of a tool that requires approval runs (see
 # Executor.execute_structured); its decision lets the call run or denies it.
+# A gate that may ask a person about a folder outside the workspace (#405)
+# also has ``asks_folders(outside) -> bool``; without it, or when it says
+# no, a path outside the workspace is refused as it always was.
 ApprovalGate = Callable[[ExecutionRequest], Awaitable[ApprovalDecision]]
 
 # A tool's own check of a call's arguments, run before the approval gate is
@@ -167,6 +182,20 @@ class Executor:
         gate, the tool and the outcome's artifacts get the path that was
         checked, and the caller's request is not changed.
 
+        A path outside the root may still run when a person allows it
+        (#405): only when *approve* has ``asks_folders`` and it answers
+        ``True`` for the call's
+        :class:`~localmelo.melo.contracts.folders.OutsideAccess`. Before
+        that, a place melo never opens (keys, its own data, system folders,
+        the whole home folder; see
+        :func:`~localmelo.melo.contracts.folders.never_offered`) is refused
+        with ``PATH_POLICY_VIOLATION`` and its own text, and nobody is
+        asked. Otherwise the gate is asked about the call, whatever the
+        tool's tier, with ``outside`` set on the request; its answer stands
+        for the tool's own approval too, so it asks once. A denial's text
+        starts with one line that names the folder. Without such a gate the
+        refusal is the plain one above, word for word.
+
         *approve* is asked about each call of a tool registered as
         requiring approval (see :meth:`register`), after every check that
         refuses a call by itself and before the tool's timeout starts, so
@@ -191,7 +220,29 @@ class Executor:
         check: it also finds the tools of :meth:`register_harness_tool`, and
         the checker's refusal of an ``exec`` tool that the mode does not
         offer the model does not apply. Every other check still does.
+
+        A file tool opens what was checked: the executor sets
+        :data:`~localmelo.melo.contracts.folders.CHECKED_PATH` while the
+        call runs, and the tool's descriptor must name that path (see
+        :func:`~localmelo.melo.contracts.folders.open_checked`), or the call
+        is refused with ``PATH_POLICY_VIOLATION``.
         """
+        token = CHECKED_PATH.set(None)
+        try:
+            return await self._execute(
+                request, allowed=allowed, approve=approve, harness=harness
+            )
+        finally:
+            CHECKED_PATH.reset(token)
+
+    async def _execute(
+        self,
+        request: ExecutionRequest,
+        *,
+        allowed: Collection[str] | None,
+        approve: ApprovalGate | None,
+        harness: bool,
+    ) -> ExecutionOutcome:
         tool_call = ToolCall(tool_name=request.tool_name, arguments=request.arguments)
 
         # 1. Authoritative registry resolution
@@ -281,9 +332,14 @@ class Executor:
         # 7. Workspace path policy for the file tools: the path is resolved
         #    against the root, and the call goes on with the real path, so
         #    the tool opens the file that was checked (and the approval
-        #    policy sees it).
+        #    policy sees it). A path outside the root is asked about only
+        #    when the gate can ask a person (#405).
         policy: WorkspacePolicy | None = None
         resolved: str | None = None
+        outside: OutsideAccess | None = None
+        if request.outside is not None:
+            # Only this step sets it: a caller's own is not trusted.
+            request = dataclasses.replace(request, outside=None)
         if request.tool_name in _FILE_TOOLS:
             policy = (
                 WorkspacePolicy(request.workspace_root)
@@ -309,22 +365,34 @@ class Executor:
                         error_category=ErrorCategory.INVALID_ARGUMENTS,
                     )
                 if resolved is None:
-                    return ExecutionOutcome(
-                        tool_name=request.tool_name,
-                        status=ExecutionStatus.ERROR,
-                        error=f"Path '{path}' is outside allowed workspace root",
-                        error_category=ErrorCategory.PATH_POLICY_VIOLATION,
+                    outside, refusal = _outside(
+                        request.tool_name, policy.root, str(path), approve
                     )
+                    if outside is None:
+                        return ExecutionOutcome(
+                            tool_name=request.tool_name,
+                            status=ExecutionStatus.ERROR,
+                            error=refusal,
+                            error_category=ErrorCategory.PATH_POLICY_VIOLATION,
+                        )
+                    resolved = outside.path
                 # A new request: the caller's arguments stay as they were.
                 request = dataclasses.replace(
-                    request, arguments={**request.arguments, "path": resolved}
+                    request,
+                    arguments={**request.arguments, "path": resolved},
+                    outside=outside,
                 )
+                # The tool opens this path and nothing else (open_checked).
+                CHECKED_PATH.set(CheckedPath(resolved, outside is not None))
 
-        # 8. Approval, for a tool that requires it: asked only about a call
-        #    that every check above let through, and before the tool's
-        #    timeout starts.
+        # 8. Approval, for a tool that requires it, and for any call on a
+        #    path outside the root (#405): asked only about a call that
+        #    every check above let through, and before the tool's timeout
+        #    starts.
         asked = False
-        if approve is not None and self.requires_approval(request.tool_name):
+        if approve is not None and (
+            outside is not None or self.requires_approval(request.tool_name)
+        ):
             mismatch = _parameter_mismatch(fn, request.arguments)
             if mismatch:
                 return ExecutionOutcome(
@@ -360,11 +428,14 @@ class Executor:
                     ),
                 )
             if not decision.allow:
+                # The agent's gate keeps the call's review (#279).
+                error = denial_text(decision, getattr(approve, "review", None))
+                if outside is not None and decision.origin in ("user", "timeout"):
+                    error = f"{asked_text(outside)} {error}"
                 return ExecutionOutcome(
                     tool_name=request.tool_name,
                     status=ExecutionStatus.BLOCKED,
-                    # The agent's gate keeps the call's review (#279).
-                    error=denial_text(decision, getattr(approve, "review", None)),
+                    error=error,
                     error_category=ErrorCategory.APPROVAL_DENIED,
                 )
             asked = True
@@ -377,7 +448,7 @@ class Executor:
             asked
             and policy is not None
             and resolved is not None
-            and policy.resolve(resolved) != resolved
+            and _resolved_again(policy, resolved, outside) != resolved
         ):
             return ExecutionOutcome(
                 tool_name=request.tool_name,
@@ -427,6 +498,16 @@ class Executor:
                     output = await fn(**request.arguments)
                 finally:
                     _ENTRY_MARKED.reset(token)
+        except PathChangedError as exc:
+            # The file opened is not the one checked (a part of the path
+            # was swapped after the check): nothing was read or written.
+            return ExecutionOutcome(
+                tool_name=request.tool_name,
+                status=ExecutionStatus.ERROR,
+                error=str(exc),
+                error_category=ErrorCategory.PATH_POLICY_VIOLATION,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
         except TimeoutError as exc:
             duration = (time.perf_counter() - start) * 1000
             if deadline.expired():
@@ -509,6 +590,45 @@ class Executor:
                 )
             )
         return artifacts
+
+
+def _outside(
+    tool_name: str, root: str, path: str, approve: ApprovalGate | None
+) -> tuple[OutsideAccess | None, str]:
+    """The outside access to ask about for *path*, or ``None`` and the refusal.
+
+    Asked about only when *approve* can ask a person (``asks_folders``);
+    when it cannot, the refusal is the one it always was, word for word,
+    whatever the path. When it can, a place never offered (a path given
+    under a file-system alias too) is refused with its own text, and nobody
+    is asked.
+    """
+    plain = f"Path '{path}' is outside allowed workspace root"
+    asks = getattr(approve, "asks_folders", None) if approve is not None else None
+    if not callable(asks):
+        return None, plain
+    joined = os.path.join(root, path)
+    access = outside_access(tool_name, joined)
+    try:
+        can_ask = asks(access) is True
+    except Exception:
+        can_ask = False
+    if not can_ask:
+        return None, plain
+    reason = never_offered(joined)
+    if reason is not None:
+        return None, never_text(path, reason)
+    return access, ""
+
+
+def _resolved_again(
+    policy: WorkspacePolicy, resolved: str, outside: OutsideAccess | None
+) -> str | None:
+    """*resolved* resolved again after the wait: under the root, or outside it as allowed."""
+    if outside is None:
+        return policy.resolve(resolved)
+    real = canonical_path(resolved)
+    return real if never_offered(real, canonical=True) is None else None
 
 
 def _parameter_mismatch(fn: ToolCallable, arguments: Mapping[str, Any]) -> str:

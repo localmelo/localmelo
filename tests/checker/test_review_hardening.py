@@ -10,6 +10,7 @@ workspace, as in ``test_review.py``.
 from __future__ import annotations
 
 import os
+import sys
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -1213,3 +1214,136 @@ def test_code_that_names_other_places_is_routine(ws: Path, gateway_port: int) ->
     (ws / "old.js").write_text("const t = '~/.cache/localmelo/gateway/auth/token';\n")
     edit = {"path": "old.js", "old": "const t", "new": "let t"}
     assert rv(ws, "file_edit", edit).verdict == "routine"
+
+
+# ── File-system aliases and letter case (#405) ──────────────────────────────
+
+needs_aliases = pytest.mark.skipif(
+    not (sys.platform == "darwin" and os.path.isdir("/.vol")),
+    reason="no file-system aliases here",
+)
+
+
+def _vol(path: Path) -> str:
+    info = os.stat(path)
+    return f"/.vol/{info.st_dev}/{info.st_ino}"
+
+
+@pytest.fixture
+def keys(ws: Path) -> Path:
+    folder = ws.parent / ".ssh"
+    folder.mkdir()
+    (folder / "id_rsa").write_text("key")
+    return folder
+
+
+@needs_aliases
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda k: f"cat {_vol(k)}/id_rsa",
+        lambda k: f"cat {_vol(k / 'id_rsa')}",
+        lambda k: f"cat /.resolve/1{os.path.realpath(k)}/id_rsa",
+        lambda k: f"cat /.nofollow{os.path.realpath(k)}/id_rsa",
+    ],
+)
+def test_a_shell_read_of_a_key_through_an_alias_is_not_routine(
+    ws: Path, keys: Path, make: Any
+) -> None:
+    review = sh(ws, make(keys))
+    assert review.verdict == "high"
+    assert "credentials" in review.categories
+
+
+@needs_aliases
+def test_python_through_an_alias_is_not_routine(ws: Path, keys: Path) -> None:
+    alias = f"{_vol(keys)}/id_rsa"
+    read = rv(ws, "python_exec", {"code": f"print(open({alias!r}).read())"})
+    link = rv(ws, "python_exec", {"code": f"import os\nos.link({alias!r}, 'k')"})
+    assert read.verdict == "high" and "credentials" in read.categories
+    assert link.verdict == "high" and "credentials" in link.categories
+
+
+@needs_aliases
+def test_an_alias_melo_cannot_name_is_sensitive(ws: Path) -> None:
+    review = sh(ws, "cat /.vol/1/2/nothing-here")
+    assert review.verdict == "high"
+    assert "credentials" in review.categories
+    assert (
+        paths.where(
+            paths.Context(str(ws), str(ws.parent), "", ""), "/.VOL/1/2", write=False
+        )
+        == "credentials"
+    )
+
+
+def test_git_hooks_in_another_case_are_persistence(ws: Path) -> None:
+    hook = "#!/bin/sh\necho hi\n"
+    for spelled in (".git/hooks/pre-commit", ".GIT/hooks/pre-commit", ".Git/HOOKS/x"):
+        review = rv(ws, "file_write", {"path": spelled, "content": hook})
+        assert review.verdict == "high", spelled
+        assert "persistence" in review.categories, spelled
+
+
+def test_a_shell_profile_in_another_case_is_persistence(ws: Path) -> None:
+    review = sh(ws, "echo 'export X=1' >> ~/.ZSHRC")
+    assert "persistence" in review.categories
+
+
+# ── melo's own data and key places, read by a command (#405) ─────────────────
+
+
+def _token(home: Path) -> Path:
+    token = home / ".cache" / "localmelo" / "gateway" / "auth" / "token"
+    token.parent.mkdir(parents=True, exist_ok=True)
+    token.write_text("bearer")
+    return token
+
+
+def _reads(path: str) -> list[tuple[str, dict[str, Any]]]:
+    return [
+        ("shell_exec", {"command": f"cat {path}"}),
+        ("python_exec", {"code": f"print(open({path!r}).read())"}),
+    ]
+
+
+def test_reading_melos_gateway_token_is_never_routine(ws: Path) -> None:
+    token = _token(ws.parent)
+    for tool, arguments in _reads(str(token)):
+        review = rv(ws, tool, arguments)
+        assert review.verdict == "high", tool
+        assert "credentials" in review.categories, tool
+
+
+def test_the_real_token_is_sensitive_under_another_home(
+    ws: Path, tmp_path: Path
+) -> None:
+    """A task's tools get a home of their own; the person's token still counts."""
+    token = _token(tmp_path / "person")
+    task_home = tmp_path / "task-home"
+    task_home.mkdir()
+    for tool, arguments in _reads(str(token)):
+        review = Checker().review_action(
+            ActionReviewPayload(tool, arguments, str(ws), home=str(task_home))
+        )
+        assert review.verdict == "high", tool
+        assert "credentials" in review.categories, tool
+
+
+def test_the_configured_memory_folder_is_sensitive(
+    ws: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    memory = tmp_path / "memory-elsewhere"
+    memory.mkdir()
+    (memory / "history.db").write_text("x")
+    monkeypatch.setenv("LOCALMELO_MEMORY_DIR", str(memory))
+    for tool, arguments in _reads(str(memory / "history.db")):
+        review = rv(ws, tool, arguments)
+        assert review.verdict == "high", tool
+        assert "credentials" in review.categories, tool
+
+
+def test_a_key_place_inside_the_workspace_reads_as_before(ws: Path) -> None:
+    (ws / ".claude").mkdir()
+    (ws / ".claude" / "notes.md").write_text("project notes")
+    assert sh(ws, "cat .claude/notes.md").verdict == "routine"

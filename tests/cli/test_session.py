@@ -1989,13 +1989,18 @@ async def test_a_turn_that_wrote_files_names_them_and_not_a_refused_write(
     setup.factory.scripts["m1"] = [
         tool_call("file_write", {"path": "notes.txt", "content": "new note\n"}),
         tool_call("file_write", {"path": "ideas.md", "content": "- one\n- two\n"}),
-        # The executor refuses a path outside the workspace; nothing is written.
+        # A write outside the workspace asks, in auto mode too (#405); the
+        # person says no, and nothing is written.
         tool_call("file_write", {"path": "../outside.txt", "content": "x\n"}),
         answer("Wrote two files."),
     ]
     session.agent = await setup.factory.build()
     session.approvals.set_mode("auto")
     session.enter("write the notes")
+    await _until(lambda: session.approver.pending is not None)
+    pending = session.approver.pending
+    assert pending is not None and pending.request.outside is not None
+    session.approver.answer("deny")
     await setup.idle()
     text = out.text()
     assert "✻ Worked for" in text

@@ -4,7 +4,10 @@
 it from the panel's keys: allow once (1), allow the tool for the session
 (2), or deny with a reason (3). A high-impact call (#279) offers no session
 choice: its options are allow once (1) and deny (2), and the panel starts
-on deny. :class:`Approvals` is the session's policy:
+on deny. A read in a folder outside the workspace (#405) offers allow once,
+allow the folder for this chat, always allow the folder (kept in the
+settings) and deny; a write there offers allow once and deny, and starts on
+deny. :class:`Approvals` is the session's policy:
 in ``ask`` mode a :class:`RememberingPolicy` that asks through the panel
 and keeps session grants, in ``auto`` mode an
 :class:`~localmelo.melo.contracts.approvals.AutoPolicy`: nothing asks, a
@@ -22,7 +25,7 @@ import dataclasses
 import json
 import os
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
@@ -36,6 +39,7 @@ from localmelo.melo.contracts.approvals import (
 from localmelo.melo.contracts.review import because, offers_grant, review_title
 from localmelo.support.cli import edits
 from localmelo.support.cli.text import escape_arguments, wrap_cells
+from localmelo.support.config import SavedFolders
 from localmelo.support.sessions.approvals import AskFunction, RememberingPolicy
 from localmelo.support.sessions.display import display_path, folder_name, home_label
 
@@ -72,7 +76,7 @@ _GRANT_WORDS: Final = {
     "python_exec": "Python code",
     "file_write": "file writes",
 }
-Choice = Literal["once", "session", "deny"]
+Choice = Literal["once", "session", "always", "deny"]
 
 
 @dataclass
@@ -83,6 +87,8 @@ class PendingApproval:
     offer_session: bool
     opened_at: float
     future: asyncio.Future[ApprovalDecision]
+    # A folder outside the workspace that may be kept in the settings (#405).
+    offer_always: bool = False
     # For file_write: what the path holds now, for the diff.
     target: edits.Target | None = None
     selected: int = 0
@@ -168,6 +174,8 @@ def panel_text(
     A high-impact call (#279) gets the review's title and a note that says
     why melo asks.
     """
+    if request.outside is not None:
+        return _outside_panel(request, target, width, minus, show_tier)
     text = _tool_panel(request, target, width, minus, show_tier)
     review = request.review
     title = review_title(review, folder_name(request.workspace_root))
@@ -270,8 +278,75 @@ def _tool_panel(
     return PanelText(f"Call {shown(tool)}?", f"{shown(tool)}{mark}", body, escaped_any)
 
 
+def _outside_panel(
+    request: ApprovalRequest,
+    target: edits.Target | None,
+    width: int,
+    minus: str,
+    show_tier: bool,
+) -> PanelText:
+    """The panel of a call on a path outside the workspace (#405).
+
+    The title names the real folder; the header says outside which
+    workspace, and whether the call reads or writes. A read's body says
+    what melo opens; a write's is the file write's body.
+    """
+    outside = request.outside
+    assert outside is not None
+    root = request.workspace_root
+    workspace = home_label(root) if root else "the workspace"
+    folder, escaped = escape_arguments(home_label(outside.folder))
+    path, changed = escape_arguments(home_label(outside.path))
+    escaped = escaped or changed
+    tool = request.tool_name
+    mark = "" if request.tier is None or not show_tier else f" · {request.tier}"
+    if outside.access == "write":
+        text = _tool_panel(request, target, width, minus, show_tier)
+        note, changed = escape_arguments(
+            f"{path} is outside {workspace}. A write there asks every time."
+        )
+        return dataclasses.replace(
+            text,
+            title=f"Write outside the workspace, in {folder}?",
+            notes=(note,),
+            escaped=text.escaped or escaped or changed,
+        )
+    if tool == "list_files":
+        title = f"Let melo look in {folder}?"
+        said = f"melo wants to list {path}."
+    else:
+        title = f"Let melo read in {folder}?"
+        said = f"melo wants to read {path}."
+    header = f"{tool}{mark} · outside {workspace} · read only"
+    body = [("", row) for row in _wrapped([said], width)]
+    if not outside.grantable:
+        rule = "melo never keeps your whole home folder open: this asks every time."
+        body += [("muted", row) for row in _wrapped([rule], width)]
+    return PanelText(title, header, body, escaped)
+
+
+def folder_options(request: ApprovalRequest) -> tuple[str, str]:
+    """The labels of "this folder for this chat" and "always this folder" (#405)."""
+    outside = request.outside
+    folder = home_label(outside.folder) if outside is not None else "this folder"
+    shown, _ = escape_arguments(folder)
+    return (
+        f"Yes, and allow {shown} for this chat",
+        f"Yes, and always allow {shown} (kept in Settings)",
+    )
+
+
+# Under the options of a read outside the workspace that may be granted.
+FOLDER_RULE: Final = (
+    "Always keeps the folder in Settings, where you can remove it. "
+    "Writing outside the workspace still asks every time."
+)
+
+
 def session_option(request: ApprovalRequest) -> str:
     """The label of the answer that allows *request* for the rest of the session."""
+    if request.outside is not None:
+        return folder_options(request)[0]
     if request.tool_name.startswith("browser:"):
         site = str(request.arguments.get("site") or "this site")
         return f"Yes, and allow {site} for the rest of this chat"
@@ -333,16 +408,21 @@ class TerminalApprover:
         future: asyncio.Future[ApprovalDecision] = (
             asyncio.get_running_loop().create_future()
         )
-        # A grant never covers a high-impact call, whatever the caller says.
-        offered = offers_grant(request.review)
+        # A grant never covers a high-impact call, whatever the caller says;
+        # a folder outside the workspace is offered only when it may be kept.
+        outside = request.outside
+        offered = offers_grant(request.review) if outside is None else outside.grantable
         self.pending = PendingApproval(
             request=request,
             offer_session=offered and offer_session is not False,
             opened_at=self._clock(),
             future=future,
             target=target,
-            selected=0 if offered else 2,
+            selected=2 if outside is not None and outside.access == "write" else 0,
+            offer_always=outside is not None and offered,
         )
+        if outside is None and not offered:
+            self.pending.selected = 2
         self.on_change()
         try:
             return await future
@@ -364,10 +444,14 @@ class TerminalApprover:
             return
         if choice == "session" and not pending.offer_session:
             return
+        if choice == "always" and not pending.offer_always:
+            return
         if choice == "once":
             decision = ApprovalDecision(True)
         elif choice == "session":
             decision = ApprovalDecision(True, remember=True)
+        elif choice == "always":
+            decision = ApprovalDecision(True, remember=True, always=True)
         else:
             decision = ApprovalDecision(False, reason[:REASON_MAX_CHARS])
         pending.future.set_result(decision)
@@ -406,9 +490,33 @@ class EditSnapshots:
 
     def __init__(self, inner: ApprovalPolicy | None = None) -> None:
         self.inner = inner
+        # The policy that asks about a folder outside the workspace (#405), in
+        # Ask and in Auto alike; None asks nobody about one.
+        self.folders: RememberingPolicy | None = None
         self._snapshots: dict[str, Snapshot] = {}
 
+    @property
+    def asks_folders(self) -> bool:
+        return self.folders is not None and self.folders.asks_folders
+
+    async def decide_folder(self, request: ApprovalRequest) -> ApprovalDecision:
+        """Ask :attr:`folders` about a path outside the workspace, a write snapshotted."""
+        folders = self.folders
+        if folders is None:
+            raise ValueError("no policy asks about folders")
+        return await self._snapshotted(request, folders.decide_folder)
+
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
+        inner = self.inner
+        if inner is None:
+            return await self._snapshotted(request, None)
+        return await self._snapshotted(request, inner.decide)
+
+    async def _snapshotted(
+        self,
+        request: ApprovalRequest,
+        decide: Callable[[ApprovalRequest], Awaitable[ApprovalDecision]] | None,
+    ) -> ApprovalDecision:
         path = ""
         stat: tuple[int, int, int, int] | None = None
         if request.tool_name == "file_write" and isinstance(request.arguments, Mapping):
@@ -428,11 +536,7 @@ class EditSnapshots:
                 removed=removed,
                 stat=stat,
             )
-        decision = (
-            ApprovalDecision(True)
-            if self.inner is None
-            else await self.inner.decide(request)
-        )
+        decision = ApprovalDecision(True) if decide is None else await decide(request)
         # Q1 a: the person approved what they saw. If the file changed while
         # the panel was open, deny rather than write over the newer file.
         # A file that did not exist then (stat None) and exists now counts too.
@@ -489,18 +593,27 @@ class Approvals:
         self.mode: Mode = mode
         self._ask = ask
         self.snapshots = snapshots if snapshots is not None else EditSnapshots()
-        self._policy = RememberingPolicy(ask)
+        self._policy = self._asking()
         # Auto mode's policy, kept across turns for its allowances.
         self._auto = AutoPolicy()
 
+    def _asking(self) -> RememberingPolicy:
+        # It also asks about a folder outside the workspace (#405).
+        return RememberingPolicy(self._ask, folders=True, saved=SavedFolders())
+
     def policy(self) -> ApprovalPolicy | None:
-        """The policy for a turn: None with ``--yolo``, so nothing asks."""
+        """The policy for a turn: None with ``--yolo``, so nothing asks.
+
+        In Ask and in Auto the panel asks about a folder outside the
+        workspace; deny mode and ``--yolo`` refuse such a path.
+        """
         if self.mode == "yolo":
             return None
         if self.mode == "deny":
             return DenyAllPolicy(DENY_REASON)
         auto = self.mode == "auto"
         self.snapshots.inner = self._auto if auto else self._policy
+        self.snapshots.folders = self._policy
         return self.snapshots
 
     def set_mode(self, mode: Literal["ask", "auto", "deny"]) -> None:
@@ -515,8 +628,12 @@ class Approvals:
     def allowed_tools(self) -> frozenset[str]:
         return self._policy.allowed_tools
 
+    @property
+    def allowed_folders(self) -> tuple[str, ...]:
+        return self._policy.allowed_folders
+
     def reset(self) -> None:
         """Forget every grant: a new session starts with none."""
-        self._policy = RememberingPolicy(self._ask)
+        self._policy = self._asking()
         self._auto = AutoPolicy()
         self.snapshots.clear()

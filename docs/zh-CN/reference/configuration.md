@@ -79,6 +79,7 @@ chat_model = "qwen3:8b"
 | `host` | `[gateway]` | `"127.0.0.1"` | 回环监听地址；拒绝非回环绑定。 |
 | `port` | `[gateway]` | `8401` | 网关监听的端口。 |
 | `workspace` | `[gateway]` | `""` | 网页控制台会话的默认工作区文件夹（为空时为 `~/localmelo-workspace`）；仅在设置时写入。 |
+| `extra_folders` | `[workspace]` | `[]` | 在你发起的对话或任务里，melo 可以不经询问读取的工作区之外的文件夹（包括其下的内容）：每一项由审批卡片上的 **总是允许这个文件夹** 加入，在设置的 **对话和文件夹** 中移除。按真实路径保存（主文件夹写作 `~/`）。在那里写入仍然每次都会询问。不是绝对路径或 `~/` 开头的项、`/`、主文件夹或它上面的文件夹，以及 melo 从不打开的位置（密钥、它自己的数据、系统文件夹）都是设置错误，永远不会使用；最多 100 项。只有列表里有文件夹时才写入。见[工作区之外的文件夹](../guides/tools-mcp.md#folders-outside-the-workspace)。 |
 | `stream` | `[cli]` | `true` | 仅在交互式界面使用的实时流式，除非关闭否则默认开启（`/stream off`、`-X cli.stream=false`、`melo config set cli.stream false`）；没有该界面的运行从不流式。`/new` 会把 `/stream` 恢复为此值。无效值在界面中警告并回退；直接运行和网关不会因此失败。见[流式回复](../guides/terminal.md#streamed-replies)。 |
 | `status_line` | `[cli]` | `"auto"` | `"auto"`：交互式状态栏根据已收到的事件显示用量区（词元数或费用、`ctx`、缓存和空闲时间或速率限制），网关有任务时还显示任务。`"off"`：只保留运行区（标题或运行中轮次的步骤）和上一次请求的 `ctx`。高级选项：没有命令行参数。其他值在界面中警告并回退；直接运行和网关不会因此失败。见[状态栏](../guides/terminal.md#the-status-bar)。 |
 | `chat` | `[cli]` | `"main"` | 不带任务的 `melo` 打开什么。`"main"`：经网关的主对话，没有网关运行时在后台启动一个。`"local"`：终端自己的对话，不经网关（一次运行用 `-X cli.chat=local`；`-u`、`-c`、`-r` 和 `--yolo` 也会打开它）。开发者设置；其他值会警告并回退。见[主对话](../guides/terminal.md#the-main-chat)。 |

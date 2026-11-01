@@ -9,6 +9,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- When melo needs a file outside the chat's folder, it asks instead of
+  refusing, in a chat or task you started. The card in the console and the
+  app, and the option list in the terminal, name the real folder and offer
+  **Allow once**, **Allow this folder for this chat**, **Always allow this
+  folder** and **Deny**. "Always" keeps the folder in Settings, under
+  **Chats and folders**, where you can remove it (`[workspace]
+  extra_folders`). A grant covers reading only: writing outside the folder
+  asks every time. Key and credential folders, melo's own data, system
+  folders and your whole home folder are never offered. Auto mode never
+  allows such a folder by itself, and a run with no one to ask refuses it as
+  before. [#405]
+
 - melo reads a public web page in the chat: ask about a website or paste its
   address, and it reads the page as text (title, headings, main text and
   links; plain text and JSON as they are) with the new `web_fetch` tool. It is
@@ -491,6 +503,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   beside `level` ([#343]).
 
 ### Security
+
+- The file tools and the action review now compare a path as the file
+  system names it: another letter case of the workspace counts as inside,
+  and a macOS alias such as `/.vol` counts as the place it names, so it no
+  longer gets past the workspace check or the key folders. A file tool
+  opens only the file that was checked. [#405]
 
 - The approval card says why melo asks, and never offers a chat-wide allow for
   a high-impact call. In the web console and the macOS app, a call that

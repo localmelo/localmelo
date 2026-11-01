@@ -356,6 +356,22 @@ from-the-child
   ↑↓ select · enter confirm · 1-2 · v view all · esc stop the turn
 ```
 
+文件夹之外的文件会得到一个写明其真实文件夹的面板。读取可以在这个对话里或总是允许那个文件夹（记在设置里），写入每次都会询问，只有“是”和“否”，并且选中“否”（见[工作区之外的文件夹](tools-mcp.md#folders-outside-the-workspace)）：
+
+```text
+╭─ Let melo read in ~/Documents/letters? ────────────────────────────────────╮
+│ file_read · outside ~/demo-project · read only                             │
+│   melo wants to read ~/Documents/letters/cover-letter.md.                  │
+╰────────────────────────────────────────────────────────────────────────────╯
+❯ 1. Yes
+  2. Yes, and allow ~/Documents/letters for this chat
+  3. Yes, and always allow ~/Documents/letters (kept in Settings)
+  4. No, and tell melo why
+  Always keeps the folder in Settings, where you can remove it. Writing outside
+  the workspace still asks every time.
+  ↑↓ select · enter confirm · 1-4 · v view all · esc stop the turn
+```
+
 - `1` 允许这次调用，`2` 在本会话余下时间内允许该工具的常规调用，`3` 打开一个填写理由的输入框（最多 500 个字符），模型会读到它；↑ ↓ 和 Enter 同样可以选择。
 - 面板打开后的 0.4 秒内只有 Esc 和 Ctrl+C 有效，所以你正在输入的消息不会误回答它；Esc 或 Ctrl+C 会停止当前轮次。
 - 命令、代码或文件内容按它将要运行的样子完整显示，折行但绝不截断；控制字符和会改变文字顺序的字符会转义显示并附一行警告。
@@ -378,7 +394,8 @@ from-the-child
 ### 工作区
 
 - melo 在当前文件夹中工作，或在 `--workspace DIR` 指定的文件夹中工作。
-- 文件工具（`file_read`、`file_write`、`list_files`）只能在这个文件夹内；命令和 Python 可以访问其他文件，所以 melo 会先询问。
+- 文件工具（`file_read`、`file_write`、`list_files`）只能在这个文件夹内，要打开它之外的文件夹时会先询问；密钥文件夹、melo 自己的数据、系统文件夹和你的整个主文件夹从不提供。`/approvals` 会列出这个对话可以读取的文件夹。
+- 命令和 Python 可以访问其他文件。在 Ask 中 melo 会先询问；在 Auto 中，只在这个文件夹之外读取的常规命令或脚本不询问就会运行，而涉及密钥或密码的会算作高影响。
 - 工作区是你的主目录或 `/` 时，横幅会发出警告。
 - `shell_exec` 和 `python_exec` 在界面中 10 分钟后停止（任务中分别为 30 秒和 60 秒）。
 

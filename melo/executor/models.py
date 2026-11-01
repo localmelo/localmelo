@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from localmelo.melo.schema import ImagePart, ToolResult
+
+if TYPE_CHECKING:
+    from localmelo.melo.contracts.folders import OutsideAccess
 
 
 class ExecutionStatus(StrEnum):
@@ -63,10 +66,17 @@ class ToolOutput:
 
 @dataclass
 class ExecutionRequest:
+    """One call to run.
+
+    ``outside`` is set by the executor alone, on the request it hands the
+    approval gate, for a file tool's path outside the workspace (#405).
+    """
+
     tool_name: str
     arguments: dict[str, Any] = field(default_factory=dict)
     timeout_ms: float | None = None
     workspace_root: str | None = None
+    outside: OutsideAccess | None = None
 
 
 @dataclass
