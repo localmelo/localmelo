@@ -90,6 +90,8 @@ MEMORY_RECALL_MIN_COVERAGE = (0.10, 1.00)
 # Whether recall carries notes, and what a turn that recalls nothing is told.
 MEMORY_RECALL_NOTES = ("on", "off")
 MEMORY_SEARCH_WHEN_EMPTY = ("off", "hint")
+# Whether a task reads its project's own instruction file: see MemoryConfig.
+MEMORY_PROJECT_INSTRUCTIONS = ("on", "off")
 RECALL_KEYS = (
     "recall_records",
     "recall_docs",
@@ -363,7 +365,9 @@ class MemoryConfig:
     ``recall_item_chars`` (120-2000), the room one turn takes, and
     ``recall_excerpt``, ``head`` (the start of each part, the default) or
     ``match`` (the sentences of each part that hold most of the question's
-    content words).
+    content words). ``project_instructions = "off"`` stops a task that
+    the person made from reading the instruction file of its folder (``AGENTS.md``,
+    ``CLAUDE.md`` or ``GEMINI.md``, the nearest first) when it starts.
     """
 
     admit_on_outcome: bool = False
@@ -381,6 +385,7 @@ class MemoryConfig:
     recall_min_coverage: float = 0.6  # Least share of the question's words held.
     recall_item_chars: int = 200  # The room one recalled chat turn takes.
     recall_excerpt: str = "head"  # head | match: which part of a turn is shown.
+    project_instructions: str = "on"  # on | off: a task reads its folder's AGENTS.md.
 
 
 @dataclass
@@ -656,6 +661,7 @@ class Config:
             ("recall_notes", MEMORY_RECALL_NOTES),
             ("search_when_empty", MEMORY_SEARCH_WHEN_EMPTY),
             ("recall_excerpt", MEMORY_RECALL_EXCERPT),
+            ("project_instructions", MEMORY_PROJECT_INSTRUCTIONS),
         ):
             value = getattr(self.memory, name)
             if value not in allowed:
@@ -1762,6 +1768,10 @@ def save(cfg: Config) -> None:
         for name in RECALL_KEYS:
             if getattr(cfg.memory, name) != getattr(MemoryConfig(), name):
                 lines.append(f"{name} = {_toml_value(getattr(cfg.memory, name))}")
+        if cfg.memory.project_instructions != "on":
+            lines.append(
+                f"project_instructions = {_toml_string(cfg.memory.project_instructions)}"
+            )
         lines.append("")
 
     if cfg.browser != BrowserConfig():

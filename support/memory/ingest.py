@@ -159,16 +159,13 @@ def parse(data: object) -> list[Chat]:
     if not isinstance(sessions, list):
         raise IngestError('the file must be an object with a "sessions" list')
     chats: list[Chat] = []
-    seen: set[str] = set()
+    seen: dict[str, Chat] = {}
     for number, item in enumerate(sessions, 1):
         if not isinstance(item, Mapping):
             raise IngestError(f"session {number}: must be an object")
         label = item.get("id")
         label = str(label) if label not in (None, "") else f"session-{number}"
         where = f"session {label}"
-        if label in seen:
-            raise IngestError(f"{where}: the id is used twice")
-        seen.add(label)
         turns = item.get("turns")
         if not isinstance(turns, list):
             raise IngestError(f'{where}: needs a "turns" list')
@@ -195,14 +192,20 @@ def parse(data: object) -> list[Chat]:
         if base is None:
             raise IngestError(f"{where}: has no date")
         title = item.get("title")
-        chats.append(
-            Chat(
-                label,
-                _text(title).strip() if isinstance(title, str) else "",
-                base,
-                tuple(messages),
-            )
+        chat = Chat(
+            label,
+            _text(title).strip() if isinstance(title, str) else "",
+            base,
+            tuple(messages),
         )
+        # A session the file repeats word for word is read once; the same id
+        # with other turns, date or title is a mistake the file must fix.
+        if label in seen:
+            if seen[label] == chat:
+                continue
+            raise IngestError(f"{where}: the id is used twice, with different turns")
+        seen[label] = chat
+        chats.append(chat)
     return chats
 
 

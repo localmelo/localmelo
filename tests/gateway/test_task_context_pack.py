@@ -1,5 +1,9 @@
 """A task starts with what its chat knows: the pack is made once, at creation.
 
+The project's own instruction files (``AGENTS.md``, ``CLAUDE.md``,
+``GEMINI.md`` of the task's folder, read-only) are read at the same moment and
+ride the same way, under their own heading after the pack.
+
 Real workers on a scripted model show that the pack reaches a task's first
 request under its heading and stays out of the turn the transcript shows,
 that a continue reuses the stored pack, that a repeated keyed request does
@@ -25,7 +29,11 @@ from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.config import Config
 from localmelo.support.gateway.chat_gate import ChatGate
 from localmelo.support.gateway.task_policy import TaskSpec, is_persons_task
-from localmelo.support.gateway.workers import TASK_PACK_HEADER, TaskWorkers
+from localmelo.support.gateway.workers import (
+    PROJECT_HEADER,
+    TASK_PACK_HEADER,
+    TaskWorkers,
+)
 from localmelo.support.memory import ChatMemory
 from localmelo.support.memory.service import PACK_HEADER
 from localmelo.support.sessions.agents import session_options
@@ -288,3 +296,219 @@ async def test_a_restart_reuses_the_stored_pack(rig: Rig) -> None:
         assert len(rig.notes.calls) == 1
     finally:
         await restarted.aclose()
+
+
+# ── The project's own instruction files ──
+
+
+def _instructions_read(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> list[tuple[str, dict[str, Any]]]:
+    """Every call the workers make to the finder, answered by the real one."""
+    from localmelo.support.memory import project_files
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+    real = project_files.instructions
+
+    def spy(folder: str, **kwargs: Any) -> Any:
+        calls.append((folder, kwargs))
+        return real(folder, **kwargs)
+
+    monkeypatch.setattr(project_files, "instructions", spy)
+    return calls
+
+
+async def test_the_projects_file_follows_the_pack_on_the_first_request(
+    rig: Rig,
+) -> None:
+    (rig.workspace / "AGENTS.md").write_text("Test with `uv run pytest`.\n")
+    rig.llm.replies = [says("Done.")]
+    row, _ = await rig.workers.create(
+        {"prompt": "Fix registry.py", "workspace": str(rig.workspace)}
+    )
+    task_id = row["task_id"]
+    await _ended(rig.workers, task_id, 1)
+    first = _texts(rig.llm.requests[0])
+    heading = PROJECT_HEADER.format(paths="AGENTS.md")
+    block = f"{heading}\n--- AGENTS.md ---\nTest with `uv run pytest`."
+    assert block in first
+    assert "follow them for how this project is built, tested and laid out" in heading
+    assert "the person's words, melo's rules and approvals come first" in heading
+    # The person's words, then the pack, then the project's files.
+    assert (
+        first.index("Fix registry.py")
+        < first.index(TASK_PACK_HEADER)
+        < first.index(heading)
+    )
+    # Neither is in the transcript; both are stored with the spec.
+    turns = await rig.workers.store.list_turns(task_id, limit=10)
+    assert [turn.user_text for turn in turns] == ["Fix registry.py"]
+    spec = (await rig.workers.get(task_id))["spec"]
+    assert (
+        spec["project_instructions"] == "--- AGENTS.md ---\nTest with `uv run pytest`."
+    )
+    assert spec["project_files"] == [{"path": "AGENTS.md", "chars": 26, "cut": False}]
+    assert "project_skipped" not in spec
+
+
+async def test_the_pack_alone_when_the_folder_has_no_file(rig: Rig) -> None:
+    rig.llm.replies = [says("Done.")]
+    row, _ = await rig.workers.create(
+        {"prompt": "List the folder", "workspace": str(rig.workspace)}
+    )
+    await _ended(rig.workers, row["task_id"], 1)
+    first = _texts(rig.llm.requests[0])
+    assert f"{TASK_PACK_HEADER}\n{PACK_BODY}" in first
+    assert "this project's notes for assistants" not in first
+    spec = (await rig.workers.get(row["task_id"]))["spec"]
+    assert not [key for key in spec if key.startswith("project_")]
+
+
+async def test_the_file_is_read_without_notes_and_the_pack_is_not_needed(
+    rig: Rig,
+) -> None:
+    rig.workers.memory = None
+    (rig.workspace / "CLAUDE.md").write_text("Lint with ruff.")
+    rig.llm.replies = [says("Done.")]
+    row, _ = await rig.workers.create(
+        {"prompt": "List the folder", "workspace": str(rig.workspace)}
+    )
+    await _ended(rig.workers, row["task_id"], 1)
+    first = _texts(rig.llm.requests[0])
+    assert TASK_PACK_HEADER not in first
+    assert PROJECT_HEADER.format(paths="CLAUDE.md") + "\n--- CLAUDE.md ---" in first
+
+
+async def test_the_nearest_file_comes_first_and_the_heading_names_each(
+    rig: Rig,
+) -> None:
+    pkg = rig.workspace / "pkg"
+    pkg.mkdir()
+    (rig.workspace / "AGENTS.md").write_text("Root rule.")
+    (pkg / "CLAUDE.md").write_text("Package rule.")
+    rig.llm.replies = [says("Done.")]
+    row, _ = await rig.workers.create({"prompt": "Fix it", "workspace": str(pkg)})
+    await _ended(rig.workers, row["task_id"], 1)
+    first = _texts(rig.llm.requests[0])
+    assert PROJECT_HEADER.format(paths="CLAUDE.md, ../AGENTS.md") in first
+    assert first.index("Package rule.") < first.index("Root rule.")
+
+
+async def test_the_setting_off_reads_nothing(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _instructions_read(rig, monkeypatch)
+    (rig.workspace / "AGENTS.md").write_text("Test with pytest.")
+    rig.workers.settings().memory.project_instructions = "off"
+    rig.llm.replies = [says("Done.")]
+    row, _ = await rig.workers.create(
+        {"prompt": "Fix registry.py", "workspace": str(rig.workspace)}
+    )
+    await _ended(rig.workers, row["task_id"], 1)
+    assert calls == []
+    first = _texts(rig.llm.requests[0])
+    assert "this project's notes for assistants" not in first
+    assert f"{TASK_PACK_HEADER}\n{PACK_BODY}" in first, "the pack is not the setting's"
+    spec = (await rig.workers.get(row["task_id"]))["spec"]
+    assert not [key for key in spec if key.startswith("project_")]
+
+
+async def test_the_homes_own_file_is_never_given_to_a_task(rig: Rig) -> None:
+    # The rig's home is the folder that holds the workspace.
+    (rig.workspace.parent / "AGENTS.md").write_text("The person's own file.")
+    rig.llm.replies = [says("Done.")]
+    row, _ = await rig.workers.create(
+        {"prompt": "Fix registry.py", "workspace": str(rig.workspace)}
+    )
+    await _ended(rig.workers, row["task_id"], 1)
+    assert "The person's own file." not in _texts(rig.llm.requests[0])
+
+
+async def test_a_task_the_person_did_not_make_reads_no_project_file(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _instructions_read(rig, monkeypatch)
+    job = rig.workspace / "job"
+    job.mkdir()
+    (job / "AGENTS.md").write_text("Test with pytest.")
+    rig.llm.replies = [says("Done.")]
+    spec = TaskSpec.from_payload(
+        {"objective": "Sweep the cache", "workspace": str(job)}
+    )
+    task, _ = await rig.workers.create_spec(spec, origin="agent")
+    await _ended(rig.workers, task["task_id"], 1)
+    assert calls == []
+    assert "this project's notes for assistants" not in _texts(rig.llm.requests[0])
+
+
+async def test_a_saved_chore_reads_the_project_file(rig: Rig) -> None:
+    job = rig.workspace / "weekly"
+    job.mkdir()
+    (job / "GEMINI.md").write_text("Weekly notes live in notes/.")
+    rig.llm.replies = [says("Done.")]
+    spec = TaskSpec.from_payload(
+        {"objective": "Summarise the week", "workspace": str(job)}
+    )
+    task, _ = await rig.workers.create_spec(spec, origin="user_rule")
+    await _ended(rig.workers, task["task_id"], 1)
+    assert "--- GEMINI.md ---\nWeekly notes live in notes/." in _texts(
+        rig.llm.requests[0]
+    )
+
+
+async def test_a_failed_read_of_the_file_still_starts_the_task(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from localmelo.support.memory import project_files
+
+    def broken(folder: str, **kwargs: Any) -> Any:
+        raise RuntimeError("the disk is gone")
+
+    monkeypatch.setattr(project_files, "instructions", broken)
+    rig.llm.replies = [says("Done.")]
+    row, _ = await rig.workers.create(
+        {"prompt": "List the folder", "workspace": str(rig.workspace)}
+    )
+    await _ended(rig.workers, row["task_id"], 1)
+    assert (await rig.workers.get(row["task_id"]))["state"] == "done"
+    assert "this project's notes for assistants" not in _texts(rig.llm.requests[0])
+    assert "Could not read the project's instructions" in caplog.text
+
+
+async def test_a_file_too_big_to_read_is_named_and_gives_no_heading(rig: Rig) -> None:
+    (rig.workspace / "AGENTS.md").write_text("x" * (256 * 1024 + 1))
+    rig.llm.replies = [says("Done.")]
+    row, _ = await rig.workers.create(
+        {"prompt": "List the folder", "workspace": str(rig.workspace)}
+    )
+    await _ended(rig.workers, row["task_id"], 1)
+    assert "this project's notes for assistants" not in _texts(rig.llm.requests[0])
+    spec = (await rig.workers.get(row["task_id"]))["spec"]
+    assert spec["project_skipped"] == ["AGENTS.md"]
+    assert "project_instructions" not in spec and "project_files" not in spec
+
+
+async def test_a_continue_and_a_repeated_request_keep_the_first_reading(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _instructions_read(rig, monkeypatch)
+    agents = rig.workspace / "AGENTS.md"
+    agents.write_text("First rule.")
+    rig.llm.replies = [says("Done."), says("Finished.")]
+    request = {
+        "prompt": "Fix registry.py",
+        "workspace": str(rig.workspace),
+        "request_key": "same-request",
+    }
+    row, _ = await rig.workers.create(dict(request))
+    task_id = row["task_id"]
+    await _ended(rig.workers, task_id, 1)
+    agents.write_text("Changed rule.")
+    again, repeated = await rig.workers.create(dict(request))
+    assert repeated and again["task_id"] == task_id
+    _, how = await rig.workers.message(task_id, "finish it")
+    assert how == "continued"
+    await _ended(rig.workers, task_id, 2)
+    assert "First rule." in _texts(rig.llm.requests[1])
+    assert "Changed rule." not in _texts(rig.llm.requests[1])
+    assert len(calls) == 1

@@ -77,6 +77,7 @@ chat_model = "qwen3:8b"
 | `recall_min_coverage` | `[memory]` | `0.6` | 用于比较的开发者设置。一条笔记或对话轮次要靠字词被召回，至少要包含消息中实词的多大比例（0.10 到 1.00），召回块和记忆搜索工具都按它来；数值越低，放进来的越多，条目仍可以靠语义被召回。默认值就是召回一直以来用的门槛。`-X memory.recall_min_coverage=0.4` 只对一次运行生效。 |
 | `recall_item_chars` | `[memory]` | `200` | 用于比较的开发者设置。一条被召回的对话轮次占用的字符数，120 到 2000：用户的话和 melo 的回复合计，召回块和记忆搜索工具的列表都按它来（不是对话轮次的文本，例如对话摘要，占用此数再加 40）。默认值就是一轮对话一直以来的篇幅；更大的数值会显示更多内容，而召回块仍然遵守 `recall_chars`，放不下的条目会被略去。`-X memory.recall_item_chars=800` 只对一次运行生效。 |
 | `recall_excerpt` | `[memory]` | `"head"` | 用于比较的开发者设置。被召回的对话轮次放不进 `recall_item_chars` 时显示哪一部分：`"head"` 是每一部分的开头，一直如此；`"match"` 对每一部分（用户的话、melo 的回复）显示包含消息中最多实词的那些句子，省略的地方用 `…` 表示。用户的话能放进篇幅的 40% 时保持完整，没有任何匹配词的部分显示开头，网页和召回条目的 JSON 不变。`-X memory.recall_excerpt=match` 只对一次运行生效。 |
+| `project_instructions` | `[memory]` | `"on"` | `"on"`：你发起的任务或已保存的例行任务，在开始时读取项目自己的说明文件：它所在文件夹以及上面每一级文件夹（直到你的主目录）里，`AGENTS.md`、`CLAUDE.md`、`GEMINI.md` 中第一个存在的，最近的在前，最多三个文件、6,000 个字符，只读，并去掉机密内容。它们放在上下文包之后，用单独的标题，永远排在你的话、melo 的规则和审批之后。`"off"`：什么都不读。只有 `"off"` 时才会保存；`-X memory.project_instructions=off` 只对一次运行生效。见[任务读取项目自己的说明文件](../concepts/memory.md#a-task-reads-its-projects-own-instruction-file)。 |
 | `admit_on_outcome` | `[memory]` | `false` | R6-lite：只在运行结束时准入最后一次尝试的摘要，并在其来源中带上最终状态。`--admit-on-outcome` 旗标对一次运行优先；直接模式会读这张表，交互式界面和网关不读，且在 `legacy` 中被接受但不生效。 |
 | `api_key_env` | 云端后端 | 未设置 | 保存 API 密钥的环境变量名称。 |
 | `base_url` | 云端后端 | 厂商的 URL | API 的 URL。 |
