@@ -38,6 +38,22 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   bounded embedding similarity or a word-only fallback without merging different
   known subjects. Reports list selected turns and each model operation's bounded,
   secret-redacted verdict; applied changes carry the same label. [#389]
+- Note tidying keeps a paraphrase out (cosine from 0.85) but never a changed value
+  or the opposite statement (a negation in only one of the two). When two of the
+  user's own active notes say one subject with different values, the older is
+  superseded and the newer kept, without a model call (a model update that names
+  the newer note, or says what it holds, does the same). Each report entry shows the text of the note it targeted and the numbers
+  behind the existing-fact check; a note written from the same message is refused
+  as `self_target`. Notes the tidying writes are recall only: never pinned into
+  every prompt. [#396]
+- A note the tidying keeps now also counts as having replaced the exchanges of
+  the notes it superseded, as a note written to replace another does, so recall
+  stops giving the old value through its exchange (unless you ask about the
+  past); undo takes that back. A model update whose new value a newer active
+  note already holds supersedes the older note and writes no copy. A note the
+  model proposes that says "I", "me" or "my" outside quotes is refused as
+  `first_person`; the model is asked to write "you" for you and "melo" for the
+  assistant. [#396]
 
 - Developer setting `[memory] sleep` (`off` by default; `rules`, `model`
   and `model+tags`; `-X memory.sleep=rules`, listed by
@@ -3320,3 +3336,4 @@ earlier milestones.
 [#389]: https://github.com/localmelo/localmelo/pull/389
 [#392]: https://github.com/localmelo/localmelo/pull/392
 [#393]: https://github.com/localmelo/localmelo/pull/393
+[#396]: https://github.com/localmelo/localmelo/pull/396

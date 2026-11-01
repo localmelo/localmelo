@@ -231,11 +231,24 @@ async def test_each_model_op_has_a_bounded_verdict_and_applied_change_label(
         "applied",
     ]
     assert all(
-        set(r) == {"session_id", "turn", "op", "note_id", "text", "quote", "verdict"}
+        set(r)
+        == {
+            "session_id",
+            "turn",
+            "op",
+            "note_id",
+            "target_text",
+            "text",
+            "quote",
+            "verdict",
+            "guard",
+        }
         for r in rows
     )
     assert all(r["session_id"] == "s" and r["turn"] == 1 for r in rows)
     assert all(len(r["text"]) <= 200 and len(r["quote"]) <= 200 for r in rows)
+    # Only an ADD that passed the existing-fact check carries its numbers.
+    assert [r["guard"] is None for r in rows] == [True, True, False]
     assert report.refused == 1 and report.selected == [["s", 1]]
     (change,) = report.changes
     assert change.verdict == "applied" and change.proposal == rows[2]

@@ -60,13 +60,15 @@ async def put(
     turn: int = 1,
     vector: list[float] | None = None,
     edited: bool = False,
+    topic: str = "about",
+    quote: str = "",
 ) -> int:
     """A note, written as it is (no supersede), kept *at* that time."""
     store, _ = memory.stores()
-    provenance = {"session_id": session, "turn": turn, "topic": "about", "quote": ""}
+    provenance = {"session_id": session, "turn": turn, "topic": topic, "quote": quote}
     entry_id, _ = await store.apply(
         text=text,
-        kind="profile",
+        kind=records.TOPIC_KINDS[topic],
         source="user",
         admitted_by="user_statement",
         provenance=provenance,
@@ -80,7 +82,7 @@ async def put(
         source_ids=(),
         keep_text=False,
         candidate_id=new_record_id(),
-        record={"topic": "about", "quote": "", "embed_model": "m" if vector else ""},
+        record={"topic": topic, "quote": quote, "embed_model": "m" if vector else ""},
     )
     assert entry_id is not None
     if edited:
