@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from localmelo.melo.schema import EMPTY_REPLY_NUDGE, Message
+from localmelo.melo.schema import EMPTY_REPLY_NUDGE, TOOL_CALL_TEXT_NUDGE, Message
 from localmelo.support.config import Config
 from localmelo.support.memory import ChatMemory, service
 from localmelo.support.memory.recall import (
@@ -169,6 +169,11 @@ async def test_an_empty_reply_nudge_and_a_message_a_run_made_do_not_start_a_turn
     # A nudge of turn 3 first: skipped, so the window starts with turn 4's question.
     nudge = Message("user", EMPTY_REPLY_NUDGE, timestamp=turns[2].started_at + 1)
     assert await window_start(store, now, [nudge, *window_of(turns[3])]) == 4
+    # So is the nudge after a tool call written as text, also with a recall
+    # block after it.
+    for text in (TOOL_CALL_TEXT_NUDGE, TOOL_CALL_TEXT_NUDGE + "\n\n[recall]"):
+        other = Message("user", text, timestamp=turns[2].started_at + 1)
+        assert await window_start(store, now, [other, *window_of(turns[3])]) == 4
     # A live message is stamped after its turn began, within it: its own turn,
     # also when it is the task's message put back in front of an evicted window.
     query = Message("user", "paint the fence", timestamp=turns[2].started_at + 2)
@@ -290,7 +295,7 @@ async def test_search_memory_finds_this_chats_evicted_turns_but_not_the_shown_on
 
 
 def _prompt(typed: str) -> str:
-    return f"User: {typed} melo: Okay."
+    return f"the user said “{typed}”; melo replied “Okay.”"
 
 
 def test_in_view_and_this_chat() -> None:

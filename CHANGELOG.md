@@ -28,6 +28,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   model marked as data, never instructions, nothing a server writes in its
   status line or headers reaches it, and the model is told to use the tool
   instead of `curl`. Direct runs do not get it. [#406]
+- The `turn.memory` event lists what the model's own memory search found in the turn, as an optional `searched` list (the same item shape as `used`).
 - With `[memory] sleep` set to `rules`, `model` or `model+tags`, the gateway
   now tidies the notes by itself while the computer is idle: no turn in the
   gateway's chats for 20 minutes (a terminal chat that runs on its own, with
@@ -561,6 +562,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - Page text with three or more `<` or `>` in a row can no longer form a page
   marker in what the browser tools return: every such run is spaced out.
   [#406]
+- The memory block melo adds to a message now says when and who: a date has its year when
+  it is not this year and its time when another line is from the same day, notes of one subject
+  with different values come newest first with the older marked, and an earlier turn reads
+  `the user said “…”; melo replied “…”`.
 - A long turn is kept in the memory index as up to 8 overlapping pieces instead of
   being cut at 2,000 characters, and a search shows a turn once, by its best piece.
   `melo memory reindex` re-cuts turns indexed before.
