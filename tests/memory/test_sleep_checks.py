@@ -14,6 +14,7 @@ import pytest
 
 from localmelo.melo.memory.long import StoredEntry
 from localmelo.support.memory import ChatMemory, records, sleep
+from localmelo.support.memory.recall import current_only, newer_first
 
 from . import test_sleep as rules
 from .test_sleep_model import Scripted, op
@@ -933,3 +934,351 @@ async def test_a_run_that_retired_a_note_makes_the_models_proposals_noops(
     undone = await memory.undo_sleep(report.run_id)
     assert undone is not None and undone["restored"] == 1
     assert await states(memory) == {older: "active", newer: "active"}
+
+
+# ── A retired value does not come back through its exchange ──
+
+
+async def kept_replaces(memory: ChatMemory, note: int) -> Any:
+    entry = await memory.stores()[0].entry(note)
+    assert entry is not None
+    return entry.provenance.get("replaces")
+
+
+@pytest.mark.parametrize("path", ["rule", "model"])
+@pytest.mark.parametrize("shape", [C3, C4])
+async def test_o2b_adds_the_older_turn_to_the_kept_notes_replaces(
+    memory: ChatMemory,
+    monkeypatch: pytest.MonkeyPatch,
+    shape: tuple[tuple[str, str], tuple[str, str]],
+    path: str,
+) -> None:
+    older, newer = await pair(memory, *shape)
+    assert await kept_replaces(memory, newer) is None
+    if path == "rule":
+        report = await tidy(memory)
+    else:
+        monkeypatch.setattr(sleep, "replacements", lambda notes, sources: [])
+        text = "Your new manager is Daniel Kim from next week."
+        proposal = op("UPDATE", shape[1][1], text, older)
+        if shape is C3:
+            proposal["text"] = "你的牙医预约改到了周四。"
+        report = await run_model(
+            memory, [turn("n", shape[1][1], AT + 20)], [[proposal]]
+        )
+    (change,) = report.changes
+    assert change.op == "O2b" and change.after_id == newer
+    assert change.replaces_before is None and change.replaces_after == [["o", 1]]
+    assert await kept_replaces(memory, newer) == [["o", 1]]
+    # Only the replaces changed: the note keeps its text, quote and place.
+    kept = await memory.stores()[0].entry(newer)
+    assert kept is not None and kept.text == shape[1][0]
+    assert kept.provenance["quote"] == shape[1][1] and kept.provenance["turn"] == 1
+
+
+async def test_recall_drops_the_exchange_of_a_retired_value_and_undo_brings_it_back(
+    memory: ChatMemory,
+) -> None:
+    from localmelo.support.memory.recall import Corpus, Item, replaced_turns
+    from localmelo.support.memory.service import _record_item
+
+    older, newer = await pair(memory, *C3)
+    store = memory.stores()[0]
+    old_exchange = Item("d:1", "User: 我的牙医预约在周二。", "chat o", "o", 1, AT)
+    message = "我的牙医预约是什么时候？"
+
+    async def recall() -> tuple[dict[tuple[str, int], Item], list[Item]]:
+        entry = await store.entry(newer)
+        assert entry is not None
+        corpus = Corpus()
+        corpus.add(_record_item(entry))
+        replaced = replaced_turns(corpus)
+        return replaced, current_only(newer_first([old_exchange], replaced), message)
+
+    replaced, shown = await recall()
+    assert replaced == {} and [i.key for i in shown] == ["d:1"]  # nothing yet
+    report = await tidy(memory)
+    replaced, shown = await recall()
+    assert list(replaced) == [("o", 1)] and replaced[("o", 1)].key == f"r:{newer}"
+    assert shown == [] or [i.key for i in shown] == [f"r:{newer}"]
+    assert "d:1" not in [i.key for i in shown]  # the old Tuesday is not given
+    assert await memory.undo_sleep(report.run_id) is not None
+    replaced, shown = await recall()
+    assert replaced == {} and [i.key for i in shown] == ["d:1"]
+    assert await kept_replaces(memory, newer) is None
+    assert await states(memory) == {older: "active", newer: "active"}
+
+
+async def test_the_running_recall_sees_the_turns_a_sleep_replaced_and_its_undo(
+    memory: ChatMemory,
+) -> None:
+    older, newer = await pair(memory, *C3)
+    await memory._sync()  # recall has read the notes as they are
+    assert memory._replaced(memory._corpus) == {}
+    report = await memory.sleep("rules")
+    assert [c.op for c in report.changes] == ["O2b"]
+    await memory._sync()
+    assert list(memory._replaced(memory._corpus)) == [("o", 1)]
+    assert await memory.undo_sleep(report.run_id) is not None
+    await memory._sync()
+    assert memory._replaced(memory._corpus) == {}
+    assert await states(memory) == {older: "active", newer: "active"}
+
+
+async def test_undo_restores_the_kept_notes_provenance_exactly(
+    memory: ChatMemory,
+) -> None:
+    older, newer = await pair(memory, *C4)
+    store = memory.stores()[0]
+    entry = await store.entry(newer)
+    assert entry is not None
+    before = dict(entry.provenance)
+    report = await tidy(memory)
+    assert await kept_replaces(memory, newer) == [["o", 1]]
+    assert await memory.undo_sleep(report.run_id) is not None
+    after = await store.entry(newer)
+    assert after is not None and after.provenance == before
+
+
+async def test_a_kept_notes_earlier_replaces_stay_and_the_older_ones_join_them(
+    memory: ChatMemory,
+) -> None:
+    older, newer = await pair(memory, *C4)
+    store = memory.stores()[0]
+    await store.set_provenance(newer, {"replaces": [["x", 5]]})
+    # The older note replaced two turns itself, one of them the kept note's own.
+    await store.set_provenance(older, {"replaces": [["n", 1], ["w", 2], ["x", 5]]})
+    report = await tidy(memory)
+    (change,) = report.changes
+    expected = [["x", 5], ["w", 2], ["o", 1]]  # never ["n", 1]; no repeat
+    assert await kept_replaces(memory, newer) == expected
+    assert change.replaces_before == [["x", 5]] and change.replaces_after == expected
+    assert await memory.undo_sleep(report.run_id) is not None
+    assert await kept_replaces(memory, newer) == [["x", 5]]
+
+
+async def test_a_kept_note_that_already_replaces_the_turn_is_not_touched(
+    memory: ChatMemory,
+) -> None:
+    older, newer = await pair(memory, *C4)
+    await memory.stores()[0].set_provenance(newer, {"replaces": [["o", 1]]})
+    report = await tidy(memory)
+    (change,) = report.changes
+    assert change.op == "O2b" and change.replaces_after is None
+    assert await kept_replaces(memory, newer) == [["o", 1]]
+    assert await memory.undo_sleep(report.run_id) is not None
+    assert await kept_replaces(memory, newer) == [["o", 1]]
+
+
+async def test_a_merged_duplicate_adds_its_turn_to_the_kept_note(
+    memory: ChatMemory,
+) -> None:
+    older = await rules.put(memory, "Your gym day is Monday.", AT, session="o")
+    newer = await rules.put(memory, "Your gym day is Monday.", AT + 20, session="n")
+    report = await tidy(memory)
+    (change,) = report.changes
+    assert (change.op, change.before_ids, change.after_id) == ("O1", [older], newer)
+    assert await kept_replaces(memory, newer) == [["o", 1]]
+    assert await memory.undo_sleep(report.run_id) is not None
+    assert await kept_replaces(memory, newer) is None
+
+
+async def test_notes_sleep_writes_replace_the_turns_of_the_notes_they_supersede(
+    memory: ChatMemory,
+) -> None:
+    old = await rules.put(memory, "Your gym day is Monday.", AT, session="o")
+    source = turn("n", "My gym day moved to Friday.", AT + 20)
+    text = "Your gym day moved to Friday."
+    report = await run_model(
+        memory, [source], [[op("UPDATE", source.typed, text, old)]]
+    )
+    (change,) = report.changes
+    assert (change.op, change.before_ids) == ("UPDATE", [old])
+    assert await kept_replaces(memory, int(change.after_id or 0)) == [["o", 1]]
+
+
+async def test_set_provenance_merges_removes_and_changes_nothing_else(
+    memory: ChatMemory,
+) -> None:
+    note = await rules.put(
+        memory, "Your gym day is Monday.", AT, session="o", vector=[1.0, 0.0]
+    )
+    gone = await rules.put(memory, "Your swim day is Friday.", AT, session="o")
+    store = memory.stores()[0]
+    await store.set_status(
+        [gone], "superseded", keeper=None, admitted_by="user", reason="gone"
+    )
+    before = await store.entry(note)
+    assert before is not None
+    assert await store.set_provenance(note, {"replaces": [["x", 5]], "quote": "q"})
+    mid = await store.entry(note)
+    assert mid is not None and mid.provenance["replaces"] == [["x", 5]]
+    assert mid.provenance["quote"] == "q" and mid.provenance["topic"] == "about"
+    assert (mid.text, mid.status, mid.vector) == (
+        before.text,
+        before.status,
+        before.vector,
+    )
+    assert await store.set_provenance(note, {"replaces": None})
+    end = await store.entry(note)
+    assert end is not None and "replaces" not in end.provenance
+    # A superseded or unknown note has no provenance to change.
+    assert not await store.set_provenance(gone, {"replaces": [["x", 5]]})
+    assert not await store.set_provenance(999, {"replaces": [["x", 5]]})
+    assert "replaces" not in (await store.entry(gone) or before).provenance
+
+
+# ── An update a newer note already holds is not written again ──
+
+LOCKER_OLD = (
+    "Your locker number at the pool is 31.",
+    "My locker number at the pool is 31.",
+)
+LOCKER_NEW = (
+    "The pool gave me a new locker, number 58.",
+    "The pool gave me a new locker, number 58.",
+)
+LOCKER_TEXT = "Your locker number at the pool is 58."
+
+
+async def test_an_update_whose_value_a_newer_note_holds_writes_no_copy(
+    memory: ChatMemory,
+) -> None:
+    older, newer = await pair(memory, LOCKER_OLD, LOCKER_NEW)
+    source = turn("n", LOCKER_NEW[1], AT + 20)
+    report = await run_model(
+        memory, [source], [[op("UPDATE", source.typed, LOCKER_TEXT, older)]]
+    )
+    (change,) = report.changes
+    assert (change.op, change.before_ids, change.after_id) == ("O2b", [older], newer)
+    assert change.verdict == "applied" and change.replaces_after == [["o", 1]]
+    assert await states(memory) == {older: "superseded", newer: "active"}
+    assert await rules.texts(memory) == {LOCKER_NEW[0]}  # no #3: nothing is written
+    assert len(rules.rows(memory)) == 2
+    (proposal,) = report.proposals
+    assert proposal["verdict"] == "applied" and proposal["guard"]["note_id"] == newer
+    assert await kept_replaces(memory, newer) == [["o", 1]]
+    undone = await memory.undo_sleep(report.run_id)
+    assert undone == {"run_id": report.run_id, "restored": 1, "removed": 0, "kept": 0}
+    assert await states(memory) == {older: "active", newer: "active"}
+    assert await kept_replaces(memory, newer) is None
+
+
+@pytest.mark.parametrize(
+    ("holder", "typed", "edited"),
+    [
+        # Another value: nothing holds 58, so the update is written.
+        (("The pool gave me a new locker, number 62.",) * 2, LOCKER_NEW[1], ""),
+        # The opposite statement is no holder.
+        (
+            ("The pool never gave me locker number 58.",) * 2,
+            "The pool gave me a new locker, number 58.",
+            "",
+        ),
+        # The user's own wording is left alone.
+        (LOCKER_NEW, LOCKER_NEW[1], "new"),
+        # A note that holds the value of another subject (a "day" in common is
+        # no subject) is no holder: the swim day is not the gym day.
+        (
+            ("Your swim day is Thursday.", "My swim day is Thursday."),
+            "My gym day is Thursday.",
+            "",
+        ),
+    ],
+)
+async def test_an_update_is_still_written_when_no_note_holds_what_it_says(
+    memory: ChatMemory,
+    monkeypatch: pytest.MonkeyPatch,
+    holder: tuple[str, str],
+    typed: str,
+    edited: str,
+) -> None:
+    # The rules would write this statement themselves; the model's proposal is on trial.
+    monkeypatch.setattr(sleep, "recoverable", lambda fresh, notes: [])
+    gym = holder[0].startswith("Your swim")
+    old = ("Your gym day is Monday.", "My gym day is Monday.") if gym else LOCKER_OLD
+    text = "Your gym day is Thursday." if gym else LOCKER_TEXT
+    older, newer = await pair(memory, old, holder, edited=edited)
+    source = turn("m", typed, AT + 30, number=2)
+    report = await run_model(memory, [source], [[op("UPDATE", typed, text, older)]])
+    (change,) = report.changes
+    assert (change.op, change.before_ids) == ("UPDATE", [older])
+    assert change.after_id not in (older, newer)
+    assert await rules.texts(memory) == {holder[0], text}
+    assert (await states(memory))[newer] == "active"
+    assert (await states(memory))[older] == "superseded"
+
+
+# ── A model note keeps the person and the assistant apart ──
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "You prefer that when you explain a technical topic to me you choose plain words.",
+        "You like my plain words.",
+        "I prefer plain words.",
+        "You told me to use plain words.",
+        "你喜欢我用简单的话解释。",
+        "你说我的牙医预约在周四。",
+    ],
+)
+@pytest.mark.parametrize("op_name", ["ADD", "UPDATE"])
+async def test_a_first_person_model_note_is_refused(
+    memory: ChatMemory, text: str, op_name: str
+) -> None:
+    old = await rules.put(memory, "Your gym day is Monday.", AT, session="o")
+    source = turn("n", text, AT + 20)
+    proposal = op(op_name, source.typed, text, old if op_name == "UPDATE" else None)
+    report = await run_model(memory, [source], [[proposal]])
+    assert not report.changes and report.refused == 1
+    assert [r["verdict"] for r in report.proposals] == ["refused:first_person"]
+    assert await states(memory) == {old: "active"}
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "You prefer that melo explains technical topics in plain words.",
+        'Your favorite line is "I think therefore I am".',
+        "你喜欢「我思故我在」这句话。",
+    ],
+)
+async def test_second_person_and_quoted_first_person_model_notes_are_kept(
+    memory: ChatMemory, text: str
+) -> None:
+    typed = (
+        text.replace("You prefer", "I prefer").replace("Your", "My").replace("你", "我")
+    )
+    source = turn("n", typed, AT + 20)
+    report = await run_model(memory, [source], [[op("ADD", typed, text)]])
+    assert [r["verdict"] for r in report.proposals] == ["applied"]
+    assert await rules.texts(memory) == {text}
+
+
+@pytest.mark.parametrize(
+    ("text", "found"),
+    [
+        ("I live in Lisbon.", True),
+        ("You said I'm late.", True),
+        ("Tell me.", True),
+        ("MY gym day", True),
+        ("The shop is mine.", True),
+        ("You did it for myself.", True),
+        ("我住在里斯本。", True),
+        ('Your line is "I think".', True),  # the checker strips quotes first
+        ("Mimi lives in Maine.", False),
+        ("You like mythology and Amy's hi-fi.", False),
+        ("Your ill neighbour Imran.", False),
+        ("You live in Lisbon.", False),
+        ("你住在里斯本。", False),
+    ],
+)
+def test_first_person_pattern_finds_whole_words_only(text: str, found: bool) -> None:
+    assert (sleep._FIRST_PERSON.search(text) is not None) is found
+
+
+def test_the_prompt_asks_for_you_and_melo() -> None:
+    prompt = sleep._MODEL_PROMPT
+    assert 'Write "you" for the user and "melo" for the assistant' in prompt
+    assert "You prefer that melo explains technical topics in plain words" in prompt

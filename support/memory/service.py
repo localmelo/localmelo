@@ -1452,13 +1452,20 @@ class ChatMemory:
                 budget=budget,
                 embed_note=embed_note if self.embedding()[0] is not None else None,
             )
+        # A kept note changed in place (the turns it replaced): read it again.
+        for change in report.changes:
+            if change.replaces_after is not None and change.after_id is not None:
+                self._corpus.remove(f"r:{change.after_id}")
         logger.info("memory.sleep %s", report.to_json())
         return report
 
     async def undo_sleep(self, run_id: str) -> dict[str, Any] | None:
         """Put the sleep run *run_id* back (:func:`sleeping.undo`); ``None`` when unknown."""
         async with self._lock:
-            return await sleeping.undo(*self.stores(), run_id)
+            undone = await sleeping.undo(*self.stores(), run_id)
+            for key in self._corpus.keys("r:"):  # a kept note may have changed
+                self._corpus.remove(key)
+            return undone
 
     # ── Notes brought in from other assistants' files ──
 

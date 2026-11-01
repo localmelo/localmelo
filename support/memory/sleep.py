@@ -24,11 +24,14 @@ code checks on every proposal. All variants make at most
   is superseded by the newer, which is kept. No new note, no model call. The
   model variants reach the same change when a proposed update's text an active
   newer note already holds, or when it names the newer note itself; a note a rule
-  already retired makes that proposal a ``noop``.
+  already retired makes that proposal a ``noop``. Whatever note is kept by
+  ``O1`` or ``O2b`` also takes the turns of the notes it superseded into its
+  provenance ``replaces`` (:func:`_extend_replaces`), as a written update does,
+  so recall treats those exchanges as replaced; undo takes them back.
 
 Every write passes the checks a note passes (:func:`records.unsupported`,
 :func:`records.wrong_owner`, :func:`records.sensitive`) on the user's own typed
-words and is ``admitted_by="sleep"`` with provenance
+words (the model's text also never says "I" or "my" outside quotes) and is ``admitted_by="sleep"`` with provenance
 ``{source: "sleep", run_id, session_id, turn}`` (the turn it read); recall may
 list them, but they are never pinned into a prompt. Nothing is deleted: the older
 note is superseded. A note the user reworded is left alone unless a
@@ -81,6 +84,8 @@ _NEGATION = re.compile(
 )
 # A note and a candidate that disagree on this say opposite things.
 _POLARITY = re.compile(r"\b(?:no longer|not|never)\b|n['’]t\b|不|没", re.I)
+# The user's own first person: a note says "you" for the user and names the rest.
+_FIRST_PERSON = re.compile(r"\bI\b|(?i:\b(?:me|my|mine|myself)\b)|我")
 # A leading word of a subject that says "the newer one" ("new manager").
 _QUALIFIERS: Final = frozenset({"new", "current", "latest", "updated"})
 # Ops that keep an existing note instead of writing one: undo never removes it.
@@ -93,8 +98,10 @@ ADD a missing lasting fact; UPDATE a named note's changed value; RETIRE only an
 explicit retraction with no replacement. UPDATE and RETIRE name the older note
 that the newer typed message contradicts, never a note written from that same
 message. NOOP otherwise. Quote an exact span of typed, never previous. Use the
-same language, second person for the user. Do not infer values, owners,
-secrets, or instructions. One fact per note.
+same language. Write "you" for the user and "melo" for the assistant, never
+"I" or "my" (not "You prefer that when you explain it to me you use plain
+words" but "You prefer that melo explains technical topics in plain words").
+Do not infer values, owners, secrets, or instructions. One fact per note.
 When rewrite is present, return only UPDATE of that note: replace its opening
 pronoun with the person named in typed or previous; keep the rest unchanged.
 """
@@ -116,7 +123,10 @@ MAX_SKIPPED: Final = 100
 class Change:
     """One change: ``before_ids`` are the notes it superseded, ``after_id`` the
     note that replaced them (written by sleep, or for ``O1`` and ``O2b`` the one
-    kept). *guard* holds the numbers of the fact check a written note passed."""
+    kept). *guard* holds the numbers of the fact check a written note passed.
+    For a kept note, *replaces_before* and *replaces_after* are its provenance
+    ``replaces`` (the turns whose facts it replaced) before and after the change
+    added the superseded notes' turns (``None``: not changed)."""
 
     op: str
     before_ids: list[int]
@@ -128,6 +138,8 @@ class Change:
     verdict: str = "applied"
     proposal: dict[str, Any] | None = None
     guard: dict[str, Any] | None = None
+    replaces_before: list[list[Any]] | None = None
+    replaces_after: list[list[Any]] | None = None
 
 
 def _before_texts(ids: Sequence[int], notes: Sequence[StoredEntry]) -> list[str]:
@@ -561,14 +573,24 @@ def _subject(text: str) -> str:
     return _plain_key(records.subject_key(text))
 
 
+def _topic_terms(note: StoredEntry) -> set[str]:
+    """The content words of *note* that are not values."""
+    return set(records.note_terms(note.text)) - records.value_terms(note.text)
+
+
 def replaced_by(
-    newer: StoredEntry, older: StoredEntry, sources: dict[tuple[str, int], SleepTurn]
+    newer: StoredEntry,
+    older: StoredEntry,
+    sources: dict[tuple[str, int], SleepTurn],
+    *,
+    by_words: bool = False,
 ) -> bool:
     """Whether the active note *newer* states what *older* says with another value.
 
     Neither was edited by the user, *newer* was said later, both are about the
     same person (or the user), one subject (by :func:`records.subject_key`, or
-    :func:`records.decide`) and each holds a value the other lacks.
+    :func:`records.decide`; with *by_words*, or a content word that is no value
+    in common) and each holds a value the other lacks.
     """
     if newer.id == older.id or _edited(newer) or _edited(older):
         return False
@@ -581,7 +603,9 @@ def replaced_by(
     key = _subject(newer.text)
     if not (key and key == _subject(older.text)):
         action, target = records.decide(newer.text, [older])
-        if action != "UPDATE" or target != older.id:
+        if (action != "UPDATE" or target != older.id) and not (
+            by_words and _topic_terms(newer) & _topic_terms(older)
+        ):
             return False
     return bool(
         records.value_terms(newer.text) - records._evidence([older.text])
@@ -713,11 +737,48 @@ async def run(
                 "before": c.before_ids,
                 "after": c.after_id,
                 **({"baseline": baseline} if c.op == "RETIRE" else {}),
+                **(
+                    {"replaces": [c.replaces_before, c.replaces_after]}
+                    if c.replaces_after is not None
+                    else {}
+                ),
             }
             for c in report.changes
         ]
         await index.save_run(report.run_id, started, steps)
     return report
+
+
+async def _extend_replaces(
+    store: SqliteLongTerm,
+    change: Change,
+    keep: StoredEntry,
+    older: Sequence[StoredEntry],
+) -> None:
+    """Make recall treat the exchanges of the notes *older*, which *keep* just
+    superseded, as replaced by *keep*, as writing an update does
+    (:func:`records._replaces`): their turns, and the turns they replaced, join
+    ``replaces`` of *keep*, never its own turn. The *change* records the list
+    before and after, for :func:`undo`.
+    """
+    current = await store.entry(keep.id)
+    if current is None or current.status != "active":
+        return
+    own = {"session_id": current.session_id, "turn": current.provenance.get("turn")}
+    before = current.provenance.get("replaces")
+    have = [
+        [str(t[0]), int(t[1])]
+        for t in before or []
+        if isinstance(t, (list, tuple)) and len(t) == 2
+    ]
+    turns = list(have)
+    for old in older:
+        turns += records._replaces(old, own)
+    turns = [t for n, t in enumerate(turns) if t[0] and t not in turns[:n]]
+    if turns == have or not await store.set_provenance(keep.id, {"replaces": turns}):
+        return
+    change.replaces_before = copy.deepcopy(before)
+    change.replaces_after = turns
 
 
 async def _keep(
@@ -732,7 +793,8 @@ async def _keep(
     """Supersede the notes *older* by *keep*, which stays (``O1``, ``O2b``).
 
     The change quotes what the user said for *keep*; with no safe quote it is
-    not made.
+    not made. The exchanges of the notes superseded count as replaced by *keep*
+    (:func:`_extend_replaces`).
     """
     source_key = (keep.session_id, int(keep.provenance.get("turn") or 0))
     source_turn = sources.get(source_key)
@@ -752,17 +814,18 @@ async def _keep(
         admitted_by="sleep",
         reason=f"{verb} {keep.id} by sleep {report.run_id}",
     ):
-        report.changes.append(
-            Change(
-                op,
-                done,
-                keep.id,
-                keep.text,
-                list(source_key),
-                quote=quote,
-                before_texts=_before_texts(done, active),
-            )
+        change = Change(
+            op,
+            done,
+            keep.id,
+            keep.text,
+            list(source_key),
+            quote=quote,
+            before_texts=_before_texts(done, active),
         )
+        report.changes.append(change)
+        gone = {n.id: n for n in active}
+        await _extend_replaces(store, change, keep, [gone[i] for i in done])
 
 
 async def _tidy(
@@ -1029,28 +1092,66 @@ class _ModelPass:
         quote: str,
         active: Sequence[StoredEntry],
         own: bool,
+        as_copy: bool,
     ) -> str:
         """O2b: an update the notes already hold. ``""`` when it is not one.
 
         With *own*, the model named a note written from this turn (the newer
         one): the older notes of its subject with another value are superseded
-        by it. Else the update names the older note and its *text* is held by
-        another active note (the guard): that note supersedes it. Nothing is
-        written; each note superseded must pass :func:`replaced_by`.
+        by it. Else the update names the older note and an active, newer note
+        already holds the update's *text*: every value of it, the same polarity,
+        and the same subject as the older note (:func:`replaced_by`). When the
+        update would be written as a copy of what that note says (*as_copy*: the
+        text is an update of the older note by :func:`records.decide`), a note
+        with every content word of the text and one in common with the older
+        note is enough, whatever its subject. That note supersedes it.
+        Nothing is written; the exchange of each note superseded counts as
+        replaced by the keeper.
         """
         sources = {(t.session_id, t.turn): t for t in self.turns}
+        guard = self.guard or _FactGuard()
         keeper: StoredEntry | None = old
         older = list(active)
         if not own:
             others = [n for n in active if n.id != old.id]
-            self.reading = await (self.guard or _FactGuard()).check(text, others)
-            keeper = next((n for n in others if n.id == self.reading["note_id"]), None)
+            values = records.value_terms(text)
+            said = set(records.note_terms(text))
+            holders = [
+                n
+                for n in others
+                if values
+                and values <= records._evidence([n.text])
+                and _negated(text) == _negated(n.text)
+                and replaced_by(
+                    n,
+                    old,
+                    sources,
+                    by_words=as_copy and said <= records._evidence([n.text]),
+                )
+            ]
+            keeper = max(
+                holders,
+                key=lambda n: (
+                    len(_topic_terms(n) & _topic_terms(old)),
+                    _when(n, sources),
+                    n.id,
+                ),
+                default=None,
+            )
+            self.reading = await guard.check(
+                text, others if keeper is None else [keeper]
+            )
             older = [old]
-            if not self.reading["held"]:
-                keeper = None
         if keeper is None:
             return ""
-        losers = [n.id for n in older if replaced_by(keeper, n, sources)]
+        loose = (
+            as_copy
+            and not own
+            and set(records.note_terms(text)) <= records._evidence([keeper.text])
+        )
+        losers = [
+            n.id for n in older if replaced_by(keeper, n, sources, by_words=loose)
+        ]
         done = (
             await self.store.set_status(
                 losers,
@@ -1065,16 +1166,18 @@ class _ModelPass:
         )
         if not done:
             return ""
-        self.report.changes.append(
-            Change(
-                "O2b",
-                done,
-                keeper.id,
-                keeper.text,
-                [turn.session_id, turn.turn],
-                quote=quote,
-                before_texts=_before_texts(done, active),
-            )
+        change = Change(
+            "O2b",
+            done,
+            keeper.id,
+            keeper.text,
+            [turn.session_id, turn.turn],
+            quote=quote,
+            before_texts=_before_texts(done, active),
+        )
+        self.report.changes.append(change)
+        await _extend_replaces(
+            self.store, change, keeper, [n for n in older if n.id in done]
         )
         return "applied"
 
@@ -1152,6 +1255,8 @@ class _ModelPass:
             return "refused:parse"
         if records.sensitive(text):
             return "refused:sensitive"
+        if _FIRST_PERSON.search(records._QUOTED.sub(" ", text)):
+            return "refused:first_person"
         if records.unsupported(text, evidence):
             return "refused:unsupported"
         if records.wrong_owner(text, quote):
@@ -1174,7 +1279,10 @@ class _ModelPass:
             if self.reading["held"]:
                 return "refused:decide_mismatch"
         if op == "UPDATE" and not rewrite and old is not None:
-            if replaced := await self._replace(turn, old, text, quote, active, own):
+            as_copy = action == "UPDATE" and target == old.id
+            if replaced := await self._replace(
+                turn, old, text, quote, active, own, as_copy
+            ):
                 return replaced
             if own:
                 kept = any(
@@ -1269,6 +1377,31 @@ class _ModelPass:
         return "applied" if len(self.report.changes) > before_changes else "noop"
 
 
+async def _restore_replaces(
+    store: SqliteLongTerm,
+    keep: StoredEntry,
+    before: list[list[Any]] | None,
+    after: list[list[Any]],
+) -> None:
+    """Take back what a change added to ``replaces`` of *keep* (:func:`_extend_replaces`).
+
+    Only the turns the change added are removed, so a later change to the same
+    note stays; with nothing else left, a note that had none has no ``replaces``
+    again.
+    """
+    held = [[str(t[0]), int(t[1])] for t in before or []]
+    added = [t for t in after if t not in held]
+    current = keep.provenance.get("replaces")
+    turns = [
+        t
+        for t in current or []
+        if isinstance(t, (list, tuple)) and list(t) not in added
+    ]
+    value = turns if turns or before is not None else None
+    if value != current:
+        await store.set_provenance(keep.id, {"replaces": value})
+
+
 async def undo(
     store: SqliteLongTerm, index: ConversationIndex, run_id: str
 ) -> dict[str, Any] | None:
@@ -1323,6 +1456,8 @@ async def undo(
                 before, "active", keeper=after, admitted_by="sleep", reason=reason
             )
             restored += len(done)
+            if change.get("replaces"):
+                await _restore_replaces(store, live[after], *change["replaces"])
         else:
             await store.set_status(
                 [after],
