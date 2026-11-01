@@ -28,6 +28,7 @@ from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.melo.contracts.review import offers_grant
 from localmelo.melo.contracts.tools import BaseToolProvider
 from localmelo.melo.schema import Message
+from localmelo.support.browser import configured_driver
 from localmelo.support.config import gateway_workspace_problem
 from localmelo.support.gateway.auto_blocks import BlockError
 from localmelo.support.gateway.chat_gate import ChatGate, GatedEmbedding, GatedLLM
@@ -147,7 +148,7 @@ async def default_builder(
         model=None,
         workspace=workspace,
         options=configured_session_options(settings, AgentOptions(mode="gateway")),
-        browser_driver=settings.browser.driver,
+        browser_driver=configured_driver(settings),
         wrap_llm=None if llm is None else (lambda inner: GatedLLM(inner, llm)),
         wrap_embedding=(
             None if llm is None else (lambda inner: GatedEmbedding(inner, llm))
