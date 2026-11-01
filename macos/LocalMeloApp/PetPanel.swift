@@ -141,9 +141,9 @@ final class PetController: NSObject {
         } else if let standIn = standIn {
             view.layer?.addSublayer(standIn)
             NSLog("localmelo: Melo's moves cannot be read in %@; the pet shows its offline picture",
-                  movesFolder?.path ?? "(no folder)")
+                  movesFolder?.path ?? "none")
         } else {
-            NSLog("localmelo: Melo's moves cannot be read in %@; the pet stays hidden", movesFolder?.path ?? "(no folder)")
+            NSLog("localmelo: Melo's moves cannot be read in %@; the pet stays hidden", movesFolder?.path ?? "none")
         }
         panel = PetPanel(contentRect: NSRect(origin: .zero, size: petPanelSize),
                          styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
