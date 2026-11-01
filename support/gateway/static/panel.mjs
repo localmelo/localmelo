@@ -46,10 +46,13 @@ const stateWords = (state) => (STATES.has(state) ? t(`panel.state.${state}`) : '
 const LIVE = new Set(['running', 'waiting', 'held', 'queued', 'paused']);
 const HREF = {chat: '#/s/', task: '#/tasks/', run: '#/workers/', terminal: '#/workers/'};
 const SHOWN = 8;
-// The still picture of each header mood: a poster of Melo's moves (the sitting dog the wake-up ends on for a run
-// that ended well, the tilted head for an error, the resting dog while nothing runs or nothing is known).
-const STILLS = {idle: 'idle_rest', working: 'working', waiting: 'attention', done: 'startup', error: 'thinking'};
+// The still picture of each header mood, by its poster beside the moves: the state's own poster while something
+// runs, waits or rests, and the stills for an ending: done (eyes closed and happy, tail up) and error (ears back, head
+// low). Before the first health reply and while the gateway is lost it is the offline still (curled up), faded.
+const STILLS = {idle: 'idle_rest', working: 'working', waiting: 'attention', done: 'done', error: 'error'};
 const STEPS = 8;
+// The page says once that the moves could not be read.
+let movesUnread = false;
 const REFRESH_MS = 30000;
 const KEY = 'localmelo-panel-tab';
 const TESTS = /(?:^|[\s;&|(])(?:pytest|py\.test|tox|nox|jest|vitest|(?:npm|pnpm|yarn|bun)(?: run)? test|(?:cargo|go|swift|deno|mix) test|python3? -m (?:pytest|unittest)|make (?:test|check))(?:$|[\s;&|)])/;
@@ -251,7 +254,11 @@ export function setupPanel({
     drawHeader();
   }})).then((player) => {
     motion.player = player ?? null;
-    if (!motion.player) return;
+    if (!motion.player) {
+      if (!movesUnread) console.warn('Melo: the moves cannot be read; the portrait shows still pictures');
+      movesUnread = true;
+      return;
+    }
     sheetSeen();
     drawHeader();
   }, () => {});
@@ -321,10 +328,11 @@ export function setupPanel({
     const scoped = state.scope === 'chat' && state.loaded ? state.rows : null;
     const said = headline(state.health, scoped);
     root.dataset.mood = said.mood;
-    const src = `/assets/moves/poster-${STILLS[said.mood] ?? 'idle_rest'}.webp`;
+    // Not connected yet, or the gateway is lost: the offline still, faded.
+    const away = !state.health || state.offline;
+    const src = `/assets/moves/poster-${away ? 'offline' : STILLS[said.mood] ?? 'idle_rest'}.webp`;
     if (picture.getAttribute?.('src') !== src) picture.setAttribute('src', src);
-    // Not connected yet, or the gateway is lost: the resting dog, dimmed.
-    ring.dataset.dim = String(!state.health || state.offline);
+    ring.dataset.dim = String(away);
     drawMove(said, scoped);
     const nodes = [node('span', 'panel-dot'), node('span', '', said.text)];
     if (said.fix) nodes.push(button('link-button', t('common.openSettings'), () => openSettings()));

@@ -1201,7 +1201,7 @@ def test_a_start_that_fails_shows_melo_thinking_not_a_healthy_start(
     process = launch(app, tmp_path, "wrong-quit")
     try:
         events = wait_for(tmp_path / "events", "failure-portrait", process)
-        assert "failure-portrait thinking" in events
+        assert "failure-portrait error" in events
         process.wait(timeout=15)  # the host clicks Quit by itself
     finally:
         stop(process, tmp_path)

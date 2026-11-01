@@ -1,10 +1,31 @@
 import CoreGraphics
 import Foundation
 
-/// The still of the app's first window: the end of the wake-up (Melo sitting up, smiling) while the server starts and
-/// once it is ready; the thinking pose when it cannot go on, so a failure never reads as a healthy start. Each is a
-/// state's poster (`poster-<state>.webp` of the moves; the wake-up's poster is its last frame).
-func startPortrait(failed: Bool) -> PetMove { failed ? .thinking : .startup }
+/// What Melo holds when nothing moves for a reason, beside the moves (`poster-<name>.webp`, from the stills of
+/// `scripts/build_moves.py`): a run that ended well (eyes closed and happy, tail up), a failure (ears back, head low),
+/// and nothing known or no connection (curled up, shown at `petOfflineOpacity`).
+enum PetStill: String, CaseIterable {
+    case done, error, offline
+
+    var file: String { "poster-\(rawValue).webp" }
+    /// The opacity it is shown at: the offline still is faded, as the console's is.
+    var opacity: Float { self == .offline ? petOfflineOpacity : 1 }
+    /// The poster of the moves that stands in when a folder has no stills (one made before them).
+    var standIn: PetMove {
+        switch self {
+        case .done: return .startup
+        case .error: return .thinking
+        case .offline: return .idleRest
+        }
+    }
+}
+
+let petOfflineOpacity: Float = 0.6
+
+/// The picture of the app's first window, by its name among the moves' posters (`poster-<name>.webp`): the end of the
+/// wake-up (Melo sitting up, smiling) while the server starts and once it is ready; the error still (ears back, head
+/// low) when it cannot go on, so a failure never reads as a healthy start.
+func startPortrait(failed: Bool) -> String { failed ? PetStill.error.rawValue : PetMove.startup.rawValue }
 
 /// The points the portrait is shown at: the moves' square canvas, so the 256 px poster is sharp on a Retina screen.
 let portraitSize = CGSize(width: 128, height: 128)
@@ -123,15 +144,15 @@ func petMove(_ mood: PetMood, thinking: Bool) -> PetMove? {
     }
 }
 
-/// The still a mood shows, as the state whose poster it is; nil where the mood has moves. Nothing known yet lies at
-/// rest; a run that just finished is the end of the wake-up (sitting up, smiling); a failure, a stopped app, no model
-/// and a model server that does not answer are the thinking pose, so they never look like a healthy rest. The words
-/// say which it is.
-func petStill(_ mood: PetMood) -> PetMove? {
+/// The still a mood shows; nil where the mood has moves. Nothing known yet is the offline still (curled up, faded); a
+/// run that just finished is done (eyes closed and happy, tail up); a failure, a stopped app, no model and a model
+/// server that does not answer are the error still (ears back, head low), so they never look like a healthy rest.
+/// The words say which it is.
+func petStill(_ mood: PetMood) -> PetStill? {
     switch mood {
-    case .unknown: return .idleRest
-    case .done: return .startup
-    case .failed, .stopped, .noModel, .unreachable: return .thinking
+    case .unknown: return .offline
+    case .done: return .done
+    case .failed, .stopped, .noModel, .unreachable: return .error
     case .resting, .sleeping, .working, .waiting: return nil
     }
 }
@@ -201,6 +222,9 @@ struct PetMovePicker: Equatable {
 /// Points of the side of the moves' square canvas on the pet's panel; nothing drawn is cut by the panel (the art
 /// keeps a clear margin round the dog).
 let petMoveSide: CGFloat = 100
+/// The moves' canvas (pixels) and where the paws rest on it, for a still shown when the manifest cannot be read.
+let petStillPixels: CGFloat = 256
+let petStillAnchor = CGPoint(x: 128, y: 244)
 
 /// The frame of the moves' canvas on a panel of `size` (points, y up): its anchor (`anchor`, in pixels of a canvas
 /// `pixels` wide, from the top left: where the paws rest) on the panel's ground line, `belowPaws` above the bottom,

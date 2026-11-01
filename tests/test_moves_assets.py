@@ -23,6 +23,8 @@ ROOT = Path(__file__).resolve().parents[1]
 MOVES = ROOT / "support/gateway/static/moves"
 STATES = ["startup", "thinking", "working", "attention", "idle_rest", "idle_play"]
 FACES = ["idle", "working", "waiting", "done", "error"]
+# What Melo holds when nothing moves for a reason: a run that ended well, a failure, nothing known or no connection.
+HELD = ["done", "error", "offline"]
 FAVICONS = [16, 32, 64]
 # The moves are one copy, served by the console and read by the app: about 1.6 MB.
 MAX_BYTES = 2_000_000
@@ -45,11 +47,12 @@ def webp(path: Path) -> tuple[int, int, bool]:
     return width, height, bool(flags & 0x10) and b"ALPH" in data[:64]
 
 
-def expected_files() -> set[str]:
+def expected_files(stills: bool = True) -> set[str]:
     return (
         {"manifest.json"}
         | {f"{state}.webp" for state in STATES}
         | {f"poster-{state}.webp" for state in STATES}
+        | ({f"poster-{name}.webp" for name in HELD} if stills else set())
         | {f"face-{name}.png" for name in FACES}
         | {f"favicon-{pixels}.png" for pixels in FAVICONS}
     )
@@ -94,8 +97,12 @@ def test_the_manifest_gives_each_state_its_timeline_on_one_canvas() -> None:
     # Startup holds its last, sitting frame; the poster is that frame. Every state's poster is a file of its own.
     startup = document["states"]["startup"]
     assert startup["poster"] == len(startup["durations_ms"]) - 1
-    for state in STATES:
+    for state in STATES + HELD:
         assert webp(MOVES / f"poster-{state}.webp") == (size, size, True)
+    # The done and error faces are their stills' heads: done is not the idle face.
+    assert (MOVES / "face-done.png").read_bytes() != (
+        MOVES / "face-idle.png"
+    ).read_bytes()
     # One loop of play is 6 s: the rest-or-play rule plays it once.
     assert sum(document["states"]["idle_play"]["durations_ms"]) == 6000
 
@@ -301,8 +308,8 @@ def test_the_build_keeps_the_timelines_and_scales_the_whole_canvas(
             if index < 3:
                 rows = np.nonzero(drawn.any(axis=1))[0]
                 assert abs(int(rows[-1]) + 1 - cell * 60 / 64) <= 2
-    # A poster per state at the cell's size; the faces and favicons, cut from the posters.
-    assert {path.name for path in out.iterdir()} == expected_files()
+    # A poster per state at the cell's size; the faces and favicons, cut from the posters (no stills given).
+    assert {path.name for path in out.iterdir()} == expected_files(stills=False)
     for state in STATES:
         with image.open(out / f"poster-{state}.webp") as poster:
             assert poster.size == (cell, cell)
@@ -317,6 +324,60 @@ def test_the_build_keeps_the_timelines_and_scales_the_whole_canvas(
     build.build(source, again)
     for path in out.iterdir():
         assert (again / path.name).read_bytes() == path.read_bytes(), path.name
+
+
+def stills(folder: Path, side: int = 64, **changes: Any) -> Path:
+    """done.png, error.png and offline.png on the pack's canvas: a square standing on its ground line, in a colour of
+    its own. `changes` gives a name another size, or None to leave it out."""
+    image = pytest.importorskip("PIL.Image")
+    draw = pytest.importorskip("PIL.ImageDraw")
+    folder.mkdir(parents=True, exist_ok=True)
+    for number, name in enumerate(HELD):
+        size = changes.get(name, side)
+        if size is None:
+            continue
+        picture = image.new("RGBA", (size, size))
+        draw.Draw(picture).rectangle(
+            (size // 4, size // 4, size * 3 // 4, size - 5),
+            fill=(60 * number, 90, 200, 255),
+        )
+        picture.save(folder / f"{name}.png")
+    return folder
+
+
+def test_the_build_writes_the_stills_and_cuts_the_done_and_error_faces_from_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    image = pytest.importorskip("PIL.Image")
+    build = script()
+    monkeypatch.setattr(build, "CELL", 32)
+    source = pack(tmp_path / "pack")
+    plain = tmp_path / "plain"
+    build.build(source, plain)
+    assert {path.name for path in plain.iterdir()} == expected_files(stills=False)
+    out = tmp_path / "moves"
+    build.build(source, out, stills(tmp_path / "stills"))
+    assert {path.name for path in out.iterdir()} == expected_files()
+    for name in HELD:
+        with image.open(out / f"poster-{name}.webp") as poster:
+            assert poster.size == (32, 32)
+    # Only the done and error faces change: they are the stills' heads; the others are the pack's.
+    for name in FACES:
+        same = (out / f"face-{name}.png").read_bytes() == (
+            plain / f"face-{name}.png"
+        ).read_bytes()
+        assert same == (name not in ("done", "error")), name
+    # A stills folder that is missing one, or has one off the canvas, is refused.
+    for broken, words in (
+        ({"error": None}, "no error.png"),
+        ({"offline": 32}, "offline.png is not on"),
+    ):
+        with pytest.raises(build.PackError, match=words):
+            build.build(
+                source,
+                tmp_path / "refused",
+                stills(tmp_path / f"stills-{words[:3]}", **broken),
+            )
 
 
 @pytest.mark.parametrize(

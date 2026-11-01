@@ -54,7 +54,7 @@ def test_the_first_window_shows_a_still_of_the_moves_at_their_canvas() -> None:
         f"let portraitSize = CGSize(width: {side}, height: {side})"
         in (APP / "PetPolicy.swift").read_text()
     )
-    for state in ("startup", "thinking"):  # the two stills the window shows
+    for state in ("startup", "error"):  # the two pictures the window shows
         assert (ROOT / f"support/gateway/static/moves/poster-{state}.webp").is_file()
     # The wake-up's poster is its last frame: Melo sitting up, smiling.
     startup = manifest["states"]["startup"]
@@ -63,7 +63,7 @@ def test_the_first_window_shows_a_still_of_the_moves_at_their_canvas() -> None:
     # blinking one.
     status = (APP / "StatusView.swift").read_text()
     assert "setAccessibilityElement(false)" in status
-    assert "poster-\\(next.rawValue).webp" in status
+    assert "poster-\\(next).webp" in status
     assert (
         "melo.png" not in status
         and "NSBezierPath" not in status
@@ -158,7 +158,7 @@ precondition(PetMood.resting.help == "Opens localmelo" && PetMood.stopped.help =
 
 // The first window's portrait: the end of the wake-up while the server starts and once it is ready, the thinking
 // pose when it cannot go on, so a failure never reads as a healthy start.
-precondition(startPortrait(failed: false) == .startup && startPortrait(failed: true) == .thinking)
+precondition(startPortrait(failed: false) == "startup" && startPortrait(failed: true) == "error")
 """,
     )
 
@@ -265,11 +265,15 @@ for mood in moods {
         precondition((petMove(mood, thinking: thinking) == nil) != (petStill(mood) == nil))
     }
 }
-// The stills: nothing known lies at rest; a finished run is the end of the wake-up (sitting up, smiling); a failure
-// and a stopped app are the thinking pose, never a healthy rest.
-precondition(petStill(.unknown) == .idleRest && petStill(.done) == .startup)
-precondition(petStill(.failed) == .thinking && petStill(.stopped) == .thinking)
-precondition(petStill(.noModel) == .thinking && petStill(.unreachable) == .thinking)
+// The stills: nothing known is offline (curled up, faded); a finished run is done (eyes closed and happy); a failure,
+// a stopped app, no model and an unreachable model server are the error still (ears back, head low), never a rest.
+precondition(petStill(.unknown) == .offline && petStill(.done) == .done)
+precondition(petStill(.failed) == .error && petStill(.stopped) == .error)
+precondition(petStill(.noModel) == .error && petStill(.unreachable) == .error)
+precondition(PetStill.allCases.map { $0.file } == ["poster-done.webp", "poster-error.webp", "poster-offline.webp"])
+precondition(PetStill.offline.opacity == 0.6 && PetStill.done.opacity == 1 && PetStill.error.opacity == 1)
+// A folder made before the stills: the moves' own posters stand in.
+precondition(PetStill.done.standIn == .startup && PetStill.error.standIn == .thinking && PetStill.offline.standIn == .idleRest)
 // Every other mood plays: work types, the model alone thinks, a wait raises a paw, rest and sleep lie down.
 precondition(petMove(.working(2), thinking: false) == .working && petMove(.working(2), thinking: true) == .thinking)
 precondition(petMove(.waiting, thinking: true) == .attention)

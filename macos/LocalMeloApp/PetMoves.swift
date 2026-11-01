@@ -16,6 +16,8 @@ import QuartzCore
 /// - A state asked for as a still (`poster`) shows its poster and holds it, with the fade of any other change.
 /// - A state whose sheet cannot be read shows its poster file (`poster-<state>.webp`) instead, held; with neither the
 ///   pet keeps what it shows.
+/// - A still (`hold`, `PetStill`) is its own picture beside the sheets, held at its opacity, with the fade of a change
+///   of pose; the state asked for next fades from it.
 /// - A pet that cannot be seen stops where it is (`run(false)`) and goes on from there.
 ///
 /// The frames are a key-frame animation of the layer's `contentsRect` over the state's sheet, run by Core Animation;
@@ -124,14 +126,17 @@ final class PetMovePlayer: NSObject, CAAnimationDelegate {
     var onEnded: (PetMove) -> Void = { _ in }
     private(set) var wanted: PetMove?
     private(set) var once = false
-    /// The state asked for shows its poster, held (a still of the pet's).
+    /// The state asked for shows its poster, held.
     private(set) var poster = false
+    /// The still on show (`hold`), in place of any state.
+    private(set) var holding: PetStill?
     private(set) var still = false
     private let incoming = CALayer()
     private let outgoing = CALayer()
     private let folder: URL
     private var sheets: [PetMove: CGImage] = [:]
     private var posters: [PetMove: CGImage] = [:]
+    private var stillImages: [PetStill: CGImage] = [:]
     private var generation = 0
 
     /// `folder` holds manifest.json, the sheets and the posters; nil when the manifest cannot be read or `attention`'s
@@ -178,6 +183,49 @@ final class PetMovePlayer: NSObject, CAAnimationDelegate {
         return image
     }
 
+    /// The picture of a still, decoded once.
+    private func stillImage(_ still: PetStill) -> CGImage? {
+        if let image = stillImages[still] { return image }
+        guard let image = petDecoded(folder.appendingPathComponent(still.file)) else { return nil }
+        stillImages[still] = image
+        return image
+    }
+
+    /// Shows `still` and holds it, at its opacity, fading from what is on the screen. The same still again does
+    /// nothing. False when its file cannot be read (the pet keeps what it shows).
+    @discardableResult
+    func hold(_ still: PetStill) -> Bool {
+        guard holding != still else { return true }
+        guard let image = stillImage(still) else { return false }
+        let frozen = wanted == nil && holding == nil ? nil : capture()
+        generation += 1
+        (wanted, holding, poster, once) = (nil, still, false, false)
+        for piece in [outgoing, incoming] { piece.removeAllAnimations() }
+        let whole = CGRect(x: 0, y: 0, width: 1, height: 1)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        outgoing.contents = frozen
+        outgoing.contentsRect = whole
+        outgoing.opacity = 0
+        incoming.contents = image
+        incoming.contentsRect = whole
+        incoming.opacity = still.opacity
+        CATransaction.commit()
+        if frozen != nil { blend(self.still ? manifest.still : manifest.poseChange, to: still.opacity) }
+        return true
+    }
+
+    /// The cross-fade of `seconds` from the frozen picture to the incoming one, which ends at `opacity`.
+    private func blend(_ seconds: Double, to opacity: Float) {
+        guard seconds > 0 else { return }
+        for (piece, from, to) in [(outgoing, Float(1), Float(0)), (incoming, Float(0), opacity)] {
+            let fade = CABasicAnimation(keyPath: "opacity")
+            (fade.fromValue, fade.toValue, fade.duration) = (from, to, seconds)
+            fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            piece.add(fade, forKey: "fade")
+        }
+    }
+
     /// The poster of `move` alone (`poster-<state>.webp`), for a state whose sheet cannot be read.
     private func posterFile(_ move: PetMove) -> CGImage? {
         if let image = posters[move] { return image }
@@ -197,15 +245,17 @@ final class PetMovePlayer: NSObject, CAAnimationDelegate {
         let sheetImage = sheet(move)
         guard let image = sheetImage ?? posterFile(move) else { return false }
         let whole = sheetImage == nil
-        let old = wanted
+        let old = wanted, wasHolding = holding != nil
         // What the person sees now, frozen, before any animation is taken off: the next state fades from it.
-        let frozen = old == nil ? nil : capture()
+        let frozen = old == nil && !wasHolding ? nil : capture()
         generation += 1
         wanted = move
+        holding = nil
         poster = held
         once = playOnce || timeline.once
         for piece in [outgoing, incoming] { piece.removeAllAnimations() }
-        let fade = manifest.fade(from: old, to: move, still: still)
+        // From a still, the fade of a change of pose (or the still one).
+        let fade = wasHolding ? (still ? manifest.still : manifest.poseChange) : manifest.fade(from: old, to: move, still: still)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         outgoing.contents = frozen
@@ -218,14 +268,7 @@ final class PetMovePlayer: NSObject, CAAnimationDelegate {
         incoming.contentsRect = whole ? CGRect(x: 0, y: 0, width: 1, height: 1)
             : manifest.cell(still || held ? timeline.poster : once ? timeline.seconds.count - 1 : 0)
         CATransaction.commit()
-        if fade > 0, frozen != nil {
-            for (piece, from, to) in [(outgoing, 1.0, 0.0), (incoming, 0.0, 1.0)] {
-                let blend = CABasicAnimation(keyPath: "opacity")
-                (blend.fromValue, blend.toValue, blend.duration) = (from, to, fade)
-                blend.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                piece.add(blend, forKey: "fade")
-            }
-        }
+        if frozen != nil { blend(fade, to: 1) }
         let token = generation
         if held { return true }
         if still || whole {

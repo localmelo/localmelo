@@ -286,6 +286,20 @@ player.set(.startup, poster: true)
 precondition(incoming.animation(forKey: "fade") === held)  // the same still again: nothing
 player.set(.startup)
 precondition(!player.poster && incoming.animation(forKey: "frames") != nil)
+// The stills of the pet's own: their pictures beside the sheets, whole, held, the offline one faded; the fade of a
+// change of pose into them and out of them; the same still again does nothing.
+precondition(player.hold(.error) && player.holding == .error && player.wanted == nil)
+precondition(incoming.contentsRect == CGRect(x: 0, y: 0, width: 1, height: 1) && incoming.opacity == 1)
+precondition(incoming.animation(forKey: "frames") == nil && incoming.animation(forKey: "fade")?.duration == 0.22)
+let errorFade = incoming.animation(forKey: "fade")
+player.hold(.error)
+precondition(incoming.animation(forKey: "fade") === errorFade)
+precondition(player.hold(.offline) && incoming.opacity == 0.6)
+precondition((incoming.animation(forKey: "fade") as? CABasicAnimation)?.toValue as? Float == 0.6)
+player.setStill(true); player.setStill(false)
+precondition(player.holding == .offline)  // Reduce Motion coming or going leaves a still as it is
+precondition(player.set(.idleRest) && player.holding == nil && incoming.opacity == 1)
+precondition(incoming.animation(forKey: "fade")?.duration == 0.22 && incoming.animation(forKey: "frames") != nil)
 // Unseen, the clock stops where it is; seen again, it goes on.
 precondition(player.running)
 player.run(false)
@@ -303,6 +317,9 @@ try! Data("not a picture".utf8).write(to: unreadable.appendingPathComponent("wor
 let fallback = PetMovePlayer(folder: unreadable, side: 100)!
 let standIn = fallback.layer.sublayers![1]
 precondition(fallback.set(.working) && fallback.wanted == .working)
+// A folder without the stills cannot hold one: the pet asks for the moves' own poster instead (PetPanel).
+try! FileManager.default.removeItem(at: unreadable.appendingPathComponent("poster-error.webp"))
+precondition(!fallback.hold(.error) && fallback.holding == nil && fallback.wanted == .working)
 precondition(standIn.animation(forKey: "frames") == nil && standIn.contents != nil)
 precondition(standIn.contentsRect == CGRect(x: 0, y: 0, width: 1, height: 1))
 try! FileManager.default.removeItem(at: unreadable.appendingPathComponent("poster-working.webp"))
@@ -341,12 +358,16 @@ def test_one_player_draws_the_whole_pet_and_the_stills_keep_their_words() -> Non
     assert "described = false\n        if isShown { refresh() }" in panel
     # The picker hears every mood (a still ends a rest, a play and the sitting), then the still wins.
     assert refresh.index("picker.pick(") < refresh.index("petStill(mood)")
-    assert "moves.set(poster, poster: true)" in refresh
+    assert (
+        "if !moves.hold(picture) { moves.set(picture.standIn, poster: true) }"
+        in refresh
+    )
     # The moves' layer is the pet: added once, never hidden; no other picture is drawn on the panel.
     assert panel.count("view.layer?.addSublayer(moves.layer)") == 1
     assert "isHidden" not in panel and "CGImageSource" not in panel
-    # Without the moves there is no pet.
-    assert "guard moves != nil, place() else { return }" in panel
+    # Without the moves the pet shows its offline still alone if it can, else not at all; either is logged.
+    assert "guard moves != nil || standIn != nil, place() else { return }" in panel
+    assert panel.count("NSLog(\"localmelo: Melo's moves cannot be read in %@;") == 2
     # The app hands the pet, the start window and the pill one moves folder: the one the bundled gateway serves.
     main = (APP / "main.swift").read_text()
     runtime = "Bundle.main.resourceURL.flatMap(runtimeMovesFolder(resources:))"

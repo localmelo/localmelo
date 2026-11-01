@@ -2,7 +2,7 @@
 """Make Melo's pictures (the moves of the desktop pet and the console's portrait, their stills and Melo's face)
 from an art pack.
 
-    uv run --with pillow==13.0.0 python scripts/build_moves.py --source <pack folder>
+    uv run --with pillow==13.0.0 python scripts/build_moves.py --source <pack folder> --stills <stills folder>
 
 Pillow is not a dependency of localmelo: `--with` fetches it for this one run. The committed files were made with
 Pillow 13.0.0, whose wheel bundles libwebp 1.6.0; another Pillow or libwebp may encode other bytes, so keep the pin
@@ -12,18 +12,28 @@ square canvas, for the six states below. The manifest gives each state its frame
 stands for it when nothing may move (`poster_frame_index`), and the canvas with the point the paws rest on
 (`canvas.anchor`).
 
-What it writes in support/gateway/static/moves, committed, served by the console and copied into the app by
-scripts/build_macos_app.py:
+The stills folder (optional) holds done.png, error.png and offline.png: one transparent picture each on the pack's
+canvas, the paws on the pack's anchor line and centred like its frames. They are what Melo holds when nothing moves for
+a reason: a run that ended well, a failure, and nothing known or no connection. Their masters stay out of the
+repository too. Without the folder those three posters are not written and the done and error faces are cut from the
+pack's posters instead.
+
+What it writes in support/gateway/static/moves, committed, served by the console and read by the app from the same
+folder inside its bundled package (scripts/build_macos_app.py):
 
 - <state>.webp: the state's frames scaled to CELL pixels (the whole canvas is scaled, never one frame cut on its
   own, so the paws stay on the anchor), in a COLUMNS x ROWS sheet, left to right and top to bottom. Lossy WebP with
   a lossless alpha: macOS 11 and every current browser read it.
-- poster-<state>.webp: each state's poster frame alone, CELL pixels: the console's still pictures (the empty chat,
-  and the panel's done, error and offline pictures) and the app's start window.
+- poster-<state>.webp: each state's poster frame alone, CELL pixels: the empty chat, the app's start window, and a
+  state shown still (reduced motion, or a sheet that cannot be read).
+- poster-done.webp, poster-error.webp, poster-offline.webp: the stills, CELL pixels, scaled as the frames are: done
+  (eyes closed, happy, tail up), error (ears back, head low) and offline (curled up). The panel and the desktop pet
+  show them for a run that just ended, a failure, and nothing known or no connection.
 - face-<name>.png: Melo's head, cut from a state's poster frame by that name's box in FACES (pixels of a 512 px
   canvas; the box scales with the pack's canvas), FACE_PIXELS square: the reply icons, the approval bar, the
-  brand, the phone's panel chip and the app's activity pill. idle and done are the sitting dog the wake-up ends on,
-  working the dog at its laptop, waiting the raised paw, error the tilted head.
+  brand, the phone's panel chip and the app's activity pill. idle is the sitting dog the wake-up ends on, working the
+  dog at its laptop, waiting the raised paw; done and error are cut from those stills by STILL_FACES (eyes closed and
+  happy; ears back), or from the wake-up's end and the thinking poster when there are no stills.
 - favicon-16.png, favicon-32.png, favicon-64.png: the idle head cut closer (FAVICON_BOX), for the browser tab.
 - manifest.json: the canvas, the anchor and the sheet's grid, and per state its file, its pose, once or loop, the
   poster frame and the frame durations; and the cross-fade times between states.
@@ -70,6 +80,13 @@ FACES = {
     "done": ("startup", (146, 64, 354, 272)),
     "error": ("thinking", (180, 0, 400, 220)),
 }
+# The faces cut from the stills instead, when they are given: the still and its box, as above.
+STILL_FACES = {
+    "done": ("done", (160, 58, 364, 262)),
+    "error": ("error", (182, 40, 402, 260)),
+}
+# The stills, by the names their files have in the stills folder and their posters in the moves.
+STILLS = ("done", "error", "offline")
 FACE_PIXELS = 96  # twice the largest size a face is shown at (48 pt)
 # The browser tab's icon: the idle head, closer, so it still reads at 16 px.
 FAVICON_BOX = (158, 74, 342, 258)
@@ -167,9 +184,27 @@ def save(path: Path, image: Image.Image) -> None:
     image.save(path, "WEBP", quality=QUALITY, alpha_quality=100, method=6, exact=False)
 
 
-def build(source: Path, out: Path) -> int:
-    """Write the sheets, the posters, the faces, the favicons and the manifest under `out`; the bytes written."""
+def read_stills(folder: Path, canvas: int) -> dict[str, Path]:
+    """The stills folder, checked: done.png, error.png and offline.png, each a file on the pack's canvas."""
+    found: dict[str, Path] = {}
+    for name in STILLS:
+        path = folder / f"{name}.png"
+        if not path.is_file():
+            raise PackError(f"The stills folder has no {name}.png")
+        with Image.open(path) as image:
+            if image.size != (canvas, canvas):
+                raise PackError(f"{name}.png is not on the {canvas} x {canvas} canvas")
+        found[name] = path
+    return found
+
+
+def build(source: Path, out: Path, stills: Path | None = None) -> int:
+    """Write the sheets, the posters, the stills, the faces, the favicons and the manifest under `out`; the bytes
+    written."""
     pack = read_pack(source)
+    pictures = (
+        read_stills(stills, pack["canvas"]["width"]) if stills is not None else {}
+    )
     side = pack["canvas"]["width"]
     scale = CELL / side
     states: dict[str, dict[str, Any]] = {}
@@ -194,8 +229,17 @@ def build(source: Path, out: Path) -> int:
             "poster": poster,
             "durations_ms": list(entry["frame_durations_ms"]),
         }
+    held: dict[str, Image.Image] = {}
+    for name, path in pictures.items():
+        save(out / f"poster-{name}.webp", scaled(path, side, CELL))
+        with Image.open(path) as full:
+            held[name] = full.convert("RGBA")
     for name, (state, box) in FACES.items():
-        save_png(out / f"face-{name}.png", cut(posters[state], box, FACE_PIXELS))
+        if name in STILL_FACES and held:
+            still, box = STILL_FACES[name]
+            save_png(out / f"face-{name}.png", cut(held[still], box, FACE_PIXELS))
+        else:
+            save_png(out / f"face-{name}.png", cut(posters[state], box, FACE_PIXELS))
     for pixels in FAVICONS:
         save_png(
             out / f"favicon-{pixels}.png", cut(posters["startup"], FAVICON_BOX, pixels)
@@ -233,11 +277,16 @@ def main() -> None:
         help="the art pack's folder: manifest.json and frames/<state>/frame_NN.png",
     )
     parser.add_argument(
+        "--stills",
+        type=Path,
+        help="the stills' folder: done.png, error.png and offline.png on the pack's canvas",
+    )
+    parser.add_argument(
         "--out", type=Path, default=OUT, help=f"where to write (default {OUT})"
     )
     args = parser.parse_args()
     try:
-        total = build(args.source, args.out)
+        total = build(args.source, args.out, args.stills)
     except PackError as error:
         raise SystemExit(f"build_moves: {error}") from None
     seconds = {

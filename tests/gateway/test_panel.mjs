@@ -910,7 +910,8 @@ test('the portrait wakes up once, sits, rests, plays now and then, and keeps its
   assert.equal(player.canvas.tagName, 'CANVAS');
   assert.equal(player.canvas.attributes['aria-hidden'], 'true');
   assert.equal(ring.dataset.moves, 'off', 'before the first health reply the picture shows');
-  assert.equal(ring.dataset.dim, 'true', 'not connected yet: the resting dog, dimmed');
+  assert.equal(ring.dataset.dim, 'true', 'not connected yet: the offline still, faded');
+  assert.equal(h.root.find((node) => node.tagName === 'IMG').getAttribute('src'), '/assets/moves/poster-offline.webp');
   await h.panel.update(health());
   await settle();
   assert.equal(ring.dataset.moves, 'on', 'the canvas shows once its state is drawn');
@@ -970,23 +971,23 @@ test('the portrait wakes up once, sits, rests, plays now and then, and keeps its
   const asked = player.asked.length;
   await h.panel.update(health({recent: {kind: 'chat', id: 'c1', outcome: 'done', ended_s_ago: 1}}));
   assert.equal(ring.dataset.moves, 'off');
-  // The sitting dog the wake-up ends on, from the moves; an error is the tilted head.
-  assert.equal(h.root.find((node) => node.tagName === 'IMG').getAttribute('src'), '/assets/moves/poster-startup.webp');
+  // The done still (eyes closed and happy, tail up); an error is the error still (ears back, head low).
+  assert.equal(h.root.find((node) => node.tagName === 'IMG').getAttribute('src'), '/assets/moves/poster-done.webp');
   assert.equal(ring.dataset.dim, 'false');
   assert.ok(player.hidden.has('portrait'));
   assert.equal(player.asked.length, asked);
   await h.panel.update(health({}, {model_server: {reachable: false}}));
   assert.equal(ring.dataset.moves, 'off');
   assert.equal(ring.dataset.move, undefined);
-  assert.equal(h.root.find((node) => node.tagName === 'IMG').getAttribute('src'), '/assets/moves/poster-thinking.webp');
+  assert.equal(h.root.find((node) => node.tagName === 'IMG').getAttribute('src'), '/assets/moves/poster-error.webp');
   // The page lost the gateway: the still picture, until it answers again.
   await h.panel.update(health());
   await settle();
   assert.equal(ring.dataset.moves, 'on');
   h.panel.offline(true);
   assert.equal(ring.dataset.moves, 'off');
-  // Lost: the resting dog, dimmed; the words and the ring stay as they were.
-  assert.equal(h.root.find((node) => node.tagName === 'IMG').getAttribute('src'), '/assets/moves/poster-idle_rest.webp');
+  // Lost: the offline still (curled up), faded; the words and the ring stay as they were.
+  assert.equal(h.root.find((node) => node.tagName === 'IMG').getAttribute('src'), '/assets/moves/poster-offline.webp');
   assert.equal(ring.dataset.dim, 'true');
   assert.ok(player.hidden.has('portrait'));
   h.panel.offline(false);

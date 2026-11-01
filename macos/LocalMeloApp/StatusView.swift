@@ -21,13 +21,13 @@ enum Palette {
     static let badgeRing = pair(0xffffff, 0x1c1c1e)
 }
 
-/// Melo's portrait in the mood the window is in: a still of the moves (`startPortrait`). The pictures are transparent,
-/// so they stand on the console's canvas in light and dark with no frame or tile. It is decoration: the title below
-/// says the same in words, so VoiceOver skips it.
+/// Melo's portrait in the mood the window is in: a poster of the moves (`startPortrait`). The pictures are
+/// transparent, so they stand on the console's canvas in light and dark with no frame or tile. It is decoration: the
+/// title below says the same in words, so VoiceOver skips it.
 final class PortraitView: NSImageView {
     private let pictures: URL?
-    private var images: [PetMove: NSImage] = [:]
-    private(set) var state: PetMove = .startup
+    private var images: [String: NSImage] = [:]
+    private(set) var state = PetMove.startup.rawValue
 
     /// `pictures` is the `moves` folder of the bundle's resources.
     init(pictures: URL?) {
@@ -35,15 +35,16 @@ final class PortraitView: NSImageView {
         super.init(frame: .zero)
         imageScaling = .scaleProportionallyUpOrDown
         setAccessibilityElement(false)
-        show(.startup)
+        show(PetMove.startup.rawValue)
     }
 
     required init?(coder: NSCoder) { nil }
 
-    /// The state's poster at the canvas's size; with no picture (a run outside the bundle) the portrait takes no room.
-    func show(_ next: PetMove) {
+    /// The poster `next` (`poster-<next>.webp`) at the canvas's size; with no picture (a run outside the bundle) the
+    /// portrait takes no room.
+    func show(_ next: String) {
         state = next
-        if images[next] == nil, let url = pictures?.appendingPathComponent("poster-\(next.rawValue).webp"),
+        if images[next] == nil, let url = pictures?.appendingPathComponent("poster-\(next).webp"),
            let image = NSImage(contentsOf: url) {
             image.size = portraitSize
             images[next] = image
@@ -70,8 +71,8 @@ final class StatusView: NSView {
 
     private let portraitView: PortraitView
 
-    /// The still on show.
-    var portrait: PetMove { portraitView.state }
+    /// The poster on show, by its name.
+    var portrait: String { portraitView.state }
 
     init(pictures: URL?) {
         portraitView = PortraitView(pictures: pictures)

@@ -85,8 +85,10 @@ final class PetPanel: NSPanel {
 final class PetController: NSObject {
     let panel: PetPanel
     let view: PetView
-    /// The animated states; nil when their files are missing, and then the pet never shows.
+    /// The animated states; nil when their files cannot be read. Then the pet shows the offline still alone
+    /// (`standIn`) if that can be read, and never shows if not; either is logged once.
     let moves: PetMovePlayer?
+    let standIn: CALayer?
     /// What a click opens: the window, or the chat or task that waits.
     var openWindow: () -> Void = {}
     var openWaiting: () -> Void = {}
@@ -121,11 +123,27 @@ final class PetController: NSObject {
         settings = petSettings(try? Data(contentsOf: settingsURL))
         view = PetView()
         moves = movesFolder.flatMap { PetMovePlayer(folder: $0, side: petMoveSide) }
+        standIn = moves != nil ? nil : movesFolder.flatMap { petDecoded($0.appendingPathComponent(PetStill.offline.file)) }
+            .map { image in
+                let layer = CALayer()
+                layer.contents = image
+                layer.contentsGravity = .resize
+                layer.opacity = PetStill.offline.opacity
+                layer.frame = petMoveFrame(side: petMoveSide, anchor: petStillAnchor, pixels: petStillPixels,
+                                           in: petPanelSize, belowPaws: petBelowPaws)
+                return layer
+            }
         if let moves = moves {
             let manifest = moves.manifest
             moves.layer.frame = petMoveFrame(side: petMoveSide, anchor: manifest.anchor, pixels: manifest.pixels,
                                              in: petPanelSize, belowPaws: petBelowPaws)
             view.layer?.addSublayer(moves.layer)
+        } else if let standIn = standIn {
+            view.layer?.addSublayer(standIn)
+            NSLog("localmelo: Melo's moves cannot be read in %@; the pet shows its offline picture",
+                  movesFolder?.path ?? "(no folder)")
+        } else {
+            NSLog("localmelo: Melo's moves cannot be read in %@; the pet stays hidden", movesFolder?.path ?? "(no folder)")
         }
         panel = PetPanel(contentRect: NSRect(origin: .zero, size: petPanelSize),
                          styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
@@ -230,7 +248,7 @@ final class PetController: NSObject {
     private func reconcile() {
         let wanted = petShouldShow(windowShown: windowShown, hiddenByPerson: settings.hidden) && !pillUp
         if wanted && !panel.isVisible {
-            guard moves != nil, place() else { return }
+            guard moves != nil || standIn != nil, place() else { return }
             touched = Date()
             described = false
             panel.orderFrontRegardless()
@@ -269,8 +287,9 @@ final class PetController: NSObject {
         let still = !petMovesMayMove(environment)
         moves.setStill(still)  // before the state, so it starts as it should show
         let pick = picker.pick(mood, thinking: health.map(petThinking) ?? false, still: still, now: Date())
-        if let poster = petStill(mood) {
-            moves.set(poster, poster: true)
+        if let picture = petStill(mood) {
+            // A folder made before the stills: the moves' own poster stands in.
+            if !moves.hold(picture) { moves.set(picture.standIn, poster: true) }
         } else if let (move, once) = pick {
             moves.set(move, once: once)
         }
