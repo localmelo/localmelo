@@ -217,13 +217,16 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     }
 
     // The window, then the chat or task that waits. The route reaches the page as an argument, never as
-    // script text, and the console follows the hash as it does for a link.
+    // script text, and the console follows the hash as it does for a link. A page already at that address
+    // gets no event from setting it again (a task shown in a panel the window has since narrowed past), so
+    // it is told the same way.
     @objc private func openWaiting() { open(route: pendingRoute) }
 
     private func open(route: String?) {
         openWindow()
         guard let route = route else { return }
-        webView?.callAsyncJavaScript("location.hash = route", arguments: ["route": route], in: nil, in: .page)
+        let script = "if (location.hash === route) { dispatchEvent(new HashChangeEvent('hashchange')); } else { location.hash = route; }"
+        webView?.callAsyncJavaScript(script, arguments: ["route": route], in: nil, in: .page)
     }
 
     // "Sign In Again" shows only after sign-ins failed or while the console is locked, and in developer mode.

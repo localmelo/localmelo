@@ -480,7 +480,7 @@ _HELD = {
 }
 _LINE = (
     "Waiting for your approval: file_write out.txt "
-    "(answer it in the web console, Tasks)"
+    "(answer it on the task's page in the web console)"
 )
 
 

@@ -345,7 +345,7 @@ default workspace, `~/localmelo-workspace`):
 c5b2d38ceecc  queued
 ID            LEVEL  STATE  TITLE
 c5b2d38ceecc  P2     held   Write hello.py so that it prints the word hello.
-  Waiting for your approval: file_write hello.py (answer it in the web console, Tasks)
+  Waiting for your approval: file_write hello.py (answer it on the task's page in the web console)
 ```
 
 With the default settings a file write waits for your approval, so the task
@@ -353,7 +353,8 @@ is `held` until you answer it. The task waits once for each tool the model
 asks to use: a model that runs its own check asks for `python_exec` too, and
 the task is `held` again until you answer that. `melo-task show` names the
 tool it waits for. Run `melo console` in a terminal to open the console,
-and answer the request in the Tasks view. Then show the
+and answer the request on the task's page: select the task's row in the
+Activity list beside Melo. Then show the
 task:
 
 ```shell

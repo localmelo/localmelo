@@ -236,10 +236,10 @@ melo-task list
 c5b2d38ceecc  queued
 ID            LEVEL  STATE  TITLE
 c5b2d38ceecc  P2     held   Write hello.py so that it prints the word hello.
-  Waiting for your approval: file_write hello.py (answer it in the web console, Tasks)
+  Waiting for your approval: file_write hello.py (answer it on the task's page in the web console)
 ```
 
-默认设置下，写文件要等你批准，所以任务处于 `held` 状态，直到你作出回答。模型每要用一个工具，任务就等待一次：自己运行检查的模型也会请求 `python_exec`，回答前任务会再次处于 `held` 状态。`melo-task show` 会指出它在等哪个工具。在终端中运行 `melo console` 打开控制台，然后在控制台的 Tasks 视图中回答该请求。之后查看任务：
+默认设置下，写文件要等你批准，所以任务处于 `held` 状态，直到你作出回答。模型每要用一个工具，任务就等待一次：自己运行检查的模型也会请求 `python_exec`，回答前任务会再次处于 `held` 状态。`melo-task show` 会指出它在等哪个工具。在终端中运行 `melo console` 打开控制台，然后在控制台的任务页面中回答该请求：在 Melo 旁边 Activity 列表里选中该任务的那一行。之后查看任务：
 
 ```shell
 melo-task show c5b2d38ceecc

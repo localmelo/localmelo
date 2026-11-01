@@ -36,8 +36,8 @@ and numeric spellings accepted by the gateway are supported without DNS lookup.
 - `list [--state STATE] [--level Pn]` lists matching tasks, not their admission
   order, as a table whose header row names the ID, level, state and title columns; every column but the title is padded so the rows line up.
   `show ID` inspects one. A held task that waits for a tool approval prints
-  `Waiting for your approval: <tool> <target> (answer it in the web console,
-  Tasks)` (under its row in `list`, in place of the `Waiting:` line in `show`) and
+  `Waiting for your approval: <tool> <target> (answer it on the task's page in
+  the web console)` (under its row in `list`, in place of the `Waiting:` line in `show`) and
   `Reason: approval`; there is no `melo-task` verb to answer it. A task whose
   run ran out of steps prints `stopped` as its state (`show` adds `Ran out of
   steps: continue it from the console.` and `Left: …`); `--json` keeps the
@@ -333,7 +333,8 @@ makes effects happen only once.
 
 ### Console task card
 
-The console's **Tasks** view (`#/tasks`, `#/tasks/<id>`) is a client of the
+The console's task page (`#/tasks/<id>`, shown in the side panel, and the list of
+all tasks at `#/tasks`) is a client of the
 routes above: `GET /api/tasks`, `GET /api/tasks/{id}`,
 `POST /api/tasks/{id}/resume` and `PATCH /api/tasks/{id}` with
 `{"state": "stop"}`. It sends Resume without a token first and opens the
