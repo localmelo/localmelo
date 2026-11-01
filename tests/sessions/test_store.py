@@ -816,7 +816,10 @@ def test_the_session_event_keys_are_pinned() -> None:
             "remember",
         },
     }
-    assert dict(OPTIONAL_SESSION_EVENT_FIELDS) == {"turn.started": {"origin"}}
+    assert dict(OPTIONAL_SESSION_EVENT_FIELDS) == {
+        "turn.started": {"origin"},
+        "turn.memory": {"search_hint"},
+    }
     assert RESERVED_EVENT_PREFIXES == ("task.", "sched.", "attention.")
 
 
