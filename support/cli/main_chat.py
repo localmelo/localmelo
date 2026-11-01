@@ -39,6 +39,7 @@ from localmelo.melo.contracts.review import ActionReview
 from localmelo.support import console_link, gateway_endpoint, task_cli
 from localmelo.support.cli import hanging
 from localmelo.support.cli.text import cut_cells
+from localmelo.support.sessions.approvals import ChatMode, chat_mode
 from localmelo.support.sessions.display import clean_output, home_label
 from localmelo.support.sessions.store import (
     GATEWAY_SESSIONS_DB,
@@ -443,12 +444,20 @@ class GatewayClient:
         body = {"text": text, "client_request_id": key}
         return await self.call("POST", _path(session_id, "turns"), json=body)
 
-    async def create(self, text: str, key: str, workspace: str) -> dict[str, Any]:
-        """A new side chat in *workspace*, with *text* as its first message."""
-        body = {
+    async def create(
+        self, text: str, key: str, workspace: str, approvals: ChatMode | None = None
+    ) -> dict[str, Any]:
+        """A new side chat in *workspace*, with *text* as its first message.
+
+        *approvals* is the mode the person picked before the chat existed;
+        without one the gateway uses the mode of its settings for new chats.
+        """
+        body: dict[str, Any] = {
             "workspace": workspace,
             "turn": {"text": text, "client_request_id": key},
         }
+        if approvals is not None:
+            body["approvals"] = approvals
         return await self.call("POST", "/api/sessions", json=body)
 
     async def retry(self, session_id: str, turn_id: str) -> dict[str, Any]:
@@ -458,6 +467,12 @@ class GatewayClient:
 
     async def rename(self, session_id: str, title: str) -> None:
         await self.call("PATCH", _path(session_id), json={"title": title})
+
+    async def set_mode(self, session_id: str, mode: ChatMode) -> dict[str, Any]:
+        """Switch a chat to Ask or Auto, from its next step; its session as stored."""
+        body = await self.call("PATCH", _path(session_id), json={"approvals": mode})
+        session = body.get("session")
+        return session if isinstance(session, dict) else {}
 
     async def cancel(self, turn_id: str) -> None:
         await self.call(
@@ -668,6 +683,10 @@ class Chat:
     title: str
     main: bool = False
     named: bool = False  # /side TITLE: the title to give it once it exists
+    # Ask or Auto, as the gateway stores it; for a chat not made yet, what it
+    # will start in. ``picked`` is set when the person chose one for it.
+    mode: ChatMode = "ask"
+    picked: bool = False
 
 
 @dataclass
@@ -684,9 +703,18 @@ class _Turn:
 class MainChat:
     """The terminal's side of the main chat (see the module docstring)."""
 
-    def __init__(self, host: Host, client: GatewayClient, link: Link) -> None:
+    def __init__(
+        self,
+        host: Host,
+        client: GatewayClient,
+        link: Link,
+        *,
+        new_mode: ChatMode = "ask",
+    ) -> None:
         self.host, self.client, self.link = host, client, link
-        self.chat = Chat(None, MAIN_TITLE, main=True)
+        # The mode a side chat starts in (``[approvals] mode``) until the person picks one.
+        self.new_mode: ChatMode = new_mode
+        self.chat = Chat(None, MAIN_TITLE, main=True, mode=new_mode)
         self.main_id = ""
         self._cursors: dict[str, int] = {}
         self._follow: asyncio.Task[None] | None = None
@@ -718,7 +746,15 @@ class MainChat:
         while True:
             await asyncio.sleep(POLL_S)
             with contextlib.suppress(GatewayError):
-                await self.client.chats()
+                main, side = await self.client.chats()
+                self._read_mode([main, *side])
+
+    def _read_mode(self, rows: Sequence[Mapping[str, Any]]) -> None:
+        """Take the open chat's mode from its row: another window may have switched it."""
+        chat = self.chat
+        for row in rows:
+            if chat.id is not None and str(row.get("id")) == chat.id:
+                chat.mode = chat_mode(row, chat.mode)
 
     async def open(self, chat: Chat) -> None:
         """Make *chat* the open one: its stream follows from where it was left."""
@@ -727,6 +763,9 @@ class MainChat:
         self.host.title = chat.title
         if chat.id is None:
             return  # its first message makes it
+        with contextlib.suppress(GatewayError):
+            found = (await self.client.session(chat.id)).get("session")
+            chat.mode = chat_mode(found, chat.mode)
         after = self._cursors.get(chat.id)
         if after is None:
             after = await self._first_look(chat.id)
@@ -986,9 +1025,15 @@ class MainChat:
             if retry and chat.id is not None:
                 body = await self.client.retry(chat.id, retry)
             elif chat.id is None:
-                body = await self.client.create(text, turn.key, self.host.workspace)
+                body = await self.client.create(
+                    text,
+                    turn.key,
+                    self.host.workspace,
+                    chat.mode if chat.picked else None,
+                )
                 session = body.get("session") or {}
                 chat.id = str(session.get("id") or "")
+                chat.mode = chat_mode(session, chat.mode)
                 if not chat.named:
                     chat.title = str(session.get("title") or title_from_text(text))
                     self.host.title = chat.title
@@ -1048,6 +1093,29 @@ class MainChat:
 
     # ── Commands ──
 
+    @property
+    def mode(self) -> ChatMode:
+        """The open chat's mode: Ask or Auto."""
+        return self.chat.mode
+
+    async def set_mode(self, mode: ChatMode) -> None:
+        """Switch the open chat to *mode* on the gateway (``/approvals`` and Shift+Tab).
+
+        The gateway stores it with the chat and applies it from the chat's
+        next step. A side chat its first message has not made yet has
+        nothing stored: it starts in the mode picked here.
+        """
+        chat = self.chat
+        if chat.main and chat.id is None:
+            await self._ready.wait()  # as melo opens
+        if chat.id is None:
+            if chat.main:
+                raise GatewayError("the main chat did not open")
+            chat.mode, chat.picked = mode, True
+            return
+        stored = await self.client.set_mode(chat.id, mode)
+        chat.mode = chat_mode(stored, mode)
+
     async def pick(self) -> None:
         """/chats: the main chat and its side chats as a list; Enter opens one."""
         await self._ready.wait()
@@ -1074,7 +1142,9 @@ class MainChat:
     async def side(self, title: str) -> None:
         """/side [TITLE]: a new side chat in this folder, made by its first message."""
         await self._ready.wait()
-        await self.open(Chat(None, title or NEW_SIDE, named=bool(title)))
+        await self.open(
+            Chat(None, title or NEW_SIDE, named=bool(title), mode=self.new_mode)
+        )
         where = home_label(self.host.workspace)
         self._say(
             f"◆ {self.chat.title} in {where}: your first message starts it. /main returns.",

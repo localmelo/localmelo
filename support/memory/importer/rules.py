@@ -30,6 +30,23 @@ _MECHANICS = re.compile(
     r"|\.claude/(?:hooks|commands|agents|skills)|\bpermissions?\.(?:allow|deny)\b"
     r"|\ballowedTools\b|\bbypassPermissions\b|\bhooks? (?:config|settings)\b"
 )
+# Key material and the details that name a key: fingerprints, public and private keys,
+# a private key's path with the words about it, a 40-hex fingerprint of a PGP key.
+_KEY_MATERIAL = re.compile(
+    r"SHA256:[A-Za-z0-9+/]{20,}|(?<![0-9A-Fa-f:])(?:[0-9A-Fa-f]{2}:){15}[0-9A-Fa-f]{2}(?![0-9A-Fa-f:])"
+    r"|\b(?:ssh-(?:ed25519|rsa|dss)|ecdsa-sha2-nistp\d+)\s+AAAA[A-Za-z0-9+/]{16,}"
+    r"|-----BEGIN"
+    r"|(?<![0-9A-Fa-f])(?:[0-9A-Fa-f]{4} ){9}[0-9A-Fa-f]{4}(?![0-9A-Fa-f])"
+)
+_HEX40 = re.compile(r"(?<![0-9A-Fa-f])[0-9A-Fa-f]{40}(?![0-9A-Fa-f])")
+_PGP_WORDS = re.compile(r"\b(?:pgp|gpg|fingerprint|fpr|signing key)\b", re.IGNORECASE)
+_KEY_PATH = re.compile(
+    r"(?:~|\$HOME|/[\w./-]*)/\.ssh/(?!(?:config|known_hosts|authorized_keys)\b)[\w.-]+"
+)
+_KEY_WORDS = re.compile(r"\b(?:key|passphrase|fingerprint)\b", re.IGNORECASE)
+# How the other tool picks a setting: its precedence among environment variables.
+_ENV_NAME = re.compile(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b")
+_PRECEDENCE = re.compile(r"\bprecedence\b|\S+\s+>\s+\S+\s+>\s+\S+", re.IGNORECASE)
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 _ACCOUNT = re.compile(
     r"\bApple ?ID\b|苹果\s?ID|\b(?:Apple|iCloud|Google|GitHub|Microsoft) account\b"
@@ -57,6 +74,30 @@ _FEEDBACK = re.compile(
     r"|不要|不得|必须|应该|优先|一律|禁止|务必|尽量|别(?!人)|请|只|先|用(?!户)|放|写|跑|保持",
     re.IGNORECASE,
 )
+# What a possessive is not a person's name: a language, a tool or command, a file.
+_NOT_PEOPLE = re.compile(
+    r"english|chinese|mandarin|cantonese|japanese|korean|french|german|spanish|italian"
+    r"|portuguese|russian|arabic|hindi|dutch|swedish|latin|python|rust|swift|java"
+    r"|javascript|typescript|kotlin|ruby|perl|lua|haskell|scala|julia|golang|matlab"
+    r"|fortran|bash|zsh|shell|git|github|gitlab|docker|make|cmake|conda|pip|pipx|uv"
+    r"|npm|node|nvm|brew|homebrew|xcode|vim|emacs|neovim|tmux|ssh|curl|pytest|ruff"
+    r"|black|mypy|linux|macos|ubuntu|windows|android|safari|chrome|firefox|claude"
+    r"|codex|gemini|hermes|openai|anthropic|slurm|kubernetes|terraform|ansible"
+    r"|direnv|poetry|cargo|gradle|maven|webpack|react|django|flask|fastapi|pandas"
+    r"|numpy|pytorch|tensorflow|jupyter|makefile|dockerfile|readme|license|changelog"
+    r"|gemfile|procfile|macbook|apple|google|microsoft|amazon|meta|slack|notion"
+    r"|obsidian|figma|jira|hugging",
+    re.IGNORECASE,
+)
+_ZH_RELATIVES = re.compile(
+    "妈妈|爸爸|哥哥|姐姐|弟弟|妹妹|妻子|丈夫|女儿|儿子|父母|家人|女朋友|男朋友"
+    "|导师|同事|同学|朋友|室友|医生|教授"
+)
+# Common surnames, less the ones that start everyday words (高效, 方法, 文件, 金融).
+_ZH_NAME = re.compile(
+    "(?:[小老阿]|[王李张刘陈杨黄赵周吴徐孙胡朱林郭马罗梁宋郑谢韩唐冯董萧程曹袁邓傅沈彭吕苏卢"
+    "蒋蔡贾丁魏薛叶阎潘杜戴汪姜谭廖邹熊陆郝崔邱秦邵孟侯赖龚顾])[\u4e00-\u9fff]{1,2}"
+)
 _ABOUT = re.compile(
     r"^(?:the user\b|user\b|用户|我(?!们)|i(?:'m|’m| am| have| live| work)\b|my\b)",
     re.IGNORECASE,
@@ -81,9 +122,21 @@ def own_email(home: Path) -> str:
     return ""
 
 
+def _key_detail(text: str) -> bool:
+    """Whether *text* is, or names, a key: its material or fingerprint, or the path
+    of a private key with the words about it (a how-to on ``~/.ssh/config`` is not)."""
+    return bool(
+        _KEY_MATERIAL.search(text)
+        or (_HEX40.search(text) and _PGP_WORDS.search(text))
+        or (_KEY_PATH.search(text) and _KEY_WORDS.search(text))
+    )
+
+
 def reject(text: str, email: str) -> str:
-    """Why *text* is not kept: ``secret``, ``third_party`` or ``mechanics``; ``""`` if it is."""
-    if records.sensitive(text):
+    """Why *text* is not kept: ``secret`` (a key's material, fingerprint or private
+    path included), ``third_party`` or ``mechanics`` (an env variable's precedence
+    included); ``""`` if it is."""
+    if records.sensitive(text) or _key_detail(text):
         return "secret"
     emails = {m.lower() for m in _EMAIL.findall(text)}
     if (
@@ -93,7 +146,33 @@ def reject(text: str, email: str) -> str:
         or (_ID.search(text) and _PERSON.search(text))
     ):
         return "third_party"
-    return "mechanics" if _MECHANICS.search(text) else ""
+    precedence = _ENV_NAME.search(text) and _PRECEDENCE.search(text)
+    return "mechanics" if _MECHANICS.search(text) or precedence else ""
+
+
+def _word_of_name(word: str) -> bool:
+    """Whether *word* is written like a name: "Marco", "Anne-Marie", "McKay"; not
+    "README", "GitHub" or "iPhone"."""
+    for part in word.split("-"):
+        part = re.sub(r"^(?:Mc|Mac)(?=[A-Z])", "", part)
+        if not (part[:1].isupper() and part[1:].isalpha() and part[1:].islower()):
+            return False
+    return True
+
+
+def person(owner: str) -> bool:
+    """Whether *owner*, the name before a possessive, can be a person.
+
+    A capitalised name that is no language, tool, command, file or code
+    identifier ("Python's", "Git's", "Makefile's", "GitHub's" are not people); a
+    Chinese name with a surname or 小/老/阿, or a relative or colleague ("妈妈", "同事").
+    """
+    if re.search("[\u4e00-\u9fff]", owner):
+        return bool(_ZH_RELATIVES.fullmatch(owner) or _ZH_NAME.fullmatch(owner))
+    words = re.sub(r"^(?:Dr|Mr|Mrs|Ms|Mx|Prof)\.\s+", "", owner).split()
+    return bool(words) and all(
+        _word_of_name(w) and not _NOT_PEOPLE.fullmatch(w) for w in words
+    )
 
 
 def topic_for(st: Statement) -> str:
@@ -104,7 +183,7 @@ def topic_for(st: Statement) -> str:
     if records.topic_of(text, request=False) == "decisions":
         return "decisions"
     owner = records._owner(text)  # "Marco's studio …": a fact about another person
-    if owner and owner != "user":
+    if owner and owner != "user" and person(owner):
         return "people"
     instruction = _FEEDBACK.search(text) is not None or st.kind == "feedback"
     about = _ABOUT.match(text) or (st.kind == "user" and not instruction)

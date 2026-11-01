@@ -42,6 +42,7 @@ LEFT_OUT = {
     "wrong_owner": "lines about someone else",
     "duplicate": "repeats",
     "mechanics": "how the other tool works",
+    "capped": "over the limit",
 }
 
 

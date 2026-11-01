@@ -42,10 +42,12 @@ from localmelo.support.cli import browsing, commands, hanging, usershell
 from localmelo.support.cli.agents import AgentFactory
 from localmelo.support.cli.app import InteractiveApp, StatusBar
 from localmelo.support.cli.approvals import (
+    MODE_SWITCHED,
     Approvals,
     Mode,
     TerminalApprover,
     approval_words,
+    next_mode,
 )
 from localmelo.support.cli.attachments import (
     Attachment,
@@ -195,6 +197,10 @@ def _progress_lines(payload: Mapping[str, Any], symbols: Any) -> list[str]:
     return lines
 
 
+# The key that switches Ask and Auto, as the bar and /help name it.
+MODE_KEY: Final = "shift+tab"
+# What --yolo says to the key and to /approvals: neither leaves it.
+MODE_YOLO: Final = "YOLO is on (--yolo); restart without it to turn prompts on."
 # A turn that ran this long rings the bell when it ends.
 BELL_AFTER_S: Final = 30.0
 UNDO_HINT: Final = "Undoing the last turn; wait for it to finish."
@@ -282,6 +288,7 @@ class CliSession:
         self._tasks: set[asyncio.Task[Any]] = set()
         self._stop_wanted = False
         self._stop_landed = False
+        self._mode_switching = False
         self._closed = False
         self.navigation = SessionNavigation(self, resume_mode)
         self.session_tools = SessionTools(self)
@@ -299,15 +306,20 @@ class CliSession:
     def attach(self, app: InteractiveApp) -> None:
         self.app = app
 
+    @property
+    def mode(self) -> Mode:
+        """The open chat's approval mode: the gateway's for the main chat and its side chats."""
+        if self.remote is not None:
+            return self.remote.mode
+        return self.approvals.mode
+
     def status_bar(self) -> StatusBar:
         backend = self.factory.backend
-        mode = self.approvals.mode
+        mode = self.mode
         yolo = mode == "yolo"
         shown: str = mode
         if yolo:
             shown = f"{self.renderer.symbols.warn} YOLO: no approvals"
-        elif mode == "ask" and not self.developer:
-            shown = ""  # what everyone expects needs no word
         # The model and the folder are in the welcome and /status, not here.
         last = self.renderer.context_tokens
         usage: tuple[BarPart, ...] = ()
@@ -331,7 +343,13 @@ class CliSession:
         return StatusBar(
             title=self.title or "New chat",
             mode=shown,
-            mode_style="class:yolo" if yolo else "class:muted",
+            mode_style=(
+                "class:yolo"
+                if yolo
+                else "class:mode_auto" if mode == "auto" else "class:muted"
+            ),
+            # The key that switches it; under --yolo it changes nothing.
+            mode_key="" if yolo else MODE_KEY,
             usage=usage,
             work=work,
             run=self._run_zone(),
@@ -991,7 +1009,7 @@ class CliSession:
         elif name == "progress":
             self.progress()
         elif name == "approvals":
-            self.approvals_command(arguments)
+            await self.approvals_command(arguments)
         elif name == "status":
             await self.status(arguments)
         elif name == "retry":
@@ -1309,10 +1327,14 @@ class CliSession:
             f"{title!r} · {short or 'new'} · {count} turn"
             + ("" if count == 1 else "s"),
         )
-        grants = ", ".join(sorted(self.approvals.allowed_tools)) or "none"
-        self._row(
-            "approvals", f"{self.approvals.mode} · allowed in this session: {grants}"
-        )
+        if self.remote is not None:
+            self._row("approvals", self.mode)  # its grants are the gateway's
+        else:
+            grants = ", ".join(sorted(self.approvals.allowed_tools)) or "none"
+            self._row(
+                "approvals",
+                f"{self.approvals.mode} · allowed in this session: {grants}",
+            )
         tools = self.agent.list_tools()
         builtin = [tool for tool in tools if tool.source == "builtin"]
         provided = [tool for tool in tools if tool.source == "provided"]
@@ -1402,8 +1424,10 @@ class CliSession:
         title = " ".join(self.title.split())
         count = f"{turns} turn" + ("" if turns == 1 else "s") if turns else "new"
         self._row("chat", f'"{title}" · {count}' if title else count)
-        mode, grants = self.approvals.mode, self.approvals.allowed_tools
-        self._row("approvals", approval_words(mode, grants))
+        grants = (
+            frozenset() if self.remote is not None else self.approvals.allowed_tools
+        )
+        self._row("approvals", approval_words(self.mode, grants))
         usage, last = self.renderer.usage, self.renderer.context_tokens
         self._row("context", context_summary(usage, last))
 
@@ -1518,25 +1542,37 @@ class CliSession:
                 )
             )
 
-    def approvals_command(self, arguments: str) -> None:
+    async def approvals_command(self, arguments: str) -> None:
         """``/approvals``: the mode and grants, or switch, or forget one."""
         approvals = self.approvals
-        mode = approvals.mode
+        mode = self.mode
         if mode == "yolo":
             self.out.print(self._text("Approvals: YOLO (--yolo); no grants.", "muted"))
             if arguments:
+                self.out.print(self._text(f"✗ {MODE_YOLO}", style="error"))
+            return
+        parts = arguments.split()
+        if self.remote is not None:
+            # The chat's grants and Deny stay in the terminal's own chat.
+            if parts and parts[0].lower() not in ("ask", "auto"):
                 self.out.print(
                     self._text(
-                        "✗ YOLO is on; /approvals ask turns prompts on.",
+                        "✗ Use /approvals ask or auto (deny and forget work in the "
+                        "terminal's own chat: melo -X cli.chat=local).",
                         style="error",
                     )
                 )
+                return
+            if parts and not await self.switch_mode(
+                cast(Literal["ask", "auto"], parts[0].lower())
+            ):
+                return
+            self.out.print(self._text(f"Approvals: {self.mode}{self._effect_note()}"))
             return
-        parts = arguments.split()
         if parts:
             what = parts[0].lower()
             if what in ("ask", "auto", "deny"):
-                approvals.set_mode(cast(Literal["ask", "auto", "deny"], what))
+                await self.switch_mode(cast(Literal["ask", "auto", "deny"], what))
             elif what == "forget":
                 approvals.forget(parts[1] if len(parts) > 1 else None)
             else:
@@ -1548,7 +1584,88 @@ class CliSession:
                 )
                 return
         grants = ", ".join(sorted(approvals.allowed_tools)) or "none"
-        self.out.print(self._text(f"Approvals: {approvals.mode} · grants: {grants}"))
+        self.out.print(
+            self._text(
+                f"Approvals: {approvals.mode} · grants: {grants}{self._effect_note()}"
+            )
+        )
+
+    def _takes_effect(self) -> str:
+        """When a switch made now applies, while a turn is under way; "" otherwise.
+
+        The terminal's own chat keeps a turn's policy as it started, and the
+        gateway applies a chat's mode from its next step.
+        """
+        if self._state not in ("running", "stopping"):
+            return ""
+        return (
+            "from the next step"
+            if self.remote is not None
+            else "from your next message"
+        )
+
+    def _effect_note(self) -> str:
+        when = self._takes_effect()
+        return f" · {when}" if when else ""
+
+    async def switch_mode(self, mode: Literal["ask", "auto", "deny"]) -> bool:
+        """Switch the open chat's mode: what ``/approvals`` and Shift+Tab both do.
+
+        The terminal's own chat switches in place. The main chat and its side
+        chats go to the chat on the gateway, which stores the mode with it
+        and applies it from its next step (it has no Deny). False when the
+        gateway refused, with the reason printed.
+        """
+        if self.remote is None:
+            self.approvals.set_mode(mode)
+            return True
+        assert mode != "deny", "the gateway's chats have Ask and Auto"
+        try:
+            await self.remote.set_mode(mode)
+        except GatewayError as exc:
+            self.out.print(
+                self._text(f"✗ Could not switch to {mode}: {exc}", style="error")
+            )
+            return False
+        return True
+
+    def cycle_mode(self) -> None:
+        """Shift+Tab: Ask to Auto and back, as ``/approvals ask|auto`` switches.
+
+        Deny goes to Ask. ``--yolo`` is never left by the key: one muted line
+        says how. A turn under way does not stop it: the bar changes at once
+        and the line says when the switch applies. The transcript line
+        follows the switch.
+        """
+        target = next_mode(self.mode)
+        if target is None:
+            self.out.print(self._text(MODE_YOLO, "muted"))
+            return
+        if self._mode_switching:
+            return  # the gateway has not answered the last press
+        self._mode_switching = True
+        self.spawn(self._mode_key(target))
+
+    def _mode_line(self, mode: Literal["ask", "auto"], when: str = "") -> Text:
+        """The quiet line a switch leaves: muted, Auto's name in the bar's colour.
+
+        *when* adds where the switch applies (``from the next step``).
+        """
+        lead, _, rest = MODE_SWITCHED[mode].partition(" ")
+        if when:
+            rest = f"{rest.removesuffix('.')}, {when}."
+        return Text.assemble(
+            (lead, "mode_auto" if mode == "auto" else "muted"), (" " + rest, "muted")
+        )
+
+    async def _mode_key(self, target: Literal["ask", "auto"]) -> None:
+        try:
+            if await self.switch_mode(target):
+                self.out.print(self._mode_line(target, self._takes_effect()))
+        finally:
+            self._mode_switching = False
+            if self.app is not None:
+                self.app.invalidate()
 
     def progress(self) -> None:
         """``/progress``: the latest run.progress of this session, in full."""
