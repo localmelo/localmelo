@@ -65,24 +65,26 @@ The pinned Python archive and the wheels are checked against their hashes. The b
 
 ## Melo on your desktop
 
-![Melo the Akita gets up from rest and starts working.](../assets/img/pet-smooth.webp)
+![Melo the Akita wakes up, works at its laptop, thinks, raises a paw, rests and plays.](../assets/img/pet-smooth.webp)
 
-Close the window, minimize it or hide the app (Command-H) and a small Melo lies at the bottom right of the screen, above the Dock. It goes away when the window comes back.
+Close the window, minimize it or hide the app (Command-H) and a small Melo appears at the bottom right of the screen, above the Dock. It goes away when the window comes back.
 
 | Melo | Meaning |
 |---|---|
-| Flopped on its belly, half-closed eyes | Resting: nothing runs. |
-| Glancing up, tongue out | Working: a chat, task, run or terminal chat runs. |
-| Wide sparkling eyes, a small hop | Waiting for your approval. |
+| Wakes up, shakes and sits | The first time Melo appears after the app opens. |
+| Typing at its laptop | Working: a chat, task, run or terminal chat runs. |
+| Tilting its head | Thinking: the model is answering and no tool runs. |
+| Raising a paw | Waiting for your approval. It shows at once, whatever Melo was doing. |
+| Lying down, eyes closed | Resting: nothing runs. Now and then it gets up and plays with its toy. |
 | Happy closed eyes, tail wagging | Done: a run just ended well (6 seconds). |
 | Sad brows | The last run did not finish (10 seconds), or localmelo stopped. |
-| Asleep, a small "z" drifting up | Nothing has happened for a minute; touching Melo wakes it. |
 
 - Click Melo to open the window, or the chat or task that waits for you; drag it anywhere, and it remembers its place on each screen.
 - Right-click (or Control-click) for **Open localmelo**, **Hide Melo**, **On the desktop** and **Quit localmelo**; **Show Melo** in the menu-bar menu brings it back.
 - It stays above other windows and on every Space, is not in the Dock or Command-Tab, and never takes the keyboard.
 - Its state is in `~/Library/Application Support/LocalMelo/pet.json`.
-- Under Reduce Motion, in Low Power Mode, when the Mac runs hot or while Melo is hidden, it stops moving and shows still pictures.
+- Melo plays once, about 20 seconds into a rest, and at most once every 5 minutes.
+- Under Reduce Motion, in Low Power Mode or when the Mac runs hot, each state is a still picture. While Melo is covered or hidden it stops where it is.
 
 ## The activity pill
 

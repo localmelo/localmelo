@@ -111,13 +111,13 @@ output or log the header; same-user processes can still read the token file.
     "running": {"chats": 0, "tasks": 1, "runs": 1, "terminal": 1},
     "tasks": {"running": 1, "queued": 1, "held": 0, "top_level": 2},
     "items": [
-      {"kind": "task", "id": "a1b2c3d4e5f6", "title": "Index the repo", "activity": "Reading notes.md", "icon": "read"},
-      {"kind": "run", "id": "c44733ec77e5", "title": "Summarize the changelog", "activity": "Thinking", "icon": "think"},
-      {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test", "activity": "Running the tests", "icon": "run"}
+      {"kind": "task", "id": "a1b2c3d4e5f6", "title": "Index the repo", "activity": "Reading notes.md", "icon": "read", "answering": false},
+      {"kind": "run", "id": "c44733ec77e5", "title": "Summarize the changelog", "activity": "Thinking", "icon": "think", "answering": true},
+      {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test", "activity": "Running the tests", "icon": "run", "answering": false}
     ],
     "waiting": [],
     "recent": {"kind": "chat", "id": "e5f60718293a", "title": "Plan the trip", "outcome": "done", "ended_s_ago": 3.2},
-    "focus": {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test", "activity": "Running the tests", "icon": "run"}
+    "focus": {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test", "activity": "Running the tests", "icon": "run", "answering": false}
   },
   "uptime_s": 132.4
 }
@@ -159,7 +159,7 @@ output or log the header; same-user processes can still read the token file.
   `status.tasks` is the scheduler's queue as the status row shows it:
   `running`, `queued`, `held` and `top_level` (the best level among them, or
   `null`). `status.items` lists what runs, chats first, then tasks, runs and
-  terminal chats, at most 20, each `{"kind", "id", "title", "activity", "icon"}`
+  terminal chats, at most 20, each `{"kind", "id", "title", "activity", "icon", "answering"}`
   (`kind` is `chat`, `task`, `run` or `terminal`; a terminal chat's title is
   redacted). The counts are not capped. A store that cannot be read counts as
   nothing running; one call reads the task states by their index and the
@@ -180,6 +180,12 @@ output or log the header; same-user processes can still read the token file.
   item's newest 40 events; only a file's name, a folder and a page's host are
   shown, never a command line, code or text. A store that cannot be read
   reads `Thinking`.
+- `answering` is true only while the item's newest event is a step, a turn or
+  a reflection that started, with no tool call, approval or hold open after
+  it: the model is answering. A `Thinking` said for want of events (none
+  read yet, or a store that cannot be read) is `false`. The macOS app's
+  desktop pet and the console's portrait show Melo thinking only on it. A
+  live row of `GET /api/activity` carries it too.
 - `status.focus` is the one item a glance shows (the item as in
   `status.items`): one that waits for an approval first, else the one whose
   newest event is the latest; `null` when nothing runs.

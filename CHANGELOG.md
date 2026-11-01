@@ -9,6 +9,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Melo moves. In the console's panel and on the desktop, Melo wakes up when
+  the page or the pet first appears, types at its laptop while something
+  runs, tilts its head while the model is answering and no tool runs, raises
+  a paw at once when something waits for you, and lies down to rest, getting
+  up to play now and then (about 20 seconds into a rest, at most once every 5
+  minutes). States cross-fade quickly, the newest change wins and the same
+  state never starts over. With reduced motion each state is a still picture;
+  a hidden tab or a covered pet stops where it is. A run that just ended, a
+  failure, a stopped app and a console that is still connecting keep their
+  pictures and words. The empty chat shows the new sitting Melo. Health's
+  `status.items` (and the panel's live activity rows) say `answering` when the
+  model is answering with no tool, approval or hold open: Melo thinks only
+  then. [#419]
 - When melo needs a file outside the chat's folder, it asks instead of
   refusing, in a chat or task you started. The card in the console and the
   app, and the option list in the terminal, name the real folder and offer

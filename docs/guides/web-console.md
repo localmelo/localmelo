@@ -286,7 +286,20 @@ folder.
 On the right of the chat is Melo's panel. At the top is Melo's portrait, with a ring in the colour of what it is
 doing (green while it works, amber while something waits for you), the name, and one status line: `Connected ·
 <model> on <server>`, `Working on 2 things`, `Waiting for you`, or `Model server not reachable` with **Open
-settings**. Under it are four tabs: **Activity**, **Workers**, **Scheduled** and **Memory**. Arrow keys, Home and
+settings**.
+
+Melo in the portrait moves with what it does:
+
+| Melo | Meaning |
+|---|---|
+| Wakes up, shakes and sits | The page has just opened. |
+| Typing at its laptop | Something runs. |
+| Tilting its head | The model is answering and no tool runs. |
+| Raising a paw | Something waits for you. It shows at once. |
+| Lying down, eyes closed | Nothing runs. Now and then it gets up and plays (at most every 5 minutes). |
+
+- A run that just ended, an error and a console that is still connecting keep their still pictures.
+- With reduced motion each state is a still picture, and a hidden tab draws nothing. Under it are four tabs: **Activity**, **Workers**, **Scheduled** and **Memory**. Arrow keys, Home and
 End move between them, and the panel opens the tab you used last.
 
 The panel shows what belongs to the chat that is open. A side chat's panel lists that chat's own activity and the
@@ -298,8 +311,8 @@ health poll whenever what runs changes, and every 30 seconds:
 
 - **Now** lists what runs or waits: this console's chats, tasks, worker runs and terminal chats. Each row says what
   it is doing in plain words (`Reading notes.md`, `Running the tests`, `Waiting for your approval`), with an icon for
-  the kind of work. A row that waits for you is amber. With nothing running it reads `Nothing running`, and the
-  portrait rests and blinks.
+  the kind of work. A row that waits for you is amber. With nothing running it reads `Nothing running`, and Melo
+  rests.
 - **Today** lists what finished today, newest first: the title, a one-line result (`All 412 tests passed.`) and the
   time. The first eight show; **Earlier today (n)** shows the rest.
 
@@ -369,16 +382,16 @@ In developer mode, **Details** opens in the panel, in place of the tabs, until y
 ## Melo in the page
 
 The page shows Melo, the Akita puppy, where it already had a picture, in the
-app and in a browser alike. The pictures are still images, except that the calm
-portrait and the calm (idle) face blink: an eyes-closed patch, laid over the
-picture, fades in twice every 11 seconds. It is CSS only, with no script, and
-under `prefers-reduced-motion: reduce` the page shows the still picture.
+app and in a browser alike. The panel's portrait moves; the other pictures are
+still, except that the calm (idle) face blinks: an eyes-closed patch, laid over
+the picture, fades in twice every 11 seconds. The blink is CSS only, and under
+`prefers-reduced-motion: reduce` the page shows still pictures.
 
-- **Empty chat.** Melo sits above *What would you like to work on?* with its calm
-  face, and blinks.
-- **The panel.** Melo's portrait sits at the top of the [panel](#the-panel-beside-a-chat): resting (and blinking)
-  when nothing runs, working, wide-eyed while something waits for you, happy for a few seconds after a run ends
-  well, and with a drooping ear when the model server cannot be reached or a run just failed.
+- **Empty chat.** Melo sits above *What would you like to work on?*.
+- **The panel.** Melo's portrait sits at the top of the [panel](#the-panel-beside-a-chat) and moves with what it
+  does: it wakes up, works, thinks, raises a paw while something waits for you, rests and plays now and then. It
+  is happy for a few seconds after a run ends well, and has a drooping ear when the model server cannot be reached
+  or a run just failed; those two are still pictures.
 - **Replies.** Beside `localmelo` on each reply is Melo's face. On the newest
   reply it shows that turn's state: working (tongue out) while it runs, wide-eyed
   while an approval waits, happy when it is done, and with a drooping ear when
@@ -392,8 +405,12 @@ under `prefers-reduced-motion: reduce` the page shows the still picture.
 The faces are decoration where words already say the state (the live row, the
 work box, the failure card, the approval bar), so they have empty alt text. A
 finished answer with no work box above it has nothing else saying it is done, so
-its face reads `Done` to a screen reader. The portrait keeps the alt text
-`Melo, the localmelo Akita mascot`.
+its face reads `Done` to a screen reader. The empty chat's Melo keeps the alt text
+`Melo, the localmelo Akita mascot`; the panel's moving portrait is decoration, as its status line says the same in
+words.
+
+The moves are served from `/assets/moves/`: one picture per state holding its frames, and `manifest.json` with each
+frame's duration (1.4 MB in all, the app plays the same files). The page loads them once, when it opens.
 
 The pictures are transparent PNGs with a thin cream rim. On the light canvas the
 navy outline sets Melo off (at least 12:1 against the console's light surfaces);
