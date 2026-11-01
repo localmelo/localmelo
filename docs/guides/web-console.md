@@ -39,12 +39,12 @@ on screen ([`GET /api/setup/detect`](../reference/api-v2.md#get-apisetupdetect))
 The page opens in default mode, which leaves out what only a developer needs: the chat's
 level chip, **Details**, the GPU-lock line, the **LOCAL** badge, the cache, step, phase and queue segments of the
 status row, the running chip (the [panel beside the chat](#the-panel-beside-a-chat) shows what runs), and the
-scheduler priority in Tasks. It says things plainly too: a running chat reads
+priority line of a task's page (a running task's priority menu stays). It says things plainly too: a running chat reads
 `Working…` beside **Stop**, and the settings call the server **Model server** and its address
 **Server address**. The header shows a
 model chip (the model's name, `Model offline` or `No model`) that opens settings.
-**Tasks** joins the sidebar once there is a task to see in it; worker runs are in the
-panel's **Workers** tab and a link in the empty [main chat](#the-main-chat-and-side-chats). [Developer mode](#developer-mode) shows all of it. Everything stays in the
+A task opens in the [panel beside the chat](#the-panel-beside-a-chat), from its row in Activity, and has no link of its own in the sidebar; worker runs are in the
+panel's **Workers** tab and a link in the empty [main chat](#the-main-chat-and-side-chats). [Developer mode](#developer-mode) shows the Workers link in the sidebar. Everything stays in the
 page, hidden.
 
 A new chat shows where melo will work before you send anything. The chip in the composer reads
@@ -144,7 +144,7 @@ come back to that side chat ([below](#side-chats-start-tasks-too)). A card reads
 - `Done: Fix the list_files test` with the first two lines of the answer: what changed, the tests, the commit.
 - `Did not finish: Fix CI` with why it ended.
 - `Ready: Fix CI`, `Done, not finished: Fix CI` or `Needs you: Fix CI` for a task that finished: how code found it ended, not what its report says ([how it is checked](scheduler.md#tasks-from-the-main-chat)). A task not finished says why in amber (`No test ran after the last change · The changes are not committed`) and offers **Finish it: run the tests and commit** (or **Finish it: run the tests**), which continues it as **Continue** does. A task that needs you shows its question.
-- `Stopped: Fix CI` for a task that used all its steps before it was done. It shows the sentence of its answer that says what is left (`Remaining: run the tests and commit.`) and offers **Continue**, which picks the task up where it stopped, with what it did before. The same task reads Stopped on its page and in the panel's Activity and Workers rows, each with **Continue**. A task that failed for another reason stays `Did not finish`.
+- `Stopped: Fix CI` for a task that used all its steps before it was done. It shows the sentence of its answer that says what is left (`Remaining: run the tests and commit.`) and offers **Continue**, which picks the task up where it stopped, with what it did before. The same task reads Stopped on its page and in the panel's Activity and Workers rows; **Continue** is on its page. A task that failed for another reason stays `Did not finish`.
 - `Needs your approval: Fix CI` with what it asks. Once you answer, the same card says how ("Allowed once", "Allowed for this task", "Denied") and no longer offers **Review**.
 - A title is the one the main chat gave the task, or the first part of your request, cut at a word.
 - **Open side chat**, **Open task** or **Review** goes to the source. A card is not a message: the model never reads it.
@@ -314,25 +314,23 @@ when it was asked. A request that waits for you has **Allow once** and **Deny** 
 approval card in the chat, and **Review**, which opens the chat or task with the card and the exact content. There is
 no separate Approvals tab.
 
-Select a row to open it in place. A running row shows its steps as they happen (a mark, the step in words and its
-time), the last lines of the latest output, and, for a task, **Pause** or **Resume**, **Stop** and its priority in
-codes (`P0` to `P4`, each with its meaning; P5 is Pause), as the terminal's
-task list offers them. **Open task**, **Open chat** or **Open run** goes to the whole view; a row that waits offers
-**Review**, which opens the chat or task with the approval card. One row is open at a time, and its steps follow the
-session's event stream while it runs.
+Select a task's row (it ends in a `›`) and the task's details open in the panel, in place of Melo's page; see
+[Tasks](#tasks). Select the row of a chat, a worker run or a terminal chat and it opens in place: a running row shows
+its steps as they happen (a mark, the step in words and its time) and the last lines of the latest output. **Open
+chat** or **Open run** goes to the whole view; a row that waits offers **Review**, which opens the chat or task with
+the approval card. One row is open at a time, and its steps follow the session's event stream while it runs.
 
 **Workers** lists the workers of the scope above: the tasks the open chat started, running ones first, then those
 that finished today. Each row has the title, its state in words (`Working`, `Waiting for your approval`, `Waiting to
-start`, `Paused`, `Done`, `Failed`, `Stopped`), the time and, for a finished worker, its result line. Select a worker
-to open its steps as they happen, or its history once it is done, with **Pause** or **Resume**, **Stop** and its
-priority, as in Activity. The main chat's Workers also lists the worker runs recorded as sessions, such as `melo
+start`, `Paused`, `Done`, `Failed`, `Stopped`), the time and, for a finished worker, its result line. Select a task
+to open it in the panel, as in Activity; a worker run opens in place. The main chat's Workers also lists the worker runs recorded as sessions, such as `melo
 worker`. With none, the tab says when they appear (`This chat has not started any workers. When it hands a task to
-one, the worker is listed here, running first.`). **All tasks** and **All worker runs** at its foot open those views.
+one, the worker is listed here, running first.`). **All tasks** at its foot opens the list of every task, today's and earlier, in the panel; **All worker runs** opens the Workers view.
 
 The panel is 340 px wide from a 1180 px window up. From 700 to 1180 px the chat list becomes a rail of initials
 (hover a circle for the chat's title), and the panel stays. Below 900 px the panel becomes a sheet: the face chip in
 the header (`2 · !` when two things run and one waits) opens it from the bottom; Esc, the backdrop or a drag down on
-its handle closes it. The [macOS app](macos-app.md) now opens at 1280 × 800 so the three columns fit.
+its handle closes it (Esc first leaves a task shown in it). The [macOS app](macos-app.md) now opens at 1280 × 800 so the three columns fit.
 
 **Memory** lists what melo remembers about you: the notes it kept from what you typed
 (see [Memory across chats](../concepts/memory.md#memory-across-chats)).
@@ -443,13 +441,23 @@ redacted.
 
 ## Tasks
 
-**Tasks** (`#/tasks`; in default mode, in the sidebar once a task exists) lists the
-scheduler's tasks, newest update first, with state, priority (developer mode only) and
-title. Open one (`#/tasks/<id>`) to see its state, the saved
-recovery card (shown as plain text), the evidence status when there is some and the actions its
-state allows, and the same status row as a chat (a task has no row until it has
-run). Like Workers, the view replaces the chat while it is open. The header says
-**Tasks**; developer mode adds "Scheduler tasks".
+A task opens in the [panel beside the chat](#the-panel-beside-a-chat), in place of Melo's page. Select its row in
+Activity or Workers; or a task's **Open task** or **Review** in the main chat, a task in the **N running** list, or
+`#/tasks/<id>` in the address (old links and the macOS app use it). The chat and its header stay as they
+were. Above the task's title a link, **Back to Melo**, returns to Melo's page, with focus on the row you came from;
+so does Esc while focus is in the panel (on a phone, while the sheet is open), and so does closing the sheet. Opening
+a task moves focus to its title, and a phone's sheet opens for it.
+
+The page shows the task's state, the saved recovery card (shown as plain text), the evidence status when there is
+some and the actions its state allows, and the same status row as a chat (a task has no row until it has run). A task
+that runs or waits to run can be paused (**Pause**) and given another priority (`P0` to `P4`, each with its meaning;
+P5 is Pause), as the terminal's task list offers; a paused one offers **Resume**. In default mode the page leaves out
+the scheduler's words and an empty recovery card; developer mode adds them, with the priority line.
+
+**All tasks**, at the foot of the panel's Workers tab (in default mode once a task exists), opens the list of every
+task in the same place: newest update first, with state, priority (developer mode only), title and time, the earlier
+days too, which Activity does not list. Select one to open it. `#/tasks` in the address opens that list. There is no
+Tasks link in the sidebar, and the task page is not a view of its own.
 
 - A task that ended opens with its answer, set as in a chat, above its facts. A task that
   did not complete says why in the same place. Its steps are folded under **Steps**.
@@ -536,7 +544,7 @@ The console speaks English or Simplified Chinese (简体中文).
 
 - **Automatic** follows your browser's languages, or your Mac's in the macOS app: the first that is English or Simplified Chinese, else English. Traditional Chinese reads English.
 - To choose one, open **Settings → Appearance → Language**: **Automatic**, **English** or **简体中文**. The page reloads in it. In a terminal, `melo config set console.language zh-Hans` (or `en`, or `auto`) does the same; reload the page after it.
-- Every screen follows: the main chat and its cards, the panel's tabs, Tasks, Workers, Settings and the sign-in page.
+- Every screen follows: the main chat and its cards, the panel's tabs and the tasks it shows, Workers, Settings and the sign-in page.
 - The gateway writes its own words for the page in the same language: error messages, the panel's rows, the main chat's cards and the lines it adds after your messages (`Started: …`, `Saved: …`). The terminal and other API clients stay English.
 - Times and dates are written in the page's language, not your computer's: `2:06 AM` and `Oct 31` in English, `上午 2:06`, `10月31日` and `星期五` in Chinese. In English the clock follows your computer, so a 24-hour computer keeps its 24-hour clock.
 - A failed run's details and the line **Copy details** copies read in the language; the status, the cause, the error text and the run id are copied as they are. The status row's words (the context, and in developer mode the cache, step and queue) read in it too, while the terminal prints the same figures in English.
@@ -585,8 +593,8 @@ never what runs. When it is on:
   token usage and cache numbers;
 - the header shows the chat's level chip, **Details**, the GPU-lock line, the **N running** chip and a chip with
   the page's state (`Ready`, `Working`, `Approval needed`), and the sidebar always lists
-  **Workers** and **Tasks**;
-- the status row adds the cache, step, phase and queue segments, and Tasks names each task's
+  **Workers**;
+- the status row adds the cache, step, phase and queue segments, and a task's page names its
   priority;
 - the sidebar shows the **LOCAL** badge, a running chat reads `Running on your backend`, and the
   connection form keeps its technical words (**Chat backend**, **Chat API URL**, `Settings apply to subsequent turns…`).
@@ -594,7 +602,7 @@ never what runs. When it is on:
 When it is off these are hidden, not removed: turn it on again to see them. While a chat
 waits on a foreign GPU lock, default mode shows a banner in place of the GPU line:
 "Waiting for this Mac's GPU, your chat starts when it is free." Chats, approvals, the
-Workers and Tasks views and what the settings save work the same in both modes.
+Workers view, a task in the panel and what the settings save work the same in both modes.
 
 ## Recover a send
 
@@ -628,7 +636,7 @@ written to the one gate the gateway shares:
 `POST /api/sessions/{id}/level` and `POST /api/presence` to set them.
 
 Stop cancels the run, and so does Escape while the cursor is in the message
-box; Escape anywhere else only closes what is open, in Tasks and Workers as in a chat. A model request in flight is abandoned, although the
+box; Escape anywhere else only closes what is open, in Workers as in a chat; with focus in the panel it leaves a task shown there. A model request in flight is abandoned, although the
 model server may finish computing it, and a running `python_exec` child is
 killed with its process group. `python_exec` code runs
 in a child process, so the gateway keeps answering other requests while it

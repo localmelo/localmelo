@@ -1,8 +1,8 @@
 /**
  * The panel beside a chat (panel.mjs) in a DOM double: Melo's header, the tabs and their keys, the day's
  * activity and its calm state, the panel following the open chat, the approvals folded under a row, the Workers
- * tab, a row opened to a task's live steps on a fake event stream, its actions, and the sheet a phone opens from
- * the face chip.
+ * tab, a worker run's row opened to its live steps on a fake event stream, a task's row as a link that opens the
+ * task in the panel in place of Melo's page (and the way back), and the sheet a phone opens from the face chip.
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -59,7 +59,7 @@ const row = (extra) => ({kind: 'task', id: 't1', title: 'Slides for the 3 pm mee
 const started = {id: 1, turn: 1, type: 'turn.started', data: {turn: 1, user_text: 'Make slides'}};
 const tool = (id, call, type, data = {}) => ({id, turn: 1, ts: id, type, data: {step: 1, call_id: call, ...data}});
 
-function harness({rows = [], turns = null, storage = null, failActivity = false, wide = null, openChat = '', developer = false} = {}) {
+function harness({rows = [], turns = null, storage = null, failActivity = false, wide = null, openChat = '', developer = false, hasTasks = false} = {}) {
   const {doc, Element} = dom();
   const root = new Element('aside');
   const drawer = new Element('section');
@@ -68,8 +68,17 @@ function harness({rows = [], turns = null, storage = null, failActivity = false,
   const chip = new Element('button');
   const backdrop = new Element('button');
   const chat = new Element('main');
+  // tasks.mjs in a double: what the panel asks of it is written down.
+  const shown = [];
+  const section = new Element('section');
+  const title = new Element('h2');
+  const tasks = {shown, left: 0, dialog: false, focused: 0, section, title,
+    show(id) { shown.push(id); section.replaceChildren(title); }, leave() { this.left += 1; section.replaceChildren(); },
+    focus() { this.focused += 1; title.focus(); },
+    closeDialog() { const was = this.dialog; this.dialog = false; return was; }};
+  root.append(section);
   const h = {calls: [], sources: [], timers: [], rows, turns: turns ?? [started], doc, root, chip, backdrop, chat, drawer,
-    open: openChat, scope: 'all', gate: {}, answerError: null};
+    open: openChat, scope: 'all', gate: {}, answerError: null, tasks, went: []};
   const api = async (path, options = {}) => {
     h.calls.push([options.method ?? 'GET', path, options.body]);
     if (path.startsWith('/activity')) {
@@ -95,7 +104,7 @@ function harness({rows = [], turns = null, storage = null, failActivity = false,
   h.panel = setupPanel({
     root, chip, backdrop, api, cover: () => [chat], chat: () => h.open, developer: () => developer, storage: storage ?? {getItem: () => null, setItem: () => {}},
     clock: () => 86400 * 1000 * 400,
-    wide,
+    wide, tasks, hasTasks: () => hasTasks, home: () => `#/s/${h.open || 'main'}`, navigate: (hash) => h.went.push(hash),
     live: {
       doc,
       open: (url) => { const source = new FakeSource(url); h.sources.push(source); return source; },
@@ -360,16 +369,16 @@ test('Workers lists the tasks and runs of the scope, running first, each with it
   assert.deepEqual(lines, ['Working · Writing slides.md', 'Waiting for your approval', 'Done · All 6 tests passed.', 'Failed · No disk.']);
   assert.doesNotMatch(h.heads()[0].text(), /\d:\d\d/, 'a worker that runs shows no time, its row is live');
   assert.match(h.heads()[2].text(), /\d:\d\d/, 'a finished one shows when');
-  assert.deepEqual(h.root.findAll((node) => node.tagName === 'A').map((link) => link.href), ['#/tasks', '#/workers']);
-  // A worker opens to its live steps and its actions, as an Activity row does.
-  h.heads()[0].click();
+  const links = h.root.findAll((node) => node.tagName === 'A').map((link) => link.href);
+  assert.deepEqual(links.slice(0, 3), ['#/tasks/t1', '#/tasks/t2', '#/tasks/t3'], 'a task row is a link to the task');
+  assert.equal(links.at(-1), '#/workers');
+  assert.deepEqual(h.heads().map((head) => head.attributes['aria-expanded']), [undefined, undefined, 'false', undefined], 'only the run unfolds in place');
+  // A worker run unfolds in place, as an Activity row does, with its link.
+  h.heads()[2].click();
   await settle();
-  assert.equal(h.sources[0].url.startsWith('/api/sessions/t1/events'), true);
+  assert.equal(h.heads()[2].attributes['aria-expanded'], 'true');
   const actions = h.root.find((node) => node.className === 'activity-actions');
-  assert.deepEqual(actions.children.map((node) => node.tagName), ['BUTTON', 'BUTTON', 'SELECT', 'A']);
-  // Leaving for a tab that lists no rows stops following it.
-  h.tabs()[3].click();
-  assert.equal(h.sources[0].closed, true);
+  assert.deepEqual(actions.children.map((node) => [node.tagName, node.href]), [['A', '#/workers/r1']]);
 });
 
 test('a task names its folder in Activity and in Workers; a row without one adds nothing', async () => {
@@ -423,12 +432,17 @@ test('Workers says when workers appear: for a side chat and for the main chat, a
   await dev.panel.update(health());
   dev.tabs()[1].click();
   assert.deepEqual(dev.root.findAll((node) => node.tagName === 'A').map((link) => link.href), ['#/tasks', '#/workers']);
+  // Once a task exists the list of all tasks is offered, as Activity lists only today's.
+  const once = harness({rows: chats, hasTasks: true});
+  await once.panel.update(health());
+  once.tabs()[1].click();
+  assert.deepEqual(once.root.findAll((node) => node.tagName === 'A').map((link) => link.href), ['#/tasks']);
 });
 
-test('a running task opens to its live steps, which follow the task stream until it ends', async () => {
-  const live = row({state: 'running', activity: 'Reading notes.md', icon: 'read', level: 2, at: 900});
+test('a running worker run opens to its live steps, which follow its stream until it ends', async () => {
+  const live = row({kind: 'run', id: 'r1', state: 'running', activity: 'Reading notes.md', icon: 'read', level: 2, at: 900});
   const h = harness({rows: [live], turns: [started, tool(2, 'c1', 'tool.started', {name: 'file_read', arguments: {path: 'notes.md'}})]});
-  await h.panel.update(health({running: {chats: 0, tasks: 1, runs: 0, terminal: 0}}));
+  await h.panel.update(health({running: {chats: 0, tasks: 0, runs: 1, terminal: 0}}));
   const [head] = h.heads();
   assert.equal(head.attributes['aria-expanded'], 'false');
   assert.match(head.text(), /Slides for the 3 pm meeting Reading notes\.md/);
@@ -438,36 +452,30 @@ test('a running task opens to its live steps, which follow the task stream until
   const steps = () => h.root.findAll((node) => node.className === 'activity-step').map((step) => [step.dataset.state, step.text()]);
   assert.deepEqual(steps(), [['running', '● Reading notes.md now']]);
   assert.equal(h.sources.length, 1);
-  assert.equal(h.sources[0].url, '/api/sessions/t1/events?after=2');
+  assert.equal(h.sources[0].url, '/api/sessions/r1/events?after=2');
   assert.deepEqual(h.calls.filter(([, path]) => path.includes('/turns')).map(([, path]) => path),
-    ['/sessions/t1/turns?limit=1&events=true'], 'only the newest turn is read');
+    ['/sessions/r1/turns?limit=1&events=true'], 'only the newest turn is read');
   h.sources[0].emit(tool(3, 'c1', 'tool.finished', {name: 'file_read', status: 'success', output: 'Meeting notes\n- one\n- two\n- three', duration_s: 0.2}));
   h.sources[0].emit(tool(4, 'c2', 'tool.started', {name: 'file_write', arguments: {path: 'slides.md', content: 'x'}}));
   h.timers.at(-1).fn();
   assert.deepEqual(steps(), [['done', '✓ Read notes.md 0.2s'], ['running', '● Writing slides.md now']]);
   assert.match(h.root.find((node) => node.className === 'activity-output').textContent, /- one\n- two\n- three/);
-  // The actions are the terminal's: Pause, Stop and the priority as P-codes with their meaning, and the link to the task.
+  // A run is read only: its link is the one action, and Pause, Stop and the priority belong to a task's own view.
   const actions = h.root.find((node) => node.className === 'activity-actions');
-  assert.deepEqual(actions.children.map((node) => node.tagName), ['BUTTON', 'BUTTON', 'SELECT', 'A']);
-  assert.deepEqual(actions.children[2].children.map((option) => option.textContent), [
-    'P0 · runs first; others wait', 'P1 · today', 'P2 · normal', 'P3 · when there is time', 'P4 · only when the computer is idle',
-  ]);
-  assert.equal(actions.children[3].href, '#/tasks/t1');
-  actions.children[0].click();
-  await settle();
-  assert.deepEqual(h.calls.find(([method]) => method === 'PATCH'), ['PATCH', '/tasks/t1', {state: 'pause'}]);
+  assert.deepEqual(actions.children.map((node) => [node.tagName, node.href]), [['A', '#/workers/r1']]);
+  assert.equal(h.calls.some(([method]) => method === 'PATCH'), false);
   // Once the day says it ended, the stream closes and the session is read once more.
-  h.rows = [row({state: 'done', icon: 'write', result: 'Four slides.'})];
+  h.rows = [row({kind: 'run', id: 'r1', state: 'done', icon: 'write', result: 'Four slides.'})];
   h.turns = [started, tool(2, 'c1', 'tool.started', {name: 'file_read', arguments: {path: 'notes.md'}}),
     tool(3, 'c1', 'tool.finished', {name: 'file_read', status: 'success', output: 'x', duration_s: 0.2})];
   await h.panel.refresh();
   await settle();
   assert.equal(h.sources[0].closed, true);
   assert.deepEqual(steps(), [['done', '✓ Read notes.md 0.2s']]);
-  assert.equal(h.root.find((node) => node.className === 'activity-actions').children.length, 1, 'a finished task offers only its link');
+  assert.equal(h.root.find((node) => node.className === 'activity-actions').children.length, 1, 'a finished run offers only its link');
 });
 
-test('a task that ran out of steps reads Stopped with what is left, and its row offers Continue', async () => {
+test('a task that ran out of steps reads Stopped with what is left; its row opens the task, where Continue is', async () => {
   const stopped = row({state: 'stopped', icon: 'stopped', result: 'Remaining: run the tests and commit.', can_continue: true});
   const failed = row({id: 't2', title: 'Broke', state: 'failed', icon: 'failed', result: 'no disk'});
   const h = harness({rows: [stopped, failed]});
@@ -475,20 +483,14 @@ test('a task that ran out of steps reads Stopped with what is left, and its row 
   h.tabs()[1].click();
   const lines = h.root.findAll((node) => node.className === 'activity-line').map((node) => node.textContent);
   assert.deepEqual(lines, ['Stopped · Remaining: run the tests and commit.', 'Failed · no disk']);
+  assert.deepEqual(h.heads().map((head) => head.href), ['#/tasks/t1', '#/tasks/t2']);
   h.heads()[0].click();
   await settle();
-  const actions = h.root.find((node) => node.className === 'activity-actions');
-  assert.deepEqual(actions.children.map((node) => node.textContent), ['Continue', 'Open task']);
-  actions.children[0].click();
-  await settle();
-  assert.deepEqual(h.calls.find(([, path]) => path.endsWith('/continue')), ['POST', '/tasks/t1/continue', undefined]);
-  // A real failure has no Continue.
-  h.heads()[1].click();
-  await settle();
-  assert.deepEqual(h.root.find((node) => node.className === 'activity-actions').children.map((node) => node.textContent), ['Open task']);
+  assert.equal(h.root.find((node) => node.className === 'activity-actions'), null, 'nothing unfolds in the row; the task view has the actions');
+  assert.equal(h.calls.some(([, path]) => path.endsWith('/continue')), false);
 });
 
-test('a task code found not finished reads so in amber, and its row offers Finish it', async () => {
+test('a task code found not finished reads so in amber in its row', async () => {
   const draft = row({state: 'done', icon: 'write', result: 'Fixed it.', can_continue: true,
     ending: {state: 'draft', reasons: ['tests_failed'], question: '', tests: []}});
   const ready = row({id: 't2', title: 'Notes', state: 'done', result: 'Wrote notes.', ending: {state: 'ready', reasons: [], tests: []}});
@@ -500,13 +502,6 @@ test('a task code found not finished reads so in amber, and its row offers Finis
   h.tabs()[1].click();
   const workers = h.root.findAll((node) => node.className === 'activity-line').map((node) => node.textContent);
   assert.deepEqual(workers, ['Done, not finished · The last test run failed', 'Ready']);
-  h.heads()[0].click();
-  await settle();
-  const actions = h.root.find((node) => node.className === 'activity-actions');
-  assert.deepEqual(actions.children.map((node) => node.textContent), ['Finish it: run the tests', 'Open task']);
-  actions.children[0].click();
-  await settle();
-  assert.deepEqual(h.calls.find(([, path]) => path.endsWith('/continue')), ['POST', '/tasks/t1/continue', undefined]);
 });
 
 test('a task held on an approval says so in the row, a slot wait keeps its words', async () => {
@@ -519,7 +514,7 @@ test('a task held on an approval says so in the row, a slot wait keeps its words
 });
 
 test('between calls the open row ends with what it is doing; a waiting row offers Review', async () => {
-  const thinking = row({state: 'running', activity: 'Thinking', icon: 'think'});
+  const thinking = row({kind: 'run', id: 'r1', state: 'running', activity: 'Thinking', icon: 'think'});
   const waiting = row({id: 'c9', kind: 'chat', title: 'Add the date', state: 'waiting', activity: 'Waiting for your approval', icon: 'wait'});
   const h = harness({rows: [thinking, waiting], turns: [started, tool(2, 'c1', 'tool.started', {name: 'list_files', arguments: {}}),
     tool(3, 'c1', 'tool.finished', {name: 'list_files', status: 'success', output: '', duration_s: 0.1})]});
@@ -565,7 +560,8 @@ test('the phone sheet opens from the chip, covers the page, and closes on the ba
 
 test('Details stays in the panel: its section is kept after the header and the tabs', () => {
   const h = harness();
-  assert.equal(h.root.children.at(-1), h.drawer);
+  assert.equal(h.root.children[3], h.drawer);
+  assert.equal(h.root.children.at(-1), h.tasks.section, 'a task is drawn after it');
   assert.deepEqual(h.root.children.slice(0, 3).map((node) => node.className), ['panel-head', 'panel-tabs', 'panel-body']);
 });
 
@@ -636,3 +632,113 @@ test('lookForNotes opens the Memory tab\'s "Look for notes" (the console\'s /mem
   assert.ok(!off.calls.some(([, path]) => path === '/memory/import/scan'), 'with memory off nothing is scanned');
 });
 
+
+test("a task's row is a link to its address, with no unfold state; the other kinds unfold in place", async () => {
+  const h = harness({rows: [task({state: 'done', result: 'Done.'}), row({id: 'c1', kind: 'chat', title: 'A chat', result: 'Hello.', at: 500})]});
+  await h.panel.update(health());
+  const [taskHead, chatHead] = h.heads();
+  assert.deepEqual([taskHead.tagName, taskHead.href, taskHead.attributes['aria-expanded']], ['A', '#/tasks/t1', undefined]);
+  assert.equal(taskHead.dataset.focusKey, 'task:t1');
+  const chevron = taskHead.find((node) => node.className === 'activity-chevron');
+  assert.deepEqual([chevron.textContent, chevron.attributes['aria-hidden']], ['›', 'true']);
+  assert.deepEqual([chatHead.tagName, chatHead.attributes['aria-expanded']], ['BUTTON', 'false']);
+  // Pressing a task row opens nothing in place: the address does the rest.
+  taskHead.click();
+  assert.equal(h.root.find((node) => node.className === 'activity-detail'), null);
+});
+
+test('a task shown in the panel takes the place of Melo\'s page, takes focus, and closeTask returns to its row', async () => {
+  const h = harness({rows: [task({state: 'done', result: 'Done.'})]});
+  await h.panel.update(health());
+  h.heads()[0].focus();
+  h.panel.openTask('t1');
+  assert.deepEqual([h.tasks.shown, h.root.dataset.view, h.panel.state.task, h.tasks.focused], [['t1'], 'task', 't1', 1]);
+  assert.equal(h.doc.activeElement, h.tasks.title, 'focus moves into the task');
+  // The address names it again (the page followed it): shown once.
+  h.panel.openTask('t1');
+  assert.deepEqual(h.tasks.shown, ['t1']);
+  // The list of all tasks is the same view with no task.
+  h.panel.openTask('');
+  assert.deepEqual([h.tasks.shown, h.panel.state.task], [['t1', ''], '']);
+  assert.equal(h.panel.closeTask(), true);
+  assert.deepEqual([h.root.dataset.view, h.panel.state.task, h.tasks.left], [undefined, null, 1]);
+  assert.equal(h.doc.activeElement, h.heads()[0], 'focus returns to the row it came from');
+  assert.equal(h.panel.closeTask(), false, 'nothing to close the second time');
+});
+
+test('without a row to return to, closing a task puts focus on the tab', async () => {
+  const h = harness({rows: [task({state: 'done'})]});
+  await h.panel.update(health());
+  h.panel.openTask('t1');
+  h.panel.closeTask();
+  assert.equal(h.doc.activeElement, h.tabs()[0]);
+});
+
+test('Escape steps back from a task: its confirmation closes first, then the address returns to the chat', async () => {
+  const h = harness({openChat: 'side-1'});
+  await h.panel.update(health());
+  assert.equal(h.panel.stepBack(), false, 'no task, nothing for Escape to do here');
+  h.panel.openTask('t1');
+  h.tasks.dialog = true;
+  assert.equal(h.panel.stepBack(), true);
+  assert.deepEqual([h.tasks.dialog, h.went], [false, []]);
+  assert.equal(h.panel.stepBack(), true);
+  assert.deepEqual(h.went, ['#/s/side-1']);
+  // Focus in the composer, not in the panel, and no sheet: Escape is not for the panel.
+  h.doc.activeElement = h.chat;
+  assert.equal(h.panel.stepBack(), false);
+});
+
+test('on a phone a task opens the sheet, and closing the sheet leaves the task; a wider window keeps it', async () => {
+  const wide = {matches: false, listeners: [], addEventListener(type, fn) { this.listeners.push(fn); }};
+  const h = harness({wide, openChat: 'side-1'});
+  h.panel.openTask('t1');
+  assert.deepEqual([h.root.classList.contains('sheet-open'), h.chat.inert, h.doc.activeElement], [true, true, h.tasks.title]);
+  // Escape with the sheet open goes back to the chat before it closes the sheet.
+  assert.equal(h.panel.stepBack(), true);
+  assert.deepEqual(h.went, ['#/s/side-1']);
+  assert.equal(h.panel.closeSheet(), true);
+  assert.deepEqual(h.went, ['#/s/side-1', '#/s/side-1'], 'dismissing the sheet leaves the task');
+  h.went.length = 0;
+  h.panel.openTask('t2');
+  wide.matches = true;
+  for (const fn of wide.listeners) fn();
+  assert.deepEqual([h.root.classList.contains('sheet-open'), h.went, h.panel.state.task], [false, [], 't2'], 'a window grown wide shows the panel, task and all');
+  // A desktop never opens the sheet for a task.
+  const desktop = harness({wide: {matches: true, addEventListener() {}}});
+  desktop.panel.openTask('t1');
+  assert.equal(desktop.root.classList.contains('sheet-open'), false);
+});
+
+test('an approval\'s Review link to a task keeps the sheet open, a chat\'s closes it', async () => {
+  const ask = {id: 'a1', what: 'Run: rm -rf build', at: 1000, answer: 'waiting'};
+  const h = harness({rows: [task({state: 'waiting', icon: 'wait', approvals: [ask]}), row({id: 'c9', kind: 'chat', title: 'Side', state: 'waiting', icon: 'wait', approvals: [{...ask, id: 'a2'}]})]});
+  await h.panel.update(health());
+  h.root.findAll((node) => node.className === 'approval-toggle').forEach((toggle) => toggle.click());
+  const reviews = h.root.findAll((node) => node.className === 'activity-open');
+  assert.deepEqual(reviews.map((link) => link.href), ['#/tasks/t1', '#/s/c9']);
+  h.chip.click();
+  reviews[0].click();
+  assert.equal(h.root.classList.contains('sheet-open'), true);
+  reviews[1].click();
+  assert.equal(h.root.classList.contains('sheet-open'), false);
+});
+
+test("the panel keeps following its chat while the address names a task", async () => {
+  const h = harness({openChat: 'side-1'});
+  await h.panel.update(health());
+  const calls = h.activityCalls().length;
+  globalThis.location = {hash: '#/tasks/t1'};
+  try {
+    h.open = '';
+    assert.equal(h.panel.follow(), undefined);
+    assert.equal(h.panel.state.chat, 'side-1');
+    assert.equal(h.activityCalls().length, calls, 'nothing is read again');
+    globalThis.location = {hash: '#/s/side-2'};
+    h.open = 'side-2';
+    await h.panel.follow();
+    assert.equal(h.panel.state.chat, 'side-2');
+  } finally {
+    delete globalThis.location;
+  }
+});

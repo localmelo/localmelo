@@ -105,7 +105,7 @@ Stop 总是获胜且始终可用。它与恢复在共享的停放身份上串行
 
 ### 控制台任务卡片
 
-控制台的 **Tasks** 视图（`#/tasks`、`#/tasks/<id>`）是上述路由的客户端：`GET /api/tasks`、`GET /api/tasks/{id}`、`POST /api/tasks/{id}/resume`，以及带 `{"state": "stop"}` 的 `PATCH /api/tasks/{id}`。它先不带令牌发送 Resume，只有收到 `confirmation_required` 时才打开确认对话框，然后用同一个 `operation_id` 带上 `details.confirmation_token` 重试。收到其他带状态的回答后，操作 id 会被丢弃，所以过期或被拒绝的尝试绝不会复用授权；网络失败后则保留它，所以重试不会启动第二个回合。已经开始但没有卡片的任务，或者收到 `missing_card` 拒绝时，Resume 会换成 **Start again as a new task**（用目标、标题、工作区和一个跨重试保留的请求键调用 `POST /api/tasks`）。恢复卡片用 `textContent` 渲染，从不作为 HTML。Stop 走任务 API，从不调用 `POST /api/turns/{id}/cancel`。
+控制台的任务页面（`#/tasks/<id>`，显示在侧边面板里；所有任务的列表在 `#/tasks`）是上述路由的客户端：`GET /api/tasks`、`GET /api/tasks/{id}`、`POST /api/tasks/{id}/resume`，以及带 `{"state": "stop"}` 的 `PATCH /api/tasks/{id}`。它先不带令牌发送 Resume，只有收到 `confirmation_required` 时才打开确认对话框，然后用同一个 `operation_id` 带上 `details.confirmation_token` 重试。收到其他带状态的回答后，操作 id 会被丢弃，所以过期或被拒绝的尝试绝不会复用授权；网络失败后则保留它，所以重试不会启动第二个回合。已经开始但没有卡片的任务，或者收到 `missing_card` 拒绝时，Resume 会换成 **Start again as a new task**（用目标、标题、工作区和一个跨重试保留的请求键调用 `POST /api/tasks`）。恢复卡片用 `textContent` 渲染，从不作为 HTML。Stop 走任务 API，从不调用 `POST /api/turns/{id}/cancel`。
 
 <a id="import-bench-traces"></a>
 

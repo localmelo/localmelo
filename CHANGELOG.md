@@ -292,6 +292,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- A task opens in the side panel next to Melo, from its row in Activity, and the
+  Tasks link in the sidebar is gone. The row ends in a `›`; selecting it shows
+  the task's page in place of Melo's, and **Back to Melo**, Esc or closing the
+  sheet returns to Melo's page with focus on the row. The task links in the
+  main chat, the **N running** list and the Workers tab open the same page,
+  `#/tasks/<id>` still works, and `#/tasks` opens the panel's list of all
+  tasks (the Workers tab's **All tasks** link). **Pause** and the priority menu
+  moved from the Activity row to the task's page. Phones open the sheet for it.
+  [#412]
 - A task the model proposes starts only when your message is a request for
   work, and then your own message is the task; otherwise the chat shows `Start
   this as a task?` with your own message, in the main chat and in side chats.
@@ -3417,3 +3426,4 @@ earlier milestones.
 [#392]: https://github.com/localmelo/localmelo/pull/392
 [#393]: https://github.com/localmelo/localmelo/pull/393
 [#396]: https://github.com/localmelo/localmelo/pull/396
+[#412]: https://github.com/localmelo/localmelo/issues/412

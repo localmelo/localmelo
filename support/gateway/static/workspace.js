@@ -432,7 +432,7 @@ function connectionState({ turn, held, pending, session }) {
 
 /**
  * What default mode leaves out of the header and the sidebar: the level, Details, the GPU line, and
- * Workers and Tasks until there is something in them. The elements stay in the page, hidden.
+ * Workers. The elements stay in the page, hidden.
  */
 function applyChrome() {
   $("details-trigger").hidden = !developerMode || workerMode;
@@ -440,8 +440,7 @@ function applyChrome() {
   $("connection-btn").hidden = workerMode;
   // Worker runs are a developer's view; a person reaches them from the main chat and the panel.
   $("workers-link").hidden = !developerMode;
-  $("tasks-link").hidden = !developerMode && !sections.tasks;
-  $("section-nav").hidden = $("workers-link").hidden && $("tasks-link").hidden;
+  $("section-nav").hidden = $("workers-link").hidden;
   $("composer-note").hidden = !developerMode;
   $("local-badge").hidden = !developerMode;
 }
@@ -543,12 +542,7 @@ function syncUI() {
   applyChrome();
   if (!session && S.levelsOpen) showLevelMenu(false);
   $("new-btn").disabled = false;
-  if (taskMode) {
-    $("header-title").textContent = t("tasks.title");
-    // "Scheduler" is the developer's word for what people call tasks.
-    $("header-model").textContent = developerMode ? t("header.schedulerTasks") : "";
-    document.title = `localmelo · ${t("tasks.title")}`;
-  } else if (workerMode) {
+  if (workerMode) {
     const heading = workers.state.mode === "detail" ? workers.state.session?.title || t("header.workerRun") : t("header.workers");
     $("header-title").textContent = heading;
     $("header-model").textContent = t("header.readOnly");
@@ -784,7 +778,7 @@ async function reloadSession(id) {
   if (view !== null && S.activeId === id) startStream(id);
 }
 
-async function openSession(id, { saveCurrent = true, scroll = true } = {}) {
+async function openSession(id, { saveCurrent = true, scroll = true, route = true } = {}) {
   if (!id) {
     newChat();
     return;
@@ -797,7 +791,7 @@ async function openSession(id, { saveCurrent = true, scroll = true } = {}) {
   S.view = newView(id);
   restoreDraft();
   persist(KEY + "-view", { id });
-  setRoute(id);
+  if (route) setRoute(id);
   sidebar(false);
   renderSessions();
   renderMessages(true);
@@ -1378,8 +1372,14 @@ async function allowCardBlock(card, facts) {
 
 /** A card's Open: the side chat, or the task. */
 function openCard(card) {
-  if (card.sourceKind === "task") globalThis.location.hash = `#/tasks/${encodeURIComponent(card.sourceId)}`;
-  else openSession(card.sourceId);
+  if (card.sourceKind !== "task") {
+    openSession(card.sourceId);
+    return;
+  }
+  const hash = `#/tasks/${encodeURIComponent(card.sourceId)}`;
+  // The address names it already (the panel was closed another way): no event comes, so show it from here.
+  if (globalThis.location.hash === hash) showTask(card.sourceId);
+  else globalThis.location.hash = hash;
 }
 
 function turnNode(turn, newest = false, asked = askTurn(turn)) {
@@ -2577,7 +2577,7 @@ function presence(force = false) {
 
 // ── Routing and the sidebar ──
 
-// `workerMode` is true in every read-only side view; `taskMode` marks the task view.
+// `workerMode` is true in every read-only side view (a task is shown in the panel, which leaves the chat as it is).
 function statusRowNode() {
   const node = el("div", "status-row");
   node.hidden = true;
@@ -2588,7 +2588,7 @@ const rowFilter = (segments) => (developerMode ? segments : plainSegments(segmen
 const chatStatus = setupStatusRow({ api, root: $("status-row"), filter: rowFilter });
 const running = setupRunning({ root: $("running-root"), button: $("running-btn"), menu: $("running-menu") });
 
-// Default mode lists Workers and Tasks once there is something in them.
+// The panel's Workers tab offers the list of all tasks once a task exists (a developer always has it).
 const sections = { workers: false, tasks: false };
 
 function setHealth(body) {
@@ -2613,9 +2613,8 @@ async function findSections() {
 }
 
 let workerMode = false;
-let taskMode = false;
 const workerStatus = setupStatusRow({ api, root: statusRowNode(), filter: rowFilter });
-const workers = workerHistory(api, () => { if (workerMode && !taskMode) renderWorkers(); }, (fn, ms) => {
+const workers = workerHistory(api, () => { if (workerMode) renderWorkers(); }, (fn, ms) => {
   const timer = setInterval(fn, ms);
   return () => globalThis.clearInterval?.(timer);
 }, {
@@ -2625,6 +2624,10 @@ const workers = workerHistory(api, () => { if (workerMode && !taskMode) renderWo
   schedule: (fn, ms) => setTimeout(fn, ms),
   cancel: (id) => clearTimeout(id),
 });
+/** Where the panel's link back goes: the chat that is open. */
+function homeHash() {
+  return S.activeId ? `#/s/${S.activeId}` : "#/new";
+}
 const tasks = setupTasks({
   api,
   statusRow: setupStatusRow({ api, root: statusRowNode(), filter: rowFilter }),
@@ -2637,7 +2640,10 @@ const tasks = setupTasks({
     cancel: (id) => clearTimeout(id),
   },
   approvalCard,
+  // The task is shown in the panel beside the chat; its link back is the chat's own address.
   root: $("task-panel"),
+  titleTag: "h2",
+  home: homeHash,
   newId: newClientRequestId,
   navigate: (hash) => { globalThis.location.hash = hash; },
   // The macOS app's folder panel; a browser has none, so the task asks for a path.
@@ -2657,28 +2663,20 @@ function taskRoute() {
   catch { return ""; }
 }
 
-function showTasks(id) {
-  if (!workerMode) {
-    saveDraft();
-    closeStream();
-    drawer.close();
-    showLevelMenu(false);
+/**
+ * `#/tasks/<id>` shows that task in the panel beside the chat, and `#/tasks` the list of all tasks. The chat stays
+ * as it is (a Workers page, which the panel replaced, is left first), so a card, a row of what runs, an
+ * approval's Review and an old link all land on the same view.
+ */
+async function showTask(id) {
+  const fromWorkers = workerMode;
+  if (fromWorkers) {
+    leaveWorkers();
+    // The Workers page closed the chat's stream; the chat behind the panel is drawn again, at the same address.
+    if (S.activeId) await openSession(S.activeId, { route: false });
   }
-  workers.leave();
-  workerMode = true;
-  taskMode = true;
-  sections.tasks = true;
-  $("worker-panel").hidden = true;
-  $("scroll").hidden = true;
-  document.querySelector(".composer-area").hidden = true;
-  applyChrome();
-  renderSessions();
-  $("workers-link").removeAttribute("aria-current");
-  $("tasks-link").setAttribute("aria-current", "page");
-  sidebar(false);
-  syncUI();
-  tasks.show(id);
-  $("task-panel").querySelector("h1")?.focus();
+  drawer.close();
+  panel.openTask(id);
 }
 
 function workerRoute() {
@@ -2690,11 +2688,7 @@ function workerRoute() {
 
 function showWorkers(id) {
   const previousWorker = workers.state.selectedId;
-  if (taskMode) {
-    tasks.leave();
-    taskMode = false;
-    $("tasks-link").removeAttribute("aria-current");
-  }
+  panel.closeTask();
   if (!workerMode) {
     saveDraft();
     closeStream();
@@ -2720,16 +2714,13 @@ function showWorkers(id) {
 function leaveWorkers() {
   if (!workerMode) return;
   workers.leave();
-  tasks.leave();
   workerMode = false;
-  taskMode = false;
   $("worker-panel").hidden = true;
   $("scroll").hidden = false;
   document.querySelector(".composer-area").hidden = false;
   applyChrome();
   renderSessions();
   $("workers-link").removeAttribute("aria-current");
-  $("tasks-link").removeAttribute("aria-current");
   for (const [slot, entry] of Object.entries(S.outbox)) {
     if (entry.state === "checking") checkSubmission(slot, entry.clientRequestId);
   }
@@ -2949,6 +2940,9 @@ const panel = setupPanel({
   developer: () => developerMode,
   openSettings: () => openSettings(),
   cover: () => [$("sidebar"), document.querySelector(".chat")],
+  tasks,
+  home: homeHash,
+  hasTasks: () => sections.tasks,
   live: {
     open: (url) => (typeof EventSource === "function" ? new EventSource(url) : null),
     schedule: (fn, ms) => setTimeout(fn, ms),
@@ -3081,7 +3075,7 @@ const slash = setupSlash({
   menu: $("slash-menu"),
   rows: $("local-rows"),
   api,
-  enabled: () => S.authenticated && !workerMode && !taskMode && !input.disabled,
+  enabled: () => S.authenticated && !workerMode && !input.disabled,
   slot: () => S.activeId ?? "new",
   state: () => {
     const session = activeSession();
@@ -3285,18 +3279,18 @@ async function init() {
     const saved = stored(KEY + "-view").id;
     wanted = listed(saved) ? saved : (S.main?.id ?? S.sessions[0]?.id ?? "");
   }
-  if (fromTask !== null) {
-    showTasks(fromTask);
-  } else if (fromWorker !== null) {
+  // A task link opens the chat behind the panel without rewriting the address, which names the task.
+  if (fromWorker !== null) {
     showWorkers(fromWorker);
   } else if (wanted) {
-    await openSession(wanted);
+    await openSession(wanted, { route: fromTask === null });
   } else {
-    setRoute(null);
+    if (fromTask === null) setRoute(null);
     renderSessions();
     renderMessages(true);
     syncUI();
   }
+  if (fromTask !== null && S.authenticated) await showTask(fromTask);
   if (wantsScheduled && S.authenticated) await showScheduled();
   if (!S.authenticated) return;
   for (const [slot, entry] of Object.entries(S.outbox)) {
@@ -3354,6 +3348,8 @@ $("close-settings").addEventListener("click", () => {
 });
 $("details-trigger").addEventListener("click", async () => {
   if (workerMode) return;
+  // Details takes the place of the tabs below Melo; a task shown there goes back to the chat first.
+  if (panel.state.task !== null) globalThis.location.hash = homeHash();
   if (drawer.close()) return;
   // A config written by hand wins: read the mode again as the drawer opens.
   await refreshMode();
@@ -3424,7 +3420,8 @@ matchMedia("(max-width: 700px)").addEventListener?.("change", () => sidebar(fals
 globalThis.addEventListener?.("hashchange", async () => {
   if (!S.authenticated) return;
   const task = taskRoute();
-  if (task !== null) { showTasks(task); return; }
+  if (task !== null) { await showTask(task); return; }
+  panel.closeTask();
   const worker = workerRoute();
   if (worker !== null) { showWorkers(worker); return; }
   if (scheduledRoute()) { await showScheduled(); return; }
@@ -3486,6 +3483,8 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (drawer.close()) return;
+  // A task shown in the panel goes back to the chat first; the sheet closes on the next Escape.
+  if (!event.defaultPrevented && panel.stepBack()) return;
   if (panel.closeSheet()) return;
   if ($("app").classList.contains("sidebar-open")) {
     sidebar(false);

@@ -1,5 +1,5 @@
 import {taskLive} from './task-live.mjs';
-import {levelCode, levelLabel} from './levels.mjs';
+import {LEVELS, levelCode, levelLabel} from './levels.mjs';
 import {formatTime, t} from './i18n.mjs';
 import {allowState, blockCard, blockFacts, stepLine} from './blocked.mjs';
 import {canFinish, endingLabel, endingWhy, finishLabel, readEnding, testWords} from './endings.mjs';
@@ -9,6 +9,8 @@ const FINISHED = new Set(['done', 'failed', 'cancelled', 'expired']);
 // "Live" is for a task whose process is writing now; the work of any other task is its steps.
 const RUNNING = new Set(['running', 'held']);
 const STATES = new Set([...RESUMABLE, ...FINISHED, ...RUNNING, 'queued', 'waiting']);
+// A task in one of these can be paused and given another priority.
+const ACTIVE = new Set([...RUNNING, 'queued', 'waiting']);
 // A task's state in words (`tasks.state.<state>`); in English, the state itself.
 const stateWord = (state) => (STATES.has(state) ? t(`tasks.state.${state}`) : state);
 // A task whose run used all its steps is stopped, not failed, and can continue (#341).
@@ -35,6 +37,10 @@ const isStopped = (task) => task.out_of_steps === true;
  * folded under "Steps"; "Live" heads the work only while the task runs.
  * `developer()` says whether developer mode is on: the scheduler's priority
  * (P2), its words and a Recovery card with nothing in it are shown only then.
+ * The view sits in the panel beside the chat, so it is a page of that panel: every
+ * view starts with a link back (`home()` gives its address, the page the panel's
+ * Melo page lives at), and its title is a `titleTag` heading (an h2 under the
+ * panel's own h1-less header, with h3 for the sections inside).
  * `chooseFolder()` (optional) asks the macOS app's folder panel for a path and
  * resolves it, or null; without it, Choose a folder opens a path field. A task
  * that could not use its folder offers it, and starts again in the folder chosen.
@@ -69,13 +75,16 @@ export function packFold(doc, task) {
   return fold;
 }
 
-export function setupTasks({api, root, newId, navigate, approvalCard, every = defaultEvery, statusRow = null, live: liveOptions = null, developer = () => true, chooseFolder = null}) {
+export function setupTasks({api, root, newId, navigate, approvalCard, every = defaultEvery, statusRow = null, live: liveOptions = null, developer = () => true, chooseFolder = null,
+  home = () => '#/new', titleTag = 'h1'}) {
   const doc = root.ownerDocument;
+  const sectionTag = titleTag === 'h1' ? 'h2' : 'h3';
   const state = {mode: 'list', epoch: 0, tasks: [], task: null, error: '', notice: '',
     busy: '', evidence: '', dialog: null, pending: null, again: null, stepsOpen: false, folderField: false, folderText: '',
     openBlock: '', blockError: {}};
   let active = false;
   let stopPolling = null;
+  let titleNode = null;
   const liveBox = doc.createElement('section');
   liveBox.className = 'task-live';
   const answerBox = doc.createElement('section');
@@ -148,8 +157,6 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   function card() {
     const task = state.task;
     if (!task) return [];
-    const back = node('a', t('tasks.back'));
-    back.href = '#/tasks';
     const meta = node('dl', undefined, 'worker-meta');
     const row = (label, value) => {
       const cell = node('dd', value);
@@ -184,7 +191,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     // Evidence is shown when there is some to show, never as "not needed".
     const evidence = evidenceText(task);
     if (evidence) row(t('tasks.row.evidence'), evidence);
-    const nodes = [back];
+    const nodes = [];
     if (live) { drawLive(); nodes.push(answerBox); }
     nodes.push(meta);
     if (task.folder_problem) nodes.push(folderBox(task));
@@ -199,7 +206,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     if (live) nodes.push(liveBox);
     // The card is a developer's recovery note: default mode shows it only when there is one to read.
     if (hasCard(task) || developer()) {
-      nodes.push(node('h2', t('tasks.recoveryCard')));
+      nodes.push(node(sectionTag, t('tasks.recoveryCard')));
       nodes.push(hasCard(task) ? node('pre', task.card, 'worker-brief task-card-text') : node('p', t('tasks.noCard'), 'muted'));
     }
     const actions = node('div', undefined, 'task-actions');
@@ -211,6 +218,12 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     } else if (canFinish(ending)) {
       // A draft finishes with one tap: the tests (and the commit), through the same continue.
       actions.append(button(state.busy === 'continue' ? t('common.starting') : finishLabel(ending), () => keepGoing(), Boolean(state.busy)));
+    }
+    // A task that runs or waits to run can be put on hold and given another priority from here.
+    if (ACTIVE.has(task.state)) {
+      actions.append(button(t('common.pause'), () => change({state: 'pause'}, 'tasks.pauseAccepted'), Boolean(state.busy)));
+      const menu = levelMenu(task);
+      if (menu) actions.append(menu);
     }
     if (!FINISHED.has(task.state)) {
       actions.append(button(t(state.busy === 'stop' ? 'tasks.stopping' : 'common.stop'), () => stop(), state.busy === 'stop'));
@@ -241,7 +254,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       if (steps.length) shown.push(stepsFold(steps));
     } else if (open) {
       const turns = liveNodes(view, drawLive);
-      if (turns.length) shown = [node('h2', t(RUNNING.has(task?.state) ? 'tasks.live' : 'tasks.steps')), ...turns];
+      if (turns.length) shown = [node(sectionTag, t(RUNNING.has(task?.state) ? 'tasks.live' : 'tasks.steps')), ...turns];
     }
     if (live.state.error && state.mode === 'card') shown.push(node('p', live.state.error, 'muted'));
     answerBox.hidden = !top.length;
@@ -283,9 +296,12 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
 
   function render() {
     if (!active) return;
-    const title = node('h1', state.mode === 'list' ? t('tasks.title') : state.task?.title || t('tasks.task'));
+    const back = node('a', t('tasks.back'), 'task-back');
+    back.href = home();
+    const title = node(titleTag, state.mode === 'list' ? t('tasks.title') : state.task?.title || t('tasks.task'), 'task-title');
     title.tabIndex = -1;
-    const nodes = [title];
+    titleNode = title;
+    const nodes = [back, title];
     for (const [text, role] of [[state.error, 'alert'], [state.notice, 'status']]) {
       if (!text) continue;
       const line = node('p', text, role === 'alert' ? 'task-error' : 'muted');
@@ -385,6 +401,8 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       return;
     }
     if (epoch !== state.epoch || state.busy || state.dialog) return;
+    // A priority being chosen is not drawn away.
+    if (root.contains(doc.activeElement) && doc.activeElement?.tagName === 'SELECT') return;
     const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     if (id) {
       if (state.task?.task_id !== id) return;
@@ -459,6 +477,35 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     render();
   }
 
+  // P0 to P4 run; P5 is on hold, which Pause sets.
+  function levelMenu(task) {
+    const level = task.level_eff ?? task.level;
+    if (!Number.isInteger(level) || level >= LEVELS.length - 1) return null;
+    const menu = node('select', undefined, 'task-level');
+    menu.setAttribute('aria-label', t('common.priority'));
+    LEVELS.slice(0, -1).forEach((_, at) => {
+      const option = node('option', levelLabel(at));
+      option.value = String(at);
+      option.selected = at === level;
+      menu.append(option);
+    });
+    menu.disabled = Boolean(state.busy);
+    menu.addEventListener('change', () => change({level: Number(menu.value)}, 'tasks.levelAccepted'));
+    return menu;
+  }
+
+  // Pause or a new priority: the task's own route, its next state read back.
+  async function change(body, notice) {
+    const epoch = state.epoch;
+    const outcome = await act('change', (id) => api(path(id), {method: 'PATCH', body}));
+    if (!outcome || epoch !== state.epoch) return;
+    if (outcome.data) {
+      Object.assign(state, {task: outcome.data.task, notice: t(notice)});
+      live?.sync(outcome.data.task);
+    } else state.error = errorText(outcome.error);
+    render();
+  }
+
   async function stop() {
     const epoch = state.epoch;
     const outcome = await act('stop', (id) => api(path(id), {method: 'PATCH', body: {state: 'stop'}}));
@@ -473,7 +520,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   // What auto mode blocked: each opens the chat's card, with Allow once; the task went on without them.
   function blockedBox(task) {
     const box = node('section', undefined, 'task-blocked');
-    box.append(node('h2', t('tasks.blocked.title')), node('p', t('tasks.blocked.note'), 'muted'));
+    box.append(node(sectionTag, t('tasks.blocked.title')), node('p', t('tasks.blocked.note'), 'muted'));
     const now = Date.now() / 1000;
     for (const block of blockedOf(task)) {
       const facts = blockFacts({approval: {origin: 'auto', allowed: false, request_id: block.request_id, step_key: block.step_key,
@@ -513,7 +560,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   // chat. Revoke takes that approval back (the step asks again next time); what ran stays done.
   function earlierBox(task) {
     const box = node('section', undefined, 'task-earlier');
-    box.append(node('h2', t('tasks.earlier.title')), node('p', t('tasks.earlier.note'), 'muted'));
+    box.append(node(sectionTag, t('tasks.earlier.title')), node('p', t('tasks.earlier.note'), 'muted'));
     const list = node('ul', undefined, 'task-earlier-list');
     for (const use of earlierOf(task)) {
       const row = node('li', undefined, 'task-earlier-row');
@@ -638,5 +685,5 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     root.replaceChildren();
   }
 
-  return {show, leave, state, closeDialog, isActive: () => active};
+  return {show, leave, state, closeDialog, isActive: () => active, focus: () => titleNode?.focus()};
 }

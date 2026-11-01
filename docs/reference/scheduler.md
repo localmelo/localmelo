@@ -333,7 +333,8 @@ makes effects happen only once.
 
 ### Console task card
 
-The console's **Tasks** view (`#/tasks`, `#/tasks/<id>`) is a client of the
+The console's task page (`#/tasks/<id>`, shown in the side panel, and the list of
+all tasks at `#/tasks`) is a client of the
 routes above: `GET /api/tasks`, `GET /api/tasks/{id}`,
 `POST /api/tasks/{id}/resume` and `PATCH /api/tasks/{id}` with
 `{"state": "stop"}`. It sends Resume without a token first and opens the
