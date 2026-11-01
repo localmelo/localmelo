@@ -116,6 +116,8 @@ class SettingsPutBody(_SettingsBaseBody):
     approvals: StrictStr | None = None
     # ``[browser] driver``: true reads web pages in Safari (``/browser on``), false turns it off; absent leaves it.
     browser: StrictBool | None = None
+    # ``[tools] web_fetch``: whether chats and tasks read public web pages; absent leaves it.
+    web_fetch: StrictBool | None = None
 
 
 def _check_single_line(field: str, value: str) -> None:
@@ -393,6 +395,7 @@ def settings_json() -> dict[str, Any]:
             cfg.approvals.mode if cfg.approvals.mode in config.APPROVAL_MODES else "ask"
         ),
         "browser": cfg.browser.driver != "off",
+        "web_fetch": cfg.tools.web_fetch is True,
         "advanced_options": _advanced_options(),
         "developer_settings": _developer_settings(cfg),
         "run_options": _run_options(),
@@ -512,6 +515,9 @@ def _build_candidate(
     browser = getattr(body, "browser", None)
     if browser is not None:
         candidate.browser.driver = "safari-automation" if browser else "off"
+    web_fetch = getattr(body, "web_fetch", None)
+    if web_fetch is not None:
+        candidate.tools.web_fetch = web_fetch
     for sec_name, sec_fields in body.sections.items():
         target = getattr(candidate, sec_name)
         for field_name, field_val in sec_fields.items():
@@ -583,6 +589,8 @@ def _changed_fields(before: config.Config, after: config.Config) -> list[str]:
         changed.append("approvals")
     if before.browser.driver != after.browser.driver:
         changed.append("browser")
+    if before.tools.web_fetch != after.tools.web_fetch:
+        changed.append("web_fetch")
     for sec_name in config._LOCAL_SECTIONS:
         b_sec = getattr(before, sec_name)
         a_sec = getattr(after, sec_name)
