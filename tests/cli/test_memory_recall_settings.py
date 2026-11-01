@@ -2,9 +2,10 @@
 
 ``recall_records``, ``recall_docs``, ``recall_chars``, ``recall_notes``,
 ``search_when_empty``, ``recall_min_cosine``, ``recall_min_coverage``,
-``recall_item_chars`` and ``recall_excerpt`` are saved only when they differ from the default, checked against their bounds and
-values, set for one run with ``-X``, and listed by the developer help only, each
-with the issue that decides it.
+``recall_item_chars``, ``recall_excerpt``, ``recall_form``, ``recall_list_max`` and
+``recall_open_chars`` are saved only when they differ from the default, checked
+against their bounds and values, set for one run with ``-X``, and listed by the
+developer help only, each with the issue that decides it.
 """
 
 from __future__ import annotations
@@ -28,6 +29,15 @@ CHANGED = {
     "recall_min_coverage": 0.4,
     "recall_item_chars": 800,
     "recall_excerpt": "match",
+    "recall_form": "list",
+    "recall_list_max": 35,
+    "recall_open_chars": 9000,
+}
+# The issue that decides each setting, as the developer help names it.
+ISSUE = {name: "#349" for name in CHANGED} | {
+    "recall_form": "#428",
+    "recall_list_max": "#428",
+    "recall_open_chars": "#428",
 }
 
 
@@ -62,6 +72,7 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
             'recall_notes = "off"\nsearch_when_empty = "hint"\n'
             "recall_min_cosine = 0.45\nrecall_min_coverage = 0.4\n"
             'recall_item_chars = 800\nrecall_excerpt = "match"\n'
+            'recall_form = "list"\nrecall_list_max = 35\nrecall_open_chars = 9000\n'
         ) in text
         assert config.load().memory == MemoryConfig(**CHANGED)  # type: ignore[arg-type]
         for name, value in CHANGED.items():  # each alone
@@ -95,6 +106,14 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
         ("recall_item_chars", 2000),
         ("recall_excerpt", "head"),
         ("recall_excerpt", "match"),
+        ("recall_form", "excerpt"),
+        ("recall_form", "list"),
+        ("recall_list_max", 1),
+        ("recall_list_max", 50),
+        ("recall_list_max", 20),
+        ("recall_open_chars", 500),
+        ("recall_open_chars", 16000),
+        ("recall_open_chars", 4000),
     ],
 )
 def test_the_bounds_and_values_are_accepted(name: str, value: object) -> None:
@@ -200,6 +219,53 @@ def test_the_bounds_and_values_are_accepted(name: str, value: object) -> None:
             "Must be one of ('head', 'match').",
         ),
         (
+            "recall_form",
+            "table",
+            "[memory] recall_form 'table' is not recognised. "
+            "Must be one of ('excerpt', 'list').",
+        ),
+        (
+            "recall_form",
+            True,
+            "[memory] recall_form True is not recognised. "
+            "Must be one of ('excerpt', 'list').",
+        ),
+        (
+            "recall_list_max",
+            0,
+            "[memory] recall_list_max must be from 1 to 50, got 0",
+        ),
+        (
+            "recall_list_max",
+            51,
+            "[memory] recall_list_max must be from 1 to 50, got 51",
+        ),
+        (
+            "recall_list_max",
+            2.5,
+            "[memory] recall_list_max must be a whole number, got 2.5",
+        ),
+        (
+            "recall_list_max",
+            True,
+            "[memory] recall_list_max must be a whole number, got True",
+        ),
+        (
+            "recall_open_chars",
+            499,
+            "[memory] recall_open_chars must be from 500 to 16000, got 499",
+        ),
+        (
+            "recall_open_chars",
+            16001,
+            "[memory] recall_open_chars must be from 500 to 16000, got 16001",
+        ),
+        (
+            "recall_open_chars",
+            "4000",
+            "[memory] recall_open_chars must be a whole number, got '4000'",
+        ),
+        (
             "recall_min_cosine",
             True,
             "[memory] recall_min_cosine must be a number, got True",
@@ -243,7 +309,7 @@ def test_x_sets_each_for_one_run_and_only_the_developer_help_lists_them(
     for name in CHANGED:
         key = f"memory.{name}"
         assert any(
-            line.startswith(f"  {key} ") and line.endswith("(#349)")
+            line.startswith(f"  {key} ") and line.endswith(f"({ISSUE[name]})")
             for line in developer
         ), key
         assert key not in plain
@@ -264,6 +330,13 @@ def test_x_sets_each_for_one_run_and_only_the_developer_help_lists_them(
         "memory.recall_item_chars=100",
         "memory.recall_item_chars=wide",
         "memory.recall_excerpt=tail",
+        "memory.recall_form=table",
+        "memory.recall_list_max=0",
+        "memory.recall_list_max=51",
+        "memory.recall_list_max=many",
+        "memory.recall_open_chars=499",
+        "memory.recall_open_chars=16001",
+        "memory.recall_open_chars=long",
     ],
 )
 def test_x_refuses_a_bad_value_with_a_clear_message(

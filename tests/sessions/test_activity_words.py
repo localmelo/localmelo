@@ -74,6 +74,7 @@ def test_a_leading_done_gives_way_to_what_followed_it(
         ("browser_screenshot", {}, "Looking at the page", "web"),
         ("recall", {"query": "x"}, "Remembering", "memory"),
         ("search_memory", {"query": "x"}, "Remembering", "memory"),
+        ("open_memory", {"ids": ["t1"]}, "Remembering", "memory"),
         (
             "remember",
             {"text": "You prefer tea.", "topic": "x"},

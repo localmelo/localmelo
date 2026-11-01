@@ -23,8 +23,10 @@ from localmelo.support.memory.recall import (
     AUTO_RECORDS,
     BLOCK_CHARS,
     BLOCK_HEADER,
+    LIST_MAX,
     MIN_COSINE,
     MIN_COVERAGE,
+    OPEN_CHARS,
     TURN_CHARS,
     Corpus,
     Item,
@@ -131,10 +133,18 @@ def test_the_defaults_are_the_numbers_recall_always_used() -> None:
         MIN_COVERAGE,
         TURN_CHARS,
         False,
+        False,
+        LIST_MAX,
+        OPEN_CHARS,
     )
     assert (cfg.recall_min_cosine, cfg.recall_min_coverage) == (0.55, 0.6)
     assert (MIN_COSINE, MIN_COVERAGE) == (0.55, 0.6)
     assert (cfg.recall_item_chars, cfg.recall_excerpt) == (200, "head")
+    assert (cfg.recall_form, cfg.recall_list_max, cfg.recall_open_chars) == (
+        "excerpt",
+        20,
+        4000,
+    )
     assert TURN_CHARS == 200
 
 

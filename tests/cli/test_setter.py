@@ -321,6 +321,9 @@ def test_keys_lists_value_default_and_source(
         "memory.recall_min_coverage": ["0.6", "0.6", "default"],
         "memory.recall_item_chars": ["200", "200", "default"],
         "memory.recall_excerpt": ['"head"', '"head"', "default"],
+        "memory.recall_form": ['"excerpt"', '"excerpt"', "default"],
+        "memory.recall_list_max": ["20", "20", "default"],
+        "memory.recall_open_chars": ["4000", "4000", "default"],
     }
 
 

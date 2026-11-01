@@ -76,7 +76,7 @@ export function stepWords(name, args, done = false) {
   if (tool === 'git_status') return say('read', t('steps.gitState'));
   if (tool === 'shell_exec') return say('run', t(TESTS.test(String(a.command ?? '').replace(/\s+/g, ' ')) ? 'steps.theTests' : 'steps.aCommand'));
   if (tool === 'python_exec') return say('run', 'Python');
-  if (tool === 'recall' || tool === 'search_memory' || tool === 'remember') return say('remember');
+  if (tool === 'recall' || tool === 'search_memory' || tool === 'open_memory' || tool === 'remember') return say('remember');
   if (tool === 'browser_open') {
     let host = '';
     try { host = new URL(String(a.url)).hostname.replace(/^www\./, ''); } catch { /* not a page address */ }

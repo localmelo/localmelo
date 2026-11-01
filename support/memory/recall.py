@@ -18,6 +18,11 @@ leaves such a turn out unless the message asks about the past
 (:func:`current_only`), so the model is given the current value only.
 A chat's own turns are recalled like another chat's once the model's window no
 longer holds them (:func:`in_view`), and read as ``this chat`` (:func:`this_chat`).
+With ``[memory] recall_form = "list"`` a turn is not shown as an excerpt but as one
+line, its id, date, chat, title and similarity (:meth:`Item.listed`), under a line
+that tells the model to open the turns it needs with ``open_memory``; the list is
+not bound by the chats' cap or the block's room (:func:`block`, :func:`pick`), and
+:func:`whole_turn` and :func:`cut_at_sentence` give a turn the model opens.
 """
 
 from __future__ import annotations
@@ -76,6 +81,17 @@ _REPLY_CHARS: Final = 60
 # keep when they are long; the rest is melo's reply's.
 _USER_SHARE: Final = 0.4
 _TITLE_CHARS: Final = 40
+# The list form (``[memory] recall_form = "list"``): the most turns it lists and the
+# room one opened turn takes, as the settings default them; the longest title of a
+# line; the line above the list; and the mark where an opened turn is cut.
+LIST_MAX: Final = 20
+OPEN_CHARS: Final = 4_000
+LIST_TITLE_CHARS: Final = 80
+LIST_GUIDE: Final = (
+    "Older chat turns that may hold the answer, closest first. Open the ones you "
+    "need with open_memory before you answer from them; a title is not the content."
+)
+CUT_MARK: Final = "… (cut)"
 # Words that ask rather than say what is asked about; never a content word. The
 # last five ask for an older value (:func:`asks_about_past`).
 _ASKING_WORDS: Final = (
@@ -117,6 +133,7 @@ class Shown(NamedTuple):
 
 
 HEADS: Final = Shown()  # the head of every turn, in :data:`TURN_CHARS`
+WHOLE: Final = Shown(10**9)  # every turn whole: no room limit
 
 
 @dataclass
@@ -130,7 +147,11 @@ class Item:
     turns (session id, turn) whose facts it replaced; a turn's ``said`` is
     what its typed words state about the user, each folded statement with
     its subject key (``""`` for none). ``older`` is how such a turn reads
-    when a newer one replaced it: :data:`OLDER` or :data:`OLDER_TURN`.
+    when a newer one replaced it: :data:`OLDER` or :data:`OLDER_TURN`. A
+    document's ``chunk`` is 0 for the head of a turn and 1 and up for the later
+    pieces of a long one (:mod:`.index`). ``similarity`` is the cosine of a
+    turn to the message when a search matched it by meaning (the list form
+    shows it); it is set on a copy for one search, never stored.
     """
 
     key: str
@@ -145,6 +166,8 @@ class Item:
     replaces: tuple[tuple[str, int], ...] = ()
     said: tuple[tuple[str, str], ...] = ()
     older: str = ""
+    chunk: int = 0
+    similarity: float | None = None
 
     @property
     def is_record(self) -> bool:
@@ -187,10 +210,46 @@ class Item:
     def _dated(self, now: float, timed: bool) -> str:
         """:attr:`where` with its date as :func:`day` writes it for *now*; a
         ``where`` that does not end in the item's own day is left as it is."""
+        chat, date = self._chat_and_date(now, timed)
+        return f"{chat}, {date}" if date else chat
+
+    def _chat_and_date(self, now: float, timed: bool) -> tuple[str, str]:
+        """The chat of :attr:`where` and its date as :func:`day` writes it for *now*;
+        no date (``""``) when ``where`` does not end in the item's own day."""
         plain = day(self.created_at)
         if not self.where.endswith(f", {plain}"):
-            return self.where
-        return self.where[: -len(plain)] + day(self.created_at, now, timed=timed)
+            return self.where, ""
+        return (
+            self.where[: -len(plain) - 2],
+            day(self.created_at, now, timed=timed),
+        )
+
+    def listed(self, now: float | None = None, *, timed: bool = False) -> str:
+        """The turn as one line of the list form: ``[t12] Oct 30 · Main chat ·
+        “Where do I plant the tomatoes?” · 0.71``.
+
+        ``t12`` is the document's id (what ``open_memory`` takes), the date and
+        chat read as :meth:`line` writes them (the year when it is not *now*'s, the
+        time of day with *timed*), the title is :func:`listed_title`, and the
+        similarity is the cosine to the message with two decimals when a search
+        matched the turn by meaning, else ``words``. A turn a newer one replaced
+        keeps its older mark, as :meth:`line` writes it.
+        """
+        chat, date = self._chat_and_date(clock.now() if now is None else now, timed)
+        date = date or day(self.created_at)
+        meaning = "words" if self.similarity is None else f"{self.similarity:.2f}"
+        older = f" ({self.older})" if self.older else ""
+        return (
+            f"[t{self.key[2:]}] {date} · {chat} · “{listed_title(self)}” · "
+            f"{meaning}{older}"
+        )
+
+    def opened_heading(self, now: float | None = None) -> str:
+        """The first line of a turn opened in full: its id, date and chat, and the
+        older mark when a newer one replaced it."""
+        chat, date = self._chat_and_date(clock.now() if now is None else now, False)
+        older = f" ({self.older})" if self.older else ""
+        return f"[t{self.key[2:]}] {date or day(self.created_at)} · {chat}{older}"
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -617,20 +676,134 @@ def current_only(items: Sequence[Item], message: str) -> list[Item]:
     return [item for item in items if not item.older]
 
 
-def pick(items: Sequence[Item], *, records: int, docs: int) -> list[Item]:
+def word_cut(text: str, limit: int) -> str:
+    """*text* if it fits in *limit* characters, else its head cut at a word, with a
+    ``…`` (at most *limit* characters in all); text without a space is cut anywhere."""
+    if len(text) <= limit:
+        return text
+    cut = text.rfind(" ", 1, limit)
+    head = text[: cut if cut > 0 else limit - 1].rstrip(" ,;:-")
+    return head + "…"
+
+
+def listed_title(item: Item) -> str:
+    """The title of *item*'s line in the list form: the first sentence of the user's
+    words in the turn, cut at a word (:data:`LIST_TITLE_CHARS` at most).
+
+    A document knows only its own text: for a later chunk of a long turn that is
+    the head of the user's words it repeats (or, when the user's words were longer
+    than a chunk, the window of them it starts in), so every chunk of a turn has
+    the same title unless the user's words ran on. A turn without the user's words
+    takes the first sentence of melo's reply, and a summary or a task's exchange
+    (no ``User:`` part) the first sentence of what there is.
+    """
+    text = item.text
+    body = text.partition("\n")[2] if text.startswith("Task: ") else text
+    if body.startswith("User: "):
+        typed, marker, answer = body[len("User: ") :].partition("\nmelo: ")
+        body = typed or answer if marker else typed
+    sentences = split_sentences(body)
+    first = sentences[0][1] if sentences else body
+    return word_cut(" ".join(first.split()), LIST_TITLE_CHARS) or "…"
+
+
+def meaning_of(
+    item: Item, vector: np.ndarray | None, embed_model: str, min_cosine: float
+) -> float | None:
+    """The cosine of *item* to the question's *vector* when :func:`ranked` took the
+    item into its vector list (its vector is of *embed_model* and the cosine is at
+    least *min_cosine*); ``None`` when it was matched by words only."""
+    if (
+        vector is None
+        or item.vector is None
+        or item.embed_model != embed_model
+        or item.vector.shape != vector.shape
+    ):
+        return None
+    cosine = float(np.dot(vector, item.vector))
+    return cosine if cosine >= min_cosine else None
+
+
+_ANSWER_MARK: Final = "\nmelo: "
+# How far back from the end of the text a later chunk's start is looked for, and
+# the least overlap that counts as one.
+_OVERLAP_REACH: Final = 400
+_MIN_OVERLAP: Final = 8
+
+
+def whole_turn(chunks: Sequence[str]) -> str:
+    """A turn's document text, ``User: …\nmelo: …``, from its chunks in order.
+
+    A later chunk (:func:`~localmelo.support.memory.index.document_chunks`) repeats
+    ``User: `` and a short head of the user's words before melo's reply when it
+    starts in the reply, and overlaps the end of the chunk before it: both are
+    taken out, so the text reads as it was written. Text the index left out after
+    its last chunk is not here.
+    """
+    if not chunks:
+        return ""
+    text = chunks[0]
+    for chunk in chunks[1:]:
+        body = chunk.removeprefix("User: ")
+        head, mark, window = body.partition(_ANSWER_MARK)
+        typed = " ".join(text.partition(_ANSWER_MARK)[0].partition("User: ")[2].split())
+        if mark and typed.startswith(head.removesuffix("…").rstrip()):
+            body = window
+        text += _after_overlap(text, body)
+    # A last chunk is stripped: with no reply, its ``melo: `` loses the space.
+    return text + " " if text.endswith(_ANSWER_MARK.rstrip()) else text
+
+
+def _after_overlap(text: str, body: str) -> str:
+    """What of *body* is new after *text*: *body* without its start, when that is
+    the end of *text* again (at least :data:`_MIN_OVERLAP` characters)."""
+    for size in range(min(len(text), len(body), _OVERLAP_REACH), _MIN_OVERLAP - 1, -1):
+        if text.endswith(body[:size]):
+            return body[size:]
+    return " " + body
+
+
+_SENTENCE_END: Final = re.compile(r"""[.!?]+["”’)\]]*(?=\s|$)|[。！？]+[”’」』）)]*""")
+
+
+def cut_at_sentence(text: str, chars: int) -> str:
+    """*text* if it fits in *chars*, else its head up to a sentence end, then
+    :data:`CUT_MARK`, in *chars* in all. The head ends at a word instead when no
+    sentence ends in its second half."""
+    if len(text) <= chars:
+        return text
+    room = max(chars - len(CUT_MARK) - 1, 1)
+    head = text[:room]
+    ends = [match.end() for match in _SENTENCE_END.finditer(head)]
+    if ends and ends[-1] >= room // 2:
+        cut = ends[-1]
+    else:
+        cut = head.rfind(" ") if " " in head[room // 2 :] else room
+    return f"{head[:cut].rstrip()} {CUT_MARK}"
+
+
+def pick(
+    items: Sequence[Item],
+    *,
+    records: int,
+    docs: int,
+    per_chat: int | None = PER_SESSION,
+) -> list[Item]:
     """From *items*, best first: at most *records* records and *docs* documents,
-    one chunk of a turn at most (the best), then at most :data:`PER_SESSION`
-    documents of a chat."""
+    one chunk of a turn at most (the best), then at most *per_chat* documents of
+    a chat (:data:`PER_SESSION`; ``None``, as many as *docs* allows)."""
     items = one_per_turn(items)
     kept = [item for item in items if item.is_record][:records]
     # A record already says what the turn it came from said.
     said = {(item.session_id, item.turn) for item in kept}
-    per_session: Counter[str] = Counter()
+    chats: Counter[str] = Counter()
     for item in items:
         if item.is_record or (item.session_id, item.turn) in said:
             continue
-        if per_session[item.session_id] < PER_SESSION and per_session.total() < docs:
-            per_session[item.session_id] += 1
+        if (
+            per_chat is None or chats[item.session_id] < per_chat
+        ) and chats.total() < docs:
+            chats[item.session_id] += 1
             kept.append(item)
     order = {id(item): n for n, item in enumerate(items)}
     return sorted(kept, key=lambda item: order[id(item)])
@@ -658,6 +831,8 @@ def block(
     kept: Sequence[str] = (),
     chars: int = BLOCK_CHARS,
     show: Shown = HEADS,
+    *,
+    listing: bool = False,
 ) -> tuple[str, list[Item]]:
     """The recall block a user message carries, and the items that fit in it.
 
@@ -665,14 +840,26 @@ def block(
     Items are added while the block stays within *chars*
     (:data:`BLOCK_CHARS` unless the settings say otherwise); *show* says how much
     of each turn they hold (:class:`Shown`).
+
+    With *listing* (``[memory] recall_form = "list"``) the notes are added so, and
+    the turns follow as :data:`LIST_GUIDE` and one line each (:meth:`Item.listed`),
+    all of them: *chars* does not bound the list.
     """
     lines = [BLOCK_HEADER, *kept]
+    fixed = len(lines)
     used: list[Item] = []
     now = clock.now()
     size = sum(len(line) + 1 for line in lines) - 1
     candidates = list(items)
     same_day = times(candidates)
+
+    def listed(item: Item) -> bool:
+        return listing and not item.is_record
+
     for item in candidates:
+        if listed(item):
+            used.append(item)
+            continue
         line = f"- {item.line(now, timed=item.key in same_day, show=show)}"
         if size + len(line) + 1 > chars:
             continue
@@ -682,10 +869,15 @@ def block(
     # An item whose same-day partner did not fit needs no time: shorter, so it fits.
     same_day = times(used)
     lines = [
-        *lines[: len(lines) - len(used)],
+        *lines[:fixed],
         *(
             f"- {item.line(now, timed=item.key in same_day, show=show)}"
             for item in used
+            if not listed(item)
         ),
     ]
+    turns = [item for item in used if listed(item)]
+    if turns:
+        lines.append(LIST_GUIDE)
+        lines.extend(item.listed(now, timed=item.key in same_day) for item in turns)
     return ("\n".join(lines) if used or kept else ""), used
