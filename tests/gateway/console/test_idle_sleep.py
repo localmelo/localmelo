@@ -286,6 +286,25 @@ async def test_a_run_is_six_hours_after_the_last(tmp_path: Path) -> None:
         assert len(w.runs) == 2
 
 
+async def test_the_run_watches_for_turns_from_before_its_gates_were_read(
+    tmp_path: Path,
+) -> None:
+    async with world(tmp_path) as w:
+        await w.note()
+        seen: dict[str, Any] = {}
+        inner = w.console.memory.sleep
+
+        async def capture(variant: str | None = None, **kwargs: Any) -> SleepReport:
+            seen.update(kwargs)
+            return await inner(variant, **kwargs)
+
+        w.console.memory.sleep = capture  # type: ignore[method-assign]
+        start = w.machine.now
+        assert await w.console.idle_sleep.tick() is not None
+        # A turn that starts while the gates are read still stops the run.
+        assert seen["began"] == start
+
+
 async def test_a_clock_set_back_does_not_skip_the_spacing(tmp_path: Path) -> None:
     async with world(tmp_path) as w:
         await w.note()

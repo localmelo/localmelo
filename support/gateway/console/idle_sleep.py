@@ -152,14 +152,17 @@ class IdleSleep:
     async def tick(self) -> SleepReport | None:
         """Run one sleep when the computer is idle; its report, or ``None`` when it did not run."""
         async with self._busy:
-            self.blocked = await self._reason()
+            # Taken before the first gate: a turn that starts while the gates
+            # are read still stops the run.
+            began = self.clock()
+            self.blocked = await self._reason(began)
             if self.blocked:
                 return None
-            return await self._run()
+            return await self._run(began)
 
-    async def _reason(self) -> str:
+    async def _reason(self, now: float) -> str:
         """Why no sleep runs now (the first gate that says no, cheapest first), or ``""``."""
-        console, now = self.console, self.clock()
+        console = self.console
         cfg = console.cfg
         if cfg.memory.sleep == "off" or not console.memory.enabled:
             return "off"
@@ -222,7 +225,7 @@ class IdleSleep:
 
     # ── One run ──
 
-    async def _run(self) -> SleepReport | None:
+    async def _run(self, began: float) -> SleepReport | None:
         console = self.console
         memory = console.memory
         # The time is kept before the run, so a run that fails is not tried again for hours.
@@ -230,7 +233,7 @@ class IdleSleep:
         pinned = await memory.pinned_quotes()
         self._running = True
         try:
-            report = await memory.sleep(None, chats=console.store)
+            report = await memory.sleep(None, chats=console.store, began=began)
         except Exception:
             logger.exception("The idle sleep could not tidy the notes")
             return None
@@ -241,7 +244,7 @@ class IdleSleep:
             "Idle sleep %s: %d changes%s",
             report.run_id,
             len(report.changes),
-            f", stopped: {report.aborted}" if report.aborted else "",
+            f" ({report.aborted})" if report.aborted else "",
         )
         if report.changes:
             await self._tell(report)
