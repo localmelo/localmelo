@@ -13,6 +13,7 @@ import {renderMarkdown} from '../../support/gateway/static/markdown.mjs';
 import {formatTime, t} from '../../support/gateway/static/i18n.mjs';
 import {workerHistory} from '../../support/gateway/static/worker-history.mjs';
 import {setupTasks} from '../../support/gateway/static/tasks.mjs';
+import {setupPanel as realSetupPanel} from '../../support/gateway/static/panel.mjs';
 import {plainSegments, setupStatusRow} from '../../support/gateway/static/status-row.mjs';
 import {setupRunning} from '../../support/gateway/static/running.mjs';
 import {setupModelCard} from '../../support/gateway/static/setup-card.mjs';
@@ -603,6 +604,7 @@ function makeElement(tag, id = '') {
     tag, tagName: tag.toUpperCase(), id, value: '', textContent: '', innerHTML: '', title: '', type: '', src: '', alt: '',
     style: {}, dataset: {}, attributes: {}, children: [], listeners: {}, parentElement: null,
     get ownerDocument() { return documentDouble; },
+    get firstChild() { return element.children[0] ?? null; },
     hidden: false, disabled: false, open: false, inert: false, tabIndex: 0,
     scrollHeight: 50, scrollTop: 0, clientHeight: 40,
     classList: {
@@ -621,7 +623,13 @@ function makeElement(tag, id = '') {
     removeAttribute(name) { delete element.attributes[name]; },
     append(...items) { for (const item of items) { item.parentElement = element; element.children.push(item); } },
     prepend(...items) { for (const item of items) item.parentElement = element; element.children.unshift(...items); },
-    replaceChildren(...items) { element.children = []; element.append(...items); },
+    // As in a browser, the focused element leaves the page with the node that held it: focus falls to the body (null here).
+    replaceChildren(...items) {
+      const active = documentDouble?.activeElement;
+      if (active && active !== element && element.contains(active) && !items.includes(active)) documentDouble.activeElement = null;
+      element.children = [];
+      element.append(...items);
+    },
     contains(node) { return node === element || element.children.some((child) => child.contains?.(node)); },
     addEventListener(type, handler) { (element.listeners[type] ||= []).push(handler); },
     removeEventListener() {},
@@ -725,7 +733,7 @@ function gateway(routes) {
   return {fetch, calls, callsTo: (path) => calls.filter((call) => call.path === path)};
 }
 
-function harness(routes, {mobile = false} = {}) {
+function harness(routes, {mobile = false, realPanel = false} = {}) {
   FakeEventSource.reset();
   const elements = new Map();
   const timers = [];
@@ -745,7 +753,9 @@ function harness(routes, {mobile = false} = {}) {
       assert.ok(['.chat', '.composer-area'].includes(selector), 'The DOM double only supports the selectors the page uses');
       return element(selector === '.chat' ? 'chat' : 'composer-area');
     },
-    querySelectorAll: () => [],
+    // Links and buttons by tag, over the elements the page made (the panel looks its controls up this way).
+    querySelectorAll: (selector) => (['a', 'button'].includes(selector)
+      ? [...new Set([...elements.values()].flatMap((node) => findNodes(node, (candidate) => candidate.tag === selector)))] : []),
     createElement: (tag) => makeElement(tag),
   };
   function element(id) {
@@ -799,16 +809,35 @@ function harness(routes, {mobile = false} = {}) {
     setupDrawer: () => drawer,
     // The panel beside the chat has its own tests (test_panel.mjs); here it only hears health.
     // `/memory import` opens its tab and presses "Look for notes": a test sets `notesOn` and reads `notesLooked`.
-    setupPanel: () => ({health: [], update(body) { this.health.push(body); }, closeSheet: () => false, select() {}, openSheet() {},
+    // A task is drawn by tasks.mjs, which the real panel owns the place of: the double shows and leaves it the same way.
+    setupPanel: realPanel ? realSetupPanel : (options) => ({health: [], state: {task: null}, update(body) { this.health.push(body); }, sheetClosed: 0, opened: 0, remembered: [],
+      closeSheet() { this.sheetClosed += 1; return false; }, select() {}, openSheet() {},
+      remember(key) { this.remembered.push(key); },
+      openTask(id) { this.opened += 1; this.state.task = id; options.tasks.show(id); options.tasks.focus(); },
+      closeTask() { if (this.state.task === null) return false; this.state.task = null; options.tasks.leave(); return true; },
+      focusOpener() {},
+      stepBack() {
+        if (this.state.task === null) return false;
+        if (!options.tasks.closeDialog()) options.navigate(options.home());
+        return true;
+      },
       lookForNotes: async () => { context.notesLooked = (context.notesLooked ?? 0) + 1; return context.notesOn !== false; }}),
     document,
-    location: {hash: '', pathname: '/', search: ''},
-    history: {replaceState(_state, _title, url) { context.location.hash = ''; context.replacedUrl = url; }},
+    location: {hash: '', pathname: '/', search: '', replace(hash) { context.replaced.push(hash); this.hash = hash; }},
+    // A state set without an address is the entry's own; one with an address cleans the sign-in code from it.
+    history: {state: null, backs: 0, back() { this.backs += 1; },
+      replaceState(state, _title, url) {
+        if (url === undefined) this.state = state;
+        else { context.location.hash = ''; context.replacedUrl = url; }
+      }},
+    replaced: [],
+    URL,
     URLSearchParams,
     localStorage: storage(),
     sessionStorage: storage(),
     navigator: {clipboard: {writeText: async (text) => { context.copied = text; }}},
-    matchMedia: () => ({matches: mobile, addEventListener() {}}),
+    // The real panel asks for a window wide enough for it; every other query follows `mobile`.
+    matchMedia: (query) => ({matches: realPanel && /min-width: 900px/.test(query) ? true : mobile, addEventListener() {}}),
     addEventListener(type, handler) {
       (windowListeners[type] ||= []).push(handler);
     },
@@ -1079,6 +1108,7 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
     ['file_write', {path: 'c.txt', content: 'abc'}, null, 'Write c.txt?', 'file_write · checking the file'],
     ['demo_lookup', {query: 'x'}, null, 'Let melo use demo_lookup?', 'demo_lookup'],
     ['browser:https://example.com', {site: 'example.com', access: 'read'}, null, 'Let melo open example.com?', 'browser · read only'],
+    ['browser:https://example.com', {site: 'example.com', access: 'read', via: 'web_fetch'}, null, 'Let melo read example.com?', 'web_fetch · read only'],
   ];
   for (const [tool, args, target, title, caption] of asks) {
     h.context.request = {request_id: `ask-${tool}-${title}`, tool_name: tool, arguments: args, workspace_label: '~/w', target};
@@ -1090,6 +1120,15 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
   const box = findNode(h.run('approvalCard(request)'), (node) => node.className === 'approval-content');
   assert.equal(box.tabIndex, 0, 'a long command scrolls, so a keyboard reaches it');
   assert.equal(box.attributes['aria-label'], 'Command');
+  // web_fetch's question shows the address it asks for, query and all.
+  const url = 'https://example.com/search?q=tomatoes';
+  h.context.request = {request_id: 'read-url', tool_name: 'browser:https://example.com',
+    arguments: {site: 'example.com', access: 'read', via: 'web_fetch', url}, workspace_label: '~/w'};
+  const card = h.run('approvalCard(request)');
+  const address = findNode(card, (node) => node.className === 'approval-content');
+  assert.equal(address.textContent, url);
+  assert.equal(address.attributes['aria-label'], 'The address melo asks for');
+  assert.match(findNode(card, (node) => node.className === 'approval-note').textContent, /read example\.com as text/);
 });
 
 // A file write over a file, as the gateway reports it: `target.diff` (docs/reference/api-v2.md).
@@ -3364,8 +3403,8 @@ test('the task list shows state, priority, title and update time, newest first, 
   await h.windowListeners.hashchange[0](); await settle();
   const panel = h.element('task-panel');
   assert.equal(panel.hidden, false);
-  assert.equal(h.element('scroll').hidden, true);
-  assert.equal(h.element('tasks-link').attributes['aria-current'], 'page');
+  assert.equal(h.element('scroll').hidden, false, 'the chat stays where it was; the list is drawn in the panel');
+  assert.equal(findNode(panel, (node) => node.className === 'task-back').href, '#/s/a', 'the link back is the chat\'s address');
   const rows = panel.children.filter((node) => node.className.includes('task-row'));
   assert.deepEqual(rows.map((row) => row.href), ['#/tasks/new', '#/tasks/old']);
   assert.match(flatten(rows[0]), /queued · P3 · updated/);
@@ -3374,7 +3413,6 @@ test('the task list shows state, priority, title and update time, newest first, 
   h.context.location.hash = '#/s/a'; await h.windowListeners.hashchange[0]();
   assert.equal(panel.hidden, true);
   assert.equal(h.element('scroll').hidden, false);
-  assert.equal(h.element('tasks-link').attributes['aria-current'], undefined);
 });
 
 test('a card that needs confirmation asks first, and Cancel sends nothing', async () => {
@@ -3638,6 +3676,64 @@ test('Stop uses the task API, disables while in flight, and shows a refusal', as
   assert.equal(h.net.calls.filter((call) => call.path.startsWith('/sessions') && call.method !== 'GET').length, 0, 'never the chat cancel');
 });
 
+test('a running task can be paused and given another priority from its page, with the task API', async () => {
+  const calls = [];
+  let level = 2;
+  const h = await openTask({
+    'GET /tasks/t1': () => ({task: taskRow('t1', {state: 'running', level, level_eff: level})}),
+    'PATCH /tasks/t1': (body) => {
+      calls.push(body);
+      if (body.level !== undefined) level = body.level;
+      return {task: taskRow('t1', body.state === 'pause' ? {state: 'parked', level: 5, level_eff: 5} : {state: 'running', level, level_eff: level})};
+    },
+  });
+  const menu = findNode(h.element('task-panel'), (node) => node.tag === 'select');
+  assert.equal(menu.attributes['aria-label'], 'Priority');
+  assert.deepEqual(menu.children.map((option) => option.textContent), [
+    'P0 · runs first; others wait', 'P1 · today', 'P2 · normal', 'P3 · when there is time', 'P4 · only when the computer is idle',
+  ], 'P0 to P4: P5 is the hold, which Pause sets');
+  assert.equal(menu.children.find((option) => option.selected).textContent, 'P2 · normal');
+  menu.value = '4';
+  menu.listeners.change[0]({target: menu}); await settle();
+  assert.deepEqual(calls, [{level: 4}]);
+  assert.match(flatten(h.element('task-panel')), /Priority changed\./);
+  labelled(h, 'Pause').click(); await settle();
+  assert.deepEqual(calls, [{level: 4}, {state: 'pause'}]);
+  assert.match(flatten(h.element('task-panel')), /Paused\./);
+  assert.ok(labelled(h, 'Resume'), 'a paused task offers Resume');
+  assert.equal(labelled(h, 'Pause'), null);
+  assert.equal(findNode(h.element('task-panel'), (node) => node.tag === 'select'), null, 'a task on hold has no priority to pick');
+});
+
+test('a finished or resumable task offers neither Pause nor a priority', async () => {
+  for (const state of ['done', 'parked', 'cancelled']) {
+    const h = await openTask({'GET /tasks/t1': {task: taskRow('t1', {state})}});
+    assert.equal(labelled(h, 'Pause'), null, state);
+    assert.equal(findNode(h.element('task-panel'), (node) => node.tag === 'select'), null, state);
+  }
+});
+
+test('a priority being chosen is not drawn away by the next poll', async () => {
+  let title = 'Task t1';
+  const h = await openTask({'GET /tasks/t1': () => ({task: taskRow('t1', {state: 'running', title})})});
+  const menu = findNode(h.element('task-panel'), (node) => node.tag === 'select');
+  menu.focus();
+  title = 'Task t1, renamed';
+  const poll = h.timers.find((timer) => timer.interval && timer.ms === 3000);
+  await poll.handler(); await settle();
+  assert.equal(findNode(h.element('task-panel'), (node) => node.tag === 'select'), menu, 'the menu stays while it has focus');
+  h.context.document.activeElement = null;
+  await poll.handler(); await settle();
+  assert.match(flatten(h.element('task-panel')), /renamed/);
+});
+
+test('opening a task moves focus to its title, inside the panel', async () => {
+  const h = await openTask({'GET /tasks/t1': {task: taskRow('t1')}});
+  const title = findNode(h.element('task-panel'), (node) => node.tag === 'h2');
+  assert.equal(title.tabIndex, -1);
+  assert.equal(h.context.document.activeElement, title);
+});
+
 test('a late answer for a task the user left is dropped', async () => {
   let release;
   const h = harness(baseRoutes({'GET /tasks/t1': () => new Promise((resolve) => { release = () => resolve({task: taskRow('t1')}); })}));
@@ -3650,7 +3746,7 @@ test('a late answer for a task the user left is dropped', async () => {
   assert.equal(h.element('task-panel').hidden, true);
 });
 
-test('the Tasks header names Tasks, not the open chat, and the chat comes back', async () => {
+test('a task opens in the panel and leaves the chat, its header and its address as they were', async () => {
   const chat = session('a', {title: 'Chat about novels', model: 'Qwen-7B'});
   const h = harness(baseRoutes({
     'GET /sessions': {sessions: [chat], machine: null, has_more: false},
@@ -3660,31 +3756,185 @@ test('the Tasks header names Tasks, not the open chat, and the chat comes back',
   }));
   await h.run('init()');
   assert.equal(h.element('header-title').textContent, 'Chat about novels');
-  h.context.location.hash = '#/tasks';
-  await h.windowListeners.hashchange[0](); await settle();
-  assert.equal(h.element('header-title').textContent, 'Tasks');
-  assert.equal(h.element('header-model').textContent, 'Scheduler tasks');
-  assert.equal(h.element('task-panel').hidden, false);
   h.context.location.hash = '#/tasks/t1';
   await h.windowListeners.hashchange[0](); await settle();
-  assert.equal(h.element('header-title').textContent, 'Tasks');
-  assert.equal(h.element('header-model').textContent, 'Scheduler tasks');
+  assert.equal(h.element('header-title').textContent, 'Chat about novels', 'the header is the chat\'s');
+  assert.equal(h.element('header-model').textContent, 'Qwen-7B · ~/w');
+  assert.deepEqual([h.element('task-panel').hidden, h.element('scroll').hidden], [false, false]);
+  assert.equal(h.context.location.hash, '#/tasks/t1', 'the address keeps naming the task');
+  assert.equal(findNode(h.element('task-panel'), (node) => node.className === 'task-back').href, '#/s/a', 'Back is the chat');
+  assert.equal(findNode(h.element('task-panel'), (node) => node.tag === 'h2')?.textContent, 'Task t1', 'the title is a heading of the panel');
   h.context.location.hash = '#/s/a';
   await h.windowListeners.hashchange[0](); await settle();
+  assert.equal(h.element('task-panel').hidden, true);
   assert.equal(h.element('header-title').textContent, 'Chat about novels');
-  assert.equal(h.element('header-model').textContent, 'Qwen-7B · ~/w', 'Developer mode names the model, then the chat\'s folder');
 });
-test('Tasks hands the header to Workers and back without the chat', async () => {
-  const h = harness(baseRoutes({'GET /tasks': {tasks: [taskRow('t1')]}, 'GET /sessions?kind=worker&limit=50': {sessions: [], next_cursor: null}}));
-  await h.run('init()');
-  h.context.location.hash = '#/tasks';
+test('a task link opens the chat behind the panel without rewriting its address, and Escape goes back to the chat', async () => {
+  const chat = session('a', {title: 'Chat about novels'});
+  const h = harness(baseRoutes({
+    'GET /sessions': {sessions: [chat], machine: null, has_more: false},
+    'GET /sessions/a': {session: chat, pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'not_loaded', tokens: 0},
+    'GET /tasks/t1': {task: taskRow('t1')},
+  }));
+  h.context.location.hash = '#/tasks/t1';
+  await h.run('init()'); await settle();
+  assert.equal(h.context.location.hash, '#/tasks/t1', 'opening the chat did not replace the address');
+  assert.equal(h.state().activeId, 'a');
+  assert.equal(h.element('task-panel').hidden, false);
+  assert.equal(h.element('header-title').textContent, 'Chat about novels');
+  // Escape returns to the chat (the page then follows the address).
+  h.documentListeners.keydown[0]({key: 'Escape', isComposing: false, keyCode: 27, preventDefault() {}});
+  assert.equal(h.context.location.hash, '#/s/a');
   await h.windowListeners.hashchange[0](); await settle();
+  assert.equal(h.element('task-panel').hidden, true);
+});
+test('a chat card pressed again while the panel names its task shows the task from where it is', async () => {
+  const h = await openTask({'GET /tasks/t1': {task: taskRow('t1')}});
+  h.run('leaveWorkers()');
+  h.run('panel.closeTask()');
+  assert.equal(h.element('task-panel').hidden, true);
+  h.run('openCard({sourceKind: "task", sourceId: "t1"})'); await settle();
+  assert.equal(h.element('task-panel').hidden, false, 'no hashchange comes for the same address; the card shows it directly');
+});
+test('an Escape the task\'s own confirmation took closes only it: the task and the phone\'s sheet stay', async () => {
+  const h = await openTask({'GET /tasks/t1': {task: taskRow('t1')}});
+  const panel = h.run('panel');
+  const press = (extra = {}) => h.documentListeners.keydown[0]({key: 'Escape', isComposing: false, keyCode: 27, preventDefault() {}, ...extra});
+  press({defaultPrevented: true});
+  assert.deepEqual([panel.state.task, panel.sheetClosed, h.context.replaced], ['t1', 0, []], 'a handled Escape reaches nothing behind it');
+  press();
+  assert.deepEqual([h.context.replaced, panel.sheetClosed], [['#/s/a'], 0], 'an unhandled one steps back to the chat');
+  // With no task, the guard sits in front of the sheet: a handled Escape does not close it, an unhandled one does.
+  h.run('panel.closeTask()');
+  press({defaultPrevented: true});
+  assert.equal(panel.sheetClosed, 0);
+  press();
+  assert.equal(panel.sheetClosed, 1);
+});
+
+test('a waiting task shown in the panel draws its approval card there only, and the chat\'s card has it back when the panel leaves', async () => {
+  const request = {request_id: 'r1', tool_name: 'python_exec', arguments: {code: 'print(1)'}, arguments_complete: true, workspace_label: '~/w', target: null};
+  const waiting = taskRow('t', {state: 'held', wait_reason: 'approval', pending_approvals: [request]});
+  const h = harness(mainRoutes({
+    'GET /approvals/r1': () => taskApproval({state: 'ready', text: 'It prints a number.'}),
+    'GET /tasks/t': {task: waiting},
+  }, {cards: [waitingCard]}));
+  await h.run('init()');
+  await settle();
+  const copies = () => [h.element('messages'), h.element('task-panel')].flatMap((root) => findNodes(root, (node) => node.id === 'approval-card-r1'));
+  assert.equal(copies().length, 1, 'the chat\'s card holds it');
+  assert.ok(findNode(h.element('messages'), (node) => node.id === 'approval-card-r1'));
+  h.context.location.hash = '#/tasks/t';
+  await h.windowListeners.hashchange[0](); await settle();
+  assert.equal(copies().length, 1, 'one request, one card id in the page');
+  assert.ok(findNode(h.element('task-panel'), (node) => node.id === 'approval-card-r1'), 'the panel\'s page has it');
+  assert.match(flatten(findNode(h.element('messages'), (node) => node.dataset?.cardId === '5')), /Review/, 'the card keeps its link to the task');
+  h.context.location.hash = h.run('homeHash()');
+  await h.windowListeners.hashchange[0](); await settle();
+  assert.equal(copies().length, 1);
+  assert.ok(findNode(h.element('messages'), (node) => node.id === 'approval-card-r1'), 'back in the chat\'s card');
+});
+
+test('Back to Melo steps back to the chat when the task was opened from it, and else replaces the task\'s entry', async () => {
+  const h = await openTask({'GET /tasks/t1': {task: taskRow('t1')}});
+  const back = () => findNode(h.element('task-panel'), (node) => node.className === 'task-back');
+  const press = (extra = {}) => { let prevented = false; back().listeners.click[0]({button: 0, preventDefault() { prevented = true; }, ...extra}); return prevented; };
+  // The first arrival at the entry keeps the address it came from; a later arrival leaves that alone.
+  assert.equal(h.context.history.state, null, 'an arrival with no previous address is not stamped');
+  assert.equal(press(), true);
+  assert.deepEqual([[...h.context.replaced], h.context.history.backs], [['#/s/a'], 0], 'unknown history: the entry is replaced');
+  h.context.replaced.length = 0;
+  h.context.location.hash = '#/tasks/t1';
+  await h.windowListeners.hashchange[0]({oldURL: 'http://localhost/#/s/a', newURL: 'http://localhost/#/tasks/t1'}); await settle();
+  assert.equal(h.context.history.state.meloFrom, '#/s/a');
+  await h.windowListeners.hashchange[0]({oldURL: 'http://localhost/#/workers', newURL: 'http://localhost/#/tasks/t1'}); await settle();
+  assert.equal(h.context.history.state.meloFrom, '#/s/a', 'the first arrival wins');
+  assert.equal(press(), true);
+  assert.deepEqual([[...h.context.replaced], h.context.history.backs], [[], 1], 'the entry before was the chat: one step back');
+  // A press with a modifier is the browser\'s own (a new tab), and a task opened from elsewhere is replaced.
+  assert.equal(press({ctrlKey: true}), false);
+  h.context.history.state = {meloFrom: '#/workers'};
+  press();
+  assert.deepEqual([[...h.context.replaced], h.context.history.backs], [['#/s/a'], 1]);
+});
+
+test('Back from a task opened from a chat card puts focus on the card\'s new Open button, after the chat is redrawn', async () => {
+  const done = cardRow(5, {at: NOW - 60, state: 'done', source_id: 't', source_kind: 'task', title: 'Fix CI', line: 'Fixed.'});
+  const h = harness(mainRoutes({
+    'GET /tasks/t': {task: taskRow('t', {state: 'done', title: 'Fix CI'})},
+    'GET /activity?since=0': {since: 0, scope: 'all', rows: [], more: false, unavailable: []},
+  }, {cards: [done]}), {realPanel: true});
+  // As in the page, the task's section is inside the panel.
+  h.element('panel').append(h.element('task-panel'));
+  await h.run('init()');
+  await settle();
+  const openButton = () => findNode(h.element('messages'), (node) => node.dataset?.focusKey === 'card:5');
+  const first = openButton();
+  assert.equal(first.textContent, 'Open task');
+  await first.click();
+  h.context.location.hash = '#/tasks/t';
+  await h.windowListeners.hashchange[0](); await settle();
+  assert.equal(h.element('task-panel').hidden, false);
+  assert.equal(h.element('task-panel').children.length > 0, true);
+  // Back, as a person presses it: the address goes to the chat, and the page follows the address.
+  const back = findNode(h.element('task-panel'), (node) => node.className === 'task-back');
+  back.listeners.click[0]({button: 0, preventDefault() {}});
+  assert.equal(h.context.location.hash, h.run('homeHash()'));
+  await h.windowListeners.hashchange[0](); await settle();
+  assert.equal(h.element('task-panel').hidden, true);
+  const second = openButton();
+  assert.ok(second, 'the chat drew its card again');
+  assert.notEqual(second, first, 'redrawing the chat made a new button');
+  assert.equal(second.dataset.focusKey, first.dataset.focusKey);
+  assert.equal(h.context.document.activeElement, second, 'focus is on the button the chat has now, not lost to the page');
+});
+
+test('the task page opens again for an address the page is on, and a card remembers where Back should go', async () => {
+  const h = await openTask({'GET /tasks/t1': {task: taskRow('t1')}});
+  const panel = h.run('panel');
+  assert.equal(panel.opened, 1);
+  // The macOS app fires the event itself when the address already names the task.
+  await h.windowListeners.hashchange[0](); await settle();
+  assert.deepEqual([panel.opened, panel.state.task], [2, 't1']);
+  h.run('openCard({id: 7, sourceKind: "task", sourceId: "t1"})'); await settle();
+  assert.deepEqual([panel.remembered, panel.opened], [['card:7'], 3]);
+});
+
+test('Pause says Pausing… until the task parks, then the word the Activity row uses', async () => {
+  let state = 'running';
+  const h = await openTask({
+    'GET /tasks/t1': () => ({task: taskRow('t1', state === 'running' ? {state, level_eff: 5, level: 5} : {state, level: 5, level_eff: 5})}),
+    'PATCH /tasks/t1': () => ({task: taskRow('t1', {state: 'running', level: 5, level_eff: 5})}),
+  });
+  labelled(h, 'Pause').click(); await settle();
+  const text = () => flatten(h.element('task-panel'));
+  assert.match(text(), /Pausing…/);
+  assert.doesNotMatch(text(), /Paused\./);
+  assert.equal(labelled(h, 'Pause').disabled, true, 'pressing it again does nothing more');
+  // Still running at the next poll: unchanged.
+  const poll = h.timers.find((timer) => timer.interval && timer.ms === 3000);
+  await poll.handler(); await settle();
+  assert.match(text(), /Pausing…/);
+  state = 'parked';
+  await poll.handler(); await settle();
+  assert.match(text(), /Paused\./);
+  assert.doesNotMatch(text(), /Pausing…/);
+  assert.match(text(), /State paused/, 'the state reads as the Activity row does');
+  assert.ok(labelled(h, 'Resume'));
+});
+
+test('a Workers page gives way to a task in the panel, and the chat is back behind it', async () => {
+  const h = harness(baseRoutes({'GET /tasks': {tasks: [taskRow('t1')]}, 'GET /tasks/t1': {task: taskRow('t1')}, 'GET /sessions?kind=worker&limit=50': {sessions: [], next_cursor: null}}));
+  await h.run('init()');
   h.context.location.hash = '#/workers';
   await h.windowListeners.hashchange[0](); await settle();
   assert.equal(h.element('header-title').textContent, 'Workers');
-  h.context.location.hash = '#/tasks';
+  assert.equal(h.element('scroll').hidden, true);
+  h.context.location.hash = '#/tasks/t1';
   await h.windowListeners.hashchange[0](); await settle();
-  assert.equal(h.element('header-title').textContent, 'Tasks');
+  assert.notEqual(h.element('header-title').textContent, 'Workers');
+  assert.deepEqual([h.element('scroll').hidden, h.element('worker-panel').hidden, h.element('task-panel').hidden], [false, true, false]);
+  assert.equal(h.context.location.hash, '#/tasks/t1');
 });
 
 test('an open task card picks up an approval that arrives later, and redraws only on a change', async () => {
@@ -3785,7 +4035,7 @@ test('a running task card gains a step and a tool call as they are recorded, wit
   assert.match(flatten(liveBox(h)), /Reading the file now/);
   assert.equal(taskReads(h), 1, 'new events are folded in without reading the task session again');
   assert.equal(panel.children[0], heading, 'the card itself is not redrawn');
-  assert.equal(panel.children.indexOf(liveBox(h)), panel.children.findIndex((node) => node.tag === 'h2' && node.textContent === 'Recovery card') - 1, 'the Live section sits above the recovery card');
+  assert.equal(panel.children.indexOf(liveBox(h)), panel.children.findIndex((node) => node.tag === 'h3' && node.textContent === 'Recovery card') - 1, 'the Live section sits above the recovery card');
 });
 
 test('the approval card and the live tail sit side by side, and a frame redraws only the tail', async () => {
@@ -3864,34 +4114,29 @@ test('a task still going heads its work Live; one that waits or paused heads it 
     [TURNS_T1]: {turns: [turnRow({user_text: 'Objective of t1', status: 'running', answer: '', events: [liveStarted, liveTool(2)]})], has_earlier: false},
     'GET /sessions/t1/status': {session_id: 't1', segments: []},
   });
-  assert.equal(findNode(liveBox(running), (node) => node.tag === 'h2' && node.textContent === 'Live') !== null, true);
+  assert.equal(findNode(liveBox(running), (node) => node.tag === 'h3' && node.textContent === 'Live') !== null, true);
   assert.equal(answerBox(running).hidden, true);
   const paused = await openTask({
     'GET /tasks/t1': () => ({task: taskRow('t1', {state: 'parked'})}),
     [TURNS_T1]: {turns: [turnRow({user_text: 'Objective of t1', status: 'cancelled', answer: '', events: [liveStarted, liveTool(2)]})], has_earlier: false},
   });
-  assert.equal(findNode(liveBox(paused), (node) => node.tag === 'h2' && node.textContent === 'Steps') !== null, true);
+  assert.equal(findNode(liveBox(paused), (node) => node.tag === 'h3' && node.textContent === 'Steps') !== null, true);
   assert.equal(findNode(liveBox(paused), (node) => node.textContent === 'Live'), null);
   assert.match(flatten(taskPage(paused)), /Evidence Checked when you press Resume/);
 });
 
-test('the Tasks header says Tasks alone in default mode, and a developer keeps the scheduler words', async () => {
+test('the task view says Tasks alone in default mode, and a developer keeps the scheduler words', async () => {
   const routes = {'GET /tasks': {tasks: [taskRow('t1', {state: 'done'})]}, 'GET /tasks/t1': {task: taskRow('t1', {state: 'done'})}};
   const person = harness(defaultMode(routes));
   await person.run('init()');
   person.context.location.hash = '#/tasks';
   await person.windowListeners.hashchange[0](); await settle();
-  assert.equal(person.element('header-title').textContent, 'Tasks');
-  assert.equal(person.element('header-model').textContent, '');
+  assert.match(flatten(person.element('task-panel')), /Open a task to see what it did\./);
   assert.doesNotMatch(flatten(person.element('task-panel')), /Scheduler|recovery card/);
-  person.context.location.hash = '#/tasks/t1';
-  await person.windowListeners.hashchange[0](); await settle();
-  assert.equal(person.element('header-model').textContent, '');
   const developer = harness(baseRoutes(routes));
   await developer.run('init()');
   developer.context.location.hash = '#/tasks';
   await developer.windowListeners.hashchange[0](); await settle();
-  assert.equal(developer.element('header-model').textContent, 'Scheduler tasks');
   assert.match(flatten(developer.element('task-panel')), /Scheduler tasks\. Open one to see its recovery card/);
 });
 
@@ -3968,7 +4213,7 @@ const defaultMode = (extra = {}) => baseRoutes({
   'GET /tasks': {tasks: []},
   ...extra,
 });
-const ONLY_DEVELOPER = ['level-btn', 'details-trigger', 'machine-state', 'workers-link', 'tasks-link', 'section-nav', 'composer-note'];
+const ONLY_DEVELOPER = ['level-btn', 'details-trigger', 'machine-state', 'workers-link', 'section-nav', 'composer-note'];
 const hiddenOf = (h, ids) => ids.map((id) => h.element(id).hidden);
 
 test('default mode leaves out the level, Details, the GPU line and the idle sections, and keeps every id', async () => {
@@ -3985,26 +4230,30 @@ test('default mode leaves out the level, Details, the GPU line and the idle sect
   assert.equal(developer.net.calls.some((call) => call.path.startsWith('/sessions?kind=')), false, 'A developer never asks whether Workers has anything');
 });
 
-test('Tasks shows in default mode once a task exists; the Workers switch is a developer\'s only', async () => {
-  const nav = (h) => hiddenOf(h, ['workers-link', 'tasks-link', 'section-nav']);
+test('the panel offers all tasks once a task exists; the Workers switch is a developer\'s only', async () => {
+  const nav = (h) => hiddenOf(h, ['workers-link', 'section-nav']);
   const none = harness(defaultMode());
   await none.run('init()');
-  assert.deepEqual(nav(none), [true, true, true]);
+  assert.deepEqual(nav(none), [true, true]);
+  assert.equal(none.run('sections.tasks'), false);
   assert.deepEqual(none.net.calls.slice(-3).map((call) => call.path), ['/sessions?kind=worker&limit=1', '/sessions?kind=terminal&limit=1', '/tasks']);
   // A run or a terminal chat no longer brings back the sidebar's Workers switch (the main chat links them).
   const terminal = harness(defaultMode({'GET /sessions?kind=terminal&limit=1': {sessions: [session('k', {kind: 'chat'})]}}));
   await terminal.run('init()');
-  assert.deepEqual(nav(terminal), [true, true, true]);
+  assert.deepEqual(nav(terminal), [true, true]);
+  // A task brings no sidebar link either: the panel's Workers tab lists all of them.
   const task = harness(defaultMode({'GET /tasks': {tasks: [taskRow('t1')]}}));
   await task.run('init()');
-  assert.deepEqual(nav(task), [true, false, false]);
-  // Something running shows its section at the next health read, and a route opens its own.
+  assert.deepEqual(nav(task), [true, true]);
+  assert.equal(task.run('sections.tasks'), true);
+  // Something running tells the panel at the next health read, and a route opens its own view.
   none.context.setHealth({...health, status: {running: {chats: 0, tasks: 1, runs: 1, terminal: 0}, tasks: {running: 1, queued: 0, held: 0}, items: [], waiting: []}});
   none.run('syncUI()');
-  assert.deepEqual(nav(none), [true, false, false]);
-  none.run('showTasks("")');
+  assert.equal(none.run('sections.tasks'), true);
+  assert.deepEqual(nav(none), [true, true]);
+  none.run('showTask("")');
   await settle();
-  assert.deepEqual(nav(none), [true, false, false]);
+  assert.deepEqual(nav(none), [true, true]);
   // Leaving them brings back the chat's header, and none of the developer's.
   none.context.location.hash = '#/s/a';
   await none.windowListeners.hashchange[0]();
@@ -4100,15 +4349,15 @@ test('the task list and card name the priority in developer mode only', async ()
     return [list, h.text('task-panel')];
   };
   const [plainList, plainCard] = await text(defaultMode);
-  assert.match(plainList, /parked · updated/);
+  assert.match(plainList, /paused · updated/);
   assert.doesNotMatch(plainCard, /Priority|P3/);
   const [devList, devCard] = await text(baseRoutes);
-  assert.match(devList, /parked · P3 · updated/);
+  assert.match(devList, /paused · P3 · updated/);
   assert.match(devCard, /Priority P3 · when there is time/);
 });
 
 test('Escape closes what is open in Tasks and Workers too, and stops no chat there', async () => {
-  for (const view of ['showTasks("")', 'showWorkers("")']) {
+  for (const view of ['showTask("")', 'showWorkers("")']) {
     const status = {running: {chats: 0, tasks: 1, runs: 0, terminal: 0}, items: [{kind: 'task', id: 't1', title: 'Index the repo'}]};
     const h = harness(defaultMode({'GET /health': () => ({body: {...health, status}}), 'GET /sessions?kind=worker&limit=50': {sessions: [], next_cursor: null}}));
     await h.run('init()');
@@ -4122,6 +4371,14 @@ test('Escape closes what is open in Tasks and Workers too, and stops no chat the
     assert.equal(h.context.document.activeElement, h.element('running-btn'));
     h.run('sidebar(true)');
     assert.equal(h.element('app').classList.contains('sidebar-open'), true);
+    if (view.startsWith('showTask')) {
+      // Focus is in the task, so Escape steps back to the chat first.
+      escape();
+      assert.match(h.context.location.hash, /^#\/(s\/|new)/);
+      await h.windowListeners.hashchange[0](); await settle();
+      assert.equal(h.element('task-panel').hidden, true);
+      assert.equal(h.element('app').classList.contains('sidebar-open'), true);
+    }
     escape();
     assert.equal(h.element('app').classList.contains('sidebar-open'), false, `Escape closes the sidebar in ${view}`);
     h.element('settings-dialog').showModal();

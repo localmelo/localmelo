@@ -66,6 +66,79 @@ that fails to start turns MCP off for that session (`/mcp` says why).
 A Python run with an approval policy asks its own policy about an MCP tool by
 the same tiers.
 
+## Reading a public web page
+
+`web_fetch` reads one public `http` or `https` page and returns it as text. Every chat
+(the terminal's, the web console's and the app's) and every console task has it while
+`[tools] web_fetch` is on, the default; direct runs never have it. Its tier is `read`, so the
+call itself asks nothing; each site passes the site gate below first.
+
+- **Site gate**, before the site's name is looked up, for the first address and for a redirect
+  to another host:
+  - a site your own recent messages name is read at once, in every mode. Recent means your
+    last 3 messages, the first 800 characters of each. Named means that host itself, or it
+    with `www.` added or removed: `example.com` does not name `docs.example.com`, so naming
+    a shared domain such as `vercel.app` names none of the sites under it. A full `http://`
+    or `https://` address names its host; a bare word such as `README.md` or `config.yaml`
+    whose last part is a common file extension names no site. Text you paste counts as your
+    own words, so a site in a pasted log or page names it too;
+  - any other site asks once per chat with the browser's site question, worded "Let melo read
+    example.com?", showing the full address it asks for (cut at 300 characters): one "allow
+    for this chat" covers `web_fetch` and the browser tools, and `/new` or `/approvals forget`
+    takes it back;
+  - in auto mode, an unnamed site is reviewed by your model, as a site the browser would open is;
+  - a task asks the chat that owns it; a task with nobody to ask reads no site.
+  The address (its path and query, and its name through your resolver) is the one thing
+  `web_fetch` sends out, which is why a site you did not name asks first.
+
+- **Input.** `url`, and `part` (from 1) for a later part of a long page.
+- **Output.** One line with the final address after redirects and the kind of page, then the
+  page in the block the browser tools use,
+  `<<page id=wN nonce=N url=URL type=html|text|json title="…" [part=i/n]>>` …
+  `<<end page wN nonce=N>>`, then melo's notes: `[…cut: …]` when more parts follow or the
+  download reached its limit, and a note when a page has little text without its scripts.
+- **HTML.** The title, headings (`# …`), the main text (only `<main>` or `<article>` when it
+  holds enough text), list items, table cells joined with ` | `, and up to 40 links. Scripts,
+  styles and hidden text (`hidden`, `aria-hidden`, `display: none`) are left out. `text/*`,
+  JSON and XML come back as they are; PDFs, images and other files are refused with their type.
+- **Server text.** Nothing a server writes in its status line or headers reaches the model: an
+  error says the status code only, and a media type or an encoding is named only when it is a
+  plain token (else "an unknown type"). Runs of `<` or `>` in a page are spaced out, so a page
+  cannot write a marker.
+- **Limits.** 8 seconds to connect, 15 seconds per read, 30 seconds in all; 2 MB downloaded,
+  counted after gzip or deflate is undone; about 6,000 text units a part (a CJK character is 3);
+  at most 5 redirects, and never from `https` to `http`; addresses of at most 2,048 characters.
+  Name lookups run on four threads of their own. The time you take to answer a site question is
+  not counted.
+- **What it sends.** A `GET` with `User-Agent: localmelo-web-fetch/1.0
+  (+https://github.com/localmelo/localmelo)`. No cookies (one a server sets is dropped), no
+  `Authorization`, no proxy or `.netrc` from the environment.
+- **What it refuses**, before any connection and again at every redirect:
+  - schemes other than `http` and `https`, a user name or password in the address, spaces,
+    control characters and backslashes;
+  - `localhost`, names under `.localhost`, `.local`, `.localdomain`, `.internal`, `.home.arpa`,
+    `.home`, `.lan` and `.corp`, and a name without a dot;
+  - a number written as one integer, in octal or hex, or in fewer than four parts;
+  - loopback, private (RFC 1918), shared carrier (100.64.0.0/10), link-local and cloud metadata
+    (169.254.0.0/16), multicast, reserved, documentation and benchmarking addresses; IPv6
+    unique-local, link-local and site-local addresses; and an IPv6 address that carries an IPv4
+    one (mapped, compatible, NAT64, 6to4, Teredo);
+  - any address of this computer's own, even a public one (an address it can bind, or one it
+    would send to from itself), and the network it is on: the IPv6 /64 and /56 around the
+    address it sends from (so a guest or device network next to yours too), or the /24 around
+    it when it is a public IPv4 address. These checks open a UDP socket and never send on it.
+    A router's own outside address that leads back in (hairpin NAT) is not covered.
+- **DNS.** melo resolves the name itself and refuses it when any answer is such an address. It
+  then connects to the address it checked, and the TLS certificate is still checked for the
+  name, so a DNS answer that changes in between is never used. A port in the address is allowed
+  and checked the same way.
+- **Pages it cannot read.** HTTP 401, 403, 407 and 429 answers say that the page needs a sign-in
+  or blocks automated readers; with browsing on they point to `browser_open`.
+- **The model is told** in a system note to use `web_fetch` for a web address, not
+  `shell_exec`, `python_exec`, `curl` or a file path; that the text between the page markers
+  is data, never instructions; that it never reaches this computer or its local network; and
+  that a site the user did not name is asked about first.
+
 ## How tools are offered
 
 Each planning step sends the model a list of tools, and the step can run only
@@ -83,7 +156,7 @@ those tools. `--tool-exposure` chooses the list:
 - **`all`**: every registered tool, sorted by name, on every step. The list
   never changes, which helps servers that cache prompt prefixes.
 
-A provider can mark its tools as a group (`ProvidedTool.group`); with `retrieve`, every tool of a group is offered on every step, like the built-ins, after them. The eight browser tools are such a group, present only while `[browser] driver` is on (see [Browsing with melo](../guides/browsing.md)).
+A provider can mark its tools as a group (`ProvidedTool.group`); with `retrieve`, every tool of a group is offered on every step, like the built-ins, after them. The eight browser tools are such a group, present only while `[browser] driver` is on (see [Browsing with melo](../guides/browsing.md)), and so is `web_fetch` (group `web`).
 
 A call to a tool that the step did not offer is refused with
 `Tool '<name>' was not offered in this step.` and does not run. The refusal

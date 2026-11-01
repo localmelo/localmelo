@@ -38,6 +38,7 @@ SECTIONS = (
     "workspace",
     "scheduler",
     "browser",
+    "tools",
     "gateway",
 )
 

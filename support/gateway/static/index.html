@@ -34,7 +34,6 @@
         </div>
         <nav class="worker-navigation" id="section-nav" aria-label="History sections" data-i18n-aria-label="html.historySections">
           <a href="#/workers" id="workers-link" data-i18n="html.workersLink">Workers</a>
-          <a href="#/tasks" id="tasks-link" data-i18n="html.tasksLink">Tasks</a>
         </nav>
         <div class="main-chat-slot" id="main-chat-row" hidden></div>
         <button class="nav-button new-chat" id="new-btn">
@@ -136,7 +135,6 @@
         </div>
         <div class="notice" id="notice" role="status" hidden></div>
         <section id="worker-panel" class="worker-panel" aria-label="Worker history" data-i18n-aria-label="html.workerHistory" hidden></section>
-        <section id="task-panel" class="worker-panel task-panel" aria-label="Tasks" data-i18n-aria-label="html.tasks" hidden></section>
         <section class="scroll" id="scroll" aria-label="Conversation" data-i18n-aria-label="html.conversation">
           <div class="welcome" id="welcome">
             <span class="blinks portrait"
@@ -243,6 +241,7 @@
       </main>
       <aside class="panel" id="panel" aria-label="Melo">
         <section class="details-drawer" id="details-drawer" hidden></section>
+        <section id="task-panel" class="task-panel" aria-label="Tasks" data-i18n-aria-label="html.tasks" hidden></section>
       </aside>
       <button type="button" class="panel-backdrop" id="panel-backdrop" tabindex="-1" aria-label="Close activity" data-i18n-aria-label="html.closeActivity" hidden></button>
     </div>
@@ -386,6 +385,10 @@
                     <label><input type="radio" name="s-approvals" id="s-approvals-ask" value="ask" disabled /><span data-i18n="auto.mode.ask">Ask</span></label>
                     <label><input type="radio" name="s-approvals" id="s-approvals-auto" value="auto" disabled /><span data-i18n="auto.mode.auto">Auto</span></label>
                   </div>
+                </li>
+                <li class="st-row" id="s-web-fetch-row" hidden>
+                  <div class="st-text"><label class="st-label" for="s-web-fetch" data-i18n="settings.webFetch.title">Read web pages</label><span class="st-key" data-developer hidden>tools.web_fetch</span><p class="st-hint" data-i18n="settings.webFetch.hint">Melo can read public web pages you ask about. It never reaches this Mac or your local network, and never signs in.</p></div>
+                  <span class="st-switch"><input type="checkbox" role="switch" id="s-web-fetch" disabled /><span class="st-track" aria-hidden="true"></span></span>
                 </li>
               </ul>
               <h4 class="st-group-title" id="s-extra-title" data-i18n="html.sExtraTitle">Other folders melo may read</h4>

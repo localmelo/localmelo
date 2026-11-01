@@ -511,6 +511,32 @@ test('a switch saves at once with the revision it read, says Saved, and Undo put
   assert.equal(h.element('s-across-chats').checked, true);
 });
 
+test('Read web pages: hidden for a gateway that does not report it, else a switch that saves web_fetch', async () => {
+  const older = harness({'GET /settings': full()});
+  await older.open('chats');
+  assert.equal(older.element('s-web-fetch-row').hidden, true);
+  let revision = 1;
+  const h = harness({
+    'GET /settings': full({web_fetch: true}),
+    'PUT /settings': (body) => full({revision: `rev${++revision}`, web_fetch: body.web_fetch ?? true}),
+  });
+  await h.open('chats');
+  assert.equal(h.element('s-web-fetch-row').hidden, false);
+  assert.equal(h.element('s-web-fetch').checked, true);
+  h.element('s-web-fetch').checked = false;
+  await h.element('s-web-fetch').emit('change');
+  await flush();
+  assert.deepEqual(h.puts().at(-1).options.body, {chat_backend: 'mlc', embedding_backend: 'none', workspace: '~/ws',
+    sections: {}, revision: 'rev1', web_fetch: false});
+  assert.equal(h.element('settings-saved-text').textContent, 'Saved: Reading web pages is off.');
+  assert.equal(h.element('s-web-fetch').checked, false);
+  await h.element('settings-undo').emit('click');
+  await flush();
+  assert.equal(h.puts().at(-1).options.body.web_fetch, true);
+  assert.equal(h.element('settings-saved-text').textContent, 'Undone: Reading web pages is on.');
+  assert.equal(h.element('s-web-fetch').checked, true);
+});
+
 test('a change made elsewhere meanwhile is a conflict: the switch goes back and Reload is offered', async () => {
   const conflict = Object.assign(new Error('stale'), {status: 409, code: 'settings_changed'});
   const h = harness({'GET /settings': full(), 'PUT /settings': () => { throw conflict; }});

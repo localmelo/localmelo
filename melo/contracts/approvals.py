@@ -184,7 +184,8 @@ class ApprovalPolicy(Protocol):
 # something the tool found out while it ran, such as the site a redirect led
 # to. The arguments are the tool name the policy sees (a grant of the run
 # covers that name), the arguments to show and a one-line preview. It raises
-# like the policy does; unset (no policy) means nobody is asked.
+# like the policy does; unset (no policy) means nobody is asked. The agent's
+# also answers ``names_host(host)``: whether the user's own words name a site.
 ToolAsk = Callable[[str, Mapping[str, Any], str], Awaitable[ApprovalDecision]]
 TOOL_ASK: ContextVar[ToolAsk | None] = ContextVar("localmelo_tool_ask", default=None)
 

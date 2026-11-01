@@ -103,6 +103,7 @@ class AgentFactory:
         mcp_servers: list[Any] | None = None,
         saves: bool = True,
         browser_driver: str = "off",
+        web_fetch: bool = False,
     ) -> None:
         self.backend = backend
         self._cfg = cfg
@@ -129,6 +130,8 @@ class AgentFactory:
         self.mcp_servers: list[Any] = list(mcp_servers or [])
         # The browser the Agents may read pages in ([browser] driver); /browser changes it.
         self.browser_driver = browser_driver
+        # Whether the Agents may read public pages with web_fetch ([tools] web_fetch).
+        self.web_fetch = web_fetch
         # Whether /model and /backend save their choice as the default: not
         # for a --base-url session whose save question was answered no.
         self.saves = saves
@@ -188,6 +191,7 @@ class AgentFactory:
                 retrieval_extra_body=self._retrieval_extra_body,
                 mcp_config=mcp_config,
                 browser_driver=self.browser_driver,
+                web_fetch=self.web_fetch,
                 identify=True,
             )
         cfg = self._cfg
@@ -204,6 +208,7 @@ class AgentFactory:
             retrieval_extra_body=self._retrieval_extra_body,
             mcp_config=mcp_config,
             browser_driver=self.browser_driver,
+            web_fetch=self.web_fetch,
             identify=True,
         )
 

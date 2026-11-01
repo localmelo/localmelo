@@ -1101,6 +1101,32 @@ def test_the_settings_carry_whether_melo_may_browse_and_save_it_only_when_sent(
     assert word.status_code == 400, "only true or false"
 
 
+def test_the_settings_carry_whether_melo_reads_web_pages_and_save_it_only_when_sent(
+    client: TestClient, isolated_config: Path
+) -> None:
+    """The Settings switch saves ``[tools] web_fetch``; on by default, so off is written."""
+    _saved_cfg()
+    loaded = client.get("/api/settings").json()
+    assert loaded["web_fetch"] is True
+    off = client.put(
+        "/api/settings", json=_put_body(loaded["revision"], web_fetch=False)
+    )
+    assert off.status_code == 200 and off.json()["web_fetch"] is False
+    assert config.load().tools.web_fetch is False
+    assert "[tools]\nweb_fetch = false" in isolated_config.read_text()
+    kept = client.put("/api/settings", json=_put_body(off.json()["revision"]))
+    assert kept.json()["web_fetch"] is False, "absent leaves it as it is"
+    on = client.put(
+        "/api/settings", json=_put_body(kept.json()["revision"], web_fetch=True)
+    )
+    assert on.status_code == 200 and on.json()["web_fetch"] is True
+    assert "[tools]" not in isolated_config.read_text(), "the default is not written"
+    word = client.put(
+        "/api/settings", json=_put_body(on.json()["revision"], web_fetch="off")
+    )
+    assert word.status_code == 400
+
+
 def test_the_developer_section_lists_every_key_by_section_with_its_value(
     client: TestClient,
 ) -> None:

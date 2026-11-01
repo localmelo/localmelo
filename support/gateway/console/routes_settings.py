@@ -119,6 +119,8 @@ class SettingsPutBody(_SettingsBaseBody):
     # ``[workspace] extra_folders``, the folders "Always allow this folder" kept
     # (#405), as the whole new list; absent leaves it.
     extra_folders: list[StrictStr] | None = None
+    # ``[tools] web_fetch``: whether chats and tasks read public web pages; absent leaves it.
+    web_fetch: StrictBool | None = None
 
 
 def _check_single_line(field: str, value: str) -> None:
@@ -397,6 +399,7 @@ def settings_json() -> dict[str, Any]:
         ),
         "browser": cfg.browser.driver != "off",
         "extra_folders": _extra_folders(cfg),
+        "web_fetch": cfg.tools.web_fetch is True,
         "advanced_options": _advanced_options(),
         "developer_settings": _developer_settings(cfg),
         "run_options": _run_options(),
@@ -542,6 +545,9 @@ def _build_candidate(
         candidate.browser.driver = "safari-automation" if browser else "off"
     if folders is not None:
         candidate.workspace.extra_folders = list(folders)
+    web_fetch = getattr(body, "web_fetch", None)
+    if web_fetch is not None:
+        candidate.tools.web_fetch = web_fetch
     for sec_name, sec_fields in body.sections.items():
         target = getattr(candidate, sec_name)
         for field_name, field_val in sec_fields.items():
@@ -615,6 +621,8 @@ def _changed_fields(before: config.Config, after: config.Config) -> list[str]:
         changed.append("browser")
     if before.workspace.extra_folders != after.workspace.extra_folders:
         changed.append("extra_folders")
+    if before.tools.web_fetch != after.tools.web_fetch:
+        changed.append("web_fetch")
     for sec_name in config._LOCAL_SECTIONS:
         b_sec = getattr(before, sec_name)
         a_sec = getattr(after, sec_name)

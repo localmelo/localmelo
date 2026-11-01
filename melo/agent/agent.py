@@ -1952,6 +1952,10 @@ class _ToolAsk:
         self._workspace_root = workspace_root
         self._reviewer = reviewer
 
+    def names_host(self, host: str) -> bool:
+        """Whether the user's recent messages name *host* itself (``www.`` aside)."""
+        return self._reviewer is not None and self._reviewer.names_host(host)
+
     async def __call__(
         self, tool_name: str, arguments: Mapping[str, Any], preview: str
     ) -> ApprovalDecision:

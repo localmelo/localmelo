@@ -246,6 +246,22 @@ def _tool_panel(
         lines = _lines(shown(content))
         body = [("", row) for row in _numbered(lines, width)]
         return PanelText("Change a file?", header, body, escaped_any)
+    if tool.startswith("browser:") and arguments.get("via") == "web_fetch":
+        site = shown(str(arguments.get("site") or tool[len("browser:") :]))
+        said = (
+            f"melo wants to read {site} as text: one request, no sign-ins, no cookies."
+        )
+        note = "The address it asks for is sent to that site."
+        body = [("", row) for row in _wrapped([said], width)]
+        if url := arguments.get("url"):
+            body += [("", row) for row in _wrapped([shown(str(url))], width)]
+        body += [("muted", row) for row in _wrapped([note], width)]
+        return PanelText(
+            "Read a website?",
+            f"{site}{mark} · web_fetch · read only",
+            body,
+            escaped_any,
+        )
     if tool.startswith("browser:"):
         site = shown(str(arguments.get("site") or tool[len("browser:") :]))
         said = f"melo wants to open {site} in Safari and read it."

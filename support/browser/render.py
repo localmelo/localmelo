@@ -38,6 +38,8 @@ HREF_CHARS = 120
 TITLE_CHARS = 120
 
 _UNSAFE = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f‎‏‪-‮⁦-⁩]")
+_ANGLES_OPEN = re.compile("<{2,}")
+_ANGLES_CLOSE = re.compile(">{2,}")
 _SENSITIVE_WORDS = {
     "password": "password field",
     "code": "one-time code field",
@@ -78,7 +80,9 @@ def weight(char: str) -> int:
 def clean(text: str) -> str:
     """*text* from a page, safe to put between markers."""
     text = _UNSAFE.sub(" ", text.replace(" ", "\n").replace(" ", "\n"))
-    return text.replace("<<", "< <").replace(">>", "> >")
+    # Every run of two or more is spaced out: "<<<" must not leave a "<<".
+    text = _ANGLES_OPEN.sub(lambda m: " ".join(m.group()), text)
+    return _ANGLES_CLOSE.sub(lambda m: " ".join(m.group()), text)
 
 
 def field_text(text: str, limit: int) -> str:

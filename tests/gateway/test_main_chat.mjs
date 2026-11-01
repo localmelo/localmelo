@@ -106,6 +106,7 @@ test('a task that ran out of steps is a stopped card that offers Continue before
   buttons[1].listeners.click();
   assert.deepEqual(resumed, [[card, 'Continue']]);
   assert.deepEqual(opened, [card]);
+  assert.equal(buttons[1].dataset.focusKey, `card:${card.id}`, 'the panel returns focus to Open when the task it showed is closed');
   // Without a way to continue, the card still opens the task.
   made.length = 0;
   cardNode({doc, card, open: () => {}});

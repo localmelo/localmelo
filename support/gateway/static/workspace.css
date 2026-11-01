@@ -1890,7 +1890,8 @@ dialog::backdrop {
 .worker-panel h1 {
   font-size: var(--text-heading);
 }
-.task-panel h2 {
+.task-panel h2,
+.task-panel h3 {
   margin: 24px 0 8px;
   font-size: var(--text-title);
 }
@@ -2259,6 +2260,52 @@ dialog::backdrop {
 /* Details, in developer mode, is a mode of the panel: while it is open it takes the place of the tabs below Melo. */
 .panel .details-drawer { position: static; width: auto; padding: 4px 16px 24px; overflow: visible; border: 0; background: none; }
 .panel:has(> .details-drawer:not([hidden])) > :is(.panel-tabs, .panel-body) { display: none; }
+/* A task is a page of the panel too: it takes the place of Melo's page (the sheet's handle stays), with a link back
+   above its title. Its card is the one the page always had, set for a narrow column: labels over their values. */
+.panel[data-view="task"] > :is(.panel-tabs, .panel-body, .details-drawer) { display: none; }
+.panel[data-view="task"] > .panel-head { padding: 0; }
+.panel[data-view="task"] > .panel-head > :not(.panel-handle) { display: none; }
+.panel .task-panel { flex: 1; padding: 14px 16px 28px; overflow-wrap: anywhere; }
+.panel .task-panel[hidden] { display: none; }
+.panel .task-panel a:not(.worker-row, .task-back) { color: var(--accent); }
+.task-back { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; margin-left: -4px; padding: 2px 8px 2px 4px; border-radius: var(--radius-control); color: var(--ink-2); font-size: var(--text-small); font-weight: 600; text-decoration: none; }
+.task-back::before { content: "‹"; font-size: var(--text-title); font-weight: 400; line-height: 1; }
+.task-back:hover { background: var(--tint); color: var(--ink); }
+.panel .task-panel .task-title { margin: 8px 0 4px; font-size: var(--text-heading); font-weight: 650; letter-spacing: -0.02em; line-height: 1.25; text-wrap: balance; }
+.panel .task-panel .task-title:focus-visible { outline-offset: 4px; }
+.panel .task-panel > p { margin: 8px 0; font-size: var(--text-small); }
+.panel .task-panel > .muted { color: var(--ink-3); }
+.panel .task-panel .worker-meta { grid-template-columns: minmax(0, 1fr); gap: 0; margin: 12px 0; font-size: var(--text-small); }
+.panel .task-panel .worker-meta dt { margin-top: 10px; color: var(--ink-3); font-size: var(--text-caption); font-weight: 600; }
+.panel .task-panel .worker-meta dd { margin: 1px 0 0; color: var(--ink); line-height: 1.45; }
+.panel .task-panel .worker-meta dd[data-ending] { font-weight: 600; }
+.panel .task-panel .worker-meta dd[data-ending="ready"] { color: var(--ok); }
+.panel .task-panel .worker-meta dd[data-ending="draft"], .panel .task-panel .worker-meta dd[data-ending="blocked"] { color: var(--warn); }
+.panel .task-panel .worker-meta dd[data-ending="failed"] { color: var(--error); }
+.panel .task-panel .worker-meta dd[data-ending="dropped"] { color: var(--ink-3); }
+.panel .task-panel :is(h2, h3):not(.task-title) { margin: 22px 0 6px; font-size: var(--text-body); font-weight: 600; }
+.panel .task-panel .task-steps { margin: 18px 0 6px; }
+.panel .task-panel .task-steps > summary { font-size: var(--text-body); }
+.panel .task-panel .task-answer { margin: 12px 0 0; padding-bottom: 0; }
+.panel .task-panel .task-answer > :last-child { margin-bottom: 0; }
+.panel .task-panel pre { max-width: 100%; overflow-x: auto; }
+.panel .task-panel .ending-tests li { grid-template-columns: 14px minmax(0, 1fr); }
+.panel .task-panel .ending-test-outcome { grid-column: 2; }
+.panel .task-panel .task-actions { align-items: center; margin: 14px 0; }
+.panel .task-panel .task-actions button:not(.primary-button, .outline-button, .quiet-button) { padding: 6px 12px; font-size: var(--text-small); }
+.panel .task-panel .task-card-text { padding: 10px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+.panel .task-panel .worker-row { margin: 6px 0; padding: 10px 12px; border-radius: var(--radius-card); background: var(--surface); }
+.panel .task-panel .worker-row:hover { background: var(--tint); }
+.panel .task-panel .worker-row strong { font-weight: 550; }
+.panel .task-panel .worker-row .muted { color: var(--ink-3); font-size: var(--text-small); }
+.panel .task-panel :is(.task-missing, .task-note) { font-size: var(--text-small); }
+.panel .task-panel .task-dialog h2 { margin: 0; font-size: var(--text-title); font-weight: 600; }
+.task-level { max-width: 100%; min-height: 32px; padding: 0 6px; border: 1px solid var(--control); border-radius: var(--radius-control); background: transparent; color: var(--ink); font-size: var(--text-small); }
+.task-level:disabled { opacity: 0.55; }
+.activity-head[href] { grid-template-columns: 32px minmax(0, 1fr) auto 12px; color: inherit; text-decoration: none; }
+.activity-head[href] .activity-time { grid-column: 3; }
+.activity-chevron { grid-column: 4; align-self: center; justify-self: end; color: var(--ink-3); font-size: var(--text-title); line-height: 1; }
+.activity-head[href]:hover .activity-chevron { color: var(--ink); }
 @media (min-width: 701px) and (max-width: 1179px) {
   .app { grid-template-columns: 64px minmax(0, 1fr) 340px; }
   .sidebar { align-items: center; padding: 18px 8px 12px; }
@@ -2277,6 +2324,7 @@ dialog::backdrop {
   .panel { position: fixed; inset: auto 0 0; z-index: 30; height: min(80dvh, 680px); border: 0; border-top-left-radius: var(--radius-panel); border-top-right-radius: var(--radius-panel); background: var(--surface); box-shadow: var(--shadow-float); transform: translateY(105%); visibility: hidden; transition: transform 0.22s, visibility 0.22s; }
   .panel.sheet-open { transform: none; visibility: visible; }
   .panel:has(> .details-drawer:not([hidden])) { transform: none; visibility: visible; }
+  .panel[data-view="task"] > .task-panel { padding-top: 34px; }
   .panel-handle { position: absolute; top: 4px; left: calc(50% - 30px); display: block; width: 60px; height: 24px; border: 0; background: none; cursor: grab; touch-action: none; }
   .panel-handle::before { content: ""; position: absolute; inset: 9px 8px; border-radius: var(--radius-pill); background: var(--control); }
   .panel-head { grid-template-columns: 56px 1fr; column-gap: 14px; justify-items: start; padding: 28px 20px 12px; text-align: left; }
@@ -2290,7 +2338,7 @@ dialog::backdrop {
   .panel-backdrop { position: fixed; inset: 0; z-index: 29; display: block; border: 0; background: var(--scrim); }
 }
 @media (pointer: coarse), (max-width: 700px) {
-  .panel-chip, .activity-head, .activity-level, .activity-actions .outline-button, .approval-toggle, .approval-choices .outline-button, .memory-actions .quiet-button, .memory-actions .outline-button, .memory-foot .link-button, .memory-search, .sched-head, .sched-actions .quiet-button, .sched-actions .outline-button, .sched-input { min-height: 44px; }
+  .panel-chip, .activity-head, .activity-level, .task-back, .task-level, .panel .task-panel .task-actions button:not(.primary-button, .outline-button, .quiet-button), .activity-actions .outline-button, .approval-toggle, .approval-choices .outline-button, .memory-actions .quiet-button, .memory-actions .outline-button, .memory-foot .link-button, .memory-search, .sched-head, .sched-actions .quiet-button, .sched-actions .outline-button, .sched-input { min-height: 44px; }
 }
 /* Settings: the sections on the left, the chosen one on the right; on a phone the list, and the section as a sheet. */
 dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc(100dvh - 48px)); max-height: none; padding: 0; overflow: hidden; }
