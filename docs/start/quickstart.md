@@ -345,7 +345,7 @@ default workspace, `~/localmelo-workspace`):
 c5b2d38ceecc  queued
 ID            LEVEL  STATE  TITLE
 c5b2d38ceecc  P2     held   Write hello.py so that it prints the word hello.
-  Waiting for your approval: file_write hello.py (answer it in the web console, Tasks)
+  Waiting for your approval: file_write hello.py (answer it on the task's page in the web console)
 ```
 
 With the default settings a file write waits for your approval, so the task

@@ -419,7 +419,10 @@ def _waiting_approval(task: dict[str, Any]) -> str | None:
     what = " ".join(
         part for part in (str(request.get("tool_name") or ""), detail) if part
     )
-    return f"Waiting for your approval: {what} (answer it in the web console, Tasks)"
+    return (
+        f"Waiting for your approval: {what} "
+        "(answer it on the task's page in the web console)"
+    )
 
 
 def token_path() -> Path:

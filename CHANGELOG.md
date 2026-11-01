@@ -304,7 +304,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   menu moved from the Activity row to the task's page, where Pause says
   `Pausing…` until the task parks and `Paused.` after. A waiting task's
   approval card is drawn once: on its page while the panel shows it. Phones
-  open the sheet for it. [#412]
+  open the sheet for it. `melo-task show` and `list` now say to answer a waiting
+  task "on the task's page in the web console". [#412]
 - A task the model proposes starts only when your message is a request for
   work, and then your own message is the task; otherwise the chat shows `Start
   this as a task?` with your own message, in the main chat and in side chats.
