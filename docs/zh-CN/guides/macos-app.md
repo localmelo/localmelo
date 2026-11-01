@@ -81,13 +81,13 @@ uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 
 | Melo | 含义 |
 |---|---|
-| 醒来，抖抖毛，坐好 | 应用打开后 Melo 第一次出现。 |
+| 醒来，抖抖毛，坐好 | 应用打开后 Melo 第一次出现。它坐几秒钟，然后休息。 |
 | 在笔记本电脑前打字 | 工作中：有对话、任务、运行或终端对话在运行。 |
 | 歪着头 | 思考：模型正在作答，没有工具在运行。 |
 | 举起一只爪子 | 在等你批准。无论 Melo 正在做什么，都会立刻显示。 |
 | 趴着，闭着眼睛 | 休息：没有任何东西在运行。它偶尔会起来玩一会儿玩具。 |
-| 坐着微笑，一动不动 | 完成：一次运行刚刚顺利结束（持续 6 秒）。 |
-| 歪着头，一动不动 | 上一次运行没有完成（持续 10 秒），或 localmelo 已停止。把指针移上去可以看到是哪一种。 |
+| 坐着微笑，一动不动 | 完成：一次运行刚刚顺利结束（持续 8 秒）。 |
+| 歪着头，一动不动 | 上一次运行没有完成（持续 8 秒）、localmelo 已停止、还没有设置模型，或连不上模型服务器。把指针移上去可以看到是哪一种。 |
 | 静静地趴着 | localmelo 还没有回应。 |
 
 - 点击 Melo 会打开窗口，或打开在等你的那个对话或任务；可以把它拖到任何地方，它会为每块屏幕记住自己的位置。
@@ -106,7 +106,7 @@ uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 窗口收起、而又有东西在运行或在等你时，一个小小的胶囊会取代 Melo，用一行话说 Melo 正在做什么。
 
 - 它用平实的话说正在运行的内容（“Reading example.com”“Running the tests”）；**+1** 表示还有几个在运行。有审批在等你时，它会变成琥珀色，并写着“Waiting for your approval”。
-- 它显示“Done: …” 6 秒、“Stopped: …” 10 秒，模型服务器连不上时显示“Model server not reachable”。然后 Melo 回来，“Done” 之后会坐着微笑一会儿。
+- 它显示“Done: …”和“Stopped: …”各 8 秒，模型服务器连不上时显示“Model server not reachable”。然后 Melo 回来，“Done” 之后会坐着微笑一会儿。
 - 点击它会打开它所说的对话或任务（审批则是在等你的那个）。像拖 Melo 一样拖它：它占用 Melo 的位置并保存。指向它并点 **×**，就在下一个任务开始之前把它隐藏。
 - 菜单栏菜单和 Melo 的菜单里的 **On the desktop** 可选 **Melo and the activity pill**（默认）、**Melo only** 或 **Nothing**。**Hide Melo** 等于 **Nothing**，**Show Melo** 会恢复你原来的选择。
 - 窗口里的 **Settings → Appearance → Melo on the desktop** 是同一个选择：它显示菜单当前的选择，在这里改就是在菜单里改。
@@ -147,10 +147,10 @@ uv run --with pillow python scripts/make_app_icons.py
 Melo 的每一张图片（桌面宠物、它的静态图、启动窗口的肖像和活动胶囊的头像）都来自 `support/gateway/static/moves` 中的动作文件，也就是网页控制台显示的同一批文件。从美术包重新生成它们：
 
 ```bash
-uv run --with pillow python scripts/build_moves.py --source /path/to/pack
+uv run --with pillow==13.0.0 python scripts/build_moves.py --source /path/to/pack
 ```
 
-- 美术包放在仓库之外；`--help` 说明它包含什么。Pillow 只在这一次运行中获取。
+- 美术包放在仓库之外；`--help` 说明它包含什么。Pillow 13.0.0（及其自带的 libwebp 1.6.0）只在这一次运行中获取：固定版本让生成的字节保持一致。
 - `GET /api/health` 还在 `status.recent` 中说明上一次运行是怎么结束的（见 [API 参考](../reference/api-v2.md)）；Melo 会读取它。
 
 WebKit 集成测试会打开原生窗口，需要图形化的 macOS 会话，因此默认关闭；请用临时 HOME 运行：

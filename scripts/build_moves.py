@@ -2,10 +2,11 @@
 """Make Melo's pictures (the moves of the desktop pet and the console's portrait, their stills and Melo's face)
 from an art pack.
 
-    uv run --with pillow python scripts/build_moves.py --source <pack folder>
+    uv run --with pillow==13.0.0 python scripts/build_moves.py --source <pack folder>
 
-Pillow is not a dependency of localmelo: `--with` fetches it for this one run. The pack stays outside the
-repository. Its folder holds `manifest.json` and `frames/<state>/frame_NN.png`: transparent frames, all on one
+Pillow is not a dependency of localmelo: `--with` fetches it for this one run. The committed files were made with
+Pillow 13.0.0, whose wheel bundles libwebp 1.6.0; another Pillow or libwebp may encode other bytes, so keep the pin
+unless the files are made again on purpose. The pack stays outside the repository. Its folder holds `manifest.json` and `frames/<state>/frame_NN.png`: transparent frames, all on one
 square canvas, for the six states below. The manifest gives each state its frames, a duration per frame
 (`frame_durations_ms`), whether it plays once (`playback: "once"` or `loop_count: 1`) or loops, the frame that
 stands for it when nothing may move (`poster_frame_index`), and the canvas with the point the paws rest on

@@ -71,13 +71,13 @@ Close the window, minimize it or hide the app (Command-H) and a small Melo appea
 
 | Melo | Meaning |
 |---|---|
-| Wakes up, shakes and sits | The first time Melo appears after the app opens. |
+| Wakes up, shakes and sits | The first time Melo appears after the app opens. It sits for a few seconds, then rests. |
 | Typing at its laptop | Working: a chat, task, run or terminal chat runs. |
 | Tilting its head | Thinking: the model is answering and no tool runs. |
 | Raising a paw | Waiting for your approval. It shows at once, whatever Melo was doing. |
 | Lying down, eyes closed | Resting: nothing runs. Now and then it gets up and plays with its toy. |
-| Sitting up, smiling, still | Done: a run just ended well (6 seconds). |
-| Head tilted, still | The last run did not finish (10 seconds), or localmelo stopped. Hover to read which. |
+| Sitting up, smiling, still | Done: a run just ended well (8 seconds). |
+| Head tilted, still | The last run did not finish (8 seconds), localmelo stopped, no model is set up, or the model server is not reachable. Hover to read which. |
 | Lying still | localmelo has not answered yet. |
 
 - Click Melo to open the window, or the chat or task that waits for you; drag it anywhere, and it remembers its place on each screen.
@@ -94,7 +94,7 @@ Close the window, minimize it or hide the app (Command-H) and a small Melo appea
 While the window is put away and something runs or waits, a small pill takes Melo's place and says in one line what Melo is doing.
 
 - It says what runs in plain words ("Reading example.com", "Running the tests"); **+1** counts the others that run. While an approval waits it turns amber and says "Waiting for your approval".
-- It shows "Done: …" for 6 seconds and "Stopped: …" for 10, and "Model server not reachable" while the model server is down. Then Melo comes back, sitting up and smiling for a moment after a "Done".
+- It shows "Done: …" and "Stopped: …" for 8 seconds each, and "Model server not reachable" while the model server is down. Then Melo comes back, sitting up and smiling for a moment after a "Done".
 - Click it to open the chat or task it names (the one that waits, for an approval). Drag it like Melo: it takes Melo's place and saves it. Point at it and press **×** to hide it until the next task starts.
 - **On the desktop** in the menu-bar menu and in Melo's menu chooses **Melo and the activity pill** (the default), **Melo only** or **Nothing**. **Hide Melo** is the same as **Nothing**, and **Show Melo** brings back what you had.
 - The window's **Settings → Appearance → Melo on the desktop** is the same choice: it shows what the menus show, and a change there is a change in the menus.
@@ -129,10 +129,10 @@ uv run --with pillow python scripts/make_app_icons.py
 Every picture of Melo (the desktop pet, its stills, the start window's portrait and the activity pill's faces) comes from the moves in `support/gateway/static/moves`, the same files the web console shows. Make them again from an art pack:
 
 ```bash
-uv run --with pillow python scripts/build_moves.py --source /path/to/pack
+uv run --with pillow==13.0.0 python scripts/build_moves.py --source /path/to/pack
 ```
 
-- The pack stays outside the repository; `--help` says what it holds. Pillow is fetched for that run only.
+- The pack stays outside the repository; `--help` says what it holds. Pillow 13.0.0 (with its libwebp 1.6.0) is fetched for that run only: the pin keeps the bytes the same.
 - `GET /api/health` also says how the last run ended, in `status.recent` (see the [API reference](../reference/api-v2.md)); Melo reads it.
 
 The WebKit integration tests open native windows and need a graphical macOS session, so they are opt-in; run them with a temporary HOME:

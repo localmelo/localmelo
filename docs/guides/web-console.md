@@ -292,15 +292,19 @@ Melo in the portrait moves with what it does:
 
 | Melo | Meaning |
 |---|---|
-| Wakes up, shakes and sits | The page has just opened. |
+| Wakes up, shakes and sits | The page has just opened. It sits for a few seconds, then rests. |
 | Typing at its laptop | Something runs. |
 | Tilting its head | The model is answering and no tool runs. |
 | Raising a paw | Something waits for you. It shows at once. |
 | Lying down, eyes closed | Nothing runs. Now and then it gets up and plays (at most every 5 minutes). |
 
-- A run that just ended, an error, and a console that is connecting or cannot reach the gateway keep their still
-  pictures.
-- With reduced motion each state is a still picture, and a hidden tab draws nothing. Under it are four tabs: **Activity**, **Workers**, **Scheduled** and **Memory**. Arrow keys, Home and
+- A run that just ended sits up smiling, and an error tilts its head; both are still pictures. While the console
+  is connecting or cannot reach the gateway, Melo lies still (faded when it cannot reach it).
+- After three minutes of plain rest Melo lies still until something changes or it is time to play.
+- With reduced motion each state is a still picture, and a hidden tab or a portrait scrolled out of view draws
+  nothing.
+
+Under it are four tabs: **Activity**, **Workers**, **Scheduled** and **Memory**. Arrow keys, Home and
 End move between them, and the panel opens the tab you used last.
 
 The panel shows what belongs to the chat that is open. A side chat's panel lists that chat's own activity and the

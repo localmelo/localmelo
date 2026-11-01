@@ -22,7 +22,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   cannot reach localmelo lies still (faded when offline), each with its own
   words. Every picture of Melo now comes from these moves: the empty chat,
   the reply faces, the approval bar, the sidebar and sign-in brand, the Main
-  chat, the tab icon, the app's start window and the activity pill. Health's
+  chat, the tab icon, the app's start window and the activity pill. After
+  the wake-up Melo sits for a few seconds, then rests; a run that just ended
+  or failed shows for 8 seconds on the desktop, in the activity pill and in
+  the console alike; on the desktop Melo also shows when no model is set up
+  or the model server cannot be reached. In the console, a long quiet rest
+  becomes a still picture until something changes. Health's
   `status.items` (and the panel's live activity rows) say `answering` when the
   model is answering with no tool, approval or hold open: Melo thinks only
   then. [#419]
