@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import dataclasses
 import socket
 from typing import Any
 
 from localmelo.support.browser.driver import (
+    Act,
     BrowserError,
     BrowserSetupError,
     Element,
     RawPage,
     Shot,
+    StaleElementError,
     TabInfo,
 )
 from localmelo.support.browser.sites import origin_of
@@ -54,17 +57,48 @@ def link(label: str, href: str) -> Element:
     return Element("link", label, href=href)
 
 
-def page(url: str, text: str = "", *elements: Element, title: str = "T") -> RawPage:
-    return RawPage(url, title, text, tuple(elements))
+def button(label: str, **more: Any) -> Element:
+    return Element("button", label, **more)
+
+
+def safari_id(n: int) -> str:
+    """A tab id in the shape Safari's automation server gives: 41 characters, too long for a short field."""
+    return f"page-635DB8F8-27ED-4CA5-81A2-7EAEE1DF{n:04X}"
+
+
+def page(
+    url: str,
+    text: str = "",
+    *elements: Element,
+    title: str = "T",
+    frames: tuple[str, ...] = (),
+) -> RawPage:
+    return RawPage(url, title, text, tuple(elements), doc="d1", frames=frames)
 
 
 class FakeDriver:
-    """Pages by address; ``redirects`` maps an address to where it lands."""
+    """Pages by address; ``redirects`` maps an address to where it lands.
+
+    ``ids`` makes the tab ids: ``t1``, ``t2`` by default, or ``safari_id``
+    for the long ones the real helper gives. An action (``act``) records
+    what it was asked and lands where ``lands`` says (a label, or
+    ``enter:<label>``, to an address); a link goes to its address. ``then``
+    maps a label to the address the page moves its own tab to a moment after
+    the action (``location`` answers the old address once, then the new one);
+    ``fails`` maps a label to an address the tab is moved to before the action
+    raises; ``stopped`` is what ``act`` answers (the page's blocked sends);
+    ``docs`` maps a tab to the document id its page shows. ``popups``
+    maps a label to an address that opens in a new tab. ``lose`` forgets a tab
+    as the real helper does when it loses one.
+    """
 
     name = "fake"
 
     def __init__(
-        self, *pages: RawPage, redirects: dict[str, str] | None = None
+        self,
+        *pages: RawPage,
+        redirects: dict[str, str] | None = None,
+        ids: Any = None,
     ) -> None:
         self.pages = {p.url: p for p in pages}
         self.redirects = redirects or {}
@@ -73,6 +107,32 @@ class FakeDriver:
         self.current: str | None = None
         self.setup_problem: str | None = None
         self.started = 0
+        self.ids = ids or (lambda n: f"t{n}")
+        self.made = 0
+        self.open_in: list[str | None] = []  # the tab each non-new open asked for
+        self.acts: list[Act] = []
+        self.lands: dict[str, str] = {}
+        self.popups: dict[str, str | list[str]] = {}
+        self.then: dict[str, str] = {}
+        self.fails: dict[str, str] = {}
+        self.stopped = ""
+        self.docs: dict[str, str] = {}
+        self.queue: dict[str, list[str]] = {}  # scripted answers of location()
+        self.blank_fails = False
+        self.tabs_fail = False
+        self.location_empty: set[str] = set()
+
+    def _new_tab(self) -> str:
+        self.made += 1
+        tab = str(self.ids(self.made))
+        self.tabs_[tab] = []
+        return tab
+
+    def lose(self, tab: str) -> None:
+        """The helper loses *tab*: it is no longer listed and answers nothing."""
+        self.tabs_.pop(tab, None)
+        if self.current == tab:
+            self.current = None
 
     def _url(self, tab: str | None) -> str:
         return self.tabs_[tab or self.current or ""][-1]
@@ -92,18 +152,27 @@ class FakeDriver:
     def kill(self) -> None:
         self.calls.append(("kill", ""))
 
-    async def open(self, url: str, *, new_tab: bool) -> TabInfo:
+    async def open(self, url: str, *, new_tab: bool, tab: str | None = None) -> TabInfo:
         self.calls.append(("open", url))
         landed = self.redirects.get(url, url)
+        if not new_tab:
+            self.open_in.append(tab)
+            if tab is not None and tab not in self.tabs_:
+                raise BrowserError(
+                    "Safari's automation helper reported a problem: "
+                    "Could not find browsing context."
+                )
+            self.current = tab or self.current
         if new_tab or self.current is None:
-            self.current = f"t{len(self.tabs_) + 1}"
-            self.tabs_[self.current] = []
+            self.current = self._new_tab()
         self.tabs_[self.current].append(landed)
         return self._info(self.current)
 
     async def page(self, tab: str | None) -> RawPage:
         self.calls.append(("page", tab or ""))
-        return self.pages[self._url(tab)]
+        here = tab or self.current or ""
+        raw = self.pages[self._url(tab)]
+        return dataclasses.replace(raw, doc=self.docs.get(here, raw.doc))
 
     async def back(self, tab: str | None) -> TabInfo:
         self.calls.append(("back", tab or ""))
@@ -113,6 +182,10 @@ class FakeDriver:
         return self._info(tab or self.current or "")
 
     async def tabs(self) -> list[TabInfo]:
+        if self.tabs_fail:
+            raise BrowserError(
+                "Safari's automation helper reported a problem: no list."
+            )
         return [self._info(tab) for tab in self.tabs_]
 
     async def switch(self, tab: str) -> TabInfo:
@@ -123,11 +196,21 @@ class FakeDriver:
 
     async def close_tab(self, tab: str) -> None:
         self.calls.append(("close_tab", tab))
-        self.tabs_.pop(tab, None)
+        if tab not in self.tabs_:
+            raise BrowserError(
+                "Safari's automation helper reported a problem: closeBrowsingContext: "
+                "Could not find browsing context."
+            )
+        self.tabs_.pop(tab)
         if self.current == tab:
             self.current = None
 
     async def location(self, tab: str | None) -> str:
+        here = tab or self.current or ""
+        if here in self.location_empty:
+            return ""
+        if self.queue.get(here):
+            return self.queue[here].pop(0)
         return self._url(tab)
 
     async def wait(
@@ -149,3 +232,41 @@ class FakeDriver:
 
     async def blank(self, tab: str | None) -> None:
         self.calls.append(("blank", tab or ""))
+        if self.blank_fails:
+            raise BrowserError("Safari's automation helper reported a problem: blank.")
+        here = tab or self.current or ""
+        if here in self.tabs_:
+            # As the real driver does it, with location.replace: the page's own
+            # entry is swapped, so Back never returns to the page that was refused.
+            self.tabs_[here][-1:] = ["about:blank"]
+
+    async def act(self, tab: str | None, act: Act) -> str:
+        self.calls.append(("act", f"{act.kind}:{act.element.label}"))
+        here = tab or self.current or ""
+        if self._url(tab) != act.url:
+            raise StaleElementError("The page is not the one that was read.")
+        if act.doc and act.doc != self.docs.get(here, "d1"):
+            raise StaleElementError(
+                "The page was reloaded or replaced since it was read."
+            )
+        self.acts.append(act)
+        label = act.element.label
+        key = ("enter:" if act.enter else "") + label
+        if label in self.fails:
+            self.tabs_[here].append(self.fails[label])
+            raise BrowserError("The page did not take that action.")
+        if act.kind == "click" and label in self.popups:
+            wanted = self.popups[label]
+            for address in [wanted] if isinstance(wanted, str) else wanted:
+                self.current = self._new_tab()
+                self.tabs_[self.current].append(address)
+            return self.stopped
+        landed = self.lands.get(key)
+        if landed is None and act.kind == "click" and act.element.kind == "link":
+            landed = act.element.href
+        if landed is not None:
+            self.tabs_[here].append(landed)
+        if key in self.then:
+            self.queue[here] = [self._url(here), self.then[key]]
+            self.tabs_[here].append(self.then[key])
+        return self.stopped

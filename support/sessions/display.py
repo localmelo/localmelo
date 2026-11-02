@@ -547,6 +547,12 @@ def activity_text(
         return _doing("open", said("steps.aPage"), "web")
     if name == "browser_follow":
         return _doing("follow", said("steps.aLink"), "web")
+    if name == "browser_click":
+        return _doing("click", said("steps.thePage"), "web")
+    if name == "browser_type":
+        return _doing("type", said("steps.aField"), "web")
+    if name == "browser_select":
+        return _doing("choose", said("steps.aList"), "web")
     if name == "browser_screenshot":
         return _doing("lookAt", said("steps.thePage"), "web")
     if name in _BROWSER_READS:

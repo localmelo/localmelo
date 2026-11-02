@@ -21,6 +21,24 @@ tiny set of pages. ``screenshot`` answers as the real one does: text only,
   ``FAKE_SAFARI_DECOY``, which exists, in its reply
 - ``symlink``: ``screenshot`` puts a link to ``FAKE_SAFARI_DECOY`` at ``savePath``
 - ``shot_error``: ``screenshot`` saves the file, then fails
+- ``long_ids``: tab ids as long as the real server's (``page-<UUID>``, 41 characters)
+- ``act_stale``: a script that acts on an element answers that the page changed
+- ``act_option``: a script that chooses an option answers that none matched
+- ``act_reloaded``: the page was reloaded since it was read (its document differs)
+- ``act_moved``: the element is no longer the one that was read (its fingerprint differs)
+- ``no_active``: ``list_tabs`` rows say nothing of which tab is active
+- ``no_url``: ``list_tabs`` rows carry no address or title
+- ``no_ids``: ``list_tabs`` rows carry no handle (only their place in the list)
+- ``focus_stays``: ``create_tab`` leaves the old tab current, as a browser may
+- ``page_moves``: the first page-reading script finds the tab on another address
+  than ``list_tabs`` just said (a page that navigates between the two calls)
+- ``replace_fails``: ``location.replace('about:blank')`` does nothing, so only the
+  browser's own navigation can leave a page
+
+A script that acts (melo's ``act_script``) is answered from the tiny page
+model too: an element may say ``goes`` (the address a click lands on), and a
+typed text is kept in ``typed``. Every page read has the document ``DOC`` and
+an element may have a fingerprint ``fp``; an act that names another is stale.
 """
 
 from __future__ import annotations
@@ -63,10 +81,59 @@ PAGES: dict[str, dict[str, Any]] = {
         "text": "Today's news.",
         "elements": [],
     },
+    "https://example.com/form": {
+        "title": "Form",
+        "text": "A form.",
+        "skipped": 2,
+        "elements": [
+            {
+                "kind": "button",
+                "label": "Check in",
+                "also": "Daily check-in",
+                "fp": "button|check in|0",
+                "goes": "https://example.com/done",
+            },
+            {
+                "kind": "textbox",
+                "label": "Nickname",
+                "value": "",
+                "submit": "https://example.com/save",
+                "attrs": {
+                    "type": "text",
+                    "autocomplete": "",
+                    "words": "nick Nickname",
+                    "inputmode": "",
+                    "maxlength": 40,
+                    "masked": False,
+                },
+            },
+            {
+                "kind": "select",
+                "label": "Country",
+                "value": "France",
+                "options": ["France", "Spain"],
+            },
+        ],
+    },
+    "https://example.com/done": {
+        "title": "Done",
+        "text": "Checked in.",
+        "elements": [],
+    },
 }
-tabs: list[dict[str, Any]] = [{"id": "page-1", "history": ["about:blank"]}]
+
+
+def tab_id(n: int) -> str:
+    if MODE == "long_ids":
+        return f"page-635DB8F8-27ED-4CA5-81A2-7EAEE1DF{n:04X}"
+    return f"page-{n}"
+
+
+tabs: list[dict[str, Any]] = [{"id": tab_id(1), "history": ["about:blank"]}]
+typed: dict[str, str] = {}
 current = 0
 polls = 0
+moved = False
 STYLE_RETURN = MODE == "return_style"
 
 
@@ -131,21 +198,66 @@ def text(value: str, error: bool = False) -> dict[str, Any]:
     return result
 
 
+DOC = "doc-1"
+
+
 def page_now() -> dict[str, Any]:
     url = tabs[current]["history"][-1]
-    return {"url": url, **PAGES.get(url, {"title": "", "text": "", "elements": []})}
+    found = PAGES.get(url, {"title": "", "text": "", "elements": []})
+    elements = [{**e, "at": i} for i, e in enumerate(found["elements"])]
+    return {"url": url, "doc": DOC, **found, "elements": elements}
+
+
+def do_act(spec: dict[str, Any]) -> dict[str, Any]:
+    """What melo's act script answers, on the page model above."""
+    here = tabs[current]["history"]
+    if MODE == "act_stale":
+        return {"ok": False, "stale": "gone"}
+    if spec["url"] != here[-1]:
+        return {"ok": False, "stale": "page"}
+    if MODE == "act_reloaded" or spec.get("doc") != DOC:
+        return {"ok": False, "stale": "doc"}
+    elements = PAGES.get(here[-1], {"elements": []})["elements"]
+    if not 0 <= spec["at"] < len(elements):
+        return {"ok": False, "stale": "gone"}
+    element = elements[spec["at"]]
+    if (element["kind"], element.get("label", ""), element.get("href", "")) != (
+        spec["kind"],
+        spec["label"],
+        spec["href"],
+    ):
+        return {"ok": False, "stale": "gone"}
+    if MODE == "act_moved" or spec.get("fp", "") != element.get("fp", ""):
+        return {"ok": False, "stale": "gone"}
+    if spec["act"] == "click":
+        if element.get("goes"):
+            here.append(element["goes"])
+    elif spec["act"] == "type":
+        typed[element["label"]] = spec["text"] + ("\n" if spec["enter"] else "")
+        if spec["enter"] and element.get("submit"):
+            here.append(element["submit"])
+    elif spec["act"] == "select":
+        if MODE == "act_option" or spec["text"] not in element["options"]:
+            return {"ok": False, "option": 0}
+        element["value"] = spec["text"]
+    return {"ok": True}
 
 
 def run_script(source: str) -> Any:
-    global polls
+    global polls, moved
     if STYLE_RETURN and not source.startswith("return "):
         raise SyntaxError("Unexpected token")
     source = source.removeprefix("return ")
+    if source.startswith("(function (spec)"):
+        spec = json.loads(source[source.rindex("})(") + 3 : -1])
+        return json.dumps(do_act(spec))
     here = tabs[current]["history"]
     if source == "1+1":
         return 2
     if source == "location.href":
         return here[-1]
+    if source == "document.title":
+        return page_now().get("title", "")
     if source.startswith("location.origin === "):
         # The wait's guard: the condition holds only on the page's own site.
         wanted, _, source = source.removeprefix("location.origin === ").partition(
@@ -162,13 +274,17 @@ def run_script(source: str) -> Any:
     if source.startswith("JSON.stringify({url"):
         return json.dumps({"url": here[-1], "title": page_now().get("title", "")})
     if "getBoundingClientRect" in source:
+        if MODE == "page_moves" and not moved:
+            moved = True
+            here.append("https://example.com/news")  # moved before the script ran
         return json.dumps(page_now())
     if "history.back" in source:
         if len(here) > 1:
             here.pop()
         return True
     if "about:blank" in source:
-        here.append("about:blank")
+        if MODE != "replace_fails":
+            here[-1] = "about:blank"  # location.replace: the entry is swapped
         return True
     if "activeElement" in source:
         return MODE == "focus_secret"
@@ -189,9 +305,10 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         return text("navigated")
     if name == "create_tab":
         tabs.append(
-            {"id": f"page-{len(tabs) + 1}", "history": [str(value or "about:blank")]}
+            {"id": tab_id(len(tabs) + 1), "history": [str(value or "about:blank")]}
         )
-        current = len(tabs) - 1
+        if MODE != "focus_stays":
+            current = len(tabs) - 1
         return text("created")
     if name == "switch_tab":
         current = next(i for i, t in enumerate(tabs) if t["id"] == value)
@@ -201,10 +318,21 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         current = max(min(current, len(tabs) - 1), 0)
         return text("closed")
     if name == "list_tabs":
-        rows = [
-            {"id": t["id"], "url": t["history"][-1], "active": i == current}
-            for i, t in enumerate(tabs)
-        ]
+        rows = []
+        for i, t in enumerate(tabs):
+            row: dict[str, Any] = {
+                "id": t["id"],
+                "url": t["history"][-1],
+                "title": PAGES.get(t["history"][-1], {}).get("title", ""),
+                "active": i == current,
+            }
+            if MODE == "no_active":
+                del row["active"]
+            if MODE == "no_url":
+                del row["url"], row["title"]
+            if MODE == "no_ids":
+                del row["id"]
+            rows.append(row)
         return text(json.dumps({"tabs": rows}))
     if name == "screenshot":
         if MODE == "inline_image":

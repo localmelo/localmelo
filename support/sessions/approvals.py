@@ -37,6 +37,7 @@ from localmelo.melo.contracts.approvals import (
     Withdrawal,
     find_auto,
     find_folder_asker,
+    never_granted,
     review_mode,
 )
 from localmelo.melo.contracts.folders import covers
@@ -213,7 +214,9 @@ class RememberingPolicy:
         if request.tool_name in self._granted and covered_by_grant(request.review):
             return ApprovalDecision(True, origin="session")
         decision = await self._ask(request)
-        if isinstance(decision, ApprovalDecision) and not offers_grant(request.review):
+        if isinstance(decision, ApprovalDecision) and (
+            not offers_grant(request.review) or never_granted(request.tool_name)
+        ):
             decision = dataclasses.replace(decision, remember=False)
         if (
             isinstance(decision, ApprovalDecision)

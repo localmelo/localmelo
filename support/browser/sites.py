@@ -12,6 +12,7 @@ chat. Without a policy (``--yolo``, a library caller) nobody is asked.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from urllib.parse import urlsplit
 
 from localmelo.melo.contracts.approvals import (
@@ -22,8 +23,17 @@ from localmelo.melo.contracts.approvals import (
 from localmelo.support.browser.driver import BrowserError
 
 PREFIX = "browser:"
+# Acting on a page asks apart from reading it: a click or a choice on a site is
+# one grant per site and chat, so the answer to "open this site" never lets melo
+# click. Typing is a question of its own that shows all the text and is asked
+# every time, and so is sending a form: neither is ever kept for the chat.
+ACT_PREFIX = "browser-act:"
+TYPE_PREFIX = "browser-type:"
+SUBMIT_PREFIX = "browser-submit:"
 # The longest address a site question shows (web_fetch's): longer ones are cut.
 URL_SHOWN = 300
+# The most form fields a send question lists.
+FORM_SHOWN = 12
 _PORTS = {"http": 80, "https": 443}
 
 
@@ -133,3 +143,90 @@ async def require_site(
     decision = await ask(*_question(origin, via, url))
     if not decision.allow:
         raise BrowserError(_refusal(origin, via, decision))
+
+
+async def require_act(origin: str, what: str) -> None:
+    """Ask about clicking or choosing on *origin*'s page; :class:`BrowserError` if refused.
+
+    The question has no ``origin`` argument on purpose: a refusal of a click
+    must not refuse the site for reading too (the earlier-blocks rule keys on
+    it). *what* is ``click`` or ``choose an option``. One answer for the site
+    covers the chat's later clicks and choices; typing asks apart
+    (:func:`require_type`).
+    """
+    ask = TOOL_ASK.get()
+    if ask is None:
+        return
+    host = host_of(origin)
+    decision = await ask(
+        ACT_PREFIX + origin,
+        {"site": host, "access": "act", "how": what},
+        f"{what} on {host} in Safari",
+    )
+    if not decision.allow:
+        raise BrowserError(
+            f"melo did not click or choose on {host}. " + denial_text(decision)
+        )
+
+
+async def require_type(origin: str, text: str) -> None:
+    """Ask about typing *text* on *origin*'s page; :class:`BrowserError` if refused.
+
+    Asked for every text, whatever was allowed before, and never kept for the
+    chat. The question carries all of the text, uncut (the caller keeps it to
+    :data:`~localmelo.support.browser.driver.MAX_TYPED_CHARS` characters it can
+    show): it is the model's own words, a person or a reviewer must see what
+    goes into the page. Like a click's question it has no ``origin`` argument.
+    """
+    ask = TOOL_ASK.get()
+    if ask is None:
+        return
+    host = host_of(origin)
+    decision = await ask(
+        TYPE_PREFIX + origin,
+        {"site": host, "access": "type", "how": "type", "text": text},
+        f"type {len(text)} character(s) on {host} in Safari",
+    )
+    if not decision.allow:
+        raise BrowserError(f"melo did not type on {host}. " + denial_text(decision))
+
+
+async def require_submit(
+    origin: str,
+    target: str,
+    how: str,
+    form: Sequence[tuple[str, str]] = (),
+) -> None:
+    """Ask about sending a form from *origin*'s page to *target*; :class:`BrowserError` if refused.
+
+    Reviewed by itself, every time: the question carries where the form goes
+    and how (``click`` on its button, or ``enter`` in a field) and what it
+    holds (*form*: each field's name and value, with nothing secret in it), and
+    an answer is never kept for the chat. *target* is an absolute address,
+    shown cut to :data:`URL_SHOWN` characters, or ``""`` when the page decides
+    where the text goes (Enter in a box that is in no form).
+    """
+    ask = TOOL_ASK.get()
+    if ask is None:
+        return
+    host = host_of(origin)
+    to = shown_url(target) if target else ""
+    decision = await ask(
+        SUBMIT_PREFIX + origin,
+        {
+            "site": host,
+            "access": "submit",
+            "to": to,
+            "how": how,
+            "fields": [[name, value] for name, value in form][:FORM_SHOWN],
+        },
+        (
+            f"send a form on {host} to {to}"
+            if to
+            else f"send what is typed on {host} (the page decides where it goes)"
+        ),
+    )
+    if not decision.allow:
+        raise BrowserError(
+            f"melo did not send the form from {host}. " + denial_text(decision)
+        )

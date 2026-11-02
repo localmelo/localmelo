@@ -1110,6 +1110,9 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
     ['demo_lookup', {query: 'x'}, null, 'Let melo use demo_lookup?', 'demo_lookup'],
     ['browser:https://example.com', {site: 'example.com', access: 'read'}, null, 'Let melo open example.com?', 'browser · read only'],
     ['browser:https://example.com', {site: 'example.com', access: 'read', via: 'web_fetch'}, null, 'Let melo read example.com?', 'web_fetch · read only'],
+    ['browser-act:https://example.com', {site: 'example.com', access: 'act'}, null, 'Let melo click and choose on example.com?', 'browser · acts on the page'],
+    ['browser-type:https://example.com', {site: 'example.com', access: 'type', how: 'type', text: 'hi'}, null, 'Let melo type on example.com?', 'browser · types text'],
+    ['browser-submit:https://example.com', {site: 'example.com', access: 'submit', to: 'https://other.org/post', how: 'click'}, null, 'Let melo send a form from example.com?', 'browser · sends a form'],
   ];
   for (const [tool, args, target, title, caption] of asks) {
     h.context.request = {request_id: `ask-${tool}-${title}`, tool_name: tool, arguments: args, workspace_label: '~/w', target};
@@ -1130,6 +1133,48 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
   assert.equal(address.textContent, url);
   assert.equal(address.attributes['aria-label'], 'The address melo asks for');
   assert.match(findNode(card, (node) => node.className === 'approval-note').textContent, /read example\.com as text/);
+  // A form sent from a page shows where it goes.
+  h.context.request = {request_id: 'send-form', tool_name: 'browser-submit:https://example.com',
+    arguments: {site: 'example.com', access: 'submit', to: 'https://other.org/post', how: 'click'}, workspace_label: '~/w'};
+  const sending = findNode(h.run('approvalCard(request)'), (node) => node.className === 'approval-content');
+  assert.equal(sending.textContent, 'https://other.org/post');
+  assert.equal(sending.attributes['aria-label'], 'Where the form goes');
+});
+
+test('a form send and typing show what goes, say when the page decides, and offer no answer that is kept', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const focuses = (card) => findNodes(card, (node) => 'approvalFocus' in node.dataset).map((node) => node.dataset.approvalFocus);
+  h.context.request = {request_id: 'send-fields', tool_name: 'browser-submit:https://example.com',
+    arguments: {site: 'example.com', access: 'submit', to: 'https://other.org/post', how: 'click',
+      fields: [['q', 'cats'], ['token', '(hidden)']]}, workspace_label: '~/w'};
+  const card = h.run('approvalCard(request)');
+  const box = findNode(card, (node) => node.className === 'approval-content');
+  assert.equal(box.textContent, 'https://other.org/post\n\nWhat the form holds\nq: cats\ntoken: (hidden)');
+  assert.match(findNode(card, (node) => node.className === 'approval-warning').textContent, /A form always asks/);
+  assert.deepEqual(focuses(card).filter((name) => name !== 'reason'), ['once', 'deny'], 'no "allow for this chat" on a send');
+  // Enter outside a form, and a page that decides where the form goes, have no address to show.
+  h.context.request = {request_id: 'send-enter', tool_name: 'browser-submit:https://example.com',
+    arguments: {site: 'example.com', access: 'submit', to: '', how: 'enter', fields: [['typed', 'cats']]}, workspace_label: '~/w'};
+  const page = findNode(h.run('approvalCard(request)'), (node) => node.className === 'approval-content');
+  assert.equal(page.textContent, 'melo cannot say where this goes: the page decides.\n\nWhat the form holds\ntyped: cats');
+  // Typing shows all of the text, since what melo types is what the person is allowing, and asks every time.
+  const long = 'a long line of words '.repeat(45) + 'THE END';
+  h.context.request = {request_id: 'typing', tool_name: 'browser-type:https://example.com',
+    arguments: {site: 'example.com', access: 'type', how: 'type', text: long}, workspace_label: '~/w'};
+  const typing = h.run('approvalCard(request)');
+  const text = findNode(typing, (node) => node.className === 'approval-content');
+  assert.equal(text.textContent, long);
+  assert.equal(text.attributes['aria-label'], 'The text it will type');
+  assert.match(findNode(typing, (node) => node.className === 'approval-note').textContent, /the page may send it on its own/);
+  assert.match(findNode(typing, (node) => node.className === 'approval-warning').textContent, /Typing always asks/);
+  assert.deepEqual(focuses(typing).filter((name) => name !== 'reason'), ['once', 'deny'], 'no "allow for this chat" on typing');
+  // A click or a choice keeps its chat-wide answer, and says typing still asks.
+  h.context.request = {request_id: 'clicking', tool_name: 'browser-act:https://example.com',
+    arguments: {site: 'example.com', access: 'act', how: 'click'}, workspace_label: '~/w'};
+  const clicking = h.run('approvalCard(request)');
+  assert.ok(focuses(clicking).includes('session'));
+  assert.match(findNode(clicking, (node) => node.className === 'approval-warning').textContent, /Typing still asks every time/);
 });
 
 // A file write over a file, as the gateway reports it: `target.diff` (docs/reference/api-v2.md).

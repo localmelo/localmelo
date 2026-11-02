@@ -36,6 +36,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalRequest,
     AutoPolicy,
     DenyAllPolicy,
+    never_granted,
 )
 from localmelo.melo.contracts.review import because, offers_grant, review_title
 from localmelo.support.cli import edits
@@ -299,6 +300,62 @@ def _tool_panel(
             body,
             escaped_any,
         )
+    if tool.startswith(("browser-act:", "browser-type:", "browser-submit:")):
+        sending = tool.startswith("browser-submit:")
+        typing = tool.startswith("browser-type:")
+        site = shown(str(arguments.get("site") or tool.split(":", 1)[1]))
+        goes = str(arguments.get("to") or "")
+        if sending:
+            said = f"melo wants to send a form from {site}."
+            note = (
+                "Whatever the form holds goes to the address below."
+                if goes
+                else "The page decides where this goes: melo cannot say."
+            )
+        elif typing:
+            said = (
+                f"melo wants to type this text on {site} in Safari's automation window:"
+            )
+            note = (
+                "It never types passwords, card numbers or one-time codes. Once the "
+                "text is in the page, the page may send it on its own; melo asks "
+                "before it presses send, but cannot stop every send the page makes."
+            )
+        else:
+            said = (
+                f"melo wants to click and choose on {site} in Safari's "
+                "automation window, as you would."
+            )
+            note = "Each text it types is asked about apart, every time."
+        body = [("", row) for row in _wrapped([said], width)]
+        if sending and goes:
+            body += [("", row) for row in _wrapped([shown(goes)], width)]
+        if sending and (rows := arguments.get("fields")):
+            body += [
+                ("muted", row)
+                for row in _wrapped(
+                    [f"{shown(str(n))}: {shown(str(v))}" for n, v in rows], width
+                )
+            ]
+        if typing:
+            typed = shown(str(arguments.get("text") or ""))
+            body += [("", row) for row in _wrapped(typed.split("\n"), width)]
+        body += [("muted", row) for row in _wrapped([note], width)]
+        return PanelText(
+            (
+                "Send a form?"
+                if sending
+                else "Type on a website?" if typing else "Click on a website?"
+            ),
+            f"{site}{mark} · "
+            + (
+                "sends a form"
+                if sending
+                else "types text" if typing else "acts on the page"
+            ),
+            body,
+            escaped_any,
+        )
     if tool.startswith("browser:"):
         site = shown(str(arguments.get("site") or tool[len("browser:") :]))
         said = f"melo wants to open {site} in Safari and read it."
@@ -387,6 +444,11 @@ def session_option(request: ApprovalRequest) -> str:
     if request.tool_name.startswith("browser:"):
         site = str(request.arguments.get("site") or "this site")
         return f"Yes, and allow {site} for the rest of this chat"
+    if request.tool_name.startswith("browser-act:"):
+        site = str(request.arguments.get("site") or "this site")
+        return (
+            f"Yes, and allow clicking and choosing on {site} for the rest of this chat"
+        )
     return f"Yes, and allow every {request.tool_name} call in this session"
 
 
@@ -449,9 +511,11 @@ class TerminalApprover:
         # a folder outside the workspace is offered only when it may be kept.
         outside = request.outside
         offered = offers_grant(request.review) if outside is None else outside.grantable
+        # An answer to typing or to a form's send is never kept for the chat: no session choice.
+        grantable = offered and not never_granted(request.tool_name)
         self.pending = PendingApproval(
             request=request,
-            offer_session=offered and offer_session is not False,
+            offer_session=grantable and offer_session is not False,
             opened_at=self._clock(),
             future=future,
             target=target,

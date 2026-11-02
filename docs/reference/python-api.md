@@ -173,7 +173,8 @@ agent = Agent(config=load(), tool_providers=[McpToolProvider(servers)])
   agent end the same way.
 - `agent.close()` stops the MCP servers.
 - Each MCP tool's raw `annotations` object is kept on its
-  `ToolDef.annotations`, and the checker derives the tool's tier from it;
+  `ToolDef.annotations` (without the key `asksItself`, which only melo's
+  own browser tools use), and the checker derives the tool's tier from it;
   see [Permission tiers](../guides/tools-mcp.md#permission-tiers). A `ToolDef` you build
   yourself starts with `{}`, which is `write`.
 - A provided tool with `requires_approval=True` asks the run's approval

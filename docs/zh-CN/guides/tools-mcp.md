@@ -98,7 +98,7 @@ melo --mcp mcp.json "What time is it in Tokyo?"
 | `require_approval` | 必须是 `true`、`false` 或字符串列表，否则属于用法错误。列表中的名称若不是服务器提供的工具，会记录一条警告。 |
 | 传输方式 | 仅支持 stdio 服务器。其他 `type` 属于用法错误：`only stdio servers are supported (got type 'sse')`。提供 `url` 却没有 `command` 的配置项也是：`'command' must be a non-empty string (HTTP/SSE servers are not supported)`。 |
 | 工具名称 | `mcp__<server>__<tool>`。字母、数字、`_` 和 `-` 以外的字符会变为 `_`。超过 64 个字符的名称会缩短至 64 个字符，并以短哈希结尾；`config.tools` 显示实际使用的名称。 |
-| `annotations` | 按服务器提供的原样保留；非内置工具的权限级别由它决定（见[权限级别](#permission-tiers)）。格式错误的值会被忽略，工具仍会列出。 |
+| `annotations` | 按服务器提供的原样保留；非内置工具的权限级别由它决定（见[权限级别](#permission-tiers)）。格式错误的值会被忽略，工具仍会列出。键 `asksItself` 是 melo 自己的，服务器的注解里带它会被丢弃：任何 MCP 工具都不能用它跳过批准询问。 |
 | 启动 | 服务器在运行开始时启动。无法启动的服务器会使运行以 `setup_error` 状态结束，例如 `MCP server 'notes' exited (code 1)`。 |
 | 适用范围 | 直接模式和 [Python API](../reference/python-api.md#tool-providers-and-mcp)。网关会话没有 MCP 工具。 |
 | `structuredContent` | 只在结果既没有文本也没有图片时才作为文本发送：截图服务器若在其中重复图片的 base64，发送的是图片本身，而不是它的 base64。 |
@@ -148,13 +148,13 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 
 ## 浏览
 
-在 Mac 上，melo 可以在 Safari 里阅读网页。它默认关闭，并且是只读的；[浏览指南](browsing.md)有设置步骤、melo 能做和不能做的事，以及故障排查。
+在 Mac 上，melo 可以在 Safari 里阅读网页，并在自己的浏览器窗口里点击、输入和选择。它默认关闭；[浏览指南](browsing.md)有设置步骤、melo 能做和不能做的事，以及故障排查。
 
 - 在终端聊天里用 `/browser on` 打开它，或用 `melo -X browser.driver=safari-automation` 只对一次运行生效。
 - 在 Safari 里打开“设置 > 开发者”，把 “Allow remote automation” 打开一次。
-- 之后终端聊天以及网页控制台和 App 的每个聊天会得到八个工具：`browser_open`、`browser_read`、`browser_find`、`browser_follow`、`browser_back`、`browser_tabs`、`browser_wait` 和 `browser_screenshot`。
+- 之后终端聊天以及网页控制台和 App 的每个聊天会得到十一个工具：`browser_open`、`browser_read`、`browser_find`、`browser_follow`、`browser_click`、`browser_type`、`browser_select`、`browser_back`、`browser_tabs`、`browser_wait` 和 `browser_screenshot`。
 - 它们在 Safari 自己的自动化窗口里工作，这些窗口启动时不带你的任何登录状态。
-- melo 加载网页之前会问 “Open a website?”，每个网站在一个聊天里问一次（`auto` 模式同样会问）；它不会点击、输入、登录或发布。直接运行、worker 和保存的任务从不会得到这些工具。
+- melo 加载网页之前会问 “Open a website?”，每个网站在一个聊天里问一次（`auto` 模式同样会问），在网站上点击、输入或选择前会再问一次，发送表单前每次都会单独问（会显示表单发往哪里、里面有什么；发送表单没有“在这个聊天里允许”）；它在一个标签页里工作，从不输入密码、银行卡号或一次性验证码，也不会替你登录或发布。直接运行、worker 和保存的任务从不会得到这些工具。
 
 不用 Safari 时，每个聊天和任务都可以用 `web_fetch` 读取公开网页，它默认开启（见[不用浏览器读取网页](browsing.md#read-a-page-without-the-browser)）。
 
@@ -218,7 +218,7 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 | `network` | 向本机外的对象发送数据或对其执行操作：HTTP API、聊天、支付、图形界面等。 | 是。 |
 
 - 内置工具的级别按名称固定：`file_read` 和 `list_files` 是 `read`，`file_write` 是 `write`，`shell_exec` 和 `python_exec` 是 `exec`。
-- `web_fetch` 和浏览工具虽然会访问互联网，但有意定为 `read`：它们不在任何地方做更改，调用本身也不需要审批。它们请求的地址仍可能把数据带出去，所以改由网站关卡来问：浏览器每个网站每个对话问一次；`web_fetch` 直接读取你自己最近的消息提到的网站（就是那个主机，`www.` 不计），其他网站每个对话问一次，并与浏览器共用同一个回答。`web_fetch` 从不访问这台电脑或它的局域网。
+- `web_fetch` 和浏览工具虽然会访问互联网，但有意定为 `read`：它们不在任何地方做更改，调用本身也不需要审批。它们请求的地址仍可能把数据带出去，所以改由网站关卡来问：浏览器每个网站每个对话问一次（点击和输入、发送表单与读取分开问）；`web_fetch` 直接读取你自己最近的消息提到的网站（就是那个主机，`www.` 不计），其他网站每个对话问一次，并与浏览器共用同一个回答。`web_fetch` 从不访问这台电脑或它的局域网。
 - 该表优先于工具自身的声明，因此复用内置工具名称的提供的工具或自定义工具会继承该级别。
 - 模式决定实际提供哪些内置工具（见[选择内置工具](#choose-the-built-in-tools)）；网关或控制台会话在通常的三个之外还获得 `list_files`。
 - 除交互式界面外，各模式都不注册 `shell_exec`，因此模型仍然调用它时会收到 `shell_exec is not available in this run. Available tools: …`，其中列出本次运行的工具（未知的非内置名称仍使用 `Tool not found in registry` 消息）。
