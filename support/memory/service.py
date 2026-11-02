@@ -2284,9 +2284,16 @@ class ChatMemory:
         chosen = [*listed, *projects]
         if objective.strip():
             seen = {item.key for item in chosen}
-            for item in await self.search(
-                objective, records_k=_PACK_RECALL, docs_k=0, exclude_session=chat_id
-            ):
+            # A note the task has already takes no slot of the lookup.
+            found = await self.search(
+                objective,
+                records_k=_PACK_RECALL + len(exclude),
+                docs_k=0,
+                exclude_session=chat_id,
+            )
+            for item in [item for item in found if item.key not in exclude][
+                :_PACK_RECALL
+            ]:
                 topic = topics.get(item.key, "")
                 if (
                     item.is_record

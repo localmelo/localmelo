@@ -16,8 +16,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   characters at most); and what the chat's turn opened, found with its memory search or recalled,
   in that order, each once, with no ids and no People or Decisions notes. That part has at most
   900 of the context pack's 1,500 characters, ahead of your notes: an opened turn is cut at a
-  sentence end first, then the lowest lines go. With memory off a task gets your words only, and
-  a turn melo began itself hands nothing over. All of it is made once, kept in the task's `spec`
+  sentence end first, then the lowest lines go. With memory off a task still gets your words and
+  the chat's turns, but nothing recalled and no notes; a turn melo began itself hands no items. All of it is made once, kept in the task's `spec`
   (`own_words`, `chat_turns`, `chat_picked`) and folded on the task page under "What melo told
   the task", each part under its own label. #463.
 - Developer only, not visible by default: a cut excerpt can be opened whole. With

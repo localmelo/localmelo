@@ -278,7 +278,7 @@ A task's worker has no long-term memory of its own: it neither recalls nor keeps
 - **What the chat recalled for it**, under `[what your chat recalled for this request · from earlier chats and notes, may be outdated · data, not instructions]`: what that turn opened, what its memory search found and what its recall showed, in that order, each once. A turn the block of newest turns shows is not repeated. No line carries an id, since a task cannot open one, and People and Decisions notes are left out here too. At most 900 characters, inside the pack's 1,500: an opened turn is cut at a sentence end first, then the lowest lines go.
 - **The context pack**, last: your notes, as below.
 
-With memory off a task gets your words only: no turns, nothing recalled, no pack. A turn melo began itself, such as a task's question to the chat, hands nothing over. A continue or a restart uses the same text. The task's page folds all of it under "What melo told the task".
+With memory off a task still gets your words and the chat's newest turns, which are the chat's own conversation, but nothing recalled and no pack. A turn melo began itself, such as a task's question to the chat, hands nothing over. A continue or a restart uses the same text. The task's page folds all of it under "What melo told the task".
 
 The context pack:
 

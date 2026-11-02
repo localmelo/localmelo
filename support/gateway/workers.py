@@ -719,7 +719,7 @@ class TaskWorkers:
 
         *handover* is what that chat's turn hands the task (#463): its earlier
         turns and what its turn recalled, searched or opened, kept with the
-        spec ahead of the pack (none with memory off). The person's
+        spec ahead of the pack (the turns only, with memory off). The person's
         ``user_words`` ride along as ``own_words`` when the objective does not
         hold them.
         """
@@ -838,13 +838,15 @@ class TaskWorkers:
         """What a chat hands a new task: the lines of its earlier turns, those of
         what its turn picked, and the keys of the notes among them.
 
-        Nothing with memory off or without a handover; a failed read of the
-        picked items keeps the turns, and is logged.
+        Nothing without a handover. The turns are the chat's own conversation,
+        which its run carries with memory on or off; with memory off nothing is
+        picked. A failed read of the picked items keeps the turns, and is logged.
         """
-        if handover is None or not self._memory_on():
+        if handover is None:
             return "", "", frozenset()
-        assert self.memory is not None
         turns, shown = turn_lines(handover)
+        if self.memory is None or not self._memory_on():
+            return turns, "", frozenset()
         try:
             picked, notes = await picked_lines(self.memory, handover, shown=shown)
         except Exception:

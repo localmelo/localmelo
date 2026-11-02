@@ -647,7 +647,7 @@ async def test_no_handover_no_budget_change(rig: Rig) -> None:
     assert rig.notes.budgets == [TASK_PACK_CHARS] and TASK_PACK_CHARS == 1500
 
 
-async def test_memory_off_hands_nothing_over_but_the_words(rig: Rig) -> None:
+async def test_memory_off_keeps_the_words_and_the_chats_turns_only(rig: Rig) -> None:
     rig.workers.memory = None
     first, spec = await _first(
         rig,
@@ -655,9 +655,27 @@ async def test_memory_off_hands_nothing_over_but_the_words(rig: Rig) -> None:
         chat_started=True,
         handover=Handover(turns=TURNS, used=(RECALLED,)),
     )
-    assert EARLIER_HEAD not in first and PICKED_HEADER not in first
-    assert not {"chat_turns", "chat_picked"} & set(spec)
+    # The chat's own conversation rides either way; nothing recalled, no notes.
+    assert f"{EARLIER_HEAD}\n- the user: My friend Alex is looking" in first
+    assert spec["chat_turns"].startswith("- the user: My friend Alex")
+    assert PICKED_HEADER not in first and TASK_PACK_HEADER not in first
+    assert not {"chat_picked", "context_pack"} & set(spec)
     assert f"{WORDS_HEADER}\n{WORDS}" in first
+
+
+async def test_memory_turned_off_in_the_settings_keeps_the_chats_turns(
+    rig: Rig,
+) -> None:
+    rig.notes.enabled = False  # type: ignore[attr-defined]
+    rig.notes.pack = ""
+    first, spec = await _first(
+        rig,
+        _spec(rig),
+        chat_started=True,
+        handover=Handover(turns=TURNS, used=(RECALLED,)),
+    )
+    assert EARLIER_HEAD in first and PICKED_HEADER not in first
+    assert "chat_picked" not in spec and spec["chat_turns"]
 
 
 async def test_a_failed_read_of_what_the_chat_recalled_keeps_its_turns(

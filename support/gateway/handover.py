@@ -16,9 +16,10 @@ matched (the pack), three blocks, each marked as data:
 
 All three are made once, when the task is made, and kept with its spec
 (``own_words``, ``chat_turns``, ``chat_picked``); a continue or a restart reuses
-them, as it reuses the pack. Only the person's own turn hands anything over: a
-turn melo began (a task's question to the chat, a follow-up) hands nothing, and
-with memory off the chat hands no turns and no items.
+them, as it reuses the pack. Only the person's own turn hands its items over: a
+turn melo began (a task's question to the chat, a follow-up) hands none. With
+memory off the chat still hands its turns (its own conversation, which its run
+carries either way), but no items and no notes.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from localmelo.melo.agent._earlier import EARLIER_END, EARLIER_HEAD, earlier_block
-from localmelo.support.memory import ChatMemory
+from localmelo.support.memory import ChatMemory, note_gate
 from localmelo.support.memory.digest import DigestItem
 from localmelo.support.memory.recall import WHOLE, Item, cut_at_sentence, turn_said
 from localmelo.support.memory.service import ChatTurn, is_owner_question
@@ -175,7 +176,7 @@ def _named(item: Item) -> Item:
     changes: dict[str, Any] = {"conflicts": ()}  # "(conflicts with m3)" names ids
     if item.where == _THIS_CHAT or item.where.startswith(f"{_THIS_CHAT},"):
         changes["where"] = _STARTING_CHAT + item.where[len(_THIS_CHAT) :]
-    if item.is_record and item.how:
+    if item.is_record and item.how not in ("", note_gate.TYPED):
         changes["quote"] = ""  # a page's or melo's note keeps its own wording
     return dataclasses.replace(item, **changes)
 

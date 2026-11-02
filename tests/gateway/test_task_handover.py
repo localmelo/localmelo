@@ -373,7 +373,7 @@ async def test_a_turn_of_the_starting_chat_is_named_so(
     assert "this chat," not in lines
 
 
-async def test_a_note_from_a_page_or_inferred_never_reads_as_the_persons_words(
+async def test_only_a_typed_note_reads_as_the_persons_words(
     memory: ChatMemory,
 ) -> None:
     def record(key: str, how: str, where: str) -> Item:
@@ -390,19 +390,26 @@ async def test_a_note_from_a_page_or_inferred_never_reads_as_the_persons_words(
 
     pointed = await note(memory, "Alex's team ships weekly.", "", "about")
     inferred = await note(memory, "Alex prefers small teams.", "", "about")
+    typed = await note(memory, "Alex moved to Utrecht.", "", "about")
+    plain = await note(memory, "Alex runs on Sundays.", "", "about")
     handover = Handover(
         used=(
             record(pointed, "pointed", "from example.com, Oct 30"),
             record(inferred, "inferred", "Main chat, Oct 30"),
+            # A gate level above typed tags the person's own notes "typed".
+            record(typed, "typed", "Main chat, Oct 30"),
+            record(plain, "", "Main chat, Oct 30"),
         )
     )
     lines, _ = await picked_lines(memory, handover)
-    first, second = lines.splitlines()
+    first, second, third, fourth = lines.splitlines()
     assert first.startswith(
         "- a note to the user “Alex's team ships weekly.” (from example.com"
     )
     assert second.startswith("- melo inferred “Alex's team ships weekly.”")
-    assert "the user said" not in lines
+    # The person's words keep their "the user said".
+    assert third == "- the user said “Alex's team ships weekly.” (Main chat, Oct 30)"
+    assert fourth == third
 
 
 async def test_opened_text_is_cut_at_a_sentence_end_before_a_line_goes(
