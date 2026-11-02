@@ -147,6 +147,17 @@ def test_one_site_has_one_origin_however_its_address_is_spelt(
     assert sites.origin_of(url) == origin
 
 
+@pytest.mark.parametrize(
+    "url", ["https://coll%65ct.example/x", "http://[fe80::1%25en0]:8080/"]
+)
+def test_a_host_with_a_percent_sign_is_not_opened(url: str) -> None:
+    # A browser decodes `coll%65ct.example` to `collect.example`: an encoded host
+    # would reach a site refused earlier under another name, so it is not opened.
+    assert sites.origin_of(url) is None
+    with pytest.raises(sites.BrowserError):
+        sites.require_origin(url)
+
+
 async def test_a_redirect_to_another_site_asks_after_it_lands() -> None:
     driver, asks = world(), Asks(other_org=False)
     tools = await tools_of(driver)

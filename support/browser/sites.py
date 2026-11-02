@@ -42,7 +42,9 @@ def origin_of(url: str) -> str | None:
         return None
     host = host.lower()
     host = host[:-1] if host.endswith(".") else host
-    if scheme not in _PORTS or not host or not re.fullmatch(r"[\w.\-\[\]:%]+", host):
+    # No % in a host, as web_fetch's check: a browser decodes `coll%65ct.example`
+    # to `collect.example`, so an encoded host would dodge a site refused earlier.
+    if scheme not in _PORTS or not host or not re.fullmatch(r"[\w.\-\[\]:]+", host):
         return None
     shown = f"[{host}]" if ":" in host else host
     return f"{scheme}://{shown}" + (
