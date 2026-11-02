@@ -2217,7 +2217,10 @@ class ChatMemory:
         The newest :data:`~.digest.DIGEST_TURNS` turns of the main chat and the
         side chats other than *session_id* stamped within the last
         :meth:`digest_minutes` before *now* (default :func:`clock.now`, which
-        ``LOCALMELO_NOW`` pins; a turn's stamp is its own time), as a
+        ``LOCALMELO_NOW`` pins). Stored stamps never follow the pin: live
+        turns keep the wall clock and ingested turns their file's dates, so
+        under a pin the digest reads only ingested turns near the pinned
+        time. Returned as a
         :class:`~.digest.Digest`. Under the lock, one
         :meth:`ConversationIndex.recent` read (at most
         :data:`~.digest.DIGEST_SCAN` turns) and the corpus recall uses
