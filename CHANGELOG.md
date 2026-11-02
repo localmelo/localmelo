@@ -9,6 +9,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The `turn.memory` event records the exact text the model read. Each entry of
+  `used` (the recall block's items) and `searched` (what `search_memory`
+  returned) has a new `shown` key: the line as the recall block or the search
+  result worded it, without the list number, whatever `recall_item_chars`,
+  `recall_excerpt` and `recall_form` made of it. `text` is unchanged, and an
+  item left out of the block for room has no entry. The text of an opened turn
+  stays in the `open_memory` result, so `opened` keeps its shape. What the model
+  reads and the defaults do not change.
+
 - One step replaces every picture of Melo from an art pack, a folder or a zip.
   `uv run --with pillow==13.0.0 python scripts/art_pack.py check PACK` reads the
   pack, writes nothing and reports what it replaces, what is missing and used
@@ -725,6 +734,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   finish** card shows the report of its own run, not the newest one, and a
   later end of the task decides whether Stop stays, whatever order the page
   got them in. [#431]
+- A chat replies in the language of your latest message even after tool results or
+  memory text in another language. The rule is set once, in the paragraph every chat
+  (terminal, main chat, side chats) starts with.
+- A long message recalled from an earlier chat shows as much of the person's own
+  words as it did before recalled turns said who spoke: about 234 characters,
+  not 140. A value stated late in a long message was cut off, and questions
+  about it went unanswered. melo's reply gets the room that is left.
+  `recall_item_chars` defaults to 234; larger rooms read as before.
+
 - Developer: `melo memory ingest` reads a session that a file repeats word for word once,
   instead of refusing the file; the same id with other turns is still refused.
 - A task that changed no code is no longer told to run tests. Outside git, melo compares the

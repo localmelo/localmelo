@@ -33,7 +33,7 @@ import re
 import time
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Final, NamedTuple
 
 import numpy as np
@@ -72,11 +72,14 @@ SIDE_SUMMARY: Final = "side_summary"
 AGENT_EXCHANGE: Final = "agent_exchange"
 _KEPT_CHARS: Final = 120
 _LINE_CHARS: Final = 240
-# What a turn's two parts may take together in the block (the words that say who
-# spoke are extra, so a turn line stays about as long as it was), and the least
-# melo's reply keeps when the user's words are long.
-TURN_CHARS: Final = _LINE_CHARS - 40
+# What a turn's two parts may take together in the block: as many of the user's
+# words as the plain 240-character head ``User: …`` of a turn showed before a turn
+# said who spoke (those words are extra). In a larger room melo's reply keeps
+# :data:`_REPLY_CHARS` of it; a reply is shown only when :data:`_REPLY_MIN` or more
+# characters are left for it.
+TURN_CHARS: Final = _LINE_CHARS - len("User: ")
 _REPLY_CHARS: Final = 60
+_REPLY_MIN: Final = 20
 # With ``recall_excerpt = "match"``, the share of a turn's room the user's words
 # keep when they are long; the rest is melo's reply's.
 _USER_SHARE: Final = 0.4
@@ -117,7 +120,8 @@ class Shown(NamedTuple):
 
     *chars* is the room one turn takes (:data:`TURN_CHARS`), in the recall block
     and in the memory search tool's list; text that is no turn takes *chars* plus
-    the 40 characters that say who spoke. With *terms*, the question's content
+    the 6 characters of ``User: `` (240 by default, the plain head it always
+    had). With *terms*, the question's content
     terms (``[memory] recall_excerpt = "match"``), each part of a turn shows the
     sentences that hold most of them rather than its head (:func:`turn_said`).
     The defaults are the head of every turn, as it always was.
@@ -151,7 +155,12 @@ class Item:
     document's ``chunk`` is 0 for the head of a turn and 1 and up for the later
     pieces of a long one (:mod:`.index`). ``similarity`` is the cosine of a
     turn to the message when a search matched it by meaning (the list form
-    shows it); it is set on a copy for one search, never stored.
+    shows it); it is set on a copy for one search, never stored. ``shown`` is
+    the line the model read for the item, as the recall block or the memory
+    search result worded it (without a list number): :func:`block` and the search
+    tool set it on a copy, once, where the line is built, for ``turn.memory``'s
+    entries (:meth:`to_json`); it is never stored and takes no part in a
+    comparison.
     """
 
     key: str
@@ -168,6 +177,7 @@ class Item:
     older: str = ""
     chunk: int = 0
     similarity: float | None = None
+    shown: str = field(default="", compare=False)
 
     @property
     def is_record(self) -> bool:
@@ -252,7 +262,10 @@ class Item:
         return f"[t{self.key[2:]}] {date or day(self.created_at)} · {chat}{older}"
 
     def to_json(self) -> dict[str, Any]:
-        return {
+        """The item as a ``turn.memory`` entry. ``text`` is the stored text (a
+        turn's head, :func:`snippet`); ``shown``, only when the model was shown
+        the item, is the exact line it read, whatever the recall settings made it."""
+        data: dict[str, Any] = {
             "kind": "record" if self.is_record else "chat",
             "id": int(self.key[2:]),
             "text": self.text if self.is_record else snippet(self.text),
@@ -261,6 +274,9 @@ class Item:
             "turn": self.turn,
             "at": self.created_at,
         }
+        if self.shown:
+            data["shown"] = self.shown
+        return data
 
 
 def unit(vector: Iterable[float] | None) -> np.ndarray | None:
@@ -346,9 +362,13 @@ def turn_said(text: str, show: Shown = HEADS) -> str:
     """A turn's document text as the model reads it: ``the user said “…”; melo
     replied “…”``, so a past reply of melo's is never read as the user's own
     statement. Both parts are bounded together (``show.chars``, :data:`TURN_CHARS`
-    by default); the user's words come first and stay whole when they fit, and
-    melo's reply keeps at least :data:`_REPLY_CHARS` of the room. Text that is no
-    turn (a summary, a task's question) is a plain :func:`snippet`.
+    by default); the user's words come first and stay whole when they fit. Long
+    words of the user take the room less :data:`_REPLY_CHARS` for melo's reply,
+    but in a room of at least :data:`TURN_CHARS` never fewer than that (as far as
+    the plain 240-character head ``User: …`` showed them): a value a person
+    states late in a long message is where questions about them look. The reply takes what is left when that
+    is at least :data:`_REPLY_MIN` characters. Text that is no turn (a summary, a
+    task's question) is a plain :func:`snippet`.
 
     With ``show.terms`` a part that does not fit shows the window that holds the
     most of them instead (:func:`_matching`).
@@ -366,8 +386,12 @@ def turn_said(text: str, show: Shown = HEADS) -> str:
         if picked is not None:
             typed, answer = picked
         else:
-            typed = snippet(typed, show.chars - _REPLY_CHARS if answer else show.chars)
-            answer = snippet(answer, show.chars - len(typed)) if answer else ""
+            user_room = show.chars - _REPLY_CHARS
+            if show.chars >= TURN_CHARS:
+                user_room = max(user_room, TURN_CHARS)
+            typed = snippet(typed, user_room if answer else show.chars)
+            room = show.chars - len(typed)
+            answer = snippet(answer, room) if answer and room >= _REPLY_MIN else ""
     said = [f"the user said “{typed}”"] if typed else []
     return "; ".join(said + ([f"melo replied “{answer}”"] if answer else []))
 
@@ -834,7 +858,8 @@ def block(
     *,
     listing: bool = False,
 ) -> tuple[str, list[Item]]:
-    """The recall block a user message carries, and the items that fit in it.
+    """The recall block a user message carries, and the items that fit in it, each
+    a copy that holds the line the model reads (:attr:`Item.shown`).
 
     The *kept* lines (:func:`kept_lines`) come first, with or without recall.
     Items are added while the block stays within *chars*
@@ -867,17 +892,21 @@ def block(
         used.append(item)
         size += len(line) + 1
     # An item whose same-day partner did not fit needs no time: shorter, so it fits.
+    # What is written here is what the model reads; each item keeps its own line.
     same_day = times(used)
-    lines = [
-        *lines[:fixed],
-        *(
-            f"- {item.line(now, timed=item.key in same_day, show=show)}"
-            for item in used
-            if not listed(item)
-        ),
-    ]
-    turns = [item for item in used if listed(item)]
+    read: dict[int, str] = {}
+    lines = lines[:fixed]
+    for n, item in enumerate(used):
+        if not listed(item):
+            read[n] = item.line(now, timed=item.key in same_day, show=show)
+            lines.append(f"- {read[n]}")
+    turns = [n for n, item in enumerate(used) if listed(item)]
     if turns:
         lines.append(LIST_GUIDE)
-        lines.extend(item.listed(now, timed=item.key in same_day) for item in turns)
-    return ("\n".join(lines) if used or kept else ""), used
+        for n in turns:
+            read[n] = used[n].listed(now, timed=used[n].key in same_day)
+            lines.append(read[n])
+    text = "\n".join(lines) if used or kept else ""
+    return text, [
+        dataclasses.replace(item, shown=read[n]) for n, item in enumerate(used)
+    ]
