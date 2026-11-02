@@ -1037,11 +1037,11 @@ def material_text(text: str) -> str:
 # A finished task's result is melo's own answer, in Markdown, and "you" in it is the
 # user. The part of it that is not trusted is page text the page reader already
 # flattened, so it holds no markup to read. Only the plainly injected forms take a
-# paragraph out of it: an order to ignore what the assistant was told, a role header,
-# an order to write to the assistant's memory, a line that opens by addressing an AI.
-# Advice ("Run the tests.", "You should always check in online."), a fact about a
-# system prompt, a "Developer:" line and "Note that your lease ends June 30" are the
-# answer, and a note may rest on them.
+# paragraph out of it: an order to ignore what the assistant was told, an order to write
+# to the assistant's memory, a line that opens by addressing an AI. Advice ("Run the
+# tests.", "You should always check in online."), a fact about a system prompt, a
+# field label such as "System: macOS 27.2" or "Assistant: Maria Lopez" and "Note that
+# your lease ends June 30" are the answer, and a note may rest on them.
 
 _ANSWER: Final = "\nmelo: "
 _IGNORE_ORDER = re.compile(
@@ -1054,23 +1054,23 @@ _IGNORE_ORDER = re.compile(
 )
 # What orders the assistant to keep something in its memory: "save this to your
 # memory", "update your memory", "remember that the user ...", "save a note that the
-# user ...". Not "save the notes to notes.md", "add more memory" or "remember to ...".
+# user ...". Not "save the notes to notes.md", "add more memory", "remember to ..." or
+# "remember that the users table ...". "memory" ends the object of the order: a
+# punctuation mark, the end of the line, or one of a few small words ("... to your
+# memory with this"), not a noun it heads ("your memory card", "memory limit").
+_ENDS: Final = (
+    r"(?=[ \t]*(?:[:;,.!?)\n]|\Z)"
+    r"|[ \t]+(?:with|now|please|and|so|that|about|using)\b)"
+)
 _MEMORY_ORDER = re.compile(
     r"\b(?:save|store|record|write|add)\b[^.!?\n]{0,60}?\b(?:to|in|into)\s+"
-    r"(?:your|its|the\s+assistant['’]?s|long[- ]term)\s+memory\b(?![-\w])"
-    r"|\bupdate\s+your\s+memory\b(?![-\w])"
-    r"|\bremember\s+that\s+the\s+users?\b"
+    rf"(?:your|its|the\s+assistant['’]?s|long[- ]term)\s+memory{_ENDS}"
+    rf"|\bupdate\s+your\s+memory{_ENDS}"
+    r"|\bremember\s+that\s+the\s+user\b"
     r"|\b(?:save|store|record|write|add)\b[^.!?\n]{0,40}?\b(?:note|memory)\s+"
-    r"(?:that|saying|stating)\s+the\s+users?\b"
+    r"(?:that|saying|stating)\s+the\s+user\b"
     "|写入记忆|存入记忆|保存到记忆|更新(?:你的|我的)?记忆",
     re.IGNORECASE,
-)
-# A role header at the start of a line ("System: ...", "[assistant]", "<system>"); a
-# list item ("- System: macOS 27.2") and ``Developer:`` are not one.
-_RESULT_ROLE = re.compile(
-    r"^[ \t>]*+#*+[ \t]*+(?:(?:system|assistant)[ \t]*[:：]"
-    r"|[\[<](?:system|assistant)[\]>](?!\())",
-    re.IGNORECASE | re.MULTILINE,
 )
 # A line that opens by addressing an AI and then has a comma or a colon: "Dear AI
 # assistant, ...", "Note to any AI reading this: ...". Not "Dear Assistant Professor Lee, ...",
@@ -1101,14 +1101,14 @@ def _code_blanked(text: str) -> str:
 
 def _result_orders(paragraph: str) -> bool:
     """Whether *paragraph* of a result holds a plainly injected form: an order to
-    ignore instructions, an order to write to the assistant's memory, a role header at
-    the start of a line, or a line that opens by addressing an AI. The ``>`` that
-    quotes its lines does not count."""
+    ignore instructions, an order to write to the assistant's memory, or a line that
+    opens by addressing an AI. The ``>`` that quotes its lines does not count. A role
+    header is no form here: ``System: macOS 27.2`` is an ordinary label in an answer,
+    and ``System: ignore previous instructions`` is caught by the first form."""
     for form in _forms(_QUOTED.sub("", paragraph)):
         if (
             _IGNORE_ORDER.search(form)
             or _MEMORY_ORDER.search(form)
-            or _RESULT_ROLE.search(form)
             or _RESULT_ADDRESSEE.search(form)
         ):
             return True

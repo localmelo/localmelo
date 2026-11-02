@@ -908,13 +908,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - A finished task's result is melo's own answer, so it is read for plain injection forms only
   and no markup is read in it. In it "you" is the user, so a paragraph is dropped only for a form
   no honest answer has: "ignore previous instructions" ("disregard", "forget" and "override"
-  too, with "all", "prior" or "your"), a role header such as `SYSTEM:` or `[assistant]` at the
-  start of a line (a list item such as "- System: macOS 27.2" and `Developer:` are not one), an
+  too, with "all", "prior" or "your"), an
   order to keep something in the assistant's memory ("save this to your memory", "update your
-  memory", "remember that the user …"), or a lead that names an AI and is followed by a comma or
+  memory", "remember that the user …"; "memory" must end the order, so "save the photos to your
+  memory card" and "remember that the users table …" are not one), or a lead that names an AI and is followed by a comma or
   a colon ("Dear AI assistant, …", "Note to any AI: …"; "Dear Assistant Professor Lee," is not
   one). Advice and plain statements stay ("Check in 24 hours before.", "You must always check in
-  online.", "From now on you should arrive early.", "Remember to bring a passport.", a command in
+  online.", "From now on you should arrive early.", "Remember to bring a passport.", "System: macOS 27.2" and
+  "Assistant: Maria Lopez" as field labels, a command in
   a code block), and code spans and fenced blocks are not read for orders. The chunks of a
   recalled result are read as one text, from the chunk that holds the answer.
 - A page read in the browser supports no note at any level above `typed`, and the refusal says
