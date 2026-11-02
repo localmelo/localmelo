@@ -271,3 +271,26 @@ test('what a follow-up did draws nothing: it only tells the page whether more ru
   assert.equal(echo.kind, 'followed');
   assert.deepEqual(echoNodes({doc: fakeDoc(), echo, act: () => assert.fail('nothing to act on')}), []);
 });
+
+test('a later end of the task wins over a follow-up on an earlier end, whenever each row was written', () => {
+  // The first end (event 5) is followed up and the follow-up continued the task; the task ended again (event 9).
+  const first = card(10, NOON + 10, {follow_up: true, end_id: 5});
+  const second = card(12, NOON + 20, {end_id: 9});
+  assert.equal(second.endId, 9);
+  // The follow-up's row was written after the second end's card: the second end still decides.
+  const continued = {...followed(13, NOON + 30, 'continued'), end_id: 5, at: NOON + 30};
+  assert.equal(stopShows([first, second], [continued]), false);
+  // A second end its chat follows up on keeps Stop until that follow-up says what it did,
+  const again = card(12, NOON + 20, {follow_up: true, end_id: 9});
+  assert.equal(stopShows([first, again], [continued]), true);
+  // even when the clock wrote that row a little before the end's card.
+  const reported = {...followed(14, NOON + 15, 'reported'), end_id: 9, at: NOON + 15};
+  assert.equal(stopShows([first, again], [continued, reported]), false);
+});
+
+test('a Stop that found nothing left to stop has no Undo', () => {
+  const nothing = row(2, {echo: 'control', action: 'stop', line: 'Stopped: Fix tests', undo: null});
+  assert.deepEqual(echoActions(nothing, false), []);
+  const stopped = row(3, {echo: 'control', action: 'stop', line: 'Stopped: Fix tests', undo: {again: true}});
+  assert.deepEqual(echoActions(stopped, false).map(([, does]) => does), ['undo']);
+});

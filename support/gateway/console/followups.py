@@ -277,8 +277,15 @@ class TaskFollowups:
         if self._closed:
             return
         for info in await self.console.store.sessions_with_meta("followup"):
-            if info.kind != "task" or (info.meta or {}).get("started_by") != "chat":
-                continue
+            meta = info.meta or {}
+            kept = meta.get("followup")
+            if (
+                info.kind != "task"
+                or meta.get("started_by") != "chat"
+                or not isinstance(kept, dict)
+                or kept.get("stage") not in ("queued", "began")
+            ):
+                continue  # only a follow-up that waits, or began, is looked at
             try:
                 async with self._lock(info.id):
                     await self._consider_locked(info.id, None, restoring=True)
@@ -317,6 +324,10 @@ class TaskFollowups:
         ):
             return None  # this ending was looked at already
         self._seen.add(ending)
+        if event_id is None:
+            # Restored: the end is the task's newest sched.finished.
+            ends = await store.events_of_type(task_id, "sched.finished", limit=1)
+            event_id = ends[-1].id if ends else None
         person = await self._person_turn(chat)
         same = kept.get("person_turn") == person[0]
         runs = int(kept.get("runs") or 0) if same else 0
@@ -401,6 +412,9 @@ class TaskFollowups:
             # Kept before the turn begins, so a restart never runs it twice; a
             # crash before the turn began loses it rather than doubling it.
             await self._mark(item, "began")
+            if item.stopped:
+                await self._settle(item, "stopped")  # the Stop came as it got ready
+                return
             try:
                 turn = await sessions.start_internal(chat_id, text, FOLLOWUP_ORIGIN)
             except SessionBusyError:
@@ -551,30 +565,49 @@ class TaskFollowups:
 
         One that waits leaves its queue; one whose turn runs has the turn
         stopped, and its ``task_continue`` is refused; either says so with a
-        ``followed`` row (``stopped``), and the task keeps it
-        (``meta.followup.stage``), so a restart does not run it. Whether
-        there was one.
+        ``followed`` row (``stopped``). The task keeps the Stop on its end as
+        it stands (``meta.followup``: that end, ``stage`` ``stopped``), so a
+        follow-up being looked at as the Stop came is never queued for it,
+        and a restart runs none. Whether one waited or ran.
         """
-        waiting = [
-            item
-            for queue in self._pending.values()
-            for item in queue
-            if item.task_id == task_id
-        ]
-        for queue in self._pending.values():
-            queue[:] = [item for item in queue if item.task_id != task_id]
-        running = [item for item in self._running.values() if item.task_id == task_id]
-        for item in running:
-            item.stopped = True
-            self._stop_turn(item)
-        ends = {item.finished_at for item in waiting + running}
+        running = self._stop_running(task_id)  # its task_continue is refused now
         async with self._lock(task_id):
-            kept = await self._kept(task_id) if ends else {}
-            if kept.get("ending_at") in ends:
-                await self._keep(task_id, {**kept, "stage": "stopped"})
+            # Under the lock: a look at the end that was under way has queued
+            # its follow-up by now, or never will.
+            waiting = [
+                item
+                for queue in self._pending.values()
+                for item in queue
+                if item.task_id == task_id
+            ]
+            for queue in self._pending.values():
+                queue[:] = [item for item in queue if item.task_id != task_id]
+            running += self._stop_running(task_id)
+            try:
+                record = await self.console.workers.tasks.get_task(task_id)
+            except TaskStoreError:
+                record = None
+            if record is not None and record.state in FINISHED:
+                kept = await self._kept(task_id)
+                await self._keep(
+                    task_id,
+                    {**kept, "ending_at": record.finished_at, "stage": "stopped"},
+                )
         for item in waiting:
             await self._said(item, "stopped")
         return bool(waiting or running)
+
+    def _stop_running(self, task_id: str) -> list[FollowUp]:
+        """Stop the follow-up of *task_id* that runs now and was not stopped yet."""
+        found = [
+            item
+            for item in self._running.values()
+            if item.task_id == task_id and not item.stopped
+        ]
+        for item in found:
+            item.stopped = True
+            self._stop_turn(item)
+        return found
 
     async def _mark(self, item: FollowUp, stage: str) -> None:
         """Keep on the task where *item*'s follow-up stands: queued, began, stopped or skipped.
@@ -603,7 +636,8 @@ class TaskFollowups:
         with contextlib.suppress(Exception):
             await self.console.front_for(item.chat_id).echo(
                 {"echo": FOLLOWED_ECHO, "task_id": item.task_id, "title": item.title,
-                 "did": did, "question": "", "turn_id": item.turn_id}
+                 "did": did, "question": "", "turn_id": item.turn_id,
+                 "end_id": item.event_id}
             )  # fmt: skip
 
     async def _followed(self, item: FollowUp, front: Front) -> None:
@@ -626,7 +660,8 @@ class TaskFollowups:
         with contextlib.suppress(Exception):
             await front.echo(
                 {"echo": FOLLOWED_ECHO, "task_id": item.task_id, "title": item.title,
-                 "did": did, "question": question, "turn_id": item.turn_id}
+                 "did": did, "question": question, "turn_id": item.turn_id,
+                 "end_id": item.event_id}
             )  # fmt: skip
         with contextlib.suppress(Exception):
             await self._mark(item, "told")

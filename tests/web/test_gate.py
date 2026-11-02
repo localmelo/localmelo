@@ -19,7 +19,11 @@ import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._step_review import StepReviewer
-from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
+from localmelo.melo.contracts.approvals import (
+    ApprovalDecision,
+    ApprovalRequest,
+    EarlierBlocks,
+)
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.schema import Message, ToolCall, ToolDef
@@ -359,3 +363,49 @@ async def test_a_chat_with_no_approval_policy_reads_as_before(
     [tool] = await provider.start()
     result = await tool.function(url=PAGE)
     assert isinstance(result, str) and "# Tomatoes" in result
+
+
+async def test_a_site_refused_earlier_stays_refused_though_the_request_names_it(
+    server: dict[str, Any],
+) -> None:
+    """A run its chat continued never reads a site refused before (#431).
+
+    Not when the person's request names the site (the named-site shortcut
+    comes after the earlier refusal), and not through another scheme.
+    """
+    resolver = _resolver(server)
+    refusing = Person(refuse=True)
+    first = ScriptedLLM([_fetch(f"http://{pages.HOST}/page?d=secret"), _say("ok")])
+    agent = _agent(first, resolver)
+    found: list[Any] = []
+    try:
+        await agent.run_task(
+            "garden notes?",
+            on_event=found.append,
+            approval=RememberingPolicy(refusing.ask),
+        )
+    finally:
+        await agent.close()
+    [finished] = [e for e in found if e.type == "tool.finished"]
+    [asked] = finished.data["tool_asks"]
+    # The continued run: the request names the site; the model tries it again.
+    person = Person()
+    blocks = EarlierBlocks(
+        RememberingPolicy(person.ask),
+        {asked["call_key"]: ("the user", "")},
+        {asked["call_key"]: asked["loose_keys"]},
+    )
+    again = ScriptedLLM(
+        [_fetch(f"http://{pages.HOST}/page"), _fetch(f"https://{pages.HOST}/page")]
+    )
+    retried = _agent(again, resolver)
+    try:
+        await retried.run_task(f"What does {pages.HOST} say?", approval=blocks)
+    finally:
+        await retried.close()
+    assert person.asked == [], "nobody was asked"
+    assert resolver.calls == [] and server["requests"] == [], "never reached"
+    named, other_scheme = _results(again)
+    assert f"melo did not read {pages.HOST}" in named
+    assert "the user blocked a step like this one earlier" in named
+    assert "the user blocked a step like this one earlier" in other_scheme

@@ -788,6 +788,25 @@ def _not_a_database(exc: BaseException) -> bool:
     )
 
 
+# A call a stopped turn never reviewed (its approval's reason): no block.
+_TURN_STOPPED: Final = "the turn stopped"
+
+
+def _block(column: str, path: str) -> str:
+    """SQL: the approval at *path* in *column* is a block (``denied_records``).
+
+    Denied by a person, auto mode or a policy, with a call key, not a
+    refusal of a step blocked before, and not a stopped turn's (one ``?``).
+    """
+    field = f"json_extract({column}, '{path}.{{}}')".format
+    return (
+        f"({field('allowed')} = 0 AND {field('origin')} IN ('user', 'auto', 'policy') "
+        f"AND COALESCE({field('call_key')}, '') != '' "
+        f"AND COALESCE({field('earlier')}, '') = '' "
+        f"AND COALESCE({field('reason')}, '') != ?)"
+    )
+
+
 _SESSION_COLUMNS: Final = (
     "s.id, s.kind, s.title, s.created_at, s.updated_at, s.model, s.workspace, "
     "s.meta, s.lease_holder, s.lease_until, "
@@ -1902,13 +1921,16 @@ class SessionStore:
     async def denied_records(
         self, session_id: str, *, limit: int = 100
     ) -> list[StoredEvent]:
-        """The ``tool.finished`` events of calls a person, auto mode or a policy denied (#411).
+        """The ``tool.finished`` events of calls a person, auto mode or a policy blocked (#411).
 
-        Their ``approval`` has ``allowed`` false and ``origin`` ``user``,
-        ``auto`` or ``policy``; a timeout, a withdrawn prompt or a failed
-        policy is no denial. So are those whose tool had a question of its
-        own refused (``tool_asks``, #431), which the caller reads. The
-        newest *limit* (1..1000), in id order.
+        A block is a denial (``allowed`` false, ``origin`` ``user``, ``auto``
+        or ``policy``) with its ``call_key``: of the call (``approval``), or
+        of a question its tool asked itself (``tool_asks``, #431). A timeout,
+        a withdrawn prompt, a failed policy, a refusal of a step blocked
+        before (``earlier``), a call a stopped turn never reviewed and a
+        record from before call keys were kept are none, so a model that
+        tries a blocked step again and again never pushes the block out of
+        the newest *limit* (1..1000), in id order.
         """
         if (
             isinstance(limit, bool)
@@ -1921,13 +1943,10 @@ class SessionStore:
             rows = await _rows(
                 conn,
                 "SELECT id, turn, event FROM events WHERE session_id = ? "
-                "AND type = 'tool.finished' AND (("
-                "json_extract(event, '$.data.approval.allowed') = 0 AND "
-                "json_extract(event, '$.data.approval.origin') IN "
-                "('user', 'auto', 'policy')) OR "
-                "json_array_length(event, '$.data.tool_asks') > 0) "
-                "ORDER BY id DESC LIMIT ?",
-                (session_id, limit),
+                f"AND type = 'tool.finished' AND ({_block('event', '$.data.approval')} "
+                "OR EXISTS (SELECT 1 FROM json_each(event, '$.data.tool_asks') "
+                f"WHERE {_block('value', '$')})) ORDER BY id DESC LIMIT ?",
+                (session_id, _TURN_STOPPED, _TURN_STOPPED, limit),
             )
         return [
             StoredEvent(row[0], session_id, row[1], json.loads(row[2]))

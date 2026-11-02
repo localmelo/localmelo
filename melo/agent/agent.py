@@ -120,6 +120,7 @@ from localmelo.melo.contracts.approvals import (
     find_folder_asker,
     question_key,
     review_mode,
+    site_key,
 )
 from localmelo.melo.contracts.events import EventSink
 from localmelo.melo.contracts.folders import OutsideAccess, home_label
@@ -2005,9 +2006,10 @@ class _ToolAsk:
 
     A question refused is a blocked step like any other (#431): it is kept
     in *refused* (the call's ``tool_asks``) with its ``call_key`` and its
-    ``loose_keys`` (:func:`question_key` among them), and a run its chat
-    continued on its own refuses the same question, or one under the same
-    name, before any review or prompt (:class:`EarlierBlocks`).
+    ``loose_keys`` (:func:`question_key` and, for a site, :func:`site_key`
+    among them), and a run its chat continued on its own refuses the same
+    question, one under the same name, or one about the same host however
+    its address is spelt, before any review or prompt (:class:`EarlierBlocks`).
     """
 
     def __init__(
@@ -2030,10 +2032,20 @@ class _ToolAsk:
         """Whether the user's recent messages name *host* itself (``www.`` aside)."""
         return self._reviewer is not None and self._reviewer.names_host(host)
 
-    async def __call__(
+    def refused_earlier(
         self, tool_name: str, arguments: Mapping[str, Any], preview: str
-    ) -> ApprovalDecision:
-        request = ApprovalRequest(
+    ) -> ApprovalDecision | None:
+        """The refusal of a question blocked earlier in this task, or one alike, or None.
+
+        Asked before anything lets the question through without asking, such
+        as a site the user's words name: a block stands over that (#431).
+        """
+        return self._earlier(self._request(tool_name, arguments, preview))
+
+    def _request(
+        self, tool_name: str, arguments: Mapping[str, Any], preview: str
+    ) -> ApprovalRequest:
+        return ApprovalRequest(
             request_id=uuid.uuid4().hex,
             run_id=self._run.task_id,
             call_id=self._call.id,
@@ -2043,6 +2055,11 @@ class _ToolAsk:
             workspace_root=self._workspace_root,
             tier="network",
         )
+
+    async def __call__(
+        self, tool_name: str, arguments: Mapping[str, Any], preview: str
+    ) -> ApprovalDecision:
+        request = self._request(tool_name, arguments, preview)
         earlier = self._earlier(request)
         if earlier is not None:
             return earlier
@@ -2119,7 +2136,7 @@ class _ToolAsk:
                 name,
                 request.arguments,
                 self._workspace_root,
-                also=(question_key(name),),
+                also=_question_keys(name, request.arguments),
             )
         )
         if found is None:
@@ -2144,8 +2161,14 @@ class _ToolAsk:
              "preview": request.preview,
              "call_key": call_key(name, arguments, self._workspace_root),
              "loose_keys": [*loose_keys(name, arguments, categories),
-                            question_key(name)]}
+                            *_question_keys(name, arguments)]}
         )  # fmt: skip
+
+
+def _question_keys(name: str, arguments: Mapping[str, Any]) -> tuple[str, ...]:
+    """The loose keys of a running tool's question: its name, and its site's host."""
+    site = site_key(arguments)
+    return (question_key(name),) if site is None else (question_key(name), site)
 
 
 class _ToolSetupError(Exception):

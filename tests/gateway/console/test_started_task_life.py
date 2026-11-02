@@ -26,11 +26,15 @@ from localmelo.melo.agent import Agent
 from localmelo.melo.contracts.approvals import ApprovalDecision
 from localmelo.melo.schema import ToolDef
 from localmelo.support.browser import sites
+from localmelo.support.gateway.auto_blocks import denied_steps
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.cards import CARD_EVENT
+from localmelo.support.gateway.console.followups import TaskFollowups
 from localmelo.support.gateway.workers import NOTE_START
+from localmelo.support.sessions.store import NewSession
 from localmelo.tests.sessions.helpers import answer, tool_call
 
+from .conftest import HOLDER, core_event
 from .test_ask_owner import Reply, held, rows, tool_results, until
 from .test_chat_owns_tasks import (
     _is,
@@ -125,6 +129,11 @@ async def test_the_card_says_a_follow_up_comes_and_stop_ends_the_waiting_follow_
         assert len(models["main"].requests) == 2, "no follow-up turn"
         assert await state(console, task_id) == "failed"
         assert await followed(console) == [("stopped", task_id)]
+        # The row names the end it follows, as its card does: a later end wins.
+        [row] = [
+            r for r in await rows(console, console.main_id) if r["echo"] == "followed"
+        ]
+        assert isinstance(card["end_id"], int) and row["end_id"] == card["end_id"]
         info = await console.store.get_session(task_id)
         # Kept on the task: a restart does not run it either.
         assert info is not None and info.meta["followup"]["stage"] == "stopped"
@@ -164,6 +173,231 @@ async def test_stop_during_the_follow_up_turn_ends_it_before_it_continues_the_ta
         record = await console.workers.tasks.get_task(task_id)
         assert record.state == "failed" and not record.card.startswith(NOTE_START)
         assert await followed(console) == [("stopped", task_id)]
+
+
+async def test_stop_while_the_task_s_end_is_looked_at_still_stops_its_follow_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main: list[Reply] = [
+        creates("Long report"),
+        answer("Started it as a task."),
+        continues("Go on and finish the remaining sections."),
+        answer("Continued it."),
+    ]
+    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        models,
+        _ran,
+    ):
+        await say(client, console, REPORT)
+        task_id = await started_task(console)
+        started = await started_row(console)
+        followups = console.followups
+        original = followups._consider_locked
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def slow(
+            task_id: str, event_id: int | None, *, restoring: bool = False
+        ) -> Any:
+            entered.set()
+            await release.wait()  # the end is being looked at, slowly
+            return await original(task_id, event_id, restoring=restoring)
+
+        monkeypatch.setattr(followups, "_consider_locked", slow)
+        await stop_run(console, task_id)
+        await asyncio.wait_for(entered.wait(), 5.0)
+        stop = asyncio.create_task(
+            client.post(f"/api/front/echoes/{started['id']}", json={"do": "stop"})
+        )
+        await asyncio.sleep(0.05)
+        release.set()
+        stopped = await stop
+        assert stopped.status_code == 200, stopped.text
+        await settled(console)
+        assert await internal_turns(console) == [], "no follow-up ran"
+        assert len(models["main"].requests) == 2
+        assert await state(console, task_id) == "failed", "nothing continued it"
+        info = await console.store.get_session(task_id)
+        assert info is not None and info.meta["followup"]["stage"] == "stopped"
+
+
+async def test_task_continue_is_refused_once_the_person_pressed_stop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    release = asyncio.Event()
+    main: list[Reply] = [
+        creates("Long report"),
+        answer("Started it as a task."),
+        held(release, continues("Go on and finish the remaining sections.")),
+        answer("It stays stopped."),
+    ]
+    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        models,
+        _ran,
+    ):
+        await say(client, console, REPORT)
+        task_id = await started_task(console)
+        started = await started_row(console)
+        # The turn is not cut off here: its task_continue is what refuses.
+        monkeypatch.setattr(console.followups, "_stop_turn", lambda item: None)
+        await stop_run(console, task_id)
+        await until(lambda: internal_turns(console))
+        stopped = await client.post(
+            f"/api/front/echoes/{started['id']}", json={"do": "stop"}
+        )
+        assert stopped.status_code == 200, stopped.text
+        # Refused at once: a stopped follow-up does not wait for its task.
+        lock = console.followups._lock(task_id)
+        await lock.acquire()
+        release.set()
+        await until(lambda: len(models["main"].requests) == 4, timeout=2.0)
+        lock.release()
+        await settled(console)
+        refused = tool_results(models["main"], 3)[-1]
+        assert refused.startswith("Not done: the user stopped this task"), refused
+        record = await console.workers.tasks.get_task(task_id)
+        assert record.state == "failed" and not record.card.startswith(NOTE_START)
+
+
+async def test_a_stop_while_task_continue_waits_for_the_task_is_refused_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    release = asyncio.Event()
+    main: list[Reply] = [
+        creates("Long report"),
+        answer("Started it as a task."),
+        held(release, continues("Go on and finish the remaining sections.")),
+        answer("It stays stopped."),
+    ]
+    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        models,
+        _ran,
+    ):
+        await say(client, console, REPORT)
+        task_id = await started_task(console)
+        started = await started_row(console)
+        followups = console.followups
+        monkeypatch.setattr(followups, "_stop_turn", lambda item: None)
+        await stop_run(console, task_id)
+        await until(lambda: internal_turns(console))
+        # task_continue gets past its first check, then waits for the task.
+        lock = followups._lock(task_id)
+        await lock.acquire()
+        release.set()
+        await until(lambda: bool(getattr(lock, "_waiters", None)))
+        stop = asyncio.create_task(
+            client.post(f"/api/front/echoes/{started['id']}", json={"do": "stop"})
+        )
+        chat = str(console.main_id)
+        await until(lambda: followups._running[chat].stopped)
+        lock.release()
+        stopped = await stop
+        assert stopped.status_code == 200, stopped.text
+        await settled(console)
+        refused = tool_results(models["main"], 3)[-1]
+        assert refused.startswith("Not done: the user stopped this task"), refused
+        record = await console.workers.tasks.get_task(task_id)
+        assert record.state == "failed" and not record.card.startswith(NOTE_START)
+
+
+async def test_stop_with_nothing_left_to_stop_offers_no_undo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main: list[Reply] = [creates("Long report"), answer("Started it as a task.")]
+    async with owner_console(
+        tmp_path, monkeypatch, main=main, run=False, follow_up=False
+    ) as (console, client, _, _ran):
+        await say(client, console, REPORT)
+        task_id = await started_task(console)
+        started = await started_row(console)
+        await stop_run(console, task_id)
+        await settled(console)
+        stopped = await client.post(
+            f"/api/front/echoes/{started['id']}", json={"do": "stop"}
+        )
+        assert stopped.status_code == 200, stopped.text
+        echo = stopped.json()["echo"]
+        # The row's buttons go; Undo would start the task again, which nobody stopped.
+        assert (echo["echo"], echo["of"], echo["undo"]) == (
+            "control",
+            started["id"],
+            None,
+        )
+        assert [t.task_id for t in await console.workers.tasks.list_tasks()] == [
+            task_id
+        ]
+
+
+async def test_steps_refused_again_never_push_a_block_out_of_the_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with owner_console(tmp_path, monkeypatch, run=False) as (console, *_):
+        store = console.store
+        turn = await store.begin_turn(
+            None,
+            "a task",
+            holder=HOLDER,
+            title="A task",
+            new_session=NewSession(model="stub-model", workspace=str(tmp_path)),
+        )
+        block = {"request_id": "r0", "allowed": False, "reason": "installs software",
+                 "remember": False, "origin": "auto", "call_key": "k" * 32,
+                 "loose_keys": ["install:pip:requests"]}  # fmt: skip
+        again = {"request_id": "r", "allowed": False, "remember": False,
+                 "reason": "blocked earlier", "origin": "policy", "earlier": "Auto mode"}  # fmt: skip
+        events = [core_event("tool.finished", seq=1, call_id="c0", approval=block)]
+        # The model tries it 300 times more: each refusal is no new block.
+        for n in range(300):
+            data: dict[str, Any] = {"call_id": f"c{n + 1}", "seq": n + 2}
+            if n % 2:
+                data["approval"] = again
+            else:
+                data["tool_asks"] = [{**again, "tool": "browser:https://x.example"}]
+            events.append(core_event("tool.finished", **data))
+        for start in range(0, len(events), 200):
+            await store.append_events(
+                turn.session_id, turn.turn, events[start : start + 200], holder=HOLDER
+            )
+        found = await denied_steps(store, turn.session_id, limit=200)
+        assert [b["call_key"] for b in found] == ["k" * 32]
+
+
+async def test_a_restart_looks_only_at_follow_ups_that_wait(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main: list[Reply] = [
+        creates("Long report"),
+        answer("Started it as a task."),
+        answer("It ran out of steps. Should I split it?"),
+    ]
+    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        _,
+        _ran,
+    ):
+        await say(client, console, REPORT)
+        task_id = await started_task(console)
+        await stop_run(console, task_id)
+        await settled(console)
+        info = await console.store.get_session(task_id)
+        assert info is not None and info.meta["followup"]["stage"] == "told"
+    looked: list[str] = []
+    original = TaskFollowups._consider_locked
+
+    async def counting(self: TaskFollowups, task_id: str, *args: Any, **kw: Any) -> Any:
+        looked.append(task_id)
+        return await original(self, task_id, *args, **kw)
+
+    monkeypatch.setattr(TaskFollowups, "_consider_locked", counting)
+    async with owner_console(tmp_path, monkeypatch, run=False) as (console, *_):
+        await settled(console)
+        assert looked == [], "a follow-up told already is not looked at again"
 
 
 async def test_an_end_with_no_follow_up_says_none_comes(

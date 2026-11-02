@@ -35,6 +35,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Final, Literal, Protocol, get_args, runtime_checkable
+from urllib.parse import urlsplit
 
 from localmelo.melo.contracts.folders import OutsideAccess
 from localmelo.melo.contracts.review import (
@@ -201,7 +202,10 @@ class ApprovalPolicy(Protocol):
 # to. The arguments are the tool name the policy sees (a grant of the run
 # covers that name), the arguments to show and a one-line preview. It raises
 # like the policy does; unset (no policy) means nobody is asked. The agent's
-# also answers ``names_host(host)``: whether the user's own words name a site.
+# also answers ``names_host(host)``: whether the user's own words name a site,
+# and ``refused_earlier(name, arguments, preview)``: the refusal of a question
+# blocked earlier in the task (#431), which a tool checks before it lets a
+# named site through.
 ToolAsk = Callable[[str, Mapping[str, Any], str], Awaitable[ApprovalDecision]]
 TOOL_ASK: ContextVar[ToolAsk | None] = ContextVar("localmelo_tool_ask", default=None)
 
@@ -390,6 +394,32 @@ def question_key(name: str) -> str:
     refused site, by either tool) is a step alike (#431).
     """
     return f"ask:{name}"
+
+
+def site_key(arguments: Mapping[str, Any]) -> str | None:
+    """The loose key of a question about a site: ``ask:site:<host>`` (#431).
+
+    The host of the question's http(s) ``origin`` argument, in ASCII (IDNA),
+    lower case and without one final dot, so a refused site stays refused
+    whatever scheme, port or spelling a later address gives it; another host
+    (``www.`` too, or a parent domain) is another site. None when the
+    question names no such origin.
+    """
+    origin = arguments.get("origin")
+    if not isinstance(origin, str):
+        return None
+    try:
+        parts = urlsplit(origin.strip())
+        host = parts.hostname or ""
+        if not host.isascii():
+            host = host.encode("idna").decode("ascii")
+    except (ValueError, UnicodeError):
+        return None
+    host = host.lower()
+    host = host[:-1] if host.endswith(".") else host
+    if parts.scheme.lower() not in ("http", "https") or not host:
+        return None
+    return f"ask:site:{host}"
 
 
 class EarlierBlocks:

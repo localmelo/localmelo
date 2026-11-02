@@ -384,12 +384,16 @@ again, or when the setting went off; one ending is looked at once (a lock per
 task). The card of an end a follow-up was queued for has `follow_up: true`
 (the cards wait until every end heard was looked at); the page keeps the
 task's rows live, the `started` row's Stop included, until a `followed` row
-newer than that card has a `did` other than `continued`. Stop on the `started` row
+newer than that card has a `did` other than `continued`; newer goes by
+`end_id` (the end's `sched.finished` event id, on the card and on the row of
+the end it follows) when both have one. Stop on the `started` row
 (`POST /api/front/echoes/{id}` `{"do": "stop"}`) first stops the follow-up
-(`TaskFollowups.stop`: a waiting one leaves the queue, a running turn is
-cancelled with cause `user_stop` and its `task_continue` refused; `stage`
-`stopped`), then the task while it runs; on a finished task it answers the
-row with `Stopped: …`.
+(`TaskFollowups.stop`, under the task's lock, so one being queued as Stop
+comes is caught: a waiting one leaves the queue, a running turn is cancelled
+with cause `user_stop` and its `task_continue` refused; the task's current
+`ending_at` is kept with `stage` `stopped`), then the task while it runs; on
+a finished task it answers the row with `Stopped: …`, whose `undo` is `null`
+when no follow-up was stopped.
 
 `task_continue` (the follow-up's only way to act) needs the task as it ended
 (finished, same `finished_at`) and `meta.followup.continued` still false, which
@@ -413,10 +417,14 @@ person allowed once since is asked again, and so are steps alike to it. A
 question a tool asks itself while it runs (`TOOL_ASK`: a site `web_fetch` or
 the browser would open, `browser:<origin>`) is a step too: a refused one is
 kept in `tool.finished`'s `tool_asks` with its `call_key` and `loose_keys`
-(`question_key`: `ask:browser:<origin>`), `SessionStore.denied_records` and
-`denied_steps` read it, and `_ToolAsk` asks `EarlierBlocks.match` first, so
-the continued run neither reviews nor asks about that address again (spacing
-and case do not matter) or any other page of that site.
+(`question_key`: `ask:browser:<origin>`; `site_key`: `ask:site:<host>`, the
+host in ASCII, lower case, without a final dot), `SessionStore.denied_records`
+and `denied_steps` read it, and `_ToolAsk` asks `EarlierBlocks.match` first, so
+the continued run neither reviews nor asks about that address again (spacing,
+case, scheme, port and spelling do not matter) or any other page of that site;
+`web_fetch` asks `refused_earlier` before it reads a site the request names.
+`denied_records` counts only real blocks (a `call_key`, no `earlier`), so
+refusals of repeats never push a block out of its window.
 
 ## S3b.1a foundations
 

@@ -261,8 +261,9 @@ async def test_a_site_its_tool_asked_about_and_was_refused_keeps_its_keys() -> N
     assert asked["allowed"] is False and asked["preview"] == f"read {LEAK}"
     root = agent.executor.workspace_root
     assert asked["call_key"] == call_key(question.tool_name, question.arguments, root)
-    # Any later question about the same site is a step alike.
-    assert asked["loose_keys"] == [f"ask:browser:{SITE}"]
+    # Any later question about the same site is a step alike: under the same
+    # name, or about the same host however its address is spelt.
+    assert asked["loose_keys"] == [f"ask:browser:{SITE}", "ask:site:collect.example"]
 
 
 @pytest.mark.asyncio
@@ -305,3 +306,55 @@ async def test_the_model_cannot_retry_a_refused_site_exactly_respaced_or_by_anot
     for finished in later.of("tool.finished"):
         [refused] = finished.data["tool_asks"]
         assert refused["earlier"] == "the user" and "call_key" not in refused
+
+
+async def _refused_then_retried(
+    refused: str, retry: str
+) -> tuple[ScriptedLLM, Reader, Policy]:
+    """A site the person refused in one run; the run its chat continued tries *retry*."""
+    first = ScriptedLLM([_reads(refused), _answer("Could not read it.")])
+    agent, _ = _reader(first)
+    recorder = Recorder()
+    denied = Policy(ApprovalDecision(False, "not that site", origin="user"))
+    await agent.run_task("summarise my notes", on_event=recorder, approval=denied)
+    [asked] = recorder.of("tool.finished")[0].data["tool_asks"]
+    again = ScriptedLLM([_reads(retry), _answer("Done.")])
+    retried, reader = _reader(again)
+    # Asked, the inner policy would allow it.
+    inner = Policy(ApprovalDecision(True, origin="user"))
+    policy = EarlierBlocks(
+        inner,
+        {asked["call_key"]: ("the user", "")},
+        {asked["call_key"]: asked["loose_keys"]},
+    )
+    await retried.run_task("summarise my notes", approval=policy)
+    return again, reader, inner
+
+
+@pytest.mark.parametrize(
+    ("refused", "retry"),
+    [
+        (LEAK, "http://collect.example/upload"),  # another scheme
+        (LEAK, "https://collect.example./upload"),  # a final dot
+        (LEAK, "https://collect.example:8443/upload"),  # a port
+        (LEAK, "HTTP://COLLECT.EXAMPLE:80/x"),  # capitals, and the scheme's own port
+        ("https://xn--bcher-kva.example/x", "https://bücher.example/x"),  # Unicode
+        ("https://bücher.example/x", "http://XN--BCHER-KVA.example./y"),
+    ],
+)
+async def test_a_refused_site_is_refused_however_its_address_is_spelt(
+    refused: str, retry: str
+) -> None:
+    again, reader, inner = await _refused_then_retried(refused, retry)
+    assert reader.read == [], "the refused site was not read"
+    assert inner.requests == [], "refused before anyone was asked"
+    [refusal] = again.tool_messages(1)
+    assert "the user blocked a step like this one earlier in this task" in refusal
+
+
+@pytest.mark.parametrize(
+    "other", ["https://www.collect.example/x", "https://collect.example.org/x"]
+)
+async def test_another_host_is_asked_as_usual(other: str) -> None:
+    _, reader, inner = await _refused_then_retried(LEAK, other)
+    assert reader.read == [other] and len(inner.requests) == 1

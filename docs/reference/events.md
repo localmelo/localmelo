@@ -358,9 +358,10 @@ The number of `tool.started` events is `RunResult.n_tool`.
   refused (a site `web_fetch` or the browser would open, asked as
   `browser:<origin>`): one entry per refused question, `{request_id, tool,
   allowed: false, origin, reason, preview}`. A question you, auto mode or a
-  policy refused also has `call_key` and `loose_keys` (`ask:<tool>` among
-  them), so a task its chat continues never asks it, or anything else about
-  that site, again; a refusal of such a repeat has `earlier` (who refused it
+  policy refused also has `call_key` and `loose_keys` (`ask:<tool>` and, for
+  a site, `ask:site:<host>` among them), so a task its chat continues never
+  asks it, or anything else about that host however its address is written,
+  again; a refusal of such a repeat has `earlier` (who refused it
   first) and no `call_key`. Every other call, and an event stored before this
   key, has no `tool_asks`.
 

@@ -376,6 +376,9 @@ class MainChatCards:
             if found is not None:
                 keys = ("state", "proposed", "reasons", "question", "notes")
                 card["ending"] = {key: found[key] for key in keys if key in found}
+            # Which end this is: a follow-up's row names the end it follows, so the
+            # page orders the two by end and not by when each was written (#431).
+            card["end_id"] = stored.id
             if self._console.followups.comes_after(stored.id):
                 # Its chat follows up on this end: more may run (#431).
                 card["follow_up"] = True
