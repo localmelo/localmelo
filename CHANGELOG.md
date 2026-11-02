@@ -9,6 +9,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A finished task's answer comes back to the chat that started it (#440). When
+  a task the chat started ends **Ready**, the chat takes one turn of its own
+  (`melo follows up on “…”: it finished`) and tells the result first, in the
+  person's language, then the key points and the files the task wrote; a long
+  answer is summarised, the rest under **Open task**. Once per ending, skipped
+  when the person wrote after the end, only for tasks the chat started, never a
+  continue, and off with `[tasks] follow_up = false`. Activity reads `Told you
+  the answer: …`. The chat's `task_get` now gives a task's whole answer (up to
+  8,000 characters, then a cut line) and the files it wrote, so "is it done?"
+  is answered from the task itself.
+- `AgentOptions.refused_steps` (default 0) and `refuse_call` in
+  `localmelo.melo.contracts.tools`: a step whose every call a policy check
+  refused (the tool's own check, a refused tool question, the approval
+  policy's denial) does not count toward `max_steps`, up to that many steps a
+  run. `Agent.closing_answer(query, note=)` asks once, without tools, for an
+  answer from what a finished run found.
+
 - The `turn.memory` event records the exact text the model read. Each entry of
   `used` (the recall block's items) and `searched` (what `search_memory`
   returned) has a new `shown` key: the line as the recall block or the search
@@ -443,6 +460,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   stays English. [#350]
 
 ### Changed
+
+- The main chat's turns flow without extra taps (#440). A request in steps
+  starts at once in Chinese as in English (`去这个网站看一下，然后告诉我最新的价格`,
+  `look at this site and tell me the latest prices`), even when its last part
+  asks a question. A question about a task (`is it done?`, `跑完了吗`) is
+  answered from the task's state and answer. Calls a policy check refused (a
+  note it may not keep, a task not asked for, a refused site) no longer use up
+  the chat's 4 steps, at most 2 a turn, and a turn that still does not settle
+  answers from what it found instead of `Start this as a task?`; that line
+  stays only under the answer to a question the chat would not start on its own.
+- Ready means done (#440): a task asked to write or save a named file (in its
+  request or a later message: `write the summary to notes.md`, `保存为
+  report.csv`) ends **Ready** only when that file is in its folder; otherwise
+  **Done, not finished** with `A file it was asked to write is missing: …`
+  (`ending.reason` `file_missing`, names in `ending.missing`).
 
 - The main chat starts a task itself when your request needs tools it lacks
   (running commands, changing files, many steps), with one line, **Change** and
