@@ -25,7 +25,6 @@ from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.console.cards import CARD_EVENT
 from localmelo.support.gateway.console.chores import ChoreOptions
 from localmelo.support.gateway.console.front import (
-    ASK_TEXT,
     ECHO_EVENT,
     STARTED_TEXT,
     TASK_TOOLS,
@@ -369,17 +368,19 @@ async def test_a_turn_not_settled_in_four_steps_becomes_a_task(tmp_path: Path) -
         assert entry.agent.conversation()[-1].content == STARTED_TEXT
 
 
-async def test_a_question_at_the_cap_asks_before_it_starts(tmp_path: Path) -> None:
-    steps = _four_steps()
+async def test_a_question_at_the_cap_answers_and_offers_before_it_starts(
+    tmp_path: Path,
+) -> None:
+    found = "The fixture it needs is missing from tests/cli/conftest.py."
+    steps = [*_four_steps(), answer(found)]
+    typed = "Why does pytest fail in tests/cli?"
     async with front_console(tmp_path, *steps) as (console, client, _):
-        await _say(client, console, "which of my tasks will finish first?")
+        await _say(client, console, typed)
         turn = await _wait_turn(client, str(console.main_id))
-        assert turn["answer"] == ASK_TEXT
+        # The answer from what it found; the deeper look is offered as a task.
+        assert turn["answer"] == found
         [ask] = await _echoes(console)
-        assert (ask["echo"], ask["text"]) == (
-            "ask",
-            "which of my tasks will finish first?",
-        )
+        assert (ask["echo"], ask["text"]) == ("ask", typed)
         assert await console.workers.tasks.list_tasks() == []
         started = await client.post(
             f"/api/front/echoes/{ask['id']}", json={"do": "start"}
@@ -607,6 +608,8 @@ def test_front_options_and_thinking_off() -> None:
     assert (options.max_steps, options.attempt_policy) == (4, "none")
     # A turn out of steps is handed off; the chat does not ask for an answer first.
     assert options.answer_on_stop is False
+    # Two steps whose calls were all refused do not count toward the four (#440).
+    assert options.refused_steps == 2
     assert options.builtins == frozenset({"file_read", "list_files"})
     cfg = _vllm()
     off = thinking_off(cfg)

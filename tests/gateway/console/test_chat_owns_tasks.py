@@ -20,6 +20,7 @@ from fastapi import FastAPI
 
 from localmelo.melo.agent import Agent
 from localmelo.melo.contracts.approvals import ApprovalDecision
+from localmelo.melo.contracts.tools import BaseToolProvider
 from localmelo.melo.schema import Message
 from localmelo.support.gateway.chat_gate import GatedLLM
 from localmelo.support.gateway.console import Console, ConsoleOptions
@@ -87,11 +88,13 @@ async def owner_console(
     follow_up: bool = True,
     approvals: str = "ask",
     run: bool = True,
+    front_tools: list[BaseToolProvider] | None = None,
 ) -> AsyncIterator[tuple[Console, httpx.AsyncClient, dict[str, Any], Ran]]:
     """A console whose main chat and task runs work on scripted models.
 
     *follow_up* is ``[tasks] follow_up``, *approvals* the mode new chats (and
-    the main chat) start in; without *run* no task starts.
+    the main chat) start in; without *run* no task starts. *front_tools* are
+    the main chat's tools beside its task tools.
     """
     monkeypatch.setenv("HOME", str(tmp_path))
     models: dict[str, Any] = {"main": Script(main or []), "workers": []}
@@ -103,7 +106,9 @@ async def owner_console(
         options = session_options(front_options(settings), workspace)
         llm = GatedLLM(models["main"], holder[0].gate.client(session_id))
         agent = FrontAgent(
-            llm=llm, options=options, tool_providers=[holder[0].front.tools]
+            llm=llm,
+            options=options,
+            tool_providers=[holder[0].front.tools, *(front_tools or [])],
         )
         agent.front = holder[0].front
         await agent.start()
@@ -309,6 +314,40 @@ def test_the_start_rule_starts_requests_and_answers_questions() -> None:
         ("can you test the login page?", "start"),
         ("can you check if the tests pass?", "start"),
         ("can you see if numpy is installed?", "start"),
+        # A request in steps starts at once, in Chinese as in English: look somewhere
+        # first, then tell or do something with it. Its question is the person's ask.
+        (
+            "你去我的网站看一下我的简历 然后告诉我什么工作适合我 特别是大公司的什么岗位",
+            "start",
+        ),
+        ("Look at my website and tell me which jobs fit me", "start"),
+        (
+            "Go to my website, read my CV, then tell me which jobs fit me, "
+            "especially at large companies",
+            "start",
+        ),
+        ("can you look at my website and tell me which jobs fit me?", "start"),
+        ("去这个网站看一下然后告诉我最新的价格", "start"),
+        ("帮我查一下明天北京的天气", "start"),
+        ("看看我的项目然后告诉我哪里需要改", "start"),
+        ("分析一下我的简历，告诉我适合什么工作", "start"),
+        ("你能看一下我的网站然后告诉我适合什么工作吗？", "start"),
+        # A plain question is answered, a status question too, and "看看再说" is talk.
+        ("什么工作适合我？", "answer"),
+        ("看看再说", "answer"),
+        ("看看我的简历写得怎么样", "answer"),
+        ("跑完了吗", "answer"),
+        ("之前worker不是已经跑完了吗", "answer"),
+        ("直接和我说就行了", "answer"),
+        ("is it done?", "answer"),
+        ("didn't it finish?", "answer"),
+        ("is the report task done yet?", "answer"),
+        ("which of my tasks will finish first?", "answer"),
+        ("任务跑完了吗？", "answer"),
+        ("你看了我的网站然后告诉我了吗", "answer"),
+        # Words that say not to act still get an offer.
+        ("看看我的项目然后告诉我哪里需要改，先别动手", "offer"),
+        ("look at my site and tell me what is wrong, don't change anything", "offer"),
     ],
 )
 def test_the_start_rule_reads_what_the_words_ask(typed: str, rule: str) -> None:

@@ -54,7 +54,11 @@ from pydantic import Field
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.events import AgentEvent
-from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
+from localmelo.melo.contracts.tools import (
+    BaseToolProvider,
+    ProvidedTool,
+    refuse_call,
+)
 from localmelo.melo.executor.search_files import (
     SEARCH_FILES_TOOL,
     rooted_search_files,
@@ -63,7 +67,9 @@ from localmelo.melo.schema import (
     NO_ANSWER_LABEL,
     Message,
     RunResult,
+    ToolCall,
     ToolDef,
+    ToolResult,
     split_thinking,
 )
 from localmelo.support.browser import configured_driver
@@ -148,6 +154,10 @@ ECHO_EVENT: Final = "attention.echo"
 SIDE_SUMMARY_EVENT: Final = "side.summary"
 # The front's step cap (design 2.4); a turn not settled in it is handed off.
 FRONT_STEPS: Final = 4
+# Steps a turn may take beyond the cap because a policy check refused every
+# call in them (a note that is not the user's words, a task not asked for, a
+# refused site): they did nothing, so they do not use up the cap (#440).
+FRONT_REFUSED_STEPS: Final = 2
 # A brief question's step cap: BRIEF_NOTE asks for one or two steps.
 BRIEF_STEPS: Final = 2
 # A follow-up turn's step cap (#411): look, continue once or ask, then report.
@@ -171,6 +181,21 @@ SIDE_TEXT: Final = (
     "many steps or runs long can go to a task with task_create, started right "
     "away; a follow-up on a task goes to it with task_message. A task you start "
     "reports back to this chat."
+)
+# What a turn that did not settle is asked for at its end (#440): its answer.
+CLOSING_NOTE: Final = (
+    "No step is left in this turn. Answer the user's message now, in the user's "
+    "language, from what you found above and what you know: the answer first, "
+    "in a few sentences, and say plainly what you could not find or check. Do "
+    "not call any tool, and do not say what you would do next."
+)
+# What such a turn says when no answer comes either.
+NO_ANSWER_TEXT: Final = (
+    "I could not finish this in the few steps a chat turn has. Ask me again with "
+    "more detail, or ask me to start it as a task."
+)
+NO_ANSWER_TEXT_ZH: Final = (
+    "这一轮的几步里我没能答完。可以说得更具体些再问我，或者让我把它作为任务开始。"
 )
 # What the main chat is told when the person asks to be answered briefly.
 BRIEF_NOTE: Final = (
@@ -242,7 +267,9 @@ _NOT_ASKED: Final = (
 )
 _ANSWER_HERE: Final = (
     "Not done: this is a question or small talk you answer yourself in the chat; "
-    "no task starts for it. Answer it now, or ask one short question if it is unclear."
+    "no task starts for it. Answer it now, or ask one short question if it is "
+    "unclear. A question about a task (is it done, what did it find) is answered "
+    "from task_list and task_get: its state and its whole answer."
 )
 _NOT_PERSONS: Final = (
     "Not done: only the user's own message starts a task, and this turn is not "
@@ -312,8 +339,11 @@ def answer_head(answer: str, chars: int = ANSWER_CHARS) -> str:
 def front_options(settings: Config | None) -> AgentOptions:
     """The main chat's options: at most 4 steps, no reflection, read-only file tools.
 
-    A turn that runs out of steps is handed off to a task, so the chat does not
-    spend a request asking for an answer first (``answer_on_stop``).
+    Steps whose every call a policy check refused do not count, up to
+    :data:`FRONT_REFUSED_STEPS` a turn. A request that runs out of steps is
+    handed off to a task, so the chat does not spend a request asking for an
+    answer first (``answer_on_stop``); :class:`FrontAgent` asks for one for a
+    turn it does not hand off.
     """
     options = configured_session_options(settings, AgentOptions(mode="gateway"))
     return dataclasses.replace(
@@ -322,6 +352,7 @@ def front_options(settings: Config | None) -> AgentOptions:
         attempt_policy="none",
         builtins=frozenset({"file_read", "list_files"}),
         answer_on_stop=False,
+        refused_steps=FRONT_REFUSED_STEPS,
     )
 
 
@@ -399,14 +430,19 @@ class FrontAgent(Agent):
         if front is None or turn is None or on_event is None:
             return await super().run_task(query, on_event=on_event, **kwargs)
         words = turn.typed_text or turn.user_text
-        # What the chat could not settle is handed off as start_rule says: a
-        # request starts, anything else (a question, words that say not to act
-        # and ask nothing else) is offered. Words that are not typed (an
+        # A turn that could not settle (out of steps, stuck, or a reply that only
+        # says what it will do) goes as start_rule reads the person's words: a
+        # request starts as a task; anything else is answered here from what
+        # the turn found (one more request, without tools), and a question is
+        # also offered as a task. Never the offer for what the chat answers,
+        # nor for a task's status (#440). Words that are not typed (an
         # attachment alone) are handed off as they are.
-        asks = bool(turn.typed_text.strip()) and start_rule(turn.typed_text) != "start"
+        rule = start_rule(turn.typed_text) if turn.typed_text.strip() else "start"
         # A question that asks for a short answer is answered here, never handed off.
         quick = brief_question(turn.typed_text)
+        offers = rule == "offer" and not quick
         handed: list[tuple[str, str, bool]] = []
+        held: list[AgentEvent] = []
         try:
             news = await front.news()
         except Exception:
@@ -423,31 +459,28 @@ class FrontAgent(Agent):
             if event.type == "run.finished" and isinstance(result, dict):
                 status = str(result.get("status"))
                 reply = split_thinking(str(result.get("result") or ""))[1]
-                stays = (
-                    quick
-                    and status in HANDOFF_STATUSES
-                    and bool(reply.strip())
-                    and not intention_only(reply)
+                made = bool(front.made.get(turn.id))
+                unsettled = status in HANDOFF_STATUSES or (
+                    status == "completed" and not made and intention_only(reply)
                 )
-                if (
-                    stays
-                    or status in HANDOFF_STATUSES
-                    or (
-                        status == "completed"
-                        and not front.made.get(turn.id)
-                        and intention_only(reply)
+                if unsettled:
+                    stays = (
+                        status in HANDOFF_STATUSES
+                        and bool(reply.strip())
+                        and not intention_only(reply)
                     )
-                ):
-                    # Out of steps, or only a preamble: the work is handed off,
-                    # unless a brief question's stop answer is its answer.
-                    text = (
-                        reply.strip()
-                        if stays
-                        else handoff_text(
-                            words, asks=asks and not front.made.get(turn.id)
-                        )
-                    )
-                    handed.append((status, text, stays))
+                    if stays:
+                        # A brief question's stop answer is its answer.
+                        handed.append((status, reply.strip(), True))
+                    elif rule == "start" and not made:
+                        # A request: the work is handed off as a task.
+                        handed.append((status, handoff_text(words, asks=False), False))
+                    else:
+                        # Answered here, from what the turn found: after the run.
+                        handed.append((status, "", False))
+                        held.append(event)
+                        return
+                    text = handed[-1][1]
                     done = {
                         **result,
                         "status": "completed",
@@ -467,21 +500,68 @@ class FrontAgent(Agent):
             )
         try:
             outcome = await super().run_task(query, on_event=sink, **kwargs)
+        except BaseException:
+            if held:
+                on_event(held[0])  # cut short before its answer was asked for
+            raise
         finally:
             self.options = saved
         if not handed:
             return outcome
         status, text, stays = handed[0]
+        if held:
+            try:
+                # A brief question was asked for its stop answer already.
+                text = "" if quick else await self._closing_answer(query)
+            except BaseException:
+                on_event(held[0])  # stopped while it asked: the run as it ended
+                raise
+            text = text or self._no_answer(
+                words, offers=offers, made=bool(front.made.get(turn.id))
+            )
+            result = held[0].data.get("result") or {}
+            done = {**result, "status": "completed", "result": text, "error": ""}
+            on_event(
+                dataclasses.replace(held[0], data={**held[0].data, "result": done})
+            )
+            handed[0] = (status, text, stays)
+            held.clear()
         window = self.hippo.working.get_window()
         said = (NO_ANSWER_LABEL.format(status=status), outcome.result)
         if window and window[-1].role == "assistant" and window[-1].content in said:
             window[-1].content = text
-        if not stays:
+        if not stays and (rule == "start" or offers):
             try:
-                await front.handed_off(turn, asks=asks)
+                await front.handed_off(turn, asks=rule != "start")
             except Exception:
                 logger.exception("The main chat could not hand its turn off")
         return dataclasses.replace(outcome, status="completed", result=text, error="")
+
+    async def _closing_answer(self, query: str) -> str:
+        """The answer of a turn that did not settle, from what it found: one request, no tools.
+
+        ``""`` when the request fails or its reply is blank, only says what it
+        will do, or is a tool call written as text.
+        """
+        try:
+            text = await self.closing_answer(query, note=CLOSING_NOTE)
+        except Exception as exc:
+            logger.warning("The main chat could not ask for its answer: %s", exc)
+            return ""
+        return "" if intention_only(text) else text
+
+    @staticmethod
+    def _no_answer(typed: str, *, offers: bool, made: bool) -> str:
+        """What a turn says that settled nothing and got no answer either."""
+        if made or offers:
+            # It started a task, sent it a message, or the work is offered.
+            return handoff_text(typed, asks=offers and not made)
+        return NO_ANSWER_TEXT_ZH if is_chinese(typed) else NO_ANSWER_TEXT
+
+    def refused_by_tool(self, call: ToolCall, result: ToolResult) -> bool:
+        """``remember``'s refusal of a note the user did not say, which it does not mark."""
+        text = (result.output or result.error).lstrip()
+        return call.tool_name == "remember" and text.startswith("Not remembered:")
 
     async def answer_ask(self, query: str, **kwargs: Any) -> RunResult:
         """A task's question (#369): at most ASK_STEPS steps, never handed off, no news."""
@@ -701,7 +781,8 @@ class TaskTools(BaseToolProvider):
             "task_continue": self.continue_task,
         }
         return [
-            ProvidedTool(definition=d, function=functions[d.name]) for d in TASK_TOOLS
+            ProvidedTool(definition=d, function=_marked(functions[d.name]))
+            for d in TASK_TOOLS
         ]
 
     async def close(self) -> None:
@@ -869,6 +950,20 @@ class TaskTools(BaseToolProvider):
     ) -> str:
         followups = self._front.console.followups
         return await followups.continue_task(self._front, str(task_id), str(message))
+
+
+def _marked(function: Callable[..., Any]) -> Callable[..., Any]:
+    """*function* whose "Not done: …" answer marks its call refused (``refuse_call``).
+
+    A task tool that did nothing (a task the user did not ask for, a change
+    their words did not name) leaves the turn's steps as they were (#440).
+    """
+
+    async def call(**arguments: Any) -> str:
+        text = str(await function(**arguments))
+        return refuse_call(text) if text.startswith("Not done:") else text
+
+    return call
 
 
 def _live_lines(front: Front, task_id: str) -> list[str]:

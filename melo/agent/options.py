@@ -336,6 +336,13 @@ class AgentOptions:
       (``BaseLLMProvider.takes_images``, asked once, when a tool first
       returns an image) and ``"off"`` otherwise. A run whose tools return
       no image sends the same requests in every mode.
+    - ``refused_steps``: how many steps of a run may go uncounted toward
+      ``max_steps`` because a policy check refused every call in them: the
+      tool's own check (it returned ``refuse_call(...)``, see
+      :mod:`~localmelo.melo.contracts.tools`), a question the tool asked that
+      was refused, or the approval policy's denial. Such a step still sends
+      its request and counts in ``RunResult.steps``; once the allowance is
+      spent, refused steps count as any other. Default 0: nothing changes.
     """
 
     context_window: int | None = None
@@ -396,6 +403,7 @@ class AgentOptions:
     answer_on_stop: bool = True
     max_calls: int | None = None
     task_aids: bool = False
+    refused_steps: int = 0
 
     def __post_init__(self) -> None:
         if not isinstance(self.fixed_prefix, bool):
@@ -435,6 +443,14 @@ class AgentOptions:
         ):
             raise ValueError(
                 f"max_calls must be None or an int >= 2, got {self.max_calls!r}"
+            )
+        if (
+            isinstance(self.refused_steps, bool)
+            or not isinstance(self.refused_steps, int)
+            or self.refused_steps < 0
+        ):
+            raise ValueError(
+                f"refused_steps must be an int >= 0, got {self.refused_steps!r}"
             )
         for name in (
             "max_steps",
