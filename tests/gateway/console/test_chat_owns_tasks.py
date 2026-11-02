@@ -348,6 +348,27 @@ def test_the_start_rule_starts_requests_and_answers_questions() -> None:
         # Words that say not to act still get an offer.
         ("看看我的项目然后告诉我哪里需要改，先别动手", "offer"),
         ("look at my site and tell me what is wrong, don't change anything", "offer"),
+        # Words against a task never start one, however the rest reads.
+        ("不用开任务，看一下我的简历然后告诉我适合什么工作", "offer"),
+        ("别开任务，看看这段代码然后告诉我哪里有问题", "offer"),
+        ("不需要建任务，去我的网站看一下然后告诉我哪里要改", "offer"),
+        ("no need for a task, look at my website and tell me what is wrong", "offer"),
+        ("don't make a task: look at my repo and tell me how it is laid out", "offer"),
+        # A look then tell starts only for something outside the chat (a site, a
+        # link, a file, a repo or folder, or the person's own things), and words
+        # that ask to be told, translated or explained, or name a task, win.
+        ("看看天气然后告诉我", "answer"),
+        ("look at this and tell me what you think", "answer"),
+        ("我最近在研究Rust，你推荐什么书？", "answer"),
+        ("研究表明喝咖啡有好处，解释一下为什么", "answer"),
+        ("解释一下：去网站看一下然后告诉我，这句话什么意思", "answer"),
+        ("翻译成英文：去这个网站看一下然后告诉我最新的价格", "answer"),
+        ("嗯，停一下，看看日志然后告诉我", "answer"),
+        ("看一下那个任务然后告诉我结果", "answer"),
+        ("look at the slides task and tell me its progress", "answer"),
+        # A status word does not swallow a request for work.
+        ("Is the report ready? If not, write it to report.md and commit it", "offer"),
+        ("做完了吗？没做完的话帮我把测试修好并提交", "offer"),
     ],
 )
 def test_the_start_rule_reads_what_the_words_ask(typed: str, rule: str) -> None:
