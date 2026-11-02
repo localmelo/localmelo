@@ -153,7 +153,8 @@ BRIEF_STEPS: Final = 2
 # A follow-up turn's step cap (#411): look, continue once or ask, then report.
 FOLLOWUP_STEPS: Final = 4
 HANDOFF_STATUSES: Final = frozenset({"budget_exhausted", "stuck"})
-# What the main chat is told about itself, after melo's identity.
+# What the main chat is told about itself, after melo's identity. The language
+# of the reply is set once, in that identity (sessions/identity.py LANGUAGE_RULE).
 FRONT_TEXT: Final = (
     "You are the main chat. Do what you can with your own tools: search_files "
     "finds where something is in the user's folder, and you can read files "
@@ -162,16 +163,14 @@ FRONT_TEXT: Final = (
     "task_create right away; do not ask whether to. Answer a question you "
     "can answer, and ask one short question when a request is too unclear to "
     "act on. A follow-up on a task goes to it with task_message. Never reply "
-    "with only what you are about to do: do it, or start the task. Answer in "
-    "the language of the user's latest message."
+    "with only what you are about to do: do it, or start the task."
 )
 # What a side chat is told about itself, after melo's identity.
 SIDE_TEXT: Final = (
     "You are a side chat. Answer and work in this chat yourself. Work that takes "
     "many steps or runs long can go to a task with task_create, started right "
     "away; a follow-up on a task goes to it with task_message. A task you start "
-    "reports back to this chat. Answer in the language of the user's latest "
-    "message."
+    "reports back to this chat."
 )
 # What the main chat is told when the person asks to be answered briefly.
 BRIEF_NOTE: Final = (
