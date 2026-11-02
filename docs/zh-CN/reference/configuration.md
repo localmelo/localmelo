@@ -118,6 +118,7 @@ chat_model = "qwen3:8b"
 | `call_log_dir` | `[scheduler]` | `""` | 日志的父目录；默认为 `~/.cache/localmelo/scheduler`。 |
 | `gpu_lock_file` | `[scheduler]` | `""` | 要读取的共享 GPU 锁；为空表示不读取锁（空闲整理也就不检查锁）。网关中的电池读取器始终开启。 |
 | `lock_self` | `[scheduler]` | `""` | 这个 bench 自己的持有者：确切的 `holder:` 值，或锁带有 `run:` 行时的 `holder:run`。匹配是精确且区分大小写的。 |
+| `recent_digest_minutes` | `[chat]` | `30` | 新对话的第一条消息（旁支对话或终端对话，从不是主对话）还会带上一段简短摘要，来自你最近这么多分钟里的其他对话：最多五行，每行一轮，说明那一轮在聊什么、在哪个对话里，总共最多 600 个字符，放在你自己的话后面。它读取记忆里的对话索引，所以 `[memory] across_chats = false` 也会关掉它。`0` 关掉它；`-X chat.recent_digest_minutes=0` 仅用于一次运行。取值为 0 到 1440 的整数；其他任何值都是配置错误。 |
 | `lock_gate` | `[scheduler]` | `"record"` | `record` 从不改变请求；`wait` 在存在外部锁时扣住每一次工作区调用，包括嵌入。见[调度器](../guides/scheduler.md#the-gpu-lock-and-the-battery-s2b)。 |
 
 全是默认值的 `[memory]` 表不会被写入。它的键 `across_chats` 和 `admit_on_outcome` 必须是布尔值，`retriever` 必须是上面四个值之一；其他任何值都是配置错误（退出码 1）。
@@ -371,7 +372,7 @@ enable_thinking = false
 - 对 `ollama` 后端，这些字段进入 Ollama `/api/chat` 的请求体。localmelo 默认向 Ollama 请求模型的思考；`extra_body = { think = false }` 会关闭它。
 - `--base-url` 不读取配置文件，因此 `extra_body` 在那里不适用。
 
-驱动为 `off` 的 `[browser]` 表不会写入，`web_fetch` 为 `true` 且 `web_fetch_allow_local` 为空的 `[tools]` 表和 `follow_up` 为 `true` 的 `[tasks]` 表也不会。
+驱动为 `off` 的 `[browser]` 表不会写入，`web_fetch` 为 `true` 且 `web_fetch_allow_local` 为空的 `[tools]` 表、`follow_up` 为 `true` 的 `[tasks]` 表和 `recent_digest_minutes` 为 `30` 的 `[chat]` 表也不会。
 
 <a id="mcp-servers"></a>
 

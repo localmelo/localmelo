@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Final, Literal, cast, get_args
 
 from localmelo.melo.agent import Agent
+from localmelo.melo.agent._earlier import EARLIER_TURNS
 from localmelo.melo.agent.agent import CANCELLED_ERROR, FINALIZE_TIMEOUT_S
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
 from localmelo.melo.contracts.approvals import (
@@ -178,6 +179,9 @@ class _Turn:
     last_note: str = ""
     # How memory's recall went for this turn (``turn.memory``'s ``recall``).
     recall: dict[str, Any] | None = None
+    # The turns (session id, turn) the recall block showed, or whose notes it
+    # showed: the digest of the other chats leaves them out.
+    recalled: frozenset[tuple[str, int]] = frozenset()
     # Whether the writer still takes events; it stops at step 7.2.
     accepting: bool = True
     writer: asyncio.Task[None] | None = None
@@ -728,10 +732,14 @@ class SessionRunner:
                 if self._memory is not None:
                     kwargs["hide_tools"] = _NOTE_TOOLS
             # The chat began when its session did, across reloads and restarts.
+            session = None
             with contextlib.suppress(Exception):
                 session = await self._store.get_session(turn.turn.session_id)
                 if session is not None:
                     kwargs["chat_started"] = session.created_at
+            earlier = await self._earlier_turns(turn)
+            if earlier:
+                kwargs["earlier_turns"] = earlier
             if self._review_since is not None:
                 since: float | None = None
                 with contextlib.suppress(Exception):
@@ -743,6 +751,8 @@ class SessionRunner:
             text = turn.text
             if self._memory is not None and not self._index_only:
                 text = await self._recall(turn)
+                if not earlier and session is not None and session.kind == "chat":
+                    text = await self._with_digest(turn, text)
             if self._context and len(text) + len(self._context) + 2 <= MAX_QUERY_LEN:
                 text = f"{text}\n\n{self._context}"
             before = await self._scan_folder(turn)
@@ -766,6 +776,62 @@ class SessionRunner:
                 if task.cancelling() > turn.runner_cancels:
                     break  # cancelled from outside again: step 7 goes on alone
         return self._outcome(turn, task, run_exc, returned)
+
+    async def _earlier_turns(self, turn: _Turn) -> list[tuple[str, str]]:
+        """This chat's newest person's turns before *turn*: ``(words, answer)``, oldest first.
+
+        At most :data:`EARLIER_TURNS` finished, not undone turns the person
+        began (not a task's question to the chat), the words they typed (or the
+        turn's text) and the answer as kept; ``[]`` for a worker's run or when
+        the store cannot be read. The run carries them for the requests whose
+        window may have lost them (``Agent.run_task(earlier_turns=...)``).
+        """
+        if self._worker:
+            return []
+        info = turn.turn
+        try:
+            found = await self._eligible_turns(info.session_id, 2 * EARLIER_TURNS)
+        except Exception:
+            logger.warning("Could not read this chat's earlier turns", exc_info=True)
+            return []
+        pairs: list[tuple[str, str]] = []
+        for past in found:  # newest first
+            words = past.typed_text or past.user_text
+            if past.turn >= info.turn or past.origin or not words.strip():
+                continue
+            pairs.append(
+                (words, answer_text(past.status, split_thinking(past.answer)[1]))
+            )
+            if len(pairs) == EARLIER_TURNS:
+                break
+        return pairs[::-1]
+
+    async def _with_digest(self, turn: _Turn, text: str) -> str:
+        """*text* with the digest of the user's other chats, on a chat's first turn.
+
+        Only for a person's turn (not a task's question) of a chat that has no
+        earlier turn of theirs; the caller checks the latter and the session's
+        kind (``chat``: a side chat or a terminal chat, never the main chat).
+        The digest (:meth:`ChatMemory.recent_digest`) leaves out the turns the
+        recall block shows already (or whose notes it shows), and comes after
+        everything else in the message, which still fits ``MAX_QUERY_LEN``; a
+        read that fails leaves *text* as it is.
+        """
+        assert self._memory is not None
+        if turn.origin:
+            return text
+        try:
+            digest = await self._memory.recent_digest(
+                turn.turn.session_id, exclude_turns=turn.recalled
+            )
+        except Exception:
+            logger.warning(
+                "Could not read the other chats' recent turns", exc_info=True
+            )
+            return text
+        if digest and len(text) + len(digest) + 2 <= MAX_QUERY_LEN:
+            return f"{text}\n\n{digest}"
+        return text
 
     async def _recall(self, turn: _Turn) -> str:
         """The turn's text with what memory recalls for it; queues ``turn.memory``.
@@ -791,6 +857,12 @@ class SessionRunner:
             logger.warning("Memory across chats failed for this turn", exc_info=True)
             return turn.text
         fits = len(turn.text) + len(found.block) <= MAX_QUERY_LEN
+        if fits and found.block:
+            turn.recalled = frozenset(
+                pair
+                for item in found.used
+                for pair in ((item.session_id, item.turn), *item.sources)
+            )
         if found.recall is not None and not fits:
             found.recall.block_chars = 0  # a block too long for the message is left out
         data = found.event()

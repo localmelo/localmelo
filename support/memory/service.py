@@ -44,7 +44,7 @@ import logging
 import os
 import re
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, NamedTuple
@@ -67,6 +67,7 @@ from localmelo.melo.schema import (
     starts_with_reply_nudge,
 )
 from localmelo.support.config import (
+    CHAT_RECENT_DIGEST_MINUTES,
     MEMORY_COMPRESS_AT_CHARS,
     MEMORY_NOTE_GATE,
     MEMORY_NOTE_MIN_COSINE,
@@ -81,6 +82,12 @@ from localmelo.support.config import (
 )
 from localmelo.support.memory import hippo_encode, note_gate, records
 from localmelo.support.memory import sleep as sleeping
+from localmelo.support.memory.digest import (
+    DIGEST_KINDS,
+    DIGEST_SCAN,
+    DIGEST_TURNS,
+    digest_block,
+)
 from localmelo.support.memory.hippo_route import Route, Router
 from localmelo.support.memory.importer import (
     ImportPlan,
@@ -2170,6 +2177,60 @@ class ChatMemory:
         return "\n".join([PACK_HEADER, *lines]) if lines else ""
 
     # ── Records, for the routes and the identity ──
+
+    def digest_minutes(self) -> int:
+        """``[chat] recent_digest_minutes`` now; 30 without a config file.
+
+        A value out of its bounds or of the wrong type (a file
+        :meth:`Config.validate` would refuse) reads as the default, as
+        :meth:`recall_settings` reads its own.
+        """
+        default = 30
+        cfg = self._settings()
+        chat = getattr(cfg, "chat", None)
+        value = getattr(chat, "recent_digest_minutes", default)
+        low, high = CHAT_RECENT_DIGEST_MINUTES
+        fits = isinstance(value, int) and not isinstance(value, bool)
+        return value if fits and low <= value <= high else default
+
+    async def recent_digest(
+        self,
+        session_id: str,
+        *,
+        exclude_turns: Collection[tuple[str, int]] = (),
+        now: float | None = None,
+    ) -> str:
+        """What the user's other chats discussed lately, for chat *session_id*'s first turn.
+
+        The newest :data:`~.digest.DIGEST_TURNS` turns of the main chat and the
+        side chats other than *session_id* indexed in the last
+        :meth:`digest_minutes`, as :func:`~.digest.digest_block` lines. Under
+        the lock, one :meth:`ConversationIndex.recent` read (at most
+        :data:`~.digest.DIGEST_SCAN` turns) and the corpus recall uses (:meth:`_sync`):
+        a turn a newer note or turn replaced is left out, as recall leaves it
+        out, and so are *exclude_turns* (``(session id, turn)``: what the recall
+        block shows already). ``""`` when memory across chats is off, the
+        setting is 0, or no such turn is left. *now* is wall-clock seconds (the
+        index stamps turns with it).
+        """
+        minutes = self.digest_minutes()
+        if not self.enabled or minutes <= 0:
+            return ""
+        now = time.time() if now is None else now
+        index = self.stores()[1]
+        async with self._lock:
+            docs = await index.recent(
+                now - minutes * 60,
+                exclude_session=session_id,
+                kinds=DIGEST_KINDS,
+                limit=DIGEST_SCAN,
+            )
+            if not docs:
+                return ""
+            replaced = self._replaced(await self._sync())
+        skip = {*replaced, *exclude_turns}
+        kept = [doc for doc in docs if (doc.session_id, doc.turn) not in skip]
+        return digest_block(kept[:DIGEST_TURNS], minutes)
 
     async def records(self) -> list[StoredEntry]:
         async with self._lock:

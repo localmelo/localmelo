@@ -98,6 +98,9 @@ MEMORY_COMPRESS_AT_CHARS = (4000, 60000)
 # MemoryConfig.recall_min_cosine and recall_min_coverage.
 MEMORY_RECALL_MIN_COSINE = (0.20, 0.95)
 MEMORY_RECALL_MIN_COVERAGE = (0.10, 1.00)
+# How far back a new chat's first turn looks into the other chats: see
+# ChatConfig.recent_digest_minutes (0 turns it off).
+CHAT_RECENT_DIGEST_MINUTES = (0, 1440)
 # Whether recall carries notes, and what a turn that recalls nothing is told.
 MEMORY_RECALL_NOTES = ("on", "off")
 MEMORY_SEARCH_WHEN_EMPTY = ("off", "hint")
@@ -543,6 +546,21 @@ class TasksConfig:
 
 
 @dataclass
+class ChatConfig:
+    """The ``[chat]`` table: what a new chat knows when it starts.
+
+    ``recent_digest_minutes``: a chat's first turn (not the main chat's) gets a
+    short digest of the user's other chats in the last that many minutes: up to
+    five lines, one per recent turn, saying what it was about and where (see
+    :mod:`localmelo.support.memory.digest`). It reads memory's turn index, so
+    ``[memory] across_chats = false`` turns it off too. ``0`` turns it off;
+    30 by default, at most 1440.
+    """
+
+    recent_digest_minutes: int = 30
+
+
+@dataclass
 class Config:
     chat_backend: str = (
         ""  # mlc | ollama | vllm | sglang | openai | gemini | anthropic | nvidia
@@ -587,6 +605,7 @@ class Config:
     workspace: WorkspaceConfig = field(default_factory=WorkspaceConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     tasks: TasksConfig = field(default_factory=TasksConfig)
+    chat: ChatConfig = field(default_factory=ChatConfig)
     # [pricing.<model>]: dollars per million tokens (input, output, and
     # cache_read for cached prompt tokens), for the terminal's session cost.
     # Configuration only: no price is bundled.
@@ -633,6 +652,7 @@ class Config:
         errors.extend(self._validate_browser())
         errors.extend(self._validate_tools())
         errors.extend(self._validate_tasks())
+        errors.extend(self._validate_chat())
         # [cli] is a display preference: like [sessions] resume_mode, a bad
         # value warns and falls back in the interactive UI (cli_errors()), so
         # direct mode and the gateway never fail on it.
@@ -796,6 +816,21 @@ class Config:
             f"[tasks] {name} must be a bool, got {value!r}"
             for name in ("follow_up",)
             if not isinstance(value := getattr(self.tasks, name), bool)
+        ]
+
+    def _validate_chat(self) -> list[str]:
+        """``[chat] recent_digest_minutes`` is a whole number of minutes, 0-1440."""
+        value = self.chat.recent_digest_minutes
+        low, high = CHAT_RECENT_DIGEST_MINUTES
+        if (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and low <= value <= high
+        ):
+            return []
+        return [
+            f"[chat] recent_digest_minutes must be an integer from {low} to {high}, "
+            f"got {value!r}"
         ]
 
     def _validate_scheduler(self) -> list[str]:
@@ -1161,6 +1196,7 @@ class Config:
             *self._validate_browser(),
             *self._validate_tools(),
             *self._validate_tasks(),
+            *self._validate_chat(),
             *self._validate_gateway_workspace(),
             *self._validate_cli(),
             *self._validate_ui(),
@@ -1539,6 +1575,11 @@ def _load_file() -> Config:
             if hasattr(cfg.tasks, k):
                 setattr(cfg.tasks, k, v)
 
+    if isinstance(data.get("chat"), dict):
+        for k, v in data["chat"].items():
+            if hasattr(cfg.chat, k):
+                setattr(cfg.chat, k, v)  # a bad value is left for Config.validate
+
     # A bad value is left for Config.validate to report.
     if isinstance(data.get("sessions"), dict):
         cfg.sessions.resume_mode = data["sessions"].get("resume_mode", "pairs")
@@ -1904,6 +1945,10 @@ def save(cfg: Config) -> None:
 
     if cfg.tasks != TasksConfig():
         lines.extend(["[tasks]", f"follow_up = {_toml_value(cfg.tasks.follow_up)}", ""])
+
+    if cfg.chat != ChatConfig():
+        minutes = _toml_value(cfg.chat.recent_digest_minutes)
+        lines.extend(["[chat]", f"recent_digest_minutes = {minutes}", ""])
 
     if cfg.sessions != SessionsConfig():
         lines.append("[sessions]")
