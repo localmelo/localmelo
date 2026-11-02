@@ -1,12 +1,11 @@
-"""``[memory]`` recall settings: developer settings that default to today's recall.
+"""``[memory]`` recall settings: developer settings with their shipped defaults.
 
 ``recall_records``, ``recall_docs``, ``recall_chars``, ``recall_notes``,
 ``search_when_empty``, ``recall_min_cosine``, ``recall_min_coverage``,
 ``recall_item_chars``, ``recall_excerpt``, ``recall_form``, ``recall_list_max``,
 ``recall_open_chars``, ``excerpt_open``, ``recall_source``, ``open_sources``,
-``compress_at_chars``,
-``compress_cache``, ``note_gate`` and ``note_min_cosine`` are saved only when they
-differ from the default, checked
+``compress_at_chars``, ``compress_cache``, ``note_gate``, ``note_min_cosine`` and
+``followup_query`` are saved only when they differ from the default, checked
 against their bounds and values, set for one run with ``-X``, and listed by the
 developer help only, each with the issue that decides it.
 """
@@ -25,7 +24,7 @@ from localmelo.support.config import RECALL_KEYS, Config, MemoryConfig, save
 CHANGED = {
     "recall_records": 8,
     "recall_docs": 0,
-    "recall_chars": 4000,
+    "recall_chars": 2500,
     "recall_notes": "off",
     "search_when_empty": "hint",
     "recall_min_cosine": 0.45,
@@ -42,6 +41,7 @@ CHANGED = {
     "compress_cache": "cache/compress.jsonl",
     "note_gate": "model",
     "note_min_cosine": 0.65,
+    "followup_query": "message",
 }
 # The issue that decides each setting, as the developer help names it.
 ISSUE = {name: "#349" for name in CHANGED} | {
@@ -55,6 +55,7 @@ ISSUE = {name: "#349" for name in CHANGED} | {
     "compress_cache": "#428",
     "note_gate": "#442",
     "note_min_cosine": "#442",
+    "followup_query": "#452",
 }
 
 
@@ -76,8 +77,12 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
         assert (
             "recall_" not in path.read_text() and "search_when" not in path.read_text()
         )
+        assert "followup_query" not in path.read_text()
         cfg.memory = MemoryConfig(  # the defaults
-            recall_records=3, recall_notes="on", recall_min_cosine=0.55
+            recall_records=3,
+            recall_notes="on",
+            recall_min_cosine=0.55,
+            followup_query="recent",
         )
         save(cfg)
         assert "[memory]" not in path.read_text()
@@ -85,7 +90,7 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
         save(cfg)
         text = path.read_text()
         assert (
-            "[memory]\nrecall_records = 8\nrecall_docs = 0\nrecall_chars = 4000\n"
+            "[memory]\nrecall_records = 8\nrecall_docs = 0\nrecall_chars = 2500\n"
             'recall_notes = "off"\nsearch_when_empty = "hint"\n'
             "recall_min_cosine = 0.45\nrecall_min_coverage = 0.4\n"
             'recall_item_chars = 800\nrecall_excerpt = "match"\n'
@@ -93,6 +98,7 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
             'excerpt_open = "on"\nrecall_source = "items"\nopen_sources = "on"\n'
             'compress_at_chars = 20000\ncompress_cache = "cache/compress.jsonl"\n'
             'note_gate = "model"\nnote_min_cosine = 0.65\n'
+            'followup_query = "message"\n'
         ) in text
         assert config.load().memory == MemoryConfig(**CHANGED)  # type: ignore[arg-type]
         for name, value in CHANGED.items():  # each alone
@@ -101,6 +107,50 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
             keys = [line.split(" ")[0] for line in path.read_text().splitlines()]
             assert [key for key in keys if key in CHANGED] == [name]
             assert config.load().memory == cfg.memory
+
+
+def test_a_saved_value_is_kept_and_a_missing_one_is_the_larger_default(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "config.toml"
+    with (
+        mock.patch.object(config, "CONFIG_PATH", str(path)),
+        mock.patch.object(config, "CONFIG_DIR", str(tmp_path)),
+    ):
+        # A config with no value for either key gets the shipped defaults (#349).
+        path.write_text('chat_backend = "vllm"\n[memory]\nrecall_docs = 5\n')
+        memory = config.load().memory
+        assert (memory.recall_chars, memory.recall_item_chars) == (4000, 900)
+        assert memory.recall_docs == 5
+        # A config that saved the earlier defaults keeps them: its value is read as
+        # written, and saving it again writes both keys, since neither is the default.
+        path.write_text("[memory]\nrecall_chars = 900\nrecall_item_chars = 234\n")
+        cfg = config.load()
+        assert (cfg.memory.recall_chars, cfg.memory.recall_item_chars) == (900, 234)
+        save(cfg)
+        assert "recall_chars = 900\nrecall_item_chars = 234\n" in path.read_text()
+        memory = config.load().memory
+        assert (memory.recall_chars, memory.recall_item_chars) == (900, 234)
+        # The shipped default itself is never written.
+        cfg.memory = MemoryConfig(recall_chars=4000, recall_item_chars=900)
+        save(cfg)
+        assert "recall_" not in path.read_text()
+        assert (MemoryConfig().recall_chars, MemoryConfig().recall_item_chars) == (
+            4000,
+            900,
+        )
+
+
+def test_a_file_without_followup_query_gets_the_new_default(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    with (
+        mock.patch.object(config, "CONFIG_PATH", str(path)),
+        mock.patch.object(config, "CONFIG_DIR", str(tmp_path)),
+    ):
+        path.write_text("[memory]\nrecall_records = 5\n")
+        assert config.load().memory.followup_query == "recent"
+        path.write_text('[memory]\nfollowup_query = "message"\n')
+        assert config.load().memory.followup_query == "message"
 
 
 @pytest.mark.parametrize(
@@ -152,6 +202,8 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
         ("note_min_cosine", 0.2),
         ("note_min_cosine", 0.95),
         ("note_min_cosine", 0.55),
+        ("followup_query", "recent"),
+        ("followup_query", "message"),
     ],
 )
 def test_the_bounds_and_values_are_accepted(name: str, value: object) -> None:
@@ -385,6 +437,18 @@ def test_the_bounds_and_values_are_accepted(name: str, value: object) -> None:
             "[memory] note_min_cosine must be a number, got True",
         ),
         (
+            "followup_query",
+            "history",
+            "[memory] followup_query 'history' is not recognised. "
+            "Must be one of ('recent', 'message').",
+        ),
+        (
+            "followup_query",
+            False,
+            "[memory] followup_query False is not recognised. "
+            "Must be one of ('recent', 'message').",
+        ),
+        (
             "recall_min_cosine",
             True,
             "[memory] recall_min_cosine must be a number, got True",
@@ -465,6 +529,8 @@ def test_x_sets_each_for_one_run_and_only_the_developer_help_lists_them(
         "memory.note_gate=typing",
         "memory.note_min_cosine=0.1",
         "memory.note_min_cosine=high",
+        "memory.followup_query=history",
+        "memory.followup_query=on",
     ],
 )
 def test_x_refuses_a_bad_value_with_a_clear_message(

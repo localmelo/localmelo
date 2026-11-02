@@ -170,10 +170,10 @@ async def test_searched_entries_carry_the_line_the_search_returned(
         await memory.aclose()
 
 
-async def test_the_default_event_shows_a_turns_head_and_a_larger_room_more(
+async def test_the_head_room_event_shows_a_turns_head_and_a_larger_room_more(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    cfg = config(recall_chars=4000)
+    cfg = config(recall_chars=4000, recall_item_chars=234)  # the head a turn had
     memory = await build(tmp_path, store, cfg)
     try:
 

@@ -1,7 +1,7 @@
 """The recall settings: block size, recall without notes, a hint when nothing matched.
 
 ``[memory] recall_records``, ``recall_docs`` and ``recall_chars`` size the block
-a chat message carries (defaults 3, 2 and 900: what recall always did);
+a chat message carries (defaults 3, 2 and 4000, a turn in it 900: #349);
 ``recall_notes = "off"`` leaves notes out of the block and the pinned lines and
 recalls turns only; ``search_when_empty = "hint"`` gives a block that recalled
 nothing one fixed line. Synthetic notes and turns, words only, no model.
@@ -23,6 +23,7 @@ from localmelo.support.memory.recall import (
     AUTO_RECORDS,
     BLOCK_CHARS,
     BLOCK_HEADER,
+    ITEM_CHARS,
     LIST_MAX,
     MIN_COSINE,
     MIN_COVERAGE,
@@ -36,6 +37,7 @@ from localmelo.support.sessions.store import NewSession, SessionStore
 from localmelo.tests.memory.chat_memory_helpers import teach
 
 HOLDER = "test-host:1:recall-settings"
+SMALL = 900  # a block bound smaller than the shipped one, which the items overflow
 QUESTION = "what do I plant in the tomato garden?"
 # Nine notes and nine chat turns, each of which the question finds.
 NOTES = [
@@ -113,7 +115,7 @@ async def recall(memory: ChatMemory, store: SessionStore, typed: str = QUESTION)
     return await memory.before_turn(store, await _turn(store, "Ask"), typed)
 
 
-def test_the_defaults_are_the_numbers_recall_always_used() -> None:
+def test_the_defaults_are_the_shipped_numbers() -> None:
     cfg = MemoryConfig()
     assert (cfg.recall_records, cfg.recall_docs, cfg.recall_chars) == (
         AUTO_RECORDS,
@@ -131,18 +133,22 @@ def test_the_defaults_are_the_numbers_recall_always_used() -> None:
         False,
         MIN_COSINE,
         MIN_COVERAGE,
-        TURN_CHARS,
+        ITEM_CHARS,
         False,
         False,
         LIST_MAX,
         OPEN_CHARS,
         False,
         False,
-        False,
+        True,  # followup: a message with no content recalls from the recent turns
+        False,  # excerpt_open
     )
+    assert cfg.followup_query == "recent"
     assert (cfg.recall_min_cosine, cfg.recall_min_coverage) == (0.55, 0.6)
     assert (MIN_COSINE, MIN_COVERAGE) == (0.55, 0.6)
-    assert (cfg.recall_item_chars, cfg.recall_excerpt) == (234, "head")
+    assert (cfg.recall_chars, cfg.recall_item_chars) == (BLOCK_CHARS, ITEM_CHARS)
+    assert (BLOCK_CHARS, ITEM_CHARS) == (4000, 900)
+    assert cfg.recall_excerpt == "head"
     assert (cfg.recall_form, cfg.recall_list_max, cfg.recall_open_chars) == (
         "excerpt",
         20,
@@ -155,10 +161,11 @@ def test_the_defaults_are_the_numbers_recall_always_used() -> None:
         cfg.compress_cache,
     ) == ("turns", "off", 12000, "")
     assert cfg.excerpt_open == "off"
+    # The head of a turn is a floor, not a default: it stays what it was.
     assert TURN_CHARS == 234
 
 
-async def test_the_defaults_give_three_notes_and_two_turns_in_900_characters(
+async def test_the_defaults_give_three_notes_and_two_turns_in_4000_characters(
     tmp_path: Path, store: SessionStore
 ) -> None:
     memory = await build(tmp_path, store, config())
@@ -181,13 +188,13 @@ async def test_a_bigger_budget_puts_eight_notes_and_eight_turns_in_4000_characte
     try:
         found = await recall(memory, store)
         assert kinds(found.used) == (8, 8)
-        assert BLOCK_CHARS < len(found.block) <= 4000 + 2
+        assert SMALL < len(found.block) <= 4000 + 2
         assert found.block.count("\n- ") == 16
         assert found.recall is not None and found.recall.used == 16
         # The size bound alone leaves items out, the best first.
-        cfg.memory.recall_chars = BLOCK_CHARS
+        cfg.memory.recall_chars = SMALL
         tight = await recall(memory, store)
-        assert 0 < len(tight.used) < 16 and len(tight.block) <= BLOCK_CHARS + 2
+        assert 0 < len(tight.used) < 16 and len(tight.block) <= SMALL + 2
         assert list(tight.used) == list(found.used[: len(tight.used)])
         cfg.memory.recall_chars = 200
         assert len((await recall(memory, store)).used) < len(tight.used)
@@ -208,7 +215,9 @@ async def test_the_settings_are_read_again_each_turn_and_a_bad_one_is_the_defaul
     memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
     cfg.memory.recall_records = 8
     cfg.memory.search_when_empty = "hint"
-    assert memory.recall_settings() == RecallSettings(8, AUTO_DOCS, 900, True, True)
+    assert memory.recall_settings() == RecallSettings(
+        8, AUTO_DOCS, BLOCK_CHARS, True, True
+    )
     cfg.memory.recall_notes = "off"
     assert memory.recall_settings().notes is False
     for bad in (-1, 21, True, "3", 2.5):
@@ -216,6 +225,9 @@ async def test_the_settings_are_read_again_each_turn_and_a_bad_one_is_the_defaul
         assert memory.recall_settings().docs == AUTO_DOCS, bad
     cfg.memory.recall_chars = 100
     assert memory.recall_settings().chars == BLOCK_CHARS
+    for bad in (100, 2001, True, "900", 450.5):
+        cfg.memory.recall_item_chars = bad  # type: ignore[assignment]
+        assert memory.recall_settings().item_chars == ITEM_CHARS, bad
     cfg.memory.recall_notes = "maybe"
     cfg.memory.search_when_empty = "always"
     assert memory.recall_settings().notes and not memory.recall_settings().hint

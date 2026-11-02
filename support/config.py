@@ -109,6 +109,10 @@ MEMORY_SEARCH_WHEN_EMPTY = ("off", "hint")
 # MemoryConfig.note_gate.
 MEMORY_NOTE_GATE = ("typed", "pointed", "meaning", "model")
 MEMORY_NOTE_MIN_COSINE = (0.20, 0.95)
+# What a message with no content of its own ("go look it up") is searched with:
+# the user's words of the chat's last turns, or its own words: see
+# MemoryConfig.followup_query.
+MEMORY_FOLLOWUP_QUERY = ("recent", "message")
 # Whether a task reads its project's own instruction file: see MemoryConfig.
 MEMORY_PROJECT_INSTRUCTIONS = ("on", "off")
 RECALL_KEYS = (
@@ -131,6 +135,7 @@ RECALL_KEYS = (
     "compress_cache",
     "note_gate",
     "note_min_cosine",
+    "followup_query",
 )
 RECALL_TRIGGERS = ("start", "attempt", "step", "tool")
 RECALL_KINDS = ("note", "draft", "thought", "digest", "reflection", "long")
@@ -379,10 +384,10 @@ class MemoryConfig:
     ``rules`` (no model call), ``model`` (rules then a bounded model pass), or
     ``model+tags`` (the same call limit, tagged turns first). ``sleep_lock`` is
     an optional path whose presence prevents model requests. Five more developer
-    settings, each defaulting to today's behaviour, shape the recall block a chat
-    message carries: ``recall_records`` notes and ``recall_docs`` chat turns at
-    most (0-20 each) in a block of at most ``recall_chars`` characters
-    (200-8000); ``recall_notes = "off"`` leaves notes out of the block and the
+    settings shape the recall block a chat message carries: ``recall_records``
+    notes (3 by default) and ``recall_docs`` chat turns (2) at most (0-20 each) in a
+    block of at most ``recall_chars`` characters (200-8000, 4000 by default);
+    ``recall_notes = "off"`` leaves notes out of the block and the
     pinned lines, so only turns are recalled; and ``search_when_empty = "hint"``
     adds one line to a block that recalls nothing, telling the model to call the
     memory search tool first. Two more set the bars an item must pass to be
@@ -391,7 +396,7 @@ class MemoryConfig:
     ``recall_min_coverage`` (0.10-1.00), the least share of the question's
     content words that a note or turn must hold. Two more set how much of a
     recalled chat turn is shown, in the block and in the search tool:
-    ``recall_item_chars`` (120-2000), the room one turn takes, and
+    ``recall_item_chars`` (120-2000, 900 by default), the room one turn takes, and
     ``recall_excerpt``, ``head`` (the start of each part, the default) or
     ``match`` (the sentences of each part that hold most of the question's
     content words). Three more set how recalled chat turns are shown at all:
@@ -428,7 +433,12 @@ class MemoryConfig:
     (also a note the model infers from what the user typed, kept as inferred); each
     level includes the ones before it. ``note_min_cosine`` (0.20-0.95) is the least
     similarity of meaning that counts as support in the last two levels (the
-    inferred note's bar is 0.15 lower). ``project_instructions = "off"`` stops a
+    inferred note's bar is 0.15 lower). ``followup_query`` (#452) is what a message
+    with no content of its own ("go look it up", "continue", "继续") is searched
+    with: ``recent`` (the default) the message and the user's words of the chat's
+    last two turns that the model still shows, or ``message`` the message's own
+    words, as recall did before; with ``recent`` the first message of a new chat
+    that has no content recalls nothing. ``project_instructions = "off"`` stops a
     task that the person made from reading the instruction file of its folder (``AGENTS.md``,
     ``CLAUDE.md`` or ``GEMINI.md``, the nearest first) when it starts.
     """
@@ -441,12 +451,12 @@ class MemoryConfig:
     sleep_lock: str = ""  # Optional lock path: no model calls while it exists.
     recall_records: int = 3  # Most notes a chat message's recall block holds.
     recall_docs: int = 2  # Most chat turns it holds.
-    recall_chars: int = 900  # Its size bound, in characters.
+    recall_chars: int = 4000  # Its size bound, in characters.
     recall_notes: str = "on"  # on | off: no notes in the block or the pinned lines.
     search_when_empty: str = "off"  # off | hint: a line when nothing was recalled.
     recall_min_cosine: float = 0.55  # Least similarity of meaning to be recalled.
     recall_min_coverage: float = 0.6  # Least share of the question's words held.
-    recall_item_chars: int = 234  # The room one recalled chat turn takes.
+    recall_item_chars: int = 900  # The room one recalled chat turn takes.
     recall_excerpt: str = "head"  # head | match: which part of a turn is shown.
     recall_form: str = "excerpt"  # excerpt | list: turns as excerpts, or as a list.
     recall_list_max: int = 20  # The most turns the list form lists.
@@ -460,6 +470,7 @@ class MemoryConfig:
     )
     note_gate: str = "typed"  # typed | pointed | meaning | model: note sources.
     note_min_cosine: float = 0.55  # Least similarity of a note to its source.
+    followup_query: str = "recent"  # recent | message: what "continue" searches with.
     project_instructions: str = "on"  # on | off: a task reads its folder's AGENTS.md.
 
 
@@ -770,6 +781,7 @@ class Config:
             ("recall_form", MEMORY_RECALL_FORM),
             ("excerpt_open", MEMORY_EXCERPT_OPEN),
             ("note_gate", MEMORY_NOTE_GATE),
+            ("followup_query", MEMORY_FOLLOWUP_QUERY),
             ("recall_source", MEMORY_RECALL_SOURCE),
             ("open_sources", MEMORY_OPEN_SOURCES),
             ("project_instructions", MEMORY_PROJECT_INSTRUCTIONS),
