@@ -2243,13 +2243,11 @@ class MemoryTools(BaseToolProvider):
         )
         if not items:
             return "Nothing in melo's memory matches that."
-        shown = items[:k]
-        if chat is not None:
-            chat.add_searched(shown)
         how = settings.shown(str(query))
-        return "\n".join(
-            f"{n}. {item.line(show=how)}" for n, item in enumerate(shown, 1)
-        )
+        found = [replace(item, shown=item.line(show=how)) for item in items[:k]]
+        if chat is not None:
+            chat.add_searched(found)
+        return "\n".join(f"{n}. {item.shown}" for n, item in enumerate(found, 1))
 
     async def _search_list(
         self,
@@ -2279,13 +2277,18 @@ class MemoryTools(BaseToolProvider):
         turns = [item for item in items if not item.is_record][:turns_k]
         if not notes and not turns:
             return "Nothing in melo's memory matches that."
+        notes = [replace(item, shown=item.line()) for item in notes]
+        now, same_day = clock.now(), times(turns)
+        turns = [
+            replace(item, shown=item.listed(now, timed=item.key in same_day))
+            for item in turns
+        ]
         if chat is not None:
             chat.add_searched([*notes, *turns])
-        lines = [f"{n}. {item.line()}" for n, item in enumerate(notes, 1)]
+        lines = [f"{n}. {item.shown}" for n, item in enumerate(notes, 1)]
         if turns:
-            now, same_day = clock.now(), times(turns)
             lines.append(LIST_GUIDE)
-            lines.extend(item.listed(now, timed=item.key in same_day) for item in turns)
+            lines.extend(item.shown for item in turns)
         return "\n".join(lines)
 
     async def open_memory(self, ids: Any = None, **_: Any) -> str:

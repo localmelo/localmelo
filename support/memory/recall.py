@@ -33,7 +33,7 @@ import re
 import time
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Final, NamedTuple
 
 import numpy as np
@@ -155,7 +155,12 @@ class Item:
     document's ``chunk`` is 0 for the head of a turn and 1 and up for the later
     pieces of a long one (:mod:`.index`). ``similarity`` is the cosine of a
     turn to the message when a search matched it by meaning (the list form
-    shows it); it is set on a copy for one search, never stored.
+    shows it); it is set on a copy for one search, never stored. ``shown`` is
+    the line the model read for the item, as the recall block or the memory
+    search result worded it (without a list number): :func:`block` and the search
+    tool set it on a copy, once, where the line is built, for ``turn.memory``'s
+    entries (:meth:`to_json`); it is never stored and takes no part in a
+    comparison.
     """
 
     key: str
@@ -172,6 +177,7 @@ class Item:
     older: str = ""
     chunk: int = 0
     similarity: float | None = None
+    shown: str = field(default="", compare=False)
 
     @property
     def is_record(self) -> bool:
@@ -256,7 +262,10 @@ class Item:
         return f"[t{self.key[2:]}] {date or day(self.created_at)} · {chat}{older}"
 
     def to_json(self) -> dict[str, Any]:
-        return {
+        """The item as a ``turn.memory`` entry. ``text`` is the stored text (a
+        turn's head, :func:`snippet`); ``shown``, only when the model was shown
+        the item, is the exact line it read, whatever the recall settings made it."""
+        data: dict[str, Any] = {
             "kind": "record" if self.is_record else "chat",
             "id": int(self.key[2:]),
             "text": self.text if self.is_record else snippet(self.text),
@@ -265,6 +274,9 @@ class Item:
             "turn": self.turn,
             "at": self.created_at,
         }
+        if self.shown:
+            data["shown"] = self.shown
+        return data
 
 
 def unit(vector: Iterable[float] | None) -> np.ndarray | None:
@@ -846,7 +858,8 @@ def block(
     *,
     listing: bool = False,
 ) -> tuple[str, list[Item]]:
-    """The recall block a user message carries, and the items that fit in it.
+    """The recall block a user message carries, and the items that fit in it, each
+    a copy that holds the line the model reads (:attr:`Item.shown`).
 
     The *kept* lines (:func:`kept_lines`) come first, with or without recall.
     Items are added while the block stays within *chars*
@@ -879,17 +892,21 @@ def block(
         used.append(item)
         size += len(line) + 1
     # An item whose same-day partner did not fit needs no time: shorter, so it fits.
+    # What is written here is what the model reads; each item keeps its own line.
     same_day = times(used)
-    lines = [
-        *lines[:fixed],
-        *(
-            f"- {item.line(now, timed=item.key in same_day, show=show)}"
-            for item in used
-            if not listed(item)
-        ),
-    ]
-    turns = [item for item in used if listed(item)]
+    read: dict[int, str] = {}
+    lines = lines[:fixed]
+    for n, item in enumerate(used):
+        if not listed(item):
+            read[n] = item.line(now, timed=item.key in same_day, show=show)
+            lines.append(f"- {read[n]}")
+    turns = [n for n, item in enumerate(used) if listed(item)]
     if turns:
         lines.append(LIST_GUIDE)
-        lines.extend(item.listed(now, timed=item.key in same_day) for item in turns)
-    return ("\n".join(lines) if used or kept else ""), used
+        for n in turns:
+            read[n] = used[n].listed(now, timed=used[n].key in same_day)
+            lines.append(read[n])
+    text = "\n".join(lines) if used or kept else ""
+    return text, [
+        dataclasses.replace(item, shown=read[n]) for n, item in enumerate(used)
+    ]
