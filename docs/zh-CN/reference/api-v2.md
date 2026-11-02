@@ -480,7 +480,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 ```
 
 - `state` 为 `done`、`failed`、`stopped`（任务用完了步数，可用 `POST /api/tasks/{id}/continue` 继续）、`waiting`（有审批在等待答复）、`answered`（该审批已答复）或 `blocked`（任务里被 Auto 拦下的一步：`request_id`、`step_key`、`name`、`preview`、`review` 和 `can_allow` 与任务的 `blocked` 相同，`line` 为 `Blocked: deletes files`；允许一次用 `POST /api/tasks/{id}/blocks/{request_id}/allow`）。每张 `blocked` 卡片都会显示，不会并入它的任务较新的卡片。`source_kind` 为 `chat` 或 `task`，`source_id` 是要打开的旁支对话或任务。`title` 至多 48 列：本人或主对话给的标题保持不变，更长的在词的边界处截断。`at` 是事情发生的时间。
-- `line` 是平实的话：`done` 卡片上是回答的前两行（后面还有内容时，开头的 `Done.` 省略）；`failed` 卡片上是运行没有结束的原因（先是状态的文字，再是错误的第一行）；`stopped` 卡片上是最终回答里说明还剩什么的那一句（否则是它的前两行，再否则是 `Ran out of steps`）；`waiting` 卡片上是它请求做什么（`Wants to run Python`、`Wants to write notes.md`）；`answered` 卡片上是答复（`Allowed once`、`Allowed for this chat`、`Allowed for this task`、`Allowed automatically`、`Denied`、`No answer in time`、`Not run: it stopped first`）。
+- `line` 是平实的话：`done` 卡片上是回答的前两行（后面还有内容时，开头的 `Done.` 省略）；`failed` 卡片上是运行没有结束的原因（先是状态的文字，再是错误的第一行）；`stopped` 卡片上是最终回答里说明还剩什么的那一句（否则是它的前两行，再否则是 `Ran out of steps`）；`waiting` 卡片上是它请求做什么（`Wants to run Python`、`Wants to write notes.md`；调用带有审批卡片那句话时，则是 `Needs your OK: List the files here`）；`answered` 卡片上是答复（`Allowed once`、`Allowed for this chat`、`Allowed for this task`、`Allowed automatically`、`Denied`、`No answer in time`、`Not run: it stopped first`）。
 - `waiting` 卡片有 `request_id`。该审批得到答复后，会有一张状态为 `answered`、`request_id` 相同、`line` 为答复的卡片跟在它后面，客户端把这一张卡片显示为带着答复、不再有 Review 的样子。答复不是新消息：它永远不是列表的 `last_card`，等待卡片从未写入时也不会写入答复。
 - 旁支对话的轮次由其运行结束时（`cause` 为 `run`）才算；本人停止、关机或崩溃都不产生卡片。任务以 `done`、`failed` 或 `expired` 结束时才算；本人停止不产生卡片。
 - 网关在读取主对话或列表时写入卡片，另外每分钟一次；审批在此之前已答复的等待卡片永远不会写入；之后才答复的审批会跟上它的 `answered` 卡片。主对话的事件流以 `attention.card` 帧送来新卡片。

@@ -344,6 +344,7 @@
   "cards.wants.read": "Wants to read {what}",
   "cards.wants.remember": "Wants to look at memory",
   "cards.wants.run": "Wants to run {what}",
+  "cards.wants.step": "Needs your OK: {what}",
   "cards.wants.use": "Wants to use {what}",
   "cards.wants.write": "Wants to write {what}",
   "chat.aResult": "a result",

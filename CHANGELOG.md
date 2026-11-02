@@ -23,6 +23,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   question and have no extra line. The approval record of `tool.finished` gets `review.gist`,
   `pending_approvals[]` gets `gist` (catalog ids `gist.say.<id>` and `gist.warn.<id>`, so each
   surface says it in its language), and the guides and `docs/for-agents.md` describe both.
+  The main chat's card for a waiting approval says the same sentence (`Needs your OK: …`).
+- `shell_exec` and `python_exec` take an optional `why` (#454): one short sentence, in the person's
+  language, saying what the step does and why. It is the sentence an approval card starts with
+  (cut at 120 characters with `…`), is not required, and changes nothing about what runs, the
+  step's key or how the rules review it. The model's tool list changes: `why` is added to both
+  tools, and their descriptions end with `Give why for a step that changes anything.` (about
+  190 more characters on the wire for each tool, 380 when both are offered). A request that
+  offers either tool is not the same as before, so the recorded wire fixtures were re-recorded.
 - A script that operates another app is its own kind, "Control an app?" (`app_control`, #454):
   `osascript` telling Safari or another app what to do, JXA `Application("…")`, `open -a Notes`
   and `shortcuts run`. It names the app in its reason and is as strict as "Change system

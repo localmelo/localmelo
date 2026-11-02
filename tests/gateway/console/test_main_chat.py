@@ -273,6 +273,55 @@ async def test_a_waiting_approval_gets_a_card_unless_answered_first(
         assert [c.event["data"]["state"] for c in cards] == ["done"]
 
 
+async def test_a_waiting_card_says_what_the_step_does_when_the_call_has_a_sentence(
+    tmp_path: Path,
+) -> None:
+    """The card starts with the sentence the approval card does (#454)."""
+    code = "import os\nprint(os.listdir('.'))"
+    call = tool_call("python_exec", {"code": code, "why": "List the files here"})
+    async with console_with(tmp_path, call, answer("done")) as (console, client, _):
+        side = (await _create(client, tmp_path, "Look around"))["session"]["id"]
+        [pending] = await _wait_pending(client, side)
+        card = (await client.get("/api/sessions")).json()["main"]["last_card"]
+        assert card["state"] == "waiting"
+        assert card["line"] == "Needs your OK: List the files here"
+        assert card["said"] == {
+            "key": "cards.wants.step",
+            "params": {
+                "what": {
+                    "key": "gist.say.model",
+                    "params": {"text": "List the files here"},
+                }
+            },
+        }
+        zh = {"X-LocalMelo-Language": "zh-Hans"}
+        chinese = (await client.get("/api/sessions", headers=zh)).json()["main"]
+        assert chinese["last_card"]["line"] == "需要你同意：List the files here"
+        await client.post(
+            f"/api/approvals/{pending['request_id']}", json={"choice": "deny"}
+        )
+        await _wait_turn(client, side)
+
+
+async def test_a_waiting_card_for_code_without_words_names_the_apps_it_operates(
+    tmp_path: Path,
+) -> None:
+    code = (
+        "import subprocess\n"
+        "subprocess.run(['osascript', '-e', 'tell application \"Safari\" to quit'])"
+    )
+    call = tool_call("python_exec", {"code": code})
+    async with console_with(tmp_path, call, answer("done")) as (console, client, _):
+        side = (await _create(client, tmp_path, "Tidy up"))["session"]["id"]
+        [pending] = await _wait_pending(client, side)
+        card = (await client.get("/api/sessions")).json()["main"]["last_card"]
+        assert card["line"] == "Needs your OK: Run a Python script that operates Safari"
+        await client.post(
+            f"/api/approvals/{pending['request_id']}", json={"choice": "deny"}
+        )
+        await _wait_turn(client, side)
+
+
 async def test_an_answered_approval_follows_its_card_and_is_no_news(
     tmp_path: Path,
 ) -> None:

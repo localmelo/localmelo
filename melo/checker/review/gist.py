@@ -36,7 +36,7 @@ WORD_FIELDS: Final = ("why", "description", "purpose")
 OWN_WORD_FIELDS: Final = ("why",)
 _RUNNERS: Final = frozenset(["shell_exec", "python_exec"])
 # The longest sentence of the model's words, and of a command in a code-built one.
-WORDS_CHARS: Final = 160
+WORDS_CHARS: Final = 120
 COMMAND_CHARS: Final = 80
 # The ids of the sentences and warnings; the catalog holds one entry for each
 # (``gist.say.<id>``, ``gist.warn.<id>``).

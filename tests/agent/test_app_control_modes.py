@@ -31,7 +31,9 @@ from localmelo.tests.agent.test_approvals import Recorder
 from localmelo.tests.agent.test_auto_mode import (
     FakeModel,
     _agent,
+    _answer,
     _approvals,
+    _calls,
     _plans,
     verdict,
 )
@@ -226,4 +228,32 @@ async def test_a_block_without_words_gets_a_sentence_built_by_code(
         "say": {"id": "script_apps", "params": {"apps": "Safari"}},
         "by": "code",
         "apps": "Safari",
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_block_keeps_the_why_the_model_gave_with_its_call(
+    tmp_path: Path,
+) -> None:
+    """The ``why`` argument is the sentence, and the kind stays the rules' own."""
+    arguments = {"code": APP, "why": "Close the extra Safari tabs"}
+    llm = FakeModel(
+        [_calls(("python_exec", arguments, "call_1")), _answer("explained")]
+    )
+    agent, fake = _agent(llm, tmp_path / "ws")
+
+    async def python_exec(code: str, why: str = "") -> str:
+        return await fake.python_exec(code)
+
+    agent.executor.register("python_exec", python_exec, requires_approval=True)
+    recorder = Recorder()
+
+    await agent.run_task("tidy up", on_event=recorder, approval=AutoPolicy())
+
+    [approval] = _approvals(recorder)
+    assert fake.ran == []
+    assert approval["review"]["categories"] == ["app_control"]
+    assert approval["review"]["gist"]["say"] == {
+        "id": "model",
+        "params": {"text": "Close the extra Safari tabs"},
     }

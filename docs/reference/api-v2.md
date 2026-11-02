@@ -984,7 +984,8 @@ Its `data`:
   error), the sentence of the stop answer that says what is left on a
   `stopped` one (else its first two lines, else `Ran out of steps`), what is
   asked on a `waiting` one (`Wants to run Python`, `Wants to
-  write notes.md`), and the answer on an `answered` one (`Allowed once`,
+  write notes.md`, or the approval card's own sentence when the call has one:
+  `Needs your OK: List the files here`), and the answer on an `answered` one (`Allowed once`,
   `Allowed for this chat`, `Allowed for this task`, `Allowed automatically`,
   `Denied`, `No answer in time`, `Not run: it stopped first`).
 - A `waiting` card has a `request_id`. When that approval is answered, a card

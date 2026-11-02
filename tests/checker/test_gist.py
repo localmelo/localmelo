@@ -57,7 +57,7 @@ def test_the_words_are_one_short_line() -> None:
     found = gist("shell_exec", {"command": "ls", "why": "  List\n the   notes  "})
     assert found.params == {"text": "List the notes"}
     long = gist("shell_exec", {"command": "ls", "why": "word " * 80})
-    assert len(long.params["text"]) <= 160 and long.params["text"].endswith("…")
+    assert len(long.params["text"]) <= 120 and long.params["text"].endswith("…")
 
 
 @pytest.mark.parametrize("value", ["", "  ", "ok", 7, None, ["a long enough list"]])

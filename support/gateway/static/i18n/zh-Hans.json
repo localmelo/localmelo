@@ -332,6 +332,7 @@
   "cards.wants.read": "想读取 {what}",
   "cards.wants.remember": "想查看记忆",
   "cards.wants.run": "想运行 {what}",
+  "cards.wants.step": "需要你同意：{what}",
   "cards.wants.use": "想使用 {what}",
   "cards.wants.write": "想写入 {what}",
   "chat.aResult": "一个结果",

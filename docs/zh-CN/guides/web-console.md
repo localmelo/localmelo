@@ -41,7 +41,7 @@
 - `Did not finish: Fix CI` 加上它结束的原因。
 - `Ready: Fix CI`、`Done, not finished: Fix CI` 或 `Needs you: Fix CI` 表示任务做完了：这是代码核对出的结局，不是报告里说的（[怎样核对](scheduler.md#tasks-from-the-main-chat)）。没收尾的任务用琥珀色写出原因（`No test ran after the last change · The changes are not committed`），并提供 **Finish it: run the tests and commit**（或 **Finish it: run the tests**），像 **Continue** 一样让它接着做。需要你的任务显示它的问题。
 - `Stopped: Fix CI` 表示任务用完了所有步数还没做完。它显示回答里说明还剩什么的那一句（`Remaining: run the tests and commit.`），并提供 **Continue**，让任务从停下的地方接着做，并记得之前做过什么。同一个任务在它的页面和面板的 Activity、Workers 行里也读作 Stopped；**Continue** 在它的页面上。因其他原因失败的任务仍是 `Did not finish`。
-- `Needs your approval: Fix CI` 加上它请求做什么。你回答之后，同一张卡片会写出结果（"Allowed once"、"Allowed for this task"、"Denied"），不再提供 **Review**。
+- `Needs your approval: Fix CI` 加上它请求做什么：这一步有一句话概述时，就是那句话（`Needs your OK: Close the extra Safari tabs`）。你回答之后，同一张卡片会写出结果（"Allowed once"、"Allowed for this task"、"Denied"），不再提供 **Review**。
 - 标题是主对话给任务起的标题，否则是你的请求的开头部分，在词的边界处截断。
 - **Open side chat**、**Open task** 或 **Review** 会前往来源。卡片不是消息：模型从不读取它。
 
