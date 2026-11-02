@@ -646,31 +646,44 @@ def asks_only(typed: str) -> bool:
     return is_question(typed) and not polite_request(typed) and not steps_request(typed)
 
 
-# Words that ask how a task stands: done, finished, its progress or result.
+# Words that ask how a task stands: done, finished, its progress or result, what it found or said.
 _STATE_WORDS: Final = re.compile(
     r"\b(?:done|finish(?:ed)?|complete(?:d)?|ready|over|progress|status|going|"
-    r"running|results?|outcome)\b"
+    r"running|results?|outcome|find|found|say|said)\b"
     r"|跑完|跑好|完成|做完|做好|弄完|弄好|搞定|好了|结束|进度|状态|怎么样了|如何了|到哪|结果|跑通"
+    r"|找到|发现|说了"
+)
+# "what did it find?", "has the task found …": the verb asks for a result, not for work.
+_ASKS_RESULT: Final = re.compile(
+    r"(\b(?:did|does|has|have|had)\s+(?:\w+\s+){0,3}?)(?:find|say)\b"
 )
 
 
 def status_question(typed: str) -> bool:
     """Whether *typed* asks how a task stands: "is it done?", "跑完了吗", "didn't it finish?".
 
-    A word of state (done, finished, progress, result; 跑完, 完成, 进度, 结果)
-    and no verb that acts ("Is the report ready? If not, write it …" asks for
-    work), in a question that is no request in steps, or in words that name a
-    task and ask to look or be told ("look at the slides task and tell me its
-    progress", "看一下那个任务然后告诉我结果"). The main chat answers it from
-    the tasks' state and result, never with a task.
+    A word of state (done, finished, progress, result, found, said; 跑完, 完成,
+    进度, 结果, 找到, 说了) and no verb that acts ("Is the report ready? If
+    not, write it …" asks for work), in a question that is no request in steps,
+    or in words that name a task and ask to look or be told ("look at the
+    slides task and tell me its progress", "看一下那个任务然后告诉我结果").
+    "what did it find?" asks for a result, and looking at a task ("check the
+    slides task …") reads its state: neither verb asks for work. The main chat
+    answers it from the tasks' state and result, never with a task.
     """
     text = norm(typed)
-    if not _STATE_WORDS.search(text) or acts(typed):
+    if not _STATE_WORDS.search(text):
+        return False
+    bare = norm(_QUOTED.sub(" ", typed or ""))
+    names_task = bool(_NAMES_TASK.search(bare))
+    asked = _ASKS_RESULT.sub(r"\1", bare)
+    if names_task:
+        asked = _LOOKS.sub(" ", asked)
+    if acts(asked):
         return False
     if is_question(typed):
         return not steps_request(typed)
-    bare = norm(_QUOTED.sub(" ", typed or ""))
-    return bool(_NAMES_TASK.search(bare)) and bool(
+    return names_task and bool(
         _LOOKS.search(bare) or _TELLS.search(bare) or _THEN_TELLS.search(bare)
     )
 

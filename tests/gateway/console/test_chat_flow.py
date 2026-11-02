@@ -185,7 +185,18 @@ def _out_of_steps() -> list[Reply]:
     return [lists(1), gets(2), lists(3), gets(4)]
 
 
-@pytest.mark.parametrize("typed", [IS_IT_DONE, DIDNT_IT, JUST_TELL_ME, "is it done?"])
+@pytest.mark.parametrize(
+    "typed",
+    [
+        IS_IT_DONE,
+        DIDNT_IT,
+        JUST_TELL_ME,
+        "is it done?",
+        "what did it find?",
+        "what did the task find?",
+        "check the slides task and tell me its progress",
+    ],
+)
 async def test_a_turn_out_of_steps_answers_with_what_it_has(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, typed: str
 ) -> None:

@@ -366,6 +366,17 @@ def test_the_start_rule_starts_requests_and_answers_questions() -> None:
         ("嗯，停一下，看看日志然后告诉我", "answer"),
         ("看一下那个任务然后告诉我结果", "answer"),
         ("look at the slides task and tell me its progress", "answer"),
+        ("check the slides task and tell me its progress", "answer"),
+        ("open the report task and tell me what it found", "answer"),
+        # What a task found or said is its result: the chat answers it.
+        ("what did it find?", "answer"),
+        ("what did the task find?", "answer"),
+        ("what did the worker say?", "answer"),
+        ("它找到了什么？", "answer"),
+        ("任务发现了什么？", "answer"),
+        ("那个任务说了什么？", "answer"),
+        ("did it find the bug? if not, fix it", "offer"),
+        ("find the bug in app.py and tell me what you found", "start"),
         # A status word does not swallow a request for work.
         ("Is the report ready? If not, write it to report.md and commit it", "offer"),
         ("做完了吗？没做完的话帮我把测试修好并提交", "offer"),
