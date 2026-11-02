@@ -40,6 +40,7 @@ SECTIONS = (
     "browser",
     "tools",
     "tasks",
+    "chat",
     "gateway",
 )
 

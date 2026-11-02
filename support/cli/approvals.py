@@ -29,6 +29,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
+from localmelo.melo.checker.review.gist import step_gist
 from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     ApprovalPolicy,
@@ -43,6 +44,7 @@ from localmelo.support.cli.text import escape_arguments, wrap_cells
 from localmelo.support.config import SavedFolders
 from localmelo.support.sessions.approvals import AskFunction, RememberingPolicy
 from localmelo.support.sessions.display import display_path, folder_name, home_label
+from localmelo.support.words import gist_note, gist_text
 
 # Keys other than Esc and Ctrl+C do nothing this long after the panel opens,
 # so a draft being typed cannot answer it.
@@ -106,6 +108,13 @@ class PanelText:
     escaped: bool
     # Why melo asks, for a high-impact call: one sentence per entry.
     notes: tuple[str, ...] = ()
+    # What the step will do in one plain sentence (#454), first on the panel;
+    # the warning is set when the model's words do not match the code.
+    says: str = ""
+    warning: str = ""
+    # The model's own words, labelled ("melo says: ..."), below the sentence
+    # of a step the rules found risky.
+    said: str = ""
 
 
 def _command_text(command: object) -> str:
@@ -177,7 +186,7 @@ def panel_text(
     """
     if request.outside is not None:
         return _outside_panel(request, target, width, minus, show_tier)
-    text = _tool_panel(request, target, width, minus, show_tier)
+    text = _says(request, _tool_panel(request, target, width, minus, show_tier))
     review = request.review
     title = review_title(review, folder_name(request.workspace_root))
     if review is None or not title:
@@ -185,6 +194,34 @@ def panel_text(
     note, changed = escape_arguments(f"melo asks because this call {because(review)}.")
     return dataclasses.replace(
         text, title=title, notes=(note,), escaped=text.escaped or changed
+    )
+
+
+def _says(request: ApprovalRequest, text: PanelText) -> PanelText:
+    """*text* with the sentence the panel starts with, escaped like the code below it.
+
+    A tool whose question says as much itself (a file write, a tool's name, a
+    site) has none.
+    """
+    gist = step_gist(request.tool_name, request.arguments, request.review)
+    if gist is None:
+        return text
+    shown = gist.to_json()
+    says, warning = gist_text(shown, "en")
+    said = gist_note(shown, "en")
+    if gist.plain:
+        says = ""
+    if not (says or warning or said):
+        return text
+    says, changed = escape_arguments(says)
+    warning, warned = escape_arguments(warning)
+    said, noted = escape_arguments(said)
+    return dataclasses.replace(
+        text,
+        says=says,
+        warning=warning,
+        said=said,
+        escaped=text.escaped or changed or warned or noted,
     )
 
 

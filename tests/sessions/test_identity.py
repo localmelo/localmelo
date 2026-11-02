@@ -33,6 +33,7 @@ from localmelo.support.sessions.identity import (
     KEPT_LEGACY,
     KEPT_TYPED,
     LANGUAGE_RULE,
+    SUBJECT_RULE,
     config_identity,
     host_of,
     identity_text,
@@ -70,10 +71,28 @@ def test_the_text_says_who_melo_is_and_how_to_answer() -> None:
     assert "never present yourself as the model's own assistant" in text
     assert "or as made by its maker" in text
     assert LANGUAGE_RULE in text
-    assert text.endswith(
-        "For a greeting or a question you can answer directly, reply without using tools."
-    )
-    assert len(text) < 1100
+    assert (
+        "For a greeting or a question you can answer directly, reply without using "
+        "tools.\n" + SUBJECT_RULE
+    ) in text
+    assert text.endswith(SUBJECT_RULE)
+    assert len(text) < 1100 + len(SUBJECT_RULE)
+
+
+def test_a_pronoun_means_whom_the_conversation_is_about() -> None:
+    # The person's own profile counts only when they speak of themselves, and a
+    # switch between 他, 她 and 它 (alike in sound) is never a new subject (#452).
+    assert "the person or thing this conversation is about" in SUBJECT_RULE
+    assert "only when they speak of themselves (I, me, my, 我, 我的)" in SUBJECT_RULE
+    assert "他, 她 and 它 sound the same" in SUBJECT_RULE
+    assert "ask one short question instead of guessing" in SUBJECT_RULE
+    assert len(SUBJECT_RULE) < 450
+    for text in (
+        config_identity(local()),
+        url_identity(URL, MODEL, KEPT_TYPED),
+        url_identity(URL, MODEL, notes="- “I live in Utrecht.”"),
+    ):
+        assert text.endswith("\n" + SUBJECT_RULE)
 
 
 @pytest.mark.parametrize(
@@ -176,7 +195,7 @@ def test_an_unnamed_model_names_the_server_only(name: str | None) -> None:
 
 def test_a_name_is_one_short_line() -> None:
     text = identity_text("odd\nname  \t" + "x" * 500, "S\nrv", local=True)
-    assert text.count("\n") == 4  # five lines
+    assert text.count("\n") == 5  # six lines
     assert "the model odd name x" in text
     assert len(line(text, "You are running on")) < 200
     assert host_of("http://u:p@Example.org:99/x") == "example.org"
@@ -412,7 +431,7 @@ def test_a_chat_with_memory_across_chats_says_what_is_kept(kept: str) -> None:
         assert memory_line(text).startswith(ACROSS.format(kept=kept) + " ")
         assert NO_NOTES in memory_line(text) and PLAIN in memory_line(text)
         assert "nothing from other chats" not in text
-        assert text.count("\n") == 4  # five lines
+        assert text.count("\n") == 5  # six lines
     # Only the memory sentences differ between the settings.
     alone, across = url_identity(URL, MODEL), url_identity(URL, MODEL, kept)
     assert alone.replace(ALONE, "X") == across.replace(ACROSS.format(kept=kept), "X")
@@ -517,7 +536,7 @@ def test_a_chat_with_notes_says_what_it_keeps_and_pins_the_users_words() -> None
     plain = url_identity(URL, MODEL, notes="")
     assert memory_line(plain) == NOTES_TEXT
     assert ALONE not in plain and NO_NOTES not in plain and PLAIN in plain
-    assert plain.count("\n") == 4
+    assert plain.count("\n") == 5
     for word in ("embedding", "sqlite", "reflection", "retriev", "bm25", "hippo"):
         assert word not in plain.lower()
     pinned = config_identity(local(), notes="- “I prefer tea”")

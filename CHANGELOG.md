@@ -77,6 +77,60 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   Safari lost drops out of the list and the list says so. `[browser] keep_tabs = true` leaves
   the tabs open. The browser tool note now tells the model to read the current page and use
   its links and buttons before it guesses addresses.
+- A chat keeps whom a request is about (#452). A new side chat's (or terminal chat's) first
+  message also reads up to five short lines on your other chats of the last 30 minutes, at most
+  600 characters after your own words: what each turn was about and where, read from memory's
+  index of your chats. `read his résumé first` then means the friend you were just discussing in
+  the main chat. Under your message, **From your other chats (last 30 min)** opens the lines melo
+  read, and a chat's name opens that chat; the turn's `turn.memory` event carries them as
+  `digest`. The main chat never gets it; `[chat] recent_digest_minutes` sets the minutes
+  (`0` turns it off), and `[memory] across_chats = false` turns it off too. Every chat is also
+  told that he, she or it means whom the conversation is about, that your own profile (a profile
+  file, notes about you) counts only when you speak of yourself, that 他, 她 and 它 never switch
+  the subject, and to ask one short question when it stays unclear. A task the main chat starts
+  names the person it is about instead of a pronoun.
+- An approval card says in one plain sentence what the step will do (#454). The
+  console's Ask and Auto-blocked cards, the terminal's approval panel and a blocked step's row
+  start with it, before the question and the reasons, and show the code under it. For a command
+  or a script the sentence is always melo's own, built from the call, and names every effect it
+  finds in order ("Operate Safari, then delete files"; a command too long to show ends "and 2
+  more"), reads a command the way a shell does (a `;` or `&&` inside quotes cuts nothing, and a
+  command shows as it was written) and always adds what the rules found (a script that deletes
+  files, even when its code does not show it); nothing asks a model for it, and the question and the reasons still come only from
+  melo's rules. The model's own words (a `why` argument, or a comment at the top of the code) are
+  shown beside it, always labelled "melo says: …": as the sentence when the rules found nothing,
+  and below the sentence when they found something, so they can never make a step look
+  safer. A risky step shows its code open; only a routine one folds it. If the words and the
+  code disagree about deleting files or sending data out, a warning quotes the words ("melo
+  described this as “Close the tabs”, but the code deletes files."). Browser sites, file writes
+  and edits, and folders outside the workspace say it in their own question and have no extra
+  line. The approval record of `tool.finished` gets `review.gist`, `pending_approvals[]` gets
+  `gist` (catalog ids `gist.say.<id>` and `gist.warn.<id>`, so each surface says it in its
+  language), and the guides and `docs/for-agents.md` describe both. The main chat's card for a
+  waiting approval says the same sentence (`Needs your OK: …`) and the warning.
+- `shell_exec` and `python_exec` take an optional `why` (#454): one short sentence, in the person's
+  language, saying what the step does and why. It is the model's words an approval card shows
+  (cut at 120 characters with `…`), is not required, and changes nothing about what runs, the
+  step's key, how the rules review it, or when a refused or repeated step counts as the same. The
+  model's tool list changes: `why` is added to both tools, and their descriptions end with `Give
+  why for a step that changes anything.` (about 190 more characters on the wire for each tool,
+  380 when both are offered). A request that offers either tool is not the same as before, so
+  the recorded wire fixtures were re-recorded. Only `why` counts as the model's words: another
+  argument named `description` or `purpose` is the content of a call, not a reason.
+- A script that operates another app is its own kind, "Control an app?" (`app_control`, #454).
+  It is an allow-list: only an `osascript` script that is one `tell application "<name>"` block
+  (or one-liner) with a plain app name and plain verbs (`activate`, `quit`, `open location`
+  of a web address, `close`, `get` and `set` of a property), the same in JXA
+  (`Application("<name>")`), or `open -a <name>` (`-b com.apple.<Name>`) with nothing else is
+  this kind. It names the app in its reason and is as strict as "Change system settings?" was:
+  a chat-wide allow never covers it, your words and your model's review never allow it, Auto
+  blocks it, and only Allow once runs it. Everything else a script can say stays "Change system
+  settings?", however it is spelt: a shell (`do shell script` in any spacing, a raw
+  `«event»`, a loaded script, the Objective-C bridge), keys, System Events or System
+  Settings, a terminal or an editor by any name or bundle id, a path or `.app` name, a second
+  app, `open` with arguments or a second `-a`, and `shortcuts run` (a Shortcut can run
+  anything). The model review that Auto uses gains the kind and one line about scripting
+  another app. The version of the rules (`review.rules_version`) is now 2.
 
 - Developer only, not visible by default: `[tools] web_fetch_allow_local` lets `web_fetch` read
   test servers you list on this computer, for a test that needs a fixture page. It is a list of
@@ -943,6 +997,26 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   use, and closing a tab works: melo's tab ids are short and stable, an id it did not give
   out is refused before the browser is called, and a tab Safari has already lost is dropped
   from the list instead of failing every call.
+- A short follow-up such as `go look it up` no longer drifts to your own profile once a long
+  search has filled melo's working memory (#452). The chat's newest three turns (your words and
+  the answers, at most 1200 characters) now come with the reflection after the step budget, the
+  answer melo gives when it stops, and a step whose working memory has lost them, so the answer
+  stays on the person the chat is about. A run with no earlier turns, such as a direct
+  `melo "task"` run, sends exactly what it sent before.
+- A short follow-up such as "go look it up", "continue" or "去查一下" recalls from what
+  you said just before, not from its own words (#452). Searched by those words alone, it
+  matched whatever held them (turns about who you are, say) and put them in the prompt.
+  A message with no content of its own (no word left after small words, asking words and
+  follow-up words, and no number, URL, quoted text or mention of you) is now searched with
+  your words of the chat's last two turns that say something and that the model still shows,
+  newest first; melo's replies, an undone turn, a task's question and an earlier "continue"
+  are left out. A question about you ("what do you know about me?", "我是谁") has content
+  and is searched as typed. The first message of a new chat that has no
+  content recalls nothing (`search_memory` is still there). The bars, the ranking and the
+  block are unchanged, and a message with content ("what is my name?") is searched as
+  typed. The `turn.memory` event's `recall` object has `query_from` (`message`, `recent` or
+  `none`). The developer setting `[memory] followup_query = "message"` (or
+  `-X memory.followup_query=message` for one run) restores the old search.
 - A task the chat started keeps **Stop** on its row while the task, or the
   chat's follow-up on it, can still run; Stop then ends a follow-up that waits
   or runs, so it never continues the task. A follow-up still waiting when melo

@@ -3,9 +3,10 @@
 ``LOCALMELO_NOW`` is a developer setting for tests and memory benchmarks that
 ask a question "on" a given day: ISO 8601 text (no zone means local time) or
 epoch seconds. While it holds a valid value, :func:`now` returns that instant
-and the model's ``Date:`` line (:func:`localmelo.melo.agent._chat.local_date_line`)
-and recall (age decay of old chat turns) read it. Unset, empty or invalid, they
-read the wall clock; an invalid value logs one warning.
+and the model's ``Date:`` line (:func:`localmelo.melo.agent._chat.local_date_line`),
+recall (age decay of old chat turns) and a new chat's digest of the other chats
+(the turns stamped within its minutes before now) read it. Unset, empty or
+invalid, they read the wall clock; an invalid value logs one warning.
 
 Only those reads follow it. The times a chat session and its turns are stamped
 with stay on the wall clock, so the variable never changes what is stored.

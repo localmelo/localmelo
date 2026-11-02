@@ -37,6 +37,8 @@ import time
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, Final
 
+from localmelo.melo.checker.review.gist import step_gist
+from localmelo.melo.contracts.approvals import ApprovalRequest
 from localmelo.melo.contracts.review import TITLES
 from localmelo.support.gateway.i18n import (
     current,
@@ -307,16 +309,21 @@ class MainChatCards:
         }
         if kind == "approval.requested":
             asked = data.get("request_id")
-            if not any(
-                request.request_id == asked
-                for request in self._console.broker.pending(info.id)
-            ):
+            waiting = next(
+                (
+                    request
+                    for request in self._console.broker.pending(info.id)
+                    if request.request_id == asked
+                ),
+                None,
+            )
+            if waiting is None:
                 return None  # answered or withdrawn before anyone saw it
             return {
                 **card,
                 "state": "waiting",
                 "request_id": asked,
-                **_waiting_words(data),
+                **_waiting_words(data, waiting),
             }
         if kind == "approval.resolved":
             return await self._answer_card(owner, card, data)
@@ -551,9 +558,37 @@ def _reason(status: str, cause: str, result: dict[str, Any] | None) -> str:
     return f"{words}: {first}"
 
 
-def _waiting_words(data: dict[str, Any]) -> dict[str, Any]:
-    """What the approval is for, in plain words: ``Wants to run a command``, with its words kept."""
-    asked = request_said(str(data.get("tool_name") or ""), data.get("arguments"))
+def _waiting_words(
+    data: dict[str, Any], request: ApprovalRequest | None = None
+) -> dict[str, Any]:
+    """What the approval is for, in plain words, with its words kept.
+
+    The sentence the approval card starts with when the call has one (``Needs
+    your OK: Operate Safari``, #454), the model's own words labelled as its
+    (``Needs your OK. melo says: ...``) for a routine step, and the warning
+    when its words disagree with the code; ``Wants to run a command`` for a
+    call the card says in its own question.
+    """
+    tool = str(data.get("tool_name") or "")
+    if request is not None:
+        gist = step_gist(tool, request.arguments, request.review)
+        if gist is not None and not gist.plain:
+            what = {"gist": {"id": gist.id, "params": gist.params}}
+            if gist.by == "model":
+                words = said(
+                    "cards.wants.stepSaid",
+                    says=said("gist.say.model", text=gist.params.get("text", "")),
+                )
+            elif gist.warn:
+                words = said(
+                    "cards.wants.stepWarned",
+                    what=what,
+                    warning=said(f"gist.warn.{gist.warn}", **gist.warn_params),
+                )
+            else:
+                words = said("cards.wants.step", what=what)
+            return {"line": said_in("en", words), "said": words}
+    asked = request_said(tool, data.get("arguments"))
     key = str(asked["key"])
     if key.startswith("steps.ask."):
         verb = key.removeprefix("steps.ask.")

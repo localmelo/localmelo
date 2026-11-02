@@ -77,6 +77,11 @@ from localmelo.melo.agent._chat import (
     lacks_task_query,
 )
 from localmelo.melo.agent._context_fit import ContextFitError
+from localmelo.melo.agent._earlier import (
+    check_earlier_turns,
+    earlier_block,
+    with_earlier,
+)
 from localmelo.melo.agent._events import GateVerdict, _Emitter, check_sink
 from localmelo.melo.agent._json_repair import error_line, rejected_objects, repairs
 from localmelo.melo.agent._step_review import (
@@ -104,6 +109,7 @@ from localmelo.melo.checker.payloads import (
 )
 from localmelo.melo.checker.policy import builtin_set_for
 from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.checker.review.gist import step_gist
 from localmelo.melo.checker.tiers import tier_of, tier_requires_approval
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN, _sanitize_images
 from localmelo.melo.contracts.approvals import (
@@ -510,7 +516,7 @@ def _unreadable_reason(reply: Message, *, flags: bool) -> str:
 
 
 def _as_planned(
-    window: list[Message], query: str, query_block: str = ""
+    window: list[Message], query: str, query_block: str = "", earlier: str = ""
 ) -> list[Message]:
     """*window* as a planning request carries it, for size checks.
 
@@ -518,13 +524,12 @@ def _as_planned(
     it, as :meth:`Chat.plan_step` puts it back (see
     :func:`~localmelo.melo.agent._chat.lacks_task_query`). *query_block*,
     the attempt's boundary recall block, rides on that query message, in
-    the request copy only.
+    the request copy only; so does *earlier*, the chat's earlier turns, once
+    nothing before the query is left (see ``Chat.plan_step``).
     """
     text = f"{query}\n\n{query_block}" if query_block else query
     if lacks_task_query(window, query):
-        return [Message(role="user", content=text), *window]
-    if not query_block:
-        return window
+        return [Message(role="user", content=with_earlier(text, earlier)), *window]
     out = list(window)
     matches = [
         index
@@ -533,7 +538,10 @@ def _as_planned(
     ]
     if matches:
         index = matches[-1]
-        out[index] = dataclasses.replace(out[index], content=text)
+        first = next(i for i, message in enumerate(out) if message.role != "system")
+        pinned = with_earlier(text, earlier) if index == first else text
+        if pinned != query:
+            out[index] = dataclasses.replace(out[index], content=pinned)
     return out
 
 
@@ -786,6 +794,17 @@ def _image_references(result: ToolResult) -> ToolResult:
     return dataclasses.replace(
         result, images=[image.as_reference() for image in result.images]
     )
+
+
+def _without_words(tool_name: str, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """*arguments* of a command or script without the model's ``why``.
+
+    The words only describe the step: the same command with other words is the
+    same step, so a refusal or a stuck loop is not dodged by rewording (#454).
+    """
+    if tool_name in ("shell_exec", "python_exec") and "why" in arguments:
+        return {k: v for k, v in arguments.items() if k != "why"}
+    return arguments
 
 
 def _result_digest(result: ToolResult) -> str:
@@ -1266,6 +1285,19 @@ class _RunState:
     task_id: str = ""
     # The query Message this run appended to the window, for replay scope.
     task_query_msg: Message | None = None
+    # The chat's earlier turns as a block (run_task's earlier_turns), which the
+    # reflection, the answer on stop and a planning request whose window lost
+    # them carry; "" for a run without them.
+    earlier_block: str = ""
+    # Whether the window held a message before this run's query when it began:
+    # only then can a planning request find the window has lost them.
+    window_had_turns: bool = False
+
+    @property
+    def plan_earlier(self) -> str:
+        """The earlier-turns block for planning requests (see ``Chat.plan_step``)."""
+        return self.earlier_block if self.window_had_turns else ""
+
     # User messages the run inserted mid-run (inbox): kept at a boundary drop.
     pinned: list[Message] = dataclasses.field(default_factory=list)
     # cache_layout v3: the message that carries the latest reflection in the
@@ -1981,7 +2013,12 @@ class _ApprovalGate:
         if review is not None and (
             self._mode == "auto" or review.verdict != "routine" or review.by == "model"
         ):
-            self.asked["review"] = review.to_json()
+            shown = review.to_json()
+            # The sentence the approval card starts with (#454).
+            gist = step_gist(asking.tool_name, asking.arguments, review)
+            if gist is not None:
+                shown["gist"] = gist.to_json()
+            self.asked["review"] = shown
             if self._key:
                 self.asked["step_key"] = self._key
         if self._allowance:
@@ -2428,6 +2465,8 @@ class Agent:
         # Runs under way: run_task calls, each until it returns or raises,
         # or after an interactive cancellation until its finalizer ends.
         self._active_runs = 0
+        # The latest run's earlier-turns block, for closing_answer after it.
+        self._earlier_block = ""
 
         # Optional persistent memory backends: options.memory_dir, or the
         # LOCALMELO_PERSIST_MEMORY / LOCALMELO_MEMORY_DIR opt-in. History and
@@ -4299,6 +4338,10 @@ class Agent:
     ) -> None:
         """Drop or strip the oldest working memory the planning prompt cannot hold.
 
+        The chat's earlier turns, which a planning request carries once the
+        window holds nothing before the query, count as the request carries
+        them (see :func:`_as_planned`).
+
         ``Checker.pre_plan`` refuses a step whose prompt, the working-memory
         window plus *others* (long-term recall and the reflection), is
         over its cap. The window is measured as the planning request
@@ -4328,7 +4371,9 @@ class Agent:
                 requires_replay=self._requires_replay,
             )
             sent = self._tool_images.hydrate(sent)
-            planned = _as_planned(sent, query, query_block)
+            planned = _as_planned(
+                sent, query, query_block, "" if run is None else run.plan_earlier
+            )
             if run is not None and (run.inbox is not None or run.brief):
                 planned = coalesce_user_messages(planned)
             check = await self.checker.pre_plan(
@@ -4530,7 +4575,12 @@ class Agent:
             requires_replay=self._requires_replay,
         )
         sent = self._tool_images.hydrate(sent)
-        planned = _as_planned(sent, query, "" if run is None else run.boundary_block)
+        planned = _as_planned(
+            sent,
+            query,
+            "" if run is None else run.boundary_block,
+            "" if run is None else run.plan_earlier,
+        )
         if run is not None and (run.inbox is not None or run.brief):
             planned = coalesce_user_messages(planned)
         all_msgs = long_context + planned + reflection_msgs
@@ -4607,6 +4657,7 @@ class Agent:
             reflections=reflections,
             query_block=query_block,
             recalls=recalls,
+            earlier="" if run is None else run.plan_earlier,
             **plan_args,
         )
         if run is not None:
@@ -4848,9 +4899,12 @@ class Agent:
         if not (policy or refused or denied):
             return False
         try:
-            key = json.dumps([call.tool_name, call.arguments], sort_keys=True)
+            key = json.dumps(
+                [call.tool_name, _without_words(call.tool_name, call.arguments)],
+                sort_keys=True,
+            )
         except (TypeError, ValueError):
-            key = f"{call.tool_name}:{call.arguments!r}"
+            key = f"{call.tool_name}:{_without_words(call.tool_name, call.arguments)!r}"
         again = key in run.refused_calls
         run.refused_calls.add(key)
         return policy and not again
@@ -5260,7 +5314,11 @@ class Agent:
         entries = sorted(
             (
                 tc.tool_name,
-                json.dumps(tc.arguments, sort_keys=True, default=str),
+                json.dumps(
+                    _without_words(tc.tool_name, tc.arguments),
+                    sort_keys=True,
+                    default=str,
+                ),
                 _result_digest(result),
             )
             for tc, result in zip(calls, results, strict=True)
@@ -5480,6 +5538,8 @@ class Agent:
             block = await self._items_block(run, "reflection")
             if block:
                 addendum["addendum"] = f"{REFLECTION_ADDENDUM}\n{block}"
+        # The chat's earlier turns, which the window may have lost by now.
+        earlier = run.earlier_block if run is not None else ""
         response = await self.chat.reflect(
             short=sent,
             query=task.query,
@@ -5490,6 +5550,7 @@ class Agent:
             fit=fit,
             notes=note_lines,
             draft_titles=draft_titles,
+            earlier=earlier,
             **addendum,
         )
         if response is None:
@@ -5536,6 +5597,7 @@ class Agent:
                 fit=fit,
                 notes=note_lines,
                 draft_titles=draft_titles,
+                earlier=earlier,
                 **addendum,
             )
             if response is None:
@@ -6052,6 +6114,7 @@ class Agent:
         chat_started: float | None = None,
         from_person: bool = True,
         hide_tools: Collection[str] = (),
+        earlier_turns: Sequence[tuple[str, str]] | None = None,
     ) -> RunResult:
         """Run one task and report how it ended.
 
@@ -6245,10 +6308,22 @@ class Agent:
         consent of their last message holds and the query's words allow
         nothing, and long-term memory takes no statement or remember request
         of the user's from it. *hide_tools* are not offered in this run.
+        *earlier_turns* are the chat's newest turns before this one, each
+        ``(what the user said, the answer)``, oldest first, from a caller that
+        keeps the chat (a session's runner): the working window drops its
+        oldest turns as tool output fills it, so the reflection, the answer on
+        stop (``answer_on_stop``, and :meth:`closing_answer` after the run)
+        and a planning request whose window has lost what it held before the
+        query (a window that began the run empty is not) carry them as one
+        data block (see
+        :func:`~localmelo.melo.agent._earlier.earlier_block`). A short request
+        such as "go look it up" then stays on what the chat is about. ``None``
+        or none adds nothing.
 
         Before the run starts, ``TypeError`` is raised when *on_event* or
         *observe* is not callable or is a coroutine function, when both
-        are given, when *approval* has no ``async def decide``, or when
+        are given, when *approval* has no ``async def decide``, when
+        *earlier_turns* is not a sequence of pairs of ``str``, or when
         *routine* is not a ``str``, and ``ValueError`` when *routine* is
         blank: no event is emitted, no task record is written, and working
         memory is left as it is.
@@ -6263,6 +6338,9 @@ class Agent:
                 raise TypeError("routine must be a str")
             if not routine.strip():
                 raise ValueError("routine must not be blank")
+        earlier = earlier_block(
+            check_earlier_turns(earlier_turns) if earlier_turns is not None else []
+        )
         place = self._run_place()
         started = time.perf_counter()
         task = TaskRecord(query=query)
@@ -6286,7 +6364,9 @@ class Agent:
                 0 if self._confinement is None else self._confinement.refused
             ),
             hidden=frozenset(hide_tools),
+            earlier_block=earlier,
         )
+        self._earlier_block = earlier
         # The user's own words, which a step review reads (never tool output).
         if from_person:
             self._reviewer.user_message(query if user_words is None else user_words)
@@ -6357,6 +6437,9 @@ class Agent:
                     except Exception as exc:
                         raise _ToolSetupError(str(exc) or _exception_text(exc)) from exc
                     query_msg = Message(role="user", content=query)
+                    run.window_had_turns = any(
+                        msg.role != "system" for msg in self.hippo.working.get_window()
+                    )
                     self.hippo.working.append(query_msg)
                     run.task_query_msg = query_msg
                     run.query_in_memory = True
@@ -7274,7 +7357,11 @@ class Agent:
         try:
             reply = _split_inline_reasoning(
                 await self.chat.final_answer(
-                    window, task.query, None, note=BLOCKED_ANSWER_NOTE
+                    window,
+                    task.query,
+                    None,
+                    note=BLOCKED_ANSWER_NOTE,
+                    earlier=run.earlier_block,
                 )
             )
             answer, thinking = reply.content.strip(), reply.thinking
@@ -7320,7 +7407,10 @@ class Agent:
         ]
         try:
             reply = await self.chat.final_answer(
-                window, task.query, self.hippo.working.get_reflections()
+                window,
+                task.query,
+                self.hippo.working.get_reflections(),
+                earlier=run.earlier_block,
             )
         except CallBudgetError as exc:
             logger.info("No call left to answer task %s on stop: %s", task.task_id, exc)
@@ -7358,6 +7448,7 @@ class Agent:
                 query,
                 self.hippo.working.get_reflections(),
                 note=note,
+                earlier=self._earlier_block,
             )
         finally:
             PREFIX_RUN.reset(prefix_run)

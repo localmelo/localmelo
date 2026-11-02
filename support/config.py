@@ -98,6 +98,9 @@ MEMORY_COMPRESS_AT_CHARS = (4000, 60000)
 # MemoryConfig.recall_min_cosine and recall_min_coverage.
 MEMORY_RECALL_MIN_COSINE = (0.20, 0.95)
 MEMORY_RECALL_MIN_COVERAGE = (0.10, 1.00)
+# How far back a new chat's first turn looks into the other chats: see
+# ChatConfig.recent_digest_minutes (0 turns it off).
+CHAT_RECENT_DIGEST_MINUTES = (0, 1440)
 # Whether recall carries notes, and what a turn that recalls nothing is told.
 MEMORY_RECALL_NOTES = ("on", "off")
 MEMORY_SEARCH_WHEN_EMPTY = ("off", "hint")
@@ -106,6 +109,10 @@ MEMORY_SEARCH_WHEN_EMPTY = ("off", "hint")
 # MemoryConfig.note_gate.
 MEMORY_NOTE_GATE = ("typed", "pointed", "meaning", "model")
 MEMORY_NOTE_MIN_COSINE = (0.20, 0.95)
+# What a message with no content of its own ("go look it up") is searched with:
+# the user's words of the chat's last turns, or its own words: see
+# MemoryConfig.followup_query.
+MEMORY_FOLLOWUP_QUERY = ("recent", "message")
 # Whether a task reads its project's own instruction file: see MemoryConfig.
 MEMORY_PROJECT_INSTRUCTIONS = ("on", "off")
 RECALL_KEYS = (
@@ -127,6 +134,7 @@ RECALL_KEYS = (
     "compress_cache",
     "note_gate",
     "note_min_cosine",
+    "followup_query",
 )
 RECALL_TRIGGERS = ("start", "attempt", "step", "tool")
 RECALL_KINDS = ("note", "draft", "thought", "digest", "reflection", "long")
@@ -417,7 +425,12 @@ class MemoryConfig:
     (also a note the model infers from what the user typed, kept as inferred); each
     level includes the ones before it. ``note_min_cosine`` (0.20-0.95) is the least
     similarity of meaning that counts as support in the last two levels (the
-    inferred note's bar is 0.15 lower). ``project_instructions = "off"`` stops a
+    inferred note's bar is 0.15 lower). ``followup_query`` (#452) is what a message
+    with no content of its own ("go look it up", "continue", "继续") is searched
+    with: ``recent`` (the default) the message and the user's words of the chat's
+    last two turns that the model still shows, or ``message`` the message's own
+    words, as recall did before; with ``recent`` the first message of a new chat
+    that has no content recalls nothing. ``project_instructions = "off"`` stops a
     task that the person made from reading the instruction file of its folder (``AGENTS.md``,
     ``CLAUDE.md`` or ``GEMINI.md``, the nearest first) when it starts.
     """
@@ -448,6 +461,7 @@ class MemoryConfig:
     )
     note_gate: str = "typed"  # typed | pointed | meaning | model: note sources.
     note_min_cosine: float = 0.55  # Least similarity of a note to its source.
+    followup_query: str = "recent"  # recent | message: what "continue" searches with.
     project_instructions: str = "on"  # on | off: a task reads its folder's AGENTS.md.
 
 
@@ -546,6 +560,21 @@ class TasksConfig:
 
 
 @dataclass
+class ChatConfig:
+    """The ``[chat]`` table: what a new chat knows when it starts.
+
+    ``recent_digest_minutes``: a chat's first turn (not the main chat's) gets a
+    short digest of the user's other chats in the last that many minutes: up to
+    five lines, one per recent turn, saying what it was about and where (see
+    :mod:`localmelo.support.memory.digest`). It reads memory's turn index, so
+    ``[memory] across_chats = false`` turns it off too. ``0`` turns it off;
+    30 by default, at most 1440.
+    """
+
+    recent_digest_minutes: int = 30
+
+
+@dataclass
 class Config:
     chat_backend: str = (
         ""  # mlc | ollama | vllm | sglang | openai | gemini | anthropic | nvidia
@@ -590,6 +619,7 @@ class Config:
     workspace: WorkspaceConfig = field(default_factory=WorkspaceConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     tasks: TasksConfig = field(default_factory=TasksConfig)
+    chat: ChatConfig = field(default_factory=ChatConfig)
     # [pricing.<model>]: dollars per million tokens (input, output, and
     # cache_read for cached prompt tokens), for the terminal's session cost.
     # Configuration only: no price is bundled.
@@ -636,6 +666,7 @@ class Config:
         errors.extend(self._validate_browser())
         errors.extend(self._validate_tools())
         errors.extend(self._validate_tasks())
+        errors.extend(self._validate_chat())
         # [cli] is a display preference: like [sessions] resume_mode, a bad
         # value warns and falls back in the interactive UI (cli_errors()), so
         # direct mode and the gateway never fail on it.
@@ -760,6 +791,7 @@ class Config:
             ("recall_excerpt", MEMORY_RECALL_EXCERPT),
             ("recall_form", MEMORY_RECALL_FORM),
             ("note_gate", MEMORY_NOTE_GATE),
+            ("followup_query", MEMORY_FOLLOWUP_QUERY),
             ("recall_source", MEMORY_RECALL_SOURCE),
             ("open_sources", MEMORY_OPEN_SOURCES),
             ("project_instructions", MEMORY_PROJECT_INSTRUCTIONS),
@@ -804,6 +836,21 @@ class Config:
             f"[tasks] {name} must be a bool, got {value!r}"
             for name in ("follow_up",)
             if not isinstance(value := getattr(self.tasks, name), bool)
+        ]
+
+    def _validate_chat(self) -> list[str]:
+        """``[chat] recent_digest_minutes`` is a whole number of minutes, 0-1440."""
+        value = self.chat.recent_digest_minutes
+        low, high = CHAT_RECENT_DIGEST_MINUTES
+        if (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and low <= value <= high
+        ):
+            return []
+        return [
+            f"[chat] recent_digest_minutes must be an integer from {low} to {high}, "
+            f"got {value!r}"
         ]
 
     def _validate_scheduler(self) -> list[str]:
@@ -1169,6 +1216,7 @@ class Config:
             *self._validate_browser(),
             *self._validate_tools(),
             *self._validate_tasks(),
+            *self._validate_chat(),
             *self._validate_gateway_workspace(),
             *self._validate_cli(),
             *self._validate_ui(),
@@ -1547,6 +1595,11 @@ def _load_file() -> Config:
             if hasattr(cfg.tasks, k):
                 setattr(cfg.tasks, k, v)
 
+    if isinstance(data.get("chat"), dict):
+        for k, v in data["chat"].items():
+            if hasattr(cfg.chat, k):
+                setattr(cfg.chat, k, v)  # a bad value is left for Config.validate
+
     # A bad value is left for Config.validate to report.
     if isinstance(data.get("sessions"), dict):
         cfg.sessions.resume_mode = data["sessions"].get("resume_mode", "pairs")
@@ -1915,6 +1968,10 @@ def save(cfg: Config) -> None:
 
     if cfg.tasks != TasksConfig():
         lines.extend(["[tasks]", f"follow_up = {_toml_value(cfg.tasks.follow_up)}", ""])
+
+    if cfg.chat != ChatConfig():
+        minutes = _toml_value(cfg.chat.recent_digest_minutes)
+        lines.extend(["[chat]", f"recent_digest_minutes = {minutes}", ""])
 
     if cfg.sessions != SessionsConfig():
         lines.append("[sessions]")

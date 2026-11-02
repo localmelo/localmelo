@@ -301,6 +301,7 @@ Whether a reply shows as it is written depends on how its model frames reasoning
 
 ```text
 ╭─ Run a shell command? ───────────────────────────────────────────────────╮
+│ Run the command ls -1                                                    │
 │ shell_exec · in ~/demo-project                                           │
 │   ls -1                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────╯
@@ -312,10 +313,20 @@ Whether a reply shows as it is written depends on how its model frames reasoning
   ↑↓ select · enter confirm · 1-3 · v view all · esc stop the turn
 ```
 
+The first line says in one plain sentence what the step will do. For a command or a script melo builds it from the call and names every effect it finds, in order ("Operate Safari, then delete files"); a command too long to show ends "and 2 more". The model's own words (a `why` argument, or a comment at the top of the code) always carry a label, `melo says: …`: they are the first line only for a routine step, and a line below it for a step the rules found risky, so they never make a step look safer. The sentence is for reading only; the question and the reasons come from melo's rules, and a file write, a site or a folder outside the workspace has no extra line.
+
+If the model's words and the code disagree about deleting files or sending data out, a warning quotes the model's words:
+
+```text
+│ Delete files                                                               │
+│ ⚠ melo described this as “Close the tabs”, but the code deletes files.     │
+```
+
 A call that installs software, downloads files, changes files outside the folder or does anything else [high-impact](tools-mcp.md#high-impact-calls) gets a panel with the question that names it, the reasons above the code, no session choice, and No selected, so that Enter alone never allows it:
 
 ```text
 ╭─ Install software? ────────────────────────────────────────────────────────╮
+│ Run the command pip install playwright                                     │
 │ shell_exec · in ~/demo-project                                             │
 │ ⚠ melo asks because this call installs playwright with pip (downloads      │
 │   about 42 MB).                                                            │
@@ -326,6 +337,20 @@ A call that installs software, downloads files, changes files outside the folder
   Session grants never cover installs, downloads or changes outside the
   folder.
   ↑↓ select · enter confirm · 1-2 · v view all · esc stop the turn
+```
+
+A script that operates one app by its plain name (`osascript` telling Safari to close tabs, `open -a Notes`) is its own kind, **Control an app?**, and the reason names the app. Like system settings it needs a click. It is an allow-list: a script that runs a shell, presses keys, drives System Events, names a terminal or an editor, a path or a second app, and `shortcuts run`, stays **Change system settings?**. A blocked step's row in a turn carries the same sentence under it.
+
+```text
+╭─ Control an app? ──────────────────────────────────────────────────────────╮
+│ Operate Safari                                                             │
+│ melo says: Close the extra Safari tabs                                     │
+│ python_exec · in ~/demo-project                                            │
+│ ⚠ melo asks because this call operates Safari through a script.            │
+│   subprocess.run(['osascript', '-e', script])                              │
+╰────────────────────────────────────────────────────────────────────────────╯
+  1. Yes
+❯ 2. No, and tell melo why
 ```
 
 A file outside the folder gets a panel that names its real folder. A read offers that folder for this chat or always (kept in Settings), and a write asks every time with Yes and No only, starting on No (see [Folders outside the workspace](tools-mcp.md#folders-outside-the-workspace)):
@@ -355,8 +380,8 @@ In auto mode nothing asks: routine steps run, and a risky step or one you did no
 
 - **Switch:** press Shift+Tab (see [Keys](#keys)), or type `/approvals auto` to turn it on for this chat and `/approvals ask` to turn it off. In the main chat and the side chats the switch goes to the chat on the gateway, so the console and the app show it too; `deny` and `forget` stay in the terminal's own chat. `[approvals] mode` (the console's **New chats start in**, or `-X approvals.mode=auto` for one run) starts the terminal's own chat in it.
 - **What runs:** steps inside the folder that install, download, send or delete nothing; a step melo cannot judge goes to your model first. Its `shell_exec` and `python_exec` calls run in the write sandbox, so a write outside the folder fails even when no rule caught it, and they can neither read melo's sign-in token nor reach melo's own API. Auto is a reviewer, not a wall: a step that hands work to another app or program is judged by the review (blocked, or checked by your model), not walled off by the sandbox.
-- **What is blocked:** installs, downloads, changes outside the folder, deletes, passwords and keys, system settings and code from the internet, unless your own words ask for them; a change to localmelo itself never runs. The row says why (`⊘ … · blocked: installs software`), and melo explains in its answer what it wanted and the other ways.
-- **Allow it:** say "go ahead" and melo tries again; your model checks that your words ask for it. A step only a click can allow (passwords or keys, system settings, something that runs later, code from the internet or code melo cannot check) needs the console's **Allow once**.
+- **What is blocked:** installs, downloads, changes outside the folder, deletes, passwords and keys, system settings, scripts that operate another app and code from the internet, unless your own words ask for them; a change to localmelo itself never runs. The row says why (`⊘ … · blocked: installs software`), and melo explains in its answer what it wanted and the other ways.
+- **Allow it:** say "go ahead" and melo tries again; your model checks that your words ask for it. A step only a click can allow (passwords or keys, system settings, a script that operates another app, something that runs later, code from the internet or code melo cannot check) needs the console's **Allow once**.
 
 ### The workspace
 

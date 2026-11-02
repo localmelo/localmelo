@@ -6,6 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from localmelo.melo.contracts.approvals import ApprovalRequest
+from localmelo.melo.contracts.review import ActionReview
 from localmelo.support.gateway.console.shapes import approval_json
 
 
@@ -113,6 +114,7 @@ def test_a_write_over_a_file_carries_what_it_replaces(tmp_path: Path) -> None:
         "workspace_label",
         "target",
         "review",
+        "gist",
         "outside",
     }
     assert pending["outside"] is None
@@ -123,3 +125,65 @@ def test_another_tools_target_is_null(tmp_path: Path) -> None:
     workspace = tmp_path / "ws"
     target = approval_json(request("shell_exec", "ls", str(workspace)))["target"]
     assert target is None
+
+
+def asked(
+    tool_name: str, arguments: dict[str, object], **more: object
+) -> ApprovalRequest:
+    return ApprovalRequest(
+        request_id="req",
+        run_id="",
+        call_id="call",
+        tool_name=tool_name,
+        arguments=arguments,
+        preview="",
+        workspace_root=None,
+        **more,  # type: ignore[arg-type]
+    )
+
+
+def test_a_card_starts_with_the_models_words_when_the_call_has_them() -> None:
+    pending = approval_json(
+        asked("shell_exec", {"command": "ls notes", "why": "List the notes"})
+    )
+    assert pending["gist"] == {
+        "say": {"id": "model", "params": {"text": "List the notes"}},
+        "by": "model",
+    }
+
+
+def test_a_card_without_words_gets_a_sentence_built_by_code() -> None:
+    pending = approval_json(asked("shell_exec", {"command": "git status"}))
+    assert pending["gist"] == {
+        "say": {"id": "command", "params": {"command": "git status"}},
+        "by": "code",
+    }
+
+
+def test_a_description_that_hides_a_delete_puts_the_real_effect_first() -> None:
+    pending = approval_json(
+        asked("shell_exec", {"command": "rm -rf build", "why": "Close the tabs"})
+    )
+    assert pending["gist"] == {
+        "say": {"id": "effect_delete", "params": {}},
+        "by": "code",
+        "warn": {"id": "delete", "params": {"said": "Close the tabs"}},
+    }
+
+
+def test_the_kind_line_of_a_script_that_operates_an_app() -> None:
+    review = ActionReview(
+        "high", ("app_control",), ("Operates Safari through a script.",)
+    )
+    pending = approval_json(asked("python_exec", {"code": "print(1)"}, review=review))
+    assert pending["review"]["title"] == "Control an app?"
+    assert pending["review"]["categories"] == ["app_control"]
+    assert pending["gist"]["say"] == {"id": "operate", "params": {"apps": ["Safari"]}}
+    assert pending["gist"]["apps"] == ["Safari"]
+
+
+def test_a_tool_that_asks_with_its_own_sentence_has_no_gist() -> None:
+    pending = approval_json(
+        asked("browser:example.com", {"site": "example.com", "via": "web_fetch"})
+    )
+    assert pending["gist"] is None

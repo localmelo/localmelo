@@ -1228,3 +1228,137 @@ async def test_a_routine_panel_keeps_its_three_options(now: list[float]) -> None
         now[0] += 1
         app.type("1")
         await asyncio.wait_for(asking, 3)
+
+
+# ── The sentence a panel starts with, and the kind of a script that operates an app (#454) ──
+
+_APP_REVIEW = ActionReview(
+    "high", ("app_control",), ("Operates Safari through a script.",)
+)
+_TABS = (
+    "import subprocess\nscript = 'tell application \"Safari\" to close every tab'\n"
+    "subprocess.run(['osascript', '-e', script])"
+)
+
+
+def _saying(tool: str, review: ActionReview | None = None, **arguments: Any) -> Any:
+    return panel_text(
+        dataclasses.replace(_request(tool, **arguments), review=review), width=60
+    )
+
+
+def test_the_panel_starts_with_what_the_step_will_do() -> None:
+    plain = _saying("shell_exec", command="git status")
+    assert (plain.says, plain.warning) == ("Run the command git status", "")
+    # The model's words, labelled as the model's, for a routine step.
+    spoken = _saying(
+        "shell_exec",
+        ActionReview("routine"),
+        command="ls notes",
+        why="List the notes folder",
+    )
+    assert (spoken.says, spoken.warning, spoken.said) == (
+        "melo says: List the notes folder",
+        "",
+        "",
+    )
+    assert _saying("python_exec", code="print(1)").says == "Run a Python script"
+
+
+def test_the_models_words_of_a_risky_step_go_below_the_sentence() -> None:
+    risky = ActionReview("high", ("install",), ("Installs numpy with pip.",))
+    text = _saying(
+        "shell_exec", risky, command="pip install numpy", why="Check the notes"
+    )
+    assert text.says == "Run the command pip install numpy"
+    assert text.said == "melo says: Check the notes"
+
+
+def test_a_script_that_operates_an_app_is_titled_by_its_kind() -> None:
+    text = _saying(
+        "python_exec",
+        _APP_REVIEW,
+        code=_TABS,
+        why="Close the 7 forum tabs melo opened",
+    )
+    assert text.title == "Control an app?"
+    assert text.says == "Operate Safari"
+    assert text.said == "melo says: Close the 7 forum tabs melo opened"
+    assert text.notes == (
+        "melo asks because this call operates Safari through a script.",
+    )
+    built = _saying("python_exec", _APP_REVIEW, code=_TABS)
+    assert (built.says, built.said) == ("Operate Safari", "")
+
+
+def test_a_description_that_does_not_match_the_code_shows_the_real_effect() -> None:
+    text = _saying("shell_exec", command="rm -rf build", why="Close the tabs")
+    assert text.says == "Delete files"
+    assert text.warning == (
+        "melo described this as “Close the tabs”, but the code deletes files."
+    )
+
+
+def test_the_models_words_are_shown_escaped() -> None:
+    text = _saying(
+        "shell_exec", ActionReview("routine"), command="ls", why="List \x1b[2Jthe notes"
+    )
+    assert text.says == "melo says: List \\x1b[2Jthe notes"
+    assert text.escaped
+    risky = ActionReview("high", ("install",), ("Installs.",))
+    below = _saying("shell_exec", risky, command="ls", why="List \x1b[2Jthe notes")
+    assert below.said == "melo says: List \\x1b[2Jthe notes"
+    assert below.escaped
+
+
+@pytest.mark.parametrize(
+    ("tool", "arguments"),
+    [
+        ("browser:example.com", {"site": "example.com"}),
+        ("file_write", {"path": "a.txt", "content": "x"}),
+        ("deploy", {"target": "staging"}),
+    ],
+)
+def test_a_panel_that_already_says_it_in_its_question_adds_no_sentence(
+    tool: str, arguments: dict[str, Any]
+) -> None:
+    assert _saying(tool, **arguments).says == ""
+
+
+async def test_the_panel_shows_the_sentence_first_then_the_kind_and_the_code(
+    now: list[float],
+) -> None:
+    approver = TerminalApprover(clock=lambda: now[0])
+    request = dataclasses.replace(
+        _request("python_exec", code=_TABS, why="Close the 7 forum tabs melo opened"),
+        review=_APP_REVIEW,
+    )
+    async with running_app(approver=approver, clock=lambda: now[0]) as app:
+        asking = asyncio.ensure_future(approver.ask(request))
+        await app.wait(lambda: "Control an app?" in app.text())
+        text = app.text()
+        assert "╭─ Control an app? ─" in text
+        sentence = text.index("Operate Safari")
+        said = text.index("melo says: Close the 7 forum tabs melo opened")
+        assert text.index("╭─") < sentence < said < text.index("melo asks because")
+        assert said < text.index("python_exec")
+        assert said < text.index("osascript")
+        now[0] += 1
+        app.type("1")
+        await asyncio.wait_for(asking, 3)
+
+
+async def test_the_panel_warns_when_the_description_and_the_code_differ(
+    now: list[float],
+) -> None:
+    approver = TerminalApprover(clock=lambda: now[0])
+    request = _request("shell_exec", command="rm -rf build", why="Close the tabs")
+    async with running_app(approver=approver, clock=lambda: now[0]) as app:
+        asking = asyncio.ensure_future(approver.ask(request))
+        await app.wait(lambda: "Delete files" in app.text())
+        text = " ".join(app.text().split())
+        assert text.index("Delete files") < text.index("⚠ melo described this as")
+        assert "“Close the tabs”, but the code deletes files." in text
+        now[0] += 1
+        app.type("1")
+        await asyncio.wait_for(asking, 3)
