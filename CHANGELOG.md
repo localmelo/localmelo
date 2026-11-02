@@ -874,51 +874,62 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   task's result no longer supports a note by text a reader of it would not see, or by an order to
   the assistant (#442). A résumé whose hidden white-on-white line told the assistant to save a
   false fact about you was counted as your material, so a note with that fact was kept as
-  `pointed`. Now a page, a file and an answer in a finished task's result are first cleaned:
-  HTML and Markdown comments; elements hidden by `hidden`, `aria-hidden="true"`, a style
-  (`display: none`, `visibility: hidden`, a font of 0 to 2 pixels of any unit, `opacity: 0`,
-  white or clear text) or a simple rule of a `<style>` block (`.class`, `#id` or a tag name,
-  alone or in a comma list); every other tag, with its attributes (`title`, `alt`, `data-*`,
-  `value`, `aria-label`), since only text nodes are text; and zero-width and other invisible
-  characters. A Markdown autolink (`<https://example.com>`, `<user@example.com>`) and a plain
-  `a < b` are no tags and stay. Then every paragraph (a line of only `>` marks ends one in a
-  quoted block) with an order to the assistant in it, such as "save a note that …", "update
-  your memory" or "ignore previous instructions", is dropped, because the facts the order wants
-  kept follow it as plain statements. The note is then refused with the usual "no source
-  supports it". What you typed is never cleaned. A page or file with none of that, in any
-  language, is read exactly as before.
-- The scan reads markup as a browser does: a `/>` on an element that is not void or foreign
-  (`<div hidden/>`) opens it; the text of `textarea`, `title`, `xmp`, `noscript`, `iframe`,
-  `noembed`, `noframes`, `script` and `style` holds no tags and `plaintext` runs to the end; a
-  `<!…>` or `<?…>` that is no comment ends at the first `>`; an unquoted attribute value runs to
-  white space or `>`; a comment, tag or element never closed hides the rest of the text.
-- A sentence that starts with a verb such as "Use" or "Open" counts as an order and takes its
-  paragraph with it in a page or a file, so a résumé paragraph written that way may support
-  nothing. In a finished task's result, which is a model's answer, a bare imperative ("Check in
-  24 hours before. Your flight is UA123 on May 4.") is no order and the paragraph stays, so the
-  default level keeps notes grounded in results; "save a note that …", "remember that …",
-  "ignore previous instructions", a sentence that opens by naming the assistant it speaks to
-  ("AI assistant: …", "To the model: …") and `SYSTEM:`-style lines still drop it.
+  `pointed`. Now a page and a file are read by one strict scan, and a result only for orders.
+  The page reader behind `web_fetch` is unchanged; a test pins its output.
+- A file or a page body is read from left to right by one tokenizer that never reads inside a
+  token: comments and `<!…>`, `<?…>` (to the first `>`), the text of `script`, `style`,
+  `textarea`, `title`, `xmp`, `noscript`, `iframe`, `noembed` and `noframes` (`plaintext` runs to
+  the end), and tags with their quoted or unquoted attributes. A `<!--` or a `>` in an attribute
+  value or a script therefore starts no comment and ends no tag. A comment, tag or element never
+  closed hides the rest of the text, as a browser reads it. What is left of the markup is cut:
+  elements with `hidden`, `popover` or `aria-hidden="true"`, `template`, `canvas`, `object`,
+  `datalist`, `video`, `audio`, a `dialog` or `details` that is not open, svg `desc`, an inline
+  style or a rule of a `<style>` block that hides (`display: none`, `visibility: hidden`, a font
+  of 0 to 2 pixels of any unit, `opacity: 0`, white or clear text in any colour notation, text the
+  colour of its background, a box with no room, text moved off the page), and then every other
+  tag, with its attributes (`title`, `alt`, `data-*`, `value`, `aria-label`), is a space. The
+  scan fails closed: it does not guess a page's background or follow its cascade, so white text
+  over a dark band is read as hidden and `body { display: none }` hides the whole file. A Markdown
+  autolink (`<https://example.com>`, `<user@example.com>`) and a plain `a < b` are no tags and
+  stay. Markdown link comments and zero-width and other invisible characters (the joiners of some
+  scripts too) are removed.
+- Then every paragraph (a line of only `>` marks ends one in a quoted block) with an order to the
+  assistant in it, such as "save a note that …", "update your memory" or "ignore previous
+  instructions", is dropped, because the facts the order wants kept follow it as plain
+  statements. In a page or a file a sentence that starts with a verb such as "Use" or "Open"
+  counts as an order too. The note is then refused with the usual "no source supports it". What
+  you typed is never cleaned. The order rule is a keyword filter, not a judgement of meaning.
+- A finished task's result is melo's own answer, so it is read for orders only and no markup is
+  read in it. A paragraph is dropped only when it is aimed at an assistant: "ignore previous
+  instructions", "system prompt", "from now on you must …", a line that names the assistant it
+  speaks to, a role header such as `SYSTEM:` at the start of a line (a list item such as
+  "- System: macOS 27.2" is not one), or an order to keep something in memory ("save a note that
+  …", "update your memory", "remember that the user …"). Advice and plain statements stay ("Check
+  in 24 hours before.", "Note that your lease ends June 30.", "Remember to bring a passport.",
+  a command in a code block), and code spans and fenced blocks are not read for orders. The
+  chunks of a recalled result are read as one text, from the chunk that holds the answer.
 - A page read in the browser supports no note at any level above `typed`, and the refusal says
   so: the browser's text holds labels and hidden controls a reader does not see (`browser_open`,
-  `browser_read`, `browser_follow`, `browser_back`). A page fetched with `web_fetch` does.
+  `browser_read`, `browser_follow`, `browser_back`). A page fetched with `web_fetch` does. This is
+  a stopgap until the browser's text is cleaned at its source.
 - The parts of one page or file read one after the other (`web_fetch` `part`, `file_read`
-  start and end lines) are cleaned as one text, and so are the chunks of a recalled result; a
-  later part read without the one before it drops its text up to a stray `-->` or end tag, so a
-  comment or hidden element split across a boundary hides what follows it.
-- In a raw file or body the gate reads, white text (also `hsl(…, 100%)` and
-  `rgb(100%,100%,100%)`), clear text (`transparent`, an alpha of 0, `#fff0`) and `opacity: 0`
-  count as hidden whatever the background, and a clear background is no background. A page that
-  `web_fetch` reads now also drops a hidden `<p>` or `<li>`, an element that a `<style>` rule
-  with `display: none` or `visibility: hidden` hides, text in a font of 2 pixels or less (any
-  unit, a sign or an exponent), clear text, and white text with no coloured background behind
-  it, where it kept them before. It follows the inline styles down the page, so what a person
-  sees stays: white text on a dark background (a background image or gradient counts as dark),
-  text a script fades in from `opacity: 0`, and a child that sets its own size under a
-  `font-size: 0` parent. A page with none of these reads as before.
-- The cleaning takes time linear in the text: a megabyte of it is read in under a second
-  whatever its shape (long style values, many comments or hidden elements, deep nesting,
-  unclosed tags). A style value is read to its first 2,000 characters.
+  start and end lines) are read as one text. A part read without the part before it (a later page
+  part, or lines of a file that do not start at line 1 while the earlier lines were not read) is
+  dropped whole when it holds a closer with no opener in it (`-->`, an end tag), since it may begin
+  inside a comment or a hidden element. A part with no such closer is read as it is.
+- A note kept from a page, a file or a task's result, or inferred, is never shown to the model as
+  your words: at recall such a note never reads `the user said “…”`, even when it carries a quote
+  (source monitoring). A note from your own words reads as before.
+- The scans take time linear in the text for the shapes the tests time: long style values, many
+  comments or hidden elements, deep nesting, unclosed tags and quotes, and style sheets of nested
+  `@media`, `@supports` and `@font-face` blocks. A style value is read to its first 2,000
+  characters.
+- Known limits. Text a fetched page hides with white colour, a tiny size, opacity or a class or
+  style sheet reaches the gate as plain text, because the page reader keeps it; the order rule still
+  applies, and a page you did not point to supports nothing. The order rule is a keyword filter, so
+  an order phrased another way may pass. A result is read as written, and the page text it quotes
+  was flattened by the page reader, so markup in a result is not read. A later part of a page or
+  file read without its predecessor and holding no stray closer is read as plain text.
 - A short follow-up such as "go look it up", "continue" or "去查一下" recalls from what
   you said just before, not from its own words (#452). Searched by those words alone, it
   matched whatever held them (turns about who you are, say) and put them in the prompt.

@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from typing import Any, TypeVar
+
+T = TypeVar("T")
 
 SMALL = 50_000
 LARGE = 200_000
@@ -27,7 +30,7 @@ def best(run: Callable[[], object]) -> float:
     return min(times)
 
 
-def assert_linear(make: Callable[[int], str], run: Callable[[str], object]) -> None:
+def assert_linear(make: Callable[[int], T], run: Callable[[T], Any]) -> None:
     small, large = make(SMALL), make(LARGE)
     fast = best(lambda: run(small))
     slow = best(lambda: run(large))

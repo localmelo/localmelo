@@ -28,13 +28,18 @@ Every level but ``typed`` also refuses a note that is an instruction to the assi
 level before this module is asked.
 
 What a page, a file or a finished task's result may support is what it *states*, not
-what it hides or asks the assistant to do (:func:`material_text`): text a reader of
-the page would not see (hidden elements, a style block's hiding rules, the attributes
-of tags, comments), and every paragraph with an order to the assistant in it, are no
-source at any level, the ``typed`` one included for results. A result is a model's
-answer, so a plain imperative in it ("Run the tests.") is no order; in a page or a
-file it is. The parts of one page or file read one after the other, and the chunks of
-one result, are cleaned as one text. A page read in the browser supports no note, since
+what it hides or asks the assistant to do. Material (a page or a file) goes through
+:func:`material_text`: one strict left-to-right scan (:mod:`markup`) leaves out the
+comments, the raw text elements, the elements a page or its style sheet hides (and
+every rule that might), and the tags; then every paragraph that orders the assistant
+is dropped. The scan fails closed, since a note wrongly refused costs little and a
+forged one costs more. A fetched page has been flattened to text by the page reader,
+which is not changed: white, tiny, transparent or class-hidden text on a fetched page
+reaches this module as plain text. A part of a page or file read without the part
+before it is dropped when it holds a closer with no opener (``-->``, a stray end tag),
+since it may begin inside a comment or a hidden element. A finished task's result is
+melo's own answer, so :func:`result_text` reads no markup in it and drops only the
+paragraphs aimed at an assistant. A page read in the browser supports no note, since
 the browser's text is not the page's markup. What the user typed is never cleaned.
 """
 
@@ -47,8 +52,7 @@ import itertools
 import os
 import re
 import unicodedata
-from collections import Counter
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, NamedTuple
 from urllib.parse import unquote, urlsplit
@@ -57,8 +61,8 @@ import numpy as np
 
 from localmelo.melo.agent._step_review import named_sites
 from localmelo.support.config import MEMORY_NOTE_GATE
-from localmelo.support.memory import records
-from localmelo.support.web.extract import Sheet, hides, sheet_of, style_blocks
+from localmelo.support.memory import markup, records
+from localmelo.support.memory.index import CHUNK_OVERLAP
 
 # The sources a note is tagged with, most trusted first.
 TYPED: Final = "typed"
@@ -420,34 +424,14 @@ def _span_of(call: Mapping[str, Any]) -> tuple[int, int | None]:
     return 1, None
 
 
-def _without_leading_tail(text: str) -> str:
-    """*text*, a later part of a page or file, without what it closes that an earlier
-    part opened: it may begin inside a comment or a hidden element, so what comes up
-    to and including the first ``-->`` with no ``<!--`` before it, or the first end
-    tag of an element not open in it, is left out. A part with neither comes back as
-    it is."""
-    opened = text.find("<!--")
-    stray = text.find("-->")
-    cut = stray + 3 if stray >= 0 and (opened < 0 or stray < opened) else -1
-    open_count: Counter[str] = Counter()
-    for tag in _TAG.finditer(text, 0, cut if cut >= 0 else len(text)):
-        name = tag["name"].lower()
-        if tag["close"]:
-            if open_count[name] > 0:
-                open_count[name] -= 1
-            else:
-                end = tag.end()
-                return text[min(end, cut) if cut >= 0 else end :]
-        elif not tag["self"] and name not in _VOID:
-            open_count[name] += 1
-    return text[cut:] if cut >= 0 else text
-
-
 def _assembled(reads: Sequence[_Read]) -> list[Material]:
     """The materials of the *reads*, oldest first: the reads of one page or file in
     parts, each part after the one before it, are joined and cleaned as one text
-    (:func:`material_text`); a part read out of order has its start cleaned of what
-    it may close (:func:`_without_leading_tail`). A read with nothing left is no
+    (:func:`material_text`). A part read without the part before it (a later page
+    part or a file range that starts past line 1, when the earlier text was not
+    read in this chat) may begin inside a comment or an element the earlier text
+    opened, which cannot be told: it is left out whole when it holds a closer with no
+    opener in it (:func:`markup.has_stray_closer`). A read with nothing left is no
     material, and what a note may rest on is what the page or file states."""
     groups: list[_Group] = []
     latest: dict[tuple[str, str, bool], _Group] = {}
@@ -455,16 +439,19 @@ def _assembled(reads: Sequence[_Read]) -> list[Material]:
         key = (read.kind, read.ref, read.browser)
         group = latest.get(key)
         if read.start <= 1 or read.browser or group is None:
-            text = read.text if read.start <= 1 else _without_leading_tail(read.text)
+            text = read.text
+            if read.start > 1 and markup.has_stray_closer(text):
+                text = ""
             group = _Group(
                 read.kind, read.ref, [text], read.other, read.browser, read.after
             )
             groups.append(group)
             latest[key] = group
             continue
-        contiguous = group.after == read.start
+        # The read after the one before it, or one whose end is not known.
+        follows = group.after is None or group.after >= read.start
         group.texts.append(
-            read.text if contiguous else _without_leading_tail(read.text)
+            read.text if follows or not markup.has_stray_closer(read.text) else ""
         )
         group.other = group.other or read.other
         group.after = read.after
@@ -509,9 +496,9 @@ def pointed_material(
     ``part``, ``file_read`` with ``start_line``) are one text, cleaned as a whole, so a
     comment or element that one part opens and a later one closes is one thing. A
     later part that is read without the part before it may begin inside what an
-    earlier part opened: its text up to a stray ``-->`` or end tag is left out
-    (:func:`_without_leading_tail`). A page read in the browser comes back with
-    ``browser`` set (:data:`BROWSER_TOOLS`).
+    earlier part opened, so it is left out whole when it holds a closer with no
+    opener in it (:func:`markup.has_stray_closer`). A page read in the browser comes
+    back with ``browser`` set (:data:`BROWSER_TOOLS`).
     """
     folded = {turn: fold(text) for turn, text in typed.items()}
     places = {turn: typed_places(text) for turn, text in typed.items()}
@@ -760,7 +747,10 @@ _IMPERATIVE = re.compile(
     r"|^(?:请|记住|务必|必须|不要|别(?!人)|忽略|无视|总是|永远|从现在起|以后你)",
     re.IGNORECASE,
 )
-_ORDER = re.compile(
+# What speaks to the assistant: an order to ignore what it was told, a claim about its
+# prompt, "from now on you must ...". (A finished task's result is checked by this
+# part alone, :func:`result_text`.)
+_AIMED_ORDER = (
     r"\b(?:ignore|disregard|forget|override|bypass)\b[^.!?\n]{0,60}"
     r"\b(?:instructions?|rules?|prompts?|guidelines?|policy|policies|restrictions?"
     r"|safeguards?)\b"
@@ -771,16 +761,19 @@ _ORDER = re.compile(
     r"(?:always|never)\b"
     r"|^melo\s+(?:must|should|shall|needs? to|has to|is to|always|never)\b"
     r"|忽略(?:之前|以上|前面|所有)的?(?:指令|规则|提示)"
-    # A shell command, or an action on a file or address after "and" or "then".
-    r"|(?:^|[\s;|&`])(?:sudo|curl|wget|chmod|chown|mkfs)\s"
+)
+# A shell command, or an action on a file or address after "and" or "then".
+_ACTION_ORDER = (
+    r"(?:^|[\s;|&`])(?:sudo|curl|wget|chmod|chown|mkfs)\s"
     r"|\brm\s+-\w"
     r"|\|\s*(?:sh|bash)\b|&&|\$\("
     r"|(?:\band\b|\bthen\b|\balso\b|[,;])\s+(?:delete|remove|overwrite|execute|run"
     r"|open|read|write|upload|download|fetch|send|cat)\s+(?:the\s+|this\s+|that\s+"
     r"|a\s+|my\s+|your\s+)?(?:files?|folders?|directory|scripts?|commands?|urls?"
-    r"|links?|pages?|repo|~|/|\.{1,2}/|https?://)",
-    re.IGNORECASE,
+    r"|links?|pages?|repo|~|/|\.{1,2}/|https?://)"
 )
+_ORDER = re.compile(f"{_AIMED_ORDER}|{_ACTION_ORDER}", re.IGNORECASE)
+_AIMED = re.compile(_AIMED_ORDER, re.IGNORECASE)
 
 
 def is_instruction(note: str) -> bool:
@@ -811,11 +804,11 @@ def about_user(note: str) -> bool:
 
 # ── What material states ──
 #
-# A page, a file or a task's result supports a note by what it *states*. Text a
-# reader of the page would not see (a comment, an element hidden by its style,
-# invisible characters) and an order to the assistant ("save a note that ...") are
-# no evidence that something holds, however the words match: source monitoring says
-# an order to believe X is not a reason to. :func:`material_text` leaves what states.
+# A page or a file supports a note by what it *states*. Text a reader of the page
+# would not see (a comment, an element hidden by its style, invisible characters) and
+# an order to the assistant ("save a note that ...") are no evidence that something
+# holds, however the words match: source monitoring says an order to believe X is not
+# a reason to. :func:`material_text` leaves what states.
 
 # Characters that draw nothing: every format character (zero-width ones, bidi marks,
 # the soft hyphen, the tag characters), the invisible fillers, the blank braille and
@@ -835,11 +828,6 @@ def _invisible(char: str) -> bool:
     )
 
 
-# An HTML or XML comment; one never closed hides the rest, as a browser does.
-_COMMENT = re.compile(r"<!--.*?(?:-->|\Z)", re.DOTALL)
-# A ``<!...>`` or ``<?...>`` that is no comment (``<!DOCTYPE>``, ``<![CDATA[...]]>``, a
-# processing instruction): a browser reads it as a comment up to the first ``>``.
-_BOGUS = re.compile(r"<[!?][^>]*(?:>|\Z)")
 # The start of a Markdown link reference whose address is ``#`` or ``<>`` (``[//]: #
 # (note)``, ``[comment]: <> "note"``): it draws nothing, and its title is where a note
 # hides. The title (``(...)``, ``"..."`` or ``'...'``, which may run over lines but not
@@ -847,172 +835,6 @@ _BOGUS = re.compile(r"<[!?][^>]*(?:>|\Z)")
 _LINK_HEAD = re.compile(r"^[ \t]{0,3}\[[^\]\n]*\][ \t]*:[ \t]*(?:#|<>)", re.MULTILINE)
 _LINK_TITLE = re.compile(r"[ \t]*([(\"'])")
 _BLANK_AT = re.compile(r"\n(?=[ \t]*\n)")
-# A tag as a browser reads it: a name followed by white space, ``/`` or ``>`` (so a
-# Markdown autolink such as ``<https://example.com/x>``, ``<user@example.com>``,
-# ``a < b`` and ``<3`` are no tags), then attributes up to the first ``>`` that is not
-# in a quoted value. A quote opens a value only after ``=``; elsewhere it is part of a
-# name, and an unquoted value runs to white space or ``>``. A quote never closed, or a
-# tag never ended, runs to the end of the text, which a browser drops. The pattern is
-# possessive: every character it scans it keeps, so it never backtracks over a run.
-_NAME = r"[A-Za-z][A-Za-z0-9_-]*+(?::[A-Za-z][A-Za-z0-9_-]*+)*+"
-_TAG = re.compile(
-    rf"<(?P<close>/?+)(?P<name>{_NAME})(?=[\s/>])"
-    r"(?P<attrs>(?:(?:[^>=\"'/]|/(?!>))++"
-    r"|=\s*+(?:\"[^\"]*+(?:\"|\Z)|'[^']*+(?:'|\Z)|[^\s>]*+)"
-    r"|[\"'])*+)"
-    r"(?P<self>/?+)(?:>|\Z)"
-)
-_ATTRIBUTE = re.compile(
-    r"([^\s/>=][^\s/>=]*+)"
-    r"(?:\s*+=\s*+(?:\"([^\"]*+)\"?+|'([^']*+)'?+|([^\s>]*+)))?+"
-)
-_VOID: Final = frozenset(
-    {
-        "area",
-        "base",
-        "br",
-        "col",
-        "embed",
-        "hr",
-        "img",
-        "input",
-        "link",
-        "meta",
-        "param",
-        "source",
-        "track",
-        "wbr",
-    }
-)
-# Elements a browser never draws (the text of ``script`` and ``style`` is no markup).
-_NEVER_SHOWN: Final = frozenset(
-    {
-        "script",
-        "style",
-        "template",
-        "meta",
-        "link",
-        "base",
-    }
-)
-# Elements whose content is text, not markup, up to their own end tag (``plaintext``,
-# to the end of the text): a tag inside one ends nothing around it.
-_RAW: Final = frozenset(
-    {
-        "script",
-        "style",
-        "textarea",
-        "title",
-        "xmp",
-        "noscript",
-        "iframe",
-        "noembed",
-        "noframes",
-        "plaintext",
-    }
-)
-_RAW_END: Final = {
-    name: re.compile(rf"</{name}(?=[\s/>])[^>]*+(?:>|\Z)", re.IGNORECASE)
-    for name in _RAW
-}
-# Elements whose ``/>`` closes them (foreign content); on any other a ``/>`` is ignored.
-_FOREIGN: Final = frozenset({"svg", "math"})
-# Elements the next one of the same name closes.
-_AUTO_CLOSED: Final = frozenset(
-    {
-        "p",
-        "li",
-        "dt",
-        "dd",
-        "tr",
-        "td",
-        "th",
-        "option",
-        "optgroup",
-        "thead",
-        "tbody",
-        "tfoot",
-    }
-)
-
-
-def _attributes(text: str) -> dict[str, str]:
-    """The attributes of a tag's attribute text, names in lower case and values with
-    their character references decoded; the first of a name wins, as in a browser."""
-    values: dict[str, str] = {}
-    for found in _ATTRIBUTE.finditer(text):
-        value = next((g for g in found.groups()[1:] if g is not None), "")
-        values.setdefault(found.group(1).lower(), html.unescape(value))
-    return values
-
-
-def _hides(name: str, attrs: str, sheet: Sheet) -> bool:
-    """Whether an element of this tag *name* and attribute text is not shown: one a
-    browser never draws, or one :func:`hides` says (the strict rule for a raw file,
-    with the page's style sheet)."""
-    return name in _NEVER_SHOWN or hides(name, _attributes(attrs), sheet)
-
-
-def _raw_end(text: str, opening: re.Match[str], name: str) -> int:
-    """Where the raw text element that tag *opening* opens ends: after its own end
-    tag, or at the end of the text when it is never closed (``plaintext`` never is)."""
-    if name == "plaintext":
-        return len(text)
-    close = _RAW_END[name].search(text, opening.end())
-    return close.end() if close else len(text)
-
-
-def _hidden_end(
-    text: str, tags: Sequence[re.Match[str]], first: int, *, foreign: bool = False
-) -> int:
-    """Where the hidden element that tag *first* opens ends in *text*.
-
-    At its own end tag, counting elements of the same name inside it; at the next
-    start tag of its name when the browser closes it by itself (``<li>``); a
-    void tag, or a ``/>`` of foreign content (*foreign*: inside ``svg``), is only
-    itself. A ``/>`` on any other element opens it. One never closed runs to the end
-    of the text, and a stray end tag inside it ends nothing: what is not shown stays
-    out. A raw text element inside it (``<textarea>``) holds no tags.
-    """
-    opening = tags[first]
-    name = opening["name"].lower()
-    if name in _VOID or (opening["self"] and (foreign or name in _FOREIGN)):
-        return opening.end()
-    if name in _RAW:
-        return _raw_end(text, opening, name)
-    open_names = [name]
-    count = Counter({name: 1})
-    index = first + 1
-    while index < len(tags):
-        tag = tags[index]
-        index += 1
-        other = tag["name"].lower()
-        if tag["close"]:
-            if count[other] > 0:
-                while True:
-                    popped = open_names.pop()
-                    count[popped] -= 1
-                    if popped == other:
-                        break
-                if not open_names:
-                    return tag.end()
-        elif other in _VOID or (
-            tag["self"] and (other in _FOREIGN or count["svg"] + count["math"] > 0)
-        ):
-            continue
-        elif other in _RAW:
-            end = _raw_end(text, tag, other)
-            while index < len(tags) and tags[index].start() < end:
-                index += 1
-        else:
-            if other in _AUTO_CLOSED and open_names[-1] == other:
-                open_names.pop()
-                count[other] -= 1
-                if not open_names:
-                    return tag.start()
-            open_names.append(other)
-            count[other] += 1
-    return len(text)
 
 
 def _link_comments(text: str) -> Iterator[tuple[int, int]]:
@@ -1052,75 +874,6 @@ def _link_comments(text: str) -> Iterator[tuple[int, int]]:
         yield head.start(), last
 
 
-def _cut(text: str, spans: Iterable[tuple[int, int]]) -> str:
-    """*text* without *spans* (in order, not overlapping). A line that held only what
-    is cut goes with its line break, so the paragraph around it does not split in two.
-    One pass: each span costs only the white space beside it."""
-    kept: list[str] = []
-    done = 0
-    size = len(text)
-    for start, end in spans:
-        kept.append(text[done:start])
-        done = end
-        before = start
-        while before > 0 and text[before - 1] != "\n" and text[before - 1].isspace():
-            before -= 1
-        if before > 0 and text[before - 1] != "\n":
-            continue
-        after = end
-        while after < size and text[after] != "\n" and text[after].isspace():
-            after += 1
-        if after < size and text[after] == "\n":
-            done = after + 1
-    kept.append(text[done:])
-    return "".join(kept)
-
-
-def _without_hidden_elements(text: str) -> str:
-    """*text* without the elements its markup or its style blocks hide, tags and text
-    (a regex scan of the tags, not an HTML parser: odd markup is read as far as it
-    goes)."""
-    tags = list(_TAG.finditer(text))
-    if not tags:
-        return text
-    sheet = sheet_of(style_blocks(text, screen_only=False), strict=True)
-    spans: list[tuple[int, int]] = []
-    at = 0
-    foreign = 0
-    while at < len(tags):
-        tag = tags[at]
-        name = tag["name"].lower()
-        if tag["close"]:
-            if name in _FOREIGN:
-                foreign = max(0, foreign - 1)
-            at += 1
-            continue
-        if _hides(name, tag["attrs"], sheet):
-            end = _hidden_end(text, tags, at, foreign=foreign > 0)
-            spans.append((tag.start(), end))
-        elif name in _RAW:
-            end = _raw_end(text, tag, name)
-        else:
-            if name in _FOREIGN and not tag["self"]:
-                foreign += 1
-            at += 1
-            continue
-        while at < len(tags) and tags[at].start() < end:
-            at += 1
-    return _cut(text, spans)
-
-
-def _without_markup(text: str) -> str:
-    """*text* without its markup: what the page hides, tags and text together, then
-    every other tag, which is no text (its attributes, ``title``, ``alt``,
-    ``data-*``, ``value`` and ``aria-label`` among them, are not what a reader reads)
-    and is replaced by a space."""
-    if "<" not in text:
-        return text
-    text = _cut(text, (found.span() for found in _BOGUS.finditer(text)))
-    return _TAG.sub(" ", _without_hidden_elements(text))
-
-
 _KEEP_VERBS: Final = (
     "save|store|record|log|add|write|put|update|create|make|take|keep|commit|append"
     "|insert"
@@ -1140,17 +893,24 @@ _AI_WORD = r"(?:ai|a\.i\.)"
 _AI = r"(?:ai|a\.i\.|llms?|language\s+models?|chatbots?|assistants?|agents?|bots?|melo)"
 # Words that speak to the assistant that reads the text ("note to any AI reading
 # this", "if you are an AI", "dear assistant").
-_ADDRESSED = re.compile(
+# A sentence about the assistants that read the text ("AI agents reading this page"):
+# in a page it is addressed to them; a summary of a page may only say it.
+_ADDRESSED_ABOUT = (
     rf"(?<!\w){_AI}(?!\w)[^.!?\n]{{0,25}}?\b(?:reading|processing|summari[sz]ing"
     r"|parsing|scanning|analy[sz]ing|browsing)\s+(?:this|it|the\s+(?:page|file"
     r"|document|text|content))\b"
-    rf"|\bif\s+you(?:'re|’re|\s+are)\s+(?:an?\s+|the\s+)?{_AI}(?!\w)"
+)
+# A sentence that speaks to the assistant ("if you are an AI", "note to any AI",
+# "dear assistant").
+_ADDRESSED_TO = (
+    rf"\bif\s+you(?:'re|’re|\s+are)\s+(?:an?\s+|the\s+)?{_AI}(?!\w)"
     r"|(?<!\w)(?:note|message|instructions?|attention|important|reminder|p\.?s\.?"
     r"|n\.?b\.?)(?!\w)[^.!?\n]{0,15}?\b(?:to|for)\s+(?:the\s+|an?\s+|any\s+|all\s+"
     rf"|every\s+|this\s+)?{_AI}(?!\w)"
-    rf"|\b(?:hey|hi|hello|dear|attention)[\s,]+(?:the\s+|any\s+|all\s+)?{_AI}(?!\w)",
-    re.IGNORECASE,
+    rf"|\b(?:hey|hi|hello|dear|attention)[\s,]+(?:the\s+|any\s+|all\s+)?{_AI}(?!\w)"
 )
+_ADDRESSED = re.compile(f"{_ADDRESSED_ABOUT}|{_ADDRESSED_TO}", re.IGNORECASE)
+_ADDRESSED_AT = re.compile(_ADDRESSED_TO, re.IGNORECASE)
 # A sentence that opens by naming the assistant it speaks to ("AI assistant: ...",
 # "Any AI agent, ...", "Dear assistant, ...", "To the model: ...", "Note to any AI:").
 # Words that are ordinary nouns of a sentence ("The model, trained on ...", "Model:
@@ -1190,13 +950,12 @@ def _forms(text: str) -> list[str]:
     return [text] if folded == text else [text, folded]
 
 
-def _orders(paragraph: str, imperatives: bool = True) -> bool:
+def _orders(paragraph: str) -> bool:
     """Whether *paragraph* holds an order to the assistant: a request to keep
-    something in memory, a line that speaks to the assistant or claims a role, or a
+    something in memory, a line that speaks to the assistant or claims a role, a
     sentence that orders it (:data:`_ORDER`: ``ignore previous instructions``, a shell
-    command). With *imperatives* (the default) a sentence that only starts with a
-    verb (:func:`is_instruction`: "Use ...", "Open ...") is an order too. The ``>``
-    that quotes its lines does not count."""
+    command), or one that only starts with a verb (:func:`is_instruction`: "Use ...",
+    "Open ..."). The ``>`` that quotes its lines does not count."""
     for form in _forms(_QUOTED.sub("", paragraph)):
         if _ASKS_TO_KEEP.search(form) or _ADDRESSED.search(form):
             return True
@@ -1206,90 +965,167 @@ def _orders(paragraph: str, imperatives: bool = True) -> bool:
                 continue
             if _ROLE.match(sentence) or _ORDER.search(sentence):
                 return True
-            if imperatives and is_instruction(sentence):
+            if is_instruction(sentence):
                 return True
     return False
 
 
-def _without_orders(text: str, imperatives: bool = True) -> str:
-    """*text* without its paragraphs that hold an order to the assistant: the facts
-    an order wants kept follow it in the same paragraph as plain statements."""
+def _without_paragraphs(text: str, orders: Callable[[str], bool]) -> str:
+    """*text* without its paragraphs for which *orders* holds: the facts an order
+    wants kept follow it in the same paragraph as plain statements."""
     parts = _BREAK.split(text)
-    kept = [
-        part for n, part in enumerate(parts) if n % 2 or not _orders(part, imperatives)
-    ]
+    kept = [part for n, part in enumerate(parts) if n % 2 or not orders(part)]
     return "".join(kept) if len(kept) < len(parts) else text
 
 
-def material_text(text: str, *, imperatives: bool = True) -> str:
-    """What *text*, a page's, a file's or a finished task's result, states: what is
-    left for a note to rest on.
+def material_text(text: str) -> str:
+    """What *text*, a page's or a file's (a body, or a text the chat read), states:
+    what is left for a note to rest on.
 
     Left out, in this order: the characters that draw nothing (zero-width and other
-    format characters); HTML and XML comments and Markdown link comments
-    (``[//]: # (...)``); elements hidden by their markup or by a simple rule of a
-    ``<style>`` block (the ``hidden`` attribute, ``aria-hidden="true"``, ``display:
-    none``, ``visibility: hidden``, a font of 0 to 2 pixels, ``opacity: 0``, white or
-    clear text), tags and text, and ``script``, ``style`` and ``template``; every
-    other tag, with its attributes, which is no text (replaced by a space); then
-    every paragraph (text between blank lines; in a quoted block a line of only ``>``
-    is blank) with an order to the assistant in it (:func:`_orders`; with
-    ``imperatives=False`` a sentence that only starts with a verb is no order, as in
-    a finished task's result). A comment or element never closed hides the rest of
-    the text, as in a browser.
+    format characters, which includes the joiners of some scripts); then the markup,
+    by one strict left-to-right scan (:func:`markup.without_markup`: comments and
+    other ``<!...>``, ``<?...>``; ``script``, ``style``, ``textarea``, ``title`` and
+    the other raw text elements; every element its markup or a rule of a ``<style>``
+    block hides, tags and text; every other tag, with its attributes, replaced by a
+    space); the Markdown link comments (``[//]: # (...)``); and every paragraph (text
+    between blank lines; in a quoted block a line of only ``>`` is blank) with an
+    order to the assistant in it (:func:`_orders`). A comment, tag or element never
+    closed hides the rest of the text, as in a browser.
 
-    Text with no markup and no order comes back unchanged, byte for byte, in any
-    language. It is a small scan, not an HTML engine, it never raises, and it takes
-    time linear in the text. What the user typed is not material and is never passed
-    through it.
+    Text with no markup, no order and no invisible character comes back unchanged. It
+    is a small scan, not an HTML engine, it never raises, and it takes time linear
+    in the text. What the user typed is not material and is never passed through it.
     """
     if not text:
         return text
     if not text.isascii():
         text = "".join(char for char in text if not _invisible(char))
-    text = _cut(text, (found.span() for found in _COMMENT.finditer(text)))
-    text = _cut(text, _link_comments(text))
-    return _without_orders(_without_markup(text), imperatives)
+    text = markup.without_markup(text)
+    text = markup.cut(text, ((a, b, "") for a, b in _link_comments(text)))
+    return _without_paragraphs(text, _orders)
 
+
+# ── What a result states ──
+#
+# A finished task's result is melo's own answer, in Markdown; the part of it that is
+# not trusted is page text the page reader already flattened, so it holds no markup to
+# read. Only what is aimed at an assistant takes a paragraph out of it. A plain
+# imperative in it ("Run the tests.") is advice to the user, and a note that is
+# "Note that your lease ends June 30" is a fact.
 
 _ANSWER: Final = "\nmelo: "
-# How far into the text before it a later chunk of a result may start (``index``
-# makes a chunk start up to its CHUNK_OVERLAP characters back, at a word), with room
-# for the white space cut from the end of the one before.
-_CHUNK_REACH: Final = 264
+# What orders the assistant to keep something: "save a note", "update your memory",
+# "remember that the user ...". Not "add more memory", "make a note of it" or
+# "remember to ...".
+_MEMORY_ORDER = re.compile(
+    r"\b(?:save|store|record|log)\b[^.!?\n]{0,40}?"
+    r"\b(?:an?|this|the|these|that|your|my)\s+(?:(?:new|short|brief)\s+)?"
+    r"(?:notes?|memory|memories)\b(?!-)"
+    r"|\b(?:update|overwrite|edit)\s+(?:your|the\s+assistant['’]?s?|melo['’]?s?)\s+"
+    r"(?:memory|memories|notes?)\b"
+    r"|\bremember\s+that\s+(?:the\s+)?users?\b"
+    r"|\bmemori[sz]e\s+(?:that|this)\b"
+    "|写入记忆|存入记忆|保存到记忆|更新(?:你的|我的)?记忆",
+    re.IGNORECASE,
+)
+# A role header at the start of a line ("System: ...", "[assistant]", "<system>") or a
+# line that opens by naming the assistant it speaks to; a list item ("- System: macOS")
+# is not one.
+_RESULT_ROLE = re.compile(
+    r"^[ \t>]*+#*+[ \t]*+(?:"
+    r"[\[(<]?(?:system|developer|assistant|melo)"
+    r"(?:\s+(?:message|prompt|note|instructions?))?[ \t]*[:：\])>]"
+    rf"|{_ADDRESSEE})",
+    re.IGNORECASE | re.MULTILINE,
+)
+_FENCE = re.compile(
+    r"^[ \t]*(```|~~~).*?(?:^[ \t]*\1[^\n]*$|\Z)", re.DOTALL | re.MULTILINE
+)
+_CODE_SPAN = re.compile(r"`[^`\n]*+`")
+
+
+def _code_blanked(text: str) -> str:
+    """*text* with the code in it (fenced blocks and code spans) replaced by ``~``, so
+    what it holds is no order and the paragraphs around it stay as they were."""
+
+    def blank(found: re.Match[str]) -> str:
+        return re.sub(r"[^\n]", "~", found.group())
+
+    return _CODE_SPAN.sub(blank, _FENCE.sub(blank, text))
+
+
+def _result_orders(paragraph: str) -> bool:
+    """Whether *paragraph* of a result is aimed at an assistant: what
+    :data:`_AIMED` says, a request to keep something in memory, a role header at the
+    start of a line, or a line that speaks to the assistant. The ``>`` that quotes its
+    lines does not count."""
+    for form in _forms(_QUOTED.sub("", paragraph)):
+        if _ADDRESSED_AT.search(form) or _MEMORY_ORDER.search(form):
+            return True
+        if _RESULT_ROLE.search(form):
+            return True
+        if any(_AIMED.search(sentence) for sentence in _CLAUSES.split(form)):
+            return True
+    return False
 
 
 def result_text(text: str) -> str:
     """What a finished task's indexed result (:func:`index.document_text`: its task
-    line, what the user asked, ``melo: `` and the answer) states: the answer through
-    :func:`material_text` (a result that is a model's answer: a sentence that only
-    starts with a verb, "Run ...", is no order in it), which may carry a web page's
-    text. What the user asked of the task is theirs and stays as it is."""
+    line, what the user asked, ``melo: `` and the answer) states: the answer without
+    its paragraphs that are aimed at an assistant (:func:`_result_orders`), code
+    skipped. No markup is read in it. What the user asked of the task is theirs and
+    stays as it is."""
     asked, label, answer = text.partition(_ANSWER)
-    return asked + label + material_text(answer, imperatives=False) if label else text
+    if not label:
+        return text
+    blanked = _code_blanked(answer)
+    parts = _BREAK.split(blanked)
+    if not any(_result_orders(part) for part in parts[::2]):
+        return text
+    kept: list[str] = []
+    at = 0
+    for n, part in enumerate(parts):
+        piece = answer[at : at + len(part)]
+        at += len(part)
+        if n % 2 or not _result_orders(part):
+            kept.append(piece)
+    return asked + label + "".join(kept)
+
+
+def _following(answer: str, more: str) -> str:
+    """What the chunk *more* adds to *answer*, the text of the chunks so far: the
+    chunk starts inside the overlap with the one before (:func:`index.document_chunks`
+    makes the next window start at the first word start after the last
+    ``CHUNK_OVERLAP`` characters of the one before), so the text it adds is what
+    follows that overlap. When the overlap cannot be found (a secret was redacted in
+    one of the two) the whole chunk is added after a line break."""
+    back = len(answer) - CHUNK_OVERLAP
+    if back > 0:
+        gap = re.search(r"\s", answer[back:])
+        at = back + (gap.end() if gap else 0)
+        if more.startswith(answer[at:]):
+            return more[len(answer) - at :]
+    for at in range(max(0, back), len(answer)):
+        if more.startswith(answer[at:]):
+            return more[len(answer) - at :]
+    return "\n" + more
 
 
 def joined_result(chunks: Sequence[str]) -> str:
-    """The text of a result's chunks (:func:`index.document_chunks`, in order) as one:
-    the first chunk, and the answer of each later one from where it goes past the
-    end of the text so far (a chunk starts inside the overlap with the one before),
-    so a comment or an element that one chunk opens and a later one closes is one
-    thing when :func:`result_text` cleans it."""
-    if not chunks:
-        return ""
-    asked, label, answer = chunks[0].partition(_ANSWER)
-    if not label:
-        return chunks[0]
-    for chunk in chunks[1:]:
+    """The text of a result's chunks (:func:`index.document_chunks`, in order) as one,
+    from the first chunk that holds the ``melo: `` label (a long question fills the
+    first chunks with itself): the answer of each later chunk from where it goes
+    past the end of the text so far, so a paragraph that one chunk starts and a later
+    one ends is one paragraph when :func:`result_text` reads it."""
+    first = next((n for n, chunk in enumerate(chunks) if _ANSWER in chunk), None)
+    if first is None:
+        return chunks[0] if chunks else ""
+    asked, label, answer = chunks[first].partition(_ANSWER)
+    for chunk in chunks[first + 1 :]:
         more = chunk.partition(_ANSWER)[2]
-        if not more:
-            continue
-        for cut in range(max(0, len(answer) - _CHUNK_REACH), len(answer)):
-            if more.startswith(answer[cut:]):
-                answer += more[len(answer) - cut :]
-                break
-        else:
-            answer = f"{answer}\n{more}"
+        if more:
+            answer += _following(answer, more)
     return asked + label + answer
 
 
