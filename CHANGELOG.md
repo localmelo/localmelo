@@ -715,6 +715,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A chat replies in the language of your latest message even after tool results or
+  memory text in another language. The rule is set once, in the paragraph every chat
+  (terminal, main chat, side chats) starts with.
 - A long message recalled from an earlier chat shows as much of the person's own
   words as it did before recalled turns said who spoke: about 234 characters,
   not 140. A value stated late in a long message was cut off, and questions
