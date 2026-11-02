@@ -236,21 +236,26 @@ def git_discards(args: Sequence[str], exists: bool = False) -> Discard | None:
     return None
 
 
-def _leading(prog: str, args: Sequence[str]) -> tuple[list[str], list[str]]:
+def _leading(
+    prog: str, args: Sequence[str]
+) -> tuple[list[tuple[str, str | None]], list[str]]:
     """The options before the first target of ``kill``, ``pkill`` or ``killall``, and the targets.
 
     These programs stop reading options at the first target: a ``-0`` or
     ``-s`` after it is one more target, not an option. A ``--`` ends the
-    options. An option that takes a value takes the next word as well. For
-    ``kill`` only the first word can be an option (a signal, ``-s sig``,
-    ``-l``): a later ``-123`` is a process group.
+    options. An option that takes a value takes the next word as well: each
+    option comes with its value (``None`` when it has none), so a value that
+    looks like an option (``pkill -u -0``) is not read as one. For ``kill``
+    only the first word can be an option (a signal, ``-s sig``, ``-l``): a
+    later ``-123`` is a process group.
     """
     if prog == "kill":
         first = args[0] if args else ""
+        options: list[tuple[str, str | None]]
         if first in _SIGNAL_WORDS:
-            options, at = list(args[:2]), 2
+            options, at = [(first, args[1] if len(args) > 1 else None)], 2
         elif first.startswith("-") and len(first) > 1 and first != "--":
-            options, at = [first], 1
+            options, at = [(first, None)], 1
         else:
             options, at = [], 0
         if args[at : at + 1] == ["--"]:
@@ -266,7 +271,6 @@ def _leading(prog: str, args: Sequence[str]) -> tuple[list[str], list[str]]:
             break
         if not word.startswith("-") or len(word) < 2:
             break
-        options.append(word)
         at += 1
         takes = word in valued
         if prog != "killall" and word[1:2] != "-" and not _is_signal(word):
@@ -276,9 +280,11 @@ def _leading(prog: str, args: Sequence[str]) -> tuple[list[str], list[str]]:
                 if char in _PKILL_VALUED:
                     takes = place == len(word) - 1
                     break
+        value = None
         if takes and at < len(args):
-            options.append(args[at])
+            value = args[at]
             at += 1
+        options.append((word, value))
     return options, list(args[at:])
 
 
@@ -288,16 +294,17 @@ def _is_signal(word: str) -> bool:
     return name.isdigit() or name.removeprefix("SIG") in _SIGNAL_NAMES
 
 
-def _signal_zero(options: Sequence[str], valued: bool) -> bool:
+def _signal_zero(options: Sequence[tuple[str, str | None]], valued: bool) -> bool:
     """Whether the signal is ``0``: ``-0``, or (for ``kill``) ``-s 0`` / ``-n 0``.
 
     For ``pkill`` and ``killall`` the ``-s`` option is something else (a
-    session, print only), so only ``-0`` counts there.
+    session, print only), so only ``-0`` counts there. Only the options
+    count, never their values.
     """
-    for at, option in enumerate(options):
+    for option, value in options:
         if option == "-0":
             return True
-        if valued and option in _SIGNAL_WORDS and options[at + 1 : at + 2] == ["0"]:
+        if valued and option in _SIGNAL_WORDS and value == "0":
             return True
     return False
 
@@ -327,9 +334,10 @@ def stops_others(prog: str, args: Sequence[str], started: set[str]) -> str | Non
     """
     if prog not in ("kill", "pkill", "killall", "skill", "killall5"):
         return None
-    options, targets = _leading(prog, args)
-    if _signal_zero(options, prog == "kill"):
+    pairs, targets = _leading(prog, args)
+    if _signal_zero(pairs, prog == "kill"):
         return None
+    options = [option for option, _ in pairs]
     if prog == "kill":
         if {"-l", "-L", "--list"} & set(options) or not targets:
             return None

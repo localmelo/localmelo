@@ -8976,6 +8976,647 @@
    },
    "verdict": "routine",
    "categories": []
+  },
+  {
+   "id": "round 3: Rscript -e 'system(\"id\")'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "Rscript -e 'system(\"id\")'"
+   },
+   "verdict": "undecided",
+   "categories": []
+  },
+  {
+   "id": "round 3: R -e 'print(1)'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "R -e 'print(1)'"
+   },
+   "verdict": "undecided",
+   "categories": []
+  },
+  {
+   "id": "round 3: R --vanilla -e 'print(1)'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "R --vanilla -e 'print(1)'"
+   },
+   "verdict": "undecided",
+   "categories": []
+  },
+  {
+   "id": "round 3: echo 'print(1)' | Rscript -",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo 'print(1)' | Rscript -"
+   },
+   "verdict": "undecided",
+   "categories": []
+  },
+  {
+   "id": "round 3: rscript -e 'print(1)'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "rscript -e 'print(1)'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: /usr/local/bin/Rscript -e 'print(1)'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "/usr/local/bin/Rscript -e 'print(1)'"
+   },
+   "verdict": "undecided",
+   "categories": []
+  },
+  {
+   "id": "round 3: Rscript analysis.R",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "Rscript analysis.R"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: Rscript -",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "Rscript -"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: bash -c -ol pipefail 'rm -rf ~/Documents'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "bash -c -ol pipefail 'rm -rf ~/Documents'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: bash -c -Ol extglob 'rm -rf ~/Documents'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "bash -c -Ol extglob 'rm -rf ~/Documents'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: bash -c -oo pipefail errexit 'rm -rf ~/Documents'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "bash -c -oo pipefail errexit 'rm -rf ~/Documents'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: bash -c -o pipefail 'rm -rf ~/Documents'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "bash -c -o pipefail 'rm -rf ~/Documents'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: bash -ec -ol pipefail 'rm -rf ~/Documents'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "bash -ec -ol pipefail 'rm -rf ~/Documents'"
+   },
+   "verdict": "undecided",
+   "categories": []
+  },
+  {
+   "id": "round 3: bash -c -ol pipefail 'echo hi'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "bash -c -ol pipefail 'echo hi'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: sleep 9 & pid=$!; sleep 1 | while read pid; do :; done; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; sleep 1 | while read pid; do :; done; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: sleep 9 & pid=$!; echo 5 | while read pid; do kill $pid; done",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; echo 5 | while read pid; do kill $pid; done"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: sleep 9 & pid=$!; IFS= read -r pid < /tmp/p; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; IFS= read -r pid < /tmp/p; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: sleep 9 & pid=$!; IFS=: read pid rest < /tmp/p; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; IFS=: read pid rest < /tmp/p; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: sleep 9 & pid=$!; if true; then for pid in $(pgrep Safari); do kill $pid; done; fi",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; if true; then for pid in $(pgrep Safari); do kill $pid; done; fi"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: sleep 9 & pid=$!; while true; do read pid < /tmp/p; kill $pid; done",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; while true; do read pid < /tmp/p; kill $pid; done"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: sleep 9 & pid=$!; (( pid = 1234 )); kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; (( pid = 1234 )); kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: sleep 9 & pid=$!; (( pid++ )); kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; (( pid++ )); kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: sleep 9 & pid=$!; for (( pid = 0; pid < 3; pid++ )); do kill $pid; done",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; for (( pid = 0; pid < 3; pid++ )); do kill $pid; done"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: sleep 9 & pid=$!; let 'pid = 1234'; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; let 'pid = 1234'; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: sleep 9 & pid=$!; unset pid; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; unset pid; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: sleep 9 & pid=$!; source /tmp/x.sh; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; source /tmp/x.sh; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: sleep 9 & pid=$!; . /tmp/x.sh; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; . /tmp/x.sh; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: sleep 9 & pid=$!; declare -n ref=pid; ref=1234; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; declare -n ref=pid; ref=1234; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: sleep 9 & echo x | pid=$!; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & echo x | pid=$!; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: sleep 9 & pid=$! | cat; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$! | cat; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: sleep 9 & pid=$!; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: sleep 9 & pid=$!; while read line; do echo $line; done < f; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; while read line; do echo $line; done < f; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: cat <<EOF\\n$(rm -rf ~/Documents)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(rm -rf ~/Documents)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: cat <<EOF\\n`rm -rf ~/Documents`\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n`rm -rf ~/Documents`\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: cat <<-EOF\\n\t$(rm -rf ~/Documents)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<-EOF\n\t$(rm -rf ~/Documents)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: cat <<EOF > notes.txt\\nvalue: ${x:-$(rm -rf ~/Documents)}\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF > notes.txt\nvalue: ${x:-$(rm -rf ~/Documents)}\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: cat <<EOF\\nfirst\\n # $(rm -rf ~/Documents)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\nfirst\n # $(rm -rf ~/Documents)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: cat <<EOF\\n$(\\nrm -rf ~/Documents\\n)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(\nrm -rf ~/Documents\n)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: python3 <<EOF\\nprint('$(rm -rf ~/Documents)')\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "python3 <<EOF\nprint('$(rm -rf ~/Documents)')\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: cat <<'EOF'\\n$(rm -rf ~/Documents)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<'EOF'\n$(rm -rf ~/Documents)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: cat <<EOF\\n\\$(rm -rf ~/Documents)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n\\$(rm -rf ~/Documents)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: cat <<EOF\\ntoday is $(date)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\ntoday is $(date)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: echo $'\\'' ; rm -rf ~/Documents #'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo $'\\'' ; rm -rf ~/Documents #'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: git commit -m $'a\\nb'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git commit -m $'a\\nb'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: grep $'\\t' notes.txt",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "grep $'\\t' notes.txt"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: echo $'\\x2f'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo $'\\x2f'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: echo ok; echo $'x'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo ok; echo $'x'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: grep -c '$' notes.txt",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "grep -c '$' notes.txt"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: echo \"cost: $' end\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"cost: $' end\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: sed -n '$p' notes.txt",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sed -n '$p' notes.txt"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: pkill -u -0 Safari",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "pkill -u -0 Safari"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: pkill -U -0 Safari",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "pkill -U -0 Safari"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: pkill -g -0 Safari",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "pkill -g -0 Safari"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: killall -u -0 Safari",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "killall -u -0 Safari"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: pkill -f -u -0 Safari",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "pkill -f -u -0 Safari"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: pkill -0 Safari",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "pkill -0 Safari"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: pkill -u bob -0 Safari",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "pkill -u bob -0 Safari"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: kill -s 0 1234",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "kill -s 0 1234"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: echo `rm -rf ~/Documents`",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo `rm -rf ~/Documents`"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: echo \\`rm -rf ~/Documents\\`",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \\`rm -rf ~/Documents\\`"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: echo \"a `rm -rf ~/Documents` b\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"a `rm -rf ~/Documents` b\""
+   },
+   "verdict": "high",
+   "categories": [
+    "delete"
+   ]
+  },
+  {
+   "id": "round 3: echo `rm -rf ~/Documents",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo `rm -rf ~/Documents"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: function f { rm -rf ~/Documents; }; f",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "function f { rm -rf ~/Documents; }; f"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: function f() { rm -rf ~/Documents; }; f",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "function f() { rm -rf ~/Documents; }; f"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: f() { rm -rf ~/Documents; }; f",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "f() { rm -rf ~/Documents; }; f"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: coproc rm -rf ~/Documents",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "coproc rm -rf ~/Documents"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: coproc X { rm -rf ~/Documents; }",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "coproc X { rm -rf ~/Documents; }"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: coproc { rm -rf ~/Documents; }",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "coproc { rm -rf ~/Documents; }"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: function f { echo hi; }; f",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "function f { echo hi; }; f"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: coproc cat",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "coproc cat"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 3: coproc X { cat; }",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "coproc X { cat; }"
+   },
+   "verdict": "routine",
+   "categories": []
   }
  ]
 }

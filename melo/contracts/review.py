@@ -31,6 +31,10 @@ Verdict = Literal["routine", "high", "undecided"]
 # naming an app, a link of a custom scheme, erasing a disk, discarding
 # uncommitted work and stopping other processes.
 RULES_VERSION: Final = 3
+# The longest command or code (in characters) the rules read, and the card's
+# sentence is built from. A longer text is undecided without being read: no
+# real step is that long, and reading it would cost more than it is worth.
+MAX_TEXT: Final = 256 * 1024
 
 # The card's title per category, strongest first: a call's title and the
 # order of its reasons follow this order.

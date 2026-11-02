@@ -518,6 +518,16 @@ def test_a_broad_target_after_cd_is_not_compared() -> None:
     assert gist("cd build && rm -rf .", "Delete build/tmp.log").warn == ""
 
 
+def test_a_cd_after_the_delete_does_not_hide_a_broad_target() -> None:
+    found = gist("rm -rf * && cd build", "Delete build/tmp.log")
+    assert found.warn == "delete_target"
+    assert found.warn_params["target"] == "*"
+    assert gist("rm -rf . ; cd build", "Delete build/tmp.log").warn == "delete_target"
+    # A delete after the cd is still a delete in the folder it changed to.
+    assert gist("rm -rf * ; cd build && rm -rf *", "Delete build/tmp.log").warn != ""
+    assert gist("cd build && rm -rf * && cd ..", "Delete build/tmp.log").warn == ""
+
+
 def test_a_target_built_at_run_time_is_still_not_compared() -> None:
     assert gist('rm -rf "$DIR"', "Delete notes.tmp").warn == ""
     assert gist('rm -rf "$DIR"/*', "Delete notes.tmp").warn == ""
@@ -539,6 +549,18 @@ def test_a_disk_erase_is_compared_by_the_disk_it_names() -> None:
     assert found.warn == "delete_target"
     assert found.warn_params["target"] == "disk2"
     assert gist("diskutil eraseDisk APFS Backup disk2", "Erase disk2").warn == ""
+
+
+def test_a_disk_named_in_the_words_is_compared_with_the_disk_erased() -> None:
+    found = gist("diskutil eraseDisk APFS Backup disk9", "Erase disk3")
+    assert found.warn == "delete_target"
+    assert found.warn_params["target"] == "disk9"
+    assert gist("diskutil eraseDisk APFS Backup disk9", "Erase /dev/disk9").warn == ""
+    assert gist("diskutil eraseDisk APFS Backup disk9", "Erase Disk9.").warn == ""
+    assert (
+        gist("diskutil eraseDisk APFS Backup disk9", "Erase the backup disk").warn == ""
+    )
+    assert gist("rm -rf notes.tmp", "Delete notes.tmp from disk3").warn == ""
 
 
 def test_stashing_is_not_dropping_a_stash() -> None:

@@ -26,6 +26,10 @@ from urllib.parse import urlsplit
 # script (a Chinese sentence) do not stick to it.
 _CHUNK: Final = re.compile(r"[A-Za-z0-9_.~/@+\-]+")
 _URL: Final = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]{0,31}://[^\s\"'“”‘’<>`]+")
+# A disk written as a device name (``disk3``, ``/dev/rdisk3s1``).
+_DISK: Final = re.compile(
+    r"(?<![\w/.\-])(?:/dev/)?r?disk\d+(?:s\d+)*(?![\w\-])(?!\.\w)", re.I
+)
 _QUOTED: Final = re.compile(
     r"'([\w.\-/~*]{1,80})'|\"([\w.\-/~*]{1,80})\"|`([\w.\-/~*]{1,80})`"
     r"|“([\w.\-/~*]{1,80})”|‘([\w.\-/~*]{1,80})’"
@@ -196,6 +200,9 @@ def named_paths(words: str) -> list[str]:
             and "@" not in chunk  # an address, not a path
         ):
             found.append(chunk)
+    for disk in _DISK.findall(text):
+        if disk.casefold() not in found:
+            found.append(disk.casefold())
     return found
 
 

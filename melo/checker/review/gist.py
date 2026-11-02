@@ -42,7 +42,7 @@ from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.review import apps as app_names
 from localmelo.melo.checker.review import destroys, targets
 from localmelo.melo.checker.review.paths import loopback
-from localmelo.melo.contracts.review import ActionReview, command_steps
+from localmelo.melo.contracts.review import MAX_TEXT, ActionReview, command_steps
 
 # The argument that carries the model's own words about a call. Another
 # argument (``description``, ``purpose``) is often the content a tool sends,
@@ -247,7 +247,12 @@ def step_gist(
     if tool_name.startswith("browser:"):
         return None
     words = _words(tool_name, arguments)
-    items = _items(tool_name, arguments) if tool_name in _RUNNERS else []
+    # A text over the limit is not read by the rules either (see MAX_TEXT).
+    items = (
+        _items(tool_name, arguments)
+        if tool_name in _RUNNERS and len(_source(tool_name, arguments)) <= MAX_TEXT
+        else []
+    )
     for effect in _EFFECTS:
         # What the rules found that the code does not show (a string run with
         # exec, a command built at run time) is part of the sentence.
@@ -424,13 +429,28 @@ def _elsewhere_target(effect: str, items: Sequence[_Item], words: str) -> str:
     mine = [item for item in items if item.kind == effect]
     if not mine or any(item.blind or not item.places for item in mine):
         return ""
-    places = list(dict.fromkeys(place for item in mine for place in item.places))
+    # After a `cd`, a bare `*` or `.` means a folder melo cannot name; before
+    # it, it is the folder the step started in.
+    moved = next(
+        (
+            at
+            for at, item in enumerate(items)
+            if item.kind == "command" and _changes_folder(item.text)
+        ),
+        len(items),
+    )
+    places = list(
+        dict.fromkeys(
+            place
+            for at, item in enumerate(items)
+            if item.kind == effect
+            for place in item.places
+            if effect != "delete" or at < moved or not targets.broad(place)
+        )
+    )
     if effect == "delete":
         named = targets.named_paths(words)
         matches = targets.path_matches
-        # After a `cd`, a bare `*` or `.` means a folder melo cannot name.
-        if any(item.kind == "command" and _changes_folder(item.text) for item in items):
-            places = [p for p in places if not targets.broad(p)]
     else:
         named = targets.named_hosts(words)
         matches = targets.host_matches
