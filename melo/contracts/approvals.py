@@ -200,6 +200,29 @@ class ApprovalPolicy(Protocol):
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision: ...
 
 
+# Questions a tool asks itself whose answer is never kept for the chat, whatever a
+# client sends: each call asks again. Sending a form is one (``browser-submit:<site>``)
+# and so is typing (``browser-type:<site>``): a grant would cover every later form
+# or text, whatever it holds and wherever it goes.
+NEVER_GRANTED: Final = ("browser-submit:", "browser-type:")
+
+# The tools melo ships that ask their own questions (per site, and for every text they
+# type or form they send), so the gate puts no second, empty question about the call.
+# Two things must hold for a call to skip the gate: its name is on this fixed list in
+# melo, and the tool came from melo's own browser provider, which says so with
+# ``ProvidedTool.asks_itself``. A tool's annotation never counts (an MCP server cannot
+# claim to ask for itself), and neither does a name alone: a tool that library code
+# registers as ``browser_type`` keeps its approval.
+SELF_ASKING_TOOLS: Final = frozenset(
+    {"browser_click", "browser_type", "browser_select"}
+)
+
+
+def never_granted(tool_name: str) -> bool:
+    """Whether an answer to the question *tool_name* names may never be kept for a chat."""
+    return tool_name.startswith(NEVER_GRANTED)
+
+
 # Set around each tool call of a run that has a policy: asks that policy about
 # something the tool found out while it ran, such as the site a redirect led
 # to. The arguments are the tool name the policy sees (a grant of the run

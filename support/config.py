@@ -88,6 +88,9 @@ MEMORY_RECALL_EXCERPT = ("head", "match")
 MEMORY_RECALL_FORM = ("excerpt", "list")
 MEMORY_RECALL_LIST_MAX = (1, 50)
 MEMORY_RECALL_OPEN_CHARS = (500, 16000)
+# Whether a turn's excerpt that shows less than the whole turn carries its id, so the
+# model can open the whole turn: see MemoryConfig.excerpt_open.
+MEMORY_EXCERPT_OPEN = ("off", "on")
 # Whether recall draws on the chat turns or on memory items encoded from them, and
 # whether an opened item also shows its source turns; the size of the window a chat
 # is cut into for that encoding: see MemoryConfig.recall_source.
@@ -98,6 +101,9 @@ MEMORY_COMPRESS_AT_CHARS = (4000, 60000)
 # MemoryConfig.recall_min_cosine and recall_min_coverage.
 MEMORY_RECALL_MIN_COSINE = (0.20, 0.95)
 MEMORY_RECALL_MIN_COVERAGE = (0.10, 1.00)
+# How far back a new chat's first turn looks into the other chats: see
+# ChatConfig.recent_digest_minutes (0 turns it off).
+CHAT_RECENT_DIGEST_MINUTES = (0, 1440)
 # Whether recall carries notes, and what a turn that recalls nothing is told.
 MEMORY_RECALL_NOTES = ("on", "off")
 MEMORY_SEARCH_WHEN_EMPTY = ("off", "hint")
@@ -125,6 +131,7 @@ RECALL_KEYS = (
     "recall_form",
     "recall_list_max",
     "recall_open_chars",
+    "excerpt_open",
     "recall_source",
     "open_sources",
     "compress_at_chars",
@@ -380,10 +387,10 @@ class MemoryConfig:
     ``rules`` (no model call), ``model`` (rules then a bounded model pass), or
     ``model+tags`` (the same call limit, tagged turns first). ``sleep_lock`` is
     an optional path whose presence prevents model requests. Five more developer
-    settings, each defaulting to today's behaviour, shape the recall block a chat
-    message carries: ``recall_records`` notes and ``recall_docs`` chat turns at
-    most (0-20 each) in a block of at most ``recall_chars`` characters
-    (200-8000); ``recall_notes = "off"`` leaves notes out of the block and the
+    settings shape the recall block a chat message carries: ``recall_records``
+    notes (3 by default) and ``recall_docs`` chat turns (2) at most (0-20 each) in a
+    block of at most ``recall_chars`` characters (200-8000, 4000 by default);
+    ``recall_notes = "off"`` leaves notes out of the block and the
     pinned lines, so only turns are recalled; and ``search_when_empty = "hint"``
     adds one line to a block that recalls nothing, telling the model to call the
     memory search tool first. Two more set the bars an item must pass to be
@@ -392,7 +399,7 @@ class MemoryConfig:
     ``recall_min_coverage`` (0.10-1.00), the least share of the question's
     content words that a note or turn must hold. Two more set how much of a
     recalled chat turn is shown, in the block and in the search tool:
-    ``recall_item_chars`` (120-2000), the room one turn takes, and
+    ``recall_item_chars`` (120-2000, 900 by default), the room one turn takes, and
     ``recall_excerpt``, ``head`` (the start of each part, the default) or
     ``match`` (the sentences of each part that hold most of the question's
     content words). Three more set how recalled chat turns are shown at all:
@@ -404,7 +411,14 @@ class MemoryConfig:
     the block and in the search tool alike, and ``recall_open_chars`` (500-16000)
     is the room one opened turn takes; ``recall_docs`` and ``recall_chars`` do not
     bound the list, and ``recall_item_chars`` and ``recall_excerpt`` apply to the
-    excerpt form only. Four more are about memory items (#428). ``recall_source``,
+    excerpt form only. ``excerpt_open``, ``off`` (the default) or ``on``, is for the
+    excerpt form of chat turns: with ``on`` a line that shows less than the whole
+    turn (an excerpt that was cut, or a piece of a long turn) starts with the
+    turn's id, such as ``[t123]``, a line under the items says so, and the model
+    has ``open_memory`` to open the turn whole within ``recall_open_chars``; a line
+    that shows the whole turn reads as before. It has no effect with
+    ``recall_form = "list"`` (which always offers ``open_memory``) or
+    ``recall_source = "items"``. Four more are about memory items (#428). ``recall_source``,
     ``turns`` (recall draws on the chat turns, the default) or ``items`` (it draws
     on the memory items a chat model encoded from the chats, in place of the turns;
     ``melo memory ingest FILE -X ingest=compress`` writes them); ``open_sources``,
@@ -440,16 +454,17 @@ class MemoryConfig:
     sleep_lock: str = ""  # Optional lock path: no model calls while it exists.
     recall_records: int = 3  # Most notes a chat message's recall block holds.
     recall_docs: int = 2  # Most chat turns it holds.
-    recall_chars: int = 900  # Its size bound, in characters.
+    recall_chars: int = 4000  # Its size bound, in characters.
     recall_notes: str = "on"  # on | off: no notes in the block or the pinned lines.
     search_when_empty: str = "off"  # off | hint: a line when nothing was recalled.
     recall_min_cosine: float = 0.55  # Least similarity of meaning to be recalled.
     recall_min_coverage: float = 0.6  # Least share of the question's words held.
-    recall_item_chars: int = 234  # The room one recalled chat turn takes.
+    recall_item_chars: int = 900  # The room one recalled chat turn takes.
     recall_excerpt: str = "head"  # head | match: which part of a turn is shown.
     recall_form: str = "excerpt"  # excerpt | list: turns as excerpts, or as a list.
     recall_list_max: int = 20  # The most turns the list form lists.
     recall_open_chars: int = 4000  # The room one turn the model opens takes.
+    excerpt_open: str = "off"  # off | on: a cut excerpt carries its id to open.
     recall_source: str = "turns"  # turns | items: recall draws on turns, or on items.
     open_sources: str = "off"  # off | on: an opened item also shows its source turns.
     compress_at_chars: int = 12000  # The size of a window a chat is encoded in.
@@ -499,9 +514,12 @@ class BrowserConfig:
 
     ``driver`` is ``off`` (the default, no browser tools) or ``safari-automation``
     (Safari's automation windows). Only the terminal chat and the console offer it.
+    ``keep_tabs`` leaves the tabs melo opened in the window when a chat ends or
+    sits idle; by default melo closes them.
     """
 
     driver: str = "off"  # off | safari-automation
+    keep_tabs: bool = False
 
 
 # The most folders ``[workspace] extra_folders`` keeps.
@@ -554,6 +572,21 @@ class TasksConfig:
 
 
 @dataclass
+class ChatConfig:
+    """The ``[chat]`` table: what a new chat knows when it starts.
+
+    ``recent_digest_minutes``: a chat's first turn (not the main chat's) gets a
+    short digest of the user's other chats in the last that many minutes: up to
+    five lines, one per recent turn, saying what it was about and where (see
+    :mod:`localmelo.support.memory.digest`). It reads memory's turn index, so
+    ``[memory] across_chats = false`` turns it off too. ``0`` turns it off;
+    30 by default, at most 1440.
+    """
+
+    recent_digest_minutes: int = 30
+
+
+@dataclass
 class Config:
     chat_backend: str = (
         ""  # mlc | ollama | vllm | sglang | openai | gemini | anthropic | nvidia
@@ -598,6 +631,7 @@ class Config:
     workspace: WorkspaceConfig = field(default_factory=WorkspaceConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     tasks: TasksConfig = field(default_factory=TasksConfig)
+    chat: ChatConfig = field(default_factory=ChatConfig)
     # [pricing.<model>]: dollars per million tokens (input, output, and
     # cache_read for cached prompt tokens), for the terminal's session cost.
     # Configuration only: no price is bundled.
@@ -644,6 +678,7 @@ class Config:
         errors.extend(self._validate_browser())
         errors.extend(self._validate_tools())
         errors.extend(self._validate_tasks())
+        errors.extend(self._validate_chat())
         # [cli] is a display preference: like [sessions] resume_mode, a bad
         # value warns and falls back in the interactive UI (cli_errors()), so
         # direct mode and the gateway never fail on it.
@@ -767,6 +802,7 @@ class Config:
             ("search_when_empty", MEMORY_SEARCH_WHEN_EMPTY),
             ("recall_excerpt", MEMORY_RECALL_EXCERPT),
             ("recall_form", MEMORY_RECALL_FORM),
+            ("excerpt_open", MEMORY_EXCERPT_OPEN),
             ("note_gate", MEMORY_NOTE_GATE),
             ("followup_query", MEMORY_FOLLOWUP_QUERY),
             ("recall_source", MEMORY_RECALL_SOURCE),
@@ -782,12 +818,17 @@ class Config:
         return errors
 
     def _validate_browser(self) -> list[str]:
-        """``[browser] driver`` names a driver."""
-        if self.browser.driver in BROWSER_DRIVERS:
-            return []
-        return [
-            f"[browser] driver={self.browser.driver!r} is not one of {BROWSER_DRIVERS}"
-        ]
+        """``[browser] driver`` names a driver and ``keep_tabs`` is true or false."""
+        errors = []
+        if self.browser.driver not in BROWSER_DRIVERS:
+            errors.append(
+                f"[browser] driver={self.browser.driver!r} is not one of {BROWSER_DRIVERS}"
+            )
+        if not isinstance(self.browser.keep_tabs, bool):
+            errors.append(
+                f"[browser] keep_tabs={self.browser.keep_tabs!r} must be true or false"
+            )
+        return errors
 
     def _validate_tools(self) -> list[str]:
         """``[tools]`` holds a bool and a list of exact local test server entries."""
@@ -808,6 +849,21 @@ class Config:
             f"[tasks] {name} must be a bool, got {value!r}"
             for name in ("follow_up",)
             if not isinstance(value := getattr(self.tasks, name), bool)
+        ]
+
+    def _validate_chat(self) -> list[str]:
+        """``[chat] recent_digest_minutes`` is a whole number of minutes, 0-1440."""
+        value = self.chat.recent_digest_minutes
+        low, high = CHAT_RECENT_DIGEST_MINUTES
+        if (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and low <= value <= high
+        ):
+            return []
+        return [
+            f"[chat] recent_digest_minutes must be an integer from {low} to {high}, "
+            f"got {value!r}"
         ]
 
     def _validate_scheduler(self) -> list[str]:
@@ -1173,6 +1229,7 @@ class Config:
             *self._validate_browser(),
             *self._validate_tools(),
             *self._validate_tasks(),
+            *self._validate_chat(),
             *self._validate_gateway_workspace(),
             *self._validate_cli(),
             *self._validate_ui(),
@@ -1551,6 +1608,11 @@ def _load_file() -> Config:
             if hasattr(cfg.tasks, k):
                 setattr(cfg.tasks, k, v)
 
+    if isinstance(data.get("chat"), dict):
+        for k, v in data["chat"].items():
+            if hasattr(cfg.chat, k):
+                setattr(cfg.chat, k, v)  # a bad value is left for Config.validate
+
     # A bad value is left for Config.validate to report.
     if isinstance(data.get("sessions"), dict):
         cfg.sessions.resume_mode = data["sessions"].get("resume_mode", "pairs")
@@ -1905,7 +1967,10 @@ def save(cfg: Config) -> None:
         lines.append("")
 
     if cfg.browser != BrowserConfig():
-        lines.extend(["[browser]", f"driver = {_toml_string(cfg.browser.driver)}", ""])
+        lines.extend(["[browser]", f"driver = {_toml_string(cfg.browser.driver)}"])
+        if cfg.browser.keep_tabs is not False:
+            lines.append(f"keep_tabs = {_toml_value(cfg.browser.keep_tabs)}")
+        lines.append("")
 
     if cfg.tools != ToolsConfig():
         lines.extend(["[tools]", f"web_fetch = {_toml_value(cfg.tools.web_fetch)}"])
@@ -1916,6 +1981,10 @@ def save(cfg: Config) -> None:
 
     if cfg.tasks != TasksConfig():
         lines.extend(["[tasks]", f"follow_up = {_toml_value(cfg.tasks.follow_up)}", ""])
+
+    if cfg.chat != ChatConfig():
+        minutes = _toml_value(cfg.chat.recent_digest_minutes)
+        lines.extend(["[chat]", f"recent_digest_minutes = {minutes}", ""])
 
     if cfg.sessions != SessionsConfig():
         lines.append("[sessions]")

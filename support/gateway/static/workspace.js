@@ -26,7 +26,7 @@ import { setupModelCard } from "./setup-card.mjs";
 import { setupImportCard } from "./import-card.mjs";
 import { folderName, setupFolderPicker } from "./folder.mjs";
 import { modeOf, setupModeChip } from "./mode.mjs";
-import { allowState, blockCard, blockFacts, reviewWords } from "./blocked.mjs";
+import { allowState, blockCard, blockFacts, gistWords, reviewWords } from "./blocked.mjs";
 import { picturesNode, setupPictureBox } from "./pictures.mjs";
 import { memoryNodes } from "./memory.mjs";
 import { parseCommand, setupSlash } from "./slash.mjs";
@@ -1046,6 +1046,7 @@ function viewSnapshot() {
     turn.picturesOpen,
     turn.memory,
     turn.memoryOpen,
+    turn.digestOpen,
   ]);
   return JSON.stringify([
     S.activeId,
@@ -1483,7 +1484,8 @@ async function allowOnce(view, facts) {
   syncUI();
 }
 
-// What memory recalled and kept for the message: "Used 1 memory ▾", "Remembered: … · Undo".
+// What memory recalled and kept for the message: "Used 1 memory ▾", "Remembered: … · Undo",
+// "From your other chats (last 30 min) ▾".
 function memoryOf(turn) {
   return memoryNodes({
     doc: document,
@@ -1493,6 +1495,13 @@ function memoryOf(turn) {
       turn.memoryOpen = !turn.memoryOpen;
       renderMessages(false, true);
     },
+    digestOpen: turn.digestOpen === true,
+    toggleDigest: () => {
+      turn.digestOpen = !turn.digestOpen;
+      renderMessages(false, true);
+    },
+    // A chat the list has opens from its line; a terminal chat or one deleted since does not.
+    openChat: (id) => (id && listed(id) ? () => openSession(id) : null),
     undo: async (note) => {
       try {
         await api(`/memory/records/${note.id}?undo=true`, { method: "DELETE" });
@@ -1873,12 +1882,36 @@ function approvalCard(request, view = chatApproval, asked = "") {
       content = String(args.url);
       what = t("approval.readAddress");
     }
+  } else if (tool.startsWith("browser-act:") || tool.startsWith("browser-type:") || tool.startsWith("browser-submit:")) {
+    // Acting on a page asks apart from reading it: clicks and choices are one question per site and
+    // chat. Typing is its own question that shows all the text, and a form sent from the page is
+    // another, with the address it goes to; both ask every time.
+    const sending = tool.startsWith("browser-submit:");
+    const typing = tool.startsWith("browser-type:");
+    const site = String(args.site || tool.slice(tool.indexOf(":") + 1));
+    what = t("approval.willDo");
+    title = t(sending ? "approval.submitSite" : typing ? "approval.typeSite" : "approval.actSite", { site });
+    caption = t(sending ? "approval.submitCaption" : typing ? "approval.typeCaption" : "approval.actCaption");
+    rule = t(sending ? "approval.rule.submitOnce" : typing ? "approval.rule.typeOnce" : "approval.rule.act", { site, scope });
+    content = t(sending ? "approval.submitContent" : typing ? "approval.typeContent" : "approval.actContent", { site });
+    if (sending) {
+      // Where the form goes (or that the page decides) and what it holds, nothing secret in it.
+      why = content;
+      const rows = Array.isArray(args.fields) ? args.fields.map(([name, value]) => `${name}: ${value}`) : [];
+      content = [args.to ? String(args.to) : t("approval.submitPage"), ...(rows.length ? ["", t("approval.submitFields"), ...rows] : [])].join("\n");
+      what = t("approval.submitAddress");
+    } else if (typing) {
+      // The whole text, uncut: it is what goes into the page.
+      why = content;
+      content = String(args.text ?? "");
+      what = t("approval.actTyped");
+    }
   }
   // A high-impact call (installs, downloads, changes outside the folder) asks every time: the
   // card says why, offers no chat-wide allow, and starts on Deny.
   const review = request.review;
   const high = review?.verdict === "high";
-  const reviewed = high ? reviewWords(review, folder) : { title: "", reasons: [] };
+  const reviewed = high ? reviewWords({ ...review, gist: request.gist }, folder) : { title: "", reasons: [] };
   if (high) {
     card.dataset.impact = "high";
     title = reviewed.title || title;
@@ -1896,6 +1929,20 @@ function approvalCard(request, view = chatApproval, asked = "") {
     caption = t(`approval.outside.caption.${outside.access === "write" ? "write" : "read"}`, { tool, workspace });
     if (outside.access === "read") { content = ""; noBox = true; }
   }
+  // What the step will do comes first, in one plain sentence; a warning follows when the model's words
+  // and the code differ. The sentence is the code's own whenever the rules found the step risky, and the
+  // model's words then stand below it, labelled as the model's. A write, an edit and a tool's card already
+  // say as much in their question.
+  const gist = outside ? null : gistWords(request.gist);
+  const said = request.gist?.say?.id;
+  const plain = request.gist?.by === "code" && !gist?.warning && ["write", "edit", "tool"].includes(said);
+  if (gist?.sentence && !plain) card.append(el("p", "approval-gist", gist.sentence));
+  if (gist?.warning) {
+    const warning = el("p", "approval-mismatch", gist.warning);
+    warning.setAttribute("role", "alert");
+    card.append(warning);
+  }
+  if (gist?.note) card.append(el("p", "approval-says", gist.note));
   card.append(el("p", "approval-title", title), el("p", "approval-caption", caption));
   if (outside) card.append(folderBox(outside, tool, outsideFolder));
   if (high && reviewed.reasons.length) {
@@ -1917,14 +1964,24 @@ function approvalCard(request, view = chatApproval, asked = "") {
   body.tabIndex = 0;
   body.setAttribute("role", "group");
   body.setAttribute("aria-label", what);
-  if (shown.length) card.append(body);
+  // The code of a routine command or script is folded: the sentence and the kind say what it is for. A step
+  // the rules found risky (or never reviewed) shows its code open, until the person folds it.
+  const fold = !outside && (tool === "shell_exec" || tool === "python_exec") ? el("details", "approval-code") : null;
+  const codeHolder = fold ?? card;
+  if (fold) {
+    fold.append(el("summary", "", t("gist.showCode")));
+    if (state.codeOpen ?? review?.verdict !== "routine") fold.open = true;
+    fold.addEventListener("toggle", () => { state.codeOpen = fold.open === true; });
+  }
+  if (shown.length) codeHolder.append(body);
   if (canFold && !state.showAll && lines.length > 20) {
     const count = diff ? lines.filter((row) => row.kind !== "gap").length : lines.length;
-    card.append(button("link-button", t("approval.showLines", { n: count }), () => {
+    codeHolder.append(button("link-button", t("approval.showLines", { n: count }), () => {
       state.showAll = true;
       view.rerender();
     }));
   }
+  if (fold && shown.length) card.append(fold);
   card.append(...explanationNodes(request.explanation));
   const actions = el("div", "approval-actions");
   const denyView = el("div", "deny-view");
@@ -1949,7 +2006,9 @@ function approvalCard(request, view = chatApproval, asked = "") {
   deny.dataset.approvalDeny = "";
   deny.dataset.approvalFocus = "deny";
   // The answers offered: a folder outside the workspace that may be kept has four.
-  const offered = high ? [once, deny] : outside ? (grantable ? [once, session, always, deny] : [once, deny]) : [once, session, deny];
+  // Typing and a form's send ask every time, like a high-impact call: their answers are never kept for the chat.
+  const everyTime = high || tool.startsWith("browser-submit:") || tool.startsWith("browser-type:");
+  const offered = everyTime ? [once, deny] : outside ? (grantable ? [once, session, always, deny] : [once, deny]) : [once, session, deny];
   actions.append(...offered);
   card.append(actions);
   const command = tool === "shell_exec" || tool === "python_exec";

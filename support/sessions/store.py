@@ -189,6 +189,7 @@ SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
                 "searched",
                 "opened",
                 "search_hint",
+                "digest",
             }
         ),
         "session.title": frozenset({"title"}),
@@ -217,14 +218,15 @@ SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
     }
 )
 # Session event keys an event may lack: turn.started's origin is only on a
-# turn the person did not begin (#369), and turn.memory's search_hint only
-# when the recall block carried the hint.
+# turn the person did not begin (#369), turn.memory's search_hint only when
+# the recall block carried the hint, and its digest only on the turn whose
+# message carried the other chats' digest (#452).
 OPTIONAL_SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
     {
         "turn.started": frozenset({"origin"}),
         # searched and opened: only once a memory search found something, or the
         # model opened a turn, in the turn.
-        "turn.memory": frozenset({"searched", "opened", "search_hint"}),
+        "turn.memory": frozenset({"searched", "opened", "search_hint", "digest"}),
     }
 )
 # The session events that a run's writer may store with its batches; the

@@ -35,13 +35,20 @@
 
 **New side chat**（`⌘ K`）开始一个专注的对话，有自己的文件夹：文件夹选择提供默认文件夹、最近用过的文件夹和 **Choose a folder…**，对话会一直保留你的选择。它列在主对话下面。旁支对话的页眉以 **Main chat ›** 开头，点按即可返回；关闭正在打开的旁支对话也会回到主对话。主对话出现之前创建的对话原样成为它的旁支对话。
 
+<a id="who-he-or-she-means"></a>
+### “他”或“她”指的是谁
+
+- **新的旁支对话知道你刚才在聊什么。** 它的第一条消息还会带上最多五行简短摘要，来自你最近 30 分钟里的其他对话：每一轮说的是谁或什么，在哪个对话里。于是 `先读他的简历`（`read his résumé first`）指的就是你刚才在主对话里聊的那位朋友。你自己说的话优先。你的消息下方，**来自你的其他聊天（最近 30 分钟）** 可以展开 melo 读到的这几行，点对话的名字会打开那个对话。`[chat] recent_digest_minutes = 0` 可以关掉它（见[配置](../reference/configuration.md)）。
+- **他、她、它指的是这个对话在聊的人或事。** 你自己的资料（文件夹里的个人资料文件、关于你的笔记）只在你说到自己时才算（`我`、`我的`、`I`、`my`）。他、她、它读音相同、常被混用，换一个字不代表换了人。仍然不清楚时，melo 会问你一个简短的问题。
+- **简短的追问不会跑题。** 长时间搜索之后说一句 `去查一下`（`go look it up`），回答仍然是关于这个对话在聊的那个人，即使 melo 的工作记忆已经放下了前面的消息。
+
 旁支对话的一次运行结束时，主对话会在事情发生的那一天下面显示一张卡片。主对话自己的任务完成、失败或等你批准时也一样；旁支对话自己的任务则回到那个旁支对话（见[下文](#side-chats-start-tasks-too)）。卡片是这样的：
 
 - `Done: Fix the list_files test` 加上回答的前两行：改了什么、测试结果、提交。
 - `Did not finish: Fix CI` 加上它结束的原因。
 - `Ready: Fix CI`、`Done, not finished: Fix CI` 或 `Needs you: Fix CI` 表示任务做完了：这是代码核对出的结局，不是报告里说的（[怎样核对](scheduler.md#tasks-from-the-main-chat)）。没收尾的任务用琥珀色写出原因（`No test ran after the last change · The changes are not committed`），并提供 **Finish it: run the tests and commit**（或 **Finish it: run the tests**），像 **Continue** 一样让它接着做。需要你的任务显示它的问题。
 - `Stopped: Fix CI` 表示任务用完了所有步数还没做完。它显示回答里说明还剩什么的那一句（`Remaining: run the tests and commit.`），并提供 **Continue**，让任务从停下的地方接着做，并记得之前做过什么。同一个任务在它的页面和面板的 Activity、Workers 行里也读作 Stopped；**Continue** 在它的页面上。因其他原因失败的任务仍是 `Did not finish`。
-- `Needs your approval: Fix CI` 加上它请求做什么。你回答之后，同一张卡片会写出结果（"Allowed once"、"Allowed for this task"、"Denied"），不再提供 **Review**。
+- `Needs your approval: Fix CI` 加上它请求做什么：这一步有一句话概述时，就是那句话（`Needs your OK: Close the extra Safari tabs`）。你回答之后，同一张卡片会写出结果（"Allowed once"、"Allowed for this task"、"Denied"），不再提供 **Review**。
 - 标题是主对话给任务起的标题，否则是你的请求的开头部分，在词的边界处截断。
 - **Open side chat**、**Open task** 或 **Review** 会前往来源。卡片不是消息：模型从不读取它。
 
@@ -361,9 +368,9 @@
 
 需要审批的工具调用会在其 `Needs approval` 工具下方显示卡片。控制台会话使用 `RememberingPolicy`，在执行 `file_write` 和 `python_exec` 前请求审批；旧版 `/v1` 没有审批策略。审批不是针对持有 bearer 令牌的人或同一操作系统账户下恶意进程的安全边界，他们可以响应审批请求。
 
-卡片用一个简单的问题发问（"Run this command in demo-project?"、"Replace notes.txt?"、"Let melo use <tool>?"），问题下方是工具名和将要运行的确切内容。对已有文本文件的写入会显示它替换的内容：问题下面一行统计行数（"5 lines removed, 1 added"），框里列出有变化的行，每行带行号、− 或 + 符号，以及每侧两行上下文。删除的行标红，添加的行标绿，符号在没有颜色时表达同样的意思。较长的改动先显示前 20 行，**Show all N lines** 显示其余部分。行中的密钥读作 `[redacted]`。melo 无法比较时（文件不是文本、无法读取、超过 200 KB 或含有私钥，或者包括上下文在内的改动超过 1,000 行），卡片用一行文字说明，问题仍带着文件大小（"Replace logo.bin (480 bytes)?"），并只显示新文本。这个比较只供你阅读：下面的回答与其他文件写入的回答规则相同。实心按钮 **Allow once** 只运行这一次调用。**Allow for this chat**（在任务页面上为 **Allow for this task**）让该工具的常规调用在这个对话的其余时间不再询问；按钮下方的一行会说明这一点，对命令或 Python 代码还会补充说明：安装、下载和工作区之外的更改仍会询问。**Deny** 会打开一个可选的输入框 "Tell melo what to do instead"，并连同你写的内容一起发送拒绝；**Back** 或 Escape 回到三个回答。控件需等待 500 毫秒才能使用；请求到达不会移动焦点，也没有单键快捷方式可响应请求。卡片不在视图中时，消息输入框上方的提示条会写 "melo is waiting for your answer"，点按 **Review** 会打开其所在分组并移至 **Allow once**（高影响卡片上移至 **Deny**）。如果无法加载审批详情，或参数被截断或转换，两个允许按钮将不可用；你可以重新加载详情、拒绝或停止运行。
+卡片用一个简单的问题发问（"Run this command in demo-project?"、"Replace notes.txt?"、"Let melo use <tool>?"），问题下方是工具名和将要运行的确切内容。命令或 Python 脚本的卡片以一句平实的话开头，说明这一步要做什么，它由 melo 根据调用生成，并按顺序写出发现的每个效果（“Operate Safari, then delete files”；太长而无法完整显示的命令以“and 2 more”结尾）。模型自己的话（`why` 参数，或代码开头的注释）始终带着标签“melo says: …”。规则没有发现需要询问的内容时，这些话就是那句话，代码折叠在 **Show the code** 下面；规则发现了风险时，那句话仍由 melo 生成，模型的话放在它下面的一行，代码是展开的，所以这些话永远不会让一步看起来更安全；无论哪种情况，问题和理由都来自 melo 的规则。对已有文本文件的写入会显示它替换的内容：问题下面一行统计行数（"5 lines removed, 1 added"），框里列出有变化的行，每行带行号、− 或 + 符号，以及每侧两行上下文。删除的行标红，添加的行标绿，符号在没有颜色时表达同样的意思。较长的改动先显示前 20 行，**Show all N lines** 显示其余部分。行中的密钥读作 `[redacted]`。melo 无法比较时（文件不是文本、无法读取、超过 200 KB 或含有私钥，或者包括上下文在内的改动超过 1,000 行），卡片用一行文字说明，问题仍带着文件大小（"Replace logo.bin (480 bytes)?"），并只显示新文本。这个比较只供你阅读：下面的回答与其他文件写入的回答规则相同。实心按钮 **Allow once** 只运行这一次调用。**Allow for this chat**（在任务页面上为 **Allow for this task**）让该工具的常规调用在这个对话的其余时间不再询问；按钮下方的一行会说明这一点，对命令或 Python 代码还会补充说明：安装、下载和工作区之外的更改仍会询问。**Deny** 会打开一个可选的输入框 "Tell melo what to do instead"，并连同你写的内容一起发送拒绝；**Back** 或 Escape 回到三个回答。控件需等待 500 毫秒才能使用；请求到达不会移动焦点，也没有单键快捷方式可响应请求。卡片不在视图中时，消息输入框上方的提示条会写 "melo is waiting for your answer"，点按 **Review** 会打开其所在分组并移至 **Allow once**（高影响卡片上移至 **Deny**）。如果无法加载审批详情，或参数被截断或转换，两个允许按钮将不可用；你可以重新加载详情、拒绝或停止运行。
 
-安装软件、下载文件、更改工作区之外的文件或做其他[高影响](tools-mcp.md#high-impact-calls)事情的调用每次都会询问，并使用不同的卡片。它的问题说出调用要做什么（“Install software?”），问题下方一行写着 `python_exec · asks every time`，**Why melo asks** 列出最多三条原因（“Installs playwright with pip into .signin_venv (downloads about 42 MB).”）。**You asked:** 重复发起本轮的那条消息，方便你把它和 melo 将要做的事对照。卡片只有 **Allow once** 和 **Deny**，其中 **Deny** 是实心按钮：没有对整个对话的授权，按钮下方的一行会这样说明（“A chat-wide allow never covers installs, downloads or changes outside ~/demo-project.”）。melo 无法读懂的调用，或出于其他原因询问的调用，显示普通卡片。
+安装软件、下载文件、更改工作区之外的文件或做其他[高影响](tools-mcp.md#high-impact-calls)事情的调用每次都会询问，并使用不同的卡片。它的问题说出调用要做什么（“Install software?”），问题下方一行写着 `python_exec · asks every time`，**Why melo asks** 列出最多三条原因（“Installs playwright with pip into .signin_venv (downloads about 42 MB).”）。**You asked:** 重复发起本轮的那条消息，方便你把它和 melo 将要做的事对照。如果模型的话和代码在“删除文件”或“把数据发出去”上不一致，卡片会用红色警告引用模型的话（“melo described this as “Close the tabs”, but the code deletes files.”）。按普通名称操作一个应用的脚本（用 AppleScript 让 Safari 关闭标签页、`open -a Notes`）会问 **Control an app?** 并写明应用名；运行 shell、按键、操作 System Events、指名终端或路径、或运行快捷指令的脚本仍然是 **Change system settings?**。卡片只有 **Allow once** 和 **Deny**，其中 **Deny** 是实心按钮：没有对整个对话的授权，按钮下方的一行会这样说明（“A chat-wide allow never covers installs, downloads or changes outside ~/demo-project.”）。melo 无法读懂的调用，或出于其他原因询问的调用，显示普通卡片。
 
 melo 想要对话文件夹之外的文件时，卡片会询问那个文件夹（“让 melo 读取 ~/Documents/letters 里的内容？”），在一个框里显示它的真实路径，以及 melo 想在那里做什么（“melo 想读取这个文件夹里的 cover-letter.md。”）。读取提供 **允许一次**、**在这个对话里允许这个文件夹**、**总是允许这个文件夹** 和 **拒绝**：“这个对话”在对话结束时失效，“总是”会把文件夹记在设置的 **对话和文件夹** 里，你可以在那里移除。在那里写入是高影响卡片，每次都只有 **允许一次** 和 **拒绝**。对话可以读取的文件夹列在 **Details › Tools** 里，每个都有 **撤回**。密钥、melo 自己的数据、系统文件夹和你的整个主文件夹从不提供（见[工作区之外的文件夹](tools-mcp.md#folders-outside-the-workspace)）。
 
@@ -382,8 +389,8 @@ melo 想要对话文件夹之外的文件时，卡片会询问那个文件夹（
 - **切换。** 输入框下方模型旁边的按钮写着 **Ask** 或 **Auto**；它的菜单“melo 在这个对话里怎么做”从 melo 的下一步起切换这个对话（已经在等待的卡片保持不变）。新对话以 设置 → 对话与文件夹 → **新对话开始时**（`[approvals] mode`）中的模式开始；主对话在你为它选定模式之前跟随这个设置。
 - **会运行什么。** 在对话文件夹内、不安装、不下载、不发送、不删除任何东西的步骤。melo 无法判断的步骤先交给你的模型，只有在它属于常规且是你要求的内容时才会运行。在自动模式下，写入文件夹之外的操作即使没有被规则发现也会失败：它的输出写着 `writing outside the workspace is not allowed in auto mode`。自动模式下的步骤既读不到 melo 的登录令牌，也连不上 melo 自己的 API。
 - **是审查，不是围墙。** 自动模式会拦下有风险的步骤和偏离你要求的步骤。它的沙箱把步骤的文件限制在文件夹内，并让它碰不到 melo 的登录信息；但把工作交给另一个应用或程序的步骤（打开应用或脚本、用脚本控制另一个应用、交给另一种语言的代码、临时下载并运行的软件包或后台任务）是由审查来判断的，而不是被隔离：这类步骤会被拦下或交给你的模型检查，永远不会当作常规步骤运行。沙箱也不让步骤连接容器引擎。
-- **会拦下什么。** 安装、下载、更改文件夹外的文件、删除、密码和密钥、系统设置、来自网络的代码等，除非你自己的话要求这样做；更改 localmelo 本身的步骤永远不会运行；如果文件夹里包含正在运行的那份 localmelo，写入那份副本的操作会被拒绝。该步骤的那一行写着 `blocked: installs software`，工作内容下方的卡片说明拦下了什么、为什么，并显示这一步，melo 的回答会给出其他办法。
-- **允许它。** **Allow once**（允许一次）在 30 分钟内只运行这一步一次，并以你的名义发送“Go ahead with the step melo blocked: install software.”；或者回复“继续”。使用密码或密钥、更改系统设置、设置以后自动运行的东西、运行来自网络的代码或 melo 无法检查的代码的步骤，需要点按钮。melo 工作时按钮会等待；之后卡片写着 `Allowed once · ran at 14:02` 或 `Allowance expired`。
+- **会拦下什么。** 安装、下载、更改文件夹外的文件、删除、密码和密钥、系统设置、操作另一个应用的脚本、来自网络的代码等，除非你自己的话要求这样做；更改 localmelo 本身的步骤永远不会运行；如果文件夹里包含正在运行的那份 localmelo，写入那份副本的操作会被拒绝。该步骤的那一行写着 `blocked: installs software`，工作内容下方的卡片说明拦下了什么、为什么，并显示这一步，melo 的回答会给出其他办法。
+- **允许它。** **Allow once**（允许一次）在 30 分钟内只运行这一步一次，并以你的名义发送“Go ahead with the step melo blocked: install software.”；或者回复“继续”。使用密码或密钥、更改系统设置、用脚本操作另一个应用、设置以后自动运行的东西、运行来自网络的代码或 melo 无法检查的代码的步骤，需要点按钮。melo 工作时按钮会等待；之后卡片写着 `Allowed once · ran at 14:02` 或 `Allowance expired`。
 - **任务。** 任务保留创建它时所在对话的模式。任务页面显示 **模式**，并列出 **被拦下的步骤**，每一项都能打开同样的卡片；任务在没有这些步骤的情况下继续，在那里点 **Allow once** 会把消息发给这个任务。定时的例行任务每次运行时采用它所在对话当时的模式。
 - 允许只保存在内存中：重启 localmelo 后会忘记；重试的那一轮没有用到的允许，会在那一轮结束时失效。
 

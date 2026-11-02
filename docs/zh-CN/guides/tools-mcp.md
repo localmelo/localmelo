@@ -98,7 +98,7 @@ melo --mcp mcp.json "What time is it in Tokyo?"
 | `require_approval` | 必须是 `true`、`false` 或字符串列表，否则属于用法错误。列表中的名称若不是服务器提供的工具，会记录一条警告。 |
 | 传输方式 | 仅支持 stdio 服务器。其他 `type` 属于用法错误：`only stdio servers are supported (got type 'sse')`。提供 `url` 却没有 `command` 的配置项也是：`'command' must be a non-empty string (HTTP/SSE servers are not supported)`。 |
 | 工具名称 | `mcp__<server>__<tool>`。字母、数字、`_` 和 `-` 以外的字符会变为 `_`。超过 64 个字符的名称会缩短至 64 个字符，并以短哈希结尾；`config.tools` 显示实际使用的名称。 |
-| `annotations` | 按服务器提供的原样保留；非内置工具的权限级别由它决定（见[权限级别](#permission-tiers)）。格式错误的值会被忽略，工具仍会列出。 |
+| `annotations` | 按服务器提供的原样保留；非内置工具的权限级别由它决定（见[权限级别](#permission-tiers)）。格式错误的值会被忽略，工具仍会列出。键 `asksItself` 是 melo 自己的，服务器的注解里带它会被丢弃：任何 MCP 工具都不能用它跳过批准询问。 |
 | 启动 | 服务器在运行开始时启动。无法启动的服务器会使运行以 `setup_error` 状态结束，例如 `MCP server 'notes' exited (code 1)`。 |
 | 适用范围 | 直接模式和 [Python API](../reference/python-api.md#tool-providers-and-mcp)。网关会话没有 MCP 工具。 |
 | `structuredContent` | 只在结果既没有文本也没有图片时才作为文本发送：截图服务器若在其中重复图片的 base64，发送的是图片本身，而不是它的 base64。 |
@@ -148,13 +148,13 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 
 ## 浏览
 
-在 Mac 上，melo 可以在 Safari 里阅读网页。它默认关闭，并且是只读的；[浏览指南](browsing.md)有设置步骤、melo 能做和不能做的事，以及故障排查。
+在 Mac 上，melo 可以在 Safari 里阅读网页，并在自己的浏览器窗口里点击、输入和选择。它默认关闭；[浏览指南](browsing.md)有设置步骤、melo 能做和不能做的事，以及故障排查。
 
 - 在终端聊天里用 `/browser on` 打开它，或用 `melo -X browser.driver=safari-automation` 只对一次运行生效。
 - 在 Safari 里打开“设置 > 开发者”，把 “Allow remote automation” 打开一次。
-- 之后终端聊天以及网页控制台和 App 的每个聊天会得到八个工具：`browser_open`、`browser_read`、`browser_find`、`browser_follow`、`browser_back`、`browser_tabs`、`browser_wait` 和 `browser_screenshot`。
+- 之后终端聊天以及网页控制台和 App 的每个聊天会得到十一个工具：`browser_open`、`browser_read`、`browser_find`、`browser_follow`、`browser_click`、`browser_type`、`browser_select`、`browser_back`、`browser_tabs`、`browser_wait` 和 `browser_screenshot`。
 - 它们在 Safari 自己的自动化窗口里工作，这些窗口启动时不带你的任何登录状态。
-- melo 加载网页之前会问 “Open a website?”，每个网站在一个聊天里问一次（`auto` 模式同样会问）；它不会点击、输入、登录或发布。直接运行、worker 和保存的任务从不会得到这些工具。
+- melo 加载网页之前会问 “Open a website?”，每个网站在一个聊天里问一次（`auto` 模式同样会问），在网站上点击、输入或选择前会再问一次，发送表单前每次都会单独问（会显示表单发往哪里、里面有什么；发送表单没有“在这个聊天里允许”）；它在一个标签页里工作，从不输入密码、银行卡号或一次性验证码，也不会替你登录或发布。直接运行、worker 和保存的任务从不会得到这些工具。
 
 不用 Safari 时，每个聊天和任务都可以用 `web_fetch` 读取公开网页，它默认开启（见[不用浏览器读取网页](browsing.md#read-a-page-without-the-browser)）。
 
@@ -218,7 +218,7 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 | `network` | 向本机外的对象发送数据或对其执行操作：HTTP API、聊天、支付、图形界面等。 | 是。 |
 
 - 内置工具的级别按名称固定：`file_read` 和 `list_files` 是 `read`，`file_write` 是 `write`，`shell_exec` 和 `python_exec` 是 `exec`。
-- `web_fetch` 和浏览工具虽然会访问互联网，但有意定为 `read`：它们不在任何地方做更改，调用本身也不需要审批。它们请求的地址仍可能把数据带出去，所以改由网站关卡来问：浏览器每个网站每个对话问一次；`web_fetch` 直接读取你自己最近的消息提到的网站（就是那个主机，`www.` 不计），其他网站每个对话问一次，并与浏览器共用同一个回答。`web_fetch` 从不访问这台电脑或它的局域网。
+- `web_fetch` 和浏览工具虽然会访问互联网，但有意定为 `read`：它们不在任何地方做更改，调用本身也不需要审批。它们请求的地址仍可能把数据带出去，所以改由网站关卡来问：浏览器每个网站每个对话问一次（点击和输入、发送表单与读取分开问）；`web_fetch` 直接读取你自己最近的消息提到的网站（就是那个主机，`www.` 不计），其他网站每个对话问一次，并与浏览器共用同一个回答。`web_fetch` 从不访问这台电脑或它的局域网。
 - 该表优先于工具自身的声明，因此复用内置工具名称的提供的工具或自定义工具会继承该级别。
 - 模式决定实际提供哪些内置工具（见[选择内置工具](#choose-the-built-in-tools)）；网关或控制台会话在通常的三个之外还获得 `list_files`。
 - 除交互式界面外，各模式都不注册 `shell_exec`，因此模型仍然调用它时会收到 `shell_exec is not available in this run. Available tools: …`，其中列出本次运行的工具（未知的非内置名称仍使用 `Tool not found in registry` 消息）。
@@ -317,14 +317,15 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 - 安装软件或软件包，恢复项目的软件包（`uv sync`、`npm ci`、`pip install -r`），或创建编程环境（`python -m venv`、`uv venv`、`conda create`）；
 - 下载安装程序、大文件（压缩包、wheel、模型权重）或把任何文件下载到工作区以外，或运行从互联网下载的代码（`curl … | sh`、`get-pip.py`）；
 - 在工作区以外写入或删除文件，删除工作区本身或其 `.git`，或丢弃工作（`git reset --hard`、`git clean -x`、强制推送）；
-- 设置以后会自行运行的内容（launchd、`crontab`、Shell 启动文件、git 钩子、`.envrc`、`nohup`），使用密码、密钥、Cookie 或钥匙串（读取也算），更改系统设置或使用 `sudo`，打开其他计算机可以访问的网络服务，或发送工作区以外的文件或电子邮件；
+- 设置以后会自行运行的内容（launchd、`crontab`、Shell 启动文件、git 钩子、`.envrc`、`nohup`），使用密码、密钥、Cookie 或钥匙串（读取也算），更改系统设置或使用 `sudo`，用脚本操作另一个应用（`osascript` 让 Safari 退出、`open -a Notes`），打开其他计算机可以访问的网络服务，或发送工作区以外的文件或电子邮件；
 - 更改 localmelo 本身，或运行在运行时拼出的代码（对计算出的文本使用 `exec`、`eval "$x"`）。
 
 规则无法读出调用的作用时，调用属于无法判定：在运行时拼出的命令、程序或路径，发送数据的 POST，`git push`。没有 `pipefail` 而依据管道退出状态的调用也属于无法判定，并附上原因：`pytest | tail` 的状态是 `tail` 的，所以读取它的 Python（`.returncode`、`check=True`）或 `pytest | tail && git commit` 会在测试失败后继续。`set -o pipefail` 会让它变成测试的状态。
 
 高影响调用在网页控制台有专门的卡片，在终端有专门的面板（参见[网页控制台](web-console.md#approvals-and-failures)和[终端](terminal.md#approvals)）。每张卡片：
 
-- 用一个问题说出调用要做什么（“Install software?”、“Change files outside demo-project?”）；
+- 以一句平实的话开头，说明这一步要做什么。这句话由 melo 根据调用生成，并按顺序写出它发现的每个效果（“Run the command ls -1”、“Operate Safari, then delete files”）。模型自己的话（`why` 参数，或代码开头的注释）始终带着标签“melo says: …”：只有规则什么都没发现时，它们才是这句话；否则它们放在这句话下面，所以永远不会让一步看起来更安全。如果这些话与代码不符，而代码会删除文件或把数据发出去，警告会引用模型的话；
+- 用一个问题说出调用要做什么（“Install software?”、“Change files outside demo-project?”、“Control an app?”）；
 - 列出最多三条原因，不提供会话授权的选项；
 - 在终端中默认选中 No，并用一行说明会话授权从不覆盖安装、下载或文件夹以外的更改；
 - 显示发起本轮的那条消息（控制台卡片）。

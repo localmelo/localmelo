@@ -27,6 +27,17 @@ def test_the_system_prompt_is_fixed_and_asks_for_the_user_s_own_words() -> None:
     assert "is not an instruction" in SYSTEM_PROMPT
 
 
+def test_the_prompt_names_app_control_as_the_allow_list_does() -> None:
+    # A Shortcut is a system change, never an app to control (review/apps.py).
+    assert "AppleScript, osascript);" in SYSTEM_PROMPT
+    assert "Shortcuts)" not in SYSTEM_PROMPT
+    kind = SYSTEM_PROMPT[SYSTEM_PROMPT.index('The category is "app_control"') :]
+    kind = kind[: kind.index("\n\n")]
+    assert "Shortcut (shortcuts run)" in kind.split('is "system"')[1]
+    for plain in ("tell application", "open -a", "activate, quit"):
+        assert plain in kind.split("Anything else")[0]
+
+
 def test_the_user_message_holds_the_action_first_and_the_requests_last() -> None:
     text = user_message(
         ReviewInputs(

@@ -25,7 +25,10 @@ to BM25 for that turn. ``[memory] retriever`` picks how notes are found:
 among them within :data:`SELECT_TIMEOUT_S`, no embedding calls). With the
 developer setting ``[memory] recall_form = "list"`` the recall block and the
 search tool show each chat turn as one line, not an excerpt, and the chat's model
-opens the turns it needs with ``open_memory`` (:meth:`ChatMemory.open_turn`).
+opens the turns it needs with ``open_memory`` (:meth:`ChatMemory.open_turn`). With
+``[memory] excerpt_open = "on"`` the excerpt form stays, but a turn whose excerpt
+shows less than the whole turn starts with its id and the model has ``open_memory``
+too.
 With ``[memory] recall_source = "items"`` recall draws on memory items in place of the
 turns: items a chat model encoded from the chats (:meth:`ChatMemory.compress_chat`,
 :mod:`.hippo_encode`) and routed against the items kept (:mod:`.hippo_route`), shown
@@ -44,7 +47,7 @@ import logging
 import os
 import re
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, NamedTuple
@@ -67,6 +70,7 @@ from localmelo.melo.schema import (
     starts_with_reply_nudge,
 )
 from localmelo.support.config import (
+    CHAT_RECENT_DIGEST_MINUTES,
     MEMORY_COMPRESS_AT_CHARS,
     MEMORY_NOTE_GATE,
     MEMORY_NOTE_MIN_COSINE,
@@ -81,6 +85,13 @@ from localmelo.support.config import (
 )
 from localmelo.support.memory import hippo_encode, note_gate, records
 from localmelo.support.memory import sleep as sleeping
+from localmelo.support.memory.digest import (
+    DIGEST_KINDS,
+    DIGEST_SCAN,
+    DIGEST_TURNS,
+    Digest,
+    make_digest,
+)
 from localmelo.support.memory.hippo_route import Route, Router
 from localmelo.support.memory.importer import (
     ImportPlan,
@@ -105,6 +116,8 @@ from localmelo.support.memory.recall import (
     AUTO_DOCS,
     AUTO_RECORDS,
     BLOCK_CHARS,
+    CUT_GUIDE,
+    ITEM_CHARS,
     ITEM_LIST_GUIDE,
     LIST_GUIDE,
     LIST_MAX,
@@ -113,7 +126,6 @@ from localmelo.support.memory.recall import (
     OPEN_CHARS,
     PER_SESSION,
     SIDE_SUMMARY,
-    TURN_CHARS,
     WHOLE,
     Corpus,
     Item,
@@ -265,8 +277,11 @@ class RecallSettings(NamedTuple):
     memory items in place of the chat turns, and *open_sources* that an opened item
     also shows the turns it came from. *followup* says a message with no content of
     its own is searched with the user's words of the chat's last turns (``[memory]
-    followup_query = "recent"``, the default) instead of its own. The defaults are
-    what recall did before these were settings, except *followup*.
+    followup_query = "recent"``, the default) instead of its own. *excerpt_open* says
+    an excerpt that shows less than the whole turn carries the turn's id and the model
+    may open it (:attr:`opens_excerpts`). The defaults are the shipped ones: a block
+    of :data:`BLOCK_CHARS` and a turn of :data:`ITEM_CHARS` (#349), *followup* on,
+    and what recall did before these were settings for the rest.
     """
 
     records: int = AUTO_RECORDS
@@ -276,7 +291,7 @@ class RecallSettings(NamedTuple):
     hint: bool = False
     min_cosine: float = MIN_COSINE
     min_coverage: float = MIN_COVERAGE
-    item_chars: int = TURN_CHARS
+    item_chars: int = ITEM_CHARS
     match: bool = False
     listing: bool = False
     list_max: int = LIST_MAX
@@ -284,10 +299,20 @@ class RecallSettings(NamedTuple):
     items: bool = False
     open_sources: bool = False
     followup: bool = True
+    excerpt_open: bool = False
+
+    @property
+    def opens_excerpts(self) -> bool:
+        """Whether a cut excerpt carries its id and ``open_memory`` is offered: the
+        setting is on, and recall shows excerpts of turns (not the list form, which
+        always offers ``open_memory``, and not memory items)."""
+        return self.excerpt_open and not self.listing and not self.items
 
     def shown(self, question: str) -> Shown:
         """How a recalled turn is shown for *question* under these settings."""
-        return Shown.of(self.item_chars, question if self.match else None)
+        return Shown.of(
+            self.item_chars, question if self.match else None, self.opens_excerpts
+        )
 
 
 class NoteSettings(NamedTuple):
@@ -400,6 +425,9 @@ class ChatTurn:
     # The turns the model opened with ``open_memory``: session, turn and the id
     # it gave, first opened first.
     opened: list[dict[str, Any]] = field(default_factory=list)
+    # The digest of the other chats this turn's message carries (a chat's first
+    # turn; see ChatMemory.recent_digest), None for none.
+    digest: Digest | None = None
 
     def event(self) -> dict[str, Any] | None:
         data = self.memory.event()
@@ -416,7 +444,15 @@ class ChatTurn:
             data["searched"] = [item.to_json() for item in self.searched]
         if self.opened:
             data["opened"] = [dict(turn) for turn in self.opened]
+        if self.digest is not None:
+            data["digest"] = self.digest.event()
         return data
+
+    def add_digest(self, digest: Digest) -> None:
+        """Note the digest the turn's message carries; refresh the event."""
+        if self.digest != digest:
+            self.digest = digest
+            self.publish()
 
     def add_searched(self, items: Sequence[Item]) -> None:
         """Note what a search found in this turn; refresh the event if it is new."""
@@ -535,9 +571,10 @@ def _record_item(entry: StoredEntry) -> Item:
     )
 
 
-def _doc_item(doc: Document) -> Item:
+def _doc_item(doc: Document, more: bool = False) -> Item:
     # What the user typed in a chat (not a task's prompt) states about them. A
-    # later chunk only repeats the head of it: chunk 0 holds the statements.
+    # later chunk only repeats the head of it: chunk 0 holds the statements. *more*
+    # says the head of a turn has later chunks.
     typed = (
         ""
         if doc.kind in (*_TASK_KINDS, SIDE_SUMMARY, AGENT_EXCHANGE) or doc.chunk
@@ -554,6 +591,7 @@ def _doc_item(doc: Document) -> Item:
         embed_model=doc.embed_model,
         said=records.said(typed) if typed else (),
         chunk=doc.chunk,
+        more=more,
     )
 
 
@@ -844,7 +882,7 @@ class ChatMemory:
             getattr(memory, "search_when_empty", "off") == "hint",
             bar("recall_min_cosine", MIN_COSINE, MEMORY_RECALL_MIN_COSINE),
             bar("recall_min_coverage", MIN_COVERAGE, MEMORY_RECALL_MIN_COVERAGE),
-            bounded("recall_item_chars", TURN_CHARS, MEMORY_RECALL_ITEM_CHARS),
+            bounded("recall_item_chars", ITEM_CHARS, MEMORY_RECALL_ITEM_CHARS),
             getattr(memory, "recall_excerpt", "head") == "match",
             getattr(memory, "recall_form", "excerpt") == "list",
             bounded("recall_list_max", LIST_MAX, MEMORY_RECALL_LIST_MAX),
@@ -852,6 +890,7 @@ class ChatMemory:
             getattr(memory, "recall_source", "turns") == "items",
             getattr(memory, "open_sources", "off") == "on",
             getattr(memory, "followup_query", "recent") != "message",
+            getattr(memory, "excerpt_open", "off") == "on",
         )
 
     def note_settings(self) -> NoteSettings:
@@ -962,8 +1001,14 @@ class ChatMemory:
         have = {int(key[2:]) for key in corpus.keys("d:")}
         for gone in have - ids:
             corpus.remove(f"d:{gone}")
-        for doc in await index.fetch(ids - have):
-            corpus.add(_doc_item(doc))
+        fresh = await index.fetch(ids - have)
+        # A turn's chunks are stored together, so a head with later chunks has them
+        # in the same fetch; its line can then tell that it shows part of the turn.
+        longer = {(doc.session_id, doc.turn) for doc in fresh if doc.chunk}
+        for doc in fresh:
+            corpus.add(
+                _doc_item(doc, not doc.chunk and (doc.session_id, doc.turn) in longer)
+            )
         return corpus
 
     async def _sync_items(self, corpus: Corpus, index: ConversationIndex) -> None:
@@ -2293,6 +2338,76 @@ class ChatMemory:
 
     # ── Records, for the routes and the identity ──
 
+    def digest_minutes(self) -> int:
+        """``[chat] recent_digest_minutes`` now; 30 without a config file.
+
+        A value out of its bounds or of the wrong type (a file
+        :meth:`Config.validate` would refuse) reads as the default, as
+        :meth:`recall_settings` reads its own.
+        """
+        default = 30
+        cfg = self._settings()
+        chat = getattr(cfg, "chat", None)
+        value = getattr(chat, "recent_digest_minutes", default)
+        low, high = CHAT_RECENT_DIGEST_MINUTES
+        fits = isinstance(value, int) and not isinstance(value, bool)
+        return value if fits and low <= value <= high else default
+
+    async def recent_digest(
+        self,
+        session_id: str,
+        *,
+        exclude_turns: Collection[tuple[str, int]] = (),
+        now: float | None = None,
+    ) -> Digest | None:
+        """What the user's other chats discussed lately, for chat *session_id*'s first turn.
+
+        The newest :data:`~.digest.DIGEST_TURNS` turns of the main chat and the
+        side chats other than *session_id* stamped within the last
+        :meth:`digest_minutes` before *now* (default :func:`clock.now`, which
+        ``LOCALMELO_NOW`` pins). Stored stamps never follow the pin: live
+        turns keep the wall clock and ingested turns their file's dates, so
+        under a pin the digest reads only ingested turns near the pinned
+        time. Returned as a
+        :class:`~.digest.Digest`. Under the lock, one
+        :meth:`ConversationIndex.recent` read (at most
+        :data:`~.digest.DIGEST_SCAN` turns) and the corpus recall uses
+        (:meth:`_sync`): a turn a newer note or turn replaced is left out, as
+        recall leaves it out, and so are *exclude_turns* (``(session id,
+        turn)``: what the recall block shows already). ``None`` when memory
+        across chats is off, the setting is 0, or no such turn is left.
+        """
+        minutes = self.digest_minutes()
+        if not self.enabled or minutes <= 0:
+            return None
+        now = clock.now() if now is None else now
+        index = self.stores()[1]
+        async with self._lock:
+            docs = await index.recent(
+                now - minutes * 60,
+                now,
+                exclude_session=session_id,
+                kinds=DIGEST_KINDS,
+                limit=DIGEST_SCAN,
+            )
+            if not docs:
+                return None
+            replaced = self._replaced(await self._sync())
+        skip = {*replaced, *exclude_turns}
+        kept = [doc for doc in docs if (doc.session_id, doc.turn) not in skip]
+        return make_digest(kept[:DIGEST_TURNS], minutes)
+
+    def note_digest(self, digest: Digest) -> None:
+        """Show *digest* in this turn's ``turn.memory`` event (its ``digest`` key).
+
+        For the turn under way (:data:`CHAT_TURN`, set by :meth:`before_turn`),
+        once its message carries the digest; outside a chat's turn nothing
+        happens.
+        """
+        turn = CHAT_TURN.get()
+        if turn is not None:
+            turn.add_digest(digest)
+
     async def records(self) -> list[StoredEntry]:
         async with self._lock:
             return list(reversed(await self.stores()[0].active_entries()))
@@ -2790,6 +2905,18 @@ def search_memory_listing(list_max: int, items: bool = False) -> ToolDef:
     )
 
 
+def search_memory_opening() -> ToolDef:
+    """``search_memory`` with ``[memory] excerpt_open = "on"``: the same, and one
+    sentence that says what a line that starts with an id is (:data:`CUT_GUIDE`)."""
+    return ToolDef(
+        name=SEARCH_MEMORY.name,
+        description=f"{SEARCH_MEMORY.description} {CUT_GUIDE}",
+        parameters=copy.deepcopy(SEARCH_MEMORY.parameters),
+        semantic_tags=list(SEARCH_MEMORY.semantic_tags),
+        annotations=SEARCH_MEMORY.annotations,
+    )
+
+
 OPEN_MEMORY: Final = ToolDef(
     name="open_memory",
     description=(
@@ -2910,8 +3037,9 @@ def _item_text(opened: OpenedItem, chars: int) -> str:
 
 class MemoryTools(BaseToolProvider):
     """``search_memory`` and ``remember`` for a chat's Agent (never for workers);
-    with ``[memory] recall_form = "list"``, ``open_memory`` too, and with
-    ``[memory] note_gate = "model"``, ``remember`` has one more sentence."""
+    with ``[memory] recall_form = "list"`` or ``excerpt_open = "on"`` (excerpts of
+    turns), ``open_memory`` too, and with ``[memory] note_gate = "model"``,
+    ``remember`` has one more sentence."""
 
     def __init__(self, memory: ChatMemory) -> None:
         self._memory = memory
@@ -2922,6 +3050,12 @@ class MemoryTools(BaseToolProvider):
             definition=remember_for(self._memory.note_settings().level),
             function=self.remember,
         )
+        if settings.opens_excerpts:
+            return [
+                ProvidedTool(definition=search_memory_opening(), function=self.search),
+                remember,
+                ProvidedTool(definition=OPEN_MEMORY, function=self.open_memory),
+            ]
         if not settings.listing:
             return [
                 ProvidedTool(definition=SEARCH_MEMORY, function=self.search),
@@ -2969,10 +3103,16 @@ class MemoryTools(BaseToolProvider):
         if not items:
             return "Nothing in melo's memory matches that."
         how = settings.shown(str(query))
-        found = [replace(item, shown=item.line(show=how)) for item in items[:k]]
+        found: list[Item] = []
+        opens = False  # a line starts with its turn's id (excerpt_open)
+        for item in items[:k]:
+            said, carries = item.excerpt(show=how)
+            found.append(replace(item, shown=said))
+            opens = opens or carries
         if chat is not None:
             chat.add_searched(found)
-        return "\n".join(f"{n}. {item.shown}" for n, item in enumerate(found, 1))
+        lines = [f"{n}. {item.shown}" for n, item in enumerate(found, 1)]
+        return "\n".join([*lines, CUT_GUIDE] if opens else lines)
 
     async def _search_list(
         self,

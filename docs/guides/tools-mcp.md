@@ -90,7 +90,7 @@ What else the file and the servers do:
 | `require_approval` | Must be `true`, `false` or a list of strings, else a usage error. A listed name the server does not offer is logged as a warning. |
 | Transport | Only stdio servers work. Another `type` is a usage error: `only stdio servers are supported (got type 'sse')`. So is an entry with a `url` and no `command`: `'command' must be a non-empty string (HTTP/SSE servers are not supported)`. |
 | Tool names | `mcp__<server>__<tool>`. Characters other than letters, digits, `_` and `-` become `_`. A name over 64 characters is cut to 64 and ends with a short hash; `config.tools` shows the names used. |
-| `annotations` | Kept as the server gives them; they decide the tier of a tool that is not a built-in (see [Permission tiers](#permission-tiers)). A malformed value is ignored and the tool still lists. |
+| `annotations` | Kept as the server gives them; they decide the tier of a tool that is not a built-in (see [Permission tiers](#permission-tiers)). A malformed value is ignored and the tool still lists. The key `asksItself` is melo's own and is dropped from a server's annotations: no MCP tool can use it to skip the approval question. |
 | Start | The servers start with the run. One that cannot start ends it as `setup_error`, for example `MCP server 'notes' exited (code 1)`. |
 | Where | Direct mode and the [Python API](../reference/python-api.md#tool-providers-and-mcp). Gateway sessions have no MCP tools. |
 | `structuredContent` | Sent as text only when the result has no text and no picture: a screenshot server that repeats the base64 there sends the picture, not its base64. |
@@ -136,13 +136,13 @@ With pixels on, the tool's text stays in its `role: "tool"` message. The picture
 
 ## Browsing
 
-On a Mac, melo can read web pages in Safari. It is off by default and read-only; [the browsing guide](browsing.md) has the setup, what melo can and cannot do, and troubleshooting.
+On a Mac, melo can read web pages in Safari, and click, type and choose on them inside its own browser window. It is off by default; [the browsing guide](browsing.md) has the setup, what melo can and cannot do, and troubleshooting.
 
 - Turn it on with `/browser on` in the terminal chat, or `melo -X browser.driver=safari-automation` for one run.
 - In Safari, open Settings > Developer and turn on "Allow remote automation" once.
-- The terminal chat and every chat of the web console and the app then get eight tools: `browser_open`, `browser_read`, `browser_find`, `browser_follow`, `browser_back`, `browser_tabs`, `browser_wait` and `browser_screenshot`.
+- The terminal chat and every chat of the web console and the app then get eleven tools: `browser_open`, `browser_read`, `browser_find`, `browser_follow`, `browser_click`, `browser_type`, `browser_select`, `browser_back`, `browser_tabs`, `browser_wait` and `browser_screenshot`.
 - They work in Safari's own automation windows, which start without any of your sign-ins.
-- melo asks "Open a website?" before it loads a page, once per site and chat (`auto` mode still asks); it does not click, type, sign in or post. Direct runs, workers and saved tasks never get these tools.
+- melo asks "Open a website?" before it loads a page, once per site and chat (`auto` mode still asks), asks again before it clicks, types or chooses on a site, and asks by itself, every time, before it sends a form (showing where it goes and what it holds; there is no "allow for this chat" for a send); it works in one tab, never types a password, card number or one-time code, and does not sign in or post for you. Direct runs, workers and saved tasks never get these tools.
 
 Without Safari, every chat and task can read a public page with `web_fetch`, which is on by default (see [Read a page without the browser](browsing.md#read-a-page-without-the-browser)).
 
@@ -203,7 +203,7 @@ Every tool has one of four tiers: what a call can reach, not a denial. For a bui
 
 - The built-ins are fixed by name: `file_read` and `list_files` are `read`, `file_write` is `write`, and `shell_exec` and `python_exec` are `exec`.
 - The table wins over a tool's own claims, so a provided or custom tool that reuses a built-in's name inherits that tier.
-- `web_fetch` and the browser tools are `read` on purpose, though they reach the internet: they change nothing anywhere, and the call itself asks nothing. The address they request can still carry data out, so a site gate asks instead: the browser asks once per site and chat; `web_fetch` reads a site your own recent messages name (that host itself, `www.` aside) at once and asks once per chat about any other, sharing the browser's answer. `web_fetch` never reaches this machine or its local network.
+- `web_fetch` and the browser tools are `read` on purpose, though they reach the internet: they change nothing anywhere, and the call itself asks nothing. The address they request can still carry data out, so a site gate asks instead: the browser asks once per site and chat (clicking and typing, and sending a form, ask apart from reading); `web_fetch` reads a site your own recent messages name (that host itself, `www.` aside) at once and asks once per chat about any other, sharing the browser's answer. `web_fetch` never reaches this machine or its local network.
 - The mode decides which built-ins are offered at all (see [Choose the built-in tools](#choose-the-built-in-tools)); a gateway or console session gets `list_files` as well as the usual three.
 - In every mode but the interactive UI, `shell_exec` is not registered, so a model that calls it gets `shell_exec is not available in this run. Available tools: …`, naming the run's tools (an unknown non-built-in name keeps the `Tool not found in registry` message).
 - `AgentOptions(builtins=…)` or `--builtins` always wins over the mode's default set, except in gateway mode.
@@ -293,14 +293,15 @@ It is high-impact when it:
 - installs software or packages, restores a project's packages (`uv sync`, `npm ci`, `pip install -r`), or creates a programming environment (`python -m venv`, `uv venv`, `conda create`);
 - downloads an installer, a large file (an archive, a wheel, model weights) or anything to a place outside the workspace, or runs code downloaded from the internet (`curl … | sh`, `get-pip.py`);
 - writes or deletes files outside the workspace, deletes the workspace or its `.git`, or discards work (`git reset --hard`, `git clean -x`, a force-push);
-- sets up something that runs later (launchd, `crontab`, shell startup files, git hooks, `.envrc`, `nohup`), uses passwords, keys, cookies or the keychain (reads too), changes system settings or uses `sudo`, opens a network service other computers can reach, or sends a file from outside the workspace or an email;
+- sets up something that runs later (launchd, `crontab`, shell startup files, git hooks, `.envrc`, `nohup`), uses passwords, keys, cookies or the keychain (reads too), changes system settings or uses `sudo`, operates another app through a script (`osascript` telling Safari to quit, `open -a Notes`), opens a network service other computers can reach, or sends a file from outside the workspace or an email;
 - changes localmelo itself, or runs code built at run time (`exec` of computed text, `eval "$x"`).
 
 A call is undecided when the rules cannot read what it does: a command, program or path built at run time, a POST that sends data, `git push`. It is also undecided, with a reason that says why, when it goes by the exit status of a pipeline without `pipefail`: the status of `pytest | tail` is `tail`'s, so Python that reads it (`.returncode`, `check=True`), or `pytest | tail && git commit`, goes on after failed tests. `set -o pipefail` makes it the test's.
 
 A high-impact call gets its own card in the web console and its own panel in the terminal (see [the web console](web-console.md#approvals-and-failures) and [the terminal](terminal.md#approvals)). Each:
 
-- names what the call does as a question ("Install software?", "Change files outside demo-project?");
+- starts with one plain sentence about what the step will do, built by melo from the call and naming every effect it finds in order ("Run the command ls -1", "Operate Safari, then delete files"). The model's own words (a `why` argument, or a comment at the top of its code) are always labelled "melo says: …": they are the sentence only when the rules found nothing, and stand below it otherwise, so they never make a step look safer. If the words say one thing and the code deletes files or sends data out, a warning quotes the words;
+- names what the call does as a question ("Install software?", "Change files outside demo-project?", "Control an app?");
 - lists up to three reasons and offers no session choice;
 - starts on No in the terminal, with one line saying that a session grant never covers installs, downloads or changes outside the folder;
 - shows the message that started the turn (the console card).

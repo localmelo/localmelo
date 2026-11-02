@@ -58,7 +58,11 @@ class ProvidedTool:
     names a set of tools that are offered together: with
     ``tool_exposure="retrieve"``, every tool of a group is offered on every
     step, as the built-ins are, instead of waiting for hints or BM25 to
-    pick it (``"all"`` offers every tool anyway).
+    pick it (``"all"`` offers every tool anyway). ``asks_itself`` is for
+    melo's own browser tools, which ask their questions themselves: the agent
+    honours it only for the few names melo lists
+    (``contracts.approvals.SELF_ASKING_TOOLS``), so it does not let any other
+    tool skip the approval policy.
     """
 
     definition: ToolDef
@@ -66,6 +70,7 @@ class ProvidedTool:
     timeout_ms: float | None = None
     requires_approval: bool = False
     group: str | None = None
+    asks_itself: bool = False
 
 
 class BaseToolProvider(ABC):

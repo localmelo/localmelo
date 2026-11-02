@@ -34,7 +34,7 @@ import signal
 import sys
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Final
 
 from localmelo.melo.checker.validators import (
     MAX_IMAGE_BYTES,
@@ -675,14 +675,22 @@ def _close_pipes(proc: asyncio.subprocess.Process) -> None:
                 pipe.close()
 
 
+# Annotation keys melo gives only to its own tools. A server cannot claim them: a
+# tool that said it asks for itself would skip the approval gate.
+_MELO_ONLY_ANNOTATIONS: Final = frozenset({"asksItself"})
+
+
 def _parse_annotations(item: dict[str, Any]) -> dict[str, Any]:
-    """The tool's raw annotations, if they are a JSON object of string keys."""
+    """The tool's raw annotations, if they are a JSON object of string keys.
+
+    Keys that are melo's own (:data:`_MELO_ONLY_ANNOTATIONS`) are dropped.
+    """
     annotations = item.get("annotations")
     if not isinstance(annotations, dict):
         return {}
     if not all(isinstance(key, str) for key in annotations):
         return {}
-    return dict(annotations)
+    return {k: v for k, v in annotations.items() if k not in _MELO_ONLY_ANNOTATIONS}
 
 
 def _parse_tool(item: Any) -> McpTool | None:

@@ -29,12 +29,14 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
+from localmelo.melo.checker.review.gist import step_gist
 from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     ApprovalPolicy,
     ApprovalRequest,
     AutoPolicy,
     DenyAllPolicy,
+    never_granted,
 )
 from localmelo.melo.contracts.review import because, offers_grant, review_title
 from localmelo.support.cli import edits
@@ -42,6 +44,7 @@ from localmelo.support.cli.text import escape_arguments, wrap_cells
 from localmelo.support.config import SavedFolders
 from localmelo.support.sessions.approvals import AskFunction, RememberingPolicy
 from localmelo.support.sessions.display import display_path, folder_name, home_label
+from localmelo.support.words import gist_note, gist_text
 
 # Keys other than Esc and Ctrl+C do nothing this long after the panel opens,
 # so a draft being typed cannot answer it.
@@ -105,6 +108,13 @@ class PanelText:
     escaped: bool
     # Why melo asks, for a high-impact call: one sentence per entry.
     notes: tuple[str, ...] = ()
+    # What the step will do in one plain sentence (#454), first on the panel;
+    # the warning is set when the model's words do not match the code.
+    says: str = ""
+    warning: str = ""
+    # The model's own words, labelled ("melo says: ..."), below the sentence
+    # of a step the rules found risky.
+    said: str = ""
 
 
 def _command_text(command: object) -> str:
@@ -176,7 +186,7 @@ def panel_text(
     """
     if request.outside is not None:
         return _outside_panel(request, target, width, minus, show_tier)
-    text = _tool_panel(request, target, width, minus, show_tier)
+    text = _says(request, _tool_panel(request, target, width, minus, show_tier))
     review = request.review
     title = review_title(review, folder_name(request.workspace_root))
     if review is None or not title:
@@ -184,6 +194,34 @@ def panel_text(
     note, changed = escape_arguments(f"melo asks because this call {because(review)}.")
     return dataclasses.replace(
         text, title=title, notes=(note,), escaped=text.escaped or changed
+    )
+
+
+def _says(request: ApprovalRequest, text: PanelText) -> PanelText:
+    """*text* with the sentence the panel starts with, escaped like the code below it.
+
+    A tool whose question says as much itself (a file write, a tool's name, a
+    site) has none.
+    """
+    gist = step_gist(request.tool_name, request.arguments, request.review)
+    if gist is None:
+        return text
+    shown = gist.to_json()
+    says, warning = gist_text(shown, "en")
+    said = gist_note(shown, "en")
+    if gist.plain:
+        says = ""
+    if not (says or warning or said):
+        return text
+    says, changed = escape_arguments(says)
+    warning, warned = escape_arguments(warning)
+    said, noted = escape_arguments(said)
+    return dataclasses.replace(
+        text,
+        says=says,
+        warning=warning,
+        said=said,
+        escaped=text.escaped or changed or warned or noted,
     )
 
 
@@ -259,6 +297,62 @@ def _tool_panel(
         return PanelText(
             "Read a website?",
             f"{site}{mark} · web_fetch · read only",
+            body,
+            escaped_any,
+        )
+    if tool.startswith(("browser-act:", "browser-type:", "browser-submit:")):
+        sending = tool.startswith("browser-submit:")
+        typing = tool.startswith("browser-type:")
+        site = shown(str(arguments.get("site") or tool.split(":", 1)[1]))
+        goes = str(arguments.get("to") or "")
+        if sending:
+            said = f"melo wants to send a form from {site}."
+            note = (
+                "Whatever the form holds goes to the address below."
+                if goes
+                else "The page decides where this goes: melo cannot say."
+            )
+        elif typing:
+            said = (
+                f"melo wants to type this text on {site} in Safari's automation window:"
+            )
+            note = (
+                "It never types passwords, card numbers or one-time codes. Once the "
+                "text is in the page, the page may send it on its own; melo asks "
+                "before it presses send, but cannot stop every send the page makes."
+            )
+        else:
+            said = (
+                f"melo wants to click and choose on {site} in Safari's "
+                "automation window, as you would."
+            )
+            note = "Each text it types is asked about apart, every time."
+        body = [("", row) for row in _wrapped([said], width)]
+        if sending and goes:
+            body += [("", row) for row in _wrapped([shown(goes)], width)]
+        if sending and (rows := arguments.get("fields")):
+            body += [
+                ("muted", row)
+                for row in _wrapped(
+                    [f"{shown(str(n))}: {shown(str(v))}" for n, v in rows], width
+                )
+            ]
+        if typing:
+            typed = shown(str(arguments.get("text") or ""))
+            body += [("", row) for row in _wrapped(typed.split("\n"), width)]
+        body += [("muted", row) for row in _wrapped([note], width)]
+        return PanelText(
+            (
+                "Send a form?"
+                if sending
+                else "Type on a website?" if typing else "Click on a website?"
+            ),
+            f"{site}{mark} · "
+            + (
+                "sends a form"
+                if sending
+                else "types text" if typing else "acts on the page"
+            ),
             body,
             escaped_any,
         )
@@ -350,6 +444,11 @@ def session_option(request: ApprovalRequest) -> str:
     if request.tool_name.startswith("browser:"):
         site = str(request.arguments.get("site") or "this site")
         return f"Yes, and allow {site} for the rest of this chat"
+    if request.tool_name.startswith("browser-act:"):
+        site = str(request.arguments.get("site") or "this site")
+        return (
+            f"Yes, and allow clicking and choosing on {site} for the rest of this chat"
+        )
     return f"Yes, and allow every {request.tool_name} call in this session"
 
 
@@ -412,9 +511,11 @@ class TerminalApprover:
         # a folder outside the workspace is offered only when it may be kept.
         outside = request.outside
         offered = offers_grant(request.review) if outside is None else outside.grantable
+        # An answer to typing or to a form's send is never kept for the chat: no session choice.
+        grantable = offered and not never_granted(request.tool_name)
         self.pending = PendingApproval(
             request=request,
-            offer_session=offered and offer_session is not False,
+            offer_session=grantable and offer_session is not False,
             opened_at=self._clock(),
             future=future,
             target=target,

@@ -7,8 +7,8 @@ from MCP servers, which tools each step offers, and what the checks do.
 
 | Tool | What it does | Limits |
 |---|---|---|
-| `shell_exec` | Runs a shell command with `/dev/null` as standard input and returns its output. | Killed with every process it started after 30 seconds. Only `interactive` mode offers it by default: a direct run and a Python caller need an explicit `builtins` set that names it; a gateway or console session does not offer it by default and refuses it even when named. |
-| `python_exec` | Runs Python code in a child process and returns what it prints. | Killed with every process it started after 60 seconds. `sys.exit()` ends only the child. |
+| `shell_exec` | Runs a shell command with `/dev/null` as standard input and returns its output. Takes `command` and an optional `why`, one short sentence that starts the approval card; it changes nothing about what runs. | Killed with every process it started after 30 seconds. Only `interactive` mode offers it by default: a direct run and a Python caller need an explicit `builtins` set that names it; a gateway or console session does not offer it by default and refuses it even when named. |
+| `python_exec` | Runs Python code in a child process and returns what it prints. Takes `code` and an optional `why`, as `shell_exec` does. | Killed with every process it started after 60 seconds. `sys.exit()` ends only the child. |
 | `file_read` | Reads a text file. Takes `path` and, to read a part, `start_line` and `end_line` (1-based, inclusive). | Any file your account can read. A part that does not show the whole file ends with a note of how many lines the file has and the `start_line` to go on from (`... [the file has 1,240 lines; showing 1-400; read more with start_line=401]`). |
 | `list_files` | Lists a folder: its folders first, each ending in `/`, then its files with their sizes; a link ends in `@`. Takes `path` (default: the workspace folder) and `depth` (1 to 3, default 1). Never reads a file, never follows a link and skips `.git`. | Shows 200 entries, then `... and N more`. Read-only, so it never asks for approval. The interactive UI and gateway and console sessions offer it by default; a direct run and the Python API's default mode do not (`--builtins list_files` or `all` names it). |
 | `file_write` | Writes text to a file, creating or replacing it. | Any file your account can write. |
@@ -210,7 +210,7 @@ those tools. `--tool-exposure` chooses the list:
 - **`all`**: every registered tool, sorted by name, on every step. The list
   never changes, which helps servers that cache prompt prefixes.
 
-A provider can mark its tools as a group (`ProvidedTool.group`); with `retrieve`, every tool of a group is offered on every step, like the built-ins, after them. The eight browser tools are such a group, present only while `[browser] driver` is on (see [Browsing with melo](../guides/browsing.md)), and so is `web_fetch` (group `web`).
+A provider can mark its tools as a group (`ProvidedTool.group`); with `retrieve`, every tool of a group is offered on every step, like the built-ins, after them. The eleven browser tools are such a group, present only while `[browser] driver` is on (see [Browsing with melo](../guides/browsing.md)), and so is `web_fetch` (group `web`).
 
 A call to a tool that the step did not offer is refused with
 `Tool '<name>' was not offered in this step.` and does not run. The refusal

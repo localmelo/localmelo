@@ -28,6 +28,7 @@ from localmelo.support.cli.approvals import (
     TerminalApprover,
     approval_words,
     panel_text,
+    session_option,
     session_warning,
 )
 from localmelo.support.cli.render import LiveState
@@ -167,6 +168,97 @@ def test_a_site_web_fetch_would_read_asks_to_read_it_not_to_open_it() -> None:
     opened = panel_text(_request("browser:https://example.com", **args), width=80)
     assert opened.title == "Open a website?" and "Safari" in " ".join(
         line for _, line in opened.body
+    )
+
+
+def test_acting_on_a_page_and_sending_a_form_ask_apart_from_opening_a_site() -> None:
+    acting = panel_text(
+        _request("browser-act:https://example.com", site="example.com", access="act"),
+        width=80,
+    )
+    assert acting.title == "Click on a website?"
+    assert (
+        acting.header.startswith("example.com") and "acts on the page" in acting.header
+    )
+    words = " ".join(line for _, line in acting.body)
+    assert "click and choose on example.com" in words
+    assert "click, type" not in words, "typing is a question of its own"
+    assert "asked about apart, every time" in words
+    address = "https://other.org/post"
+    sending = panel_text(
+        _request(
+            "browser-submit:https://example.com",
+            site="example.com",
+            access="submit",
+            to=address,
+            how="click",
+        ),
+        width=80,
+    )
+    assert sending.title == "Send a form?" and "sends a form" in sending.header
+    assert ("", address) in sending.body
+
+
+def test_a_form_panel_shows_what_it_holds_and_when_the_page_decides() -> None:
+    holding = panel_text(
+        _request(
+            "browser-submit:https://example.com",
+            site="example.com",
+            access="submit",
+            to="https://other.org/post",
+            how="click",
+            fields=[["q", "cats"], ["token", "(hidden)"]],
+        ),
+        width=80,
+    )
+    rows = [line for _, line in holding.body]
+    assert "q: cats" in rows and "token: (hidden)" in rows
+    # Enter outside a form: no address is known, and the panel says so.
+    entering = panel_text(
+        _request(
+            "browser-submit:https://example.com",
+            site="example.com",
+            access="submit",
+            to="",
+            how="enter",
+            fields=[["typed", "cats"]],
+        ),
+        width=80,
+    )
+    words = " ".join(line for _, line in entering.body)
+    assert "the page decides where this goes" in words.lower()
+    assert "typed: cats" in words
+
+
+def test_a_typing_panel_shows_all_the_text_and_says_the_page_may_send_it() -> None:
+    text = "hello there\n" + "a long line of words " * 40 + "THE END"
+    typing = panel_text(
+        _request(
+            "browser-type:https://example.com",
+            site="example.com",
+            access="type",
+            how="type",
+            text=text,
+        ),
+        width=80,
+    )
+    assert typing.title == "Type on a website?" and "types text" in typing.header
+    words = " ".join(line for _, line in typing.body)
+    assert "hello there" in [line for _, line in typing.body]
+    assert "".join(text.split()) in "".join(words.split()), "none of the text is cut"
+    assert "never types passwords" in words
+    assert "the page may send it on its own" in words
+
+
+def test_the_chat_wide_answer_names_what_it_allows() -> None:
+    def option(name: str) -> str:
+        return session_option(_request(name, site="example.com"))
+
+    assert option("browser:https://example.com") == (
+        "Yes, and allow example.com for the rest of this chat"
+    )
+    assert "clicking and choosing on example.com" in option(
+        "browser-act:https://example.com"
     )
 
 
@@ -1059,6 +1151,41 @@ async def test_every_other_call_still_offers_the_session_choice(
     assert await asking == ApprovalDecision(True, remember=True)
 
 
+@pytest.mark.parametrize(
+    "request_",
+    [
+        _request(
+            "browser-submit:https://example.com",
+            site="example.com",
+            access="submit",
+            to="https://other.org/post",
+            how="click",
+        ),
+        _request(
+            "browser-type:https://example.com",
+            site="example.com",
+            access="type",
+            how="type",
+            text="hello",
+        ),
+    ],
+    ids=["send", "type"],
+)
+async def test_a_form_send_and_typing_have_no_session_choice_and_a_session_answer_does_nothing(
+    request_: ApprovalRequest,
+) -> None:
+    approver = TerminalApprover()
+    request = request_
+    asking = asyncio.ensure_future(approver.ask(request, offer_session=True))
+    await asyncio.sleep(0)
+    pending = approver.pending
+    assert pending is not None and pending.offer_session is False
+    approver.answer("session")
+    assert not asking.done()
+    approver.answer("once")
+    assert await asking == ApprovalDecision(True)
+
+
 async def test_the_high_impact_panel_shows_why_and_answers_by_position(
     now: list[float],
 ) -> None:
@@ -1098,6 +1225,140 @@ async def test_a_routine_panel_keeps_its_three_options(now: list[float]) -> None
         text = app.text()
         assert "❯ 1. Yes" in text and "3. No, and tell melo why" in text
         assert "melo asks because" not in text and "never cover" not in text
+        now[0] += 1
+        app.type("1")
+        await asyncio.wait_for(asking, 3)
+
+
+# ── The sentence a panel starts with, and the kind of a script that operates an app (#454) ──
+
+_APP_REVIEW = ActionReview(
+    "high", ("app_control",), ("Operates Safari through a script.",)
+)
+_TABS = (
+    "import subprocess\nscript = 'tell application \"Safari\" to close every tab'\n"
+    "subprocess.run(['osascript', '-e', script])"
+)
+
+
+def _saying(tool: str, review: ActionReview | None = None, **arguments: Any) -> Any:
+    return panel_text(
+        dataclasses.replace(_request(tool, **arguments), review=review), width=60
+    )
+
+
+def test_the_panel_starts_with_what_the_step_will_do() -> None:
+    plain = _saying("shell_exec", command="git status")
+    assert (plain.says, plain.warning) == ("Run the command git status", "")
+    # The model's words, labelled as the model's, for a routine step.
+    spoken = _saying(
+        "shell_exec",
+        ActionReview("routine"),
+        command="ls notes",
+        why="List the notes folder",
+    )
+    assert (spoken.says, spoken.warning, spoken.said) == (
+        "melo says: List the notes folder",
+        "",
+        "",
+    )
+    assert _saying("python_exec", code="print(1)").says == "Run a Python script"
+
+
+def test_the_models_words_of_a_risky_step_go_below_the_sentence() -> None:
+    risky = ActionReview("high", ("install",), ("Installs numpy with pip.",))
+    text = _saying(
+        "shell_exec", risky, command="pip install numpy", why="Check the notes"
+    )
+    assert text.says == "Run the command pip install numpy"
+    assert text.said == "melo says: Check the notes"
+
+
+def test_a_script_that_operates_an_app_is_titled_by_its_kind() -> None:
+    text = _saying(
+        "python_exec",
+        _APP_REVIEW,
+        code=_TABS,
+        why="Close the 7 forum tabs melo opened",
+    )
+    assert text.title == "Control an app?"
+    assert text.says == "Operate Safari"
+    assert text.said == "melo says: Close the 7 forum tabs melo opened"
+    assert text.notes == (
+        "melo asks because this call operates Safari through a script.",
+    )
+    built = _saying("python_exec", _APP_REVIEW, code=_TABS)
+    assert (built.says, built.said) == ("Operate Safari", "")
+
+
+def test_a_description_that_does_not_match_the_code_shows_the_real_effect() -> None:
+    text = _saying("shell_exec", command="rm -rf build", why="Close the tabs")
+    assert text.says == "Delete files"
+    assert text.warning == (
+        "melo described this as “Close the tabs”, but the code deletes files."
+    )
+
+
+def test_the_models_words_are_shown_escaped() -> None:
+    text = _saying(
+        "shell_exec", ActionReview("routine"), command="ls", why="List \x1b[2Jthe notes"
+    )
+    assert text.says == "melo says: List \\x1b[2Jthe notes"
+    assert text.escaped
+    risky = ActionReview("high", ("install",), ("Installs.",))
+    below = _saying("shell_exec", risky, command="ls", why="List \x1b[2Jthe notes")
+    assert below.said == "melo says: List \\x1b[2Jthe notes"
+    assert below.escaped
+
+
+@pytest.mark.parametrize(
+    ("tool", "arguments"),
+    [
+        ("browser:example.com", {"site": "example.com"}),
+        ("file_write", {"path": "a.txt", "content": "x"}),
+        ("deploy", {"target": "staging"}),
+    ],
+)
+def test_a_panel_that_already_says_it_in_its_question_adds_no_sentence(
+    tool: str, arguments: dict[str, Any]
+) -> None:
+    assert _saying(tool, **arguments).says == ""
+
+
+async def test_the_panel_shows_the_sentence_first_then_the_kind_and_the_code(
+    now: list[float],
+) -> None:
+    approver = TerminalApprover(clock=lambda: now[0])
+    request = dataclasses.replace(
+        _request("python_exec", code=_TABS, why="Close the 7 forum tabs melo opened"),
+        review=_APP_REVIEW,
+    )
+    async with running_app(approver=approver, clock=lambda: now[0]) as app:
+        asking = asyncio.ensure_future(approver.ask(request))
+        await app.wait(lambda: "Control an app?" in app.text())
+        text = app.text()
+        assert "╭─ Control an app? ─" in text
+        sentence = text.index("Operate Safari")
+        said = text.index("melo says: Close the 7 forum tabs melo opened")
+        assert text.index("╭─") < sentence < said < text.index("melo asks because")
+        assert said < text.index("python_exec")
+        assert said < text.index("osascript")
+        now[0] += 1
+        app.type("1")
+        await asyncio.wait_for(asking, 3)
+
+
+async def test_the_panel_warns_when_the_description_and_the_code_differ(
+    now: list[float],
+) -> None:
+    approver = TerminalApprover(clock=lambda: now[0])
+    request = _request("shell_exec", command="rm -rf build", why="Close the tabs")
+    async with running_app(approver=approver, clock=lambda: now[0]) as app:
+        asking = asyncio.ensure_future(approver.ask(request))
+        await app.wait(lambda: "Delete files" in app.text())
+        text = " ".join(app.text().split())
+        assert text.index("Delete files") < text.index("⚠ melo described this as")
+        assert "“Close the tabs”, but the code deletes files." in text
         now[0] += 1
         app.type("1")
         await asyncio.wait_for(asking, 3)

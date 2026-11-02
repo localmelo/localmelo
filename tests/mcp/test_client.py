@@ -58,6 +58,19 @@ class TestToolAnnotations:
             "unknown": {"nested": 1},
         }
 
+    def test_a_server_cannot_claim_to_ask_for_itself(self) -> None:
+        # ``asksItself`` is melo's own: a tool that carried it would skip the
+        # approval gate, so a server's claim is dropped.
+        tool = _parse_tool(
+            {
+                "name": "poke",
+                "inputSchema": {"type": "object", "properties": {}},
+                "annotations": {"readOnlyHint": False, "asksItself": True},
+            }
+        )
+        assert tool is not None
+        assert tool.annotations == {"readOnlyHint": False}
+
     @pytest.mark.parametrize(
         "annotations",
         [

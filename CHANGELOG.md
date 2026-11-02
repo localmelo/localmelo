@@ -9,6 +9,142 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Developer only, not visible by default: a cut excerpt can be opened whole. With
+  `[memory] excerpt_open = "on"` (`-X memory.excerpt_open=on` for one run; the default, `"off"`,
+  changes nothing) recall keeps its excerpts of earlier chat turns, but a line that shows less
+  than the whole turn starts with the turn's id, `[t123] the user said “…”; melo replied “…”`,
+  in the recall block and in the memory search tool alike. A line shows less when the excerpt cut
+  what you said or what melo replied (or left the reply out), or when it is a piece of a longer
+  turn; a line that shows the whole turn, and every note, reads as before. The id counts toward
+  the line's room and the block stays within `recall_chars`. One line under the excerpts says that
+  a line that starts with an id is cut and can be opened with `open_memory`, and it appears only
+  when a line has an id. With the setting on, the chat's model also gets `open_memory`, which
+  returns the whole turn up to `recall_open_chars`; `turn.memory` lists what it opened as
+  `opened`, and each entry's `shown` keeps the exact line, id included. It has no effect with
+  `recall_form = "list"` or `recall_source = "items"`. Part of #428.
+- melo can now click, type and choose in its browser, inside its own Safari automation
+  window (it does not move your mouse or use other apps; full-screen computer use stays a
+  separate feature). With browsing on, three tools join the eight: `browser_click` presses a
+  button, link, menu item or checkbox from the last reading, `browser_type` types into a text
+  box (at most 1,000 characters; it presses Enter when asked, which sends the form), and
+  `browser_select` chooses an option in a list. The three are write tools, not read-only ones,
+  and ask their own questions; the approval step leaves them to it by their names, never by
+  what a tool says about itself, so a tool from outside cannot skip it. An action only happens
+  on the page that was read: the tab must still show the same address and the same document (a
+  reload is another one), and the element must still be the one that was read (same place,
+  kind, name, link address and form address, which of its name it is, the words of its row or
+  the heading above it, and the same description for a text box); where a link leads and where
+  a form is sent are read from the page again at that moment. Otherwise nothing is done and
+  melo reads the page again; refs from an older page are refused. **melo asks before it types
+  any text and before it presses send. Once a text is in a page, the page itself may send it,
+  and melo cannot stop every such send.** While it acts, melo also tries to stop a form the
+  page sends that it did not ask about and a link whose address changed when it was pressed;
+  that is a best-effort guard that only holds while melo acts, and a page can get around it.
+  After each action melo takes the address Safari reports for every tab the action touched, the
+  one acted on and up to three that appeared meanwhile (a further new tab is neither checked, read
+  nor closed), and checks them all before it reads any: a
+  tab on a local or private address, or whose address cannot be told, is blanked in place (so
+  Back does not return to it; if the replacement does not take, melo opens a blank page the
+  browser's own way, Back can then reach the refused page, and melo refuses it and blanks it
+  again; a tab melo made is closed if blanking fails altogether) and nothing from it reaches
+  the model, and a failed action is checked the same way. A page that melo reads is
+  compared with the address Safari reported just before, and a page that moved in between is
+  not read. melo itself never opens a local or private address (apart from Back reaching a
+  refused page as described above), and a link or form that points at one is refused before it
+  is used. A page that sends its own tab there
+  with its own script is noticed afterwards and blanked before anything is read; this is a
+  check on what melo reads, not a network block, and Safari still makes the requests a page
+  asks for. melo never types into a password, card number or one-time-code field, and when it
+  is unsure the field counts as secret: it goes by the field's type, its `autocomplete` hint,
+  CSS masking, its name, label, placeholder, `aria-label`, `aria-labelledby` text, legend and
+  the text before it (in English, Chinese and a few other languages, also when PIN or "code"
+  is part of a longer word) and the shape of a code (a one-character box, a short numeric
+  field, a digits-only pattern, or a short box whose names say nothing). It decides when it
+  reads the page, after the field gets focus, after the text is set and after the page's own
+  handlers ran, and clears a field that turned secret. A page with a card number or card
+  expiry field is not read. melo cannot see where a page's own scripts send what is typed. It
+  never reads cookies or page storage. Clicking and choosing on a site ask once per site and
+  chat apart from reading. Typing asks every time, shows all of the text (a text with a
+  control, format, surrogate, private-use or unassigned character, a line or paragraph
+  separator, a Hangul filler, the blank Braille cell, the combining grapheme joiner or a
+  variation selector is refused, since the question could not show it; new lines, tabs and the
+  two joiners U+200C and U+200D are allowed) and has no "allow for this chat". A click on a button that sends a form, or typing that presses Enter, asks by
+  itself every time and shows where the form goes (or that the page decides, when Enter is
+  pressed outside a form) and what it holds as melo last read it, with secret-looking and
+  token-like values hidden; a site other than the page's is asked about first. A send has no
+  "allow for this chat" either, in the terminal, the console or the API. In Auto mode a click or
+  choice on a site you named is routine, while every typing and every form that is sent are
+  reviewed on their own, and one verdict is not used for the next.
+- `browser_find` now matches more than links: buttons, `role="button"` elements, menu items,
+  tabs, switches, links that run a script and other clickable elements, by visible text and
+  `aria-label`. Select lists show their options, a button that sends a form says where, and
+  when nothing matches the answer says how many things on the page were left out.
+- melo works in one browser tab per chat. `browser_open` reuses the tab it opened (`tab="new"`
+  opens another, `tab="t2"` names one), tabs have short ids (`t1`, `t2`) that every browser
+  tool accepts, and the tabs it opened close when the chat ends, on `/new` and after ten
+  minutes without a browser call; your own tabs are never listed, read or closed. A tab is
+  melo's only if melo opened it or saw it appear while it was acting, never because of its
+  place in Safari's list or because it is the active one. melo closes only the tabs it made
+  with `browser_open`: a tab that appeared while it was acting is checked and can be read, but
+  it is left open when the chat ends. A tab that
+  Safari lost drops out of the list and the list says so. `[browser] keep_tabs = true` leaves
+  the tabs open. The browser tool note now tells the model to read the current page and use
+  its links and buttons before it guesses addresses.
+- A chat keeps whom a request is about (#452). A new side chat's (or terminal chat's) first
+  message also reads up to five short lines on your other chats of the last 30 minutes, at most
+  600 characters after your own words: what each turn was about and where, read from memory's
+  index of your chats. `read his résumé first` then means the friend you were just discussing in
+  the main chat. Under your message, **From your other chats (last 30 min)** opens the lines melo
+  read, and a chat's name opens that chat; the turn's `turn.memory` event carries them as
+  `digest`. The main chat never gets it; `[chat] recent_digest_minutes` sets the minutes
+  (`0` turns it off), and `[memory] across_chats = false` turns it off too. Every chat is also
+  told that he, she or it means whom the conversation is about, that your own profile (a profile
+  file, notes about you) counts only when you speak of yourself, that 他, 她 and 它 never switch
+  the subject, and to ask one short question when it stays unclear. A task the main chat starts
+  names the person it is about instead of a pronoun.
+- An approval card says in one plain sentence what the step will do (#454). The
+  console's Ask and Auto-blocked cards, the terminal's approval panel and a blocked step's row
+  start with it, before the question and the reasons, and show the code under it. For a command
+  or a script the sentence is always melo's own, built from the call, and names every effect it
+  finds in order ("Operate Safari, then delete files"; a command too long to show ends "and 2
+  more"), reads a command the way a shell does (a `;` or `&&` inside quotes cuts nothing, and a
+  command shows as it was written) and always adds what the rules found (a script that deletes
+  files, even when its code does not show it); nothing asks a model for it, and the question and the reasons still come only from
+  melo's rules. The model's own words (a `why` argument, or a comment at the top of the code) are
+  shown beside it, always labelled "melo says: …": as the sentence when the rules found nothing,
+  and below the sentence when they found something, so they can never make a step look
+  safer. A risky step shows its code open; only a routine one folds it. If the words and the
+  code disagree about deleting files or sending data out, a warning quotes the words ("melo
+  described this as “Close the tabs”, but the code deletes files."). Browser sites, file writes
+  and edits, and folders outside the workspace say it in their own question and have no extra
+  line. The approval record of `tool.finished` gets `review.gist`, `pending_approvals[]` gets
+  `gist` (catalog ids `gist.say.<id>` and `gist.warn.<id>`, so each surface says it in its
+  language), and the guides and `docs/for-agents.md` describe both. The main chat's card for a
+  waiting approval says the same sentence (`Needs your OK: …`) and the warning.
+- `shell_exec` and `python_exec` take an optional `why` (#454): one short sentence, in the person's
+  language, saying what the step does and why. It is the model's words an approval card shows
+  (cut at 120 characters with `…`), is not required, and changes nothing about what runs, the
+  step's key, how the rules review it, or when a refused or repeated step counts as the same. The
+  model's tool list changes: `why` is added to both tools, and their descriptions end with `Give
+  why for a step that changes anything.` (about 190 more characters on the wire for each tool,
+  380 when both are offered). A request that offers either tool is not the same as before, so
+  the recorded wire fixtures were re-recorded. Only `why` counts as the model's words: another
+  argument named `description` or `purpose` is the content of a call, not a reason.
+- A script that operates another app is its own kind, "Control an app?" (`app_control`, #454).
+  It is an allow-list: only an `osascript` script that is one `tell application "<name>"` block
+  (or one-liner) with a plain app name and plain verbs (`activate`, `quit`, `open location`
+  of a web address, `close`, `get` and `set` of a property), the same in JXA
+  (`Application("<name>")`), or `open -a <name>` (`-b com.apple.<Name>`) with nothing else is
+  this kind. It names the app in its reason and is as strict as "Change system settings?" was:
+  a chat-wide allow never covers it, your words and your model's review never allow it, Auto
+  blocks it, and only Allow once runs it. Everything else a script can say stays "Change system
+  settings?", however it is spelt: a shell (`do shell script` in any spacing, a raw
+  `«event»`, a loaded script, the Objective-C bridge), keys, System Events or System
+  Settings, a terminal or an editor by any name or bundle id, a path or `.app` name, a second
+  app, `open` with arguments or a second `-a`, and `shortcuts run` (a Shortcut can run
+  anything). The model review that Auto uses gains the kind and one line about scripting
+  another app. The version of the rules (`review.rules_version`) is now 2.
+
 - Developer only, not visible by default: `[tools] web_fetch_allow_local` lets `web_fetch` read
   test servers you list on this computer, for a test that needs a fixture page. It is a list of
   exact `127.0.0.1:PORT` or `[::1]:PORT` entries, empty (off) by default, set in the config file
@@ -504,6 +640,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- A recalled chat turn now shows up to 900 characters by default, and the recall block holds
+  up to 4000 (#349), where it showed 234 and 900. On a public long-memory benchmark, a model that
+  reads earlier chats answered 71.1% of questions instead of 58.9% (90 questions, 2 repeats;
+  16 better, 3 worse). The first request grows by about 220 tokens, its time to first byte does
+  not change, and the whole turn is faster because the model searches less.
+  `[memory] recall_item_chars` is 900 (was 234) and `recall_chars` is 4000 (was 900); the
+  ranges, the list form, `recall_open_chars` and `recall_source` are unchanged. A config that
+  sets either key keeps its value (`recall_item_chars = 234` with `recall_chars = 900` reads a
+  turn exactly as before), and a config without them gets the new defaults. A message that
+  needs no memory carries the same prompt.
 - The main chat's turns flow without extra taps (#440). A request in steps
   starts at once in Chinese as in English (`去这个网站看一下，然后告诉我最新的价格`,
   `look at this site and tell me the latest prices`), even when its last part
@@ -947,6 +1093,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   may pass there too; the page text it quotes was flattened by the page reader, so markup in a
   result is not read. A later part of a page or file read without its predecessor and holding no
   stray closer is read as plain text.
+- `browser_tabs` no longer shows tab ids cut off with "…" that no other browser tool could
+  use, and closing a tab works: melo's tab ids are short and stable, an id it did not give
+  out is refused before the browser is called, and a tab Safari has already lost is dropped
+  from the list instead of failing every call.
+- A short follow-up such as `go look it up` no longer drifts to your own profile once a long
+  search has filled melo's working memory (#452). The chat's newest three turns (your words and
+  the answers, at most 1200 characters) now come with the reflection after the step budget, the
+  answer melo gives when it stops, and a step whose working memory has lost them, so the answer
+  stays on the person the chat is about. A run with no earlier turns, such as a direct
+  `melo "task"` run, sends exactly what it sent before.
 - A short follow-up such as "go look it up", "continue" or "去查一下" recalls from what
   you said just before, not from its own words (#452). Searched by those words alone, it
   matched whatever held them (turns about who you are, say) and put them in the prompt.

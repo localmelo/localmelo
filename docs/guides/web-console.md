@@ -137,6 +137,12 @@ under the main chat. A side chat's header begins with **Main chat ›**, which g
 and closing the open side chat goes back to the main chat too. Chats made before the main
 chat existed are its side chats, as they were.
 
+### Who "he" or "she" means
+
+- **A new side chat knows what you were just discussing.** Its first message also reads up to five short lines on your other chats of the last 30 minutes: what each turn was about, and where. `read his résumé first` (`先读他的简历`) then means the friend you were talking about in the main chat. Your own words come first. Under your message, **From your other chats (last 30 min)** opens the lines melo read, and a chat's name opens that chat. `[chat] recent_digest_minutes = 0` turns it off ([Configuration](../reference/configuration.md)).
+- **He, she or it means whom the chat is about.** Your own profile (a profile file in your folder, notes about you) counts only when you speak of yourself (`I`, `my`, `我`, `我的`). 他, 她 and 它 never switch the subject. When it stays unclear, melo asks one short question.
+- **A short follow-up keeps the subject.** `go look it up` (`去查一下`) after a long search still answers about the person the chat is about, even once melo's working memory has dropped the earlier messages.
+
 When a side chat's run ends, the main chat shows a card under the day it happened. So does a
 task of the main chat that finishes, fails or waits for your approval; a side chat's own tasks
 come back to that side chat ([below](#side-chats-start-tasks-too)). A card reads:
@@ -145,7 +151,7 @@ come back to that side chat ([below](#side-chats-start-tasks-too)). A card reads
 - `Did not finish: Fix CI` with why it ended.
 - `Ready: Fix CI`, `Done, not finished: Fix CI` or `Needs you: Fix CI` for a task that finished: how code found it ended, not what its report says ([how it is checked](scheduler.md#tasks-from-the-main-chat)). A task not finished says why in amber (`No test ran after the last change · The changes are not committed`) and offers **Finish it: run the tests and commit** (or **Finish it: run the tests**), which continues it as **Continue** does. A task that needs you shows its question.
 - `Stopped: Fix CI` for a task that used all its steps before it was done. It shows the sentence of its answer that says what is left (`Remaining: run the tests and commit.`) and offers **Continue**, which picks the task up where it stopped, with what it did before. The same task reads Stopped on its page and in the panel's Activity and Workers rows; **Continue** is on its page. A task that failed for another reason stays `Did not finish`.
-- `Needs your approval: Fix CI` with what it asks. Once you answer, the same card says how ("Allowed once", "Allowed for this task", "Denied") and no longer offers **Review**.
+- `Needs your approval: Fix CI` with what it asks: the step's one-sentence summary (`Needs your OK: Close the extra Safari tabs`) when it has one. Once you answer, the same card says how ("Allowed once", "Allowed for this task", "Denied") and no longer offers **Review**.
 - A title is the one the main chat gave the task, or the first part of your request, cut at a word.
 - **Open side chat**, **Open task** or **Review** goes to the source. A card is not a message: the model never reads it.
 
@@ -715,7 +721,16 @@ security boundary against a bearer holder or a malicious process under the same
 OS account, which can answer them.
 
 The card asks a plain question ("Run this command in demo-project?", "Replace
-notes.txt?", "Let melo use <tool>?") and shows exactly what would run. A file
+notes.txt?", "Let melo use <tool>?") and shows exactly what would run. A command
+or a Python script starts with one plain sentence about what the step will do,
+which melo builds from the call and which names every effect it finds, in order
+("Operate Safari, then delete files"; a command too long to show ends "and 2
+more"). The model's own words (a `why` argument, or a comment at the top of the
+code) always carry a label, "melo says: …". When the rules find nothing to ask
+about, the words are the sentence and the code sits under it in a fold, **Show
+the code**. When the rules find something, the sentence stays melo's own, the
+words go in a line below it, and the code is open, so the words can never make a
+step look safer; the question and the reasons come from melo's rules either way. A file
 write over an existing text file shows what it replaces: the line under the
 question counts the lines ("5 lines removed, 1 added"), and the box lists the
 changed lines, each with its number, a − or + sign and two lines of context on
@@ -749,7 +764,13 @@ asks every time, with a different card. Its question names what the call does
 time`, and **Why melo asks** lists up to three reasons ("Installs playwright
 with pip into .signin_venv (downloads about 42 MB)."). **You asked:** repeats
 the message that started the turn, so you can compare it with what melo is
-about to do. The card has **Allow once** and **Deny** only, and **Deny** is the
+about to do. When the model's words and the code disagree about deleting
+files or sending data out, the card shows a red warning that quotes the words
+("melo described this as “Close the tabs”, but the code deletes files."). A script
+that operates one app by its plain name (AppleScript telling Safari to close
+tabs, `open -a Notes`) asks **Control an app?** and names the app; a script that
+runs a shell, presses keys, drives System Events, names a terminal or a path,
+or runs a Shortcut stays **Change system settings?**. The card has **Allow once** and **Deny** only, and **Deny** is the
 filled button: there is no chat-wide allow, and the line under the buttons
 says so ("A chat-wide allow never covers installs, downloads or changes outside
 ~/demo-project."). A call melo cannot read, or that it asks about for another
@@ -826,8 +847,8 @@ asks before commands and file changes.
   model, never run as routine. The sandbox also keeps a step from talking to
   a container engine.
 - **What is blocked.** Installs, downloads, changes outside the folder,
-  deletes, passwords and keys, system settings, code from the internet and
-  the like, unless your own words ask for them; a change to localmelo itself
+  deletes, passwords and keys, system settings, scripts that operate another
+  app, code from the internet and the like, unless your own words ask for them; a change to localmelo itself
   never runs; in a folder that holds the copy of localmelo that is running,
   a write under that copy is refused. The step's row reads
   `blocked: installs software`, a card under
@@ -836,7 +857,8 @@ asks before commands and file changes.
 - **Allow it.** **Allow once** runs that exact step once, within 30 minutes,
   and sends "Go ahead with the step melo blocked: install software." as your
   message; or reply "go ahead". Steps that use passwords or keys, change
-  system settings, set up something that runs later, or run code from the
+  system settings, operate another app through a script, set up something that
+  runs later, or run code from the
   internet or code melo cannot check need the button. While melo works the
   button waits; afterwards the card reads `Allowed once · ran at 14:02` or
   `Allowance expired`.
