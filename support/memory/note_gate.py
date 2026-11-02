@@ -29,18 +29,23 @@ level before this module is asked.
 
 What a page, a file or a finished task's result may support is what it *states*, not
 what it hides or asks the assistant to do. Material (a page or a file) goes through
-:func:`material_text`: one strict left-to-right scan (:mod:`markup`) leaves out the
-comments, the raw text elements, the elements a page or its style sheet hides (and
-every rule that might), and the tags; then every paragraph that orders the assistant
-is dropped. The scan fails closed, since a note wrongly refused costs little and a
-forged one costs more. A fetched page has been flattened to text by the page reader,
-which is not changed: white, tiny, transparent or class-hidden text on a fetched page
-reaches this module as plain text. A part of a page or file read without the part
-before it is dropped when it holds a closer with no opener (``-->``, a stray end tag),
-since it may begin inside a comment or a hidden element. A finished task's result is
-melo's own answer, so :func:`result_text` reads no markup in it and drops only the
-paragraphs aimed at an assistant. A page read in the browser supports no note, since
-the browser's text is not the page's markup. What the user typed is never cleaned.
+:func:`material_text`: one left-to-right scan (:mod:`markup`) leaves out the comments,
+the raw text elements and every element that is not plainly drawn, then the tags; then
+every paragraph that orders the assistant is dropped. The scan is an allow-list and
+fails closed (no style or colour is parsed): text counts only outside every element
+that is not a plain one (:data:`markup.ALLOWED_TAGS`, :data:`markup.ALLOWED_ATTRS`),
+and a text with a style sheet supports no note at all. A note wrongly refused costs
+little and a forged one costs more. A fetched page has been flattened to text by the
+page reader, which is not changed: white, tiny, transparent or class-hidden text on a
+fetched page reaches this module as plain text. A part of a page or file read without
+the part before it is dropped when it holds a closer with no opener (``-->``, a stray
+end tag), since it may begin inside a comment or a hidden element; every later part of
+a read in pieces needs the one before it, in order. A finished task's result is melo's
+own answer, so :func:`result_text` reads no markup in it and drops only the paragraphs
+that carry an unmistakable injection form (an order to ignore the rules, a role
+header, an order to save to the assistant's memory, a lead that names an AI). A page
+read in the browser supports no note, since the browser's text is not the page's
+markup. What the user typed is never cleaned.
 """
 
 from __future__ import annotations
@@ -386,13 +391,17 @@ class _Read(NamedTuple):
 
 @dataclass(eq=False)
 class _Group:
-    """The reads of one page or file, one after the other, that make one text."""
+    """The reads of one page or file, one after the other, that make one text: where
+    the first began (*begin*), where the last one did (*last*) and where the one after
+    it would (*after*, ``None`` when that is not known)."""
 
     kind: str
     ref: str
     texts: list[str]
     other: bool
     browser: bool
+    begin: int
+    last: int
     after: int | None
 
 
@@ -424,46 +433,62 @@ def _span_of(call: Mapping[str, Any]) -> tuple[int, int | None]:
     return 1, None
 
 
-def _assembled(reads: Sequence[_Read]) -> list[Material]:
-    """The materials of the *reads*, oldest first: the reads of one page or file in
-    parts, each part after the one before it, are joined and cleaned as one text
-    (:func:`material_text`). A part read without the part before it (a later page
-    part or a file range that starts past line 1, when the earlier text was not
-    read in this chat) may begin inside a comment or an element the earlier text
-    opened, which cannot be told: it is left out whole when it holds a closer with no
-    opener in it (:func:`markup.has_stray_closer`). A read with nothing left is no
-    material, and what a note may rest on is what the page or file states."""
+def _assembled(reads: Sequence[_Read], limit: int = MAX_MATERIAL) -> list[Material]:
+    """The materials of the *reads*, oldest first, the newest *limit* of them: the
+    reads of one page or file in parts, each part right after the one before it (the
+    one before it must say where it ended), are joined and read as one text
+    (:func:`material_text`). Any other read starts a text of its own.
+
+    A text that does not start at part 1 or line 1 may begin inside a comment or an
+    element that the part before it, not read, opened: it is left out whole when it
+    holds any ``-->`` or a closer with no opener in it (:func:`markup.has_stray_closer`).
+    The newest text is read first and the reading stops when *limit* of them have
+    something left, so a chat with many reads costs no more than *limit* of them. A
+    read with nothing left is no material."""
     groups: list[_Group] = []
     latest: dict[tuple[str, str, bool], _Group] = {}
     for read in reads:
         key = (read.kind, read.ref, read.browser)
         group = latest.get(key)
-        if read.start <= 1 or read.browser or group is None:
-            text = read.text
-            if read.start > 1 and markup.has_stray_closer(text):
-                text = ""
+        if (
+            group is None
+            or read.browser
+            or read.start <= 1
+            or group.after is None
+            or not group.last < read.start <= group.after
+        ):
             group = _Group(
-                read.kind, read.ref, [text], read.other, read.browser, read.after
+                read.kind,
+                read.ref,
+                [read.text],
+                read.other,
+                read.browser,
+                read.start,
+                read.start,
+                read.after,
             )
             groups.append(group)
             latest[key] = group
             continue
-        # The read after the one before it, or one whose end is not known.
-        follows = group.after is None or group.after >= read.start
-        group.texts.append(
-            read.text if follows or not markup.has_stray_closer(read.text) else ""
-        )
+        group.texts.append(read.text)
         group.other = group.other or read.other
+        group.last = read.start
         group.after = read.after
         groups.remove(group)
         groups.append(group)
     found: list[Material] = []
-    for group in groups:
-        stated = material_text("\n".join(group.texts))
+    for group in reversed(groups):
+        whole = "\n".join(group.texts)
+        if group.begin > 1 and ("-->" in whole or markup.has_stray_closer(whole)):
+            continue
+        stated = material_text(whole)
         if stated.strip():
             found.append(
                 Material(group.kind, group.ref, stated, group.other, group.browser)
             )
+            if len(found) >= limit:
+                break
+    found.reverse()
     return found
 
 
@@ -493,11 +518,11 @@ def pointed_material(
     nothing is left out.
 
     The parts of one page or file read one after the other (``web_fetch`` with
-    ``part``, ``file_read`` with ``start_line``) are one text, cleaned as a whole, so a
-    comment or element that one part opens and a later one closes is one thing. A
-    later part that is read without the part before it may begin inside what an
-    earlier part opened, so it is left out whole when it holds a closer with no
-    opener in it (:func:`markup.has_stray_closer`). A page read in the browser comes
+    ``part``, ``file_read`` with ``start_line`` and ``end_line``) are one text, read as
+    a whole, so a comment or element that one part opens and a later one closes is one
+    thing. A text that does not start at part 1 or line 1 is left out whole when it
+    holds a ``-->`` or a closer with no opener in it (:func:`_assembled`). A page read
+    in the browser comes
     back with ``browser`` set (:data:`BROWSER_TOOLS`).
     """
     folded = {turn: fold(text) for turn, text in typed.items()}
@@ -566,7 +591,7 @@ def pointed_material(
         browser = str(call.get("name")) in BROWSER_TOOLS
         start, after = (1, None) if browser else _span_of(call)
         reads.append(_Read(kind, ref, text, other, browser, start, after))
-    return _assembled(reads)[-MAX_MATERIAL:]
+    return _assembled(reads)
 
 
 def name_of(source: str) -> str:
@@ -748,8 +773,8 @@ _IMPERATIVE = re.compile(
     re.IGNORECASE,
 )
 # What speaks to the assistant: an order to ignore what it was told, a claim about its
-# prompt, "from now on you must ...". (A finished task's result is checked by this
-# part alone, :func:`result_text`.)
+# prompt, "from now on you must ...". (Raw material has the whole rule; a finished
+# task's result has its own, narrower one, :func:`_result_orders`.)
 _AIMED_ORDER = (
     r"\b(?:ignore|disregard|forget|override|bypass)\b[^.!?\n]{0,60}"
     r"\b(?:instructions?|rules?|prompts?|guidelines?|policy|policies|restrictions?"
@@ -773,7 +798,6 @@ _ACTION_ORDER = (
     r"|links?|pages?|repo|~|/|\.{1,2}/|https?://)"
 )
 _ORDER = re.compile(f"{_AIMED_ORDER}|{_ACTION_ORDER}", re.IGNORECASE)
-_AIMED = re.compile(_AIMED_ORDER, re.IGNORECASE)
 
 
 def is_instruction(note: str) -> bool:
@@ -910,7 +934,6 @@ _ADDRESSED_TO = (
     rf"|\b(?:hey|hi|hello|dear|attention)[\s,]+(?:the\s+|any\s+|all\s+)?{_AI}(?!\w)"
 )
 _ADDRESSED = re.compile(f"{_ADDRESSED_ABOUT}|{_ADDRESSED_TO}", re.IGNORECASE)
-_ADDRESSED_AT = re.compile(_ADDRESSED_TO, re.IGNORECASE)
 # A sentence that opens by naming the assistant it speaks to ("AI assistant: ...",
 # "Any AI agent, ...", "Dear assistant, ...", "To the model: ...", "Note to any AI:").
 # Words that are ordinary nouns of a sentence ("The model, trained on ...", "Model:
@@ -982,16 +1005,19 @@ def material_text(text: str) -> str:
     """What *text*, a page's or a file's (a body, or a text the chat read), states:
     what is left for a note to rest on.
 
-    Left out, in this order: the characters that draw nothing (zero-width and other
-    format characters, which includes the joiners of some scripts); then the markup,
-    by one strict left-to-right scan (:func:`markup.without_markup`: comments and
-    other ``<!...>``, ``<?...>``; ``script``, ``style``, ``textarea``, ``title`` and
-    the other raw text elements; every element its markup or a rule of a ``<style>``
-    block hides, tags and text; every other tag, with its attributes, replaced by a
-    space); the Markdown link comments (``[//]: # (...)``); and every paragraph (text
-    between blank lines; in a quoted block a line of only ``>`` is blank) with an
-    order to the assistant in it (:func:`_orders`). A comment, tag or element never
-    closed hides the rest of the text, as in a browser.
+    Left out, in this order: the markup, by one strict left-to-right scan that allows
+    only what is plainly shown (:func:`markup.without_markup`: comments and other
+    ``<!...>``, ``<?...>``; ``script``, ``style``, ``textarea``, ``title`` and the
+    other raw text elements; every element that is not a plain one, tags and text, so
+    ``style``, ``hidden``, ``font``, ``svg``, ``details`` and the like hide what they
+    hold; the whole text when it has a style sheet; every other tag, with its
+    attributes, replaced by a space); then the characters that draw nothing (zero-width
+    and other format characters, which includes the joiners of some scripts; they are
+    stripped after the markup is cut, so none can split a tag); the Markdown link
+    comments (``[//]: # (...)``); and every paragraph (text between blank lines; in a
+    quoted block a line of only ``>`` is blank) with an order to the assistant in it
+    (:func:`_orders`). A comment, tag or element never closed hides the rest of the
+    text, as in a browser.
 
     Text with no markup, no order and no invisible character comes back unchanged. It
     is a small scan, not an HTML engine, it never raises, and it takes time linear
@@ -999,44 +1025,62 @@ def material_text(text: str) -> str:
     """
     if not text:
         return text
+    text = markup.without_markup(text)
     if not text.isascii():
         text = "".join(char for char in text if not _invisible(char))
-    text = markup.without_markup(text)
     text = markup.cut(text, ((a, b, "") for a, b in _link_comments(text)))
     return _without_paragraphs(text, _orders)
 
 
 # ── What a result states ──
 #
-# A finished task's result is melo's own answer, in Markdown; the part of it that is
-# not trusted is page text the page reader already flattened, so it holds no markup to
-# read. Only what is aimed at an assistant takes a paragraph out of it. A plain
-# imperative in it ("Run the tests.") is advice to the user, and a note that is
-# "Note that your lease ends June 30" is a fact.
+# A finished task's result is melo's own answer, in Markdown, and "you" in it is the
+# user. The part of it that is not trusted is page text the page reader already
+# flattened, so it holds no markup to read. Only the plainly injected forms take a
+# paragraph out of it: an order to ignore what the assistant was told, a role header,
+# an order to write to the assistant's memory, a line that opens by addressing an AI.
+# Advice ("Run the tests.", "You should always check in online."), a fact about a
+# system prompt, a "Developer:" line and "Note that your lease ends June 30" are the
+# answer, and a note may rest on them.
 
 _ANSWER: Final = "\nmelo: "
-# What orders the assistant to keep something: "save a note", "update your memory",
-# "remember that the user ...". Not "add more memory", "make a note of it" or
-# "remember to ...".
+_IGNORE_ORDER = re.compile(
+    r"\b(?:ignore|disregard|forget|override)\s+(?:(?:all|any|the)\s+)?"
+    r"(?:(?:previous|prior|above|earlier|preceding)\s+"
+    r"|your\s+(?:(?:previous|prior|above|earlier|preceding)\s+)?)"
+    r"(?:instructions?|rules?|prompts?)\b"
+    "|忽略(?:之前|以上|前面|所有)的?(?:指令|规则|提示)",
+    re.IGNORECASE,
+)
+# What orders the assistant to keep something in its memory: "save this to your
+# memory", "update your memory", "remember that the user ...", "save a note that the
+# user ...". Not "save the notes to notes.md", "add more memory" or "remember to ...".
 _MEMORY_ORDER = re.compile(
-    r"\b(?:save|store|record|log)\b[^.!?\n]{0,40}?"
-    r"\b(?:an?|this|the|these|that|your|my)\s+(?:(?:new|short|brief)\s+)?"
-    r"(?:notes?|memory|memories)\b(?!-)"
-    r"|\b(?:update|overwrite|edit)\s+(?:your|the\s+assistant['’]?s?|melo['’]?s?)\s+"
-    r"(?:memory|memories|notes?)\b"
-    r"|\bremember\s+that\s+(?:the\s+)?users?\b"
-    r"|\bmemori[sz]e\s+(?:that|this)\b"
+    r"\b(?:save|store|record|write|add)\b[^.!?\n]{0,60}?\b(?:to|in|into)\s+"
+    r"(?:your|its|the\s+assistant['’]?s|long[- ]term)\s+memory\b(?![-\w])"
+    r"|\bupdate\s+your\s+memory\b(?![-\w])"
+    r"|\bremember\s+that\s+the\s+users?\b"
+    r"|\b(?:save|store|record|write|add)\b[^.!?\n]{0,40}?\b(?:note|memory)\s+"
+    r"(?:that|saying|stating)\s+the\s+users?\b"
     "|写入记忆|存入记忆|保存到记忆|更新(?:你的|我的)?记忆",
     re.IGNORECASE,
 )
-# A role header at the start of a line ("System: ...", "[assistant]", "<system>") or a
-# line that opens by naming the assistant it speaks to; a list item ("- System: macOS")
-# is not one.
+# A role header at the start of a line ("System: ...", "[assistant]", "<system>"); a
+# list item ("- System: macOS 27.2") and ``Developer:`` are not one.
 _RESULT_ROLE = re.compile(
-    r"^[ \t>]*+#*+[ \t]*+(?:"
-    r"[\[(<]?(?:system|developer|assistant|melo)"
-    r"(?:\s+(?:message|prompt|note|instructions?))?[ \t]*[:：\])>]"
-    rf"|{_ADDRESSEE})",
+    r"^[ \t>]*+#*+[ \t]*+(?:(?:system|assistant)[ \t]*[:：]"
+    r"|[\[<](?:system|assistant)[\]>](?!\())",
+    re.IGNORECASE | re.MULTILINE,
+)
+# A line that opens by addressing an AI and then has a comma or a colon: "Dear AI
+# assistant, ...", "Note to any AI reading this: ...". Not "Dear Assistant Professor Lee, ...",
+# and not "Hello, ..." with no AI named.
+_RESULT_ADDRESSEE = re.compile(
+    r"^[ \t>#]*+(?:dear|hello|hi|hey|attention|note\s+to|message\s+to|to)\s+"
+    r"(?:(?:any|all|the|every)\s+)?"
+    r"(?:ai|a\.i\.|llms?|language\s+models?|chatbots?)"
+    r"(?:\s+(?:assistants?|agents?|models?|systems?|bots?))?"
+    r"(?:\s+reading\s+(?:this|it))?[ \t]*[,:]",
     re.IGNORECASE | re.MULTILINE,
 )
 _FENCE = re.compile(
@@ -1056,16 +1100,17 @@ def _code_blanked(text: str) -> str:
 
 
 def _result_orders(paragraph: str) -> bool:
-    """Whether *paragraph* of a result is aimed at an assistant: what
-    :data:`_AIMED` says, a request to keep something in memory, a role header at the
-    start of a line, or a line that speaks to the assistant. The ``>`` that quotes its
-    lines does not count."""
+    """Whether *paragraph* of a result holds a plainly injected form: an order to
+    ignore instructions, an order to write to the assistant's memory, a role header at
+    the start of a line, or a line that opens by addressing an AI. The ``>`` that
+    quotes its lines does not count."""
     for form in _forms(_QUOTED.sub("", paragraph)):
-        if _ADDRESSED_AT.search(form) or _MEMORY_ORDER.search(form):
-            return True
-        if _RESULT_ROLE.search(form):
-            return True
-        if any(_AIMED.search(sentence) for sentence in _CLAUSES.split(form)):
+        if (
+            _IGNORE_ORDER.search(form)
+            or _MEMORY_ORDER.search(form)
+            or _RESULT_ROLE.search(form)
+            or _RESULT_ADDRESSEE.search(form)
+        ):
             return True
     return False
 
