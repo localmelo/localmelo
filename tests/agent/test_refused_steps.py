@@ -133,10 +133,13 @@ async def test_a_step_with_a_call_that_ran_counts() -> None:
 
 
 class _Deny:
-    """An approval policy that denies every call."""
+    """An approval policy that denies every call, as *origin* decided."""
+
+    def __init__(self, origin: str = "policy") -> None:
+        self.origin = origin
 
     async def decide(self, request: Any) -> ApprovalDecision:
-        return ApprovalDecision(False, "not allowed", origin="policy")
+        return ApprovalDecision(False, "not allowed", origin=self.origin)  # type: ignore[arg-type]
 
 
 async def test_a_call_the_approval_policy_denied_is_a_refused_step() -> None:
@@ -151,6 +154,32 @@ async def test_a_call_the_approval_policy_denied_is_a_refused_step() -> None:
     outcome = await agent.run_task("run the guarded step", approval=_Deny())
     assert outcome.status == "completed"
     assert llm.calls == 2
+
+
+@pytest.mark.parametrize("origin", ["user", "timeout"])
+async def test_the_persons_own_denial_counts(origin: str) -> None:
+    # A step the person (or their silence) refused is theirs: asking again is
+    # no free step, so the model cannot ask twice more for free.
+    replies = [
+        _call("guarded", "x", "c1"),
+        Message(role="assistant", content="Not allowed, then."),
+    ]
+    llm = FakeLLM(replies)
+    agent = _agent(llm, max_steps=1, refused_steps=2)
+    agent.hippo.register_tool(_tool("guarded"))
+    agent.executor.register("guarded", _echo, requires_approval=True)
+    outcome = await agent.run_task("run the guarded step", approval=_Deny(origin))
+    assert outcome.status == "budget_exhausted"
+    assert llm.calls == 1
+
+
+async def test_the_same_refused_call_again_counts() -> None:
+    replies = [_call("note", "same", f"c{n}") for n in range(4)]
+    llm = FakeLLM(replies)
+    agent = _agent(llm, max_steps=1, refused_steps=2)
+    outcome = await agent.run_task("note it")
+    assert outcome.status == "budget_exhausted"
+    assert llm.calls == 2, "the first refusal was free, its repeat was not"
 
 
 def test_the_allowance_is_checked() -> None:

@@ -1306,6 +1306,7 @@ class _RunState:
     # last, and the steps of this run that did not count for it.
     call_refused: bool = False
     free_steps: int = 0
+    refused_calls: set[str] = dataclasses.field(default_factory=set)
     # Whether the person sent the run's query (run_task's from_person): only
     # then may a path outside the workspace be asked about (#405).
     from_person: bool = True
@@ -4659,11 +4660,8 @@ class Agent:
                 TOOL_EXIT_CODE.reset(slot)
             if ask_slot is not None:
                 TOOL_ASK.reset(ask_slot)
-        run.call_refused = (
-            bool(refusals)
-            or bool(refused)
-            or outcome.error_category == ErrorCategory.APPROVAL_DENIED
-            or self.refused_by_tool(call, result)
+        run.call_refused = self._refused_free(
+            call, result, outcome, gate, refusals, refused, run
         )
         exported = (
             preview_result(captured[0], notes)[0] if captured is not None else result
@@ -4695,6 +4693,44 @@ class Agent:
             run.attempt_calls.append((call, result))
             await self._rehearse_acted(call, result, run, exit_codes or ())
         return result, cut
+
+    def _refused_free(
+        self,
+        call: ToolCall,
+        result: ToolResult,
+        outcome: Any,
+        gate: _ApprovalGate | None,
+        refusals: list[str],
+        refused: list[dict[str, Any]],
+        run: _RunState,
+    ) -> bool:
+        """Whether *call* was refused by a policy check, so its step may be free (refused_steps).
+
+        The tool's own check (``refuse_call`` or :meth:`refused_by_tool`), a
+        question it asked that a policy or Auto refused, or the approval
+        policy's denial by a policy or Auto. The person's own Deny, or no
+        answer in time, is theirs: asking again is never free. Neither is a
+        call refused before in this run, by tool and arguments.
+        """
+        free = ("policy", "auto")
+        denied = outcome.error_category == ErrorCategory.APPROVAL_DENIED
+        asked = gate.asked if gate is not None else None
+        by = str((asked or {}).get("origin") or "")
+        if refused:
+            policy = all(str(entry.get("origin")) in free for entry in refused)
+        elif denied:
+            policy = by in free
+        else:
+            policy = bool(refusals) or self.refused_by_tool(call, result)
+        if not (policy or refused or denied):
+            return False
+        try:
+            key = json.dumps([call.tool_name, call.arguments], sort_keys=True)
+        except (TypeError, ValueError):
+            key = f"{call.tool_name}:{call.arguments!r}"
+        again = key in run.refused_calls
+        run.refused_calls.add(key)
+        return policy and not again
 
     def refused_by_tool(self, call: ToolCall, result: ToolResult) -> bool:
         """Whether *result* is the refusal of *call* by its tool's own check.
