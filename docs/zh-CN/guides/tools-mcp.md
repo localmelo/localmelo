@@ -336,4 +336,5 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 | 会话授权 | “Allow for this chat”（终端中为 “Yes, and allow every … call in this session”）只覆盖常规调用。同一工具的高影响或无法判定的调用每次都会询问，对它选择授权只允许这一次调用。终端的 `auto` 模式运行常规调用，其余调用会先询问。 |
 | localmelo 本身 | 安装到运行 localmelo 的 Python、或写入 `~/.cache/localmelo` 或应用程序的调用会被直接拒绝，不会询问：`The approval policy denied this call: melo never lets a call change its own runtime, settings or keys. …` |
 | 模型会读到什么 | 拒绝会说明调用的作用，例如 `The user denied this call: not now. melo asked because it installs httpx with pip into .venv. Do not run it again or reach the same result another way unless the user asks. If the task needs it, say in your answer what for and ask the user.` |
+| 任务中被拒绝的网站 | 在对话继续的任务里，`shell_exec` 或 `python_exec` 调用如果写出了你或 Auto 拒绝过的网站上的地址，会在审查之前就被拒绝：`curl` 和 `wget` 的参数，Python 里的任何字符串（`urllib`、`requests`、`httpx`、变量、写出了主机名的 f-string），主机名用大写、带端口、百分号编码或国际化的拼写都一样。没有写出被拒绝网站的调用从不会因此被拒绝。运行时才拼出来的主机名（`$HOST`、`{host}`）不会被读取：这样的调用照常审查，你的模型在审查时会被告知任务中哪些网站已被拒绝（只有网站名，从不包括原因）。melo 无法解码的编码主机名，只要有网站被拒绝过就会被拒绝。 |
 | 限制 | 规则读取调用的字面文本；在运行时拼出所运行内容的代码属于无法判定，规则漏掉的调用在授权下仍会运行。直接运行、`--brief` 运行和 `--yolo` 没有策略，因此不做审查。 |

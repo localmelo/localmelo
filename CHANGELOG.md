@@ -431,6 +431,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- In Auto, one verdict that lets `web_fetch` read a site now covers that
+  site's other addresses with no query for the rest of the chat, so its plain
+  pages are no longer reviewed one address at a time (six reviews a turn at
+  most). An address with a query, which can carry data out, or one longer
+  than 300 characters, is still reviewed by itself, and a verdict that blocks
+  covers only its own address. A chat keeps its last 512 review verdicts,
+  dropping the least recently used.
+
 - The main chat starts a task itself when your request needs tools it lacks
   (running commands, changing files, many steps), with one line, **Change** and
   **Stop**, instead of offering "Start this as a task?". Your message is still
@@ -630,6 +638,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   refused before anyone is asked or anything is reviewed, even when your
   request names the site. Steps refused again no longer push the first block
   out of what the task remembers. [#431]
+
+- A site you or Auto refused also stays refused for the commands and scripts
+  of a task the chat continues. A `shell_exec` or `python_exec` step that
+  names an address on that site is refused before it is reviewed: a `curl` or
+  `wget` argument, a string in Python (`urllib`, `requests`, `httpx`, an
+  address kept in a variable, an f-string whose host is written out), with
+  the host in capitals, with a port, percent-encoded or in its international
+  spelling. A step that names no refused site is never refused this way, and
+  a step blocked for another reason does not make the sites it names
+  refused. A host put together while the step runs is reviewed as before, and
+  the review is now told which sites were refused in the task (their names
+  only, never why). An encoded host melo cannot decode is refused while any
+  site is. [#433]
 
 - A file with more than one name (a hard link) is one file in two places,
   so `file_write` and `file_edit` now refuse it, in the workspace too, and a
@@ -3660,4 +3681,5 @@ earlier milestones.
 [#410]: https://github.com/localmelo/localmelo/issues/410
 [#411]: https://github.com/localmelo/localmelo/issues/411
 [#431]: https://github.com/localmelo/localmelo/issues/431
+[#433]: https://github.com/localmelo/localmelo/issues/433
 [#426]: https://github.com/localmelo/localmelo/issues/426

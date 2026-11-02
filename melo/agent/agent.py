@@ -79,7 +79,12 @@ from localmelo.melo.agent._chat import (
 from localmelo.melo.agent._context_fit import ContextFitError
 from localmelo.melo.agent._events import GateVerdict, _Emitter, check_sink
 from localmelo.melo.agent._json_repair import error_line, rejected_objects, repairs
-from localmelo.melo.agent._step_review import RunReviews, StepReviewer, answer_on_block
+from localmelo.melo.agent._step_review import (
+    RunReviews,
+    StepReviewer,
+    answer_on_block,
+    plain_page_key,
+)
 from localmelo.melo.agent._task_aids import FINISH_NOTE, refusal_note
 from localmelo.melo.agent._tool_images import ToolImageStore
 from localmelo.melo.agent.options import (
@@ -134,6 +139,7 @@ from localmelo.melo.contracts.review import (
     CATEGORY_WORDS,
     RULED_TOOLS,
     SELF_DENIAL,
+    SITE_KEY,
     TITLES,
     ActionReview,
     block_words,
@@ -1678,6 +1684,7 @@ class _ApprovalGate:
                     mode=self._mode,
                     key=self._key,
                     workspace=self._workspace_root,
+                    refused_sites=_refused_sites(self._policy, run),
                 )
                 asking = dataclasses.replace(asking, review=self.review)
             run.reviews.calls.append(
@@ -2089,6 +2096,11 @@ class _ToolAsk:
                     mode="auto",
                     key=key,
                     workspace=self._workspace_root,
+                    # One routine verdict reads the site's plain pages.
+                    shared=plain_page_key(
+                        tool_name, request.arguments, self._workspace_root
+                    ),
+                    refused_sites=_refused_sites(self._policy, self._run),
                 )
             request = dataclasses.replace(request, review=review)
         decided: object = await self._policy.decide(request)
@@ -2152,9 +2164,17 @@ class _ToolAsk:
         return ApprovalDecision(False, reason, origin="policy")
 
     def _keep(self, request: ApprovalRequest, decided: ApprovalDecision) -> None:
-        """Keep a refused question as a blocked step: its call key and keys alike."""
+        """Keep a refused question as a blocked step: its call key and keys alike.
+
+        A refused site joins the run's refused sites, which a later review
+        is told of (#433).
+        """
         name, arguments = request.tool_name, request.arguments
         categories = () if request.review is None else request.review.categories
+        site = site_key(arguments)
+        refused = self._run.reviews.refused_sites
+        if site is not None and site[len(SITE_KEY) :] not in refused:
+            refused.append(site[len(SITE_KEY) :])
         self.refused.append(
             {"request_id": request.request_id, "tool": name, "allowed": False,
              "origin": decided.origin, "reason": decided.reason,
@@ -2163,6 +2183,14 @@ class _ToolAsk:
              "loose_keys": [*loose_keys(name, arguments, categories),
                             *_question_keys(name, arguments)]}
         )  # fmt: skip
+
+
+def _refused_sites(policy: ApprovalPolicy, run: _RunState) -> tuple[str, ...]:
+    """The hosts of the sites refused in this task (#433): earlier runs' first, then this run's."""
+    blocks = find_earlier(policy)
+    found = dict.fromkeys(() if blocks is None else blocks.refused_sites())
+    found.update(dict.fromkeys(run.reviews.refused_sites))
+    return tuple(found)
 
 
 def _question_keys(name: str, arguments: Mapping[str, Any]) -> tuple[str, ...]:

@@ -14,13 +14,15 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import ipaddress
 import json
 import os
 import re
 import shlex
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, Literal
+from urllib.parse import unquote, urlsplit
 
 Verdict = Literal["routine", "high", "undecided"]
 RULES_VERSION: Final = 1
@@ -383,3 +385,191 @@ def loose_keys(
             if targets:
                 keys.add(f"install:{tokens[0]}:{','.join(targets)}")
     return sorted(keys)
+
+
+# ── The sites a step names (#433): keys that only ever refuse ──
+
+# The loose key of a site: ``ask:site:<host>`` (approvals.site_key).
+SITE_KEY: Final = "ask:site:"
+# A step naming an http(s) address whose encoded host melo cannot read as
+# one site (a percent-encoding or an international name that does not
+# decode): refused wherever a site was refused, never anywhere else.
+UNREADABLE_SITE: Final = "ask:site-unreadable"
+_ADDRESS: Final = re.compile(r"https?://[^\s<>\"'`]+", re.IGNORECASE)
+# What a host built at run time has: a variable, a template, a format
+# placeholder (``%s``, a ``%`` without two hex digits), an f-string's value.
+_BUILT: Final = re.compile(r"[$`{}\x00]|%(?![0-9a-fA-F]{2})")
+# A host melo reads as one site, once encoded: labels of letters, digits,
+# ``-`` and ``_``.
+_HOST_NAME: Final = re.compile(r"[a-z0-9_-]+(?:\.[a-z0-9_-]+)*")
+# One brace group a shell (or curl) expands into words: ``{a,b}``.
+_BRACES: Final = re.compile(r"^([^{}]*)\{([^{}]*,[^{}]*)\}([^{}]*)$")
+# Characters after a host that end a sentence or a call, not the host.
+_HOST_END: Final = ")],;!'\""
+# A value an f-string fills in: no host is read through it.
+_FILLED: Final = "\x00"
+
+
+def site_host(host: str) -> str | None:
+    """*host* as one site: in ASCII (IDNA), lower case, without one final dot.
+
+    An IP address is written the one standard way (``::1``). ``None`` when
+    it is empty or cannot be encoded. What
+    :func:`~localmelo.melo.contracts.approvals.site_key` uses, so one site
+    has one key however its name is spelt.
+    """
+    try:
+        if not host.isascii():
+            host = host.encode("idna").decode("ascii")
+    except UnicodeError:
+        return None
+    host = host.lower()
+    host = host[:-1] if host.endswith(".") else host
+    try:
+        return str(ipaddress.ip_address(host))
+    except ValueError:
+        return host or None
+
+
+def _is_ip(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return True
+
+
+def url_site(url: str) -> str | None:
+    """The site of an http(s) *url* (:func:`site_host`), or ``None``."""
+    try:
+        parts = urlsplit(url.strip())
+        host = site_host(parts.hostname or "")
+    except ValueError:
+        return None
+    if parts.scheme.lower() not in ("http", "https"):
+        return None
+    return host
+
+
+def _raw_hosts(address: str) -> set[str]:
+    """The host texts *address* (``http(s)://…``) can reach.
+
+    Clients read an address differently: a ``\\`` ends the host for some
+    and not for others, and an ``@`` that appears twice is split at the
+    first or the last. Each reading is kept, so a refused site cannot hide
+    behind one of them.
+    """
+    rest = address.split("://", 1)[1]
+    hosts: set[str] = set()
+    for authority in {re.split(r"[/?#]", rest)[0], re.split(r"[/?#\\]", rest)[0]}:
+        for hostport in {authority.rpartition("@")[2], authority.partition("@")[2]}:
+            if not hostport:
+                continue
+            if hostport.startswith("["):
+                hosts.add(hostport[1:].partition("]")[0])
+            else:
+                hosts.add(hostport.partition(":")[0])
+    return hosts
+
+
+def _host_key(raw: str) -> str | None:
+    """The loose key of one host text, :data:`UNREADABLE_SITE`, or ``None`` (unknown)."""
+    raw = raw.rstrip(_HOST_END)
+    if not raw:
+        return None
+    if _BUILT.search(raw):
+        return None  # built at run time: the review judges it
+    encoded = "%" in raw
+    if encoded:
+        try:
+            raw = unquote(raw, errors="strict")
+        except UnicodeDecodeError:
+            return UNREADABLE_SITE
+    host = site_host(raw)
+    if host is None:
+        return UNREADABLE_SITE if encoded or not raw.isascii() else None
+    if not (_HOST_NAME.fullmatch(host) or _is_ip(host)):
+        # Not a name a client resolves (a pattern, a stray character):
+        # unknown, unless an encoding hid what it is.
+        return UNREADABLE_SITE if encoded else None
+    return SITE_KEY + host
+
+
+def _expanded(raw: str) -> list[str]:
+    """*raw* with one brace group expanded, as a shell or curl does: ``{a,b}.x``."""
+    found = _BRACES.match(raw)
+    if found is None:
+        return [raw]
+    head, choices, tail = found.groups()
+    return [head + choice + tail for choice in choices.split(",")]
+
+
+def _address_keys(text: str) -> Iterator[str]:
+    for address in _ADDRESS.findall(text):
+        for raw in _raw_hosts(address):
+            for host in _expanded(raw):
+                key = _host_key(host)
+                if key is not None:
+                    yield key
+
+
+def _shell_words(command: Any) -> list[str]:
+    if isinstance(command, list):
+        return [str(word) for word in command]
+    text = str(command or "")
+    try:
+        return shlex.split(text)
+    except ValueError:
+        return text.split()
+
+
+def _python_texts(code: str) -> list[str]:
+    """The literal strings of *code*: an f-string with each value it fills in marked."""
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError, RecursionError):
+        return []  # it does not run
+    texts: list[str] = []
+    parts: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.JoinedStr):
+            text = ""
+            for value in node.values:
+                parts.add(id(value))
+                if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                    text += value.value
+                else:
+                    text += _FILLED
+            texts.append(text)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Constant) or id(node) in parts:
+            continue
+        if isinstance(node.value, str):
+            texts.append(node.value)
+        elif isinstance(node.value, bytes):
+            texts.append(node.value.decode("latin-1"))
+    return texts
+
+
+def site_keys(tool_name: str, arguments: Mapping[str, Any]) -> list[str]:
+    """The loose keys of the sites a ``shell_exec`` or ``python_exec`` step names (#433).
+
+    One ``ask:site:<host>`` (:func:`site_host`) per literal ``http://`` or
+    ``https://`` address in it: each word of a command (a ``curl`` or
+    ``wget`` argument, a variable set to an address), each string of
+    Python code (an address passed to ``urllib``, ``requests`` or
+    ``httpx``, or kept in a variable), and an f-string whose host is
+    written out. A percent-encoded host is decoded first; one that does not
+    decode into a site gives :data:`UNREADABLE_SITE`. A host built at run
+    time (``$HOST``, ``{host}``, ``%s``) gives nothing: the review judges
+    that step. They only ever refuse a step that names a site refused
+    earlier (:class:`~localmelo.melo.contracts.approvals.EarlierBlocks`):
+    a blocked step never keeps them, since what was refused was the step.
+    """
+    if tool_name == "shell_exec":
+        texts = _shell_words(arguments.get("command"))
+    elif tool_name == "python_exec":
+        texts = _python_texts(str(arguments.get("code") or ""))
+    else:
+        return []
+    return sorted({key for text in texts for key in _address_keys(text)})

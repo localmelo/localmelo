@@ -7,7 +7,8 @@ that decides whether a high-impact call in auto mode is worth a review at
 all. The agent sends the request (``kind="review"``); nothing here does I/O.
 
 What the model sees: the call first, the rules' findings, the earlier calls
-of the turn as one-line previews, then the user's own messages. Never a
+of the turn as one-line previews, the names of the sites refused in the task
+(#433), then the user's own messages. Never a
 tool's output or the assistant's text: a web page could carry text that
 argues for its own call. Each block is marked with a random nonce, and a
 ``<`` inside one is written ``&lt;``, so no text can close a block or open
@@ -39,6 +40,10 @@ REVIEW_TIMEOUT_S: Final = 20.0
 # Earlier calls of the turn and earlier blocks of the chat the prompt lists.
 EARLIER_CALLS: Final = 5
 EARLIER_BLOCKS: Final = 3
+# Sites refused in the task that the prompt lists, newest kept (#433).
+REFUSED_SITES: Final = 5
+# What a listed site may be: a host name or an IP address, nothing else.
+_SITE: Final = re.compile(r"[a-z0-9._:\-]{1,253}")
 REASON_CHARS: Final = 160
 
 SYSTEM_PROMPT: Final = """\
@@ -96,7 +101,8 @@ class ReviewInputs:
     ``requests`` are the user's own messages, oldest first; ``calls`` the
     turn's earlier calls as ``(tool, preview, verdict)``; ``blocked`` the
     chat's earlier blocks as ``(title, preview)``; ``findings`` what the
-    rules said.
+    rules said; ``refused_sites`` the hosts of the sites refused in the
+    task, oldest first: hosts only, never why they were refused.
     """
 
     workspace: str
@@ -106,6 +112,7 @@ class ReviewInputs:
     findings: str = ""
     calls: Sequence[tuple[str, str, str]] = ()
     blocked: Sequence[tuple[str, str]] = ()
+    refused_sites: Sequence[str] = ()
 
 
 def _data(text: str) -> str:
@@ -166,6 +173,13 @@ def user_message(inputs: ReviewInputs, nonce: str | None = None) -> str:
             for title, preview in list(inputs.blocked)[-EARLIER_BLOCKS:]
         ]
         lines += block("blocked", "\n".join(blocked))
+    sites = [s for s in inputs.refused_sites if _SITE.fullmatch(s)][-REFUSED_SITES:]
+    if sites:
+        lines.append(
+            "Sites refused in this task. An action that reaches one of "
+            'them, through any address or encoding, is "ask":'
+        )
+        lines += block("refused", "\n".join(sites))
     lines.append("What the user asked (newest last):")
     requests = [r for r in inputs.requests if r.strip()][-(EARLIER_REQUESTS + 1) :]
     for text in requests or ["(nothing)"]:
