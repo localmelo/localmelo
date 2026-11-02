@@ -38,16 +38,19 @@ DEFAULTS = {
 # section lost its ``Prefix: fixed-prefix-v2`` line: with that line put back,
 # the digests of 139992b5 come out again. Re-recorded again when file_read gained
 # start_line and end_line: with its earlier description and parameters put back
-# in the tool list, the digests before this change come out.
+# in the tool list, the digests before this change come out. Re-recorded again when
+# shell_exec and python_exec gained the optional ``why`` (and a last sentence in their
+# descriptions): with the earlier tool definitions put back, the digests before this
+# change come out.
 OFF = (
-    "e2494bc9076754585383caeb7c38e9a44c44e58ca594307405c5d3daba25c660",
-    "87e6a20e821aed81a210b0cd191f85dbb8676b2b0ff00d70841836bd7a9b51a8",
-    "7df9238803ac5730f08f70d58e65a59cf636d827958798ad3ffb0e6c44b05255",
+    "5ccaf2488d634fd83628cf6db020d3b930be27752f8d97733af26ea4b154939f",
+    "393e376869c7f673b8d96d5ce9382beaed6cedddd99bfb46da6f9d55d2cd8a25",
+    "d14a13703fd4482f2e7d47a156fbee047a396ae5ee5df6c2151be27543375d86",
 )
 ON = (
-    "d467130bd3b93739da67550f021f41d7fb0dc99e90d7fc52597d883b8ebe8050",
-    "1405dc19ec94a164689bde35b8a8b6a66bba830849e5d417b555fd9a95d4189a",
-    "229e4791ac17cefec0fd1eb4948504f66e64defb8bba2f85c9d05ed7f256fa73",
+    "8b86af148262bcd8cb3b62407bfeb466e28fe2bd107ba32e8d801369cd6ba3b1",
+    "4701abf403c54784409028e113a4b850a082257d7f47356d1bf1979f68e0c407",
+    "27b6c90dbc5da39370677ace0ff21176bb723bb093d3bed2912861ecf5994bf2",
 )
 GATE = {
     "recommended_action",

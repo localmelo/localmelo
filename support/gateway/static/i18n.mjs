@@ -83,9 +83,36 @@ export function saidText(said) {
     if (value && typeof value === "object" && typeof value.key === "string") params[name] = saidText(value);
     else if (value && typeof value === "object" && Number.isFinite(value.clock)) {
       params[name] = formatTime(new Date(2000, 0, 1, Math.floor(value.clock / 60), value.clock % 60), "clock");
-    } else params[name] = value;
+    } else if (value && typeof value === "object" && value.gist) params[name] = gistSentence(value.gist);
+    else params[name] = value;
   }
   return t(said.key, params);
+}
+
+/** Names as a list in the page's language: `Safari`, `Safari and Notes`, `Safari, Notes and Mail`. */
+export function nameList(names) {
+  const found = (Array.isArray(names) ? names : [names]).map(String).filter(Boolean);
+  if (found.length < 2) return found.join("");
+  if (found.length === 2) return t("gist.list.two", {first: found[0], second: found[1]});
+  return t("gist.list.many", {head: found.slice(0, -1).join(t("gist.list.sep")), last: found.at(-1)});
+}
+
+/**
+ * The words of a step's sentence, a gist's `say` node `{id, params}`, in the page's language. A parameter
+ * may be another sentence (`then`, `more`) or a list of names (`apps`); in English the sentence after
+ * `then` starts in lower case. An empty string when the node is not one.
+ */
+export function gistSentence(node) {
+  if (!node || typeof node !== "object" || typeof node.id !== "string") return "";
+  const params = {};
+  for (const [name, value] of Object.entries(node.params && typeof node.params === "object" ? node.params : {})) {
+    if (Array.isArray(value)) params[name] = nameList(value);
+    else if (value && typeof value === "object") {
+      const text = gistSentence(value);
+      params[name] = name === "next" && current === "en" ? text.charAt(0).toLowerCase() + text.slice(1) : text;
+    } else params[name] = value;
+  }
+  return t(`gist.say.${node.id}`, params);
 }
 
 /** The page's language. */

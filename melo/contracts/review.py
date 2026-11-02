@@ -25,7 +25,9 @@ from typing import Any, Final, Literal
 from urllib.parse import unquote, urlsplit
 
 Verdict = Literal["routine", "high", "undecided"]
-RULES_VERSION: Final = 1
+# The version of the rules a review recorded: 2 added the ``app_control`` kind
+# (an allow-list of plain scripts) and the sentence of an approval card (#454).
+RULES_VERSION: Final = 2
 
 # The card's title per category, strongest first: a call's title and the
 # order of its reasons follow this order.
@@ -33,6 +35,7 @@ TITLES: Final[dict[str, str]] = {
     "self": "Change localmelo itself?",
     "credentials": "Use your passwords or keys?",
     "system": "Change system settings?",
+    "app_control": "Control an app?",
     "persistence": "Set up something that runs later?",
     "remote_code": "Run code downloaded from the internet?",
     "install": "Install software?",
@@ -53,6 +56,7 @@ CATEGORY_WORDS: Final[dict[str, str]] = {
     "self": "changes localmelo itself",
     "credentials": "uses passwords or keys",
     "system": "changes system settings",
+    "app_control": "controls an app",
     "persistence": "sets up something that runs later",
     "remote_code": "runs code from the internet",
     "install": "installs software",
@@ -83,8 +87,18 @@ WORDS_CAN_ALLOW: Final = frozenset(
         "beyond_request",
     }
 )
+# ``app_control`` (a script that operates another app) was ``system`` once and
+# is as strict: only a click allows it, never words or the model.
 CLICK_ONLY: Final = frozenset(
-    {"credentials", "system", "persistence", "remote_code", "opaque", "unreviewed"}
+    {
+        "credentials",
+        "system",
+        "app_control",
+        "persistence",
+        "remote_code",
+        "opaque",
+        "unreviewed",
+    }
 )
 # The reason a call of the ``self`` category is denied without asking.
 SELF_DENIAL: Final = "melo never lets a call change its own runtime, settings or keys"
@@ -308,6 +322,87 @@ def _shell_commands(text: str) -> list[list[str]]:
     return found
 
 
+Step = tuple[list[str], str]
+
+
+def _cut(text: str) -> tuple[list[str], bool]:
+    """*text* cut into commands, and whether every quote in it closed.
+
+    The cuts are ``;``, ``&&``, ``||``, ``|``, ``&`` and line breaks, only
+    where no quote, ``$(…)`` or backquote is open. A comment (``#`` after a
+    space or an operator) runs to its line end and cuts nothing.
+    """
+    parts: list[str] = []
+    stack: list[str] = []  # what is open, innermost last: ' " ` or (
+    start = at = 0
+    while at < len(text):
+        char, top = text[at], (stack[-1] if stack else "")
+        if top == "'":
+            if char == "'":
+                stack.pop()
+        elif char == "\\":
+            at += 1
+        elif top == '"' and char == '"' or top == "`" and char == "`":
+            stack.pop()
+        elif text.startswith("$(", at):
+            stack.append("(")
+            at += 1
+        elif char == "`" or char in "'\"" and top != '"':
+            stack.append(char)
+        elif top == "(" and char == "(":
+            stack.append("(")
+        elif top == "(" and char == ")":
+            stack.pop()
+        elif top:
+            pass
+        elif char == "#" and (at == 0 or text[at - 1] in " \t\n;&|("):
+            end = text.find("\n", at)
+            at = len(text) if end < 0 else end - 1
+        elif char in ";\n" or char == "|" or char == "&" and _cuts_here(text, at):
+            parts.append(text[start:at])
+            if (
+                text[at + 1 : at + 2] == "&"
+                or char == "|"
+                and text[at + 1 : at + 2] == "|"
+            ):
+                at += 1  # && || and |&
+            start = at + 1
+        at += 1
+    parts.append(text[start:])
+    return parts, not stack
+
+
+def _cuts_here(text: str, at: int) -> bool:
+    """Whether the ``&`` at *at* ends a command: ``&&`` or a background ``&``, not ``2>&1`` or ``&>``."""
+    before, after = text[at - 1 : at] if at else "", text[at + 1 : at + 2]
+    return after == "&" or before not in ("<", ">") and after != ">"
+
+
+def _shell_parts(text: str) -> list[str]:
+    """The commands of a shell *text*, each as written: cut outside quotes only.
+
+    A text that leaves a quote open is read line by line instead.
+    """
+    text = _joined_lines(text)
+    parts, closed = _cut(text)
+    if not closed and "\n" in text:
+        parts = [part for line in text.split("\n") for part in _cut(line)[0]]
+    return [part.strip() for part in parts if part.strip()]
+
+
+def _shell_steps(text: str) -> list[Step]:
+    """The commands of a shell *text* as ``(words, text as written)``."""
+    found: list[Step] = []
+    for part in _shell_parts(text):
+        try:
+            words = shlex.split(part)
+        except ValueError:
+            words = part.split()
+        if words:
+            found.append((words, part))
+    return found
+
+
 def _word(node: ast.AST) -> str | None:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
@@ -317,14 +412,14 @@ def _word(node: ast.AST) -> str | None:
     return None
 
 
-def _python_commands(code: str) -> list[list[str]]:
-    """The commands a Python step runs with literal arguments: ``subprocess.run([...])``,
-    ``os.system("...")`` and the like."""
+def _python_runs(code: str) -> list[list[str] | str]:
+    """What a Python step runs with literal arguments: a word list for
+    ``subprocess.run([...])``, a shell text for ``os.system("...")``."""
     try:
         tree = ast.parse(code)
     except (SyntaxError, ValueError, RecursionError):
         return []
-    found: list[list[str]] = []
+    found: list[list[str] | str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or not node.args:
             continue
@@ -338,8 +433,55 @@ def _python_commands(code: str) -> list[list[str]]:
             if words and all(word is not None for word in words):
                 found.append([str(word) for word in words])
         elif (text := _word(first)) is not None:
-            found += _shell_commands(text)
+            found.append(text)
     return found
+
+
+def _python_commands(code: str) -> list[list[str]]:
+    """The commands a Python step runs with literal arguments: ``subprocess.run([...])``,
+    ``os.system("...")`` and the like."""
+    found: list[list[str]] = []
+    for run in _python_runs(code):
+        found += _shell_commands(run) if isinstance(run, str) else [run]
+    return found
+
+
+def commands_of(tool_name: str, arguments: Mapping[str, Any]) -> list[list[str]]:
+    """The commands a ``shell_exec`` or ``python_exec`` call runs, as word lists.
+
+    A shell command is split at ``&&``, ``||``, ``;``, ``|`` and line breaks;
+    Python gives the commands it runs with literal arguments
+    (``subprocess.run([...])``, ``os.system("...")``). Another tool gives none.
+    """
+    if tool_name == "shell_exec":
+        command = arguments.get("command")
+        if isinstance(command, list):
+            return [[str(word) for word in command]]
+        return _shell_commands(str(command or ""))
+    if tool_name == "python_exec":
+        return _python_commands(str(arguments.get("code") or ""))
+    return []
+
+
+def command_steps(tool_name: str, arguments: Mapping[str, Any]) -> list[Step]:
+    """Like :func:`commands_of`, with each command's text as written.
+
+    A shell text is cut only outside quotes, ``$(…)`` and comments, so
+    ``git commit -m "tidy; rm old"`` is one command. The text is ``""`` for a
+    command given as a list of words. :func:`commands_of` and the keys built
+    on it are unchanged.
+    """
+    if tool_name == "shell_exec":
+        command = arguments.get("command")
+        if isinstance(command, list):
+            return [([str(word) for word in command], "")]
+        return _shell_steps(str(command or ""))
+    if tool_name == "python_exec":
+        found: list[Step] = []
+        for run in _python_runs(str(arguments.get("code") or "")):
+            found += _shell_steps(run) if isinstance(run, str) else [(run, "")]
+        return found
+    return []
 
 
 def _installs(tokens: Sequence[str]) -> bool:
@@ -360,15 +502,8 @@ def loose_keys(
     fetch.py`` refuses a later ``pip3 install numpy`` but not ``python
     fetch.py``. They only ever refuse: no allowance is kept by them.
     """
-    if tool_name == "shell_exec":
-        command = arguments.get("command")
-        if isinstance(command, list):
-            commands = [[str(word) for word in command]]
-        else:
-            commands = _shell_commands(str(command or ""))
-    elif tool_name == "python_exec":
-        commands = _python_commands(str(arguments.get("code") or ""))
-    else:
+    commands = commands_of(tool_name, arguments)
+    if not commands:
         return []
     parts = [tokens for tokens in (_command(words) for words in commands) if tokens]
     if not parts:
