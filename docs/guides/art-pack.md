@@ -68,7 +68,7 @@ uv run --with pillow==13.0.0 pytest tests/test_moves_assets.py tests/cli/test_ma
 uv run python scripts/build_macos_app.py --install
 ```
 
-The screenshots in `docs/assets/img` show the console and the app with the old art; retake them when the pictures change.
+The screenshots in `docs/assets/img` show the console and the app with the current art; retake them when the pictures change.
 
 ## The pack
 
