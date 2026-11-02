@@ -195,8 +195,10 @@ NOTE_EMBED_TIMEOUT_S: Final = INDEX_EMBED_TIMEOUT_S
 COMPRESS_AT_CHARS: Final = 12_000
 COMPRESS_CACHE_FILE: Final = "compress_cache.jsonl"
 _QUERY_CHARS: Final = 2_000
-# How many of the chat's earlier turns a follow-up's query is made of.
+# How many of the chat's earlier turns a follow-up's query is made of, and the
+# most turns it looks at to find them (a turn with no content of its own is skipped).
 FOLLOW_UP_TURNS: Final = 2
+_FOLLOW_UP_SCAN: Final = 100
 _TURN_PAGE: Final = 16
 # The instruction the Qwen3 embedding models expect on a query, not on documents.
 _QWEN3_QUERY: Final = (
@@ -637,21 +639,28 @@ async def recent_said(
     count: int = FOLLOW_UP_TURNS,
 ) -> list[str]:
     """What the user typed in the last *count* turns of chat *info*'s session before
-    it, newest first: those the model's window still shows (*keep_from* and later;
-    every earlier turn without it), as :func:`window_start` tells. An undone turn,
-    a turn the person did not begin (a task's question to its chat) and a turn
-    with no typed words are left out, as :meth:`ChatMemory._said` leaves them out.
-    Fewer than *count* when the chat has fewer; melo's replies are never included.
+    it that say something, newest first: those the model's window still shows
+    (*keep_from* and later; every earlier turn without it), as :func:`window_start`
+    tells. An undone turn, a turn the person did not begin (a task's question to
+    its chat) and a turn with no content of its own ("continue", an empty message;
+    :func:`is_contentless`) are skipped, as :meth:`ChatMemory._said` skips the first
+    two, so "continue" typed twice does not use up the places. At most
+    :data:`_FOLLOW_UP_SCAN` turns are looked at. Fewer than *count* when the chat has
+    fewer; melo's replies are never included.
     """
     said: list[str] = []
     before = info.turn
+    seen = 0
     while len(said) < count:
         page = await store.list_turns(info.session_id, limit=_TURN_PAGE, before=before)
         for turn in reversed(page):
-            if keep_from is not None and turn.turn < keep_from:
+            if seen >= _FOLLOW_UP_SCAN or (
+                keep_from is not None and turn.turn < keep_from
+            ):
                 return said
+            seen += 1
             words = _typed_words(turn)
-            if turn.undone or is_owner_question(turn) or not words.strip():
+            if turn.undone or is_owner_question(turn) or is_contentless(words):
                 continue
             said.append(words)
             if len(said) == count:

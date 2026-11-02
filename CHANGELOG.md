@@ -874,9 +874,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   you said just before, not from its own words (#452). Searched by those words alone, it
   matched whatever held them (turns about who you are, say) and put them in the prompt.
   A message with no content of its own (no word left after small words, asking words and
-  follow-up words, and no number, URL or quoted text) is now searched with your words of the
-  chat's last two turns that the model still shows, newest first; melo's replies, an undone
-  turn and a task's question are left out. The first message of a new chat that has no
+  follow-up words, and no number, URL, quoted text or mention of you) is now searched with
+  your words of the chat's last two turns that say something and that the model still shows,
+  newest first; melo's replies, an undone turn, a task's question and an earlier "continue"
+  are left out. A question about you ("what do you know about me?", "我是谁") has content
+  and is searched as typed. The first message of a new chat that has no
   content recalls nothing (`search_memory` is still there). The bars, the ranking and the
   block are unchanged, and a message with content ("what is my name?") is searched as
   typed. The `turn.memory` event's `recall` object has `query_from` (`message`, `recent` or

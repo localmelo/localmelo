@@ -226,6 +226,14 @@ def about(found: TurnMemory, word: str) -> bool:
         "keep going",
         "try again",
         "tell me more",
+        "show me",
+        "let me know",
+        "do it for me",
+        "look it up for me",
+        "给我看看",
+        "让我想想",
+        "告诉我",
+        "我们继续",
         "what about that one?",
         "and the second one?",
         "what about her?",
@@ -259,6 +267,14 @@ def test_a_message_that_names_nothing_has_no_content(message: str) -> None:
         "what is Lena's new job?",
         "我朋友叫什么名字",
         "what is my name?",
+        "what's my name",
+        "what do you know about me?",
+        "who am I?",
+        "do you remember me?",
+        "tell me about myself",
+        "你知道我什么",
+        "我是谁",
+        "我的名字",
         "where do I live?",
         "我叫什么名字",
         "do you remember the dentist appointment?",
@@ -404,16 +420,16 @@ async def test_only_the_last_two_turns_are_used_and_attachments_are_not(
     cfg = config()
     memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
     try:
-        turns = await chat_of(store, clock, ("one", "two", "three", "four"))
+        turns = await chat_of(store, clock, ("alpha", "bravo", "charlie", "delta"))
         info = await now_in(store, clock, turns[0].session_id, "go on")
         assert FOLLOW_UP_TURNS == 2
-        assert await recent_said(store, info, None) == ["four", "three"]
-        assert await recent_said(store, info, None, 3) == ["four", "three", "two"]
+        assert await recent_said(store, info, None) == ["delta", "charlie"]
+        assert await recent_said(store, info, None, 3) == ["delta", "charlie", "bravo"]
         assert await recent_said(store, info, None, 9) == [
-            "four",
-            "three",
-            "two",
-            "one",
+            "delta",
+            "charlie",
+            "bravo",
+            "alpha",
         ]
         assert await recent_said(store, info, None, 0) == []
     finally:
@@ -437,6 +453,50 @@ async def test_many_turns_are_read_a_page_at_a_time(
         await memory.aclose()
 
 
+async def test_a_turn_with_no_content_does_not_use_up_a_place(
+    tmp_path: Path, store: SessionStore, clock: Clock
+) -> None:
+    cfg = config()
+    memory = await build(tmp_path, store, clock, cfg, [EN_FRIEND_DOC], EN_IDENTITY)
+    try:
+        turns = await chat_of(store, clock, EN_FRIEND)
+        sid = turns[0].session_id
+        for text in ("continue", "ok", "go on"):
+            await said(store, clock, sid, text)
+        await said(store, clock, sid, "tell me more", origin="followup")
+        spy = Spy(memory)
+        info = await now_in(store, clock, sid, "continue")
+        found = await memory.before_turn(store, info, "continue")
+        assert spy.queries == [f"continue\n{EN_FRIEND[2]}\n{EN_FRIEND[1]}"]
+        assert about(found, "Lena")
+        assert found.recall is not None and found.recall.query_from == "recent"
+        # A chat of turns that say nothing, one after the other, has nothing to follow.
+        other = await chat_of(store, clock, ("continue", "ok", "go on"))
+        assert (
+            await recent_said(
+                store, await now_in(store, clock, other[0].session_id, "yes"), None
+            )
+            == []
+        )
+    finally:
+        await memory.aclose()
+
+
+async def test_only_a_bounded_number_of_turns_is_looked_at(
+    tmp_path: Path, store: SessionStore, clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    memory = ChatMemory(lambda: config(), directory=str(tmp_path / "memory"))
+    try:
+        monkeypatch.setattr(service, "_FOLLOW_UP_SCAN", 20)
+        turns = await chat_of(store, clock, ["hello world", *["ok"] * 30])
+        info = await now_in(store, clock, turns[0].session_id, "go on")
+        assert await recent_said(store, info, None) == []
+        monkeypatch.setattr(service, "_FOLLOW_UP_SCAN", 100)
+        assert await recent_said(store, info, None) == ["hello world"]
+    finally:
+        await memory.aclose()
+
+
 async def test_the_window_decides_which_turns_the_query_is_made_of(
     tmp_path: Path, store: SessionStore, clock: Clock
 ) -> None:
@@ -456,15 +516,23 @@ async def test_the_window_decides_which_turns_the_query_is_made_of(
             == f"go look it up\n{turns[3].user_text}\n{turns[2].user_text}"
         )
         await finish(store, info)
-        # It holds the last one and the turn that followed it.
+        # It holds the last one and the turn that followed it, which says nothing
+        # of its own and is skipped: the last one is all there is to follow.
         info = await now_in(store, clock, sid, "go look it up")
         earlier = (await store.list_turns(sid))[-2]
         assert earlier.user_text == "go look it up"
         mine = window_of(turns[3], earlier)
         await memory.before_turn(store, info, "go look it up", window=mine)
-        assert spy.queries[-1] == (
-            f"go look it up\n{earlier.user_text}\n{turns[3].user_text}"
+        assert spy.queries[-1] == f"go look it up\n{turns[3].user_text}"
+        await finish(store, info)
+        # It holds only turns that say nothing: nothing to follow.
+        count = len(spy.queries)
+        info = await now_in(store, clock, sid, "go look it up")
+        none = await memory.before_turn(
+            store, info, "go look it up", window=window_of(earlier)
         )
+        assert len(spy.queries) == count and none.recall is not None
+        assert none.recall.query_from == "none" and not none.block
         await finish(store, info)
         # It holds none of them: nothing to follow, nothing recalled.
         count = len(spy.queries)
@@ -477,6 +545,63 @@ async def test_the_window_decides_which_turns_the_query_is_made_of(
 
 
 # ── No earlier turn ──
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "我是谁",
+        "你知道我什么",
+        "what do you know about me?",
+        "what's my name",
+        "who am I?",
+    ],
+)
+async def test_a_question_about_the_person_is_searched_as_typed_in_a_new_chat(
+    tmp_path: Path, store: SessionStore, clock: Clock, message: str
+) -> None:
+    cfg = config()
+    memory = await build(
+        tmp_path,
+        store,
+        clock,
+        cfg,
+        [EN_FRIEND_DOC, ZH_FRIEND_DOC],
+        EN_IDENTITY + ZH_IDENTITY,
+    )
+    try:
+        spy = Spy(memory)
+        results = []
+        for setting in ("recent", "message"):
+            cfg.memory.followup_query = setting
+            info = await store.begin_turn(
+                None, message, holder=HOLDER, title=message, new_session=NewSession()
+            )
+            found = await memory.before_turn(store, info, message, window=[])
+            assert found.recall is not None and found.recall.query_from == "message"
+            results.append((found.block, [item.key for item in found.used]))
+        assert spy.queries == [message, message]  # a search ran, on the message
+        assert results[0] == results[1]  # the same as before this change
+    finally:
+        await memory.aclose()
+
+
+async def test_a_question_about_the_person_after_other_talk_is_searched_as_typed(
+    tmp_path: Path, store: SessionStore, clock: Clock
+) -> None:
+    cfg = config()
+    memory = await build(tmp_path, store, clock, cfg, [EN_FRIEND_DOC], EN_IDENTITY)
+    try:
+        turns = await chat_of(store, clock, EN_FRIEND)
+        spy = Spy(memory)
+        for message in ("我是谁", "what do you know about me?"):
+            info = await now_in(store, clock, turns[0].session_id, message)
+            found = await memory.before_turn(store, info, message)
+            assert found.recall is not None and found.recall.query_from == "message"
+            await finish(store, info)
+        assert spy.queries == ["我是谁", "what do you know about me?"]
+    finally:
+        await memory.aclose()
 
 
 @pytest.mark.parametrize("message", ["go look it up", "去查一下", "继续", "continue"])

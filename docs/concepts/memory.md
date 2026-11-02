@@ -106,9 +106,9 @@ when is my dentist appointment?
 
 **A short follow-up.** A message such as "go look it up", "continue" or "那个呢" says nothing to search for.
 
-- Searched by its own words, it matches whatever holds them, such as earlier turns about you. So melo adds what you typed in the last 2 turns of this chat, newest first, to the search text (2,000 characters at most); melo's replies, an undone turn and a task's question are left out.
+- Searched by its own words, it matches whatever holds them, such as earlier turns about you. So melo adds what you typed in the last 2 turns of this chat that say something, newest first, to the search text (2,000 characters at most); melo's replies, an undone turn, a task's question and an earlier "continue" are left out.
 - Only the search text changes: the bars, the ranking, the limits and the block are the same.
-- A message has content of its own when a word is left after small words ("the", "do"), asking words ("what", "where") and follow-up words ("go", "look", "up", "continue", "that", "继续", "去查一下"), or when it holds a number, a URL or quoted text. "What is my name?" and "我朋友叫什么名字" have content and are searched as typed.
+- A message has content of its own when a word is left after small words ("the", "do"), asking words ("what", "where") and follow-up words ("go", "look", "up", "continue", "that", "继续", "去查一下"), or when it holds a number, a URL or quoted text, or speaks of you ("I", "me", "my", "我", "我的"; "tell me more" and "帮我查一下" do not). "What is my name?", "what do you know about me?", "我是谁" and "我朋友叫什么名字" have content and are searched as typed.
 - The first message of a new chat has no earlier turn to follow, so nothing is searched and no block is added. The model can still call `search_memory`.
 - `[memory] followup_query = "message"` (`-X memory.followup_query=message` for one run; default `"recent"`) searches such a message by its own words, as before.
 

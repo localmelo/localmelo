@@ -638,6 +638,14 @@ _FOLLOW_UP_CHARS: Final = frozenset(
 # Words of two characters whose characters are not fillers by themselves.
 _FOLLOW_UP_PHRASES: Final = ("开始", "结束", "完成", "可以")
 _HAN: Final = re.compile("[\u3400-\u4dbf\u4e00-\u9fff]+")
+# "We" ("我们") and the first person as the object of a request ("tell me more", "do
+# it for me", "帮我查一下", "告诉我") do not make a message about the person.
+_NOT_ABOUT_ME: Final = re.compile(
+    r"\b(?:tell|show|let|give|help|send|bring|pass|read|ask|for)\s+me\b"
+    r"|我们|(?:帮|给|让|替|陪|为|跟|告诉)我"
+)
+# The person in a message: "I", "me", "my", "mine", "myself", "我", "我的".
+_ABOUT_ME: Final = re.compile(r"\b(?:i|me|my|mine|myself)\b|我")
 # What a message holds that is its own subject whatever its words: a number, a
 # URL, or quoted text (straight or curly quotes, corner brackets, title marks, code).
 _OWN_SUBJECT: Final = re.compile(
@@ -649,9 +657,12 @@ _OWN_SUBJECT: Final = re.compile(
 def is_contentless(text: str) -> bool:
     """Whether *text* names nothing to look up: after the stopwords, the asking
     words and the follow-up words (:data:`_FOLLOW_UP_WORDS`, the Chinese
-    :data:`_FOLLOW_UP_CHARS`) no word is left, and it holds no number, URL or quoted
-    text. "go look it up", "continue", "do that", "去查一下" and "那个呢" are
-    contentless; "what is my name?" and "我朋友叫什么名字" are not.
+    :data:`_FOLLOW_UP_CHARS`) no word is left, it holds no number, URL or quoted
+    text, and it does not speak of the person ("I", "me", "my", "我", "我的").
+    "go look it up", "continue", "do that", "tell me more", "去查一下" and "那个呢"
+    are contentless; "what is my name?", "what do you know about me?", "我是谁"
+    and "我朋友叫什么名字" are not. "Tell me", "for me", "帮我" and "我们" are
+    requests and group words, not a question about the person.
 
     :func:`gate_terms` is not the measure for this: it counts a Chinese run as its
     characters and bigrams (so "继续" is three terms) and it counts "go", "look" and
@@ -659,7 +670,7 @@ def is_contentless(text: str) -> bool:
     so such a message is searched as it is. An empty message is contentless.
     """
     folded = normalise(text)
-    if _OWN_SUBJECT.search(folded):
+    if _OWN_SUBJECT.search(folded) or _ABOUT_ME.search(_NOT_ABOUT_ME.sub(" ", folded)):
         return False
     for word in _WORD.findall(folded):
         if (
