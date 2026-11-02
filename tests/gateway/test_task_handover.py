@@ -237,14 +237,12 @@ async def test_a_turn_melo_began_or_another_turn_hands_no_items(
     item = await item_of(memory, key)
     first = await said(store, None, "Tell me about Alex.")
     chat = first.session_id
-    # A task's question to the chat: agent data, never the person's notes.
+    # A task's question to the chat: agent data, never the person's; it hands nothing.
     asked = await said(store, chat, "Which city?", origin=ASK_OWNER)
     handover = await handover_of(
         store, chat, asked, chat_turn(store, asked, used=(item,))
     )
-    assert not handover.used and [w for _, _, w, _ in handover.turns] == [
-        "Tell me about Alex."
-    ]
+    assert handover == Handover()
     # The memory's turn is another turn than the one that starts the task.
     now = await said(store, chat, "go look it up", finish=False)
     stale = chat_turn(store, first, used=(item,))
@@ -296,7 +294,7 @@ async def test_the_lines_come_opened_searched_recalled_then_the_digest(
             DigestItem("s7", 3, "Main chat, 09:10 · the user: Alex has two offers"),
         ),
     )
-    lines, kept = await picked_lines(memory, handover)
+    lines, kept, _ = await picked_lines(memory, handover)
     body = lines.splitlines()
     assert [line.split(" (")[0] for line in body] == [
         "- the user said “What does Alex's résumé say?”; melo replied “Alex led the "
@@ -327,10 +325,10 @@ async def test_a_turn_reached_twice_or_shown_in_the_earlier_turns_is_listed_once
         used=(same, rust),
         digest=(DigestItem(other, 1, "chat, 09:00 · the user: Alex likes Rust."),),
     )
-    lines, _ = await picked_lines(memory, handover)
+    lines, *_ = await picked_lines(memory, handover)
     assert lines.count("two pages") == 1 and lines.count("Rust") == 1
     # The earlier-turns block shows the Rust turn already.
-    lines, _ = await picked_lines(memory, handover, shown={(other, 1)})
+    lines, *_ = await picked_lines(memory, handover, shown={(other, 1)})
     assert "Rust" not in lines and "two pages" in lines
 
 
@@ -351,7 +349,7 @@ async def test_no_line_names_an_id_a_task_cannot_open(
         title="Alex's search",
         conflicts=(3, 5),
     )
-    lines, _ = await picked_lines(memory, Handover(used=(shown, held)))
+    lines, *_ = await picked_lines(memory, Handover(used=(shown, held)))
     assert "[t" not in lines and "m12" not in lines and "m3" not in lines
     assert "conflicts" not in lines
     assert "“Alex's search”: Alex wants a staff role." in lines
@@ -368,7 +366,7 @@ async def test_a_turn_of_the_starting_chat_is_named_so(
         turn=1,
         created_at=time.time(),
     )
-    lines, _ = await picked_lines(memory, Handover(used=(item,)))
+    lines, *_ = await picked_lines(memory, Handover(used=(item,)))
     assert "(the chat that started this task, Oct 30)" in lines
     assert "this chat," not in lines
 
@@ -401,7 +399,7 @@ async def test_only_a_typed_note_reads_as_the_persons_words(
             record(plain, "", "Main chat, Oct 30"),
         )
     )
-    lines, _ = await picked_lines(memory, handover)
+    lines, *_ = await picked_lines(memory, handover)
     first, second, third, fourth = lines.splitlines()
     assert first.startswith(
         "- a note to the user “Alex's team ships weekly.” (from example.com"
@@ -431,13 +429,13 @@ async def test_opened_text_is_cut_at_a_sentence_end_before_a_line_goes(
         opened=({"session_id": long_chat, "turn": 1, "id": long_ids[0]},),
         used=items,
     )
-    lines, kept = await picked_lines(memory, handover)
+    lines, kept, _ = await picked_lines(memory, handover)
     assert len(lines) <= PICKED_CHARS
     first, *rest = lines.splitlines()
     assert f"city. {CUT_MARK} (" in first, first
     assert len(rest) == 3 and kept == set(small)
     # Less room: the opened text goes down to its floor, then the lowest lines go.
-    lines, kept = await picked_lines(memory, handover, chars=OPENED_FLOOR + 140)
+    lines, kept, _ = await picked_lines(memory, handover, chars=OPENED_FLOOR + 140)
     assert len(lines) <= OPENED_FLOOR + 140
     first, *rest = lines.splitlines()
     assert CUT_MARK in first and len(rest) < 3
@@ -453,7 +451,7 @@ async def test_a_turn_or_item_opened_and_gone_since_is_left_out(
             {"item": 999, "sources": []},
         )
     )
-    assert await picked_lines(memory, handover) == ("", frozenset())
+    assert await picked_lines(memory, handover) == ("", frozenset(), frozenset())
 
 
 async def test_with_memory_items_the_lines_are_items_and_carry_no_id(
@@ -482,7 +480,7 @@ async def test_with_memory_items_the_lines_are_items_and_carry_no_id(
         handover = Handover(
             opened=({"item": item_id, "sources": [["s1", 1]]},), used=(found.item,)
         )
-        lines, kept = await picked_lines(memory, handover)
+        lines, kept, _ = await picked_lines(memory, handover)
         assert lines.splitlines() == [
             f"- “Alex's search”: Alex wants a staff role at a large company. "
             f"({found.item.where})"

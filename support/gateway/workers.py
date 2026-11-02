@@ -59,6 +59,7 @@ from localmelo.support.gateway.finishing import (
 from localmelo.support.gateway.front_rules import asks_commit, asks_tests
 from localmelo.support.gateway.handover import (
     Handover,
+    inert,
     own_words,
     picked_block,
     picked_lines,
@@ -362,9 +363,12 @@ def _turn_text(record: TaskRecord) -> tuple[str, str | None]:
 
 
 def _pack_block(spec: Mapping[str, Any]) -> str:
-    """The context pack a task's turn carries under its heading; "" for none."""
+    """The context pack a task's turn carries under its heading; "" for none.
+
+    Nothing in the notes reads as a block's heading (:func:`~.handover.inert`).
+    """
     body = str(spec.get("context_pack") or "")
-    return f"{TASK_PACK_HEADER}\n{body}" if body else ""
+    return f"{TASK_PACK_HEADER}\n{inert(body)}" if body else ""
 
 
 def _project_block(spec: Mapping[str, Any]) -> str:
@@ -377,12 +381,11 @@ def _project_block(spec: Mapping[str, Any]) -> str:
     return f"{PROJECT_HEADER.format(paths=paths)}\n{body}"
 
 
-def _task_context(spec: Mapping[str, Any]) -> str:
-    """What a task's turn carries after its request, each block marked as data.
-
-    The person's own words, its chat's earlier turns, what the chat's turn
-    recalled (#463), the pack, then the project's files; each only when set.
-    """
+def _task_blocks(spec: Mapping[str, Any]) -> tuple[str, ...]:
+    """What a task's turn carries after its request, each block marked as data,
+    highest first: the person's own words, its chat's earlier turns, what the
+    chat's turn recalled (#463), each fenced; the pack, then the project's
+    files. Each only when set; near the query limit the lowest go first."""
     blocks = (
         words_block(str(spec.get("own_words") or "")),
         turns_block(str(spec.get("chat_turns") or "")),
@@ -390,7 +393,12 @@ def _task_context(spec: Mapping[str, Any]) -> str:
         _pack_block(spec),
         _project_block(spec),
     )
-    return "\n\n".join(block for block in blocks if block)
+    return tuple(block for block in blocks if block)
+
+
+def _task_context(spec: Mapping[str, Any]) -> str:
+    """The blocks of :func:`_task_blocks` as one text."""
+    return "\n\n".join(_task_blocks(spec))
 
 
 def _project_fields(found: project_files.ProjectInstructions | None) -> dict[str, Any]:
@@ -848,13 +856,15 @@ class TaskWorkers:
         if self.memory is None or not self._memory_on():
             return turns, "", frozenset()
         try:
-            picked, notes = await picked_lines(self.memory, handover, shown=shown)
+            picked = await picked_lines(self.memory, handover, shown=shown)
         except Exception:
             log.warning(
                 "Could not read what the chat recalled for a task", exc_info=True
             )
             return turns, "", frozenset()
-        return turns, picked, notes
+        if picked.over:  # an opened line carries those turns whole
+            turns, _ = turn_lines(handover, leave_out=picked.over)
+        return turns, picked.lines, picked.notes
 
     async def _task_pack(
         self,
@@ -2399,7 +2409,7 @@ class TaskWorkers:
                 index_only=True,
                 # The pack and the project's files the task was made with, on every run
                 # (a continue or a restart too).
-                context=_task_context(record.spec),
+                context=_task_blocks(record.spec),
                 inbox=self._inboxes.setdefault(task_id, TaskInbox()),
                 observe=lambda event: self._observe(task_id, event),
                 review_since=review_since,

@@ -2328,7 +2328,7 @@ def _same_request(
 ) -> bool:
     # The context pack, what the chat handed over and the project's instructions
     # are made once, when the task is created: a repeat of the request does not
-    # make them again, so they are not part of what the key repeats.
+    # make them again, so they are not part of what the key repeats, on either side.
     skipped = (
         "task_id",
         "context_pack",
@@ -2341,8 +2341,9 @@ def _same_request(
     )
     stored = {key: value for key, value in record.spec.items() if key not in skipped}
     stored.setdefault("deadline", None)
+    asked = {key: value for key, value in spec.to_dict().items() if key not in skipped}
     expected = {
-        **spec.to_dict(),
+        **asked,
         "deadline": deadline,
         "origin": origin,
         "request_key": request_key,

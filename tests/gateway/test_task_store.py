@@ -1610,3 +1610,29 @@ async def test_latest_finished_carries_the_reason_of_a_run_out_of_steps(
         clock.now,
         OUT_OF_STEPS,
     )
+
+
+async def test_what_a_task_was_handed_is_no_part_of_a_repeated_request(
+    tasks: TaskStore,
+) -> None:
+    handed = replace(
+        spec("Plan the week"),
+        own_words="plan my week",
+        chat_turns="- the user: My week is busy.",
+        chat_picked="- the user said “I run on Sundays.” (Main chat, Oct 30)",
+        context_pack="- the user said “I drink tea.” (Main chat, Oct 30)",
+    )
+    record, repeated = await create_task(
+        tasks, handed, origin="user", request_key="week"
+    )
+    assert not repeated
+    # The same request, handed the same or other things, or nothing, repeats.
+    for again in (
+        handed,
+        replace(handed, chat_turns="- the user: Another chat.", own_words=""),
+        spec("Plan the week"),
+    ):
+        found = await tasks.find_existing_request(
+            again, origin="user", request_key="week"
+        )
+        assert found is not None and found.task_id == record.task_id

@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from localmelo.melo.agent._earlier import EARLIER_HEAD
+from localmelo.support.gateway.console.front import ECHO_EVENT
 from localmelo.support.gateway.handover import PICKED_HEADER
 from localmelo.support.gateway.workers import TASK_PACK_HEADER
 from localmelo.tests.memory.test_recall_list import add_turn
@@ -141,3 +142,40 @@ async def test_the_task_reads_them_as_data_after_its_request(
 
 async def _tick() -> None:
     await asyncio.sleep(0.02)
+
+
+async def test_a_start_tapped_later_hands_the_turns_before_its_proposal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main: list[Reply] = [
+        answer("Noted: Alex is looking."),
+        answer("I can look into that."),
+        answer("Maya's thesis sounds great."),
+    ]
+    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        _,
+        _,
+    ):
+        await say(client, console, FRIEND)
+        await say(client, console, REQUEST)
+        turns = await console.store.list_turns(str(console.main_id))
+        # The chat offers "Start this as a task?" for the request ...
+        await console.front.ask_to_start(turns[-1])
+        # ... and the person talks about someone else before tapping Start.
+        await say(client, console, "My friend Maya finished her thesis.")
+        found = await console.store.events_of_type(
+            str(console.main_id), ECHO_EVENT, limit=10
+        )
+        (offer,) = [
+            e for e in found if (e.event.get("data") or {}).get("echo") == "ask"
+        ]
+        started = await client.post(
+            f"/api/front/echoes/{offer.id}", json={"do": "start"}
+        )
+        assert started.status_code == 200, started.text
+        record = await console.workers.tasks.get_task(await started_task(console))
+        assert record.spec["chat_turns"].splitlines()[0] == f"- the user: {FRIEND}"
+        assert "Maya" not in record.spec["chat_turns"]
+        assert REQUEST not in record.spec["chat_turns"]

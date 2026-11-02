@@ -32,7 +32,14 @@ from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.config import Config
 from localmelo.support.gateway.chat_gate import ChatGate
-from localmelo.support.gateway.handover import PICKED_HEADER, WORDS_HEADER, Handover
+from localmelo.support.gateway.handover import (
+    PICKED_HEADER,
+    WORDS_HEADER,
+    Handover,
+    picked_block,
+    turns_block,
+    words_block,
+)
 from localmelo.support.gateway.task_policy import TaskSpec, is_persons_task
 from localmelo.support.gateway.workers import (
     PROJECT_HEADER,
@@ -564,7 +571,7 @@ async def _first(rig: Rig, spec: TaskSpec, **kwargs: Any) -> tuple[str, dict[str
 async def test_the_persons_words_ride_once_under_their_heading(rig: Rig) -> None:
     first, spec = await _first(rig, _spec(rig), chat_started=True)
     assert first.count(WORDS) == 1
-    assert f"{WORDS_HEADER}\n{WORDS}" in first
+    assert words_block(WORDS) in first
     assert (
         first.index(ASKED) < first.index(WORDS_HEADER) < first.index(TASK_PACK_HEADER)
     )
@@ -607,12 +614,14 @@ async def test_the_chats_turns_ride_ahead_of_the_pack(rig: Rig) -> None:
     first, spec = await _first(
         rig, _spec(rig), chat_started=True, handover=Handover(turns=TURNS)
     )
-    block = (
-        f"{EARLIER_HEAD}\n- the user: My friend Alex is looking for a new job.\n"
+    lines = (
+        "- the user: My friend Alex is looking for a new job.\n"
         "  melo: Noted.\n- the user: He wants a staff role at a large company.\n"
-        f"  melo: Got it.\n{EARLIER_END}"
+        "  melo: Got it."
     )
-    assert block in first
+    assert turns_block(lines) in first
+    assert turns_block(lines).startswith(f"{EARLIER_HEAD}\n<<turns nonce=")
+    assert turns_block(lines).endswith(f">>\n{EARLIER_END}")
     assert first.index(WORDS_HEADER) < first.index(EARLIER_HEAD)
     assert first.index(EARLIER_END) < first.index(TASK_PACK_HEADER)
     assert spec["chat_turns"].startswith("- the user: My friend Alex")
@@ -632,7 +641,7 @@ async def test_what_the_chat_recalled_rides_ahead_of_the_notes_in_the_packs_room
         "- the user said “Alex's résumé is two pages.”; melo replied “Good.” "
         "(chat “Résumé”, Oct 30)"
     )
-    assert f"{PICKED_HEADER}\n{line}" in first
+    assert picked_block(line) in first
     assert first.index(EARLIER_END) < first.index(PICKED_HEADER)
     assert first.index(PICKED_HEADER) < first.index(TASK_PACK_HEADER)
     assert spec["chat_picked"] == line
@@ -656,11 +665,11 @@ async def test_memory_off_keeps_the_words_and_the_chats_turns_only(rig: Rig) -> 
         handover=Handover(turns=TURNS, used=(RECALLED,)),
     )
     # The chat's own conversation rides either way; nothing recalled, no notes.
-    assert f"{EARLIER_HEAD}\n- the user: My friend Alex is looking" in first
+    assert EARLIER_HEAD in first and "- the user: My friend Alex is looking" in first
     assert spec["chat_turns"].startswith("- the user: My friend Alex")
     assert PICKED_HEADER not in first and TASK_PACK_HEADER not in first
     assert not {"chat_picked", "context_pack"} & set(spec)
-    assert f"{WORDS_HEADER}\n{WORDS}" in first
+    assert words_block(WORDS) in first
 
 
 async def test_memory_turned_off_in_the_settings_keeps_the_chats_turns(
@@ -688,3 +697,44 @@ async def test_a_failed_read_of_what_the_chat_recalled_keeps_its_turns(
     )
     assert EARLIER_HEAD in first and PICKED_HEADER not in first
     assert "Could not read what the chat recalled" in caplog.text
+
+
+async def test_a_request_near_the_query_limit_keeps_the_blocks_that_fit(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from localmelo.melo.checker.validators import MAX_QUERY_LEN
+
+    queries: list[str] = []
+
+    async def build(**kwargs: Any) -> Agent:
+        agent = Agent(
+            llm=kwargs["wrap_llm"](rig.llm),
+            options=session_options(kwargs["options"], kwargs["workspace"]),
+        )
+        await agent.start()
+        run_task = agent.run_task
+
+        async def recorded(query: str, **more: Any) -> Any:
+            queries.append(query)
+            return await run_task(query, **more)
+
+        agent.run_task = recorded  # type: ignore[method-assign]
+        return agent
+
+    monkeypatch.setattr("localmelo.support.gateway.workers.build_session_agent", build)
+    # Room for the person's words, not for the chat's turns or the notes too.
+    objective = "Read Alex's notes. " + "x" * (MAX_QUERY_LEN - 19 - 400)
+    rig.llm.replies = [says("Done.")]
+    await rig.workers.create_spec(
+        _spec(rig, objective=objective),
+        chat_started=True,
+        handover=Handover(turns=TURNS * 2),
+    )
+    async with asyncio.timeout(5):
+        while not queries:
+            await asyncio.sleep(0.01)
+    (query,) = queries
+    assert len(query) <= MAX_QUERY_LEN
+    assert WORDS_HEADER in query, "the highest block that fits stays"
+    assert EARLIER_HEAD not in query and TASK_PACK_HEADER not in query
+    assert "Left 2 of 3 context blocks out of the request" in caplog.text

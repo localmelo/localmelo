@@ -1173,7 +1173,7 @@ class Front:
         self._count(turn)  # the turn has its offer: nothing is handed off again
         await self.echo(
             {"echo": "ask", "text": turn.user_text, "words": turn.typed_text,
-             "turn_id": turn.id, "line": "Start this as a task?",
+             "turn_id": turn.id, "turn": turn.turn, "line": "Start this as a task?",
              "said": said("front.echo.ask")}
         )  # fmt: skip
 
@@ -1704,8 +1704,15 @@ class Front:
         turn: TurnInfo | None = None,
         of: int | None = None,
         create_key: str | None = None,
+        asked_in: int | None = None,
+        asked_at: float | None = None,
     ) -> dict[str, Any]:
-        """Start *work* as a task this chat owns, at the level the person's words give."""
+        """Start *work* as a task this chat owns, at the level the person's words give.
+
+        A task started from a card the chat showed earlier names the turn that
+        offered it (*asked_in*), or the card's time (*asked_at*): it starts with
+        the chat's turns before that, not with what was said since.
+        """
         level, reason = triage(typed)
         try:
             spec = TaskSpec.from_payload(
@@ -1721,7 +1728,12 @@ class Front:
         # What the chat hands the task (#463): its earlier turns, and what this
         # turn of the person's recalled, searched or opened.
         handover = await handover_of(
-            self.console.store, self.chat_id, turn, CHAT_TURN.get()
+            self.console.store,
+            self.chat_id,
+            turn,
+            CHAT_TURN.get(),
+            before=asked_in,
+            until=asked_at if asked_in is None else None,
         )
         # The task starts at once, under the request's first words; the model's
         # task_create brings a title of its own, any other long request is named later.
@@ -2025,8 +2037,8 @@ class Front:
         if asks:
             data = {"echo": "ask", "text": turn.user_text, "words": turn.typed_text}
             await self.echo(
-                {**data, "turn_id": turn.id, "line": "Start this as a task?",
-                 "said": said("front.echo.ask")}
+                {**data, "turn_id": turn.id, "turn": turn.turn,
+                 "line": "Start this as a task?", "said": said("front.echo.ask")}
             )  # fmt: skip
         else:
             await self.delegate(turn.user_text, typed=turn.typed_text, turn=turn)
@@ -2106,10 +2118,12 @@ class Front:
         ):
             raise ApiError(409, "already_answered", t("errors.echoAnswered"))
         kind = echo.get("echo")
+        # When the card was shown: a task it starts takes the chat's turns of then.
+        shown_at = float(found[0].event.get("ts") or 0) or None
         if kind == "sleep":
             return await self._act_sleep(echo_id, echo, do)
         if kind in ("chore", "chore_saved"):
-            return await self._act_chore(echo_id, echo, do)
+            return await self._act_chore(echo_id, echo, do, shown_at)
         if do == "reply" and kind == "task_escalate":
             # The person's answer to a task's question (#369).
             text = text.strip()
@@ -2134,8 +2148,13 @@ class Front:
             )  # fmt: skip
         if do == "start" and kind == "ask":
             words = str(echo.get("words", ""))
+            asked = echo.get("turn")
             return await self.delegate(
-                str(echo.get("text", "")), typed=words, of=echo_id
+                str(echo.get("text", "")),
+                typed=words,
+                of=echo_id,
+                asked_in=asked if isinstance(asked, int) else None,
+                asked_at=shown_at,
             )
         record = await self.record(str(echo.get("task_id", "")))
         if record is None:
@@ -2204,15 +2223,18 @@ class Front:
         )  # fmt: skip
 
     async def _act_chore(
-        self, echo_id: int, echo: dict[str, Any], do: str
+        self,
+        echo_id: int,
+        echo: dict[str, Any],
+        do: str,
+        shown_at: float | None = None,
     ) -> dict[str, Any]:
         """The person's tap on a chore proposal (Save chore, Just once, Cancel) or on Undo after a save."""
         title = str(echo.get("title", ""))
         store = self.console.chore_runner.store
         if do == "once" and echo.get("echo") == "chore" and not echo.get("reminder"):
-            return await self.delegate(
-                str(echo.get("text", "")), typed=str(echo.get("text", "")), of=echo_id
-            )
+            text = str(echo.get("text", ""))
+            return await self.delegate(text, typed=text, of=echo_id, asked_at=shown_at)
         if do == "cancel" and echo.get("echo") == "chore":
             line = f"Not saved: {title}"
             return await self._echo(
