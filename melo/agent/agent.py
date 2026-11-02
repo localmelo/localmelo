@@ -788,6 +788,17 @@ def _image_references(result: ToolResult) -> ToolResult:
     )
 
 
+def _without_words(tool_name: str, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """*arguments* of a command or script without the model's ``why``.
+
+    The words only describe the step: the same command with other words is the
+    same step, so a refusal or a stuck loop is not dodged by rewording (#454).
+    """
+    if tool_name in ("shell_exec", "python_exec") and "why" in arguments:
+        return {k: v for k, v in arguments.items() if k != "why"}
+    return arguments
+
+
 def _result_digest(result: ToolResult) -> str:
     """Digest of what one call returned, for stuck detection.
 
@@ -4800,9 +4811,12 @@ class Agent:
         if not (policy or refused or denied):
             return False
         try:
-            key = json.dumps([call.tool_name, call.arguments], sort_keys=True)
+            key = json.dumps(
+                [call.tool_name, _without_words(call.tool_name, call.arguments)],
+                sort_keys=True,
+            )
         except (TypeError, ValueError):
-            key = f"{call.tool_name}:{call.arguments!r}"
+            key = f"{call.tool_name}:{_without_words(call.tool_name, call.arguments)!r}"
         again = key in run.refused_calls
         run.refused_calls.add(key)
         return policy and not again
@@ -5212,7 +5226,11 @@ class Agent:
         entries = sorted(
             (
                 tc.tool_name,
-                json.dumps(tc.arguments, sort_keys=True, default=str),
+                json.dumps(
+                    _without_words(tc.tool_name, tc.arguments),
+                    sort_keys=True,
+                    default=str,
+                ),
                 _result_digest(result),
             )
             for tc, result in zip(calls, results, strict=True)

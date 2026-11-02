@@ -167,48 +167,62 @@ test('in Chinese, the row, the card and the chip read in Chinese', async () => {
 // ── The sentence a card starts with, the kind, and the folded code (#454) ──
 
 const TABS = "import subprocess\nscript = '''\ntell application \"Safari\"\n  close (every tab of front window whose URL contains \"example.com\")\nend tell\n'''\nsubprocess.run(['osascript', '-e', script])";
-const GIST_MODEL = {say: {id: 'model', params: {text: 'Close the 7 forum tabs melo opened'}}, by: 'model', apps: 'Safari'};
+const GIST_CODE = {say: {id: 'operate', params: {apps: ['Safari']}}, by: 'code', note: 'Close the 7 forum tabs melo opened', apps: ['Safari']};
 const APP_CONTROL = {
   request_id: 'r4', allowed: false, origin: 'auto', mode: 'auto', reason: 'controls an app', step_key: 'k4',
-  review: {verdict: 'high', categories: ['app_control'], reasons: ['Operates Safari through a script.'], by: 'rules', gist: GIST_MODEL},
+  review: {verdict: 'high', categories: ['app_control'], reasons: ['Operates Safari through a script.'], by: 'rules', gist: GIST_CODE},
 };
 const script = (approval) => ({...item(approval), arguments: {code: TABS}, preview: 'script = ... (+4 more lines)'});
 const classes = (node) => String(node.className ?? '').split(' ');
 
-test('a card starts with the sentence, then the kind and its reason, and folds the code', () => {
+test('a card starts with the sentence, then the model\'s words, the kind and its reason, and shows the code', () => {
   const facts = blockFacts(script(APP_CONTROL));
   assert.equal(facts.category, 'app_control');
   assert.equal(facts.title, 'Blocked: Control an app');
-  assert.deepEqual(facts.gist, {sentence: 'Close the 7 forum tabs melo opened', warning: ''});
+  // The sentence is the code's; the model's words are labelled as the model's.
+  assert.deepEqual(facts.gist, {sentence: 'Operate Safari', warning: '', note: 'melo says: Close the 7 forum tabs melo opened'});
   // Only a click allows it: no "go ahead" for this kind.
   assert.deepEqual([facts.allow, facts.words], [true, false]);
   const card = blockCard(fakeDoc(), facts);
-  // The sentence comes first, before the kind line.
+  // The sentence comes first, then the model's words, before the kind line.
   assert.deepEqual(classes(card.children[0]), ['block-gist']);
-  assert.equal(card.children[0].textContent, 'Close the 7 forum tabs melo opened');
-  assert.deepEqual(classes(card.children[1]), ['block-head']);
+  assert.equal(card.children[0].textContent, 'Operate Safari');
+  assert.deepEqual(classes(card.children[1]), ['block-says']);
+  assert.equal(card.children[1].textContent, 'melo says: Close the 7 forum tabs melo opened');
+  assert.deepEqual(classes(card.children[2]), ['block-head']);
   assert.match(text(card), /Blocked: Control an app/);
   assert.match(text(card), /Operates Safari through a script\./);
   assert.equal(byClass(card, 'block-or'), null);
-  // The code follows, folded.
+  // A blocked step is never routine: its code is open.
   const fold = byClass(card, 'block-code');
   assert.equal(fold.tag, 'details');
-  assert.notEqual(fold.open, true, 'closed until the person opens it');
+  assert.equal(fold.open, true, 'open: the sentence does not stand in for the code');
   assert.equal(fold.children[0].tag, 'summary');
   assert.equal(fold.children[0].textContent, 'Show the code');
   assert.match(byClass(fold, 'block-step').textContent, /tell application "Safari"/);
   assert.equal(byClass(card, 'block-mismatch'), null);
 });
 
-test('a sentence built by code and a card with no sentence', () => {
-  const built = {...APP_CONTROL.review, gist: {say: {id: 'script_apps', params: {apps: 'Safari'}}, by: 'code', apps: 'Safari'}};
+test('a sentence without the model\'s words and a card with no sentence', () => {
+  const built = {...APP_CONTROL.review, gist: {say: {id: 'operate', params: {apps: ['Safari', 'Notes']}}, by: 'code', apps: ['Safari', 'Notes']}};
   const facts = blockFacts(script({...APP_CONTROL, review: built}));
-  assert.equal(facts.gist.sentence, 'Run a Python script that operates Safari');
-  // A block stored before the sentence was kept reads as it did, with its code folded.
+  assert.equal(facts.gist.sentence, 'Operate Safari and Notes');
+  assert.equal(facts.gist.note, '');
+  assert.equal(byClass(blockCard(fakeDoc(), facts), 'block-says'), null);
+  // A block stored before the sentence was kept reads as it did, with its code shown.
   const old = blockCard(fakeDoc(), blockFacts(script({...APP_CONTROL, review: {...APP_CONTROL.review, gist: undefined}})));
   assert.equal(byClass(old, 'block-gist'), null);
   assert.deepEqual(classes(old.children[0]), ['block-head']);
   assert.ok(byClass(old, 'block-code'));
+});
+
+test('a compound step lists each part, the next in lower case, and "and N more"', () => {
+  const gist = {say: {id: 'more', params: {count: '2', list: {id: 'then', params: {
+    first: {id: 'operate', params: {apps: ['Safari']}},
+    next: {id: 'then', params: {first: {id: 'effect_delete', params: {}}, next: {id: 'effect_send_out', params: {}}}},
+  }}}}, by: 'code'};
+  const facts = blockFacts(script({...APP_CONTROL, review: {...APP_CONTROL.review, gist}}));
+  assert.equal(facts.gist.sentence, 'Operate Safari, then delete files, then send data to another computer, and 2 more');
 });
 
 test('a description that does not match the code shows the real effect first, then a warning', () => {
@@ -221,20 +235,25 @@ test('a description that does not match the code shows the real effect first, th
   assert.equal(card.children[1].attributes.role, 'alert');
 });
 
-test('in Chinese the kind, its reason with the app, the sentence and the warning read in Chinese', async () => {
+test('in Chinese the kind, its reason with the apps, the sentence, the label and the warning read in Chinese', async () => {
   assert.equal(await useLanguage('zh-Hans'), 'zh-Hans');
   const facts = blockFacts(script(APP_CONTROL));
   assert.equal(facts.title, '已拦下：控制一个应用');
   assert.deepEqual(facts.reasons, ['这一步会通过脚本操作 Safari。']);
-  assert.equal(facts.gist.sentence, 'Close the 7 forum tabs melo opened');
-  const built = {...APP_CONTROL.review, gist: {say: {id: 'script_apps', params: {apps: 'Safari'}}, by: 'code', apps: 'Safari'}};
-  assert.equal(blockFacts(script({...APP_CONTROL, review: built})).gist.sentence, '运行一段 Python 脚本，操作 Safari');
+  assert.equal(facts.gist.sentence, '操作 Safari');
+  assert.equal(facts.gist.note, 'melo 说：Close the 7 forum tabs melo opened');
+  // The apps are joined by the Chinese catalog, never by an English "and".
+  const two = {...APP_CONTROL.review, gist: {say: {id: 'operate', params: {apps: ['Safari', 'Notes']}}, by: 'code', apps: ['Safari', 'Notes']}};
+  assert.equal(blockFacts(script({...APP_CONTROL, review: two})).gist.sentence, '操作 Safari和Notes');
+  assert.deepEqual(blockFacts(script({...APP_CONTROL, review: two})).reasons, ['这一步会通过脚本操作 Safari和Notes。']);
+  const chain = {say: {id: 'then', params: {first: {id: 'operate', params: {apps: ['Safari']}}, next: {id: 'effect_delete', params: {}}}}, by: 'code'};
+  assert.equal(blockFacts(script({...APP_CONTROL, review: {...APP_CONTROL.review, gist: chain}})).gist.sentence, '操作 Safari，然后删除文件');
   // Without the app's name the reason names the kind.
   const bare = {...APP_CONTROL.review, gist: undefined};
   assert.deepEqual(blockFacts(script({...APP_CONTROL, review: bare})).reasons, ['这一步会通过脚本操作另一个应用。']);
   const gist = {say: {id: 'effect_send_out', params: {}}, by: 'code', warn: {id: 'send_out', params: {said: '关闭标签页'}}};
   const sent = blockFacts(item({...INSTALL, review: {...INSTALL.review, gist}}));
-  assert.deepEqual(sent.gist, {sentence: '向另一台电脑发送数据', warning: 'melo 把这一步描述为“关闭标签页”，但代码会向外发送数据。'});
+  assert.deepEqual(sent.gist, {sentence: '向另一台电脑发送数据', warning: 'melo 把这一步描述为“关闭标签页”，但代码会向外发送数据。', note: ''});
   assert.match(text(blockCard(fakeDoc(), facts)), /查看代码/);
   await useLanguage('en');
 });

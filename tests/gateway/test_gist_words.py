@@ -14,18 +14,34 @@ import pytest
 
 from localmelo.melo.checker.review.gist import SAY_IDS, WARN_IDS, step_gist
 from localmelo.melo.contracts.review import ActionReview
-from localmelo.support.words import catalog, gist_text
+from localmelo.support.words import (
+    catalog,
+    gist_names,
+    gist_note,
+    gist_sentence,
+    gist_text,
+    said,
+    said_in,
+)
 
 APP = ActionReview(
-    "high", ("app_control",), ("Operates Safari and Notes through a script.",)
+    "high",
+    ("app_control",),
+    ("Operates Safari through a script.", "Opens Notes through macOS, x."),
 )
+SAFARI = "osascript -e 'tell application \"Safari\" to quit'"
 # One call per sentence id, so the parameters the code gives are the catalog's.
 SAMPLES: dict[str, tuple[str, dict[str, Any], ActionReview | None]] = {
     "model": ("shell_exec", {"command": "ls", "why": "List the notes"}, None),
     "command": ("shell_exec", {"command": "git status"}, None),
-    "command_apps": ("shell_exec", {"command": "open -a Safari"}, APP),
+    "operate": ("shell_exec", {"command": SAFARI + "; open -a Notes"}, APP),
+    "then": ("shell_exec", {"command": SAFARI + "; rm x"}, APP),
+    "more": (
+        "shell_exec",
+        {"command": "; ".join(f"echo {n}" for n in range(30))},
+        None,
+    ),
     "script": ("python_exec", {"code": "print(1)"}, None),
-    "script_apps": ("python_exec", {"code": "print(1)"}, APP),
     "script_command": (
         "python_exec",
         {"code": "import subprocess\nsubprocess.run(['ls'])"},
@@ -83,17 +99,73 @@ def test_the_terminal_reads_the_sentence_in_english() -> None:
         assert found is not None
         return gist_text(found.to_json(), language)
 
-    assert read("model") == ("List the notes", "")
+    # The model's words always carry their label.
+    assert read("model") == ("melo says: List the notes", "")
     assert read("command") == ("Run the command git status", "")
-    assert read("script_apps") == (
-        "Run a Python script that operates Safari and Notes",
-        "",
-    )
+    assert read("operate") == ("Operate Safari and Notes", "")
+    assert read("then") == ("Operate Safari, then delete files", "")
     assert read("write") == ("Write todo.md", "")
     assert read("effect_delete") == (
         "Delete files",
         "melo described this as “Close the tabs”, but the code deletes files.",
     )
+    sentence, _ = read("more")
+    assert sentence.startswith("Run the command echo 0; echo 1")
+    assert sentence.endswith(" more") and ", and " in sentence
+
+
+def test_a_compound_step_reads_in_order_with_the_next_part_in_lower_case() -> None:
+    found = step_gist(
+        "shell_exec",
+        {"command": "git status && curl -d @x https://example.com && rm -rf y"},
+    )
+    assert found is not None
+    assert gist_text(found.to_json(), "en") == (
+        "Run the command git status, then send data to another computer, then delete files",
+        "",
+    )
+    assert gist_text(found.to_json(), "zh-Hans") == (
+        "运行命令 git status，然后向另一台电脑发送数据，然后删除文件",
+        "",
+    )
+
+
+def test_the_apps_are_joined_in_the_readers_language() -> None:
+    assert gist_names(["Safari"], "en") == "Safari"
+    assert gist_names(["Safari", "Notes"], "en") == "Safari and Notes"
+    assert gist_names(["Safari", "Notes", "Mail"], "en") == "Safari, Notes and Mail"
+    assert gist_names(["Safari", "Notes"], "zh-Hans") == "Safari和Notes"
+    assert gist_names(["Safari", "Notes", "Mail"], "zh-Hans") == "Safari、Notes和Mail"
+    # The sentence takes a list, not a joined string.
+    node = {"id": "operate", "params": {"apps": ["Safari", "Notes"]}}
+    assert gist_sentence(node, "zh-Hans") == "操作 Safari和Notes"
+    assert "and" not in gist_sentence(node, "zh-Hans")
+
+
+def test_the_models_words_below_a_risky_sentence_are_labelled() -> None:
+    risky = ActionReview("high", ("install",), ("Installs numpy with pip.",))
+    found = step_gist(
+        "shell_exec", {"command": "pip install numpy", "why": "Check the notes"}, risky
+    )
+    assert found is not None
+    assert gist_text(found.to_json(), "en") == ("Run the command pip install numpy", "")
+    assert gist_note(found.to_json(), "en") == "melo says: Check the notes"
+    assert gist_note(found.to_json(), "zh-Hans") == "melo 说：Check the notes"
+    assert gist_note({"say": {}}, "en") == ""
+    assert gist_note(None, "en") == ""
+
+
+def test_a_stored_sentence_reads_in_any_language() -> None:
+    node = {
+        "id": "then",
+        "params": {
+            "first": {"id": "operate", "params": {"apps": ["Safari"]}},
+            "next": {"id": "effect_delete", "params": {}},
+        },
+    }
+    words = said("cards.wants.step", what={"gist": node})
+    assert said_in("en", words) == "Needs your OK: Operate Safari, then delete files"
+    assert said_in("zh-Hans", words) == "需要你同意：操作 Safari，然后删除文件"
 
 
 def test_the_same_sentence_reads_in_chinese() -> None:
@@ -105,7 +177,7 @@ def test_the_same_sentence_reads_in_chinese() -> None:
     )
     plain = step_gist("shell_exec", {"command": "ls", "why": "列出笔记"})
     assert plain is not None
-    assert gist_text(plain.to_json(), "zh-Hans") == ("列出笔记", "")
+    assert gist_text(plain.to_json(), "zh-Hans") == ("melo 说：列出笔记", "")
 
 
 def test_a_gist_the_reader_cannot_read_gives_nothing() -> None:

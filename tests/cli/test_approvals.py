@@ -1123,9 +1123,28 @@ def _saying(tool: str, review: ActionReview | None = None, **arguments: Any) -> 
 def test_the_panel_starts_with_what_the_step_will_do() -> None:
     plain = _saying("shell_exec", command="git status")
     assert (plain.says, plain.warning) == ("Run the command git status", "")
-    spoken = _saying("shell_exec", command="ls notes", why="List the notes folder")
-    assert (spoken.says, spoken.warning) == ("List the notes folder", "")
+    # The model's words, labelled as the model's, for a routine step.
+    spoken = _saying(
+        "shell_exec",
+        ActionReview("routine"),
+        command="ls notes",
+        why="List the notes folder",
+    )
+    assert (spoken.says, spoken.warning, spoken.said) == (
+        "melo says: List the notes folder",
+        "",
+        "",
+    )
     assert _saying("python_exec", code="print(1)").says == "Run a Python script"
+
+
+def test_the_models_words_of_a_risky_step_go_below_the_sentence() -> None:
+    risky = ActionReview("high", ("install",), ("Installs numpy with pip.",))
+    text = _saying(
+        "shell_exec", risky, command="pip install numpy", why="Check the notes"
+    )
+    assert text.says == "Run the command pip install numpy"
+    assert text.said == "melo says: Check the notes"
 
 
 def test_a_script_that_operates_an_app_is_titled_by_its_kind() -> None:
@@ -1136,12 +1155,13 @@ def test_a_script_that_operates_an_app_is_titled_by_its_kind() -> None:
         why="Close the 7 forum tabs melo opened",
     )
     assert text.title == "Control an app?"
-    assert text.says == "Close the 7 forum tabs melo opened"
+    assert text.says == "Operate Safari"
+    assert text.said == "melo says: Close the 7 forum tabs melo opened"
     assert text.notes == (
         "melo asks because this call operates Safari through a script.",
     )
     built = _saying("python_exec", _APP_REVIEW, code=_TABS)
-    assert built.says == "Run a Python script that operates Safari"
+    assert (built.says, built.said) == ("Operate Safari", "")
 
 
 def test_a_description_that_does_not_match_the_code_shows_the_real_effect() -> None:
@@ -1153,9 +1173,15 @@ def test_a_description_that_does_not_match_the_code_shows_the_real_effect() -> N
 
 
 def test_the_models_words_are_shown_escaped() -> None:
-    text = _saying("shell_exec", command="ls", why="List \x1b[2Jthe notes")
-    assert text.says == "List \\x1b[2Jthe notes"
+    text = _saying(
+        "shell_exec", ActionReview("routine"), command="ls", why="List \x1b[2Jthe notes"
+    )
+    assert text.says == "melo says: List \\x1b[2Jthe notes"
     assert text.escaped
+    risky = ActionReview("high", ("install",), ("Installs.",))
+    below = _saying("shell_exec", risky, command="ls", why="List \x1b[2Jthe notes")
+    assert below.said == "melo says: List \\x1b[2Jthe notes"
+    assert below.escaped
 
 
 @pytest.mark.parametrize(
@@ -1185,10 +1211,11 @@ async def test_the_panel_shows_the_sentence_first_then_the_kind_and_the_code(
         await app.wait(lambda: "Control an app?" in app.text())
         text = app.text()
         assert "╭─ Control an app? ─" in text
-        sentence = text.index("Close the 7 forum tabs melo opened")
-        assert text.index("╭─") < sentence < text.index("melo asks because")
-        assert sentence < text.index("python_exec")
-        assert sentence < text.index("osascript")
+        sentence = text.index("Operate Safari")
+        said = text.index("melo says: Close the 7 forum tabs melo opened")
+        assert text.index("╭─") < sentence < said < text.index("melo asks because")
+        assert said < text.index("python_exec")
+        assert said < text.index("osascript")
         now[0] += 1
         app.type("1")
         await asyncio.wait_for(asking, 3)

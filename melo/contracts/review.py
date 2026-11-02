@@ -25,7 +25,9 @@ from typing import Any, Final, Literal
 from urllib.parse import unquote, urlsplit
 
 Verdict = Literal["routine", "high", "undecided"]
-RULES_VERSION: Final = 1
+# The version of the rules a review recorded: 2 added the ``app_control`` kind
+# (an allow-list of plain scripts) and the sentence of an approval card (#454).
+RULES_VERSION: Final = 2
 
 # The card's title per category, strongest first: a call's title and the
 # order of its reasons follow this order.

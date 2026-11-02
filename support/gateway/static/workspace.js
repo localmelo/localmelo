@@ -1897,8 +1897,9 @@ function approvalCard(request, view = chatApproval, asked = "") {
     if (outside.access === "read") { content = ""; noBox = true; }
   }
   // What the step will do comes first, in one plain sentence; a warning follows when the model's words
-  // and the code differ (then the sentence is the code's real effect). A write, an edit and a tool's
-  // card already say as much in their question.
+  // and the code differ. The sentence is the code's own whenever the rules found the step risky, and the
+  // model's words then stand below it, labelled as the model's. A write, an edit and a tool's card already
+  // say as much in their question.
   const gist = outside ? null : gistWords(request.gist);
   const said = request.gist?.say?.id;
   const plain = request.gist?.by === "code" && !gist?.warning && ["write", "edit", "tool"].includes(said);
@@ -1908,6 +1909,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
     warning.setAttribute("role", "alert");
     card.append(warning);
   }
+  if (gist?.note) card.append(el("p", "approval-says", gist.note));
   card.append(el("p", "approval-title", title), el("p", "approval-caption", caption));
   if (outside) card.append(folderBox(outside, tool, outsideFolder));
   if (high && reviewed.reasons.length) {
@@ -1929,12 +1931,13 @@ function approvalCard(request, view = chatApproval, asked = "") {
   body.tabIndex = 0;
   body.setAttribute("role", "group");
   body.setAttribute("aria-label", what);
-  // The code of a command or a script is folded: the sentence and the kind say what it is for.
+  // The code of a routine command or script is folded: the sentence and the kind say what it is for. A step
+  // the rules found risky (or never reviewed) shows its code open, until the person folds it.
   const fold = !outside && (tool === "shell_exec" || tool === "python_exec") ? el("details", "approval-code") : null;
   const codeHolder = fold ?? card;
   if (fold) {
     fold.append(el("summary", "", t("gist.showCode")));
-    if (state.codeOpen) fold.open = true;
+    if (state.codeOpen ?? review?.verdict !== "routine") fold.open = true;
     fold.addEventListener("toggle", () => { state.codeOpen = fold.open === true; });
   }
   if (shown.length) codeHolder.append(body);

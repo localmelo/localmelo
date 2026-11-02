@@ -284,11 +284,12 @@ async def test_a_waiting_card_says_what_the_step_does_when_the_call_has_a_senten
         [pending] = await _wait_pending(client, side)
         card = (await client.get("/api/sessions")).json()["main"]["last_card"]
         assert card["state"] == "waiting"
-        assert card["line"] == "Needs your OK: List the files here"
+        # The model's words always carry their label.
+        assert card["line"] == "Needs your OK. melo says: List the files here"
         assert card["said"] == {
-            "key": "cards.wants.step",
+            "key": "cards.wants.stepSaid",
             "params": {
-                "what": {
+                "says": {
                     "key": "gist.say.model",
                     "params": {"text": "List the files here"},
                 }
@@ -296,7 +297,9 @@ async def test_a_waiting_card_says_what_the_step_does_when_the_call_has_a_senten
         }
         zh = {"X-LocalMelo-Language": "zh-Hans"}
         chinese = (await client.get("/api/sessions", headers=zh)).json()["main"]
-        assert chinese["last_card"]["line"] == "需要你同意：List the files here"
+        assert (
+            chinese["last_card"]["line"] == "需要你同意。melo 说：List the files here"
+        )
         await client.post(
             f"/api/approvals/{pending['request_id']}", json={"choice": "deny"}
         )
@@ -315,7 +318,31 @@ async def test_a_waiting_card_for_code_without_words_names_the_apps_it_operates(
         side = (await _create(client, tmp_path, "Tidy up"))["session"]["id"]
         [pending] = await _wait_pending(client, side)
         card = (await client.get("/api/sessions")).json()["main"]["last_card"]
-        assert card["line"] == "Needs your OK: Run a Python script that operates Safari"
+        assert card["line"] == "Needs your OK: Operate Safari"
+        await client.post(
+            f"/api/approvals/{pending['request_id']}", json={"choice": "deny"}
+        )
+        await _wait_turn(client, side)
+
+
+async def test_a_waiting_card_shows_the_warning_when_the_words_and_the_code_differ(
+    tmp_path: Path,
+) -> None:
+    code = "import shutil\nshutil.rmtree('build', ignore_errors=True)"
+    call = tool_call("python_exec", {"code": code, "why": "Close the tabs"})
+    async with console_with(tmp_path, call, answer("done")) as (console, client, _):
+        side = (await _create(client, tmp_path, "Tidy up"))["session"]["id"]
+        [pending] = await _wait_pending(client, side)
+        card = (await client.get("/api/sessions")).json()["main"]["last_card"]
+        assert card["line"] == (
+            "Needs your OK: Delete files. "
+            "melo described this as “Close the tabs”, but the code deletes files."
+        )
+        zh = {"X-LocalMelo-Language": "zh-Hans"}
+        chinese = (await client.get("/api/sessions", headers=zh)).json()["main"]
+        assert chinese["last_card"]["line"] == (
+            "需要你同意：删除文件。melo 把这一步描述为“Close the tabs”，但代码会删除文件。"
+        )
         await client.post(
             f"/api/approvals/{pending['request_id']}", json={"choice": "deny"}
         )

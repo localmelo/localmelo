@@ -564,16 +564,29 @@ def _waiting_words(
     """What the approval is for, in plain words, with its words kept.
 
     The sentence the approval card starts with when the call has one (``Needs
-    your OK: Close the extra Safari tabs``, #454); ``Wants to run a command``
-    for a call the card says in its own question.
+    your OK: Operate Safari``, #454), the model's own words labelled as its
+    (``Needs your OK. melo says: ...``) for a routine step, and the warning
+    when its words disagree with the code; ``Wants to run a command`` for a
+    call the card says in its own question.
     """
     tool = str(data.get("tool_name") or "")
     if request is not None:
         gist = step_gist(tool, request.arguments, request.review)
         if gist is not None and not gist.plain:
-            words = said(
-                "cards.wants.step", what=said(f"gist.say.{gist.id}", **gist.params)
-            )
+            what = {"gist": {"id": gist.id, "params": gist.params}}
+            if gist.by == "model":
+                words = said(
+                    "cards.wants.stepSaid",
+                    says=said("gist.say.model", text=gist.params.get("text", "")),
+                )
+            elif gist.warn:
+                words = said(
+                    "cards.wants.stepWarned",
+                    what=what,
+                    warning=said(f"gist.warn.{gist.warn}", **gist.warn_params),
+                )
+            else:
+                words = said("cards.wants.step", what=what)
             return {"line": said_in("en", words), "said": words}
     asked = request_said(tool, data.get("arguments"))
     key = str(asked["key"])

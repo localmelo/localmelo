@@ -870,6 +870,23 @@ class TestStuckDetection:
         assert len(set(fingerprints)) == 3
         assert Agent._detect_stuck(fingerprints) == "stuck"
 
+    def test_new_words_for_the_same_command_are_the_same_step(self) -> None:
+        """A model cannot dodge stuck detection by rewording a command's ``why``."""
+
+        def run(tool: str, why: str) -> tuple[str, str, str]:
+            return Agent._make_fingerprint(
+                [ToolCall(tool_name=tool, arguments={"command": "ls", "why": why})],
+                [ToolResult(tool, output="same")],
+            )
+
+        for tool in ("shell_exec", "python_exec"):
+            prints = [run(tool, why) for why in ("List it", "Look inside", "Check")]
+            assert len(set(prints)) == 1
+            assert Agent._detect_stuck(prints) == "stuck"
+        # Another tool's ``why`` is its own argument: a different call.
+        other = [run("poll", why) for why in ("List it", "Look inside")]
+        assert len(set(other)) == 2
+
     @pytest.mark.asyncio
     async def test_polling_that_makes_progress_runs_on(self) -> None:
         progress = iter(["10%", "40%", "70%", "90%"])

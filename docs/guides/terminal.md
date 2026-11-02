@@ -313,9 +313,9 @@ Whether a reply shows as it is written depends on how its model frames reasoning
   ↑↓ select · enter confirm · 1-3 · v view all · esc stop the turn
 ```
 
-The first line says in one plain sentence what the step will do: the model's own words when it gave them (a `why` or `description` argument, or a comment at the top of the code), otherwise a sentence melo builds from the call. It is for reading only; the question and the reasons come from melo's rules, and a file write, a site or a folder outside the workspace has no extra line.
+The first line says in one plain sentence what the step will do. For a command or a script melo builds it from the call and names every effect it finds, in order ("Operate Safari, then delete files"); a command too long to show ends "and 2 more". The model's own words (a `why` argument, or a comment at the top of the code) always carry a label, `melo says: …`: they are the first line only for a routine step, and a line below it for a step the rules found risky, so they never make a step look safer. The sentence is for reading only; the question and the reasons come from melo's rules, and a file write, a site or a folder outside the workspace has no extra line.
 
-If the model's words and the code disagree about deleting files or sending data out, the panel shows what the code does, and a warning quotes the model's words:
+If the model's words and the code disagree about deleting files or sending data out, a warning quotes the model's words:
 
 ```text
 │ Delete files                                                               │
@@ -339,11 +339,12 @@ A call that installs software, downloads files, changes files outside the folder
   ↑↓ select · enter confirm · 1-2 · v view all · esc stop the turn
 ```
 
-A script that operates another app (`osascript` telling Safari to close tabs, `open -a Notes`) is its own kind, **Control an app?**, and the reason names the app. Like system settings it needs a click, and a script that presses keys or drives System Events stays **Change system settings?**.
+A script that operates one app by its plain name (`osascript` telling Safari to close tabs, `open -a Notes`) is its own kind, **Control an app?**, and the reason names the app. Like system settings it needs a click. It is an allow-list: a script that runs a shell, presses keys, drives System Events, names a terminal or an editor, a path or a second app, and `shortcuts run`, stays **Change system settings?**. A blocked step's row in a turn carries the same sentence under it.
 
 ```text
 ╭─ Control an app? ──────────────────────────────────────────────────────────╮
-│ Close the extra Safari tabs                                                │
+│ Operate Safari                                                             │
+│ melo says: Close the extra Safari tabs                                     │
 │ python_exec · in ~/demo-project                                            │
 │ ⚠ melo asks because this call operates Safari through a script.            │
 │   subprocess.run(['osascript', '-e', script])                              │

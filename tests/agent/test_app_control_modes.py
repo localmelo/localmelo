@@ -206,10 +206,13 @@ async def test_a_block_keeps_the_sentence_and_the_kind_for_the_card(
     assert fake.ran == []
     review = approval["review"]
     assert review["categories"] == ["app_control"]
+    # A blocked step is never routine: the sentence is the code's own, and the
+    # model's words stand below it.
     assert review["gist"] == {
-        "say": {"id": "model", "params": {"text": "Close the extra Safari tabs"}},
-        "by": "model",
-        "apps": "Safari",
+        "say": {"id": "operate", "params": {"apps": ["Safari"]}},
+        "by": "code",
+        "note": "Close the extra Safari tabs",
+        "apps": ["Safari"],
     }
 
 
@@ -225,9 +228,9 @@ async def test_a_block_without_words_gets_a_sentence_built_by_code(
 
     [approval] = _approvals(recorder)
     assert approval["review"]["gist"] == {
-        "say": {"id": "script_apps", "params": {"apps": "Safari"}},
+        "say": {"id": "operate", "params": {"apps": ["Safari"]}},
         "by": "code",
-        "apps": "Safari",
+        "apps": ["Safari"],
     }
 
 
@@ -235,7 +238,7 @@ async def test_a_block_without_words_gets_a_sentence_built_by_code(
 async def test_a_block_keeps_the_why_the_model_gave_with_its_call(
     tmp_path: Path,
 ) -> None:
-    """The ``why`` argument is the sentence, and the kind stays the rules' own."""
+    """The ``why`` argument is the note below the sentence, and the kind stays the rules' own."""
     arguments = {"code": APP, "why": "Close the extra Safari tabs"}
     llm = FakeModel(
         [_calls(("python_exec", arguments, "call_1")), _answer("explained")]
@@ -253,7 +256,6 @@ async def test_a_block_keeps_the_why_the_model_gave_with_its_call(
     [approval] = _approvals(recorder)
     assert fake.ran == []
     assert approval["review"]["categories"] == ["app_control"]
-    assert approval["review"]["gist"]["say"] == {
-        "id": "model",
-        "params": {"text": "Close the extra Safari tabs"},
-    }
+    gist = approval["review"]["gist"]
+    assert gist["say"] == {"id": "operate", "params": {"apps": ["Safari"]}}
+    assert gist["note"] == "Close the extra Safari tabs"

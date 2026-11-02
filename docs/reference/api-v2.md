@@ -880,17 +880,21 @@ token total.
   (`install`, `download`, `outside_write`, `system`, `app_control`, ...). A `high` call asks every time and the card offers no `session`
   answer.
 - A `pending_approvals` entry's `gist` is the sentence the card starts with, as
-  `{say: {id, params}, by, warn?: {id, params}, apps?}`, or `null` for a tool
-  whose card says it itself (a browser site). `by` is `model` when the sentence
-  is the model's own words (a `why`, `description` or `purpose` argument of a
-  command or script, `why` alone for another tool, or the comment at the top of a
-  script; `say.params.text`) and `code` when melo built
-  it from the call. A client says it in its own language with the catalog entry
-  `gist.say.<id>`; `warn` is set when the
-  model's words disagree with what the code does (`delete` or `send_out`), and
-  `say` is then the code's real effect. The sentence is for reading: `review`
-  decides whether the call asks, and `categories` has `app_control` for a script
-  that operates another app (click-only, like `system`).
+  `{say: {id, params}, by, warn?: {id, params}, note?, apps?}`, or `null` for a tool
+  whose card says it itself (a browser site). For a command or a script `by` is
+  `code`: melo built `say` from the call and it names every effect in order
+  (`then` holds two sentences, `more` a sentence and a count; a param may be
+  another `{id, params}` or a list of names). `by` is `model` only when the rules
+  found nothing and the sentence is the model's own words (a `why` argument, or the
+  comment at the top of a script; `say.params.text`). When the rules found
+  something, the words are `note` instead. A client shows them with the label
+  `gist.say.model` (`melo says: …`), so the words always read as the model's. A
+  client says everything in its own language with the catalog entries
+  `gist.say.<id>`, and joins `apps` with `gist.list.*`; `warn` is set when the
+  model's words disagree with what the code does (`delete` or `send_out`) and
+  quotes them. The sentence is for reading: `review` decides whether the call
+  asks, and `categories` has `app_control` for a script that operates one app by
+  its plain name (click-only, like `system`).
 - A `pending_approvals` entry's `target` is set for a `file_write`: the
   path `path_label` (relative to the workspace, else with the home folder
   as `~`), whether the file `exists`, and its `size_bytes`, read when the

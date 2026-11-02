@@ -1624,6 +1624,7 @@ dialog::backdrop {
 .approval-gist, .block-gist { margin: 0 0 var(--space-2); font-size: var(--text-title); font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
 .approval-mismatch, .block-mismatch { margin: 0 0 var(--space-2); padding: var(--space-2) var(--space-3); border-radius: var(--radius-control); background: var(--raised); box-shadow: inset 3px 0 0 var(--error); color: var(--error); font-size: var(--text-small); line-height: 1.5; }
 .approval-mismatch::before, .block-mismatch::before { content: "⚠ "; }
+.approval-says, .block-says { margin: 0 0 var(--space-2); color: var(--muted); font-size: var(--text-small); line-height: 1.5; overflow-wrap: anywhere; }
 .approval-code { margin: 0 0 8px; }
 .approval-code > summary, .block-code > summary { color: var(--ink-2); font-size: var(--text-small); cursor: pointer; }
 .approval-code[open] > summary { margin-bottom: 6px; }

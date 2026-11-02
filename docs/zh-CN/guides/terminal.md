@@ -341,9 +341,9 @@ from-the-child
   ↑↓ select · enter confirm · 1-3 · v view all · esc stop the turn
 ```
 
-面板的第一行用一句平实的话说明这一步要做什么：模型给了它自己的话（`why` 或 `description` 参数，或代码开头的一行注释）就用它的话，否则由 melo 根据调用生成一句。这句话只供阅读；问题和理由来自 melo 的规则，写文件、网站或工作区之外的文件夹没有这一行。
+面板的第一行用一句平实的话说明这一步要做什么。对命令或脚本，melo 根据调用生成它，并按顺序写出发现的每个效果（“Operate Safari, then delete files”）；太长而无法完整显示的命令以“and 2 more”结尾。模型自己的话（`why` 参数，或代码开头的一行注释）始终带着标签 `melo says: …`：只有常规步骤才把它们放在第一行，规则发现风险的步骤则把它们放在下面一行，所以它们永远不会让一步看起来更安全。这句话只供阅读；问题和理由来自 melo 的规则，写文件、网站或工作区之外的文件夹没有这一行。
 
-如果模型的话和代码在“删除文件”或“把数据发出去”上不一致，面板会显示代码真正做的事，并用一条警告引用模型的话：
+如果模型的话和代码在“删除文件”或“把数据发出去”上不一致，一条警告会引用模型的话：
 
 ```text
 │ Delete files                                                               │
@@ -367,11 +367,12 @@ from-the-child
   ↑↓ select · enter confirm · 1-2 · v view all · esc stop the turn
 ```
 
-操作另一个应用的脚本（用 `osascript` 让 Safari 关闭标签页、`open -a Notes`）是单独的一类，**Control an app?**，理由里会写明应用名。它和系统设置一样需要点按钮；按键或操作 System Events 的脚本仍然是 **Change system settings?**。
+按普通名称操作一个应用的脚本（用 `osascript` 让 Safari 关闭标签页、`open -a Notes`）是单独的一类，**Control an app?**，理由里会写明应用名。它和系统设置一样需要点按钮。这是一份允许清单：运行 shell、按键、操作 System Events、指名终端或编辑器、给出路径或第二个应用的脚本，以及 `shortcuts run`，仍然是 **Change system settings?**。一轮中被拦下的步骤那一行下面带有同样的句子。
 
 ```text
 ╭─ Control an app? ──────────────────────────────────────────────────────────╮
-│ Close the extra Safari tabs                                                │
+│ Operate Safari                                                             │
+│ melo says: Close the extra Safari tabs                                     │
 │ python_exec · in ~/demo-project                                            │
 │ ⚠ melo asks because this call operates Safari through a script.            │
 │   subprocess.run(['osascript', '-e', script])                              │

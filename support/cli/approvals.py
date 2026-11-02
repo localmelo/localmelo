@@ -43,7 +43,7 @@ from localmelo.support.cli.text import escape_arguments, wrap_cells
 from localmelo.support.config import SavedFolders
 from localmelo.support.sessions.approvals import AskFunction, RememberingPolicy
 from localmelo.support.sessions.display import display_path, folder_name, home_label
-from localmelo.support.words import gist_text
+from localmelo.support.words import gist_note, gist_text
 
 # Keys other than Esc and Ctrl+C do nothing this long after the panel opens,
 # so a draft being typed cannot answer it.
@@ -111,6 +111,9 @@ class PanelText:
     # the warning is set when the model's words do not match the code.
     says: str = ""
     warning: str = ""
+    # The model's own words, labelled ("melo says: ..."), below the sentence
+    # of a step the rules found risky.
+    said: str = ""
 
 
 def _command_text(command: object) -> str:
@@ -200,16 +203,24 @@ def _says(request: ApprovalRequest, text: PanelText) -> PanelText:
     site) has none.
     """
     gist = step_gist(request.tool_name, request.arguments, request.review)
-    if gist is None or gist.plain:
+    if gist is None:
         return text
-    says, warning = gist_text(gist.to_json(), "en")
+    shown = gist.to_json()
+    says, warning = gist_text(shown, "en")
+    said = gist_note(shown, "en")
+    if gist.plain:
+        says = ""
+    if not (says or warning or said):
+        return text
     says, changed = escape_arguments(says)
     warning, warned = escape_arguments(warning)
+    said, noted = escape_arguments(said)
     return dataclasses.replace(
         text,
         says=says,
         warning=warning,
-        escaped=text.escaped or changed or warned,
+        said=said,
+        escaped=text.escaped or changed or warned or noted,
     )
 
 

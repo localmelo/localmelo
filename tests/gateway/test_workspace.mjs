@@ -5656,28 +5656,47 @@ const controlsAnApp = (gist, extra = {}) => ({
   gist,
   ...extra,
 });
-const MODEL_SAID = {say: {id: 'model', params: {text: 'Close the 7 forum tabs melo opened'}}, by: 'model', apps: 'Safari'};
+const MODEL_SAID = {say: {id: 'operate', params: {apps: ['Safari']}}, by: 'code', note: 'Close the 7 forum tabs melo opened', apps: ['Safari']};
+const ROUTINE_SAID = {say: {id: 'model', params: {text: 'List the notes folder'}}, by: 'model'};
 const classOf = (node) => String(node.className ?? '').split(' ')[0];
 
-test('an approval card starts with the sentence, then the kind and its reasons, and folds the code', async () => {
+test('an approval card starts with the sentence, then the model\'s words, the kind and its reasons, and shows the code', async () => {
   const h = harness(baseRoutes());
   await h.run('init()');
   h.context.request = controlsAnApp(MODEL_SAID);
   const card = h.run('approvalCard(request)');
-  assert.deepEqual(card.children.slice(0, 3).map(classOf), ['approval-gist', 'approval-title', 'approval-caption']);
-  assert.equal(card.children[0].textContent, 'Close the 7 forum tabs melo opened');
-  assert.equal(card.children[1].textContent, 'Control an app?');
+  assert.deepEqual(card.children.slice(0, 4).map(classOf), ['approval-gist', 'approval-says', 'approval-title', 'approval-caption']);
+  assert.equal(card.children[0].textContent, 'Operate Safari');
+  // The model's words come below, labelled as the model's.
+  assert.equal(card.children[1].textContent, 'melo says: Close the 7 forum tabs melo opened');
+  assert.equal(card.children[2].textContent, 'Control an app?');
   const reasons = findNode(card, (node) => node.className === 'approval-reasons');
   assert.deepEqual(reasons.children.map((node) => node.textContent), ['Operates Safari through a script.']);
-  // The code is behind a fold; Allow once and Deny are still the only answers.
+  // A risky step shows its code open; Allow once and Deny are still the only answers.
   const fold = findNode(card, (node) => node.className === 'approval-code');
   assert.equal(fold.tag, 'details');
-  assert.notEqual(fold.open, true, 'closed until the person opens it');
+  assert.equal(fold.open, true, 'open until the person folds it');
   assert.equal(fold.children[0].textContent, 'Show the code');
   assert.match(findNode(fold, (node) => node.className === 'approval-content').textContent, /tell application "Safari"/);
   assert.equal(findNode(card, (node) => node.className === 'approval-mismatch'), null);
   const actions = findNode(card, (node) => node.className === 'approval-actions');
   assert.deepEqual(actions.children.map((node) => node.textContent), ['Allow once', 'Deny']);
+});
+
+test('a routine step shows the model\'s words, labelled, and folds its code', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.context.request = {request_id: 'routine', tool_name: 'shell_exec', arguments: {command: 'ls notes'}, arguments_complete: true,
+    workspace_label: '~/w', review: {verdict: 'routine', categories: [], reasons: []}, gist: ROUTINE_SAID};
+  const card = h.run('approvalCard(request)');
+  assert.equal(card.children[0].textContent, 'melo says: List the notes folder');
+  assert.equal(findNode(card, (node) => node.className === 'approval-says'), null, 'the words are the sentence, once');
+  const fold = findNode(card, (node) => node.className === 'approval-code');
+  assert.notEqual(fold.open, true, 'folded: nothing was found in it');
+  // A request with no review at all is not known to be routine: its code is open.
+  h.context.request = {request_id: 'unknown', tool_name: 'shell_exec', arguments: {command: 'ls notes'}, arguments_complete: true,
+    workspace_label: '~/w', gist: ROUTINE_SAID};
+  assert.equal(findNode(h.run('approvalCard(request)'), (node) => node.className === 'approval-code').open, true);
 });
 
 test('a description that does not match the code shows the real effect first and a warning', async () => {
@@ -5719,13 +5738,14 @@ test('the approval card reads in Simplified Chinese: sentence, kind, reason with
   try {
     h.context.request = controlsAnApp(MODEL_SAID, {request_id: 'app-zh'});
     const card = h.run('approvalCard(request)');
-    assert.equal(card.children[0].textContent, 'Close the 7 forum tabs melo opened');
+    assert.equal(card.children[0].textContent, '操作 Safari');
+    assert.equal(card.children[1].textContent, 'melo 说：Close the 7 forum tabs melo opened');
     assert.equal(findNode(card, (node) => node.className === 'approval-title').textContent, '控制一个应用？');
     const reasons = findNode(card, (node) => node.className === 'approval-reasons');
     assert.deepEqual(reasons.children.map((node) => node.textContent), ['这一步会通过脚本操作 Safari。']);
     assert.equal(findNode(card, (node) => node.className === 'approval-code').children[0].textContent, '查看代码');
-    h.context.request = controlsAnApp({say: {id: 'script_apps', params: {apps: 'Safari'}}, by: 'code', apps: 'Safari'}, {request_id: 'app-zh2'});
-    assert.equal(h.run('approvalCard(request)').children[0].textContent, '运行一段 Python 脚本，操作 Safari');
+    h.context.request = controlsAnApp({say: {id: 'operate', params: {apps: ['Safari', 'Notes']}}, by: 'code', apps: ['Safari', 'Notes']}, {request_id: 'app-zh2'});
+    assert.equal(h.run('approvalCard(request)').children[0].textContent, '操作 Safari和Notes');
   } finally {
     await useLanguage('en');
   }

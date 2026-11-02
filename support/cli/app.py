@@ -1110,6 +1110,8 @@ class InteractiveApp:
                 intro += wrapped(
                     "class:warn", f"{symbols.warn} {text.warning}", inner, "  "
                 )
+            if text.said:
+                intro += wrapped("class:muted", text.said, inner)
             # Why melo asks comes before the code it asks about.
             why = [
                 part
@@ -1251,7 +1253,7 @@ class InteractiveApp:
             show_tier=self.renderer.developer,
         )
         header = text.header.replace(" · ", f" {self.symbols.dot} ")
-        says = [row for row in (text.says, text.warning) if row]
+        says = [row for row in (text.says, text.warning, text.said) if row]
         self.renderer.out.print(
             Text(
                 "\n".join(

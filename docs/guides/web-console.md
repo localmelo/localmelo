@@ -716,11 +716,15 @@ OS account, which can answer them.
 
 The card asks a plain question ("Run this command in demo-project?", "Replace
 notes.txt?", "Let melo use <tool>?") and shows exactly what would run. A command
-or a Python script starts with one plain sentence about what the step will do:
-the model's own words when it gave them, otherwise a sentence melo builds
-("Run a Python script that operates Safari"). The code sits under it in a fold,
-**Show the code**; the question and the reasons come from melo's rules, so the
-model's words never make a step look safer. A file
+or a Python script starts with one plain sentence about what the step will do,
+which melo builds from the call and which names every effect it finds, in order
+("Operate Safari, then delete files"; a command too long to show ends "and 2
+more"). The model's own words (a `why` argument, or a comment at the top of the
+code) always carry a label, "melo says: …". When the rules find nothing to ask
+about, the words are the sentence and the code sits under it in a fold, **Show
+the code**. When the rules find something, the sentence stays melo's own, the
+words go in a line below it, and the code is open, so the words can never make a
+step look safer; the question and the reasons come from melo's rules either way. A file
 write over an existing text file shows what it replaces: the line under the
 question counts the lines ("5 lines removed, 1 added"), and the box lists the
 changed lines, each with its number, a − or + sign and two lines of context on
@@ -755,12 +759,12 @@ time`, and **Why melo asks** lists up to three reasons ("Installs playwright
 with pip into .signin_venv (downloads about 42 MB)."). **You asked:** repeats
 the message that started the turn, so you can compare it with what melo is
 about to do. When the model's words and the code disagree about deleting
-files or sending data out, the card shows what the code does, with a red warning
-that quotes the words ("melo described this as “Close the tabs”, but the code
-deletes files."). A script that operates another app (AppleScript telling Safari
-to close tabs, `open -a Notes`) asks **Control an app?** and names the app; a
-script that presses keys or drives System Events stays **Change system
-settings?**. The card has **Allow once** and **Deny** only, and **Deny** is the
+files or sending data out, the card shows a red warning that quotes the words
+("melo described this as “Close the tabs”, but the code deletes files."). A script
+that operates one app by its plain name (AppleScript telling Safari to close
+tabs, `open -a Notes`) asks **Control an app?** and names the app; a script that
+runs a shell, presses keys, drives System Events, names a terminal or a path,
+or runs a Shortcut stays **Change system settings?**. The card has **Allow once** and **Deny** only, and **Deny** is the
 filled button: there is no chat-wide allow, and the line under the buttons
 says so ("A chat-wide allow never covers installs, downloads or changes outside
 ~/demo-project."). A call melo cannot read, or that it asks about for another

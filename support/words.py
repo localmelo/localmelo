@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from functools import cache
 from pathlib import Path
 from typing import Any, Final
@@ -67,7 +67,8 @@ def said(key: str, /, **params: Any) -> dict[str, Any]:
 
     ``{"key": key, "params": params}``; a parameter may itself be a :func:`said`,
     or a time of day, ``{"clock": minutes after midnight}``, which a reader
-    writes as its language writes a clock (here, as ``8:30``).
+    writes as its language writes a clock (here, as ``8:30``), or a step's
+    sentence, ``{"gist": {id, params}}`` (see :func:`gist_sentence`).
     """
     return {"key": key, "params": params}
 
@@ -86,8 +87,42 @@ def said_in(language: str, words: Mapping[str, Any]) -> str:
             value = said_in(language, value)
         elif isinstance(value, Mapping) and "clock" in value:
             value = clock_words(int(value["clock"]))
+        elif isinstance(value, Mapping) and "gist" in value:
+            value = gist_sentence(value["gist"], language)
         filled[name] = value
     return t_in(language, str(words.get("key")), **filled)
+
+
+def gist_names(names: Sequence[object], language: str = "en") -> str:
+    """*names* as a list in *language*: ``Safari``, ``Safari and Notes``, ``Safari, Notes and Mail``."""
+    found = [str(name) for name in names]
+    if len(found) < 2:
+        return "".join(found)
+    if len(found) == 2:
+        return t_in(language, "gist.list.two", first=found[0], second=found[1])
+    head = t_in(language, "gist.list.sep").join(found[:-1])
+    return t_in(language, "gist.list.many", head=head, last=found[-1])
+
+
+def gist_sentence(node: object, language: str = "en") -> str:
+    """The sentence of a gist's ``say`` node (``{id, params}``) in *language*.
+
+    A parameter may be another sentence (``then``, ``more``) or a list of names
+    (``apps``). In English the sentence after ``then`` starts in lower case.
+    """
+    if not isinstance(node, Mapping) or not isinstance(node.get("id"), str):
+        return ""
+    params = node.get("params")
+    filled: dict[str, Any] = {}
+    for name, value in params.items() if isinstance(params, Mapping) else ():
+        if isinstance(value, Mapping):
+            value = gist_sentence(value, language)
+            if name == "next" and language.startswith("en"):
+                value = value[:1].lower() + value[1:]
+        elif isinstance(value, list):
+            value = gist_names(value, language)
+        filled[name] = value
+    return t_in(language, f"gist.say.{node['id']}", **filled)
 
 
 def gist_text(gist: object, language: str = "en") -> tuple[str, str]:
@@ -99,12 +134,21 @@ def gist_text(gist: object, language: str = "en") -> tuple[str, str]:
     """
     if not isinstance(gist, Mapping):
         return "", ""
+    warn = gist.get("warn")
+    warning = ""
+    if isinstance(warn, Mapping) and isinstance(warn.get("id"), str):
+        params = warn.get("params")
+        warning = t_in(
+            language,
+            f"gist.warn.{warn['id']}",
+            **(params if isinstance(params, Mapping) else {}),
+        )
+    return gist_sentence(gist.get("say"), language), warning
 
-    def part(entry: object, kind: str) -> str:
-        if not isinstance(entry, Mapping) or not isinstance(entry.get("id"), str):
-            return ""
-        params = entry.get("params")
-        params = params if isinstance(params, Mapping) else {}
-        return t_in(language, f"gist.{kind}.{entry['id']}", **params)
 
-    return part(gist.get("say"), "say"), part(gist.get("warn"), "warn")
+def gist_note(gist: object, language: str = "en") -> str:
+    """The model's words under a risky step's sentence, labelled as the model's; ``""`` if none."""
+    note = gist.get("note") if isinstance(gist, Mapping) else None
+    if not isinstance(note, str) or not note:
+        return ""
+    return t_in(language, "gist.say.model", text=note)

@@ -1,4 +1,4 @@
-import {formatTime, language, t} from './i18n.mjs';
+import {formatTime, gistSentence, language, nameList, t} from './i18n.mjs';
 
 // The kinds of step auto mode blocks (#339), as the review names them.
 export const CATEGORIES = new Set([
@@ -53,30 +53,33 @@ export function reasonLines(review, categories) {
   if (written.length && language() === 'en') return written;
   const modelFound = review.by === 'model' && !['beyond_request', 'opaque', 'unreviewed'].includes(categories[0]);
   if (modelFound) return [t('auto.reason.model', {what: t(`auto.words.${categories[0]}`)})];
-  const apps = isObject(review.gist) && typeof review.gist.apps === 'string' ? review.gist.apps : '';
+  const apps = isObject(review.gist) && Array.isArray(review.gist.apps) ? nameList(review.gist.apps) : '';
   return categories.slice(0, 3).map((category) => (
     category === 'app_control' && apps ? t('auto.reason.appControlNamed', {apps}) : t(`auto.reason.${category}`)
   ));
 }
 
 /**
- * The sentence an approval card starts with and its warning, in the page's language, from the `gist` the
- * server sends (catalog ids and parameters); null when there is none. The warning is `''` unless the
- * model's words do not match what the code does: the sentence is then the code's real effect.
+ * The sentence an approval card starts with, its warning and the model's note, in the page's language,
+ * from the `gist` the server sends (catalog ids and parameters); null when there is none. The sentence is
+ * the code's own whenever the rules found the step risky; the model's words then stand in `note`, already
+ * labelled as the model's ("melo says: ..."). The warning is `''` unless the model's words do not match
+ * what the code does.
  */
 export function gistWords(gist) {
   const say = isObject(gist) ? gist.say : null;
   if (!isObject(say) || typeof say.id !== 'string') return null;
   const warn = isObject(gist.warn) && typeof gist.warn.id === 'string' ? gist.warn : null;
   return {
-    sentence: t(`gist.say.${say.id}`, isObject(say.params) ? say.params : {}),
+    sentence: gistSentence(say),
     warning: warn ? t(`gist.warn.${warn.id}`, isObject(warn.params) ? warn.params : {}) : '',
+    note: typeof gist.note === 'string' && gist.note ? t('gist.say.model', {text: gist.note}) : '',
   };
 }
 
 /**
  * What a blocked call's card says, or null for a call auto mode did not block. `step` is the call's
- * code or command on one line; `gist` the sentence the card starts with and its warning (or null);
+ * code or command on one line; `gist` the sentence the card starts with, its warning and the model's note (or null);
  * `allow` whether Allow once may run it (never for `self`, never for a call a stopped turn left
  * unreviewed); `words` whether "go ahead" can allow it too.
  */
@@ -154,6 +157,7 @@ export function blockCard(doc, facts, {allowing = {state: 'open'}, busy = false,
     warning.setAttribute('role', 'alert');
     card.append(warning);
   }
+  if (facts.gist?.note) card.append(node('p', 'block-says', facts.gist.note));
   const head = node('div', 'block-head');
   const mark = node('span', 'block-mark', '⊘');
   mark.setAttribute('aria-hidden', 'true');
@@ -165,10 +169,12 @@ export function blockCard(doc, facts, {allowing = {state: 'open'}, busy = false,
   why.push(t(facts.self ? 'auto.blocked.self' : facts.words ? 'auto.blocked.why' : 'auto.blocked.clickOnly'));
   card.append(node('p', 'block-why', why.join(t('common.sentenceGap'))));
   if (facts.step) {
-    // The code follows, folded: the sentence and the kind say what it is for.
+    // The code follows. A blocked step is never routine, so it is open: the sentence and the kind do not
+    // stand in for reading it.
     const step = node('code', 'block-step', facts.step);
     step.title = facts.step;
     const fold = node('details', 'block-code');
+    fold.open = true;
     fold.append(node('summary', '', t('gist.showCode')), step);
     card.append(fold);
   }

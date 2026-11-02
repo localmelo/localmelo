@@ -349,13 +349,17 @@ The number of `tool.started` events is `RunResult.n_tool`.
   [Approve tool calls](../guides/python.md#approve-tool-calls).
   `review.gist` is the sentence an approval card starts with, as ids a client
   says in its own language: `{say: {id, params}, by: "model" | "code", warn?:
-  {id, params}, apps?}`. `say.id` is one of `model` (the model's own words, in
-  `params.text`), `command`, `command_apps`, `script`, `script_command`,
-  `script_apps`, `write`, `edit`, `tool`, `effect_delete` and `effect_send_out`;
-  `warn` is set only when the model's words disagree with what the code does
-  (`delete`, `send_out`), and then `say` is the code's effect; `apps` names the
-  apps a script operates. It is absent for a tool whose card has a sentence of
-  its own.
+  {id, params}, note?, apps?}`. `say.id` is one of `model` (the model's own
+  words, in `params.text`, only for a step the rules found nothing in), `command`,
+  `script`, `script_command`, `operate` (`params.apps`, a list of names), `write`,
+  `edit`, `tool`, `effect_delete` and `effect_send_out`, or `then` and `more`,
+  whose params hold other sentences (`first` and `next`; `list` and `count`) and
+  name every effect of a compound step in order. `note` holds the model's words
+  when the rules found something: they stand below the sentence, and a client
+  labels them with `gist.say.model` ("melo says: …"). `warn` is set only when the
+  model's words disagree with what the code does (`delete`, `send_out`) and quotes
+  them; `apps` names the apps a script operates. It is absent for a tool whose
+  card has a sentence of its own.
 - `exit_code`: the exit status of the child process that `shell_exec` or
   `python_exec` ran; a negative value `-N` means that signal `N` ended it. It
   is `null` for every other tool, for a call whose child never started, and

@@ -178,7 +178,8 @@ def test_the_kind_line_of_a_script_that_operates_an_app() -> None:
     pending = approval_json(asked("python_exec", {"code": "print(1)"}, review=review))
     assert pending["review"]["title"] == "Control an app?"
     assert pending["review"]["categories"] == ["app_control"]
-    assert pending["gist"]["say"] == {"id": "script_apps", "params": {"apps": "Safari"}}
+    assert pending["gist"]["say"] == {"id": "operate", "params": {"apps": ["Safari"]}}
+    assert pending["gist"]["apps"] == ["Safari"]
 
 
 def test_a_tool_that_asks_with_its_own_sentence_has_no_gist() -> None:
