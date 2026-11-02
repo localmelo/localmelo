@@ -407,6 +407,43 @@ def test_a_denial_shows_its_reason() -> None:
     assert "⊘ ± file_write  todo.md (68 chars) · denied: keep the item first\n" in text
 
 
+def test_a_blocked_row_says_what_the_step_would_have_done() -> None:
+    """Auto mode's block carries the sentence the approval card has (#454)."""
+    gist = {
+        "say": {
+            "id": "then",
+            "params": {
+                "first": {"id": "operate", "params": {"apps": ["Safari"]}},
+                "next": {"id": "effect_delete", "params": {}},
+            },
+        },
+        "by": "code",
+        "warn": {"id": "delete", "params": {"said": "Close the tabs"}},
+        "note": "Close the tabs",
+    }
+    approval = {
+        "allowed": False,
+        "origin": "auto",
+        "reason": "controls an app",
+        "review": {"verdict": "high", "categories": ["app_control"], "gist": gist},
+    }
+    text = (
+        Turn()
+        .tool("python_exec", "script = ...", status="blocked", approval=approval)
+        .text()
+    )
+    rows = text.split("\n")
+    header = next(i for i, row in enumerate(rows) if row.startswith("⊘"))
+    assert rows[header].endswith("blocked: controls an app")
+    assert rows[header + 1].strip().endswith("Operate Safari, then delete files")
+    assert any("melo described this as “Close the tabs”" in row for row in rows)
+    assert any("melo says: Close the tabs" in row for row in rows)
+    # A block with no sentence (an older record) is the row it was.
+    bare = {**approval, "review": {"verdict": "high", "categories": ["app_control"]}}
+    plain = Turn().tool("python_exec", "script", status="blocked", approval=bare).text()
+    assert "Operate Safari" not in plain
+
+
 def test_a_blocked_call_without_an_approval_names_the_block() -> None:
     text = (
         Turn()

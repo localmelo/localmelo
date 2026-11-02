@@ -339,7 +339,7 @@ The number of `tool.started` events is `RunResult.n_tool`.
   failed, or `withdrawn` when the run was cancelled while the policy decided.
   In auto mode, and for a call whose review is not plainly routine, it also has
   `mode` (`"auto"`), `review` (the review: `verdict`, `categories`, `reasons`,
-  `paths`, `by` (`rules` or `model`), `rules_version` and, when the model was
+  `paths`, `by` (`rules` or `model`), `rules_version`, `gist` and, when the model was
   asked, `model`: `{verdict, category, fits_request, user_asked, reason, ms}` or
   `{error, ms}`) and `step_key` (32 hex characters: the same step in the same
   folder); a step allowed once has `allowance: "once"`. Origin `auto` with
@@ -347,6 +347,21 @@ The number of `tool.started` events is `RunResult.n_tool`.
   words (`installs software`); the console's
   [Allow once](api-v2.md#ask-and-auto) finds it by `request_id`. See
   [Approve tool calls](../guides/python.md#approve-tool-calls).
+  `review.gist` is the sentence an approval card starts with, as ids a client
+  says in its own language: `{say: {id, params}, by: "model" | "code", warn?:
+  {id, params}, note?, apps?}`. `say.id` is one of `model` (the model's own
+  words, in `params.text`, only for a step the rules found nothing in), `command`,
+  `script`, `script_command`, `operate` (`params.apps`, a list of names), `write`,
+  `edit`, `tool`, `effect_delete` and `effect_send_out` (or `script_effect_delete` and
+  `script_effect_send_out`, "a Python script that deletes files": an effect only the
+  rules saw, in a script whose code shows nothing), or `then` and `more`,
+  whose params hold other sentences (`first` and `next`; `list` and `count`) and
+  name every effect of a compound step in order. `note` holds the model's words
+  when the rules found something: they stand below the sentence, and a client
+  labels them with `gist.say.model` ("melo says: …"). `warn` is set only when the
+  model's words disagree with what the code does (`delete`, `send_out`) and quotes
+  them; `apps` names the apps a script operates. It is absent for a tool whose
+  card has a sentence of its own.
 - `exit_code`: the exit status of the child process that `shell_exec` or
   `python_exec` ran; a negative value `-N` means that signal `N` ended it. It
   is `null` for every other tool, for a call whose child never started, and
