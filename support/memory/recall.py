@@ -72,11 +72,14 @@ SIDE_SUMMARY: Final = "side_summary"
 AGENT_EXCHANGE: Final = "agent_exchange"
 _KEPT_CHARS: Final = 120
 _LINE_CHARS: Final = 240
-# What a turn's two parts may take together in the block (the words that say who
-# spoke are extra, so a turn line stays about as long as it was), and the least
-# melo's reply keeps when the user's words are long.
-TURN_CHARS: Final = _LINE_CHARS - 40
+# What a turn's two parts may take together in the block: as many of the user's
+# words as the plain 240-character head ``User: …`` of a turn showed before a turn
+# said who spoke (those words are extra). In a larger room melo's reply keeps
+# :data:`_REPLY_CHARS` of it; a reply is shown only when :data:`_REPLY_MIN` or more
+# characters are left for it.
+TURN_CHARS: Final = _LINE_CHARS - len("User: ")
 _REPLY_CHARS: Final = 60
+_REPLY_MIN: Final = 20
 # With ``recall_excerpt = "match"``, the share of a turn's room the user's words
 # keep when they are long; the rest is melo's reply's.
 _USER_SHARE: Final = 0.4
@@ -117,7 +120,8 @@ class Shown(NamedTuple):
 
     *chars* is the room one turn takes (:data:`TURN_CHARS`), in the recall block
     and in the memory search tool's list; text that is no turn takes *chars* plus
-    the 40 characters that say who spoke. With *terms*, the question's content
+    the 6 characters of ``User: `` (240 by default, the plain head it always
+    had). With *terms*, the question's content
     terms (``[memory] recall_excerpt = "match"``), each part of a turn shows the
     sentences that hold most of them rather than its head (:func:`turn_said`).
     The defaults are the head of every turn, as it always was.
@@ -346,9 +350,13 @@ def turn_said(text: str, show: Shown = HEADS) -> str:
     """A turn's document text as the model reads it: ``the user said “…”; melo
     replied “…”``, so a past reply of melo's is never read as the user's own
     statement. Both parts are bounded together (``show.chars``, :data:`TURN_CHARS`
-    by default); the user's words come first and stay whole when they fit, and
-    melo's reply keeps at least :data:`_REPLY_CHARS` of the room. Text that is no
-    turn (a summary, a task's question) is a plain :func:`snippet`.
+    by default); the user's words come first and stay whole when they fit. Long
+    words of the user take the room less :data:`_REPLY_CHARS` for melo's reply,
+    but in a room of at least :data:`TURN_CHARS` never fewer than that (as far as
+    the plain 240-character head ``User: …`` showed them): a value a person
+    states late in a long message is where questions about them look. The reply takes what is left when that
+    is at least :data:`_REPLY_MIN` characters. Text that is no turn (a summary, a
+    task's question) is a plain :func:`snippet`.
 
     With ``show.terms`` a part that does not fit shows the window that holds the
     most of them instead (:func:`_matching`).
@@ -366,8 +374,12 @@ def turn_said(text: str, show: Shown = HEADS) -> str:
         if picked is not None:
             typed, answer = picked
         else:
-            typed = snippet(typed, show.chars - _REPLY_CHARS if answer else show.chars)
-            answer = snippet(answer, show.chars - len(typed)) if answer else ""
+            user_room = show.chars - _REPLY_CHARS
+            if show.chars >= TURN_CHARS:
+                user_room = max(user_room, TURN_CHARS)
+            typed = snippet(typed, user_room if answer else show.chars)
+            room = show.chars - len(typed)
+            answer = snippet(answer, room) if answer and room >= _REPLY_MIN else ""
     said = [f"the user said “{typed}”"] if typed else []
     return "; ".join(said + ([f"melo replied “{answer}”"] if answer else []))
 

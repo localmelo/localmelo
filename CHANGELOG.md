@@ -706,6 +706,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A long message recalled from an earlier chat shows as much of the person's own
+  words as it did before recalled turns said who spoke: about 234 characters,
+  not 140. A value stated late in a long message was cut off, and questions
+  about it went unanswered. melo's reply gets the room that is left.
+  `recall_item_chars` defaults to 234; larger rooms read as before.
+
 - Developer: `melo memory ingest` reads a session that a file repeats word for word once,
   instead of refusing the file; the same id with other turns is still refused.
 - A task that changed no code is no longer told to run tests. Outside git, melo compares the
