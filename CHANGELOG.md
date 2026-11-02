@@ -21,9 +21,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   is answered from the task itself.
 - `AgentOptions.refused_steps` (default 0) and `refuse_call` in
   `localmelo.melo.contracts.tools`: a step whose every call a policy check
-  refused (the tool's own check, a refused tool question, the approval
-  policy's denial) does not count toward `max_steps`, up to that many steps a
-  run. `Agent.closing_answer(query, note=)` asks once, without tools, for an
+  refused (the tool's own check, or a tool question or call that a policy or
+  Auto refused) does not count toward `max_steps`, up to that many steps a
+  run. Your own Deny, an unanswered question and the same refused call again
+  always count. `Agent.closing_answer(query, note=)` asks once, without tools, for an
   answer from what a finished run found.
 
 - The `turn.memory` event records the exact text the model read. Each entry of
@@ -465,7 +466,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   starts at once in Chinese as in English (`去这个网站看一下，然后告诉我最新的价格`,
   `look at this site and tell me the latest prices`), even when its last part
   asks a question. A question about a task (`is it done?`, `跑完了吗`) is
-  answered from the task's state and answer. Calls a policy check refused (a
+  answered from the task's state and answer, unless it also asks for work
+  (`Is the report ready? If not, write it to report.md`). A request in steps
+  starts only for something outside the chat (a site, a link, a file, a repo or
+  folder, your own things); `看看天气然后告诉我`, text to translate or explain
+  after a colon, and words against a task (`no need for a task`, `不用开任务`)
+  do not start one. Calls a policy check refused (a
   note it may not keep, a task not asked for, a refused site) no longer use up
   the chat's 4 steps, at most 2 a turn, and a turn that still does not settle
   answers from what it found instead of `Start this as a task?`; that line
