@@ -155,7 +155,7 @@ elements:
 | `This Safari's automation server lacks the tools melo needs` | 更新 macOS 和 Safari。 |
 | 页面读出来是空的 | 可能需要登录，或页面在加载后由脚本生成；试试 `browser_wait`，或自己打开它。 |
 | melo 说没有打开某个网站 | 你对该网站的询问回答了“否”；再问一次并允许该网站。 |
-| `melo's browser does not open local or private addresses` | 这个地址是这台 Mac、你的局域网或 melo 的控制台。这是有意的；需要的话请自己打开。 |
+| `melo's browser does not open local or private addresses` | 这个地址是这台 Mac、你的局域网或 melo 的控制台。这是有意的；需要的话请自己打开。让 `web_fetch` 读取测试服务器的开发者设置（`web_fetch_allow_local`）不会改变这一点。 |
 
 要在不涉及模型的情况下查看 Safari 的自动化服务器回答了什么，在检出目录中运行下面的命令。它会打开一个自动化窗口，读取一个页面，列出标签页，拍一张图并关闭；每一行显示返回的内容，失败时会说明要打开什么：
 

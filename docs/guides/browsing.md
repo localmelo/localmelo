@@ -135,7 +135,7 @@ Browsing is built in parts; none of the next two exists yet.
 | `This Safari's automation server lacks the tools melo needs` | Update macOS and Safari. |
 | A page reads as empty | It may need a sign-in or be built by scripts after loading; try `browser_wait`, or open it yourself. |
 | melo says it did not open a site | You answered no to the question about it; ask again and allow the site. |
-| `melo's browser does not open local or private addresses` | The address is this Mac, your network or melo's console. That is on purpose; open it yourself if you need it. |
+| `melo's browser does not open local or private addresses` | The address is this Mac, your network or melo's console. That is on purpose; open it yourself if you need it. The developer setting that lets `web_fetch` read a test server (`web_fetch_allow_local`) does not change this. |
 
 To see what Safari's automation server answers, with no model involved, run this from the checkout. It opens an automation window, reads one page, lists the tabs, takes a picture and closes; each line shows what came back, and a failure says what to turn on:
 
