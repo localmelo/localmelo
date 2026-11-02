@@ -1103,6 +1103,15 @@ class InteractiveApp:
                 if text.escaped
                 else []
             )
+            # What the step will do comes first, then a warning when the
+            # words and the code differ (#454).
+            intro = wrapped("class:title", text.says, inner) if text.says else []
+            if text.warning:
+                intro += wrapped(
+                    "class:warn", f"{symbols.warn} {text.warning}", inner, "  "
+                )
+            if text.said:
+                intro += wrapped("class:muted", text.said, inner)
             # Why melo asks comes before the code it asks about.
             why = [
                 part
@@ -1110,7 +1119,12 @@ class InteractiveApp:
                 for part in wrapped("class:warn", f"{symbols.warn} {note}", inner, "  ")
             ]
             fixed = (
-                (2 if boxed else 1) + len(head) + len(why) + len(tail) + len(options)
+                (2 if boxed else 1)
+                + len(intro)
+                + len(head)
+                + len(why)
+                + len(tail)
+                + len(options)
             )
             room = rows - fixed - len(keys)
             if room >= min(2, len(text.body)) or not (boxed or keys):
@@ -1156,7 +1170,7 @@ class InteractiveApp:
             out.append(("class:title", label))
             dashes = "─" * max(0, width - 5 - cells(label))
             row("class:frame", f" {dashes}╮")
-            for style, line in head + why + body + tail:
+            for style, line in intro + head + why + body + tail:
                 shown = cut_cells(line, inner, symbols.ellipsis)
                 out.append(("class:frame", "│ "))
                 row(style, shown, inner)
@@ -1166,7 +1180,7 @@ class InteractiveApp:
             row("class:frame", "╰" + "─" * (width - 2) + "╯")
         else:
             row("class:question", cut_cells(text.title, width, symbols.ellipsis))
-            for style, line in head + why + body + tail:
+            for style, line in intro + head + why + body + tail:
                 row(style, line)
         for style, line in options + keys:
             row(style, line)
@@ -1239,8 +1253,13 @@ class InteractiveApp:
             show_tier=self.renderer.developer,
         )
         header = text.header.replace(" · ", f" {self.symbols.dot} ")
+        says = [row for row in (text.says, text.warning, text.said) if row]
         self.renderer.out.print(
-            Text("\n".join([header, *text.notes, *(line for _, line in text.body)]))
+            Text(
+                "\n".join(
+                    [*says, header, *text.notes, *(line for _, line in text.body)]
+                )
+            )
         )
 
     def _panel_bindings(self) -> list[KeyBindings]:

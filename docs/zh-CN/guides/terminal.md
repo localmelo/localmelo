@@ -329,6 +329,7 @@ from-the-child
 
 ```text
 ╭─ Run a shell command? ───────────────────────────────────────────────────╮
+│ Run the command ls -1                                                    │
 │ shell_exec · in ~/demo-project                                           │
 │   ls -1                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────╯
@@ -340,10 +341,20 @@ from-the-child
   ↑↓ select · enter confirm · 1-3 · v view all · esc stop the turn
 ```
 
+面板的第一行用一句平实的话说明这一步要做什么。对命令或脚本，melo 根据调用生成它，并按顺序写出发现的每个效果（“Operate Safari, then delete files”）；太长而无法完整显示的命令以“and 2 more”结尾。模型自己的话（`why` 参数，或代码开头的一行注释）始终带着标签 `melo says: …`：只有常规步骤才把它们放在第一行，规则发现风险的步骤则把它们放在下面一行，所以它们永远不会让一步看起来更安全。这句话只供阅读；问题和理由来自 melo 的规则，写文件、网站或工作区之外的文件夹没有这一行。
+
+如果模型的话和代码在“删除文件”或“把数据发出去”上不一致，一条警告会引用模型的话：
+
+```text
+│ Delete files                                                               │
+│ ⚠ melo described this as “Close the tabs”, but the code deletes files.     │
+```
+
 安装软件、下载文件、修改文件夹之外的文件或做其他[高影响](tools-mcp.md#high-impact-calls)操作的调用，会得到一个面板：问题点明了它是什么，理由写在代码上方，没有会话选项，且选中“否”，所以只按 Enter 绝不会允许它：
 
 ```text
 ╭─ Install software? ────────────────────────────────────────────────────────╮
+│ Run the command pip install playwright                                     │
 │ shell_exec · in ~/demo-project                                             │
 │ ⚠ melo asks because this call installs playwright with pip (downloads      │
 │   about 42 MB).                                                            │
@@ -354,6 +365,20 @@ from-the-child
   Session grants never cover installs, downloads or changes outside the
   folder.
   ↑↓ select · enter confirm · 1-2 · v view all · esc stop the turn
+```
+
+按普通名称操作一个应用的脚本（用 `osascript` 让 Safari 关闭标签页、`open -a Notes`）是单独的一类，**Control an app?**，理由里会写明应用名。它和系统设置一样需要点按钮。这是一份允许清单：运行 shell、按键、操作 System Events、指名终端或编辑器、给出路径或第二个应用的脚本，以及 `shortcuts run`，仍然是 **Change system settings?**。一轮中被拦下的步骤那一行下面带有同样的句子。
+
+```text
+╭─ Control an app? ──────────────────────────────────────────────────────────╮
+│ Operate Safari                                                             │
+│ melo says: Close the extra Safari tabs                                     │
+│ python_exec · in ~/demo-project                                            │
+│ ⚠ melo asks because this call operates Safari through a script.            │
+│   subprocess.run(['osascript', '-e', script])                              │
+╰────────────────────────────────────────────────────────────────────────────╯
+  1. Yes
+❯ 2. No, and tell melo why
 ```
 
 文件夹之外的文件会得到一个写明其真实文件夹的面板。读取可以在这个对话里或总是允许那个文件夹（记在设置里），写入每次都会询问，只有“是”和“否”，并且选中“否”（见[工作区之外的文件夹](tools-mcp.md#folders-outside-the-workspace)）：
@@ -386,8 +411,8 @@ from-the-child
 
 - **切换：** 按 Shift+Tab（见[按键](#keys)），或输入 `/approvals auto` 为这个对话打开它，`/approvals ask` 关闭它。在主对话和侧边对话里，切换会发给网关上的那个对话，所以控制台和应用也会看到；`deny` 和 `forget` 仍只在终端自己的对话里可用。`[approvals] mode`（控制台的 **新对话开始时**，或单次运行用 `-X approvals.mode=auto`）让终端自己的对话以它开始。
 - **会运行什么：** 在文件夹内、不安装、不下载、不发送、不删除任何东西的步骤；melo 无法判断的步骤先交给你的模型。它的 `shell_exec` 和 `python_exec` 调用在写入沙箱中运行，所以即使没有规则发现，写入文件夹之外也会失败，而且它们既读不到 melo 的登录令牌，也连不上 melo 自己的 API。自动模式是审查，不是围墙：把工作交给另一个应用或程序的步骤由审查来判断（拦下，或交给你的模型检查），而不是由沙箱隔离。
-- **会拦下什么：** 安装、下载、更改文件夹外的文件、删除、密码和密钥、系统设置以及来自网络的代码，除非你自己的话要求这样做；更改 localmelo 本身的步骤永远不会运行。那一行会写明原因（`⊘ … · blocked: installs software`），melo 会在回答里说明它想做什么，以及还有哪些别的办法。
-- **允许它：** 说“go ahead”（继续），melo 会再试一次；你的模型会核对你的话确实要求了它。只有点按钮才能允许的步骤（密码或密钥、系统设置、以后自动运行的东西、来自网络的代码或 melo 无法检查的代码）需要用控制台的 **Allow once**。
+- **会拦下什么：** 安装、下载、更改文件夹外的文件、删除、密码和密钥、系统设置、操作另一个应用的脚本以及来自网络的代码，除非你自己的话要求这样做；更改 localmelo 本身的步骤永远不会运行。那一行会写明原因（`⊘ … · blocked: installs software`），melo 会在回答里说明它想做什么，以及还有哪些别的办法。
+- **允许它：** 说“go ahead”（继续），melo 会再试一次；你的模型会核对你的话确实要求了它。只有点按钮才能允许的步骤（密码或密钥、系统设置、操作另一个应用的脚本、以后自动运行的东西、来自网络的代码或 melo 无法检查的代码）需要用控制台的 **Allow once**。
 
 <a id="the-workspace"></a>
 

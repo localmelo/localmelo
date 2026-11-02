@@ -109,6 +109,7 @@ from localmelo.melo.checker.payloads import (
 )
 from localmelo.melo.checker.policy import builtin_set_for
 from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.checker.review.gist import step_gist
 from localmelo.melo.checker.tiers import tier_of, tier_requires_approval
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN, _sanitize_images
 from localmelo.melo.contracts.approvals import (
@@ -792,6 +793,17 @@ def _image_references(result: ToolResult) -> ToolResult:
     return dataclasses.replace(
         result, images=[image.as_reference() for image in result.images]
     )
+
+
+def _without_words(tool_name: str, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    """*arguments* of a command or script without the model's ``why``.
+
+    The words only describe the step: the same command with other words is the
+    same step, so a refusal or a stuck loop is not dodged by rewording (#454).
+    """
+    if tool_name in ("shell_exec", "python_exec") and "why" in arguments:
+        return {k: v for k, v in arguments.items() if k != "why"}
+    return arguments
 
 
 def _result_digest(result: ToolResult) -> str:
@@ -1992,7 +2004,12 @@ class _ApprovalGate:
         if review is not None and (
             self._mode == "auto" or review.verdict != "routine" or review.by == "model"
         ):
-            self.asked["review"] = review.to_json()
+            shown = review.to_json()
+            # The sentence the approval card starts with (#454).
+            gist = step_gist(asking.tool_name, asking.arguments, review)
+            if gist is not None:
+                shown["gist"] = gist.to_json()
+            self.asked["review"] = shown
             if self._key:
                 self.asked["step_key"] = self._key
         if self._allowance:
@@ -4828,9 +4845,12 @@ class Agent:
         if not (policy or refused or denied):
             return False
         try:
-            key = json.dumps([call.tool_name, call.arguments], sort_keys=True)
+            key = json.dumps(
+                [call.tool_name, _without_words(call.tool_name, call.arguments)],
+                sort_keys=True,
+            )
         except (TypeError, ValueError):
-            key = f"{call.tool_name}:{call.arguments!r}"
+            key = f"{call.tool_name}:{_without_words(call.tool_name, call.arguments)!r}"
         again = key in run.refused_calls
         run.refused_calls.add(key)
         return policy and not again
@@ -5240,7 +5260,11 @@ class Agent:
         entries = sorted(
             (
                 tc.tool_name,
-                json.dumps(tc.arguments, sort_keys=True, default=str),
+                json.dumps(
+                    _without_words(tc.tool_name, tc.arguments),
+                    sort_keys=True,
+                    default=str,
+                ),
                 _result_digest(result),
             )
             for tc, result in zip(calls, results, strict=True)
