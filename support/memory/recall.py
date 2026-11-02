@@ -23,6 +23,11 @@ line, its id, date, chat, title and similarity (:meth:`Item.listed`), under a li
 that tells the model to open the turns it needs with ``open_memory``; the list is
 not bound by the chats' cap or the block's room (:func:`block`, :func:`pick`), and
 :func:`whole_turn` and :func:`cut_at_sentence` give a turn the model opens.
+With ``[memory] recall_source = "items"`` the items a chat model encoded from the
+chats (key ``m:<id>``, :mod:`.hippo_encode`) take the place of the turns: they are
+ranked, picked and listed the same way, an item is shown as its title and text
+(:meth:`Item.line`), reads as older when a newer item replaced it, and says which
+items it conflicts with.
 """
 
 from __future__ import annotations
@@ -67,6 +72,7 @@ KEPT_NOTES: Final = 3
 # to the model and the page.
 OLDER: Final = "older; replaced by a newer note"
 OLDER_TURN: Final = "older; replaced by a newer message"
+OLDER_ITEM: Final = "older; replaced by a newer item"
 # Index document kinds besides a chat's turns (:mod:`.index`).
 SIDE_SUMMARY: Final = "side_summary"
 AGENT_EXCHANGE: Final = "agent_exchange"
@@ -92,6 +98,11 @@ OPEN_CHARS: Final = 4_000
 LIST_TITLE_CHARS: Final = 80
 LIST_GUIDE: Final = (
     "Older chat turns that may hold the answer, closest first. Open the ones you "
+    "need with open_memory before you answer from them; a title is not the content."
+)
+# The line above a list of memory items, as LIST_GUIDE is above a list of turns.
+ITEM_LIST_GUIDE: Final = (
+    "Memory items that may hold the answer, closest first. Open the ones you "
     "need with open_memory before you answer from them; a title is not the content."
 )
 CUT_MARK: Final = "… (cut)"
@@ -142,7 +153,8 @@ WHOLE: Final = Shown(10**9)  # every turn whole: no room limit
 
 @dataclass
 class Item:
-    """One record (key ``r:<id>``) or document (``d:<id>``) that can be recalled.
+    """One record (key ``r:<id>``), document (``d:<id>``) or memory item
+    (``m:<id>``) that can be recalled.
 
     ``text`` is what the person reads: a record in the second person, or a
     turn. ``quote`` is a record's words as the user typed them, which the
@@ -161,6 +173,12 @@ class Item:
     tool set it on a copy, once, where the line is built, for ``turn.memory``'s
     entries (:meth:`to_json`); it is never stored and takes no part in a
     comparison.
+
+    A memory item has a ``title`` (``text`` is its text), the ``sources`` it came
+    from (``(session id, turn)``; its ``turn`` is the oldest of them, so a chat that
+    still shows that turn shows it all), ``replaced_by`` (the key of the item that
+    replaced it, ``""`` for none) and ``conflicts`` (the ids of the items it
+    disagrees with).
     """
 
     key: str
@@ -177,6 +195,14 @@ class Item:
     older: str = ""
     chunk: int = 0
     similarity: float | None = None
+    title: str = ""
+    sources: tuple[tuple[str, int], ...] = ()
+    replaced_by: str = ""
+    conflicts: tuple[int, ...] = ()
+    # Where a note came from when it is not the user's own words: ``pointed`` (a
+    # page or file the user pointed to; ``where`` then reads ``from example.com,
+    # Oct 30``) or ``inferred`` (the model's own conclusion). ``""`` for the rest.
+    how: str = ""
     shown: str = field(default="", compare=False)
 
     @property
@@ -184,8 +210,34 @@ class Item:
         return self.key.startswith("r:")
 
     @property
+    def is_memory(self) -> bool:
+        """Whether this is a memory item (``m:<id>``)."""
+        return self.key.startswith("m:")
+
+    @property
+    def is_turn(self) -> bool:
+        """Whether this is a chat turn's document (``d:<id>``)."""
+        return self.key.startswith("d:")
+
+    @property
+    def ref(self) -> str:
+        """The id a list line shows: ``t123`` for a turn, ``m12`` for an item."""
+        return f"{'m' if self.is_memory else 't'}{self.key[2:]}"
+
+    def _conflict(self) -> str:
+        """`` (conflicts with m3, m5)`` for an item that disagrees with others."""
+        if not self.conflicts:
+            return ""
+        return f" (conflicts with {', '.join(f'm{n}' for n in self.conflicts)})"
+
+    @property
     def source(self) -> str:
-        said = ("you said it · " if self.is_record else "") + self.where
+        if self.is_record and self.how == "pointed":
+            said = self.where
+        elif self.is_record and self.how == "inferred":
+            said = f"melo inferred it · {self.where}"
+        else:
+            said = ("you said it · " if self.is_record else "") + self.where
         return f"{said} · {self.older}" if self.older else said
 
     @property
@@ -200,16 +252,24 @@ class Item:
 
         A record reads as the user's words when it has them; without, a note in
         the second person says it is written to the user ("you" is the user),
-        and one in the first person says it is the user's own. A turn says who
-        spoke (:func:`turn_said`). The date has the year when it is not *now*'s
+        and one in the first person says it is the user's own; a note a page or
+        file gave reads so with that host or file name as its place (``from
+        example.com, Oct 30``), and one the model inferred says ``melo inferred``.
+        A turn says who spoke (:func:`turn_said`). The date has the year when it is not *now*'s
         (the pinned or real time by default), and the time of day with *timed*
         (:func:`times`). *show* says how much of a turn is shown (:class:`Shown`).
         """
         where = self._dated(clock.now() if now is None else now, timed)
         older = f" ({self.older})" if self.older else ""
+        if self.is_memory:
+            text = _window(self.text, show.terms, show.chars)[0]
+            said = f"“{self.title}”: {text}" if self.title else text
+            return f"{said} ({where}){older}{self._conflict()}"
         if not self.is_record:
             return f"{turn_said(self.text, show)} ({where}){older}"
-        if self.quote:
+        if self.how == "inferred":
+            said = f"melo inferred “{self.text}”"
+        elif self.quote:
             said = f"the user said “{self.quote}”"
         elif _FIRST_PERSON.match(self.text):
             said = f"the user's note “{self.text}”"
@@ -236,7 +296,8 @@ class Item:
 
     def listed(self, now: float | None = None, *, timed: bool = False) -> str:
         """The turn as one line of the list form: ``[t12] Oct 30 · Main chat ·
-        “Where do I plant the tomatoes?” · 0.71``.
+        “Where do I plant the tomatoes?” · 0.71``; an item's has its own title and
+        ``m`` id (``[m12] …``) and ends with the items it conflicts with.
 
         ``t12`` is the document's id (what ``open_memory`` takes), the date and
         chat read as :meth:`line` writes them (the year when it is not *now*'s, the
@@ -250,8 +311,8 @@ class Item:
         meaning = "words" if self.similarity is None else f"{self.similarity:.2f}"
         older = f" ({self.older})" if self.older else ""
         return (
-            f"[t{self.key[2:]}] {date} · {chat} · “{listed_title(self)}” · "
-            f"{meaning}{older}"
+            f"[{self.ref}] {date} · {chat} · “{listed_title(self)}” · "
+            f"{meaning}{older}{self._conflict()}"
         )
 
     def opened_heading(self, now: float | None = None) -> str:
@@ -259,14 +320,19 @@ class Item:
         older mark when a newer one replaced it."""
         chat, date = self._chat_and_date(clock.now() if now is None else now, False)
         older = f" ({self.older})" if self.older else ""
-        return f"[t{self.key[2:]}] {date or day(self.created_at)} · {chat}{older}"
+        return (
+            f"[{self.ref}] {date or day(self.created_at)} · {chat}{older}"
+            f"{self._conflict()}"
+        )
 
     def to_json(self) -> dict[str, Any]:
         """The item as a ``turn.memory`` entry. ``text`` is the stored text (a
         turn's head, :func:`snippet`); ``shown``, only when the model was shown
         the item, is the exact line it read, whatever the recall settings made it."""
         data: dict[str, Any] = {
-            "kind": "record" if self.is_record else "chat",
+            "kind": (
+                "record" if self.is_record else "item" if self.is_memory else "chat"
+            ),
             "id": int(self.key[2:]),
             "text": self.text if self.is_record else snippet(self.text),
             "source": self.source,
@@ -274,6 +340,9 @@ class Item:
             "turn": self.turn,
             "at": self.created_at,
         }
+        if self.is_memory:
+            data["item"] = int(self.key[2:])
+            data["sources"] = [[session, turn] for session, turn in self.sources]
         if self.shown:
             data["shown"] = self.shown
         return data
@@ -555,7 +624,9 @@ class Corpus:
     def add(self, item: Item) -> None:
         self.version += 1
         self.items[item.key] = item
-        words = stemmed(normalise(item.text))
+        words = stemmed(
+            normalise(f"{item.title}\n{item.text}" if item.title else item.text)
+        )
         self.terms[item.key] = frozenset(tokenize(words))
         self.index.add(item.key, words)
 
@@ -623,11 +694,12 @@ def ranked(
 
 def one_per_turn(items: Sequence[Item]) -> list[Item]:
     """*items* with only the first (the best) document of each turn kept: a long
-    turn's chunks (:mod:`.index`) share their session and turn. Records stay."""
+    turn's chunks (:mod:`.index`) share their session and turn. Records and memory
+    items stay."""
     seen: set[tuple[str, int]] = set()
     kept: list[Item] = []
     for item in items:
-        if not item.is_record:
+        if item.is_turn:
             turn = (item.session_id, item.turn)
             if turn in seen:
                 continue
@@ -652,18 +724,35 @@ def newer_first(
     *,
     exclude_session: str = "",
     keep_from_turn: int | None = None,
+    known: Mapping[str, Item] | None = None,
 ) -> list[Item]:
     """*items* with each turn whose fact a newer note or turn *replaced* moved
     after the rest and marked older; the newer one comes in ahead of it if it
     was not found (a turn the chat under way still shows, never: the chat has
     it already, :func:`in_view`).
 
+    A memory item a newer item replaced (:attr:`Item.replaced_by`) is moved and
+    marked the same way, the newer one looked up in *known* (the items by key).
     The old fact stays as history, as people keep it, but the newer one wins.
     """
     keys = {item.key for item in items}
     fresh: list[Item] = []
     stale: list[Item] = []
     for item in items:
+        if item.is_memory:
+            newer = _newest(item, known or {}) if item.replaced_by else None
+            if not item.replaced_by:
+                fresh.append(item)
+                continue
+            if (
+                newer is not None
+                and newer.key not in keys
+                and not in_view(newer, exclude_session, keep_from_turn)
+            ):
+                keys.add(newer.key)
+                fresh.append(newer)
+            stale.append(dataclasses.replace(item, older=OLDER_ITEM))
+            continue
         newer = None if item.is_record else replaced.get((item.session_id, item.turn))
         if newer is None:
             fresh.append(item)
@@ -680,6 +769,20 @@ def newer_first(
         older = OLDER if newer.is_record else OLDER_TURN
         stale.append(dataclasses.replace(item, older=older))
     return fresh + stale
+
+
+def _newest(item: Item, known: Mapping[str, Item]) -> Item | None:
+    """The item that replaced *item*, or the one that replaced that, and so on:
+    ``None`` when *known* does not hold it."""
+    seen = {item.key}
+    newer = known.get(item.replaced_by)
+    while newer is not None and newer.replaced_by and newer.replaced_by not in seen:
+        seen.add(newer.key)
+        further = known.get(newer.replaced_by)
+        if further is None:
+            break
+        newer = further
+    return newer
 
 
 def asks_about_past(message: str) -> bool:
@@ -721,6 +824,8 @@ def listed_title(item: Item) -> str:
     takes the first sentence of melo's reply, and a summary or a task's exchange
     (no ``User:`` part) the first sentence of what there is.
     """
+    if item.is_memory:
+        return word_cut(" ".join(item.title.split()), LIST_TITLE_CHARS) or "…"
     text = item.text
     body = text.partition("\n")[2] if text.startswith("Task: ") else text
     if body.startswith("User: "):
@@ -822,7 +927,7 @@ def pick(
     said = {(item.session_id, item.turn) for item in kept}
     chats: Counter[str] = Counter()
     for item in items:
-        if item.is_record or (item.session_id, item.turn) in said:
+        if item.is_record or (item.is_turn and (item.session_id, item.turn) in said):
             continue
         if (
             per_chat is None or chats[item.session_id] < per_chat
@@ -857,6 +962,7 @@ def block(
     show: Shown = HEADS,
     *,
     listing: bool = False,
+    guide: str = LIST_GUIDE,
 ) -> tuple[str, list[Item]]:
     """The recall block a user message carries, and the items that fit in it, each
     a copy that holds the line the model reads (:attr:`Item.shown`).
@@ -868,7 +974,7 @@ def block(
 
     With *listing* (``[memory] recall_form = "list"``) the notes are added so, and
     the turns follow as :data:`LIST_GUIDE` and one line each (:meth:`Item.listed`),
-    all of them: *chars* does not bound the list.
+    all of them: *chars* does not bound the list, and *guide* is the line above it.
     """
     lines = [BLOCK_HEADER, *kept]
     fixed = len(lines)
@@ -902,7 +1008,7 @@ def block(
             lines.append(f"- {read[n]}")
     turns = [n for n, item in enumerate(used) if listed(item)]
     if turns:
-        lines.append(LIST_GUIDE)
+        lines.append(guide)
         for n in turns:
             read[n] = used[n].listed(now, timed=used[n].key in same_day)
             lines.append(read[n])

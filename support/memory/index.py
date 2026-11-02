@@ -11,7 +11,10 @@ are never indexed. The file is ``index.db`` in the memory folder, mode 0600,
 shared by every surface; deleting a chat or a turn deletes all its documents. It
 can be rebuilt from the session files, which re-chunks every turn. Its ``meta``
 table also holds the sleep watermark (``sleep_until``), and ``sleep_runs`` what
-each sleep run changed, by id, for its undo.
+each sleep run changed, by id, for its undo. Its ``items`` table holds the memory
+items a chat model encoded from chats (developer setting, :class:`MemoryItem`):
+each names the turns it came from, and deleting a chat deletes the items that came
+from it alone and takes its turns out of the sources of the rest.
 """
 
 from __future__ import annotations
@@ -23,7 +26,7 @@ import re
 import time
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any, Final, NamedTuple
 
 import aiosqlite
 import numpy as np
@@ -82,11 +85,35 @@ CREATE TABLE IF NOT EXISTS sleep_runs (
     started REAL NOT NULL,
     changes TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS items (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id  TEXT NOT NULL,
+    title       TEXT NOT NULL DEFAULT '',
+    text        TEXT NOT NULL,
+    kind        TEXT NOT NULL DEFAULT 'semantic',
+    created_at  REAL NOT NULL,
+    sources     TEXT NOT NULL DEFAULT '[]',
+    status      TEXT NOT NULL DEFAULT 'active',
+    replaced_by INTEGER,
+    related     TEXT NOT NULL DEFAULT '[]',
+    conflicts   TEXT NOT NULL DEFAULT '[]',
+    vector      BLOB,
+    embed_model TEXT NOT NULL DEFAULT '',
+    encoder     TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS items_session ON items(session_id);
 """
 _COLUMNS: Final = (
     "id, session_id, turn, surface, kind, title, text, created_at, vector, "
     "embed_model, chunk"
 )
+_ITEM_COLUMNS: Final = (
+    "id, session_id, title, text, kind, created_at, sources, status, replaced_by, "
+    "related, conflicts, vector, embed_model, encoder"
+)
+# What an item's ``kind`` and ``status`` may be.
+ITEM_KINDS: Final = ("profile", "semantic", "episodic")
+ITEM_STATUSES: Final = ("active", "replaced", "conflict")
 
 
 @dataclass(frozen=True)
@@ -110,6 +137,91 @@ class Document:
     chunk: int = 0
 
 
+@dataclass(frozen=True)
+class MemoryItem:
+    """One memory item: a fact, event or specific a chat model encoded from turns.
+
+    ``session_id`` is the chat it came from and ``sources`` the ``(session id,
+    turn)`` of every turn that says it; ``created_at`` is its newest source's time.
+    ``status`` is ``active``, ``replaced`` (a newer item, ``replaced_by``, says it
+    now) or ``conflict`` (it and the items in ``conflicts`` disagree; each stays
+    recallable). ``related`` are the ids of items that say something close to it,
+    ``encoder`` names what wrote it. ``id`` is 0 until it is stored.
+    """
+
+    session_id: str
+    title: str
+    text: str
+    kind: str
+    created_at: float
+    sources: tuple[tuple[str, int], ...] = ()
+    status: str = "active"
+    replaced_by: int | None = None
+    related: tuple[int, ...] = ()
+    conflicts: tuple[int, ...] = ()
+    vector: tuple[float, ...] | None = None
+    embed_model: str = ""
+    encoder: str = ""
+    id: int = 0
+
+
+class ItemState(NamedTuple):
+    """What of a stored item can change after it is written: for noticing a change."""
+
+    status: str
+    replaced_by: int | None
+    conflicts: tuple[int, ...]
+    sources: tuple[tuple[str, int], ...]
+
+
+def _ids(raw: object) -> tuple[int, ...]:
+    """The ids of a JSON list column; nothing for a value that is not one."""
+    try:
+        value = json.loads(str(raw))
+    except ValueError:
+        return ()
+    if not isinstance(value, list):
+        return ()
+    return tuple(v for v in value if isinstance(v, int) and not isinstance(v, bool))
+
+
+def _sources(raw: object) -> tuple[tuple[str, int], ...]:
+    """The ``(session id, turn)`` pairs of the ``sources`` column."""
+    try:
+        value = json.loads(str(raw))
+    except ValueError:
+        return ()
+    if not isinstance(value, list):
+        return ()
+    return tuple(
+        (str(pair[0]), int(pair[1]))
+        for pair in value
+        if isinstance(pair, list) and len(pair) == 2 and isinstance(pair[1], int)
+    )
+
+
+def _item(row: Sequence[Any]) -> MemoryItem:
+    blob = row[11]
+    return MemoryItem(
+        id=int(row[0]),
+        session_id=str(row[1]),
+        title=str(row[2]),
+        text=str(row[3]),
+        kind=str(row[4]),
+        created_at=float(row[5]),
+        sources=_sources(row[6]),
+        status=str(row[7]),
+        replaced_by=None if row[8] is None else int(row[8]),
+        related=_ids(row[9]),
+        conflicts=_ids(row[10]),
+        vector=(
+            tuple(float(v) for v in np.frombuffer(blob, np.float32)) if blob else None
+        ),
+        embed_model=str(row[12]),
+        encoder=str(row[13]),
+    )
+
+
 def _kept(text: str) -> str:
     """*text* without the sentences a note would refuse (a password, a card number)."""
     for _, sentence in reversed(split_sentences(text)):
@@ -126,6 +238,12 @@ def _clean(text: str) -> str:
     if "PRIVATE KEY" in text:
         text = redact_secrets(text)[0]
     return redact_secrets(_kept(text))[0]
+
+
+def cleaned(text: str) -> str:
+    """*text* without its secrets, as a turn's document is (a sentence a note would
+    refuse is left out, the rest redacted), for text that leaves the index."""
+    return _clean(text)
 
 
 def _parts(typed: str, answer: str, title: str) -> tuple[str, str, str]:
@@ -312,6 +430,25 @@ async def _add_chunks(conn: aiosqlite.Connection) -> None:
         raise
 
 
+def _document(row: Sequence[Any]) -> Document:
+    blob = row[8]
+    return Document(
+        session_id=str(row[1]),
+        turn=int(row[2]),
+        surface=str(row[3]),
+        kind=str(row[4]),
+        title=str(row[5]),
+        text=str(row[6]),
+        created_at=float(row[7]),
+        vector=(
+            tuple(float(v) for v in np.frombuffer(blob, np.float32)) if blob else None
+        ),
+        embed_model=str(row[9]),
+        id=int(row[0]),
+        chunk=int(row[10]),
+    )
+
+
 class ConversationIndex:
     """``index.db``: add, list and delete the documents of every session."""
 
@@ -402,28 +539,42 @@ class ConversationIndex:
             async with conn.execute(
                 f"SELECT {_COLUMNS} FROM documents WHERE id IN ({marks})", batch
             ) as cur:
+                out.extend(_document(row) for row in await cur.fetchall())
+        return out
+
+    async def turn_documents(self, turns: Iterable[tuple[str, int]]) -> list[Document]:
+        """Every document (chunk) of each ``(session id, turn)`` of *turns*, the
+        turns in the order given and each one's chunks in order; a turn that is
+        not indexed has none."""
+        conn = await self._ready()
+        out: list[Document] = []
+        for session_id, turn in dict.fromkeys(turns):
+            async with conn.execute(
+                f"SELECT {_COLUMNS} FROM documents WHERE session_id = ? AND turn = ? "
+                "ORDER BY chunk",
+                (session_id, turn),
+            ) as cur:
+                out.extend(_document(row) for row in await cur.fetchall())
+        return out
+
+    async def session_labels(
+        self, session_ids: Iterable[str]
+    ) -> dict[str, tuple[str, str, str]]:
+        """Each of these chats' ``(kind, title, surface)``, as its first indexed turn
+        has them; a chat with no indexed turn is left out."""
+        conn = await self._ready()
+        wanted = sorted(set(session_ids))
+        out: dict[str, tuple[str, str, str]] = {}
+        for start in range(0, len(wanted), 500):
+            batch = wanted[start : start + 500]
+            marks = ", ".join("?" * len(batch))
+            async with conn.execute(
+                "SELECT session_id, kind, title, surface, MIN(turn) FROM documents "
+                f"WHERE session_id IN ({marks}) AND turn >= 0 GROUP BY session_id",
+                batch,
+            ) as cur:
                 for row in await cur.fetchall():
-                    blob = row[8]
-                    vector = (
-                        tuple(float(v) for v in np.frombuffer(blob, np.float32))
-                        if blob
-                        else None
-                    )
-                    out.append(
-                        Document(
-                            session_id=str(row[1]),
-                            turn=int(row[2]),
-                            surface=str(row[3]),
-                            kind=str(row[4]),
-                            title=str(row[5]),
-                            text=str(row[6]),
-                            created_at=float(row[7]),
-                            vector=vector,
-                            embed_model=str(row[9]),
-                            id=int(row[0]),
-                            chunk=int(row[10]),
-                        )
-                    )
+                    out[str(row[0])] = (str(row[1]), str(row[2]), str(row[3]))
         return out
 
     async def count(self) -> int:
@@ -437,7 +588,8 @@ class ConversationIndex:
 
     async def delete(self, session_id: str, turn: int | None = None) -> int:
         """Delete a session's documents, every chunk of them (one turn's with
-        *turn*); returns how many turns."""
+        *turn*); returns how many turns. The memory items that came from that
+        chat or turn alone go with it; the others lose it from their sources."""
         conn = await self._ready()
         where = " WHERE session_id = ?"
         args: list[object] = [session_id]
@@ -455,17 +607,90 @@ class ConversationIndex:
                 + (" AND turn = ?" if turn is not None else ""),
                 args,
             )
+            await self._drop_sources(conn, session_id, turn)
             await conn.commit()
         return int(row[0]) if row else 0
 
+    async def _drop_sources(
+        self, conn: aiosqlite.Connection, session_id: str, turn: int | None
+    ) -> None:
+        """Take a chat's turn (every turn without *turn*) out of the items' sources;
+        an item left with none is deleted, and the links to it are undone."""
+        async with conn.execute(
+            "SELECT id, session_id, sources FROM items "
+            "WHERE session_id = ? OR instr(sources, ?) > 0",
+            (session_id, json.dumps(session_id)),
+        ) as cur:
+            rows = await cur.fetchall()
+        gone: set[int] = set()
+        for item_id, owner, raw in rows:
+            sources = _sources(raw)
+            kept = tuple(
+                src
+                for src in sources
+                if not (src[0] == session_id and (turn is None or src[1] == turn))
+            )
+            if not kept and (sources or (owner == session_id and turn is None)):
+                gone.add(int(item_id))
+            elif kept != sources:
+                await conn.execute(
+                    "UPDATE items SET sources = ? WHERE id = ?",
+                    (json.dumps([list(src) for src in kept]), item_id),
+                )
+        if gone:
+            marks = ", ".join("?" * len(gone))
+            await conn.execute(f"DELETE FROM items WHERE id IN ({marks})", sorted(gone))
+            await self._unlink(conn, gone)
+
+    async def _unlink(self, conn: aiosqlite.Connection, gone: set[int]) -> None:
+        """Undo what the items in *gone* did to the others: an item they replaced is
+        current again, an item that disagreed only with them is no longer in
+        conflict, and links to them are dropped."""
+        async with conn.execute(
+            "SELECT id, status, replaced_by, related, conflicts FROM items "
+            "WHERE replaced_by IS NOT NULL OR related != '[]' OR conflicts != '[]'"
+        ) as cur:
+            rows = await cur.fetchall()
+        for item_id, status, by, related_raw, conflicts_raw in rows:
+            related = tuple(i for i in _ids(related_raw) if i not in gone)
+            conflicts = tuple(i for i in _ids(conflicts_raw) if i not in gone)
+            replaced_by = None if by in gone else by
+            status_now = status
+            if by in gone and status == "replaced":
+                status_now = "active"
+            if status_now == "conflict" and not conflicts:
+                status_now = "active"
+            if (status_now, replaced_by, related, conflicts) == (
+                status,
+                by,
+                _ids(related_raw),
+                _ids(conflicts_raw),
+            ):
+                continue
+            status = status_now
+            await conn.execute(
+                "UPDATE items SET status = ?, replaced_by = ?, related = ?, "
+                "conflicts = ? WHERE id = ?",
+                (
+                    status,
+                    replaced_by,
+                    json.dumps(related),
+                    json.dumps(conflicts),
+                    item_id,
+                ),
+            )
+
     async def forget_all(self, *, mark: bool = True) -> int:
         """Delete every document; returns how many turns. With *mark*, a turn that
-        ended before now is not indexed again (:meth:`forgotten_at`)."""
+        ended before now is not indexed again (:meth:`forgotten_at`), and every
+        memory item goes too (a rebuild of the index, without *mark*, keeps them:
+        they cannot be rebuilt without the chat model)."""
         conn = await self._ready()
         turns = await self.count()
         async with secure_deletes(conn):
             await conn.execute("DELETE FROM documents")
             if mark:
+                await conn.execute("DELETE FROM items")
                 await conn.execute("DELETE FROM sleep_runs")
                 await conn.execute("DELETE FROM sleep_processed")
                 await conn.execute(
@@ -579,6 +804,145 @@ class ConversationIndex:
         conn = await self._ready()
         await conn.execute("DELETE FROM sleep_runs WHERE run_id = ?", (run_id,))
         await conn.commit()
+
+    # ── Memory items ──
+
+    async def add_item(self, item: MemoryItem) -> int:
+        """Store *item* and return its id (its own ``id`` is ignored)."""
+        conn = await self._ready()
+        vector = None if item.vector is None else np.asarray(item.vector, np.float32)
+        try:
+            cur = await conn.execute(
+                "INSERT INTO items (session_id, title, text, kind, created_at, "
+                "sources, status, replaced_by, related, conflicts, vector, "
+                "embed_model, encoder) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    item.session_id,
+                    item.title,
+                    item.text,
+                    item.kind,
+                    item.created_at or time.time(),
+                    json.dumps([list(src) for src in item.sources]),
+                    item.status,
+                    item.replaced_by,
+                    json.dumps(list(item.related)),
+                    json.dumps(list(item.conflicts)),
+                    None if vector is None else vector.tobytes(),
+                    item.embed_model if vector is not None else "",
+                    item.encoder,
+                ),
+            )
+            await conn.commit()
+        except BaseException:
+            await conn.rollback()
+            raise
+        assert cur.lastrowid is not None
+        return int(cur.lastrowid)
+
+    async def fetch_items(self, ids: Iterable[int]) -> list[MemoryItem]:
+        """The items with these ids, in id order (in batches, as :meth:`fetch`)."""
+        conn = await self._ready()
+        wanted = sorted(set(ids))
+        out: list[MemoryItem] = []
+        for start in range(0, len(wanted), 500):
+            batch = wanted[start : start + 500]
+            marks = ", ".join("?" * len(batch))
+            async with conn.execute(
+                f"SELECT {_ITEM_COLUMNS} FROM items WHERE id IN ({marks}) ORDER BY id",
+                batch,
+            ) as cur:
+                out.extend(_item(row) for row in await cur.fetchall())
+        return out
+
+    async def item_states(self) -> dict[int, ItemState]:
+        """Every item's id and what of it can change (:class:`ItemState`)."""
+        conn = await self._ready()
+        async with conn.execute(
+            "SELECT id, status, replaced_by, conflicts, sources FROM items"
+        ) as cur:
+            return {
+                int(row[0]): ItemState(
+                    str(row[1]),
+                    None if row[2] is None else int(row[2]),
+                    _ids(row[3]),
+                    _sources(row[4]),
+                )
+                for row in await cur.fetchall()
+            }
+
+    async def count_items(self) -> int:
+        conn = await self._ready()
+        async with conn.execute("SELECT COUNT(*) FROM items") as cur:
+            row = await cur.fetchone()
+        return int(row[0]) if row else 0
+
+    async def active_items(self, kind: str | None = None) -> list[MemoryItem]:
+        """The items that are current (``status`` ``active``), oldest id first; only
+        those of *kind* with one."""
+        conn = await self._ready()
+        where = " WHERE status = 'active'" + (" AND kind = ?" if kind else "")
+        async with conn.execute(
+            f"SELECT {_ITEM_COLUMNS} FROM items{where} ORDER BY id",
+            (kind,) if kind else (),
+        ) as cur:
+            return [_item(row) for row in await cur.fetchall()]
+
+    async def _links(
+        self, conn: aiosqlite.Connection, item_id: int
+    ) -> tuple[str, tuple[int, ...], tuple[int, ...]]:
+        async with conn.execute(
+            "SELECT status, related, conflicts FROM items WHERE id = ?", (item_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            raise KeyError(f"no item {item_id}")
+        return (str(row[0]), _ids(row[1]), _ids(row[2]))
+
+    async def mark_replaced(self, item_id: int, by: int) -> None:
+        """Mark *item_id* replaced by item *by*: it stays, and reads as older. Any
+        conflict it was in ends (its partners are current again unless another
+        item disagrees with them)."""
+        conn = await self._ready()
+        try:
+            _, _, conflicts = await self._links(conn, item_id)
+            await conn.execute(
+                "UPDATE items SET status = 'replaced', replaced_by = ?, "
+                "conflicts = '[]' WHERE id = ?",
+                (by, item_id),
+            )
+            for other in conflicts:
+                _, _, theirs = await self._links(conn, other)
+                left = tuple(i for i in theirs if i != item_id)
+                await conn.execute(
+                    "UPDATE items SET conflicts = ?, status = ? WHERE id = ?",
+                    (json.dumps(left), "conflict" if left else "active", other),
+                )
+            await conn.commit()
+        except BaseException:
+            await conn.rollback()
+            raise
+
+    async def link_items(self, first: int, second: int, *, conflict: bool) -> None:
+        """Link two items both ways as related, or with *conflict* as in conflict
+        (both ``status`` ``conflict``; each stays recallable)."""
+        conn = await self._ready()
+        try:
+            for item_id, other in ((first, second), (second, first)):
+                status, related, conflicts = await self._links(conn, item_id)
+                if conflict:
+                    conflicts = tuple(dict.fromkeys((*conflicts, other)))
+                    status = "conflict" if status != "replaced" else status
+                else:
+                    related = tuple(dict.fromkeys((*related, other)))
+                await conn.execute(
+                    "UPDATE items SET status = ?, related = ?, conflicts = ? "
+                    "WHERE id = ?",
+                    (status, json.dumps(related), json.dumps(conflicts), item_id),
+                )
+            await conn.commit()
+        except BaseException:
+            await conn.rollback()
+            raise
 
     async def aclose(self) -> None:
         if self._conn is not None:

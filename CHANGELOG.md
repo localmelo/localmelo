@@ -9,6 +9,28 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Developer only, not visible by default: notes from material the user points to and from
+  what the conversation shows (#442). `[memory] note_gate` has four levels, each including the
+  ones before it, and `-X memory.note_gate=pointed` sets one for a run. `typed`, the default,
+  is the rule as always and changes nothing. `pointed` also accepts a page or file the chat read
+  that the user pointed to, read from the chat's stored tool results: a host they typed points
+  to every page of it, an address with a path (`github.com/jane`) to that page and the pages
+  below it and not to the rest of the host (`github.com/evil`), a file by its name, and a turn
+  that calls it theirs ("my website", "my resume") without saying which, to the first page or
+  file that turn read only (a later read of it counts only for the same page or file again, or
+  one the user typed); a page the user did not point to, or called someone else's, never
+  supports a note about them.
+  `meaning` also accepts a note that says the same in other words or another language: its key
+  tokens (numbers, dates, addresses, e-mail addresses, Latin-script names) must be found in a
+  source, and its embedding must be at least `note_min_cosine` (0.55, 0.20 to 0.95) close to a
+  window of one. `model` also keeps a note about the user that no source supports as
+  inferred, and adds one sentence to the `remember` tool text. Above `typed`, a note that is an
+  instruction to the assistant is refused, and the tool text says that what the user pointed to
+  may support a note. A note keeps its source (`typed`, `pointed`, `result` or `inferred`, and
+  the page or file): the reply to the model, the `turn.memory` entry (`source`), the notes page
+  and recall say so. Known limit: a page fetched in the same step as the `remember` call may
+  not be stored yet, and the note is refused. Part of #442.
+
 - The `turn.memory` event records the exact text the model read. Each entry of
   `used` (the recall block's items) and `searched` (what `search_memory`
   returned) has a new `shown` key: the line as the recall block or the search
@@ -172,6 +194,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   takes one to five of those ids and returns each whole turn, up to `recall_open_chars` (4000,
   500 to 16000) characters and cut at a sentence end, and the `turn.memory` event lists what was
   opened as an optional `opened` list. Out-of-range values are config errors. Part of #428.
+- Developer only, not visible by default: memory items written from chats. `melo memory ingest
+  FILE -X ingest=compress` has the chat model read each ingested chat, a window of
+  `compress_at_chars` (12000, 4000 to 60000) characters at a time, and write short items (a
+  title, a text, a kind and the exchanges they came from); a lasting statement the model left out
+  is made into an item by the rules. Each item is compared by rules with the items kept of its
+  kind and is stored as new, as an update (the older item reads as replaced), as related, as a
+  conflict (both are marked) or not at all when it repeats one. The replies are cached in
+  `compress_cache`, so the same window asks the model once; the report names each chat's
+  windows, items and what became of each, and the model calls. `recall_source = "items"` recalls
+  these items in place of earlier chat turns (shown as a title and text, or as list lines such as
+  `[m12] …` that `open_memory` opens), and `open_sources = "on"` brings the turns an opened item
+  came from. The default, `recall_source = "turns"`, changes nothing. Deleting a chat deletes the
+  items made only from it. Part of #428.
 - Developer only: `melo memory ingest FILE` loads past chats from a JSON file as if they
   had happened on their dates (no model call), and `LOCALMELO_NOW` pins the date
   the model and memory recall read, for memory tests.
@@ -440,6 +475,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   reviewed by itself, and a verdict that blocks
   covers only its own address. A chat keeps its last 512 review verdicts,
   dropping the least recently used.
+- Memory items written from chats (`melo memory ingest FILE -X ingest=compress`,
+  a developer setting) keep what everyday talk shows about the person's daily
+  life, routines, mood and personality. Only exchanges that carry no
+  information, such as "ok" or "thanks", are left out. Small talk was left out
+  before.
 
 - The main chat starts a task itself when your request needs tools it lacks
   (running commands, changing files, many steps), with one line, **Change** and
@@ -632,6 +672,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- The browser tools never open this computer, its local network or melo's
+  own console. `localhost`, private, link-local, carrier-shared and
+  unspecified addresses (also written as IPv6 or as one number), local and
+  dotless names, and a name whose DNS answer is one of these are refused
+  before any question about the site and before the page loads, as
+  `web_fetch` refuses them. The console is refused wherever its settings or
+  the running gateway say it listens, even at a public address. A redirect,
+  a followed link or a page that moves to such an address is blanked and
+  refused. A picture or a wait works only on a page melo opened in that tab,
+  reads where the tab is before and after, and a wait counts only what it
+  sees on that page's own site. The tab list shows a tab's address and title
+  only while it is on the site melo checked for it. An address with a user
+  name or password in it, an address melo cannot take apart, and a name that
+  is not found are not opened either. The model is told to use `task_get`
+  for a task's result. [#439]
 - A site that a task's `web_fetch` or browser asked about, and that you, Auto
   or melo's rules refused, is now a blocked step like any other. When the chat
   continues that task on its own, that address however it is written (other

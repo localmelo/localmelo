@@ -23,7 +23,11 @@ from localmelo.support.gateway import webapp
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.activity import _row, result_line
 from localmelo.support.gateway.console.cards import card_json
-from localmelo.support.gateway.console.routes_memory import _from_words
+from localmelo.support.gateway.console.routes_memory import (
+    _from_page,
+    _from_words,
+    _inferred_words,
+)
 from localmelo.support.gateway.i18n import said_text, using
 from localmelo.support.sessions.store import StoredEvent
 
@@ -178,6 +182,30 @@ def test_a_note_s_source_reads_in_the_reader_s_language() -> None:
             == "来自主对话，10月30日"
         )
         assert _from_words(None, "", True, at, "web") == "来自已删除的对话，10月30日"
+
+
+def test_a_note_from_material_or_inferred_reads_in_the_reader_s_language() -> None:
+    at = time.mktime((2026, 10, 30, 12, 0, 0, 0, 0, -1))
+    page = {"from": "https://www.jane.example.com/about"}
+    file = {"from": "resume.pdf"}
+    plans = Chat("chat", "Plans")
+    assert _from_page(page, at) == "from jane.example.com, Oct 30"
+    assert _from_page(file, at) == "from the file resume.pdf, Oct 30"
+    assert _inferred_words(plans, "", False, at, "web") == (
+        "melo inferred it from chat “Plans”, Oct 30"
+    )
+    assert _inferred_words(None, "", True, at, "web") == (
+        "melo inferred it from a deleted chat, Oct 30"
+    )
+    with using("zh-Hans"):
+        assert _from_page(page, at) == "来自 jane.example.com，10月30日"
+        assert _from_page(file, at) == "来自文件 resume.pdf，10月30日"
+        assert _inferred_words(plans, "", False, at, "web") == (
+            "melo 根据对话“Plans”推断，10月30日"
+        )
+        assert _inferred_words(None, "", True, at, "web") == (
+            "melo 根据已删除的对话推断，10月30日"
+        )
 
 
 async def test_an_echo_keeps_its_english_line_and_its_words_for_the_page(

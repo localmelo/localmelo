@@ -48,6 +48,7 @@
       <a href="#boundaries">Add a check</a>
       <a href="#changes">Commits and pull requests</a>
       <a href="#docs">Docs and the website</a>
+      <a href="#art-pack">Replace Melo's art</a>
       <a href="#design">Design notes</a>
     </nav>
 
@@ -378,6 +379,20 @@
         <p>Preview the website locally:</p>
         <!-- usage:dev-preview --><figure class="usage" aria-label="Preview" data-copy="python3 -m http.server 8080 --bind 127.0.0.1 --directory docs"><div class="usage-bar"><span class="usage-title">Preview</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">python3</span> <span class="f">-m</span> <span class="a">http.server</span> <span class="a">8080</span> <span class="f">--bind</span> <span class="a">127.0.0.1</span> <span class="f">--directory</span> <span class="a">docs</span></span></code></pre></figure><!-- /usage -->
         <p>Then open <code>http://127.0.0.1:8080/en/</code>.</p>
+      </section>
+
+      <section class="section" id="art-pack">
+        <h2>Replace Melo's art</h2>
+        <figure class="shot compact"><img src="../assets/img/art-pack-moves.webp" alt="The poster of each of Melo's six states, with the state's name: startup, thinking, working, attention, idle_rest and idle_play." width="880" height="648" loading="lazy"></figure>
+        <ul>
+          <li>One command checks a folder or a zip of Melo's art and replaces every picture of Melo: the pet, the console's portrait, the faces, the icons and the logos.</li>
+          <li><code>check</code> writes nothing and says what is missing; <code>apply</code> replaces the pictures in one run.</li>
+          <li>Pillow is fetched for one run: it is not a dependency of localmelo.</li>
+          <li>The pack is only read: a zip is checked before anything is written, and nothing in it is run.</li>
+        </ul>
+        <!-- usage:art-pack --><figure class="usage" aria-label="Replace Melo&#x27;s art" data-copy="uv run --with pillow==13.0.0 python scripts/art_pack.py check melo-pack.zip&#10;uv run --with pillow==13.0.0 python scripts/art_pack.py apply melo-pack.zip"><div class="usage-bar"><span class="usage-title">Replace Melo&#x27;s art</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">run</span> <span class="f">--with</span> <span class="a">pillow==13.0.0</span> <span class="c">python</span> <span class="a">scripts/art_pack.py</span> <span class="a">check</span> <span class="a">melo-pack.zip</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">run</span> <span class="f">--with</span> <span class="a">pillow==13.0.0</span> <span class="c">python</span> <span class="a">scripts/art_pack.py</span> <span class="a">apply</span> <span class="a">melo-pack.zip</span></span></code></pre></figure><!-- /usage -->
+        <p class="more-link">The <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/art-pack.md">art pack guide</a> has the layout of a pack, the six moves and what the check tests.</p>
       </section>
 
       <section class="section" id="design">

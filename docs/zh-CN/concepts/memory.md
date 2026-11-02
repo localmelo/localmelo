@@ -30,7 +30,7 @@
 
 ## 跨对话记忆
 
-![一个询问“when is my group meeting?”的对话：消息下方的“Used 1 memory”展开后显示它用到的笔记及其出处。](../../assets/img/memory-across.webp)
+![一个询问“when is my group meeting?”的对话：消息下方的“Used 1 memory”展开后显示它用到的较早一轮对话及其出处。](../../assets/img/memory-across.webp)
 
 在网页控制台和 App 中，melo 会跨对话记忆。
 
@@ -41,7 +41,7 @@
 | 文件 | 保存什么 |
 |---|---|
 | `records.db` | **关于你的笔记。** |
-| `index.db` | **每个对话的索引。** 每个完成的对话轮次添加文档：你输入的内容和 melo 的回答（不含思考），密钥会被遮盖。长的一轮会分成多个相互重叠的片段保存（最多 8 个，每个最多 2,000 个字符），所以长回答后半段的细节也能被找到；一次搜索对每一轮只给出最匹配的一个片段。任务添加它的标题和结果。工具输出和附件从不进入索引。删除一个对话会删除它的文档；你重试的那一轮不会留下文档。 |
+| `index.db` | **每个对话的索引。** 每个完成的对话轮次添加文档：你输入的内容和 melo 的回答（不含思考），密钥会被遮盖。长的一轮会分成多个相互重叠的片段保存（最多 8 个，每个最多 2,000 个字符），所以长回答后半段的细节也能被找到；一次搜索对每一轮只给出最匹配的一个片段。任务添加它的标题和结果。工具输出和附件从不进入索引。删除一个对话会删除它的文档；你重试的那一轮不会留下文档。使用开发者设置 `melo memory ingest -X ingest=compress` 时，它还保存记忆条目（见下文），条目随它们的对话一起删除。 |
 
 **关于你的笔记。** melo 用两种方式记笔记，都不会请你确认：
 
@@ -62,13 +62,13 @@
 - 回答说它记下了某件事（"Remembered: …"、"Noted — …"、"I've noted that …"、"记下了：…"）而没有记下任何笔记时，melo 会按下面同样的检查，把回答里说到的内容记下来，前提是它是一句陈述：对你说的（含 "you"、"your"、"你" 或 "您"），或关于别人的（"Prof. Duarte's office is in the Atrium Wing"）。如果不行（那些词不是你说的，看起来像密钥，或只是 "gate 9 for Faro" 这样没有动词的片段），就什么也不保存，这一轮的 `turn.memory` 事件带有 `unsaved_claim: true`。回答只说记下了或保存了却没有说明内容（"Saved."、"Noted."、"Got it, noted…"、"I've saved it."、"I've saved your preference."、"已记录。"、"我已经记录了你的偏好。"），而又没有记下任何笔记时，也是如此。"Got it!"、"Thanks!" 不算声称。
 - 已经记下的笔记不会重复写入。问题和待办（"remember to buy milk"）不是笔记。
 - `[memory] keep_statements = true`（默认关闭；`-X memory.keep_statements=on` 只对一次运行生效，`melo -h all` 会列出它）是用于比较的开发者设置：模型回答之后，代码也会记下你说出、但模型没有记的明确而长期的事实（"I live in …"、"my advisor is …"、"我的…是…"）；问题、"如果"、"不"、过去、别人的看法和一时的状态（"my build is failing"）从不记。
-- 用于比较的开发者设置，默认都是关闭或今天的取值，用 `-X memory.KEY=VALUE` 只对一次运行生效（`melo -h all` 会列出它们）：`recall_records`（3）和 `recall_docs`（2）是一条消息的召回块最多包含的笔记数和以前的对话轮次数，`recall_chars`（900）是它的字符数上限；`recall_notes = "off"` 只召回对话轮次，也不置顶任何笔记；`search_when_empty = "hint"` 会给没有召回任何内容的块加上一行，告诉模型先调用记忆搜索工具，搜索也没有结果就说不知道。这一轮的 `turn.memory` 事件里会有 `search_hint: true`。`recall_min_cosine`（0.55）是一个条目要被召回至少需要的语义相似度，`recall_min_coverage`（0.6）是它至少要包含消息中实词的比例；两者对召回块和记忆搜索工具都生效，调低就会放进更多条目。`recall_item_chars`（234）是一条被召回的对话轮次占用的字符数，召回块和搜索工具的列表都按它来；`recall_excerpt = "match"` 对轮次的每一部分显示包含消息中最多实词的句子，而不是开头（一轮对话中的答案常常在最初的 200 个字符之后）。`recall_form = "list"` 把以前的每一轮对话显示成一行，而不是节选，并给模型一个工具来打开它需要的轮次（见下文）；`recall_list_max`（20）是它最多列出的轮次数，`recall_open_chars`（4000）是打开的一轮对话占用的字符数，`recall_docs` 和 `recall_chars` 不限制这个列表。见[配置参考](../reference/configuration.md)。
+- 用于比较的开发者设置，默认都是关闭或今天的取值，用 `-X memory.KEY=VALUE` 只对一次运行生效（`melo -h all` 会列出它们）：`recall_records`（3）和 `recall_docs`（2）是一条消息的召回块最多包含的笔记数和以前的对话轮次数，`recall_chars`（900）是它的字符数上限；`recall_notes = "off"` 只召回对话轮次，也不置顶任何笔记；`search_when_empty = "hint"` 会给没有召回任何内容的块加上一行，告诉模型先调用记忆搜索工具，搜索也没有结果就说不知道。这一轮的 `turn.memory` 事件里会有 `search_hint: true`。`recall_min_cosine`（0.55）是一个条目要被召回至少需要的语义相似度，`recall_min_coverage`（0.6）是它至少要包含消息中实词的比例；两者对召回块和记忆搜索工具都生效，调低就会放进更多条目。`recall_item_chars`（234）是一条被召回的对话轮次占用的字符数，召回块和搜索工具的列表都按它来；`recall_excerpt = "match"` 对轮次的每一部分显示包含消息中最多实词的句子，而不是开头（一轮对话中的答案常常在最初的 200 个字符之后）。`recall_form = "list"` 把以前的每一轮对话显示成一行，而不是节选，并给模型一个工具来打开它需要的轮次（见下文）；`recall_list_max`（20）是它最多列出的轮次数，`recall_open_chars`（4000）是打开的一轮对话占用的字符数，`recall_docs` 和 `recall_chars` 不限制这个列表。`recall_source = "items"` 用记忆条目（见下文）代替以前的对话轮次来召回，`open_sources = "on"` 让打开的条目连同它所来自的轮次一起返回，`compress_at_chars`（12000）是编码器一次读取的对话文本量，`compress_cache` 指定保存其回复的文件。见[配置参考](../reference/configuration.md)。
 
 笔记被记下之前，代码会检查：
 
 - 它的词必须来自你在这个对话中输入的内容（任何一轮，撤销的轮次除外），或来自对话展示给你的一个已完成任务的结果（在你某条消息下召回的任务结果）。
 - 措辞可以不同，值不可以。每个数字或带数字的词、星期、句中大写的名字或词、引号里的短语，都必须出现在你的话里；其余的实词至少要有五分之四出现，所以 "your replies" 能对上你说的 "reply"，用 "then" 代替 "followed by" 也没关系，而把 `C14` 写成 `C15`、把 Wednesday 写成 Thursday 会被拒绝。用中文为英文消息写的笔记会被拒绝，模型会被告知要用你用的语言来写。
-- 只有网页、文件、工具输出或 melo 自己的回答说过的事实会被拒绝，模型会被告知这不是你说的话。
+- 只有网页、文件、工具输出或 melo 自己的回答说过的事实会被拒绝，模型会被告知这不是你说的话。（下面的开发者设置 `note_gate` 可以让你指过的网页或文件算数。）
 - 笔记用 "you" 指你。模型用 "I"、"my"、"me" 或 "我" 写、又没有 "you" 的笔记（"My flight to Porto is at gate 22."、"我的航班在22号登机口。"）会改成第二人称保存（"Your flight to Porto is at gate 22."、"你的航班在22号登机口。"），和你自己的话一样，所以同一主题的较新笔记会取代它。同时出现两者的笔记（"I prefer that when you explain…"、"我喜欢你用简单的话解释。"），或 "I" 与第三人称的 "the user" 同时出现的笔记（"The user wants me to answer in Chinese."、"用户希望我用中文回答。"，其中的 "I"、"我" 指 melo），会被拒绝，模型会被告知把你写成 "you"、把 melo 写成 "melo"。"we"、"our"、"我们" 和引号里的话保持原样。
 - "who"、"where"、"which" 这样的词不算实词，所以 "You have a cousin named Ren who lives in Kyoto." 能对上你说的 "My cousin Ren lives in Kyoto."。
 - 关于别人的笔记不会被写成关于你：你输入了 "马可的工作室在中山路88号。"，笔记 "你的工作室在中山路88号。" 会被拒绝，模型会被告知改成写他们（"马可的…"）；反过来，你在那句话里没有提到的人，笔记也不能写成关于他。"我的姐姐的车" 和 "你的姐姐的车" 都是你的。
@@ -155,6 +155,38 @@ Older chat turns that may hold the answer, closest first. Open the ones you need
 - 笔记的显示不变。列表不受 `recall_docs` 和 `recall_chars` 限制，同一个对话的轮次数也不设上限：最多 `recall_list_max` 轮，最好的在前。`search_memory` 返回同样的行。
 - `open_memory` 接收这些行里的一到五个编号，把每一轮完整返回：你说的话和 melo 的回复，附上日期和对话，最多 `recall_open_chars` 个字符（更长的一轮在句末截断，并以 `… (cut)` 结尾）。编号不存在、属于你已删除的对话，或不是对话轮次的编号（例如笔记的编号），都不会打开任何内容，并会说明这一点。这一轮的 `turn.memory` 事件用 `opened` 列出打开过的轮次。
 
+**记忆条目（开发者设置）。** 以前的对话轮次是原始文本。使用 `melo memory ingest FILE -X ingest=compress` 时，聊天模型会每次读取 `compress_at_chars` 个字符的已导入对话，并从中写出简短的记忆条目：每条有标题、一两句话的正文、类型（`profile`、`semantic` 或 `episodic`）以及它所来自的轮次。模型漏掉的长期陈述，由规则补成条目。每个条目随后按规则（不发起模型请求）与已有的同类型条目比对，出现以下五种结果之一：
+
+| 结果 | 做法 |
+|---|---|
+| New | 条目入库。 |
+| Update | 条目入库，它所更新的旧条目被标记为已替换：显示为 `older; replaced by a newer item`，排在新条目之后，除非消息询问过去，否则不进入召回块。 |
+| Related | 条目入库，两者互相关联。 |
+| Conflict | 条目入库，双方都被标记；每一条的行尾都有 `(conflicts with m12)`，让模型看到两方面。 |
+| Ignore | 条目重复了已有的条目，或不值得保留（比如太短）；不入库。 |
+
+对话按从旧到新的顺序编码，所以较新的事实可以替换较旧的。已导入对话的轮次、笔记和索引照常写入；条目是在它们之外增加的。它是开发者设置，因为每个窗口要花一次聊天模型请求，也还没有测得召回效果更好。
+
+设置 `[memory] recall_source = "items"`（默认 `"turns"`，不改变任何行为）后，召回用这些条目代替对话轮次。它们按同样的门槛排序、保留或丢弃，在召回块和 `search_memory` 中的显示方式与轮次一样，如 `“Tomato stakes”: The user stakes the tomato garden with bamboo. (chat “Garden”, Oct 29)`。设置 `recall_form = "list"` 时每条是一行，如 `[m12] Oct 29 · chat “Garden” · “Tomato stakes” · 0.71`，上面有一行提示模型用 `open_memory` 打开它需要的条目；此时它接收 `m12` 这样的编号，返回标题和正文，设置 `open_sources = "on"` 后条目所来自的整轮对话也会跟在后面，全部不超过 `recall_open_chars`。在 `turn.memory` 事件中，条目的 `used`、`searched` 和 `opened` 项的类型为 `item`，条目编号写在 `item` 中，来源写在 `sources` 中，格式为 `[chat id, turn]` 对。删除一个对话会删除只来自它的条目，并把它的轮次从其他条目的来源中去掉；不带 ID 的 `melo memory forget` 也会忘记条目；`reindex` 保留它们，因为只有模型能再次写出它们。
+
+**来自你指给 melo 的材料、来自对话所显示内容的笔记（开发者设置）。** 人们很少说“记住这个”，而一条关于你自己网站或简历的笔记，又不可能用你输入的词写出来。设置 `[memory] note_gate`（`-X memory.note_gate=pointed` 只对一次运行生效；`melo -h all` 会列出它）后，聊天可以记更多，而且每条笔记都会保留它的来源。默认值 `"typed"` 就是上面讲的一切，不改变任何行为。共有四级，每一级都包含前面的：
+
+| 级别 | 笔记还可以依据 |
+|---|---|
+| `typed`（默认） | 你在这个对话中输入的内容，以及其中展示的已完成任务的结果。 |
+| `pointed` | 你在这个对话中指给 melo 的网页或文件。 |
+| `meaning` | 用别的词或别的语言说同一件事的笔记，例如关于英文简历的中文笔记。 |
+| `model` | 对话所显示的你的目标、处境和偏好，即使你没有要求 melo 记住。 |
+
+- **指过的材料。** melo 读过的网页（`web_fetch` 或浏览器）或文件，在三种情况下算你指过的。（1）你在这个对话中输入过它的地址（此前任何一轮都行）：只输入主机名（`jane.example.com`）指向该主机上的所有网页；带路径的地址（`github.com/jane`）指向那个页面和它下面的页面，不指向同一主机上的其他页面（`github.com/evil`、`github.com/janet`）。协议、`www.` 和末尾的斜杠不影响判断。（2）你输入过文件名。（3）读取它的那一轮里你称它是你的：“my site”“my website”“my homepage”“my résumé”“my CV”“我的网站”“我的简历”“我的主页”，但没有说是哪一个。这时只有那一轮读的第一个网页或文件算数；那一轮后面的读取，只有读的还是同一个网页或文件，或者你输入过它的地址或名称，才算数。“my profile at github.com/jane”指的就是那个地址，不是别的。文字取自对话已保存的工具结果。浏览器的 read、follow 和 back 的结果只写明标签页和主机，不写地址：再次读取同一个标签页会沿用打开它时的地址，而点链接或后退得到的页面地址未知，所以只有你输入过的主机名才指向它。你没有指过的网页或文件，在任何级别都不会支持笔记。你说是别人的（“a page about Bob”“his résumé”）可以支持关于那个人或那个页面的笔记，但不能支持说“你”的笔记。
+- **来源。** 给模型的回复写作 `Remembered (source: pointed, from example.com): …`，该笔记的 `turn.memory` 条目有 `source`：`typed`、`pointed`、`result` 或 `inferred`。笔记页在原来写笔记所来自对话的地方显示 `From example.com, Oct 30`（文件则显示文件名）或 `Melo inferred it from chat “Plans”, Oct 30`（中文界面显示翻译后的文字），笔记 API 的 `source` 则以 `from example.com, Oct 30` 或 `melo inferred it · chat “Plans”, Oct 30` 代替 `you said it · …`。召回时，来自网页的笔记读作 `a note to the user “…” (from example.com, Oct 30)`，推断的笔记读作 `melo inferred “…” (chat “Plans”, Oct 30)`。来自你自己的话的笔记和以前一样。
+- **含义。** 笔记的关键词必须在某个来源里找到：数字和年份、日期、网址和电子邮箱，以及拉丁字母的名字（不在句首的大写词，或两个字母以上的缩写）。其余的词可以不同，也可以是另一种语言：笔记的嵌入向量与某个来源中最接近的约 300 个字符的窗口的余弦相似度至少为 `note_min_cosine`（0.55，0.20 到 0.95）时通过，使用召回所用的同一个嵌入模型来判断。没有任何来源含有的关键词会在拒绝信息里指明。没有嵌入模型时，其余的词按 `typed` 的词检查。
+- **模型。** `remember` 工具的说明多一句，请模型记下对话所显示的你的目标、处境和偏好，即使你没有要求。这时，没有来源支持的、关于你的笔记，在每个关键词都找到、并且含义与你在这个对话中输入的内容的相似度不低于门槛减 0.15 时，可以记为 `inferred`。
+- **安全，每一级都一样。** 密钥仍然绝不保存。高于 `typed` 时，属于给 melo 的指令而不是关于你的事实的笔记会被拒绝（`Not remembered: an instruction, not a fact about the user`）：祈使句、“ignore …”“always …”“from now on you must …”、命令，或对文件和网址的操作。你陈述的偏好（“You prefer short replies.”）是事实。高于 `typed` 时，工具说明写的是你指过的内容可以支持笔记、你没指过的不行，取代“never something only a web page, a file or a tool's output says”。
+- **已知限制。** 笔记是对照这一轮已保存的工具结果来检查的，所以模型在调用 `remember` 的同一步里取回的网页可能还没保存：这条笔记会被拒绝，模型可以在之后的某一步再记。
+
+这些级别是开发者设置，因为还没有测得它们比 `typed` 记下的笔记更好。撤销、笔记的两种写入方式和较新值的替换规则，在每一级都一样。
+
 **召回如何找到笔记。** `[memory] retriever` 选择方式（`melo config set memory.retriever llm`，然后重启 `melo serve` 或 App；`-X memory.retriever=llm` 只对一次运行生效，`melo -h all` 会列出它）。这是用于比较各种方式的开发者设置；默认值适合几乎所有人。
 
 | 值 | 如何找到笔记 | 代价 |
@@ -185,7 +217,7 @@ Older chat turns that may hold the answer, closest first. Open the ones you need
 - 笔记用你这条消息的语言来写；记忆带回来的内容，不管有没有存成笔记，都可以用来回答你的问题：这个对话或别的对话里更早的消息，和笔记一样算数。
 - 笔记或早先的对话互相矛盾时，以最新的为准。
 - 你的 About you 和 Preferences 笔记，用你的原话列出（最多 600 个字符，在对话启动模型时读取；被替换的笔记不列出）。
-- 两个记忆工具：只读的 `search_memory`（`query`；`scope` 为 `all`、`records` 或 `chats`；`k` 最多 8）和 `remember`（`text`，一句话；`topic`：`about`、`preferences`、`people`、`projects` 或 `decisions`），后者不需要批准。设置 `recall_form = "list"` 时还有第三个，只读的 `open_memory`（`ids`：一到五个列表编号，如 `t123`），`search_memory` 的 `k` 也可以达到 `recall_list_max`。
+- 两个记忆工具：只读的 `search_memory`（`query`；`scope` 为 `all`、`records` 或 `chats`；`k` 最多 8）和 `remember`（`text`，一句话；`topic`：`about`、`preferences`、`people`、`projects` 或 `decisions`），后者不需要批准。设置 `recall_form = "list"` 时还有第三个，只读的 `open_memory`（`ids`：一到五个列表编号，如 `t123`），`search_memory` 的 `k` 也可以达到 `recall_list_max`。设置 `recall_source = "items"` 时，编号是记忆条目的（`m12`）。
 - 模型每记一条笔记，这一轮的 `turn.memory` 事件就会带着它完整地再发送一次。回答说它记下了或保存了某件事而没有记下任何笔记时（包括回答没有说明内容，如 "Saved."），该事件里的 `unsaved_claim` 为 `true`。
 
 直接运行（`melo "<task>"`）、终端对话、worker 和基准测试既不召回也不记笔记，也没有 `remember` 工具；任务的运行器只把结果加入索引。

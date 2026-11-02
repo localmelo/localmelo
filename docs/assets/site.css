@@ -1293,8 +1293,25 @@ a.show-card:hover,
   margin: 0 0 12px;
 }
 
+.day .shot.compact {
+  max-width: 640px;
+}
+
 .day .shot img {
   box-shadow: var(--shadow);
+}
+
+.day-entry {
+  margin-top: 26px;
+}
+
+.content .day-entry h4 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
+.day-entry .more-link {
+  margin: 8px 0 0;
 }
 
 .content .day-points {

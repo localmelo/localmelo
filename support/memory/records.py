@@ -356,15 +356,24 @@ class Candidate:
 
 @dataclass(frozen=True)
 class Written:
-    """A record a turn wrote; ``replaced`` is the id it superseded, if any."""
+    """A record a turn wrote; ``replaced`` is the id it superseded, if any.
+
+    ``source`` is where the note came from (``typed``, ``pointed``, ``result`` or
+    ``inferred``) when the note gate says so (``[memory] note_gate`` above ``typed``);
+    ``""`` otherwise, and then the event has no ``source``.
+    """
 
     id: int
     text: str
     topic: str
     replaced: int | None = None
+    source: str = ""
 
     def to_json(self) -> dict[str, Any]:
-        return {"id": self.id, "text": self.text, "topic": self.topic}
+        data: dict[str, Any] = {"id": self.id, "text": self.text, "topic": self.topic}
+        if self.source:
+            data["source"] = self.source
+        return data
 
 
 def _luhn(digits: str) -> bool:
@@ -840,6 +849,11 @@ def _missing(note: str, evidence: Sequence[str]) -> list[str]:
             and any(w.startswith(term) and len(w) <= len(term) + 2 for w in ascii_words)
         )
     ]
+
+
+def missing_terms(note: str, evidence: Sequence[str]) -> list[str]:
+    """The content words of *note* that none of the *evidence* texts holds."""
+    return _missing(note, evidence)
 
 
 def _flagged(note: str) -> set[str]:

@@ -136,6 +136,8 @@ def test_the_defaults_are_the_numbers_recall_always_used() -> None:
         False,
         LIST_MAX,
         OPEN_CHARS,
+        False,
+        False,
     )
     assert (cfg.recall_min_cosine, cfg.recall_min_coverage) == (0.55, 0.6)
     assert (MIN_COSINE, MIN_COVERAGE) == (0.55, 0.6)
@@ -145,6 +147,12 @@ def test_the_defaults_are_the_numbers_recall_always_used() -> None:
         20,
         4000,
     )
+    assert (
+        cfg.recall_source,
+        cfg.open_sources,
+        cfg.compress_at_chars,
+        cfg.compress_cache,
+    ) == ("turns", "off", 12000, "")
     assert TURN_CHARS == 234
 
 

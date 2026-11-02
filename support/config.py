@@ -88,6 +88,12 @@ MEMORY_RECALL_EXCERPT = ("head", "match")
 MEMORY_RECALL_FORM = ("excerpt", "list")
 MEMORY_RECALL_LIST_MAX = (1, 50)
 MEMORY_RECALL_OPEN_CHARS = (500, 16000)
+# Whether recall draws on the chat turns or on memory items encoded from them, and
+# whether an opened item also shows its source turns; the size of the window a chat
+# is cut into for that encoding: see MemoryConfig.recall_source.
+MEMORY_RECALL_SOURCE = ("turns", "items")
+MEMORY_OPEN_SOURCES = ("off", "on")
+MEMORY_COMPRESS_AT_CHARS = (4000, 60000)
 # The bars an item must pass to be recalled, and their bounds (inclusive): see
 # MemoryConfig.recall_min_cosine and recall_min_coverage.
 MEMORY_RECALL_MIN_COSINE = (0.20, 0.95)
@@ -95,6 +101,11 @@ MEMORY_RECALL_MIN_COVERAGE = (0.10, 1.00)
 # Whether recall carries notes, and what a turn that recalls nothing is told.
 MEMORY_RECALL_NOTES = ("on", "off")
 MEMORY_SEARCH_WHEN_EMPTY = ("off", "hint")
+# Where a note the chat's model keeps may come from, in four cumulative levels,
+# and the bar a note's meaning must clear against its sources: see
+# MemoryConfig.note_gate.
+MEMORY_NOTE_GATE = ("typed", "pointed", "meaning", "model")
+MEMORY_NOTE_MIN_COSINE = (0.20, 0.95)
 # Whether a task reads its project's own instruction file: see MemoryConfig.
 MEMORY_PROJECT_INSTRUCTIONS = ("on", "off")
 RECALL_KEYS = (
@@ -110,6 +121,12 @@ RECALL_KEYS = (
     "recall_form",
     "recall_list_max",
     "recall_open_chars",
+    "recall_source",
+    "open_sources",
+    "compress_at_chars",
+    "compress_cache",
+    "note_gate",
+    "note_min_cosine",
 )
 RECALL_TRIGGERS = ("start", "attempt", "step", "tool")
 RECALL_KINDS = ("note", "draft", "thought", "digest", "reflection", "long")
@@ -382,8 +399,26 @@ class MemoryConfig:
     the block and in the search tool alike, and ``recall_open_chars`` (500-16000)
     is the room one opened turn takes; ``recall_docs`` and ``recall_chars`` do not
     bound the list, and ``recall_item_chars`` and ``recall_excerpt`` apply to the
-    excerpt form only. ``project_instructions = "off"`` stops a task that
-    the person made from reading the instruction file of its folder (``AGENTS.md``,
+    excerpt form only. Four more are about memory items (#428). ``recall_source``,
+    ``turns`` (recall draws on the chat turns, the default) or ``items`` (it draws
+    on the memory items a chat model encoded from the chats, in place of the turns;
+    ``melo memory ingest FILE -X ingest=compress`` writes them); ``open_sources``,
+    ``off`` (the default: an opened item shows its title and text only) or ``on``
+    (it also shows its source turns whole, within ``recall_open_chars``);
+    ``compress_at_chars`` (4000-60000), the size of the window a chat is cut into
+    for the chat model to encode, one model call each; and ``compress_cache``, the
+    path of the file that keeps each window's reply (empty: ``compress_cache.jsonl``
+    in the memory folder). Two more are about where a note the chat's model keeps
+    with ``remember`` may come from (#442). ``note_gate``, ``typed`` (the words the
+    user typed in the chat and a finished task's result shown in it, the default),
+    ``pointed`` (also a page or file the user pointed to in the chat), ``meaning``
+    (also a note that says the same in other words or another language: its key
+    tokens must be found and its meaning must be close to a source) or ``model``
+    (also a note the model infers from what the user typed, kept as inferred); each
+    level includes the ones before it. ``note_min_cosine`` (0.20-0.95) is the least
+    similarity of meaning that counts as support in the last two levels (the
+    inferred note's bar is 0.15 lower). ``project_instructions = "off"`` stops a
+    task that the person made from reading the instruction file of its folder (``AGENTS.md``,
     ``CLAUDE.md`` or ``GEMINI.md``, the nearest first) when it starts.
     """
 
@@ -405,6 +440,14 @@ class MemoryConfig:
     recall_form: str = "excerpt"  # excerpt | list: turns as excerpts, or as a list.
     recall_list_max: int = 20  # The most turns the list form lists.
     recall_open_chars: int = 4000  # The room one turn the model opens takes.
+    recall_source: str = "turns"  # turns | items: recall draws on turns, or on items.
+    open_sources: str = "off"  # off | on: an opened item also shows its source turns.
+    compress_at_chars: int = 12000  # The size of a window a chat is encoded in.
+    compress_cache: str = (
+        ""  # Where encoder replies are kept; empty: in the memory dir.
+    )
+    note_gate: str = "typed"  # typed | pointed | meaning | model: note sources.
+    note_min_cosine: float = 0.55  # Least similarity of a note to its source.
     project_instructions: str = "on"  # on | off: a task reads its folder's AGENTS.md.
 
 
@@ -668,6 +711,11 @@ class Config:
             or "\x00" in self.memory.sleep_lock
         ):
             errors.append("[memory] sleep_lock must be a path string without NUL")
+        if (
+            not isinstance(self.memory.compress_cache, str)
+            or "\x00" in self.memory.compress_cache
+        ):
+            errors.append("[memory] compress_cache must be a path string without NUL")
         for name, (low, high) in (
             ("recall_records", MEMORY_RECALL_RECORDS),
             ("recall_docs", MEMORY_RECALL_DOCS),
@@ -675,6 +723,7 @@ class Config:
             ("recall_item_chars", MEMORY_RECALL_ITEM_CHARS),
             ("recall_list_max", MEMORY_RECALL_LIST_MAX),
             ("recall_open_chars", MEMORY_RECALL_OPEN_CHARS),
+            ("compress_at_chars", MEMORY_COMPRESS_AT_CHARS),
         ):
             value = getattr(self.memory, name)
             if not isinstance(value, int) or isinstance(value, bool):
@@ -686,6 +735,7 @@ class Config:
         for name, (floor, ceiling) in (
             ("recall_min_cosine", MEMORY_RECALL_MIN_COSINE),
             ("recall_min_coverage", MEMORY_RECALL_MIN_COVERAGE),
+            ("note_min_cosine", MEMORY_NOTE_MIN_COSINE),
         ):
             value = getattr(self.memory, name)
             if not isinstance(value, int | float) or isinstance(value, bool):
@@ -699,6 +749,9 @@ class Config:
             ("search_when_empty", MEMORY_SEARCH_WHEN_EMPTY),
             ("recall_excerpt", MEMORY_RECALL_EXCERPT),
             ("recall_form", MEMORY_RECALL_FORM),
+            ("note_gate", MEMORY_NOTE_GATE),
+            ("recall_source", MEMORY_RECALL_SOURCE),
+            ("open_sources", MEMORY_OPEN_SOURCES),
             ("project_instructions", MEMORY_PROJECT_INSTRUCTIONS),
         ):
             value = getattr(self.memory, name)

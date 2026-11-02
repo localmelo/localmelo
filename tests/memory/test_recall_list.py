@@ -779,7 +779,7 @@ async def test_the_list_settings_are_read_each_turn_and_a_bad_one_is_the_default
     cfg = config()
     memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
     try:
-        assert memory.recall_settings()[-3:] == (False, 20, 4000)
+        assert memory.recall_settings()[-5:-2] == (False, 20, 4000)
         cfg.memory.recall_form = "list"
         cfg.memory.recall_list_max = 7
         cfg.memory.recall_open_chars = 1200
