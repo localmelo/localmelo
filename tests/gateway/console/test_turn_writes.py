@@ -568,6 +568,38 @@ async def test_a_chat_wide_answer_to_a_high_impact_call_allows_only_that_call(
         assert await waiting == ApprovalDecision(True, remember=remember)
 
 
+@pytest.mark.parametrize(
+    "tool", ["browser-submit:https://example.com", "browser-type:https://example.com"]
+)
+async def test_a_chat_wide_answer_to_a_form_send_or_typing_allows_only_that_one(
+    tmp_path: Path, tool: str
+) -> None:
+    async with console_with(tmp_path) as (console, client, _):
+        request = ApprovalRequest(
+            request_id="req-form",
+            run_id="",
+            call_id="call_1",
+            tool_name=tool,
+            arguments={
+                "site": "example.com",
+                "access": "submit",
+                "to": "",
+                "how": "click",
+            },
+            preview="send a form from example.com",
+            workspace_root=str(tmp_path / "ws"),
+            review=ActionReview("undecided"),
+        )
+        waiting = console.broker.begin("s1", request)
+
+        response = await client.post(
+            "/api/approvals/req-form", json={"choice": "session"}
+        )
+
+        assert response.json()["remember"] is False
+        assert await waiting == ApprovalDecision(True, remember=False)
+
+
 async def test_stopping_a_turn_while_an_approval_waits(tmp_path: Path) -> None:
     target = tmp_path / "ws" / "todo.md"
     async with console_with(

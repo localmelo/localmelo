@@ -146,7 +146,7 @@ agent = Agent(config=load(), tool_providers=[McpToolProvider(servers)])
 - 第一次运行会启动这些提供方，并把它们的工具注册在内置工具旁边。
 - 如果某个提供方无法启动，或者它的某个工具与已注册的工具同名，运行以 `setup_error` 结束。该智能体之后的运行也会以同样方式结束。
 - `agent.close()` 停止 MCP 服务器。
-- 每个 MCP 工具原始的 `annotations` 对象保存在它的 `ToolDef.annotations` 上，检查器据此推导工具的权限级别；见[权限级别](../guides/tools-mcp.md#permission-tiers)。你自己构建的 `ToolDef` 以 `{}` 开头，即 `write`。
+- 每个 MCP 工具原始的 `annotations` 对象（去掉键 `asksItself`，它只给 melo 自己的浏览器工具用）保存在它的 `ToolDef.annotations` 上，检查器据此推导工具的权限级别；见[权限级别](../guides/tools-mcp.md#permission-tiers)。你自己构建的 `ToolDef` 以 `{}` 开头，即 `write`。
 - `requires_approval=True` 的提供工具会在每次调用前询问本次运行的审批策略；见[审批工具调用](../guides/python.md#approve-tool-calls)。对 MCP 服务器，在其条目中设置 `require_approval`。
 
 <a id="custom-model-providers"></a>

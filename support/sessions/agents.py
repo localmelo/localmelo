@@ -340,7 +340,10 @@ async def build_session_agent(
     if browser_driver != "off":
         from localmelo.support.browser import provider_for
 
-        browser = provider_for(browser_driver)
+        browser = provider_for(
+            browser_driver,
+            keep_tabs=cfg is not None and cfg.browser.keep_tabs is True,
+        )
         if browser is not None:
             providers.append(browser)
     if web_fetch:
