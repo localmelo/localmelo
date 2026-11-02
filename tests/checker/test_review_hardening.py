@@ -958,7 +958,7 @@ def test_code_another_interpreter_runs_is_never_routine(ws: Path, command: str) 
             "system",
         ),
         ("osascript", "system"),
-        ("shortcuts run Foo", "system"),
+        ("shortcuts run Foo", "app_control"),
         ("automator x.workflow", "system"),
         (f"/usr/bin/open {LAUNCH}", "system"),
         (f"open file:///tmp/{LAUNCH}", "system"),

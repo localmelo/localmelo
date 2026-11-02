@@ -62,6 +62,39 @@ _DRIVES = re.compile(
     r"|\bdo script\b",
     re.IGNORECASE,
 )
+# What an AppleScript or JXA names: ``tell application "Safari"``,
+# ``application id "com.apple.Safari"``, ``Application("Safari")``.
+_SCRIPTED_APP = re.compile(
+    r"""\b(?:tell\s+)?(?:application|app)\s+(?:id\s+)?"([^"]+)"|Application\(\s*(["'])(.+?)\2\s*\)""",
+    re.IGNORECASE,
+)
+# A ``tell application`` or ``Application(`` whose target is not spelt out.
+_UNNAMED_APP = re.compile(
+    r"""\btell\s+(?:application|app)\s+(?!id\b)[^"\s]|Application\(\s*[^"'\s]""",
+    re.IGNORECASE,
+)
+# JXA's bridge to macOS itself: it can run any program without naming an app.
+_BRIDGE = re.compile(r"ObjC\b|\$\.\w")
+# What a script does beyond the app it names: runs a shell, a program or a
+# script, presses keys, adds a login item, asks for the administrator, or
+# reaches into macOS itself (JXA's ObjC bridge).
+_BEYOND_APP = re.compile(
+    r"do shell script|doShellScript|\bdo script\b|\brun script\b|\bdoScript\b"
+    r"|administrator privileges|\bkeystroke\b|key code|login item|ObjC\b|\$\.\w"
+    r"|\bcurrentApplication\b|\bopen location\b|\bmount volume\b|\bshut down\b"
+    r"|\brestart\b|\blog out\b",
+    re.IGNORECASE,
+)
+# Apps that run commands or change settings, so scripting them is a system
+# change: terminals, System Events (keys, login items), Settings, script tools.
+_SYSTEM_APPS = frozenset(
+    ["terminal", "iterm", "iterm2", "kitty", "alacritty", "warp", "ghostty", "wezterm"]
+    + ["hyper", "tabby", "xterm", "system events", "system settings", "automator"]
+    + ["system preferences", "script editor", "shortcuts events", "keychain access"]
+    + ["com.apple.terminal", "com.googlecode.iterm2", "com.apple.systemevents"]
+    + ["com.apple.systempreferences", "com.apple.scripteditor2", "com.apple.automator"]
+    + ["com.apple.keychainaccess", "com.apple.shortcuts.events"]
+)
 _LAUNCHD_RUNS = set(["asuser", "submit", "start", "kickstart", "bootstrap", "load"])
 _TMUX_RUNS = set(
     ["new", "new-session", "send-keys", "send", "run-shell", "run", "new-window"]
@@ -934,9 +967,7 @@ def _elsewhere(
         if {"-a", "-b"} & set(args) or any(
             re.fullmatch(r"-\w*[ab]\w*", a) for a in args
         ):
-            return f.add(
-                "system", "Opens a program through macOS, outside melo's limits."
-            )
+            return _open_app(f, args)
         for word in words:
             if "://" in word and not word.startswith("file:"):
                 if own_api(word, sending=False):
@@ -946,11 +977,13 @@ def _elsewhere(
     elif prog == "osascript":
         code = " ".join(args)
         given = "-e" in args
-        if not given or _DRIVES.search(code):
+        if not given:
             # A script file, or its input when it names none: melo reads neither.
             f.add("system", "Drives another app or a shell through AppleScript.")
+        elif _DRIVES.search(code) or _BRIDGE.search(code):
+            _script_apps(f, code)
     elif prog == "shortcuts" and words[:1] == ["run"]:
-        f.add("system", "Runs a Shortcut, which can control other apps.")
+        f.add("app_control", "Runs a Shortcut, which can control other apps.")
     elif prog == "automator":
         f.add("system", "Runs an Automator workflow, which can control other apps.")
     elif prog in _CONTAINERS:
@@ -969,6 +1002,59 @@ def _elsewhere(
         or any(re.fullmatch(r"-\w*[dD]\w*m\w*|-\w*m\w*[dD]\w*", a) for a in args)
     ):
         f.add("persistence", "Runs a command in a detached screen session.")
+
+
+def _app_names(text: str) -> list[str]:
+    """The apps a script names, in order, each once: ``["Safari", "Notes"]``."""
+    found = [m.group(1) or m.group(3) for m in _SCRIPTED_APP.finditer(text)]
+    return list(dict.fromkeys(name.strip() for name in found if name.strip()))
+
+
+def _app_list(names: list[str]) -> str:
+    """``Safari``, ``Safari and Notes``, ``Safari, Notes and Mail``."""
+    return ", ".join(names[:-1]) + " and " + names[-1] if len(names) > 1 else names[0]
+
+
+def _script_apps(f: Findings, code: str) -> None:
+    """A script that drives something: ``app_control`` when it only operates named apps.
+
+    It stays ``system`` when it can reach beyond the apps it names: it runs a
+    shell or a program, presses keys, changes login items or settings (System
+    Events, Terminal…), or its target is not spelt out.
+    """
+    names = _app_names(code)
+    if (
+        not names
+        or _BEYOND_APP.search(code)
+        or _UNNAMED_APP.search(code)
+        or any(name.casefold() in _SYSTEM_APPS for name in names)
+    ):
+        f.add("system", "Drives another app or a shell through AppleScript.")
+    else:
+        f.add("app_control", f"Operates {_app_list(names)} through a script.")
+
+
+def _open_app(f: Findings, args: list[str]) -> None:
+    """``open -a Safari``: ``app_control`` for an app by name, ``system`` otherwise.
+
+    A path (a program melo cannot vet), arguments handed to the app, and the
+    apps that run commands stay ``system``.
+    """
+    named = ""
+    for at, arg in enumerate(args[:-1]):
+        if re.fullmatch(r"-\w*[ab]\w*", arg):
+            named = args[at + 1]
+            break
+    if (
+        not named
+        or named.startswith("-")
+        or "/" in named
+        or "--args" in args
+        or named.removesuffix(".app").casefold() in _SYSTEM_APPS
+    ):
+        f.add("system", "Opens a program through macOS, outside melo's limits.")
+    else:
+        f.add("app_control", f"Opens {named} through macOS, outside melo's limits.")
 
 
 def opened(ctx: Context, f: Findings, target: str, cwd: str) -> None:

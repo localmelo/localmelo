@@ -293,14 +293,15 @@ It is high-impact when it:
 - installs software or packages, restores a project's packages (`uv sync`, `npm ci`, `pip install -r`), or creates a programming environment (`python -m venv`, `uv venv`, `conda create`);
 - downloads an installer, a large file (an archive, a wheel, model weights) or anything to a place outside the workspace, or runs code downloaded from the internet (`curl … | sh`, `get-pip.py`);
 - writes or deletes files outside the workspace, deletes the workspace or its `.git`, or discards work (`git reset --hard`, `git clean -x`, a force-push);
-- sets up something that runs later (launchd, `crontab`, shell startup files, git hooks, `.envrc`, `nohup`), uses passwords, keys, cookies or the keychain (reads too), changes system settings or uses `sudo`, opens a network service other computers can reach, or sends a file from outside the workspace or an email;
+- sets up something that runs later (launchd, `crontab`, shell startup files, git hooks, `.envrc`, `nohup`), uses passwords, keys, cookies or the keychain (reads too), changes system settings or uses `sudo`, operates another app through a script (`osascript` telling Safari to quit, `open -a Notes`, `shortcuts run`), opens a network service other computers can reach, or sends a file from outside the workspace or an email;
 - changes localmelo itself, or runs code built at run time (`exec` of computed text, `eval "$x"`).
 
 A call is undecided when the rules cannot read what it does: a command, program or path built at run time, a POST that sends data, `git push`. It is also undecided, with a reason that says why, when it goes by the exit status of a pipeline without `pipefail`: the status of `pytest | tail` is `tail`'s, so Python that reads it (`.returncode`, `check=True`), or `pytest | tail && git commit`, goes on after failed tests. `set -o pipefail` makes it the test's.
 
 A high-impact call gets its own card in the web console and its own panel in the terminal (see [the web console](web-console.md#approvals-and-failures) and [the terminal](terminal.md#approvals)). Each:
 
-- names what the call does as a question ("Install software?", "Change files outside demo-project?");
+- starts with one plain sentence about what the step will do: the model's own words when it gave them (a `why` or `description` argument, or a comment at the top of its code), otherwise a sentence built from the call ("Run the command ls -1"). If the words say one thing and the code deletes files or sends data out, the sentence is the code's and a warning quotes the words;
+- names what the call does as a question ("Install software?", "Change files outside demo-project?", "Control an app?");
 - lists up to three reasons and offers no session choice;
 - starts on No in the terminal, with one line saying that a session grant never covers installs, downloads or changes outside the folder;
 - shows the message that started the turn (the console card).

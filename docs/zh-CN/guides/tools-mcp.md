@@ -317,14 +317,15 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 - 安装软件或软件包，恢复项目的软件包（`uv sync`、`npm ci`、`pip install -r`），或创建编程环境（`python -m venv`、`uv venv`、`conda create`）；
 - 下载安装程序、大文件（压缩包、wheel、模型权重）或把任何文件下载到工作区以外，或运行从互联网下载的代码（`curl … | sh`、`get-pip.py`）；
 - 在工作区以外写入或删除文件，删除工作区本身或其 `.git`，或丢弃工作（`git reset --hard`、`git clean -x`、强制推送）；
-- 设置以后会自行运行的内容（launchd、`crontab`、Shell 启动文件、git 钩子、`.envrc`、`nohup`），使用密码、密钥、Cookie 或钥匙串（读取也算），更改系统设置或使用 `sudo`，打开其他计算机可以访问的网络服务，或发送工作区以外的文件或电子邮件；
+- 设置以后会自行运行的内容（launchd、`crontab`、Shell 启动文件、git 钩子、`.envrc`、`nohup`），使用密码、密钥、Cookie 或钥匙串（读取也算），更改系统设置或使用 `sudo`，用脚本操作另一个应用（`osascript` 让 Safari 退出、`open -a Notes`、`shortcuts run`），打开其他计算机可以访问的网络服务，或发送工作区以外的文件或电子邮件；
 - 更改 localmelo 本身，或运行在运行时拼出的代码（对计算出的文本使用 `exec`、`eval "$x"`）。
 
 规则无法读出调用的作用时，调用属于无法判定：在运行时拼出的命令、程序或路径，发送数据的 POST，`git push`。没有 `pipefail` 而依据管道退出状态的调用也属于无法判定，并附上原因：`pytest | tail` 的状态是 `tail` 的，所以读取它的 Python（`.returncode`、`check=True`）或 `pytest | tail && git commit` 会在测试失败后继续。`set -o pipefail` 会让它变成测试的状态。
 
 高影响调用在网页控制台有专门的卡片，在终端有专门的面板（参见[网页控制台](web-console.md#approvals-and-failures)和[终端](terminal.md#approvals)）。每张卡片：
 
-- 用一个问题说出调用要做什么（“Install software?”、“Change files outside demo-project?”）；
+- 以一句平实的话开头，说明这一步要做什么：模型给了它自己的话（`why` 或 `description` 参数，或代码开头的注释）就用它的话，否则根据调用生成（“Run the command ls -1”）。如果这些话与代码不符，而代码会删除文件或把数据发出去，这句话就是代码真正做的事，并用警告引用模型的话；
+- 用一个问题说出调用要做什么（“Install software?”、“Change files outside demo-project?”、“Control an app?”）；
 - 列出最多三条原因，不提供会话授权的选项；
 - 在终端中默认选中 No，并用一行说明会话授权从不覆盖安装、下载或文件夹以外的更改；
 - 显示发起本轮的那条消息（控制台卡片）。

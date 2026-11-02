@@ -9,6 +9,29 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- An approval card says in one plain sentence what the step will do (#454). The
+  console's Ask and Auto-blocked cards, the terminal's approval panel and a task's blocked
+  steps start with it, before the question and the reasons, and show the code under it
+  (folded in the console). The sentence is the model's own words when the call has them (a
+  `why`, `description` or `purpose` argument of a command or script, `why` of another tool, or a
+  comment at the top of the code) and otherwise one melo builds from the call ("Run the command
+  ls -1", "Run a Python script that operates Safari"); nothing asks a model for it, and the
+  question and the reasons still come only from melo's rules. If the words and the code disagree
+  about deleting files or sending data out, the card shows what the code does and a warning that
+  quotes the words ("melo described this as “Close the tabs”, but the code deletes files.").
+  Browser sites, file writes and edits, and folders outside the workspace say it in their own
+  question and have no extra line. The approval record of `tool.finished` gets `review.gist`,
+  `pending_approvals[]` gets `gist` (catalog ids `gist.say.<id>` and `gist.warn.<id>`, so each
+  surface says it in its language), and the guides and `docs/for-agents.md` describe both.
+- A script that operates another app is its own kind, "Control an app?" (`app_control`, #454):
+  `osascript` telling Safari or another app what to do, JXA `Application("…")`, `open -a Notes`
+  and `shortcuts run`. It names the app in its reason and is as strict as "Change system
+  settings?" was: a chat-wide allow never covers it, your words and your model's review never
+  allow it, Auto blocks it, and only Allow once runs it. A script that presses keys, runs a
+  shell through AppleScript, drives System Events or System Settings, or whose target melo
+  cannot name stays "Change system settings?". The model review that Auto uses gains the kind
+  and one line about scripting another app.
+
 - Developer only, not visible by default: `[tools] web_fetch_allow_local` lets `web_fetch` read
   test servers you list on this computer, for a test that needs a fixture page. It is a list of
   exact `127.0.0.1:PORT` or `[::1]:PORT` entries, empty (off) by default, set in the config file

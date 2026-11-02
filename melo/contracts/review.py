@@ -33,6 +33,7 @@ TITLES: Final[dict[str, str]] = {
     "self": "Change localmelo itself?",
     "credentials": "Use your passwords or keys?",
     "system": "Change system settings?",
+    "app_control": "Control an app?",
     "persistence": "Set up something that runs later?",
     "remote_code": "Run code downloaded from the internet?",
     "install": "Install software?",
@@ -53,6 +54,7 @@ CATEGORY_WORDS: Final[dict[str, str]] = {
     "self": "changes localmelo itself",
     "credentials": "uses passwords or keys",
     "system": "changes system settings",
+    "app_control": "controls an app",
     "persistence": "sets up something that runs later",
     "remote_code": "runs code from the internet",
     "install": "installs software",
@@ -83,8 +85,18 @@ WORDS_CAN_ALLOW: Final = frozenset(
         "beyond_request",
     }
 )
+# ``app_control`` (a script that operates another app) was ``system`` once and
+# is as strict: only a click allows it, never words or the model.
 CLICK_ONLY: Final = frozenset(
-    {"credentials", "system", "persistence", "remote_code", "opaque", "unreviewed"}
+    {
+        "credentials",
+        "system",
+        "app_control",
+        "persistence",
+        "remote_code",
+        "opaque",
+        "unreviewed",
+    }
 )
 # The reason a call of the ``self`` category is denied without asking.
 SELF_DENIAL: Final = "melo never lets a call change its own runtime, settings or keys"
@@ -342,6 +354,23 @@ def _python_commands(code: str) -> list[list[str]]:
     return found
 
 
+def commands_of(tool_name: str, arguments: Mapping[str, Any]) -> list[list[str]]:
+    """The commands a ``shell_exec`` or ``python_exec`` call runs, as word lists.
+
+    A shell command is split at ``&&``, ``||``, ``;``, ``|`` and line breaks;
+    Python gives the commands it runs with literal arguments
+    (``subprocess.run([...])``, ``os.system("...")``). Another tool gives none.
+    """
+    if tool_name == "shell_exec":
+        command = arguments.get("command")
+        if isinstance(command, list):
+            return [[str(word) for word in command]]
+        return _shell_commands(str(command or ""))
+    if tool_name == "python_exec":
+        return _python_commands(str(arguments.get("code") or ""))
+    return []
+
+
 def _installs(tokens: Sequence[str]) -> bool:
     return len(tokens) > 2 and tokens[1] == "install"
 
@@ -360,15 +389,8 @@ def loose_keys(
     fetch.py`` refuses a later ``pip3 install numpy`` but not ``python
     fetch.py``. They only ever refuse: no allowance is kept by them.
     """
-    if tool_name == "shell_exec":
-        command = arguments.get("command")
-        if isinstance(command, list):
-            commands = [[str(word) for word in command]]
-        else:
-            commands = _shell_commands(str(command or ""))
-    elif tool_name == "python_exec":
-        commands = _python_commands(str(arguments.get("code") or ""))
-    else:
+    commands = commands_of(tool_name, arguments)
+    if not commands:
         return []
     parts = [tokens for tokens in (_command(words) for words in commands) if tokens]
     if not parts:

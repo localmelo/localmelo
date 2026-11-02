@@ -355,7 +355,7 @@ button:hover:not(:disabled) {
 .main-card .block-mark { display: none; }
 .main-card .block-title { font-size: var(--text-small); }
 .main-card .block-why { padding-left: 0; }
-.main-card :is(.block-step, .block-foot, .block-error) { margin-left: 0; }
+.main-card :is(.block-step, .block-code, .block-foot, .block-error) { margin-left: 0; }
 /* A task's approval, answered in the card that says it waits. */
 .main-card .approval-card { margin: 10px 0 0; }
 /* Echoes: one quiet line for what the main chat did with a task. The level word is the colour:
@@ -1619,6 +1619,14 @@ dialog::backdrop {
   line-height: 24px;
   font-weight: 600;
 }
+/* What the step will do, in one plain sentence, first on the card (#454). When the model's words and the
+   code disagree, the sentence is the code's real effect and the warning under it says so. */
+.approval-gist, .block-gist { margin: 0 0 var(--space-2); font-size: var(--text-title); font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.approval-mismatch, .block-mismatch { margin: 0 0 var(--space-2); padding: var(--space-2) var(--space-3); border-radius: var(--radius-control); background: var(--raised); box-shadow: inset 3px 0 0 var(--error); color: var(--error); font-size: var(--text-small); line-height: 1.5; }
+.approval-mismatch::before, .block-mismatch::before { content: "⚠ "; }
+.approval-code { margin: 0 0 8px; }
+.approval-code > summary, .block-code > summary { color: var(--ink-2); font-size: var(--text-small); cursor: pointer; }
+.approval-code[open] > summary { margin-bottom: 6px; }
 .approval-caption {
   margin: 2px 0 12px;
   color: var(--ink-3);
@@ -2476,6 +2484,8 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .block-title { margin: 0; font-size: var(--text-reading); font-weight: 600; }
 .block-tool { margin-left: auto; color: var(--ink-3); font: var(--text-caption)/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .block-why { margin: var(--space-1) 0 var(--space-2); padding-left: calc(1.25em + var(--space-2)); color: var(--ink-2); font-size: var(--text-small); }
+.block-code { margin: 0 0 0 calc(1.25em + var(--space-2)); }
+.block-code .block-step { margin: var(--space-2) 0 0; white-space: pre-wrap; overflow-wrap: anywhere; text-overflow: clip; }
 .block-step { display: block; margin-left: calc(1.25em + var(--space-2)); padding: var(--space-2) var(--space-3); overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-control); color: var(--ink); font: var(--text-caption)/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: normal; text-overflow: ellipsis; white-space: nowrap; }
 .block-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin: var(--space-3) 0 0 calc(1.25em + var(--space-2)); font-size: var(--text-small); }
 .block-allow { background: var(--surface); color: var(--ink); font-weight: 600; }
@@ -2502,7 +2512,7 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
   .mode-picker { position: static; }
   .mode-menu { right: 0; width: auto; }
   .mode-chip, .mode-item, .block-allow { min-height: 44px; }
-  .block-why, .block-step, .block-foot, .block-error { margin-left: 0; padding-left: 0; }
+  .block-why, .block-step, .block-code, .block-foot, .block-error { margin-left: 0; padding-left: 0; }
   .block-step { padding: var(--space-2) var(--space-3); }
   .block-once { flex-basis: 100%; margin-left: 0; }
 }

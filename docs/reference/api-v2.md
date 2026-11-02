@@ -610,7 +610,9 @@ it. A task in Auto asks nobody, so nothing holds it, and its calls run
 under the write sandbox. Its object adds `blocked`, the steps Auto blocked
 (oldest first: `request_id`, `call_id`, `name`, `step_key`, `reason`,
 `review`, `preview`, `ts`, `turn`, `can_allow`, and `used_at`, when the
-allowed step ran, else `null`), and `allowances` as a chat's. The task goes
+allowed step ran, else `null`), and `allowances` as a chat's. A blocked
+step's `review` carries the card's `gist` (see `pending_approvals` in `GET
+/api/sessions/{id}`) when the call had one. The task goes
 on without a blocked step. `POST
 /api/tasks/{task_id}/blocks/{request_id}/allow` allows it once (as for a
 chat) and sends the go-ahead message to the task: 202 `{"task": ...,
@@ -875,8 +877,20 @@ token total.
   `reasons` are at most three sentences that say why melo asks ("Installs
   playwright with pip into .signin_venv (downloads about 42 MB)."), secrets
   redacted. `categories` are the rules' categories, strongest first
-  (`install`, `download`, `outside_write`, ...). A `high` call asks every time and the card offers no `session`
+  (`install`, `download`, `outside_write`, `system`, `app_control`, ...). A `high` call asks every time and the card offers no `session`
   answer.
+- A `pending_approvals` entry's `gist` is the sentence the card starts with, as
+  `{say: {id, params}, by, warn?: {id, params}, apps?}`, or `null` for a tool
+  whose card says it itself (a browser site). `by` is `model` when the sentence
+  is the model's own words (a `why`, `description` or `purpose` argument of a
+  command or script, `why` alone for another tool, or the comment at the top of a
+  script; `say.params.text`) and `code` when melo built
+  it from the call. A client says it in its own language with the catalog entry
+  `gist.say.<id>`; `warn` is set when the
+  model's words disagree with what the code does (`delete` or `send_out`), and
+  `say` is then the code's real effect. The sentence is for reading: `review`
+  decides whether the call asks, and `categories` has `app_control` for a script
+  that operates another app (click-only, like `system`).
 - A `pending_approvals` entry's `target` is set for a `file_write`: the
   path `path_label` (relative to the workspace, else with the home folder
   as `~`), whether the file `exists`, and its `size_bytes`, read when the

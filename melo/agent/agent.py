@@ -104,6 +104,7 @@ from localmelo.melo.checker.payloads import (
 )
 from localmelo.melo.checker.policy import builtin_set_for
 from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.checker.review.gist import step_gist
 from localmelo.melo.checker.tiers import tier_of, tier_requires_approval
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN, _sanitize_images
 from localmelo.melo.contracts.approvals import (
@@ -1972,7 +1973,12 @@ class _ApprovalGate:
         if review is not None and (
             self._mode == "auto" or review.verdict != "routine" or review.by == "model"
         ):
-            self.asked["review"] = review.to_json()
+            shown = review.to_json()
+            # The sentence the approval card starts with (#454).
+            gist = step_gist(asking.tool_name, asking.arguments, review)
+            if gist is not None:
+                shown["gist"] = gist.to_json()
+            self.asked["review"] = shown
             if self._key:
                 self.asked["step_key"] = self._key
         if self._allowance:

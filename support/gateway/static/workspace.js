@@ -26,7 +26,7 @@ import { setupModelCard } from "./setup-card.mjs";
 import { setupImportCard } from "./import-card.mjs";
 import { folderName, setupFolderPicker } from "./folder.mjs";
 import { modeOf, setupModeChip } from "./mode.mjs";
-import { allowState, blockCard, blockFacts, reviewWords } from "./blocked.mjs";
+import { allowState, blockCard, blockFacts, gistWords, reviewWords } from "./blocked.mjs";
 import { picturesNode, setupPictureBox } from "./pictures.mjs";
 import { memoryNodes } from "./memory.mjs";
 import { parseCommand, setupSlash } from "./slash.mjs";
@@ -1878,7 +1878,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
   // card says why, offers no chat-wide allow, and starts on Deny.
   const review = request.review;
   const high = review?.verdict === "high";
-  const reviewed = high ? reviewWords(review, folder) : { title: "", reasons: [] };
+  const reviewed = high ? reviewWords({ ...review, gist: request.gist }, folder) : { title: "", reasons: [] };
   if (high) {
     card.dataset.impact = "high";
     title = reviewed.title || title;
@@ -1895,6 +1895,18 @@ function approvalCard(request, view = chatApproval, asked = "") {
     title = t(`approval.outside.${asked}`, { folder: outsideFolder });
     caption = t(`approval.outside.caption.${outside.access === "write" ? "write" : "read"}`, { tool, workspace });
     if (outside.access === "read") { content = ""; noBox = true; }
+  }
+  // What the step will do comes first, in one plain sentence; a warning follows when the model's words
+  // and the code differ (then the sentence is the code's real effect). A write, an edit and a tool's
+  // card already say as much in their question.
+  const gist = outside ? null : gistWords(request.gist);
+  const said = request.gist?.say?.id;
+  const plain = request.gist?.by === "code" && !gist?.warning && ["write", "edit", "tool"].includes(said);
+  if (gist?.sentence && !plain) card.append(el("p", "approval-gist", gist.sentence));
+  if (gist?.warning) {
+    const warning = el("p", "approval-mismatch", gist.warning);
+    warning.setAttribute("role", "alert");
+    card.append(warning);
   }
   card.append(el("p", "approval-title", title), el("p", "approval-caption", caption));
   if (outside) card.append(folderBox(outside, tool, outsideFolder));
@@ -1917,14 +1929,23 @@ function approvalCard(request, view = chatApproval, asked = "") {
   body.tabIndex = 0;
   body.setAttribute("role", "group");
   body.setAttribute("aria-label", what);
-  if (shown.length) card.append(body);
+  // The code of a command or a script is folded: the sentence and the kind say what it is for.
+  const fold = !outside && (tool === "shell_exec" || tool === "python_exec") ? el("details", "approval-code") : null;
+  const codeHolder = fold ?? card;
+  if (fold) {
+    fold.append(el("summary", "", t("gist.showCode")));
+    if (state.codeOpen) fold.open = true;
+    fold.addEventListener("toggle", () => { state.codeOpen = fold.open === true; });
+  }
+  if (shown.length) codeHolder.append(body);
   if (canFold && !state.showAll && lines.length > 20) {
     const count = diff ? lines.filter((row) => row.kind !== "gap").length : lines.length;
-    card.append(button("link-button", t("approval.showLines", { n: count }), () => {
+    codeHolder.append(button("link-button", t("approval.showLines", { n: count }), () => {
       state.showAll = true;
       view.rerender();
     }));
   }
+  if (fold && shown.length) card.append(fold);
   card.append(...explanationNodes(request.explanation));
   const actions = el("div", "approval-actions");
   const denyView = el("div", "deny-view");

@@ -88,3 +88,23 @@ def said_in(language: str, words: Mapping[str, Any]) -> str:
             value = clock_words(int(value["clock"]))
         filled[name] = value
     return t_in(language, str(words.get("key")), **filled)
+
+
+def gist_text(gist: object, language: str = "en") -> tuple[str, str]:
+    """The sentence an approval card starts with, and its warning, in *language*.
+
+    *gist* is what ``melo.checker.review.gist.Gist.to_json`` gives; anything
+    else reads as nothing, ``("", "")``. The warning is ``""`` unless the
+    model's words disagree with what the code does.
+    """
+    if not isinstance(gist, Mapping):
+        return "", ""
+
+    def part(entry: object, kind: str) -> str:
+        if not isinstance(entry, Mapping) or not isinstance(entry.get("id"), str):
+            return ""
+        params = entry.get("params")
+        params = params if isinstance(params, Mapping) else {}
+        return t_in(language, f"gist.{kind}.{entry['id']}", **params)
+
+    return part(gist.get("say"), "say"), part(gist.get("warn"), "warn")

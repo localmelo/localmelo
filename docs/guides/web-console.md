@@ -715,7 +715,12 @@ security boundary against a bearer holder or a malicious process under the same
 OS account, which can answer them.
 
 The card asks a plain question ("Run this command in demo-project?", "Replace
-notes.txt?", "Let melo use <tool>?") and shows exactly what would run. A file
+notes.txt?", "Let melo use <tool>?") and shows exactly what would run. A command
+or a Python script starts with one plain sentence about what the step will do:
+the model's own words when it gave them, otherwise a sentence melo builds
+("Run a Python script that operates Safari"). The code sits under it in a fold,
+**Show the code**; the question and the reasons come from melo's rules, so the
+model's words never make a step look safer. A file
 write over an existing text file shows what it replaces: the line under the
 question counts the lines ("5 lines removed, 1 added"), and the box lists the
 changed lines, each with its number, a − or + sign and two lines of context on
@@ -749,7 +754,13 @@ asks every time, with a different card. Its question names what the call does
 time`, and **Why melo asks** lists up to three reasons ("Installs playwright
 with pip into .signin_venv (downloads about 42 MB)."). **You asked:** repeats
 the message that started the turn, so you can compare it with what melo is
-about to do. The card has **Allow once** and **Deny** only, and **Deny** is the
+about to do. When the model's words and the code disagree about deleting
+files or sending data out, the card shows what the code does, with a red warning
+that quotes the words ("melo described this as “Close the tabs”, but the code
+deletes files."). A script that operates another app (AppleScript telling Safari
+to close tabs, `open -a Notes`) asks **Control an app?** and names the app; a
+script that presses keys or drives System Events stays **Change system
+settings?**. The card has **Allow once** and **Deny** only, and **Deny** is the
 filled button: there is no chat-wide allow, and the line under the buttons
 says so ("A chat-wide allow never covers installs, downloads or changes outside
 ~/demo-project."). A call melo cannot read, or that it asks about for another
@@ -826,8 +837,8 @@ asks before commands and file changes.
   model, never run as routine. The sandbox also keeps a step from talking to
   a container engine.
 - **What is blocked.** Installs, downloads, changes outside the folder,
-  deletes, passwords and keys, system settings, code from the internet and
-  the like, unless your own words ask for them; a change to localmelo itself
+  deletes, passwords and keys, system settings, scripts that operate another
+  app, code from the internet and the like, unless your own words ask for them; a change to localmelo itself
   never runs; in a folder that holds the copy of localmelo that is running,
   a write under that copy is refused. The step's row reads
   `blocked: installs software`, a card under
@@ -836,7 +847,8 @@ asks before commands and file changes.
 - **Allow it.** **Allow once** runs that exact step once, within 30 minutes,
   and sends "Go ahead with the step melo blocked: install software." as your
   message; or reply "go ahead". Steps that use passwords or keys, change
-  system settings, set up something that runs later, or run code from the
+  system settings, operate another app through a script, set up something that
+  runs later, or run code from the
   internet or code melo cannot check need the button. While melo works the
   button waits; afterwards the card reads `Allowed once · ran at 14:02` or
   `Allowance expired`.

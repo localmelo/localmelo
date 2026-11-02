@@ -5645,3 +5645,88 @@ test('the folder card in a task says this task, and reads in Simplified Chinese'
     await useLanguage('en');
   }
 });
+
+// ── What the step will do, in one plain sentence, first on the card (#454) ──
+
+const SAFARI_SCRIPT = "import subprocess\nscript = '''\ntell application \"Safari\"\n  close (every tab of front window whose URL contains \"example.com\")\nend tell\n'''\nsubprocess.run(['osascript', '-e', script])";
+const controlsAnApp = (gist, extra = {}) => ({
+  request_id: 'app', tool_name: 'python_exec', arguments: {code: SAFARI_SCRIPT}, arguments_complete: true,
+  workspace_label: '~/melo_test_workspace',
+  review: {verdict: 'high', title: 'Control an app?', categories: ['app_control'], reasons: ['Operates Safari through a script.']},
+  gist,
+  ...extra,
+});
+const MODEL_SAID = {say: {id: 'model', params: {text: 'Close the 7 forum tabs melo opened'}}, by: 'model', apps: 'Safari'};
+const classOf = (node) => String(node.className ?? '').split(' ')[0];
+
+test('an approval card starts with the sentence, then the kind and its reasons, and folds the code', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.context.request = controlsAnApp(MODEL_SAID);
+  const card = h.run('approvalCard(request)');
+  assert.deepEqual(card.children.slice(0, 3).map(classOf), ['approval-gist', 'approval-title', 'approval-caption']);
+  assert.equal(card.children[0].textContent, 'Close the 7 forum tabs melo opened');
+  assert.equal(card.children[1].textContent, 'Control an app?');
+  const reasons = findNode(card, (node) => node.className === 'approval-reasons');
+  assert.deepEqual(reasons.children.map((node) => node.textContent), ['Operates Safari through a script.']);
+  // The code is behind a fold; Allow once and Deny are still the only answers.
+  const fold = findNode(card, (node) => node.className === 'approval-code');
+  assert.equal(fold.tag, 'details');
+  assert.notEqual(fold.open, true, 'closed until the person opens it');
+  assert.equal(fold.children[0].textContent, 'Show the code');
+  assert.match(findNode(fold, (node) => node.className === 'approval-content').textContent, /tell application "Safari"/);
+  assert.equal(findNode(card, (node) => node.className === 'approval-mismatch'), null);
+  const actions = findNode(card, (node) => node.className === 'approval-actions');
+  assert.deepEqual(actions.children.map((node) => node.textContent), ['Allow once', 'Deny']);
+});
+
+test('a description that does not match the code shows the real effect first and a warning', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const gist = {say: {id: 'effect_delete', params: {}}, by: 'code', warn: {id: 'delete', params: {said: 'Close the tabs'}}};
+  h.context.request = highImpact({gist});
+  const card = h.run('approvalCard(request)');
+  assert.deepEqual(card.children.slice(0, 3).map(classOf), ['approval-gist', 'approval-mismatch', 'approval-title']);
+  assert.equal(card.children[0].textContent, 'Delete files');
+  assert.equal(card.children[1].textContent, 'melo described this as “Close the tabs”, but the code deletes files.');
+  assert.equal(card.children[1].attributes.role, 'alert');
+});
+
+test('a sentence built by code, a card without one, and the command fold', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.context.request = {request_id: 'cmd', tool_name: 'shell_exec', arguments: {command: 'git status'}, arguments_complete: true,
+    workspace_label: '~/w', gist: {say: {id: 'command', params: {command: 'git status'}}, by: 'code'}};
+  const card = h.run('approvalCard(request)');
+  assert.equal(card.children[0].textContent, 'Run the command git status');
+  assert.equal(findNode(card, (node) => node.className === 'approval-code').tag, 'details');
+  // A request with no gist (an older gateway, a tool with its own sentence) is the card it was.
+  h.context.request = {request_id: 'plain', tool_name: 'shell_exec', arguments: {command: 'pwd'}, arguments_complete: true, workspace_label: '~/w'};
+  const plain = h.run('approvalCard(request)');
+  assert.equal(findNode(plain, (node) => node.className === 'approval-gist'), null);
+  assert.equal(classOf(plain.children[0]), 'approval-title');
+  h.context.request = {request_id: 'site', tool_name: 'browser:https://example.com', arguments: {site: 'example.com', access: 'read'},
+    workspace_label: '~/w', gist: null};
+  const site = h.run('approvalCard(request)');
+  assert.equal(findNode(site, (node) => node.className === 'approval-code'), null, 'only a command or code folds');
+});
+
+test('the approval card reads in Simplified Chinese: sentence, kind, reason with the app, fold', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const {useLanguage} = await import('../../support/gateway/static/i18n.mjs');
+  await useLanguage('zh-Hans');
+  try {
+    h.context.request = controlsAnApp(MODEL_SAID, {request_id: 'app-zh'});
+    const card = h.run('approvalCard(request)');
+    assert.equal(card.children[0].textContent, 'Close the 7 forum tabs melo opened');
+    assert.equal(findNode(card, (node) => node.className === 'approval-title').textContent, '控制一个应用？');
+    const reasons = findNode(card, (node) => node.className === 'approval-reasons');
+    assert.deepEqual(reasons.children.map((node) => node.textContent), ['这一步会通过脚本操作 Safari。']);
+    assert.equal(findNode(card, (node) => node.className === 'approval-code').children[0].textContent, '查看代码');
+    h.context.request = controlsAnApp({say: {id: 'script_apps', params: {apps: 'Safari'}}, by: 'code', apps: 'Safari'}, {request_id: 'app-zh2'});
+    assert.equal(h.run('approvalCard(request)').children[0].textContent, '运行一段 Python 脚本，操作 Safari');
+  } finally {
+    await useLanguage('en');
+  }
+});

@@ -318,7 +318,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 任务对象包含任务 id、规范化的 `spec`、`state`、优先级和来源、`wait_reason`、`pending_approvals`（任务正在等待的批准，形状与会话的相同；没有时为空；与对话一样，用 `POST
 /api/approvals/{request_id}` 回答其中一个；每个还带 `explanation`，见[任务的批准](#a-tasks-approvals-go-through-its-chat)）、`earlier`（它凭之前的批准运行的步骤）、时间戳、工作区和 `priority_events`，以及保留的计量字段。服务、等待和工具计量尚未实现。
 
-任务保留创建时其对话的[模式](#ask-and-auto)（`approvals`，`ask` 或 `auto`）；之后切换对话不会改变它。Auto 下的任务不问任何人，所以没有东西会让它停下等待，它的调用在写入沙箱中运行。它的对象另有 `blocked`，即 Auto 拦下的步骤（从旧到新：`request_id`、`call_id`、`name`、`step_key`、`reason`、`review`、`preview`、`ts`、`turn`、`can_allow`，以及 `used_at`，即被允许的步骤运行的时间，否则为 `null`），还有与对话相同的 `allowances`。任务在没有被拦下步骤的情况下继续。`POST
+任务保留创建时其对话的[模式](#ask-and-auto)（`approvals`，`ask` 或 `auto`）；之后切换对话不会改变它。Auto 下的任务不问任何人，所以没有东西会让它停下等待，它的调用在写入沙箱中运行。它的对象另有 `blocked`，即 Auto 拦下的步骤（从旧到新：`request_id`、`call_id`、`name`、`step_key`、`reason`、`review`、`preview`、`ts`、`turn`、`can_allow`，以及 `used_at`，即被允许的步骤运行的时间，否则为 `null`），还有与对话相同的 `allowances`。被拦下步骤的 `review` 在调用有 `gist` 时带着它（见 `GET /api/sessions/{id}` 的 `pending_approvals`）。任务在没有被拦下步骤的情况下继续。`POST
 /api/tasks/{task_id}/blocks/{request_id}/allow` 允许一次（与对话相同），并把继续的消息发给任务：尚未结束的任务返回 202 `{"task": ...,
 "message": "queued"}`（它在下一步读到消息），已结束的任务返回 `"continued"`（它再次运行）；没有这个被拦下的步骤返回 404 `not_found`，不能被允许的返回 409 `not_allowable`，这一步已经凭允许运行过或仍有一个允许在等待时返回 409 `already_allowed`。任务结束时，它的允许随之失效。
 
@@ -432,7 +432,8 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `tokens` 汇总该会话已结束轮次的 `completion_tokens`，与回答所报告的字段相同。
 - `last_event_id` 是该会话最新一条已存事件的 id（没有事件时为 0）：客户端从这个 id 之后读取 `GET /api/sessions/{id}/events?after=`，只会收到之后的事件。
 - `pending_approvals` 条目的 `arguments_complete` 仅当 JSON 安全的 `arguments` 保留了原始值、未经截断或转换时才为 true。当它为 false 或缺失时，客户端不应允许该请求；拒绝仍然可用。仅审批事件中的参数可能被截断，因此在允许之前请获取会话详情。
-- `pending_approvals` 条目的 `review` 是 melo 的规则在 `shell_exec`、`python_exec` 或 `file_write` 调用中发现的内容，其他工具为 `null`：`verdict` 为 `routine`、`high` 或 `undecided`；`title` 是 `high` 调用的卡片问题（“Install software?”），其他为 `""`；`reasons` 是最多三句说明 melo 为何询问的话（“Installs playwright with pip into .signin_venv (downloads about 42 MB).”），其中的密钥已被遮盖；`categories` 是规则的类别，最强的在前（`install`、`download`、`outside_write` 等）。`high` 调用每次都会询问，卡片不提供 `session` 回答。
+- `pending_approvals` 条目的 `review` 是 melo 的规则在 `shell_exec`、`python_exec` 或 `file_write` 调用中发现的内容，其他工具为 `null`：`verdict` 为 `routine`、`high` 或 `undecided`；`title` 是 `high` 调用的卡片问题（“Install software?”），其他为 `""`；`reasons` 是最多三句说明 melo 为何询问的话（“Installs playwright with pip into .signin_venv (downloads about 42 MB).”），其中的密钥已被遮盖；`categories` 是规则的类别，最强的在前（`install`、`download`、`outside_write`、`system`、`app_control` 等）。`high` 调用每次都会询问，卡片不提供 `session` 回答。
+- `pending_approvals` 条目的 `gist` 是卡片开头的那句话，形如 `{say: {id, params}, by, warn?: {id, params}, apps?}`；卡片自带一句话的工具（浏览器网站）为 `null`。`by` 为 `model` 表示这句话是模型自己的话（命令或脚本的 `why`、`description` 或 `purpose` 参数，其他工具只认 `why`，或脚本开头的注释；`say.params.text`），为 `code` 表示 melo 根据调用生成。客户端用目录项 `gist.say.<id>` 以自己的语言说出它；模型的话与代码不符（`delete` 或 `send_out`）时设置 `warn`，此时 `say` 是代码的真实效果。这句话只供阅读：调用是否询问由 `review` 决定，操作另一个应用的脚本在 `categories` 中是 `app_control`（只能点按钮，和 `system` 一样）。
 - `pending_approvals` 条目的 `target` 仅为 `file_write` 设置：路径 `path_label`（相对于工作区；否则以 `~` 代表主目录）、文件是否 `exists`，以及其 `size_bytes`（在生成响应时读取）。其他工具的 `target` 为 `null`。
 - 对已有文件写入文本的 `file_write`，其 `target` 还带有 `diff`，即这次写入会替换的内容；它在生成响应时读取，显示方式与终端的审批面板相同。新文件或没有文本的调用，`target` 没有 `diff`。
 
