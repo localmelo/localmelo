@@ -166,7 +166,7 @@ asyncio.run(main())
 | `assistant.message` | When the step's planning reply arrives. | `step`, `content`, `thinking`, `tool_calls`, `usage`, `prefix`, `duration_s` |
 | `note` | In the compress modes, when a note, a reflection's note or an attempt digest enters the RAM-only note store. | `step`, `attempt`, `note_id`, `kind`, `source`, `text`, `chars`, `drafts`, `remember`, `stage` |
 | `tool.started` | Before each tool call goes to the executor, also a call that the checks then refuse. | `step`, `call_id`, `name`, `arguments`, `preview` |
-| `tool.finished` | When that call is done, refused, cancelled or crashed. | `step`, `call_id`, `name`, `status`, `error_category`, `output`, `output_chars`, `error`, `duration_s`, `images`, `approval`, `exit_code` |
+| `tool.finished` | When that call is done, refused, cancelled or crashed. | `step`, `call_id`, `name`, `status`, `error_category`, `output`, `output_chars`, `error`, `duration_s`, `images`, `approval`, `exit_code`, `tool_asks` |
 | `notice` | When an attempt ends, the model gave an empty reply or one that is only unfinished thinking, or a model request is retried. | `kind`, `message`, `step`, `attempt`, `detail` |
 | `recall` | When a recall block enters a request: at `start`, `attempt`, `step`, or from the `recall` tool. | `step`, `attempt`, `trigger`, `retriever`, `query`, `hits`, `chars`, `ms`, `fallback`, `placement` |
 | `reflection.started` | Before the reflection that follows an attempt. | `attempt`, `failure_type` |
@@ -354,6 +354,16 @@ The number of `tool.started` events is `RunResult.n_tool`.
   non-zero exit does not change `status`: `shell_exec` succeeds, and its text
   starts with `[exit code <n>]`; `python_exec` fails with
   `Python exited with code <n>`.
+- `tool_asks`: only for a call whose tool asked a question of its own that was
+  refused (a site `web_fetch` or the browser would open, asked as
+  `browser:<origin>`): one entry per refused question, `{request_id, tool,
+  allowed: false, origin, reason, preview}`. A question you, auto mode or a
+  policy refused also has `call_key` and `loose_keys` (`ask:<tool>` and, for
+  a site, `ask:site:<host>` among them), so a task its chat continues never
+  asks it, or anything else about that host however its address is written,
+  again; a refusal of such a repeat has `earlier` (who refused it
+  first) and no `call_key`. Every other call, and an event stored before this
+  key, has no `tool_asks`.
 
 ### note
 

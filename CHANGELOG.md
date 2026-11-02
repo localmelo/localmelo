@@ -635,6 +635,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- A site that a task's `web_fetch` or browser asked about, and that you, Auto
+  or melo's rules refused, is now a blocked step like any other. When the chat
+  continues that task on its own, that address however it is written (other
+  spacing or capitals, `http` or `https`, another port, a final dot, the
+  international spelling of its name) and every other page of that site are
+  refused before anyone is asked or anything is reviewed, even when your
+  request names the site. Steps refused again no longer push the first block
+  out of what the task remembers. [#431]
+
 - A file with more than one name (a hard link) is one file in two places,
   so `file_write` and `file_edit` now refuse it, in the workspace too, and a
   read outside the workspace refuses one as well. A command that makes a
@@ -728,6 +737,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A task the chat started keeps **Stop** on its row while the task, or the
+  chat's follow-up on it, can still run; Stop then ends a follow-up that waits
+  or runs, so it never continues the task. A follow-up still waiting when melo
+  stops runs after the restart, still once per ending and at most one continue
+  per message of yours, and is dropped when you wrote after the task ended.
+  Stop also holds when you press it just as the task ends, and on a task with
+  nothing left to stop it no longer offers **Undo**. An older **Did not
+  finish** card shows the report of its own run, not the newest one, and a
+  later end of the task decides whether Stop stays, whatever order the page
+  got them in. [#431]
 - A chat replies in the language of your latest message even after tool results or
   memory text in another language. The rule is set once, in the paragraph every chat
   (terminal, main chat, side chats) starts with.
@@ -3653,4 +3672,5 @@ earlier milestones.
 [#412]: https://github.com/localmelo/localmelo/issues/412
 [#410]: https://github.com/localmelo/localmelo/issues/410
 [#411]: https://github.com/localmelo/localmelo/issues/411
+[#431]: https://github.com/localmelo/localmelo/issues/431
 [#426]: https://github.com/localmelo/localmelo/issues/426

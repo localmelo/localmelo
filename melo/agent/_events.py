@@ -368,6 +368,7 @@ class _Emitter:
         *,
         exit_codes: Sequence[int] | None,
         approval: Mapping[str, Any] | None = None,
+        asks: Sequence[Mapping[str, Any]] = (),
     ) -> None:
         """The checked *result* of *call*, whose executor *outcome* gives the status.
 
@@ -375,7 +376,9 @@ class _Emitter:
         ``TOOL_EXIT_CODE``; the last one is the event's ``exit_code``.
         *approval* is what came of asking the approval policy about the
         call (``request_id``, ``allowed``, ``reason``, ``remember`` and
-        ``origin``), or ``None`` when it was not asked.
+        ``origin``), or ``None`` when it was not asked. *asks* are the
+        questions the call's tool asked itself (``TOOL_ASK``) that were
+        refused, as ``tool_asks``: the key is there only when one was.
         """
         if self._sink is None:
             return
@@ -396,6 +399,7 @@ class _Emitter:
                     "images": [_image_entry(image) for image in result.images],
                     "approval": None if approval is None else dict(approval),
                     "exit_code": exit_codes[-1] if exit_codes else None,
+                    **_asks(asks),
                 }
             ),
             images=tuple(result.images),
@@ -410,6 +414,7 @@ class _Emitter:
         exit_codes: Sequence[int] | None,
         not_started: bool = False,
         approval: Mapping[str, Any] | None = None,
+        asks: Sequence[Mapping[str, Any]] = (),
     ) -> None:
         """*call* ended in *exc* instead of a result.
 
@@ -420,7 +425,8 @@ class _Emitter:
         about the call. Any other exception, which ends the run, gives
         ``crashed``, also a ``CancelledError`` that something raised while
         nothing cancelled the run. ``duration_s`` is the time since
-        ``tool.started``. *approval* is as for :meth:`tool_finished`.
+        ``tool.started``. *approval* and *asks* are as for
+        :meth:`tool_finished`.
         """
         if self._sink is None:
             return
@@ -449,6 +455,7 @@ class _Emitter:
                     "images": [],
                     "approval": None if approval is None else dict(approval),
                     "exit_code": exit_codes[-1] if exit_codes else None,
+                    **_asks(asks),
                 }
             ),
         )
@@ -784,6 +791,11 @@ def _call_entry(call: ToolCall) -> dict[str, Any]:
 def _redacted(text: str | None) -> str | None:
     """*text* through :func:`redact_secrets`; ``None`` stays ``None``."""
     return None if text is None else redact_secrets(text)[0]
+
+
+def _asks(asks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """``tool_asks`` of a tool event: only when the call's tool had a question refused."""
+    return {"tool_asks": [dict(ask) for ask in asks]} if asks else {}
 
 
 def _image_entry(image: ImagePart) -> dict[str, Any]:

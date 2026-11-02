@@ -1698,6 +1698,31 @@ class Front:
             said=said(key, title=record.title),
         )  # fmt: skip
 
+    async def _stop_started(self, record: TaskRecord, echo_id: int) -> dict[str, Any]:
+        """Stop a task the chat started, and the chat's follow-up on it (#431).
+
+        Its row keeps Stop while the task or that follow-up can still run: a
+        follow-up that waits or runs is stopped first, so it never continues
+        the task, then the task itself while it runs. A task that has finished
+        is stopped already: the row is answered (its buttons go) all the same,
+        with Undo only when a follow-up was stopped.
+        """
+        followups = self.console.followups
+        stopped = await followups.stop(record.task_id)
+        now = await self.record(record.task_id) or record
+        if now.state not in FINISHED:
+            echo = await self.control(_ref(now), "stop", of=echo_id)
+            now = await self.record(record.task_id) or now
+            if echo.get("echo") != "failed" or now.state not in FINISHED:
+                return echo
+            # It ended as the Stop came: what may still run is its follow-up.
+            stopped = await followups.stop(record.task_id) or stopped
+        return await self._echo(
+            "control", now.task_id, now.title, f"Stopped: {now.title}", None,
+            echo_id, action="stop", undo={"again": True} if stopped else None,
+            said=said("front.echo.stopped", title=now.title),
+        )  # fmt: skip
+
     async def set_level(
         self,
         record: TaskRecord,
@@ -1943,7 +1968,7 @@ class Front:
             raise ApiError(404, "not_found", t("front.echo.gone"))
         if do == "stop" and kind == "started":
             # The Stop of a task the chat started (#410): the person's own tap.
-            return await self.control(_ref(record), "stop", of=echo_id)
+            return await self._stop_started(record, echo_id)
         if do == "level" and kind in ("started", "level"):
             number = level_number(level)
             if number is None:
@@ -1962,8 +1987,8 @@ class Front:
                 text = str(echo.get("text", ""))
                 return await self.follow(record, text, typed=text, of=echo_id)
             return await self.control(_ref(record), echo["action"], of=echo_id)
-        if do == "undo" and kind in ("control", "level"):
-            return await self._undo(record, echo.get("undo") or {}, echo_id)
+        if do == "undo" and kind in ("control", "level") and echo.get("undo"):
+            return await self._undo(record, echo["undo"], echo_id)
         raise ApiError(400, "invalid_request", f"{do} does not apply to this line.")
 
     async def _act_sleep(
