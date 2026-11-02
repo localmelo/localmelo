@@ -513,9 +513,11 @@ Tasks link in the sidebar, and the task page is not a view of its own.
 
 - A task that ended opens with its answer, set as in a chat, above its facts. A task that
   did not complete says why in the same place. Its steps are folded under **Steps**.
-- **What melo told the task** is folded on the page when the task began with notes from its
-  chat (see [Tasks start with them](memory.md#notes-melo-keeps-about-you)): the lines it was given,
-  as information, not instructions. A task with no notes shows no fold.
+- **What melo told the task** is folded on the page when the task began with something from you
+  or its chat (see [Tasks start with them](memory.md#notes-melo-keeps-about-you)), each part under
+  its own label: what you typed (when its request left it out), the chat's earlier turns, what the
+  chat recalled for it, and your notes. They are information, not instructions. A task that got
+  none of these shows no fold.
 
 - **Resume** appears for a parked or interrupted task. The page asks the
   server and confirms only when the server requires it: then a dialog says "A

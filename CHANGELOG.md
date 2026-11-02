@@ -9,6 +9,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A task the chat starts now begins with what the chat knew when you asked, so a short request
+  such as "go look it up" or "read his résumé first" keeps who or what it is about. After its
+  request, each part marked as data: what you typed, when the request the task got does not hold
+  it already (cut at a sentence end at 1,200 characters); the chat's newest three turns (1,200
+  characters at most); and what the chat's turn opened, found with its memory search or recalled,
+  in that order, each once, with no ids and no People or Decisions notes. That part has at most
+  900 of the context pack's 1,500 characters, ahead of your notes: an opened turn is cut at a
+  sentence end first, then the lowest lines go. With memory off a task gets your words only, and
+  a turn melo began itself hands nothing over. All of it is made once, kept in the task's `spec`
+  (`own_words`, `chat_turns`, `chat_picked`) and folded on the task page under "What melo told
+  the task", each part under its own label. #463.
 - Developer only, not visible by default: a cut excerpt can be opened whole. With
   `[memory] excerpt_open = "on"` (`-X memory.excerpt_open=on` for one run; the default, `"off"`,
   changes nothing) recall keeps its excerpts of earlier chat turns, but a line that shows less

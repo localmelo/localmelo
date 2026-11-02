@@ -93,6 +93,11 @@ async def test_a_task_made_on_the_tasks_page_gets_no_chat_turns(
         )
         for name in ("chat_turns", "chat_picked", "own_words"):
             assert name not in record.spec
+            # Only trusted code sets them: a request that names one is refused.
+            refused = await client.post(
+                "/api/tasks", json={"prompt": "Look up roles.", name: "- Alex"}
+            )
+            assert refused.status_code == 400, refused.text
 
 
 async def test_the_task_reads_them_as_data_after_its_request(
