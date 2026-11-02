@@ -622,6 +622,204 @@ async def test_a_site_opens_when_named_and_is_reviewed_otherwise(
         assert answer.reason.startswith(BLOCKED)
 
 
+class ActsOnSite(OpensSite):
+    """A provided tool that asks to act on a site the way the browser does."""
+
+    async def start(self) -> list[ProvidedTool]:
+        [tool] = await super().start()
+        return [
+            ProvidedTool(
+                definition=ToolDef(
+                    name="act_on_site",
+                    description="Click on a site, or send a form from it.",
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "site": {"type": "string"},
+                            "access": {"type": "string"},
+                            "how": {"type": "string"},
+                        },
+                        "required": ["site", "access"],
+                    },
+                    annotations={"readOnlyHint": True},
+                ),
+                function=self._act,
+            )
+        ]
+
+    async def _act(self, site: str, access: str, how: str = "click") -> str:
+        ask = TOOL_ASK.get()
+        assert ask is not None
+        arguments: dict[str, Any] = {"site": site, "access": access, "how": how}
+        if access == "submit":
+            arguments.update(
+                to="https://collect.example/post", fields=[["email", "me@example.org"]]
+            )
+        if access == "type":
+            arguments.update(text="hello there")
+        decision = await ask(
+            f"browser-{access}:https://{site}", arguments, f"{access} on {site}"
+        )
+        self.answers.append(decision)
+        return "done" if decision.allow else decision.reason
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("access", "reviews", "allowed", "reviewed"),
+    [
+        # Clicking on a site the request names is reviewed like opening it: routine.
+        ("act", [], True, 0),
+        # A form sent from it is reviewed by itself, even there.
+        ("submit", [verdict()], True, 1),
+        ("submit", [verdict(fits_request="no", category="beyond_request")], False, 1),
+    ],
+)
+async def test_a_click_is_reviewed_like_opening_the_site_and_a_form_by_itself(
+    tmp_path: Path,
+    access: str,
+    reviews: list[Message],
+    allowed: bool,
+    reviewed: int,
+) -> None:
+    tool = ActsOnSite()
+    plans = [
+        _calls(("act_on_site", {"site": "news.example", "access": access}, "call_1")),
+        _answer("done"),
+    ]
+    llm = FakeModel(plans, reviews)
+    (tmp_path / "ws").mkdir()
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset(),
+            tool_exposure="all",
+            workspace_root=str(tmp_path / "ws"),
+        ),
+        tool_providers=[tool],
+    )
+    agent.chat.sleep = _no_wait
+
+    await agent.run_task("log in to news.example for me", approval=AutoPolicy())
+
+    [answer] = tool.answers
+    assert answer.allow is allowed
+    assert len(llm.review_requests) == reviewed
+    if reviewed:
+        words = json.dumps([m.content for m in llm.review_requests[0]])
+        assert "collect.example/post" in words
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("how", "reviews", "allowed", "reviewed"),
+    [
+        # A click or a choice on a site the request names stays routine.
+        ("click", [], True, 0),
+        ("select", [], True, 0),
+        # Typed text is the model's own: reviewed by itself, even on that site.
+        ("type", [verdict()], True, 1),
+        ("type", [verdict(fits_request="no", category="beyond_request")], False, 1),
+    ],
+)
+async def test_typing_is_reviewed_by_itself_while_a_click_or_choice_stays_routine(
+    tmp_path: Path,
+    how: str,
+    reviews: list[Message],
+    allowed: bool,
+    reviewed: int,
+) -> None:
+    tool = ActsOnSite()
+    access = "type" if how == "type" else "act"
+    call = ("act_on_site", {"site": "news.example", "access": access, "how": how}, "c1")
+    llm = FakeModel([_calls(call), _answer("done")], reviews)
+    (tmp_path / "ws").mkdir()
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset(),
+            tool_exposure="all",
+            workspace_root=str(tmp_path / "ws"),
+        ),
+        tool_providers=[tool],
+    )
+    agent.chat.sleep = _no_wait
+
+    await agent.run_task("log in to news.example for me", approval=AutoPolicy())
+
+    [answer] = tool.answers
+    assert answer.allow is allowed
+    assert len(llm.review_requests) == reviewed
+    if reviewed:
+        words = json.dumps([m.content for m in llm.review_requests[0]])
+        assert "types text on news.example" in words and "hello there" in words
+
+
+@pytest.mark.asyncio
+async def test_typing_the_same_text_twice_is_two_reviews(tmp_path: Path) -> None:
+    tool = ActsOnSite()
+    typing = {"site": "news.example", "access": "type", "how": "type"}
+    llm = FakeModel(
+        [
+            _calls(("act_on_site", typing, "call_1")),
+            _calls(("act_on_site", typing, "call_2")),
+            _answer("done"),
+        ],
+        [verdict(), verdict()],
+    )
+    (tmp_path / "ws").mkdir()
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset(),
+            tool_exposure="all",
+            workspace_root=str(tmp_path / "ws"),
+        ),
+        tool_providers=[tool],
+    )
+    agent.chat.sleep = _no_wait
+
+    await agent.run_task("log in to news.example for me", approval=AutoPolicy())
+
+    assert [answer.allow for answer in tool.answers] == [True, True]
+    assert len(llm.review_requests) == 2, "a typing verdict is never reused"
+
+
+@pytest.mark.asyncio
+async def test_sending_twice_is_two_reviews_and_the_review_sees_what_goes(
+    tmp_path: Path,
+) -> None:
+    tool = ActsOnSite()
+    send = {"site": "news.example", "access": "submit"}
+    llm = FakeModel(
+        [
+            _calls(("act_on_site", send, "call_1")),
+            _calls(("act_on_site", send, "call_2")),
+            _answer("done"),
+        ],
+        [verdict(), verdict()],
+    )
+    (tmp_path / "ws").mkdir()
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset(),
+            tool_exposure="all",
+            workspace_root=str(tmp_path / "ws"),
+        ),
+        tool_providers=[tool],
+    )
+    agent.chat.sleep = _no_wait
+
+    await agent.run_task("log in to news.example for me", approval=AutoPolicy())
+
+    assert [answer.allow for answer in tool.answers] == [True, True]
+    assert len(llm.review_requests) == 2, "a send's verdict is never reused"
+    for request in llm.review_requests:
+        words = json.dumps([m.content for m in request])
+        assert "collect.example/post" in words and "me@example.org" in words
+
+
 # ── What the review counts as the user's words, and how long it keeps them ──
 
 

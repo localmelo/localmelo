@@ -514,9 +514,12 @@ class BrowserConfig:
 
     ``driver`` is ``off`` (the default, no browser tools) or ``safari-automation``
     (Safari's automation windows). Only the terminal chat and the console offer it.
+    ``keep_tabs`` leaves the tabs melo opened in the window when a chat ends or
+    sits idle; by default melo closes them.
     """
 
     driver: str = "off"  # off | safari-automation
+    keep_tabs: bool = False
 
 
 # The most folders ``[workspace] extra_folders`` keeps.
@@ -815,12 +818,17 @@ class Config:
         return errors
 
     def _validate_browser(self) -> list[str]:
-        """``[browser] driver`` names a driver."""
-        if self.browser.driver in BROWSER_DRIVERS:
-            return []
-        return [
-            f"[browser] driver={self.browser.driver!r} is not one of {BROWSER_DRIVERS}"
-        ]
+        """``[browser] driver`` names a driver and ``keep_tabs`` is true or false."""
+        errors = []
+        if self.browser.driver not in BROWSER_DRIVERS:
+            errors.append(
+                f"[browser] driver={self.browser.driver!r} is not one of {BROWSER_DRIVERS}"
+            )
+        if not isinstance(self.browser.keep_tabs, bool):
+            errors.append(
+                f"[browser] keep_tabs={self.browser.keep_tabs!r} must be true or false"
+            )
+        return errors
 
     def _validate_tools(self) -> list[str]:
         """``[tools]`` holds a bool and a list of exact local test server entries."""
@@ -1959,7 +1967,10 @@ def save(cfg: Config) -> None:
         lines.append("")
 
     if cfg.browser != BrowserConfig():
-        lines.extend(["[browser]", f"driver = {_toml_string(cfg.browser.driver)}", ""])
+        lines.extend(["[browser]", f"driver = {_toml_string(cfg.browser.driver)}"])
+        if cfg.browser.keep_tabs is not False:
+            lines.append(f"keep_tabs = {_toml_value(cfg.browser.keep_tabs)}")
+        lines.append("")
 
     if cfg.tools != ToolsConfig():
         lines.extend(["[tools]", f"web_fetch = {_toml_value(cfg.tools.web_fetch)}"])

@@ -21,6 +21,7 @@ import pytest
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.checker import DEFAULT_BUILTINS
 from localmelo.melo.contracts.approvals import (
+    TOOL_ASK,
     AllowAllPolicy,
     ApprovalDecision,
     ApprovalRequest,
@@ -230,6 +231,47 @@ class TieredTools(BaseToolProvider):
     async def _remember(self) -> str:
         self.ran.append("remember")
         return "remembered"
+
+    async def close(self) -> None:
+        pass
+
+
+class SelfAskingTools(BaseToolProvider):
+    """A write tool that asks its own question, whatever it says about itself.
+
+    ``own`` is the word ``ProvidedTool.asks_itself`` that melo's browser provider gives.
+    """
+
+    def __init__(
+        self, name: str, annotations: dict[str, Any], own: bool = False
+    ) -> None:
+        self.name = name
+        self.annotations = annotations
+        self.own = own
+        self.ran: list[str] = []
+
+    async def start(self) -> list[ProvidedTool]:
+        return [
+            ProvidedTool(
+                definition=ToolDef(
+                    name=self.name,
+                    description="Act on a site",
+                    parameters={"type": "object", "properties": {}},
+                    annotations=self.annotations,
+                ),
+                function=self._poke,
+                asks_itself=self.own,
+            )
+        ]
+
+    async def _poke(self) -> str:
+        ask = TOOL_ASK.get()
+        assert ask is not None
+        decision = await ask(
+            "browser-act:https://example.com", {"site": "example.com"}, "x"
+        )
+        self.ran.append(self.name if decision.allow else "refused")
+        return "poked" if decision.allow else "refused"
 
     async def close(self) -> None:
         pass
@@ -474,6 +516,105 @@ class TestWhoIsAsked:
         } == {"lookup": "read", "remember": "write"}
         assert [request.tool_name for request in policy.requests] == ["remember"]
         assert provider.ran == ["lookup", "remember"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("name", "annotations", "own", "asked"),
+        [
+            # An ordinary write tool is asked about its call, then asks its own question.
+            (
+                "poke",
+                {"readOnlyHint": False},
+                False,
+                ["poke", "browser-act:https://example.com"],
+            ),
+            # One of melo's own that ask for themselves (the provider says so and the
+            # name is on melo's list) is asked only its own question, with no
+            # annotation at all.
+            (
+                "browser_select",
+                {"readOnlyHint": False},
+                True,
+                ["browser-act:https://example.com"],
+            ),
+            # The same name from any other provider is asked about its call all the same.
+            (
+                "browser_type",
+                {"readOnlyHint": False},
+                False,
+                ["browser_type", "browser-act:https://example.com"],
+            ),
+            # The provider's word does nothing for a name melo does not list.
+            (
+                "poke",
+                {"readOnlyHint": False},
+                True,
+                ["poke", "browser-act:https://example.com"],
+            ),
+            # A tool of a server that says it asks for itself is asked all the same:
+            # a name melo does not list, and an annotation nobody trusts.
+            (
+                "mcp__srv__poke",
+                {"readOnlyHint": False, "asksItself": True},
+                False,
+                ["mcp__srv__poke", "browser-act:https://example.com"],
+            ),
+            (
+                "browser_click",
+                {"readOnlyHint": False, "asksItself": True},
+                False,
+                ["browser_click", "browser-act:https://example.com"],
+            ),
+        ],
+    )
+    async def test_only_melos_own_tools_ask_for_themselves(
+        self, name: str, annotations: dict[str, Any], own: bool, asked: list[str]
+    ) -> None:
+        provider = SelfAskingTools(name, annotations, own)
+        llm = ScriptedLLM([_calls((name, {}, "c1")), _answer("done")])
+        policy = Policy(ApprovalDecision(True))
+        agent, _ = _agent(llm, providers=[provider])
+
+        result = await agent.run_task("poke the site", approval=policy)
+
+        assert result.status == "completed"
+        assert [request.tool_name for request in policy.requests] == asked
+        assert provider.ran == [name]
+
+    @pytest.mark.asyncio
+    async def test_a_tool_the_library_registers_as_browser_type_keeps_its_approval(
+        self,
+    ) -> None:
+        # Registered straight on the agent, as Python code does: no provider, no word
+        # from melo's browser provider, so its name alone skips nothing.
+        ran: list[str] = []
+
+        async def browser_type(text: str) -> str:
+            ran.append(text)
+            return "typed"
+
+        agent, _ = _agent(
+            ScriptedLLM([_calls(("browser_type", {"text": "hi"}, "c1")), _answer("ok")])
+        )
+        agent.hippo.register_tool(
+            ToolDef(
+                name="browser_type",
+                description="My own typing tool",
+                parameters={
+                    "type": "object",
+                    "properties": {"text": {"type": "string"}},
+                    "required": ["text"],
+                },
+            )
+        )
+        agent.executor.register("browser_type", browser_type, requires_approval=True)
+        policy = Policy(ApprovalDecision(False, reason="no"))
+
+        result = await agent.run_task("type something", approval=policy)
+
+        assert result.status == "completed"
+        assert [request.tool_name for request in policy.requests] == ["browser_type"]
+        assert ran == []
 
     @pytest.mark.asyncio
     async def test_retrieve_mode_asks_about_builtins_and_offered_tools_only(

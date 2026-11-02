@@ -174,7 +174,7 @@ class SessionNavigation:
         old, s.runner = s.runner, candidate
         self.mark = mark
         s.approvals.reset()
-        browsing.forget(s)
+        await browsing.forget(s)
         s.session_tools.reset()
         s.title = current.title
         s.renderer.clear_session()
