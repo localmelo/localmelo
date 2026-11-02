@@ -866,6 +866,21 @@ def test_a_task_that_ran_out_of_steps_is_a_stopped_card_not_a_failed_one() -> No
     assert "Not finished" not in line.plain
 
 
+def test_a_card_names_the_file_the_task_was_asked_to_write_and_did_not() -> None:
+    ending = {
+        "state": "draft",
+        "reasons": ["file_missing"],
+        "missing": ["career-advice.md"],
+    }
+    card = {"state": "done", "source_id": "t1", "source_kind": "task",
+            "title": "Jobs that fit", "line": "Jobs: ML systems.", "ending": ending}  # fmt: skip
+    line = card_line(card, UNICODE, 140)
+    assert line.plain.startswith(
+        "⚠ Done, not finished: Jobs that fit · A file it was asked to write is "
+        "missing: career-advice.md"
+    )
+
+
 def test_a_done_task_card_says_how_code_found_it_ended() -> None:
     card = {"state": "done", "source_id": "t1", "source_kind": "task", "title": "Fix it",
             "line": "Fixed it.", "ending": {"state": "draft", "reasons": ["tests_failed", "commit_missing"]}}  # fmt: skip

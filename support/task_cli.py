@@ -33,6 +33,7 @@ _WHY = (
     "unreadable",
     "stashed",
     "no_runner",
+    "file_missing",
 )
 _NOTES = ("no_tests",)
 
@@ -234,7 +235,16 @@ def ending_words(ending: Any) -> tuple[str, str]:
     notes = ending.get("notes")
     notes = notes if isinstance(notes, list) else []
     why = [str(ending.get("question") or "")]
-    why += [t_in("en", f"ending.reason.{code}") for code in reasons if code in _WHY]
+    # The files the words asked for that are not in the folder (file_missing).
+    missing = ending.get("missing")
+    files = (
+        ", ".join(str(name) for name in missing) if isinstance(missing, list) else ""
+    )
+    why += [
+        t_in("en", f"ending.reason.{code}", files=files)
+        for code in reasons
+        if code in _WHY
+    ]
     # What the ending notes beside it, such as that no tests apply to the folder.
     why += [t_in("en", f"ending.note.{code}") for code in notes if code in _NOTES]
     return t_in("en", f"ending.state.{name}"), "; ".join(w for w in why if w)

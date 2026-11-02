@@ -25,6 +25,9 @@ ended ready. Ready needs proof; any doubt leaves ``draft`` with its reason:
   offers Finish it again (:data:`FINISH_TRIED`);
 - ``commit_missing``: a commit was asked and changes since the baseline are not
   committed;
+- ``file_missing``: the words asked the task to write or save a named file
+  (``notes.md``, ``table.csv``) and it is not in the folder; ``missing``
+  names them. Only names written as files count (#440);
 - ``unchecked``: git or the snapshot could not be read, the folder lists too
   many changes (or files), or ``git stash list`` grew in this run (or in an
   earlier one, while it stays above the count that run started with), and a
@@ -64,6 +67,7 @@ from localmelo.support.words import LANGUAGES, t_in
 
 from .finishing import OUT_OF_STEPS
 from .i18n import t
+from .task_files import missing_files
 from .task_store import TaskRecord
 
 STATES: Final = ("ready", "draft", "blocked", "failed", "dropped")
@@ -1224,6 +1228,7 @@ async def decide(
     asks_commit: bool,
     asks_tests: bool = False,
     finishing: bool = False,
+    asked_files: Sequence[str] = (),
 ) -> dict[str, Any] | None:
     """The ending of a run that ended in *phase*, or ``None`` for its state's default.
 
@@ -1232,6 +1237,10 @@ async def decide(
     Finish it's (its message, :func:`finishes`, or the person's own ask for the
     tests on a task that already ran), so a folder with no runner ends with
     ``no_tests``, and one still not checked is not offered Finish it again.
+    *asked_files*: the files the words asked the task to write
+    (:func:`~localmelo.support.gateway.task_files.asked_files`); a run that
+    ended done with one of them not in the folder is no Ready
+    (``file_missing``, the names in ``missing``, #440).
     """
     out_of_steps = phase == "failed" and failure_reason == OUT_OF_STEPS
     if phase != "done" and not out_of_steps:
@@ -1251,6 +1260,11 @@ async def decide(
     )
     if asks_commit and own and "commit_missing" not in reasons:
         reasons.append("commit_missing")
+    missing: list[str] = []
+    if asked_files and not out_of_steps:
+        missing = await asyncio.to_thread(missing_files, folder, list(asked_files))
+        if missing:
+            reasons.append("file_missing")
     if out_of_steps:
         state, reasons = "draft", ["out_of_steps", *reasons]
     elif proposed in ("failed", "dropped"):
@@ -1276,6 +1290,7 @@ async def decide(
         "question": question,
         "tests": kept,
         "uncommitted": own,
+        "missing": missing,
         "notes": notes,
         "turn": turn.turn if turn is not None else None,
         "run_id": turn.run_id if turn is not None else "",

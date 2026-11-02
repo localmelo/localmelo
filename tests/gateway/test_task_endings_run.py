@@ -627,3 +627,51 @@ async def test_a_finish_it_run_parked_and_resumed_is_still_finish_its(
     ending = await workers._ending(task_id, "done", None, str(folder), base, resumed)
     assert ending is not None
     assert (ending["state"], ending["notes"]) == ("ready", ["no_tests"])
+
+
+# ── Ready needs the files the words asked for (#440) ──
+
+ADVICE = "Read my site, then write the advice to career-advice.md"
+
+
+async def test_a_named_file_never_written_is_done_not_finished(
+    setup: Setup, tmp_path: Path
+) -> None:
+    workers, llm, _ = setup
+    folder = tmp_path / "localmelo-workspace"
+    folder.mkdir()
+    llm.replies = [says("Jobs that fit: ML systems engineer.\nEnding: ready")]
+    task = await ended(workers, await start(workers, folder, ADVICE))
+    ending = task["ending"]
+    assert (ending["state"], ending["reasons"]) == ("draft", ["file_missing"])
+    assert ending["missing"] == ["career-advice.md"]
+
+
+async def test_a_named_file_written_is_ready(setup: Setup, tmp_path: Path) -> None:
+    workers, llm, _ = setup
+    folder = tmp_path / "localmelo-workspace"
+    folder.mkdir()
+    write = {"path": "career-advice.md", "content": "# Jobs\n- ML systems\n"}
+    llm.replies = [
+        call("file_write", write),
+        says("Wrote career-advice.md.\nEnding: ready"),
+    ]
+    task = await ended(workers, await start(workers, folder, ADVICE))
+    ending = task["ending"]
+    assert (ending["state"], ending["reasons"]) == ("ready", [])
+    assert "missing" not in ending or ending["missing"] == []
+
+
+async def test_a_file_a_later_message_asks_for_is_needed_too(
+    setup: Setup, tmp_path: Path
+) -> None:
+    workers, llm, _ = setup
+    folder = tmp_path / "localmelo-workspace"
+    folder.mkdir()
+    llm.replies = [says("Three laptops compared.\nEnding: ready")]
+    task_id = await start(workers, folder, "Compare three light laptops")
+    assert (await ended(workers, task_id))["ending"]["state"] == "ready"
+    llm.replies = [says("Here is the table.\nEnding: ready")]
+    await workers.message(task_id, "now save the table as laptops.csv")
+    ending = (await ended(workers, task_id, turns=2))["ending"]
+    assert (ending["state"], ending["missing"]) == ("draft", ["laptops.csv"])
