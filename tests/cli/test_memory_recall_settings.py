@@ -2,8 +2,9 @@
 
 ``recall_records``, ``recall_docs``, ``recall_chars``, ``recall_notes``,
 ``search_when_empty``, ``recall_min_cosine``, ``recall_min_coverage``,
-``recall_item_chars``, ``recall_excerpt``, ``recall_form``, ``recall_list_max`` and
-``recall_open_chars`` are saved only when they differ from the default, checked
+``recall_item_chars``, ``recall_excerpt``, ``recall_form``, ``recall_list_max``,
+``recall_open_chars``, ``recall_source``, ``open_sources``, ``compress_at_chars`` and
+``compress_cache`` are saved only when they differ from the default, checked
 against their bounds and values, set for one run with ``-X``, and listed by the
 developer help only, each with the issue that decides it.
 """
@@ -32,12 +33,20 @@ CHANGED = {
     "recall_form": "list",
     "recall_list_max": 35,
     "recall_open_chars": 9000,
+    "recall_source": "items",
+    "open_sources": "on",
+    "compress_at_chars": 20000,
+    "compress_cache": "cache/compress.jsonl",
 }
 # The issue that decides each setting, as the developer help names it.
 ISSUE = {name: "#349" for name in CHANGED} | {
     "recall_form": "#428",
     "recall_list_max": "#428",
     "recall_open_chars": "#428",
+    "recall_source": "#428",
+    "open_sources": "#428",
+    "compress_at_chars": "#428",
+    "compress_cache": "#428",
 }
 
 
@@ -73,6 +82,8 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
             "recall_min_cosine = 0.45\nrecall_min_coverage = 0.4\n"
             'recall_item_chars = 800\nrecall_excerpt = "match"\n'
             'recall_form = "list"\nrecall_list_max = 35\nrecall_open_chars = 9000\n'
+            'recall_source = "items"\nopen_sources = "on"\n'
+            'compress_at_chars = 20000\ncompress_cache = "cache/compress.jsonl"\n'
         ) in text
         assert config.load().memory == MemoryConfig(**CHANGED)  # type: ignore[arg-type]
         for name, value in CHANGED.items():  # each alone
@@ -114,6 +125,15 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
         ("recall_open_chars", 500),
         ("recall_open_chars", 16000),
         ("recall_open_chars", 4000),
+        ("recall_source", "turns"),
+        ("recall_source", "items"),
+        ("open_sources", "off"),
+        ("open_sources", "on"),
+        ("compress_at_chars", 4000),
+        ("compress_at_chars", 60000),
+        ("compress_at_chars", 12000),
+        ("compress_cache", ""),
+        ("compress_cache", "~/runs/compress_cache.jsonl"),
     ],
 )
 def test_the_bounds_and_values_are_accepted(name: str, value: object) -> None:
@@ -266,6 +286,43 @@ def test_the_bounds_and_values_are_accepted(name: str, value: object) -> None:
             "[memory] recall_open_chars must be a whole number, got '4000'",
         ),
         (
+            "recall_source",
+            "both",
+            "[memory] recall_source 'both' is not recognised. "
+            "Must be one of ('turns', 'items').",
+        ),
+        (
+            "open_sources",
+            True,
+            "[memory] open_sources True is not recognised. "
+            "Must be one of ('off', 'on').",
+        ),
+        (
+            "compress_at_chars",
+            3999,
+            "[memory] compress_at_chars must be from 4000 to 60000, got 3999",
+        ),
+        (
+            "compress_at_chars",
+            60001,
+            "[memory] compress_at_chars must be from 4000 to 60000, got 60001",
+        ),
+        (
+            "compress_at_chars",
+            "12000",
+            "[memory] compress_at_chars must be a whole number, got '12000'",
+        ),
+        (
+            "compress_cache",
+            "a\x00b",
+            "[memory] compress_cache must be a path string without NUL",
+        ),
+        (
+            "compress_cache",
+            7,
+            "[memory] compress_cache must be a path string without NUL",
+        ),
+        (
             "recall_min_cosine",
             True,
             "[memory] recall_min_cosine must be a number, got True",
@@ -337,6 +394,11 @@ def test_x_sets_each_for_one_run_and_only_the_developer_help_lists_them(
         "memory.recall_open_chars=499",
         "memory.recall_open_chars=16001",
         "memory.recall_open_chars=long",
+        "memory.recall_source=both",
+        "memory.open_sources=maybe",
+        "memory.compress_at_chars=3999",
+        "memory.compress_at_chars=60001",
+        "memory.compress_at_chars=big",
     ],
 )
 def test_x_refuses_a_bad_value_with_a_clear_message(
