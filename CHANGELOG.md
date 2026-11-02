@@ -9,6 +9,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A chat keeps whom a request is about (#452). A new side chat's (or terminal chat's) first
+  message also reads up to five short lines on your other chats of the last 30 minutes, at most
+  600 characters after your own words: what each turn was about and where, read from memory's
+  index of your chats. `read his résumé first` then means the friend you were just discussing in
+  the main chat. Under your message, **From your other chats (last 30 min)** opens the lines melo
+  read, and a chat's name opens that chat; the turn's `turn.memory` event carries them as
+  `digest`. The main chat never gets it; `[chat] recent_digest_minutes` sets the minutes
+  (`0` turns it off), and `[memory] across_chats = false` turns it off too. Every chat is also
+  told that he, she or it means whom the conversation is about, that your own profile (a profile
+  file, notes about you) counts only when you speak of yourself, that 他, 她 and 它 never switch
+  the subject, and to ask one short question when it stays unclear. A task the main chat starts
+  names the person it is about instead of a pronoun.
 - An approval card says in one plain sentence what the step will do (#454). The
   console's Ask and Auto-blocked cards, the terminal's approval panel and a blocked step's row
   start with it, before the question and the reasons, and show the code under it. For a command
@@ -923,6 +935,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A short follow-up such as `go look it up` no longer drifts to your own profile once a long
+  search has filled melo's working memory (#452). The chat's newest three turns (your words and
+  the answers, at most 1200 characters) now come with the reflection after the step budget, the
+  answer melo gives when it stops, and a step whose working memory has lost them, so the answer
+  stays on the person the chat is about. A run with no earlier turns, such as a direct
+  `melo "task"` run, sends exactly what it sent before.
 - A short follow-up such as "go look it up", "continue" or "去查一下" recalls from what
   you said just before, not from its own words (#452). Searched by those words alone, it
   matched whatever held them (turns about who you are, say) and put them in the prompt.
