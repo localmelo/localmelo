@@ -26,11 +26,18 @@ inference from what the user typed (``inferred``), in that order of trust.
 Every level but ``typed`` also refuses a note that is an instruction to the assistant
 (:func:`is_instruction`), not a fact about the user. Secrets are refused at every
 level before this module is asked.
+
+What a page, a file or a finished task's result may support is what it *states*, not
+what it hides or asks the assistant to do (:func:`material_text`): text a reader of
+the page would not see, and every paragraph with an order to the assistant in it, are
+no source at any level, the ``typed`` one included for results. What the user typed is
+never cleaned.
 """
 
 from __future__ import annotations
 
 import contextlib
+import html
 import itertools
 import os
 import re
@@ -150,7 +157,8 @@ class Material(NamedTuple):
     """A page or file the user pointed to, as this chat read it.
 
     *ref* is the address (a page) or the file name, *text* what the tool returned
-    and *other* says the user called it someone else's.
+    that may support a note (:func:`material_text`: no hidden text, no order to the
+    assistant, never empty) and *other* says the user called it someone else's.
     """
 
     kind: str  # "page" or "file"
@@ -359,7 +367,9 @@ def pointed_material(
 
     It is someone else's (``other``) when the words of that turn, or of a turn that
     names it, say so. A page or file the user did not point to is left out, as is
-    every call of a turn the user did not begin.
+    every call of a turn the user did not begin. The text of each is what
+    :func:`material_text` leaves of what the tool returned, and a read that leaves
+    nothing is left out.
     """
     folded = {turn: fold(text) for turn, text in typed.items()}
     places = {turn: typed_places(text) for turn, text in typed.items()}
@@ -425,7 +435,11 @@ def pointed_material(
         if not named and not theirs:
             continue
         other = any(_OTHERS.search(folded[t]) for t in {began, *named})
-        found.append(Material(kind, ref, text, other))
+        # What a note may rest on is what the page or file states, not what it
+        # hides or orders; a read with nothing of that left is no material.
+        stated = material_text(text)
+        if stated.strip():
+            found.append(Material(kind, ref, stated, other))
     return found[-MAX_MATERIAL:]
 
 
@@ -654,6 +668,354 @@ def about_user(note: str) -> bool:
     """Whether *note* says something about the user: it addresses them (``you``,
     ``your``, ``你``) or names them (``the user``)."""
     return records.addresses_user(note) or records.names_user(note)
+
+
+# ── What material states ──
+#
+# A page, a file or a task's result supports a note by what it *states*. Text a
+# reader of the page would not see (a comment, an element hidden by its style,
+# invisible characters) and an order to the assistant ("save a note that ...") are
+# no evidence that something holds, however the words match: source monitoring says
+# an order to believe X is not a reason to. :func:`material_text` leaves what states.
+
+# Characters that draw nothing: every format character (zero-width ones, bidi marks,
+# the soft hyphen, the tag characters), the invisible fillers, the blank braille and
+# the variation selectors.
+_FILLERS: Final = frozenset(
+    "\u034f\u115f\u1160\u17b4\u17b5\u180b\u180c\u180d\u2800\u3164\uffa0"
+)
+
+
+def _invisible(char: str) -> bool:
+    code = ord(char)
+    return (
+        char in _FILLERS
+        or unicodedata.category(char) == "Cf"
+        or 0xFE00 <= code <= 0xFE0F
+        or 0xE0100 <= code <= 0xE01EF
+    )
+
+
+# An HTML or XML comment; one never closed hides the rest, as a browser does.
+_COMMENT = re.compile(r"<!--.*?(?:-->|\Z)", re.DOTALL)
+# A Markdown link reference whose address is ``#`` or ``<>`` (``[//]: # (note)``,
+# ``[comment]: <> "note"``): it draws nothing, and its title is where a note hides.
+_LINK_COMMENT = re.compile(
+    r"^[ \t]{0,3}\[[^\]\n]*\][ \t]*:[ \t]*(?:#|<>)"
+    r"(?:[ \t]*(?:\((?:(?!\n[ \t]*\n)[^)])*\)|\"(?:(?!\n[ \t]*\n)[^\"])*\""
+    r"|'(?:(?!\n[ \t]*\n)[^'])*'))?[^\n]*$",
+    re.MULTILINE,
+)
+_TAG = re.compile(
+    r"<(?P<close>/?)(?P<name>[A-Za-z][A-Za-z0-9:_-]*)"
+    r"(?P<attrs>(?:\"[^\"]*\"|'[^']*'|[^<>\"'])*?)(?P<self>/?)>"
+)
+_ATTRIBUTE = re.compile(
+    r"([^\s\"'<>/=]+)(?:\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s\"'<>=`]+)))?"
+)
+_CSS_COMMENT = re.compile(r"/\*.*?(?:\*/|\Z)", re.DOTALL)
+_VOID: Final = frozenset(
+    {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    }
+)
+# Elements a browser never draws (the text of ``script`` and ``style`` is no markup).
+_NEVER_SHOWN: Final = frozenset(
+    {
+        "script",
+        "style",
+        "template",
+        "meta",
+        "link",
+        "base",
+    }
+)
+_RAW: Final = frozenset({"script", "style"})
+# Elements the next one of the same name closes.
+_AUTO_CLOSED: Final = frozenset(
+    {
+        "p",
+        "li",
+        "dt",
+        "dd",
+        "tr",
+        "td",
+        "th",
+        "option",
+        "optgroup",
+        "thead",
+        "tbody",
+        "tfoot",
+    }
+)
+# Font sizes in pixels per unit; with no unit only 0 is a size.
+_PIXELS: Final = {
+    "px": 1.0,
+    "pt": 4 / 3,
+    "pc": 16.0,
+    "q": 0.945,
+    "em": 16.0,
+    "rem": 16.0,
+    "%": 0.16,
+    "ex": 8.0,
+    "ch": 8.0,
+    "mm": 3.78,
+    "cm": 37.8,
+    "in": 96.0,
+}
+_SIZE = re.compile(r"(\d+\.?\d*|\.\d+)\s*([a-z%]*)")
+_WHITE = re.compile(
+    r"white|#f{3}|#f{4}|#f{6}|#f{8}"
+    r"|rgba?\(\s*255\s*[,\s]\s*255\s*[,\s]\s*255\s*(?:[,/][^)]*)?\)"
+)
+# The largest font size, in pixels, that counts as hidden.
+_TINY_PIXELS: Final = 2.0
+
+
+def _tiny(value: str) -> bool:
+    found = _SIZE.fullmatch(value)
+    if not found:
+        return False
+    number, unit = float(found.group(1)), found.group(2)
+    if not unit:
+        return number == 0
+    return unit in _PIXELS and number * _PIXELS[unit] <= _TINY_PIXELS
+
+
+def _is_white(value: str) -> bool:
+    return _WHITE.fullmatch(" ".join(value.lower().split())) is not None
+
+
+def _hidden_style(style: str) -> bool:
+    """Whether the inline *style* hides the text of its element: ``display: none``,
+    ``visibility: hidden``, a font of 0 to 2 pixels, ``opacity: 0`` or white text."""
+    for declaration in _CSS_COMMENT.sub("", style).split(";"):
+        name, _, value = declaration.partition(":")
+        name = name.strip().lower()
+        value = re.sub(r"\s*!\s*important\s*$", "", value.strip().lower())
+        if (
+            (name == "display" and value == "none")
+            or (name == "visibility" and value in ("hidden", "collapse"))
+            or (
+                name == "opacity"
+                and re.fullmatch(r"(?:0+\.?0*|\.0+)%?", value) is not None
+            )
+            or (name == "font-size" and _tiny(value))
+            or (name == "color" and _is_white(value))
+        ):
+            return True
+    return False
+
+
+def _hides(name: str, attrs: str) -> bool:
+    """Whether an element of this tag *name* and attribute text is not shown."""
+    if name in _NEVER_SHOWN:
+        return True
+    values: dict[str, str] = {}
+    for found in _ATTRIBUTE.finditer(attrs):
+        value = next((g for g in found.groups()[1:] if g is not None), "")
+        values.setdefault(found.group(1).lower(), html.unescape(value))
+    return (
+        "hidden" in values
+        or values.get("aria-hidden", "").strip().lower() == "true"
+        or _hidden_style(values.get("style", ""))
+        # The old way to colour text, ``<font color=white>``.
+        or (name == "font" and _is_white(values.get("color", "")))
+    )
+
+
+def _hidden_end(text: str, tags: Sequence[re.Match[str]], first: int) -> int:
+    """Where the hidden element that tag *first* opens ends in *text*.
+
+    At its own end tag, counting elements of the same name inside it; at the next
+    start tag of its name when the browser closes it by itself (``<li>``); a
+    void or self-closing tag is only itself. One never closed runs to the end of the
+    text, and a stray end tag inside it ends nothing: what is not shown stays out.
+    """
+    opening = tags[first]
+    name = opening["name"].lower()
+    if opening["self"] or name in _VOID:
+        return opening.end()
+    if name in _RAW:
+        close = re.compile(rf"</{name}\s*>", re.IGNORECASE).search(text, opening.end())
+        return close.end() if close else len(text)
+    open_names = [name]
+    for index in range(first + 1, len(tags)):
+        tag = tags[index]
+        other = tag["name"].lower()
+        if tag["close"]:
+            if other in open_names:
+                while open_names.pop() != other:
+                    pass
+                if not open_names:
+                    return tag.end()
+        elif not tag["self"] and other not in _VOID:
+            if other in _AUTO_CLOSED and open_names[-1] == other:
+                open_names.pop()
+                if not open_names:
+                    return tag.start()
+            open_names.append(other)
+    return len(text)
+
+
+def _cut(text: str, spans: Iterable[tuple[int, int]]) -> str:
+    """*text* without *spans*, in order. A line that held only what is cut goes with
+    its line break, so the paragraph around it does not split in two."""
+    kept: list[str] = []
+    done = 0
+    for start, end in spans:
+        kept.append(text[done:start])
+        done = end
+        head = text.rfind("\n", 0, start) + 1
+        tail = text.find("\n", end)
+        if tail >= 0 and not text[head:start].strip() and not text[end:tail].strip():
+            done = tail + 1
+    kept.append(text[done:])
+    return "".join(kept)
+
+
+def _without_hidden_elements(text: str) -> str:
+    """*text* without the elements its markup hides, tags and text (a regex scan of
+    the tags, not an HTML parser: odd markup is read as far as it goes)."""
+    if "<" not in text:
+        return text
+    tags = list(_TAG.finditer(text))
+    spans: list[tuple[int, int]] = []
+    at = 0
+    while at < len(tags):
+        tag = tags[at]
+        if tag["close"] or not _hides(tag["name"].lower(), tag["attrs"]):
+            at += 1
+            continue
+        end = _hidden_end(text, tags, at)
+        spans.append((tag.start(), end))
+        while at < len(tags) and tags[at].start() < end:
+            at += 1
+    return _cut(text, spans)
+
+
+_KEEP_VERBS: Final = (
+    "save|store|record|log|add|write|put|update|create|make|take|keep|commit|append"
+    "|insert"
+)
+# A request to keep something in the assistant's memory.
+_ASKS_TO_KEEP = re.compile(
+    rf"\b(?:{_KEEP_VERBS})\b[^.!?\n]{{0,40}}?\b(?:notes?|memory|memories)\b(?!-)"
+    r"|\b(?:remember|memori[sz]e)\s+(?:that|this|these|the\s+following|the\s+fact|it|to)\b"
+    r"|\b(?:please|kindly)\s+(?:remember|note)\b"
+    r"|\bnote\s+(?:down\s+)?(?:that\s+)?(?:the\s+user|users?['’]s|you|your|melo)\b"
+    r"|\b(?:jot|note|write)\s+(?:this\s+|that\s+|it\s+)?down\b"
+    r"|\b(?:keep|bear)\s+(?:this\s+|that\s+|it\s+)?in\s+mind\b"
+    "|记住|记下|写入记忆|存入记忆|保存到记忆|更新(?:你的|我的)?记忆",
+    re.IGNORECASE,
+)
+_AI = r"(?:ai|a\.i\.|llms?|language\s+models?|chatbots?|assistants?|agents?|bots?|melo)"
+# Words that speak to the assistant that reads the text ("note to any AI reading
+# this", "if you are an AI", "dear assistant").
+_ADDRESSED = re.compile(
+    rf"(?<!\w){_AI}(?!\w)[^.!?\n]{{0,25}}?\b(?:reading|processing|summari[sz]ing"
+    r"|parsing|scanning|analy[sz]ing|browsing)\s+(?:this|it|the\s+(?:page|file"
+    r"|document|text|content))\b"
+    rf"|\bif\s+you(?:'re|’re|\s+are)\s+(?:an?\s+|the\s+)?{_AI}(?!\w)"
+    r"|(?<!\w)(?:note|message|instructions?|attention|important|reminder|p\.?s\.?"
+    r"|n\.?b\.?)(?!\w)[^.!?\n]{0,15}?\b(?:to|for)\s+(?:the\s+|an?\s+|any\s+|all\s+"
+    rf"|every\s+|this\s+)?{_AI}(?!\w)"
+    rf"|\b(?:hey|hi|hello|dear|attention)[\s,]+(?:the\s+|any\s+|all\s+)?{_AI}(?!\w)",
+    re.IGNORECASE,
+)
+# A role the text claims ("SYSTEM: ...", "[assistant] ...", "<system>").
+_ROLE = re.compile(
+    r"[\s>*+\-•#\[(<]*(?:system|developer|assistant|melo)"
+    r"(?:\s+(?:message|prompt|note|instructions?))?\s*[:：\])>]",
+    re.IGNORECASE,
+)
+_CLAUSES = re.compile(r"(?<=[.!?。！？])\s+|\n|[;；]")
+# The ``>`` that quotes a line, and a paragraph break: a blank line, a quoted one
+# (only ``>`` marks) included.
+_QUOTED = re.compile(r"^[ \t]*(?:>[ \t]*)+", re.MULTILINE)
+_BREAK = re.compile(r"(\r?\n(?:[ \t]*(?:>[ \t]*)*\r?\n)+)")
+
+
+def _forms(text: str) -> list[str]:
+    """*text* as written and, when it differs, as a reader or a parser folds it
+    (compatibility forms such as full-width letters, character references)."""
+    folded = html.unescape(unicodedata.normalize("NFKC", text))
+    return [text] if folded == text else [text, folded]
+
+
+def _orders(paragraph: str) -> bool:
+    """Whether *paragraph* holds an order to the assistant: an instruction
+    (:func:`is_instruction`) in a sentence, a request to keep something in memory, a
+    line that speaks to the assistant or claims a role. The ``>`` that quotes its
+    lines does not count."""
+    for form in _forms(_QUOTED.sub("", paragraph)):
+        if _ASKS_TO_KEEP.search(form) or _ADDRESSED.search(form):
+            return True
+        for sentence in _CLAUSES.split(form):
+            sentence = sentence.strip()
+            if sentence and (_ROLE.match(sentence) or is_instruction(sentence)):
+                return True
+    return False
+
+
+def _without_orders(text: str) -> str:
+    """*text* without its paragraphs that hold an order to the assistant: the facts
+    an order wants kept follow it in the same paragraph as plain statements."""
+    parts = _BREAK.split(text)
+    kept = [part for n, part in enumerate(parts) if n % 2 or not _orders(part)]
+    return "".join(kept) if len(kept) < len(parts) else text
+
+
+def material_text(text: str) -> str:
+    """What *text*, a page's, a file's or a finished task's result, states: what is
+    left for a note to rest on.
+
+    Left out, in this order: the characters that draw nothing (zero-width and other
+    format characters); HTML and XML comments and Markdown link comments
+    (``[//]: # (...)``); elements hidden by their markup (the ``hidden`` attribute,
+    ``aria-hidden="true"``, an inline style of ``display: none``, ``visibility:
+    hidden``, a font of 0 to 2 pixels, ``opacity: 0`` or white text), tags and text,
+    and ``script``, ``style`` and ``template``; then every paragraph (text between
+    blank lines; in a quoted block a line of only ``>`` is blank) with an order to the
+    assistant in it (:func:`_orders`). A comment or element never closed hides the
+    rest of the text, as in a browser.
+
+    Text with none of that comes back unchanged, byte for byte, in any language. It
+    is a small scan, not an HTML engine, and it never raises. What the user typed is
+    not material and is never passed through it.
+    """
+    if not text:
+        return text
+    if not text.isascii():
+        text = "".join(char for char in text if not _invisible(char))
+    text = _cut(text, (found.span() for found in _COMMENT.finditer(text)))
+    text = _cut(text, (found.span() for found in _LINK_COMMENT.finditer(text)))
+    return _without_orders(_without_hidden_elements(text))
+
+
+_ANSWER: Final = "\nmelo: "
+
+
+def result_text(text: str) -> str:
+    """What a finished task's indexed result (:func:`index.document_text`: its task
+    line, what the user asked, ``melo: `` and the answer) states: the answer through
+    :func:`material_text`, which may carry a web page's text. What the user asked of
+    the task is theirs and stays as it is."""
+    asked, label, answer = text.partition(_ANSWER)
+    return asked + label + material_text(answer) if label else text
 
 
 # ── Meaning ──

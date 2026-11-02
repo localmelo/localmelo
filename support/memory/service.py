@@ -1554,7 +1554,9 @@ class ChatMemory:
         other words or another language (:meth:`_by_meaning`); with ``model``, the
         model's own conclusion from what the user typed is kept as ``inferred``. A
         page or file the user did not point to supports nothing, and one the user
-        called someone else's supports no note about the user.
+        called someone else's supports no note about the user. What a page, a file or
+        a result supports is what it states (:func:`note_gate.material_text`): its
+        hidden text and its paragraphs that order the assistant are left out.
         """
         if note_gate.is_instruction(note):
             return note_gate.NOT_A_FACT
@@ -1805,7 +1807,9 @@ class ChatMemory:
         ]
 
     async def _results(self, turn: ChatTurn) -> list[str]:
-        """The finished tasks' results this chat has shown: those it recalled."""
+        """The finished tasks' results this chat has shown: those it recalled, as they
+        may support a note (:func:`note_gate.result_text`: an answer's hidden text and
+        orders to the assistant left out, what the user asked left as it was)."""
         from localmelo.support.sessions.store import MEMORY_EVENT_TYPE
 
         ids = {int(item.key[2:]) for item in turn.memory.used if item.is_turn}
@@ -1825,7 +1829,7 @@ class ChatMemory:
             after = int(events[-1].id or 0)
         async with self._lock:
             docs = await self.stores()[1].fetch(ids)
-        return [doc.text for doc in docs if doc.kind in _TASK_KINDS]
+        return [note_gate.result_text(d.text) for d in docs if d.kind in _TASK_KINDS]
 
     def after_turn(
         self, store: SessionStore, info: TurnInfo, typed: str, answer: str

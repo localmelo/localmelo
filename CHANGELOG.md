@@ -870,6 +870,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- With `[memory] note_gate` above `typed` (a developer setting), a page, a file or a finished
+  task's result no longer supports a note by text a reader of it would not see, or by an order to
+  the assistant (#442). A résumé whose hidden white-on-white line told the assistant to save a
+  false fact about you was counted as your material, so a note with that fact was kept as
+  `pointed`. Now a page, a file and an answer in a finished task's result are first cleaned:
+  HTML and Markdown comments, elements hidden by `hidden`, `aria-hidden="true"` or a style
+  (`display: none`, `visibility: hidden`, a font of 0 to 2 pixels, `opacity: 0`, white text),
+  and zero-width and other invisible characters are left out; so is every paragraph (a line of
+  only `>` marks ends one in a quoted block) with an order to the assistant in it, such as "save
+  a note that …", "update your memory" or "ignore previous instructions", because the facts the
+  order wants kept follow it as plain statements. The note is then refused with the usual "no
+  source supports it". This holds for a finished task's result at `typed` as well. What you
+  typed is never cleaned. A page or file with none of that, in any language, is read exactly as
+  before. A sentence that starts with a verb such as "Use" or "Open" counts as an order and
+  takes its paragraph with it, so a résumé paragraph written that way may support nothing.
 - A short follow-up such as "go look it up", "continue" or "去查一下" recalls from what
   you said just before, not from its own words (#452). Searched by those words alone, it
   matched whatever held them (turns about who you are, say) and put them in the prompt.
