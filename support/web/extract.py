@@ -1,10 +1,22 @@
 """An HTML page as readable text: its title, headings, main text and links (standard library only).
 
 Scripts, styles, templates, embedded documents and form choices are left
-out, and so is what a page hides from people (the ``hidden`` attribute,
-``aria-hidden="true"``, and an inline style that does not draw the text:
-:func:`hidden_style`), since hidden text is a common place for instructions aimed at a
-model. When the page marks its main part (``<main>``, ``role="main"`` or
+out, and so is what a page hides from people, since hidden text is a common place
+for instructions aimed at a model. Two things are dropped, and nothing a person
+sees:
+
+* an element the page does not draw, with everything in it: the ``hidden``
+  attribute, ``aria-hidden="true"``, ``display: none``, ``visibility: hidden`` or
+  ``collapse`` (also an element a browser closes by itself, such as ``<p hidden>``);
+* a piece of text whose font size is tiny (2 px or less) or whose colour is white
+  with no coloured background behind it, following the inline styles down the page
+  (the nearest font size, colour and background set on an open element win, so a
+  child that resets a size or sits on a dark background shows its own text).
+
+``opacity: 0`` hides nothing here (a script usually fades such text in), and a
+background or colour that comes from a style sheet is not seen. The stricter rule
+for a raw file the note gate reads is :func:`hidden_style` and :func:`hides`.
+When the page marks its main part (``<main>``, ``role="main"`` or
 ``<article>``) with enough text in it, only that part is kept, so menus and
 footers do not crowd it out. Headings read ``# Title``, list items ``- item``
 and table cells are joined with `` | ``.
@@ -13,9 +25,11 @@ and table cells are joined with `` | ``.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
+from typing import NamedTuple
 from urllib.parse import urljoin, urlsplit
 
 # Text a main part needs to be kept alone, in characters other than spaces.
@@ -131,11 +145,20 @@ _ENDED_BY = {
 }
 
 # ── What a page hides from people ──
-# One rule for the pages ``web_fetch`` reads and for the text the note gate lets a
-# note rest on (:func:`localmelo.support.memory.note_gate.material_text`).
+# Two rules share the style parser. The strict one, :func:`hidden_style` and
+# :func:`hides`, is for raw files, where only the markup is known: the note gate
+# uses it, and text it takes for hidden costs at most a note. The page reader
+# (:class:`_Reader`) is what the model reads a page by, so it drops only what no
+# person sees: it leaves out an element that is not drawn at all (``hidden``,
+# ``aria-hidden="true"``, ``display: none``, ``visibility: hidden`` or ``collapse``),
+# and it follows how font size, text colour and background cascade through the
+# inline styles, dropping a piece of text whose size is tiny or whose colour is
+# white with no opaque background behind it. ``opacity: 0`` hides nothing there: a
+# script fades such text in.
 
 _CSS_COMMENT = re.compile(r"/\*.*?(?:\*/|\Z)", re.DOTALL)
-# Font sizes in pixels per unit; with no unit only 0 is a size.
+# Font sizes in pixels per unit; with no unit only 0 is a size. A relative unit
+# (``em``, ``%``, ``ex``, ``ch``) is a share of the size around it, 16 px at the top.
 _PIXELS = {
     "px": 1.0,
     "pt": 4 / 3,
@@ -150,40 +173,83 @@ _PIXELS = {
     "cm": 37.8,
     "in": 96.0,
 }
+_RELATIVE = frozenset({"em", "%", "ex", "ch"})
 _SIZE = re.compile(r"(\d+\.?\d*|\.\d+)\s*([a-z%]*)")
 _WHITE = re.compile(
     r"white|#f{3}|#f{4}|#f{6}|#f{8}"
     r"|rgba?\(\s*255\s*[,\s]\s*255\s*[,\s]\s*255\s*(?:[,/][^)]*)?\)"
 )
-# The largest font size, in pixels, that counts as hidden.
+# The largest font size, in pixels, that counts as hidden, and the usual one.
 TINY_PIXELS = 2.0
+_NORMAL_PIXELS = 16.0
+_INHERITED = frozenset({"inherit", "unset", "currentcolor"})
+# What a background property says when it puts nothing behind the text.
+_NO_BACKGROUND = frozenset(
+    {"", "none", "transparent", "inherit", "initial", "unset", "currentcolor"}
+)
+
+
+def _size_px(value: str, base: float) -> float | None:
+    """A font size in pixels, a relative unit taken against *base*; ``None`` when
+    *value* is no size this reads (a keyword, ``calc()``, a viewport unit)."""
+    found = _SIZE.fullmatch(value)
+    if not found:
+        return None
+    number, unit = float(found.group(1)), found.group(2)
+    if not unit:
+        return 0.0 if number == 0 else None
+    if unit not in _PIXELS:
+        return None
+    return number * _PIXELS[unit] * (base / _NORMAL_PIXELS if unit in _RELATIVE else 1)
 
 
 def _tiny(value: str) -> bool:
-    found = _SIZE.fullmatch(value)
-    if not found:
-        return False
-    number, unit = float(found.group(1)), found.group(2)
-    if not unit:
-        return number == 0
-    return unit in _PIXELS and number * _PIXELS[unit] <= TINY_PIXELS
+    size = _size_px(value, _NORMAL_PIXELS)
+    return size is not None and size <= TINY_PIXELS
 
 
 def _is_white(value: str) -> bool:
     return _WHITE.fullmatch(" ".join(value.lower().split())) is not None
 
 
-def hidden_style(style: str) -> bool:
-    """Whether the inline *style* (an attribute value, character references already
-    decoded) keeps the text of its element from being drawn: ``display: none``,
-    ``visibility: hidden`` or ``collapse``, a font of 0 to :data:`TINY_PIXELS`
-    pixels, ``opacity: 0``, or a text colour of white (``white``, ``#fff``,
-    ``#ffffff``, ``rgb(255, 255, 255)``). Names and values are read in any case and
-    spacing, with ``!important`` and CSS comments."""
+def _font_size_of(value: str) -> str | None:
+    """The size a ``font`` shorthand names (``"0/0 serif"`` gives ``"0"``), if any."""
+    for token in value.split():
+        size = token.partition("/")[0]
+        found = _SIZE.fullmatch(size)
+        if found and (found.group(2) or float(found.group(1)) == 0):
+            return size
+    return None
+
+
+def _declarations(style: str) -> list[tuple[str, str]]:
+    """The ``(property, value)`` pairs of an inline *style* in order, both in lower
+    case, the value without ``!important``; CSS comments are dropped."""
+    if not style:
+        return []
+    pairs = []
     for declaration in _CSS_COMMENT.sub("", style).split(";"):
         name, _, value = declaration.partition(":")
-        name = name.strip().lower()
-        value = re.sub(r"\s*!\s*important\s*$", "", value.strip().lower())
+        pairs.append(
+            (
+                name.strip().lower(),
+                re.sub(r"\s*!\s*important\s*$", "", value.strip().lower()),
+            )
+        )
+    return pairs
+
+
+def hidden_style(style: str) -> bool:
+    """Whether the inline *style* (an attribute value, character references already
+    decoded) keeps the text of its element from being drawn, as a raw file's markup
+    says it: ``display: none``, ``visibility: hidden`` or ``collapse``, a font of 0
+    to :data:`TINY_PIXELS` pixels (also in a ``font`` shorthand), ``opacity: 0``, or
+    a text colour of white (``white``, ``#fff``, ``#ffffff``, ``rgb(255, 255,
+    255)``). Names and values are read in any case and spacing, with ``!important``
+    and CSS comments. This is the strict rule: it knows nothing of a dark background
+    behind white text or of a child that sets its own size, which the page reader
+    follows."""
+    for name, value in _declarations(style):
         if (
             (name == "display" and value == "none")
             or (name == "visibility" and value in ("hidden", "collapse"))
@@ -195,19 +261,104 @@ def hidden_style(style: str) -> bool:
             or (name == "color" and _is_white(value))
         ):
             return True
+        if name == "font":
+            size = _font_size_of(value)
+            if size is not None and _tiny(size):
+                return True
     return False
 
 
 def hides(tag: str, attrs: Mapping[str, str | None]) -> bool:
     """Whether an element of this *tag* and these attributes (names in lower case,
-    values decoded) is not shown: the ``hidden`` attribute, ``aria-hidden="true"``,
-    a style that hides it (:func:`hidden_style`), or the old ``<font color=white>``."""
+    values decoded) is not shown, by the strict rule for a raw file: the ``hidden``
+    attribute, ``aria-hidden="true"``, a style that hides it (:func:`hidden_style`),
+    or the old ``<font color=white>``."""
     return (
         "hidden" in attrs
         or (attrs.get("aria-hidden") or "").strip().lower() == "true"
         or hidden_style(attrs.get("style") or "")
         or (tag == "font" and _is_white(attrs.get("color") or ""))
     )
+
+
+def _never_drawn(attrs: Mapping[str, str | None], style: list[tuple[str, str]]) -> bool:
+    """Whether the page reader leaves out the element and all it holds: the
+    ``hidden`` attribute, ``aria-hidden="true"``, ``display: none``, ``visibility:
+    hidden`` or ``collapse``."""
+    return (
+        "hidden" in attrs
+        or (attrs.get("aria-hidden") or "").strip().lower() == "true"
+        or any(
+            (name == "display" and value == "none")
+            or (name == "visibility" and value in ("hidden", "collapse"))
+            for name, value in style
+        )
+    )
+
+
+class _Look(NamedTuple):
+    """What cascades through the open elements of a page: the font size in pixels,
+    whether the text colour is white, and whether the nearest background set is
+    one other than white."""
+
+    size: float = _NORMAL_PIXELS
+    white: bool = False
+    dark: bool = False
+
+    @property
+    def shown(self) -> bool:
+        """Whether text here is seen: not tiny, and not white with no background."""
+        return self.size > TINY_PIXELS and not (self.white and not self.dark)
+
+
+def _background(value: str) -> bool | None:
+    """What a ``background``, ``background-color`` or ``background-image`` value
+    does: ``True`` for a colour that is not white or an image, ``False`` for white,
+    ``None`` for nothing (it leaves what is behind as it was)."""
+    if "url(" in value or "gradient(" in value:
+        return True
+    first = re.match(r"rgba?\([^)]*\)|\S+", value)
+    if first is None or first.group(0) in _NO_BACKGROUND:
+        return None
+    return not _is_white(first.group(0))
+
+
+def _size_after(value: str, around: float) -> float:
+    if value in _INHERITED or value in ("larger", "smaller"):
+        return around
+    size = _size_px(value, around)
+    return _NORMAL_PIXELS if size is None else size
+
+
+def _look_of(
+    around: _Look,
+    tag: str,
+    attrs: Mapping[str, str | None],
+    style: list[tuple[str, str]],
+) -> _Look:
+    """The :class:`_Look` of an element inside one that looks as *around*: what its
+    inline style (and ``<font color>``, ``bgcolor``) sets, else what it inherits.
+    A value this does not read is taken as the visible one."""
+    size, white, dark = around
+    if tag == "font" and attrs.get("color"):
+        white = _is_white(attrs["color"] or "")
+    background = (attrs.get("bgcolor") or "").strip().lower()
+    if background and (state := _background(background)) is not None:
+        dark = state
+    for name, value in style:
+        if name == "font-size":
+            size = _size_after(value, size)
+        elif name == "font":
+            named = _font_size_of(value)
+            size = _size_after(named, size) if named else _size_after(value, size)
+        elif name == "color" and value not in _INHERITED:
+            white = _is_white(value)
+        elif (
+            name in ("background", "background-color", "background-image")
+            and (state := _background(value)) is not None
+        ):
+            dark = state
+    return _Look(size, white, dark)
 
 
 @dataclass
@@ -249,6 +400,10 @@ class _Reader(HTMLParser):
         # The open elements inside a hidden element a browser closes by itself, the
         # hidden one first; ``None`` when there is none.
         self._auto: list[str] | None = None
+        # The open elements that are drawn, with how each looks (:class:`_Look`),
+        # and how many of each name are open.
+        self._looks: list[tuple[str, _Look]] = []
+        self._open_count: Counter[str] = Counter()
         self._in_title = False
         self._pre = 0
         self._main = 0
@@ -264,6 +419,41 @@ class _Reader(HTMLParser):
 
     def _newline(self, level: int = 1) -> None:
         self.pieces.append(_Piece("", self._main > 0, self._article > 0, level))
+
+    def _look(self) -> _Look:
+        return self._looks[-1][1] if self._looks else _Look()
+
+    def _pop(self) -> None:
+        name, _ = self._looks.pop()
+        self._open_count[name] -= 1
+
+    def _open(
+        self,
+        tag: str,
+        values: Mapping[str, str | None],
+        style: list[tuple[str, str]],
+    ) -> None:
+        """Open a drawn element: first end the auto-closed ones this tag ends, then
+        give it its look from the one around it."""
+        while self._looks:
+            top = self._looks[-1][0]
+            if top in AUTO_CLOSED and (tag == top or tag in _ENDED_BY.get(top, ())):
+                self._pop()
+            else:
+                break
+        if tag not in VOID:
+            self._looks.append((tag, _look_of(self._look(), tag, values, style)))
+            self._open_count[tag] += 1
+
+    def _close(self, tag: str) -> None:
+        """Close the nearest open element of this name, and what is open inside it;
+        an end tag with no start tag open ends nothing."""
+        if self._open_count[tag] > 0:
+            while True:
+                name = self._looks[-1][0]
+                self._pop()
+                if name == tag:
+                    break
 
     def _in_auto(self, tag: str, *, closing: bool) -> bool:
         """Whether *tag*, a start or an end tag, is still inside the hidden element a
@@ -319,15 +509,17 @@ class _Reader(HTMLParser):
         if tag == "title":
             self._in_title = not self.title  # the first title is the page's
             return
-        if tag in SKIP or (
-            tag not in VOID and tag not in AUTO_CLOSED and hides(tag, values)
-        ):
+        style = _declarations(values.get("style") or "")
+        never = _never_drawn(values, style)
+        if tag in SKIP or (tag not in VOID and tag not in AUTO_CLOSED and never):
             if tag not in VOID:
                 self._skip.append(tag)
             return
-        if tag in AUTO_CLOSED and hides(tag, values):
+        if tag in AUTO_CLOSED and never:
             self._auto = [tag]
             return
+        self._open(tag, values, style)
+        shown = self._look().shown
         role = (values.get("role") or "").lower()
         if tag == "main" or role == "main":
             self._main += 1
@@ -337,19 +529,22 @@ class _Reader(HTMLParser):
             self._region.append((tag, "article"))
         if tag in HEADINGS:
             self._newline(2)
-            self._put("#" * HEADINGS[tag] + " ")
+            if shown:
+                self._put("#" * HEADINGS[tag] + " ")
         elif tag == "li":
             self._newline()
-            self._put("- ")
+            if shown:
+                self._put("- ")
         elif tag == "br":
             self._newline()
         elif tag == "tr":
             self._newline()
             self._cells = 0
         elif tag in ("td", "th"):
-            if self._cells:
-                self._put(" | ")
-            self._cells += 1
+            if shown:
+                if self._cells:
+                    self._put(" | ")
+                self._cells += 1
         elif tag in PARAGRAPH:
             self._newline(2)
         elif tag in LINE:
@@ -358,7 +553,7 @@ class _Reader(HTMLParser):
             self._pre += 1
         if tag == "a":
             href = (values.get("href") or "").strip()
-            self._link = (href, []) if href else None
+            self._link = (href, []) if href and shown else None
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self.handle_starttag(tag, attrs)
@@ -375,6 +570,7 @@ class _Reader(HTMLParser):
         if tag == "title":
             self._in_title = False
             return
+        self._close(tag)
         if tag == "a" and self._link is not None:
             href, words = self._link
             self._link = None
@@ -396,7 +592,7 @@ class _Reader(HTMLParser):
         if self._in_title:
             self.title += data
             return
-        if self._skip or self._auto is not None:
+        if self._skip or self._auto is not None or not self._look().shown:
             return
         if self._link is not None and data.strip():
             self._link[1].append(data)

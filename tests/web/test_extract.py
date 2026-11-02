@@ -1,7 +1,10 @@
 """``extract``: a page as text, without what the page hides from people.
 
-The rule for a style that hides text (:func:`hidden_style`) is the one the note gate
-reads a file with, so a page and a file are judged alike. Synthetic HTML only.
+The page reader drops only what no person sees: an element that is not drawn at all,
+and a piece of text whose size is tiny or whose colour is white with no background
+behind it, following the inline styles down the page. ``opacity: 0`` hides nothing
+there (a script fades such text in). The strict rule for a raw file
+(:func:`hidden_style`) is the one the note gate uses. Synthetic HTML only.
 """
 
 from __future__ import annotations
@@ -31,8 +34,6 @@ def text(html: str) -> str:
         'style="font-size: 1px"',
         'style="FONT-SIZE:2px;margin:0"',
         'style="font-size:0.1em"',
-        'style="opacity:0"',
-        'style="opacity: 0.0"',
         'style="color:#fff"',
         'style="COLOR:#FFFFFF"',
         'style="color:white"',
@@ -70,6 +71,8 @@ def test_white_text_set_with_the_font_tag_is_not_extracted() -> None:
         'style="color:#000"',
         'style="color:#fffffe"',
         'style="background-color:#fff"',
+        'style="opacity:0"',
+        'style="opacity: 0.0"',
         'style="opacity:0.5"',
         'style="opacity:1"',
         'aria-hidden="false"',
@@ -126,6 +129,139 @@ def test_a_self_closing_hidden_element_is_only_itself() -> None:
     assert text("<img hidden alt='x'><p>Seen.</p>") == "Seen."
 
 
+# ── Text that is white, tiny or faded is dropped only when no person sees it ──
+
+
+def shown(html: str) -> str:
+    return text(html)
+
+
+@pytest.mark.parametrize(
+    "dark",
+    [
+        '<div style="background:#111;color:#fff">Seen words.</div>',
+        '<div style="background-color: rgb(10, 10, 10)"><p style="color:white">Seen words.</p></div>',
+        '<body style="background:#000"><h1 style="color:#fff">Seen words.</h1></body>',
+        '<section style="background: url(hero.jpg) center"><p style="color:#fff">Seen words.</p></section>',
+        '<div style="background-image:linear-gradient(#000,#333)"><b style="color:#FFF">Seen words.</b></div>',
+        '<div style="background:#111"><div><div><span style="color:#fff">Seen words.</span></div></div></div>',
+        '<table bgcolor="#000"><tr><td><font color="white">Seen words.</font></td></tr></table>',
+        '<div style="background:#111"><font color=white>Seen words.</font></div>',
+        '<div style="color:#fff;background:#111 !important">Seen words.</div>',
+    ],
+)
+def test_white_text_on_a_dark_background_is_kept(dark: str) -> None:
+    assert "Seen words." in text(f"<p>Before.</p>{dark}<p>After.</p>")
+
+
+@pytest.mark.parametrize(
+    "bare",
+    [
+        '<div style="color:#fff">Secret words.</div>',
+        '<div style="background:#fff;color:#fff">Secret words.</div>',
+        '<div style="background-color:white;color:white">Secret words.</div>',
+        '<div style="background:transparent;color:#fff">Secret words.</div>',
+        '<div style="background:none;color:#fff">Secret words.</div>',
+        '<div style="color:#fff"><p>Secret words.</p></div>',
+        "<font color=white>Secret words.</font>",
+        '<div style="background:#111"><div style="background:#fff"><p style="color:#fff">Secret words.</p></div></div>',
+        '<div style="background:#111"></div><p style="color:#fff">Secret words.</p>',
+    ],
+)
+def test_white_text_with_no_background_or_a_white_one_is_dropped(bare: str) -> None:
+    found = text(f"<p>Before.</p>{bare}<p>After.</p>")
+    assert "Secret" not in found
+    assert "Before." in found and "After." in found
+
+
+def test_an_opacity_zero_section_is_kept_for_a_script_fades_it_in() -> None:
+    html = (
+        '<section style="opacity:0;transform:translateY(24px)">'
+        "<h2>Seen heading</h2><p>Seen words.</p><ul><li>Seen item</li></ul></section>"
+        '<div style="opacity: 0 !important">Seen too.</div>'
+    )
+    found = text(html)
+    for words in ("## Seen heading", "Seen words.", "- Seen item", "Seen too."):
+        assert words in found
+
+
+def test_a_font_size_zero_parent_keeps_the_children_that_set_a_size() -> None:
+    html = (
+        '<div style="font-size:0">'
+        '<span style="font-size:16px">One</span>'
+        '<span style="font-size:1rem">Two</span>'
+        '<span style="font: 14px Arial">Three</span>'
+        '<span style="font-size:1em">Four</span>'
+        "<span>Five</span>"
+        "</div>"
+    )
+    found = text(html)
+    assert "One" in found and "Two" in found and "Three" in found
+    assert "Four" not in found and "Five" not in found  # 1em of 0 is still 0
+
+
+def test_a_font_size_zero_span_with_no_reset_is_dropped() -> None:
+    for html in (
+        '<p>Seen.</p><span style="font-size:0">Secret.</span><p>Also seen.</p>',
+        '<p>Seen.</p><div style="font-size:0"><p>Secret.</p><b>Secret too.</b></div><p>Also seen.</p>',
+        '<p>Seen.</p><p style="font: 0/0 serif">Secret.</p><p>Also seen.</p>',
+    ):
+        assert text(html) == "Seen.\n\nAlso seen."
+
+
+def test_the_nearest_size_and_colour_win() -> None:
+    html = (
+        '<div style="color:#fff"><span style="color:#000">Seen</span> Secret</div>'
+        '<p>Mid. <span style="color:#fff">Secret</span> After.</p>'
+        '<div style="font-size:1px"><span style="font-size:inherit">Secret</span>'
+        '<span style="font-size:12px">Seen too</span></div>'
+    )
+    found = text(html)
+    assert "Seen" in found and "Seen too" in found
+    assert "Secret" not in found
+    assert "Mid." in found and "After." in found
+
+
+def test_text_after_a_white_element_is_shown_again() -> None:
+    assert text('<p>Mid <span style="color:#fff">Secret</span> after.</p>') == (
+        "Mid after."
+    )
+    # A paragraph or item never closed does not carry its colour to the next one.
+    assert text('<p style="color:white">Secret.<p>Seen.') == "Seen."
+    assert text('<ul><li style="color:white">Secret.<li>Seen.</ul>') == "- Seen."
+
+
+def test_what_is_dropped_leaves_no_marker_and_no_link_behind() -> None:
+    assert text('<ul><li style="color:#fff">Secret</li><li>Seen</li></ul>') == "- Seen"
+    assert text('<h2 style="color:#fff">Secret</h2><p>Seen</p>') == "Seen"
+    assert text('<table><tr><td style="color:#fff">x<td>a<td>b</table>') == "a | b"
+    found = extract(
+        '<a href="/evil" style="color:#fff">evil</a> <a href="/ok">ok</a>', BASE
+    )
+    assert [link.href for link in found.links] == ["https://pages.test/ok"]
+
+
+def test_an_element_that_is_not_drawn_takes_what_it_holds_whatever_the_children_say() -> (
+    None
+):
+    html = (
+        '<div style="visibility:hidden"><span style="visibility:visible">a</span></div>'
+        '<div style="display:none"><div style="background:#111"><p style="color:#fff">'
+        "b</p></div></div>"
+        '<div hidden><p style="font-size:16px">c</p></div>'
+        '<div aria-hidden="true"><b style="color:#000">d</b></div>'
+        "<p>Seen.</p>"
+    )
+    assert text(html) == "Seen."
+
+
+def test_stray_end_tags_and_unclosed_elements_are_read_in_linear_time() -> None:
+    page = "<div style='color:#fff'>" * 30000 + "</span>" * 30000 + "<p>x</p>"
+    assert isinstance(text(page), str)
+    page = "<div>" * 30000 + "</div></b>" * 30000
+    assert text(page) == ""
+
+
 # ── The rule itself ──
 
 
@@ -147,6 +283,10 @@ def test_a_self_closing_hidden_element_is_only_itself() -> None:
         ("font-size: 0.2em", False),
         ("font-size: 10%", True),
         ("font-size: 1", False),
+        ("font: 0/0 serif", True),
+        ("font: bold 1px a", True),
+        ("font: 12px/1.5 Arial", False),
+        ("font: bold 700 serif", False),
         ("font-size: calc(1px)", False),
         ("opacity: 0", True),
         ("opacity: 0%", True),

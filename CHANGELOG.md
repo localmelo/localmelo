@@ -887,9 +887,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   takes its paragraph with it, so a résumé paragraph written that way may support nothing.
   So does a sentence that opens by naming the assistant it speaks to ("AI assistant: …", "Any AI
   agent, …", "To the model: …"); an ordinary noun such as "The model, trained on …" does not.
-  A page that `web_fetch` reads now also drops tiny (0 to 2 pixels), white and fully transparent
-  text and a hidden `<p>` or `<li>`, by the same rule, where it kept them before; a page with
-  none of these reads as before.
+  In a raw file or body the gate reads, white text and `opacity: 0` count as hidden whatever
+  the background. A page that `web_fetch` reads now also drops a hidden `<p>` or `<li>`, text in
+  a font of 2 pixels or less, and white text with no coloured background behind it, where it
+  kept them before. It follows the inline styles down the page, so what a person sees stays:
+  white text on a dark background, text a script fades in from `opacity: 0`, and a child that
+  sets its own size under a `font-size: 0` parent. A page with none of these reads as before.
 - A short follow-up such as "go look it up", "continue" or "去查一下" recalls from what
   you said just before, not from its own words (#452). Searched by those words alone, it
   matched whatever held them (turns about who you are, say) and put them in the prompt.

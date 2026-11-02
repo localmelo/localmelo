@@ -834,13 +834,35 @@ def test_material_text_leaves_out_what_a_reader_would_not_see(form: str) -> None
         "margin:0;color:white",
     ],
 )
-def test_a_file_and_a_fetched_page_are_judged_by_one_style_rule(style: str) -> None:
+def test_a_file_and_a_fetched_page_agree_except_where_a_person_still_sees_the_text(
+    style: str,
+) -> None:
     from localmelo.support.web.extract import extract, hidden_style
 
     html = f'<p>Before.</p><p style="{style}">Secret words.</p><p>After.</p>'
     kept_in_file = "Secret" in gate.material_text(html)
     kept_in_page = "Secret" in extract(html, "https://pages.test/").text
-    assert kept_in_file == kept_in_page == (not hidden_style(style))
+    # The raw file rule is the strict one.
+    assert kept_in_file == (not hidden_style(style))
+    # The page reader differs only for opacity 0, which a script can fade in.
+    assert kept_in_page == (kept_in_file or style == "opacity:0")
+
+
+def test_a_file_stays_strict_where_a_fetched_page_shows_white_text_on_a_dark_ground() -> (
+    None
+):
+    from localmelo.support.web.extract import extract
+
+    html = (
+        '<div style="background:#111"><p style="color:#fff">Seen on the page.</p></div>'
+        '<p style="opacity:0">Faded in by a script.</p>'
+    )
+    page = extract(html, "https://pages.test/").text
+    assert "Seen on the page." in page and "Faded in by a script." in page
+    # A raw file is read strictly: the same white text and the opacity-0 text count
+    # as hidden there, so neither can support a note.
+    file = gate.material_text(html)
+    assert "Seen on the page." not in file and "Faded in by a script." not in file
 
 
 @pytest.mark.parametrize(
