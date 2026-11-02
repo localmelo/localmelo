@@ -30,7 +30,7 @@
 
 ## 跨对话记忆
 
-![一个询问“when is my group meeting?”的对话：消息下方的“Used 1 memory”展开后显示它用到的笔记及其出处。](../../assets/img/memory-across.webp)
+![一个询问“when is my group meeting?”的对话：消息下方的“Used 1 memory”展开后显示它用到的较早一轮对话及其出处。](../../assets/img/memory-across.webp)
 
 在网页控制台和 App 中，melo 会跨对话记忆。
 
