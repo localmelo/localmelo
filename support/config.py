@@ -89,7 +89,8 @@ MEMORY_RECALL_FORM = ("excerpt", "list")
 MEMORY_RECALL_LIST_MAX = (1, 50)
 MEMORY_RECALL_OPEN_CHARS = (500, 16000)
 # Whether a turn's excerpt that shows less than the whole turn carries its id, so the
-# model can open the whole turn: see MemoryConfig.excerpt_open.
+# model can open the whole turn (on, the default; off is the developer comparison):
+# see MemoryConfig.excerpt_open.
 MEMORY_EXCERPT_OPEN = ("off", "on")
 # Whether recall draws on the chat turns or on memory items encoded from them, and
 # whether an opened item also shows its source turns; the size of the window a chat
@@ -411,12 +412,13 @@ class MemoryConfig:
     the block and in the search tool alike, and ``recall_open_chars`` (500-16000)
     is the room one opened turn takes; ``recall_docs`` and ``recall_chars`` do not
     bound the list, and ``recall_item_chars`` and ``recall_excerpt`` apply to the
-    excerpt form only. ``excerpt_open``, ``off`` (the default) or ``on``, is for the
+    excerpt form only. ``excerpt_open``, ``on`` (the default) or ``off``, is for the
     excerpt form of chat turns: with ``on`` a line that shows less than the whole
     turn (an excerpt that was cut, or a piece of a long turn) starts with the
     turn's id, such as ``[t123]``, a line under the items says so, and the model
     has ``open_memory`` to open the turn whole within ``recall_open_chars``; a line
-    that shows the whole turn reads as before. It has no effect with
+    that shows the whole turn reads as before; ``off`` is the developer comparison
+    (the block, the search result and the tools as before). It has no effect with
     ``recall_form = "list"`` (which always offers ``open_memory``) or
     ``recall_source = "items"``. Four more are about memory items (#428). ``recall_source``,
     ``turns`` (recall draws on the chat turns, the default) or ``items`` (it draws
@@ -464,7 +466,7 @@ class MemoryConfig:
     recall_form: str = "excerpt"  # excerpt | list: turns as excerpts, or as a list.
     recall_list_max: int = 20  # The most turns the list form lists.
     recall_open_chars: int = 4000  # The room one turn the model opens takes.
-    excerpt_open: str = "off"  # off | on: a cut excerpt carries its id to open.
+    excerpt_open: str = "on"  # on | off: a cut excerpt carries its id to open.
     recall_source: str = "turns"  # turns | items: recall draws on turns, or on items.
     open_sources: str = "off"  # off | on: an opened item also shows its source turns.
     compress_at_chars: int = 12000  # The size of a window a chat is encoded in.

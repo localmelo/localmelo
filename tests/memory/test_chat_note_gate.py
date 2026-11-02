@@ -83,6 +83,7 @@ def at(cosine: float) -> list[float]:
 
 
 def config(level: str = "typed", **memory: object) -> Config:
+    memory.setdefault("excerpt_open", "off")  # about the note gate, not open_memory
     cfg = Config(chat_backend="vllm", embedding_backend="none")
     cfg.memory = MemoryConfig(note_gate=level, **memory)  # type: ignore[arg-type]
     return cfg

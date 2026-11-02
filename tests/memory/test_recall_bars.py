@@ -74,6 +74,9 @@ class FixedEmbedding(BaseEmbeddingProvider):
 
 
 def config(**memory: object) -> Config:
+    # These tests are about bars, rooms and excerpt shapes, not ids on cut lines
+    # (tests/memory/test_excerpt_open.py): they pin excerpt_open off unless told.
+    memory.setdefault("excerpt_open", "off")
     cfg = Config(chat_backend="vllm", embedding_backend="none")
     cfg.memory = MemoryConfig(**memory)  # type: ignore[arg-type]
     return cfg
