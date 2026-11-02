@@ -48,6 +48,7 @@
       <a href="#boundaries">添加检查</a>
       <a href="#changes">提交和 pull request</a>
       <a href="#docs">文档和网站</a>
+      <a href="#art-pack">替换 Melo 的美术</a>
       <a href="#design">设计笔记</a>
     </nav>
 
@@ -296,6 +297,20 @@
         <p>
           然后打开 <code>http://127.0.0.1:8080/en/</code>。
         </p>
+      </section>
+
+      <section class="section" id="art-pack">
+        <h2>替换 Melo 的美术</h2>
+        <figure class="shot compact"><img src="../assets/img/art-pack-moves.webp" alt="Melo 六个状态各自的海报图，附状态名：startup、thinking、working、attention、idle_rest 和 idle_play。" width="880" height="648" loading="lazy"></figure>
+        <ul>
+          <li>一条命令检查一个装着 Melo 美术的文件夹或 zip，并替换 Melo 的每一张图片：宠物、控制台的画像、各种脸、图标和标志。</li>
+          <li><code>check</code> 什么都不写，只说明缺了什么；<code>apply</code> 一次替换全部图片。</li>
+          <li>Pillow 只为这一次运行下载：它不是 localmelo 的依赖。</li>
+          <li>美术包只会被读取：zip 在写入任何东西之前先检查，包里的内容不会被运行。</li>
+        </ul>
+        <!-- usage:art-pack --><figure class="usage" aria-label="替换 Melo 的美术" data-copy="uv run --with pillow==13.0.0 python scripts/art_pack.py check melo-pack.zip&#10;uv run --with pillow==13.0.0 python scripts/art_pack.py apply melo-pack.zip"><div class="usage-bar"><span class="usage-title">替换 Melo 的美术</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">run</span> <span class="f">--with</span> <span class="a">pillow==13.0.0</span> <span class="c">python</span> <span class="a">scripts/art_pack.py</span> <span class="a">check</span> <span class="a">melo-pack.zip</span></span>
+<span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">run</span> <span class="f">--with</span> <span class="a">pillow==13.0.0</span> <span class="c">python</span> <span class="a">scripts/art_pack.py</span> <span class="a">apply</span> <span class="a">melo-pack.zip</span></span></code></pre></figure><!-- /usage -->
+        <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/art-pack.md">美术包指南</a>有美术包的结构、六个动作和检查项。</p>
       </section>
 
       <section class="section" id="design">

@@ -24,7 +24,7 @@ In the web console and the app, today:
 
 ## Memory across chats
 
-![A chat that asks "when is my group meeting?": under the message, "Used 1 memory" opens the note it used and where it came from.](../assets/img/memory-across.webp)
+![A chat that asks "when is my group meeting?": under the message, "Used 1 memory" opens the earlier exchange it used and the chat it came from.](../assets/img/memory-across.webp)
 
 In the web console and the app, melo remembers across chats.
 

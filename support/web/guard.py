@@ -113,6 +113,22 @@ class AddressError(Exception):
     """An address ``web_fetch`` does not reach; the message is for the model."""
 
 
+class NotPublicError(AddressError):
+    """An address that is this computer, its network or not public at all.
+
+    ``host`` is the host as checked and ``what`` says what it is ("it is this
+    computer (loopback)"), so the browser can word its own refusal.
+    """
+
+    def __init__(self, host: str, what: str) -> None:
+        super().__init__(
+            f"melo does not read {host}: {what}. web_fetch reads public web pages "
+            "only, never this computer or its local network."
+        )
+        self.host = host
+        self.what = what
+
+
 @dataclass(frozen=True)
 class Target:
     """A checked address: its parts, and its host in ASCII without a final dot.
@@ -184,11 +200,8 @@ def _name_problem(host: str) -> str | None:
     return None
 
 
-def _not_public(host: str, what: str) -> AddressError:
-    return AddressError(
-        f"melo does not read {host}: {what}. web_fetch reads public web pages only, "
-        "never this computer or its local network."
-    )
+def _not_public(host: str, what: str) -> NotPublicError:
+    return NotPublicError(host, what)
 
 
 def _split_netloc(netloc: str) -> tuple[str, str | None]:
@@ -386,6 +399,7 @@ __all__ = [
     "AllowHook",
     "IPAddress",
     "AddressError",
+    "NotPublicError",
     "Resolver",
     "Target",
     "DNS_THREADS",
