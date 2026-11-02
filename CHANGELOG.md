@@ -444,6 +444,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Memory items written from chats (`melo memory ingest FILE -X ingest=compress`,
+  a developer setting) keep what everyday talk shows about the person's daily
+  life, routines, mood and personality. Only exchanges that carry no
+  information, such as "ok" or "thanks", are left out. Small talk was left out
+  before.
+
 - The main chat starts a task itself when your request needs tools it lacks
   (running commands, changing files, many steps), with one line, **Change** and
   **Stop**, instead of offering "Start this as a task?". Your message is still

@@ -137,7 +137,7 @@ async def test_the_turns_are_written_as_ever_and_the_items_follow(
         assert (first.status, first.replaced_by) == ("replaced", 3)
         assert (book.status, utrecht.status) == ("active", "active")
         assert first.session_id == may and utrecht.session_id == june
-        assert first.encoder == "1:stub-encoder" and first.embed_model == ""
+        assert first.encoder == "2:stub-encoder" and first.embed_model == ""
         # The item's time is that of the last turn it came from.
         stored = await chats.get_session(may)
         assert stored is not None and stored.title == "Moving"
