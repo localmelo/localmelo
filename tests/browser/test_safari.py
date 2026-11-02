@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
+import shutil
 import stat
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -11,7 +14,13 @@ from typing import Any
 import pytest
 
 from localmelo.melo.executor.models import ToolOutput
-from localmelo.support.browser.driver import BrowserError, BrowserSetupError
+from localmelo.support.browser.driver import (
+    Act,
+    BrowserError,
+    BrowserSetupError,
+    Element,
+    StaleElementError,
+)
 from localmelo.support.browser.provider import BrowserToolProvider
 from localmelo.support.browser.safari import (
     SETUP_MESSAGE,
@@ -273,3 +282,152 @@ def test_the_probe_says_what_to_turn_on(
     monkeypatch.setenv("LOCALMELO_SAFARIDRIVER", f"{sys.executable} -I {FAKE} exit_off")
     assert asyncio.run(probe.probe("https://example.com/")) == 1
     assert "FAILED: Safari is not set up for melo yet." in capsys.readouterr().out
+
+
+# ── Tabs, acting and the page scripts ──
+
+
+async def test_a_tab_is_named_when_a_page_is_opened_in_it(
+    driver: SafariAutomationDriver,
+) -> None:
+    first = await driver.open("https://example.com/", new_tab=False)
+    second = await driver.open("https://example.com/news", new_tab=True)
+    await driver.open("https://example.com/form", new_tab=False, tab=first.id)
+    assert (await driver.location(first.id)) == "https://example.com/form"
+    assert (await driver.location(second.id)) == "https://example.com/news"
+
+
+async def test_the_page_script_reads_buttons_fields_choices_and_what_it_skipped(
+    driver: SafariAutomationDriver,
+) -> None:
+    await driver.open("https://example.com/form", new_tab=False)
+    raw = await driver.page(None)
+    assert raw.skipped == 2
+    check, nick, country = raw.elements
+    assert (check.kind, check.label, check.also, check.at) == (
+        "button",
+        "Check in",
+        "Daily check-in",
+        0,
+    )
+    assert nick.submit == "https://example.com/save" and nick.at == 1
+    assert nick.attrs is not None and nick.attrs.words == "nick Nickname"
+    assert nick.attrs.maxlength == 40 and nick.attrs.masked is False
+    assert country.options == ("France", "Spain") and country.at == 2
+
+
+async def test_clicking_typing_and_choosing_over_the_fake_server(
+    driver: SafariAutomationDriver,
+) -> None:
+    await driver.open("https://example.com/form", new_tab=False)
+    raw = await driver.page(None)
+    url = raw.url
+    check, nick, country = raw.elements
+    await driver.act(None, Act("type", url, nick, text="Alex"))
+    await driver.act(None, Act("select", url, country, text="Spain"))
+    await driver.act(None, Act("click", url, check))
+    assert await driver.location(None) == "https://example.com/done"
+    assert (await driver.page(None)).title == "Done"
+
+
+async def test_an_act_on_a_page_that_is_not_the_one_read_is_refused(
+    driver: SafariAutomationDriver,
+) -> None:
+    await driver.open("https://example.com/form", new_tab=False)
+    raw = await driver.page(None)
+    await driver.open("https://example.com/news", new_tab=False)
+    with pytest.raises(StaleElementError, match="its address changed"):
+        await driver.act(None, Act("click", raw.url, raw.elements[0]))
+    assert await driver.location(None) == "https://example.com/news"
+
+
+async def test_an_act_on_an_element_that_is_not_the_one_read_is_refused(
+    driver: SafariAutomationDriver,
+) -> None:
+    await driver.open("https://example.com/form", new_tab=False)
+    raw = await driver.page(None)
+    other = Element("button", "Check out", at=0)
+    with pytest.raises(StaleElementError, match="no longer on the page"):
+        await driver.act(None, Act("click", raw.url, other))
+    assert await driver.location(None) == "https://example.com/form"
+
+
+async def test_an_option_that_is_not_there_is_not_chosen(
+    driver: SafariAutomationDriver,
+) -> None:
+    await driver.open("https://example.com/form", new_tab=False)
+    raw = await driver.page(None)
+    with pytest.raises(BrowserError, match="no single option"):
+        await driver.act(None, Act("select", raw.url, raw.elements[2], text="Mars"))
+
+
+async def test_the_act_script_text_is_valid_and_carries_its_spec_as_data() -> None:
+    from localmelo.support.browser.safari import act_script
+
+    spec = {"act": "type", "url": "https://a/", "at": 3, "text": "</script> x"}
+    script = act_script(spec)
+    assert " " not in script
+    assert json.loads(script[script.rindex("})(") + 3 : -1]) == spec
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_the_page_scripts_are_valid_javascript(tmp_path: Path) -> None:
+    from localmelo.support.browser.safari import FOCUS_JS, PAGE_JS, act_script
+
+    for name, source in (
+        ("page", PAGE_JS),
+        ("focus", FOCUS_JS),
+        ("act", act_script({"act": "click", "url": "u", "at": 0})),
+    ):
+        file = tmp_path / f"{name}.js"
+        file.write_text(f"(function () {{ return {source}; }});", encoding="utf-8")
+        checked = subprocess.run(
+            ["node", "--check", str(file)], capture_output=True, text=True, timeout=30
+        )
+        assert checked.returncode == 0, f"{name}: {checked.stderr}"
+
+
+async def test_the_tools_use_short_ids_over_the_real_driver_with_long_helper_ids() -> (
+    None
+):
+    # The bug the person saw: the helper's ids are 41 characters, the tab list
+    # cut them with an ellipsis, and every close failed.
+    provider = BrowserToolProvider(driver_for("long_ids"))
+    tools = {t.definition.name: t for t in await provider.start()}
+    try:
+        await tools["browser_open"].function(url="https://example.com/")
+        await tools["browser_open"].function(url="https://example.com/news", tab="new")
+        listing = await tools["browser_tabs"].function(action="list")
+        assert isinstance(listing, str)
+        assert (
+            "t1 https://example.com/ " in listing
+            and "* t2 https://example.com/news" in listing
+        )
+        assert "page-" not in listing and "…" not in listing
+        closed = await tools["browser_tabs"].function(action="close", tab="t1")
+        assert isinstance(closed, str) and "t1" not in closed and "t2" in closed
+        assert not isinstance(closed, ToolOutput)
+        again = await tools["browser_tabs"].function(action="close", tab="t1")
+        assert isinstance(again, ToolOutput) and again.is_error
+        assert "not a tab of this chat" in again.text
+    finally:
+        await provider.close()
+
+
+async def test_a_button_is_found_clicked_and_the_new_page_read_over_the_fake_server() -> (
+    None
+):
+    provider = BrowserToolProvider(driver_for())
+    tools = {t.definition.name: t for t in await provider.start()}
+    try:
+        await tools["browser_open"].function(url="https://example.com/form")
+        found = await tools["browser_find"].function(query="daily check-in")
+        assert isinstance(found, str) and '[e1 button "Check in"]' in found
+        assert "2 more things on the page were skipped" in found
+        clicked = await tools["browser_click"].function(ref="e1")
+        assert isinstance(clicked, str)
+        assert (
+            clicked.startswith("Clicked e1.\n<<page id=s2") and "Checked in." in clicked
+        )
+    finally:
+        await provider.close()

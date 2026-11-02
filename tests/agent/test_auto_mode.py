@@ -622,6 +622,89 @@ async def test_a_site_opens_when_named_and_is_reviewed_otherwise(
         assert answer.reason.startswith(BLOCKED)
 
 
+class ActsOnSite(OpensSite):
+    """A provided tool that asks to act on a site the way the browser does."""
+
+    async def start(self) -> list[ProvidedTool]:
+        [tool] = await super().start()
+        return [
+            ProvidedTool(
+                definition=ToolDef(
+                    name="act_on_site",
+                    description="Click on a site, or send a form from it.",
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "site": {"type": "string"},
+                            "access": {"type": "string"},
+                        },
+                        "required": ["site", "access"],
+                    },
+                    annotations={"readOnlyHint": True},
+                ),
+                function=self._act,
+            )
+        ]
+
+    async def _act(self, site: str, access: str) -> str:
+        ask = TOOL_ASK.get()
+        assert ask is not None
+        arguments = {"site": site, "access": access}
+        if access == "submit":
+            arguments.update(to="https://collect.example/post", how="click")
+        decision = await ask(
+            f"browser-{access}:https://{site}", arguments, f"{access} on {site}"
+        )
+        self.answers.append(decision)
+        return "done" if decision.allow else decision.reason
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("access", "reviews", "allowed", "reviewed"),
+    [
+        # Clicking on a site the request names is reviewed like opening it: routine.
+        ("act", [], True, 0),
+        # A form sent from it is reviewed by itself, even there.
+        ("submit", [verdict()], True, 1),
+        ("submit", [verdict(fits_request="no", category="beyond_request")], False, 1),
+    ],
+)
+async def test_a_click_is_reviewed_like_opening_the_site_and_a_form_by_itself(
+    tmp_path: Path,
+    access: str,
+    reviews: list[Message],
+    allowed: bool,
+    reviewed: int,
+) -> None:
+    tool = ActsOnSite()
+    plans = [
+        _calls(("act_on_site", {"site": "news.example", "access": access}, "call_1")),
+        _answer("done"),
+    ]
+    llm = FakeModel(plans, reviews)
+    (tmp_path / "ws").mkdir()
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset(),
+            tool_exposure="all",
+            workspace_root=str(tmp_path / "ws"),
+        ),
+        tool_providers=[tool],
+    )
+    agent.chat.sleep = _no_wait
+
+    await agent.run_task("log in to news.example for me", approval=AutoPolicy())
+
+    [answer] = tool.answers
+    assert answer.allow is allowed
+    assert len(llm.review_requests) == reviewed
+    if reviewed:
+        words = json.dumps([m.content for m in llm.review_requests[0]])
+        assert "collect.example/post" in words
+
+
 # ── What the review counts as the user's words, and how long it keeps them ──
 
 

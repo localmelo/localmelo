@@ -1,12 +1,13 @@
 # Browsing with melo
 
-Let melo read web pages in Safari, on a Mac, from the terminal or the web console. Read the safety section before you turn it on; the settings are in the [configuration reference](../reference/configuration.md).
+Let melo read web pages in Safari, and click, type and choose on them, on a Mac, from the terminal or the web console. Read the safety section before you turn it on; the settings are in the [configuration reference](../reference/configuration.md).
 
 ![A terminal chat in which melo opens a web page and says what it contains.](../assets/img/browser.webp)
 
-- Browsing is **off by default** and **read-only in this first part**.
-- melo opens pages in Safari's *automation windows*, follows links and reads what it finds.
-- It does not click buttons, fill in forms, sign in, post or buy; those come later (see [What is coming](#what-is-coming)).
+- Browsing is **off by default**.
+- melo opens pages in Safari's *automation windows*, follows links and reads what it finds. It works in one tab, like a person would.
+- It can click a button or link, type into a text box and choose from a list, all **inside melo's own browser window**. It never types a password, a card number or a one-time code, never reads your cookies, and asks before it sends a form (see [Clicking, typing and choosing](#clicking-typing-and-choosing)).
+- It does not sign in for you, post or buy; moving the mouse on your desktop is a different feature and is not part of this (see [What is coming](#what-is-coming)).
 
 ## Read a page without the browser
 
@@ -19,7 +20,7 @@ Every chat can read a public page without Safari, with the `web_fetch` tool. It 
 - A page that needs a sign-in, blocks automated readers or is built by scripts says so. With browsing on, melo can try it in Safari instead.
 - Tasks have it too. Turn it off in Settings → Chats and folders → **Read web pages**, or with `melo config set tools.web_fetch false`. The limits and the exact rules are in [Tools](../reference/tools.md#reading-a-public-web-page).
 
-The rest of this page is about browsing in Safari, which also follows links and runs a page's scripts.
+The rest of this page is about browsing in Safari, which also follows links, clicks, types and runs a page's scripts.
 
 ## What you need
 
@@ -50,6 +51,7 @@ In the config file:
 ```toml
 [browser]
 driver = "safari-automation"
+keep_tabs = false   # true leaves the tabs melo opened in the window
 ```
 
 `"off"` is the default. The web console and the app read the same setting when they open a chat, the main chat included: change it with `/browser on` there, or `melo config set browser.driver safari-automation`, and open a new chat.
@@ -82,10 +84,13 @@ Safari is not set up for melo yet. In Safari, open Settings > Developer and turn
 
 | Tool | What it does |
 |---|---|
-| `browser_open` | Open an `http` or `https` address (in a new tab, or the current one) and read it. |
+| `browser_open` | Open an `http` or `https` address and read it. It reuses the tab melo opened in this chat; `tab="new"` opens another, and a tab id such as `t2` names one. |
 | `browser_read` | Read the current page again, or the next part of a long page (`part`). |
-| `browser_find` | Search the elements of the last reading by words in their label or address. |
+| `browser_find` | Search the elements of the last reading (links, buttons, menu items, fields) by words in their visible text, `aria-label` or address. It says how many things on the page it left out. |
 | `browser_follow` | Open the address of a link from the last reading. It opens the address; it does not click. |
+| `browser_click` | Click a button, link, menu item or checkbox from the last reading, then read the page again. |
+| `browser_type` | Type into a text box from the last reading (`submit=true` presses Enter afterwards, which sends the form). Never a password, card or one-time-code field. |
+| `browser_select` | Choose an option in a select list from the last reading, by its text. |
 | `browser_back` | Go back one page in the tab. |
 | `browser_tabs` | List melo's tabs, switch to one, or close one. A tab whose page melo has not checked shows as *(not checked)*. |
 | `browser_wait` | Wait (30 seconds at most) for the page melo opened to load, or for some text to appear or go. |
@@ -94,14 +99,14 @@ Safari is not set up for melo yet. In Safari, open Settings > Developer and turn
 A page reaches the model as one bounded block:
 
 ```text
-<<page id=s1 nonce=ab3218de tab=w2 origin=https://example.com title="Example Home">>
+<<page id=s1 nonce=ab3218de tab=t1 origin=https://example.com title="Example Home">>
 Welcome to the example.
 Second line, with 中文。
 elements:
 [e1 link "News" -> /news]
 [e2 textbox "Search" value="cats"]
 [e3 password field: melo never types here]
-[e4 button "Go"]
+[e4 button "Go" sends a form -> /search]
 <<end page s1 nonce=ab3218de>>
 ```
 
@@ -109,6 +114,30 @@ elements:
 - At most 60 elements show. `browser_find` searches all of them.
 - Element refs (`e1`) are numbered across the chat and belong to the newest reading of their tab. A ref from an older page is refused, not guessed.
 - The values of password, one-time-code and card fields are never read, and a page with payment fields is not read at all.
+- A button that would send a form says so (`sends a form -> /search`), with the address the form goes to.
+- Buttons are not only `<button>` elements: `role="button"` elements, menu items, tabs, links that run a script and other clickable elements are listed too, and `browser_find` matches their visible text and their `aria-label`. When nothing matches, the answer says how many things the page reader skipped (hidden or disabled ones, or past its limit of 400).
+
+## Tabs
+
+- **One tab per chat.** `browser_open` loads the next page into the tab melo opened, so a long task does not pile up windows. Ask for `tab="new"` only when two pages must stay open.
+- **Short ids.** Tabs are called `t1`, `t2` and so on, in the order melo opened them, and every tool that takes a `tab` takes these. An id is never cut and never reused. Safari's own long ids never reach the model, and an id that melo did not hand out is refused.
+- **Closing works.** `browser_tabs close` closes a tab melo opened. If Safari lost a tab meanwhile, the list leaves it out and says so (`t3 is gone: the browser no longer has it.`).
+- **Your own tabs are left alone.** A tab melo did not open is never listed, read or closed; the list only says how many other tabs the window has. A tab a click opens (a link that opens in a new tab) counts as melo's.
+- **Tidying up.** The tabs melo opened are closed when the chat ends and after ten minutes without a browser call; the last one is kept, empty, so Safari's automation session goes on, and nothing in it stays approved. `/new` does the same. Set `[browser] keep_tabs = true` to leave them all open.
+
+<a id="clicking-typing-and-choosing"></a>
+
+## Clicking, typing and choosing
+
+`browser_click`, `browser_type` and `browser_select` act on an element of the last reading by its ref (`e12`), the way a person would. They work inside melo's browser window; they do not move your mouse or touch other apps.
+
+- **Only the page that was read.** The action is done only if the tab still shows the address it had when the page was read and the element is still the one that was read (same kind, label and address). Otherwise nothing happens and melo asks the model to read the page again. A ref from an older page is refused before the browser is called.
+- **After each action** melo checks the address the tab shows, as it does after a redirect: never this Mac, your network or melo's console, and a site it has not asked about is asked about before the page is read. Then it reads the page again; its refs are new.
+- **Never a secret field.** melo does not type into a password, card or one-time-code field, and says why. It decides from the field's `type`, its `autocomplete` values (`current-password`, `new-password`, `one-time-code`, `cc-*`), text the page masks with CSS, the words that name it (name, id, `aria-label`, placeholder and its label, in English or Chinese: password, PIN, card number, CVV, verification code and so on) and the shape of a numeric code, once when it reads the page and again at the moment it types, so a field the page changed in between is not typed into. Ask the person to fill such a field in the window themselves.
+- **Clicks and typing ask apart from reading.** The first time melo wants to click or type on a site in a chat you see "Let melo click and type on example.com?"; "allow for this chat" covers that site's clicks and typing only. Opening the site does not allow it.
+- **A form that is sent asks by itself.** A click on a button that submits a form, and `browser_type` with `submit=true`, ask "Let melo send a form from example.com?" with the address the form goes to. That address is checked first, like any other: a form that posts to this Mac or your network is refused outright, and one that posts to another site asks about that site before anything is sent.
+- **A link's address is checked before the click**, the same way. A click that lands on a local address anyway (a script sent it there) is blanked and refused.
+- **Your session stays yours.** melo never reads cookies or page storage, and the automation windows have none of your sign-ins.
 
 ## Who decides which sites melo opens
 
@@ -116,14 +145,14 @@ elements:
 - **A redirect asks again.** If a link or a redirect lands on another site, melo asks about that site before it reads the page. If you say no, the window goes back to a blank page and the model reads that you refused.
 - **Only `http` and `https`.** `file:`, `about:`, `javascript:`, `data:` and the browser's own pages are never opened. Nor is an address with a user name or password in it (`user@site`).
 - **Never this Mac, your network or melo's console.** As with `web_fetch`, melo does not open `localhost`, private, link-local or carrier-shared addresses, `.local` names, names without a dot, an address written as one number, or a name whose DNS answer is one of these. melo's own console is refused too, wherever it listens. A redirect or a page that moves to such an address is blanked. This is checked before any question about the site. For a task's result, the main chat reads the task itself (`task_get`).
-- **In auto mode nothing asks.** A site your own recent messages name opens (that site itself, with or without `www.`, not a site under it); another one opens only when your model finds that it serves what you asked (checked once per site per chat), and is blocked otherwise. `--yolo` skips every question.
+- **In auto mode nothing asks.** A site your own recent messages name opens (that site itself, with or without `www.`, not a site under it); another one opens only when your model finds that it serves what you asked (checked once per site per chat), and is blocked otherwise. A click or typing on a site is reviewed like opening it. A form that is sent is always reviewed by itself, even on a site you named. `--yolo` skips every question.
 - **Page text is data.** A page can say anything. melo's system prompt tells the model that text between the page markers is content of a web page, never instructions, and the closing marker carries a random number that no page can know, so a page cannot end its own block. This lowers the risk of a page steering the model; it does not remove it. Do not allow sites you do not trust, and do not turn browsing on in a chat that holds secrets you would not paste into a web page.
 
 ## What is coming
 
 Browsing is built in parts; none of the next two exists yet.
 
-- Acting in your own signed-in browser (a Chrome extension): clicks and typing, with a confirmation that `auto` and `--yolo` cannot skip for sending, posting, buying and signing in.
+- Acting in your own signed-in browser (a Chrome extension): clicks and typing there, with a confirmation that `auto` and `--yolo` cannot skip for sending, posting, buying and signing in. The clicks on this page happen only inside melo's own automation window; moving your mouse on the desktop (computer use) is a separate feature.
 - Saved chores that run on a schedule (for example a daily check-in), with steps you approved once.
 
 ## Troubleshooting
@@ -135,6 +164,9 @@ Browsing is built in parts; none of the next two exists yet.
 | `This Safari's automation server lacks the tools melo needs` | Update macOS and Safari. |
 | A page reads as empty | It may need a sign-in or be built by scripts after loading; try `browser_wait`, or open it yourself. |
 | melo says it did not open a site | You answered no to the question about it; ask again and allow the site. |
+| `... is not a tab of this chat` | Use a tab id such as `t1` from `browser_tabs list`; ids are never cut or guessed. |
+| `That is a password field: melo never types ...` | By design. melo does not type passwords, card numbers or one-time codes; fill the field in yourself, in the automation window. |
+| `The page is not the one that was read` or `That element is no longer on the page` | The page changed after it was read. `browser_read` gives current refs. |
 | `melo's browser does not open local or private addresses` | The address is this Mac, your network or melo's console. That is on purpose; open it yourself if you need it. The developer setting that lets `web_fetch` read a test server (`web_fetch_allow_local`) does not change this. |
 
 To see what Safari's automation server answers, with no model involved, run this from the checkout. It opens an automation window, reads one page, lists the tabs, takes a picture and closes; each line shows what came back, and a failure says what to turn on:

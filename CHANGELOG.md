@@ -9,6 +9,36 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- melo can now click, type and choose in its browser, inside its own Safari automation
+  window (it does not move your mouse or use other apps; full-screen computer use stays a
+  separate feature). With browsing on, three tools join the eight: `browser_click` presses a
+  button, link, menu item or checkbox from the last reading, `browser_type` types into a text
+  box (and presses Enter when asked, which sends the form), and `browser_select` chooses an
+  option in a list. An action only happens on the page that was read: the tab must still show
+  the same address and the element must still be the one that was read, otherwise nothing is
+  done and melo reads the page again; refs from an older page are refused. Each action is
+  followed by the same address checks as a redirect, and by a fresh reading of the page. Local
+  and private addresses stay refused whatever a click or a script does, a link or a form that
+  points at one is refused before the click, and a tab a click opens is checked and closed if
+  refused. melo never types into a password, card number or one-time-code field, even one the
+  page disguises (a masked text box, an `autocomplete` hint, or a name, label or placeholder
+  such as "PIN", "CVV" or "验证码"), and checks again at the moment it types. It never reads
+  cookies or page storage. Clicking and typing on a site ask once per site and chat apart
+  from reading; a click on a button that sends a form, or typing that presses Enter, asks by
+  itself and shows where the form goes, a site other than the page's is asked about first, and
+  Auto mode reviews every form that is sent on its own, even on a site you named.
+- `browser_find` now matches more than links: buttons, `role="button"` elements, menu items,
+  tabs, switches, links that run a script and other clickable elements, by visible text and
+  `aria-label`. Select lists show their options, a button that sends a form says where, and
+  when nothing matches the answer says how many things on the page were left out.
+- melo works in one browser tab per chat. `browser_open` reuses the tab it opened (`tab="new"`
+  opens another, `tab="t2"` names one), tabs have short ids (`t1`, `t2`) that every browser
+  tool accepts, and the tabs it opened close when the chat ends, on `/new` and after ten
+  minutes without a browser call; your own tabs are never listed, read or closed. A tab that
+  Safari lost drops out of the list and the list says so. `[browser] keep_tabs = true` leaves
+  the tabs open. The browser tool note now tells the model to read the current page and use
+  its links and buttons before it guesses addresses.
+
 - Developer only, not visible by default: `[tools] web_fetch_allow_local` lets `web_fetch` read
   test servers you list on this computer, for a test that needs a fixture page. It is a list of
   exact `127.0.0.1:PORT` or `[::1]:PORT` entries, empty (off) by default, set in the config file
@@ -870,6 +900,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- `browser_tabs` no longer shows tab ids cut off with "…" that no other browser tool could
+  use, and closing a tab works: melo's tab ids are short and stable, an id it did not give
+  out is refused before the browser is called, and a tab Safari has already lost is dropped
+  from the list instead of failing every call.
 - A task the chat started keeps **Stop** on its row while the task, or the
   chat's follow-up on it, can still run; Stop then ends a follow-up that waits
   or runs, so it never continues the task. A follow-up still waiting when melo

@@ -22,6 +22,11 @@ from localmelo.melo.contracts.approvals import (
 from localmelo.support.browser.driver import BrowserError
 
 PREFIX = "browser:"
+# Acting on a page asks apart from reading it: a click or typing on a site is
+# one grant per site and chat, a form sent from it is another, so the answer
+# to "open this site" never lets melo click, and neither lets it send a form.
+ACT_PREFIX = "browser-act:"
+SUBMIT_PREFIX = "browser-submit:"
 # The longest address a site question shows (web_fetch's): longer ones are cut.
 URL_SHOWN = 300
 _PORTS = {"http": 80, "https": 443}
@@ -133,3 +138,49 @@ async def require_site(
     decision = await ask(*_question(origin, via, url))
     if not decision.allow:
         raise BrowserError(_refusal(origin, via, decision))
+
+
+async def require_act(origin: str, what: str) -> None:
+    """Ask about clicking or typing on *origin*'s page; :class:`BrowserError` if refused.
+
+    The question has no ``origin`` argument on purpose: a refusal of a click
+    must not refuse the site for reading too (the earlier-blocks rule keys on
+    it). *what* is the plain words for the preview (``click "Check in"``).
+    """
+    ask = TOOL_ASK.get()
+    if ask is None:
+        return
+    host = host_of(origin)
+    decision = await ask(
+        ACT_PREFIX + origin,
+        {"site": host, "access": "act"},
+        f"{what} on {host} in Safari",
+    )
+    if not decision.allow:
+        raise BrowserError(
+            f"melo did not click or type on {host}. " + denial_text(decision)
+        )
+
+
+async def require_submit(origin: str, target: str, how: str) -> None:
+    """Ask about sending a form from *origin*'s page to *target*; :class:`BrowserError` if refused.
+
+    Reviewed by itself: the question carries where the form goes and how
+    (``click`` on its button, or ``enter`` in a field), so no earlier answer
+    covers another form. *target* is an absolute address, shown cut to
+    :data:`URL_SHOWN` characters.
+    """
+    ask = TOOL_ASK.get()
+    if ask is None:
+        return
+    host = host_of(origin)
+    to = shown_url(target)
+    decision = await ask(
+        SUBMIT_PREFIX + origin,
+        {"site": host, "access": "submit", "to": to, "how": how},
+        f"send a form on {host} to {to}",
+    )
+    if not decision.allow:
+        raise BrowserError(
+            f"melo did not send the form from {host}. " + denial_text(decision)
+        )

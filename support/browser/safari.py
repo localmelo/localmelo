@@ -28,12 +28,15 @@ from typing import Any, cast
 
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.support.browser.driver import (
+    Act,
     BrowserError,
     BrowserSetupError,
     Element,
+    FieldAttrs,
     RawPage,
     Sensitive,
     Shot,
+    StaleElementError,
     TabInfo,
 )
 from localmelo.support.mcp import McpError, McpServerConfig, McpTool, StdioMcpClient
@@ -77,46 +80,169 @@ MAX_SHOT_BYTES = 10 * 1024 * 1024
 KINDS = ("link", "button", "textbox", "checkbox", "select")
 SECRETS = ("password", "code", "card")
 SETTLE_S = 15.0
+_STALE = {
+    "page": "The page is not the one that was read (its address changed). Use browser_read for current refs.",
+    "gone": "That element is no longer on the page as it was read. Use browser_read for current refs.",
+    "field": "That field changed since it was read, so melo did not use it. Use browser_read for current refs.",
+}
 POLL_S = 0.4
 
+# The page script's pieces, shared by reading a page and by acting on it, so
+# an element is found again by the same rules that listed it. ``SEL`` lists
+# what may be a target; ``lookAt`` describes one (or says why it is not one:
+# ``skip`` 1 is counted as skipped, 0 is not worth counting). Nothing here
+# reads cookies or storage, and nothing changes the page.
+COMMON_JS = r"""
+var SEL = "a[href],button,input,textarea,select,summary,[role=button],[role=link],[role=menuitem],[role=menuitemcheckbox],[role=menuitemradio],[role=tab],[role=switch],[role=option],[role=checkbox],[role=radio],[onclick],[tabindex]:not([tabindex='-1']),[class*=btn],[class*=button]";
+var NESTED = "a[href],button,input,select,textarea,summary,[role=button],[role=link],[role=menuitem],[role=tab]";
+var cap = function (s, n) { return String(s == null ? "" : s).replace(/\s+/g, " ").trim().slice(0, n); };
+var attr = function (n, a) { return n.getAttribute(a) || ""; };
+var inside = function (n, q) { return Element.prototype.querySelector.call(n, q); };
+var formAddress = function (form, button) {
+  var raw = button ? button.getAttribute("formaction") : null;
+  if (raw === null || raw === undefined) raw = form.getAttribute("action");
+  try { return new URL(raw === null || raw === "" ? location.href : raw, document.baseURI).href; }
+  catch (e) { return location.href; }
+};
+var defaultButton = function (form) {
+  return inside(form, "button:not([type]),button[type=submit],input[type=submit],input[type=image]");
+};
+var lookAt = function (n) {
+  var tag = n.tagName.toLowerCase(), type = attr(n, "type").toLowerCase(), role = attr(n, "role").toLowerCase();
+  var r = n.getBoundingClientRect(), st = getComputedStyle(n);
+  if (st.visibility === "hidden" || st.display === "none" || (r.width === 0 && r.height === 0)) return {skip: 1};
+  if (n.disabled || attr(n, "aria-disabled") === "true") return {skip: 1};
+  var native = /^(a|button|input|textarea|select|summary)$/.test(tag);
+  var known = /^(button|link|menuitem|menuitemcheckbox|menuitemradio|tab|switch|option|checkbox|radio)$/.test(role);
+  if (!native && !known) {
+    // A plain element that only looks clickable: it must say so, hold no other target,
+    // and not sit inside one (the target is then the outer element).
+    if (inside(n, SEL) || (n.parentElement && n.parentElement.closest(NESTED))) return {skip: 0};
+    if (!attr(n, "onclick") && st.cursor !== "pointer") return {skip: 0};
+  }
+  var labels = n.labels ? Array.prototype.map.call(n.labels, function (l) { return cap(l.innerText || l.textContent, 80); }).join(" ") : "";
+  var aria = cap(attr(n, "aria-label"), 120), ph = cap(attr(n, "placeholder"), 120);
+  var title = cap(attr(n, "title") || attr(n, "alt"), 120);
+  var shown = cap(n.innerText || n.textContent, 120);
+  var el = {};
+  if (tag === "select") {
+    el.kind = "select";
+    el.label = labels || aria || title || cap(n.name, 80);
+    el.value = cap(n.options && n.selectedIndex >= 0 ? n.options[n.selectedIndex].text : "", 120);
+    el.options = Array.prototype.slice.call(n.options || [], 0, 40).map(function (o) { return cap(o.text, 60); });
+  } else if (tag === "input" && (type === "checkbox" || type === "radio")) {
+    el.kind = "checkbox"; el.checked = !!n.checked;
+    el.label = labels || aria || title || cap(n.name, 80);
+  } else if (tag === "textarea" || (tag === "input" && !/^(button|submit|reset|image|hidden|file|checkbox|radio)$/.test(type))) {
+    el.kind = "textbox"; el.value = cap(n.value, 120);
+    el.label = labels || aria || ph || title || cap(n.name, 80);
+    var max = parseInt(attr(n, "maxlength") || "0", 10);
+    var ac = attr(n, "autocomplete").toLowerCase();
+    var words = [attr(n, "name"), n.id, aria, ph, labels].join(" ");
+    var masked = String(st.webkitTextSecurity || st.getPropertyValue("-webkit-text-security") || "none") !== "none";
+    el.attrs = {type: tag === "textarea" ? "textarea" : type || "text", autocomplete: ac, words: cap(words, 300), inputmode: attr(n, "inputmode").toLowerCase(), maxlength: isNaN(max) ? 0 : max, masked: masked};
+    if (type === "password" || masked || /(^|\s)(current|new)-password(\s|$)/.test(ac)) el.sensitive = "password";
+    else if (/(^|\s)one-time-code(\s|$)/.test(ac) || /otp|one.?time|verif|验证码/i.test(words) || (el.attrs.inputmode === "numeric" && max >= 4 && max <= 8)) el.sensitive = "code";
+    else if (/(^|\s)cc-/.test(ac)) el.sensitive = "card";
+    if (n.form && !el.sensitive) {
+      var db = defaultButton(n.form);
+      el.submit = formAddress(n.form, db);
+    }
+  } else if (tag === "input" || tag === "button") {
+    el.kind = "button";
+    el.label = tag === "input" ? cap(n.value, 120) || aria || title : shown || aria || title || cap(n.name, 80);
+    if (n.form && (tag === "input" ? /^(submit|image)$/.test(type) : (type === "" || type === "submit"))) el.submit = formAddress(n.form, n);
+  } else if (tag === "a" || role === "link") {
+    var href = tag === "a" ? (typeof n.href === "string" ? n.href : attr(n, "href")) : "";
+    if (/^https?:/i.test(href)) { el.kind = "link"; el.href = href; }
+    else if (/^(mailto|tel|sms|file|blob|data|ftp):/i.test(href)) return {skip: 1};
+    else el.kind = "button";  // javascript: and empty addresses are clicked, not opened
+    el.label = shown || aria || title;
+  } else if (/^(checkbox|switch|radio|menuitemcheckbox|menuitemradio)$/.test(role)) {
+    el.kind = "checkbox"; el.checked = attr(n, "aria-checked") === "true";
+    el.label = shown || aria || title;
+  } else {
+    el.kind = "button";
+    el.label = shown || aria || title;
+  }
+  var other = aria && aria !== el.label ? aria : (title && title !== el.label ? title : "");
+  if (other) el.also = other;
+  if (el.sensitive) { el.value = ""; el.label = ""; el.also = ""; }
+  return {el: el};
+};
+"""
+
 # Returns JSON: the page's text (the main part when there is one) and its
-# visible links, buttons and fields. Secret fields are marked, their values never read.
-PAGE_JS = r"""(function () {
-  var cap = function (s, n) { return String(s == null ? "" : s).replace(/\s+/g, " ").trim().slice(0, n); };
-  var out = {url: location.href, title: document.title || "", text: "", elements: []};
+# visible links, buttons and fields, each with its place (``at``) among the
+# page's possible targets. Secret fields are marked, their values never read.
+PAGE_JS = r"""(function () {""" + COMMON_JS + r"""
+  var out = {url: location.href, title: document.title || "", text: "", elements: [], skipped: 0};
   var main = document.querySelector("main,[role=main],article");
   var root = main && (main.innerText || "").length > 300 ? main : document.body;
   out.text = root ? String(root.innerText || "").slice(0, 200000) : "";
-  var nodes = document.querySelectorAll("a[href],button,input,textarea,select,[role=button],[role=link]");
-  for (var i = 0; i < nodes.length && out.elements.length < 400; i++) {
-    var n = nodes[i], r = n.getBoundingClientRect(), st = getComputedStyle(n);
-    if (st.visibility === "hidden" || st.display === "none" || (r.width === 0 && r.height === 0)) continue;
-    var tag = n.tagName.toLowerCase(), type = (n.getAttribute("type") || "").toLowerCase();
-    var ac = (n.getAttribute("autocomplete") || "").toLowerCase();
-    var name = (n.getAttribute("name") || "") + " " + (n.id || "") + " " + (n.getAttribute("aria-label") || "");
-    var label = cap(n.getAttribute("aria-label") || n.innerText || n.getAttribute("placeholder") || n.getAttribute("title") || n.getAttribute("alt") || n.value || n.name, 120);
-    var el = {label: label};
-    if (tag === "a" || n.getAttribute("role") === "link") {
-      if (!/^https?:/i.test(n.href || "")) continue;
-      el.kind = "link"; el.href = n.href;
-    } else if (tag === "button" || n.getAttribute("role") === "button" || (tag === "input" && /^(button|submit|reset|image)$/.test(type))) {
-      el.kind = "button";
-    } else if (tag === "select") {
-      el.kind = "select"; el.value = cap(n.options && n.selectedIndex >= 0 ? n.options[n.selectedIndex].text : "", 120);
-    } else if (tag === "input" && (type === "checkbox" || type === "radio")) {
-      el.kind = "checkbox"; el.checked = !!n.checked;
-    } else if (tag === "textarea" || (tag === "input" && type !== "hidden" && type !== "file")) {
-      el.kind = "textbox"; el.value = cap(n.value, 120);
-      var max = parseInt(n.getAttribute("maxlength") || "0", 10);
-      if (type === "password" || ac === "current-password" || ac === "new-password") el.sensitive = "password";
-      else if (ac === "one-time-code" || /otp|one.?time|verif|验证码/i.test(name) || (n.getAttribute("inputmode") === "numeric" && max >= 4 && max <= 8)) el.sensitive = "code";
-      else if (ac.indexOf("cc-") === 0) el.sensitive = "card";
-    } else { continue; }
-    if (el.sensitive) { el.value = ""; el.label = ""; }
-    out.elements.push(el);
+  var nodes = document.querySelectorAll(SEL);
+  for (var i = 0; i < nodes.length && i < 4000; i++) {
+    var d = lookAt(nodes[i]);
+    if (!d.el) { out.skipped += d.skip; continue; }
+    if (out.elements.length >= 400) { out.skipped += 1; continue; }
+    d.el.at = i;
+    out.elements.push(d.el);
   }
   return JSON.stringify(out);
 })()"""
+
+MAX_TYPED_CHARS = 2000
+
+
+def act_script(spec: dict[str, Any]) -> str:
+    """The script that does one :class:`Act`, given its *spec* as plain data.
+
+    It refuses, and does nothing, unless the page still has the address it was
+    read at and the element at ``at`` is the one that was read (same kind,
+    label and address, and for a text box the same field attributes).
+    """
+    data = json.dumps(spec).replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+    return r"""(function (spec) {""" + COMMON_JS + r"""
+  var say = function (o) { return JSON.stringify(o); };
+  if (location.href !== spec.url) return say({ok: false, stale: "page"});
+  var n = document.querySelectorAll(SEL)[spec.at];
+  var d = n ? lookAt(n) : {};
+  var el = d.el;
+  if (!el || el.kind !== spec.kind || el.label !== spec.label || (el.href || "") !== spec.href) return say({ok: false, stale: "gone"});
+  if (spec.act === "type") {
+    var a = el.attrs, b = spec.attrs || {};
+    if (el.kind !== "textbox" || !a || a.type !== b.type || a.autocomplete !== b.autocomplete || a.words !== b.words || a.inputmode !== b.inputmode || a.maxlength !== b.maxlength || a.masked !== b.masked) return say({ok: false, stale: "field"});
+    if (el.sensitive) return say({ok: false, stale: "field"});
+  }
+  if (spec.act !== "type" && el.sensitive) return say({ok: false, stale: "field"});
+  n.scrollIntoView({block: "center", inline: "center"});
+  var fire = function (type) { n.dispatchEvent(new Event(type, {bubbles: true})); };
+  if (spec.act === "click") {
+    ["mousedown", "mouseup"].forEach(function (t) { n.dispatchEvent(new MouseEvent(t, {bubbles: true, cancelable: true, view: window})); });
+    n.click();
+  } else if (spec.act === "type") {
+    n.focus();
+    var proto = n.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, "value").set.call(n, spec.text);
+    fire("input"); fire("change");
+    if (spec.enter) {
+      var key = function (t) { return new KeyboardEvent(t, {key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true}); };
+      var go = n.dispatchEvent(key("keydown"));
+      n.dispatchEvent(key("keypress"));
+      n.dispatchEvent(key("keyup"));
+      if (go && n.form) HTMLFormElement.prototype.requestSubmit.call(n.form, defaultButton(n.form) || undefined);
+    }
+  } else if (spec.act === "select") {
+    var want = String(spec.text).trim().toLowerCase(), opts = Array.prototype.slice.call(n.options);
+    var hits = opts.filter(function (o) { return !o.disabled && (cap(o.text, 60).toLowerCase() === want || String(o.value).toLowerCase() === want); });
+    if (!hits.length) hits = opts.filter(function (o) { return !o.disabled && want && cap(o.text, 60).toLowerCase().indexOf(want) >= 0; });
+    if (hits.length !== 1) return say({ok: false, option: hits.length});
+    n.value = hits[0].value; hits[0].selected = true;
+    fire("input"); fire("change");
+  }
+  return say({ok: true});
+})(""" + data + ")"
+
 
 FOCUS_JS = r"""(function () {
   var a = document.activeElement;
@@ -157,11 +283,27 @@ def _translate(text: str, *, starting: bool = False) -> BrowserError:
     )
 
 
+def _attrs(item: Any) -> FieldAttrs | None:
+    """The :class:`FieldAttrs` the page script read for a text box, or None."""
+    if not isinstance(item, dict):
+        return None
+    limit = item.get("maxlength")
+    return FieldAttrs(
+        type=str(item.get("type") or ""),
+        autocomplete=str(item.get("autocomplete") or ""),
+        words=str(item.get("words") or ""),
+        inputmode=str(item.get("inputmode") or ""),
+        maxlength=limit if isinstance(limit, int) and limit > 0 else 0,
+        masked=item.get("masked") is True,
+    )
+
+
 def _element(item: Any) -> Element | None:
     """An :class:`Element` from the page script's JSON; None for a kind melo ignores."""
     if not isinstance(item, dict) or item.get("kind") not in KINDS:
         return None
     checked, secret = item.get("checked"), item.get("sensitive")
+    options, place = item.get("options"), item.get("at")
     return Element(
         item["kind"],
         str(item.get("label") or ""),
@@ -169,6 +311,11 @@ def _element(item: Any) -> Element | None:
         value=str(item.get("value") or ""),
         checked=checked if isinstance(checked, bool) else None,
         sensitive=cast(Sensitive, secret) if secret in SECRETS else "",
+        also=str(item.get("also") or ""),
+        submit=str(item.get("submit") or ""),
+        options=tuple(str(o) for o in options) if isinstance(options, list) else (),
+        attrs=_attrs(item.get("attrs")),
+        at=place if isinstance(place, int) else -1,
     )
 
 
@@ -360,7 +507,7 @@ class SafariAutomationDriver:
 
     # ── The driver ──
 
-    async def open(self, url: str, *, new_tab: bool) -> TabInfo:
+    async def open(self, url: str, *, new_tab: bool, tab: str | None = None) -> TabInfo:
         sent = False
         if new_tab and self._has("new_tab"):
             tool = self._tools[TOOL_NAMES["new_tab"]]
@@ -369,6 +516,8 @@ class SafariAutomationDriver:
             await self._call("new_tab", **({"url": url} if sent else {}))
             self._current = None
         if not sent:
+            if not new_tab:
+                await self._focus(tab)
             await self._call("open", url=url)
         await self._ready()
         return await self._here()
@@ -379,11 +528,13 @@ class SafariAutomationDriver:
         if not isinstance(data, dict):
             raise BrowserError("Safari returned a page melo could not read.")
         elements = [e for e in map(_element, data.get("elements") or []) if e]
+        skipped = data.get("skipped")
         return RawPage(
             str(data.get("url") or ""),
             str(data.get("title") or ""),
             str(data.get("text") or ""),
             tuple(elements),
+            skipped=skipped if isinstance(skipped, int) and skipped > 0 else 0,
         )
 
     async def back(self, tab: str | None) -> TabInfo:
@@ -461,6 +612,46 @@ class SafariAutomationDriver:
     async def blank(self, tab: str | None) -> None:
         await self._focus(tab)
         await self._eval("(location.replace('about:blank'), true)")
+
+    async def act(self, tab: str | None, act: Act) -> None:
+        await self._focus(tab)
+        item = act.element
+        spec: dict[str, Any] = {
+            "act": act.kind,
+            "url": act.url,
+            "at": item.at,
+            "kind": item.kind,
+            "label": item.label,
+            "href": item.href,
+            "text": act.text[:MAX_TYPED_CHARS],
+            "enter": act.enter,
+        }
+        if item.attrs is not None:
+            spec["attrs"] = {
+                "type": item.attrs.type,
+                "autocomplete": item.attrs.autocomplete,
+                "words": item.attrs.words,
+                "inputmode": item.attrs.inputmode,
+                "maxlength": item.attrs.maxlength,
+                "masked": item.attrs.masked,
+            }
+        result = await self._eval(act_script(spec))
+        if not isinstance(result, dict):
+            raise BrowserError("Safari returned an answer melo could not read.")
+        if result.get("ok") is not True:
+            if result.get("stale"):
+                raise StaleElementError(_STALE[str(result["stale"])])
+            if "option" in result:
+                raise BrowserError(
+                    "That list has no single option with those words (none, or "
+                    "more than one). Use browser_read for its options."
+                )
+            raise BrowserError("The page did not take that action.")
+        await asyncio.sleep(
+            POLL_S
+        )  # a click may start a load that is not yet under way
+        with contextlib.suppress(BrowserError):  # the page may have closed itself
+            await self._ready()
 
     def _has(self, key: str) -> bool:
         return TOOL_NAMES[key] in self._tools

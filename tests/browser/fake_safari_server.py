@@ -21,6 +21,13 @@ tiny set of pages. ``screenshot`` answers as the real one does: text only,
   ``FAKE_SAFARI_DECOY``, which exists, in its reply
 - ``symlink``: ``screenshot`` puts a link to ``FAKE_SAFARI_DECOY`` at ``savePath``
 - ``shot_error``: ``screenshot`` saves the file, then fails
+- ``long_ids``: tab ids as long as the real server's (``page-<UUID>``, 41 characters)
+- ``act_stale``: a script that acts on an element answers that the page changed
+- ``act_option``: a script that chooses an option answers that none matched
+
+A script that acts (melo's ``act_script``) is answered from the tiny page
+model too: an element may say ``goes`` (the address a click lands on), and a
+typed text is kept in ``typed``.
 """
 
 from __future__ import annotations
@@ -63,8 +70,55 @@ PAGES: dict[str, dict[str, Any]] = {
         "text": "Today's news.",
         "elements": [],
     },
+    "https://example.com/form": {
+        "title": "Form",
+        "text": "A form.",
+        "skipped": 2,
+        "elements": [
+            {
+                "kind": "button",
+                "label": "Check in",
+                "also": "Daily check-in",
+                "goes": "https://example.com/done",
+            },
+            {
+                "kind": "textbox",
+                "label": "Nickname",
+                "value": "",
+                "submit": "https://example.com/save",
+                "attrs": {
+                    "type": "text",
+                    "autocomplete": "",
+                    "words": "nick Nickname",
+                    "inputmode": "",
+                    "maxlength": 40,
+                    "masked": False,
+                },
+            },
+            {
+                "kind": "select",
+                "label": "Country",
+                "value": "France",
+                "options": ["France", "Spain"],
+            },
+        ],
+    },
+    "https://example.com/done": {
+        "title": "Done",
+        "text": "Checked in.",
+        "elements": [],
+    },
 }
-tabs: list[dict[str, Any]] = [{"id": "page-1", "history": ["about:blank"]}]
+
+
+def tab_id(n: int) -> str:
+    if MODE == "long_ids":
+        return f"page-635DB8F8-27ED-4CA5-81A2-7EAEE1DF{n:04X}"
+    return f"page-{n}"
+
+
+tabs: list[dict[str, Any]] = [{"id": tab_id(1), "history": ["about:blank"]}]
+typed: dict[str, str] = {}
 current = 0
 polls = 0
 STYLE_RETURN = MODE == "return_style"
@@ -133,7 +187,40 @@ def text(value: str, error: bool = False) -> dict[str, Any]:
 
 def page_now() -> dict[str, Any]:
     url = tabs[current]["history"][-1]
-    return {"url": url, **PAGES.get(url, {"title": "", "text": "", "elements": []})}
+    found = PAGES.get(url, {"title": "", "text": "", "elements": []})
+    elements = [{**e, "at": i} for i, e in enumerate(found["elements"])]
+    return {"url": url, **found, "elements": elements}
+
+
+def do_act(spec: dict[str, Any]) -> dict[str, Any]:
+    """What melo's act script answers, on the page model above."""
+    here = tabs[current]["history"]
+    if MODE == "act_stale":
+        return {"ok": False, "stale": "gone"}
+    if spec["url"] != here[-1]:
+        return {"ok": False, "stale": "page"}
+    elements = PAGES.get(here[-1], {"elements": []})["elements"]
+    if not 0 <= spec["at"] < len(elements):
+        return {"ok": False, "stale": "gone"}
+    element = elements[spec["at"]]
+    if (element["kind"], element.get("label", ""), element.get("href", "")) != (
+        spec["kind"],
+        spec["label"],
+        spec["href"],
+    ):
+        return {"ok": False, "stale": "gone"}
+    if spec["act"] == "click":
+        if element.get("goes"):
+            here.append(element["goes"])
+    elif spec["act"] == "type":
+        typed[element["label"]] = spec["text"] + ("\n" if spec["enter"] else "")
+        if spec["enter"] and element.get("submit"):
+            here.append(element["submit"])
+    elif spec["act"] == "select":
+        if MODE == "act_option" or spec["text"] not in element["options"]:
+            return {"ok": False, "option": 0}
+        element["value"] = spec["text"]
+    return {"ok": True}
 
 
 def run_script(source: str) -> Any:
@@ -141,6 +228,9 @@ def run_script(source: str) -> Any:
     if STYLE_RETURN and not source.startswith("return "):
         raise SyntaxError("Unexpected token")
     source = source.removeprefix("return ")
+    if source.startswith("(function (spec)"):
+        spec = json.loads(source[source.rindex("})(") + 3 : -1])
+        return json.dumps(do_act(spec))
     here = tabs[current]["history"]
     if source == "1+1":
         return 2
@@ -189,7 +279,7 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         return text("navigated")
     if name == "create_tab":
         tabs.append(
-            {"id": f"page-{len(tabs) + 1}", "history": [str(value or "about:blank")]}
+            {"id": tab_id(len(tabs) + 1), "history": [str(value or "about:blank")]}
         )
         current = len(tabs) - 1
         return text("created")
@@ -202,7 +292,12 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         return text("closed")
     if name == "list_tabs":
         rows = [
-            {"id": t["id"], "url": t["history"][-1], "active": i == current}
+            {
+                "id": t["id"],
+                "url": t["history"][-1],
+                "title": PAGES.get(t["history"][-1], {}).get("title", ""),
+                "active": i == current,
+            }
             for i, t in enumerate(tabs)
         ]
         return text(json.dumps({"tabs": rows}))

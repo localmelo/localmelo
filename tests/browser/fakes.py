@@ -6,11 +6,13 @@ import socket
 from typing import Any
 
 from localmelo.support.browser.driver import (
+    Act,
     BrowserError,
     BrowserSetupError,
     Element,
     RawPage,
     Shot,
+    StaleElementError,
     TabInfo,
 )
 from localmelo.support.browser.sites import origin_of
@@ -54,17 +56,37 @@ def link(label: str, href: str) -> Element:
     return Element("link", label, href=href)
 
 
+def button(label: str, **more: Any) -> Element:
+    return Element("button", label, **more)
+
+
+def safari_id(n: int) -> str:
+    """A tab id in the shape Safari's automation server gives: 41 characters, too long for a short field."""
+    return f"page-635DB8F8-27ED-4CA5-81A2-7EAEE1DF{n:04X}"
+
+
 def page(url: str, text: str = "", *elements: Element, title: str = "T") -> RawPage:
     return RawPage(url, title, text, tuple(elements))
 
 
 class FakeDriver:
-    """Pages by address; ``redirects`` maps an address to where it lands."""
+    """Pages by address; ``redirects`` maps an address to where it lands.
+
+    ``ids`` makes the tab ids: ``t1``, ``t2`` by default, or ``safari_id``
+    for the long ones the real helper gives. An action (``act``) records
+    what it was asked and lands where ``lands`` says (a label, or
+    ``enter:<label>``, to an address); a link goes to its address. ``popups``
+    maps a label to an address that opens in a new tab. ``lose`` forgets a tab
+    as the real helper does when it loses one.
+    """
 
     name = "fake"
 
     def __init__(
-        self, *pages: RawPage, redirects: dict[str, str] | None = None
+        self,
+        *pages: RawPage,
+        redirects: dict[str, str] | None = None,
+        ids: Any = None,
     ) -> None:
         self.pages = {p.url: p for p in pages}
         self.redirects = redirects or {}
@@ -73,6 +95,24 @@ class FakeDriver:
         self.current: str | None = None
         self.setup_problem: str | None = None
         self.started = 0
+        self.ids = ids or (lambda n: f"t{n}")
+        self.made = 0
+        self.open_in: list[str | None] = []  # the tab each non-new open asked for
+        self.acts: list[Act] = []
+        self.lands: dict[str, str] = {}
+        self.popups: dict[str, str] = {}
+
+    def _new_tab(self) -> str:
+        self.made += 1
+        tab = str(self.ids(self.made))
+        self.tabs_[tab] = []
+        return tab
+
+    def lose(self, tab: str) -> None:
+        """The helper loses *tab*: it is no longer listed and answers nothing."""
+        self.tabs_.pop(tab, None)
+        if self.current == tab:
+            self.current = None
 
     def _url(self, tab: str | None) -> str:
         return self.tabs_[tab or self.current or ""][-1]
@@ -92,12 +132,19 @@ class FakeDriver:
     def kill(self) -> None:
         self.calls.append(("kill", ""))
 
-    async def open(self, url: str, *, new_tab: bool) -> TabInfo:
+    async def open(self, url: str, *, new_tab: bool, tab: str | None = None) -> TabInfo:
         self.calls.append(("open", url))
         landed = self.redirects.get(url, url)
+        if not new_tab:
+            self.open_in.append(tab)
+            if tab is not None and tab not in self.tabs_:
+                raise BrowserError(
+                    "Safari's automation helper reported a problem: "
+                    "Could not find browsing context."
+                )
+            self.current = tab or self.current
         if new_tab or self.current is None:
-            self.current = f"t{len(self.tabs_) + 1}"
-            self.tabs_[self.current] = []
+            self.current = self._new_tab()
         self.tabs_[self.current].append(landed)
         return self._info(self.current)
 
@@ -123,7 +170,12 @@ class FakeDriver:
 
     async def close_tab(self, tab: str) -> None:
         self.calls.append(("close_tab", tab))
-        self.tabs_.pop(tab, None)
+        if tab not in self.tabs_:
+            raise BrowserError(
+                "Safari's automation helper reported a problem: closeBrowsingContext: "
+                "Could not find browsing context."
+            )
+        self.tabs_.pop(tab)
         if self.current == tab:
             self.current = None
 
@@ -149,3 +201,20 @@ class FakeDriver:
 
     async def blank(self, tab: str | None) -> None:
         self.calls.append(("blank", tab or ""))
+
+    async def act(self, tab: str | None, act: Act) -> None:
+        self.calls.append(("act", f"{act.kind}:{act.element.label}"))
+        if self._url(tab) != act.url:
+            raise StaleElementError("The page is not the one that was read.")
+        self.acts.append(act)
+        here = tab or self.current or ""
+        key = ("enter:" if act.enter else "") + act.element.label
+        if act.kind == "click" and act.element.label in self.popups:
+            self.current = self._new_tab()
+            self.tabs_[self.current].append(self.popups[act.element.label])
+            return
+        landed = self.lands.get(key)
+        if landed is None and act.kind == "click" and act.element.kind == "link":
+            landed = act.element.href
+        if landed is not None:
+            self.tabs_[here].append(landed)

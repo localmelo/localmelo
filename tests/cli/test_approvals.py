@@ -28,6 +28,7 @@ from localmelo.support.cli.approvals import (
     TerminalApprover,
     approval_words,
     panel_text,
+    session_option,
     session_warning,
 )
 from localmelo.support.cli.render import LiveState
@@ -168,6 +169,46 @@ def test_a_site_web_fetch_would_read_asks_to_read_it_not_to_open_it() -> None:
     assert opened.title == "Open a website?" and "Safari" in " ".join(
         line for _, line in opened.body
     )
+
+
+def test_acting_on_a_page_and_sending_a_form_ask_apart_from_opening_a_site() -> None:
+    acting = panel_text(
+        _request("browser-act:https://example.com", site="example.com", access="act"),
+        width=80,
+    )
+    assert acting.title == "Click on a website?"
+    assert (
+        acting.header.startswith("example.com") and "acts on the page" in acting.header
+    )
+    words = " ".join(line for _, line in acting.body)
+    assert "click, type and choose on example.com" in words
+    assert "never types passwords" in words
+    address = "https://other.org/post"
+    sending = panel_text(
+        _request(
+            "browser-submit:https://example.com",
+            site="example.com",
+            access="submit",
+            to=address,
+            how="click",
+        ),
+        width=80,
+    )
+    assert sending.title == "Send a form?" and "sends a form" in sending.header
+    assert ("", address) in sending.body
+
+
+def test_the_chat_wide_answer_names_what_it_allows() -> None:
+    def option(name: str) -> str:
+        return session_option(_request(name, site="example.com"))
+
+    assert option("browser:https://example.com") == (
+        "Yes, and allow example.com for the rest of this chat"
+    )
+    assert "clicking and typing on example.com" in option(
+        "browser-act:https://example.com"
+    )
+    assert "forms from example.com" in option("browser-submit:https://example.com")
 
 
 def test_the_header_names_the_tier() -> None:

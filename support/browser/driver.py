@@ -8,7 +8,7 @@ problem as :class:`BrowserError`, in words a person and the model can read.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
 ElementKind = Literal["link", "button", "textbox", "checkbox", "select"]
@@ -25,12 +25,37 @@ class BrowserSetupError(BrowserError):
 
 
 @dataclass(frozen=True)
+class FieldAttrs:
+    """How a page describes a text box, as the page script read it.
+
+    ``words`` joins what names the field: its name, id, ``aria-label``,
+    placeholder and the text of its labels. :mod:`localmelo.support.browser.fields`
+    decides from these whether melo may type into it, here when the page is
+    read and again where it types, so a field the page re-described since
+    is not typed into on the old reading.
+    """
+
+    type: str = ""
+    autocomplete: str = ""
+    words: str = ""
+    inputmode: str = ""
+    maxlength: int = 0
+    masked: bool = False
+
+
+@dataclass(frozen=True)
 class Element:
     """One thing on a page: a link, a button or a form field.
 
     ``href`` is absolute and only for links. ``value`` is only for text boxes
     and selects, and a driver leaves it empty for a ``sensitive`` field (the
-    renderer drops it again).
+    renderer drops it again). ``also`` is another name the page gives it
+    (an ``aria-label`` next to its visible text, a title), searched by
+    ``browser_find``. ``at`` is where the driver finds it again on the page it
+    read (not part of what two elements are); ``submit`` is the address a
+    click on a button, or Enter in a text box, would send a form to, and is
+    empty for anything that sends nothing; ``options`` are the choices of a
+    select; ``attrs`` describes a text box (see :class:`FieldAttrs`).
     """
 
     kind: ElementKind
@@ -39,6 +64,11 @@ class Element:
     value: str = ""
     checked: bool | None = None
     sensitive: Sensitive = ""
+    also: str = ""
+    submit: str = ""
+    options: tuple[str, ...] = ()
+    attrs: FieldAttrs | None = None
+    at: int = field(default=-1, compare=False)
 
 
 @dataclass(frozen=True)
@@ -49,6 +79,9 @@ class RawPage:
     title: str
     text: str
     elements: tuple[Element, ...] = ()
+    skipped: int = (
+        0  # candidates the page script did not list (hidden, disabled, over the cap)
+    )
 
 
 @dataclass(frozen=True)
@@ -66,6 +99,32 @@ class Shot:
     data: str
 
 
+ActionKind = Literal["click", "type", "select"]
+
+
+@dataclass(frozen=True)
+class Act:
+    """One thing to do on a page: click, type or choose, on an element melo read.
+
+    ``url`` is the address the page had when it was read and ``element`` what
+    was read there; a driver does nothing unless the page still shows the
+    same address and, at ``element.at``, the same element (and, for a text
+    box, the same :class:`FieldAttrs`), and says so with
+    :class:`StaleElementError`. ``text`` is what to type, or the option to
+    choose; ``enter`` presses Enter after typing.
+    """
+
+    kind: ActionKind
+    url: str
+    element: Element
+    text: str = ""
+    enter: bool = False
+
+
+class StaleElementError(BrowserError):
+    """The page is not the one that was read, or the element is no longer there."""
+
+
 class BrowserDriver(Protocol):
     """A browser melo reads pages in. ``tab`` None means the current tab."""
 
@@ -78,8 +137,8 @@ class BrowserDriver(Protocol):
 
     def kill(self) -> None: ...
 
-    async def open(self, url: str, *, new_tab: bool) -> TabInfo:
-        """Load *url* (in a new tab or the current one) and return where it landed."""
+    async def open(self, url: str, *, new_tab: bool, tab: str | None = None) -> TabInfo:
+        """Load *url* in a new tab, or in *tab* (the current one when None); return where it landed."""
 
     async def page(self, tab: str | None) -> RawPage: ...
 
@@ -114,3 +173,12 @@ class BrowserDriver(Protocol):
 
     async def blank(self, tab: str | None) -> None:
         """Leave the page: load an empty one (a redirect the person refused)."""
+
+    async def act(self, tab: str | None, act: Act) -> None:
+        """Do *act* on the page of *tab*, then let the page settle.
+
+        Raises :class:`StaleElementError` when the page is not the one that
+        was read, and :class:`BrowserError`, in words for the model, when the
+        element cannot be used (hidden, disabled, a field melo never types in,
+        an option that is not there).
+        """

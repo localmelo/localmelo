@@ -2035,6 +2035,17 @@ def _folder_scope(decision: ApprovalDecision) -> str:
     return "chat" if decision.remember else "once"
 
 
+# The words of auto mode's review of a site question, by what the tool wants to
+# do there: open it (no ``access``), act on a page, or send a form from it.
+_SITE_ROUTINE = {"": "Opens", "read": "Opens", "act": "Acts on"}
+_SITE_DOUBT = {
+    "": "Opens {site}, a site the request did not name.",
+    "read": "Opens {site}, a site the request did not name.",
+    "act": "Clicks or types on {site}, a site the request did not name.",
+    "submit": "Sends a form from {site}, which needs its own review.",
+}
+
+
 class _ToolAsk:
     """What a running tool uses to ask the run's approval policy (``TOOL_ASK``).
 
@@ -2115,9 +2126,14 @@ class _ToolAsk:
             return ApprovalDecision(False, STOPPED_NOTE, origin="auto")
         if auto and reviewer is not None:
             site = str(arguments.get("site") or "")
-            if reviewer.names_host(site):
+            access = str(arguments.get("access") or "")
+            # A click or typing on a site is reviewed as opening it; a form
+            # sent from a page is reviewed by itself, even on a site you named.
+            if access != "submit" and reviewer.names_host(site):
                 review = ActionReview(
-                    "routine", (), (f"Opens {site}, which you named.",)
+                    "routine",
+                    (),
+                    (f"{_SITE_ROUTINE.get(access, 'Opens')} {site}, which you named.",),
                 )
             else:
                 review = await reviewer.review(
@@ -2128,7 +2144,7 @@ class _ToolAsk:
                     review=ActionReview(
                         "undecided",
                         (),
-                        (f"Opens {site}, a site the request did not name.",),
+                        (_SITE_DOUBT.get(access, _SITE_DOUBT[""]).format(site=site),),
                     ),
                     mode="auto",
                     key=key,

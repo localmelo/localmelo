@@ -24,6 +24,7 @@ import re
 import secrets
 from dataclasses import dataclass, field
 
+from localmelo.support.browser import fields
 from localmelo.support.browser.driver import Element, RawPage
 
 # A part of a page's text holds this many units: a Latin character is one, a
@@ -34,6 +35,8 @@ MAX_ELEMENTS = 60
 FIND_LIMIT = 20
 LABEL_CHARS = 80
 VALUE_CHARS = 60
+OPTION_CHARS = 40
+OPTIONS_SHOWN = 10
 HREF_CHARS = 120
 TITLE_CHARS = 120
 
@@ -140,18 +143,24 @@ class Snapshot:
     parts: list[str]
     elements: dict[str, Element] = field(default_factory=dict)
     payment: bool = False
+    skipped: int = (
+        0  # elements the page script left out (hidden, disabled, over its cap)
+    )
 
 
 def make_snapshot(
     raw: RawPage, *, sid: str, tab: str, origin: str, first_ref: int
 ) -> Snapshot:
     """A :class:`Snapshot` of *raw*. Refs are ``e<first_ref>`` onward, never reused."""
-    snap = Snapshot(sid, tab, raw.url, origin, raw.title, [""])
+    snap = Snapshot(sid, tab, raw.url, origin, raw.title, [""], skipped=raw.skipped)
     kept: list[Element] = []
     for item in raw.elements:
-        if item.sensitive:
-            item = Element(item.kind, "", sensitive=item.sensitive)
-        elif not (item.label.strip() or item.href):
+        secret = item.sensitive or (
+            fields.sensitive_kind(item.attrs) if item.kind == "textbox" else ""
+        )
+        if secret:
+            item = Element(item.kind, "", sensitive=secret, at=item.at)
+        elif not (item.label.strip() or item.also.strip() or item.href):
             continue
         if kept and kept[-1] == item and item.kind == "link":
             continue
@@ -174,21 +183,35 @@ def block(ident: str, attrs: str, body: str) -> str:
     )
 
 
+def _address(href: str, origin: str) -> str:
+    """*href* as the page block shows it: without the page's own origin."""
+    if origin and href.startswith(origin + "/"):
+        href = href[len(origin) :]
+    return field_text(href, HREF_CHARS)
+
+
 def element_line(ref: str, item: Element, origin: str = "") -> str:
     if item.sensitive:
         return f"[{ref} {_SENSITIVE_WORDS[item.sensitive]}: melo never types here]"
-    label = field_text(item.label, LABEL_CHARS)
+    label = field_text(item.label or item.also, LABEL_CHARS)
     if item.kind == "link":
-        href = item.href
-        if origin and href.startswith(origin + "/"):
-            href = href[len(origin) :]
-        return f'[{ref} link "{label}" -> {field_text(href, HREF_CHARS)}]'
+        return f'[{ref} link "{label}" -> {_address(item.href, origin)}]'
     if item.kind == "checkbox":
         state = "checked" if item.checked else "unchecked"
         return f'[{ref} checkbox "{label}" {state}]'
-    if item.kind in ("textbox", "select"):
-        return f'[{ref} {item.kind} "{label}" value="{field_text(item.value, VALUE_CHARS)}"]'
-    return f'[{ref} {item.kind} "{label}"]'
+    if item.kind == "select":
+        shown = [field_text(o, OPTION_CHARS) for o in item.options[:OPTIONS_SHOWN]]
+        more = len(item.options) - len(shown)
+        if more > 0:
+            shown.append(f"{more} more")
+        options = f' options="{" | ".join(shown)}"' if shown else ""
+        return f'[{ref} select "{label}" value="{field_text(item.value, VALUE_CHARS)}"{options}]'
+    if item.kind == "textbox":
+        return (
+            f'[{ref} textbox "{label}" value="{field_text(item.value, VALUE_CHARS)}"]'
+        )
+    sends = f" sends a form -> {_address(item.submit, origin)}" if item.submit else ""
+    return f'[{ref} {item.kind} "{label}"{sends}]'
 
 
 def render_page(snap: Snapshot, *, part: int = 1, view: str = "all") -> str:
@@ -226,7 +249,7 @@ def find_elements(
         (ref, item)
         for ref, item in snap.elements.items()
         if role in ("any", item.kind)
-        and all(w in f"{item.label} {item.href}".lower() for w in words)
+        and all(w in f"{item.label} {item.also} {item.href}".lower() for w in words)
     ]
     return found[:FIND_LIMIT], len(found)
 
@@ -237,5 +260,15 @@ def render_find(snap: Snapshot, query: str, role: str = "any") -> str:
         f'{total} of {len(snap.elements)} elements match "{field_text(query, 60)}":'
     ]
     lines.extend(element_line(ref, item, snap.origin) for ref, item in found)
+    if snap.skipped:
+        lines.append(
+            f"[{snap.skipped} more things on the page were skipped: hidden, "
+            "disabled, or past the page script's limit]"
+        )
+    if not total:
+        lines.append(
+            "[Nothing matches. A button or menu may say something else, or sit "
+            "behind another click: try other words, or browser_read the page.]"
+        )
     attrs = f"tab={field_text(snap.tab, 40)} origin={snap.origin}"
     return block(snap.id, attrs, "\n".join(lines))

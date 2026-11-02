@@ -1110,6 +1110,8 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
     ['demo_lookup', {query: 'x'}, null, 'Let melo use demo_lookup?', 'demo_lookup'],
     ['browser:https://example.com', {site: 'example.com', access: 'read'}, null, 'Let melo open example.com?', 'browser · read only'],
     ['browser:https://example.com', {site: 'example.com', access: 'read', via: 'web_fetch'}, null, 'Let melo read example.com?', 'web_fetch · read only'],
+    ['browser-act:https://example.com', {site: 'example.com', access: 'act'}, null, 'Let melo click and type on example.com?', 'browser · acts on the page'],
+    ['browser-submit:https://example.com', {site: 'example.com', access: 'submit', to: 'https://other.org/post', how: 'click'}, null, 'Let melo send a form from example.com?', 'browser · sends a form'],
   ];
   for (const [tool, args, target, title, caption] of asks) {
     h.context.request = {request_id: `ask-${tool}-${title}`, tool_name: tool, arguments: args, workspace_label: '~/w', target};
@@ -1130,6 +1132,12 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
   assert.equal(address.textContent, url);
   assert.equal(address.attributes['aria-label'], 'The address melo asks for');
   assert.match(findNode(card, (node) => node.className === 'approval-note').textContent, /read example\.com as text/);
+  // A form sent from a page shows where it goes.
+  h.context.request = {request_id: 'send-form', tool_name: 'browser-submit:https://example.com',
+    arguments: {site: 'example.com', access: 'submit', to: 'https://other.org/post', how: 'click'}, workspace_label: '~/w'};
+  const sending = findNode(h.run('approvalCard(request)'), (node) => node.className === 'approval-content');
+  assert.equal(sending.textContent, 'https://other.org/post');
+  assert.equal(sending.attributes['aria-label'], 'Where the form goes');
 });
 
 // A file write over a file, as the gateway reports it: `target.diff` (docs/reference/api-v2.md).

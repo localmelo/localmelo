@@ -73,7 +73,7 @@ async def test_a_session_gets_the_browser_tools_only_when_a_driver_is_named() ->
             ]
         finally:
             await agent.close()
-    assert names["off"] == [] and len(names["safari-automation"]) == 8
+    assert names["off"] == [] and len(names["safari-automation"]) == 11
     with pytest.raises(ValueError, match="unknown browser driver"):
         await session_agents.build_session_agent(
             cfg=cfg,
@@ -126,7 +126,7 @@ class _NoTools(BaseToolProvider):
 
 
 @pytest.mark.parametrize(
-    ("driver", "count"), [("safari-automation", 8), ("off", 0), ("chrome", 0)]
+    ("driver", "count"), [("safari-automation", 11), ("off", 0), ("chrome", 0)]
 )
 async def test_every_console_chat_has_the_browser_tools_the_setting_names(
     driver: str, count: int

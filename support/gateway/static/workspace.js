@@ -1873,6 +1873,21 @@ function approvalCard(request, view = chatApproval, asked = "") {
       content = String(args.url);
       what = t("approval.readAddress");
     }
+  } else if (tool.startsWith("browser-act:") || tool.startsWith("browser-submit:")) {
+    // Acting on a page asks apart from reading it: clicks and typing are one question per site and
+    // chat, and a form sent from the page is its own, with the address it goes to.
+    const sending = tool.startsWith("browser-submit:");
+    const site = String(args.site || tool.slice(tool.indexOf(":") + 1));
+    what = t("approval.willDo");
+    title = t(sending ? "approval.submitSite" : "approval.actSite", { site });
+    caption = t(sending ? "approval.submitCaption" : "approval.actCaption");
+    rule = t(sending ? "approval.rule.submit" : "approval.rule.act", { site, scope });
+    content = t(sending ? "approval.submitContent" : "approval.actContent", { site });
+    if (sending && args.to) {
+      why = content;
+      content = String(args.to);
+      what = t("approval.submitAddress");
+    }
   }
   // A high-impact call (installs, downloads, changes outside the folder) asks every time: the
   // card says why, offers no chat-wide allow, and starts on Deny.

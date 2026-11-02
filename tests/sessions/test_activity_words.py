@@ -71,6 +71,19 @@ def test_a_leading_done_gives_way_to_what_followed_it(
         ("browser_open", {"url": "not a url"}, "Opening a page", "web"),
         ("browser_read", {}, "Reading the page", "web"),
         ("browser_follow", {"ref": "e12"}, "Following a link", "web"),
+        ("browser_click", {"ref": "e12"}, "Clicking on the page", "web"),
+        (
+            "browser_type",
+            {"ref": "e3", "text": "my secret", "submit": True},
+            "Typing into a field",
+            "web",
+        ),
+        (
+            "browser_select",
+            {"ref": "e4", "option": "Spain"},
+            "Choosing from a list",
+            "web",
+        ),
         ("browser_screenshot", {}, "Looking at the page", "web"),
         ("recall", {"query": "x"}, "Remembering", "memory"),
         ("search_memory", {"query": "x"}, "Remembering", "memory"),
@@ -127,6 +140,9 @@ def test_no_command_line_code_or_text_is_ever_shown() -> None:
         ("python_exec", {"code": f"key = '{secret}'"}),
         ("file_write", {"path": "a.txt", "content": secret}),
         ("browser_open", {"url": f"https://example.com/?token={secret}"}),
+        ("browser_type", {"ref": "e1", "text": secret}),
+        ("browser_select", {"ref": "e1", "option": secret}),
+        ("browser_click", {"ref": secret}),
     ]:
         assert secret not in activity_text(tool, arguments).text
 
@@ -197,6 +213,9 @@ def test_only_a_model_call_under_way_is_the_model_answering() -> None:
         ("python_exec", {"code": "print(1)"}, "Run Python"),
         ("browser_open", {"url": "https://www.example.com/a"}, "Read example.com"),
         ("browser_screenshot", {}, "Look at the page"),
+        ("browser_click", {"ref": "e1"}, "Click on the page"),
+        ("browser_type", {"ref": "e1", "text": "hunter2"}, "Type into a field"),
+        ("browser_select", {"ref": "e1", "option": "x"}, "Choose from a list"),
         ("mcp__calendar__list_events", {}, "Use a tool"),
         ("", None, "Thinking"),
     ],

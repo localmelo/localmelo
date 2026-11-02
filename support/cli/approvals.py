@@ -262,6 +262,28 @@ def _tool_panel(
             body,
             escaped_any,
         )
+    if tool.startswith(("browser-act:", "browser-submit:")):
+        sending = tool.startswith("browser-submit:")
+        site = shown(str(arguments.get("site") or tool.split(":", 1)[1]))
+        if sending:
+            said = f"melo wants to send a form from {site}."
+            note = "Whatever the form holds goes to the address below."
+        else:
+            said = (
+                f"melo wants to click, type and choose on {site} in Safari's "
+                "automation window, as you would."
+            )
+            note = "It never types passwords, card numbers or one-time codes."
+        body = [("", row) for row in _wrapped([said], width)]
+        if sending and (target := arguments.get("to")):
+            body += [("", row) for row in _wrapped([shown(str(target))], width)]
+        body += [("muted", row) for row in _wrapped([note], width)]
+        return PanelText(
+            "Send a form?" if sending else "Click on a website?",
+            f"{site}{mark} · " + ("sends a form" if sending else "acts on the page"),
+            body,
+            escaped_any,
+        )
     if tool.startswith("browser:"):
         site = shown(str(arguments.get("site") or tool[len("browser:") :]))
         said = f"melo wants to open {site} in Safari and read it."
@@ -350,6 +372,12 @@ def session_option(request: ApprovalRequest) -> str:
     if request.tool_name.startswith("browser:"):
         site = str(request.arguments.get("site") or "this site")
         return f"Yes, and allow {site} for the rest of this chat"
+    if request.tool_name.startswith("browser-act:"):
+        site = str(request.arguments.get("site") or "this site")
+        return f"Yes, and allow clicking and typing on {site} for the rest of this chat"
+    if request.tool_name.startswith("browser-submit:"):
+        site = str(request.arguments.get("site") or "this site")
+        return f"Yes, and allow forms from {site} for the rest of this chat"
     return f"Yes, and allow every {request.tool_name} call in this session"
 
 

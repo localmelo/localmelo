@@ -67,16 +67,19 @@ def world() -> FakeDriver:
     )
 
 
-async def test_the_tools_are_a_read_only_group_of_eight() -> None:
+async def test_the_tools_are_a_read_only_group_of_eleven() -> None:
     tools = await tools_of(world())
     assert sorted(tools) == [
         "browser_back",
+        "browser_click",
         "browser_find",
         "browser_follow",
         "browser_open",
         "browser_read",
         "browser_screenshot",
+        "browser_select",
         "browser_tabs",
+        "browser_type",
         "browser_wait",
     ]
     for tool in tools.values():
@@ -276,7 +279,7 @@ async def test_tabs_list_switch_and_close() -> None:
     driver = world()
     tools = await tools_of(driver)
     await run(tools, "browser_open", url=HOME)
-    await run(tools, "browser_open", url=OTHER)
+    await run(tools, "browser_open", url=OTHER, tab="new")
     listing = (await run(tools, "browser_tabs", action="list")).text
     assert listing.startswith("<<page id=tabs") and "* t2 https://other.org/" in listing
     await run(tools, "browser_tabs", action="switch", tab="t1")
