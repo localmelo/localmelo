@@ -1,9 +1,11 @@
 """The model review of steps, and auto mode's blocks (#279 §3.3, #339).
 
 :class:`StepReviewer` belongs to one Agent, so one chat: it keeps the
-user's latest messages, the reviews it settled (by step key) and the steps
-auto mode blocked. :class:`RunReviews` is one run's share: the reviews it
-sent, its calls and its blocks, and the summary ``run.finished`` carries.
+user's latest messages, the reviews it settled (by step key, the
+:data:`REVIEWS_KEPT` most recently used) and the steps auto mode blocked.
+:class:`RunReviews` is one run's share: the reviews it sent, its calls, its
+blocks and the sites refused in it, and the summary ``run.finished``
+carries.
 
 When the model is asked:
 
@@ -28,8 +30,8 @@ import ipaddress
 import os
 import re
 import time
-from collections import deque
-from collections.abc import Callable
+from collections import OrderedDict, deque
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Final, Literal
 from urllib.parse import urlsplit
@@ -58,6 +60,7 @@ from localmelo.melo.contracts.review import (
     ActionReview,
     ModelAnswer,
     because,
+    step_key,
 )
 from localmelo.melo.schema import Message
 
@@ -71,6 +74,14 @@ BLOCKS_PER_TURN: Final = 3
 RUNNER_REVIEWS_PER_TURN: Final = 3
 # Blocks of a chat kept for the prompt and the "go ahead" check.
 BLOCKS_KEPT: Final = 20
+# Settled reviews a chat keeps, the least recently used dropped first.
+REVIEWS_KEPT: Final = 512
+# The longest path of an address one verdict on its site covers: a longer
+# one, which can carry more data out, is reviewed by itself.
+PLAIN_PATH_CHARS: Final = 120
+# Addresses one verdict on a site lets through until the user's next
+# message; past that, each is reviewed by itself.
+PLAIN_PAGES_PER_TURN: Final = 10
 
 Purpose = Literal["undecided", "consent"]
 
@@ -193,6 +204,9 @@ class RunReviews:
     blocked: list[dict[str, str]] = field(default_factory=list)
     # A second block of the same kind: the run stops and answers.
     stop: bool = False
+    # The hosts of the sites refused in this run, oldest first (#433): the
+    # review of a later step is told of them.
+    refused_sites: list[str] = field(default_factory=list)
 
     def count(self, review: ActionReview | None) -> None:
         if review is not None:
@@ -200,6 +214,34 @@ class RunReviews:
 
     def summary(self) -> dict[str, Any]:
         return {**self.counts, "blocked": [dict(b) for b in self.blocked]}
+
+
+def plain_page_key(
+    tool_name: str, arguments: Mapping[str, Any], workspace: str | None
+) -> str:
+    """The key a routine verdict on a site's plain pages is kept under, or ``""``.
+
+    For a site question that carries the address it reads (web_fetch's
+    ``url``): when the address has no query, no fragment and no user name,
+    is shown whole and its path has at most :data:`PLAIN_PATH_CHARS`
+    characters, the question without it, so one review lets the site's
+    other plain pages be read in this chat (at most
+    :data:`PLAIN_PAGES_PER_TURN` until the user's next message). Any other
+    address, which can carry more data out, is reviewed by itself.
+    """
+    url = arguments.get("url")
+    if not isinstance(url, str) or not url.strip() or url.endswith("…"):
+        return ""
+    if any(mark in url for mark in "?#"):
+        return ""
+    try:
+        parts = urlsplit(url.strip())
+    except ValueError:
+        return ""
+    if "@" in parts.netloc or len(parts.path) > PLAIN_PATH_CHARS:
+        return ""
+    rest = {name: value for name, value in arguments.items() if name != "url"}
+    return "site|" + step_key(tool_name, rest, workspace)
 
 
 def _title(review: ActionReview) -> str:
@@ -233,7 +275,9 @@ class StepReviewer:
         """
         self._requests: deque[str] = deque(maxlen=EARLIER_REQUESTS + 1)
         self._marker = 0
-        self._cache: dict[str, tuple[ActionReview, int, Purpose]] = {}
+        self._cache: OrderedDict[str, tuple[ActionReview, int, Purpose]] = OrderedDict()
+        # Addresses each site verdict let through since the user's last message.
+        self._shared_used: dict[str, int] = {}
         self._blocks: deque[_Block] = deque(maxlen=BLOCKS_KEPT)
         if new_chat:
             self.since = self._wall()
@@ -250,6 +294,7 @@ class StepReviewer:
         # A message counts even with no words (an attachment): a consent or a
         # block of the last message does not carry over to it.
         self._marker += 1
+        self._shared_used.clear()
         if text.strip():
             self._requests.append(text[:MAX_REQUEST_CHARS])
 
@@ -304,12 +349,19 @@ class StepReviewer:
         mode: ReviewMode,
         key: str,
         workspace: str | None,
+        shared: str = "",
+        refused_sites: Sequence[str] = (),
     ) -> ActionReview:
         """*review* settled by the model when the rules leave it open, else as it is.
 
         A settled review is kept by step key: one that lets an undecided
         call run is used again in this chat; any other only until the
-        user's next message, since new words can change the answer.
+        user's next message, since new words can change the answer. A
+        verdict that lets it run is kept under *shared* too (a site's plain
+        pages, :func:`plain_page_key`) and used for any call with that key.
+        *refused_sites* are the hosts of the sites refused in this task
+        (#433): the model is told of them, and a verdict given before one
+        was refused is not used again.
         """
         action = action_text(tool_name, arguments)
         purpose = self._purpose(review, mode, step_names(tool_name, arguments))
@@ -318,13 +370,28 @@ class StepReviewer:
         # A runner's review holds while the files it could not read stay as
         # they are.
         key = key + "|" + "|".join(review.changed) if review.changed else key
-        cached = self._cache.get(key)
+        if refused_sites:
+            refused = "|refused:" + ",".join(refused_sites)
+            key, shared = key + refused, shared and shared + refused
+        cached = self._kept(key)
         if cached is not None and (
             cached[1] == self._marker
             or cached[2] == "undecided"
             and cached[0].verdict == "routine"
         ):
             return cached[0]
+        # A site's verdict never lets through an address judged otherwise
+        # before, and only so many a turn.
+        kept = (
+            self._kept(shared)
+            if shared
+            and (cached is None or cached[0].verdict == "routine")
+            and self._shared_used.get(shared, 0) < PLAIN_PAGES_PER_TURN
+            else None
+        )
+        if kept is not None and kept[2] == "undecided" and kept[0].verdict == "routine":
+            self._shared_used[shared] = self._shared_used.get(shared, 0) + 1
+            return kept[0]
         runner = bool(review.changed)
         used = run.runner_used if runner else run.used
         if len(action) > MAX_ACTION_CHARS:
@@ -345,12 +412,28 @@ class StepReviewer:
                 findings=because(review) if review.reasons else "",
                 calls=run.calls,
                 blocked=[(b.title, b.preview) for b in self._blocks],
+                refused_sites=tuple(refused_sites),
             )
             answer = await self._ask(inputs)
         settled = _settle(review, answer, purpose)
         if not answer.error:
-            self._cache[key] = (settled, self._marker, purpose)
+            self._keep(key, (settled, self._marker, purpose))
+            if shared and purpose == "undecided" and settled.verdict == "routine":
+                self._keep(shared, (settled, self._marker, purpose))
         return settled
+
+    def _kept(self, key: str) -> tuple[ActionReview, int, Purpose] | None:
+        found = self._cache.get(key)
+        if found is not None:
+            self._cache.move_to_end(key)
+        return found
+
+    def _keep(self, key: str, settled: tuple[ActionReview, int, Purpose]) -> None:
+        """Keep a settled review; past :data:`REVIEWS_KEPT`, the least recently used goes."""
+        self._cache[key] = settled
+        self._cache.move_to_end(key)
+        while len(self._cache) > REVIEWS_KEPT:
+            self._cache.popitem(last=False)
 
     async def _ask(self, inputs: ReviewInputs) -> ModelAnswer:
         """One review request; any failure is an answer with an ``error``."""
