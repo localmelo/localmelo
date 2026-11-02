@@ -105,6 +105,7 @@ from localmelo.support.memory.recall import (
     AUTO_DOCS,
     AUTO_RECORDS,
     BLOCK_CHARS,
+    ITEM_CHARS,
     ITEM_LIST_GUIDE,
     LIST_GUIDE,
     LIST_MAX,
@@ -113,7 +114,6 @@ from localmelo.support.memory.recall import (
     OPEN_CHARS,
     PER_SESSION,
     SIDE_SUMMARY,
-    TURN_CHARS,
     WHOLE,
     Corpus,
     Item,
@@ -254,8 +254,9 @@ class RecallSettings(NamedTuple):
     instead of showing excerpts of them, *list_max* is the most turns it lists
     and *open_chars* the room one opened turn takes. *items* says recall draws on
     memory items in place of the chat turns, and *open_sources* that an opened item
-    also shows the turns it came from. The defaults are what recall did before these
-    were settings.
+    also shows the turns it came from. The defaults are the shipped ones: a block of
+    :data:`BLOCK_CHARS` and a turn of :data:`ITEM_CHARS` (#349), and what recall did
+    before these were settings for the rest.
     """
 
     records: int = AUTO_RECORDS
@@ -265,7 +266,7 @@ class RecallSettings(NamedTuple):
     hint: bool = False
     min_cosine: float = MIN_COSINE
     min_coverage: float = MIN_COVERAGE
-    item_chars: int = TURN_CHARS
+    item_chars: int = ITEM_CHARS
     match: bool = False
     listing: bool = False
     list_max: int = LIST_MAX
@@ -773,7 +774,7 @@ class ChatMemory:
             getattr(memory, "search_when_empty", "off") == "hint",
             bar("recall_min_cosine", MIN_COSINE, MEMORY_RECALL_MIN_COSINE),
             bar("recall_min_coverage", MIN_COVERAGE, MEMORY_RECALL_MIN_COVERAGE),
-            bounded("recall_item_chars", TURN_CHARS, MEMORY_RECALL_ITEM_CHARS),
+            bounded("recall_item_chars", ITEM_CHARS, MEMORY_RECALL_ITEM_CHARS),
             getattr(memory, "recall_excerpt", "head") == "match",
             getattr(memory, "recall_form", "excerpt") == "list",
             bounded("recall_list_max", LIST_MAX, MEMORY_RECALL_LIST_MAX),
