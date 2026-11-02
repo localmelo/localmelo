@@ -1598,6 +1598,7 @@ class _ApprovalGate:
         reviewer: StepReviewer | None = None,
         destructive: bool = False,
         confinement: AutoConfinement | None = None,
+        asks_itself: bool = False,
     ) -> None:
         self._policy = policy
         self._run = run
@@ -1608,6 +1609,7 @@ class _ApprovalGate:
         self._reviewer = reviewer
         self._destructive = destructive
         self._confinement = confinement
+        self._asks_itself = asks_itself
         self.review: ActionReview | None = None
         # The approval of tool.finished: request_id, allowed, reason,
         # remember and origin, once the policy is asked; None until then.
@@ -1629,6 +1631,11 @@ class _ApprovalGate:
         earlier = self._earlier(request)
         if earlier is not None:
             return earlier
+        if self._asks_itself:
+            # A tool that is not read-only but asks its own questions (the browser
+            # tools that act: per site, and for every form they send) is not asked
+            # a second, empty question here about its call.
+            return ApprovalDecision(True, origin="policy")
         if request.outside is not None:
             return await self._folder(request, request.outside)
         run, call = self._run, self._call
@@ -2041,9 +2048,12 @@ _SITE_ROUTINE = {"": "Opens", "read": "Opens", "act": "Acts on"}
 _SITE_DOUBT = {
     "": "Opens {site}, a site the request did not name.",
     "read": "Opens {site}, a site the request did not name.",
-    "act": "Clicks or types on {site}, a site the request did not name.",
+    "act": "Clicks, types or chooses on {site}, a site the request did not name.",
     "submit": "Sends a form from {site}, which needs its own review.",
 }
+_TYPING_DOUBT = (
+    "Types text on {site}, which needs its own review: the text is the model's own."
+)
 
 
 class _ToolAsk:
@@ -2127,9 +2137,13 @@ class _ToolAsk:
         if auto and reviewer is not None:
             site = str(arguments.get("site") or "")
             access = str(arguments.get("access") or "")
-            # A click or typing on a site is reviewed as opening it; a form
-            # sent from a page is reviewed by itself, even on a site you named.
-            if access != "submit" and reviewer.names_host(site):
+            # A click or a choice on a site is reviewed as opening it. Typed text
+            # is the model's own data and a form sent from a page leaves the
+            # computer: each is reviewed by itself, even on a site you named, and
+            # a send's verdict is never kept for the next one.
+            sends = access == "submit"
+            typing = access == "act" and arguments.get("how") == "type"
+            if not (sends or typing) and reviewer.names_host(site):
                 review = ActionReview(
                     "routine",
                     (),
@@ -2144,14 +2158,24 @@ class _ToolAsk:
                     review=ActionReview(
                         "undecided",
                         (),
-                        (_SITE_DOUBT.get(access, _SITE_DOUBT[""]).format(site=site),),
+                        (
+                            (
+                                _TYPING_DOUBT
+                                if typing
+                                else _SITE_DOUBT.get(access, _SITE_DOUBT[""])
+                            ).format(site=site),
+                        ),
                     ),
                     mode="auto",
-                    key=key,
+                    key=f"{key}|{self._call.id}" if sends else key,
                     workspace=self._workspace_root,
                     # One routine verdict reads the site's plain pages.
-                    shared=plain_page_key(
-                        tool_name, request.arguments, self._workspace_root
+                    shared=(
+                        ""
+                        if sends or typing
+                        else plain_page_key(
+                            tool_name, request.arguments, self._workspace_root
+                        )
                     ),
                     refused_sites=_refused_sites(self._policy, self._run),
                 )
@@ -4665,6 +4689,7 @@ class Agent:
                 self._reviewer,
                 destructive=hints.get("destructiveHint") is True,
                 confinement=switch,
+                asks_itself=hints.get("asksItself") is True,
             )
             ask_slot = TOOL_ASK.set(
                 _ToolAsk(

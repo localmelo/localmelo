@@ -198,6 +198,49 @@ def test_acting_on_a_page_and_sending_a_form_ask_apart_from_opening_a_site() -> 
     assert ("", address) in sending.body
 
 
+def test_a_form_panel_shows_what_it_holds_and_when_the_page_decides() -> None:
+    holding = panel_text(
+        _request(
+            "browser-submit:https://example.com",
+            site="example.com",
+            access="submit",
+            to="https://other.org/post",
+            how="click",
+            fields=[["q", "cats"], ["token", "(hidden)"]],
+        ),
+        width=80,
+    )
+    rows = [line for _, line in holding.body]
+    assert "q: cats" in rows and "token: (hidden)" in rows
+    # Enter outside a form: no address is known, and the panel says so.
+    entering = panel_text(
+        _request(
+            "browser-submit:https://example.com",
+            site="example.com",
+            access="submit",
+            to="",
+            how="enter",
+            fields=[["typed", "cats"]],
+        ),
+        width=80,
+    )
+    words = " ".join(line for _, line in entering.body)
+    assert "the page decides where this goes" in words.lower()
+    assert "typed: cats" in words
+    # Typing shows the text melo will type.
+    typing = panel_text(
+        _request(
+            "browser-act:https://example.com",
+            site="example.com",
+            access="act",
+            how="type",
+            text="hello there",
+        ),
+        width=80,
+    )
+    assert "It will type: hello there" in " ".join(line for _, line in typing.body)
+
+
 def test_the_chat_wide_answer_names_what_it_allows() -> None:
     def option(name: str) -> str:
         return session_option(_request(name, site="example.com"))
@@ -208,7 +251,6 @@ def test_the_chat_wide_answer_names_what_it_allows() -> None:
     assert "clicking and typing on example.com" in option(
         "browser-act:https://example.com"
     )
-    assert "forms from example.com" in option("browser-submit:https://example.com")
 
 
 def test_the_header_names_the_tier() -> None:
@@ -1098,6 +1140,27 @@ async def test_every_other_call_still_offers_the_session_choice(
     assert (pending.offer_session, pending.selected) == (True, 0)
     approver.answer("session")
     assert await asking == ApprovalDecision(True, remember=True)
+
+
+async def test_a_form_send_has_no_session_choice_and_a_session_answer_does_nothing() -> (
+    None
+):
+    approver = TerminalApprover()
+    request = _request(
+        "browser-submit:https://example.com",
+        site="example.com",
+        access="submit",
+        to="https://other.org/post",
+        how="click",
+    )
+    asking = asyncio.ensure_future(approver.ask(request, offer_session=True))
+    await asyncio.sleep(0)
+    pending = approver.pending
+    assert pending is not None and pending.offer_session is False
+    approver.answer("session")
+    assert not asking.done()
+    approver.answer("once")
+    assert await asking == ApprovalDecision(True)
 
 
 async def test_the_high_impact_panel_shows_why_and_answers_by_position(

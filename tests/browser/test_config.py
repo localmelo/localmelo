@@ -145,7 +145,14 @@ async def test_every_console_chat_has_the_browser_tools_the_setting_names(
                 t.name for t in agent.list_tools() if t.name.startswith("browser_")
             ]
             assert len(names) == count
-            assert all(t.tier == "read" for t in agent.list_tools() if t.name in names)
+            tiers = {t.name: t.tier for t in agent.list_tools() if t.name in names}
+            acting = {"browser_click", "browser_type", "browser_select"}
+            # Reading is read tier; what acts is not, so a surface that trusts the
+            # read tier does not get it.
+            assert all(
+                tier == ("write" if name in acting else "read")
+                for name, tier in tiers.items()
+            )
     finally:
         await main.close()
         await side.close()

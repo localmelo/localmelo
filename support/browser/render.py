@@ -143,6 +143,7 @@ class Snapshot:
     parts: list[str]
     elements: dict[str, Element] = field(default_factory=dict)
     payment: bool = False
+    doc: str = ""  # the loaded document the reading was made in
     skipped: int = (
         0  # elements the page script left out (hidden, disabled, over its cap)
     )
@@ -152,14 +153,18 @@ def make_snapshot(
     raw: RawPage, *, sid: str, tab: str, origin: str, first_ref: int
 ) -> Snapshot:
     """A :class:`Snapshot` of *raw*. Refs are ``e<first_ref>`` onward, never reused."""
-    snap = Snapshot(sid, tab, raw.url, origin, raw.title, [""], skipped=raw.skipped)
+    snap = Snapshot(
+        sid, tab, raw.url, origin, raw.title, [""], doc=raw.doc, skipped=raw.skipped
+    )
     kept: list[Element] = []
     for item in raw.elements:
         secret = item.sensitive or (
-            fields.sensitive_kind(item.attrs) if item.kind == "textbox" else ""
+            fields.sensitive_kind(item.attrs)
+            if item.kind in ("textbox", "select")
+            else ""
         )
         if secret:
-            item = Element(item.kind, "", sensitive=secret, at=item.at)
+            item = Element(item.kind, "", sensitive=secret, at=item.at, fp=item.fp)
         elif not (item.label.strip() or item.also.strip() or item.href):
             continue
         if kept and kept[-1] == item and item.kind == "link":

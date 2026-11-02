@@ -35,6 +35,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalRequest,
     AutoPolicy,
     DenyAllPolicy,
+    never_granted,
 )
 from localmelo.melo.contracts.review import because, offers_grant, review_title
 from localmelo.support.cli import edits
@@ -265,9 +266,14 @@ def _tool_panel(
     if tool.startswith(("browser-act:", "browser-submit:")):
         sending = tool.startswith("browser-submit:")
         site = shown(str(arguments.get("site") or tool.split(":", 1)[1]))
+        goes = str(arguments.get("to") or "")
         if sending:
             said = f"melo wants to send a form from {site}."
-            note = "Whatever the form holds goes to the address below."
+            note = (
+                "Whatever the form holds goes to the address below."
+                if goes
+                else "The page decides where this goes: melo cannot say."
+            )
         else:
             said = (
                 f"melo wants to click, type and choose on {site} in Safari's "
@@ -275,8 +281,22 @@ def _tool_panel(
             )
             note = "It never types passwords, card numbers or one-time codes."
         body = [("", row) for row in _wrapped([said], width)]
-        if sending and (target := arguments.get("to")):
-            body += [("", row) for row in _wrapped([shown(str(target))], width)]
+        if sending and goes:
+            body += [("", row) for row in _wrapped([shown(goes)], width)]
+        if sending and (rows := arguments.get("fields")):
+            body += [
+                ("muted", row)
+                for row in _wrapped(
+                    [f"{shown(str(n))}: {shown(str(v))}" for n, v in rows], width
+                )
+            ]
+        if not sending and arguments.get("how") == "type":
+            body += [
+                ("", row)
+                for row in _wrapped(
+                    [f"It will type: {shown(str(arguments.get('text') or ''))}"], width
+                )
+            ]
         body += [("muted", row) for row in _wrapped([note], width)]
         return PanelText(
             "Send a form?" if sending else "Click on a website?",
@@ -375,9 +395,6 @@ def session_option(request: ApprovalRequest) -> str:
     if request.tool_name.startswith("browser-act:"):
         site = str(request.arguments.get("site") or "this site")
         return f"Yes, and allow clicking and typing on {site} for the rest of this chat"
-    if request.tool_name.startswith("browser-submit:"):
-        site = str(request.arguments.get("site") or "this site")
-        return f"Yes, and allow forms from {site} for the rest of this chat"
     return f"Yes, and allow every {request.tool_name} call in this session"
 
 
@@ -440,9 +457,11 @@ class TerminalApprover:
         # a folder outside the workspace is offered only when it may be kept.
         outside = request.outside
         offered = offers_grant(request.review) if outside is None else outside.grantable
+        # An answer to a form's send is never kept for the chat: no session choice.
+        grantable = offered and not never_granted(request.tool_name)
         self.pending = PendingApproval(
             request=request,
-            offer_session=offered and offer_session is not False,
+            offer_session=grantable and offer_session is not False,
             opened_at=self._clock(),
             future=future,
             target=target,

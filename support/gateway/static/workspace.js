@@ -1881,12 +1881,18 @@ function approvalCard(request, view = chatApproval, asked = "") {
     what = t("approval.willDo");
     title = t(sending ? "approval.submitSite" : "approval.actSite", { site });
     caption = t(sending ? "approval.submitCaption" : "approval.actCaption");
-    rule = t(sending ? "approval.rule.submit" : "approval.rule.act", { site, scope });
+    rule = t(sending ? "approval.rule.submitOnce" : "approval.rule.act", { site, scope });
     content = t(sending ? "approval.submitContent" : "approval.actContent", { site });
-    if (sending && args.to) {
+    if (sending) {
+      // Where the form goes (or that the page decides) and what it holds, nothing secret in it.
       why = content;
-      content = String(args.to);
+      const rows = Array.isArray(args.fields) ? args.fields.map(([name, value]) => `${name}: ${value}`) : [];
+      content = [args.to ? String(args.to) : t("approval.submitPage"), ...(rows.length ? ["", t("approval.submitFields"), ...rows] : [])].join("\n");
       what = t("approval.submitAddress");
+    } else if (args.how === "type" && args.text) {
+      why = content;
+      content = String(args.text);
+      what = t("approval.actTyped");
     }
   }
   // A high-impact call (installs, downloads, changes outside the folder) asks every time: the
@@ -1964,7 +1970,9 @@ function approvalCard(request, view = chatApproval, asked = "") {
   deny.dataset.approvalDeny = "";
   deny.dataset.approvalFocus = "deny";
   // The answers offered: a folder outside the workspace that may be kept has four.
-  const offered = high ? [once, deny] : outside ? (grantable ? [once, session, always, deny] : [once, deny]) : [once, session, deny];
+  // A form's send asks every time, like a high-impact call: its answer is never kept for the chat.
+  const everyTime = high || tool.startsWith("browser-submit:");
+  const offered = everyTime ? [once, deny] : outside ? (grantable ? [once, session, always, deny] : [once, deny]) : [once, session, deny];
   actions.append(...offered);
   card.append(actions);
   const command = tool === "shell_exec" || tool === "python_exec";

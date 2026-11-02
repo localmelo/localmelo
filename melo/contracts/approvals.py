@@ -200,6 +200,17 @@ class ApprovalPolicy(Protocol):
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision: ...
 
 
+# Questions a tool asks itself whose answer is never kept for the chat, whatever a
+# client sends: each call asks again. Sending a form is one (``browser-submit:<site>``):
+# a grant would cover every later form, whatever it holds and wherever it goes.
+NEVER_GRANTED: Final = ("browser-submit:",)
+
+
+def never_granted(tool_name: str) -> bool:
+    """Whether an answer to the question *tool_name* names may never be kept for a chat."""
+    return tool_name.startswith(NEVER_GRANTED)
+
+
 # Set around each tool call of a run that has a policy: asks that policy about
 # something the tool found out while it ran, such as the site a redirect led
 # to. The arguments are the tool name the policy sees (a grant of the run

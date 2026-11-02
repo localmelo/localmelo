@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from localmelo.melo.checker.tiers import tier_of
 from localmelo.melo.contracts.approvals import TOOL_ASK, ApprovalDecision
 from localmelo.melo.contracts.tools import ProvidedTool
 from localmelo.melo.executor.models import ToolOutput
@@ -67,7 +68,9 @@ def world() -> FakeDriver:
     )
 
 
-async def test_the_tools_are_a_read_only_group_of_eleven() -> None:
+async def test_the_tools_are_a_group_of_eleven_and_only_the_readers_are_read_only() -> (
+    None
+):
     tools = await tools_of(world())
     assert sorted(tools) == [
         "browser_back",
@@ -82,9 +85,22 @@ async def test_the_tools_are_a_read_only_group_of_eleven() -> None:
         "browser_type",
         "browser_wait",
     ]
-    for tool in tools.values():
+    acting = {"browser_click", "browser_type", "browser_select"}
+    for name, tool in tools.items():
         assert tool.group == "browser"
-        assert tool.definition.annotations == {"readOnlyHint": True}
+        if name in acting:
+            # Not read-only: a surface that trusts the read tier must not get
+            # them. They ask their own questions, so the generic gate is skipped.
+            assert tool.definition.annotations == {
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": False,
+                "asksItself": True,
+            }
+            assert tier_of(tool.definition) == "write"
+        else:
+            assert tool.definition.annotations == {"readOnlyHint": True}
+            assert tier_of(tool.definition) == "read"
         assert tool.definition.parameters["type"] == "object"
 
 

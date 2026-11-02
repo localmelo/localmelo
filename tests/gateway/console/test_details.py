@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
+from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
+from localmelo.melo.contracts.review import ActionReview
 from localmelo.support.gateway.chat_gate import ChatGate, GatedLLM
 from localmelo.support.gateway.console.registry import default_builder
 from localmelo.tests.sessions.helpers import answer, tool_call
@@ -54,6 +57,33 @@ async def test_tools_list_each_tool_and_whether_it_is_granted(
         assert by_name["python_exec"]["requires_approval"] is True
         assert by_name["python_exec"]["source"] == "builtin"
         assert by_name["python_exec"]["parameters"]["type"] == "object"
+
+
+async def test_a_form_send_is_never_recorded_as_a_grant_of_the_chat(
+    tmp_path: Path,
+) -> None:
+    async with console_with(tmp_path) as (console, _client, _):
+        granted_at: dict[str, float] = {}
+        ask = console.sessions._timed_ask("s1", granted_at)
+        for tool in ("browser-submit:https://example.com", "file_write"):
+            request = ApprovalRequest(
+                request_id=f"r-{tool}",
+                run_id="",
+                call_id="call_1",
+                tool_name=tool,
+                arguments={"site": "example.com"},
+                preview="x",
+                workspace_root=str(tmp_path / "ws"),
+                review=ActionReview("undecided"),
+            )
+            waiting = asyncio.ensure_future(ask(request))
+            await asyncio.sleep(0)
+            console.broker.answer(
+                request.request_id, ApprovalDecision(True, remember=True, origin="user")
+            )
+            await waiting
+        # Even if a client's answer asked for it, only the other tool is granted.
+        assert set(granted_at) == {"file_write"}
 
 
 async def test_tools_open_a_session_its_agent_was_kept_from(

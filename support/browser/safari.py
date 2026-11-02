@@ -10,6 +10,12 @@ Pages are read with ``evaluate_javascript``: one script returns the page's text
 and elements as JSON (:data:`PAGE_JS`), so what the model reads does not depend
 on the format of the server's own content tool. Tool and argument names are
 looked up in the server's ``tools/list`` (:data:`TOOL_NAMES`, :data:`ARG_NAMES`).
+
+A tab is the handle the server gave it. A tab's address is what the server's own
+tab list reports for that handle (a bare ``location.href`` is read only when the
+list carries none), never a value a page serialises for itself. Every call
+switches to the tab it means. A new tab is the one handle that appeared between
+two tab lists; if not exactly one did, nothing is used.
 """
 
 from __future__ import annotations
@@ -27,6 +33,7 @@ from base64 import b64encode
 from typing import Any, cast
 
 from localmelo.melo.executor.models import ToolOutput
+from localmelo.support.browser import fields
 from localmelo.support.browser.driver import (
     Act,
     BrowserError,
@@ -82,8 +89,15 @@ SECRETS = ("password", "code", "card")
 SETTLE_S = 15.0
 _STALE = {
     "page": "The page is not the one that was read (its address changed). Use browser_read for current refs.",
+    "doc": "The page was reloaded or replaced since it was read. Use browser_read for current refs.",
     "gone": "That element is no longer on the page as it was read. Use browser_read for current refs.",
+    "dest": "Where that element leads or sends changed since it was read, so melo did not use it. Use browser_read for current refs.",
     "field": "That field changed since it was read, so melo did not use it. Use browser_read for current refs.",
+    "grew": "That field turned into a protected one while melo typed, so melo cleared it. Ask the person to fill it in themselves.",
+}
+_BLOCKED = {
+    "send": "The page tried to send a form that melo had not asked about, so melo stopped it. To send a form, click its button: melo asks first.",
+    "link": "The page changed where that link goes while it was clicked, so melo stopped it.",
 }
 POLL_S = 0.4
 
@@ -92,24 +106,120 @@ POLL_S = 0.4
 # what may be a target; ``lookAt`` describes one (or says why it is not one:
 # ``skip`` 1 is counted as skipped, 0 is not worth counting). Nothing here
 # reads cookies or storage, and nothing changes the page.
-COMMON_JS = r"""
+#
+# ``P`` holds the page-reading built-ins taken from a fresh, hidden frame, so
+# a page that replaced ``getAttribute`` or ``JSON.stringify`` for itself does
+# not change what these checks see. When the frame cannot be made, or one of
+# its functions does not work, the page's own are used.
+COMMON_JS = (
+    r"""
+var P = (function () {
+  var own = {
+    qsa: Document.prototype.querySelectorAll, qs: Element.prototype.querySelector,
+    ga: Element.prototype.getAttribute, ra: Element.prototype.removeAttribute,
+    json: JSON.stringify, gcs: window.getComputedStyle, add: EventTarget.prototype.addEventListener,
+    req: HTMLFormElement.prototype.requestSubmit, sub: HTMLFormElement.prototype.submit,
+    click: HTMLElement.prototype.click, dispatch: EventTarget.prototype.dispatchEvent,
+    rm: EventTarget.prototype.removeEventListener
+  };
+  var frame = null;
+  try {
+    frame = document.createElement("iframe");
+    frame.setAttribute("style", "display:none");
+    (document.body || document.documentElement).appendChild(frame);
+    var w = frame.contentWindow;
+    var fresh = {
+      qsa: w.Document.prototype.querySelectorAll, qs: w.Element.prototype.querySelector,
+      ga: w.Element.prototype.getAttribute, ra: w.Element.prototype.removeAttribute,
+      json: w.JSON.stringify, gcs: w.getComputedStyle.bind(window), add: w.EventTarget.prototype.addEventListener,
+      req: w.HTMLFormElement.prototype.requestSubmit, sub: w.HTMLFormElement.prototype.submit,
+      click: w.HTMLElement.prototype.click, dispatch: w.EventTarget.prototype.dispatchEvent,
+      rm: w.EventTarget.prototype.removeEventListener
+    };
+    // The fresh functions are tried on their own terms, never against the page's.
+    var probe = w.document.createElement("div");
+    w.Element.prototype.setAttribute.call(probe, "lang", "x");
+    if (fresh.ga.call(probe, "lang") !== "x" || fresh.json({a: 1}) !== '{"a":1}' ||
+        typeof fresh.qsa.call(document, "html").length !== "number" || typeof fresh.gcs(document.documentElement).display !== "string") throw new Error("frame");
+    for (var k in fresh) if (typeof fresh[k] !== "function") throw new Error(k);
+    return fresh;
+  } catch (e) {
+    return own;
+  } finally {
+    if (frame && frame.parentNode) frame.parentNode.removeChild(frame);
+  }
+})();
 var SEL = "a[href],button,input,textarea,select,summary,[role=button],[role=link],[role=menuitem],[role=menuitemcheckbox],[role=menuitemradio],[role=tab],[role=switch],[role=option],[role=checkbox],[role=radio],[onclick],[tabindex]:not([tabindex='-1']),[class*=btn],[class*=button]";
 var NESTED = "a[href],button,input,select,textarea,summary,[role=button],[role=link],[role=menuitem],[role=tab]";
 var cap = function (s, n) { return String(s == null ? "" : s).replace(/\s+/g, " ").trim().slice(0, n); };
-var attr = function (n, a) { return n.getAttribute(a) || ""; };
-var inside = function (n, q) { return Element.prototype.querySelector.call(n, q); };
+var attr = function (n, a) { return P.ga.call(n, a) || ""; };
+var inside = function (n, q) { return P.qs.call(n, q); };
+var hrefOf = function (a) { return typeof a.href === "string" ? a.href : attr(a, "href"); };  // an SVG link has no string href
+"""
+    + fields.JS_RULES
+    + r"""
+var docId = function () { return String(performance.timeOrigin); };
 var formAddress = function (form, button) {
-  var raw = button ? button.getAttribute("formaction") : null;
-  if (raw === null || raw === undefined) raw = form.getAttribute("action");
+  var raw = button ? P.ga.call(button, "formaction") : null;
+  if (raw === null || raw === undefined) raw = P.ga.call(form, "action");
   try { return new URL(raw === null || raw === "" ? location.href : raw, document.baseURI).href; }
   catch (e) { return location.href; }
 };
 var defaultButton = function (form) {
   return inside(form, "button:not([type]),button[type=submit],input[type=submit],input[type=image]");
 };
+var textOf = function (id) { var t = document.getElementById(id); return t ? cap(t.textContent, 80) : ""; };
+var refsText = function (n, a) { return attr(n, a).split(/\s+/).filter(Boolean).slice(0, 4).map(textOf).join(" "); };
+var legendOf = function (n) {
+  var f = n.closest ? n.closest("fieldset") : null, l = f ? inside(f, "legend") : null;
+  return l ? cap(l.textContent, 80) : "";
+};
+var textBefore = function (n) {
+  var p = n.previousSibling, t = "";
+  while (p && !t) {
+    if (p.nodeType === 3 || (p.nodeType === 1 && !/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(p.tagName))) t = cap(p.textContent, 60);
+    p = p.previousSibling;
+  }
+  return t;
+};
+var labelsOf = function (n) {
+  return n.labels ? Array.prototype.map.call(n.labels, function (l) { return cap(l.innerText || l.textContent, 80); }).join(" ") : "";
+};
+var fingerprint = function (n) {
+  var parts = [], cur = n, depth = 0;
+  while (cur && cur.nodeType === 1 && depth < 12) {
+    var i = 1, sib = cur;
+    while ((sib = sib.previousElementSibling)) if (sib.tagName === cur.tagName) i++;
+    parts.push(cur.tagName.toLowerCase() + (i > 1 ? ":" + i : ""));
+    cur = cur.parentElement; depth++;
+  }
+  return [n.tagName.toLowerCase(), attr(n, "type").toLowerCase(), attr(n, "role").toLowerCase(), cap(n.id, 40), cap(attr(n, "name"), 40), parts.reverse().join(">")].join("|");
+};
+var attrsOf = function (n, st, labels, aria, ph) {
+  var tag = n.tagName.toLowerCase(), type = attr(n, "type").toLowerCase();
+  var max = parseInt(attr(n, "maxlength") || "0", 10);
+  var words = [attr(n, "name"), n.id, aria, attr(n, "title"), ph, labels, refsText(n, "aria-labelledby"), refsText(n, "aria-describedby"), legendOf(n), textBefore(n)].join(" ");
+  var masked = String(st.webkitTextSecurity || st.getPropertyValue("-webkit-text-security") || "none") !== "none";
+  return {type: tag === "textarea" ? "textarea" : tag === "select" ? "select" : type || "text", autocomplete: attr(n, "autocomplete").toLowerCase(), words: cap(words, 400), inputmode: attr(n, "inputmode").toLowerCase(), maxlength: isNaN(max) ? 0 : max, masked: masked};
+};
+var formFields = function (form) {
+  var out = [], list = form.elements;
+  for (var i = 0; i < list.length && out.length < 12; i++) {
+    var f = list[i], tag = f.tagName.toLowerCase(), type = attr(f, "type").toLowerCase();
+    if (/^(button|submit|reset|image|file)$/.test(type) || /^(fieldset|button|object|output)$/.test(tag)) continue;
+    var name = cap(attr(f, "name") || f.id || attr(f, "aria-label"), 40);
+    if (!name) continue;
+    if (type === "hidden") { out.push([name, "", "h"]); continue; }
+    var secret = secretKind(attrsOf(f, P.gcs(f), labelsOf(f), cap(attr(f, "aria-label"), 120), cap(attr(f, "placeholder"), 120)));
+    var v = tag === "select" ? cap(f.options && f.selectedIndex >= 0 ? f.options[f.selectedIndex].text : "", 80)
+      : (type === "checkbox" || type === "radio") ? (f.checked ? "on" : "off") : cap(f.value, 80);
+    out.push([name, secret ? "" : v, secret ? "s" : ""]);
+  }
+  return out;
+};
 var lookAt = function (n) {
   var tag = n.tagName.toLowerCase(), type = attr(n, "type").toLowerCase(), role = attr(n, "role").toLowerCase();
-  var r = n.getBoundingClientRect(), st = getComputedStyle(n);
+  var r = n.getBoundingClientRect(), st = P.gcs(n);
   if (st.visibility === "hidden" || st.display === "none" || (r.width === 0 && r.height === 0)) return {skip: 1};
   if (n.disabled || attr(n, "aria-disabled") === "true") return {skip: 1};
   var native = /^(a|button|input|textarea|select|summary)$/.test(tag);
@@ -120,7 +230,7 @@ var lookAt = function (n) {
     if (inside(n, SEL) || (n.parentElement && n.parentElement.closest(NESTED))) return {skip: 0};
     if (!attr(n, "onclick") && st.cursor !== "pointer") return {skip: 0};
   }
-  var labels = n.labels ? Array.prototype.map.call(n.labels, function (l) { return cap(l.innerText || l.textContent, 80); }).join(" ") : "";
+  var labels = labelsOf(n);
   var aria = cap(attr(n, "aria-label"), 120), ph = cap(attr(n, "placeholder"), 120);
   var title = cap(attr(n, "title") || attr(n, "alt"), 120);
   var shown = cap(n.innerText || n.textContent, 120);
@@ -130,30 +240,31 @@ var lookAt = function (n) {
     el.label = labels || aria || title || cap(n.name, 80);
     el.value = cap(n.options && n.selectedIndex >= 0 ? n.options[n.selectedIndex].text : "", 120);
     el.options = Array.prototype.slice.call(n.options || [], 0, 40).map(function (o) { return cap(o.text, 60); });
+    el.attrs = attrsOf(n, st, labels, aria, ph);
+    var picked = secretKind(el.attrs);
+    if (picked) el.sensitive = picked;
   } else if (tag === "input" && (type === "checkbox" || type === "radio")) {
     el.kind = "checkbox"; el.checked = !!n.checked;
     el.label = labels || aria || title || cap(n.name, 80);
   } else if (tag === "textarea" || (tag === "input" && !/^(button|submit|reset|image|hidden|file|checkbox|radio)$/.test(type))) {
     el.kind = "textbox"; el.value = cap(n.value, 120);
     el.label = labels || aria || ph || title || cap(n.name, 80);
-    var max = parseInt(attr(n, "maxlength") || "0", 10);
-    var ac = attr(n, "autocomplete").toLowerCase();
-    var words = [attr(n, "name"), n.id, aria, ph, labels].join(" ");
-    var masked = String(st.webkitTextSecurity || st.getPropertyValue("-webkit-text-security") || "none") !== "none";
-    el.attrs = {type: tag === "textarea" ? "textarea" : type || "text", autocomplete: ac, words: cap(words, 300), inputmode: attr(n, "inputmode").toLowerCase(), maxlength: isNaN(max) ? 0 : max, masked: masked};
-    if (type === "password" || masked || /(^|\s)(current|new)-password(\s|$)/.test(ac)) el.sensitive = "password";
-    else if (/(^|\s)one-time-code(\s|$)/.test(ac) || /otp|one.?time|verif|验证码/i.test(words) || (el.attrs.inputmode === "numeric" && max >= 4 && max <= 8)) el.sensitive = "code";
-    else if (/(^|\s)cc-/.test(ac)) el.sensitive = "card";
+    el.attrs = attrsOf(n, st, labels, aria, ph);
+    var kind = secretKind(el.attrs);
+    if (kind) el.sensitive = kind;
     if (n.form && !el.sensitive) {
-      var db = defaultButton(n.form);
-      el.submit = formAddress(n.form, db);
+      el.submit = formAddress(n.form, defaultButton(n.form));
+      el.form = formFields(n.form);
     }
   } else if (tag === "input" || tag === "button") {
     el.kind = "button";
     el.label = tag === "input" ? cap(n.value, 120) || aria || title : shown || aria || title || cap(n.name, 80);
-    if (n.form && (tag === "input" ? /^(submit|image)$/.test(type) : (type === "" || type === "submit"))) el.submit = formAddress(n.form, n);
+    if (n.form && (tag === "input" ? /^(submit|image)$/.test(type) : (type === "" || type === "submit"))) {
+      el.submit = formAddress(n.form, n);
+      el.form = formFields(n.form);
+    }
   } else if (tag === "a" || role === "link") {
-    var href = tag === "a" ? (typeof n.href === "string" ? n.href : attr(n, "href")) : "";
+    var href = tag === "a" ? hrefOf(n) : "";
     if (/^https?:/i.test(href)) { el.kind = "link"; el.href = href; }
     else if (/^(mailto|tel|sms|file|blob|data|ftp):/i.test(href)) return {skip: 1};
     else el.kind = "button";  // javascript: and empty addresses are clicked, not opened
@@ -167,20 +278,22 @@ var lookAt = function (n) {
   }
   var other = aria && aria !== el.label ? aria : (title && title !== el.label ? title : "");
   if (other) el.also = other;
-  if (el.sensitive) { el.value = ""; el.label = ""; el.also = ""; }
+  if (el.sensitive) { el.value = ""; el.label = ""; el.also = ""; el.options = []; el.form = []; }
+  el.fp = fingerprint(n);
   return {el: el};
 };
 """
+)
 
 # Returns JSON: the page's text (the main part when there is one) and its
 # visible links, buttons and fields, each with its place (``at``) among the
 # page's possible targets. Secret fields are marked, their values never read.
 PAGE_JS = r"""(function () {""" + COMMON_JS + r"""
-  var out = {url: location.href, title: document.title || "", text: "", elements: [], skipped: 0};
+  var out = {url: location.href, doc: docId(), title: document.title || "", text: "", elements: [], skipped: 0, frames: []};
   var main = document.querySelector("main,[role=main],article");
   var root = main && (main.innerText || "").length > 300 ? main : document.body;
   out.text = root ? String(root.innerText || "").slice(0, 200000) : "";
-  var nodes = document.querySelectorAll(SEL);
+  var nodes = P.qsa.call(document, SEL);
   for (var i = 0; i < nodes.length && i < 4000; i++) {
     var d = lookAt(nodes[i]);
     if (!d.el) { out.skipped += d.skip; continue; }
@@ -188,7 +301,14 @@ PAGE_JS = r"""(function () {""" + COMMON_JS + r"""
     d.el.at = i;
     out.elements.push(d.el);
   }
-  return JSON.stringify(out);
+  var frames = P.qsa.call(document, "iframe,frame");
+  for (var k = 0; k < frames.length && k < 20; k++) {
+    var u = "";
+    try { u = String(frames[k].contentWindow.location.href); } catch (e) { u = ""; }
+    if (!u || u === "about:blank") u = String(frames[k].src || "");
+    if (u) out.frames.push(u.slice(0, 500));
+  }
+  return P.json(out);
 })()"""
 
 MAX_TYPED_CHARS = 2000
@@ -197,50 +317,108 @@ MAX_TYPED_CHARS = 2000
 def act_script(spec: dict[str, Any]) -> str:
     """The script that does one :class:`Act`, given its *spec* as plain data.
 
-    It refuses, and does nothing, unless the page still has the address it was
-    read at and the element at ``at`` is the one that was read (same kind,
-    label and address, and for a text box the same field attributes).
+    It does nothing, and says why, unless the page is the one that was read:
+    the same address in the same document, and at ``at`` the same element (its
+    fingerprint, kind, label, address and the address its form is sent to, and
+    for a text box the same field attributes). It looks again after the field
+    has focus, after the text is in and after the page's own handlers ran, and
+    clears the field if it turned into a secret one. While it works, a form
+    the page sends that melo did not ask about is stopped, and so is a link
+    whose address is no longer the one that was read when it is pressed or
+    clicked. It guards only while it runs.
     """
     data = json.dumps(spec).replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
     return r"""(function (spec) {""" + COMMON_JS + r"""
-  var say = function (o) { return JSON.stringify(o); };
+  var say = function (o) { return P.json(o); };
+  var blocked = [];
   if (location.href !== spec.url) return say({ok: false, stale: "page"});
-  var n = document.querySelectorAll(SEL)[spec.at];
-  var d = n ? lookAt(n) : {};
-  var el = d.el;
-  if (!el || el.kind !== spec.kind || el.label !== spec.label || (el.href || "") !== spec.href) return say({ok: false, stale: "gone"});
-  if (spec.act === "type") {
-    var a = el.attrs, b = spec.attrs || {};
-    if (el.kind !== "textbox" || !a || a.type !== b.type || a.autocomplete !== b.autocomplete || a.words !== b.words || a.inputmode !== b.inputmode || a.maxlength !== b.maxlength || a.masked !== b.masked) return say({ok: false, stale: "field"});
-    if (el.sensitive) return say({ok: false, stale: "field"});
-  }
-  if (spec.act !== "type" && el.sensitive) return say({ok: false, stale: "field"});
-  n.scrollIntoView({block: "center", inline: "center"});
-  var fire = function (type) { n.dispatchEvent(new Event(type, {bubbles: true})); };
-  if (spec.act === "click") {
-    ["mousedown", "mouseup"].forEach(function (t) { n.dispatchEvent(new MouseEvent(t, {bubbles: true, cancelable: true, view: window})); });
-    n.click();
-  } else if (spec.act === "type") {
-    n.focus();
-    var proto = n.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-    Object.getOwnPropertyDescriptor(proto, "value").set.call(n, spec.text);
-    fire("input"); fire("change");
-    if (spec.enter) {
-      var key = function (t) { return new KeyboardEvent(t, {key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true}); };
-      var go = n.dispatchEvent(key("keydown"));
-      n.dispatchEvent(key("keypress"));
-      n.dispatchEvent(key("keyup"));
-      if (go && n.form) HTMLFormElement.prototype.requestSubmit.call(n.form, defaultButton(n.form) || undefined);
+  if (docId() !== spec.doc) return say({ok: false, stale: "doc"});
+  var n = P.qsa.call(document, SEL)[spec.at];
+  var same = function () {
+    var d = n ? lookAt(n) : {}, el = d.el;
+    if (!el || el.fp !== spec.fp || el.kind !== spec.kind || el.label !== spec.label || (el.href || "") !== spec.href) return "gone";
+    if ((el.submit || "") !== spec.submit) return "dest";
+    if (spec.attrs) {
+      var a = el.attrs, b = spec.attrs, keys = ["type", "autocomplete", "words", "inputmode", "maxlength", "masked"];
+      if (!a || keys.some(function (k) { return a[k] !== b[k]; })) return "field";
     }
-  } else if (spec.act === "select") {
-    var want = String(spec.text).trim().toLowerCase(), opts = Array.prototype.slice.call(n.options);
-    var hits = opts.filter(function (o) { return !o.disabled && (cap(o.text, 60).toLowerCase() === want || String(o.value).toLowerCase() === want); });
-    if (!hits.length) hits = opts.filter(function (o) { return !o.disabled && want && cap(o.text, 60).toLowerCase().indexOf(want) >= 0; });
-    if (hits.length !== 1) return say({ok: false, option: hits.length});
-    n.value = hits[0].value; hits[0].selected = true;
-    fire("input"); fire("change");
+    if (el.sensitive) return "field";
+    return "";
+  };
+  var why = same();
+  if (why) return say({ok: false, stale: why});
+  var allowed = function (form, button) {
+    return spec.send && (spec.submit === "" || formAddress(form, button) === spec.submit);
+  };
+  var onSubmit = function (e) {
+    if (!allowed(e.target, e.submitter)) { e.preventDefault(); e.stopImmediatePropagation(); blocked.push("send"); }
+  };
+  var onClick = function (e) {
+    var t = e.target, a = t && t.closest ? t.closest("a[href]") : null;
+    if (spec.kind === "link" && a && hrefOf(a) !== spec.href) { e.preventDefault(); e.stopImmediatePropagation(); blocked.push("link"); }
+  };
+  var proto = HTMLFormElement.prototype;
+  var saved = {submit: Object.getOwnPropertyDescriptor(proto, "submit"), requestSubmit: Object.getOwnPropertyDescriptor(proto, "requestSubmit")};
+  var put = function (name, fn) { Object.defineProperty(proto, name, {value: fn, configurable: true, writable: true}); };
+  var done = function (o) { blocked.length && (o.blocked = blocked.slice()); return say(o); };
+  try {
+    put("submit", function () { if (allowed(this, null)) return P.sub.call(this); blocked.push("send"); });
+    put("requestSubmit", function (b) { if (allowed(this, b)) return P.req.call(this, b); blocked.push("send"); });
+    P.add.call(window, "submit", onSubmit, true);
+    P.add.call(window, "submit", onSubmit, false);
+    P.add.call(window, "click", onClick, true);
+    P.add.call(n, "click", onClick, false);  // after the page's own handlers on the element
+    if (n.form) P.add.call(n.form, "submit", onSubmit, false);
+    n.scrollIntoView({block: "center", inline: "center"});
+    var fire = function (type) { P.dispatch.call(n, new Event(type, {bubbles: true})); };
+    var cleared = function (stale) {
+      if (spec.act === "type") { Object.getOwnPropertyDescriptor(n.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, "value").set.call(n, ""); }
+      return done({ok: false, stale: stale});
+    };
+    if (spec.act === "click") {
+      if (n.tagName === "A" || n.tagName === "AREA") P.ra.call(n, "ping");
+      ["mousedown", "mouseup"].forEach(function (t) { P.dispatch.call(n, new MouseEvent(t, {bubbles: true, cancelable: true, view: window})); });
+      var moved = same();  // a handler of the press may have changed where this goes
+      if (moved) return done({ok: false, stale: moved === "gone" ? "dest" : moved});
+      if (n instanceof HTMLElement) P.click.call(n);
+      else P.dispatch.call(n, new MouseEvent("click", {bubbles: true, cancelable: true, view: window}));
+    } else if (spec.act === "type") {
+      n.focus();
+      var after = same();  // the page's focus handlers have run
+      if (after) return done({ok: false, stale: after});
+      var setter = Object.getOwnPropertyDescriptor(n.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, "value").set;
+      setter.call(n, spec.text);
+      var typed = same();
+      if (typed) return cleared("grew");
+      fire("input"); fire("change");
+      var handled = same();  // and the handlers of the typing
+      if (handled) return cleared("grew");
+      if (spec.enter) {
+        var key = function (t) { return new KeyboardEvent(t, {key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true}); };
+        var go = P.dispatch.call(n, key("keydown"));
+        P.dispatch.call(n, key("keypress"));
+        P.dispatch.call(n, key("keyup"));
+        if (go && n.form) P.req.call(n.form, defaultButton(n.form) || undefined);
+      }
+    } else if (spec.act === "select") {
+      var want = String(spec.text).trim().toLowerCase(), opts = Array.prototype.slice.call(n.options);
+      var hits = opts.filter(function (o) { return !o.disabled && (cap(o.text, 60).toLowerCase() === want || String(o.value).toLowerCase() === want); });
+      if (!hits.length) hits = opts.filter(function (o) { return !o.disabled && want && cap(o.text, 60).toLowerCase().indexOf(want) >= 0; });
+      if (hits.length !== 1) return done({ok: false, option: hits.length});
+      hits[0].selected = true;
+      fire("input"); fire("change");
+    }
+    return done({ok: true});
+  } finally {
+    ["submit", "requestSubmit"].forEach(function (name) {
+      if (saved[name]) Object.defineProperty(proto, name, saved[name]); else delete proto[name];
+    });
+    P.rm.call(window, "submit", onSubmit, true);
+    P.rm.call(window, "submit", onSubmit, false);
+    P.rm.call(window, "click", onClick, true);
+    if (n) P.rm.call(n, "click", onClick, false);
+    if (n && n.form) P.rm.call(n.form, "submit", onSubmit, false);
   }
-  return say({ok: true});
 })(""" + data + ")"
 
 
@@ -303,7 +481,7 @@ def _element(item: Any) -> Element | None:
     if not isinstance(item, dict) or item.get("kind") not in KINDS:
         return None
     checked, secret = item.get("checked"), item.get("sensitive")
-    options, place = item.get("options"), item.get("at")
+    options, place, rows = item.get("options"), item.get("at"), item.get("form")
     return Element(
         item["kind"],
         str(item.get("label") or ""),
@@ -316,6 +494,8 @@ def _element(item: Any) -> Element | None:
         options=tuple(str(o) for o in options) if isinstance(options, list) else (),
         attrs=_attrs(item.get("attrs")),
         at=place if isinstance(place, int) else -1,
+        fp=str(item.get("fp") or ""),
+        form=fields.form_pairs(rows) if isinstance(rows, list) else (),
     )
 
 
@@ -323,18 +503,22 @@ def _parse_tabs(text: str) -> list[tuple[TabInfo, bool]]:
     """Tabs (and whether each is the active one) from a ``list_tabs`` reply."""
     value = _decode(text)
     items = value.get("tabs", []) if isinstance(value, dict) else value
-    if not isinstance(items, list):  # plain lines: one tab each, by position
-        items = [line for line in text.splitlines() if line.strip()]
+    if not isinstance(items, list):
+        return []
     tabs = []
-    for index, item in enumerate(items):
-        row = item if isinstance(item, dict) else {"title": str(item)}
+    for item in items:
+        # A tab is the handle the browser gave it. A row with none is not a tab
+        # melo can name: its place in the list is no identity, since it moves
+        # when another tab closes.
+        if not isinstance(item, dict):
+            continue
         ident = next(
-            (row[k] for k in (*ARG_NAMES["tab"], "windowHandle") if k in row), index
+            (item[k] for k in (*ARG_NAMES["tab"], "windowHandle") if item.get(k)), ""
         )
-        active = any(row.get(k) for k in ("active", "current", "selected"))
-        info = TabInfo(
-            str(ident), str(row.get("url") or ""), str(row.get("title") or "")
-        )
+        if not isinstance(ident, str) or not ident:
+            continue
+        active = any(item.get(k) for k in ("active", "current", "selected"))
+        info = TabInfo(ident, str(item.get("url") or ""), str(item.get("title") or ""))
         tabs.append((info, active))
     return tabs
 
@@ -474,9 +658,62 @@ class SafariAutomationDriver:
         return _decode(out.text)
 
     async def _focus(self, tab: str | None) -> None:
-        if tab and tab != "current" and tab != self._current:
+        """Make *tab* the tab the scripts run in.
+
+        Done on every call, not remembered: Safari's current tab can move
+        without melo (a page that opens a tab, the person), and a script must
+        never run in a tab melo did not choose.
+        """
+        if not tab or tab == "current":
+            return
+        if self._has("switch"):
             await self._call("switch", tab=tab)
-            self._current = tab
+        self._current = tab
+
+    async def _listed(self) -> list[tuple[TabInfo, bool]]:
+        if not self._has("tabs"):
+            raise BrowserError(
+                "Safari's automation server cannot list tabs, so melo cannot tell "
+                "which tab is which."
+            )
+        return _parse_tabs((await self._call("tabs")).text)
+
+    async def _info(self, tab: str) -> TabInfo:
+        """*tab* as Safari's own tab list reports it: its address and title."""
+        for info, _ in await self._listed():
+            if info.id == tab:
+                return info
+        raise BrowserError("Safari no longer has that tab.")
+
+    async def _address(self, tab: str | None) -> str:
+        """The address Safari reports for *tab* (``""`` when it cannot say).
+
+        It comes from the tab list. Only a server whose list has no address is
+        asked in the page, with a bare ``location.href`` (an unforgeable
+        property read by the server itself, not a value the page serialises).
+        """
+        handle = tab if tab and tab != "current" else self._current
+        if not handle:
+            return ""
+        with contextlib.suppress(BrowserError):
+            if url := (await self._info(handle)).url:
+                return url
+        await self._focus(handle)
+        where = await self._eval("location.href")
+        return where if isinstance(where, str) else ""
+
+    async def _here(self, tab: str) -> TabInfo:
+        """Where *tab* is now: its address from Safari, its title from the list or the page."""
+        info = TabInfo(tab)
+        with contextlib.suppress(BrowserError):
+            info = await self._info(tab)
+        url = info.url or await self._address(tab)
+        title = info.title
+        if not title:
+            await self._focus(tab)
+            said = await self._eval("document.title")
+            title = said if isinstance(said, str) else ""
+        return TabInfo(tab, url, title)
 
     async def _ready(self) -> None:
         loop = asyncio.get_running_loop()
@@ -486,63 +723,64 @@ class SafariAutomationDriver:
                 return
             await asyncio.sleep(POLL_S)
 
-    async def _here(self) -> TabInfo:
-        where = await self._eval(
-            "JSON.stringify({url: location.href, title: document.title})"
-        )
-        info = where if isinstance(where, dict) else {}
-        tab = self._current
-        if self._has("tabs"):
-            try:
-                tabs = _parse_tabs((await self._call("tabs")).text)
-            except BrowserError:
-                tabs = []
-            tab = next(
-                (t.id for t, active in tabs if active), tabs[-1][0].id if tabs else tab
-            )
-        self._current = tab or "current"
-        return TabInfo(
-            self._current, str(info.get("url") or ""), str(info.get("title") or "")
-        )
-
     # ── The driver ──
 
     async def open(self, url: str, *, new_tab: bool, tab: str | None = None) -> TabInfo:
-        sent = False
-        if new_tab and self._has("new_tab"):
+        if new_tab:
+            if not self._has("new_tab"):
+                raise BrowserError("Safari's automation server cannot open a new tab.")
+            before = {info.id for info, _ in await self._listed()}
             tool = self._tools[TOOL_NAMES["new_tab"]]
             props = tool.input_schema.get("properties")
             sent = isinstance(props, dict) and "url" in props
             await self._call("new_tab", **({"url": url} if sent else {}))
-            self._current = None
-        if not sent:
-            if not new_tab:
-                await self._focus(tab)
+            # The tab melo opened is the one that appeared: never "the active one"
+            # or "the last one", which another tab can be.
+            fresh = [i.id for i, _ in await self._listed() if i.id not in before]
+            if len(fresh) != 1:
+                raise BrowserError(
+                    "melo could not tell which tab Safari opened, so it did not use it."
+                )
+            target = fresh[0]
+            await self._focus(target)
+            if not sent:
+                await self._call("open", url=url)
+        else:
+            target = tab if tab and tab != "current" else (self._current or "")
+            if not target:
+                raise BrowserError("No tab is open. Use browser_open first.")
+            await self._focus(target)
             await self._call("open", url=url)
         await self._ready()
-        return await self._here()
+        return await self._here(target)
 
     async def page(self, tab: str | None) -> RawPage:
         await self._focus(tab)
+        url = await self._address(tab)
         data = await self._eval(PAGE_JS)
         if not isinstance(data, dict):
             raise BrowserError("Safari returned a page melo could not read.")
         elements = [e for e in map(_element, data.get("elements") or []) if e]
-        skipped = data.get("skipped")
+        skipped, frames = data.get("skipped"), data.get("frames")
         return RawPage(
-            str(data.get("url") or ""),
+            url,
             str(data.get("title") or ""),
             str(data.get("text") or ""),
             tuple(elements),
             skipped=skipped if isinstance(skipped, int) and skipped > 0 else 0,
+            doc=str(data.get("doc") or ""),
+            frames=tuple(str(f) for f in frames) if isinstance(frames, list) else (),
         )
 
     async def back(self, tab: str | None) -> TabInfo:
-        await self._focus(tab)
+        handle = tab if tab and tab != "current" else (self._current or "")
+        if not handle:
+            raise BrowserError("No tab is open. Use browser_open first.")
+        await self._focus(handle)
         await self._eval("(history.back(), true)")
         await asyncio.sleep(POLL_S)
         await self._ready()
-        return await self._here()
+        return await self._here(handle)
 
     async def tabs(self) -> list[TabInfo]:
         return [tab for tab, _ in _parse_tabs((await self._call("tabs")).text)]
@@ -550,7 +788,7 @@ class SafariAutomationDriver:
     async def switch(self, tab: str) -> TabInfo:
         await self._call("switch", tab=tab)
         self._current = tab
-        return await self._here()
+        return await self._here(tab)
 
     async def close_tab(self, tab: str) -> None:
         await self._call("close", tab=tab)
@@ -558,9 +796,7 @@ class SafariAutomationDriver:
             self._current = None
 
     async def location(self, tab: str | None) -> str:
-        await self._focus(tab)
-        where = await self._eval("location.href")
-        return where if isinstance(where, str) else ""
+        return await self._address(tab)
 
     async def wait(
         self,
@@ -611,20 +847,29 @@ class SafariAutomationDriver:
 
     async def blank(self, tab: str | None) -> None:
         await self._focus(tab)
-        await self._eval("(location.replace('about:blank'), true)")
+        try:  # the browser's own navigation, not a script the page could have changed
+            await self._call("open", url="about:blank")
+        except BrowserSetupError:
+            raise
+        except BrowserError:
+            await self._eval("(location.replace('about:blank'), true)")
 
-    async def act(self, tab: str | None, act: Act) -> None:
+    async def act(self, tab: str | None, act: Act) -> str:
         await self._focus(tab)
         item = act.element
         spec: dict[str, Any] = {
             "act": act.kind,
             "url": act.url,
+            "doc": act.doc,
             "at": item.at,
+            "fp": item.fp,
             "kind": item.kind,
             "label": item.label,
             "href": item.href,
+            "submit": item.submit,
             "text": act.text[:MAX_TYPED_CHARS],
             "enter": act.enter,
+            "send": act.send,
         }
         if item.attrs is not None:
             spec["attrs"] = {
@@ -638,9 +883,14 @@ class SafariAutomationDriver:
         result = await self._eval(act_script(spec))
         if not isinstance(result, dict):
             raise BrowserError("Safari returned an answer melo could not read.")
+        stopped = [
+            _BLOCKED[str(k)] for k in result.get("blocked") or [] if str(k) in _BLOCKED
+        ]
         if result.get("ok") is not True:
             if result.get("stale"):
-                raise StaleElementError(_STALE[str(result["stale"])])
+                raise StaleElementError(
+                    _STALE.get(str(result["stale"]), _STALE["gone"])
+                )
             if "option" in result:
                 raise BrowserError(
                     "That list has no single option with those words (none, or "
@@ -652,6 +902,7 @@ class SafariAutomationDriver:
         )  # a click may start a load that is not yet under way
         with contextlib.suppress(BrowserError):  # the page may have closed itself
             await self._ready()
+        return " ".join(dict.fromkeys(stopped))
 
     def _has(self, key: str) -> bool:
         return TOOL_NAMES[key] in self._tools

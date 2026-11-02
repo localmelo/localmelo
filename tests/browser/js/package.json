@@ -1,0 +1,8 @@
+{
+  "name": "localmelo-browser-script-tests",
+  "private": true,
+  "description": "Dev dependency for running melo's page scripts in a JS engine (npm ci --prefix tests/browser/js).",
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  }
+}

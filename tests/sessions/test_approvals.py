@@ -242,6 +242,22 @@ async def test_a_high_impact_answer_never_grants_the_tool() -> None:
     assert policy.allowed_tools == frozenset()
 
 
+async def test_sending_a_form_is_never_granted_for_the_session() -> None:
+    asked: list[str] = []
+
+    async def ask(req: ApprovalRequest) -> ApprovalDecision:
+        asked.append(req.tool_name)
+        return ApprovalDecision(True, remember=True)
+
+    policy = RememberingPolicy(ask)
+    send = request("browser-submit:https://example.com")
+    # Whatever a client sends, the answer allows this send and nothing after it.
+    assert await policy.decide(send) == ApprovalDecision(True)
+    assert policy.allowed_tools == frozenset()
+    assert await policy.decide(send) == ApprovalDecision(True)
+    assert asked == ["browser-submit:https://example.com"] * 2
+
+
 async def test_a_grant_is_silent_only_for_its_tool() -> None:
     # Under a grant the gate lets the user's model review an undecided call
     # first (the routine-only policy of the old terminal auto mode is gone:

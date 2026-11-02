@@ -12,6 +12,8 @@ chat. Without a policy (``--yolo``, a library caller) nobody is asked.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
+from typing import Any
 from urllib.parse import urlsplit
 
 from localmelo.melo.contracts.approvals import (
@@ -20,6 +22,7 @@ from localmelo.melo.contracts.approvals import (
     denial_text,
 )
 from localmelo.support.browser.driver import BrowserError
+from localmelo.support.browser.render import field_text
 
 PREFIX = "browser:"
 # Acting on a page asks apart from reading it: a click or typing on a site is
@@ -29,6 +32,8 @@ ACT_PREFIX = "browser-act:"
 SUBMIT_PREFIX = "browser-submit:"
 # The longest address a site question shows (web_fetch's): longer ones are cut.
 URL_SHOWN = 300
+# The most form fields a send question lists.
+FORM_SHOWN = 12
 _PORTS = {"http": 80, "https": 443}
 
 
@@ -140,20 +145,28 @@ async def require_site(
         raise BrowserError(_refusal(origin, via, decision))
 
 
-async def require_act(origin: str, what: str) -> None:
-    """Ask about clicking or typing on *origin*'s page; :class:`BrowserError` if refused.
+TYPED_SHOWN = 200
+
+
+async def require_act(origin: str, what: str, text: str = "") -> None:
+    """Ask about clicking, typing or choosing on *origin*'s page; :class:`BrowserError` if refused.
 
     The question has no ``origin`` argument on purpose: a refusal of a click
     must not refuse the site for reading too (the earlier-blocks rule keys on
-    it). *what* is the plain words for the preview (``click "Check in"``).
+    it). *what* is ``click``, ``type`` or ``choose an option``. For ``type`` the
+    text goes with the question (cut to :data:`TYPED_SHOWN` characters), because
+    it is the model's own words and a reviewer must see them.
     """
     ask = TOOL_ASK.get()
     if ask is None:
         return
     host = host_of(origin)
+    arguments: dict[str, Any] = {"site": host, "access": "act", "how": what}
+    if what == "type":
+        arguments["text"] = field_text(text, TYPED_SHOWN)
     decision = await ask(
         ACT_PREFIX + origin,
-        {"site": host, "access": "act"},
+        arguments,
         f"{what} on {host} in Safari",
     )
     if not decision.allow:
@@ -162,23 +175,40 @@ async def require_act(origin: str, what: str) -> None:
         )
 
 
-async def require_submit(origin: str, target: str, how: str) -> None:
+async def require_submit(
+    origin: str,
+    target: str,
+    how: str,
+    form: Sequence[tuple[str, str]] = (),
+) -> None:
     """Ask about sending a form from *origin*'s page to *target*; :class:`BrowserError` if refused.
 
-    Reviewed by itself: the question carries where the form goes and how
-    (``click`` on its button, or ``enter`` in a field), so no earlier answer
-    covers another form. *target* is an absolute address, shown cut to
-    :data:`URL_SHOWN` characters.
+    Reviewed by itself, every time: the question carries where the form goes
+    and how (``click`` on its button, or ``enter`` in a field) and what it
+    holds (*form*: each field's name and value, with nothing secret in it), and
+    an answer is never kept for the chat. *target* is an absolute address,
+    shown cut to :data:`URL_SHOWN` characters, or ``""`` when the page decides
+    where the text goes (Enter in a box that is in no form).
     """
     ask = TOOL_ASK.get()
     if ask is None:
         return
     host = host_of(origin)
-    to = shown_url(target)
+    to = shown_url(target) if target else ""
     decision = await ask(
         SUBMIT_PREFIX + origin,
-        {"site": host, "access": "submit", "to": to, "how": how},
-        f"send a form on {host} to {to}",
+        {
+            "site": host,
+            "access": "submit",
+            "to": to,
+            "how": how,
+            "fields": [[name, value] for name, value in form][:FORM_SHOWN],
+        },
+        (
+            f"send a form on {host} to {to}"
+            if to
+            else f"send what is typed on {host} (the page decides where it goes)"
+        ),
     )
     if not decision.allow:
         raise BrowserError(

@@ -1110,7 +1110,7 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
     ['demo_lookup', {query: 'x'}, null, 'Let melo use demo_lookup?', 'demo_lookup'],
     ['browser:https://example.com', {site: 'example.com', access: 'read'}, null, 'Let melo open example.com?', 'browser · read only'],
     ['browser:https://example.com', {site: 'example.com', access: 'read', via: 'web_fetch'}, null, 'Let melo read example.com?', 'web_fetch · read only'],
-    ['browser-act:https://example.com', {site: 'example.com', access: 'act'}, null, 'Let melo click and type on example.com?', 'browser · acts on the page'],
+    ['browser-act:https://example.com', {site: 'example.com', access: 'act'}, null, 'Let melo click, type and choose on example.com?', 'browser · acts on the page'],
     ['browser-submit:https://example.com', {site: 'example.com', access: 'submit', to: 'https://other.org/post', how: 'click'}, null, 'Let melo send a form from example.com?', 'browser · sends a form'],
   ];
   for (const [tool, args, target, title, caption] of asks) {
@@ -1138,6 +1138,32 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
   const sending = findNode(h.run('approvalCard(request)'), (node) => node.className === 'approval-content');
   assert.equal(sending.textContent, 'https://other.org/post');
   assert.equal(sending.attributes['aria-label'], 'Where the form goes');
+});
+
+test('a form send shows what it holds, says when the page decides, and offers no answer that is kept', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const focuses = (card) => findNodes(card, (node) => 'approvalFocus' in node.dataset).map((node) => node.dataset.approvalFocus);
+  h.context.request = {request_id: 'send-fields', tool_name: 'browser-submit:https://example.com',
+    arguments: {site: 'example.com', access: 'submit', to: 'https://other.org/post', how: 'click',
+      fields: [['q', 'cats'], ['token', '(hidden)']]}, workspace_label: '~/w'};
+  const card = h.run('approvalCard(request)');
+  const box = findNode(card, (node) => node.className === 'approval-content');
+  assert.equal(box.textContent, 'https://other.org/post\n\nWhat the form holds\nq: cats\ntoken: (hidden)');
+  assert.match(findNode(card, (node) => node.className === 'approval-warning').textContent, /A form always asks/);
+  assert.deepEqual(focuses(card).filter((name) => name !== 'reason'), ['once', 'deny'], 'no "allow for this chat" on a send');
+  // Enter outside a form, and a page that decides where the form goes, have no address to show.
+  h.context.request = {request_id: 'send-enter', tool_name: 'browser-submit:https://example.com',
+    arguments: {site: 'example.com', access: 'submit', to: '', how: 'enter', fields: [['typed', 'cats']]}, workspace_label: '~/w'};
+  const page = findNode(h.run('approvalCard(request)'), (node) => node.className === 'approval-content');
+  assert.equal(page.textContent, 'melo cannot say where this goes: the page decides.\n\nWhat the form holds\ntyped: cats');
+  // Typing shows the text, since what melo types is what the person is allowing.
+  h.context.request = {request_id: 'typing', tool_name: 'browser-act:https://example.com',
+    arguments: {site: 'example.com', access: 'act', how: 'type', text: 'hello there'}, workspace_label: '~/w'};
+  const typing = h.run('approvalCard(request)');
+  const text = findNode(typing, (node) => node.className === 'approval-content');
+  assert.equal(text.textContent, 'hello there');
+  assert.equal(text.attributes['aria-label'], 'The text it will type');
 });
 
 // A file write over a file, as the gateway reports it: `target.diff` (docs/reference/api-v2.md).

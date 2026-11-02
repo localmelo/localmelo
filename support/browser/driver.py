@@ -28,8 +28,10 @@ class BrowserSetupError(BrowserError):
 class FieldAttrs:
     """How a page describes a text box, as the page script read it.
 
-    ``words`` joins what names the field: its name, id, ``aria-label``,
-    placeholder and the text of its labels. :mod:`localmelo.support.browser.fields`
+    ``words`` joins what names the field: its name, id, ``aria-label``, the text
+    ``aria-labelledby`` and ``aria-describedby`` point at, title, placeholder,
+    the text of its labels, its fieldset's legend and the text just before it.
+    :mod:`localmelo.support.browser.fields`
     decides from these whether melo may type into it, here when the page is
     read and again where it types, so a field the page re-described since
     is not typed into on the old reading.
@@ -52,10 +54,15 @@ class Element:
     renderer drops it again). ``also`` is another name the page gives it
     (an ``aria-label`` next to its visible text, a title), searched by
     ``browser_find``. ``at`` is where the driver finds it again on the page it
-    read (not part of what two elements are); ``submit`` is the address a
-    click on a button, or Enter in a text box, would send a form to, and is
-    empty for anything that sends nothing; ``options`` are the choices of a
-    select; ``attrs`` describes a text box (see :class:`FieldAttrs`).
+    read and ``fp`` what identifies it there (its tag, kind, key attributes and
+    place in the document); neither is part of what two elements are.
+    ``submit`` is the address a click on a button, or Enter in a text box,
+    would send a form to, and is empty for anything that sends nothing (a text
+    box that is in no form, where Enter is the page's own business, has none);
+    ``form`` is the name and value of every field in that form, with nothing
+    secret in it, as the question about sending it shows; ``options`` are the
+    choices of a select; ``attrs`` describes a text box or a select (see
+    :class:`FieldAttrs`).
     """
 
     kind: ElementKind
@@ -69,11 +76,19 @@ class Element:
     options: tuple[str, ...] = ()
     attrs: FieldAttrs | None = None
     at: int = field(default=-1, compare=False)
+    fp: str = field(default="", compare=False)
+    form: tuple[tuple[str, str], ...] = field(default=(), compare=False)
 
 
 @dataclass(frozen=True)
 class RawPage:
-    """The readable text of a page and its elements, in document order."""
+    """The readable text of a page and its elements, in document order.
+
+    ``url`` is the address the browser itself reports for the tab (never the
+    page's own word for it). ``doc`` identifies the loaded document: it changes
+    when the page is reloaded or replaced. ``frames`` are the addresses of the
+    page's frames as far as they can be read.
+    """
 
     url: str
     title: str
@@ -82,6 +97,8 @@ class RawPage:
     skipped: int = (
         0  # candidates the page script did not list (hidden, disabled, over the cap)
     )
+    doc: str = ""
+    frames: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -106,12 +123,16 @@ ActionKind = Literal["click", "type", "select"]
 class Act:
     """One thing to do on a page: click, type or choose, on an element melo read.
 
-    ``url`` is the address the page had when it was read and ``element`` what
-    was read there; a driver does nothing unless the page still shows the
-    same address and, at ``element.at``, the same element (and, for a text
-    box, the same :class:`FieldAttrs`), and says so with
-    :class:`StaleElementError`. ``text`` is what to type, or the option to
-    choose; ``enter`` presses Enter after typing.
+    ``url`` is the address the page had when it was read, ``doc`` the document
+    it was read in and ``element`` what was read there; a driver does nothing
+    unless the page still shows the same address in the same document and, at
+    ``element.at``, the same element (its fingerprint, label, address, the
+    address its form is sent to and, for a text box, the same
+    :class:`FieldAttrs`), and says so with :class:`StaleElementError`. ``text``
+    is what to type, or the option to choose; ``enter`` presses Enter after
+    typing. ``send`` says the action is an approved send of ``element.submit``
+    (a click on its submit button, or Enter): any other attempt by the page to
+    send a form while the action runs is stopped.
     """
 
     kind: ActionKind
@@ -119,6 +140,8 @@ class Act:
     element: Element
     text: str = ""
     enter: bool = False
+    doc: str = ""
+    send: bool = False
 
 
 class StaleElementError(BrowserError):
@@ -151,7 +174,11 @@ class BrowserDriver(Protocol):
     async def close_tab(self, tab: str) -> None: ...
 
     async def location(self, tab: str | None) -> str:
-        """The address the tab shows now, read in the tab itself (``location.href``)."""
+        """The address the browser reports for the tab now, or ``""`` when it cannot say.
+
+        It comes from the browser's own tab list, never from a script running
+        in the page, which could say anything.
+        """
 
     async def wait(
         self,
@@ -174,11 +201,13 @@ class BrowserDriver(Protocol):
     async def blank(self, tab: str | None) -> None:
         """Leave the page: load an empty one (a redirect the person refused)."""
 
-    async def act(self, tab: str | None, act: Act) -> None:
+    async def act(self, tab: str | None, act: Act) -> str:
         """Do *act* on the page of *tab*, then let the page settle.
 
-        Raises :class:`StaleElementError` when the page is not the one that
-        was read, and :class:`BrowserError`, in words for the model, when the
-        element cannot be used (hidden, disabled, a field melo never types in,
-        an option that is not there).
+        Returns a sentence about what the driver stopped the page from doing
+        meanwhile (sending a form nobody asked about), or ``""``. Raises
+        :class:`StaleElementError` when the page is not the one that was read,
+        and :class:`BrowserError`, in words for the model, when the element
+        cannot be used (hidden, disabled, a field melo never types in, an
+        option that is not there).
         """

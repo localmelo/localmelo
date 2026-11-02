@@ -24,16 +24,25 @@ the tab's address in the tab before and after; a wait's condition counts only
 on the approved site. The tab list shows the address and title of a tab only
 while its page is on the site approved for it.
 
-Acting adds three rules, all kept after a click as before it. A click, a
+Acting adds rules, all kept after a click as before it. A click, a
 keystroke or a choice needs the tab's page to be read and approved, and its
 site to be asked about for acting (apart from reading). It is done only on the
-page that was read, and only on the element that was read there. Melo never
-types into a password, card or one-time-code field, however the page names
-it (:mod:`localmelo.support.browser.fields`). A click that sends a form, or
-Enter in a field, is its own question, with where the form goes: that address
-is checked like any other (never this computer, and its site asked about)
-before anything is sent. After each action the address the tab shows is
-checked, a new site asked about, and the page read again.
+page that was read (the same address in the same loaded document), and only on
+the element that was read there, which the page script looks for again by its
+fingerprint. Melo never types into a password, card or one-time-code field,
+however the page names it (:mod:`localmelo.support.browser.fields`). A click
+that sends a form, or Enter in a field, is its own question every time, with
+where the form goes and what it holds: that address is checked like any other
+(never this computer, and its site asked about) before anything is sent, and the
+page script stops any other send while it acts. Enter in a box that is in no
+form is asked about too, and says the page decides where it goes.
+
+Melo never directs the browser to a local or private address. It cannot stop a
+page from doing that itself, so after each action every tab the action touched
+(the one acted on, and every tab that appeared during it) is checked, by the
+address the browser reports, before anything is read from any of them; one that
+is refused is blanked, or closed when blanking fails, and nothing from it reaches
+the model. This is a check after the page has acted, not a block on the network.
 """
 
 from __future__ import annotations
@@ -54,6 +63,7 @@ from localmelo.support.browser.driver import (
     BrowserDriver,
     BrowserError,
     Element,
+    StaleElementError,
     TabInfo,
 )
 
@@ -68,6 +78,10 @@ IDLE_CLOSE_S = 600.0
 MAX_TYPED_CHARS = 2000
 # The most tabs one click may open (a page that opens more has the rest closed).
 MAX_NEW_TABS = 3
+# After an action a tab's address is read until two reads agree (a navigation the
+# page starts a moment later is then seen), at most this many times, this far apart.
+SETTLE_TRIES = 5
+SETTLE_S = 0.3
 
 PAGE_NOTE = (
     "Web pages: the browser_* tools return pages between a start marker "
@@ -95,16 +109,35 @@ def _p(kind: str, text: str = "", **more: Any) -> dict[str, Any]:
     return {"type": kind, **({"description": text} if text else {}), **more}
 
 
-def _def(name: str, doc: str, required: tuple[str, ...] = (), **props: Any) -> ToolDef:
+def _def(
+    name: str,
+    doc: str,
+    required: tuple[str, ...] = (),
+    *,
+    acts: bool = False,
+    **props: Any,
+) -> ToolDef:
     return ToolDef(
         name=name,
         description=doc,
         parameters={"type": "object", "properties": props, "required": list(required)},
         semantic_tags=["browser", "web", "page"],
-        # Read tier on purpose: the executor's per-tool approval would cover
-        # every site after one grant. The site gate asks per site instead (and
-        # acting and sending a form ask apart from reading).
-        annotations={"readOnlyHint": True},
+        # Reading is the read tier on purpose: the executor's per-tool approval
+        # would cover every site after one grant, and the site gate asks per
+        # site instead. A tool that acts is not read-only (a surface that trusts
+        # the read tier must not get it), and it asks its own questions, per site
+        # and for every form it sends, so the executor's generic question is
+        # skipped for it (``asksItself``).
+        annotations=(
+            {
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": False,
+                "asksItself": True,
+            }
+            if acts
+            else {"readOnlyHint": True}
+        ),
     )
 
 
@@ -148,6 +181,7 @@ TOOLS: tuple[ToolDef, ...] = (
         "Click a button, link, menu item or checkbox from the last reading, "
         "inside melo's browser window, and read the page again.",
         ("ref",),
+        acts=True,
         ref=_p("string", "A ref such as e12 from the last reading."),
         tab=_TAB,
     ),
@@ -157,6 +191,7 @@ TOOLS: tuple[ToolDef, ...] = (
         "a password, card or one-time-code field. With submit=true, press Enter "
         "afterwards, which sends the form.",
         ("ref", "text"),
+        acts=True,
         ref=_p("string", "A textbox ref such as e7 from the last reading."),
         text=_p("string", f"At most {MAX_TYPED_CHARS} characters."),
         submit=_p("boolean", "Press Enter after typing. Default false."),
@@ -166,6 +201,7 @@ TOOLS: tuple[ToolDef, ...] = (
         "browser_select",
         "Choose an option in a select list from the last reading, by its text.",
         ("ref", "option"),
+        acts=True,
         ref=_p("string", "A select ref such as e9 from the last reading."),
         option=_p("string", "The option's visible text."),
         tab=_TAB,
@@ -222,10 +258,12 @@ class BrowserToolProvider(BaseToolProvider):
         *,
         keep_tabs: bool = False,
         idle_close_s: float = IDLE_CLOSE_S,
+        settle_s: float | None = None,
     ) -> None:
         self._driver = driver
         self._keep_tabs = keep_tabs
         self._idle_s = idle_close_s
+        self._settle_s = SETTLE_S if settle_s is None else settle_s
         self._lock = asyncio.Lock()
         self._tab: str | None = None  # the current tab (a short id)
         # The tabs melo opened in this chat: a short id is what the model sees,
@@ -425,12 +463,7 @@ class BrowserToolProvider(BaseToolProvider):
                 if self._origins.get(tab) != origin:
                     await sites.require_site(origin)
             except BrowserError:
-                with contextlib.suppress(BrowserError):
-                    await self._driver.blank(
-                        self._raw[tab]
-                    )  # leave the page the redirect led to
-                self._origins.pop(tab, None)
-                self._snaps.pop(tab, None)
+                await self._refuse_tab(tab, close=False)  # leave the page it led to
                 raise
             done.add(origin)
         self._origins[tab] = origin
@@ -442,10 +475,8 @@ class BrowserToolProvider(BaseToolProvider):
         """
         url = await self._driver.location(self._raw[tab])
         if not url:
-            raise BrowserError(
-                "melo could not tell which page that tab shows, so it did not look "
-                "at it. Use browser_read to read the tab again."
-            )
+            self._drop_reading(tab)
+            raise BrowserError(_NO_ADDRESS)
         await self._admit(url, tab, set())
 
     def _approved(self, tab: str | None) -> str:
@@ -460,7 +491,11 @@ class BrowserToolProvider(BaseToolProvider):
         if info.url:
             await self._admit(info.url, info.id, done)
         raw = await self._driver.page(self._raw[info.id])
+        if not raw.url:
+            self._drop_reading(info.id)
+            raise BrowserError(_NO_ADDRESS)
         await self._admit(raw.url, info.id, done)  # a script may have redirected it
+        await self._admit_frames(raw.frames, info.id)
         self._snap_n += 1
         snap = render.make_snapshot(
             raw,
@@ -473,6 +508,45 @@ class BrowserToolProvider(BaseToolProvider):
         self._snaps[info.id] = snap
         self._tab = info.id
         return render.render_page(snap, view=view)
+
+    async def _admit_frames(self, frames: tuple[str, ...], tab: str) -> None:
+        """Refuse a page whose frames, as far as they can be read, are on a local address."""
+        for url in frames:
+            if not url.lower().startswith(("http://", "https://")):
+                continue
+            try:
+                sites.require_origin(url)
+                await addresses.require_public(url)
+            except BrowserError:
+                await self._refuse_tab(tab, close=False)
+                raise
+
+    def _drop_reading(self, tab: str) -> None:
+        """Forget what was read in *tab* and approved for it: its page is no longer known."""
+        self._snaps.pop(tab, None)
+        self._origins.pop(tab, None)
+
+    async def _refuse_tab(self, tab: str, *, close: bool) -> None:
+        """Leave a page that was refused: blank its tab, and close it when that fails.
+
+        A tab a page or a click opened (*close*) is closed outright. Nothing
+        read from the tab is kept, so no ref of it works any more.
+        """
+        self._drop_reading(tab)
+        raw = self._raw.get(tab)
+        if raw is None:
+            return
+        blanked = False
+        if not close:
+            try:
+                await self._driver.blank(raw)
+                blanked = True
+            except BrowserError:
+                pass
+        if not blanked:
+            with contextlib.suppress(BrowserError):
+                await self._driver.close_tab(raw)
+            self._forget_tab(tab)
 
     def _open_target(self, tab: str) -> str | None:
         """The tab ``browser_open`` loads into: the current one, a tab named, or None for a new tab."""
@@ -599,38 +673,65 @@ class BrowserToolProvider(BaseToolProvider):
         done.add(target)
 
     async def _submit_checks(
-        self, snap: render.Snapshot, item: Element, how: str, done: set[str]
+        self,
+        snap: render.Snapshot,
+        item: Element,
+        how: str,
+        done: set[str],
+        typed: str | None = None,
     ) -> None:
-        """A form is about to be sent: where it goes is checked, then the send is asked about by itself."""
-        target = item.submit or snap.url
-        await self._check_destination(target, snap.origin, done)
-        await sites.require_submit(snap.origin, target, how)
+        """A form is about to be sent: where it goes is checked, then the send is asked about by itself.
 
-    async def _after(
-        self, tab_id: str, said: str, before: set[str] | None, done: set[str]
+        The question lists what the form holds (and the text being typed, for
+        Enter in a box). A box that is in no form has no address: the page
+        decides where Enter sends it, and the question says so.
+        """
+        if item.submit:
+            await self._check_destination(item.submit, snap.origin, done)
+        rows = list(item.form)
+        if typed is not None:
+            rows = [*fields.form_pairs([["typed", typed]]), *rows]
+        await sites.require_submit(snap.origin, item.submit, how, rows)
+
+    async def _acting(
+        self, tab_id: str, snap: render.Snapshot, what: str, text: str = ""
+    ) -> set[str] | None:
+        """Everything that must hold before melo does something on a page, and the tabs there are now.
+
+        The tab's address is read again, the site is asked about for acting, and
+        the window's tabs are listed so the ones the action opens are known for
+        what they are. A window that cannot be listed is not acted in.
+        """
+        await self._recheck(
+            tab_id
+        )  # where the tab is now, before anything is done on it
+        await sites.require_act(snap.origin, what, text)
+        before = await self._tabs_now()
+        if before is None:
+            raise BrowserError(
+                "melo could not list the browser's tabs, so it did not act: it "
+                "would not know which tabs the action opens."
+            )
+        return before
+
+    async def _run_act(
+        self,
+        tab_id: str,
+        act: Act,
+        before: set[str],
     ) -> str:
-        """Read the page an action left: new tabs adopted, the address checked, a new site asked about."""
-        landed = tab_id
-        opened = await self._new_tabs(before)
-        if opened:
-            landed = opened[0]
-            said += f" It opened {landed}."
+        """Do *act*; when it fails after it may have run, the tab is checked before anything else."""
         try:
-            url = await self._driver.location(self._raw[landed])
-            if not url:
-                raise BrowserError(
-                    "melo could not tell which page that tab shows, so it did not "
-                    "look at it. Use browser_read to read the tab again."
-                )
-            page = await self._read_tab(TabInfo(landed, url), done)
-        except BrowserError:
-            if opened:  # a tab the refused page opened is closed, not left on screen
-                for short in opened:
-                    with contextlib.suppress(BrowserError):
-                        await self._driver.close_tab(self._raw[short])
-                    self._forget_tab(short)
+            return await self._driver.act(self._raw[tab_id], act)
+        except StaleElementError:
+            raise  # nothing was done
+        except BrowserError as exc:
+            try:
+                await self._verify(tab_id, before)
+            except BrowserError as refused:
+                raise refused from exc
+            self._drop_reading(tab_id)  # what it did to the page is not known
             raise
-        return f"{said}\n{page}"
 
     async def _tabs_now(self) -> set[str] | None:
         """The driver's ids of every tab in the window now, or None when it cannot say."""
@@ -639,29 +740,94 @@ class BrowserToolProvider(BaseToolProvider):
         except BrowserError:
             return None
 
-    async def _new_tabs(self, before: set[str] | None) -> list[str]:
-        """The short ids of tabs that appeared since *before*: tabs the action opened are melo's.
+    async def _adopt(self, before: set[str]) -> list[str]:
+        """The short ids of the tabs that appeared since *before*: tabs the action opened are melo's.
 
-        When the window could not be listed before the action, nothing is
-        adopted: a tab melo cannot show it opened is not melo's to close.
+        Only a tab seen to appear during melo's own action is adopted, by its
+        browser handle. A window that cannot be listed now is an error: a tab
+        the action opened could be on any address.
         """
-        if before is None:
-            return []
         try:
             now = await self._driver.tabs()
         except BrowserError:
-            return []
-        fresh = [
-            tab for tab in now if tab.id not in before and tab.id not in self._short
-        ]
+            raise BrowserError(
+                "melo could not list the browser's tabs after that, so it read "
+                "nothing. Use browser_tabs to see them."
+            ) from None
         opened: list[str] = []
-        for tab in fresh:
+        for tab in now:
+            if tab.id in before or tab.id in self._short:
+                continue
             if len(opened) < MAX_NEW_TABS:
                 opened.append(self._own(tab).id)
             else:
                 with contextlib.suppress(BrowserError):
                     await self._driver.close_tab(tab.id)
         return opened
+
+    async def _settled(self, short: str) -> str:
+        """The address *short* shows once two reads agree: a late navigation of the page is then seen."""
+        last = ""
+        for _ in range(SETTLE_TRIES):
+            now = await self._driver.location(self._raw[short])
+            if now and now == last:
+                return now
+            last = now
+            if self._settle_s:
+                await asyncio.sleep(self._settle_s)
+        return last
+
+    async def _verify(
+        self, tab_id: str, before: set[str]
+    ) -> tuple[list[str], dict[str, str]]:
+        """Check where every tab the action touched is, before anything is read from any of them.
+
+        The touched tabs are the one acted on and every tab that appeared
+        meanwhile. Each address is the browser's own report. One that is on a
+        local or private address, or that cannot be told, is blanked (closed
+        when blanking fails; a new tab is closed at once) and its readings go;
+        the first such problem is raised after all of them were dealt with.
+        """
+        opened = await self._adopt(before)
+        problem: BrowserError | None = None
+        urls: dict[str, str] = {}
+        for short in [tab_id, *opened]:
+            if short not in self._raw:
+                continue  # closed meanwhile
+            try:
+                url = await self._settled(short)
+                if not url:
+                    raise BrowserError(_NO_ADDRESS)
+                sites.require_origin(url)
+                await addresses.require_public(url)
+                urls[short] = url
+            except BrowserError as exc:
+                problem = problem or exc
+                await self._refuse_tab(short, close=short in opened)
+        if problem is not None:
+            raise problem
+        return opened, urls
+
+    async def _after(
+        self, tab_id: str, said: str, before: set[str], done: set[str]
+    ) -> str:
+        """Read the page an action left, once every tab it touched has been checked."""
+        opened, urls = await self._verify(tab_id, before)
+        landed = opened[0] if opened else tab_id
+        if opened:
+            said += f" It opened {landed}."
+        if landed not in urls:
+            raise BrowserError(_NO_ADDRESS)
+        try:
+            page = await self._read_tab(TabInfo(landed, urls[landed]), done)
+        except BrowserError:
+            for short in opened:  # a refused page's popups are not left on screen
+                if short in self._raw and short not in self._origins:
+                    with contextlib.suppress(BrowserError):
+                        await self._driver.close_tab(self._raw[short])
+                    self._forget_tab(short)
+            raise
+        return f"{said}\n{page}"
 
     @_guarded
     async def _click(self, ref: str = "", tab: str | None = None, **_: Any) -> str:
@@ -671,18 +837,19 @@ class BrowserToolProvider(BaseToolProvider):
         if item.kind in ("textbox", "select"):
             use = "browser_type" if item.kind == "textbox" else "browser_select"
             raise BrowserError(f"{ref} is a {item.kind}: use {use}.")
-        await self._recheck(
-            tab_id
-        )  # where the tab is now, before anything is done on it
-        await sites.require_act(snap.origin, "click")
+        before = await self._acting(tab_id, snap, "click")
+        assert before is not None
         done: set[str] = set()
         if item.kind == "link" and item.href:
             await self._check_destination(item.href, snap.origin, done)
         elif item.submit:
             await self._submit_checks(snap, item, "click", done)
-        before = await self._tabs_now()
-        await self._driver.act(self._raw[tab_id], Act("click", snap.url, item))
-        return await self._after(tab_id, f"Clicked {ref}.", before, done)
+        note = await self._run_act(
+            tab_id,
+            Act("click", snap.url, item, doc=snap.doc, send=bool(item.submit)),
+            before,
+        )
+        return await self._after(tab_id, _said(f"Clicked {ref}.", note), before, done)
 
     @_guarded
     async def _type(
@@ -703,20 +870,29 @@ class BrowserToolProvider(BaseToolProvider):
                 f"That text is {len(typed)} characters; melo types at most "
                 f"{MAX_TYPED_CHARS} at a time."
             )
-        await self._recheck(tab_id)
-        await sites.require_act(snap.origin, "type")
+        before = await self._acting(tab_id, snap, "type", typed)
+        assert before is not None
         done: set[str] = set()
         enter = submit is True or str(submit).lower() == "true"
         if enter:
-            await self._submit_checks(snap, item, "enter", done)
-        before = await self._tabs_now()
-        await self._driver.act(
-            self._raw[tab_id], Act("type", snap.url, item, text=typed, enter=enter)
+            await self._submit_checks(snap, item, "enter", done, typed)
+        note = await self._run_act(
+            tab_id,
+            Act(
+                "type",
+                snap.url,
+                item,
+                text=typed,
+                enter=enter,
+                doc=snap.doc,
+                send=enter,
+            ),
+            before,
         )
         said = f"Typed {len(typed)} character(s) into {ref}" + (
             " and pressed Enter." if enter else "."
         )
-        return await self._after(tab_id, said, before, done)
+        return await self._after(tab_id, _said(said, note), before, done)
 
     @_guarded
     async def _select(
@@ -725,15 +901,20 @@ class BrowserToolProvider(BaseToolProvider):
         tab_id, snap, item = self._target(ref, tab)
         if item.kind != "select":
             raise BrowserError(f"{ref} is a {item.kind}, not a select list.")
+        if item.sensitive:
+            self._refuse_secret(item)
         if not str(option).strip():
             raise BrowserError("browser_select needs the option's text.")
-        await self._recheck(tab_id)
-        await sites.require_act(snap.origin, "choose an option")
-        before = await self._tabs_now()
-        await self._driver.act(
-            self._raw[tab_id], Act("select", snap.url, item, text=str(option))
+        before = await self._acting(tab_id, snap, "choose an option")
+        assert before is not None
+        note = await self._run_act(
+            tab_id,
+            Act("select", snap.url, item, text=str(option), doc=snap.doc),
+            before,
         )
-        return await self._after(tab_id, f"Chose an option in {ref}.", before, set())
+        return await self._after(
+            tab_id, _said(f"Chose an option in {ref}.", note), before, set()
+        )
 
     # ── Tabs, waiting, pictures ──
 
@@ -838,6 +1019,16 @@ class BrowserToolProvider(BaseToolProvider):
             text=f"A picture of {self._origins[tab_id]} was taken and kept with this chat.",
             images=[ImagePart(mime_type=shot.mime_type, data=shot.data)],
         )
+
+
+_NO_ADDRESS = (
+    "melo could not tell which page that tab shows, so it did not look at it. "
+    "Use browser_read to read the tab again."
+)
+
+
+def _said(line: str, note: str) -> str:
+    return f"{line} {note}" if note else line
 
 
 def _stale_ref(ref: object) -> str:

@@ -130,7 +130,7 @@ async def test_a_click_asks_to_act_on_the_site_apart_from_reading_it() -> None:
     ]
     # No origin in the question: a refused click must not refuse reading the site.
     name, arguments, preview = asks.asked[1]
-    assert arguments == {"site": "example.com", "access": "act"}
+    assert arguments == {"site": "example.com", "access": "act", "how": "click"}
     assert preview == "click on example.com in Safari"
 
 
@@ -303,7 +303,10 @@ async def test_a_click_that_opens_a_local_address_in_a_new_tab_is_refused_and_cl
     await run(tools, "browser_open", url=HOME)
     out = await run(tools, "browser_click", ref="e1")
     assert_refused(out)
-    assert ("blank", "t2") in driver.calls and ("close_tab", "t2") in driver.calls
+    assert (
+        "close_tab",
+        "t2",
+    ) in driver.calls  # a tab the click opened is closed outright
     assert list(driver.tabs_) == ["t1"]
     listing = (await run(tools, "browser_tabs", action="list")).text
     assert "t2" not in listing and SECRET not in listing
@@ -330,7 +333,7 @@ async def test_a_page_that_opens_many_tabs_has_the_extra_ones_closed() -> None:
             driver.current = driver._new_tab()
             driver.tabs_[driver.current].append(DONE)
 
-    driver.act = act  # type: ignore[method-assign]
+    driver.act = act  # type: ignore[assignment]
     tools = await tools_of(driver)
     await run(tools, "browser_open", url=HOME)
     await run(tools, "browser_click", ref="e1")
@@ -359,6 +362,7 @@ async def test_a_form_button_is_its_own_question_with_where_the_form_goes() -> N
         "access": "submit",
         "to": DONE,
         "how": "click",
+        "fields": [],
     }
     assert preview == f"send a form on example.com to {DONE}"
 
@@ -448,7 +452,13 @@ async def test_enter_in_a_field_is_a_form_send_that_asks_by_itself() -> None:
     assert "Checked in." in sent.text
     submit = [a for n, a, _ in asks.asked if n.startswith("browser-submit:")]
     assert submit == [
-        {"site": "example.com", "access": "submit", "to": DONE, "how": "enter"}
+        {
+            "site": "example.com",
+            "access": "submit",
+            "to": DONE,
+            "how": "enter",
+            "fields": [["typed", "cats"]],
+        }
     ]
     assert [a.enter for a in driver.acts] == [False, True]
 
@@ -521,6 +531,16 @@ DISGUISES = {
     "numeric code shape": FieldAttrs(
         type="text", inputmode="numeric", maxlength=6, words="q"
     ),
+    "one box of a split code": FieldAttrs(type="text", maxlength=1, words="digit 3"),
+    "telephone type of six": FieldAttrs(type="tel", maxlength=6, words="q"),
+    "bare Code": FieldAttrs(type="text", words="Code"),
+    "two-factor token": FieldAttrs(type="text", words="two-factor token"),
+    "credit card": FieldAttrs(type="text", words="Credit card"),
+    "expiry": FieldAttrs(type="text", words="Expiry MM/YY"),
+    "german card number": FieldAttrs(type="text", words="Kartennummer"),
+    "named by what aria-labelledby says": FieldAttrs(
+        type="text", words="f9 Card number"
+    ),
 }
 
 
@@ -583,6 +603,19 @@ async def test_the_values_and_labels_of_secret_fields_never_reach_the_model() ->
     )
     text = render.render_page(snap)
     assert "hunter2" not in text and "password field: melo never types here" in text
+
+
+async def test_a_card_expiry_list_marks_a_payment_page() -> None:
+    attrs = FieldAttrs(autocomplete="cc-exp-month", words="Expiry month")
+    month = Element("select", "Month", options=("01", "02"), attrs=attrs)
+    driver = world(month, button("Check in"))
+    tools = await tools_of(driver)
+    opened = await run(tools, "browser_open", url=HOME)
+    assert "does not read pages with payment fields" in opened.text
+    for name, args in (("browser_select", {"option": "01"}), ("browser_click", {})):
+        out = await run(tools, name, ref="e1", **args)
+        assert out.is_error and "not a ref of the newest reading" in out.text
+    assert not driver.acts
 
 
 async def test_an_ordinary_field_is_typed_into() -> None:

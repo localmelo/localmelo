@@ -14,19 +14,38 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   separate feature). With browsing on, three tools join the eight: `browser_click` presses a
   button, link, menu item or checkbox from the last reading, `browser_type` types into a text
   box (and presses Enter when asked, which sends the form), and `browser_select` chooses an
-  option in a list. An action only happens on the page that was read: the tab must still show
-  the same address and the element must still be the one that was read, otherwise nothing is
-  done and melo reads the page again; refs from an older page are refused. Each action is
-  followed by the same address checks as a redirect, and by a fresh reading of the page. Local
-  and private addresses stay refused whatever a click or a script does, a link or a form that
-  points at one is refused before the click, and a tab a click opens is checked and closed if
-  refused. melo never types into a password, card number or one-time-code field, even one the
-  page disguises (a masked text box, an `autocomplete` hint, or a name, label or placeholder
-  such as "PIN", "CVV" or "验证码"), and checks again at the moment it types. It never reads
-  cookies or page storage. Clicking and typing on a site ask once per site and chat apart
-  from reading; a click on a button that sends a form, or typing that presses Enter, asks by
-  itself and shows where the form goes, a site other than the page's is asked about first, and
-  Auto mode reviews every form that is sent on its own, even on a site you named.
+  option in a list. The three are write tools, not read-only ones, and ask their own questions.
+  An action only happens on the page that was read: the tab must still show the same address
+  and the same document (a reload is another one), and the element must still be the one that
+  was read (same place, kind, name, link address and form address, and the same description for
+  a text box); where a link leads and where a form is sent are read from the page again at that
+  moment. Otherwise nothing is done and melo reads the page again; refs from an older page are
+  refused. While it acts, melo stops a form the page sends that it did not ask about and a link
+  whose address changed when it was pressed, and says so. After each action melo takes the
+  address Safari reports for every tab the action touched, the one acted on and each one that
+  appeared meanwhile, and checks them all before it reads any: a tab on a local or private
+  address, or whose address cannot be told, is blanked (closed if that fails) and nothing from
+  it reaches the model, and a failed action is checked the same way. melo never sends the
+  browser to a local or private address itself, and a link or form that points at one is
+  refused before it is used. A page that sends its own tab there with its own script is
+  noticed afterwards and blanked before anything is read; this is a check on what melo reads,
+  not a network block, and Safari still makes the requests a page asks for. melo never types
+  into a password, card number or one-time-code field, and when it is unsure the field counts
+  as secret: it goes by the field's type, its `autocomplete` hint, CSS masking, its name,
+  label, placeholder, `aria-label`, `aria-labelledby` text, legend and the text before it (in
+  English, Chinese and a few other languages) and the shape of a code (a one-character box, a
+  short numeric field). It decides when it reads the page, after the field gets focus, after the
+  text is set and after the page's own handlers ran, and clears a field that turned secret. A
+  page with a card number or card expiry field is not read. melo cannot see where a page's own
+  scripts send what is typed. It never reads cookies or page storage. Clicking, typing and
+  choosing on a site ask once per site and chat apart from reading; the question for typing
+  shows the text. A click on a button that sends a form, or typing that presses Enter, asks by
+  itself every time and shows where the form goes (or that the page decides, when Enter is
+  pressed outside a form) and what it holds, with secret-looking and token-like values hidden;
+  a site other than the page's is asked about first. A send has no "allow for this chat", in the
+  terminal, the console or the API. In Auto mode a click or choice on a site you named is
+  routine, while typing and every form that is sent are reviewed on their own, and one send's
+  verdict is not used for the next.
 - `browser_find` now matches more than links: buttons, `role="button"` elements, menu items,
   tabs, switches, links that run a script and other clickable elements, by visible text and
   `aria-label`. Select lists show their options, a button that sends a form says where, and
@@ -34,7 +53,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - melo works in one browser tab per chat. `browser_open` reuses the tab it opened (`tab="new"`
   opens another, `tab="t2"` names one), tabs have short ids (`t1`, `t2`) that every browser
   tool accepts, and the tabs it opened close when the chat ends, on `/new` and after ten
-  minutes without a browser call; your own tabs are never listed, read or closed. A tab that
+  minutes without a browser call; your own tabs are never listed, read or closed. A tab is
+  melo's only if melo opened it or saw it appear while it was acting, never because of its
+  place in Safari's list or because it is the active one. A tab that
   Safari lost drops out of the list and the list says so. `[browser] keep_tabs = true` leaves
   the tabs open. The browser tool note now tells the model to read the current page and use
   its links and buttons before it guesses addresses.
