@@ -560,26 +560,28 @@ class ConversationIndex:
     async def recent(
         self,
         since: float,
+        until: float,
         *,
         exclude_session: str,
         kinds: Sequence[str],
         limit: int,
     ) -> list[Document]:
-        """The newest *limit* turns indexed at or after *since*, newest first.
+        """The newest *limit* turns stamped from *since* to *until*, newest first.
 
         One document per turn (its head, chunk 0), of the sessions of *kinds*
         other than *exclude_session*; a side chat's summary and a task's
-        exchanges (turns below 0) are not turns.
+        exchanges (turns below 0) are not turns. A turn's stamp is its own
+        time (``created_at``), so a pinned clock reads the turns of its day.
         """
         if limit <= 0 or not kinds:
             return []
         conn = await self._ready()
         marks = ", ".join("?" * len(kinds))
         async with conn.execute(
-            f"SELECT {_COLUMNS} FROM documents WHERE created_at >= ? AND chunk = 0 "
-            f"AND turn >= 0 AND session_id != ? AND kind IN ({marks}) "
+            f"SELECT {_COLUMNS} FROM documents WHERE created_at >= ? AND created_at <= ? "
+            f"AND chunk = 0 AND turn >= 0 AND session_id != ? AND kind IN ({marks}) "
             "ORDER BY created_at DESC, id DESC LIMIT ?",
-            (since, exclude_session, *kinds, limit),
+            (since, until, exclude_session, *kinds, limit),
         ) as cur:
             return [_document(row) for row in await cur.fetchall()]
 

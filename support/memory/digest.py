@@ -2,16 +2,18 @@
 
 A person who opens a new chat mid-thought ("read his résumé first") means what
 they were just discussing elsewhere, and the new chat's window holds none of it.
-:func:`digest_block` turns the newest turns of the user's other chats (the main
+:func:`make_digest` turns the newest turns of the user's other chats (the main
 chat and the side chats, read from memory's turn index by
-:meth:`~localmelo.support.memory.service.ChatMemory.recent_digest`) into a few
-lines: what each turn was about, in the user's words and the head of melo's
-reply, and where and when it happened. The session's runner appends the block
-to the first turn's message, after the user's words and any recall block, so
-the system prompt and its cached prefix stay as they were. It is marked as the
-other chats' context, after the user's message, which comes first; the step
-review and memory read only what the user typed. The subject comes from the
-turn's own text, so no model request is made for it.
+:meth:`~localmelo.support.memory.service.ChatMemory.recent_digest`) into a
+:class:`Digest`: a few lines saying what each turn was about, in the user's
+words and the head of melo's reply, and where and when it happened. The
+session's runner appends its :attr:`Digest.block` to the first turn's message,
+after the user's words and any recall block, so the system prompt and its
+cached prefix stay as they were, and the turn's ``turn.memory`` event carries
+:meth:`Digest.event`, so the person sees the lines the model read. It is marked
+as the other chats' context, after the user's message, which comes first; the
+step review and memory read only what the user typed. The subject comes from
+the turn's own text, so no model request is made for it.
 """
 
 from __future__ import annotations
@@ -19,7 +21,8 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Sequence
-from typing import Final
+from dataclasses import dataclass
+from typing import Any, Final
 
 from localmelo.support.memory.index import Document, typed_of
 from localmelo.support.memory.recall import chat_label
@@ -37,6 +40,8 @@ DIGEST_HEAD: Final = (
     "their message above comes first]"
 )
 _REPLY_LEAD: Final = " · melo: "
+# What starts each line in the block (the event's lines are without it).
+_BULLET: Final = "- "
 _MARKS: Final = re.compile(r"[*_`#>|]+")
 # A reply's head shorter than this is not worth its label.
 _MIN_REPLY: Final = 12
@@ -77,10 +82,11 @@ def _reply_of(text: str) -> str:
 def digest_line(doc: Document, room: int) -> str:
     """One turn of *doc* in at most *room* characters; ``""`` for a turn with no words.
 
-    ``- <where>, <HH:MM> · the user: <their words> · melo: <reply's first line>``:
+    ``<where>, <HH:MM> · the user: <their words> · melo: <reply's first line>``:
     the user's words take at least three fifths of what is left after the
     label, more when the reply is short; the reply gets the rest, when at least
-    :data:`_MIN_REPLY` characters are left for it.
+    :data:`_MIN_REPLY` characters are left for it. The time is the turn's own
+    stamp, in local time.
     """
     typed = _plain(typed_of(doc.text))
     reply = _first_line(_reply_of(doc.text))
@@ -88,7 +94,7 @@ def digest_line(doc: Document, room: int) -> str:
         return ""
     when = time.strftime("%H:%M", time.localtime(doc.created_at))
     where = chat_label(doc.kind, doc.title, doc.surface)
-    lead = f"- {where}, {when} · the user: "
+    lead = f"{where}, {when} · the user: "
     left = room - len(lead)
     if left <= 0:
         return _cut(lead.rstrip(), room)
@@ -100,20 +106,58 @@ def digest_line(doc: Document, room: int) -> str:
     return line
 
 
-def digest_block(
+@dataclass(frozen=True)
+class DigestItem:
+    """One turn of a digest: where it is, and the line the model reads for it."""
+
+    session_id: str
+    turn: int
+    line: str  # without the block's "- "
+
+
+@dataclass(frozen=True)
+class Digest:
+    """The digest of the other chats for one first turn."""
+
+    minutes: int
+    items: tuple[DigestItem, ...]
+
+    @property
+    def block(self) -> str:
+        """What the message carries: :data:`DIGEST_HEAD`, then one ``- `` line each."""
+        head = DIGEST_HEAD.format(minutes=self.minutes)
+        return "\n".join([head, *(_BULLET + item.line for item in self.items)])
+
+    def event(self) -> dict[str, Any]:
+        """``turn.memory``'s ``digest``: ``{minutes, items: [{session_id, turn, line}]}``."""
+        return {
+            "minutes": self.minutes,
+            "items": [
+                {"session_id": item.session_id, "turn": item.turn, "line": item.line}
+                for item in self.items
+            ],
+        }
+
+
+def make_digest(
     docs: Sequence[Document], minutes: int, *, chars: int = DIGEST_CHARS
-) -> str:
+) -> Digest | None:
     """The digest of the newest :data:`DIGEST_TURNS` of *docs*, oldest first.
 
-    *docs* are chat turns' documents (chunk 0), in any order. The block is the
-    header, then one line per turn (:func:`digest_line`), each with an even
-    share of *chars*, so the whole block is at most *chars* long. ``""`` when
-    no turn has words.
+    *docs* are chat turns' documents (chunk 0), in any order. Each line
+    (:func:`digest_line`) gets an even share of *chars*, after the header and
+    its ``- ``, so the whole block is at most *chars* long. ``None`` when no
+    turn has words.
     """
     newest = sorted(docs, key=lambda doc: (doc.created_at, doc.id))[-DIGEST_TURNS:]
-    head = DIGEST_HEAD.format(minutes=minutes)
     if not newest:
-        return ""
-    room = (chars - len(head)) // len(newest) - 1  # each line after a newline
-    lines = [line for doc in newest if (line := digest_line(doc, room))]
-    return "\n".join([head, *lines]) if lines else ""
+        return None
+    head = DIGEST_HEAD.format(minutes=minutes)
+    # Each line follows a newline and starts with the bullet.
+    room = (chars - len(head)) // len(newest) - 1 - len(_BULLET)
+    items = tuple(
+        DigestItem(doc.session_id, doc.turn, line)
+        for doc in newest
+        if (line := digest_line(doc, room))
+    )
+    return Digest(minutes, items) if items else None

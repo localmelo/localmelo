@@ -13,7 +13,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   message also reads up to five short lines on your other chats of the last 30 minutes, at most
   600 characters after your own words: what each turn was about and where, read from memory's
   index of your chats. `read his résumé first` then means the friend you were just discussing in
-  the main chat. The main chat never gets it; `[chat] recent_digest_minutes` sets the minutes
+  the main chat. Under your message, **From your other chats (last 30 min)** opens the lines melo
+  read, and a chat's name opens that chat; the turn's `turn.memory` event carries them as
+  `digest`. The main chat never gets it; `[chat] recent_digest_minutes` sets the minutes
   (`0` turns it off), and `[memory] across_chats = false` turns it off too. Every chat is also
   told that he, she or it means whom the conversation is about, that your own profile (a profile
   file, notes about you) counts only when you speak of yourself, that 他, 她 and 它 never switch

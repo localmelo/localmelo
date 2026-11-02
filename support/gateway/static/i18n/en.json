@@ -912,6 +912,7 @@
   "mainChat.openSideChat": "Open side chat",
   "mainChat.openTask": "Open task",
   "memory.forgotten": "Forgotten: {note}",
+  "memory.fromOtherChats": "From your other chats (last {n} min)",
   "memory.notRemembered": "Not remembered: {reason}",
   "memory.remembered": "Remembered: {note}",
   "memory.undo": "Undo",

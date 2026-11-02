@@ -139,7 +139,7 @@ chat existed are its side chats, as they were.
 
 ### Who "he" or "she" means
 
-- **A new side chat knows what you were just discussing.** Its first message also reads up to five short lines on your other chats of the last 30 minutes: what each turn was about, and where. `read his résumé first` (`先读他的简历`) then means the friend you were talking about in the main chat. Your own words come first. `[chat] recent_digest_minutes = 0` turns it off ([Configuration](../reference/configuration.md)).
+- **A new side chat knows what you were just discussing.** Its first message also reads up to five short lines on your other chats of the last 30 minutes: what each turn was about, and where. `read his résumé first` (`先读他的简历`) then means the friend you were talking about in the main chat. Your own words come first. Under your message, **From your other chats (last 30 min)** opens the lines melo read, and a chat's name opens that chat. `[chat] recent_digest_minutes = 0` turns it off ([Configuration](../reference/configuration.md)).
 - **He, she or it means whom the chat is about.** Your own profile (a profile file in your folder, notes about you) counts only when you speak of yourself (`I`, `my`, `我`, `我的`). 他, 她 and 它 never switch the subject. When it stays unclear, melo asks one short question.
 - **A short follow-up keeps the subject.** `go look it up` (`去查一下`) after a long search still answers about the person the chat is about, even once melo's working memory has dropped the earlier messages.
 

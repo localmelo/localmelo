@@ -814,8 +814,10 @@ class SessionRunner:
         kind (``chat``: a side chat or a terminal chat, never the main chat).
         The digest (:meth:`ChatMemory.recent_digest`) leaves out the turns the
         recall block shows already (or whose notes it shows), and comes after
-        everything else in the message, which still fits ``MAX_QUERY_LEN``; a
-        read that fails leaves *text* as it is.
+        everything else in the message, which still fits ``MAX_QUERY_LEN``; the
+        turn's ``turn.memory`` event then carries it as ``digest``
+        (:meth:`ChatMemory.note_digest`). A read that fails leaves *text* as it
+        is.
         """
         assert self._memory is not None
         if turn.origin:
@@ -829,9 +831,13 @@ class SessionRunner:
                 "Could not read the other chats' recent turns", exc_info=True
             )
             return text
-        if digest and len(text) + len(digest) + 2 <= MAX_QUERY_LEN:
-            return f"{text}\n\n{digest}"
-        return text
+        if digest is None:
+            return text
+        block = digest.block
+        if len(text) + len(block) + 2 > MAX_QUERY_LEN:
+            return text
+        self._memory.note_digest(digest)
+        return f"{text}\n\n{block}"
 
     async def _recall(self, turn: _Turn) -> str:
         """The turn's text with what memory recalls for it; queues ``turn.memory``.

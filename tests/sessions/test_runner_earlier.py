@@ -14,16 +14,18 @@ from __future__ import annotations
 
 import time
 from collections.abc import AsyncIterator
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from localmelo.melo import clock
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
 from localmelo.support.config import Config
 from localmelo.support.memory import ChatMemory
-from localmelo.support.memory.digest import DIGEST_CHARS, DIGEST_HEAD
+from localmelo.support.memory.digest import DIGEST_CHARS, DIGEST_HEAD, Digest
 from localmelo.support.memory.index import Document
 from localmelo.support.sessions import runner as runner_module
 from localmelo.support.sessions.runner import SessionRunner
@@ -175,13 +177,16 @@ class TestEarlierTurns:
 class TestDigest:
     async def _main_chat_about_alex(
         self, store: SessionStore, memory: ChatMemory, tmp_path: Path
-    ) -> None:
+    ) -> str:
+        """The main chat's turn about Alex, indexed; returns the main chat's id."""
         main = Chat(store, memory, tmp_path / "main", kind="front")
         try:
             await main.say(ABOUT, ALEX)
             await memory.drain()  # the turn is indexed off the reply path
         finally:
             await main.close()
+        assert main.runner.session_id is not None
+        return main.runner.session_id
 
     async def test_a_new_chat_hears_about_the_friend_and_answers_about_him(
         self, store: SessionStore, memory: ChatMemory, tmp_path: Path
@@ -209,6 +214,37 @@ class TestDigest:
             assert head not in side.last_message()
         finally:
             await side.close()
+
+    async def test_the_turn_memory_event_shows_the_digest_on_that_turn_only(
+        self, store: SessionStore, memory: ChatMemory, tmp_path: Path
+    ) -> None:
+        main_id = await self._main_chat_about_alex(store, memory, tmp_path)
+        side = Chat(store, memory, tmp_path / "side")
+        try:
+            await side.say("read his résumé first")
+            await side.say("and his projects?")
+            await memory.drain()
+            session_id = side.runner.session_id
+            assert session_id is not None
+            events = [
+                e.event
+                for e in await store.list_events(session_id)
+                if e.event["type"] == "turn.memory"
+            ]
+        finally:
+            await side.close()
+        first = [e["data"] for e in events if e["data"]["turn"] == 1]
+        second = [e["data"] for e in events if e["data"]["turn"] == 2]
+        # The recall's own event comes first; the refreshed one adds the digest.
+        assert "digest" not in first[0] and "digest" in first[-1]
+        digest = first[-1]["digest"]
+        assert digest["minutes"] == 30
+        (item,) = digest["items"]
+        assert (item["session_id"], item["turn"]) == (main_id, 1)
+        message = side.model.calls[0]["messages"][-1].content
+        assert f"\n- {item['line']}" in message
+        assert not item["line"].startswith("- ")
+        assert second and all("digest" not in data for data in second)
 
     async def test_without_the_digest_the_users_profile_wins(
         self, store: SessionStore, tmp_path: Path
@@ -296,7 +332,7 @@ class TestDigest:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        async def broken(*_: Any, **__: Any) -> str:
+        async def broken(*_: Any, **__: Any) -> Digest:
             raise OSError("index gone")
 
         monkeypatch.setattr(memory, "recent_digest", broken)
@@ -305,6 +341,10 @@ class TestDigest:
             assert await side.say("read his résumé first") == "Roles that fit Sam."
         finally:
             await side.close()
+
+
+def _block(digest: Digest | None) -> str:
+    return "" if digest is None else digest.block
 
 
 class TestRecentDigest:
@@ -346,7 +386,7 @@ class TestRecentDigest:
                 self._doc("m", 7, now - 10, kind="front", text="User: main\nmelo: ok"),
             ],
         )
-        digest = await memory.recent_digest("b", now=now)
+        digest = _block(await memory.recent_digest("b", now=now))
         lines = digest.splitlines()
         assert lines[0] == DIGEST_HEAD.format(minutes=30)
         assert [line.split(" · the user: ")[1] for line in lines[1:]] == [
@@ -365,7 +405,7 @@ class TestRecentDigest:
                 for n in range(8)
             ],
         )
-        digest = await memory.recent_digest("other", now=now)
+        digest = _block(await memory.recent_digest("other", now=now))
         lines = digest.splitlines()[1:]
         assert len(lines) == 5 and len(digest) <= DIGEST_CHARS
         assert [line.split("the user: ")[1].split()[0] for line in lines] == [
@@ -382,7 +422,7 @@ class TestRecentDigest:
         now = time.time()
         text = "User: go on\nmelo: \n## **Alex** is a *UX researcher*\n| a | b |"
         await self._index(memory, [self._doc("a", 1, now - 5, text=text)])
-        digest = await memory.recent_digest("b", now=now)
+        digest = _block(await memory.recent_digest("b", now=now))
         assert digest.splitlines()[1].endswith(
             "the user: go on · melo: Alex is a UX researcher"
         )
@@ -403,17 +443,69 @@ class TestRecentDigest:
         )
         # A newer note replaced the Lisbon turn, as recall reads the corpus.
         monkeypatch.setattr(memory, "_replaced", lambda *_: {("a", 1): None})
-        digest = await memory.recent_digest("x", exclude_turns={("b", 1)}, now=now)
+        digest = _block(
+            await memory.recent_digest("x", exclude_turns={("b", 1)}, now=now)
+        )
         assert "Lisbon" not in digest and "Utrecht" not in digest
         assert "about Alex" in digest
         # Nothing left: no digest at all.
         left = await memory.recent_digest(
             "x", exclude_turns={("b", 1), ("c", 1)}, now=now
         )
-        assert left == ""
+        assert left is None
 
     async def test_no_turn_no_digest(self, memory: ChatMemory) -> None:
-        assert await memory.recent_digest("b") == ""
+        assert await memory.recent_digest("b") is None
+
+    async def test_a_pinned_clock_reads_the_turns_near_its_time(
+        self, memory: ChatMemory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A memory benchmark asks "on" an earlier day: only the turns stamped
+        # within the minutes before that time count, not later ones nor today's.
+        pinned = datetime(2023, 5, 20, 13, 40).timestamp()
+        monkeypatch.setenv(clock.ENV, "2023-05-20T13:40:00")
+        await self._index(
+            memory,
+            [
+                self._doc("a", 1, pinned - 10 * 60, text="User: in time\nmelo: ok"),
+                self._doc("b", 1, pinned - 40 * 60, text="User: too early\nmelo: ok"),
+                self._doc("c", 1, pinned + 5 * 60, text="User: after it\nmelo: ok"),
+                self._doc("d", 1, time.time() - 60, text="User: today\nmelo: ok"),
+            ],
+        )
+        digest = await memory.recent_digest("x")
+        assert digest is not None
+        assert [item.session_id for item in digest.items] == ["a"]
+        assert "the user: in time" in digest.items[0].line
+        # Unpinned, today's turn is the one that counts.
+        monkeypatch.delenv(clock.ENV)
+        digest = await memory.recent_digest("x")
+        assert digest is not None and [i.session_id for i in digest.items] == ["d"]
+
+    async def test_its_event_names_each_turn_and_the_line_the_model_read(
+        self, memory: ChatMemory
+    ) -> None:
+        now = time.time()
+        await self._index(
+            memory,
+            [
+                self._doc(
+                    "m", 3, now - 90, kind="front", text=f"User: {ABOUT}\nmelo: {ALEX}"
+                ),
+                self._doc("s", 1, now - 30, text="User: go on\nmelo: done"),
+            ],
+        )
+        digest = await memory.recent_digest("x", now=now)
+        assert digest is not None
+        event = digest.event()
+        assert event["minutes"] == 30
+        assert [(i["session_id"], i["turn"]) for i in event["items"]] == [
+            ("m", 3),
+            ("s", 1),
+        ]
+        lines = digest.block.splitlines()[1:]
+        assert [f"- {item['line']}" for item in event["items"]] == lines
+        assert event["items"][0]["line"].startswith("Main chat, ")
 
     @pytest.mark.parametrize("value", [-1, 1441, "30", True, 2.5])
     def test_a_bad_setting_reads_as_the_default(
