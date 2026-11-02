@@ -106,6 +106,10 @@ MEMORY_SEARCH_WHEN_EMPTY = ("off", "hint")
 # MemoryConfig.note_gate.
 MEMORY_NOTE_GATE = ("typed", "pointed", "meaning", "model")
 MEMORY_NOTE_MIN_COSINE = (0.20, 0.95)
+# What a message with no content of its own ("go look it up") is searched with:
+# the user's words of the chat's last turns, or its own words: see
+# MemoryConfig.followup_query.
+MEMORY_FOLLOWUP_QUERY = ("recent", "message")
 # Whether a task reads its project's own instruction file: see MemoryConfig.
 MEMORY_PROJECT_INSTRUCTIONS = ("on", "off")
 RECALL_KEYS = (
@@ -127,6 +131,7 @@ RECALL_KEYS = (
     "compress_cache",
     "note_gate",
     "note_min_cosine",
+    "followup_query",
 )
 RECALL_TRIGGERS = ("start", "attempt", "step", "tool")
 RECALL_KINDS = ("note", "draft", "thought", "digest", "reflection", "long")
@@ -417,7 +422,12 @@ class MemoryConfig:
     (also a note the model infers from what the user typed, kept as inferred); each
     level includes the ones before it. ``note_min_cosine`` (0.20-0.95) is the least
     similarity of meaning that counts as support in the last two levels (the
-    inferred note's bar is 0.15 lower). ``project_instructions = "off"`` stops a
+    inferred note's bar is 0.15 lower). ``followup_query`` (#452) is what a message
+    with no content of its own ("go look it up", "continue", "继续") is searched
+    with: ``recent`` (the default) the message and the user's words of the chat's
+    last two turns that the model still shows, or ``message`` the message's own
+    words, as recall did before; with ``recent`` the first message of a new chat
+    that has no content recalls nothing. ``project_instructions = "off"`` stops a
     task that the person made from reading the instruction file of its folder (``AGENTS.md``,
     ``CLAUDE.md`` or ``GEMINI.md``, the nearest first) when it starts.
     """
@@ -448,6 +458,7 @@ class MemoryConfig:
     )
     note_gate: str = "typed"  # typed | pointed | meaning | model: note sources.
     note_min_cosine: float = 0.55  # Least similarity of a note to its source.
+    followup_query: str = "recent"  # recent | message: what "continue" searches with.
     project_instructions: str = "on"  # on | off: a task reads its folder's AGENTS.md.
 
 
@@ -757,6 +768,7 @@ class Config:
             ("recall_excerpt", MEMORY_RECALL_EXCERPT),
             ("recall_form", MEMORY_RECALL_FORM),
             ("note_gate", MEMORY_NOTE_GATE),
+            ("followup_query", MEMORY_FOLLOWUP_QUERY),
             ("recall_source", MEMORY_RECALL_SOURCE),
             ("open_sources", MEMORY_OPEN_SOURCES),
             ("project_instructions", MEMORY_PROJECT_INSTRUCTIONS),

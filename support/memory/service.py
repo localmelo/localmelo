@@ -124,6 +124,7 @@ from localmelo.support.memory.recall import (
     cut_at_sentence,
     day,
     in_view,
+    is_contentless,
     kept_lines,
     meaning_of,
     newer_first,
@@ -194,6 +195,10 @@ NOTE_EMBED_TIMEOUT_S: Final = INDEX_EMBED_TIMEOUT_S
 COMPRESS_AT_CHARS: Final = 12_000
 COMPRESS_CACHE_FILE: Final = "compress_cache.jsonl"
 _QUERY_CHARS: Final = 2_000
+# How many of the chat's earlier turns a follow-up's query is made of, and the
+# most turns it looks at to find them (a turn with no content of its own is skipped).
+FOLLOW_UP_TURNS: Final = 2
+_FOLLOW_UP_SCAN: Final = 100
 _TURN_PAGE: Final = 16
 # The instruction the Qwen3 embedding models expect on a query, not on documents.
 _QWEN3_QUERY: Final = (
@@ -212,7 +217,10 @@ class Recall:
     (the retriever asked for vectors and there is no embedding model).
     *candidates* are the notes and turns that passed to the choice, *used* the
     ones the message carries; *block_chars* is the length of the block text
-    appended to the message (0 when there is none).
+    appended to the message (0 when there is none). *query_from* says what the
+    search was for: ``message`` (the message's own words), ``recent`` (a message
+    with no content of its own, searched with the user's words of the chat's last
+    turns, :func:`follow_up_query`) or ``none`` (nothing: no recall ran).
     """
 
     retriever: str = "bm25"
@@ -226,6 +234,7 @@ class Recall:
     candidates: int = 0
     used: int = 0
     block_chars: int = 0
+    query_from: str = "message"
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -254,9 +263,12 @@ class RecallSettings(NamedTuple):
     instead of showing excerpts of them, *list_max* is the most turns it lists
     and *open_chars* the room one opened turn takes. *items* says recall draws on
     memory items in place of the chat turns, and *open_sources* that an opened item
-    also shows the turns it came from. The defaults are the shipped ones: a block of
-    :data:`BLOCK_CHARS` and a turn of :data:`ITEM_CHARS` (#349), and what recall did
-    before these were settings for the rest.
+    also shows the turns it came from. *followup* says a message with no content of
+    its own is searched with the user's words of the chat's last turns (``[memory]
+    followup_query = "recent"``, the default) instead of its own. The defaults are
+    the shipped ones: a block of :data:`BLOCK_CHARS` and a turn of :data:`ITEM_CHARS`
+    (#349), *followup* on, and what recall did before these were settings for the
+    rest.
     """
 
     records: int = AUTO_RECORDS
@@ -273,6 +285,7 @@ class RecallSettings(NamedTuple):
     open_chars: int = OPEN_CHARS
     items: bool = False
     open_sources: bool = False
+    followup: bool = True
 
     def shown(self, question: str) -> Shown:
         """How a recalled turn is shown for *question* under these settings."""
@@ -615,6 +628,61 @@ async def window_start(
         before = page[0].turn
 
 
+def _typed_words(turn: TurnInfo) -> str:
+    """What the user typed in *turn*: with attachments the typed text, which holds
+    none of the attached text, else the turn's text."""
+    return turn.typed_text if turn.attachments else turn.user_text
+
+
+async def recent_said(
+    store: SessionStore,
+    info: TurnInfo,
+    keep_from: int | None,
+    count: int = FOLLOW_UP_TURNS,
+) -> list[str]:
+    """What the user typed in the last *count* turns of chat *info*'s session before
+    it that say something, newest first: those the model's window still shows
+    (*keep_from* and later; every earlier turn without it), as :func:`window_start`
+    tells. An undone turn, a turn the person did not begin (a task's question to
+    its chat) and a turn with no content of its own ("continue", an empty message;
+    :func:`is_contentless`) are skipped, as :meth:`ChatMemory._said` skips the first
+    two, so "continue" typed twice does not use up the places. At most
+    :data:`_FOLLOW_UP_SCAN` turns are looked at. Fewer than *count* when the chat has
+    fewer; melo's replies are never included.
+    """
+    said: list[str] = []
+    before = info.turn
+    seen = 0
+    while len(said) < count:
+        page = await store.list_turns(info.session_id, limit=_TURN_PAGE, before=before)
+        for turn in reversed(page):
+            if seen >= _FOLLOW_UP_SCAN or (
+                keep_from is not None and turn.turn < keep_from
+            ):
+                return said
+            seen += 1
+            words = _typed_words(turn)
+            if turn.undone or is_owner_question(turn) or is_contentless(words):
+                continue
+            said.append(words)
+            if len(said) == count:
+                return said
+        if len(page) < _TURN_PAGE:
+            break
+        before = page[0].turn
+    return said
+
+
+def follow_up_query(typed: str, said: Sequence[str]) -> str:
+    """The query for a message that has no content of its own (:func:`is_contentless`):
+    the message, then the user's words of the chat's last turns (*said*, newest
+    first, :func:`recent_said`), cut to the room a query has. Without *said* the
+    message has nothing to follow: the query is empty, and nothing is recalled."""
+    if not said:
+        return ""
+    return "\n".join([typed.strip(), *said])[:_QUERY_CHARS]
+
+
 def _build_embedder(
     key: tuple[str, ...] | None, cfg: Config | None
 ) -> BaseEmbeddingProvider | None:
@@ -781,6 +849,7 @@ class ChatMemory:
             bounded("recall_open_chars", OPEN_CHARS, MEMORY_RECALL_OPEN_CHARS),
             getattr(memory, "recall_source", "turns") == "items",
             getattr(memory, "open_sources", "off") == "on",
+            getattr(memory, "followup_query", "recent") != "message",
         )
 
     def note_settings(self) -> NoteSettings:
@@ -1289,7 +1358,29 @@ class ChatMemory:
         found, refused = ([], False) if asked else records.candidates(typed)
         query = (info.user_text if asked else typed)[:_QUERY_CHARS]
         recall = Recall()
+        budget = self.recall_settings()
+        # A message with no content of its own ("go look it up", "continue") is
+        # searched with what the person said last in this chat, not with its own
+        # words, which match whatever holds them. With no earlier turn to follow
+        # there is no recall. A message that asks to remember something, or
+        # carries a secret, is not one: its notes are kept either way.
+        if (
+            budget.followup
+            and not asked
+            and not found
+            and not refused
+            and query.strip()
+            and is_contentless(typed)
+        ):
+            try:
+                said = await recent_said(store, info, keep_from)
+            except Exception:
+                logger.warning("Could not read this chat's recent turns", exc_info=True)
+            else:
+                query = follow_up_query(typed, said)
+                recall.query_from = "recent" if said else "none"
         if not query.strip():
+            recall.query_from = "none"
             failure = "" if self.embedding()[0] else "no-embedding"
             recall.retriever, recall.fallback = _resolve(self.retriever(), failure)
             return TurnMemory(recall=recall)
@@ -1298,7 +1389,6 @@ class ChatMemory:
             [query, *(cand.text for cand in found)], EMBED_TIMEOUT_S, query=True
         )
         recall.embed_ms = elapsed_ms(started)
-        budget = self.recall_settings()
         used = await self._find(
             query,
             embedded,
@@ -1711,7 +1801,7 @@ class ChatMemory:
     async def _said(self, turn: ChatTurn) -> list[str]:
         """What the user typed in the earlier turns of this chat (undone ones aside)."""
         return [
-            t.typed_text if t.attachments else t.user_text
+            _typed_words(t)
             for t in await turn.store.list_turns(turn.info.session_id)
             if t.turn < turn.info.turn and not t.undone and not is_owner_question(t)
         ]

@@ -140,7 +140,9 @@ def test_the_defaults_are_the_shipped_numbers() -> None:
         OPEN_CHARS,
         False,
         False,
+        True,  # followup: a message with no content recalls from the recent turns
     )
+    assert cfg.followup_query == "recent"
     assert (cfg.recall_min_cosine, cfg.recall_min_coverage) == (0.55, 0.6)
     assert (MIN_COSINE, MIN_COVERAGE) == (0.55, 0.6)
     assert (cfg.recall_chars, cfg.recall_item_chars) == (BLOCK_CHARS, ITEM_CHARS)
