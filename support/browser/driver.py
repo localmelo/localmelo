@@ -91,10 +91,24 @@ class BrowserDriver(Protocol):
 
     async def close_tab(self, tab: str) -> None: ...
 
+    async def location(self, tab: str | None) -> str:
+        """The address the tab shows now, read in the tab itself (``location.href``)."""
+
     async def wait(
-        self, tab: str | None, until: str, text: str, seconds: float
+        self,
+        tab: str | None,
+        until: str,
+        text: str,
+        seconds: float,
+        *,
+        origin: str = "",
     ) -> bool:
-        """Wait for ``load``, ``text`` or ``gone``; whether it happened in time."""
+        """Wait for ``load``, ``text`` or ``gone``; whether it happened in time.
+
+        With *origin*, the condition counts only while the page is on that
+        origin (``location.origin``), read in the same step as the condition,
+        so a page that goes elsewhere for a moment answers nothing about it.
+        """
 
     async def screenshot(self, tab: str | None) -> Shot: ...
 

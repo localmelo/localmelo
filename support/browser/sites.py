@@ -57,7 +57,10 @@ def require_origin(url: str) -> str:
     origin = origin_of(url)
     if origin is not None:
         return origin
-    scheme = urlsplit(url.strip()).scheme.lower()
+    try:
+        scheme = urlsplit(url.strip()).scheme.lower()
+    except ValueError:  # `＠` that normalizes to `@`, an unclosed or odd [ ] host
+        raise BrowserError("That is not a valid http or https address.") from None
     if scheme in ("file", "about", "data", "javascript", "blob") or "-" in scheme:
         raise BrowserError(
             f"melo does not open {scheme}: pages (the browser's own and local ones)."
