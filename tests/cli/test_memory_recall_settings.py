@@ -3,9 +3,9 @@
 ``recall_records``, ``recall_docs``, ``recall_chars``, ``recall_notes``,
 ``search_when_empty``, ``recall_min_cosine``, ``recall_min_coverage``,
 ``recall_item_chars``, ``recall_excerpt``, ``recall_form``, ``recall_list_max``,
-``recall_open_chars``, ``recall_source``, ``open_sources``, ``compress_at_chars``,
-``compress_cache``, ``note_gate``, ``note_min_cosine`` and ``followup_query`` are
-saved only when they differ from the default, checked
+``recall_open_chars``, ``excerpt_open``, ``recall_source``, ``open_sources``,
+``compress_at_chars``, ``compress_cache``, ``note_gate``, ``note_min_cosine`` and
+``followup_query`` are saved only when they differ from the default, checked
 against their bounds and values, set for one run with ``-X``, and listed by the
 developer help only, each with the issue that decides it.
 """
@@ -34,6 +34,7 @@ CHANGED = {
     "recall_form": "list",
     "recall_list_max": 35,
     "recall_open_chars": 9000,
+    "excerpt_open": "on",
     "recall_source": "items",
     "open_sources": "on",
     "compress_at_chars": 20000,
@@ -47,6 +48,7 @@ ISSUE = {name: "#349" for name in CHANGED} | {
     "recall_form": "#428",
     "recall_list_max": "#428",
     "recall_open_chars": "#428",
+    "excerpt_open": "#428",
     "recall_source": "#428",
     "open_sources": "#428",
     "compress_at_chars": "#428",
@@ -93,7 +95,7 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
             "recall_min_cosine = 0.45\nrecall_min_coverage = 0.4\n"
             'recall_item_chars = 800\nrecall_excerpt = "match"\n'
             'recall_form = "list"\nrecall_list_max = 35\nrecall_open_chars = 9000\n'
-            'recall_source = "items"\nopen_sources = "on"\n'
+            'excerpt_open = "on"\nrecall_source = "items"\nopen_sources = "on"\n'
             'compress_at_chars = 20000\ncompress_cache = "cache/compress.jsonl"\n'
             'note_gate = "model"\nnote_min_cosine = 0.65\n'
             'followup_query = "message"\n'
@@ -182,6 +184,8 @@ def test_a_file_without_followup_query_gets_the_new_default(tmp_path: Path) -> N
         ("recall_open_chars", 500),
         ("recall_open_chars", 16000),
         ("recall_open_chars", 4000),
+        ("excerpt_open", "off"),
+        ("excerpt_open", "on"),
         ("recall_source", "turns"),
         ("recall_source", "items"),
         ("open_sources", "off"),
@@ -352,6 +356,18 @@ def test_the_bounds_and_values_are_accepted(name: str, value: object) -> None:
             "[memory] recall_open_chars must be a whole number, got '4000'",
         ),
         (
+            "excerpt_open",
+            "maybe",
+            "[memory] excerpt_open 'maybe' is not recognised. "
+            "Must be one of ('off', 'on').",
+        ),
+        (
+            "excerpt_open",
+            True,
+            "[memory] excerpt_open True is not recognised. "
+            "Must be one of ('off', 'on').",
+        ),
+        (
             "recall_source",
             "both",
             "[memory] recall_source 'both' is not recognised. "
@@ -504,6 +520,7 @@ def test_x_sets_each_for_one_run_and_only_the_developer_help_lists_them(
         "memory.recall_open_chars=499",
         "memory.recall_open_chars=16001",
         "memory.recall_open_chars=long",
+        "memory.excerpt_open=maybe",
         "memory.recall_source=both",
         "memory.open_sources=maybe",
         "memory.compress_at_chars=3999",
