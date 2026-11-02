@@ -6,6 +6,11 @@ status line. Refs (``e12``) are numbered across the whole chat and valid only
 for the newest reading of their tab, so a ref from an older page is refused
 rather than guessed. The driver starts on the first call, not with the chat,
 so a chat that never browses opens nothing.
+
+No tool opens or reads this computer, its local network or melo's own
+console (:mod:`localmelo.support.browser.addresses`): the address is checked
+before its site is asked about and before the page loads, again where the
+page lands, and before a picture or a wait on a page that may have moved.
 """
 
 from __future__ import annotations
@@ -19,7 +24,7 @@ from typing import Any
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool, ToolFunction
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.schema import ImagePart, ToolDef
-from localmelo.support.browser import render, sites
+from localmelo.support.browser import addresses, render, sites
 from localmelo.support.browser.driver import (
     BrowserDriver,
     BrowserError,
@@ -200,11 +205,18 @@ class BrowserToolProvider(BaseToolProvider):
         return snap
 
     async def _admit(self, url: str, tab: str, done: set[str]) -> None:
-        """Let the page at *url* in *tab* be read, or raise why not."""
+        """Let the page at *url* in *tab* be read, or raise why not.
+
+        Its address is checked, then its site asked about unless the tab's
+        page was approved for it. *done* holds the origins already checked
+        in this call. A refused page is left for an empty one.
+        """
         origin = sites.require_origin(url)
-        if origin not in done and self._origins.get(tab) != origin:
+        if origin not in done:
             try:
-                await sites.require_site(origin)
+                await addresses.require_public(url)
+                if self._origins.get(tab) != origin:
+                    await sites.require_site(origin)
             except BrowserError:
                 with contextlib.suppress(BrowserError):
                     await self._driver.blank(tab)  # leave the page the redirect led to
@@ -213,6 +225,16 @@ class BrowserToolProvider(BaseToolProvider):
                 raise
             done.add(origin)
         self._origins[tab] = origin
+
+    async def _recheck(self, tab: str) -> None:
+        """Check where *tab* is now: a page can move itself after it was read."""
+        try:
+            listed = await self._driver.tabs()
+        except BrowserError:
+            return  # a browser that cannot list tabs keeps the last check
+        url = next((t.url for t in listed if t.id == tab), "")
+        if url:
+            await self._admit(url, tab, set())
 
     async def _read_tab(self, info: TabInfo, done: set[str], view: str = "all") -> str:
         """Read the page the tab landed on, after checking where it landed."""
@@ -236,6 +258,7 @@ class BrowserToolProvider(BaseToolProvider):
     async def _go(self, url: str, new_tab: bool, same_site: str = "") -> str:
         """Open *url* (asking about its site unless it is *same_site*) and read it."""
         origin = sites.require_origin(url)
+        await addresses.require_public(url)  # before the site question and the load
         if origin != same_site:
             await sites.require_site(origin)
         info = await self._driver.open(url, new_tab=new_tab)
@@ -339,6 +362,8 @@ class BrowserToolProvider(BaseToolProvider):
             "text": "the text appeared",
             "gone": "the text was gone",
         }[until]
+        if tab or self._tab:
+            await self._recheck(str(tab or self._tab))
         if await self._driver.wait(tab or self._tab, until, str(text), limit):
             return f"Reached: {what}."
         return f"Timed out after {limit:g} s: {what} did not happen."
@@ -348,6 +373,7 @@ class BrowserToolProvider(BaseToolProvider):
         tab_id = self._current(tab)
         if tab_id not in self._origins:
             raise BrowserError("No page is open in that tab. Use browser_open first.")
+        await self._recheck(tab_id)
         shot = await self._driver.screenshot(tab_id)
         return ToolOutput(
             text=f"A picture of {self._origins[tab_id]} was taken and kept with this chat.",
