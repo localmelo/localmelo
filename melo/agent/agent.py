@@ -144,6 +144,7 @@ from localmelo.melo.contracts.review import (
     ActionReview,
     block_words,
     loose_keys,
+    reaches_unread_site,
     step_key,
 )
 from localmelo.melo.contracts.streaming import STREAM_DISPLAY
@@ -1556,6 +1557,11 @@ class _ApprovalGate:
     calls are then blocked unreviewed. A tool the rules do not read
     (:data:`~localmelo.melo.checker.review.RULED_TOOLS`) that is not
     read-only is undecided in auto mode, so the user's model reviews it.
+    While a site is refused in the task (#433), a ``shell_exec`` or
+    ``python_exec`` call the rules find routine that reaches a host melo
+    cannot read (:func:`~localmelo.melo.contracts.review.reaches_unread_site`)
+    is undecided too when it would run without a person, so the user's
+    model reviews it, told which sites were refused.
 
     A file tool's call on a path outside the workspace (#405) is asked of
     the policy's folder layer only
@@ -1654,6 +1660,20 @@ class _ApprovalGate:
                 (f"Runs {request.tool_name}, a tool melo's rules do not read.",),
             )
             asking = dataclasses.replace(asking, review=self.review)
+        refused = _refused_sites(self._policy, run)
+        if (
+            self._mode != "ask"
+            and refused
+            and self.review is not None
+            and self.review.verdict == "routine"
+            and reaches_unread_site(request.tool_name, request.arguments)
+        ):
+            # A site is refused in this task: a step that reaches a host melo
+            # cannot read is reviewed, not run as routine (#433).
+            self.review = dataclasses.replace(
+                self.review, verdict="undecided", reasons=(UNREAD_SITE,)
+            )
+            asking = dataclasses.replace(asking, review=self.review)
         run.reviews.count(self.review)
         if self.review is not None and (
             self._mode != "ask" or self.review.verdict != "routine"
@@ -1684,7 +1704,7 @@ class _ApprovalGate:
                     mode=self._mode,
                     key=self._key,
                     workspace=self._workspace_root,
-                    refused_sites=_refused_sites(self._policy, run),
+                    refused_sites=refused,
                 )
                 asking = dataclasses.replace(asking, review=self.review)
             run.reviews.calls.append(
@@ -1958,6 +1978,12 @@ class _ApprovalGate:
                 () if review is None else review.categories,
             )
 
+
+# Why a step is reviewed that the rules found routine: it reaches a host melo
+# cannot read while a site is refused in the task (#433).
+UNREAD_SITE: Final = (
+    "Reaches a host melo cannot read, while a site is refused in this task."
+)
 
 # Why a path outside the workspace was refused when no person could be
 # asked after all (the policy changed while the call was checked).

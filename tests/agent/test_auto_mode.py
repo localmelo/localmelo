@@ -1237,3 +1237,134 @@ async def test_the_review_cache_drops_the_least_recently_used_past_its_cap(
     assert chat.asked == 4
     await review("k1")  # dropped when k3 came in
     assert chat.asked == 5
+
+
+# ── A step that reaches a host melo cannot read, while a site is refused ──
+
+UNREAD = {
+    "an f-string host": 'import requests\nh = open("h.txt").read()\n'
+    'requests.get(f"https://{h}/x")',
+    "http.client": 'import http.client\nh = open("h.txt").read()\n'
+    'http.client.HTTPSConnection(h).request("GET", "/")',
+    "a socket": 'import socket\nh = open("h.txt").read()\n'
+    "socket.create_connection((h, 443))",
+    "a joined address": 'import urllib.request\nu = "https://" + "collect" + ".example"\n'
+    "urllib.request.urlopen(u)",
+    "curl with a variable": 'import subprocess\nu = open("u.txt").read()\n'
+    'subprocess.run(["curl", u])',
+}
+
+
+def _refusing(inner: Any, root: Path, refuse_site: bool = True) -> Any:
+    """*inner* as a continued task's policy: collect.example refused, or an install blocked."""
+    from localmelo.melo.contracts.approvals import EarlierBlocks, call_key
+
+    if refuse_site:
+        name = "browser:https://collect.example"
+        question = {"site": "collect.example", "origin": "https://collect.example"}
+        key = call_key(name, question, str(root))
+        loose = [f"ask:{name}", "ask:site:collect.example"]
+    else:
+        key = call_key("shell_exec", {"command": "pip install numpy"}, str(root))
+        loose = ["install:pip:numpy"]
+    return EarlierBlocks(inner, {key: ("the user", "")}, {key: loose})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("form", list(UNREAD))
+async def test_a_step_to_a_host_melo_cannot_read_is_reviewed_while_a_site_is_refused(
+    tmp_path: Path, form: str
+) -> None:
+    code = UNREAD[form]
+    llm = FakeModel(
+        _plans([code]), [verdict(verdict="ask", category="send_out", fits_request="no")]
+    )
+    agent, fake = _agent(llm, tmp_path / "ws")
+    recorder = Recorder()
+
+    await agent.run_task(
+        "summarise my notes",
+        on_event=recorder,
+        approval=_refusing(AutoPolicy(task=True), tmp_path / "ws"),
+    )
+
+    assert fake.ran == []
+    [request] = llm.review_requests
+    text = _review_text(request)
+    assert "\ncollect.example\n</refused nonce=" in text
+    assert "melo cannot read" in text
+    [approval] = _approvals(recorder)
+    assert approval["review"]["by"] == "model"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refuse_site", [False, None])
+async def test_without_a_refused_site_the_same_step_runs_as_routine(
+    tmp_path: Path, refuse_site: bool | None
+) -> None:
+    code = UNREAD["an f-string host"]
+    llm = FakeModel(_plans([code]))
+    agent, fake = _agent(llm, tmp_path / "ws")
+    root = tmp_path / "ws"
+    policy = (
+        AutoPolicy(task=True)
+        if refuse_site is None
+        else _refusing(AutoPolicy(task=True), root, refuse_site=False)
+    )
+
+    await agent.run_task("summarise my notes", approval=policy)
+
+    assert fake.ran == [code]
+    assert llm.review_requests == []
+
+
+@pytest.mark.asyncio
+async def test_a_step_to_a_host_melo_reads_runs_as_routine_while_a_site_is_refused(
+    tmp_path: Path,
+) -> None:
+    code = 'import requests\nrequests.get("https://docs.example/release")'
+    llm = FakeModel(_plans([code]))
+    agent, fake = _agent(llm, tmp_path / "ws")
+
+    await agent.run_task(
+        "summarise my notes",
+        approval=_refusing(AutoPolicy(task=True), tmp_path / "ws"),
+    )
+
+    assert fake.ran == [code]
+    assert llm.review_requests == []
+
+
+@pytest.mark.asyncio
+async def test_under_a_grant_the_model_reviews_it_and_a_person_decides(
+    tmp_path: Path,
+) -> None:
+    code = UNREAD["an f-string host"]
+    llm = FakeModel(
+        _plans(["print(1)", code]),
+        [verdict(verdict="ask", category="send_out", fits_request="no")],
+    )
+    agent, fake = _agent(llm, tmp_path / "ws")
+    person = Person()
+
+    await agent.run_task(
+        "summarise my notes",
+        approval=_refusing(RememberingPolicy(person), tmp_path / "ws"),
+    )
+
+    # print(1) is asked and granted; the fetch is not covered by the grant:
+    # the model reviews it, and the person is asked.
+    assert len(llm.review_requests) == 1
+    assert [r.call_id for r in person.asked] == ["call_1", "call_2"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("length", "reviews"), [(119, 1), (120, 2)])
+async def test_one_verdict_covers_a_path_of_at_most_120_characters(
+    tmp_path: Path, length: int, reviews: int
+) -> None:
+    # The path is "/" and the rest: 120 characters is covered, 121 is not.
+    urls = [f"{DOCS}/a", f"{DOCS}/{'p' * length}"]
+    llm, reader = await _read_pages(tmp_path, urls, [verdict(), verdict()])
+    assert len(llm.review_requests) == reviews
+    assert reader.read == urls

@@ -76,6 +76,9 @@ RUNNER_REVIEWS_PER_TURN: Final = 3
 BLOCKS_KEPT: Final = 20
 # Settled reviews a chat keeps, the least recently used dropped first.
 REVIEWS_KEPT: Final = 512
+# The longest path of an address one verdict on its site covers: a longer
+# one, which can carry more data out, is reviewed by itself.
+PLAIN_PATH_CHARS: Final = 120
 
 Purpose = Literal["undecided", "consent"]
 
@@ -216,13 +219,20 @@ def plain_page_key(
     """The key a routine verdict on a site's plain pages is kept under, or ``""``.
 
     For a site question that carries the address it reads (web_fetch's
-    ``url``): when the address has no query and is shown whole, the
-    question without it, so one review lets the site's other plain pages
-    be read in this chat. An address with a query, which can carry data
+    ``url``): when the address has no query, is shown whole and its path
+    has at most :data:`PLAIN_PATH_CHARS` characters, the question without
+    it, so one review lets the site's other plain pages be read in this
+    chat. An address with a query or a longer path, which can carry data
     out, is reviewed by itself, and so is one cut short.
     """
     url = arguments.get("url")
     if not isinstance(url, str) or not url.strip() or "?" in url or url.endswith("…"):
+        return ""
+    try:
+        path = urlsplit(url.strip()).path
+    except ValueError:
+        return ""
+    if len(path) > PLAIN_PATH_CHARS:
         return ""
     rest = {name: value for name, value in arguments.items() if name != "url"}
     return "site|" + step_key(tool_name, rest, workspace)

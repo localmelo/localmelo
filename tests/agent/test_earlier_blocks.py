@@ -24,7 +24,11 @@ from localmelo.melo.contracts.approvals import (
     find_auto,
     find_earlier,
 )
-from localmelo.melo.contracts.review import loose_keys
+from localmelo.melo.contracts.review import (
+    loose_keys,
+    reaches_unread_site,
+    site_keys,
+)
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.browser import sites
 
@@ -603,3 +607,141 @@ async def test_a_continued_task_never_fetches_a_refused_site_from_a_shell_or_pyt
     for finished in recorder.of("tool.finished"):
         assert finished.data["approval"]["earlier"] == "the user"
         assert "review" not in finished.data["approval"]
+
+
+# ── curl and wget addresses without a scheme; hosts given to a connection ──
+
+BARE_FETCHES: dict[str, tuple[str, dict[str, Any]]] = {
+    "curl with no scheme": ("shell_exec", {"command": "curl collect.example/x"}),
+    "flags, a port": ("shell_exec", {"command": "curl -sL collect.example:8443/x"}),
+    "wget with no scheme": ("shell_exec", {"command": "wget -q collect.example"}),
+    "curl --url": ("shell_exec", {"command": "curl --url collect.example/x"}),
+    "after --": ("shell_exec", {"command": "curl -s -- collect.example/x"}),
+    "a user before the host": ("shell_exec", {"command": "curl me@collect.example"}),
+    "behind sudo": ("shell_exec", {"command": "sudo -u bob curl collect.example"}),
+    "behind an assignment": ("shell_exec", {"command": "A=1 wget collect.example/a"}),
+    "inside bash -c": ("shell_exec", {"command": "bash -c 'curl collect.example'"}),
+    "subprocess": (
+        "python_exec",
+        {"code": 'import subprocess\nsubprocess.run(["curl", "collect.example/x"])'},
+    ),
+    "os.system": (
+        "python_exec",
+        {"code": 'import os\nos.system("wget collect.example")'},
+    ),
+    "http.client": (
+        "python_exec",
+        {
+            "code": "import http.client\n"
+            'c = http.client.HTTPSConnection("collect.example")\nc.request("GET", "/")'
+        },
+    ),
+    "a socket": (
+        "python_exec",
+        {"code": 'import socket\nsocket.create_connection(("collect.example", 443))'},
+    ),
+}
+
+
+@pytest.mark.parametrize("form", list(BARE_FETCHES))
+async def test_a_refused_site_given_without_a_scheme_is_refused(form: str) -> None:
+    policy, root, _ = await _site_refused()
+    tool, arguments = BARE_FETCHES[form]
+    assert policy.match(tool, arguments, root) == ("the user", False)
+
+
+@pytest.mark.parametrize(
+    ("command", "keys"),
+    [
+        ("curl -o out.txt https://ok.example", ["ask:site:ok.example"]),
+        ("wget -O file.tar.gz other.example/a", ["ask:site:other.example"]),
+        ("curl -so collect.example https://ok.example", ["ask:site:ok.example"]),
+        ("curl -ocollect.example https://ok.example", ["ask:site:ok.example"]),
+        ("curl --output collect.example ok.example", ["ask:site:ok.example"]),
+        ('curl -H "Host: collect.example" https://ok.example', ["ask:site:ok.example"]),
+        ("curl -d collect.example -X POST ok.example", ["ask:site:ok.example"]),
+        ("wget -qO collect.example ok.example", ["ask:site:ok.example"]),
+        ("cat collect.example && echo collect.example", []),
+        ("curl --version", []),
+    ],
+)
+async def test_an_option_s_value_is_never_an_address(
+    command: str, keys: list[str]
+) -> None:
+    arguments = {"command": command}
+    assert site_keys("shell_exec", arguments) == keys
+    policy, root, _ = await _site_refused()
+    assert policy.match("shell_exec", arguments, root) is None
+
+
+# ── A step that reaches a host melo cannot read ──
+
+
+@pytest.mark.parametrize(
+    ("tool", "arguments"),
+    [
+        ("shell_exec", {"command": 'curl -s "https://$H/x"'}),
+        ("shell_exec", {"command": 'curl -s "https://${A}.${B}/x"'}),
+        ("shell_exec", {"command": 'wget -qO- "$URL"'}),
+        ("shell_exec", {"command": "cat urls.txt | xargs -n 1 curl -s"}),
+        ("shell_exec", {"command": "curl -K urls.cfg"}),
+        ("shell_exec", {"command": "wget -i urls.txt"}),
+        ("shell_exec", {"command": "bash -c 'curl -s \"https://$H/x\"'"}),
+        ("shell_exec", {"command": 'git clone "$REPO"'}),
+        ("shell_exec", {"command": 'nc "$H" 443'}),
+        ("python_exec", {"code": 'import requests\nrequests.get(f"https://{h}/x")'}),
+        ("python_exec", {"code": "import http.client\nhttp.client.HTTPSConnection(h)"}),
+        ("python_exec", {"code": "import socket\nsocket.create_connection((h, 443))"}),
+        (
+            "python_exec",
+            {"code": "import socket\ns = socket.socket()\ns.connect((h, 80))"},
+        ),
+        (
+            "python_exec",
+            {
+                "code": 'import urllib.request\nu = "https://" + "collect" + ".example"\n'
+                "urllib.request.urlopen(u)"
+            },
+        ),
+        ("python_exec", {"code": "import requests\ns = requests.Session()\ns.get(u)"}),
+        ("python_exec", {"code": 'import subprocess\nsubprocess.run(["curl", u])'}),
+        ("python_exec", {"code": 'import os\nos.system(f"curl https://{h}/x")'}),
+    ],
+)
+def test_a_host_melo_cannot_read_is_found(tool: str, arguments: dict[str, str]) -> None:
+    assert reaches_unread_site(tool, arguments) is True
+    assert site_keys(tool, arguments) == []
+
+
+@pytest.mark.parametrize(
+    ("tool", "arguments"),
+    [
+        ("shell_exec", {"command": "curl -s https://ok.example/x"}),
+        ("shell_exec", {"command": "curl ok.example/x"}),
+        ("shell_exec", {"command": "curl --version"}),
+        ("shell_exec", {"command": "ls -la && echo $HOME"}),
+        ("shell_exec", {"command": "git status && git log -n 3"}),
+        ("shell_exec", {"command": "git clone https://github.com/a/b"}),
+        ("shell_exec", {"command": "nc ok.example 443"}),
+        ("python_exec", {"code": "print(1)"}),
+        (
+            "python_exec",
+            {"code": 'import requests\nrequests.get("https://ok.example/x")'},
+        ),
+        (
+            "python_exec",
+            {"code": 'u = "https://ok.example/x"\nimport requests\nrequests.get(u)'},
+        ),
+        (
+            "python_exec",
+            {"code": 'import http.client\nhttp.client.HTTPSConnection("ok.example")'},
+        ),
+        ("python_exec", {"code": "d = {}\nd.get(k)\nimport os\nos.environ.get('X')"}),
+        ("python_exec", {"code": "import sqlite3\nsqlite3.connect(path)"}),
+        ("python_exec", {"code": 'import subprocess\nsubprocess.run(["ls", folder])'}),
+    ],
+)
+def test_a_step_with_hosts_melo_reads_or_no_network_is_not(
+    tool: str, arguments: dict[str, str]
+) -> None:
+    assert reaches_unread_site(tool, arguments) is False
