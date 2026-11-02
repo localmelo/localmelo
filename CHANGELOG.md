@@ -466,6 +466,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- In Auto, one verdict that lets `web_fetch` read a site now covers that
+  site's other addresses with no query, fragment or user name and a path of
+  at most 120 characters, up to 10 of them until your next message, so its
+  plain pages are no longer reviewed one address at a time (six reviews a turn
+  at most). Any other address, which can carry more data out, one longer than
+  300 characters, or one an earlier review did not let through, is still
+  reviewed by itself, and a verdict that blocks
+  covers only its own address. A chat keeps its last 512 review verdicts,
+  dropping the least recently used.
 - Memory items written from chats (`melo memory ingest FILE -X ingest=compress`,
   a developer setting) keep what everyday talk shows about the person's daily
   life, routines, mood and personality. Only exchanges that carry no
@@ -686,6 +695,30 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   refused before anyone is asked or anything is reviewed, even when your
   request names the site. Steps refused again no longer push the first block
   out of what the task remembers. [#431]
+
+- A site you or Auto refused also stays refused for the commands and scripts
+  of a task the chat continues. A `shell_exec` or `python_exec` step that
+  names an address on that site is refused before it is reviewed: a `curl` or
+  `wget` argument (an address without `http://` too, never an option's value
+  such as `-o out.txt`) wherever the command stands (`if curl …`, `( … )`,
+  `$( … )`, `bash -c`, `eval`, after another program such as `watch`), the
+  proxy it goes through, a string in Python (`urllib`,
+  `requests` under any import name, `httpx`, `pycurl`, `httplib2`, an address
+  kept in a variable, an f-string whose host is written out), the host of an
+  `http.client` or socket connection, an address nested in a reader's or an
+  archive's address or encoded in a query, with the host in capitals, with a
+  port, percent-encoded, in its international spelling or, for an IP address,
+  written as one number. `web_fetch` refuses a reader's address that carries
+  a refused site too. A step that
+  names no refused site is never refused this way, and a step blocked for
+  another reason does not make the sites it names refused. While a site is
+  refused, a step whose host is put together while it runs (`$HOST`, brace
+  groups or ranges, a variable read from a file, a command built at run time)
+  is reviewed by your model even when it would run
+  as routine, in Auto and under a grant, and the review is told which sites
+  were refused in the task (their names only, never why); runs with no
+  refused site are unchanged. An encoded host melo cannot decode is refused
+  while any site is. [#433]
 
 - A file with more than one name (a hard link) is one file in two places,
   so `file_write` and `file_edit` now refuse it, in the workspace too, and a
@@ -3716,4 +3749,5 @@ earlier milestones.
 [#410]: https://github.com/localmelo/localmelo/issues/410
 [#411]: https://github.com/localmelo/localmelo/issues/411
 [#431]: https://github.com/localmelo/localmelo/issues/431
+[#433]: https://github.com/localmelo/localmelo/issues/433
 [#426]: https://github.com/localmelo/localmelo/issues/426

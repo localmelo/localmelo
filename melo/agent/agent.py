@@ -79,7 +79,12 @@ from localmelo.melo.agent._chat import (
 from localmelo.melo.agent._context_fit import ContextFitError
 from localmelo.melo.agent._events import GateVerdict, _Emitter, check_sink
 from localmelo.melo.agent._json_repair import error_line, rejected_objects, repairs
-from localmelo.melo.agent._step_review import RunReviews, StepReviewer, answer_on_block
+from localmelo.melo.agent._step_review import (
+    RunReviews,
+    StepReviewer,
+    answer_on_block,
+    plain_page_key,
+)
 from localmelo.melo.agent._task_aids import FINISH_NOTE, refusal_note
 from localmelo.melo.agent._tool_images import ToolImageStore
 from localmelo.melo.agent.options import (
@@ -134,10 +139,13 @@ from localmelo.melo.contracts.review import (
     CATEGORY_WORDS,
     RULED_TOOLS,
     SELF_DENIAL,
+    SITE_KEY,
     TITLES,
     ActionReview,
+    address_keys,
     block_words,
     loose_keys,
+    reaches_unread_site,
     step_key,
 )
 from localmelo.melo.contracts.streaming import STREAM_DISPLAY
@@ -1550,6 +1558,11 @@ class _ApprovalGate:
     calls are then blocked unreviewed. A tool the rules do not read
     (:data:`~localmelo.melo.checker.review.RULED_TOOLS`) that is not
     read-only is undecided in auto mode, so the user's model reviews it.
+    While a site is refused in the task (#433), a ``shell_exec`` or
+    ``python_exec`` call the rules find routine that reaches a host melo
+    cannot read (:func:`~localmelo.melo.contracts.review.reaches_unread_site`)
+    is undecided too when it would run without a person, so the user's
+    model reviews it, told which sites were refused.
 
     A file tool's call on a path outside the workspace (#405) is asked of
     the policy's folder layer only
@@ -1648,6 +1661,20 @@ class _ApprovalGate:
                 (f"Runs {request.tool_name}, a tool melo's rules do not read.",),
             )
             asking = dataclasses.replace(asking, review=self.review)
+        refused = _refused_sites(self._policy, run)
+        if (
+            self._mode != "ask"
+            and refused
+            and self.review is not None
+            and self.review.verdict == "routine"
+            and reaches_unread_site(request.tool_name, request.arguments)
+        ):
+            # A site is refused in this task: a step that reaches a host melo
+            # cannot read is reviewed, not run as routine (#433).
+            self.review = dataclasses.replace(
+                self.review, verdict="undecided", reasons=(UNREAD_SITE,)
+            )
+            asking = dataclasses.replace(asking, review=self.review)
         run.reviews.count(self.review)
         if self.review is not None and (
             self._mode != "ask" or self.review.verdict != "routine"
@@ -1678,6 +1705,7 @@ class _ApprovalGate:
                     mode=self._mode,
                     key=self._key,
                     workspace=self._workspace_root,
+                    refused_sites=refused,
                 )
                 asking = dataclasses.replace(asking, review=self.review)
             run.reviews.calls.append(
@@ -1952,6 +1980,12 @@ class _ApprovalGate:
             )
 
 
+# Why a step is reviewed that the rules found routine: it reaches a host melo
+# cannot read while a site is refused in the task (#433).
+UNREAD_SITE: Final = (
+    "Reaches a host melo cannot read, while a site is refused in this task."
+)
+
 # Why a path outside the workspace was refused when no person could be
 # asked after all (the policy changed while the call was checked).
 NO_FOLDER_ASKER: Final = "no one can allow a folder outside the workspace in this run"
@@ -2089,6 +2123,11 @@ class _ToolAsk:
                     mode="auto",
                     key=key,
                     workspace=self._workspace_root,
+                    # One routine verdict reads the site's plain pages.
+                    shared=plain_page_key(
+                        tool_name, request.arguments, self._workspace_root
+                    ),
+                    refused_sites=_refused_sites(self._policy, self._run),
                 )
             request = dataclasses.replace(request, review=review)
         decided: object = await self._policy.decide(request)
@@ -2136,7 +2175,12 @@ class _ToolAsk:
                 name,
                 request.arguments,
                 self._workspace_root,
-                also=_question_keys(name, request.arguments),
+                # An address nested in its path (a reader, an archive) too:
+                # only to refuse, never kept with a refusal.
+                also=(
+                    *_question_keys(name, request.arguments),
+                    *address_keys(str(request.arguments.get("url") or "")),
+                ),
             )
         )
         if found is None:
@@ -2152,9 +2196,17 @@ class _ToolAsk:
         return ApprovalDecision(False, reason, origin="policy")
 
     def _keep(self, request: ApprovalRequest, decided: ApprovalDecision) -> None:
-        """Keep a refused question as a blocked step: its call key and keys alike."""
+        """Keep a refused question as a blocked step: its call key and keys alike.
+
+        A refused site joins the run's refused sites, which a later review
+        is told of (#433).
+        """
         name, arguments = request.tool_name, request.arguments
         categories = () if request.review is None else request.review.categories
+        site = site_key(arguments)
+        refused = self._run.reviews.refused_sites
+        if site is not None and site[len(SITE_KEY) :] not in refused:
+            refused.append(site[len(SITE_KEY) :])
         self.refused.append(
             {"request_id": request.request_id, "tool": name, "allowed": False,
              "origin": decided.origin, "reason": decided.reason,
@@ -2163,6 +2215,14 @@ class _ToolAsk:
              "loose_keys": [*loose_keys(name, arguments, categories),
                             *_question_keys(name, arguments)]}
         )  # fmt: skip
+
+
+def _refused_sites(policy: ApprovalPolicy, run: _RunState) -> tuple[str, ...]:
+    """The hosts of the sites refused in this task (#433): earlier runs' first, then this run's."""
+    blocks = find_earlier(policy)
+    found = dict.fromkeys(() if blocks is None else blocks.refused_sites())
+    found.update(dict.fromkeys(run.reviews.refused_sites))
+    return tuple(found)
 
 
 def _question_keys(name: str, arguments: Mapping[str, Any]) -> tuple[str, ...]:
