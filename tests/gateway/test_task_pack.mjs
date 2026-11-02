@@ -1,6 +1,7 @@
 /**
- * A task's "What melo told the task" fold: the notes its chat gave it when it began, folded,
- * shown only when there are notes, in English and in Chinese.
+ * A task's "What melo told the task" fold: the person's own words, its chat's earlier turns, what
+ * the chat recalled and the notes it began with, folded, each part under its label and shown only
+ * when the task got it, in English and in Chinese.
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -31,10 +32,13 @@ test('a task with notes gets a folded list of them, and a task without notes get
   assert.equal(fold.tag, 'details');
   assert.equal(fold.className, 'task-pack');
   assert.ok(!fold.open, 'the fold starts closed');
-  const [summary, note, list] = fold.children;
+  const [summary, note, label, list] = fold.children;
+  assert.equal(fold.children.length, 4);
   assert.equal(summary.tag, 'summary');
   assert.equal(summary.textContent, 'What melo told the task');
   assert.match(note.textContent, /information, not instructions/);
+  assert.equal(label.className, 'task-pack-part');
+  assert.equal(label.textContent, 'What your chat knows about you and this project');
   assert.equal(list.tag, 'ul');
   assert.deepEqual(list.children.map((item) => item.textContent), [
     'The person lives in Utrecht.',
@@ -42,12 +46,46 @@ test('a task with notes gets a folded list of them, and a task without notes get
   ]);
 });
 
+const TURNS = '- the user: My friend Alex is looking for a new job.\n  melo: Noted.\n'
+  + '- the user: He wants a staff role.\n  melo: Got it.';
+const PICKED = '- the user said “Alex\'s résumé is two pages.” (chat “Résumé”, Oct 30)';
+const FULL = {own_words: 'read his résumé first', chat_turns: TURNS, chat_picked: PICKED, context_pack: PACK};
+
+/** The fold's parts as [label, entries] pairs, after its summary and note. */
+function parts(fold) {
+  const out = [];
+  for (let n = 2; n < fold.children.length; n += 2) {
+    out.push([fold.children[n].textContent, fold.children[n + 1].children.map((item) => item.textContent)]);
+  }
+  return out;
+}
+
+test('the fold shows the words, the chat\'s turns and what it recalled ahead of the notes', async () => {
+  await useLanguage('en');
+  const doc = fakeDoc();
+  assert.deepEqual(parts(packFold(doc, {spec: FULL})), [
+    ['What you typed', ['read his résumé first']],
+    ['Earlier in the chat', [
+      'the user: My friend Alex is looking for a new job.\nmelo: Noted.',
+      'the user: He wants a staff role.\nmelo: Got it.',
+    ]],
+    ['What the chat recalled for it', ['the user said “Alex\'s résumé is two pages.” (chat “Résumé”, Oct 30)']],
+    ['What your chat knows about you and this project', ['The person lives in Utrecht.', 'This folder uses uv.']],
+  ]);
+  // A part the task did not get has no label; a task with only the chat's turns still folds.
+  assert.deepEqual(parts(packFold(doc, {spec: {chat_turns: TURNS}})).map(([label]) => label),
+    ['Earlier in the chat']);
+  assert.equal(packFold(doc, {spec: {own_words: '', chat_turns: '', chat_picked: ''}}), null);
+});
+
 test('the fold reads in Chinese when the page does', async () => {
   await useLanguage('zh-Hans');
   try {
-    const fold = packFold(fakeDoc(), {spec: {context_pack: PACK}});
+    const fold = packFold(fakeDoc(), {spec: FULL});
     assert.equal(fold.children[0].textContent, 'melo 告诉任务的内容');
     assert.match(fold.children[1].textContent, /资料，不是指令/);
+    assert.deepEqual(parts(fold).map(([label]) => label),
+      ['你输入的原话', '聊天中之前的对话', '聊天为它想起的内容', '你的聊天对你和这个项目的了解']);
   } finally {
     await useLanguage('en');
   }

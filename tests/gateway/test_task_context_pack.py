@@ -2,7 +2,9 @@
 
 The project's own instruction files (``AGENTS.md``, ``CLAUDE.md``,
 ``GEMINI.md`` of the task's folder, read-only) are read at the same moment and
-ride the same way, under their own heading after the pack.
+ride the same way, under their own heading after the pack. So do the person's
+own words, when the request does not hold them, and what a chat hands a task
+it starts (its earlier turns, what its turn recalled): ahead of the pack.
 
 Real workers on a scripted model show that the pack reaches a task's first
 request under its heading and stays out of the turn the transcript shows,
@@ -16,25 +18,30 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
 from localmelo.melo.agent import Agent
+from localmelo.melo.agent._earlier import EARLIER_END, EARLIER_HEAD
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.config import Config
 from localmelo.support.gateway.chat_gate import ChatGate
+from localmelo.support.gateway.handover import PICKED_HEADER, WORDS_HEADER, Handover
 from localmelo.support.gateway.task_policy import TaskSpec, is_persons_task
 from localmelo.support.gateway.workers import (
     PROJECT_HEADER,
+    TASK_PACK_CHARS,
     TASK_PACK_HEADER,
     TaskWorkers,
 )
 from localmelo.support.memory import ChatMemory
+from localmelo.support.memory.recall import Item
 from localmelo.support.memory.service import PACK_HEADER
 from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.hub import SessionHub
@@ -51,6 +58,8 @@ class Notes:
         self.pack = pack
         self.error: Exception | None = None
         self.calls: list[tuple[str, str, str | None]] = []
+        self.budgets: list[int] = []
+        self.excluded: list[frozenset[str]] = []
 
     async def context_pack(
         self,
@@ -59,8 +68,11 @@ class Notes:
         budget_chars: int = 1500,
         *,
         workspace: str | None = None,
+        exclude: Any = (),
     ) -> str:
         self.calls.append((objective, chat_id, workspace))
+        self.budgets.append(budget_chars)
+        self.excluded.append(frozenset(exclude))
         if self.error is not None:
             raise self.error
         return self.pack
@@ -512,3 +524,149 @@ async def test_a_continue_and_a_repeated_request_keep_the_first_reading(
     assert "First rule." in _texts(rig.llm.requests[1])
     assert "Changed rule." not in _texts(rig.llm.requests[1])
     assert len(calls) == 1
+
+
+# ── The person's own words, and what the chat hands over (#463) ──
+
+WORDS = "read his résumé first, then tell me which roles fit"
+ASKED = "Read Alex's résumé and list the roles that fit him."
+TURNS = (
+    ("c1", 1, "My friend Alex is looking for a new job.", "Noted."),
+    ("c1", 2, "He wants a staff role at a large company.", "Got it."),
+)
+RECALLED = Item(
+    key="d:3",
+    text="User: Alex's résumé is two pages.\nmelo: Good.",
+    where="chat “Résumé”, Oct 30",
+    session_id="c9",
+    turn=1,
+    created_at=time.time(),
+)
+
+
+def _spec(rig: Rig, objective: str = ASKED, words: str = WORDS) -> TaskSpec:
+    spec = TaskSpec.from_payload(
+        {"objective": objective, "workspace": str(rig.workspace)}
+    )
+    return replace(spec, user_words=words)
+
+
+async def _first(rig: Rig, spec: TaskSpec, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+    """The task's first request and its stored spec."""
+    rig.llm.replies = [says("Done.")]
+    task, _ = await rig.workers.create_spec(spec, **kwargs)
+    await _ended(rig.workers, task["task_id"], 1)
+    turns = await rig.workers.store.list_turns(task["task_id"], limit=10)
+    assert [turn.user_text for turn in turns] == [spec.objective], "never in the turn"
+    return _texts(rig.llm.requests[0]), (await rig.workers.get(task["task_id"]))["spec"]
+
+
+async def test_the_persons_words_ride_once_under_their_heading(rig: Rig) -> None:
+    first, spec = await _first(rig, _spec(rig), chat_started=True)
+    assert first.count(WORDS) == 1
+    assert f"{WORDS_HEADER}\n{WORDS}" in first
+    assert (
+        first.index(ASKED) < first.index(WORDS_HEADER) < first.index(TASK_PACK_HEADER)
+    )
+    assert spec["own_words"] == WORDS and spec["user_words"] == WORDS
+
+
+async def test_no_words_when_the_request_holds_them_or_there_are_none(
+    rig: Rig,
+) -> None:
+    first, spec = await _first(rig, _spec(rig, "Fix registry.py", "fix  registry.py"))
+    assert WORDS_HEADER not in first and "own_words" not in spec
+    # A saved chore, a task melo made: no words, nothing new.
+    job = rig.workspace / "weekly"
+    job.mkdir()
+    chore = TaskSpec.from_payload(
+        {"objective": "Summarise the week", "workspace": str(job)}
+    )
+    first, spec = await _first(rig, chore, origin="user_rule")
+    assert WORDS_HEADER not in first and EARLIER_HEAD not in first
+    assert not {"own_words", "chat_turns", "chat_picked"} & set(spec)
+
+
+async def test_a_continue_reuses_the_words_and_the_handover(rig: Rig) -> None:
+    rig.llm.replies = [says("Done."), says("Finished.")]
+    handover = Handover(turns=TURNS, used=(RECALLED,))
+    task, _ = await rig.workers.create_spec(
+        _spec(rig), chat_started=True, handover=handover
+    )
+    task_id = task["task_id"]
+    await _ended(rig.workers, task_id, 1)
+    _, how = await rig.workers.message(task_id, "finish it")
+    assert how == "continued"
+    await _ended(rig.workers, task_id, 2)
+    second = _texts(rig.llm.requests[1])
+    for block in (WORDS_HEADER, EARLIER_HEAD, PICKED_HEADER):
+        assert second.count(block) == 1, block
+
+
+async def test_the_chats_turns_ride_ahead_of_the_pack(rig: Rig) -> None:
+    first, spec = await _first(
+        rig, _spec(rig), chat_started=True, handover=Handover(turns=TURNS)
+    )
+    block = (
+        f"{EARLIER_HEAD}\n- the user: My friend Alex is looking for a new job.\n"
+        "  melo: Noted.\n- the user: He wants a staff role at a large company.\n"
+        f"  melo: Got it.\n{EARLIER_END}"
+    )
+    assert block in first
+    assert first.index(WORDS_HEADER) < first.index(EARLIER_HEAD)
+    assert first.index(EARLIER_END) < first.index(TASK_PACK_HEADER)
+    assert spec["chat_turns"].startswith("- the user: My friend Alex")
+    assert PICKED_HEADER not in first and "chat_picked" not in spec
+
+
+async def test_what_the_chat_recalled_rides_ahead_of_the_notes_in_the_packs_room(
+    rig: Rig,
+) -> None:
+    first, spec = await _first(
+        rig,
+        _spec(rig, words=""),
+        chat_started=True,
+        handover=Handover(turns=TURNS, used=(RECALLED,)),
+    )
+    line = (
+        "- the user said “Alex's résumé is two pages.”; melo replied “Good.” "
+        "(chat “Résumé”, Oct 30)"
+    )
+    assert f"{PICKED_HEADER}\n{line}" in first
+    assert first.index(EARLIER_END) < first.index(PICKED_HEADER)
+    assert first.index(PICKED_HEADER) < first.index(TASK_PACK_HEADER)
+    assert spec["chat_picked"] == line
+    # The notes get the pack's room the picked lines leave; none is left out by key.
+    assert rig.notes.budgets == [TASK_PACK_CHARS - len(line) - 1]
+    assert rig.notes.excluded == [frozenset()]
+
+
+async def test_no_handover_no_budget_change(rig: Rig) -> None:
+    first, spec = await _first(rig, _spec(rig, words=""))
+    assert EARLIER_HEAD not in first and PICKED_HEADER not in first
+    assert rig.notes.budgets == [TASK_PACK_CHARS] and TASK_PACK_CHARS == 1500
+
+
+async def test_memory_off_hands_nothing_over_but_the_words(rig: Rig) -> None:
+    rig.workers.memory = None
+    first, spec = await _first(
+        rig,
+        _spec(rig),
+        chat_started=True,
+        handover=Handover(turns=TURNS, used=(RECALLED,)),
+    )
+    assert EARLIER_HEAD not in first and PICKED_HEADER not in first
+    assert not {"chat_turns", "chat_picked"} & set(spec)
+    assert f"{WORDS_HEADER}\n{WORDS}" in first
+
+
+async def test_a_failed_read_of_what_the_chat_recalled_keeps_its_turns(
+    rig: Rig, caplog: pytest.LogCaptureFixture
+) -> None:
+    # A note needs the notes' topics, which this stand-in cannot read.
+    note = replace(RECALLED, key="r:5", text="Alex is a friend.")
+    first, spec = await _first(
+        rig, _spec(rig), chat_started=True, handover=Handover(turns=TURNS, used=(note,))
+    )
+    assert EARLIER_HEAD in first and PICKED_HEADER not in first
+    assert "Could not read what the chat recalled" in caplog.text

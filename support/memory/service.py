@@ -2243,6 +2243,7 @@ class ChatMemory:
         budget_chars: int = 1500,
         *,
         workspace: str | None = None,
+        exclude: Collection[str] = (),
     ) -> str:
         """What a task starts with in place of recall: the person's notes, as
         information. ``""`` with memory off or when nothing qualifies.
@@ -2253,7 +2254,8 @@ class ChatMemory:
         People or Decisions: a task browses and calls outside tools. Lines read
         as the recall block's do. The lowest-ranked lines go first when
         *budget_chars* is short, none is cut in half. No model call besides the
-        query embedding, which falls back to words as recall does.
+        query embedding, which falls back to words as recall does. A note whose
+        key (``r:<id>``) is in *exclude* is left out: the task has it already.
         """
         if not self.enabled:
             return ""
@@ -2296,6 +2298,8 @@ class ChatMemory:
         lines: list[str] = []
         size = len(PACK_HEADER)
         for item in chosen:
+            if item.key in exclude:
+                continue
             line = f"- {item.prompt}"
             if size + len(line) + 1 > budget_chars:
                 break

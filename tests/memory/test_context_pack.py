@@ -258,6 +258,23 @@ async def test_the_budget_drops_the_last_lines_whole(
     assert await memory.context_pack("x", "c", 10, workspace=str(tmp_path)) == ""
 
 
+async def test_a_note_the_task_has_already_is_left_out(
+    memory: ChatMemory, tmp_path: Path
+) -> None:
+    ids = await seed(memory, tmp_path)
+    full = lines(await memory.context_pack("x", "c", workspace=str(tmp_path)))
+    left = await memory.context_pack(
+        "x", "c", workspace=str(tmp_path), exclude={f"r:{ids['tea']}"}
+    )
+    assert lines(left) == [line for line in full if "tea" not in line]
+    # Its room goes to the next line.
+    budget = len(PACK_HEADER) + len(full[1]) + 1
+    short = await memory.context_pack(
+        "x", "c", budget, workspace=str(tmp_path), exclude={f"r:{ids['tea']}"}
+    )
+    assert lines(short) == [full[1]]
+
+
 async def test_the_pack_is_empty_with_memory_off_or_nothing_to_say(
     tmp_path: Path,
 ) -> None:

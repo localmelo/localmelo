@@ -223,6 +223,61 @@ async def _settle(future: asyncio.Future[Any]) -> None:
             await asyncio.shield(future)
 
 
+async def eligible_turns(
+    store: SessionStore, session_id: str, max_turns: int, *, above: int = 0
+) -> list[TurnInfo]:
+    """The newest *max_turns* finished, not undone turns of *session_id* numbered
+    above *above*, newest first."""
+    eligible: list[TurnInfo] = []
+    before: int | None = None
+    page_size = max(2 * max_turns, 20)
+    while len(eligible) < max_turns:
+        page = await store.list_turns(session_id, limit=page_size, before=before)
+        for turn in reversed(page):
+            if turn.turn <= above:
+                return eligible
+            if turn.status == "running" or turn.undone:
+                continue
+            eligible.append(turn)
+            if len(eligible) == max_turns:
+                return eligible
+        if len(page) < page_size:
+            break
+        before = page[0].turn
+    return eligible
+
+
+async def earlier_turns(
+    store: SessionStore, session_id: str, *, before: int | None = None
+) -> list[TurnInfo]:
+    """A chat's newest :data:`EARLIER_TURNS` turns the person began, oldest first.
+
+    Finished, not undone turns numbered below *before* (any, when ``None``)
+    that have words of the person's (typed, or the turn's text); a turn melo
+    began (a task's question to the chat, a follow-up) is never one. A
+    chat's run carries them as ``Agent.run_task(earlier_turns=...)``, and a
+    task the chat starts begins with them (:func:`earlier_pair` for each).
+    """
+    found = await eligible_turns(store, session_id, 2 * EARLIER_TURNS)
+    kept: list[TurnInfo] = []
+    for past in found:  # newest first
+        words = past.typed_text or past.user_text
+        if before is not None and past.turn >= before:
+            continue
+        if past.origin or not words.strip():
+            continue
+        kept.append(past)
+        if len(kept) == EARLIER_TURNS:
+            break
+    return kept[::-1]
+
+
+def earlier_pair(turn: TurnInfo) -> tuple[str, str]:
+    """*turn* as ``(the person's words, the answer as kept)`` for an earlier-turns block."""
+    words = turn.typed_text or turn.user_text
+    return words, answer_text(turn.status, split_thinking(turn.answer)[1])
+
+
 class SessionRunner:
     """Runs one session's turns on *agent*, one at a time, and stores them.
 
@@ -790,21 +845,11 @@ class SessionRunner:
             return []
         info = turn.turn
         try:
-            found = await self._eligible_turns(info.session_id, 2 * EARLIER_TURNS)
+            found = await earlier_turns(self._store, info.session_id, before=info.turn)
         except Exception:
             logger.warning("Could not read this chat's earlier turns", exc_info=True)
             return []
-        pairs: list[tuple[str, str]] = []
-        for past in found:  # newest first
-            words = past.typed_text or past.user_text
-            if past.turn >= info.turn or past.origin or not words.strip():
-                continue
-            pairs.append(
-                (words, answer_text(past.status, split_thinking(past.answer)[1]))
-            )
-            if len(pairs) == EARLIER_TURNS:
-                break
-        return pairs[::-1]
+        return [earlier_pair(past) for past in found]
 
     async def _with_digest(self, turn: _Turn, text: str) -> str:
         """*text* with the digest of the user's other chats, on a chat's first turn.
@@ -1575,25 +1620,7 @@ class SessionRunner:
 
         Newest first.
         """
-        eligible: list[TurnInfo] = []
-        before: int | None = None
-        page_size = max(2 * max_turns, 20)
-        while len(eligible) < max_turns:
-            page = await self._store.list_turns(
-                session_id, limit=page_size, before=before
-            )
-            for turn in reversed(page):
-                if turn.turn <= above:
-                    return eligible
-                if turn.status == "running" or turn.undone:
-                    continue
-                eligible.append(turn)
-                if len(eligible) == max_turns:
-                    return eligible
-            if len(page) < page_size:
-                break
-            before = page[0].turn
-        return eligible
+        return await eligible_turns(self._store, session_id, max_turns, above=above)
 
     async def _pairs(
         self, session_id: str, max_turns: int, *, above: int = 0

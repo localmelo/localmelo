@@ -116,6 +116,7 @@ from localmelo.support.gateway.front_rules import (
     triage,
     work_request,
 )
+from localmelo.support.gateway.handover import Handover, handover_of
 from localmelo.support.gateway.i18n import said, said_text, t, t_in
 from localmelo.support.gateway.reminder_time import Reminder, parse_reminder, parse_when
 from localmelo.support.gateway.task_endings import report_text, shown
@@ -126,6 +127,7 @@ from localmelo.support.gateway.task_policy import (
     TaskSpec,
 )
 from localmelo.support.gateway.task_store import TaskRecord, TaskStoreError
+from localmelo.support.memory.service import CHAT_TURN
 from localmelo.support.sessions.agents import (
     build_session_agent,
     configured_session_options,
@@ -1716,6 +1718,11 @@ class Front:
             return await self._failed(show, "front.echo.startFailed", problem=str(exc))
         words = typed.strip()[:MAX_OBJECTIVE_CHARS]
         spec = dataclasses.replace(spec, level=level, reason=reason, user_words=words)
+        # What the chat hands the task (#463): its earlier turns, and what this
+        # turn of the person's recalled, searched or opened.
+        handover = await handover_of(
+            self.console.store, self.chat_id, turn, CHAT_TURN.get()
+        )
         # The task starts at once, under the request's first words; the model's
         # task_create brings a title of its own, any other long request is named later.
         echo = await self._start(
@@ -1726,6 +1733,7 @@ class Front:
             turn=turn,
             of=of,
             create_key=create_key,
+            handover=handover,
         )
         if not title and echo.get("echo") == "started" and wants_title(work):
             self._name_later(str(echo["task_id"]), spec.title, work)
@@ -1742,6 +1750,7 @@ class Front:
         of: int | None = None,
         word: str = "Started",
         create_key: str | None = None,
+        handover: Handover | None = None,
     ) -> dict[str, Any]:
         try:
             # A task a chat starts is the chat's to follow up on (#411).
@@ -1751,6 +1760,7 @@ class Front:
                 request_key=key,
                 create_key=create_key,
                 chat_started=True,
+                handover=handover,
             )
         except (TaskPolicyError, ValueError, TaskStoreError) as exc:
             return await self._failed(show, "front.echo.startFailed", problem=str(exc))

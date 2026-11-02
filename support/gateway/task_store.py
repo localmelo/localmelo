@@ -2326,12 +2326,15 @@ def _same_request(
     request_key: str,
     deadline: float | None,
 ) -> bool:
-    # The context pack and the project's instructions are made once, when the
-    # task is created: a repeat of the request does not make them again, so they
-    # are not part of what the key repeats.
+    # The context pack, what the chat handed over and the project's instructions
+    # are made once, when the task is created: a repeat of the request does not
+    # make them again, so they are not part of what the key repeats.
     skipped = (
         "task_id",
         "context_pack",
+        "own_words",
+        "chat_turns",
+        "chat_picked",
         "project_instructions",
         "project_files",
         "project_skipped",
