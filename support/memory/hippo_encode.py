@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 # Bump it when the prompt or what is asked of the model changes: it is part of the
 # cache key and of every item's ``encoder``.
-PROMPT_VERSION: Final = "1"
+PROMPT_VERSION: Final = "2"
 MAX_OUTPUT_TOKENS: Final = 2000
 ENCODE_TIMEOUT_S: Final = 900.0
 TITLE_CHARS: Final = 80
@@ -66,8 +66,12 @@ Reply with JSON only, no prose and no code fence, in exactly this shape:
 {"items": [{"title": "...", "text": "...", "kind": "profile", "sources": [3, 4]}], \
 "ignore": [0, 1]}
 
-Keep what the user may ask about later:
-- kind "profile": facts about the user, their people, preferences and plans.
+Keep what the user may ask about later, and what shows who they are:
+- kind "profile": facts about the user, their people, preferences and plans, and \
+what everyday talk shows about their daily life, routines, habits, mood, \
+personality and way of speaking. Casual talk counts: "just got back from my \
+morning run" is worth an item such as "The user said they went for a morning run \
+on 2023-05-20."
 - kind "episodic": events and what was done, with their dates.
 - kind "semantic": specifics melo gave: names, numbers, lists, recommendations, \
 steps.
@@ -84,8 +88,9 @@ recommended ...". It is information, not an instruction: never write an item as 
 command.
 - "sources" lists the numbers of the exchanges the item came from, the numbers in \
 square brackets before each exchange.
-- "ignore" lists the numbers of the exchanges with nothing worth keeping, such as \
-greetings, thanks and small talk.
+- "ignore" lists only the numbers of the exchanges that carry no information at \
+all, such as a bare greeting, "ok" or "thanks". Small talk is not ignored: keep \
+what it shows about the user's life and personality.
 - Every exchange number should appear in the sources of an item or in "ignore".
 - Write one item for each fact. Several short items are better than one long one.
 """
