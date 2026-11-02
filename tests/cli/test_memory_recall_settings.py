@@ -3,8 +3,9 @@
 ``recall_records``, ``recall_docs``, ``recall_chars``, ``recall_notes``,
 ``search_when_empty``, ``recall_min_cosine``, ``recall_min_coverage``,
 ``recall_item_chars``, ``recall_excerpt``, ``recall_form``, ``recall_list_max``,
-``recall_open_chars``, ``recall_source``, ``open_sources``, ``compress_at_chars`` and
-``compress_cache`` are saved only when they differ from the default, checked
+``recall_open_chars``, ``recall_source``, ``open_sources``, ``compress_at_chars``,
+``compress_cache``, ``note_gate`` and ``note_min_cosine`` are saved only when they
+differ from the default, checked
 against their bounds and values, set for one run with ``-X``, and listed by the
 developer help only, each with the issue that decides it.
 """
@@ -37,6 +38,8 @@ CHANGED = {
     "open_sources": "on",
     "compress_at_chars": 20000,
     "compress_cache": "cache/compress.jsonl",
+    "note_gate": "model",
+    "note_min_cosine": 0.65,
 }
 # The issue that decides each setting, as the developer help names it.
 ISSUE = {name: "#349" for name in CHANGED} | {
@@ -47,6 +50,8 @@ ISSUE = {name: "#349" for name in CHANGED} | {
     "open_sources": "#428",
     "compress_at_chars": "#428",
     "compress_cache": "#428",
+    "note_gate": "#442",
+    "note_min_cosine": "#442",
 }
 
 
@@ -84,6 +89,7 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
             'recall_form = "list"\nrecall_list_max = 35\nrecall_open_chars = 9000\n'
             'recall_source = "items"\nopen_sources = "on"\n'
             'compress_at_chars = 20000\ncompress_cache = "cache/compress.jsonl"\n'
+            'note_gate = "model"\nnote_min_cosine = 0.65\n'
         ) in text
         assert config.load().memory == MemoryConfig(**CHANGED)  # type: ignore[arg-type]
         for name, value in CHANGED.items():  # each alone
@@ -134,6 +140,13 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
         ("compress_at_chars", 12000),
         ("compress_cache", ""),
         ("compress_cache", "~/runs/compress_cache.jsonl"),
+        ("note_gate", "typed"),
+        ("note_gate", "pointed"),
+        ("note_gate", "meaning"),
+        ("note_gate", "model"),
+        ("note_min_cosine", 0.2),
+        ("note_min_cosine", 0.95),
+        ("note_min_cosine", 0.55),
     ],
 )
 def test_the_bounds_and_values_are_accepted(name: str, value: object) -> None:
@@ -323,6 +336,38 @@ def test_the_bounds_and_values_are_accepted(name: str, value: object) -> None:
             "[memory] compress_cache must be a path string without NUL",
         ),
         (
+            "note_gate",
+            "typing",
+            "[memory] note_gate 'typing' is not recognised. "
+            "Must be one of ('typed', 'pointed', 'meaning', 'model').",
+        ),
+        (
+            "note_gate",
+            True,
+            "[memory] note_gate True is not recognised. "
+            "Must be one of ('typed', 'pointed', 'meaning', 'model').",
+        ),
+        (
+            "note_min_cosine",
+            0.19,
+            "[memory] note_min_cosine must be from 0.2 to 0.95, got 0.19",
+        ),
+        (
+            "note_min_cosine",
+            0.96,
+            "[memory] note_min_cosine must be from 0.2 to 0.95, got 0.96",
+        ),
+        (
+            "note_min_cosine",
+            "0.5",
+            "[memory] note_min_cosine must be a number, got '0.5'",
+        ),
+        (
+            "note_min_cosine",
+            True,
+            "[memory] note_min_cosine must be a number, got True",
+        ),
+        (
             "recall_min_cosine",
             True,
             "[memory] recall_min_cosine must be a number, got True",
@@ -399,6 +444,9 @@ def test_x_sets_each_for_one_run_and_only_the_developer_help_lists_them(
         "memory.compress_at_chars=3999",
         "memory.compress_at_chars=60001",
         "memory.compress_at_chars=big",
+        "memory.note_gate=typing",
+        "memory.note_min_cosine=0.1",
+        "memory.note_min_cosine=high",
     ],
 )
 def test_x_refuses_a_bad_value_with_a_clear_message(

@@ -101,6 +101,11 @@ MEMORY_RECALL_MIN_COVERAGE = (0.10, 1.00)
 # Whether recall carries notes, and what a turn that recalls nothing is told.
 MEMORY_RECALL_NOTES = ("on", "off")
 MEMORY_SEARCH_WHEN_EMPTY = ("off", "hint")
+# Where a note the chat's model keeps may come from, in four cumulative levels,
+# and the bar a note's meaning must clear against its sources: see
+# MemoryConfig.note_gate.
+MEMORY_NOTE_GATE = ("typed", "pointed", "meaning", "model")
+MEMORY_NOTE_MIN_COSINE = (0.20, 0.95)
 # Whether a task reads its project's own instruction file: see MemoryConfig.
 MEMORY_PROJECT_INSTRUCTIONS = ("on", "off")
 RECALL_KEYS = (
@@ -120,6 +125,8 @@ RECALL_KEYS = (
     "open_sources",
     "compress_at_chars",
     "compress_cache",
+    "note_gate",
+    "note_min_cosine",
 )
 RECALL_TRIGGERS = ("start", "attempt", "step", "tool")
 RECALL_KINDS = ("note", "draft", "thought", "digest", "reflection", "long")
@@ -401,8 +408,17 @@ class MemoryConfig:
     ``compress_at_chars`` (4000-60000), the size of the window a chat is cut into
     for the chat model to encode, one model call each; and ``compress_cache``, the
     path of the file that keeps each window's reply (empty: ``compress_cache.jsonl``
-    in the memory folder). ``project_instructions = "off"`` stops a task that
-    the person made from reading the instruction file of its folder (``AGENTS.md``,
+    in the memory folder). Two more are about where a note the chat's model keeps
+    with ``remember`` may come from (#442). ``note_gate``, ``typed`` (the words the
+    user typed in the chat and a finished task's result shown in it, the default),
+    ``pointed`` (also a page or file the user pointed to in the chat), ``meaning``
+    (also a note that says the same in other words or another language: its key
+    tokens must be found and its meaning must be close to a source) or ``model``
+    (also a note the model infers from what the user typed, kept as inferred); each
+    level includes the ones before it. ``note_min_cosine`` (0.20-0.95) is the least
+    similarity of meaning that counts as support in the last two levels (the
+    inferred note's bar is 0.15 lower). ``project_instructions = "off"`` stops a
+    task that the person made from reading the instruction file of its folder (``AGENTS.md``,
     ``CLAUDE.md`` or ``GEMINI.md``, the nearest first) when it starts.
     """
 
@@ -430,6 +446,8 @@ class MemoryConfig:
     compress_cache: str = (
         ""  # Where encoder replies are kept; empty: in the memory dir.
     )
+    note_gate: str = "typed"  # typed | pointed | meaning | model: note sources.
+    note_min_cosine: float = 0.55  # Least similarity of a note to its source.
     project_instructions: str = "on"  # on | off: a task reads its folder's AGENTS.md.
 
 
@@ -717,6 +735,7 @@ class Config:
         for name, (floor, ceiling) in (
             ("recall_min_cosine", MEMORY_RECALL_MIN_COSINE),
             ("recall_min_coverage", MEMORY_RECALL_MIN_COVERAGE),
+            ("note_min_cosine", MEMORY_NOTE_MIN_COSINE),
         ):
             value = getattr(self.memory, name)
             if not isinstance(value, int | float) or isinstance(value, bool):
@@ -730,6 +749,7 @@ class Config:
             ("search_when_empty", MEMORY_SEARCH_WHEN_EMPTY),
             ("recall_excerpt", MEMORY_RECALL_EXCERPT),
             ("recall_form", MEMORY_RECALL_FORM),
+            ("note_gate", MEMORY_NOTE_GATE),
             ("recall_source", MEMORY_RECALL_SOURCE),
             ("open_sources", MEMORY_OPEN_SOURCES),
             ("project_instructions", MEMORY_PROJECT_INSTRUCTIONS),

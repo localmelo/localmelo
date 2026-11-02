@@ -68,7 +68,7 @@
 
 - 它的词必须来自你在这个对话中输入的内容（任何一轮，撤销的轮次除外），或来自对话展示给你的一个已完成任务的结果（在你某条消息下召回的任务结果）。
 - 措辞可以不同，值不可以。每个数字或带数字的词、星期、句中大写的名字或词、引号里的短语，都必须出现在你的话里；其余的实词至少要有五分之四出现，所以 "your replies" 能对上你说的 "reply"，用 "then" 代替 "followed by" 也没关系，而把 `C14` 写成 `C15`、把 Wednesday 写成 Thursday 会被拒绝。用中文为英文消息写的笔记会被拒绝，模型会被告知要用你用的语言来写。
-- 只有网页、文件、工具输出或 melo 自己的回答说过的事实会被拒绝，模型会被告知这不是你说的话。
+- 只有网页、文件、工具输出或 melo 自己的回答说过的事实会被拒绝，模型会被告知这不是你说的话。（下面的开发者设置 `note_gate` 可以让你指过的网页或文件算数。）
 - 笔记用 "you" 指你。模型用 "I"、"my"、"me" 或 "我" 写、又没有 "you" 的笔记（"My flight to Porto is at gate 22."、"我的航班在22号登机口。"）会改成第二人称保存（"Your flight to Porto is at gate 22."、"你的航班在22号登机口。"），和你自己的话一样，所以同一主题的较新笔记会取代它。同时出现两者的笔记（"I prefer that when you explain…"、"我喜欢你用简单的话解释。"），或 "I" 与第三人称的 "the user" 同时出现的笔记（"The user wants me to answer in Chinese."、"用户希望我用中文回答。"，其中的 "I"、"我" 指 melo），会被拒绝，模型会被告知把你写成 "you"、把 melo 写成 "melo"。"we"、"our"、"我们" 和引号里的话保持原样。
 - "who"、"where"、"which" 这样的词不算实词，所以 "You have a cousin named Ren who lives in Kyoto." 能对上你说的 "My cousin Ren lives in Kyoto."。
 - 关于别人的笔记不会被写成关于你：你输入了 "马可的工作室在中山路88号。"，笔记 "你的工作室在中山路88号。" 会被拒绝，模型会被告知改成写他们（"马可的…"）；反过来，你在那句话里没有提到的人，笔记也不能写成关于他。"我的姐姐的车" 和 "你的姐姐的车" 都是你的。
@@ -168,6 +168,24 @@ Older chat turns that may hold the answer, closest first. Open the ones you need
 对话按从旧到新的顺序编码，所以较新的事实可以替换较旧的。已导入对话的轮次、笔记和索引照常写入；条目是在它们之外增加的。它是开发者设置，因为每个窗口要花一次聊天模型请求，也还没有测得召回效果更好。
 
 设置 `[memory] recall_source = "items"`（默认 `"turns"`，不改变任何行为）后，召回用这些条目代替对话轮次。它们按同样的门槛排序、保留或丢弃，在召回块和 `search_memory` 中的显示方式与轮次一样，如 `“Tomato stakes”: The user stakes the tomato garden with bamboo. (chat “Garden”, Oct 29)`。设置 `recall_form = "list"` 时每条是一行，如 `[m12] Oct 29 · chat “Garden” · “Tomato stakes” · 0.71`，上面有一行提示模型用 `open_memory` 打开它需要的条目；此时它接收 `m12` 这样的编号，返回标题和正文，设置 `open_sources = "on"` 后条目所来自的整轮对话也会跟在后面，全部不超过 `recall_open_chars`。在 `turn.memory` 事件中，条目的 `used`、`searched` 和 `opened` 项的类型为 `item`，条目编号写在 `item` 中，来源写在 `sources` 中，格式为 `[chat id, turn]` 对。删除一个对话会删除只来自它的条目，并把它的轮次从其他条目的来源中去掉；不带 ID 的 `melo memory forget` 也会忘记条目；`reindex` 保留它们，因为只有模型能再次写出它们。
+
+**来自你指给 melo 的材料、来自对话所显示内容的笔记（开发者设置）。** 人们很少说“记住这个”，而一条关于你自己网站或简历的笔记，又不可能用你输入的词写出来。设置 `[memory] note_gate`（`-X memory.note_gate=pointed` 只对一次运行生效；`melo -h all` 会列出它）后，聊天可以记更多，而且每条笔记都会保留它的来源。默认值 `"typed"` 就是上面讲的一切，不改变任何行为。共有四级，每一级都包含前面的：
+
+| 级别 | 笔记还可以依据 |
+|---|---|
+| `typed`（默认） | 你在这个对话中输入的内容，以及其中展示的已完成任务的结果。 |
+| `pointed` | 你在这个对话中指给 melo 的网页或文件。 |
+| `meaning` | 用别的词或别的语言说同一件事的笔记，例如关于英文简历的中文笔记。 |
+| `model` | 对话所显示的你的目标、处境和偏好，即使你没有要求 melo 记住。 |
+
+- **指过的材料。** melo 读过的网页（`web_fetch` 或浏览器）或文件，在三种情况下算你指过的。（1）你在这个对话中输入过它的地址（此前任何一轮都行）：只输入主机名（`jane.example.com`）指向该主机上的所有网页；带路径的地址（`github.com/jane`）指向那个页面和它下面的页面，不指向同一主机上的其他页面（`github.com/evil`、`github.com/janet`）。协议、`www.` 和末尾的斜杠不影响判断。（2）你输入过文件名。（3）读取它的那一轮里你称它是你的：“my site”“my website”“my homepage”“my résumé”“my CV”“我的网站”“我的简历”“我的主页”，但没有说是哪一个。这时只有那一轮读的第一个网页或文件算数；那一轮后面的读取，只有读的还是同一个网页或文件，或者你输入过它的地址或名称，才算数。“my profile at github.com/jane”指的就是那个地址，不是别的。文字取自对话已保存的工具结果。浏览器的 read、follow 和 back 的结果只写明标签页和主机，不写地址：再次读取同一个标签页会沿用打开它时的地址，而点链接或后退得到的页面地址未知，所以只有你输入过的主机名才指向它。你没有指过的网页或文件，在任何级别都不会支持笔记。你说是别人的（“a page about Bob”“his résumé”）可以支持关于那个人或那个页面的笔记，但不能支持说“你”的笔记。
+- **来源。** 给模型的回复写作 `Remembered (source: pointed, from example.com): …`，该笔记的 `turn.memory` 条目有 `source`：`typed`、`pointed`、`result` 或 `inferred`。笔记页在原来写笔记所来自对话的地方显示 `From example.com, Oct 30`（文件则显示文件名）或 `Melo inferred it from chat “Plans”, Oct 30`（中文界面显示翻译后的文字），笔记 API 的 `source` 则以 `from example.com, Oct 30` 或 `melo inferred it · chat “Plans”, Oct 30` 代替 `you said it · …`。召回时，来自网页的笔记读作 `a note to the user “…” (from example.com, Oct 30)`，推断的笔记读作 `melo inferred “…” (chat “Plans”, Oct 30)`。来自你自己的话的笔记和以前一样。
+- **含义。** 笔记的关键词必须在某个来源里找到：数字和年份、日期、网址和电子邮箱，以及拉丁字母的名字（不在句首的大写词，或两个字母以上的缩写）。其余的词可以不同，也可以是另一种语言：笔记的嵌入向量与某个来源中最接近的约 300 个字符的窗口的余弦相似度至少为 `note_min_cosine`（0.55，0.20 到 0.95）时通过，使用召回所用的同一个嵌入模型来判断。没有任何来源含有的关键词会在拒绝信息里指明。没有嵌入模型时，其余的词按 `typed` 的词检查。
+- **模型。** `remember` 工具的说明多一句，请模型记下对话所显示的你的目标、处境和偏好，即使你没有要求。这时，没有来源支持的、关于你的笔记，在每个关键词都找到、并且含义与你在这个对话中输入的内容的相似度不低于门槛减 0.15 时，可以记为 `inferred`。
+- **安全，每一级都一样。** 密钥仍然绝不保存。高于 `typed` 时，属于给 melo 的指令而不是关于你的事实的笔记会被拒绝（`Not remembered: an instruction, not a fact about the user`）：祈使句、“ignore …”“always …”“from now on you must …”、命令，或对文件和网址的操作。你陈述的偏好（“You prefer short replies.”）是事实。高于 `typed` 时，工具说明写的是你指过的内容可以支持笔记、你没指过的不行，取代“never something only a web page, a file or a tool's output says”。
+- **已知限制。** 笔记是对照这一轮已保存的工具结果来检查的，所以模型在调用 `remember` 的同一步里取回的网页可能还没保存：这条笔记会被拒绝，模型可以在之后的某一步再记。
+
+这些级别是开发者设置，因为还没有测得它们比 `typed` 记下的笔记更好。撤销、笔记的两种写入方式和较新值的替换规则，在每一级都一样。
 
 **召回如何找到笔记。** `[memory] retriever` 选择方式（`melo config set memory.retriever llm`，然后重启 `melo serve` 或 App；`-X memory.retriever=llm` 只对一次运行生效，`melo -h all` 会列出它）。这是用于比较各种方式的开发者设置；默认值适合几乎所有人。
 

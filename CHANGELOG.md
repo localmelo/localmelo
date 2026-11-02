@@ -9,6 +9,28 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Developer only, not visible by default: notes from material the user points to and from
+  what the conversation shows (#442). `[memory] note_gate` has four levels, each including the
+  ones before it, and `-X memory.note_gate=pointed` sets one for a run. `typed`, the default,
+  is the rule as always and changes nothing. `pointed` also accepts a page or file the chat read
+  that the user pointed to, read from the chat's stored tool results: a host they typed points
+  to every page of it, an address with a path (`github.com/jane`) to that page and the pages
+  below it and not to the rest of the host (`github.com/evil`), a file by its name, and a turn
+  that calls it theirs ("my website", "my resume") without saying which, to the first page or
+  file that turn read only (a later read of it counts only for the same page or file again, or
+  one the user typed); a page the user did not point to, or called someone else's, never
+  supports a note about them.
+  `meaning` also accepts a note that says the same in other words or another language: its key
+  tokens (numbers, dates, addresses, e-mail addresses, Latin-script names) must be found in a
+  source, and its embedding must be at least `note_min_cosine` (0.55, 0.20 to 0.95) close to a
+  window of one. `model` also keeps a note about the user that no source supports as
+  inferred, and adds one sentence to the `remember` tool text. Above `typed`, a note that is an
+  instruction to the assistant is refused, and the tool text says that what the user pointed to
+  may support a note. A note keeps its source (`typed`, `pointed`, `result` or `inferred`, and
+  the page or file): the reply to the model, the `turn.memory` entry (`source`), the notes page
+  and recall say so. Known limit: a page fetched in the same step as the `remember` call may
+  not be stored yet, and the note is refused. Part of #442.
+
 - The `turn.memory` event records the exact text the model read. Each entry of
   `used` (the recall block's items) and `searched` (what `search_memory`
   returned) has a new `shown` key: the line as the recall block or the search

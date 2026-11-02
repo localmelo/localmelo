@@ -35,6 +35,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, Strict
 from localmelo.melo.memory.long import StoredEntry
 from localmelo.support import config
 from localmelo.support.gateway.i18n import current, t
+from localmelo.support.memory import note_gate
 from localmelo.support.memory.recall import chat_label, chat_title, day
 
 from .errors import ApiError
@@ -96,27 +97,44 @@ def _on(at: float) -> str:
     return t("memoryRows.day", month=month, day=when.tm_mday)
 
 
+def _chat_words(info: Any, label: str, surface: str) -> str:
+    """The chat a note came from, in the reader's language: ``Main chat``, ``chat
+    “Plans”``; *label* is its name as the note kept it, for a chat that is not known."""
+    if info is None:
+        return label
+    title = chat_title(info.title)
+    kind = {"front": "main", "task": "task", "front_bg": "mainTask"}.get(
+        info.kind, "terminal" if surface == "cli" and info.kind == "chat" else "chat"
+    )
+    if kind == "main":
+        return t("memoryRows.chat.main")
+    if title:
+        return t(f"memoryRows.chat.{kind}", title=title)
+    return t(f"memoryRows.chat.{kind}Untitled")
+
+
 def _from_words(info: Any, label: str, gone: bool, at: float, surface: str) -> str:
     """Where a note came from, in the reader's language; in English, :func:`origin`'s words."""
     on = _on(at)
     if gone:
         return t("memoryRows.fromDeleted", day=on)
-    if info is None:
-        return t("memoryRows.from", chat=label, day=on)
-    title = chat_title(info.title)
-    kind = {"front": "main", "task": "task", "front_bg": "mainTask"}.get(
-        info.kind, "terminal" if surface == "cli" and info.kind == "chat" else "chat"
-    )
-    chat = (
-        t("memoryRows.chat.main")
-        if kind == "main"
-        else (
-            t(f"memoryRows.chat.{kind}", title=title)
-            if title
-            else t(f"memoryRows.chat.{kind}Untitled")
-        )
-    )
-    return t("memoryRows.from", chat=chat, day=on)
+    return t("memoryRows.from", chat=_chat_words(info, label, surface), day=on)
+
+
+def _inferred_words(info: Any, label: str, gone: bool, at: float, surface: str) -> str:
+    """Where a note the model inferred came from: ``melo inferred it from …``."""
+    on = _on(at)
+    if gone:
+        return t("memoryRows.inferredDeleted", day=on)
+    return t("memoryRows.inferred", chat=_chat_words(info, label, surface), day=on)
+
+
+def _from_page(prov: dict[str, Any], at: float) -> str:
+    """Where a note kept from material the user pointed to came from: the page's host
+    or the file's name, and the day."""
+    ref = str(prov.get("from") or "")
+    key = "memoryRows.fromPage" if "://" in ref else "memoryRows.fromFile"
+    return t(key, name=note_gate.name_of(ref), day=_on(at))
 
 
 def _from_file(prov: dict[str, Any], at: float) -> str:
@@ -139,20 +157,35 @@ def _row(
     if info is not None:
         label = chat_label(info.kind, info.title, surface)
     imported = prov.get("source") == "import"
+    # A note the note gate kept says where it came from (``[memory] note_gate``): a page
+    # or file the user pointed to, or the model's own inference; a note of the user's
+    # own words reads as it always did.
+    how = str(prov.get("source") or "")
+    pointed = how == note_gate.POINTED and bool(prov.get("from"))
+    inferred = how == note_gate.INFERRED
+    when = day(entry.created_at)
+    if pointed:
+        source = f"from {note_gate.name_of(str(prov['from']))}, {when}"
+        origin = _from_page(prov, entry.created_at)
+    elif inferred:
+        source = f"melo inferred it · {label}, {when}"
+        origin = _inferred_words(info, label, gone, entry.created_at, surface)
+    else:
+        source = f"{'imported from' if imported else 'you said it ·'} {label}, {when}"
+        origin = (
+            _from_file(prov, entry.created_at)
+            if imported
+            else _from_words(info, label, gone, entry.created_at, surface)
+        )
     return {
         "id": entry.id,
         "text": entry.text,
         "topic": str(prov.get("topic") or ""),
         "quote": str(prov.get("quote") or ""),
-        "source": f"{'imported from' if imported else 'you said it ·'} {label}, "
-        f"{day(entry.created_at)}",
+        "source": source,
         "imported": imported,
         "batch_id": str(prov.get("batch_id") or ""),
-        "from": (
-            _from_file(prov, entry.created_at)
-            if imported
-            else _from_words(info, label, gone, entry.created_at, surface)
-        ),
+        "from": origin,
         "chat_gone": gone,
         "edited": bool(prov.get("edited")),
         "session_id": entry.session_id,
