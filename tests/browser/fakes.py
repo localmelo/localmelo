@@ -13,6 +13,7 @@ from localmelo.support.browser.driver import (
     Shot,
     TabInfo,
 )
+from localmelo.support.browser.sites import origin_of
 
 PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kg"
 PNG += "AAAABJRU5ErkJggg=="
@@ -126,10 +127,21 @@ class FakeDriver:
         if self.current == tab:
             self.current = None
 
+    async def location(self, tab: str | None) -> str:
+        return self._url(tab)
+
     async def wait(
-        self, tab: str | None, until: str, text: str, seconds: float
+        self,
+        tab: str | None,
+        until: str,
+        text: str,
+        seconds: float,
+        *,
+        origin: str = "",
     ) -> bool:
         self.calls.append(("wait", f"{until}:{text}:{seconds:g}"))
+        if origin and origin_of(self._url(tab)) != origin:
+            return False  # the condition holds only on the page's own site
         return text != "never"
 
     async def screenshot(self, tab: str | None) -> Shot:

@@ -9,8 +9,11 @@ so a chat that never browses opens nothing.
 
 No tool opens or reads this computer, its local network or melo's own
 console (:mod:`localmelo.support.browser.addresses`): the address is checked
-before its site is asked about and before the page loads, again where the
-page lands, and before a picture or a wait on a page that may have moved.
+before its site is asked about and before the page loads, and again where the
+page lands. A picture or a wait needs a page approved in that tab and reads
+the tab's address in the tab before and after; a wait's condition counts only
+on the approved site. The tab list shows the address and title of a tab only
+while its page is on the site approved for it.
 """
 
 from __future__ import annotations
@@ -227,14 +230,24 @@ class BrowserToolProvider(BaseToolProvider):
         self._origins[tab] = origin
 
     async def _recheck(self, tab: str) -> None:
-        """Check where *tab* is now: a page can move itself after it was read."""
-        try:
-            listed = await self._driver.tabs()
-        except BrowserError:
-            return  # a browser that cannot list tabs keeps the last check
-        url = next((t.url for t in listed if t.id == tab), "")
-        if url:
-            await self._admit(url, tab, set())
+        """Check where *tab* is now, read in the tab: a page can move itself after it was read.
+
+        A browser that cannot say raises, so nothing is looked at unchecked.
+        """
+        url = await self._driver.location(tab)
+        if not url:
+            raise BrowserError(
+                "melo could not tell which page that tab shows, so it did not look "
+                "at it. Use browser_read to read the tab again."
+            )
+        await self._admit(url, tab, set())
+
+    def _approved(self, tab: str | None) -> str:
+        """The id of *tab* (default the current one); :class:`BrowserError` unless its page was approved."""
+        tab_id = self._current(tab)
+        if tab_id not in self._origins:
+            raise BrowserError("No page is open in that tab. Use browser_open first.")
+        return tab_id
 
     async def _read_tab(self, info: TabInfo, done: set[str], view: str = "all") -> str:
         """Read the page the tab landed on, after checking where it landed."""
@@ -265,6 +278,7 @@ class BrowserToolProvider(BaseToolProvider):
         return await self._read_tab(info, {origin})
 
     def _current(self, tab: str | None) -> str:
+        tab = None if tab == "current" else tab
         if (tab or self._tab) is None:
             raise BrowserError("No page is open. Use browser_open first.")
         return str(tab or self._tab)
@@ -333,11 +347,17 @@ class BrowserToolProvider(BaseToolProvider):
             self._snaps.pop(tab, None)
             self._origins.pop(tab, None)
             self._tab = None if self._tab == tab else self._tab
-        rows = [
-            f'{"*" if t.id == self._tab else " "} {render.field_text(t.id, 40)} '
-            f'{render.field_text(t.url, render.HREF_CHARS)} "{render.field_text(t.title, 80)}"'
-            for t in await self._driver.tabs()
-        ]
+        rows = []
+        for t in await self._driver.tabs():
+            row = f'{"*" if t.id == self._tab else " "} {render.field_text(t.id, 40)} '
+            if t.url and sites.origin_of(t.url) == self._origins.get(t.id):
+                row += (
+                    f"{render.field_text(t.url, render.HREF_CHARS)} "
+                    f'"{render.field_text(t.title, 80)}"'
+                )
+            else:  # a page this chat did not approve, or one that moved itself
+                row += "(not checked)"
+            rows.append(row)
         return render.block("tabs", "", "\n".join(rows) or "(no tabs)")
 
     @_guarded
@@ -362,19 +382,25 @@ class BrowserToolProvider(BaseToolProvider):
             "text": "the text appeared",
             "gone": "the text was gone",
         }[until]
-        if tab or self._tab:
-            await self._recheck(str(tab or self._tab))
-        if await self._driver.wait(tab or self._tab, until, str(text), limit):
+        tab_id = self._approved(tab)
+        await self._recheck(tab_id)
+        # The condition counts only on the approved site, read in the same step,
+        # and the tab is checked again after: a wait says nothing about a page
+        # that went elsewhere while it was watched.
+        reached = await self._driver.wait(
+            tab_id, until, str(text), limit, origin=self._origins[tab_id]
+        )
+        await self._recheck(tab_id)
+        if reached:
             return f"Reached: {what}."
         return f"Timed out after {limit:g} s: {what} did not happen."
 
     @_guarded
     async def _screenshot(self, tab: str | None = None, **_: Any) -> ToolOutput:
-        tab_id = self._current(tab)
-        if tab_id not in self._origins:
-            raise BrowserError("No page is open in that tab. Use browser_open first.")
+        tab_id = self._approved(tab)
         await self._recheck(tab_id)
         shot = await self._driver.screenshot(tab_id)
+        await self._recheck(tab_id)  # a page that moved while it was pictured
         return ToolOutput(
             text=f"A picture of {self._origins[tab_id]} was taken and kept with this chat.",
             images=[ImagePart(mime_type=shot.mime_type, data=shot.data)],

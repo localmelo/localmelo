@@ -19,8 +19,10 @@ from localmelo.melo.contracts.approvals import TOOL_ASK, ApprovalDecision
 from localmelo.melo.contracts.tools import ProvidedTool
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.support import config, gateway_endpoint
-from localmelo.support.browser.driver import RawPage
+from localmelo.support.browser import sites
+from localmelo.support.browser.driver import BrowserError, RawPage, Shot, TabInfo
 from localmelo.support.browser.provider import BrowserToolProvider
+from localmelo.support.browser.sites import origin_of
 from localmelo.tests.browser.fakes import FakeDns, FakeDriver, link, page
 
 HOME = "https://example.com/"
@@ -31,12 +33,45 @@ HINT = "For a task's result, use task_get."
 
 
 class Anywhere(FakeDriver):
-    """A browser that loads every address: one it has no page for is the console."""
+    """A browser that loads every address: one it has no page for is the console.
+
+    A wait polls whatever the tab shows at that moment, as a real browser
+    does: ``visit`` is an address the page goes to while it is watched, and
+    ``returns`` sends it back before the wait ends.
+    """
+
+    visit = ""
+    returns = False
+
+    def shown(self, url: str) -> RawPage:
+        return self.pages.get(url) or page(url, SECRET, title="localmelo console")
 
     async def page(self, tab: str | None) -> RawPage:
         self.calls.append(("page", tab or ""))
-        url = self._url(tab)
-        return self.pages.get(url) or page(url, SECRET, title="localmelo console")
+        return self.shown(self._url(tab))
+
+    async def wait(
+        self,
+        tab: str | None,
+        until: str,
+        text: str,
+        seconds: float,
+        *,
+        origin: str = "",
+    ) -> bool:
+        self.calls.append(("wait", origin))
+        history = self.tabs_[str(self.current if tab in (None, "current") else tab)]
+        polled = [history[-1]] + ([self.visit] if self.visit else [])
+        if self.visit:
+            history.append(self.visit)
+        found = False
+        for url in polled:
+            if origin and origin_of(url) != origin:
+                continue  # the condition holds only on the page's own site
+            found = found or text in self.shown(url).text
+        if self.visit and self.returns:
+            history.pop()
+        return found
 
 
 class Asks:
@@ -220,20 +255,149 @@ async def test_a_link_to_this_computer_is_not_followed() -> None:
     assert opened(driver) == [HOME] and asks.asked == ["browser:https://example.com"]
 
 
-async def test_a_page_that_moved_to_this_computer_is_not_pictured_or_watched() -> None:
+@pytest.mark.parametrize("tab", [None, "current", "t1"])
+@pytest.mark.parametrize("tool", ["browser_screenshot", "browser_wait"])
+async def test_a_page_that_moved_to_this_computer_is_not_pictured_or_watched(
+    tool: str, tab: str | None
+) -> None:
     # A page read as public can send its tab to the console afterwards; a
-    # picture or a wait on that tab would show it.
+    # picture or a wait on that tab would show it, whichever way the tab is named.
     driver = world()
     tools = await tools_of(driver)
     assert not (await run(tools, "browser_open", url=HOME)).is_error
     driver.tabs_["t1"].append(CONSOLE)
-    shot = await run(tools, "browser_screenshot")
-    assert_refused(shot)
-    assert not shot.images
-    driver.tabs_["t1"].append(CONSOLE)
-    waited = await run(tools, "browser_wait", until="text", text="secret")
-    assert_refused(waited)
+    args = {} if tab is None else {"tab": tab}
+    if tool == "browser_wait":
+        args.update(until="text", text="the secret")
+    out = await run(tools, tool, **args)
+    assert_refused(out)
+    assert not out.images and ("blank", "t1") in driver.calls
     assert not [c for c in driver.calls if c[0] == "wait"]
+
+
+async def test_a_wait_after_a_new_chat_watches_no_tab() -> None:
+    # /new takes back every approval; the tab left on the console is nobody's.
+    driver = world()
+    provider = BrowserToolProvider(driver)
+    tools = {t.definition.name: t for t in await provider.start()}
+    assert not (await run(tools, "browser_open", url=HOME)).is_error
+    driver.tabs_["t1"].append(CONSOLE)
+    provider.forget()
+    out = await run(tools, "browser_wait", until="text", text="the secret")
+    assert out.is_error and "No page is open" in out.text
+    assert not [c for c in driver.calls if c[0] == "wait"]
+
+
+async def test_a_page_that_moves_while_it_is_watched_answers_nothing() -> None:
+    driver = world()
+    driver.visit = CONSOLE
+    tools = await tools_of(driver)
+    assert not (await run(tools, "browser_open", url=HOME)).is_error
+    out = await run(tools, "browser_wait", until="text", text="the secret")
+    assert_refused(out)
+    assert ("wait", "https://example.com") in driver.calls
+    assert ("blank", "t1") in driver.calls
+
+
+@pytest.mark.parametrize("text", ["the secret", "nothing like this"])
+async def test_a_page_that_visits_this_computer_during_a_wait_answers_nothing(
+    text: str,
+) -> None:
+    # Gone to the console and back before the wait ends: the answer must not
+    # depend on what the console showed.
+    driver = world()
+    driver.visit, driver.returns = CONSOLE, True
+    tools = await tools_of(driver)
+    assert not (await run(tools, "browser_open", url=HOME)).is_error
+    out = await run(tools, "browser_wait", until="text", text=text, seconds=1)
+    assert not out.is_error and out.text.startswith("Timed out after 1 s"), out.text
+
+
+class Blind(Anywhere):
+    """A browser that cannot say which page a tab shows."""
+
+    async def tabs(self) -> list[Any]:
+        raise BrowserError("Safari's automation server has no list_tabs tool.")
+
+    async def location(self, tab: str | None) -> str:
+        raise BrowserError("Safari did not answer evaluate_javascript in 15 s.")
+
+
+class Unsure(Anywhere):
+    """A browser that lists its tabs by title only and answers with no address."""
+
+    async def tabs(self) -> list[Any]:
+        return [TabInfo(tab, "", "") for tab in self.tabs_]
+
+    async def location(self, tab: str | None) -> str:
+        return ""
+
+
+@pytest.mark.parametrize("make", [Blind, Unsure])
+@pytest.mark.parametrize("tool", ["browser_screenshot", "browser_wait"])
+async def test_a_tab_whose_page_cannot_be_checked_is_not_pictured_or_watched(
+    make: type[Anywhere], tool: str
+) -> None:
+    driver = make(page(HOME, "Welcome."))
+    tools = await tools_of(driver)
+    assert not (await run(tools, "browser_open", url=HOME)).is_error
+    driver.tabs_["t1"].append(CONSOLE)
+    args = {"until": "text", "text": "the secret"} if tool == "browser_wait" else {}
+    out = await run(tools, tool, **args)
+    assert out.is_error and not out.images and SECRET not in out.text
+    assert not [c for c in driver.calls if c[0] == "wait"]
+
+
+class MovesWhilePictured(Anywhere):
+    async def screenshot(self, tab: str | None) -> Shot:
+        self.tabs_["t1"].append(CONSOLE)  # the page moved while the picture was taken
+        return await super().screenshot(tab)
+
+
+async def test_a_picture_taken_while_the_page_moved_is_dropped() -> None:
+    driver = MovesWhilePictured(page(HOME, "Welcome."))
+    tools = await tools_of(driver)
+    assert not (await run(tools, "browser_open", url=HOME)).is_error
+    out = await run(tools, "browser_screenshot")
+    assert_refused(out)
+    assert not out.images
+
+
+async def test_the_tab_list_shows_only_pages_melo_checked() -> None:
+    driver = world()
+    driver.pages[CONSOLE] = page(CONSOLE, SECRET, title="localmelo console " + SECRET)
+    provider = BrowserToolProvider(driver)
+    tools = {t.definition.name: t for t in await provider.start()}
+    await run(tools, "browser_open", url=HOME)
+    await run(tools, "browser_open", url=HOME + "news")
+    driver.tabs_["t1"].append(CONSOLE)  # moved itself after it was read
+    listing = (await run(tools, "browser_tabs", action="list")).text
+    assert "  t1 (not checked)" in listing and "127.0.0.1" not in listing
+    assert "console" not in listing and SECRET not in listing
+    assert '* t2 https://example.com/news "T"' in listing
+    provider.forget()
+    listing = (await run(tools, "browser_tabs", action="list")).text
+    assert "t1 (not checked)" in listing and "t2 (not checked)" in listing
+    assert "example.com" not in listing
+
+
+@pytest.mark.parametrize(
+    "url", ["http://evil.com\uff20127.0.0.1/", "http://[::ffff:127.0.0.1]./"]
+)
+async def test_an_address_python_cannot_split_is_refused_in_plain_words(
+    url: str,
+) -> None:
+    # `＠` becomes `@` under the normalization a browser applies; Python refuses
+    # to split such an address and must not hand the model its own error.
+    with pytest.raises(BrowserError, match="That is not a valid http or https address"):
+        sites.require_origin(url)
+    asks, driver = Asks(), world()
+    tools = await tools_of(driver)
+    with asking(asks):
+        out = await run(tools, "browser_open", url=url)
+    assert out.is_error and "not a valid http or https address" in out.text
+    assert "NFKC" not in out.text and "netloc" not in out.text
+    assert not asks.asked and not opened(driver)
 
 
 def _console_at(host: str, port: int) -> None:

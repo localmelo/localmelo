@@ -101,8 +101,8 @@ Safari is not set up for melo yet. In Safari, open Settings > Developer and turn
 | `browser_find` | 按标签或地址中的词搜索上一次读取的元素。 |
 | `browser_follow` | 打开上一次读取中某个链接的地址。它打开地址，不做点击。 |
 | `browser_back` | 在该标签页中后退一页。 |
-| `browser_tabs` | 列出 melo 的标签页、切换或关闭其中一个。 |
-| `browser_wait` | 等待（最多 30 秒）页面加载完成，或某段文字出现或消失。 |
+| `browser_tabs` | 列出 melo 的标签页、切换或关闭其中一个。melo 没有检查过页面的标签页显示为 *(not checked)*。 |
+| `browser_wait` | 等待（最多 30 秒）melo 打开的页面加载完成，或某段文字出现或消失。 |
 | `browser_screenshot` | 给页面拍一张图。图片随对话保存，网页控制台会显示；终端不绘制图片。能读图的模型也会收到它（见[配置参考](../reference/configuration.md)中的 `tool_images`）。 |
 
 页面以一个有界的块交给模型：
