@@ -163,7 +163,7 @@ Older chat turns that may hold the answer, closest first. Open the ones you need
 - 笔记的显示不变。列表不受 `recall_docs` 和 `recall_chars` 限制，同一个对话的轮次数也不设上限：最多 `recall_list_max` 轮，最好的在前。`search_memory` 返回同样的行。
 - `open_memory` 接收这些行里的一到五个编号，把每一轮完整返回：你说的话和 melo 的回复，附上日期和对话，最多 `recall_open_chars` 个字符（更长的一轮在句末截断，并以 `… (cut)` 结尾）。编号不存在、属于你已删除的对话，或不是对话轮次的编号（例如笔记的编号），都不会打开任何内容，并会说明这一点。这一轮的 `turn.memory` 事件用 `opened` 列出打开过的轮次。
 
-**记忆条目（开发者设置）。** 以前的对话轮次是原始文本。使用 `melo memory ingest FILE -X ingest=compress` 时，聊天模型会每次读取 `compress_at_chars` 个字符的已导入对话，并从中写出简短的记忆条目：每条有标题、一两句话的正文、类型（`profile`、`semantic` 或 `episodic`）以及它所来自的轮次。模型漏掉的长期陈述，由规则补成条目。每个条目随后按规则（不发起模型请求）与已有的同类型条目比对，出现以下五种结果之一：
+**记忆条目（开发者设置）。** 以前的对话轮次是原始文本。使用 `melo memory ingest FILE -X ingest=compress` 时，聊天模型会每次读取 `compress_at_chars` 个字符的已导入对话，并从中写出简短的记忆条目：每条有标题、一两句话的正文、类型（`profile`、`semantic` 或 `episodic`）以及它所来自的轮次。模型漏掉的长期陈述，由规则补成条目。编码器像步骤审查一样，请本地模型在关闭思考的情况下回答，所以默认会思考的模型不会把回答用在思考上。每个条目随后按规则（不发起模型请求）与已有的同类型条目比对，出现以下五种结果之一：
 
 | 结果 | 做法 |
 |---|---|
