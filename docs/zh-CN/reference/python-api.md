@@ -43,6 +43,7 @@ agent = Agent(llm=llm, options=AgentOptions(builtins=["file_read"], timeout_s=60
 | `reflection_gate` | `"patient"` | 使用 `"reflect"` 时为 `"patient"`、`"flags"` 或 `"utility"`；见[反思](../concepts/how-it-works.md#reflection)。 |
 | `answer_on_stop` | `True` | `True`：以 `gate_stopped` 或 `budget_exhausted` 结束且没有答案的运行，会再发出一次不带工具的请求，根据已收集的证据索要答案；答案里没有任务要求的收尾行时，再发出一次请求把它加上；`False` 两种请求都不发。见[运行结果](run-results.md#statuses)。 |
 | `max_calls` | `None` | 不小于 2 的整数：一次运行最多发出的模型请求数；在会超出它的那个请求之前运行以 `budget_exhausted` 结束（开启 `answer_on_stop` 时，最后一次调用留给答案）。`None`：没有上限。见[运行结果](run-results.md#statuses)。 |
+| `refused_steps` | `0` | 一步里的每个调用都被策略检查拒绝时（工具返回了 `localmelo.melo.contracts.tools` 的 `refuse_call(...)`、工具提出的询问被拒绝，或批准策略拒绝了调用），这一步不计入 `max_steps`，每次运行最多这么多步。这些步仍然会发出请求。`0`：每一步都计数。 |
 | `tool_exposure` | `"retrieve"` | `"retrieve"` 或 `"all"`；见[如何提供工具](tools.md#how-tools-are-offered)。 |
 | `builtins` | `None` | 要注册的内置工具：`None` 表示该模式的默认集合，空集合表示没有，或者给出一个名称集合。 |
 | `memory` | `True` | `False` 关闭长期记忆。 |

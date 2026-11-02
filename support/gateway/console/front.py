@@ -13,11 +13,13 @@ control phrase that names a task changes it, with an echo line and Undo; a
 follow-up word with a task's name sends the message to that task; none of
 them calls the model. Every other message is one turn of :class:`FrontAgent`,
 which has its own options (thinking off, at most :data:`FRONT_STEPS` steps, no
-reflection), the task tools of :class:`FrontTools` and ``search_files``. A
-turn that has not settled in those steps, or whose reply only says what it
-will do, ends ``completed`` and starts the work as a task, or, for a
-question, asks "Start this as a task?"; the sentence is in the message's
-language.
+reflection; steps whose calls were all refused do not count, up to
+:data:`FRONT_REFUSED_STEPS`), the task tools of :class:`FrontTools` and
+``search_files``. A turn that has not settled in those steps, or whose reply
+only says what it will do, ends ``completed``: a request starts the work as a
+task; anything else is answered from what the turn found, and a question code
+offers also shows "Start this as a task?" (#440); the sentences are in the
+message's language.
 
 A message to a task (``task_message``, or code's follow-up route) is read at
 the task's next step while it runs, and continues a done, failed or stopped
@@ -420,15 +422,17 @@ def _plain_answer(routed: Routed, typed: str, composed: str) -> bool:
 
 
 class FrontAgent(Agent):
-    """The main chat's Agent: a run that does not settle is handed off as a task.
+    """The main chat's Agent: a run that does not settle starts a task, or answers.
 
-    A run that runs out of steps, or whose answer only says what it will do
-    (:func:`~localmelo.support.gateway.front_rules.intention_only`), ends
-    ``completed`` with :func:`handoff_text` as its answer, in the
-    ``run.finished`` the session stores and in the conversation the next turn
-    reads; ``front`` then starts the task or, for a question, asks. Each run
-    also reads the tasks that ended since the last one. Without ``front`` it
-    is a plain Agent.
+    A run that runs out of steps, gets stuck, or whose answer only says what
+    it will do (:func:`~localmelo.support.gateway.front_rules.intention_only`)
+    ends ``completed``, in the ``run.finished`` the session stores and in the
+    conversation the next turn reads: for a request (``start_rule`` ``start``)
+    with :func:`handoff_text`, and ``front`` starts the task; otherwise with an
+    answer from what the run found (:meth:`_closing_answer`), and ``front``
+    offers the task only when ``start_rule`` says ``offer``. Each run also
+    reads the tasks that ended since the last one. Without ``front`` it is a
+    plain Agent.
     """
 
     front: Front | None = None
