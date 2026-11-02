@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections import deque
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -19,7 +20,7 @@ from localmelo.melo.agent import Agent
 from localmelo.melo.contracts.approvals import ApprovalDecision
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.contracts.tools import refuse_call
-from localmelo.melo.schema import Message, ToolCall, ToolDef
+from localmelo.melo.schema import Message, ToolCall, ToolDef, ToolResult
 from localmelo.tests.legacy_options import legacy_options
 
 
@@ -180,6 +181,27 @@ async def test_the_same_refused_call_again_counts() -> None:
     outcome = await agent.run_task("note it")
     assert outcome.status == "budget_exhausted"
     assert llm.calls == 2, "the first refusal was free, its repeat was not"
+
+
+def test_the_same_refused_command_with_new_words_counts() -> None:
+    """The ``why`` only describes a step: rewording it does not make a fresh refusal."""
+    agent = _agent(FakeLLM([]))
+    run = SimpleNamespace(refused_calls=set())
+    outcome = SimpleNamespace(error_category=None)
+
+    def free(tool: str, **arguments: Any) -> bool:
+        call = ToolCall(tool_name=tool, arguments=arguments, id="c")
+        result = ToolResult(tool, error="Not allowed.")
+        return agent._refused_free(call, result, outcome, None, ["no"], [], run)  # type: ignore[arg-type]
+
+    assert free("shell_exec", command="make", why="One reason") is True
+    assert free("shell_exec", command="make", why="Another reason") is False
+    assert free("shell_exec", command="make deploy", why="One reason") is True
+    assert free("python_exec", code="print(1)", why="One reason") is True
+    assert free("python_exec", code="print(1)", why="Another") is False
+    # Another tool's ``why`` is its own argument: a different call.
+    assert free("create_issue", title="x", why="One reason") is True
+    assert free("create_issue", title="x", why="Another reason") is True
 
 
 def test_the_allowance_is_checked() -> None:

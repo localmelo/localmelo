@@ -110,13 +110,17 @@
           "type": "function",
           "function": {
             "name": "python_exec",
-            "description": "Execute Python code and return the result",
+            "description": "Execute Python code and return the result. Give why for a step that changes anything.",
             "parameters": {
               "type": "object",
               "properties": {
                 "code": {
                   "type": "string",
                   "description": "Python code"
+                },
+                "why": {
+                  "type": "string",
+                  "description": "One short sentence, in the person's language, saying what this step does and why (shown on approval cards)"
                 }
               },
               "required": [
@@ -217,13 +221,17 @@
           "type": "function",
           "function": {
             "name": "python_exec",
-            "description": "Execute Python code and return the result",
+            "description": "Execute Python code and return the result. Give why for a step that changes anything.",
             "parameters": {
               "type": "object",
               "properties": {
                 "code": {
                   "type": "string",
                   "description": "Python code"
+                },
+                "why": {
+                  "type": "string",
+                  "description": "One short sentence, in the person's language, saying what this step does and why (shown on approval cards)"
                 }
               },
               "required": [

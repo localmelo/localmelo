@@ -610,7 +610,9 @@ it. A task in Auto asks nobody, so nothing holds it, and its calls run
 under the write sandbox. Its object adds `blocked`, the steps Auto blocked
 (oldest first: `request_id`, `call_id`, `name`, `step_key`, `reason`,
 `review`, `preview`, `ts`, `turn`, `can_allow`, and `used_at`, when the
-allowed step ran, else `null`), and `allowances` as a chat's. The task goes
+allowed step ran, else `null`), and `allowances` as a chat's. A blocked
+step's `review` carries the card's `gist` (see `pending_approvals` in `GET
+/api/sessions/{id}`) when the call had one. The task goes
 on without a blocked step. `POST
 /api/tasks/{task_id}/blocks/{request_id}/allow` allows it once (as for a
 chat) and sends the go-ahead message to the task: 202 `{"task": ...,
@@ -875,8 +877,24 @@ token total.
   `reasons` are at most three sentences that say why melo asks ("Installs
   playwright with pip into .signin_venv (downloads about 42 MB)."), secrets
   redacted. `categories` are the rules' categories, strongest first
-  (`install`, `download`, `outside_write`, ...). A `high` call asks every time and the card offers no `session`
+  (`install`, `download`, `outside_write`, `system`, `app_control`, ...). A `high` call asks every time and the card offers no `session`
   answer.
+- A `pending_approvals` entry's `gist` is the sentence the card starts with, as
+  `{say: {id, params}, by, warn?: {id, params}, note?, apps?}`, or `null` for a tool
+  whose card says it itself (a browser site). For a command or a script `by` is
+  `code`: melo built `say` from the call and it names every effect in order
+  (`then` holds two sentences, `more` a sentence and a count; a param may be
+  another `{id, params}` or a list of names). `by` is `model` only when the rules
+  found nothing and the sentence is the model's own words (a `why` argument, or the
+  comment at the top of a script; `say.params.text`). When the rules found
+  something, the words are `note` instead. A client shows them with the label
+  `gist.say.model` (`melo says: …`), so the words always read as the model's. A
+  client says everything in its own language with the catalog entries
+  `gist.say.<id>`, and joins `apps` with `gist.list.*`; `warn` is set when the
+  model's words disagree with what the code does (`delete` or `send_out`) and
+  quotes them. The sentence is for reading: `review` decides whether the call
+  asks, and `categories` has `app_control` for a script that operates one app by
+  its plain name (click-only, like `system`).
 - A `pending_approvals` entry's `target` is set for a `file_write`: the
   path `path_label` (relative to the workspace, else with the home folder
   as `~`), whether the file `exists`, and its `size_bytes`, read when the
@@ -970,7 +988,8 @@ Its `data`:
   error), the sentence of the stop answer that says what is left on a
   `stopped` one (else its first two lines, else `Ran out of steps`), what is
   asked on a `waiting` one (`Wants to run Python`, `Wants to
-  write notes.md`), and the answer on an `answered` one (`Allowed once`,
+  write notes.md`, or the approval card's own sentence when the call has one:
+  `Needs your OK: List the files here`), and the answer on an `answered` one (`Allowed once`,
   `Allowed for this chat`, `Allowed for this task`, `Allowed automatically`,
   `Denied`, `No answer in time`, `Not run: it stopped first`).
 - A `waiting` card has a `request_id`. When that approval is answered, a card

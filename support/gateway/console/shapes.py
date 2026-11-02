@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.checker.review.gist import step_gist
 from localmelo.melo.contracts.approvals import ApprovalRequest
 from localmelo.melo.contracts.events import json_safe_payload
 from localmelo.melo.contracts.folders import OutsideAccess
@@ -174,11 +175,14 @@ def approval_json(request: ApprovalRequest) -> dict[str, Any]:
     ``target`` is the shared ``approval_target`` shape for a ``file_write``
     request, read per response, and ``None`` for every other tool.
     ``review`` is what the checker's rules found, or ``None`` (#279).
+    ``gist`` is the sentence the card starts with (#454): catalog ids and
+    parameters, or ``None`` for a tool whose card has a sentence of its own.
     ``outside`` is set for a path outside the workspace (#405).
     """
     root = request.workspace_root
     arguments = dict(request.arguments)
     safe_arguments = json_safe_payload(arguments)
+    gist = step_gist(request.tool_name, arguments, request.review)
     return {
         "request_id": request.request_id,
         "call_id": request.call_id,
@@ -196,6 +200,7 @@ def approval_json(request: ApprovalRequest) -> dict[str, Any]:
             }
         ),
         "review": _review_json(request.review, root),
+        "gist": None if gist is None else gist.to_json(),
         "outside": outside_json(request.outside),
     }
 

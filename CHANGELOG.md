@@ -9,6 +9,49 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- An approval card says in one plain sentence what the step will do (#454). The
+  console's Ask and Auto-blocked cards, the terminal's approval panel and a blocked step's row
+  start with it, before the question and the reasons, and show the code under it. For a command
+  or a script the sentence is always melo's own, built from the call, and names every effect it
+  finds in order ("Operate Safari, then delete files"; a command too long to show ends "and 2
+  more"), reads a command the way a shell does (a `;` or `&&` inside quotes cuts nothing, and a
+  command shows as it was written) and always adds what the rules found (a script that deletes
+  files, even when its code does not show it); nothing asks a model for it, and the question and the reasons still come only from
+  melo's rules. The model's own words (a `why` argument, or a comment at the top of the code) are
+  shown beside it, always labelled "melo says: …": as the sentence when the rules found nothing,
+  and below the sentence when they found something, so they can never make a step look
+  safer. A risky step shows its code open; only a routine one folds it. If the words and the
+  code disagree about deleting files or sending data out, a warning quotes the words ("melo
+  described this as “Close the tabs”, but the code deletes files."). Browser sites, file writes
+  and edits, and folders outside the workspace say it in their own question and have no extra
+  line. The approval record of `tool.finished` gets `review.gist`, `pending_approvals[]` gets
+  `gist` (catalog ids `gist.say.<id>` and `gist.warn.<id>`, so each surface says it in its
+  language), and the guides and `docs/for-agents.md` describe both. The main chat's card for a
+  waiting approval says the same sentence (`Needs your OK: …`) and the warning.
+- `shell_exec` and `python_exec` take an optional `why` (#454): one short sentence, in the person's
+  language, saying what the step does and why. It is the model's words an approval card shows
+  (cut at 120 characters with `…`), is not required, and changes nothing about what runs, the
+  step's key, how the rules review it, or when a refused or repeated step counts as the same. The
+  model's tool list changes: `why` is added to both tools, and their descriptions end with `Give
+  why for a step that changes anything.` (about 190 more characters on the wire for each tool,
+  380 when both are offered). A request that offers either tool is not the same as before, so
+  the recorded wire fixtures were re-recorded. Only `why` counts as the model's words: another
+  argument named `description` or `purpose` is the content of a call, not a reason.
+- A script that operates another app is its own kind, "Control an app?" (`app_control`, #454).
+  It is an allow-list: only an `osascript` script that is one `tell application "<name>"` block
+  (or one-liner) with a plain app name and plain verbs (`activate`, `quit`, `open location`
+  of a web address, `close`, `get` and `set` of a property), the same in JXA
+  (`Application("<name>")`), or `open -a <name>` (`-b com.apple.<Name>`) with nothing else is
+  this kind. It names the app in its reason and is as strict as "Change system settings?" was:
+  a chat-wide allow never covers it, your words and your model's review never allow it, Auto
+  blocks it, and only Allow once runs it. Everything else a script can say stays "Change system
+  settings?", however it is spelt: a shell (`do shell script` in any spacing, a raw
+  `«event»`, a loaded script, the Objective-C bridge), keys, System Events or System
+  Settings, a terminal or an editor by any name or bundle id, a path or `.app` name, a second
+  app, `open` with arguments or a second `-a`, and `shortcuts run` (a Shortcut can run
+  anything). The model review that Auto uses gains the kind and one line about scripting
+  another app. The version of the rules (`review.rules_version`) is now 2.
+
 - Developer only, not visible by default: `[tools] web_fetch_allow_local` lets `web_fetch` read
   test servers you list on this computer, for a test that needs a fixture page. It is a list of
   exact `127.0.0.1:PORT` or `[::1]:PORT` entries, empty (off) by default, set in the config file

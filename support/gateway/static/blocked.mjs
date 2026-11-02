@@ -1,11 +1,12 @@
-import {formatTime, language, t} from './i18n.mjs';
+import {formatTime, gistSentence, language, nameList, t} from './i18n.mjs';
 
 // The kinds of step auto mode blocks (#339), as the review names them.
 export const CATEGORIES = new Set([
-  'self', 'credentials', 'system', 'persistence', 'remote_code', 'install', 'restore', 'env', 'download',
+  'self', 'credentials', 'system', 'app_control', 'persistence', 'remote_code', 'install', 'restore', 'env', 'download',
   'outside_write', 'delete', 'service', 'send_out', 'opaque', 'beyond_request', 'unreviewed',
 ]);
-// What the person's words can allow ("go ahead"); the rest only an Allow once, and `self` never.
+// What the person's words can allow ("go ahead"); the rest (`app_control` and `system` among them) only an
+// Allow once, and `self` never.
 const WORDS_ALLOW = new Set(['install', 'restore', 'env', 'download', 'outside_write', 'delete', 'send_out', 'service', 'beyond_request']);
 // How long an Allow once holds, as the server keeps it.
 export const ALLOW_ONCE_S = 30 * 60;
@@ -43,21 +44,44 @@ export function reviewWords(review, folder = '') {
 /**
  * The sentences under a blocked step's title, in the page's language. English keeps the rules' own
  * sentences, which name the package, the file or the host; another language names the kind of step
- * in its own words (the step itself is on the card, as written). A review the model settled says what
- * it found by its category. A review with no sentences of its own reads by category in any language.
+ * in its own words (the step itself is on the card, as written), and the apps a script operates when
+ * the review's `gist` names them. A review the model settled says what it found by its category. A
+ * review with no sentences of its own reads by category in any language.
  */
 export function reasonLines(review, categories) {
   const written = (Array.isArray(review.reasons) ? review.reasons : []).map(String).filter(Boolean);
   if (written.length && language() === 'en') return written;
   const modelFound = review.by === 'model' && !['beyond_request', 'opaque', 'unreviewed'].includes(categories[0]);
   if (modelFound) return [t('auto.reason.model', {what: t(`auto.words.${categories[0]}`)})];
-  return categories.slice(0, 3).map((category) => t(`auto.reason.${category}`));
+  const apps = isObject(review.gist) && Array.isArray(review.gist.apps) ? nameList(review.gist.apps) : '';
+  return categories.slice(0, 3).map((category) => (
+    category === 'app_control' && apps ? t('auto.reason.appControlNamed', {apps}) : t(`auto.reason.${category}`)
+  ));
+}
+
+/**
+ * The sentence an approval card starts with, its warning and the model's note, in the page's language,
+ * from the `gist` the server sends (catalog ids and parameters); null when there is none. The sentence is
+ * the code's own whenever the rules found the step risky; the model's words then stand in `note`, already
+ * labelled as the model's ("melo says: ..."). The warning is `''` unless the model's words do not match
+ * what the code does.
+ */
+export function gistWords(gist) {
+  const say = isObject(gist) ? gist.say : null;
+  if (!isObject(say) || typeof say.id !== 'string') return null;
+  const warn = isObject(gist.warn) && typeof gist.warn.id === 'string' ? gist.warn : null;
+  return {
+    sentence: gistSentence(say),
+    warning: warn ? t(`gist.warn.${warn.id}`, isObject(warn.params) ? warn.params : {}) : '',
+    note: typeof gist.note === 'string' && gist.note ? t('gist.say.model', {text: gist.note}) : '',
+  };
 }
 
 /**
  * What a blocked call's card says, or null for a call auto mode did not block. `step` is the call's
- * code or command on one line; `allow` whether Allow once may run it (never for `self`, never for a
- * call a stopped turn left unreviewed); `words` whether "go ahead" can allow it too.
+ * code or command on one line; `gist` the sentence the card starts with, its warning and the model's note (or null);
+ * `allow` whether Allow once may run it (never for `self`, never for a call a stopped turn left
+ * unreviewed); `words` whether "go ahead" can allow it too.
  */
 export function blockFacts({approval, name = '', arguments: args = {}, preview = '', requestId = ''} = {}) {
   if (!isBlock(approval)) return null;
@@ -72,6 +96,7 @@ export function blockFacts({approval, name = '', arguments: args = {}, preview =
     category: first,
     title: first ? t('auto.blocked.title', {title: t(`auto.title.${first}`)}) : t('auto.blocked.stopped'),
     reasons: reasonLines(review, categories),
+    gist: gistWords(review.gist),
     name: String(name),
     step: stepText(name, args, preview),
     self,
@@ -125,6 +150,14 @@ export function blockCard(doc, facts, {allowing = {state: 'open'}, busy = false,
   };
   const card = node('section', 'block-card');
   card.dataset.state = facts.self ? 'never' : allowing.state;
+  // What the step does comes first, in a plain sentence; a warning follows when the words and the code differ.
+  if (facts.gist?.sentence) card.append(node('p', 'block-gist', facts.gist.sentence));
+  if (facts.gist?.warning) {
+    const warning = node('p', 'block-mismatch', facts.gist.warning);
+    warning.setAttribute('role', 'alert');
+    card.append(warning);
+  }
+  if (facts.gist?.note) card.append(node('p', 'block-says', facts.gist.note));
   const head = node('div', 'block-head');
   const mark = node('span', 'block-mark', '⊘');
   mark.setAttribute('aria-hidden', 'true');
@@ -136,9 +169,14 @@ export function blockCard(doc, facts, {allowing = {state: 'open'}, busy = false,
   why.push(t(facts.self ? 'auto.blocked.self' : facts.words ? 'auto.blocked.why' : 'auto.blocked.clickOnly'));
   card.append(node('p', 'block-why', why.join(t('common.sentenceGap'))));
   if (facts.step) {
+    // The code follows. A blocked step is never routine, so it is open: the sentence and the kind do not
+    // stand in for reading it.
     const step = node('code', 'block-step', facts.step);
     step.title = facts.step;
-    card.append(step);
+    const fold = node('details', 'block-code');
+    fold.open = true;
+    fold.append(node('summary', '', t('gist.showCode')), step);
+    card.append(fold);
   }
   if (!facts.allow) return card;
   const foot = node('div', 'block-foot');
