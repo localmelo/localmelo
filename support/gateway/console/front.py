@@ -116,7 +116,14 @@ from localmelo.support.gateway.front_rules import (
     triage,
     work_request,
 )
-from localmelo.support.gateway.handover import Handover, handover_of
+from localmelo.support.gateway.handover import (
+    Handover,
+    from_snapshot,
+    handover_of,
+    picked_lines,
+    snapshot,
+    turn_lines,
+)
 from localmelo.support.gateway.i18n import said, said_text, t, t_in
 from localmelo.support.gateway.reminder_time import Reminder, parse_reminder, parse_when
 from localmelo.support.gateway.task_endings import report_text, shown
@@ -1171,11 +1178,35 @@ class Front:
     async def ask_to_start(self, turn: TurnInfo) -> None:
         """ "Start this as a task?" for the person's whole message, in place of a task the model made up."""
         self._count(turn)  # the turn has its offer: nothing is handed off again
+        handed = await self._offered(turn)
         await self.echo(
             {"echo": "ask", "text": turn.user_text, "words": turn.typed_text,
              "turn_id": turn.id, "turn": turn.turn, "line": "Start this as a task?",
-             "said": said("front.echo.ask")}
+             "said": said("front.echo.ask"), **({"handed": handed} if handed else {})}
         )  # fmt: skip
+
+    async def _offered(self, turn: TurnInfo) -> dict[str, Any]:
+        """What *turn*, which offers a task, recalled, searched or opened, as the
+        lines a task would get (#463), kept with its card for Start; ``{}`` with
+        memory off, for a turn melo began, or when there is none."""
+        memory = self.console.memory
+        if memory is None or not memory.enabled:
+            return {}
+        try:
+            handover = await handover_of(
+                self.console.store, self.chat_id, turn, CHAT_TURN.get()
+            )
+            if not (
+                handover.used or handover.searched or handover.opened or handover.digest
+            ):
+                return {}
+            _, shown = turn_lines(handover)
+            return snapshot(await picked_lines(memory, handover, shown=shown))
+        except Exception:
+            logger.warning(
+                "Could not keep what the chat recalled with its offer", exc_info=True
+            )
+            return {}
 
     def typed(self) -> str:
         """What the person typed in the running turn, never an attachment ("" with none).
@@ -1706,12 +1737,15 @@ class Front:
         create_key: str | None = None,
         asked_in: int | None = None,
         asked_at: float | None = None,
+        kept: object = None,
     ) -> dict[str, Any]:
         """Start *work* as a task this chat owns, at the level the person's words give.
 
         A task started from a card the chat showed earlier names the turn that
         offered it (*asked_in*), or the card's time (*asked_at*): it starts with
-        the chat's turns before that, not with what was said since.
+        the chat's turns before that, not with what was said since, and with what
+        that turn picked as the card kept it (*kept*, :func:`~.handover.snapshot`),
+        checked again when the task is made.
         """
         level, reason = triage(typed)
         try:
@@ -1735,6 +1769,9 @@ class Front:
             before=asked_in,
             until=asked_at if asked_in is None else None,
         )
+        lines, over = from_snapshot(kept)
+        if lines:
+            handover = dataclasses.replace(handover, kept=lines, kept_over=over)
         # The task starts at once, under the request's first words; the model's
         # task_create brings a title of its own, any other long request is named later.
         echo = await self._start(
@@ -2036,9 +2073,11 @@ class Front:
         # The work is the whole message; its level, only the typed words.
         if asks:
             data = {"echo": "ask", "text": turn.user_text, "words": turn.typed_text}
+            handed = await self._offered(turn)
             await self.echo(
                 {**data, "turn_id": turn.id, "turn": turn.turn,
-                 "line": "Start this as a task?", "said": said("front.echo.ask")}
+                 "line": "Start this as a task?", "said": said("front.echo.ask"),
+                 **({"handed": handed} if handed else {})}
             )  # fmt: skip
         else:
             await self.delegate(turn.user_text, typed=turn.typed_text, turn=turn)
@@ -2155,6 +2194,7 @@ class Front:
                 of=echo_id,
                 asked_in=asked if isinstance(asked, int) else None,
                 asked_at=shown_at,
+                kept=echo.get("handed"),
             )
         record = await self.record(str(echo.get("task_id", "")))
         if record is None:

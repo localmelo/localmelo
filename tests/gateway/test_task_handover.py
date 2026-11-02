@@ -294,7 +294,7 @@ async def test_the_lines_come_opened_searched_recalled_then_the_digest(
             DigestItem("s7", 3, "Main chat, 09:10 · the user: Alex has two offers"),
         ),
     )
-    lines, kept, _ = await picked_lines(memory, handover)
+    lines, kept, *_ = await picked_lines(memory, handover)
     body = lines.splitlines()
     assert [line.split(" (")[0] for line in body] == [
         "- the user said “What does Alex's résumé say?”; melo replied “Alex led the "
@@ -429,13 +429,13 @@ async def test_opened_text_is_cut_at_a_sentence_end_before_a_line_goes(
         opened=({"session_id": long_chat, "turn": 1, "id": long_ids[0]},),
         used=items,
     )
-    lines, kept, _ = await picked_lines(memory, handover)
+    lines, kept, *_ = await picked_lines(memory, handover)
     assert len(lines) <= PICKED_CHARS
     first, *rest = lines.splitlines()
     assert f"city. {CUT_MARK} (" in first, first
     assert len(rest) == 3 and kept == set(small)
     # Less room: the opened text goes down to its floor, then the lowest lines go.
-    lines, kept, _ = await picked_lines(memory, handover, chars=OPENED_FLOOR + 140)
+    lines, kept, *_ = await picked_lines(memory, handover, chars=OPENED_FLOOR + 140)
     assert len(lines) <= OPENED_FLOOR + 140
     first, *rest = lines.splitlines()
     assert CUT_MARK in first and len(rest) < 3
@@ -451,7 +451,8 @@ async def test_a_turn_or_item_opened_and_gone_since_is_left_out(
             {"item": 999, "sources": []},
         )
     )
-    assert await picked_lines(memory, handover) == ("", frozenset(), frozenset())
+    found = await picked_lines(memory, handover)
+    assert (found.lines, found.notes, found.over) == ("", frozenset(), frozenset())
 
 
 async def test_with_memory_items_the_lines_are_items_and_carry_no_id(
@@ -480,7 +481,7 @@ async def test_with_memory_items_the_lines_are_items_and_carry_no_id(
         handover = Handover(
             opened=({"item": item_id, "sources": [["s1", 1]]},), used=(found.item,)
         )
-        lines, kept, _ = await picked_lines(memory, handover)
+        lines, kept, *_ = await picked_lines(memory, handover)
         assert lines.splitlines() == [
             f"- “Alex's search”: Alex wants a staff role at a large company. "
             f"({found.item.where})"

@@ -60,6 +60,7 @@ from localmelo.support.gateway.front_rules import asks_commit, asks_tests
 from localmelo.support.gateway.handover import (
     Handover,
     inert,
+    kept_lines,
     own_words,
     picked_block,
     picked_lines,
@@ -848,7 +849,9 @@ class TaskWorkers:
 
         Nothing without a handover. The turns are the chat's own conversation,
         which its run carries with memory on or off; with memory off nothing is
-        picked. A failed read of the picked items keeps the turns, and is logged.
+        picked. A task started from a card gets what the offering turn kept
+        (``handover.kept``), checked again now. A failed read of the picked
+        items keeps the turns, and is logged.
         """
         if handover is None:
             return "", "", frozenset()
@@ -856,7 +859,11 @@ class TaskWorkers:
         if self.memory is None or not self._memory_on():
             return turns, "", frozenset()
         try:
-            picked = await picked_lines(self.memory, handover, shown=shown)
+            picked = await (
+                kept_lines(self.memory, handover)
+                if handover.kept
+                else picked_lines(self.memory, handover, shown=shown)
+            )
         except Exception:
             log.warning(
                 "Could not read what the chat recalled for a task", exc_info=True

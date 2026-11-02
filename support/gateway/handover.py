@@ -100,6 +100,11 @@ class Handover:
     searched: tuple[Item, ...] = ()
     opened: tuple[dict[str, Any], ...] = ()
     digest: tuple[DigestItem, ...] = ()
+    # What the turn that offered the task picked, kept with its "Start this as a
+    # task?" card (:func:`snapshot`): each line with its note's key ("" for
+    # none), and the earlier turns an opened line carries whole.
+    kept: tuple[tuple[str, str], ...] = ()
+    kept_over: tuple[tuple[str, int], ...] = ()
 
 
 async def handover_of(
@@ -228,12 +233,14 @@ class _Line:
 
 class Picked(NamedTuple):
     """What :func:`picked_lines` gives: the ``- `` *lines*, the keys of the
-    *notes* among them, and the earlier turns an opened line carries whole
-    (*over*), which the block of newest turns then leaves out."""
+    *notes* among them, the earlier turns an opened line carries whole
+    (*over*), which the block of newest turns then leaves out, and each line
+    with its note's key (*entries*, ``""`` for none)."""
 
     lines: str
     notes: frozenset[str]
     over: frozenset[tuple[str, int]]
+    entries: tuple[tuple[str, str], ...] = ()
 
 
 def _flat(text: str) -> str:
@@ -359,6 +366,60 @@ async def picked_lines(
         frozenset(
             (line.key[1], int(line.key[2])) for line in lines if line.key in earlier
         ),
+        tuple((line.text, line.record) for line in lines),
+    )
+
+
+def snapshot(picked: Picked) -> dict[str, Any]:
+    """*picked* as JSON a "Start this as a task?" card keeps; ``{}`` for nothing."""
+    if not picked.entries:
+        return {}
+    return {
+        "lines": [[text, note] for text, note in picked.entries],
+        "over": sorted([session, turn] for session, turn in picked.over),
+    }
+
+
+def from_snapshot(
+    data: object,
+) -> tuple[tuple[tuple[str, str], ...], tuple[tuple[str, int], ...]]:
+    """The lines and the opened earlier turns a card kept (:func:`snapshot`);
+    anything else in *data* is left out."""
+    if not isinstance(data, dict):
+        return (), ()
+    lines = tuple(
+        (str(entry[0]), str(entry[1]))
+        for entry in data.get("lines") or []
+        if isinstance(entry, list) and len(entry) == 2
+    )
+    over = tuple(
+        (str(entry[0]), int(entry[1]))
+        for entry in data.get("over") or []
+        if isinstance(entry, list) and len(entry) == 2 and isinstance(entry[1], int)
+    )
+    return lines, over
+
+
+async def kept_lines(memory: ChatMemory, handover: Handover) -> Picked:
+    """What the offering turn picked (``handover.kept``), as :func:`picked_lines`
+    gives it, checked again now: a note deleted since, or one of People or
+    Decisions, is left out. The lines were cut to their room when kept."""
+    keys = {note for _, note in handover.kept if note}
+    topics = await _topics(memory) if keys else {}
+    entries = tuple(
+        (text, note)
+        for text, note in handover.kept
+        if text
+        and (
+            not note
+            or (topics.get(note) is not None and topics[note] not in LEFT_OUT_TOPICS)
+        )
+    )
+    return Picked(
+        "\n".join(f"- {_flat(text)}" for text, _ in entries),
+        frozenset(note for _, note in entries if note),
+        frozenset(handover.kept_over),
+        entries,
     )
 
 

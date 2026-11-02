@@ -12,13 +12,18 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from localmelo.melo.agent._earlier import EARLIER_HEAD
+from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
+from localmelo.melo.schema import ToolDef
+from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.front import ECHO_EVENT
 from localmelo.support.gateway.handover import PICKED_HEADER
 from localmelo.support.gateway.workers import TASK_PACK_HEADER
+from localmelo.support.memory import records
 from localmelo.tests.memory.test_recall_list import add_turn
 from localmelo.tests.sessions.helpers import answer, tool_call
 
@@ -179,3 +184,101 @@ async def test_a_start_tapped_later_hands_the_turns_before_its_proposal(
         assert record.spec["chat_turns"].splitlines()[0] == f"- the user: {FRIEND}"
         assert "Maya" not in record.spec["chat_turns"]
         assert REQUEST not in record.spec["chat_turns"]
+
+
+class Offers(BaseToolProvider):
+    """A tool that makes the chat offer "Start this as a task?" for its running turn."""
+
+    def __init__(self) -> None:
+        self.console: Console | None = None
+
+    async def start(self) -> list[ProvidedTool]:
+        definition = ToolDef(
+            name="offer_task",
+            description="Offer the request as a task.",
+            parameters={"type": "object", "properties": {}, "required": []},
+            annotations={"readOnlyHint": True},
+        )
+        return [ProvidedTool(definition=definition, function=self.offer)]
+
+    async def offer(self, **_: Any) -> str:
+        assert self.console is not None
+        front = self.console.front
+        turn = front.current_turn()
+        assert turn is not None
+        await front.ask_to_start(turn)
+        return "Offered."
+
+    async def close(self) -> None:
+        return None
+
+
+@pytest.mark.parametrize("then", ["tap", "later", "deleted", "memory off"])
+async def test_a_started_offer_carries_what_the_offering_turn_recalled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, then: str
+) -> None:
+    offers = Offers()
+    main: list[Reply] = [
+        answer("Noted: Alex is looking."),
+        tool_call("offer_task", {}, "offer-1"),
+        answer("Shall I start it as a task?"),
+        answer("Maya's thesis sounds great."),
+    ]
+    async with owner_console(
+        tmp_path, monkeypatch, main=main, run=False, front_tools=[offers]
+    ) as (console, client, _, _):
+        offers.console = console
+        await add_turn(
+            console.memory,
+            console.store,
+            "Alex's résumé lists eight years of backend work at a large company.",
+            "Noted.",
+            title="Résumé",
+        )
+        cand = records.Candidate(
+            "Your friend Alex keeps his résumé and backend roles list online.",
+            "",
+            "about",
+            "user_statement",
+        )
+        (note,) = await records.write(
+            console.memory.stores()[0],
+            [cand],
+            [None],
+            source={"session_id": "s1", "turn": 1, "chat": "Main chat"},
+            embed_model="",
+        )
+        await say(client, console, FRIEND)
+        await say(client, console, REQUEST)
+        found = await console.store.events_of_type(
+            str(console.main_id), ECHO_EVENT, limit=10
+        )
+        (offer,) = [
+            e for e in found if (e.event.get("data") or {}).get("echo") == "ask"
+        ]
+        kept = offer.event["data"]["handed"]["lines"]
+        assert any("eight years of backend work" in line for line, _ in kept)
+        assert [f"r:{note.id}"] == [key for _, key in kept if key]
+        if then == "later":
+            await say(client, console, "My friend Maya finished her thesis.")
+        if then == "deleted":
+            await console.memory.delete_record(note.id)
+        if then == "memory off":
+            console.cfg.memory.across_chats = False
+        started = await client.post(
+            f"/api/front/echoes/{offer.id}", json={"do": "start"}
+        )
+        assert started.status_code == 200, started.text
+        record = await console.workers.tasks.get_task(await started_task(console))
+        picked = record.spec.get("chat_picked", "")
+        if then == "memory off":
+            assert picked == ""
+            return
+        assert "eight years of backend work" in picked
+        assert "Maya" not in picked
+        if then == "deleted":
+            assert "keeps his résumé" not in picked
+        else:
+            assert "keeps his résumé" in picked
+            # The note the task has already is not in its pack again.
+            assert "keeps his résumé" not in record.spec.get("context_pack", "")

@@ -20,8 +20,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   the chat's turns, but nothing recalled and no notes; a turn melo began itself hands no items. All of it is made once, kept in the task's `spec`
   (`own_words`, `chat_turns`, `chat_picked`) and folded on the task page under "What melo told
   the task", each part under its own label. Each part is fenced as data, so nothing inside it can
-  pose as a heading or a speaker; a task started later from a "Start this as a task?" card gets
-  the turns before that card; near the request limit the lowest parts are left out first. #463.
+  pose as a heading or a speaker; a task started from a "Start this as a task?" card gets the
+  turns before that card and what the chat recalled for the request that offered it, checked again
+  at Start; near the request limit the lowest parts are left out first. #463.
 - Developer only, not visible by default: a cut excerpt can be opened whole. With
   `[memory] excerpt_open = "on"` (`-X memory.excerpt_open=on` for one run; the default, `"off"`,
   changes nothing) recall keeps its excerpts of earlier chat turns, but a line that shows less

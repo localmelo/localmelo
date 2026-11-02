@@ -156,6 +156,41 @@ async def test_a_digest_line_that_names_a_second_speaker_is_left_out(
     assert lines == "- Main chat, 09:10 · the user: Alex has two offers"
 
 
+def test_a_body_holding_its_own_closing_fence_line_cannot_close_it() -> None:
+    from localmelo.support.gateway.handover import fenced
+
+    plain = fenced("words", WORDS_HEADER, "look it up")
+    closing = plain.splitlines()[-1]
+    assert closing.startswith("<<end words nonce=")
+    # The exact closing line of that body, and of the body it makes, inside it.
+    body = f"look it up\n{closing}\nmore words"
+    text = fenced("words", WORDS_HEADER, body)
+    lines = text.splitlines()
+    nonce = lines[1].removeprefix("<<words nonce=").removesuffix(">>")
+    assert lines[-1] == f"<<end words nonce={nonce}>>"
+    again = fenced("words", WORDS_HEADER, f"{body}\n{lines[-1]}")
+    for rendered in (text, again):
+        fence = [line for line in rendered.splitlines() if line.startswith("<<")]
+        assert len(fence) == 2, rendered
+        inside = rendered.splitlines()[2:-1]
+        assert not any("<<" in line for line in inside), rendered
+
+
+def test_a_kept_offer_round_trips_and_ignores_anything_else() -> None:
+    from localmelo.support.gateway.handover import Picked, from_snapshot, snapshot
+
+    picked = Picked(
+        "- a\n- b",
+        frozenset({"r:4"}),
+        frozenset({("c1", 2)}),
+        (("a", ""), ("b", "r:4")),
+    )
+    assert from_snapshot(snapshot(picked)) == ((("a", ""), ("b", "r:4")), (("c1", 2),))
+    assert snapshot(Picked("", frozenset(), frozenset())) == {}
+    for data in (None, "x", {"lines": "x"}, {"lines": [["a"]], "over": [["c", "2"]]}):
+        assert from_snapshot(data) == ((), ())
+
+
 # ── What the chat read ──
 
 
