@@ -377,11 +377,17 @@ async def test_what_got_done_names_the_commits_tasks_reported(tmp_path: Path) ->
         query = llm.requests[0][-1].content
         assert "tasks that ended since the last message" in query
         assert "Committed b60d0892" in query
-        # …and the task tools carry each task's state and the first lines of its answer.
+        # …task_list carries each task's state and the first lines of its answer…
         listed = _tool_result(llm, 1)
         assert f"{task_id} · Fix the e2e list_files check · done · P2 · " in listed
         assert "24 passed. / Committed b60d0892." in listed
-        assert "answer: Fixed the check" in _tool_result(llm, 2)
+        # …and task_get its whole answer, line by line (#440).
+        got = _tool_result(llm, 2)
+        assert "its answer:" in got
+        assert (
+            "Fixed the check in test_e2e_pty.py.\n24 passed.\nCommitted b60d0892."
+            in got
+        )
         # Read once: the next turn does not hear it again.
         llm.replies.append(answer("Nothing new."))
         await _say(client, console, "anything else?")

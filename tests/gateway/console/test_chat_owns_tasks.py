@@ -438,7 +438,12 @@ async def test_ask_mode_still_asks_inside_a_task_the_chat_started(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     code = "print('sunny')"
-    main: list[Reply] = [creates("Weather script"), answer("Started it as a task.")]
+    told = "It is done: the script prints the weather."
+    main: list[Reply] = [
+        creates("Weather script"),
+        answer("Started it as a task."),
+        answer(told),
+    ]
     workers: list[list[Reply]] = [
         [
             tool_call("python_exec", {"code": code}, "w-1"),
@@ -460,7 +465,9 @@ async def test_ask_mode_still_asks_inside_a_task_the_chat_started(
         await until(lambda: _is(console, task_id, "done"))
         assert ran.codes == [code]
         await settled(console)
-        assert await internal_turns(console) == [], "a ready task needs no follow-up"
+        # A ready task's answer comes back to the chat in one turn of its own (#440).
+        [turn] = await internal_turns(console)
+        assert turn.answer == told and "it finished" in turn.user_text
 
 
 async def _is(console: Console, task_id: str, wanted: str) -> bool:
@@ -511,6 +518,8 @@ async def test_a_blocked_install_is_worked_around_and_never_run_again(
             "The package install was blocked, so the task goes on with urllib. "
             "Nothing was installed."
         ),
+        # The continued task ends ready: its answer comes back (#440).
+        answer("It is done: the script fetches the weather with urllib."),
     ]
     workers: list[list[Reply]] = [
         [
@@ -532,8 +541,10 @@ async def test_a_blocked_install_is_worked_around_and_never_run_again(
         await until(lambda: _is(console, task_id, "done"))
         await settled(console)
         assert ran.codes == [], "the install never ran"
-        # The follow-up read the ending and the blocked step, as data.
-        [turn] = await internal_turns(console)
+        # The follow-up read the ending and the blocked step, as data; the
+        # second turn told the ready answer.
+        turn, told = await internal_turns(console)
+        assert "it finished" in told.user_text and "urllib" in told.answer
         assert turn.typed_text == "" and turn.status == "completed"
         assert turn.user_text.startswith(f"[localmelo · follow-up on task {task_id} · ")
         assert "Steps blocked in it" in turn.user_text
@@ -552,7 +563,14 @@ async def test_a_blocked_install_is_worked_around_and_never_run_again(
         assert "file_read" in models["main"].offered[0], "the person's turn has it"
         found = await rows(console, console.main_id)
         kinds = [r["echo"] for r in found]
-        assert kinds == ["started", "followup", "sent", "followed"]
+        assert kinds == [
+            "started",
+            "followup",
+            "sent",
+            "followed",
+            "followup",
+            "followed",
+        ]
         followup, sent, followed = found[1], found[2], found[3]
         assert (followup["why"], followup["lead"]) == (
             "failed",
@@ -584,7 +602,7 @@ async def test_a_blocked_install_is_worked_around_and_never_run_again(
         # Activity says what the chat did, plainly.
         activity = (await client.get("/api/activity")).json()
         results = " / ".join(str(row.get("result")) for row in activity["rows"])
-        assert "Continued the task: Weather script" in results
+        assert "Told you the answer: Weather script" in results
 
 
 async def test_out_of_steps_continues_once_then_asks_then_stops_following_up(
