@@ -8,7 +8,7 @@ import re
 import shlex
 from urllib.parse import urlparse
 
-from localmelo.melo.checker.review import apps
+from localmelo.melo.checker.review import apps, destroys
 from localmelo.melo.checker.review import files as file_rules
 from localmelo.melo.checker.review import python as py_rules
 from localmelo.melo.checker.review.paths import (
@@ -551,6 +551,8 @@ def _review_shell(
                 review_shell(ctx.deeper(), f, inner[0] or inner[1])
         if argv[1:2] == ["run"] and os.path.basename(argv[0]) in _RUN_WRAPPERS:
             file_rules.runner(ctx, f, f"{os.path.basename(argv[0])} run")
+        if argv and all(re.fullmatch(r"[A-Za-z_]\w*=\$(?:!|\{!\})", a) for a in argv):
+            f.started.update(a.split("=")[0] for a in argv)  # pid=$! : started here
         argv = _unwrap(f, argv)
         if not argv:
             continue
@@ -849,6 +851,11 @@ def run_argv(
         if re.search(r"(\$\(|`)\s*(curl|wget)\b", code):
             f.add("remote_code", "Runs a script downloaded from the internet.")
         review_shell(ctx.deeper(), f, code)
+    elif prog in _SHELLS and (inline := _cluster_code(args)) is not None:
+        # `bash -lc 'cmd'`: its text is read as with `-c`. What it did before
+        # stays: the text is also taken for a script file melo cannot read.
+        review_shell(ctx.deeper(), f, inline)
+        script(ctx, f, words[0], "shell", cwd)
     elif prog in _SHELLS and words:
         script(ctx, f, words[0], "shell", cwd)
     elif "/" in argv[0]:
@@ -875,11 +882,56 @@ def run_argv(
         _reaches(f, args, sending)
     if prog in _ELSEWHERE:
         _elsewhere(ctx, f, prog, args, cwd, stdin)
+    _destroys(ctx, f, prog, args, cwd)
     _inline(f, prog, args, stdin)
     if _runs_project(prog, words):
         file_rules.runner(ctx, f, prog)
     if prog == "git" and set(plain[:1]) & _HOOKED:
         file_rules.hooks(ctx, f, f"git {plain[0]}")
+
+
+_SHELL_C = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
+
+
+def _cluster_code(args: list[str]) -> str | None:
+    """The command text of a shell started with ``-c`` in a cluster of flags (``-lc``, ``-ic``).
+
+    ``-c`` alone is read elsewhere; here is the text after a word such as
+    ``-lc``, or ``None`` when there is none.
+    """
+    for at, arg in enumerate(args[:-1]):
+        if arg != "-c" and _SHELL_C.fullmatch(arg):
+            return args[at + 1]
+    return None
+
+
+def _destroys(ctx: Context, f: Findings, prog: str, args: list[str], cwd: str) -> None:
+    """A disk erased, uncommitted work discarded, or another process stopped.
+
+    Rules of :mod:`~localmelo.melo.checker.review.destroys`: a disk or other
+    processes are a ``system`` change, discarded work is ``delete``. The
+    read-only forms of the same programs (``diskutil list``, ``kill -0``,
+    ``git status``) are not findings.
+    """
+    if prog == "diskutil":
+        reason = destroys.diskutil_erases(args)
+        if reason:
+            f.add("system", reason)
+            f.add("delete", reason)
+    elif prog == "git":
+        sub, rest = destroys.git_sub(args)
+        plain = [a for a in rest if not a.startswith("-")]
+        there = False
+        if sub == "checkout" and len(plain) == 1:
+            path = resolve(ctx, plain[0], cwd)
+            there = bool(path) and os.path.lexists(path or "")
+        found = destroys.git_discards(args, there)
+        if found:
+            f.add("delete", found.reason)
+    elif prog in ("kill", "pkill", "killall", "skill", "killall5"):
+        reason = destroys.stops_others(prog, args, f.started)
+        if reason:
+            f.add("system", reason)
 
 
 def _searched(args: list[str]) -> list[str]:
@@ -939,18 +991,21 @@ def _elsewhere(
         ):
             return _open_app(f, args)
         for word in words:
-            if "://" in word and not word.startswith("file:"):
+            scheme = link_scheme(word)
+            if scheme in ("http", "https"):
                 if own_api(word, sending=False):
                     reach_own(f, word)
-                continue
-            opened(ctx, f, word, cwd)
+            elif scheme in ("", "file"):
+                opened(ctx, f, word, cwd)
+            else:
+                custom_link(f, word)
     elif prog == "osascript":
         code = " ".join(" ".join(args).split())
         given = "-e" in args
         if not given:
             # A script file, or its input when it names none: melo reads neither.
             f.add("system", "Drives another app or a shell through AppleScript.")
-        elif _DRIVES.search(code) or _BRIDGE.search(code):
+        elif _DRIVES.search(code) or _BRIDGE.search(code) or apps.reaches_out(args):
             _script_apps(f, args)
     elif prog == "shortcuts" and words[:1] == ["run"]:
         f.add("system", "Runs a Shortcut, which can control other apps.")
@@ -1000,6 +1055,37 @@ def _open_app(f: Findings, args: list[str]) -> None:
         f.add("system", "Opens a program through macOS, outside melo's limits.")
     else:
         f.add("app_control", f"Opens {named} through macOS, outside melo's limits.")
+
+
+_SCHEME = re.compile(r"([A-Za-z][A-Za-z0-9+.\-]*):")
+
+
+def link_scheme(target: str) -> str:
+    """The scheme of a link (``shortcuts`` for ``shortcuts://run``), lower case, else ``""``."""
+    found = _SCHEME.match(target)
+    return found.group(1).lower() if found else ""
+
+
+def custom_link(f: Findings, target: str) -> bool:
+    """Record a link of a custom scheme (anything but http, https and file) as ``system``.
+
+    The app that answers such a link is whichever one the person installed,
+    and the link can make it run things (``shortcuts://``, ``obsidian://``,
+    ``ssh://``), so it is never ``app_control``, which is only for an app the
+    script names and the allow-list knows. A Shortcut gets the sentence
+    ``shortcuts run`` has. Returns whether *target* was such a link.
+    """
+    scheme = link_scheme(target)
+    if scheme in ("", "http", "https", "file"):
+        return False
+    if scheme == "shortcuts":
+        f.add("system", "Runs a Shortcut, which can control other apps.")
+    else:
+        f.add(
+            "system",
+            f"Opens a {scheme}: link, which another app acts on outside melo's limits.",
+        )
+    return True
 
 
 def opened(ctx: Context, f: Findings, target: str, cwd: str) -> None:
@@ -1332,6 +1418,9 @@ def _python(ctx: Context, f: Findings, argv: list[str], cwd: str) -> None:
 
 
 def _module(ctx: Context, f: Findings, interp: str, name: str, args: list[str]) -> None:
+    if name == "webbrowser":  # python -m webbrowser <link>
+        for word in args:
+            custom_link(f, word)
     if name == "pip":
         _pip(ctx, f, args, interp)
     elif name == "ensurepip" and not {"--version", "-h"} & set(args):

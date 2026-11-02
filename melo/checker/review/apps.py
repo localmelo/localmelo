@@ -253,6 +253,86 @@ def osascript_app(args: Sequence[str]) -> str | None:
     return None
 
 
+# What a script can use to reach another app or the system without a ``tell
+# application`` line: an app held in a variable, a framework, a loaded script,
+# a file opened for access, a link opened by the system, a mounted volume.
+_REACHES: Final = re.compile(
+    r"\bapp(?:lication)?\b|\bframework\b|\bload\s+script\b|\bopen\s+for\s+access\b"
+    r"|\bPOSIX\b|\bopen\s+location\b|\bmount\s+volume\b",
+    re.IGNORECASE,
+)
+# The same in JavaScript for Automation: the ``Application`` function under
+# any name, ``eval``, a computed global, the ObjC bridge by index, libraries.
+_REACHES_JS: Final = re.compile(
+    r"\bApplication\b|\bcurrentApplication\b|\beval\b|\bFunction\b|\bglobalThis\b"
+    r"|\bthis\s*\[|\$\s*[.\[(]|\bLibrary\b|\bObjC\b"
+)
+
+
+def _code_only(script: str, javascript: bool) -> str | None:
+    """*script* with its strings and comments blanked, or ``None`` when one does not close.
+
+    AppleScript has ``"…"`` strings and ``--``, ``#`` and ``(* *)`` comments;
+    JavaScript has ``'…'``, ``"…"`` and template strings and ``//`` and
+    ``/* */`` comments. What a string or comment holds is not run, so a word
+    in one (``"The application finished"``) does not count. A string or
+    comment left open is not a script either language runs, so it is refused.
+    """
+    out: list[str] = []
+    at, size = 0, len(script)
+    quotes = "\"'`" if javascript else '"'
+    while at < size:
+        char, pair = script[at], script[at : at + 2]
+        if char in quotes:
+            end = at + 1
+            while end < size and script[end] != char:
+                end += 2 if script[end] == "\\" else 1
+            if end >= size:
+                return None
+            at = end + 1
+            out.append('""')
+        elif pair == "/*" if javascript else pair == "(*":
+            end = script.find("*/" if javascript else "*)", at + 2)
+            if end < 0:
+                return None
+            at = end + 2
+            out.append(" ")
+        elif pair == "//" if javascript else pair == "--" or char == "#":
+            end = script.find("\n", at)
+            at = size if end < 0 else end
+        else:
+            out.append(char)
+            at += 1
+    return "".join(out)
+
+
+def reaches_out(args: Sequence[str]) -> bool:
+    """Whether an ``osascript -e`` script uses a way to reach another app or the system.
+
+    It is checked outside the script's strings and comments, so the plain
+    forms (a notification, a dialog) are not caught; whatever else is
+    (:func:`osascript_app` then decides) and a script that does not parse as
+    code are.
+    """
+    pieces: list[str] = []
+    language = "applescript"
+    at = 0
+    while at < len(args):
+        if args[at] == "-e" and at + 1 < len(args):
+            pieces.append(args[at + 1])
+            at += 2
+        elif args[at] == "-l" and at + 1 < len(args):
+            language = args[at + 1].lower()
+            at += 2
+        else:
+            at += 1
+    javascript = language in ("javascript", "jxa")
+    code = _code_only("\n".join(pieces), javascript)
+    if code is None:
+        return True
+    return bool(_REACHES.search(code) or (javascript and _REACHES_JS.search(code)))
+
+
 def open_app(args: Sequence[str]) -> str | None:
     """The app ``open -a <name>`` (or ``-b com.apple.<Name>``) starts, or ``None``.
 

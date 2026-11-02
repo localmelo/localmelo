@@ -767,8 +767,12 @@ class _Review:
             for url in self.fold(first):
                 if not isinstance(url, str):
                     f.doubt("Opens a page or a file melo could not name.")
+                elif shell.custom_link(f, url):
+                    continue  # a custom scheme: another app acts on it
                 elif url.startswith("file:") or "://" not in url:
                     shell.opened(ctx, f, url, ctx.root)
+        elif name in ("os.kill", "os.killpg"):
+            self.stop(node)
         elif attr == "open" and module != "os":
             at = 0 if method else 1
             mode = self.fold(node.args[at] if len(node.args) > at else kw.get("mode"))
@@ -1098,6 +1102,29 @@ class _Review:
                 shell.run_argv(ctx.deeper(), f, ran, ctx.root, given)
             else:
                 f.doubt("Runs a command melo could not read.")
+
+    def stop(self, node: ast.Call) -> None:
+        """``os.kill`` / ``os.killpg``: signal 0 only asks; a process this code started is its own."""
+        signal = node.args[1] if len(node.args) > 1 else None
+        if isinstance(signal, ast.Constant) and signal.value == 0:
+            return
+        target = node.args[0] if node.args else None
+        if isinstance(target, ast.Call) and self.name(target.func) == "os.getpid":
+            return
+        if isinstance(target, ast.Attribute) and target.attr == "pid":
+            owner = target.value
+            values = self.bound.get(owner.id, []) if isinstance(owner, ast.Name) else []
+            if (
+                values
+                and isinstance(owner, ast.Name)
+                and owner.id not in self.unsure
+                and all(
+                    isinstance(v, ast.Call) and self.name(v.func) == "subprocess.Popen"
+                    for v in values
+                )
+            ):
+                return
+        self.f.add("system", "Signals a process this step did not start (os.kill).")
 
     def send(self, node: ast.Call) -> None:
         for inner in ast.walk(node):

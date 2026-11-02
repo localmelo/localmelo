@@ -38,6 +38,22 @@ def test_the_prompt_names_app_control_as_the_allow_list_does() -> None:
         assert plain in kind.split("Anything else")[0]
 
 
+def test_the_prompt_asks_about_a_disk_erased_work_discarded_and_programs_stopped() -> (
+    None
+):
+    asked = SYSTEM_PROMPT[SYSTEM_PROMPT.index('The verdict is "ask"') :]
+    asked = asked[: asked.index("Otherwise the verdict")]
+    assert "erases a disk" in asked
+    for word in ("git checkout -- .", "git reset --hard", "git clean", "pkill"):
+        assert word in asked
+
+
+def test_the_prompt_calls_a_link_of_a_custom_scheme_a_system_change() -> None:
+    kind = SYSTEM_PROMPT[SYSTEM_PROMPT.index('The category is "app_control"') :]
+    kind = kind[: kind.index("\n\n")]
+    assert "custom scheme (open shortcuts://...)" in kind.split('is "system"')[1]
+
+
 def test_the_user_message_holds_the_action_first_and_the_requests_last() -> None:
     text = user_message(
         ReviewInputs(
