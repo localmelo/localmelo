@@ -610,6 +610,78 @@ def gate_terms(text: str) -> set[str]:
     }
 
 
+# Words, besides the stopwords and the asking words, that point back at the talk or
+# ask to go on and name nothing: "go look it up", "do that", "what about the second
+# one?". Only verbs, small words and fillers are here, never a noun a question could
+# be about. A single letter (what a contraction leaves, "let's", "don't") is one too.
+_FOLLOW_UP_TEXT: Final = (
+    "go goes going gone went come comes coming let lets continue continues "
+    "continuing proceed resume carry keep start begin finish finished done "
+    "complete try tries trying retry again look looks looking check checks see "
+    "show find search lookup get got make use doing run open ahead up out over "
+    "back forward next then now soon first second third last previous other "
+    "another ok okay yes yeah yep yup no nope not sure fine right alright good "
+    "great cool nice thanks thank thx please pls hi hello hey well so just also "
+    "still too yet already really actually maybe perhaps anyway exactly indeed "
+    "very much some all both each every only even ever never more further else "
+    "thing things stuff one ones same may might must shall here those these him "
+    "us if than because say says said don doesn didn isn aren wasn weren won "
+    "wouldn couldn shouldn haven hasn hadn"
+)
+_FOLLOW_UP_WORDS: Final = frozenset(_FOLLOW_UP_TEXT.split())
+# The same for Chinese, as characters: a message whose every character is one of
+# these (or a ``_CJK_FILLER``) names nothing. "继续", "去查一下", "那个呢", "然后呢".
+_FOLLOW_UP_CHARS: Final = frozenset(
+    "去来查找看做试再继续接着然后先又还把给让请帮麻烦好行对嗯哦噢哈呀哇个这那些"
+    "一二三四五六七八九十下次遍点有没不要用以想说讲告诉第样别其刚才最另外之前过记得知道"
+)
+# Words of two characters whose characters are not fillers by themselves.
+_FOLLOW_UP_PHRASES: Final = ("开始", "结束", "完成", "可以")
+_HAN: Final = re.compile("[\u3400-\u4dbf\u4e00-\u9fff]+")
+# What a message holds that is its own subject whatever its words: a number, a
+# URL, or quoted text (straight or curly quotes, corner brackets, title marks, code).
+_OWN_SUBJECT: Final = re.compile(
+    r"\d|https?://|www\.|\"[^\"]*\w[^\"]*\"|“[^”]*\w[^”]*”|「[^」]*\w[^」]*」"
+    r"|『[^』]*\w[^』]*』|《[^》]*\w[^》]*》|`[^`]*\w[^`]*`"
+)
+
+
+def is_contentless(text: str) -> bool:
+    """Whether *text* names nothing to look up: after the stopwords, the asking
+    words and the follow-up words (:data:`_FOLLOW_UP_WORDS`, the Chinese
+    :data:`_FOLLOW_UP_CHARS`) no word is left, and it holds no number, URL or quoted
+    text. "go look it up", "continue", "do that", "去查一下" and "那个呢" are
+    contentless; "what is my name?" and "我朋友叫什么名字" are not.
+
+    :func:`gate_terms` is not the measure for this: it counts a Chinese run as its
+    characters and bigrams (so "继续" is three terms) and it counts "go", "look" and
+    "up". A script this does not know (Cyrillic, kana, Hangul) counts as content,
+    so such a message is searched as it is. An empty message is contentless.
+    """
+    folded = normalise(text)
+    if _OWN_SUBJECT.search(folded):
+        return False
+    for word in _WORD.findall(folded):
+        if (
+            len(word) > 1
+            and word not in STOPWORDS
+            and word not in _ASKING
+            and word not in _FOLLOW_UP_WORDS
+        ):
+            return False
+    for run in _HAN.findall(folded):
+        for phrase in _FOLLOW_UP_PHRASES:
+            run = run.replace(phrase, " ")
+        if any(
+            char not in _CJK_FILLER and char not in _FOLLOW_UP_CHARS
+            for char in run
+            if not char.isspace()
+        ):
+            return False
+    other = _WORD.sub(" ", _HAN.sub(" ", folded))
+    return not any(char.isalpha() for char in other)
+
+
 class Corpus:
     """The items a search ranks, with a BM25 index kept up to date by key."""
 
