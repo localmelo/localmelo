@@ -646,7 +646,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   names an address on that site is refused before it is reviewed: a `curl` or
   `wget` argument (an address without `http://` too, never an option's value
   such as `-o out.txt`) wherever the command stands (`if curl …`, `( … )`,
-  `bash -c`), the proxy it goes through, a string in Python (`urllib`,
+  `$( … )`, `bash -c`, `eval`, after another program such as `watch`), the
+  proxy it goes through, a string in Python (`urllib`,
   `requests` under any import name, `httpx`, `pycurl`, `httplib2`, an address
   kept in a variable, an f-string whose host is written out), the host of an
   `http.client` or socket connection, an address nested in a reader's or an

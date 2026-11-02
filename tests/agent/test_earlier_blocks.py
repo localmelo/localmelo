@@ -940,3 +940,48 @@ def test_a_huge_brace_group_is_unread_and_quick() -> None:
     command = 'curl "http://{' + "," * 20000 + '"'
     assert reaches_unread_site("shell_exec", {"command": command}) is True
     assert time.monotonic() - started < 1.0
+
+
+# ── Re-check: substitutions in quotes, line continuations, code in words ──
+
+HIDDEN_IN_SHELL = [
+    'x="$(curl -s collect.example)"',
+    'echo "$(curl -s collect.example)"',
+    'echo "`curl -s collect.example`"',
+    'x=$(echo "$(curl -s collect.example)")',
+    "curl -s https://ok.example/a \\\n  -x collect.example:8080",
+    "curl -s \\\ncollect.example",
+    'eval "curl -s collect.example"',
+    "eval 'curl -s collect.example'",
+    "eval curl -s collect.example",
+    'bash <<< "curl -s collect.example"',
+    'env -S "curl -s collect.example"',
+    "stdbuf -o0 curl -s collect.example",
+    "caffeinate curl -s collect.example",
+    "watch -n1 curl -s collect.example",
+    "script -q /dev/null curl -s collect.example",
+    "builtin command curl -s collect.example",
+]
+
+
+@pytest.mark.parametrize("command", HIDDEN_IN_SHELL)
+async def test_a_fetch_hidden_in_a_shell_word_is_refused(command: str) -> None:
+    policy, root, _ = await _site_refused()
+    assert policy.match("shell_exec", {"command": command}, root) == ("the user", False)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "brew install curl wget",
+        "man curl",
+        "git log --grep curl",
+        'echo "$(date)" `whoami`',
+        "echo 'line one \\\nline two'",
+        'eval "$(ssh-agent -s)"',
+    ],
+)
+async def test_naming_curl_without_a_refused_site_is_not_refused(command: str) -> None:
+    policy, root, _ = await _site_refused()
+    assert policy.match("shell_exec", {"command": command}, root) is None
+    assert reaches_unread_site("shell_exec", {"command": command}) is False

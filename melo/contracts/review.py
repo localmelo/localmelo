@@ -679,6 +679,7 @@ _WRAPPERS: Final[dict[str, frozenset[str]]] = {
     "xargs": frozenset({"-n", "-I", "-P", "-L", "-d", "-E", "-s", "-a", "-J", "-R"}),
     "nice": frozenset({"-n"}),
     "timeout": frozenset({"-s", "-k"}),
+    "builtin": frozenset(),
 }
 # Shell words that open or close a compound command: the command follows.
 _KEYWORDS: Final = frozenset(
@@ -688,6 +689,8 @@ _KEYWORDS: Final = frozenset(
 _ASSIGNMENT: Final = re.compile(r"([A-Za-z_]\w*)=(.*)", re.S)
 # What separates two commands, or redirects one, in a shell's text.
 _OPERATORS: Final = ";&|()<>`\n"
+# A command substitution in a word: ``$(…)`` or ``\`…\```.
+_SUBSTITUTION: Final = re.compile(r"\$\((.*)\)|`([^`]*)`", re.S)
 # Python: calls that fetch an address, and calls that connect to a host.
 _PY_URL_CALLS: Final = frozenset({"urlopen", "urlretrieve", "Request"})
 _PY_METHODS: Final = frozenset(
@@ -709,12 +712,39 @@ _DEPTH: Final = 3
 Sites = tuple[set[str], bool]
 
 
+def _joined_lines(text: str) -> str:
+    """*text* with each backslash-newline outside single quotes removed, as a shell does."""
+    out: list[str] = []
+    single = double = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if single:
+            single = char != "'"
+        elif char == "\\":
+            if text[index + 1 : index + 2] == "\n":
+                index += 2
+                continue
+            out.append(text[index : index + 2])
+            index += 2
+            continue
+        elif char == "'" and not double:
+            single = True
+        elif char == '"':
+            double = not double
+        out.append(char)
+        index += 1
+    return "".join(out)
+
+
 def _shell_tokens(text: str) -> list[str]:
     """*text* as a shell reads it: words, and operators (``;``, ``&&``, ``(``, ``>``) apart.
 
-    Quotes are kept together; text that does not parse is read line by
-    line, and a line that does not parse is split at spaces and operators.
+    Line continuations are joined first. Quotes are kept together; text
+    that does not parse is read line by line, and a line that does not
+    parse is split at spaces and operators.
     """
+    text = _joined_lines(text)
 
     def split(part: str) -> list[str]:
         lexer = shlex.shlex(part, posix=True, punctuation_chars=_OPERATORS)
@@ -737,26 +767,35 @@ def _shell_tokens(text: str) -> list[str]:
     return tokens
 
 
-def _shell_commands_of(tokens: Sequence[str]) -> list[list[str]]:
-    """The simple commands in *tokens*: split at operators, redirections dropped."""
-    commands: list[list[str]] = []
+Command = tuple[list[str], list[str]]
+
+
+def _shell_commands_of(tokens: Sequence[str]) -> list[Command]:
+    """The simple commands in *tokens*, each with the here-strings (``<<<``) it reads.
+
+    Split at operators; a redirection's target is dropped.
+    """
+    commands: list[Command] = []
     current: list[str] = []
-    target = False
+    here: list[str] = []
+    target = ""
     for token in tokens:
         if token and all(c in _OPERATORS for c in token):
             if "(" in token or ")" in token or not ("<" in token or ">" in token):
-                if current:
-                    commands.append(current)
-                current, target = [], False
+                if current or here:
+                    commands.append((current, here))
+                current, here, target = [], [], ""
             else:
-                target = True  # the word after it is where it redirects
+                target = "here" if "<<<" in token else "file"
             continue
         if target:
-            target = False
+            if target == "here":
+                here.append(token)
+            target = ""
             continue
         current.append(token)
-    if current:
-        commands.append(current)
+    if current or here:
+        commands.append((current, here))
     return commands
 
 
@@ -766,14 +805,17 @@ def _shell_words(command: Any) -> list[str]:
     return _shell_tokens(str(command or ""))
 
 
-def _unwrapped(words: Sequence[str]) -> tuple[list[str], list[tuple[str, str]]]:
-    """*words* from the program they run, and the assignments before it.
+def _unwrapped(
+    words: Sequence[str],
+) -> tuple[list[str], list[tuple[str, str]], list[str]]:
+    """*words* from the program they run, the assignments before it, and code given to ``env -S``.
 
     Shell keywords (``if``, ``do``, ``!``, ``{``), assignments and wrappers
     (``sudo``, ``xargs``, ``env``) are dropped.
     """
     rest = list(words)
     assigned: list[tuple[str, str]] = []
+    codes: list[str] = []
     while rest:
         if rest[0] in _KEYWORDS:
             rest = rest[1:]
@@ -789,10 +831,15 @@ def _unwrapped(words: Sequence[str]) -> tuple[list[str], list[tuple[str, str]]]:
             break
         rest = rest[1:]
         while rest and rest[0].startswith("-") and rest[0] != "-":
-            rest = rest[2:] if rest[0] in valued else rest[1:]
+            option = rest[0]
+            if wrapper == "env" and option in ("-S", "--split-string") and rest[1:]:
+                codes.append(rest[1])  # a command line env splits and runs
+            elif wrapper == "env" and option.startswith(("-S", "--split-string=")):
+                codes.append(option.split("=", 1)[-1] if "=" in option else option[2:])
+            rest = rest[2:] if option in valued else rest[1:]
         if rest and wrapper == "timeout":
             rest = rest[1:]  # its duration
-    return rest, assigned
+    return rest, assigned, codes
 
 
 def _proxy_sites(value: str) -> Sites:
@@ -892,23 +939,38 @@ def _fetcher_sites(program: str, args: Sequence[str]) -> Sites:
     return keys, unread
 
 
-def _command_sites(words: Sequence[str], depth: int) -> Sites:
-    words, assigned = _unwrapped(words)
+def _code_sites(code: str, python: bool, depth: int) -> Sites:
+    """What shell (or Python) code given in a word reaches; past :data:`_DEPTH`, unread."""
+    if depth >= _DEPTH:
+        return set(), bool(code.strip())
+    return _python_sites(code, depth + 1) if python else _shell_sites(code, depth + 1)
+
+
+def _command_sites(words: Sequence[str], depth: int, here: Sequence[str] = ()) -> Sites:
+    words, assigned, codes = _unwrapped(words)
     keys: set[str] = set()
     unread = False
+
+    def add(found: Sites) -> None:
+        nonlocal unread
+        keys.update(found[0])
+        unread = unread or found[1]
+
     for name, value in assigned:
         if _PROXY_WORD.fullmatch(f"{name}={value}"):
-            more, hidden = _proxy_sites(value)
-            keys |= more
-            unread = unread or hidden
+            add(_proxy_sites(value))
+    for code in codes:
+        add(_code_sites(code, False, depth))
     if not words:
         return keys, unread
     program, args = _program(words[0]), list(words[1:])
-    found: Sites = (set(), False)
-    if program in ("curl", "wget"):
-        found = _fetcher_sites(program, args)
-        unread = unread or any(name in _CONFIG_HOMES for name, _ in assigned)
-    elif program in _SHELLS or program == "python":
+    # The first word that runs curl or wget, whatever runs it (``stdbuf``,
+    # ``watch``, ``script -q /dev/null``…).
+    fetcher = next(
+        (at for at, word in enumerate(words) if _program(word) in ("curl", "wget")),
+        None,
+    )
+    if program in _SHELLS or program == "python":
         flag = next(
             (
                 at
@@ -918,35 +980,41 @@ def _command_sites(words: Sequence[str], depth: int) -> Sites:
             None,
         )
         if flag is not None:
-            code = args[flag + 1]
-            if depth >= _DEPTH:
-                found = (set(), bool(_EXPANDS.search(code)))
-            elif program == "python":
-                found = _python_sites(code, depth + 1)
-            else:
-                found = _shell_sites(code, depth + 1)
+            add(_code_sites(args[flag + 1], program == "python", depth))
+        for text in here:  # bash <<< "…"
+            add(_code_sites(text, program == "python", depth))
+    elif program == "eval":
+        add(_code_sites(" ".join(args), False, depth))
+    elif fetcher is not None:
+        add(_fetcher_sites(_program(words[fetcher]), words[fetcher + 1 :]))
+        unread = unread or any(name in _CONFIG_HOMES for name, _ in assigned)
     else:
         plain = [arg for arg in args if not arg.startswith("-")]
         network = program in _NETWORK or (
             program == "git" and bool(set(plain) & _GIT_NETWORK)
         )
         if network:
-            found = (set(), any(_EXPANDS.search(arg) for arg in args))
-    return keys | found[0], unread or found[1]
+            add((set(), any(_EXPANDS.search(arg) for arg in args)))
+    return keys, unread
 
 
 def _shell_sites(command: Any, depth: int = 0) -> Sites:
     words = _shell_words(command)
     keys: set[str] = set()
+    unread = False
     for word in words:
         keys |= _address_keys(word)
         proxy = _PROXY_WORD.match(word)
         if proxy is not None:
             keys |= _proxy_sites(proxy.group(1))[0]
-    unread = False
-    commands = [words] if isinstance(command, list) else _shell_commands_of(words)
-    for found in commands:
-        more, hidden = _command_sites(found, depth)
+        # A command substitution inside quotes ("$(…)", "`…`") runs too.
+        for inner in _SUBSTITUTION.findall(word):
+            more, hidden = _code_sites(inner[0] or inner[1], False, depth)
+            keys |= more
+            unread = unread or hidden
+    commands = [(words, [])] if isinstance(command, list) else _shell_commands_of(words)
+    for found, here in commands:
+        more, hidden = _command_sites(found, depth, here)
         keys |= more
         unread = unread or hidden
     return keys, unread
