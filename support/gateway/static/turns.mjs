@@ -561,6 +561,8 @@ export function newTurn(row) {
     // What memory across chats recalled and kept for the message (`turn.memory`), or null.
     memory: null,
     memoryOpen: false,
+    // Whether the other chats' digest under the message is open (`turn.memory`'s digest).
+    digestOpen: false,
     error: "",
   };
 }

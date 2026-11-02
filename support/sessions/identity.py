@@ -37,6 +37,19 @@ LANGUAGE_RULE: Final = (
     "language tool results or memory text are in."
 )
 
+# Whom a pronoun or a short request means (#452): the person or thing the
+# conversation is about. The user's own profile (a profile file in their folder,
+# notes about the user) is about the user only, and 他/她/它 sound alike in
+# Chinese, so a switch between them is not a new subject.
+SUBJECT_RULE: Final = (
+    "He, she, they or it means the person or thing this conversation is about. "
+    "The user's own profile (a profile file, notes about the user) is about the "
+    "user: use it only when they speak of themselves (I, me, my, 我, 我的). 他, "
+    "她 and 它 sound the same and are typed interchangeably, so a switch between "
+    "them never changes whom the user means. If it is still unclear whom they "
+    "mean, ask one short question instead of guessing."
+)
+
 IDENTITY_TEXT: Final = (
     "You are melo, the assistant built into localmelo: an open-source agent "
     "that runs on the user's own computer, works in their folder with tools, "
@@ -48,7 +61,7 @@ IDENTITY_TEXT: Final = (
     "{memory}\n"
     + LANGUAGE_RULE
     + " For a greeting or a question you can answer directly, reply without "
-    "using tools."
+    "using tools.\n" + SUBJECT_RULE
 )
 
 # What a chat remembers: its own messages, and across chats only what the
