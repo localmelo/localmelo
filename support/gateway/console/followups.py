@@ -78,6 +78,7 @@ from ..auto_blocks import denied_steps
 from ..finishing import NOT_CONTINUED, is_out_of_steps
 from ..front_rules import FINISHED, reply_language
 from ..task_endings import shown
+from ..task_files import files_line
 from ..task_store import TaskRecord, TaskStoreError
 from .asks import FOLLOWUP_ORIGIN
 
@@ -530,7 +531,7 @@ class TaskFollowups:
                         "with Open task]"
                     )
             if files:
-                lines.append(f"Files it wrote (in its folder): {', '.join(files)}")
+                lines.append(f"Files it wrote (in its folder): {files_line(files)}")
             lines.append(
                 "[localmelo · this chat started the task, and it finished. Tell the "
                 f"user its answer now, in {reply_language(asked or record.title)}, in "
