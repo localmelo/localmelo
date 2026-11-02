@@ -85,7 +85,7 @@
 <figure class="usage" aria-label="主对话" data-copy="melo"><div class="usage-bar"><span class="usage-title"></span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span></span></code></pre></figure></li>
 <li class="step"><h3><a href="quickstart.html#interactive-conversations">交给它一个任务</a></h3>
 <p>在对话里提出更大的工作：它会成为任务，完成后以卡片回来。</p>
-<figure class="step-shot"><img src="../assets/img/cards.webp" alt="主对话中的三张卡片：一个已完成的任务（改了什么、跑了哪些测试）、一个已答复的批准请求和一个在等你的批准请求。" width="1280" height="800" loading="lazy"></figure></li>
+<figure class="step-shot"><img src="../assets/img/cards.webp" alt="主对话中的三张卡片：Done, not finished（还差什么，有 Finish it 按钮）、Needs you（要你回答的问题）和 Ready（任务的小结）。" width="1280" height="800" loading="lazy"></figure></li>
 <li class="step"><h3><a href="quickstart.html#set-up-an-embedding-model">查看它记住了什么</a></h3>
 <p>melo 跨对话保存笔记；你可以列出它们，或忘掉某一条。</p>
 <figure class="usage" aria-label="melo 记得什么" data-copy="melo memory list&#10;melo memory forget 3 -y"><div class="usage-bar"><span class="usage-title"></span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">melo</span> <span class="s">memory</span> <span class="s">list</span></span>
@@ -109,7 +109,7 @@
         <h2>能做什么</h2>
         <div class="show-grid">
           <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#hand-work-to-the-main-chat">
-            <img src="../assets/img/main-chat-search.webp" alt="主对话通过搜索文件夹回答了一个问题，然后开始一个任务，接着一句话要求提交它。" width="1280" height="800" loading="lazy">
+            <img src="../assets/img/main-chat-search.webp" alt="主对话：用 /task 开始的任务、被要求提交后继续它，以及一张说明任务已就绪并附上提交的卡片。" width="1280" height="800" loading="lazy">
             <span class="show-text"><strong>一个主对话，旁边是旁支对话</strong><span>提问，或者交代工作：更大的工作按优先级（P0 到 P5）成为任务，完成后以卡片回来。</span></span>
           </a>
           <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/concepts/memory.md#memory-across-chats">
@@ -121,15 +121,15 @@
             <span class="show-text"><strong>按时运行的定时事项</strong><span>说一次就行，比如 <code class="wrap">every weekday at 8:30, brief me on my calendar</code>。check-in 会告诉你什么做完了。</span></span>
           </a>
           <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#the-main-chat-and-side-chats">
-            <img src="../assets/img/cards.webp" alt="主对话里的三张卡片：一个完成的任务（改了什么和测试结果）、一个已回答的审批、一个在等你的审批。" width="1280" height="800" loading="lazy">
-            <span class="show-text"><strong>说清发生了什么的任务</strong><span>完成的任务的卡片说明改了什么和提交；任务只在它所属对话的文件夹里工作。</span></span>
+            <img src="../assets/img/cards.webp" alt="主对话中的三张卡片：Done, not finished（还差什么，有 Finish it 按钮）、Needs you（要你回答的问题）和 Ready（任务的小结）。" width="1280" height="800" loading="lazy">
+            <span class="show-text"><strong>说清发生了什么的任务</strong><span>卡片说明任务怎样结束：Ready、Done, not finished 或 Needs you；任务只在它所属对话的文件夹里工作。</span></span>
           </a>
           <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/terminal.md#the-main-chat">
             <img src="../assets/img/terminal-main-chat.webp" alt="主对话里的终端：用 /side 开始旁支对话、得到回复、用 /main 回去，以及一张说明任务完成的卡片。" width="1280" height="813" loading="lazy">
             <span class="show-text"><strong>终端进入同一个对话</strong><span>输入 <code>melo</code> 就进入 App 里同一个主对话，<code>/side</code> 开始旁支对话。</span></span>
           </a>
           <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/macos-app.md#the-activity-pill">
-            <img src="../assets/img/pill.webp" alt="Melo 的活动胶囊的六种状态：工作中、有多个在运行、在等你批准、完成、已停止、模型服务器连不上。" width="1080" height="630" loading="lazy">
+            <img src="../assets/img/pill.webp" alt="Melo 的活动胶囊的六种状态：工作中、有多个在运行、在等你批准、完成、已停止、模型服务器连不上。" width="1080" height="590" loading="lazy">
             <span class="show-text"><strong>显示正在运行什么的胶囊</strong><span>窗口收起时，Mac 上的一个小胶囊说明 melo 正在做什么。</span></span>
           </a>
           <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/tools-mcp.md#what-the-checks-do">
@@ -204,8 +204,9 @@
         <p>第一个版本 v0.1.0 计划于 2026-12-20 发布。</p>
         <div class="board">
           <div class="board-col now">
-            <h3>现在 <small>4</small></h3>
+            <h3>现在 <small>5</small></h3>
             <ul>
+              <li class="board-card"><strong>电脑空闲时整理笔记</strong><span>已做好，测试期间默认关闭：你不在时，melo 整理最近的笔记，并在对话里说明，一键即可撤销。</span><span class="chip testing">测试中</span></li>
               <li class="board-card"><strong>任务页面用平实的话</strong><span>任务页面用平实的话说明发生了什么，不带 melo 内部的标签。</span><span class="chip building">开发中</span></li>
               <li class="board-card"><strong>把活干完的 worker 运行</strong><span>运行尽早动手，检查自己的结果，并说明为什么停下。</span><span class="chip testing">测试中</span></li>
               <li class="board-card"><strong>不看文档也能完成首次运行</strong><span>连接模型、回答 melo 的问题，无需阅读任何说明。</span><span class="chip testing">测试中</span></li>
@@ -213,15 +214,13 @@
             </ul>
           </div>
           <div class="board-col">
-            <h3>接下来 <small>7</small></h3>
+            <h3>接下来 <small>5</small></h3>
             <ul>
               <li class="board-card"><strong>浏览器里的计算机操作</strong><span>melo 在你能看到的窗口里操作网页，重要的操作先问你。</span></li>
-              <li class="board-card"><strong>Melo 工作时的更多姿势</strong><span>胶囊和桌面宠物为 melo 工作的时刻画出更多姿势。</span></li>
               <li class="board-card"><strong>在 melo 里安装模型服务器</strong><span>什么都没装时，确认一次就能得到第一个答案。</span></li>
               <li class="board-card"><strong>其他智能体把工作交给 melo</strong><span>任务 API 上的 worker，以及供编程智能体使用的 MCP 服务器。</span></li>
               <li class="board-card"><strong>共享同一项目的 worker</strong><span>并行的 worker 共用一段已缓存的开头；每个任务彼此独立。</span></li>
               <li class="board-card"><strong>melo 参与开发 melo</strong><span>在托管模型上做真实的开发任务，并与其他 worker 对比评分。</span></li>
-              <li class="board-card"><strong>电脑空闲时整理笔记</strong><span>计划中：melo 离线回顾最近的对话，合并重复的笔记、保留较新的值，可撤销。</span></li>
             </ul>
           </div>
           <div class="board-col later">
@@ -236,7 +235,7 @@
           </div>
         </div>
         <div class="board-done">
-          <h3>已完成 <small>14</small></h3>
+          <h3>已完成 <small>17</small></h3>
           <ul>
             <li class="board-card"><strong>主对话和旁支对话</strong><span>一个对话：自己回答，或按优先级把更大的工作交给任务；终端打开的是同一个对话。</span><span class="chip done">已完成</span></li>
             <li class="board-card"><strong>看得见的记忆</strong><span>跨对话的笔记，新的值取代旧的；在“记忆”标签页里编辑或删除。</span><span class="chip done">已完成</span></li>
@@ -252,6 +251,9 @@
             <li class="board-card"><strong>停下后可继续</strong><span>步数用完的任务显示“已停止”，点“继续”就从停下的地方接着做。</span><span class="chip done">已完成</span></li>
             <li class="board-card"><strong>在这个仓库上自用</strong><span>已完成三轮；第三轮在“自动”下，melo 没有问过一次就修好了自己代码里的两件事。</span><span class="chip done">已完成</span></li>
             <li class="board-card"><strong>带入其他助手的记忆</strong><span>首次设置时，或在“记忆”标签页里，melo 读取你电脑上其他编程助手保存的笔记，带入你选中的那些，可撤销。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>主对话开始任务</strong><span>用平常的话提出工作，主对话就开始任务；任务失败时，它跟进一次。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>Melo 会动了</strong><span>Melo 会醒来、在笔记本电脑前打字、歪着头、举起爪子、休息和玩耍，在控制台和你的桌面上都是。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>换上你自己的 Melo 美术</strong><span>一条命令检查一个文件夹或 zip 里的美术，并替换 Melo 的每一张图片。</span><span class="chip done">已完成</span></li>
           </ul>
         </div>
         <p class="more-link"><a href="./updates.html#updates">最新变化</a>和<a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">变更详情（英文）</a>。</p>

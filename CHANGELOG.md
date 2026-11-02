@@ -466,6 +466,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Memory items written from chats (`melo memory ingest FILE -X ingest=compress`,
+  a developer setting) keep what everyday talk shows about the person's daily
+  life, routines, mood and personality. Only exchanges that carry no
+  information, such as "ok" or "thanks", are left out. Small talk was left out
+  before.
+
 - The main chat starts a task itself when your request needs tools it lacks
   (running commands, changing files, many steps), with one line, **Change** and
   **Stop**, instead of offering "Start this as a task?". Your message is still
@@ -657,6 +663,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- The browser tools never open this computer, its local network or melo's
+  own console. `localhost`, private, link-local, carrier-shared and
+  unspecified addresses (also written as IPv6 or as one number), local and
+  dotless names, and a name whose DNS answer is one of these are refused
+  before any question about the site and before the page loads, as
+  `web_fetch` refuses them. The console is refused wherever its settings or
+  the running gateway say it listens, even at a public address. A redirect,
+  a followed link or a page that moves to such an address is blanked and
+  refused. A picture or a wait works only on a page melo opened in that tab,
+  reads where the tab is before and after, and a wait counts only what it
+  sees on that page's own site. The tab list shows a tab's address and title
+  only while it is on the site melo checked for it. An address with a user
+  name or password in it, an address melo cannot take apart, and a name that
+  is not found are not opened either. The model is told to use `task_get`
+  for a task's result. [#439]
 - A site that a task's `web_fetch` or browser asked about, and that you, Auto
   or melo's rules refused, is now a blocked step like any other. When the chat
   continues that task on its own, that address however it is written (other

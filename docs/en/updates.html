@@ -62,10 +62,9 @@
             </ul>
           </div>
           <div class="board-col">
-            <h3>Next <small>6</small></h3>
+            <h3>Next <small>5</small></h3>
             <ul>
               <li class="board-card"><strong>Computer use in the browser</strong><span>melo acts on pages in a window you can watch, and asks before anything that matters.</span></li>
-              <li class="board-card"><strong>Art for Melo's working poses</strong><span>The pill and the pet get drawn poses for the moments when melo works.</span></li>
               <li class="board-card"><strong>Set up a model server from melo</strong><span>With nothing installed, reach a first answer with one confirmation.</span></li>
               <li class="board-card"><strong>Other agents hand work to melo</strong><span>Workers on the task API, and an MCP server for coding agents.</span></li>
               <li class="board-card"><strong>Workers that share a project</strong><span>Parallel workers share one cached start; each task stays separate.</span></li>
@@ -84,7 +83,7 @@
           </div>
         </div>
         <div class="board-done">
-          <h3>Done <small>14</small></h3>
+          <h3>Done <small>17</small></h3>
           <ul>
             <li class="board-card"><strong>Main chat and side chats</strong><span>One chat that answers, or hands bigger work to a task by priority; the terminal opens the same chat.</span><span class="chip done">done</span></li>
             <li class="board-card"><strong>Memory you can see</strong><span>Notes across chats, the newer value wins, and a Memory tab to edit or forget.</span><span class="chip done">done</span></li>
@@ -100,6 +99,9 @@
             <li class="board-card"><strong>Stop and continue</strong><span>A task that runs out of steps reads Stopped, and Continue picks it up where it left off.</span><span class="chip done">done</span></li>
             <li class="board-card"><strong>Self-runs on this repository</strong><span>Three runs are done; in the third, in Auto, melo fixed two things in its own code without asking.</span><span class="chip done">done</span></li>
             <li class="board-card"><strong>Bring in what other assistants remember</strong><span>On first setup, or from the Memory tab, melo reads the notes other coding assistants keep on this computer and brings in the ones you pick, with Undo.</span><span class="chip done">done</span></li>
+            <li class="board-card"><strong>The main chat starts tasks</strong><span>Ask for work in plain words and the main chat starts the task, then follows up once if it fails.</span><span class="chip done">done</span></li>
+            <li class="board-card"><strong>Melo moves</strong><span>Melo wakes up, types at its laptop, tilts its head, raises a paw, rests and plays, in the console and on your desktop.</span><span class="chip done">done</span></li>
+            <li class="board-card"><strong>Bring your own Melo art</strong><span>One command checks a folder or a zip of art and replaces every picture of Melo.</span><span class="chip done">done</span></li>
           </ul>
         </div>
         <p class="more-link"><a href="https://github.com/localmelo/localmelo/issues/2">The full plan on GitHub</a>; the parts of the memory design not built yet are on the <a href="./memory-design.html">memory design</a> page.</p>
@@ -110,12 +112,46 @@
         <p class="more-link">Each change in detail is in the <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">changelog</a>.</p>
         <section class="day" id="day-2026-11-01">
           <h3><time datetime="2026-11-01">November 1</time></h3>
-          <ul class="day-points">
-            <li>Melo moves, in the console's panel and on your desktop: it wakes up, types at its laptop while melo works, tilts its head while the model answers, raises a paw when it needs you, and rests or plays.</li>
-            <li>Tidying notes while you are away is built and off by default while it is tested. When it runs, the main chat says what it tidied, and one tap, or <code class="wrap">/memory undo</code>, puts it all back.</li>
-            <li>When a local model writes a tool call as text instead of running it, melo asks it again instead of showing a broken reply such as "text".</li>
-            <li>A finished task says how it really ended: Ready only with proof, otherwise Done, not finished, with the reason and a one-tap Finish it.</li>
-          </ul>
+          <div class="day-entry" id="u-2026-11-01-melo-moves">
+            <h4>Melo moves</h4>
+            <figure class="shot compact"><picture><source media="(prefers-reduced-motion: reduce)" srcset="../assets/img/melo-moves-still.webp"><img src="../assets/img/melo-moves.webp" alt="Melo the Akita in turn: waking up, typing at its laptop, tilting its head, raising a paw, resting and playing, beside a list of what each move means with the one on screen marked." width="640" height="336" loading="lazy"></picture></figure>
+            <ul class="day-points">
+              <li>Melo wakes up when the page or the app opens, rests when nothing runs, and plays now and then.</li>
+              <li>It types at its laptop while melo works, and tilts its head while the model answers.</li>
+              <li>It raises a paw at once when something waits for your approval.</li>
+              <li>The moves play in the console's panel and on your desktop; with reduced motion, each is one still picture.</li>
+            </ul>
+          </div>
+          <div class="day-entry" id="u-2026-11-01-chat-starts-tasks">
+            <h4>The main chat starts the task for you</h4>
+            <figure class="shot"><a href="../assets/img/main-chat-starts-task.webp"><img src="../assets/img/main-chat-starts-task.webp" alt="The main chat after a task it started did not finish: a card says so, the chat follows up once, explains that the install step was blocked and continues the task another way, and Melo's panel shows it at work beside the chat." width="1280" height="800" loading="lazy"></a></figure>
+            <ul class="day-points">
+              <li>Ask for bigger work in plain words, like <code class="wrap">make a bar chart of sales.csv</code>: the main chat starts the task itself, with Change and Stop.</li>
+              <li>When a task it started fails, runs out of steps or needs you, the chat follows up once: it continues the task another way, or asks you one clear question.</li>
+              <li>It says in a line or two what got done, instead of leaving you a bare Failed.</li>
+              <li>A step that was blocked is never tried again, however it is spelt.</li>
+            </ul>
+            <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/web-console.md#when-a-task-it-started-stops-the-chat-follows-up">Follow-ups in the guide</a></p>
+          </div>
+          <div class="day-entry" id="u-2026-11-01-art-pack">
+            <h4>Bring your own Melo art</h4>
+            <figure class="shot compact"><img src="../assets/img/art-pack-moves.webp" alt="The poster of each of Melo's six states, with the state's name: startup, thinking, working, attention, idle_rest and idle_play." width="880" height="648" loading="lazy"></figure>
+            <ul class="day-points">
+              <li>One command checks a folder or a zip of art and replaces every picture of Melo: the pet, the console's portrait, the faces, the icons and the logos.</li>
+              <li><code>check</code> changes nothing and says what is missing; <code>apply</code> replaces everything in one run and leaves a preview sheet.</li>
+              <li>A pack holds six moves of up to 16 frames each, and optional stills, heads and brand pictures.</li>
+              <li>A zip is checked before anything is written, and nothing in a pack is run.</li>
+            </ul>
+            <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/art-pack.md">The art pack guide</a>, and <a href="./developers.html#art-pack">the command</a> for developers.</p>
+          </div>
+          <div class="day-entry" id="u-2026-11-01-also">
+            <h4>Also</h4>
+            <ul class="day-points">
+              <li>Tidying notes while you are away is built and off by default while it is tested. When it runs, the main chat says what it tidied, and one tap, or <code class="wrap">/memory undo</code>, puts it all back.</li>
+              <li>When a local model writes a tool call as text instead of running it, melo asks it again instead of showing a broken reply such as "text".</li>
+              <li>A finished task says how it really ended: Ready only with proof, otherwise Done, not finished, with the reason and a one-tap Finish it.</li>
+            </ul>
+          </div>
         </section>
         <section class="day" id="day-2026-10-31">
           <h3><time datetime="2026-10-31">October 31</time></h3>
