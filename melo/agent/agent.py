@@ -103,6 +103,8 @@ from localmelo.melo.checker.tiers import tier_of, tier_requires_approval
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN, _sanitize_images
 from localmelo.melo.contracts.approvals import (
     ALLOWED_ONCE,
+    BLOCKED_ALIKE,
+    BLOCKED_EARLIER,
     STOPPED_NOTE,
     TOOL_ASK,
     ApprovalDecision,
@@ -110,8 +112,11 @@ from localmelo.melo.contracts.approvals import (
     ApprovalRequest,
     AutoPolicy,
     ReviewMode,
+    Withdrawal,
     block_note,
+    call_key,
     find_auto,
+    find_earlier,
     find_folder_asker,
     review_mode,
 )
@@ -130,6 +135,7 @@ from localmelo.melo.contracts.review import (
     TITLES,
     ActionReview,
     block_words,
+    loose_keys,
     step_key,
 )
 from localmelo.melo.contracts.streaming import STREAM_DISPLAY
@@ -1595,6 +1601,9 @@ class _ApprovalGate:
         return self._run.from_person and find_folder_asker(self._policy) is not None
 
     async def __call__(self, request: ExecutionRequest) -> ApprovalDecision:
+        earlier = self._earlier(request)
+        if earlier is not None:
+            return earlier
         if request.outside is not None:
             return await self._folder(request, request.outside)
         run, call = self._run, self._call
@@ -1680,11 +1689,11 @@ class _ApprovalGate:
                 run.waiting_call_id = ""
                 if self._mode == "auto":
                     words = CATEGORY_WORDS["self"]
-                    self._record(asking, origin="auto", reason=words)
+                    self._record(asking, origin="auto", reason=words, denial=True)
                     return ApprovalDecision(
                         False, self._block(asking, auto, words), origin="auto"
                     )
-                self._record(asking, origin="policy", reason=SELF_DENIAL)
+                self._record(asking, origin="policy", reason=SELF_DENIAL, denial=True)
                 return ApprovalDecision(False, SELF_DENIAL, origin="policy")
             decided: object = await self._policy.decide(asking)
         except asyncio.CancelledError as exc:
@@ -1732,12 +1741,52 @@ class _ApprovalGate:
             allowed=decided.allow,
             reason=decided.reason,
             remember=decided.remember,
+            # A person's Deny, an auto block, a policy's refusal of the step
+            # itself; never a question withdrawn or one that could not be asked.
+            denial=not decided.allow
+            and decided.origin in ("user", "auto", "policy")
+            and not isinstance(decided, Withdrawal),
         )
         if not decided.allow and decided.origin == "auto":
             return dataclasses.replace(
                 decided, reason=self._block(asking, auto, decided.reason)
             )
         return decided
+
+    def _earlier(self, request: ExecutionRequest) -> ApprovalDecision | None:
+        """A refusal of a step blocked earlier in this task, before any review (#411).
+
+        Only a policy with :class:`~localmelo.melo.contracts.approvals.EarlierBlocks`
+        in it refuses: a task the chat continued on its own. The record says
+        who blocked the step first (``approval.earlier``).
+        """
+        blocks = find_earlier(self._policy)
+        found = (
+            None
+            if blocks is None
+            else blocks.match(
+                request.tool_name, request.arguments, self._workspace_root
+            )
+        )
+        if found is None:
+            return None
+        who, exact = found
+        asking = ApprovalRequest(
+            request_id=uuid.uuid4().hex,
+            run_id=self._run.task_id,
+            call_id=self._call.id,
+            tool_name=request.tool_name,
+            arguments=copy.deepcopy(request.arguments),
+            preview=call_preview(request.tool_name, request.arguments),
+            workspace_root=self._workspace_root,
+            tier=self._tier,
+            outside=request.outside,
+        )
+        reason = (BLOCKED_EARLIER if exact else BLOCKED_ALIKE).format(who=who)
+        self._record(asking, origin="policy", reason=reason)
+        assert self.asked is not None
+        self.asked["earlier"] = who
+        return ApprovalDecision(False, reason, origin="policy")
 
     async def _folder(
         self, request: ExecutionRequest, outside: OutsideAccess
@@ -1856,6 +1905,7 @@ class _ApprovalGate:
         allowed: bool = False,
         reason: str = "",
         remember: bool = False,
+        denial: bool = False,
     ) -> None:
         """Keep the outcome of *asking*.
 
@@ -1864,6 +1914,10 @@ class _ApprovalGate:
         cancelled while the policy decided. In auto mode, and for a call
         that is not plainly routine, the record also holds the ``mode``, the
         ``review`` and the ``step_key``; an allowance used is ``"once"``.
+        *denial*: the step itself was denied (a person's Deny, an auto block,
+        a policy's refusal of the step); the record then keeps its
+        ``call_key`` and ``loose_keys``, so a task its chat continues does not
+        run it, or a step alike, again (#411).
         """
         self.asked = {
             "request_id": asking.request_id,
@@ -1883,6 +1937,17 @@ class _ApprovalGate:
                 self.asked["step_key"] = self._key
         if self._allowance:
             self.asked["allowance"] = "once"
+        if denial and not allowed:
+            # What makes a later call the same step, or one alike: a task the
+            # chat continues on its own never runs it again (#411).
+            self.asked["call_key"] = call_key(
+                asking.tool_name, asking.arguments, self._workspace_root
+            )
+            self.asked["loose_keys"] = loose_keys(
+                asking.tool_name,
+                asking.arguments,
+                () if review is None else review.categories,
+            )
 
 
 # Why a path outside the workspace was refused when no person could be

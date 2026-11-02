@@ -159,14 +159,16 @@ worker runs did** (once a run or a terminal chat exists, and always in developer
 
 ![The main chat: a question answered, a task that came back done, a task with its priorities open, and a pause with Undo](../assets/img/main-chat-tasks.webp)
 
-- **Ask, or ask for work.** The main chat answers a quick question itself, and searches your folder for "which file defines X?". A question that says `briefly`, `in short`, `one line`, `简单说一下` or `一句话` is always answered here, after a quick look: it is never offered as a task. Bigger work (several steps, files, research, writing) it starts as a task, with one line: `Started: Plan the trip · P2`. Its result comes back as a card. It never answers with only what it is about to do: a reply like "I'll start by looking at the test file" starts the work as a task instead.
+- **Ask, or ask for work.** The main chat does what its own tools can: it answers a quick question, searches your folder for "which file defines X?", and reads files and public web pages. A question that says `briefly`, `in short`, `one line`, `简单说一下` or `一句话` is always answered here, after a quick look: it is never offered as a task.
+- **It starts the work itself.** A request it cannot do with its own tools (running commands, changing files, many steps of research or writing) starts as a task right away, with one line and **Stop**: `Started: Plan the trip · P2`. It does not ask first. Your message is the task's request, word for word. Starting is not a risky step: every step inside the task still asks you, or is blocked in Auto, as in the chat. Its result comes back as a card. It never answers with only what it is about to do: a reply like "I'll start by looking at the test file" starts the work as a task instead.
+- **When it does not start one.** A greeting, a short message with nothing to do in it (`thanks`, `今天天气不错`), a short question it can answer, or a request to be told something (`please explain what a monad is`, `帮我看看 x.py 是做什么的`) is answered in the chat. A request too unclear to act on gets one short question back. **Start this as a task?** is offered only where starting would be wrong: a question, which asks to know rather than to act (`why do the tests fail?`; a polite request that asks for work, such as `can you run the tests?`, is a request), words that say not to act and ask for nothing else (`just explain how`, `don't change anything`, `只解释一下`; `fix the login bug without changing anything else` asks for the fix and starts), words that steer a task (`cancel it`, `continue the report task`), a message with no words of its own (an attachment alone), or a repeating chore or a reminder code could not schedule.
 - **Say it in code's words.** `/task …`, or **Run as a task** beside the send button, starts the message as a task at once; no model reads it to decide. So does a request to change files it names (`Fix tests/cli/test_e2e_pty.py and commit`). A task the main chat starts this way begins at once under the first words of your message, and is renamed in 3 to 8 words in the language of your message (`Hide the recovery card in default mode`) when the model answers one short request, made at the lowest priority so it never waits ahead of real work; a short message is its own title, a name you gave the task meanwhile stays, and the first words stay when the model does not answer in 6 seconds. `stop`, `pause`, `resume` or `first` with a task's name (`pause the slides`, `暂停 Fix CI`, `先做 slides`) changes that task at once, with **Undo**. A request you forbid or only quote is never read as work: `don't delete a.md` and `不要删除 a.md` start nothing.
 - **Priorities as P0 to P5.** A line shows the code (`P1`); hover it for what it means. Your words choose: "urgent", "asap", a deadline today (`by 5pm`, `今天下午三点前`) or "today" anywhere in the request (not "not today", "今天不用") make it P1 (today), "no rush" makes it P3 (when there is time), anything else is P2 (normal). **Change** on the line opens the list (`P0 · runs first; others wait`, `P1 · today`, `P2 · normal`, `P3 · when there is time`, `P4 · only when the computer is idle`, `P5 · on hold until you start it`) and sets your own priority, which stays.
 - **Follow up on a task.** `finish it`, `commit it` or `继续那个任务` goes to the task you mean: a running task reads it at its next step, and a done or stopped one continues in its own session, with what it did before. The line says where it went: `Sent to: Slides`, `Continued: Fix CI`.
 - **Continue a stopped task by name.** `Continue the recovery card task where it stopped: run the tests` or `继续恢复卡片任务` continues the one stopped task whose title those words name, at once and with no suggestion to tap; the whole message is its next turn. When several stopped tasks match, each is offered as a one-tap `Suggested: send your message to …`. A task that is done or still working says so (`Fix CI is done. There is nothing to continue.`).
 - **What got done.** The main chat reads each task's state and the first lines of its answer, so it can name the commits tasks made.
 - **Only your own words change a task.** What you type counts; an attached file, a web page or a task's report that says "stop the slides" changes nothing: the line reads `Suggested: stop Slides`, and one tap applies it.
-- **Long questions.** A message the main chat cannot settle in 4 steps becomes a task (`This needs more than a quick answer, so I started it as a task.`); a question (a `?` anywhere, or "quick question") asks **Start this as a task?** first. It answers in the language of your message. While you type, finished results wait until you send or pause for 10 seconds; one that needs your approval shows at once.
+- **Long questions.** A message the main chat cannot settle in 4 steps becomes a task (`This needs more than a quick answer, so I started it as a task.`); a question (a `?` anywhere, or "quick question") asks **Start this as a task?** first, but a polite request (`can you run the tests?`, `请帮我…`) is a request and starts. It answers in the language of your message. While you type, finished results wait until you send or pause for 10 seconds; one that needs your approval shows at once.
 
 ## Side chats start tasks too
 
@@ -174,7 +176,7 @@ worker runs did** (once a run or a terminal chat exists, and always in developer
 - **A task comes back to the chat that started it.** Its line (`Started: Find hotels · P2`, with **Change** and **Undo**), its card, its approvals and its result appear in that side chat, which reads the tasks that ended before its next answer. The main chat gets no card for them.
 - **The main chat still sees everything.** Activity and Workers list every task; one a side chat started reads `From Trip plan`.
 - **Your own chat first.** `pause the slides` means this chat's slides task before another chat's. Words that fit several tasks of this chat show a one-tap `Suggested: pause …` for each, and never reach another chat's task. A task of another chat can still be named, by its id, its chat or words that fit none of this chat's own: its line reads `From Main chat` or `From Trip plan`. The same holds when the model picks the task.
-- **Only your words start a task.** A task starts from the model only when your message is a request for work (it changes files it names, or says the whole job), and then your own message is the task. When your message is anything else (a question, or a file or a page gave the model the idea), the chat shows `Start this as a task?` with your own message and starts nothing until you tap. The main chat does the same.
+- **Only your words start a task.** When the model starts a task, your own message is the task, never the model's wording (the model only names it); a file, a page or a task's report can give the model the idea but never the request. A turn melo began itself (a task's question, a follow-up) starts no task at all. Where starting would be wrong, the chat shows `Start this as a task?` with your own message and starts nothing until you tap. The main chat does the same.
 - **Deleting a side chat** hands its unfinished tasks, chores and waiting approvals to the main chat in one step, including tasks that end while it goes. The main chat then shows their cards and reads their results; finished tasks keep their record.
 - **A task that waits for you shows on the list.** The side chat's row gets the dot and reads `A task waits for you`; the main chat's row reads `1 waiting in a side chat`.
 - **The main chat hears when a side chat finishes work.** With your next message it reads one line, the side chat's name and a short summary, when that chat answered or one of its tasks finished. It is information, not a message.
@@ -200,6 +202,17 @@ worker runs did** (once a run or a terminal chat exists, and always in developer
 - **What always asks.** A high-impact step (installs, downloads, deletes, sends data out, changes outside the folder, uses your keys, changes melo itself) asks every time, however often you allowed it before. So does a step melo could not see all of (a file too big to read, a command built while it runs), and every call of a tool melo's rules do not read (a web or MCP tool, such as one that pays an invoice). Chores, and tasks another program or melo itself started, never use or record your approvals. Auto's **Allow once** is one step, once, and is never recorded. A task you create with your gateway token (`melo task new`) is yours, and uses the main chat's approvals.
 - **Revoke.** **Revoke** on the chat's row, on the task's page, or under **Steps you approved here** in a chat's **Details** (developer mode) takes an approval back: that step asks again; what ran stays done. Approvals live in memory: restarting the gateway or deleting the chat forgets them.
 - **In Auto.** A step Auto blocked in a task shows in its chat too, with what was blocked, why, and **Allow once**. An earlier approval never lifts Auto's block: Auto blocks only steps that are not routine, and those are never kept.
+
+## When a task it started stops, the chat follows up
+
+- **The chat owns the outcome.** When a task a chat started fails, runs out of steps, ends `Done, not finished`, or needs you, that chat takes one turn of its own, right after the task's card: a row reads `melo follows up on “Fix CI”: it ran out of steps`, marked `melo started this`.
+- **It does one thing, then says so.** It continues the task once with a short message (`Continued: Fix CI`), works around a step that was blocked (for an install Auto blocked: use what is installed, or write it without the package), or asks you one clear question. Then it tells you in one or two lines what got done and what did not.
+- **A blocked step never runs again.** In a task the chat continued, a step you, Auto or melo's rules blocked is refused before it is reviewed (`blocked earlier`), and so is one alike: the same command spelt another way (`pip3` for `pip`, other quoting, a quiet flag) or the same install. The task must find another way. Your own message to the task, or **Allow once**, lifts that. A question that was withdrawn (the gateway stopped) blocked nothing.
+- **It continues at most once.** For each message of yours, a task is continued by its chat at most once; if it stops again, the chat only reports and asks. A third stop gets the card alone.
+- **Your turn wins.** The follow-up never interrupts your message: it waits until the chat is free, and a message you send meanwhile is queued. If you write after the task ended, your turn reads the ending and the follow-up is skipped.
+- **It approves nothing.** A follow-up has only the task tools (no web, browser, file or shell tool) and widens no permission. What it tells the task reaches it as melo's note, never as your words: a step your own request did not ask for stays blocked in Auto, whatever the note says.
+- **Only tasks the chat started.** Chores, tasks started from the task page and other chats' tasks keep the card alone. Activity reads what the chat did: `Continued the task: Fix CI`, `Asked you: Should I split it?`.
+- **Turn it off** with **Follow up on tasks** in Settings → Chats and folders (developer mode), or `[tasks] follow_up = false`.
 
 <a id="slash-commands"></a>
 
@@ -286,7 +299,26 @@ folder.
 On the right of the chat is Melo's panel. At the top is Melo's portrait, with a ring in the colour of what it is
 doing (green while it works, amber while something waits for you), the name, and one status line: `Connected ·
 <model> on <server>`, `Working on 2 things`, `Waiting for you`, or `Model server not reachable` with **Open
-settings**. Under it are four tabs: **Activity**, **Workers**, **Scheduled** and **Memory**. Arrow keys, Home and
+settings**.
+
+Melo in the portrait moves with what it does:
+
+| Melo | Meaning |
+|---|---|
+| Wakes up, shakes and sits | The page has just opened. It sits for a few seconds, then rests. |
+| Typing at its laptop | Something runs. |
+| Tilting its head | The model is answering and no tool runs. |
+| Raising a paw | Something waits for you. It shows at once. |
+| Lying down, eyes closed | Nothing runs. Now and then it gets up and plays (at most every 5 minutes). |
+
+- A run that just ended closes its eyes happily with its tail up, and an error puts its ears back and its head
+  low; both are still pictures. While the console is connecting or cannot reach the gateway, Melo is curled up and
+  faded.
+- After three minutes of plain rest Melo lies still until something changes or it is time to play.
+- With reduced motion each state is a still picture, and a hidden tab or a portrait scrolled out of view draws
+  nothing.
+
+Under it are four tabs: **Activity**, **Workers**, **Scheduled** and **Memory**. Arrow keys, Home and
 End move between them, and the panel opens the tab you used last.
 
 The panel shows what belongs to the chat that is open. A side chat's panel lists that chat's own activity and the
@@ -298,8 +330,8 @@ health poll whenever what runs changes, and every 30 seconds:
 
 - **Now** lists what runs or waits: this console's chats, tasks, worker runs and terminal chats. Each row says what
   it is doing in plain words (`Reading notes.md`, `Running the tests`, `Waiting for your approval`), with an icon for
-  the kind of work. A row that waits for you is amber. With nothing running it reads `Nothing running`, and the
-  portrait rests and blinks.
+  the kind of work. A row that waits for you is amber. With nothing running it reads `Nothing running`, and Melo
+  rests.
 - **Today** lists what finished today, newest first: the title, a one-line result (`All 412 tests passed.`) and the
   time. The first eight show; **Earlier today (n)** shows the rest.
 
@@ -373,42 +405,42 @@ In developer mode, **Details** opens in the panel, in place of the tabs, until y
 ## Melo in the page
 
 The page shows Melo, the Akita puppy, where it already had a picture, in the
-app and in a browser alike. The pictures are still images, except that the calm
-portrait and the calm (idle) face blink: an eyes-closed patch, laid over the
-picture, fades in twice every 11 seconds. It is CSS only, with no script, and
-under `prefers-reduced-motion: reduce` the page shows the still picture.
+app and in a browser alike. The panel's portrait moves; the other pictures are
+still, and all of them come from the same moves. Under
+`prefers-reduced-motion: reduce` the page shows still pictures.
 
-- **Empty chat.** Melo sits above *What would you like to work on?* with its calm
-  face, and blinks.
-- **The panel.** Melo's portrait sits at the top of the [panel](#the-panel-beside-a-chat): resting (and blinking)
-  when nothing runs, working, wide-eyed while something waits for you, happy for a few seconds after a run ends
-  well, and with a drooping ear when the model server cannot be reached or a run just failed.
+- **Empty chat.** Melo sits above *What would you like to work on?*.
+- **The panel.** Melo's portrait sits at the top of the [panel](#the-panel-beside-a-chat) and moves with what it
+  does: it wakes up, works, thinks, raises a paw while something waits for you, rests and plays now and then. It
+  closes its eyes happily for a few seconds after a run ends well, and puts its ears back and its head low when the
+  model server cannot be reached or a run just failed; those two are still pictures. While the page cannot reach
+  localmelo, Melo is curled up and faded.
 - **Replies.** Beside `localmelo` on each reply is Melo's face. On the newest
-  reply it shows that turn's state: working (tongue out) while it runs, wide-eyed
-  while an approval waits, happy when it is done, and with a drooping ear when
-  it ended with a warning or an error. A turn you stopped is not a failure and
-  keeps the calm face, and so does every older reply; the calm face blinks.
+  reply it shows that turn's state: at its laptop while it runs, with a raised paw
+  while an approval waits, eyes closed and happy when it is done, and with its ears
+  back when it ended with a warning or an error. A turn you stopped is not a failure and
+  keeps the calm face, and so does every older reply.
 - **Approval bar.** The bar that reads "melo is waiting for your answer" shows the
-  wide-eyed face.
-- **Brand and tab.** The sidebar and the sign-in screen show the calm face, and
-  the browser tab uses it at 16, 32 and 64 px.
+  face with the raised paw.
+- **Brand and tab.** The sidebar and the sign-in screen show Melo's calm face, and the browser tab uses it, cut
+  closer, at 16, 32 and 64 px. The Main chat shows the smiling face, as the replies do.
 
 The faces are decoration where words already say the state (the live row, the
 work box, the failure card, the approval bar), so they have empty alt text. A
 finished answer with no work box above it has nothing else saying it is done, so
-its face reads `Done` to a screen reader. The portrait keeps the alt text
-`Melo, the localmelo Akita mascot`.
+its face reads `Done` to a screen reader. The empty chat's Melo keeps the alt text
+`Melo, the localmelo Akita mascot`; the panel's moving portrait is decoration, as its status line says the same in
+words.
 
-The pictures are transparent PNGs with a thin cream rim. On the light canvas the
-navy outline sets Melo off (at least 12:1 against the console's light surfaces);
-on the dark canvas the rim does (at least 5.6:1 against the dark ones, 3:1 is the
-bar for a picture). They are served from `/assets/akita/` (`sit-idle.png`,
-`sit-idle-blink.png`, `sit-working.png`, `sit-waiting.png`, `sit-done.png`, `sit-error.png`, `face-idle.png`,
-`face-idle-blink.png`, `face-working.png`, `face-waiting.png`, `face-done.png`,
-`face-error.png` and `favicon-16.png`, `-32` and `-64`): 430 KB in all, of which a page loads the portrait and
-the face its state shows. They are copies of
-the app's own pictures in `macos/art/akita` made by the same script (see the
-[macOS app guide](macos-app.md)).
+The moves are served from `/assets/moves/`: one picture per state holding its frames, a still of each state
+(`poster-<state>.webp`), the done, error and offline stills (`poster-done.webp`, `poster-error.webp`,
+`poster-offline.webp`), Melo's head (`face-idle.png`, `face-brand.png`, `face-working.png`, `face-waiting.png`,
+`face-done.png`, `face-error.png`) and the tab icons (`favicon-16.png`, `-32` and `-64`), and `manifest.json` with
+each frame's duration: 1.6 MB in all, and the app shows the same files. The page loads the moves once, when it opens.
+
+The pictures are transparent. On the light canvas the dark brown line round Melo
+sets it off (about 15:1 against the console's light surfaces); on the dark canvas
+its orange fur does (about 7.5:1 against the dark ones; 3:1 is the bar for a picture).
 
 ## Inspect workers
 

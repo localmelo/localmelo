@@ -77,6 +77,7 @@ from .cards import CARD_EVENT, MainChatCards
 from .chores import ChoreOptions, ChoreRunner
 from .errors import ApiError
 from .explain import Explainer, Explanations
+from .followups import TaskFollowups
 from .front import Front, FrontAgent, SideAgent, build_front_agent
 from .idle_sleep import IdleSleep, IdleSleepOptions
 from .probe import ModelServerProbe, Probe
@@ -207,6 +208,8 @@ class Console:
         # A task asks the chat that started it when it is stuck (#369).
         self.asks = OwnerAsks(self)
         self.workers.owner = self.asks
+        # A chat follows up on a task it started that failed or stopped (#411).
+        self.followups = TaskFollowups(self)
         # A task's approvals go through its chat (#369): its chat's recorded
         # approvals first, then the person, with melo's explanation.
         self.explanations = Explanations(self)
@@ -489,6 +492,7 @@ class Console:
             self.main_id = main.id
             self.workers.front_id = main.id
             await self.cards.start(main.id)
+            self.followups.listen()
             try:
                 await self.asks.expire_stale()
                 await self.asks.restore_queued()
@@ -574,6 +578,8 @@ class Console:
         if self._monitor is not None:
             with contextlib.suppress(Exception):
                 await self._monitor.stop()
+        # No follow-up starts while the workers stop their tasks.
+        await self.followups.aclose()
         try:
             try:
                 await self.workers.aclose()

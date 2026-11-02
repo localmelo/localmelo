@@ -2,11 +2,13 @@
  * The panel beside a chat (panel.mjs) in a DOM double: Melo's header, the tabs and their keys, the day's
  * activity and its calm state, the panel following the open chat, the approvals folded under a row, the Workers
  * tab, a worker run's row opened to its live steps on a fake event stream, a task's row as a link that opens the
- * task in the panel in place of Melo's page (and the way back), and the sheet a phone opens from the face chip.
+ * task in the panel in place of Melo's page (and the way back), the sheet a phone opens from the face chip, and
+ * Melo's moves in the portrait (which state each header shows; the player itself is tests/gateway/test_moves.mjs).
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {headline, setupPanel, stepWords} from '../../support/gateway/static/panel.mjs';
+import {answering, headline, portraitMove, setupPanel, stepWords} from '../../support/gateway/static/panel.mjs';
+import {REST_STILL_AFTER_MS, SIT_MS} from '../../support/gateway/static/moves.mjs';
 
 function dom() {
   const doc = {activeElement: null, listeners: {}, visibilityState: 'visible',
@@ -61,7 +63,8 @@ const row = (extra) => ({kind: 'task', id: 't1', title: 'Slides for the 3 pm mee
 const started = {id: 1, turn: 1, type: 'turn.started', data: {turn: 1, user_text: 'Make slides'}};
 const tool = (id, call, type, data = {}) => ({id, turn: 1, ts: id, type, data: {step: 1, call_id: call, ...data}});
 
-function harness({rows = [], turns = null, storage = null, failActivity = false, wide = null, openChat = '', developer = false, hasTasks = false} = {}) {
+function harness({rows = [], turns = null, storage = null, failActivity = false, wide = null, openChat = '', developer = false, hasTasks = false,
+  moves = undefined, clock = () => 86400 * 1000 * 400, wait = undefined} = {}) {
   const {doc, Element} = dom();
   const root = new Element('aside');
   const drawer = new Element('section');
@@ -106,7 +109,7 @@ function harness({rows = [], turns = null, storage = null, failActivity = false,
   };
   h.panel = setupPanel({
     root, chip, backdrop, api, cover: () => [chat], chat: () => h.open, developer: () => developer, storage: storage ?? {getItem: () => null, setItem: () => {}},
-    clock: () => 86400 * 1000 * 400,
+    clock, ...(moves ? {moves} : {}), ...(wait ? {wait, cancelWait: () => {}} : {}),
     wide, tasks, hasTasks: () => hasTasks, home: () => `#/s/${h.open || 'main'}`, navigate: (hash) => h.went.push(hash),
     live: {
       doc,
@@ -166,13 +169,14 @@ test('the portrait, the status line and the face chip follow health', async () =
   await h.panel.update(health({running: {chats: 0, tasks: 2, runs: 0, terminal: 0}, waiting: [{kind: 'task', id: 't1'}]}));
   assert.equal(h.root.dataset.mood, 'waiting');
   const picture = h.root.find((node) => node.tagName === 'IMG');
-  assert.equal(picture.getAttribute('src'), '/assets/akita/sit-waiting.png');
+  assert.equal(picture.getAttribute('src'), '/assets/moves/poster-attention.webp');
   assert.match(h.root.find((node) => node.attributes.role === 'status').text(), /Waiting for you/);
   assert.equal(h.chip.children[1].textContent, '2 · !');
   assert.equal(h.chip.attributes['aria-label'], 'Activity: Waiting for you');
   await h.panel.update(health());
-  assert.equal(picture.getAttribute('src'), '/assets/akita/sit-idle.png');
-  assert.ok(h.root.find((node) => node.className.includes('blinks')), 'only the resting portrait blinks');
+  assert.equal(picture.getAttribute('src'), '/assets/moves/poster-idle_rest.webp');
+  assert.ok(!h.root.find((node) => node.className.includes('blinks')), 'no picture blinks');
+  assert.equal(h.chip.children[0].src, '/assets/moves/face-idle.png');
 });
 
 test('calm: nothing running, and today newest first with each kind and result', async () => {
@@ -852,4 +856,196 @@ test("the panel keeps following its chat while the address names a task", async 
   } finally {
     delete globalThis.location;
   }
+});
+
+// ── Melo's moves ──
+
+/** A player double: each change the panel asks of it is written down (the same state asked again is no change, as
+ * in the player); `complete(state)` plays a state's end. */
+function movesDouble({still = false} = {}) {
+  const player = {asked: [], cuts: [], hidden: new Set(), still, onComplete: null, fail: false,
+    set(key, {once = false, cut = false} = {}) {
+      const label = once ? `${key} once` : key;
+      if (this.asked.at(-1) !== label) { this.asked.push(label); this.cuts.push(cut); }
+      return Promise.resolve(this.fail ? {changed: false, error: new Error('no sheet')} : {changed: true});
+    },
+    setVisible(visible, reason) { if (visible) this.hidden.delete(reason); else this.hidden.add(reason); },
+    inspect() { return {still: this.still}; },
+    complete(state) { this.onComplete({state}); }};
+  const moves = (canvas, options) => { player.canvas = canvas; player.onComplete = options.onComplete; return Promise.resolve(player); };
+  return {player, moves};
+}
+const running = (n = 1) => ({running: {chats: n, tasks: 0, runs: 0, terminal: 0}});
+const item = (extra = {}) => ({kind: 'chat', id: 'c1', title: 'x', activity: 'Thinking', icon: 'think', ...extra});
+
+test('the portrait moves: waits raise a paw, work works, the model alone thinks, a quiet console rests', () => {
+  const move = (h, scoped = null) => portraitMove(h, headline(h, scoped), scoped);
+  assert.equal(move(null), null, 'no health yet: the still picture');
+  assert.equal(move(health({}, {model_server: {reachable: false}})), null);
+  assert.equal(move(health({recent: {outcome: 'done', ended_s_ago: 2}})), null);
+  assert.equal(move(health({recent: {outcome: 'failed', ended_s_ago: 2}})), null);
+  assert.equal(move(health()), 'idle');
+  assert.equal(move(health({...running(), waiting: [{kind: 'chat', id: 'c1'}]})), 'attention');
+  assert.equal(move(health({...running(), items: [item({icon: 'run', activity: 'Running the tests'})]})), 'working');
+  assert.equal(move(health({...running(), items: [item({answering: true})]})), 'thinking');
+  // "Thinking" in words is not enough: only the gateway's mark that the model is answering is.
+  assert.equal(move(health({...running(), items: [item()]})), 'working');
+  // Two things run and one uses a tool, or one is not listed: working.
+  assert.equal(move(health({...running(2), items: [item({answering: true}), item({id: 'c2', icon: 'read', answering: false})]})), 'working');
+  assert.equal(move(health({...running(2), items: [item({answering: true})]})), 'working');
+  // A side chat reads its own rows: a held row waits on a model slot, not the model.
+  const scoped = [{id: 'c1', state: 'running', answering: true}, {id: 't1', state: 'done'}];
+  assert.equal(answering(health(running()), scoped), true);
+  assert.equal(answering(health(running()), [...scoped, {id: 't2', state: 'held', answering: false}]), false);
+  assert.equal(answering(health(running()), []), false);
+});
+
+test('the portrait wakes up once, sits, rests, plays now and then, and keeps its still pictures for an ending and an error', async () => {
+  let now = 1_000_000;
+  const {player, moves} = movesDouble();
+  const timers = [];
+  const h = harness({moves, clock: () => now, wait: (fn, ms) => { timers.push({fn, at: now + ms}); return timers.length; }});
+  await settle();
+  const ring = h.root.find((node) => node.className === 'panel-portrait');
+  assert.equal(player.canvas.tagName, 'CANVAS');
+  assert.equal(player.canvas.attributes['aria-hidden'], 'true');
+  assert.equal(ring.dataset.moves, 'off', 'before the first health reply the picture shows');
+  assert.equal(ring.dataset.dim, 'true', 'not connected yet: the offline still, faded');
+  assert.equal(h.root.find((node) => node.tagName === 'IMG').getAttribute('src'), '/assets/moves/poster-offline.webp');
+  await h.panel.update(health());
+  await settle();
+  assert.equal(ring.dataset.moves, 'on', 'the canvas shows once its state is drawn');
+  assert.deepEqual(player.asked, ['startup']);
+  // Startup holds until it ends; then Melo sits on its last frame for 8 s, and lies down to rest.
+  await h.panel.update(health());
+  assert.deepEqual(player.asked, ['startup']);
+  player.complete('startup');
+  assert.equal(player.asked.at(-1), 'startup');
+  assert.equal(SIT_MS, 8000);
+  assert.ok(timers.some((timer) => timer.at >= now + SIT_MS), 'the header looks again when the sitting ends');
+  now += 7_000;
+  await h.panel.update(health());
+  assert.equal(player.asked.at(-1), 'startup');
+  now += 1_000;
+  timers.at(-1).fn();
+  assert.equal(player.asked.at(-1), 'idle_rest');
+  assert.equal(ring.dataset.move, 'idle_rest');
+  // After 20 s of rest it plays once, to the end, and rests again; not again for 5 minutes.
+  now += 20_000;
+  await h.panel.update(health());
+  assert.equal(player.asked.at(-1), 'idle_play once');
+  now += 4_000;
+  await h.panel.update(health());
+  assert.equal(player.asked.at(-1), 'idle_play once', 'a play goes on to its end');
+  player.complete('idle_play');
+  assert.equal(player.asked.at(-1), 'idle_rest');
+  // Three minutes of plain rest: the resting poster, and nothing draws, until the next play.
+  now += 179_000;
+  await h.panel.update(health());
+  await settle();
+  assert.equal(ring.dataset.moves, 'on');
+  now += 21_000;
+  await h.panel.update(health());
+  assert.equal(REST_STILL_AFTER_MS, 180_000);
+  assert.equal(ring.dataset.moves, 'off');
+  assert.equal(ring.dataset.move, 'idle_rest');
+  assert.ok(player.hidden.has('portrait'));
+  assert.equal(h.root.find((node) => node.tagName === 'IMG').getAttribute('src'), '/assets/moves/poster-idle_rest.webp');
+  assert.equal(player.asked.at(-1), 'idle_rest');
+  now += 100_000;
+  await h.panel.update(health());
+  await settle();
+  assert.equal(player.asked.at(-1), 'idle_play once');
+  assert.equal(player.cuts.at(-1), true, 'back from the still picture the play cuts in under its fade');
+  assert.equal(ring.dataset.moves, 'on');
+  assert.ok(!player.hidden.has('portrait'));
+  // Work, a wait and the model answering each take over at once.
+  await h.panel.update(health({...running(), items: [item({icon: 'run'})]}));
+  assert.equal(player.asked.at(-1), 'working');
+  assert.equal(player.cuts.at(-1), false, 'a change on show cross-fades');
+  await h.panel.update(health({...running(), items: [item({answering: true})], waiting: [{kind: 'chat', id: 'c1'}]}));
+  assert.equal(player.asked.at(-1), 'attention');
+  await h.panel.update(health({...running(), items: [item({answering: true})]}));
+  assert.equal(player.asked.at(-1), 'thinking');
+  // A run that just ended keeps today's picture; the moves behind it stop.
+  const asked = player.asked.length;
+  await h.panel.update(health({recent: {kind: 'chat', id: 'c1', outcome: 'done', ended_s_ago: 1}}));
+  assert.equal(ring.dataset.moves, 'off');
+  // The done still (eyes closed and happy, tail up); an error is the error still (ears back, head low).
+  assert.equal(h.root.find((node) => node.tagName === 'IMG').getAttribute('src'), '/assets/moves/poster-done.webp');
+  assert.equal(ring.dataset.dim, 'false');
+  assert.ok(player.hidden.has('portrait'));
+  assert.equal(player.asked.length, asked);
+  await h.panel.update(health({}, {model_server: {reachable: false}}));
+  assert.equal(ring.dataset.moves, 'off');
+  assert.equal(ring.dataset.move, undefined);
+  assert.equal(h.root.find((node) => node.tagName === 'IMG').getAttribute('src'), '/assets/moves/poster-error.webp');
+  // The page lost the gateway: the still picture, until it answers again.
+  await h.panel.update(health());
+  await settle();
+  assert.equal(ring.dataset.moves, 'on');
+  h.panel.offline(true);
+  assert.equal(ring.dataset.moves, 'off');
+  // Lost: the offline still (curled up), faded; the words and the ring stay as they were.
+  assert.equal(h.root.find((node) => node.tagName === 'IMG').getAttribute('src'), '/assets/moves/poster-offline.webp');
+  assert.equal(ring.dataset.dim, 'true');
+  assert.ok(player.hidden.has('portrait'));
+  h.panel.offline(false);
+  await settle();
+  assert.equal(ring.dataset.moves, 'on');
+  // Back to rest: the wake-up is not played again, and the rest starts over.
+  await h.panel.update(health());
+  assert.equal(ring.dataset.moves, 'on');
+  assert.ok(!player.hidden.has('portrait'));
+  assert.equal(player.asked.at(-1), 'idle_rest');
+  // A state that cannot be drawn leaves the still picture in front.
+  h.panel.offline(true);
+  player.fail = true;
+  await h.panel.update(health({...running(), items: [item({icon: 'run'})]}));
+  h.panel.offline(false);
+  await settle();
+  assert.equal(player.asked.at(-1), 'working');
+  assert.equal(ring.dataset.moves, 'off');
+});
+
+test('a still ends the sitting after the wake-up and the rest: back at rest Melo lies down at once', async () => {
+  let now = 0;
+  const {player, moves} = movesDouble();
+  const h = harness({moves, clock: () => now, wait: () => 1});
+  await settle();
+  await h.panel.update(health());
+  player.complete('startup');
+  assert.equal(player.asked.at(-1), 'startup');
+  now += 1_000;
+  await h.panel.update(health({recent: {kind: 'chat', id: 'c1', outcome: 'done', ended_s_ago: 0}}));
+  now += 1_000;
+  await h.panel.update(health());
+  assert.equal(player.asked.at(-1), 'idle_rest', 'no sitting left over from before the ending');
+});
+
+test('the first move of a busy console skips the wake-up, and reduced motion never plays', async () => {
+  let now = 0;
+  const {player, moves} = movesDouble({still: true});
+  const h = harness({moves, clock: () => now});
+  await settle();
+  await h.panel.update(health({...running(), items: [item({icon: 'run'})]}));
+  assert.deepEqual(player.asked, ['working']);
+  await h.panel.update(health());
+  assert.equal(player.asked.at(-1), 'idle_rest');
+  now += 600_000;
+  await h.panel.update(health());
+  assert.equal(player.asked.at(-1), 'idle_rest');
+});
+
+test('on a phone the portrait in the closed sheet draws nothing until the sheet opens', async () => {
+  const {player, moves} = movesDouble();
+  const wide = {matches: false, addEventListener() {}};
+  const h = harness({moves, wide});
+  await settle();
+  await h.panel.update(health());
+  assert.ok(player.hidden.has('sheet'));
+  h.chip.click();
+  assert.ok(!player.hidden.has('sheet'));
+  h.panel.closeSheet();
+  assert.ok(player.hidden.has('sheet'));
 });

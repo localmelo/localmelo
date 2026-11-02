@@ -20,6 +20,10 @@ of its internal turn's start, or whose internal turn ends without doing
 either, gives the worker "No answer from <chat>"; a stopped task ends its
 wait at once. Either stops the internal turn. A restart marks a pending ask
 expired; a deleted chat's open questions move to the main chat.
+
+The same drain runs a chat's follow-ups on the tasks it started (#411, see
+:mod:`.followups`), after the person's queued messages and the tasks'
+questions: a message the person sends during one is queued the same way.
 """
 
 from __future__ import annotations
@@ -48,11 +52,14 @@ from .errors import ApiError
 
 if TYPE_CHECKING:
     from . import Console
+    from .followups import FollowUp
     from .front import Front
 
 logger = logging.getLogger(__name__)
 
 ASK_ORIGIN: Final = "ask_owner"
+# The origin of a chat's follow-up on a task it started that stopped (#411).
+FOLLOWUP_ORIGIN: Final = "followup"
 # The internal turn's step cap.
 ASK_STEPS: Final = 8
 # How long a chat has to answer, from its internal turn's start.
@@ -121,7 +128,7 @@ class OwnerAsks:
         # person's queued messages; the ask whose internal turn runs.
         self._waiting: dict[str, list[Ask]] = {}
         self._people: dict[str, list[_Queued]] = {}
-        self._busy: dict[str, Ask] = {}
+        self._busy: dict[str, Ask | FollowUp] = {}
         self._turns: dict[str, Ask] = {}
         self._drains: dict[str, asyncio.Task[None]] = {}
         self._jobs: set[asyncio.Task[Any]] = set()
@@ -441,12 +448,16 @@ class OwnerAsks:
         title = (
             busy.title if busy else (people[-1].echo.get("title", "") if people else "")
         )
+        following = busy is not None and not isinstance(busy, Ask)
+        if busy is None and people:
+            following = bool(people[-1].echo.get("following"))
+        words = "ask.queuedFollowUp" if following else "ask.queued"
         front = self.console.front_for(chat_id)
         item = _Queued(typed, composed, key or f"queued-{uuid.uuid4().hex}")
         item.echo = await front.echo(
             {"echo": "queued", "title": title, "typed": typed,
-             "line": t_in("en", "ask.queued", title=title),
-             "said": said("ask.queued", title=title)}
+             "line": t_in("en", words, title=title), "said": said(words, title=title),
+             **({"following": True} if following else {})}
         )  # fmt: skip
         people.append(item)
         try:
@@ -497,6 +508,17 @@ class OwnerAsks:
         # A queued message waits in meta.queued for the next start, not a closing gateway.
         return self._closed or self.console.shutdown.is_set()
 
+    def kick(self, chat_id: str) -> None:
+        """Run *chat_id*'s waiting turns once it is idle (a follow-up was queued)."""
+        self._kick(chat_id)
+
+    def busy_with(self, chat_id: str, item: FollowUp | None) -> None:
+        """*chat_id* runs a follow-up (*item*), or no longer (``None``): the person's messages queue meanwhile."""
+        if item is None:
+            self._busy.pop(chat_id, None)
+        else:
+            self._busy[chat_id] = item
+
     def _kick(self, chat_id: str) -> None:
         drain = self._drains.get(chat_id)
         if not self._stopping() and (drain is None or drain.done()):
@@ -507,8 +529,11 @@ class OwnerAsks:
             )
 
     async def _drain(self, chat_id: str) -> None:
+        followups = self.console.followups
         while not self._stopping() and (
-            self._people.get(chat_id) or self._waiting.get(chat_id)
+            self._people.get(chat_id)
+            or self._waiting.get(chat_id)
+            or followups.pending(chat_id)
         ):
             try:
                 await self._idle(chat_id)
@@ -521,6 +546,9 @@ class OwnerAsks:
                     ask = queue.pop(0)
                     if not ask.closed:
                         await self._internal_turn(chat_id, ask)
+                elif followups.pending(chat_id):
+                    # Last: the person's messages and the tasks' questions go first.
+                    await followups.run_next(chat_id)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -732,4 +760,11 @@ class OwnerAsks:
         await asyncio.gather(*drains, return_exceptions=True)
 
 
-__all__ = ["ASK_ORIGIN", "ASK_STEPS", "OWNER_TIMEOUT_S", "Ask", "OwnerAsks"]
+__all__ = [
+    "ASK_ORIGIN",
+    "ASK_STEPS",
+    "FOLLOWUP_ORIGIN",
+    "OWNER_TIMEOUT_S",
+    "Ask",
+    "OwnerAsks",
+]

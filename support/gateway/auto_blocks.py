@@ -178,3 +178,68 @@ async def blocked_steps(store: SessionStore, session_id: str) -> list[dict[str, 
             if block["turn"] == turn:
                 block["preview"] = previews.get(block["call_id"], "")
     return out
+
+
+# Who blocked a step, as a follow-up and the refusal of a repeat name them (#411).
+BLOCKERS: dict[str, str] = {
+    "auto": "Auto mode",
+    "user": "the user",
+    "policy": "melo's rules",
+}
+# An auto record of a call a stopped turn never reviewed: not blocked on its own.
+_STOPPED = "the turn stopped"
+
+
+async def denied_steps(
+    store: SessionStore, session_id: str, *, limit: int = 100
+) -> list[dict[str, Any]]:
+    """The steps blocked in *session_id* by the person, auto mode or melo's rules (#411).
+
+    Newest last, each with its ``call_key`` (what makes a later call the same
+    step), its ``loose_keys`` (what makes one alike), ``who`` blocked it, its
+    ``reason``, the ``step_key`` of an auto block, its tool ``name`` and its
+    ``preview``. Only real denials carry a call key. A call a stopped turn never
+    reviewed, a refusal of a repeat, and a record from before call keys were
+    kept are left out.
+    """
+    records = await store.denied_records(session_id, limit=limit)
+    out: list[dict[str, Any]] = []
+    for stored in records:
+        approval, raw = _approval(stored.event), stored.event.get("data")
+        data: dict[str, Any] = raw if isinstance(raw, dict) else {}
+        key = approval.get("call_key")
+        if (
+            not isinstance(key, str)
+            or not key
+            or approval.get("earlier")
+            or approval.get("reason") == _STOPPED
+        ):
+            continue
+        loose = approval.get("loose_keys")
+        out.append(
+            {
+                "call_key": key,
+                "loose_keys": (
+                    [str(k) for k in loose] if isinstance(loose, list) else []
+                ),
+                "who": BLOCKERS.get(str(approval.get("origin")), "melo's rules"),
+                "reason": str(approval.get("reason") or ""),
+                "step_key": str(approval.get("step_key") or ""),
+                "name": str(data.get("name") or ""),
+                "call_id": data.get("call_id"),
+                "turn": stored.turn,
+                "preview": "",
+            }
+        )
+    for turn in sorted({b["turn"] for b in out if b["turn"] is not None}):
+        events = await store.list_events(session_id, turns=(turn, turn))
+        previews = {
+            e.event["data"].get("call_id"): str(e.event["data"].get("preview") or "")
+            for e in events
+            if e.event.get("type") == "tool.started"
+            and isinstance(e.event.get("data"), dict)
+        }
+        for block in out:
+            if block["turn"] == turn:
+                block["preview"] = previews.get(block["call_id"], "")
+    return out

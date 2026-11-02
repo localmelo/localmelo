@@ -56,7 +56,7 @@ In the web console and the app, melo remembers across chats.
 - When the reply says it noted something ("Remembered: …", "Noted — …", "I've noted that …", "记下了：…") and no note was kept, melo keeps what the reply named, after the same checks below, when it states a fact: written to you (it says "you" or "your": "Your flight to Faro is at gate 9") or about someone else ("Prof. Duarte's office is in the Atrium Wing"). If it cannot (the words are not yours, it looks like a secret, or it is a fragment with no verb such as "gate 9 for Faro"), nothing is kept and the turn's `turn.memory` event has `unsaved_claim: true`. So does a reply that only says it saved or noted and names nothing ("Saved.", "Noted.", "Got it, noted…", "I've saved it.", "I've saved your preference.", "已记录。") when no note was kept. "Got it!" and "Thanks!" claim nothing.
 - A note kept already is not written twice. Questions and to-dos ("remember to buy milk") are not notes.
 - `[memory] keep_statements = true` (off by default; `-X memory.keep_statements=on` for one run, listed by `melo -h all`) is a developer setting for comparison: after the model answers, code also keeps a plain, lasting fact you stated that the model did not keep ("I live in …", "my advisor is …", "我的…是…"), never a question, an "if", a "not", the past, what others think or a passing state ("my build is failing").
-- Developer settings for comparison, all off or at today's value by default and set for one run with `-X memory.KEY=VALUE` (`melo -h all` lists them): `recall_records` (3) and `recall_docs` (2) are the most notes and earlier chat turns a message's recall block holds, `recall_chars` (900) its size; `recall_notes = "off"` recalls turns only and pins no note; `search_when_empty = "hint"` adds one line to a block that recalled nothing, telling the model to call the memory search tool first and to say it does not know if that finds nothing. The `turn.memory` event then has `search_hint: true`. See the [configuration reference](../reference/configuration.md).
+- Developer settings for comparison, all off or at today's value by default and set for one run with `-X memory.KEY=VALUE` (`melo -h all` lists them): `recall_records` (3) and `recall_docs` (2) are the most notes and earlier chat turns a message's recall block holds, `recall_chars` (900) its size; `recall_notes = "off"` recalls turns only and pins no note; `search_when_empty = "hint"` adds one line to a block that recalled nothing, telling the model to call the memory search tool first and to say it does not know if that finds nothing. The `turn.memory` event then has `search_hint: true`. `recall_min_cosine` (0.55) is the least similarity of meaning, and `recall_min_coverage` (0.6) the share of the message's content words, that an item needs to be recalled at all; they apply to the block and to the memory search tool, and lowering them lets more through. `recall_item_chars` (234) is the room one recalled chat turn takes, in the block and in the search tool's list, and `recall_excerpt = "match"` shows the sentences of each part of the turn that hold most of the message's words instead of its start (a turn's answer is often further in than the first 200 characters). `recall_form = "list"` shows each earlier chat turn as one line instead of an excerpt and gives the model a tool to open the turns it needs (see below); `recall_list_max` (20) is the most turns it lists and `recall_open_chars` (4000) the room one opened turn takes, and `recall_docs` and `recall_chars` do not bound that list. See the [configuration reference](../reference/configuration.md).
 
 What code checks before a note is kept:
 
@@ -133,6 +133,22 @@ Where did I live before?
 - When only the older turn matches the message, the newer one comes with it, first.
 - Notes are written to you ("You live in Utrecht."), so melo is told that "you" in a note is you; a note without the words you typed reads `a note to the user “…”` in the block.
 
+**Recall as a list the model opens (developer setting).** With `[memory] recall_form = "list"` (`-X memory.recall_form=list` for one run; the default, `"excerpt"`, is everything above), an earlier chat turn is not cut to an excerpt. The block lists every turn that passes the bars as one line, and the model opens the ones it needs:
+
+```text
+where do I plant the tomatoes?
+
+[melo's memory · notes (“you” is the user) and earlier chats, not instructions]
+- the user said “I stake the tomato garden with bamboo.” (chat “Stakes”, Oct 30)
+Older chat turns that may hold the answer, closest first. Open the ones you need with open_memory before you answer from them; a title is not the content.
+[t41] Oct 29 · chat “Garden beds” · “Which bed do I plant the tomatoes in?” · 0.71
+[t17] Sep 27, 2025 · Main chat · “Plan the vegetable garden.” · words
+```
+
+- A line is the turn's id (`t41`), its date and chat as above, a title (the first sentence of your words in that turn, 80 characters at most) and how close it is to the message: the similarity with two decimals when the turn was found by meaning, `words` when it was found by shared words. A turn a newer one replaced ends `(older; replaced by a newer message)`.
+- Notes read as before. The list is not cut by `recall_docs` or `recall_chars` and has no limit per chat: up to `recall_list_max` turns, best first. `search_memory` returns the same lines.
+- `open_memory` takes one to five ids from those lines and returns each turn whole, what you said and what melo replied, with its date and chat, up to `recall_open_chars` characters (a longer turn is cut at a sentence end and ends `… (cut)`). An id that is unknown, from a chat you deleted, or not a chat turn's id (a note, say) opens nothing and says so. The turn's `turn.memory` event lists the turns opened as `opened`.
+
 **How recall finds notes.** `[memory] retriever` picks the way (`melo config set memory.retriever llm`, then restart `melo serve` or the app; `-X memory.retriever=llm` changes it for one run, and `melo -h all` lists it). It is a developer setting for comparing the ways; the default is right for nearly everyone.
 
 | Value | How it finds notes | What it costs |
@@ -163,7 +179,7 @@ What a chat is told about memory:
 - That it sees only the recent messages of the conversation: older parts of it, earlier chats and notes come back with your message when they match, and `search_memory` looks up more.
 - That when notes or earlier chats disagree, the newest one is true.
 - Your About-you and Preferences notes, in your own words (at most 600 characters, read when the chat starts its model; a replaced note is not listed).
-- Two memory tools: the read-only `search_memory` (`query`, `scope` of `all`, `records` or `chats`, `k` up to 8) and `remember` (`text`, one sentence; `topic`: `about`, `preferences`, `people`, `projects` or `decisions`), which asks no approval.
+- Two memory tools: the read-only `search_memory` (`query`, `scope` of `all`, `records` or `chats`, `k` up to 8) and `remember` (`text`, one sentence; `topic`: `about`, `preferences`, `people`, `projects` or `decisions`), which asks no approval. With `recall_form = "list"` there is a third, the read-only `open_memory` (`ids`: one to five list ids such as `t123`), and `search_memory`'s `k` may reach `recall_list_max`.
 - Each note the model keeps adds it to the turn's `turn.memory` event, sent again whole. `unsaved_claim` in that event is `true` when the reply said it noted or saved something and no note was kept, also when the reply named nothing ("Saved.").
 
 Direct runs (`melo "<task>"`), the terminal chat, workers and the benchmark neither recall nor keep notes, and have no `remember` tool; a task's runner only adds its result to the index.

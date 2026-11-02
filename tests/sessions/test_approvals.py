@@ -12,6 +12,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     ApprovalPolicy,
     ApprovalRequest,
+    Withdrawal,
 )
 from localmelo.melo.contracts.review import ActionReview
 from localmelo.support.sessions.approvals import (
@@ -176,9 +177,8 @@ async def test_withdraw_all_denies_one_session_or_every_one() -> None:
     assert broker.withdraw_all("s1", reason="The session closed") == 2
     for task in tasks[:2]:
         decision = await task
-        assert decision == ApprovalDecision(
-            False, "The session closed", origin="policy"
-        )
+        # Withdrawn unanswered: no one denied the step itself (#411).
+        assert decision == Withdrawal(False, "The session closed", origin="policy")
     assert broker.pending("s2") == [other]
     assert broker.withdraw_all(reason="The gateway is stopping") == 1
     assert (await tasks[2]).reason == "The gateway is stopping"

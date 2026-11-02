@@ -79,6 +79,19 @@ MEMORY_SLEEP = ("off", "rules", "model", "model+tags")
 MEMORY_RECALL_RECORDS = (0, 20)
 MEMORY_RECALL_DOCS = (0, 20)
 MEMORY_RECALL_CHARS = (200, 8000)
+# The room one recalled chat turn takes in the block and in the search tool's
+# list, and which part of a turn is shown: see MemoryConfig.recall_item_chars.
+MEMORY_RECALL_ITEM_CHARS = (120, 2000)
+MEMORY_RECALL_EXCERPT = ("head", "match")
+# How recall shows earlier chat turns: as excerpts, or as a list of titles the model
+# opens, and the list form's two sizes: see MemoryConfig.recall_form.
+MEMORY_RECALL_FORM = ("excerpt", "list")
+MEMORY_RECALL_LIST_MAX = (1, 50)
+MEMORY_RECALL_OPEN_CHARS = (500, 16000)
+# The bars an item must pass to be recalled, and their bounds (inclusive): see
+# MemoryConfig.recall_min_cosine and recall_min_coverage.
+MEMORY_RECALL_MIN_COSINE = (0.20, 0.95)
+MEMORY_RECALL_MIN_COVERAGE = (0.10, 1.00)
 # Whether recall carries notes, and what a turn that recalls nothing is told.
 MEMORY_RECALL_NOTES = ("on", "off")
 MEMORY_SEARCH_WHEN_EMPTY = ("off", "hint")
@@ -90,6 +103,13 @@ RECALL_KEYS = (
     "recall_chars",
     "recall_notes",
     "search_when_empty",
+    "recall_min_cosine",
+    "recall_min_coverage",
+    "recall_item_chars",
+    "recall_excerpt",
+    "recall_form",
+    "recall_list_max",
+    "recall_open_chars",
 )
 RECALL_TRIGGERS = ("start", "attempt", "step", "tool")
 RECALL_KINDS = ("note", "draft", "thought", "digest", "reflection", "long")
@@ -344,7 +364,25 @@ class MemoryConfig:
     (200-8000); ``recall_notes = "off"`` leaves notes out of the block and the
     pinned lines, so only turns are recalled; and ``search_when_empty = "hint"``
     adds one line to a block that recalls nothing, telling the model to call the
-    memory search tool first. ``project_instructions = "off"`` stops a task that
+    memory search tool first. Two more set the bars an item must pass to be
+    recalled at all, in the block and in the memory search tool:
+    ``recall_min_cosine`` (0.20-0.95), the least similarity of meaning, and
+    ``recall_min_coverage`` (0.10-1.00), the least share of the question's
+    content words that a note or turn must hold. Two more set how much of a
+    recalled chat turn is shown, in the block and in the search tool:
+    ``recall_item_chars`` (120-2000), the room one turn takes, and
+    ``recall_excerpt``, ``head`` (the start of each part, the default) or
+    ``match`` (the sentences of each part that hold most of the question's
+    content words). Three more set how recalled chat turns are shown at all:
+    ``recall_form``, ``excerpt`` (an excerpt of each turn, the default) or
+    ``list`` (one line per turn, with its id, date, chat, a title and its
+    similarity, and a tool, ``open_memory``, with which the model opens the turns
+    it needs in full). Notes are shown as before in both forms. The list form
+    lists every turn that passes the bars, ``recall_list_max`` (1-50) at most, in
+    the block and in the search tool alike, and ``recall_open_chars`` (500-16000)
+    is the room one opened turn takes; ``recall_docs`` and ``recall_chars`` do not
+    bound the list, and ``recall_item_chars`` and ``recall_excerpt`` apply to the
+    excerpt form only. ``project_instructions = "off"`` stops a task that
     the person made from reading the instruction file of its folder (``AGENTS.md``,
     ``CLAUDE.md`` or ``GEMINI.md``, the nearest first) when it starts.
     """
@@ -360,6 +398,13 @@ class MemoryConfig:
     recall_chars: int = 900  # Its size bound, in characters.
     recall_notes: str = "on"  # on | off: no notes in the block or the pinned lines.
     search_when_empty: str = "off"  # off | hint: a line when nothing was recalled.
+    recall_min_cosine: float = 0.55  # Least similarity of meaning to be recalled.
+    recall_min_coverage: float = 0.6  # Least share of the question's words held.
+    recall_item_chars: int = 234  # The room one recalled chat turn takes.
+    recall_excerpt: str = "head"  # head | match: which part of a turn is shown.
+    recall_form: str = "excerpt"  # excerpt | list: turns as excerpts, or as a list.
+    recall_list_max: int = 20  # The most turns the list form lists.
+    recall_open_chars: int = 4000  # The room one turn the model opens takes.
     project_instructions: str = "on"  # on | off: a task reads its folder's AGENTS.md.
 
 
@@ -435,6 +480,19 @@ class ToolsConfig:
 
 
 @dataclass
+class TasksConfig:
+    """The ``[tasks]`` table: what a chat does about the tasks it started.
+
+    ``follow_up``: when a task a chat started fails or stops, that chat gets
+    one turn of its own to continue it once, work around a blocked step, or
+    ask the person one question, then says what got done (#411). On unless
+    the file turns it off; a developer setting.
+    """
+
+    follow_up: bool = True
+
+
+@dataclass
 class Config:
     chat_backend: str = (
         ""  # mlc | ollama | vllm | sglang | openai | gemini | anthropic | nvidia
@@ -478,6 +536,7 @@ class Config:
     browser: BrowserConfig = field(default_factory=BrowserConfig)
     workspace: WorkspaceConfig = field(default_factory=WorkspaceConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
+    tasks: TasksConfig = field(default_factory=TasksConfig)
     # [pricing.<model>]: dollars per million tokens (input, output, and
     # cache_read for cached prompt tokens), for the terminal's session cost.
     # Configuration only: no price is bundled.
@@ -523,6 +582,7 @@ class Config:
         errors.extend(self._validate_scheduler())
         errors.extend(self._validate_browser())
         errors.extend(self._validate_tools())
+        errors.extend(self._validate_tasks())
         # [cli] is a display preference: like [sessions] resume_mode, a bad
         # value warns and falls back in the interactive UI (cli_errors()), so
         # direct mode and the gateway never fail on it.
@@ -612,6 +672,9 @@ class Config:
             ("recall_records", MEMORY_RECALL_RECORDS),
             ("recall_docs", MEMORY_RECALL_DOCS),
             ("recall_chars", MEMORY_RECALL_CHARS),
+            ("recall_item_chars", MEMORY_RECALL_ITEM_CHARS),
+            ("recall_list_max", MEMORY_RECALL_LIST_MAX),
+            ("recall_open_chars", MEMORY_RECALL_OPEN_CHARS),
         ):
             value = getattr(self.memory, name)
             if not isinstance(value, int) or isinstance(value, bool):
@@ -620,9 +683,22 @@ class Config:
                 errors.append(
                     f"[memory] {name} must be from {low} to {high}, got {value}"
                 )
+        for name, (floor, ceiling) in (
+            ("recall_min_cosine", MEMORY_RECALL_MIN_COSINE),
+            ("recall_min_coverage", MEMORY_RECALL_MIN_COVERAGE),
+        ):
+            value = getattr(self.memory, name)
+            if not isinstance(value, int | float) or isinstance(value, bool):
+                errors.append(f"[memory] {name} must be a number, got {value!r}")
+            elif not floor <= value <= ceiling:
+                errors.append(
+                    f"[memory] {name} must be from {floor} to {ceiling}, got {value}"
+                )
         for name, allowed in (
             ("recall_notes", MEMORY_RECALL_NOTES),
             ("search_when_empty", MEMORY_SEARCH_WHEN_EMPTY),
+            ("recall_excerpt", MEMORY_RECALL_EXCERPT),
+            ("recall_form", MEMORY_RECALL_FORM),
             ("project_instructions", MEMORY_PROJECT_INSTRUCTIONS),
         ):
             value = getattr(self.memory, name)
@@ -647,6 +723,14 @@ class Config:
             f"[tools] {name} must be a bool, got {value!r}"
             for name in ("web_fetch",)
             if not isinstance(value := getattr(self.tools, name), bool)
+        ]
+
+    def _validate_tasks(self) -> list[str]:
+        """``[tasks]`` holds bools."""
+        return [
+            f"[tasks] {name} must be a bool, got {value!r}"
+            for name in ("follow_up",)
+            if not isinstance(value := getattr(self.tasks, name), bool)
         ]
 
     def _validate_scheduler(self) -> list[str]:
@@ -1011,6 +1095,7 @@ class Config:
             *self._validate_scheduler(),
             *self._validate_browser(),
             *self._validate_tools(),
+            *self._validate_tasks(),
             *self._validate_gateway_workspace(),
             *self._validate_cli(),
             *self._validate_ui(),
@@ -1383,6 +1468,11 @@ def _load_file() -> Config:
             if hasattr(cfg.tools, k):
                 setattr(cfg.tools, k, v)
 
+    if isinstance(data.get("tasks"), dict):
+        for k, v in data["tasks"].items():
+            if hasattr(cfg.tasks, k):
+                setattr(cfg.tasks, k, v)
+
     # A bad value is left for Config.validate to report.
     if isinstance(data.get("sessions"), dict):
         cfg.sessions.resume_mode = data["sessions"].get("resume_mode", "pairs")
@@ -1741,6 +1831,9 @@ def save(cfg: Config) -> None:
 
     if cfg.tools != ToolsConfig():
         lines.extend(["[tools]", f"web_fetch = {_toml_value(cfg.tools.web_fetch)}", ""])
+
+    if cfg.tasks != TasksConfig():
+        lines.extend(["[tasks]", f"follow_up = {_toml_value(cfg.tasks.follow_up)}", ""])
 
     if cfg.sessions != SessionsConfig():
         lines.append("[sessions]")

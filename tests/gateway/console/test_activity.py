@@ -335,6 +335,41 @@ async def test_a_running_chat_says_what_it_does_and_a_finished_one_its_last_kind
     assert (row["state"], row["icon"], row["activity"]) == ("done", "web", "")
 
 
+async def test_a_live_row_says_when_the_model_is_answering(
+    client: TestClient,
+    console: Console,
+    workspace: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A side chat's portrait thinks on this mark of its rows, as health's items give it to the pet."""
+    running = await seed_turn(console.store, workspace, title="Live", status="running")
+    await console.store.append_events(
+        running.session_id,
+        running.turn,
+        [core_event("step.started", seq=2)],
+        holder=HOLDER,
+    )
+    tasks(monkeypatch, console)
+    row = activity(client)["rows"][0]
+    assert (row["state"], row["icon"], row["answering"]) == ("running", "think", True)
+    await console.store.append_events(
+        running.session_id,
+        running.turn,
+        [
+            core_event(
+                "tool.started",
+                seq=3,
+                call_id="c1",
+                name="file_read",
+                arguments={"path": "a.md"},
+            )
+        ],
+        holder=HOLDER,
+    )
+    row = activity(client)["rows"][0]
+    assert (row["state"], row["icon"], row["answering"]) == ("running", "read", False)
+
+
 async def test_the_list_is_capped_and_says_so(
     client: TestClient,
     console: Console,

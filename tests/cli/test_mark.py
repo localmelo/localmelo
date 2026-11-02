@@ -35,9 +35,9 @@ def test_the_pixels_are_the_pet_picture_downsampled() -> None:
 
 def test_the_head_has_two_upright_ears_eyes_and_a_nose() -> None:
     top, inner = mark.PIXELS[0], mark.PIXELS[1]
-    # Two ears, apart, each with its inner ear below; a gap between them.
+    # Two ears, apart, with a gap between them that closes below them.
     assert top.strip(".").count("..") >= 1 and top == top[::-1]
-    assert inner.count("b") == 2
+    assert inner.strip(".").count("..") == 1 and "." not in mark.PIXELS[2].strip(".")
     dark = [row for row in mark.PIXELS if "k" in row]
     assert len(dark) >= 2  # the eyes, then the nose under them
     assert all(row == row[::-1] for row in mark.PIXELS)
@@ -49,7 +49,7 @@ def test_the_png_reader_reads_rgb_and_alpha() -> None:
     # An RGB picture is opaque; the logo's page is a warm white.
     red, green, blue, alpha = image[0][0]
     assert min(red, green, blue) > 220 and red >= blue and alpha == 255
-    face = _script().read_png(ROOT / "macos/art/akita/face/idle@2x.png")
+    face = _script().read_png(ROOT / "support/gateway/static/moves/face-brand.png")
     assert (len(face), len(face[0])) == (96, 96)
     assert face[0][0][3] == 0  # the face's corner is transparent
 
@@ -66,7 +66,7 @@ def test_the_mark_is_five_rows_of_its_cells() -> None:
     middle = mark.rows("dark")[1]
     style = middle.get_style_at_offset(Console(), 5)
     assert middle.plain[5] == " " and style.bgcolor is not None
-    assert style.bgcolor.name == "#d4893a"
+    assert style.bgcolor.name == "#f09e51"
 
 
 @pytest.mark.parametrize(
@@ -131,7 +131,6 @@ def test_the_mark_paints_its_own_colours() -> None:
         for row in mark.rows("dark"):
             console.print(row)
     ansi = captured.get()
-    assert "2;212;137;58" in ansi  # the fur, #d4893a
-    assert "2;243;233;210" in ansi  # the cream
-    assert "2;24;40;54" in ansi  # the eyes and nose, #182836
-    assert "2;143;82;32" in ansi  # the inner ears, #8f5220
+    assert "2;240;158;81" in ansi  # the fur, #f09e51
+    assert "2;250;236;221" in ansi  # the cream
+    assert "2;52;30;21" in ansi  # the eyes and nose, #341e15

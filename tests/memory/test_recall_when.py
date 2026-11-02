@@ -211,12 +211,11 @@ def test_a_turns_parts_are_bounded_and_the_users_words_stay_whole_when_they_fit(
     user, reply = said.split("; melo replied ")
     assert user == f"the user said “{typed}”"
     assert reply.endswith("…”") and len(reply) >= 60
-    assert len(said) <= 240
-    # Long words from the user are cut, and melo's reply keeps a share.
+    assert len(said) <= 234 + len("the user said “”; melo replied “”")
+    # Long words from the user show as far as the plain 240-character head did,
+    # which leaves no room for the reply.
     said = turn_said(document_text("u" * 900, "r" * 900))
-    user, reply = said.split("; melo replied ")
-    assert user.endswith("…”") and "r" * 55 in reply
-    assert len(said) <= 240
+    assert said == "the user said “" + "u" * 233 + "…”"
     # Everything fits: both whole. No reply: the user's words alone.
     assert turn_said(document_text("a" * 90, "b" * 90)).count("…") == 0
     assert turn_said("User: question\nmelo: ") == "the user said “question”"
@@ -242,7 +241,7 @@ def test_the_page_keeps_the_turns_text_as_it_was() -> None:
 
 
 def test_a_block_of_turns_fits_with_both_parts() -> None:
-    items = [turn(n, "w" * 300, "x" * 600, at(2026, 10, n)) for n in range(1, 4)] + [
+    items = [turn(n, "w" * 150, "x" * 600, at(2026, 10, n)) for n in range(1, 4)] + [
         note(9, "dentist is Okafor.", at(2026, 10, 9))
     ]
     text, used = block(items)

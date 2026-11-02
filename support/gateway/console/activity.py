@@ -46,6 +46,7 @@ from ..finishing import NOT_CONTINUED, is_out_of_steps
 from ..front_rules import HANDOFF_TEXTS
 from ..task_endings import can_finish, report_text, shown
 from .errors import ApiError
+from .followups import FOLLOWED_ECHO, followed_words
 from .running import (
     TASK_OUTCOMES,
     TITLE_CHARS,
@@ -344,15 +345,17 @@ async def _live(row: dict[str, Any], console: Console) -> None:
     text, _ = await item_activity(console, row["kind"], row["id"])
     if text.icon in ("wait", "held"):
         row["state"] = "waiting" if text.icon == "wait" else "held"
-    row.update(activity=spoken(text), icon=text.icon)
+    # Whether the model is answering, as health's items say it (the portrait thinks).
+    row.update(activity=spoken(text), icon=text.icon, answering=text.answering)
 
 
 async def chat_did(console: Console, turn: DayTurn) -> str:
     """What a chat did in its newest turn besides answering, in plain words, or ``""``.
 
     The tasks it started or offered (its echo rows since the turn began; a
-    task offered and then started reads once, as started) and the notes it
-    kept (its ``remember`` calls that succeeded), joined with `` · ``.
+    task offered and then started reads once, as started), what its follow-up
+    on a task did (#411: "Continued the task: …", "Asked you: …") and the
+    notes it kept (its ``remember`` calls that succeeded), joined with `` · ``.
     """
     try:
         echoes = await console.store.events_of_type(turn.session_id, _ECHO, limit=50)
@@ -362,12 +365,22 @@ async def chat_did(console: Console, turn: DayTurn) -> str:
     except (SessionStoreError, OSError, AttributeError):
         return ""
     tasks: dict[str, tuple[str, str]] = {}
+    followed: list[str] = []
     for stored in echoes:
         ts, data = stored.event.get("ts"), stored.event.get("data")
         if not isinstance(ts, int | float) or ts < turn.started_at:
             continue
         data = data if isinstance(data, Mapping) else {}
         kind = data.get("echo")
+        if kind == FOLLOWED_ECHO:
+            title = " ".join(str(data.get("title") or "").split())
+            key, params = followed_words(
+                str(data.get("did") or ""),
+                _cut(title, TITLE_CHARS) or t("activity.untitled.task"),
+                _cut(str(data.get("question") or ""), RESULT_CHARS),
+            )
+            followed.append(t(key, **params))
+            continue
         if kind not in ("started", "suggest"):
             continue
         key = str(data.get("task_id") or data.get("title") or stored.id)
@@ -380,6 +393,7 @@ async def chat_did(console: Console, turn: DayTurn) -> str:
         )
         for kind, title in tasks.values()
     ]
+    words += followed
     notes = sum(
         1
         for stored in finished

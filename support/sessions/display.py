@@ -25,7 +25,7 @@ import re
 import subprocess
 import unicodedata
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Final, Literal
 from urllib.parse import urlsplit
@@ -410,11 +410,15 @@ class ActivityText:
     ``text`` is the words in English, as the terminal reads them; ``words`` is
     the same as a ``said`` (a key of the console's catalogs and its
     parameters), which the console writes in its reader's language.
+    ``answering`` is true only when the session's newest events show a model
+    call under way (a step or a reflection started) and no tool call,
+    approval or hold open; a ``Thinking`` said for want of events is not.
     """
 
     text: str
     icon: str
     words: dict[str, Any] = field(default_factory=dict, compare=False)
+    answering: bool = field(default=False, compare=False)
 
 
 # A command that runs a test suite reads as "Running the tests".
@@ -534,7 +538,7 @@ def activity_text(
         )
     if name == "python_exec":
         return _doing("run", "Python", "run")
-    if name in ("recall", "search_memory", "remember"):
+    if name in ("recall", "search_memory", "open_memory", "remember"):
         return _state("remembering")
     if name in ("browser_open", "web_fetch"):
         host = _host(args.get("url"))
@@ -582,7 +586,8 @@ def event_activity(
 
     An approval that waits wins, then a call still running, then a
     reflection; any other event of a running turn reads ``Thinking``. A turn
-    whose end is among them is doing nothing: ``None``.
+    whose end is among them is doing nothing: ``None``. A step, a turn or a
+    reflection that started last is the model answering (``answering``).
     """
     finished: set[str] = set()
     resolved: set[str] = set()
@@ -605,15 +610,13 @@ def event_activity(
                     str(data.get("name") or ""), data.get("arguments"), root=root
                 )
         elif kind == "reflection.started":
-            return _state("reflecting")
+            return replace(_state("reflecting"), answering=True)
         elif kind in ("recall", "memory"):
             return _state("remembering")
-        elif kind in (
-            "reflection",
-            "step.started",
-            "assistant.message",
-            "turn.started",
-        ):
+        elif kind in ("step.started", "turn.started"):
+            return replace(_state("thinking"), answering=True)
+        elif kind in ("reflection", "assistant.message"):
+            # The model's reply or reflection is in: what follows is not its call.
             return _state("thinking")
     return _state("thinking")
 

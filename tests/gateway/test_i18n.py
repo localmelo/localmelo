@@ -98,6 +98,8 @@ JS_ENGLISH = {
     "tool call written as text",
     "cannot reach the model server at",
     "noopener noreferrer",
+    # A note for the browser console, never shown on the page.
+    "Melo: the moves cannot be read; the portrait shows still pictures",
     # Class lists of one word each.
     "msg user",
     "msg assistant",

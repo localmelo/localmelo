@@ -4,6 +4,7 @@ import {setupMemoryTab} from './memory-tab.mjs';
 import {setupScheduledTab} from './scheduled-tab.mjs';
 import {formatTime, t} from './i18n.mjs';
 import {endingLabel, endingWhy, readEnding} from './endings.mjs';
+import {REST_STILL_AFTER_MS, SIT_MS, idleMove, startMoves} from './moves.mjs';
 
 /**
  * The panel beside a chat: Melo's portrait and status, then tabs. It follows
@@ -19,7 +20,9 @@ import {endingLabel, endingWhy, readEnding} from './endings.mjs';
  * address `#/tasks/<id>` names it, so a card in the chat or a row of what runs lands on the same view; `#/tasks`
  * names the list of all tasks, which Activity (today only) does not have. Scheduled (scheduled-tab.mjs) lists the
  * check-in and the chores that run on a schedule; Memory
- * (memory-tab.mjs) lists the notes melo keeps. `update(health)` is called on every health poll: the
+ * (memory-tab.mjs) lists the notes melo keeps. Melo's portrait moves (moves.mjs, `portraitMove`): it wakes up on
+ * the first load, works, thinks, raises a paw when something waits for the person and rests; a run that just ended,
+ * an error and the time before the first health reply keep a still poster of the moves. `update(health)` is called on every health poll: the
  * header follows it, and the list is read again when what runs changed, the
  * chat changed, or every REFRESH_MS. Below 900 px the panel is a bottom sheet
  * behind `chip`, closed by Escape (`closeSheet()`), the backdrop, or a drag
@@ -43,7 +46,13 @@ const stateWords = (state) => (STATES.has(state) ? t(`panel.state.${state}`) : '
 const LIVE = new Set(['running', 'waiting', 'held', 'queued', 'paused']);
 const HREF = {chat: '#/s/', task: '#/tasks/', run: '#/workers/', terminal: '#/workers/'};
 const SHOWN = 8;
+// The still picture of each header mood, by its poster beside the moves: the state's own poster while something
+// runs, waits or rests, and the stills for an ending: done (eyes closed and happy, tail up) and error (ears back, head
+// low). Before the first health reply and while the gateway is lost it is the offline still (curled up), faded.
+const STILLS = {idle: 'idle_rest', working: 'working', waiting: 'attention', done: 'done', error: 'error'};
 const STEPS = 8;
+// The page says once that the moves could not be read.
+let movesUnread = false;
 const REFRESH_MS = 30000;
 const KEY = 'localmelo-panel-tab';
 const TESTS = /(?:^|[\s;&|(])(?:pytest|py\.test|tox|nox|jest|vitest|(?:npm|pnpm|yarn|bun)(?: run)? test|(?:cargo|go|swift|deno|mix) test|python3? -m (?:pytest|unittest)|make (?:test|check))(?:$|[\s;&|)])/;
@@ -67,7 +76,7 @@ export function stepWords(name, args, done = false) {
   if (tool === 'git_status') return say('read', t('steps.gitState'));
   if (tool === 'shell_exec') return say('run', t(TESTS.test(String(a.command ?? '').replace(/\s+/g, ' ')) ? 'steps.theTests' : 'steps.aCommand'));
   if (tool === 'python_exec') return say('run', 'Python');
-  if (tool === 'recall' || tool === 'search_memory' || tool === 'remember') return say('remember');
+  if (tool === 'recall' || tool === 'search_memory' || tool === 'open_memory' || tool === 'remember') return say('remember');
   if (tool === 'browser_open') {
     let host = '';
     try { host = new URL(String(a.url)).hostname.replace(/^www\./, ''); } catch { /* not a page address */ }
@@ -100,16 +109,43 @@ export function headline(health, scoped = null) {
   return {text, mood, fix: false, count: 0};
 }
 
+/**
+ * Whether every running thing waits on the model: the gateway marks an item `answering` while its newest step is a
+ * model call with no tool, approval or hold open. `scoped` is a side chat's rows (else the whole console's items);
+ * a list that leaves out some of what runs is no answer.
+ */
+export function answering(health, scoped = null) {
+  const items = scoped ? scoped.filter((row) => row.state === 'running' || row.state === 'held') : health?.status?.items ?? [];
+  const count = scoped ? items.length : Object.values(health?.status?.running ?? {}).reduce((sum, n) => sum + (Number(n) || 0), 0);
+  return items.length > 0 && items.length >= count && items.every((item) => item.answering === true);
+}
+
+/**
+ * The move of Melo's portrait for a header (`said`, from `headline`): `attention` while something waits for the
+ * person, `thinking` while everything running waits on the model, `working` while anything else runs, `idle` when
+ * nothing runs (rest or play, chosen over time by the caller). Null keeps the header's still picture: before the
+ * first health reply, an error (no model, an unreachable server) and a run that just ended have no moves.
+ */
+export function portraitMove(health, said, scoped = null) {
+  if (!health || said.mood === 'error' || said.mood === 'done') return null;
+  if (said.mood === 'waiting') return 'attention';
+  if (said.mood === 'working') return answering(health, scoped) ? 'thinking' : 'working';
+  return 'idle';
+}
+
 export function setupPanel({
   root, chip, backdrop, api, developer = () => false, openSettings = () => {}, cover = () => [],
   storage = globalThis.localStorage, clock = Date.now, live: stream = {}, chat = chatOfAddress,
   wide = globalThis.matchMedia?.('(min-width: 900px)'),
   tasks = null, home = () => '#/new', navigate = (hash) => { globalThis.location.hash = hash; }, hasTasks = () => false,
+  moves = startMoves,
+  // The header's own timer (the end of the sitting, a long rest turning still): it never keeps a process alive.
+  wait = (fn, ms) => { const id = setTimeout(fn, ms); id?.unref?.(); return id; }, cancelWait = (id) => clearTimeout(id),
 }) {
   const doc = root.ownerDocument;
   const state = {health: null, rows: [], more: false, unavailable: [], loaded: false, error: '', notice: '', noticeFor: '',
     tab: 'activity', open: null, all: false, sheet: false, busy: '', fetchedAt: 0, seen: null, day: 0,
-    chat: chat(), scope: 'all', folds: new Set(), task: null, from: ''};
+    chat: chat(), scope: 'all', folds: new Set(), task: null, from: '', offline: false};
   try { if (TABS.some(([id]) => id === storage?.getItem(KEY))) state.tab = storage.getItem(KEY); } catch { /* no storage */ }
   // A row's steps are its session's newest turn: a long chat is not read back to its first turn.
   const newest = (path, options) => (/\/turns\?/.test(path)
@@ -138,10 +174,14 @@ export function setupPanel({
   const frame = node('span', 'panel-picture');
   const picture = node('img');
   picture.alt = '';
-  picture.width = 108;
-  picture.height = 140;
+  picture.width = 100;
+  picture.height = 100;
   frame.append(picture);
-  ring.append(frame);
+  // The moves draw on a canvas over the picture; the ring shows one of the two (`data-moves`). The status line
+  // says in words what both show.
+  const stage = node('canvas', 'panel-moves');
+  stage.setAttribute('aria-hidden', 'true');
+  ring.append(frame, stage);
   const status = node('p', 'panel-status');
   status.setAttribute('role', 'status');
   const head = node('header', 'panel-head');
@@ -193,18 +233,113 @@ export function setupPanel({
     body.setAttribute('aria-labelledby', `panel-tab-${state.tab}`);
   }
 
+  // ── Melo's moves ──
+
+  // `startup`: the wake-up still to play (the first move of the page, if nothing runs then); `sitUntil`: the end of
+  // the sitting after it (clock ms); `restSince` and `playedAt`: when the rest began and the last play did;
+  // `playing`: a play goes on to its end; `quietSince`: when the plain rest on show began (a long one is a still).
+  const motion = {player: null, startup: true, sitUntil: null, restSince: null, playedAt: -Infinity, playing: false,
+    quietSince: null, timer: null};
+  // The next look at the header, when the sitting ends or a long rest turns still; one at a time.
+  const lookAt = (at) => {
+    if (motion.timer !== null) cancelWait(motion.timer);
+    motion.timer = wait(() => { motion.timer = null; drawHeader(); }, Math.max(0, at - clock()) + 50);
+  };
+  Promise.resolve(moves(stage, {onComplete: ({state: done}) => {
+    if (done === 'startup' && motion.startup) {
+      Object.assign(motion, {startup: false, sitUntil: clock() + SIT_MS});
+      lookAt(motion.sitUntil);
+    }
+    if (done === 'idle_play') Object.assign(motion, {playing: false, quietSince: null});
+    drawHeader();
+  }})).then((player) => {
+    motion.player = player ?? null;
+    if (!motion.player) {
+      if (!movesUnread) console.warn('Melo: the moves cannot be read; the portrait shows still pictures');
+      movesUnread = true;
+      return;
+    }
+    sheetSeen();
+    drawHeader();
+  }, () => {});
+  // Below 900 px the portrait is in the sheet: while the sheet is closed nothing is drawn.
+  const sheetSeen = () => motion.player?.setVisible(!wide || wide.matches || state.sheet, 'sheet');
+  // A portrait scrolled out of view draws nothing either.
+  if (typeof globalThis.IntersectionObserver === 'function') {
+    new globalThis.IntersectionObserver((entries) => {
+      const last = entries[entries.length - 1];
+      if (last) motion.player?.setVisible(last.isIntersecting, 'scroll');
+    }).observe(ring);
+  }
+  // A tab shown again looks at the header at once: a sitting or a rest may have ended while it was hidden.
+  doc.addEventListener?.('visibilitychange', () => { if (doc.visibilityState !== 'hidden') drawHeader(); });
+  // The state to show for a move, and whether a looping state plays once; `still` for a rest that has gone on long
+  // enough to show the resting poster.
+  function pick(move) {
+    if (move !== 'idle') {
+      Object.assign(motion, {startup: false, sitUntil: null, restSince: null, playing: false, quietSince: null});
+      return {key: move};
+    }
+    if (motion.startup) return {key: 'startup'};
+    const now = clock();
+    if (motion.sitUntil !== null) {
+      if (now < motion.sitUntil) return {key: 'startup'};
+      motion.sitUntil = null;
+    }
+    motion.restSince ??= now;
+    if (motion.player.inspect().still) return {key: 'idle_rest'};
+    if (!motion.playing && idleMove(now - motion.restSince, now - motion.playedAt) === 'idle_play') {
+      Object.assign(motion, {playing: true, playedAt: now, quietSince: null});
+    }
+    if (motion.playing) return {key: 'idle_play', once: true};
+    motion.quietSince ??= now;
+    if (now - motion.quietSince >= REST_STILL_AFTER_MS) return {key: 'idle_rest', still: true};
+    lookAt(motion.quietSince + REST_STILL_AFTER_MS);
+    return {key: 'idle_rest'};
+  }
+  function drawMove(said, scoped) {
+    // Offline, the last health reply is old news: the still picture stays until the gateway answers again.
+    const move = motion.player && !state.offline ? portraitMove(state.health, said, scoped) : null;
+    const picked = move ? pick(move) : null;
+    // A still ends a rest, a play and the sitting after the wake-up.
+    if (!move) Object.assign(motion, {sitUntil: null, restSince: null, playing: false, quietSince: null});
+    if (!picked || picked.still) {
+      ring.dataset.moves = 'off';
+      // A still picture stops the moves behind it; they go on from where they were.
+      motion.player?.setVisible(false, 'portrait');
+      if (picked) ring.dataset.move = picked.key;
+      else delete ring.dataset.move;
+      return false;
+    }
+    const {key, once = false} = picked;
+    // The state asked for, for a look at the page (the canvas itself says nothing).
+    ring.dataset.move = key;
+    // Back from a still picture the canvas was not on show: the new state cuts in under the picture's fade.
+    const cut = ring.dataset.moves !== 'on';
+    motion.player.setVisible(true, 'portrait');
+    // The canvas shows once its state is drawn, never an old frame first.
+    motion.player.set(key, {once, cut}).then((result) => {
+      if (!result?.superseded && !result?.error && ring.dataset.move === key) ring.dataset.moves = 'on';
+    }, () => {});
+    return true;
+  }
+
   function drawHeader() {
-    const said = headline(state.health, state.scope === 'chat' && state.loaded ? state.rows : null);
+    const scoped = state.scope === 'chat' && state.loaded ? state.rows : null;
+    const said = headline(state.health, scoped);
     root.dataset.mood = said.mood;
-    const src = `/assets/akita/sit-${said.mood}.png`;
+    // Not connected yet, or the gateway is lost: the offline still, faded.
+    const away = !state.health || state.offline;
+    const src = `/assets/moves/poster-${away ? 'offline' : STILLS[said.mood] ?? 'idle_rest'}.webp`;
     if (picture.getAttribute?.('src') !== src) picture.setAttribute('src', src);
-    frame.classList.toggle('blinks', said.mood === 'idle');
+    ring.dataset.dim = String(away);
+    drawMove(said, scoped);
     const nodes = [node('span', 'panel-dot'), node('span', '', said.text)];
     if (said.fix) nodes.push(button('link-button', t('common.openSettings'), () => openSettings()));
     status.replaceChildren(...nodes);
     const waiting = said.mood === 'waiting';
     chip.dataset.mood = said.mood;
-    chip.replaceChildren(Object.assign(node('img'), {src: `/assets/akita/face-${said.mood}.png`, alt: '', width: 24, height: 24}),
+    chip.replaceChildren(Object.assign(node('img'), {src: `/assets/moves/face-${said.mood}.png`, alt: '', width: 24, height: 24}),
       node('span', '', [said.count || '', waiting ? '!' : ''].filter(Boolean).join(' · ')));
     chip.setAttribute('aria-label', t('panel.chipLabel', {text: said.text}));
   }
@@ -576,6 +711,7 @@ export function setupPanel({
   function setSheet(open, {keepTask = false} = {}) {
     if (state.sheet === open) return false;
     state.sheet = open;
+    sheetSeen();
     root.classList.toggle('sheet-open', open);
     root.style.transform = '';
     backdrop.hidden = !open;
@@ -589,7 +725,7 @@ export function setupPanel({
   }
   chip.addEventListener('click', () => setSheet(!state.sheet));
   // A window grown past the sheet's width has no chip to close it with: it closes, and the page is usable again.
-  wide?.addEventListener?.('change', () => { if (wide.matches) setSheet(false, {keepTask: true}); });
+  wide?.addEventListener?.('change', () => { if (wide.matches) setSheet(false, {keepTask: true}); sheetSeen(); });
   backdrop.addEventListener('click', () => setSheet(false));
   let drag = null;
   handle.addEventListener('pointerdown', (event) => { drag = {y: event.clientY, moved: 0}; handle.setPointerCapture?.(event.pointerId); });
@@ -609,5 +745,12 @@ export function setupPanel({
   drawTabs();
   drawBody();
 
-  return {update, refresh, follow, select, state, openTask, closeTask, focusOpener, stepBack, remember, closeSheet: () => setSheet(false), openSheet: () => setSheet(true), lookForNotes: () => memory.lookForNotes()};
+  /** The page lost the gateway (true) or found it again: the portrait keeps its still picture while it is lost. */
+  function offline(lost) {
+    if (state.offline === Boolean(lost)) return;
+    state.offline = Boolean(lost);
+    drawHeader();
+  }
+
+  return {update, refresh, follow, select, state, offline, openTask, closeTask, focusOpener, stepBack, remember, closeSheet: () => setSheet(false), openSheet: () => setSheet(true), lookForNotes: () => memory.lookForNotes()};
 }

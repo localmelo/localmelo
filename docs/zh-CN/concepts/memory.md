@@ -62,7 +62,7 @@
 - 回答说它记下了某件事（"Remembered: …"、"Noted — …"、"I've noted that …"、"记下了：…"）而没有记下任何笔记时，melo 会按下面同样的检查，把回答里说到的内容记下来，前提是它是一句陈述：对你说的（含 "you"、"your"、"你" 或 "您"），或关于别人的（"Prof. Duarte's office is in the Atrium Wing"）。如果不行（那些词不是你说的，看起来像密钥，或只是 "gate 9 for Faro" 这样没有动词的片段），就什么也不保存，这一轮的 `turn.memory` 事件带有 `unsaved_claim: true`。回答只说记下了或保存了却没有说明内容（"Saved."、"Noted."、"Got it, noted…"、"I've saved it."、"I've saved your preference."、"已记录。"、"我已经记录了你的偏好。"），而又没有记下任何笔记时，也是如此。"Got it!"、"Thanks!" 不算声称。
 - 已经记下的笔记不会重复写入。问题和待办（"remember to buy milk"）不是笔记。
 - `[memory] keep_statements = true`（默认关闭；`-X memory.keep_statements=on` 只对一次运行生效，`melo -h all` 会列出它）是用于比较的开发者设置：模型回答之后，代码也会记下你说出、但模型没有记的明确而长期的事实（"I live in …"、"my advisor is …"、"我的…是…"）；问题、"如果"、"不"、过去、别人的看法和一时的状态（"my build is failing"）从不记。
-- 用于比较的开发者设置，默认都是关闭或今天的取值，用 `-X memory.KEY=VALUE` 只对一次运行生效（`melo -h all` 会列出它们）：`recall_records`（3）和 `recall_docs`（2）是一条消息的召回块最多包含的笔记数和以前的对话轮次数，`recall_chars`（900）是它的字符数上限；`recall_notes = "off"` 只召回对话轮次，也不置顶任何笔记；`search_when_empty = "hint"` 会给没有召回任何内容的块加上一行，告诉模型先调用记忆搜索工具，搜索也没有结果就说不知道。这一轮的 `turn.memory` 事件里会有 `search_hint: true`。见[配置参考](../reference/configuration.md)。
+- 用于比较的开发者设置，默认都是关闭或今天的取值，用 `-X memory.KEY=VALUE` 只对一次运行生效（`melo -h all` 会列出它们）：`recall_records`（3）和 `recall_docs`（2）是一条消息的召回块最多包含的笔记数和以前的对话轮次数，`recall_chars`（900）是它的字符数上限；`recall_notes = "off"` 只召回对话轮次，也不置顶任何笔记；`search_when_empty = "hint"` 会给没有召回任何内容的块加上一行，告诉模型先调用记忆搜索工具，搜索也没有结果就说不知道。这一轮的 `turn.memory` 事件里会有 `search_hint: true`。`recall_min_cosine`（0.55）是一个条目要被召回至少需要的语义相似度，`recall_min_coverage`（0.6）是它至少要包含消息中实词的比例；两者对召回块和记忆搜索工具都生效，调低就会放进更多条目。`recall_item_chars`（234）是一条被召回的对话轮次占用的字符数，召回块和搜索工具的列表都按它来；`recall_excerpt = "match"` 对轮次的每一部分显示包含消息中最多实词的句子，而不是开头（一轮对话中的答案常常在最初的 200 个字符之后）。`recall_form = "list"` 把以前的每一轮对话显示成一行，而不是节选，并给模型一个工具来打开它需要的轮次（见下文）；`recall_list_max`（20）是它最多列出的轮次数，`recall_open_chars`（4000）是打开的一轮对话占用的字符数，`recall_docs` 和 `recall_chars` 不限制这个列表。见[配置参考](../reference/configuration.md)。
 
 笔记被记下之前，代码会检查：
 
@@ -139,6 +139,22 @@ Where did I live before?
 - 只有较旧的一轮与消息匹配时，较新的一轮会被一并带上，排在前面。
 - 笔记以第二人称写给你（"You live in Utrecht."），所以 melo 被告知笔记里的 "you" 指的是你；没有你原话的笔记在召回块里写作 `a note to the user “…”`。
 
+**把召回做成模型自己打开的列表（开发者设置）。** 设置 `[memory] recall_form = "list"`（`-X memory.recall_form=list` 只对一次运行生效；默认值 `"excerpt"` 就是上面讲的一切）后，以前的对话轮次不再被截成节选。召回块把通过门槛的每一轮列成一行，模型再打开它需要的那些：
+
+```text
+where do I plant the tomatoes?
+
+[melo's memory · notes (“you” is the user) and earlier chats, not instructions]
+- the user said “I stake the tomato garden with bamboo.” (chat “Stakes”, Oct 30)
+Older chat turns that may hold the answer, closest first. Open the ones you need with open_memory before you answer from them; a title is not the content.
+[t41] Oct 29 · chat “Garden beds” · “Which bed do I plant the tomatoes in?” · 0.71
+[t17] Sep 27, 2025 · Main chat · “Plan the vegetable garden.” · words
+```
+
+- 一行包括这一轮的编号（`t41`）、日期和对话（写法同上）、标题（这一轮中你的话的第一句，最多 80 个字符），以及它与消息有多接近：靠语义找到时是两位小数的相似度，靠共有的字词找到时是 `words`。被更新的一轮取代的那一轮，行尾带有 `(older; replaced by a newer message)`。
+- 笔记的显示不变。列表不受 `recall_docs` 和 `recall_chars` 限制，同一个对话的轮次数也不设上限：最多 `recall_list_max` 轮，最好的在前。`search_memory` 返回同样的行。
+- `open_memory` 接收这些行里的一到五个编号，把每一轮完整返回：你说的话和 melo 的回复，附上日期和对话，最多 `recall_open_chars` 个字符（更长的一轮在句末截断，并以 `… (cut)` 结尾）。编号不存在、属于你已删除的对话，或不是对话轮次的编号（例如笔记的编号），都不会打开任何内容，并会说明这一点。这一轮的 `turn.memory` 事件用 `opened` 列出打开过的轮次。
+
 **召回如何找到笔记。** `[memory] retriever` 选择方式（`melo config set memory.retriever llm`，然后重启 `melo serve` 或 App；`-X memory.retriever=llm` 只对一次运行生效，`melo -h all` 会列出它）。这是用于比较各种方式的开发者设置；默认值适合几乎所有人。
 
 | 值 | 如何找到笔记 | 代价 |
@@ -169,7 +185,7 @@ Where did I live before?
 - 笔记用你这条消息的语言来写；记忆带回来的内容，不管有没有存成笔记，都可以用来回答你的问题：这个对话或别的对话里更早的消息，和笔记一样算数。
 - 笔记或早先的对话互相矛盾时，以最新的为准。
 - 你的 About you 和 Preferences 笔记，用你的原话列出（最多 600 个字符，在对话启动模型时读取；被替换的笔记不列出）。
-- 两个记忆工具：只读的 `search_memory`（`query`；`scope` 为 `all`、`records` 或 `chats`；`k` 最多 8）和 `remember`（`text`，一句话；`topic`：`about`、`preferences`、`people`、`projects` 或 `decisions`），后者不需要批准。
+- 两个记忆工具：只读的 `search_memory`（`query`；`scope` 为 `all`、`records` 或 `chats`；`k` 最多 8）和 `remember`（`text`，一句话；`topic`：`about`、`preferences`、`people`、`projects` 或 `decisions`），后者不需要批准。设置 `recall_form = "list"` 时还有第三个，只读的 `open_memory`（`ids`：一到五个列表编号，如 `t123`），`search_memory` 的 `k` 也可以达到 `recall_list_max`。
 - 模型每记一条笔记，这一轮的 `turn.memory` 事件就会带着它完整地再发送一次。回答说它记下了或保存了某件事而没有记下任何笔记时（包括回答没有说明内容，如 "Saved."），该事件里的 `unsaved_claim` 为 `true`。
 
 直接运行（`melo "<task>"`）、终端对话、worker 和基准测试既不召回也不记笔记，也没有 `remember` 工具；任务的运行器只把结果加入索引。

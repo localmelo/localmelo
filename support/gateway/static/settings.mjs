@@ -96,7 +96,7 @@ export function setupSettings({
   const inputIds = ["s-adapter", "s-chat-url", "s-key-env", "s-base-url", "s-chat-model", "s-embed-backend", "s-embed-url",
     "s-embed-model", "s-embed-use"];
   // Each saves on its own; they wait while a change is being saved.
-  const switchIds = ["s-across-chats", "s-web-fetch", "s-developer", ...RECALL.map((name) => `s-recall-${name}`),
+  const switchIds = ["s-across-chats", "s-web-fetch", "s-follow-up", "s-developer", ...RECALL.map((name) => `s-recall-${name}`),
     ...LANGUAGE_SETTINGS.map((name) => `s-language-${name}`), ...APPROVAL_MODES.map((name) => `s-approvals-${name}`)];
   let settings = null;
   let sections = {};
@@ -166,6 +166,14 @@ export function setupSettings({
     $("s-recall-key").hidden = !developerMode;
     if (!listed().includes(current)) select("model", {show: false});
     recall();
+    followUp();
+  }
+
+  // Following up on the tasks a chat started (`[tasks] follow_up`, #411): a developer setting, so its
+  // switch shows in developer mode only, and not at all for a gateway that does not report it.
+  function followUp() {
+    $("s-follow-up-row").hidden = !isDeveloper || !settings || settings.follow_up === undefined;
+    $("s-follow-up").checked = settings?.follow_up !== false;
   }
 
   // --- the connection form (as before: a draft per server, saved together) -----------------------------------
@@ -413,6 +421,7 @@ export function setupSettings({
     // Reading public web pages (`[tools] web_fetch`); a gateway that does not report it has no switch.
     $("s-web-fetch-row").hidden = settings.web_fetch === undefined;
     $("s-web-fetch").checked = settings.web_fetch !== false;
+    followUp();
     notes();
   }
 
@@ -622,6 +631,12 @@ export function setupSettings({
     if (saving || !settings || settings.web_fetch === undefined) { event.target.checked = !on; return; }
     const words = (value) => t(value ? "settings.webFetch.on" : "settings.webFetch.off");
     settingCommit("web_fetch", on, words(on), !on, words(!on));
+  });
+  $("s-follow-up").addEventListener("change", (event) => {
+    const on = event.target.checked;
+    if (saving || !settings || settings.follow_up === undefined) { event.target.checked = !on; return; }
+    const words = (value) => t(value ? "settings.followUp.on" : "settings.followUp.off");
+    settingCommit("follow_up", on, words(on), !on, words(!on));
   });
   for (const name of RECALL) {
     $(`s-recall-${name}`).addEventListener("change", (event) => {

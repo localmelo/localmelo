@@ -9,6 +9,66 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- One step replaces every picture of Melo from an art pack, a folder or a zip.
+  `uv run --with pillow==13.0.0 python scripts/art_pack.py check PACK` reads the
+  pack, writes nothing and reports what it replaces, what is missing and used
+  instead, the problems that stop `apply` (exit 1) and the warnings, each rule
+  named in plain words. `apply PACK` then replaces the moves folder, the faces
+  and tab icons, the terminal welcome's mark and, from `brand/` pictures, the
+  app icon, the menu-bar logo, the README emblem and the website's logo; it
+  redraws the guide's two pictures and leaves a preview sheet (`-o DIR`; `-r
+  ROOT` writes elsewhere than the checkout). A pack counts its frames from
+  `frame_00` or `frame_01`; the stills, the heads and the brand pictures are
+  optional, and a still that is missing is written as a copy of the poster that
+  stands in for it. A zip is checked whole before anything is written (no
+  absolute path, `..`, symbolic link, duplicate name, more than 2000 entries,
+  50 MB a file or 300 MB in all), only PNG and JSON are read, and nothing in a
+  pack is run. The same pack gives the same bytes, and the committed moves are
+  reproduced byte for byte. The format, the art rules and the fallbacks are in
+  the new [art pack guide](docs/guides/art-pack.md). `build_moves.py` and
+  `make_app_icons.py` are now importable engines of this command and still run
+  alone. [#426]
+
+- Melo moves. In the console's panel and on the desktop, Melo wakes up when
+  the page or the pet first appears, types at its laptop while something
+  runs, tilts its head while the model is answering and no tool runs, raises
+  a paw at once when something waits for you, and lies down to rest, getting
+  up to play now and then (about 20 seconds into a rest, at most once every 5
+  minutes). States cross-fade quickly, the newest change wins and the same
+  state never starts over. With reduced motion each state is a still picture;
+  a hidden tab or a covered pet stops where it is; the pet keeps moving in
+  Low Power Mode and heat. A run that just ended shows Melo with its eyes
+  closed and happy, a failure or a stopped app with its ears back and head
+  low, and a console that is still connecting or cannot reach localmelo
+  curled up and faded, each with its own words. Every picture of Melo now comes from these moves: the empty chat,
+  the reply faces, the approval bar, the sidebar and sign-in brand, the Main
+  chat, the tab icon, the app's start window and the activity pill. After
+  the wake-up Melo sits for a few seconds, then rests; a run that just ended
+  or failed shows for 8 seconds on the desktop, in the activity pill and in
+  the console alike; on the desktop Melo also shows when no model is set up
+  or the model server cannot be reached. In the console, a long quiet rest
+  becomes a still picture until something changes. Health's
+  `status.items` (and the panel's live activity rows) say `answering` when the
+  model is answering with no tool, approval or hold open: Melo thinks only
+  then. [#419]
+- When a task a chat started fails, runs out of steps, ends **Done, not
+  finished** or needs you, that chat follows up by itself instead of leaving
+  it to you: one turn of its own, shown in the chat with `melo started this`,
+  that continues the task once, works around a step that was blocked (for an
+  install Auto blocked: use what is installed, or write it without the
+  package), or asks you one clear question, then says in one or two lines what
+  got done and what did not. A task the chat continued never runs a step that
+  you, Auto or melo's rules blocked before, nor one alike (the same command
+  spelt another way, the same install): it is refused before it is reviewed.
+  What the chat tells the task is its own note, never your words, so it allows
+  nothing your request did not. It continues a task at most once per message
+  of yours, only while the task stands as it ended, has only the task tools,
+  never starts a task, approves nothing, waits for your own turn, and is
+  skipped when you write after the task ended. Activity reads `Continued the task: …`
+  or `Asked you: …`. Chores, tasks from the task page and other chats' tasks
+  keep their card alone. Settings → Chats and folders → **Follow up on tasks**
+  (developer mode) or `[tasks] follow_up = false` turns it off. [#411]
+
 - A task you start, and a saved chore, reads its project's own instruction file
   when it starts: the first of `AGENTS.md`, `CLAUDE.md` and `GEMINI.md` in the
   task's folder and in each folder above it up to your home folder, nearest
@@ -78,6 +138,31 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `search_when_empty = "hint"` gives a block that recalled nothing one line telling the
   model to call the memory search tool first, and the `turn.memory` event then has
   `search_hint: true`. Out-of-range values are config errors. Part of #349.
+- Developer only, not visible by default: two `[memory]` settings for the bars an item must
+  pass to be recalled, set for one run with `-X memory.KEY=VALUE` and defaulting to today's
+  recall. `recall_min_cosine` (0.55, 0.20 to 0.95) is the least similarity of meaning and
+  `recall_min_coverage` (0.6, 0.10 to 1.00) the least share of the message's content words;
+  both apply to the recall block and to the memory search tool, and lowering them lets more
+  notes and chat turns through. Out-of-range values are config errors. Part of #349.
+- Developer only, not visible by default: two `[memory]` settings for how much of a recalled
+  chat turn is shown, set for one run with `-X memory.KEY=VALUE` and defaulting to today's
+  reading. `recall_item_chars` (200, 120 to 2000) is the room one turn takes in the recall
+  block and in the memory search tool's list, and `recall_excerpt = "match"` shows, for the
+  user's words and melo's reply each, the sentences that hold most of the message's words
+  instead of the start, with `…` where text is left out. The block still keeps to its size
+  bound, and the page is unchanged. Part of #349.
+- Developer only, not visible by default: three `[memory]` settings that let recall show earlier
+  chat turns as a list the model opens instead of as excerpts, set for one run with
+  `-X memory.KEY=VALUE` and defaulting to today's recall. `recall_form = "list"` shows each turn
+  as one line, `[t12] Oct 30 · Main chat · “title” · 0.71` (its id, date, chat, a title of at most
+  80 characters and the similarity to the message, or `words`), under one line that tells the
+  model to open the turns it needs, in the recall block and in the memory search tool alike; notes
+  read as before. Every turn that passes the recall bars is listed, best first, `recall_list_max`
+  (20, 1 to 50) at most, with no limit on turns per chat; `recall_docs`, `recall_chars` and the
+  two excerpt settings do not apply to the list. The model also gets an `open_memory` tool that
+  takes one to five of those ids and returns each whole turn, up to `recall_open_chars` (4000,
+  500 to 16000) characters and cut at a sentence end, and the `turn.memory` event lists what was
+  opened as an optional `opened` list. Out-of-range values are config errors. Part of #428.
 - Developer only: `melo memory ingest FILE` loads past chats from a JSON file as if they
   had happened on their dates (no model call), and `LOCALMELO_NOW` pins the date
   the model and memory recall read, for memory tests.
@@ -336,6 +421,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   stays English. [#350]
 
 ### Changed
+
+- The main chat starts a task itself when your request needs tools it lacks
+  (running commands, changing files, many steps), with one line, **Change** and
+  **Stop**, instead of offering "Start this as a task?". Your message is still
+  the task's request, and every step inside it still asks you or is blocked in
+  Auto. A greeting or a short question it can answer starts nothing, an unclear
+  request gets one short question, and the offer stays only where starting
+  would be wrong: a question, words that say not to act and ask for nothing
+  else ("just explain", "don't change anything"), words that steer a task
+  ("cancel it", "continue the report task"), a message with no words of its
+  own, and a chore or reminder code could not schedule. A polite request that
+  asks for work ("can you run the tests?") counts as a request; "please
+  explain …" and short talk ("thanks") are answered. The task is your message
+  alone: the model only names it. Side chats do the same. [#410]
 
 - A task opens in the side panel next to Melo, from its row in Activity, and the
   Tasks link in the sidebar is gone. The row ends in a `›`; selecting it shows
@@ -610,6 +709,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - A chat replies in the language of your latest message even after tool results or
   memory text in another language. The rule is set once, in the paragraph every chat
   (terminal, main chat, side chats) starts with.
+- A long message recalled from an earlier chat shows as much of the person's own
+  words as it did before recalled turns said who spoke: about 234 characters,
+  not 140. A value stated late in a long message was cut off, and questions
+  about it went unanswered. melo's reply gets the room that is left.
+  `recall_item_chars` defaults to 234; larger rooms read as before.
+
 - Developer: `melo memory ingest` reads a session that a file repeats word for word once,
   instead of refusing the file; the same id with other turns is still refused.
 - A task that changed no code is no longer told to run tests. Outside git, melo compares the
@@ -3524,3 +3629,6 @@ earlier milestones.
 [#396]: https://github.com/localmelo/localmelo/pull/396
 [#406]: https://github.com/localmelo/localmelo/issues/406
 [#412]: https://github.com/localmelo/localmelo/issues/412
+[#410]: https://github.com/localmelo/localmelo/issues/410
+[#411]: https://github.com/localmelo/localmelo/issues/411
+[#426]: https://github.com/localmelo/localmelo/issues/426

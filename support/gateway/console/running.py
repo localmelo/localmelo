@@ -11,6 +11,8 @@ it was called and how many seconds ago (``null`` when none did), for the app's
 desktop pet and activity pill.
 Each item says what it is doing in plain words (``activity``, with its kind
 ``icon``: :func:`~localmelo.support.sessions.display.activity_text`), and
+``answering`` is true while its newest step is a model call with no tool,
+approval or hold open (the pet and the console's portrait show it thinking);
 ``focus`` names the one item a glance shows: one that waits for the person
 first, else the one whose newest event is the latest (``null`` when nothing
 runs). A part whose store cannot be read counts as nothing running and
@@ -252,7 +254,7 @@ async def _with_activity(
         text, changed[item["id"]] = await item_activity(
             console, item["kind"], item["id"]
         )
-        item.update(activity=spoken(text), icon=text.icon)
+        item.update(activity=spoken(text), icon=text.icon, answering=text.answering)
     if not items:
         return None
     asking = {entry["id"] for entry in waiting}

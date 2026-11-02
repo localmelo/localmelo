@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
     <title>localmelo · Workspace</title>
-    <link rel="icon" type="image/png" sizes="16x16" href="/assets/akita/favicon-16.png" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/assets/akita/favicon-32.png" />
-    <link rel="icon" type="image/png" sizes="64x64" href="/assets/akita/favicon-64.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/assets/moves/favicon-16.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/moves/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="64x64" href="/assets/moves/favicon-64.png" />
     <script src="/assets/theme-init.js"></script>
     <link rel="stylesheet" href="/assets/workspace.css" />
     <script type="module" src="/assets/workspace.js"></script>
@@ -15,7 +15,7 @@
   <body>
     <main class="lock-screen" id="lock-screen" aria-labelledby="lock-title">
       <div class="lock-card">
-        <div class="lock-brand"><img src="/assets/akita/face-idle.png" width="32" height="32" alt="" /> <strong>localmelo</strong></div>
+        <div class="lock-brand"><img src="/assets/moves/face-brand.png" width="32" height="32" alt="" /> <strong>localmelo</strong></div>
         <h1 id="lock-title" tabindex="-1" data-i18n="signIn.title">Sign in to localmelo</h1>
         <p data-i18n="signIn.run">In a terminal, run <code>melo console</code>. It opens this page signed in.</p>
         <p id="lock-status" role="status" aria-live="polite"></p>
@@ -26,7 +26,7 @@
         <div class="brand">
           <img
             class="brand-icon"
-            src="/assets/akita/face-idle.png"
+            src="/assets/moves/face-brand.png"
             width="32"
             height="32"
             alt=""
@@ -137,14 +137,13 @@
         <section id="worker-panel" class="worker-panel" aria-label="Worker history" data-i18n-aria-label="html.workerHistory" hidden></section>
         <section class="scroll" id="scroll" aria-label="Conversation" data-i18n-aria-label="html.conversation">
           <div class="welcome" id="welcome">
-            <span class="blinks portrait"
-              ><img
-                class="welcome-mascot"
-                src="/assets/akita/sit-idle.png"
-                width="108"
-                height="140"
-                alt="Melo, the localmelo Akita mascot"
-            /></span>
+            <img
+              class="welcome-mascot"
+              src="/assets/moves/poster-startup.webp"
+              width="128"
+              height="128"
+              alt="Melo, the localmelo Akita mascot"
+            />
             <h1 data-i18n="html.whatWouldYouLikeTo">What would you like to work on?</h1>
             <p id="welcome-description" data-i18n="html.welcomeDescription">
               A quiet space to think, build, and explore with your own model.
@@ -166,7 +165,7 @@
           <div id="status-row" class="status-row" role="status" aria-live="off" aria-label="Session status" data-i18n-aria-label="html.sessionStatus" hidden></div>
           <div id="approval-bar" class="approval-bar" role="status" hidden>
             <span class="approval-note"
-              ><img src="/assets/akita/face-waiting.png" width="24" height="24" alt="" /><span data-i18n="html.meloIsWaitingForYour">melo is waiting for your answer</span></span
+              ><img src="/assets/moves/face-waiting.png" width="24" height="24" alt="" /><span data-i18n="html.meloIsWaitingForYour">melo is waiting for your answer</span></span
             >
             <button type="button" id="approval-go" class="outline-button" data-i18n="html.approvalGo">Review</button>
           </div>
@@ -389,6 +388,10 @@
                 <li class="st-row" id="s-web-fetch-row" hidden>
                   <div class="st-text"><label class="st-label" for="s-web-fetch" data-i18n="settings.webFetch.title">Read web pages</label><span class="st-key" data-developer hidden>tools.web_fetch</span><p class="st-hint" data-i18n="settings.webFetch.hint">Melo can read public web pages you ask about. It never reaches this Mac or your local network, and never signs in.</p></div>
                   <span class="st-switch"><input type="checkbox" role="switch" id="s-web-fetch" disabled /><span class="st-track" aria-hidden="true"></span></span>
+                </li>
+                <li class="st-row" id="s-follow-up-row" hidden>
+                  <div class="st-text"><label class="st-label" for="s-follow-up" data-i18n="settings.followUp.title">Follow up on tasks</label><span class="st-key" data-developer hidden>tasks.follow_up</span><p class="st-hint" data-i18n="settings.followUp.hint">When a task a chat started fails or stops, that chat continues it once, works around a blocked step, or asks you one question, then says what got done.</p></div>
+                  <span class="st-switch"><input type="checkbox" role="switch" id="s-follow-up" disabled /><span class="st-track" aria-hidden="true"></span></span>
                 </li>
               </ul>
               <h4 class="st-group-title" id="s-extra-title" data-i18n="html.sExtraTitle">Other folders melo may read</h4>
