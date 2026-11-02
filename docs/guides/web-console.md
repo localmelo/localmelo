@@ -768,7 +768,7 @@ about to do. When the model's words and the code disagree about deleting
 files or sending data out, the card shows a red warning that quotes the words
 ("melo described this as “Close the tabs”, but the code deletes files."). When the
 words do say the right thing but name a file, folder or website and the code deletes or sends
-somewhere else, it says where ("…but the code deletes build/."). A script
+to a place they do not name as well, it says where ("…but the code deletes build/."). A script
 that operates one app by its plain name (AppleScript telling Safari to close
 tabs, `open -a Notes`) asks **Control an app?** and names the app; a script that
 runs a shell, presses keys, drives System Events, names a terminal or a path,
