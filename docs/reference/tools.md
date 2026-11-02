@@ -152,12 +152,22 @@ computer. `[tools] web_fetch_allow_local` is empty, so off, by default.
   in digits. A name such as `localhost`, any other address (a private or local-network range,
   `127.0.0.2`, `0.0.0.0`), a range of ports, a wildcard and an entry with no port are
   configuration errors, and are never used.
-- **melo's own ports** are refused even when listed, and listing one is a configuration error:
-  the gateway and console port (the saved `[gateway] port`, and the port of a gateway that is
-  running), and the port of every model server (each configured `chat_url`, `embedding_url`
-  and cloud `base_url`, and the `-u` URL of the run). A port counts whatever address it is
-  written with, because a server on this computer answers at `127.0.0.1` from any of its
-  addresses.
+- **melo's own ports** are refused even when listed, and listing one in the file is a
+  configuration error: the gateway and console port (the `[gateway] port` of the session's own
+  config, which is the port the console really listens on even when `melo serve --port` set it
+  for this run only, and the port of a gateway that is running), and the port of every model
+  server the config names (each `chat_url`, `embedding_url` and cloud `base_url`, and the `-u`
+  URL of the run). A port counts whatever address it is written with, because a server on this
+  computer answers at `127.0.0.1` from any of its addresses. A model server that is in neither
+  the config nor the `-u` URL of the run is not protected: list only ports that serve test pages.
+- **It is read when a chat or a task starts.** A chat or task takes the list, and the ports
+  above, from its config when its `web_fetch` is made; a change to the file reaches the chats
+  and tasks started after it, not the ones already open.
+- **A listed server always asks the person.** The site gate above lets a site the user's words
+  name be read at once; a listed server is not read that way, because naming `127.0.0.1` does not
+  name a port, and a page may have steered the model to a listed one. It is put to the run's
+  approval policy like any other site (in Auto it is reviewed), and when nobody can be asked (a
+  run with `--yolo`, a task with no approval policy) it is not read.
 - **The address must be written as listed.** A name that resolves to a listed address
   (`localhost`, `pages.test`) and another way of writing it (`127.1`, `[::ffff:127.0.0.1]`) are
   refused, as is every other local address and every other port.
@@ -165,6 +175,10 @@ computer. `[tools] web_fetch_allow_local` is empty, so off, by default.
   never to an unlisted one, and a page that is not itself a listed address cannot send melo to
   one. The site gate above still applies.
 - **Only `web_fetch` reads the list.** The browser tools use the guard's own checks with no list.
+- **A call cannot set it.** A `shell_exec` or `python_exec` call that runs
+  `melo config set tools.web_fetch_allow_local …`, or passes the key with `-X` or `--set`, is a
+  change to localmelo itself: it asks every time, is never granted, and Auto mode refuses it. A
+  key the call builds at run time is undecided.
 - **It is marked.** A fetch the list allows adds `allowed_local: true` to the call's
   `tool.finished` event (see [Events](events.md#toolfinished)) and the line `[This address is a test
   server on this computer, which [tools] web_fetch_allow_local lists.]` to what the call shows,

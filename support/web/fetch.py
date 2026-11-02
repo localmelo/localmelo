@@ -206,7 +206,7 @@ class WebFetcher:
         previous_local = False
         while True:
             target = check_url(current, self._allow)
-            listed = self._listed(target)
+            listed = self.listed(target)
             if previous is not None and listed and not previous_local:
                 raise AddressError(
                     f"{previous.host} redirected to {target.host}:{target.port}, a test "
@@ -250,7 +250,7 @@ class WebFetcher:
             previous, previous_local = target, listed
             current = urljoin(target.url, location)
 
-    def _listed(self, target: Target) -> bool:
+    def listed(self, target: Target) -> bool:
         """Whether only the fetcher's :class:`LocalAllow` lets *target* through."""
         return (
             isinstance(self._allow, LocalAllow)

@@ -69,9 +69,10 @@ def _paths(state: dict[str, Any]) -> list[str]:
 
 
 async def _web_fetch_reads(url: str) -> None:
-    """The control: the setting is in force, so web_fetch reads *url*."""
+    """The control: the setting is in force, so web_fetch reads *url* once the person says yes."""
     [fetch] = await WebFetchProvider().start()
-    text = await fetch.function(url=url)
+    with asking(Asks()):
+        text = await fetch.function(url=url)
     assert "# Tomatoes" in str(text), text
 
 

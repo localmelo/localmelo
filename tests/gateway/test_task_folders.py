@@ -250,3 +250,31 @@ async def test_a_worker_searches_its_task_folder_without_asking(setup: Setup) ->
     found = await tool.function(pattern="def parse_header")
     assert "src/parser.py:1" in found
     assert "search_files" in built[0]["options"].identity
+
+
+async def test_a_workers_web_fetch_refuses_the_port_the_console_is_on(
+    setup: Setup,
+) -> None:
+    """The worker's web_fetch is built from the console's live config, port and all.
+
+    ``melo serve --port N`` changes the running config only, and the endpoint
+    file may be missing, so a listed port that is the console's own stays
+    refused.
+    """
+    import ipaddress
+
+    from localmelo.support.web.guard import LocalAllow
+
+    workers, cfg, _, built, home = setup
+    cfg.tools.web_fetch_allow_local = ["127.0.0.1:9100", "127.0.0.1:9101"]
+    cfg.gateway.port = 9100
+    project = home / "project"
+    project.mkdir()
+    await workers.create({"objective": "read it", "workspace": str(project)})
+    await eventually(lambda: len(built) == 1)
+    web = built[0]["tools"][2]
+    allow = web.fetcher._allow
+    assert isinstance(allow, LocalAllow)
+    address = ipaddress.ip_address("127.0.0.1")
+    assert allow.allows("127.0.0.1", address, 9101)
+    assert not allow.allows("127.0.0.1", address, 9100)

@@ -21,7 +21,10 @@ person's recent messages name exactly (``www.`` aside) reads at once, in
 every mode; any other asks once per chat through the browser's site question (``browser:<origin>``), so
 one "allow for this chat" covers both tools, and auto mode reviews it as it
 reviews a site the browser would open. A task asks the chat that owns it;
-a task with nobody to ask is refused.
+a task with nobody to ask is refused. A test server that the developer
+setting ``[tools] web_fetch_allow_local`` lists is the one exception to the
+first rule: it always asks, whatever the person's words name, and it is not
+read when nobody can be asked.
 """
 
 from __future__ import annotations
@@ -33,7 +36,7 @@ import time
 from collections import OrderedDict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 from localmelo.melo.contracts.approvals import TOOL_ASK
@@ -46,6 +49,9 @@ from localmelo.support.browser.driver import BrowserError
 from localmelo.support.web.extract import extract
 from localmelo.support.web.fetch import FetchError, WebFetcher
 from localmelo.support.web.guard import AddressError, LocalAllow, Target
+
+if TYPE_CHECKING:
+    from localmelo.support.config import Config
 
 NAME = "web_fetch"
 GROUP = "web"
@@ -254,10 +260,14 @@ class WebFetchProvider(BaseToolProvider):
     web_fetch cannot read can point to them. *task* is set for a task's
     Agent: with no approval policy to ask, it reads no site at all. *fetcher*
     replaces the real fetcher in tests and screenshots. Without one, the
-    fetcher is made from the config (:func:`localmelo.support.web_local.fetcher`):
-    it reads the test servers that the developer setting ``[tools]
-    web_fetch_allow_local`` lists, and nothing local without it. *protect*
-    are the model server URLs of this run that are not in the config.
+    fetcher is made from *cfg*, the config of the session it serves (the saved
+    config when None; :func:`localmelo.support.web_local.fetcher`): it reads the
+    test servers that the developer setting ``[tools] web_fetch_allow_local``
+    lists, and nothing local without it. The session's config matters twice:
+    the list is the one it holds when the provider is made, and its
+    ``[gateway] port`` is the port the console really listens on, which
+    ``melo serve --port`` changes in memory only. *protect* are the model
+    server URLs of this run that are not in the config.
     """
 
     def __init__(
@@ -267,10 +277,11 @@ class WebFetchProvider(BaseToolProvider):
         task: bool = False,
         fetcher: WebFetcher | None = None,
         protect: Iterable[str | None] = (),
+        cfg: Config | None = None,
     ) -> None:
         self.browser = browser
         self.task = task
-        self.fetcher = fetcher or web_local.fetcher(protect=protect)
+        self.fetcher = fetcher or web_local.fetcher(cfg, protect=protect)
         self._kept: OrderedDict[str, tuple[float, Reading]] = OrderedDict()
         self._n = 0
 
@@ -351,10 +362,23 @@ class WebFetchProvider(BaseToolProvider):
         (``browser:<origin>``, worded "read <url>" and carrying the address),
         so a grant of either tool covers both. With no policy, a chat reads
         (nobody is asked, as with ``--yolo``) and a task does not.
+
+        A test server that ``[tools] web_fetch_allow_local`` lists is the
+        exception to both shortcuts: the person's words naming the host do not
+        read it at once (they name a host, not its port, and a page may have
+        steered the model to a listed port), and with no policy it is not
+        read at all, since nobody can be asked.
         """
         host = target.host
+        listed = self.fetcher.listed(target)
         ask = TOOL_ASK.get()
         if ask is None:
+            if listed:
+                raise AddressError(
+                    f"melo did not read {host}:{target.port}: it is a test server on "
+                    "this computer, which is read only after the person allows it, "
+                    "and this run has nobody to ask."
+                )
             if self.task:
                 raise AddressError(
                     f"melo did not read {host}: this task has nobody to ask about a site."
@@ -368,7 +392,7 @@ class WebFetchProvider(BaseToolProvider):
         if refused is not None:
             raise AddressError(refused)
         named = getattr(ask, "names_host", None)
-        if callable(named) and named(host):
+        if not listed and callable(named) and named(host):
             return
         try:
             await sites.require_site(origin, via="web_fetch", url=target.url)

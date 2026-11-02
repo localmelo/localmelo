@@ -347,11 +347,14 @@ async def build_session_agent(
         from localmelo.support import web_local
         from localmelo.support.web import WebFetchProvider
 
-        # The model servers of this run (the config's, and -u) are ports that
-        # web_fetch never reads, even if [tools] web_fetch_allow_local lists them.
+        # The model servers of this run (the config's, and -u) and the console's
+        # live port (this config's, which --port changes in memory only) are
+        # ports that web_fetch never reads, even if [tools] web_fetch_allow_local
+        # lists them.
         providers.append(
             WebFetchProvider(
                 browser=browser_driver != "off",
+                cfg=cfg,
                 protect=(
                     base_url,
                     embedding_base_url,

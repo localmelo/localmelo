@@ -17,7 +17,14 @@ rule that ``web_fetch`` never reaches this computer (see
   used (:func:`sites_of`).
 - The port of melo's own gateway and console, of a gateway that is running,
   and of every model server (the configured URLs and the ``-u`` URL of the
-  run) is refused even when it is listed (:func:`own_ports`).
+  run) is refused even when it is listed (:func:`own_ports`). A session
+  passes its own live config: ``melo serve --port N`` sets the gateway port
+  in memory only, so the saved file does not know it. A model server that is
+  in neither the config nor the run's URLs is not protected.
+- The list is read when a session's ``web_fetch`` is made. A site on it asks
+  the person every time (see ``WebFetchProvider._admit``), and a call of the
+  shell or Python cannot set it (the shell review keeps :data:`KEY`'s full
+  name, ``tools.web_fetch_allow_local``, among the settings it guards).
 - The list reaches only ``web_fetch``'s fetcher, as its ``allow`` hook
   (:class:`~localmelo.support.web.guard.LocalAllow`); the browser tools use
   the guard's own checks with no hook. A redirect meets the same list.
@@ -145,7 +152,8 @@ def own_ports(
 ) -> dict[int, str]:
     """The ports that are melo's own, each with what it is; none can be listed.
 
-    The saved ``[gateway]`` port, which is also the console's, and every
+    The ``[gateway]`` port of *cfg*, which is also the console's (the live
+    config of a running session has the port it really bound), and every
     port of the model servers the config names (``chat_url`` and
     ``embedding_url`` of the local backends, ``base_url`` of the cloud ones).
     A port is refused whatever its host: a server on this computer is

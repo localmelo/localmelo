@@ -23,7 +23,7 @@ from __future__ import annotations
 import inspect
 import urllib.parse
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +32,7 @@ from pydantic import ValidationError
 
 import localmelo.__main__ as cli
 from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.contracts.approvals import TOOL_ASK, ApprovalDecision
 from localmelo.melo.contracts.events import EVENT_FIELDS, OPTIONAL_EVENT_FIELDS
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.executor.models import ToolOutput
@@ -43,11 +44,13 @@ from localmelo.support import (
     settings,
     web_local,
 )
+from localmelo.support.sessions.approvals import RememberingPolicy
 from localmelo.support.web import guard
 from localmelo.support.web.fetch import Response, WebFetcher
 from localmelo.support.web.guard import AddressError, LocalAllow
 from localmelo.support.web.tool import WebFetchProvider
 from localmelo.tests.web import pages
+from localmelo.tests.web.test_gate import Person
 
 KEY = "tools.web_fetch_allow_local"
 # The line a result carries when a listed test server was read.
@@ -93,9 +96,41 @@ def _provider(entries: list[str], cfg: config.Config | None = None) -> WebFetchP
     return WebFetchProvider(fetcher=web_local.fetcher(cfg))
 
 
-async def _call(provider: WebFetchProvider, url: str, **more: Any) -> str | ToolOutput:
+class Asks:
+    """The run's approval policy as a tool sees it: answers each site question, keeps them.
+
+    *names* are the hosts the person's own words name (what ``names_host``
+    answers); a listed test server asks even then.
+    """
+
+    def __init__(self, *, allow: bool = True, names: tuple[str, ...] = ()) -> None:
+        self.allow = allow
+        self.names = names
+        self.asked: list[tuple[str, dict[str, Any], str]] = []
+
+    async def __call__(
+        self, name: str, arguments: Mapping[str, Any], preview: str
+    ) -> ApprovalDecision:
+        self.asked.append((name, dict(arguments), preview))
+        return ApprovalDecision(self.allow, "" if self.allow else "not that one")
+
+    def names_host(self, host: str) -> bool:
+        return host in self.names
+
+
+_APPROVES: Any = object()
+
+
+async def _call(
+    provider: WebFetchProvider, url: str, *, ask: Any = _APPROVES, **more: Any
+) -> str | ToolOutput:
+    """One web_fetch call under a policy that says yes (``ask=None``: no policy at all)."""
     [tool] = await provider.start()
-    return await tool.function(url=url, **more)
+    token = TOOL_ASK.set(Asks() if ask is _APPROVES else ask)
+    try:
+        return await tool.function(url=url, **more)
+    finally:
+        TOOL_ASK.reset(token)
 
 
 def _text(result: str | ToolOutput) -> str:
@@ -655,6 +690,7 @@ def test_the_model_cannot_set_it() -> None:
         "task",
         "fetcher",
         "protect",
+        "cfg",
     }
 
 
@@ -734,7 +770,12 @@ def _fetch_message(url: str) -> Message:
     )
 
 
-async def _finished(provider: WebFetchProvider, *urls: str) -> list[Any]:
+async def _finished(
+    provider: WebFetchProvider,
+    *urls: str,
+    person: Person | None = None,
+    query: str = "read the page",
+) -> list[Any]:
     llm = ScriptedLLM([_fetch_message(url) for url in urls])
     agent = Agent(
         llm=llm,
@@ -743,7 +784,11 @@ async def _finished(provider: WebFetchProvider, *urls: str) -> list[Any]:
     )
     found: list[Any] = []
     try:
-        await agent.run_task("read the page", on_event=found.append)
+        await agent.run_task(
+            query,
+            on_event=found.append,
+            approval=RememberingPolicy((person or Person()).ask),
+        )
     finally:
         await agent.close()
     return [event for event in found if event.type == "tool.finished"]
@@ -795,6 +840,164 @@ async def test_a_redirect_inside_a_listed_origin_marks_the_fetch(
     provider = _provider(_listed(server))
     [finished] = await _finished(provider, _url(server, "/redirect"))
     assert finished.data["allowed_local"] is True
+
+
+# ── The live config: the port the gateway really listens on ──
+
+
+async def test_the_live_gateways_port_is_refused_even_when_the_file_says_another(
+    server: dict[str, Any], other: dict[str, Any]
+) -> None:
+    """``melo serve --port N`` (or ``--port 0``) changes the running config only.
+
+    The file keeps its own gateway port, and the endpoint file is missing
+    when another gateway holds the store or its write failed, so the session's
+    config is the only thing that knows the port the console is on.
+    """
+    config.save(_cfg(_listed(server, other)))
+    live = config.load()
+    assert live.gateway.port not in (server["port"], other["port"])
+    live.gateway.port = int(server["port"])  # what --port does, in memory
+    assert gateway_endpoint.read() is None
+    provider = WebFetchProvider(cfg=live)
+    await _control(provider, other)
+    assert "loopback" in _error(await _call(provider, _url(server)))
+    assert _paths(server) == []
+    # The file alone does not know it: a provider built from the file reads it.
+    assert "# Tomatoes" in _text(await _call(WebFetchProvider(), _url(server)))
+
+
+async def test_a_session_agent_hands_its_live_config_to_web_fetch(
+    server: dict[str, Any], other: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from localmelo.support import web as web_package
+    from localmelo.support.sessions.agents import build_session_agent
+
+    config.save(_cfg(_listed(server, other)))
+    live = config.load()
+    live.gateway.port = int(server["port"])
+    made: list[WebFetchProvider] = []
+
+    class Spy(web_package.WebFetchProvider):  # type: ignore[misc]
+        def __init__(self, **kwargs: Any) -> None:
+            super().__init__(**kwargs)
+            made.append(self)
+
+    monkeypatch.setattr(web_package, "WebFetchProvider", Spy)
+    agent = await build_session_agent(
+        cfg=live,
+        base_url=None,
+        model=None,
+        workspace=str(Path.cwd()),
+        options=AgentOptions(mode="interactive"),
+        web_fetch=True,
+    )
+    await agent.close()
+    [provider] = made
+    await _control(provider, other)
+    assert "loopback" in _error(await _call(provider, _url(server)))
+    assert _paths(server) == []
+
+
+async def test_a_provider_made_from_a_config_lists_what_that_config_lists(
+    server: dict[str, Any],
+) -> None:
+    """The list is the session's own: not the file, which may have changed since."""
+    live = _cfg(_listed(server))  # never saved
+    assert "# Tomatoes" in _text(await _call(WebFetchProvider(cfg=live), _url(server)))
+    config.save(_cfg(_listed(server)))
+    assert "loopback" in _error(
+        await _call(WebFetchProvider(cfg=_cfg([])), _url(server))
+    )
+
+
+# ── A listed server asks the person, whatever else is known ──
+
+
+async def test_a_listed_server_asks_even_when_the_persons_words_name_it(
+    server: dict[str, Any],
+) -> None:
+    """A page may steer the model to a listed port; naming 127.0.0.1 once is no answer."""
+    person = Person()
+    provider = _provider(_listed(server))
+    url = _url(server)
+    [finished] = await _finished(
+        provider, url, person=person, query="read http://127.0.0.1:1/ for me"
+    )
+    assert finished.data["status"] == "success"
+    [asked] = person.asked
+    assert asked.tool_name == f"browser:http://127.0.0.1:{server['port']}"
+    assert asked.arguments["via"] == "web_fetch" and asked.arguments["url"] == url
+    assert _paths(server) == ["/page"]
+
+
+async def test_the_shortcut_is_still_taken_for_a_public_site_the_person_named(
+    server: dict[str, Any],
+) -> None:
+    """The control: a named public site reads without a question, a listed one does not."""
+    person = Person()
+    provider = WebFetchProvider(
+        fetcher=WebFetcher(
+            resolver=pages.resolver_for(int(server["port"])), allow=pages.allow
+        )
+    )
+    [finished] = await _finished(
+        provider,
+        f"http://{pages.HOST}/page",
+        person=person,
+        query=f"read {pages.HOST}",
+    )
+    assert finished.data["status"] == "success" and person.asked == []
+
+
+async def test_a_no_leaves_a_listed_server_unread(server: dict[str, Any]) -> None:
+    ask = Asks(allow=False, names=("127.0.0.1",))
+    provider = _provider(_listed(server))
+    error = _error(await _call(provider, _url(server), ask=ask))
+    assert "127.0.0.1" in error and "melo did not read" in error
+    assert [name for name, _, _ in ask.asked] == [
+        f"browser:http://127.0.0.1:{server['port']}"
+    ]
+    assert _paths(server) == []
+
+
+async def test_a_yes_covers_only_that_server(
+    server: dict[str, Any], other: dict[str, Any]
+) -> None:
+    ask = Asks(names=("127.0.0.1",))
+    provider = _provider(_listed(server, other))
+    await _call(provider, _url(server), ask=ask)
+    await _call(provider, _url(other), ask=ask)
+    assert [name for name, _, _ in ask.asked] == [
+        f"browser:http://127.0.0.1:{server['port']}",
+        f"browser:http://127.0.0.1:{other['port']}",
+    ]
+
+
+async def test_a_redirect_to_another_listed_server_asks_about_it(
+    server: dict[str, Any], other: dict[str, Any]
+) -> None:
+    target = urllib.parse.quote(_url(other), safe="")
+    ask = Asks()
+    provider = _provider(_listed(server, other))
+    text = _text(await _call(provider, _url(server, f"/to?u={target}"), ask=ask))
+    assert "# Tomatoes" in text
+    assert [name for name, _, _ in ask.asked] == [
+        f"browser:http://127.0.0.1:{server['port']}",
+        f"browser:http://127.0.0.1:{other['port']}",
+    ]
+
+
+@pytest.mark.parametrize("task", [False, True])
+async def test_a_listed_server_is_not_read_when_nobody_can_be_asked(
+    server: dict[str, Any], task: bool
+) -> None:
+    """No approval policy (--yolo, a bare tool) reads a public page, never a listed server."""
+    cfg = _cfg(_listed(server))
+    provider = WebFetchProvider(task=task, fetcher=web_local.fetcher(cfg))
+    error = _error(await _call(provider, _url(server), ask=None))
+    assert "melo did not read 127.0.0.1" in error and "nobody to ask" in error
+    assert _paths(server) == []
 
 
 def test_a_list_can_name_only_these_two_addresses() -> None:

@@ -1458,3 +1458,88 @@ def test_a_write_through_an_existing_hard_link_is_never_routine(
     (ws / "z").unlink()
     (ws / "z").write_text("# mine")
     assert rv(ws, tool, arguments).verdict == "routine"
+
+
+# ── A setting that loosens a safety rule is not for a call to change ──
+
+LOOSE = "tools.web_fetch_allow_local"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        f"melo config set {LOOSE} 127.0.0.1:8123",
+        f"melo config set {LOOSE} '[\"127.0.0.1:8123\"]'",
+        f'melo config set "{LOOSE}" 127.0.0.1:8123',
+        f"uv run melo config set {LOOSE} 127.0.0.1:8123",
+        f"./.venv/bin/melo config set {LOOSE} 127.0.0.1:8123",
+        f"cd . && melo config set {LOOSE} 127.0.0.1:8123",
+        f"sh -c 'melo config set {LOOSE} 127.0.0.1:8123'",
+        f"env FOO=1 melo config set {LOOSE} 127.0.0.1:8123",
+        f"python3 -m localmelo config set {LOOSE} 127.0.0.1:8123",
+        f"melo -X {LOOSE}=127.0.0.1:8123 chat",
+        f"melo --set {LOOSE}=127.0.0.1:8123 chat",
+        f"melo --set={LOOSE}=127.0.0.1:8123 chat",
+        f"melo -X{LOOSE}=127.0.0.1:8123 chat",
+        f"melo config -X {LOOSE}=127.0.0.1:8123",
+        f"melo serve -X {LOOSE}=127.0.0.1:8123",
+        f"python -m localmelo -X {LOOSE}=127.0.0.1:8123 chat",
+    ],
+)
+def test_widening_web_fetch_through_the_shell_is_changing_localmelo(
+    ws: Path, command: str
+) -> None:
+    review = sh(ws, command)
+    assert review.verdict == "high" and "self" in review.categories, command
+    assert LOOSE in " ".join(review.reasons)
+
+
+def test_widening_web_fetch_from_python_is_changing_localmelo(ws: Path) -> None:
+    code = (
+        "import subprocess\n"
+        f"subprocess.run(['melo', 'config', 'set', {LOOSE!r}, '127.0.0.1:8123'])\n"
+    )
+    assert "self" in py(ws, code).categories
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        f"melo config get {LOOSE}",
+        "melo config keys web_fetch",
+        "melo config",
+        f"echo melo config set {LOOSE} 127.0.0.1:8123",
+        "grep -rn web_fetch_allow_local docs",
+        "melo -X agent.max_steps=5 chat",
+    ],
+)
+def test_reading_the_setting_or_naming_it_stays_routine(ws: Path, command: str) -> None:
+    assert sh(ws, command).verdict == "routine", command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "melo config set $KEY 127.0.0.1:8123",
+        'K=tools.web_fetch_allow_local; melo -X "$K=127.0.0.1:8123" chat',
+        "melo config set tools.web_fetch_allow_loc* x",
+    ],
+)
+def test_a_setting_named_at_run_time_is_undecided(ws: Path, command: str) -> None:
+    review = sh(ws, command)
+    assert review.verdict == "undecided", command
+    assert "could not name" in " ".join(review.reasons)
+
+
+def test_every_setting_melo_warns_about_is_guarded(ws: Path) -> None:
+    """A key added to the warnings must be added to the rule, or this fails."""
+    from localmelo.support import settings
+
+    assert LOOSE in settings.WARNINGS
+    for name in settings.WARNINGS:
+        for command in (
+            f"melo config set {name} x",
+            f"melo -X {name}=x chat",
+            f"uv run melo --set {name}=x chat",
+        ):
+            assert "self" in sh(ws, command).categories, command
