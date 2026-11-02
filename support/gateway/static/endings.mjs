@@ -10,7 +10,7 @@ import {t} from './i18n.mjs';
 const STATES = new Set(['ready', 'draft', 'blocked', 'failed', 'dropped']);
 // The reasons worth words beside the state; the others restate it.
 const WHY = new Set(['tests_failed', 'tests_still_fail', 'tests_missing', 'tests_unverified', 'commit_missing', 'unchecked',
-  'too_large', 'unreadable', 'stashed', 'no_runner']);
+  'too_large', 'unreadable', 'stashed', 'no_runner', 'file_missing']);
 // The reasons a Finish it settles; tests that still fail with nothing changed have nothing to finish.
 const OWED = new Set(['tests_failed', 'tests_missing', 'tests_unverified', 'commit_missing', 'unchecked']);
 // What an ending notes beside its state, such as that no tests apply to the folder.
@@ -23,7 +23,7 @@ const PROPOSAL = /^[\s>*_`-]*ending[*_`\s]*[:：][*_`\s]*(?:ready|blocked|failed
 /** A task's report without its `Ending:` line: the proposal is for code, the person reads the rest. */
 export const reportText = (answer) => String(answer ?? '').replace(PROPOSAL, '').trimEnd();
 
-/** An ending as the page keeps it, `{state, reasons, question, tests}`, or null when there is none. */
+/** An ending as the page keeps it, `{state, reasons, question, tests, missing}`, or null when there is none. */
 export function readEnding(raw) {
   if (!raw || typeof raw !== 'object' || !STATES.has(raw.state)) return null;
   const list = (value) => (Array.isArray(value) ? value : []);
@@ -35,6 +35,8 @@ export function readEnding(raw) {
     notes: list(raw.notes).filter((note) => NOTES.has(note)),
     question: typeof raw.question === 'string' ? raw.question : '',
     tests: list(raw.tests).filter((test) => typeof test?.command === 'string' && OUTCOMES.has(test.outcome)),
+    // The files the words asked it to write that are not in its folder (`file_missing`).
+    missing: list(raw.missing).filter((name) => typeof name === 'string'),
   };
 }
 
@@ -47,7 +49,8 @@ export const endingLabel = (ending) => t(`ending.state.${endingName(ending)}`);
 /** Why it is not ready, in words: its question, then what code found missing. */
 export function endingWhy(ending) {
   const asks = ending.state === 'blocked' ? ending.question || t('ending.reason.question') : '';
-  const why = ending.reasons.filter((reason) => WHY.has(reason)).map((reason) => t(`ending.reason.${reason}`));
+  const files = (ending.missing ?? []).join(', ');
+  const why = ending.reasons.filter((reason) => WHY.has(reason)).map((reason) => t(`ending.reason.${reason}`, {files}));
   const notes = (ending.notes ?? []).map((note) => t(`ending.note.${note}`));
   return [asks, ...why, ...notes].filter(Boolean).join(' · ');
 }

@@ -150,7 +150,11 @@ from localmelo.melo.contracts.review import (
 )
 from localmelo.melo.contracts.streaming import STREAM_DISPLAY
 from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
-from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
+from localmelo.melo.contracts.tools import (
+    CALL_REFUSED,
+    BaseToolProvider,
+    ProvidedTool,
+)
 from localmelo.melo.executor import (
     TOOL_EXIT_CODE,
     AutoConfinement,
@@ -162,7 +166,7 @@ from localmelo.melo.executor import (
     register_builtins,
 )
 from localmelo.melo.executor.env import child_env
-from localmelo.melo.executor.models import ExecutionRequest
+from localmelo.melo.executor.models import ErrorCategory, ExecutionRequest
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.memory.hippo import (
     KINDS,
@@ -1306,6 +1310,11 @@ class _RunState:
     events: _Emitter = dataclasses.field(default_factory=_Emitter)
     # The approval policy the caller passed to run_task, or None.
     approval: ApprovalPolicy | None = None
+    # refused_steps: whether a policy check refused the call _do_execute ran
+    # last, and the steps of this run that did not count for it.
+    call_refused: bool = False
+    free_steps: int = 0
+    refused_calls: set[str] = dataclasses.field(default_factory=set)
     # Whether the person sent the run's query (run_task's from_person): only
     # then may a path outside the workspace be asked about (#405).
     from_person: bool = True
@@ -4609,6 +4618,10 @@ class Agent:
         ask_slot = None
         # The questions the call's tool asked itself that were refused (#431).
         refused: list[dict[str, Any]] = []
+        # What the tool's own check refused (refuse_call), for refused_steps.
+        refusals: list[str] = []
+        refusal_slot = CALL_REFUSED.set(refusals)
+        run.call_refused = False
         switch = self._auto_confinement
         if switch is not None:
             # A call auto mode decides runs confined; the gate settles it.
@@ -4702,10 +4715,14 @@ class Agent:
             )
             raise
         finally:
+            CALL_REFUSED.reset(refusal_slot)
             if slot is not None:
                 TOOL_EXIT_CODE.reset(slot)
             if ask_slot is not None:
                 TOOL_ASK.reset(ask_slot)
+        run.call_refused = self._refused_free(
+            call, result, outcome, gate, refusals, refused, run
+        )
         exported = (
             preview_result(captured[0], notes)[0] if captured is not None else result
         )
@@ -4736,6 +4753,53 @@ class Agent:
             run.attempt_calls.append((call, result))
             await self._rehearse_acted(call, result, run, exit_codes or ())
         return result, cut
+
+    def _refused_free(
+        self,
+        call: ToolCall,
+        result: ToolResult,
+        outcome: Any,
+        gate: _ApprovalGate | None,
+        refusals: list[str],
+        refused: list[dict[str, Any]],
+        run: _RunState,
+    ) -> bool:
+        """Whether *call* was refused by a policy check, so its step may be free (refused_steps).
+
+        The tool's own check (``refuse_call`` or :meth:`refused_by_tool`), a
+        question it asked that a policy or Auto refused, or the approval
+        policy's denial by a policy or Auto. The person's own Deny, or no
+        answer in time, is theirs: asking again is never free. Neither is a
+        call refused before in this run, by tool and arguments.
+        """
+        free = ("policy", "auto")
+        denied = outcome.error_category == ErrorCategory.APPROVAL_DENIED
+        asked = gate.asked if gate is not None else None
+        by = str((asked or {}).get("origin") or "")
+        if refused:
+            policy = all(str(entry.get("origin")) in free for entry in refused)
+        elif denied:
+            policy = by in free
+        else:
+            policy = bool(refusals) or self.refused_by_tool(call, result)
+        if not (policy or refused or denied):
+            return False
+        try:
+            key = json.dumps([call.tool_name, call.arguments], sort_keys=True)
+        except (TypeError, ValueError):
+            key = f"{call.tool_name}:{call.arguments!r}"
+        again = key in run.refused_calls
+        run.refused_calls.add(key)
+        return policy and not again
+
+    def refused_by_tool(self, call: ToolCall, result: ToolResult) -> bool:
+        """Whether *result* is the refusal of *call* by its tool's own check.
+
+        For ``refused_steps``, beside ``refuse_call`` and the approval
+        policy's denial: a subclass may read a tool's known refusal text, for
+        a tool that does not mark its refusals. None here.
+        """
+        return False
 
     async def _do_memorize(
         self, task_id: str, step: _InflightStep, run: _RunState
@@ -5623,7 +5687,12 @@ class Agent:
         run.attempt_calls.clear()
         run.read_streak = 0
 
-        for step in range(budget):
+        # A step whose every call a policy check refused may not count
+        # (refused_steps): the budget grows by one, so ``step`` still counts
+        # the planning calls of this attempt.
+        step = -1
+        while step + 1 < budget:
+            step += 1
             self.chat.check_call_budget()  # before the step starts, not inside it
             if budget - step == 2:
                 await self._deadline_check(run)
@@ -5859,6 +5928,7 @@ class Agent:
                 recent_path=run.recent_path,
                 thought_aliases=thought_aliases,
             )
+            refused_all = bool(calls)
             for call in calls:
                 # Counted when handed over, so a call that timeout_s cuts
                 # short counts too.
@@ -5866,6 +5936,7 @@ class Agent:
                 result, cut = await self._do_execute(call, allowed=allowed, run=run)
                 inflight.results.append(result)
                 inflight.cut_before.append(cut)
+                refused_all = refused_all and run.call_refused
             await self._do_memorize(task.task_id, inflight, run)
             run.inflight = None
             if run.reviews.stop:
@@ -5874,6 +5945,11 @@ class Agent:
                 await self._answer_on_block(task, run)
                 return step + 1, ""
 
+            if refused_all and run.free_steps < self.options.refused_steps:
+                # Every call of the step was refused: it did nothing, so it
+                # does not use up the run's steps (refused_steps).
+                run.free_steps += 1
+                budget += 1
             # Stuck detection (one fingerprint per step)
             fingerprints.append(self._make_fingerprint(calls, inflight.results))
             stuck = self._detect_stuck(fingerprints)
@@ -7058,6 +7134,8 @@ class Agent:
         }
         if opts.answer_on_stop:
             config["answer_on_stop"] = True
+        if opts.refused_steps:
+            config["refused_steps"] = opts.refused_steps
         if opts.max_calls is not None:
             config["max_calls"] = opts.max_calls
         if opts.window_eviction != "slide":
@@ -7199,6 +7277,29 @@ class Agent:
         run.result = answer
         run.answered_on_stop = True
         run.answer_thinking = reply.thinking
+
+    async def closing_answer(self, query: str, *, note: str = "") -> str:
+        """After a run: one request, without tools, for the answer to *query* from what it found.
+
+        For a caller whose run ended with no answer it can use (a reply that
+        only said what it would do, a run that got stuck): the request is
+        the one ``answer_on_stop`` makes (the working window and the latest
+        reflection), with *note* in place of its closing instruction when
+        given. Returns the reply without its thinking, or ``""`` when it is
+        blank or a tool call written as text. A failed request raises.
+        """
+        prefix_run = self.chat.begin_prefix()
+        try:
+            reply = await self.chat.final_answer(
+                self.hippo.working.get_window(),
+                query,
+                self.hippo.working.get_reflections(),
+                note=note,
+            )
+        finally:
+            PREFIX_RUN.reset(prefix_run)
+        answer = _split_inline_reasoning(reply).content.strip()
+        return "" if not answer or broken_tool_call(answer) else answer
 
     async def _restore_closing_line(self, task: TaskRecord, run: _RunState) -> None:
         """``answer_on_stop``: add the closing line the task asks for, when the answer lacks it.

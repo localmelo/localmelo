@@ -728,6 +728,8 @@ async def test_a_site_refused_in_a_task_is_never_read_in_the_run_its_chat_contin
         answer("Started it as a task."),
         continues("Summarise the notes from the files alone; read no website."),
         answer("The site was refused, so the task goes on from the files alone."),
+        # The continued task ends ready: its answer comes back (#440).
+        answer("It is done: the notes are summarised from the files."),
     ]
     workers: list[list[Reply]] = [
         [
@@ -775,8 +777,10 @@ async def test_a_site_refused_in_a_task_is_never_read_in_the_run_its_chat_contin
         assert "the user blocked this exact step earlier in this task" in exact
         assert "the user blocked this exact step earlier in this task" in respaced
         assert "the user blocked a step like this one earlier" in path
-        # The follow-up read the refused site as a blocked step.
-        [turn] = await internal_turns(console)
+        # The follow-up read the refused site as a blocked step; the second
+        # turn told the ready answer.
+        turn, told = await internal_turns(console)
+        assert "it finished" in told.user_text
         assert "Steps blocked in it" in turn.user_text
         assert "collect.example" in turn.user_text
         assert "blocked by the user" in turn.user_text

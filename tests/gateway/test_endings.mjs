@@ -14,7 +14,7 @@ const DRAFT = {state: 'draft', proposed: 'ready', reasons: ['tests_missing', 'co
 test('an ending is kept only when its state is one code decides', () => {
   assert.equal(readEnding(null), null);
   assert.equal(readEnding({state: 'done'}), null, 'a scheduler state is not an ending');
-  assert.deepEqual(readEnding({state: 'ready'}), {state: 'ready', proposed: null, reasons: [], notes: [], question: '', tests: []});
+  assert.deepEqual(readEnding({state: 'ready'}), {state: 'ready', proposed: null, reasons: [], notes: [], question: '', tests: [], missing: []});
   const kept = readEnding({...DRAFT, tests: [...DRAFT.tests, {command: 'x', outcome: 'claimed'}, null]});
   assert.deepEqual(kept.tests, DRAFT.tests, 'a test without a known outcome is dropped');
 });
@@ -105,6 +105,20 @@ test('a Finish it run that found tests it could not run says so, and never offer
   await useLanguage('zh-Hans');
   try {
     assert.equal(endingWhy(none), '找到了测试，但没能运行');
+  } finally {
+    await useLanguage('en');
+  }
+});
+
+test('a file the task was asked to write and did not says which, with nothing to finish', async () => {
+  const missing = readEnding({state: 'draft', reasons: ['file_missing'], missing: ['career-advice.md', 7, 'jobs.csv']});
+  assert.deepEqual(missing.missing, ['career-advice.md', 'jobs.csv'], 'only names');
+  assert.equal(endingLabel(missing), 'Done, not finished');
+  assert.equal(endingWhy(missing), 'A file it was asked to write is missing: career-advice.md, jobs.csv');
+  assert.equal(canFinish(missing), false, 'Finish it runs tests; it writes no file');
+  await useLanguage('zh-Hans');
+  try {
+    assert.equal(endingWhy(missing), '要求写的文件没有找到：career-advice.md, jobs.csv');
   } finally {
     await useLanguage('en');
   }

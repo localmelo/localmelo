@@ -23,9 +23,9 @@ from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console import front as front_module
 from localmelo.support.gateway.console.front import (
-    ASK_TEXT,
     BRIEF_NOTE,
     FRONT_TEXT,
+    NO_ANSWER_TEXT,
     STARTED_TEXT,
     STARTED_TEXT_ZH,
     answer_head,
@@ -126,18 +126,25 @@ async def test_a_request_that_keeps_the_rest_unchanged_hands_off_as_a_task(
         assert [e["echo"] for e in await _echoes(console)] == ["started"]
 
 
-async def test_a_question_answered_with_a_preamble_asks(tmp_path: Path) -> None:
-    async with front_console(tmp_path, answer("Let me look into it.")) as (
-        console,
-        client,
-        _,
-    ):
+async def test_a_question_answered_with_a_preamble_gets_its_answer(
+    tmp_path: Path,
+) -> None:
+    # A question the chat answers is never offered as a task (#440): the turn
+    # asks once more, without tools, for the answer from what it found.
+    replies = (
+        answer("Let me look into it."),
+        answer("It checks one word of the listing, not a file name."),
+    )
+    async with front_console(tmp_path, *replies) as (console, client, llm):
         await _say(client, console, "why is the e2e check so weak?")
         turn = await _wait_turn(client, str(console.main_id))
-        assert turn["answer"] == ASK_TEXT
-        [ask] = await _echoes(console)
-        assert ask["echo"] == "ask"
+        assert turn["answer"] == "It checks one word of the listing, not a file name."
+        assert len(llm.requests) == 2
+        assert await _echoes(console) == []
         assert await console.workers.tasks.list_tasks() == []
+        entry = console.sessions.get(str(console.main_id))
+        assert entry is not None and entry.agent is not None
+        assert entry.agent.conversation()[-1].content == turn["answer"]
 
 
 async def test_a_real_answer_is_kept(tmp_path: Path) -> None:
@@ -205,15 +212,21 @@ async def test_the_main_chat_answers_which_file_defines_x_with_its_search(
         assert await _echoes(console) == []
 
 
-async def test_a_quick_question_at_the_cap_asks(tmp_path: Path) -> None:
-    async with front_console(tmp_path, *_four_steps()) as (console, client, _):
+async def test_a_quick_question_at_the_cap_answers_and_offers(tmp_path: Path) -> None:
+    found = "I could not find it in the folder's Python files."
+    async with front_console(tmp_path, *_four_steps(), answer(found)) as (
+        console,
+        client,
+        _,
+    ):
         await _say(
             client,
             console,
             "Quick question: which file defines DEFAULT_WORKSPACE?",
         )
         turn = await _wait_turn(client, str(console.main_id))
-        assert turn["answer"] == ASK_TEXT
+        # The answer from what it found, and the work still offered as a task.
+        assert turn["answer"] == found
         assert [e["echo"] for e in await _echoes(console)] == ["ask"]
         assert await console.workers.tasks.list_tasks() == []
 
@@ -364,11 +377,17 @@ async def test_what_got_done_names_the_commits_tasks_reported(tmp_path: Path) ->
         query = llm.requests[0][-1].content
         assert "tasks that ended since the last message" in query
         assert "Committed b60d0892" in query
-        # …and the task tools carry each task's state and the first lines of its answer.
+        # …task_list carries each task's state and the first lines of its answer…
         listed = _tool_result(llm, 1)
         assert f"{task_id} · Fix the e2e list_files check · done · P2 · " in listed
         assert "24 passed. / Committed b60d0892." in listed
-        assert "answer: Fixed the check" in _tool_result(llm, 2)
+        # …and task_get its whole answer, line by line (#440).
+        got = _tool_result(llm, 2)
+        assert "its answer:" in got
+        assert (
+            "Fixed the check in test_e2e_pty.py.\n24 passed.\nCommitted b60d0892."
+            in got
+        )
         # Read once: the next turn does not hear it again.
         llm.replies.append(answer("Nothing new."))
         await _say(client, console, "anything else?")
@@ -543,13 +562,16 @@ async def test_a_brief_question_at_the_cap_gets_its_stop_answer(tmp_path: Path) 
         assert entry.agent.conversation()[-1].content == turn["answer"]
 
 
-async def test_a_brief_question_with_no_stop_answer_still_asks(tmp_path: Path) -> None:
-    # The stop answer is asked for, and the model keeps calling tools instead.
+async def test_a_brief_question_with_no_stop_answer_says_so(tmp_path: Path) -> None:
+    # The stop answer is asked for, and the model keeps calling tools instead:
+    # the turn says it could not finish, and offers no task for a brief question.
     steps = [*_four_steps(), tool_call("task_list", {"x": 2}, call_id="c5")]
-    async with front_console(tmp_path, *steps) as (console, client, _):
+    async with front_console(tmp_path, *steps) as (console, client, llm):
         await _say(client, console, "briefly, how is the Done card made?")
         turn = await _wait_turn(client, str(console.main_id))
-        assert turn["answer"] == ASK_TEXT
+        assert turn["answer"] == NO_ANSWER_TEXT
+        assert await _echoes(console) == []
+        assert len(llm.requests) == 3, "two steps and the stop answer; no more"
 
 
 # Each search narrows the one before, so no step repeats another (three repeats

@@ -20,6 +20,7 @@ from fastapi import FastAPI
 
 from localmelo.melo.agent import Agent
 from localmelo.melo.contracts.approvals import ApprovalDecision
+from localmelo.melo.contracts.tools import BaseToolProvider
 from localmelo.melo.schema import Message
 from localmelo.support.gateway.chat_gate import GatedLLM
 from localmelo.support.gateway.console import Console, ConsoleOptions
@@ -87,11 +88,13 @@ async def owner_console(
     follow_up: bool = True,
     approvals: str = "ask",
     run: bool = True,
+    front_tools: list[BaseToolProvider] | None = None,
 ) -> AsyncIterator[tuple[Console, httpx.AsyncClient, dict[str, Any], Ran]]:
     """A console whose main chat and task runs work on scripted models.
 
     *follow_up* is ``[tasks] follow_up``, *approvals* the mode new chats (and
-    the main chat) start in; without *run* no task starts.
+    the main chat) start in; without *run* no task starts. *front_tools* are
+    the main chat's tools beside its task tools.
     """
     monkeypatch.setenv("HOME", str(tmp_path))
     models: dict[str, Any] = {"main": Script(main or []), "workers": []}
@@ -103,7 +106,9 @@ async def owner_console(
         options = session_options(front_options(settings), workspace)
         llm = GatedLLM(models["main"], holder[0].gate.client(session_id))
         agent = FrontAgent(
-            llm=llm, options=options, tool_providers=[holder[0].front.tools]
+            llm=llm,
+            options=options,
+            tool_providers=[holder[0].front.tools, *(front_tools or [])],
         )
         agent.front = holder[0].front
         await agent.start()
@@ -309,6 +314,76 @@ def test_the_start_rule_starts_requests_and_answers_questions() -> None:
         ("can you test the login page?", "start"),
         ("can you check if the tests pass?", "start"),
         ("can you see if numpy is installed?", "start"),
+        # A request in steps starts at once, in Chinese as in English: look somewhere
+        # first, then tell or do something with it. Its question is the person's ask.
+        (
+            "你去我的网站看一下我的简历 然后告诉我什么工作适合我 特别是大公司的什么岗位",
+            "start",
+        ),
+        ("Look at my website and tell me which jobs fit me", "start"),
+        (
+            "Go to my website, read my CV, then tell me which jobs fit me, "
+            "especially at large companies",
+            "start",
+        ),
+        ("can you look at my website and tell me which jobs fit me?", "start"),
+        ("去这个网站看一下然后告诉我最新的价格", "start"),
+        ("帮我查一下明天北京的天气", "start"),
+        ("看看我的项目然后告诉我哪里需要改", "start"),
+        ("分析一下我的简历，告诉我适合什么工作", "start"),
+        ("你能看一下我的网站然后告诉我适合什么工作吗？", "start"),
+        # A plain question is answered, a status question too, and "看看再说" is talk.
+        ("什么工作适合我？", "answer"),
+        ("看看再说", "answer"),
+        ("看看我的简历写得怎么样", "answer"),
+        ("跑完了吗", "answer"),
+        ("之前worker不是已经跑完了吗", "answer"),
+        ("直接和我说就行了", "answer"),
+        ("is it done?", "answer"),
+        ("didn't it finish?", "answer"),
+        ("is the report task done yet?", "answer"),
+        ("which of my tasks will finish first?", "answer"),
+        ("任务跑完了吗？", "answer"),
+        ("你看了我的网站然后告诉我了吗", "answer"),
+        # Words that say not to act still get an offer.
+        ("看看我的项目然后告诉我哪里需要改，先别动手", "offer"),
+        ("look at my site and tell me what is wrong, don't change anything", "offer"),
+        # Words against a task never start one, however the rest reads.
+        ("不用开任务，看一下我的简历然后告诉我适合什么工作", "offer"),
+        ("别开任务，看看这段代码然后告诉我哪里有问题", "offer"),
+        ("不需要建任务，去我的网站看一下然后告诉我哪里要改", "offer"),
+        ("no need for a task, look at my website and tell me what is wrong", "offer"),
+        ("don't make a task: look at my repo and tell me how it is laid out", "offer"),
+        # A look then tell starts only for something outside the chat (a site, a
+        # link, a file, a repo or folder, or the person's own things), and words
+        # that ask to be told, translated or explained, or name a task, win.
+        ("看看天气然后告诉我", "answer"),
+        ("look at this and tell me what you think", "answer"),
+        ("我最近在研究Rust，你推荐什么书？", "answer"),
+        ("研究表明喝咖啡有好处，解释一下为什么", "answer"),
+        ("解释一下：去网站看一下然后告诉我，这句话什么意思", "answer"),
+        ("翻译成英文：去这个网站看一下然后告诉我最新的价格", "answer"),
+        ("嗯，停一下，看看日志然后告诉我", "answer"),
+        ("看一下那个任务然后告诉我结果", "answer"),
+        ("look at the slides task and tell me its progress", "answer"),
+        ("check the slides task and tell me its progress", "answer"),
+        ("open the report task and tell me what it found", "answer"),
+        # What a task found or said is its result: the chat answers it.
+        ("what did it find?", "answer"),
+        ("what did the task find?", "answer"),
+        ("what did the worker say?", "answer"),
+        ("what does the task say?", "answer"),
+        ("has the task found anything?", "answer"),
+        # What a file says is a question about the file, not a task.
+        ("What does report.md say?", "offer"),
+        ("它找到了什么？", "answer"),
+        ("任务发现了什么？", "answer"),
+        ("那个任务说了什么？", "answer"),
+        ("did it find the bug? if not, fix it", "offer"),
+        ("find the bug in app.py and tell me what you found", "start"),
+        # A status word does not swallow a request for work.
+        ("Is the report ready? If not, write it to report.md and commit it", "offer"),
+        ("做完了吗？没做完的话帮我把测试修好并提交", "offer"),
     ],
 )
 def test_the_start_rule_reads_what_the_words_ask(typed: str, rule: str) -> None:
@@ -399,7 +474,12 @@ async def test_ask_mode_still_asks_inside_a_task_the_chat_started(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     code = "print('sunny')"
-    main: list[Reply] = [creates("Weather script"), answer("Started it as a task.")]
+    told = "It is done: the script prints the weather."
+    main: list[Reply] = [
+        creates("Weather script"),
+        answer("Started it as a task."),
+        answer(told),
+    ]
     workers: list[list[Reply]] = [
         [
             tool_call("python_exec", {"code": code}, "w-1"),
@@ -421,7 +501,9 @@ async def test_ask_mode_still_asks_inside_a_task_the_chat_started(
         await until(lambda: _is(console, task_id, "done"))
         assert ran.codes == [code]
         await settled(console)
-        assert await internal_turns(console) == [], "a ready task needs no follow-up"
+        # A ready task's answer comes back to the chat in one turn of its own (#440).
+        [turn] = await internal_turns(console)
+        assert turn.answer == told and "it finished" in turn.user_text
 
 
 async def _is(console: Console, task_id: str, wanted: str) -> bool:
@@ -472,6 +554,8 @@ async def test_a_blocked_install_is_worked_around_and_never_run_again(
             "The package install was blocked, so the task goes on with urllib. "
             "Nothing was installed."
         ),
+        # The continued task ends ready: its answer comes back (#440).
+        answer("It is done: the script fetches the weather with urllib."),
     ]
     workers: list[list[Reply]] = [
         [
@@ -493,8 +577,10 @@ async def test_a_blocked_install_is_worked_around_and_never_run_again(
         await until(lambda: _is(console, task_id, "done"))
         await settled(console)
         assert ran.codes == [], "the install never ran"
-        # The follow-up read the ending and the blocked step, as data.
-        [turn] = await internal_turns(console)
+        # The follow-up read the ending and the blocked step, as data; the
+        # second turn told the ready answer.
+        turn, told = await internal_turns(console)
+        assert "it finished" in told.user_text and "urllib" in told.answer
         assert turn.typed_text == "" and turn.status == "completed"
         assert turn.user_text.startswith(f"[localmelo · follow-up on task {task_id} · ")
         assert "Steps blocked in it" in turn.user_text
@@ -513,7 +599,14 @@ async def test_a_blocked_install_is_worked_around_and_never_run_again(
         assert "file_read" in models["main"].offered[0], "the person's turn has it"
         found = await rows(console, console.main_id)
         kinds = [r["echo"] for r in found]
-        assert kinds == ["started", "followup", "sent", "followed"]
+        assert kinds == [
+            "started",
+            "followup",
+            "sent",
+            "followed",
+            "followup",
+            "followed",
+        ]
         followup, sent, followed = found[1], found[2], found[3]
         assert (followup["why"], followup["lead"]) == (
             "failed",
@@ -545,7 +638,7 @@ async def test_a_blocked_install_is_worked_around_and_never_run_again(
         # Activity says what the chat did, plainly.
         activity = (await client.get("/api/activity")).json()
         results = " / ".join(str(row.get("result")) for row in activity["rows"])
-        assert "Continued the task: Weather script" in results
+        assert "Told you the answer: Weather script" in results
 
 
 async def test_out_of_steps_continues_once_then_asks_then_stops_following_up(
