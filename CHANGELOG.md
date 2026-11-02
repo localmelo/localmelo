@@ -906,12 +906,22 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
     `send_signal` are `system`. Signal 0, listing signals (`kill -l`, `killall -l`) and
     a process the step started itself stay routine; options count only before the first
     target, and `pkill -l` is long output that still kills. A name counts as the step's own
-    process only if every value it is given in the text is `$!`.
+    process only if every way the text gives it a value is `$!` in the step's own shell:
+    a `read` (also behind `while`, `do` or `IFS=`), a loop, arithmetic (`(( pid = 1 ))`,
+    `let`), `unset`, a sourced file, `eval`, a name reference or a pipeline takes it
+    out. The value of an option is never read as an option (`pkill -u -0` is not signal 0).
   - Commands are also read inside loops and conditions (`for … do …; done`,
-    `if …; then …; fi`), inside a backquoted command with spaces, after more options
-    than `-c` (`bash -c -l '…'`), and under any letter case of the program name.
+    `if …; then …; fi`), in the body of a function or a coprocess (`function f { … }`,
+    `coproc cmd`), inside a backquoted command with spaces, inside the `$(…)` and
+    backquotes of a here-document whose delimiter is not quoted (the shell runs them),
+    after more options than `-c` (`bash -c -l '…'`, also an option that takes a value
+    inside a cluster, `-ol name`), and under any letter case of the program name.
+  - A text melo cannot read the way the shell does is undecided, with a reason: an
+    ANSI-C quote (`$'…'`), whose end the shell and melo's reading place differently, a
+    backquote that is never closed, and a command or code longer than 256 KB (it is not
+    read at all).
   - `git status`, `git diff`, `diskutil list`, `diskutil info`, `pgrep` and `kill -0`
-    stay routine. A comparison of 902 commands against the verdicts from before this
+    stay routine. A comparison of 973 commands against the verdicts from before this
     change found none looser. A command of 100 KB is reviewed in linear time.
 - The approval card now compares targets as well as effects. When melo's words describe
   the right effect (delete, send data out) and name a file, folder or website, every place
@@ -922,7 +932,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   it (`.`, `~`, `./*`) is more than any one named file. The warning is new in
   `delete_target` and `send_out_target` (`warn.params`: `said`, `target`), in English and
   Chinese; nothing is warned when the words name no file, folder or site, and the sentence
-  never changes the verdict.
+  never changes the verdict. A broad place is not compared in a delete that comes after a
+  `cd` (it means a folder melo cannot name), but a `cd` later in the step hides nothing
+  (`rm -rf * && cd build` warns). A disk written in the words (`disk3`) is compared with
+  the disk erased.
 - The words “revert”, “restore”, “undo”, “roll back” and the like describe a discard of
   uncommitted work honestly, so they do not trigger the mismatch warning for a step that is
   only `git checkout`, `restore`, `switch` or `stash` discards. They never cover `git clean`

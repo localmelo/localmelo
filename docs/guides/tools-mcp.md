@@ -286,7 +286,7 @@ When a file tool's path is outside the workspace, in a chat or task you started,
 
 ### High-impact calls
 
-Before the policy decides, the checker reviews each `shell_exec`, `python_exec` and `file_write` call with fixed rules: a command is split as the shell splits it, Python code is parsed (nothing runs), and a local script the call runs is read once. A call is **routine**, **high-impact** or **undecided**.
+Before the policy decides, the checker reviews each `shell_exec`, `python_exec` and `file_write` call with fixed rules: a command is split as the shell splits it (the commands inside `$(…)`, backquotes and a here-document that expands them are reviewed too), Python code is parsed (nothing runs), and a local script the call runs is read once. A call is **routine**, **high-impact** or **undecided**.
 
 It is high-impact when it:
 
@@ -296,7 +296,7 @@ It is high-impact when it:
 - sets up something that runs later (launchd, `crontab`, shell startup files, git hooks, `.envrc`, `nohup`), uses passwords, keys, cookies or the keychain (reads too), changes system settings or uses `sudo`, operates another app through a script (`osascript` telling Safari to quit, `open -a Notes`) or reaches macOS through one without naming an app, opens a link of a custom scheme (`open shortcuts://…`; `http`, `https` and `file` links are not one), opens a network service other computers can reach, or sends a file from outside the workspace or an email;
 - changes localmelo itself, or runs code built at run time (`exec` of computed text, `eval "$x"`).
 
-A call is undecided when the rules cannot read what it does: a command, program or path built at run time, a POST that sends data, `git push`. It is also undecided, with a reason that says why, when it goes by the exit status of a pipeline without `pipefail`: the status of `pytest | tail` is `tail`'s, so Python that reads it (`.returncode`, `check=True`), or `pytest | tail && git commit`, goes on after failed tests. `set -o pipefail` makes it the test's.
+A call is undecided when the rules cannot read what it does: a command, program or path built at run time, a POST that sends data, `git push`. It is also undecided, with a reason that says why, when it goes by the exit status of a pipeline without `pipefail`: the status of `pytest | tail` is `tail`'s, so Python that reads it (`.returncode`, `check=True`), or `pytest | tail && git commit`, goes on after failed tests. `set -o pipefail` makes it the test's. A call is undecided too when melo cannot read its text the way the shell does: a `$'…'` quote, a backquote that is never closed, or a command or code longer than 256 KB (which is not read at all).
 
 A high-impact call gets its own card in the web console and its own panel in the terminal (see [the web console](web-console.md#approvals-and-failures) and [the terminal](terminal.md#approvals)). Each:
 

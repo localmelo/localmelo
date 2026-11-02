@@ -310,7 +310,7 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 
 ### 高影响调用
 
-在策略决策之前，检查器会用固定规则审查每次 `shell_exec`、`python_exec` 和 `file_write` 调用：命令按 Shell 的方式拆分，Python 代码只解析不运行，调用运行的本地脚本会读取一次。调用分为**常规**、**高影响**和**无法判定**三类。
+在策略决策之前，检查器会用固定规则审查每次 `shell_exec`、`python_exec` 和 `file_write` 调用：命令按 Shell 的方式拆分（`$(…)`、反引号以及会展开内容的 here-document 里的命令也会被审查），Python 代码只解析不运行，调用运行的本地脚本会读取一次。调用分为**常规**、**高影响**和**无法判定**三类。
 
 以下调用属于高影响：
 
@@ -320,7 +320,7 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 - 设置以后会自行运行的内容（launchd、`crontab`、Shell 启动文件、git 钩子、`.envrc`、`nohup`），使用密码、密钥、Cookie 或钥匙串（读取也算），更改系统设置或使用 `sudo`，用脚本操作另一个应用（`osascript` 让 Safari 退出、`open -a Notes`）或不指名应用就通过脚本接触 macOS，打开自定义协议的链接（`open shortcuts://…`；`http`、`https` 和 `file` 链接不算），打开其他计算机可以访问的网络服务，或发送工作区以外的文件或电子邮件；
 - 更改 localmelo 本身，或运行在运行时拼出的代码（对计算出的文本使用 `exec`、`eval "$x"`）。
 
-规则无法读出调用的作用时，调用属于无法判定：在运行时拼出的命令、程序或路径，发送数据的 POST，`git push`。没有 `pipefail` 而依据管道退出状态的调用也属于无法判定，并附上原因：`pytest | tail` 的状态是 `tail` 的，所以读取它的 Python（`.returncode`、`check=True`）或 `pytest | tail && git commit` 会在测试失败后继续。`set -o pipefail` 会让它变成测试的状态。
+规则无法读出调用的作用时，调用属于无法判定：在运行时拼出的命令、程序或路径，发送数据的 POST，`git push`。没有 `pipefail` 而依据管道退出状态的调用也属于无法判定，并附上原因：`pytest | tail` 的状态是 `tail` 的，所以读取它的 Python（`.returncode`、`check=True`）或 `pytest | tail && git commit` 会在测试失败后继续。`set -o pipefail` 会让它变成测试的状态。当 melo 无法像 Shell 那样读出调用的文本时，调用同样属于无法判定：`$'…'` 引号、始终没有闭合的反引号，以及超过 256 KB 的命令或代码（这样的文本根本不会被读取）。
 
 高影响调用在网页控制台有专门的卡片，在终端有专门的面板（参见[网页控制台](web-console.md#approvals-and-failures)和[终端](terminal.md#approvals)）。每张卡片：
 
