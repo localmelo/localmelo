@@ -47,7 +47,7 @@ import logging
 import os
 import re
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, NamedTuple
@@ -70,6 +70,7 @@ from localmelo.melo.schema import (
     starts_with_reply_nudge,
 )
 from localmelo.support.config import (
+    CHAT_RECENT_DIGEST_MINUTES,
     MEMORY_COMPRESS_AT_CHARS,
     MEMORY_NOTE_GATE,
     MEMORY_NOTE_MIN_COSINE,
@@ -84,6 +85,13 @@ from localmelo.support.config import (
 )
 from localmelo.support.memory import hippo_encode, note_gate, records
 from localmelo.support.memory import sleep as sleeping
+from localmelo.support.memory.digest import (
+    DIGEST_KINDS,
+    DIGEST_SCAN,
+    DIGEST_TURNS,
+    Digest,
+    make_digest,
+)
 from localmelo.support.memory.hippo_route import Route, Router
 from localmelo.support.memory.importer import (
     ImportPlan,
@@ -417,6 +425,9 @@ class ChatTurn:
     # The turns the model opened with ``open_memory``: session, turn and the id
     # it gave, first opened first.
     opened: list[dict[str, Any]] = field(default_factory=list)
+    # The digest of the other chats this turn's message carries (a chat's first
+    # turn; see ChatMemory.recent_digest), None for none.
+    digest: Digest | None = None
 
     def event(self) -> dict[str, Any] | None:
         data = self.memory.event()
@@ -433,7 +444,15 @@ class ChatTurn:
             data["searched"] = [item.to_json() for item in self.searched]
         if self.opened:
             data["opened"] = [dict(turn) for turn in self.opened]
+        if self.digest is not None:
+            data["digest"] = self.digest.event()
         return data
+
+    def add_digest(self, digest: Digest) -> None:
+        """Note the digest the turn's message carries; refresh the event."""
+        if self.digest != digest:
+            self.digest = digest
+            self.publish()
 
     def add_searched(self, items: Sequence[Item]) -> None:
         """Note what a search found in this turn; refresh the event if it is new."""
@@ -2285,6 +2304,76 @@ class ChatMemory:
         return "\n".join([PACK_HEADER, *lines]) if lines else ""
 
     # ── Records, for the routes and the identity ──
+
+    def digest_minutes(self) -> int:
+        """``[chat] recent_digest_minutes`` now; 30 without a config file.
+
+        A value out of its bounds or of the wrong type (a file
+        :meth:`Config.validate` would refuse) reads as the default, as
+        :meth:`recall_settings` reads its own.
+        """
+        default = 30
+        cfg = self._settings()
+        chat = getattr(cfg, "chat", None)
+        value = getattr(chat, "recent_digest_minutes", default)
+        low, high = CHAT_RECENT_DIGEST_MINUTES
+        fits = isinstance(value, int) and not isinstance(value, bool)
+        return value if fits and low <= value <= high else default
+
+    async def recent_digest(
+        self,
+        session_id: str,
+        *,
+        exclude_turns: Collection[tuple[str, int]] = (),
+        now: float | None = None,
+    ) -> Digest | None:
+        """What the user's other chats discussed lately, for chat *session_id*'s first turn.
+
+        The newest :data:`~.digest.DIGEST_TURNS` turns of the main chat and the
+        side chats other than *session_id* stamped within the last
+        :meth:`digest_minutes` before *now* (default :func:`clock.now`, which
+        ``LOCALMELO_NOW`` pins). Stored stamps never follow the pin: live
+        turns keep the wall clock and ingested turns their file's dates, so
+        under a pin the digest reads only ingested turns near the pinned
+        time. Returned as a
+        :class:`~.digest.Digest`. Under the lock, one
+        :meth:`ConversationIndex.recent` read (at most
+        :data:`~.digest.DIGEST_SCAN` turns) and the corpus recall uses
+        (:meth:`_sync`): a turn a newer note or turn replaced is left out, as
+        recall leaves it out, and so are *exclude_turns* (``(session id,
+        turn)``: what the recall block shows already). ``None`` when memory
+        across chats is off, the setting is 0, or no such turn is left.
+        """
+        minutes = self.digest_minutes()
+        if not self.enabled or minutes <= 0:
+            return None
+        now = clock.now() if now is None else now
+        index = self.stores()[1]
+        async with self._lock:
+            docs = await index.recent(
+                now - minutes * 60,
+                now,
+                exclude_session=session_id,
+                kinds=DIGEST_KINDS,
+                limit=DIGEST_SCAN,
+            )
+            if not docs:
+                return None
+            replaced = self._replaced(await self._sync())
+        skip = {*replaced, *exclude_turns}
+        kept = [doc for doc in docs if (doc.session_id, doc.turn) not in skip]
+        return make_digest(kept[:DIGEST_TURNS], minutes)
+
+    def note_digest(self, digest: Digest) -> None:
+        """Show *digest* in this turn's ``turn.memory`` event (its ``digest`` key).
+
+        For the turn under way (:data:`CHAT_TURN`, set by :meth:`before_turn`),
+        once its message carries the digest; outside a chat's turn nothing
+        happens.
+        """
+        turn = CHAT_TURN.get()
+        if turn is not None:
+            turn.add_digest(digest)
 
     async def records(self) -> list[StoredEntry]:
         async with self._lock:

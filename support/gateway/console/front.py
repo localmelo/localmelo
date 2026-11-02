@@ -724,7 +724,10 @@ TASK_TOOLS: Final = (
             "title": {"type": "string", "description": TITLE_HINT},
             "objective": {
                 "type": "string",
-                "description": "What the task should do, with every detail the user gave.",
+                "description": (
+                    "What the task should do, with every detail the user gave. Name "
+                    "the person or thing it is about; never he, she or it."
+                ),
             },
         },
     ),
