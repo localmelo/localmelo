@@ -1,4 +1,4 @@
-"""Browsing for melo: read and follow web pages in a browser, with the person's say.
+"""Browsing for melo: read, follow and act on web pages in a browser, with the person's say.
 
 ``provider_for`` builds the tool provider that a session registers when
 ``[browser] driver`` names a driver (``off``, the default, registers nothing).
@@ -31,8 +31,12 @@ def configured_driver(cfg: Config) -> str:
     return "off"
 
 
-def provider_for(driver: str) -> BrowserToolProvider | None:
-    """The browser tools for *driver*; None for ``off``. ``ValueError`` for an unknown name."""
+def provider_for(driver: str, *, keep_tabs: bool = False) -> BrowserToolProvider | None:
+    """The browser tools for *driver*; None for ``off``. ``ValueError`` for an unknown name.
+
+    With *keep_tabs* (``[browser] keep_tabs``) the tabs melo opened are left
+    open when the chat ends or goes idle.
+    """
     if driver == "off":
         return None
     if driver == "safari-automation":
@@ -44,7 +48,8 @@ def provider_for(driver: str) -> BrowserToolProvider | None:
             "/usr/bin/safaridriver"
         ]
         return BrowserToolProvider(
-            SafariAutomationDriver(command=command, args=(*args, "--mcp"))
+            SafariAutomationDriver(command=command, args=(*args, "--mcp")),
+            keep_tabs=keep_tabs,
         )
     raise ValueError(f"unknown browser driver {driver!r}; use one of {DRIVERS}")
 

@@ -369,7 +369,7 @@ async def test_the_tab_list_shows_only_pages_melo_checked() -> None:
     provider = BrowserToolProvider(driver)
     tools = {t.definition.name: t for t in await provider.start()}
     await run(tools, "browser_open", url=HOME)
-    await run(tools, "browser_open", url=HOME + "news")
+    await run(tools, "browser_open", url=HOME + "news", tab="new")
     driver.tabs_["t1"].append(CONSOLE)  # moved itself after it was read
     listing = (await run(tools, "browser_tabs", action="list")).text
     assert "  t1 (not checked)" in listing and "127.0.0.1" not in listing

@@ -116,6 +116,7 @@ from localmelo.melo.contracts.approvals import (
     ALLOWED_ONCE,
     BLOCKED_ALIKE,
     BLOCKED_EARLIER,
+    SELF_ASKING_TOOLS,
     STOPPED_NOTE,
     TOOL_ASK,
     ApprovalDecision,
@@ -1630,6 +1631,7 @@ class _ApprovalGate:
         reviewer: StepReviewer | None = None,
         destructive: bool = False,
         confinement: AutoConfinement | None = None,
+        asks_itself: bool = False,
     ) -> None:
         self._policy = policy
         self._run = run
@@ -1640,6 +1642,7 @@ class _ApprovalGate:
         self._reviewer = reviewer
         self._destructive = destructive
         self._confinement = confinement
+        self._asks_itself = asks_itself
         self.review: ActionReview | None = None
         # The approval of tool.finished: request_id, allowed, reason,
         # remember and origin, once the policy is asked; None until then.
@@ -1661,6 +1664,12 @@ class _ApprovalGate:
         earlier = self._earlier(request)
         if earlier is not None:
             return earlier
+        if self._asks_itself:
+            # One of melo's own tools that ask their questions themselves (the
+            # browser tools that act: per site, for every text typed and every
+            # form sent) is not asked a second, empty question here about its
+            # call. Only the names melo lists count, never a tool's annotation.
+            return ApprovalDecision(True, origin="policy")
         if request.outside is not None:
             return await self._folder(request, request.outside)
         run, call = self._run, self._call
@@ -2072,6 +2081,21 @@ def _folder_scope(decision: ApprovalDecision) -> str:
     return "chat" if decision.remember else "once"
 
 
+# The words of auto mode's review of a site question, by what the tool wants to
+# do there: open it (no ``access``), click or choose on a page, type on it, or
+# send a form from it.
+_SITE_ROUTINE = {"": "Opens", "read": "Opens", "act": "Acts on"}
+_SITE_DOUBT = {
+    "": "Opens {site}, a site the request did not name.",
+    "read": "Opens {site}, a site the request did not name.",
+    "act": "Clicks or chooses on {site}, a site the request did not name.",
+    "submit": "Sends a form from {site}, which needs its own review.",
+}
+_TYPING_DOUBT = (
+    "Types text on {site}, which needs its own review: the text is the model's own."
+)
+
+
 class _ToolAsk:
     """What a running tool uses to ask the run's approval policy (``TOOL_ASK``).
 
@@ -2152,9 +2176,18 @@ class _ToolAsk:
             return ApprovalDecision(False, STOPPED_NOTE, origin="auto")
         if auto and reviewer is not None:
             site = str(arguments.get("site") or "")
-            if reviewer.names_host(site):
+            access = str(arguments.get("access") or "")
+            # A click or a choice on a site is reviewed as opening it. Typed text
+            # is the model's own data and a form sent from a page leaves the
+            # computer: each is reviewed by itself, even on a site you named, and
+            # the verdict of one is never kept for the next.
+            sends = access == "submit"
+            typing = access == "type"
+            if not (sends or typing) and reviewer.names_host(site):
                 review = ActionReview(
-                    "routine", (), (f"Opens {site}, which you named.",)
+                    "routine",
+                    (),
+                    (f"{_SITE_ROUTINE.get(access, 'Opens')} {site}, which you named.",),
                 )
             else:
                 review = await reviewer.review(
@@ -2165,14 +2198,24 @@ class _ToolAsk:
                     review=ActionReview(
                         "undecided",
                         (),
-                        (f"Opens {site}, a site the request did not name.",),
+                        (
+                            (
+                                _TYPING_DOUBT
+                                if typing
+                                else _SITE_DOUBT.get(access, _SITE_DOUBT[""])
+                            ).format(site=site),
+                        ),
                     ),
                     mode="auto",
-                    key=key,
+                    key=f"{key}|{self._call.id}" if sends or typing else key,
                     workspace=self._workspace_root,
                     # One routine verdict reads the site's plain pages.
-                    shared=plain_page_key(
-                        tool_name, request.arguments, self._workspace_root
+                    shared=(
+                        ""
+                        if sends or typing
+                        else plain_page_key(
+                            tool_name, request.arguments, self._workspace_root
+                        )
                     ),
                     refused_sites=_refused_sites(self._policy, self._run),
                 )
@@ -2404,6 +2447,9 @@ class Agent:
         self._provided_names: frozenset[str] = frozenset()
         # Of those, the ones in a group, which "retrieve" offers on every step.
         self._grouped_names: frozenset[str] = frozenset()
+        # Of those, melo's own browser tools that ask their questions themselves:
+        # the only calls the approval gate does not ask a second question about.
+        self._self_asking_names: frozenset[str] = frozenset()
         # close() or begin_exit() has begun: no tool provider is started
         # from then on.
         self._closing = False
@@ -4148,6 +4194,13 @@ class Agent:
             self._grouped_names = frozenset(
                 tool.definition.name for tool in provided if tool.group
             )
+            # Both the provider's word and melo's list: a name alone does not
+            # count, and a flag on any other name does nothing.
+            self._self_asking_names = frozenset(
+                tool.definition.name
+                for tool in provided
+                if tool.asks_itself and tool.definition.name in SELF_ASKING_TOOLS
+            )
             self.chat.add_system_notes(
                 [note for provider in started for note in provider.system_notes()]
             )
@@ -4700,6 +4753,7 @@ class Agent:
                 self._reviewer,
                 destructive=hints.get("destructiveHint") is True,
                 confinement=switch,
+                asks_itself=call.tool_name in self._self_asking_names,
             )
             ask_slot = TOOL_ASK.set(
                 _ToolAsk(

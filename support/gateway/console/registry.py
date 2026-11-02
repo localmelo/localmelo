@@ -28,6 +28,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     ApprovalRequest,
     Withdrawal,
+    never_granted,
 )
 from localmelo.melo.contracts.review import offers_grant
 from localmelo.melo.contracts.tools import BaseToolProvider
@@ -570,6 +571,7 @@ class ConsoleSessions:
                     decision.remember
                     and request.outside is None
                     and offers_grant(request.review)
+                    and not never_granted(request.tool_name)
                 ):
                     granted_at[request.tool_name] = self._clock()
             return decision

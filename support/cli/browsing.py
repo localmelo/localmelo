@@ -28,11 +28,11 @@ def _provider(session: CliSession) -> BrowserToolProvider | None:
     return None
 
 
-def forget(session: CliSession) -> None:
-    """A new chat starts with no site allowed: the open tabs keep nothing approved."""
+async def forget(session: CliSession) -> None:
+    """A new chat starts with no site allowed, and the old chat's tabs are tidied."""
     provider = _provider(session)
     if provider is not None:
-        provider.forget()
+        await provider.end_chat()
 
 
 async def status(session: CliSession) -> None:
