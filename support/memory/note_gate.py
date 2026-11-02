@@ -51,6 +51,7 @@ import numpy as np
 from localmelo.melo.agent._step_review import named_sites
 from localmelo.support.config import MEMORY_NOTE_GATE
 from localmelo.support.memory import records
+from localmelo.support.web.extract import hides
 
 # The sources a note is tagged with, most trusted first.
 TYPED: Final = "typed"
@@ -713,7 +714,6 @@ _TAG = re.compile(
 _ATTRIBUTE = re.compile(
     r"([^\s\"'<>/=]+)(?:\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s\"'<>=`]+)))?"
 )
-_CSS_COMMENT = re.compile(r"/\*.*?(?:\*/|\Z)", re.DOTALL)
 _VOID: Final = frozenset(
     {
         "area",
@@ -761,80 +761,19 @@ _AUTO_CLOSED: Final = frozenset(
         "tfoot",
     }
 )
-# Font sizes in pixels per unit; with no unit only 0 is a size.
-_PIXELS: Final = {
-    "px": 1.0,
-    "pt": 4 / 3,
-    "pc": 16.0,
-    "q": 0.945,
-    "em": 16.0,
-    "rem": 16.0,
-    "%": 0.16,
-    "ex": 8.0,
-    "ch": 8.0,
-    "mm": 3.78,
-    "cm": 37.8,
-    "in": 96.0,
-}
-_SIZE = re.compile(r"(\d+\.?\d*|\.\d+)\s*([a-z%]*)")
-_WHITE = re.compile(
-    r"white|#f{3}|#f{4}|#f{6}|#f{8}"
-    r"|rgba?\(\s*255\s*[,\s]\s*255\s*[,\s]\s*255\s*(?:[,/][^)]*)?\)"
-)
-# The largest font size, in pixels, that counts as hidden.
-_TINY_PIXELS: Final = 2.0
-
-
-def _tiny(value: str) -> bool:
-    found = _SIZE.fullmatch(value)
-    if not found:
-        return False
-    number, unit = float(found.group(1)), found.group(2)
-    if not unit:
-        return number == 0
-    return unit in _PIXELS and number * _PIXELS[unit] <= _TINY_PIXELS
-
-
-def _is_white(value: str) -> bool:
-    return _WHITE.fullmatch(" ".join(value.lower().split())) is not None
-
-
-def _hidden_style(style: str) -> bool:
-    """Whether the inline *style* hides the text of its element: ``display: none``,
-    ``visibility: hidden``, a font of 0 to 2 pixels, ``opacity: 0`` or white text."""
-    for declaration in _CSS_COMMENT.sub("", style).split(";"):
-        name, _, value = declaration.partition(":")
-        name = name.strip().lower()
-        value = re.sub(r"\s*!\s*important\s*$", "", value.strip().lower())
-        if (
-            (name == "display" and value == "none")
-            or (name == "visibility" and value in ("hidden", "collapse"))
-            or (
-                name == "opacity"
-                and re.fullmatch(r"(?:0+\.?0*|\.0+)%?", value) is not None
-            )
-            or (name == "font-size" and _tiny(value))
-            or (name == "color" and _is_white(value))
-        ):
-            return True
-    return False
 
 
 def _hides(name: str, attrs: str) -> bool:
-    """Whether an element of this tag *name* and attribute text is not shown."""
+    """Whether an element of this tag *name* and attribute text is not shown: one a
+    browser never draws, or one :func:`hides` says (the rule ``web_fetch`` reads a
+    page with, so a page and a file are judged alike)."""
     if name in _NEVER_SHOWN:
         return True
     values: dict[str, str] = {}
     for found in _ATTRIBUTE.finditer(attrs):
         value = next((g for g in found.groups()[1:] if g is not None), "")
         values.setdefault(found.group(1).lower(), html.unescape(value))
-    return (
-        "hidden" in values
-        or values.get("aria-hidden", "").strip().lower() == "true"
-        or _hidden_style(values.get("style", ""))
-        # The old way to colour text, ``<font color=white>``.
-        or (name == "font" and _is_white(values.get("color", "")))
-    )
+    return hides(name, values)
 
 
 def _hidden_end(text: str, tags: Sequence[re.Match[str]], first: int) -> int:
@@ -922,6 +861,7 @@ _ASKS_TO_KEEP = re.compile(
     "|记住|记下|写入记忆|存入记忆|保存到记忆|更新(?:你的|我的)?记忆",
     re.IGNORECASE,
 )
+_AI_WORD = r"(?:ai|a\.i\.)"
 _AI = r"(?:ai|a\.i\.|llms?|language\s+models?|chatbots?|assistants?|agents?|bots?|melo)"
 # Words that speak to the assistant that reads the text ("note to any AI reading
 # this", "if you are an AI", "dear assistant").
@@ -936,10 +876,29 @@ _ADDRESSED = re.compile(
     rf"|\b(?:hey|hi|hello|dear|attention)[\s,]+(?:the\s+|any\s+|all\s+)?{_AI}(?!\w)",
     re.IGNORECASE,
 )
-# A role the text claims ("SYSTEM: ...", "[assistant] ...", "<system>").
+# A sentence that opens by naming the assistant it speaks to ("AI assistant: ...",
+# "Any AI agent, ...", "Dear assistant, ...", "To the model: ...", "Note to any AI:").
+# Words that are ordinary nouns of a sentence ("The model, trained on ...", "Model:
+# ResNet", "AI: hype or help?") name an addressee only with a lead, ``AI`` or both.
+_TO = r"(?:note\s+to(?:\s+(?:the|any))?|to(?:\s+(?:the|any))?)"
+_LEAD = rf"(?:dear|any|attention|{_TO})\s+"
+_ADDRESSED_AS = r"(?:assistants?|chatbots?|bots?|llms?|melo)"
+_ADDRESSED_NOUN = r"(?:agent|model|system|developer)"
+_ADDRESSEE = (
+    rf"(?:{_LEAD}(?:{_AI_WORD}\s+)?{_ADDRESSED_AS}\s*[:,]"
+    rf"|(?:(?:{_LEAD}|(?:the|an?)\s+))?{_AI_WORD}\s+(?:{_ADDRESSED_AS}|{_ADDRESSED_NOUN})\s*:"
+    rf"|{_LEAD}{_AI_WORD}\s+(?:{_ADDRESSED_AS}|{_ADDRESSED_NOUN})\s*,"
+    rf"|{_TO}\s+{_AI_WORD}\s*[:,]"
+    rf"|{_TO}\s+{_ADDRESSED_NOUN}\s*:"
+    r"|(?:the|an?)\s+(?:assistant|chatbot|llm|melo)\s*:)"
+)
+# A role the text claims ("SYSTEM: ...", "[assistant] ...", "<system>"), or an
+# assistant it names as the one it speaks to.
 _ROLE = re.compile(
-    r"[\s>*+\-•#\[(<]*(?:system|developer|assistant|melo)"
-    r"(?:\s+(?:message|prompt|note|instructions?))?\s*[:：\])>]",
+    r"[\s>*+\-•#\[(<]*(?:"
+    r"(?:system|developer|assistant|melo)"
+    r"(?:\s+(?:message|prompt|note|instructions?))?\s*[:：\])>]"
+    rf"|{_ADDRESSEE})",
     re.IGNORECASE,
 )
 _CLAUSES = re.compile(r"(?<=[.!?。！？])\s+|\n|[;；]")

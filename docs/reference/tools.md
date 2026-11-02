@@ -105,7 +105,8 @@ call itself asks nothing; each site passes the site gate below first.
   download reached its limit, and a note when a page has little text without its scripts.
 - **HTML.** The title, headings (`# …`), the main text (only `<main>` or `<article>` when it
   holds enough text), list items, table cells joined with ` | `, and up to 40 links. Scripts,
-  styles and hidden text (`hidden`, `aria-hidden`, `display: none`) are left out. `text/*`,
+  styles and hidden text (`hidden`, `aria-hidden`, and an inline style of `display: none`,
+  `visibility: hidden`, a tiny font, `opacity: 0` or white text) are left out. `text/*`,
   JSON and XML come back as they are; PDFs, images and other files are refused with their type.
 - **Server text.** Nothing a server writes in its status line or headers reaches the model: an
   error says the status code only, and a media type or an encoding is named only when it is a
