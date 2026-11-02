@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import socket
+from typing import Any
+
 from localmelo.support.browser.driver import (
     BrowserError,
     BrowserSetupError,
@@ -10,9 +13,41 @@ from localmelo.support.browser.driver import (
     Shot,
     TabInfo,
 )
+from localmelo.support.browser.sites import origin_of
 
 PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kg"
 PNG += "AAAABJRU5ErkJggg=="
+# What a name answers when a test gives it no answer of its own: a public address.
+PUBLIC_IP = "93.184.216.34"
+
+
+class FakeDns:
+    """Stands in for the system's name lookup (``socket.getaddrinfo``).
+
+    ``answers`` maps a name to its addresses, or to None when it is not
+    found; any other name answers :data:`PUBLIC_IP`. ``asked`` lists the
+    names looked up, in order.
+    """
+
+    def __init__(self) -> None:
+        self.answers: dict[str, list[str] | None] = {}
+        self.asked: list[str] = []
+
+    def getaddrinfo(
+        self, host: Any, port: Any, *args: Any, **kwargs: Any
+    ) -> list[tuple[Any, ...]]:
+        name = host.decode() if isinstance(host, bytes) else str(host)
+        self.asked.append(name)
+        found = self.answers.get(name, [PUBLIC_IP])
+        if found is None:
+            raise socket.gaierror(socket.EAI_NONAME, "nodename nor servname provided")
+        number, infos = int(port or 0), []
+        for address in found:
+            v6 = ":" in address
+            family = socket.AF_INET6 if v6 else socket.AF_INET
+            where = (address, number, 0, 0) if v6 else (address, number)
+            infos.append((family, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", where))
+        return infos
 
 
 def link(label: str, href: str) -> Element:
@@ -92,10 +127,21 @@ class FakeDriver:
         if self.current == tab:
             self.current = None
 
+    async def location(self, tab: str | None) -> str:
+        return self._url(tab)
+
     async def wait(
-        self, tab: str | None, until: str, text: str, seconds: float
+        self,
+        tab: str | None,
+        until: str,
+        text: str,
+        seconds: float,
+        *,
+        origin: str = "",
     ) -> bool:
         self.calls.append(("wait", f"{until}:{text}:{seconds:g}"))
+        if origin and origin_of(self._url(tab)) != origin:
+            return False  # the condition holds only on the page's own site
         return text != "never"
 
     async def screenshot(self, tab: str | None) -> Shot:
