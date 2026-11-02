@@ -344,9 +344,21 @@ async def build_session_agent(
         if browser is not None:
             providers.append(browser)
     if web_fetch:
+        from localmelo.support import web_local
         from localmelo.support.web import WebFetchProvider
 
-        providers.append(WebFetchProvider(browser=browser_driver != "off"))
+        # The model servers of this run (the config's, and -u) are ports that
+        # web_fetch never reads, even if [tools] web_fetch_allow_local lists them.
+        providers.append(
+            WebFetchProvider(
+                browser=browser_driver != "off",
+                protect=(
+                    base_url,
+                    embedding_base_url,
+                    *(web_local.urls_of(cfg) if cfg is not None else ()),
+                ),
+            )
+        )
     llm: BaseLLMProvider | None = None
     embedding: BaseEmbeddingProvider | None = None
     from_config = False

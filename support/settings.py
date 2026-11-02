@@ -44,6 +44,17 @@ SECTIONS = (
 )
 
 
+# Keys that loosen a safety rule, with the plain warning ``melo config`` prints
+# beside them (on stderr, after the listing). A developer setting each.
+WARNINGS = {
+    "tools.web_fetch_allow_local": (
+        "developer only. It lets web_fetch read the test servers listed in it "
+        "on this computer (127.0.0.1:PORT), which web_fetch never reads otherwise. "
+        "Leave it empty unless you run a test server of your own."
+    ),
+}
+
+
 class Key(NamedTuple):
     name: str
     flag: str  # the old option that sets it for one run ("" if none)
@@ -51,6 +62,13 @@ class Key(NamedTuple):
     default: Any
     hint: Any  # the type of its value
     section: str
+
+
+def warn(names: Sequence[str]) -> None:
+    """Print the warning of each of *names* that has one (on stderr)."""
+    for name in names:
+        if name in WARNINGS:
+            print(f"melo: warning: {name}: {WARNINGS[name]}", file=sys.stderr)
 
 
 def fail(message: str) -> NoReturn:

@@ -52,6 +52,7 @@ EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
                 "approval",
                 "exit_code",
                 "tool_asks",
+                "allowed_local",
             }
         ),
         "note": frozenset(
@@ -155,8 +156,10 @@ OPTIONAL_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
         # A run's reviews (#339): only a run with an approval policy has it.
         "run.finished": frozenset({"reviews"}),
         # The questions the call's tool asked and was refused (#431): a site
-        # web_fetch or the browser would open. Only when there is one.
-        "tool.finished": frozenset({"tool_asks"}),
+        # web_fetch or the browser would open. Only when there is one. And
+        # allowed_local, true only for a web_fetch call that read a test server
+        # on this computer that the developer setting lists.
+        "tool.finished": frozenset({"tool_asks", "allowed_local"}),
         "reflection": frozenset(
             {
                 "prefix",

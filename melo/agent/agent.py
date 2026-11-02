@@ -142,7 +142,11 @@ from localmelo.melo.contracts.review import (
 )
 from localmelo.melo.contracts.streaming import STREAM_DISPLAY
 from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
-from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
+from localmelo.melo.contracts.tools import (
+    TOOL_MARKS,
+    BaseToolProvider,
+    ProvidedTool,
+)
 from localmelo.melo.executor import (
     TOOL_EXIT_CODE,
     AutoConfinement,
@@ -4536,7 +4540,8 @@ class Agent:
         was still deciding about it, and that it may have partly run
         otherwise. ``tool.finished`` carries the policy's answer whenever
         the policy was asked. The call runs with a new ``TOOL_EXIT_CODE``
-        list, so a tool can record its child's exit status for the event.
+        list, so a tool can record its child's exit status for the event, and
+        a new ``TOOL_MARKS`` dict, so a tool can mark its own call.
         """
         events = run.events
         events.tool_started(call)
@@ -4545,6 +4550,9 @@ class Agent:
         # before.
         exit_codes: list[int] | None = [] if events.active or self._notes_mode else None
         slot = TOOL_EXIT_CODE.set(exit_codes) if exit_codes is not None else None
+        # What the tool says of its own call (``allowed_local``), for the event.
+        marks: dict[str, bool] | None = {} if events.active else None
+        marks_slot = TOOL_MARKS.set(marks) if marks is not None else None
         gate = None
         ask_slot = None
         # The questions the call's tool asked itself that were refused (#431).
@@ -4639,11 +4647,14 @@ class Agent:
                 not_started=run.waiting_call_id == call.id,
                 approval=None if gate is None else gate.asked,
                 asks=refused,
+                marks=marks,
             )
             raise
         finally:
             if slot is not None:
                 TOOL_EXIT_CODE.reset(slot)
+            if marks_slot is not None:
+                TOOL_MARKS.reset(marks_slot)
             if ask_slot is not None:
                 TOOL_ASK.reset(ask_slot)
         exported = (
@@ -4656,6 +4667,7 @@ class Agent:
             exit_codes=exit_codes,
             approval=None if gate is None else gate.asked,
             asks=refused,
+            marks=marks,
         )
         run.note(
             lambda trace: trace.tool(

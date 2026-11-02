@@ -499,9 +499,16 @@ class ToolsConfig:
 
     ``web_fetch`` reads a public web page as text (on unless the file turns it
     off). The chats and the console's tasks offer it; direct runs never do.
+
+    ``web_fetch_allow_local`` is a developer setting, empty by default: the
+    test servers on this computer ``web_fetch`` may also read, as exact
+    ``127.0.0.1:PORT`` or ``[::1]:PORT`` entries. Any other entry is an error,
+    and melo's own ports stay refused when listed (see
+    :mod:`localmelo.support.web_local`). Config and ``-X`` only.
     """
 
     web_fetch: bool = True
+    web_fetch_allow_local: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -751,11 +758,16 @@ class Config:
         ]
 
     def _validate_tools(self) -> list[str]:
-        """``[tools]`` holds bools."""
+        """``[tools]`` holds a bool and a list of exact local test server entries."""
+        from localmelo.support import web_local
+
         return [
-            f"[tools] {name} must be a bool, got {value!r}"
-            for name in ("web_fetch",)
-            if not isinstance(value := getattr(self.tools, name), bool)
+            *(
+                f"[tools] {name} must be a bool, got {value!r}"
+                for name in ("web_fetch",)
+                if not isinstance(value := getattr(self.tools, name), bool)
+            ),
+            *web_local.problems(self),
         ]
 
     def _validate_tasks(self) -> list[str]:
@@ -1499,7 +1511,8 @@ def _load_file() -> Config:
     if isinstance(data.get("tools"), dict):
         for k, v in data["tools"].items():
             if hasattr(cfg.tools, k):
-                setattr(cfg.tools, k, v)
+                # A bad value is kept for Config.validate; a list is the file's own copy.
+                setattr(cfg.tools, k, list(v) if isinstance(v, list) else v)
 
     if isinstance(data.get("tasks"), dict):
         for k, v in data["tasks"].items():
@@ -1863,7 +1876,11 @@ def save(cfg: Config) -> None:
         lines.extend(["[browser]", f"driver = {_toml_string(cfg.browser.driver)}", ""])
 
     if cfg.tools != ToolsConfig():
-        lines.extend(["[tools]", f"web_fetch = {_toml_value(cfg.tools.web_fetch)}", ""])
+        lines.extend(["[tools]", f"web_fetch = {_toml_value(cfg.tools.web_fetch)}"])
+        if cfg.tools.web_fetch_allow_local:
+            allowed = _toml_value(cfg.tools.web_fetch_allow_local)
+            lines.append(f"web_fetch_allow_local = {allowed}")
+        lines.append("")
 
     if cfg.tasks != TasksConfig():
         lines.extend(["[tasks]", f"follow_up = {_toml_value(cfg.tasks.follow_up)}", ""])

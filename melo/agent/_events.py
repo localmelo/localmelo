@@ -369,6 +369,7 @@ class _Emitter:
         exit_codes: Sequence[int] | None,
         approval: Mapping[str, Any] | None = None,
         asks: Sequence[Mapping[str, Any]] = (),
+        marks: Mapping[str, bool] | None = None,
     ) -> None:
         """The checked *result* of *call*, whose executor *outcome* gives the status.
 
@@ -379,6 +380,8 @@ class _Emitter:
         ``origin``), or ``None`` when it was not asked. *asks* are the
         questions the call's tool asked itself (``TOOL_ASK``) that were
         refused, as ``tool_asks``: the key is there only when one was.
+        *marks* are what the tool said of its own call (``TOOL_MARKS``): the
+        key ``allowed_local`` is there, true, only when it set it.
         """
         if self._sink is None:
             return
@@ -400,6 +403,7 @@ class _Emitter:
                     "approval": None if approval is None else dict(approval),
                     "exit_code": exit_codes[-1] if exit_codes else None,
                     **_asks(asks),
+                    **_marks(marks),
                 }
             ),
             images=tuple(result.images),
@@ -415,6 +419,7 @@ class _Emitter:
         not_started: bool = False,
         approval: Mapping[str, Any] | None = None,
         asks: Sequence[Mapping[str, Any]] = (),
+        marks: Mapping[str, bool] | None = None,
     ) -> None:
         """*call* ended in *exc* instead of a result.
 
@@ -425,7 +430,7 @@ class _Emitter:
         about the call. Any other exception, which ends the run, gives
         ``crashed``, also a ``CancelledError`` that something raised while
         nothing cancelled the run. ``duration_s`` is the time since
-        ``tool.started``. *approval* and *asks* are as for
+        ``tool.started``. *approval*, *asks* and *marks* are as for
         :meth:`tool_finished`.
         """
         if self._sink is None:
@@ -456,6 +461,7 @@ class _Emitter:
                     "approval": None if approval is None else dict(approval),
                     "exit_code": exit_codes[-1] if exit_codes else None,
                     **_asks(asks),
+                    **_marks(marks),
                 }
             ),
         )
@@ -796,6 +802,11 @@ def _redacted(text: str | None) -> str | None:
 def _asks(asks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """``tool_asks`` of a tool event: only when the call's tool had a question refused."""
     return {"tool_asks": [dict(ask) for ask in asks]} if asks else {}
+
+
+def _marks(marks: Mapping[str, bool] | None) -> dict[str, Any]:
+    """``allowed_local`` of a tool event: only when the call's tool set it (true)."""
+    return {"allowed_local": True} if marks and marks.get("allowed_local") else {}
 
 
 def _image_entry(image: ImagePart) -> dict[str, Any]:
