@@ -649,13 +649,17 @@ def asks_only(typed: str) -> bool:
 # Words that ask how a task stands: done, finished, its progress or result, what it found or said.
 _STATE_WORDS: Final = re.compile(
     r"\b(?:done|finish(?:ed)?|complete(?:d)?|ready|over|progress|status|going|"
-    r"running|results?|outcome|find|found|say|said)\b"
+    r"running|results?|outcome|found|said)\b"
+    r"|\bdid\s+(?:\w+\s+){0,3}?(?:find|say)\b"
     r"|跑完|跑好|完成|做完|做好|弄完|弄好|搞定|好了|结束|进度|状态|怎么样了|如何了|到哪|结果|跑通"
     r"|找到|发现|说了"
 )
+# What a task finds or says, when the words name a task: "what does the task say?".
+# "What does report.md say?" asks about a file, not a task.
+_TASK_SAYS: Final = re.compile(r"\b(?:find|finds|say|says)\b")
 # "what did it find?", "has the task found …": the verb asks for a result, not for work.
 _ASKS_RESULT: Final = re.compile(
-    r"(\b(?:did|does|has|have|had)\s+(?:\w+\s+){0,3}?)(?:find|say)\b"
+    r"(\b(?:did|does|do|has|have|had)\s+(?:\w+\s+){0,3}?)(?:find|say)\b"
 )
 
 
@@ -672,10 +676,10 @@ def status_question(typed: str) -> bool:
     answers it from the tasks' state and result, never with a task.
     """
     text = norm(typed)
-    if not _STATE_WORDS.search(text):
-        return False
     bare = norm(_QUOTED.sub(" ", typed or ""))
     names_task = bool(_NAMES_TASK.search(bare))
+    if not (_STATE_WORDS.search(text) or (names_task and _TASK_SAYS.search(bare))):
+        return False
     asked = _ASKS_RESULT.sub(r"\1", bare)
     if names_task:
         asked = _LOOKS.sub(" ", asked)

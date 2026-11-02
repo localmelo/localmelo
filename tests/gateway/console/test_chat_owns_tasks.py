@@ -372,6 +372,10 @@ def test_the_start_rule_starts_requests_and_answers_questions() -> None:
         ("what did it find?", "answer"),
         ("what did the task find?", "answer"),
         ("what did the worker say?", "answer"),
+        ("what does the task say?", "answer"),
+        ("has the task found anything?", "answer"),
+        # What a file says is a question about the file, not a task.
+        ("What does report.md say?", "offer"),
         ("它找到了什么？", "answer"),
         ("任务发现了什么？", "answer"),
         ("那个任务说了什么？", "answer"),
