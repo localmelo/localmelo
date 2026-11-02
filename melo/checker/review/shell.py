@@ -8,6 +8,7 @@ import re
 import shlex
 from urllib.parse import urlparse
 
+from localmelo.melo.checker.review import apps
 from localmelo.melo.checker.review import files as file_rules
 from localmelo.melo.checker.review import python as py_rules
 from localmelo.melo.checker.review.paths import (
@@ -59,9 +60,11 @@ _LAUNCHABLE = (
 )
 _DRIVES = re.compile(
     r"\btell\s+(application|app)\b|do shell script|run script|Application\(|doShellScript"
-    r"|\bdo script\b",
+    r"|\bdo script\b|«",
     re.IGNORECASE,
 )
+# JXA's bridge to macOS itself: it can run any program without naming an app.
+_BRIDGE = re.compile(r"ObjC\b|\$\.\w")
 _LAUNCHD_RUNS = set(["asuser", "submit", "start", "kickstart", "bootstrap", "load"])
 _TMUX_RUNS = set(
     ["new", "new-session", "send-keys", "send", "run-shell", "run", "new-window"]
@@ -934,9 +937,7 @@ def _elsewhere(
         if {"-a", "-b"} & set(args) or any(
             re.fullmatch(r"-\w*[ab]\w*", a) for a in args
         ):
-            return f.add(
-                "system", "Opens a program through macOS, outside melo's limits."
-            )
+            return _open_app(f, args)
         for word in words:
             if "://" in word and not word.startswith("file:"):
                 if own_api(word, sending=False):
@@ -944,11 +945,13 @@ def _elsewhere(
                 continue
             opened(ctx, f, word, cwd)
     elif prog == "osascript":
-        code = " ".join(args)
+        code = " ".join(" ".join(args).split())
         given = "-e" in args
-        if not given or _DRIVES.search(code):
+        if not given:
             # A script file, or its input when it names none: melo reads neither.
             f.add("system", "Drives another app or a shell through AppleScript.")
+        elif _DRIVES.search(code) or _BRIDGE.search(code):
+            _script_apps(f, args)
     elif prog == "shortcuts" and words[:1] == ["run"]:
         f.add("system", "Runs a Shortcut, which can control other apps.")
     elif prog == "automator":
@@ -969,6 +972,34 @@ def _elsewhere(
         or any(re.fullmatch(r"-\w*[dD]\w*m\w*|-\w*m\w*[dD]\w*", a) for a in args)
     ):
         f.add("persistence", "Runs a command in a detached screen session.")
+
+
+def _script_apps(f: Findings, args: list[str]) -> None:
+    """A script that drives something: ``app_control`` only when it is plain.
+
+    Only the allow-list of :mod:`~localmelo.melo.checker.review.apps` counts
+    (one named app, plain verbs); anything else, whatever it is spelt like, is
+    a system change: a shell, a program, keys, login items, the ObjC bridge, a
+    terminal, System Events, an app not named outright.
+    """
+    named = apps.osascript_app(args)
+    if named is None:
+        f.add("system", "Drives another app or a shell through AppleScript.")
+    else:
+        f.add("app_control", f"Operates {named} through a script.")
+
+
+def _open_app(f: Findings, args: list[str]) -> None:
+    """``open -a Safari``: ``app_control`` for one app by name, ``system`` otherwise.
+
+    A path (a program melo cannot vet), arguments handed to the app, a second
+    ``-a`` or ``-b``, and the apps that run commands stay ``system``.
+    """
+    named = apps.open_app(args)
+    if named is None:
+        f.add("system", "Opens a program through macOS, outside melo's limits.")
+    else:
+        f.add("app_control", f"Opens {named} through macOS, outside melo's limits.")
 
 
 def opened(ctx: Context, f: Findings, target: str, cwd: str) -> None:

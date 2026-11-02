@@ -124,21 +124,33 @@ def builtin_names() -> frozenset[str]:
     return frozenset(tool_def.name for tool_def, _ in BUILTINS)
 
 
+# What the optional ``why`` of shell_exec and python_exec says (#454). It is
+# shown on the approval card as the sentence that starts it and changes
+# nothing about what runs or how the step is reviewed.
+WHY_TEXT = (
+    "One short sentence, in the person's language, saying what this step does "
+    "and why (shown on approval cards)"
+)
+# The line the two tools' descriptions end with.
+WHY_NOTE = "Give why for a step that changes anything."
+
+
 @_builtin(
     ToolDef(
         name="shell_exec",
-        description="Execute a shell command and return its output",
+        description=f"Execute a shell command and return its output. {WHY_NOTE}",
         parameters={
             "type": "object",
             "properties": {
-                "command": {"type": "string", "description": "Shell command"}
+                "command": {"type": "string", "description": "Shell command"},
+                "why": {"type": "string", "description": WHY_TEXT},
             },
             "required": ["command"],
         },
         semantic_tags=["shell", "bash", "command", "terminal", "exec", "run"],
     )
 )
-async def _shell_exec(command: str) -> str:
+async def _shell_exec(command: str, why: str = "") -> str:
     # /dev/null, never this process's stdin: a shell whose stdin is a
     # terminal that is not its controlling one (the pty slave of
     # pty.openpty(), melo started with start_new_session) opens
@@ -434,16 +446,19 @@ async def _git_status(
 @_builtin(
     ToolDef(
         name="python_exec",
-        description="Execute Python code and return the result",
+        description=f"Execute Python code and return the result. {WHY_NOTE}",
         parameters={
             "type": "object",
-            "properties": {"code": {"type": "string", "description": "Python code"}},
+            "properties": {
+                "code": {"type": "string", "description": "Python code"},
+                "why": {"type": "string", "description": WHY_TEXT},
+            },
             "required": ["code"],
         },
         semantic_tags=["python", "code", "execute", "eval", "script", "compute"],
     )
 )
-async def _python_exec(code: str) -> str:
+async def _python_exec(code: str, why: str = "") -> str:
     # A child process, as the rooted python_exec is: code that loops, sleeps
     # or calls os._exit() must not hold or end the agent's own process, and
     # the executor's timeout and the run's timeout_s must be able to stop it.
@@ -472,7 +487,7 @@ def builtins_with_env(
     :func:`~localmelo.melo.executor.register_builtins`).
     """
 
-    async def shell_exec(command: str) -> str:
+    async def shell_exec(command: str, why: str = "") -> str:
         text, _ = await _run_shell(
             command,
             stdin=subprocess.DEVNULL,
@@ -481,7 +496,7 @@ def builtins_with_env(
         )
         return text
 
-    async def python_exec(code: str) -> str:
+    async def python_exec(code: str, why: str = "") -> str:
         return await _run_python(code, tool_env=tool_env, confinement=confinement)
 
     return {"shell_exec": shell_exec, "python_exec": python_exec}
@@ -743,7 +758,7 @@ def _rooted_shell_exec(
     tool_env: Mapping[str, str] | None,
     confinement: Confinement | None = None,
 ) -> ToolFunction:
-    async def shell_exec(command: str) -> str:
+    async def shell_exec(command: str, why: str = "") -> str:
         text, returncode = await _run_shell(
             command,
             cwd=root,
@@ -766,7 +781,7 @@ def _rooted_python_exec(
     tool_env: Mapping[str, str] | None,
     confinement: Confinement | None = None,
 ) -> ToolFunction:
-    async def python_exec(code: str) -> str:
+    async def python_exec(code: str, why: str = "") -> str:
         return await _run_python(
             code, cwd=root, tool_env=tool_env, confinement=confinement
         )

@@ -89,6 +89,7 @@ from localmelo.support.sessions.store import (
     UnknownSessionError,
 )
 from localmelo.support.usage_snapshot import UsageSnapshot
+from localmelo.support.words import gist_note, gist_text
 
 # Output lines a tool block shows under its header (20 with /verbose). A call
 # that succeeded shows QUIET_BLOCK_LINES outside developer mode.
@@ -1375,7 +1376,9 @@ class TurnRenderer:
             if not tag:
                 first = clean_output(error).strip().split("\n")[0]
                 tag = f"blocked: {first}" if first else "blocked"
-            return self._header(symbols.blocked, "blocked", name, preview, [tag])
+            header = self._header(symbols.blocked, "blocked", name, preview, [tag])
+            under = self._block_says(approval)
+            return header if under is None else Group(header, under)
         meta = [duration]
         exit_code = data.get("exit_code")
         nonzero = isinstance(exit_code, int) and exit_code != 0
@@ -1413,6 +1416,28 @@ class TurnRenderer:
         if images is not None:
             parts.append(images)
         return Group(*parts)
+
+    def _block_says(self, approval: Mapping[str, Any] | None) -> RenderableType | None:
+        """What a blocked step would have done, in one plain sentence under its row (#454).
+
+        The sentence the approval card starts with, a warning when the model's
+        words disagree with the code, and the model's words labelled as its.
+        """
+        review = approval.get("review") if approval else None
+        gist = review.get("gist") if isinstance(review, Mapping) else None
+        says, warning = gist_text(gist, "en")
+        said = gist_note(gist, "en")
+        rows = [
+            (escape_arguments(row)[0], style)
+            for row, style in ((says, ""), (warning, "error"), (said, "muted"))
+            if row
+        ]
+        if not rows:
+            return None
+        body = Text()
+        for number, (row, style) in enumerate(rows):
+            body.append(("\n" if number else "") + row, style=style)
+        return Hung(body, self.symbols)
 
     def _output_limit(self, *, failed: bool) -> int:
         """The output lines a call shows: a success shows one outside developer mode."""
