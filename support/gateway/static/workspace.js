@@ -1046,6 +1046,7 @@ function viewSnapshot() {
     turn.picturesOpen,
     turn.memory,
     turn.memoryOpen,
+    turn.digestOpen,
   ]);
   return JSON.stringify([
     S.activeId,
@@ -1483,7 +1484,8 @@ async function allowOnce(view, facts) {
   syncUI();
 }
 
-// What memory recalled and kept for the message: "Used 1 memory ▾", "Remembered: … · Undo".
+// What memory recalled and kept for the message: "Used 1 memory ▾", "Remembered: … · Undo",
+// "From your other chats (last 30 min) ▾".
 function memoryOf(turn) {
   return memoryNodes({
     doc: document,
@@ -1493,6 +1495,13 @@ function memoryOf(turn) {
       turn.memoryOpen = !turn.memoryOpen;
       renderMessages(false, true);
     },
+    digestOpen: turn.digestOpen === true,
+    toggleDigest: () => {
+      turn.digestOpen = !turn.digestOpen;
+      renderMessages(false, true);
+    },
+    // A chat the list has opens from its line; a terminal chat or one deleted since does not.
+    openChat: (id) => (id && listed(id) ? () => openSession(id) : null),
     undo: async (note) => {
       try {
         await api(`/memory/records/${note.id}?undo=true`, { method: "DELETE" });

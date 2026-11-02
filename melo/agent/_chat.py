@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from localmelo.melo import clock
 from localmelo.melo.agent._call_budget import CallBudgetError
 from localmelo.melo.agent._context_fit import ContextFitError, FitCut, fit_request
+from localmelo.melo.agent._earlier import with_earlier
 from localmelo.melo.agent._prefix_diag import (
     MAX_FINGERPRINTS,
     Fingerprint,
@@ -405,6 +406,26 @@ def _with_query_block(
         out[index] = dataclasses.replace(
             out[index], content=_query_text(out[index].content, block)
         )
+    return out
+
+
+def _pin_earlier(
+    messages: list[Message], query: str, earlier: str, *, query_block: str = ""
+) -> list[Message]:
+    """*messages* (a request after its system part) with *earlier* before the query.
+
+    Only when the window no longer holds a message before the task query: the
+    query put back in front (its message is *query*, or *query* with
+    *query_block*), or the window's own query message as its first message.
+    The block rides on a copy of that message; the window is unchanged.
+    """
+    if not earlier or not messages or messages[0].role != "user":
+        return messages
+    head = messages[0].content
+    if head not in (query, _query_text(query, query_block)):
+        return messages
+    out = list(messages)
+    out[0] = dataclasses.replace(out[0], content=with_earlier(head, earlier))
     return out
 
 
@@ -1202,7 +1223,16 @@ class Chat:
         coalesce_users: bool = False,
         on_ready: Callable[[list[Message]], None] | None = None,
         tail_note: str = "",
+        earlier: str = "",
     ) -> Message:
+        """One planning request: the window and *tools*, for the next step.
+
+        *earlier*, the chat's earlier turns (see
+        :func:`~localmelo.melo.agent._earlier.earlier_block`), rides on the
+        request's copy of the task query once the window holds nothing before
+        it (see :func:`_pin_earlier`); while an earlier turn is still in the
+        window, the request is as it was.
+        """
         ready_args: dict[str, Any] = (
             {"on_ready": on_ready} if on_ready is not None else {}
         )
@@ -1246,9 +1276,11 @@ class Chat:
                         ),
                     )
                 )
+            rest: list[Message] = []
             if lacks_task_query(short, query):
-                messages.append(Message(role="user", content=query))
-            messages.extend(m for m in all_context if m.role != "system")
+                rest.append(Message(role="user", content=query))
+            rest.extend(m for m in all_context if m.role != "system")
+            messages.extend(_pin_earlier(rest, query, earlier))
             if latest:
                 messages.append(_reflection_user_message(latest))
             if coalesce_users:
@@ -1272,21 +1304,23 @@ class Chat:
             self.system_prompt,
             self.identity,
         )
-        messages = [Message(role="system", content=system_prompt)]
+        rest = []
         if lacks_task_query(short, query):
             # The task query is no longer in the window (evicted, or dropped
             # to fit the prompt cap). Put it back ahead of the remaining
             # turns so the conversation still opens with the request instead
             # of ending with it. The agent counts it when it checks the
             # prompt's size (see Agent._fit_prompt_cap).
-            messages.append(
-                Message(role="user", content=_query_text(query, query_block))
-            )
-        messages.extend(
+            rest.append(Message(role="user", content=_query_text(query, query_block)))
+        rest.extend(
             _with_query_block(other_msgs, query, query_block)
             if query_block
             else other_msgs
         )
+        messages = [
+            Message(role="system", content=system_prompt),
+            *_pin_earlier(rest, query, earlier, query_block=query_block),
+        ]
 
         messages = _with_tail(messages, tail_note, False)
         if coalesce_users:
@@ -1323,10 +1357,13 @@ class Chat:
         reflections: list[ReflectionEntry] | None = None,
         *,
         note: str = "",
+        earlier: str = "",
     ) -> Message:
         """One request, no tools, for the answer that a stopped run did not give.
 
-        The request is the system message, then one user message: the original
+        The request is the system message, then one user message: the chat's
+        earlier turns when *earlier* gives them (see
+        :func:`~localmelo.melo.agent._earlier.earlier_block`), the original
         task, the turns of *short* written out as text
         (:func:`render_transcript`; only the newest
         :data:`ANSWER_EVIDENCE_CHARS` characters), the block of *reflections*
@@ -1343,6 +1380,8 @@ class Chat:
                 + evidence[cut + 2 if cut != -1 else start :]
             )
         parts = [f"Original task: {query}"]
+        if earlier:
+            parts.insert(0, earlier)
         if evidence:
             parts.append(f"The evidence gathered, written out as text:\n\n{evidence}")
         parts.extend(
@@ -1415,6 +1454,7 @@ class Chat:
         notes: Sequence[str] = (),
         draft_titles: Sequence[str] = (),
         addendum: str = "",
+        earlier: str = "",
     ) -> Message | None:
         """Ask the LLM to reflect on the current attempt.
 
@@ -1428,6 +1468,12 @@ class Chat:
         turns left, a model has no tool call to continue. *retry_hint*,
         when given, is one more line after that note, on the prefix retry
         too: the decoder's complaint about the reply that went unread.
+
+        *earlier*, the chat's earlier turns (see
+        :func:`~localmelo.melo.agent._earlier.earlier_block`), comes right
+        before the original task in the request's last user message, on the
+        prefix retry too, so the reflection reads a short request such as
+        "look it up" as the conversation means it.
 
         In the compress modes, *notes* and *draft_titles* are the
         already-rendered entry lines of this attempt's notes and pending
@@ -1507,7 +1553,7 @@ class Chat:
         block = render_note_block(notes, draft_titles)
 
         def compose(prior: str) -> str:
-            return "\n\n".join(part for part in (block, prior, core) if part)
+            return "\n\n".join(part for part in (block, prior, earlier, core) if part)
 
         shared = self._plan if self.fixed_prefix and not retry else None
         turns = _turns_after(shared.short, short) if shared is not None else None
