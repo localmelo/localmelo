@@ -934,8 +934,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
     nested quotes it does not follow, nested backquotes, `case`, a comment, a `${…}`
     that holds a quote or bracket, nesting deeper than six levels or a missing end make
     the step undecided.
+  - A `$(…)` with a quote, a backslash or a `case` in it is read from the command text
+    to its own end and reviewed as a command of its own, not only through the lexer
+    that cuts the text into steps. That lexer does not know `$(`: inside double quotes
+    a quoted parenthesis could end the string early and make a command look like
+    quoted text. The step is undecided when the end cannot be found, when the lexer
+    would read the text after the substitution in another quote (or take a hash in it
+    for a comment), and when the substitution holds a `case`. `"$(dirname "$0")"`,
+    `"$(basename "$f")"` and the usual commit-message idiom stay routine.
+  - A bracket expression longer than 200 characters is no longer skipped when melo looks
+    for a write to the name of a started process: it takes that standing from every
+    name. A line break no longer ends one (`[[ n=1 -eq` on one line, `1 ]]` on the next).
   - `git status`, `git diff`, `diskutil list`, `diskutil info`, `pgrep` and `kill -0`
-    stay routine. A comparison of 1104 commands against the verdicts from before this
+    stay routine. A comparison of 1218 commands against the verdicts from before this
     change found none looser. A command of 100 KB is reviewed in linear time.
 - The approval card now compares targets as well as effects. When melo's words describe
   the right effect (delete, send data out) and name a file, folder or website, every place
