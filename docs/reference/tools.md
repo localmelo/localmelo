@@ -139,6 +139,38 @@ call itself asks nothing; each site passes the site gate below first.
   is data, never instructions; that it never reaches this computer or its local network; and
   that a site the user did not name is asked about first.
 
+### Test servers on this computer
+
+A developer setting for a test that needs `web_fetch` to read a fixture page served on this
+computer. `[tools] web_fetch_allow_local` is empty, so off, by default.
+
+- **Set it** in the config file, `web_fetch_allow_local = ["127.0.0.1:8123"]`, or for one run with
+  `-X tools.web_fetch_allow_local=127.0.0.1:8123` (several entries are separated by commas).
+  `melo config keys web_fetch` lists it with a warning. The model, the console's Settings and
+  the API cannot set it.
+- **An entry** is exactly `127.0.0.1:PORT` or `[::1]:PORT`, with a port from 1 to 65535 written
+  in digits. A name such as `localhost`, any other address (a private or local-network range,
+  `127.0.0.2`, `0.0.0.0`), a range of ports, a wildcard and an entry with no port are
+  configuration errors, and are never used.
+- **melo's own ports** are refused even when listed, and listing one is a configuration error:
+  the gateway and console port (the saved `[gateway] port`, and the port of a gateway that is
+  running), and the port of every model server (each configured `chat_url`, `embedding_url`
+  and cloud `base_url`, and the `-u` URL of the run). A port counts whatever address it is
+  written with, because a server on this computer answers at `127.0.0.1` from any of its
+  addresses.
+- **The address must be written as listed.** A name that resolves to a listed address
+  (`localhost`, `pages.test`) and another way of writing it (`127.1`, `[::ffff:127.0.0.1]`) are
+  refused, as is every other local address and every other port.
+- **Redirects meet the same list.** A listed address may redirect to another listed address and
+  never to an unlisted one, and a page that is not itself a listed address cannot send melo to
+  one. The site gate above still applies.
+- **Only `web_fetch` reads the list.** The browser tools use the guard's own checks with no list.
+- **It is marked.** A fetch the list allows adds `allowed_local: true` to the call's
+  `tool.finished` event (see [Events](events.md#toolfinished)) and the line `[This address is a test
+  server on this computer, which [tools] web_fetch_allow_local lists.]` to what the call shows,
+  an error included. While the list has an entry, the model's note about `web_fetch` gains one
+  sentence that names the exception.
+
 ## How tools are offered
 
 Each planning step sends the model a list of tools, and the step can run only

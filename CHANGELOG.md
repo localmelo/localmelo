@@ -9,6 +9,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Developer only, not visible by default: `[tools] web_fetch_allow_local` lets `web_fetch` read
+  test servers you list on this computer, for a test that needs a fixture page. It is a list of
+  exact `127.0.0.1:PORT` or `[::1]:PORT` entries, empty (off) by default, set in the config file
+  or with `-X tools.web_fetch_allow_local=127.0.0.1:PORT[,…]`, and `melo config keys` lists it
+  with a warning. A name such as `localhost`, any other address, a range of ports, a wildcard
+  and an entry with no port are configuration errors and are never used. The port of melo's own
+  gateway and console, of a running gateway and of any model server (the configured URLs and the
+  `-u` URL of the run) stays refused even when listed. The address must be written as listed,
+  a redirect meets the same list (a listed address cannot send melo to an unlisted one, and a
+  page that is not itself listed cannot send it to a listed one), and only `web_fetch` reads
+  it: the browser tools never do, and the model, the console and the API cannot set it. A fetch
+  it allows adds `allowed_local: true` to the call's `tool.finished` event, a line to what the
+  call shows, and one sentence to the model's note about `web_fetch`. Nothing changes while the
+  list is empty.
+
 - The `turn.memory` event records the exact text the model read. Each entry of
   `used` (the recall block's items) and `searched` (what `search_memory`
   returned) has a new `shown` key: the line as the recall block or the search

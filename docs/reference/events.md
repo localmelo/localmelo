@@ -166,7 +166,7 @@ asyncio.run(main())
 | `assistant.message` | When the step's planning reply arrives. | `step`, `content`, `thinking`, `tool_calls`, `usage`, `prefix`, `duration_s` |
 | `note` | In the compress modes, when a note, a reflection's note or an attempt digest enters the RAM-only note store. | `step`, `attempt`, `note_id`, `kind`, `source`, `text`, `chars`, `drafts`, `remember`, `stage` |
 | `tool.started` | Before each tool call goes to the executor, also a call that the checks then refuse. | `step`, `call_id`, `name`, `arguments`, `preview` |
-| `tool.finished` | When that call is done, refused, cancelled or crashed. | `step`, `call_id`, `name`, `status`, `error_category`, `output`, `output_chars`, `error`, `duration_s`, `images`, `approval`, `exit_code`, `tool_asks` |
+| `tool.finished` | When that call is done, refused, cancelled or crashed. | `step`, `call_id`, `name`, `status`, `error_category`, `output`, `output_chars`, `error`, `duration_s`, `images`, `approval`, `exit_code`, `tool_asks`, `allowed_local` |
 | `notice` | When an attempt ends, the model gave an empty reply or one that is only unfinished thinking, or a model request is retried. | `kind`, `message`, `step`, `attempt`, `detail` |
 | `recall` | When a recall block enters a request: at `start`, `attempt`, `step`, or from the `recall` tool. | `step`, `attempt`, `trigger`, `retriever`, `query`, `hits`, `chars`, `ms`, `fallback`, `placement` |
 | `reflection.started` | Before the reflection that follows an attempt. | `attempt`, `failure_type` |
@@ -364,6 +364,11 @@ The number of `tool.started` events is `RunResult.n_tool`.
   again; a refusal of such a repeat has `earlier` (who refused it
   first) and no `call_key`. Every other call, and an event stored before this
   key, has no `tool_asks`.
+- `allowed_local`: `true`, and only for a `web_fetch` call that read a test server on this
+  computer which the developer setting `[tools] web_fetch_allow_local` lists (see
+  [Tools](tools.md#test-servers-on-this-computer)); it is there even when the page then
+  answered with an error. Every other call, and an event stored before this key, has no
+  `allowed_local`.
 
 ### note
 
