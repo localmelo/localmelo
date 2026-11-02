@@ -147,6 +147,8 @@ EXPERIMENTAL_KEYS: dict[str, str] = {
     "memory.open_sources": "#428",
     "memory.compress_at_chars": "#428",
     "memory.compress_cache": "#428",
+    "memory.note_gate": "#442",
+    "memory.note_min_cosine": "#442",
 }
 
 # Long option name -> tier, for every option the parser has.

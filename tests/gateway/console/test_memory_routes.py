@@ -18,6 +18,7 @@ import pytest
 from fastapi import FastAPI
 
 from localmelo.support.gateway.console import Console, ConsoleOptions
+from localmelo.support.memory import records
 from localmelo.support.memory.recall import BLOCK_HEADER
 from localmelo.tests.sessions.helpers import ScriptedLLM, answer, started_agent
 
@@ -129,3 +130,54 @@ async def test_deleting_a_chat_deletes_its_documents(
     assert (await client.delete(f"/api/sessions/{session_id}")).status_code == 204
     assert await index.count() == 0
     assert await console.memory.search("tomato garden", docs_k=8) == []
+
+
+async def test_a_note_from_material_or_inferred_says_so_and_a_typed_one_reads_as_before(
+    setup: tuple[Console, httpx.AsyncClient, list[ScriptedLLM]], tmp_path: Path
+) -> None:
+    """The notes page names the page, the file or the model as a note's source
+    (``[memory] note_gate``, #442) in place of "you said it"."""
+    console, client, _ = setup
+    session_id = await say(client, tmp_path, "Plan my job search")
+    at = {"session_id": session_id, "turn": 1, "chat": "Plan my job search"}
+
+    async def keep(text: str, **provenance: str) -> int:
+        (written,) = await records.write(
+            console.memory.stores()[0],
+            [records.Candidate(text, "", "about", "user_statement")],
+            [None],
+            source={**at, **provenance},
+            embed_model="",
+        )
+        return written.id
+
+    typed = await keep("You prefer short answers.")
+    page = await keep(
+        "You have an MSc in Robotics.",
+        source="pointed",
+        **{"from": "https://www.jane.example.com/about"},
+    )
+    file = await keep(
+        "You know Python and Rust.", source="pointed", **{"from": "resume.pdf"}
+    )
+    inferred = await keep(
+        "You are looking for roles at large tech companies.", source="inferred"
+    )
+    rows = {
+        row["id"]: row
+        for row in (await client.get("/api/memory/records")).json()["records"]
+    }
+    day = rows[typed]["source"].rsplit(", ", 1)[1]
+    chat = "chat “Plan my job search”"
+    # A typed note reads as it always did.
+    assert rows[typed]["source"] == f"you said it · {chat}, {day}"
+    assert rows[typed]["from"] == f"from {chat}, {day}"
+    # A note from material the user pointed to names the page or the file.
+    assert rows[page]["source"] == f"from jane.example.com, {day}"
+    assert rows[page]["from"] == f"from jane.example.com, {day}"
+    assert rows[file]["source"] == f"from resume.pdf, {day}"
+    assert rows[file]["from"] == f"from the file resume.pdf, {day}"
+    # A note the model inferred says so, and in which chat.
+    assert rows[inferred]["source"] == f"melo inferred it · {chat}, {day}"
+    assert rows[inferred]["from"] == f"melo inferred it from {chat}, {day}"
+    assert not any(row["imported"] for row in rows.values())
