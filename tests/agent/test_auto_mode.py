@@ -1130,7 +1130,10 @@ class ReadsPages(BaseToolProvider):
 
 
 async def _read_pages(
-    tmp_path: Path, urls: list[str], reviews: list[Message]
+    tmp_path: Path,
+    urls: list[str],
+    reviews: list[Message],
+    query: str = "what changed in the release?",
 ) -> tuple[FakeModel, ReadsPages]:
     reader = ReadsPages()
     plans = [
@@ -1153,11 +1156,12 @@ async def _read_pages(
         tool_providers=[reader],
     )
     agent.chat.sleep = _no_wait
-    await agent.run_task("what changed in the release?", approval=AutoPolicy())
+    await agent.run_task(query, approval=AutoPolicy())
     return llm, reader
 
 
 DOCS = "https://docs.example"
+LOCAL = "http://127.0.0.1:8123"
 
 
 @pytest.mark.asyncio
@@ -1466,3 +1470,59 @@ async def test_a_page_blocked_before_is_reviewed_again_not_waved_through_by_its_
     reviewer.user_message("and the changelog?")  # a message mid-run
     await review("/p")
     assert Chat.asked == 3, "the blocked page is asked about again"
+
+
+# ── An address on this computer (a test server web_fetch_allow_local lists) ──
+
+
+@pytest.mark.parametrize(
+    "url",
+    [f"{LOCAL}/a", "http://[::1]:8123/a", "http://10.0.0.5/a", "https://127.0.0.1/a"],
+)
+def test_an_address_on_this_computer_gets_no_site_verdict(url: str) -> None:
+    host = url.split("//", 1)[1].split("/", 1)[0].rsplit(":", 1)[0]
+    question = {"site": host, "origin": url.rsplit("/a", 1)[0], "url": url}
+    assert _step_review.plain_page_key("browser:x", question, None) == ""
+    public = {**question, "site": "93.184.216.34", "url": "http://93.184.216.34/a"}
+    assert _step_review.plain_page_key("browser:x", public, None)
+
+
+@pytest.mark.asyncio
+async def test_a_listed_servers_pages_are_each_reviewed(tmp_path: Path) -> None:
+    # The control of test_one_routine_verdict_reads_a_site_s_plain_pages: the
+    # same two plain pages of one site cost one review there, two here.
+    urls = [f"{LOCAL}/a", f"{LOCAL}/b"]
+    llm, reader = await _read_pages(tmp_path, urls, [verdict(), verdict()])
+    assert len(llm.review_requests) == 2
+    assert reader.read == urls
+
+
+@pytest.mark.asyncio
+async def test_the_persons_words_do_not_make_a_listed_server_routine(
+    tmp_path: Path,
+) -> None:
+    # A public host the person named reads with no review; naming 127.0.0.1
+    # does not name its port, so the model reviews the step.
+    llm, reader = await _read_pages(
+        tmp_path, [f"{DOCS}/a"], [], query=f"what does {DOCS}/a say?"
+    )
+    assert llm.review_requests == [] and reader.read == [f"{DOCS}/a"]
+    (tmp_path / "again").mkdir()
+    llm, reader = await _read_pages(
+        tmp_path / "again",
+        [f"{LOCAL}/a"],
+        [verdict()],
+        query=f"what does {LOCAL}/a say?",
+    )
+    assert len(llm.review_requests) == 1
+    assert reader.read == [f"{LOCAL}/a"]
+
+
+def test_a_local_address_is_never_named_by_the_persons_words() -> None:
+    reviewer = _step_review.StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+    reviewer.user_message(
+        "read http://127.0.0.1:8123/a and http://[::1]:8123/ and example.com"
+    )
+    assert reviewer.names_host("example.com")
+    for host in ("127.0.0.1", "::1", "[::1]", "127.0.0.1:8123", "[::1]:8123"):
+        assert not reviewer.names_host(host), host

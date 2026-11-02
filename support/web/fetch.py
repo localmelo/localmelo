@@ -30,6 +30,7 @@ from localmelo.support.web.guard import (
     AddressError,
     AllowHook,
     IPAddress,
+    LocalAllow,
     Resolver,
     Target,
     check_url,
@@ -55,6 +56,8 @@ REDIRECTS = frozenset({301, 302, 303, 307, 308})
 _TOKEN = re.compile(r"[a-z0-9._+-]{1,40}")
 # Asked before a site is looked up: the first address, and a redirect to another site.
 Admit = Callable[[Target], Awaitable[None]]
+# Told of each address that only a LocalAllow let through (a listed test server).
+Local = Callable[[Target], None]
 
 
 class FetchError(Exception):
@@ -132,6 +135,13 @@ class WebFetcher:
     server on this computer: *resolver* answers for a test host name, and
     *allow* lets that one host's local address through. The checks of the
     address, of every answer and of every redirect stay the same.
+
+    *allow* is also where ``[tools] web_fetch_allow_local`` comes in: a
+    :class:`~localmelo.support.web.guard.LocalAllow` lets through the
+    loopback addresses and ports it lists, as addresses in the URL, and no
+    other. A redirect meets the same list: it may lead from one listed
+    address to another, never to an unlisted one, and a page that is not
+    itself a listed address cannot send melo to one.
     """
 
     def __init__(
@@ -159,6 +169,7 @@ class WebFetcher:
         url: str,
         accept: Callable[[str], bool] | None = None,
         admit: Admit | None = None,
+        local: Local | None = None,
     ) -> Response:
         """The page at *url* after redirects; :class:`AddressError` or :class:`FetchError` with why not.
 
@@ -167,11 +178,14 @@ class WebFetcher:
         say what it was without downloading it. A page with no type is read.
         *admit* is awaited with each address whose site has not been admitted
         in this fetch, before its name is looked up: the first, and a redirect
-        to another host. It raises to refuse.
+        to another host. It raises to refuse. *local* is called with each
+        address that only a :class:`~localmelo.support.web.guard.LocalAllow`
+        let through, once the guard and *admit* have passed it and before it
+        is requested, so a caller can mark the fetch.
         """
         try:
             async with asyncio.timeout(self.total_s) as limit:
-                return await self._follow(url, accept, admit, limit)
+                return await self._follow(url, accept, admit, limit, local)
         except TimeoutError:
             raise FetchError(
                 f"The page did not finish loading within {self.total_s:g} seconds."
@@ -183,13 +197,22 @@ class WebFetcher:
         accept: Callable[[str], bool] | None,
         admit: Admit | None,
         limit: asyncio.Timeout,
+        local: Local | None,
     ) -> Response:
         current = url
         redirects: list[str] = []
         admitted: set[tuple[str, int]] = set()
         previous: Target | None = None
+        previous_local = False
         while True:
-            target = check_url(current)
+            target = check_url(current, self._allow)
+            listed = self.listed(target)
+            if previous is not None and listed and not previous_local:
+                raise AddressError(
+                    f"{previous.host} redirected to {target.host}:{target.port}, a test "
+                    "server on this computer. melo does not follow a page on the public "
+                    "web to this computer."
+                )
             if (
                 previous is not None
                 and previous.scheme == "https"
@@ -212,6 +235,8 @@ class WebFetcher:
             addresses = await checked_addresses(
                 target, self._resolver, allow=self._allow, timeout_s=DNS_S
             )
+            if listed and local is not None:
+                local(target)
             response = await self._get(target, addresses, accept)
             location = response.location if response.status in REDIRECTS else ""
             if not location:
@@ -222,8 +247,16 @@ class WebFetcher:
                     f"The page redirected more than {self.max_redirects} times; melo stopped."
                 )
             redirects.append(target.url)
-            previous = target
+            previous, previous_local = target, listed
             current = urljoin(target.url, location)
+
+    def listed(self, target: Target) -> bool:
+        """Whether only the fetcher's :class:`LocalAllow` lets *target* through."""
+        return (
+            isinstance(self._allow, LocalAllow)
+            and target.ip is not None
+            and self._allow.allows(target.host, target.ip, target.port)
+        )
 
     async def _get(
         self,

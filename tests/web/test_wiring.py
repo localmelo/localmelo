@@ -162,7 +162,7 @@ async def test_the_terminal_and_the_tasks_pass_the_setting(
     assert "web_fetch=loaded.tools.web_fetch is True" in inspect.getsource(launch)
     source = inspect.getsource(workers)
     # A task's provider asks the chat that owns it about a site, or refuses.
-    assert "[WebFetchProvider(task=True)]" in source
+    assert "[WebFetchProvider(task=True, cfg=self.settings())]" in source
     assert "if self.settings().tools.web_fetch is True" in source
 
 

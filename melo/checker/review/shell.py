@@ -207,6 +207,65 @@ _WRITERS = {
 # GNU tools under the names a package manager gives them (``gln``…).
 _GNU_NAMES = {"gln": "ln", "gcp": "cp", "ginstall": "install", "glink": "link"}
 
+# Settings that loosen one of melo's safety rules, as ``melo config`` names
+# them. A call does not set one, for a run (``-X``) or for good (``config
+# set``): the person does. These are the keys of ``settings.WARNINGS`` in
+# ``support``, which this package cannot import; a test keeps the two in step.
+LOOSENING = frozenset(["tools.web_fetch_allow_local"])
+_MELO = set(["melo", "localmelo"])
+_MELO_MODULES = set(["localmelo", "localmelo.__main__"])
+
+
+def _melo_args(argv: list[str]) -> list[str] | None:
+    """The arguments melo's command line gets when *argv* runs melo, else ``None``.
+
+    That is a program named ``melo`` (a path to it, or ``uv run melo`` once
+    unwrapped), or Python run as ``-m localmelo``.
+    """
+    prog = os.path.basename(argv[0])
+    if prog in _MELO:
+        return argv[1:]
+    if _PY.match(prog):
+        for i, arg in enumerate(argv[1:-1], 1):
+            if arg == "-m" and argv[i + 1] in _MELO_MODULES:
+                return argv[i + 2 :]
+    return None
+
+
+def _set_keys(args: list[str]) -> list[str]:
+    """The keys a melo command line sets: ``-X K=V``, ``-XK=V``, ``--set K=V``, ``--set=K=V``, ``config set K V``."""
+    keys: list[str] = []
+    for i, arg in enumerate(args):
+        if arg in ("-X", "--set") and i + 1 < len(args):
+            keys.append(args[i + 1].partition("=")[0])
+        elif arg.startswith("--set="):
+            keys.append(arg[6:].partition("=")[0])
+        elif arg.startswith("-X") and "=" in arg:
+            keys.append(arg[2:].partition("=")[0])
+    if "config" in args:
+        rest = args[args.index("config") + 1 :]
+        if "set" in rest:
+            keys.extend(rest[rest.index("set") + 1 : rest.index("set") + 2])
+    return [key.strip() for key in keys]
+
+
+def _settings(f: Findings, argv: list[str]) -> None:
+    """A setting that loosens a safety rule is changing localmelo itself.
+
+    A key melo cannot read (built at run time) is a doubt: it may be one.
+    """
+    args = _melo_args(argv)
+    if args is None:
+        return
+    for key in _set_keys(args):
+        if key in LOOSENING:
+            f.add(
+                "self",
+                f"Sets {key}, a setting that loosens one of melo's safety rules.",
+            )
+        elif re.search(r"[$`*?{}\\[]", key):
+            f.doubt("Sets a melo setting that melo could not name.")
+
 
 def _link_sources(
     ctx: Context, f: Findings, prog: str, args: list[str], cwd: str
@@ -703,6 +762,7 @@ def run_argv(
         f.doubt("Runs a program melo could not name.")
     # Hard links: one file under two names, so the source counts as written.
     _link_sources(ctx, f, prog, args, cwd)
+    _settings(f, argv)
     words = [a for a in args if not a.startswith("-")]
     for arg in words:
         path = None if "://" in arg else resolve(ctx, arg.lstrip("@"), cwd)

@@ -216,6 +216,28 @@ class RunReviews:
         return {**self.counts, "blocked": [dict(b) for b in self.blocked]}
 
 
+def local_address(host: str) -> bool:
+    """Whether *host* (or ``host:port``, or a URL) is an address written as a number that is not public.
+
+    ``127.0.0.1``, ``[::1]:8123`` and ``10.0.0.5`` are; a name and a public address are not.
+
+    Such an address can be reached only on this computer or its network, so
+    what the user's words name and what one review covers do not carry over
+    to it: it is another server on another port, and its pages are not a
+    site's pages.
+    """
+    text = host.strip()
+    try:
+        return not ipaddress.ip_address(text.strip("[]")).is_global
+    except ValueError:
+        pass
+    try:  # host:port or a URL
+        name = urlsplit(text if "://" in text else "//" + text).hostname or ""
+        return not ipaddress.ip_address(name).is_global
+    except ValueError:
+        return False
+
+
 def plain_page_key(
     tool_name: str, arguments: Mapping[str, Any], workspace: str | None
 ) -> str:
@@ -227,7 +249,8 @@ def plain_page_key(
     characters, the question without it, so one review lets the site's
     other plain pages be read in this chat (at most
     :data:`PLAIN_PAGES_PER_TURN` until the user's next message). Any other
-    address, which can carry more data out, is reviewed by itself.
+    address, which can carry more data out, is reviewed by itself, and so is
+    every address on this computer (:func:`local_address`).
     """
     url = arguments.get("url")
     if not isinstance(url, str) or not url.strip() or url.endswith("…"):
@@ -239,6 +262,8 @@ def plain_page_key(
     except ValueError:
         return ""
     if "@" in parts.netloc or len(parts.path) > PLAIN_PATH_CHARS:
+        return ""
+    if local_address(parts.hostname or ""):
         return ""
     rest = {name: value for name, value in arguments.items() if name != "url"}
     return "site|" + step_key(tool_name, rest, workspace)
@@ -308,8 +333,12 @@ class StepReviewer:
         The same host, or it with ``www.`` added or removed, and nothing
         under it: naming ``example.com`` does not name ``docs.example.com``,
         so a site under a shared domain (``vercel.app``) is not named by
-        it. See :func:`named_sites` for what counts as naming.
+        it. See :func:`named_sites` for what counts as naming. An address
+        on this computer (:func:`local_address`) is never named: its host
+        is not its port, and a page may have steered the model to another.
         """
+        if local_address(host):
+            return False
         wanted = _site_host(host)
         return bool(wanted) and any(
             wanted in named_sites(text) for text in self._requests

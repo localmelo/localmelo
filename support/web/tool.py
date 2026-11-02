@@ -21,7 +21,11 @@ person's recent messages name exactly (``www.`` aside) reads at once, in
 every mode; any other asks once per chat through the browser's site question (``browser:<origin>``), so
 one "allow for this chat" covers both tools, and auto mode reviews it as it
 reviews a site the browser would open. A task asks the chat that owns it;
-a task with nobody to ask is refused.
+a task with nobody to ask is refused. A test server that the developer
+setting ``[tools] web_fetch_allow_local`` lists is the exception to the first
+rule: a chat with a person asks, whatever the person's words name, and in auto
+mode it is reviewed by itself; where nobody can be asked (``--yolo``, an
+unattended run) it is read, since the developer listed it on purpose.
 """
 
 from __future__ import annotations
@@ -31,19 +35,24 @@ import codecs
 import re
 import time
 from collections import OrderedDict
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 from localmelo.melo.contracts.approvals import TOOL_ASK
-from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
+from localmelo.melo.contracts.tools import TOOL_MARKS, BaseToolProvider, ProvidedTool
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.schema import ToolDef
+from localmelo.support import web_local
 from localmelo.support.browser import render, sites
 from localmelo.support.browser.driver import BrowserError
 from localmelo.support.web.extract import extract
 from localmelo.support.web.fetch import FetchError, WebFetcher
-from localmelo.support.web.guard import AddressError, Target
+from localmelo.support.web.guard import AddressError, LocalAllow, Target
+
+if TYPE_CHECKING:
+    from localmelo.support.config import Config
 
 NAME = "web_fetch"
 GROUP = "web"
@@ -223,6 +232,26 @@ class Reading:
     links: list[str] = field(default_factory=list)
     redirected_from: str = ""
     notes: list[str] = field(default_factory=list)
+    # Read from a test server on this computer that ``[tools] web_fetch_allow_local`` lists.
+    local: bool = False
+
+
+def _mark_local() -> None:
+    """Mark the running call's ``tool.finished`` event ``allowed_local``."""
+    marks = TOOL_MARKS.get()
+    if marks is not None:
+        marks["allowed_local"] = True
+
+
+class _Local:
+    """Whether one call read a listed test server: the fetcher tells it of each."""
+
+    def __init__(self) -> None:
+        self.used = False
+
+    def __call__(self, target: Target) -> None:
+        self.used = True
+        _mark_local()
 
 
 class WebFetchProvider(BaseToolProvider):
@@ -231,7 +260,15 @@ class WebFetchProvider(BaseToolProvider):
     *browser* says whether the chat also has the browser tools, so a page
     web_fetch cannot read can point to them. *task* is set for a task's
     Agent: with no approval policy to ask, it reads no site at all. *fetcher*
-    replaces the real fetcher in tests and screenshots.
+    replaces the real fetcher in tests and screenshots. Without one, the
+    fetcher is made from *cfg*, the config of the session it serves (the saved
+    config when None; :func:`localmelo.support.web_local.fetcher`): it reads the
+    test servers that the developer setting ``[tools] web_fetch_allow_local``
+    lists, and nothing local without it. The session's config matters twice:
+    the list is the one it holds when the provider is made, and its
+    ``[gateway] port`` is the port the console really listens on, which
+    ``melo serve --port`` changes in memory only. *protect* are the model
+    server URLs of this run that are not in the config.
     """
 
     def __init__(
@@ -240,15 +277,23 @@ class WebFetchProvider(BaseToolProvider):
         browser: bool = False,
         task: bool = False,
         fetcher: WebFetcher | None = None,
+        protect: Iterable[str | None] = (),
+        cfg: Config | None = None,
     ) -> None:
         self.browser = browser
         self.task = task
-        self.fetcher = fetcher or WebFetcher()
+        self.fetcher = fetcher or web_local.fetcher(cfg, protect=protect)
         self._kept: OrderedDict[str, tuple[float, Reading]] = OrderedDict()
         self._n = 0
 
     def system_notes(self) -> tuple[str, ...]:
-        return (NOTE + (NOTE_BROWSER if self.browser else ""),)
+        allow = getattr(self.fetcher, "_allow", None)
+        local = isinstance(allow, LocalAllow) and bool(allow.sites)
+        return (
+            NOTE
+            + (NOTE_BROWSER if self.browser else "")
+            + (web_local.MODEL_NOTE if local else ""),
+        )
 
     async def start(self) -> list[ProvidedTool]:
         return [
@@ -277,11 +322,15 @@ class WebFetchProvider(BaseToolProvider):
         address = str(url or "").strip()
         reading = self._kept_reading(address) if number > 1 else None
         if reading is None:
+            local = _Local()
             try:
-                reading = await self._read(address)
+                reading = await self._read(address, local)
             except (AddressError, FetchError) as exc:
-                return ToolOutput(text=str(exc), is_error=True)
+                text = f"{exc} {web_local.NOTE}" if local.used else str(exc)
+                return ToolOutput(text=text, is_error=True)
             self._keep(address, reading)
+        elif reading.local:
+            _mark_local()
         if number > len(reading.parts):
             return ToolOutput(
                 text=f"The page has {len(reading.parts)} part(s); there is no part {number}.",
@@ -314,10 +363,20 @@ class WebFetchProvider(BaseToolProvider):
         (``browser:<origin>``, worded "read <url>" and carrying the address),
         so a grant of either tool covers both. With no policy, a chat reads
         (nobody is asked, as with ``--yolo``) and a task does not.
+
+        A test server that ``[tools] web_fetch_allow_local`` lists is the
+        exception to the first shortcut: the person's words naming the host
+        do not read it at once (they name a host, not its port, and a page
+        may have steered the model to a listed port), so a chat with a person
+        asks. With no policy at all (``--yolo``, an unattended run) nobody can
+        be asked and the developer listed it on purpose, so it is read.
         """
         host = target.host
+        listed = self.fetcher.listed(target)
         ask = TOOL_ASK.get()
         if ask is None:
+            if listed:
+                return
             if self.task:
                 raise AddressError(
                     f"melo did not read {host}: this task has nobody to ask about a site."
@@ -331,15 +390,17 @@ class WebFetchProvider(BaseToolProvider):
         if refused is not None:
             raise AddressError(refused)
         named = getattr(ask, "names_host", None)
-        if callable(named) and named(host):
+        if not listed and callable(named) and named(host):
             return
         try:
             await sites.require_site(origin, via="web_fetch", url=target.url)
         except BrowserError as exc:
             raise AddressError(str(exc)) from None
 
-    async def _read(self, address: str) -> Reading:
-        page = await self.fetcher.fetch(address, accept=readable, admit=self._admit)
+    async def _read(self, address: str, local: _Local) -> Reading:
+        page = await self.fetcher.fetch(
+            address, accept=readable, admit=self._admit, local=local
+        )
         host = urlsplit(page.url).hostname or page.url
         if page.status in _LOGIN or page.status in _BLOCKED:
             what = _LOGIN.get(page.status) or _BLOCKED[page.status]
@@ -356,7 +417,7 @@ class WebFetchProvider(BaseToolProvider):
             raise FetchError(_not_read(media))
         kind = _kind(media)
         text = _decode(page.body, page.charset, kind == "html")
-        reading = Reading(page.url, kind, "", [""])
+        reading = Reading(page.url, kind, "", [""], local=local.used)
         if page.redirects:
             reading.redirected_from = page.redirects[0]
         if kind == "html":
@@ -376,6 +437,8 @@ class WebFetchProvider(BaseToolProvider):
                 )
         else:
             reading.parts = _plain_parts(text)
+        if local.used:
+            reading.notes.append(web_local.NOTE)
         if page.cut:
             limit = self.fetcher.max_bytes / 1_000_000
             reading.notes.append(

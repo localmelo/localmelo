@@ -79,9 +79,11 @@ def _keys(pattern: str) -> int:
     in_file = settings.file_keys(data)
     given = config.overrides()
     rows = [("key", "value", "default", "source")]
+    listed: list[str] = []
     for key in settings.catalog().values():
         if pattern.lower() not in f"{key.name} {key.flag}".lower():
             continue
+        listed.append(key.name)
         source = (
             "-X" if key.name in given else "file" if key.name in in_file else "default"
         )
@@ -100,6 +102,7 @@ def _keys(pattern: str) -> int:
     widths = [max(len(row[col]) for row in rows) for col in range(3)]
     for row in rows:
         print("  ".join([*(row[col].ljust(widths[col]) for col in range(3)), row[3]]))
+    settings.warn(listed)
     return 0
 
 
@@ -109,6 +112,7 @@ def _get(name: str) -> int:
     if read is None:
         return 1
     print(_shown(key, _value(key, read[0]), read[0]))
+    settings.warn([key.name])
     return 0
 
 
@@ -127,6 +131,7 @@ def _set(name: str, text: str) -> int:
     print(
         f"{key.name} = {settings.show(value)}  ({_home_relative(config.config_path())})"
     )
+    settings.warn([key.name])
     return 0
 
 

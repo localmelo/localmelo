@@ -30,6 +30,13 @@ The fetcher (:mod:`localmelo.support.web.fetch`) resolves the name itself,
 checks every answer, and connects to an address it checked, so a DNS answer
 that changes between the check and the connection is never used. It checks
 again on every redirect.
+
+One hook lets a non-public address through, and only a fetcher is given one:
+tests and screenshots pass a function for a test host name, and the developer
+setting ``[tools] web_fetch_allow_local`` passes a :class:`LocalAllow`, which
+lets through exactly the loopback addresses and ports it lists, written as
+addresses and never as names. Without a hook, as the browser calls these
+checks, nothing non-public passes.
 """
 
 from __future__ import annotations
@@ -38,7 +45,7 @@ import asyncio
 import ipaddress
 import re
 import socket
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from urllib.parse import urlsplit
@@ -47,7 +54,8 @@ IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 # (host, port) -> the (address, port) pairs the host resolves to.
 Resolver = Callable[[str, int], Awaitable[list[tuple[str, int]]]]
 # (host, address) -> True to let a non-public address through. Tests and the
-# screenshot tool pass one to reach a local page server; nothing else does.
+# screenshot tool pass one to reach a local page server, and a LocalAllow is
+# one (see below); nothing else does.
 AllowHook = Callable[[str, IPAddress], bool]
 
 MAX_URL_CHARS = 2048
@@ -154,6 +162,50 @@ class Target:
         return shown if self.default_port else f"{shown}:{self.port}"
 
 
+class LocalAllow:
+    """The hook of ``[tools] web_fetch_allow_local``: listed loopback sites, and nothing else.
+
+    A site is an address and a port, ``("127.0.0.1", 8000)`` or
+    ``("::1", 8000)``, as :func:`localmelo.support.web_local.sites_of` reads
+    them from the list. It lets an address through only when
+
+    - the URL names the address itself (never a host name that resolves to
+      it, however it is spelt: ``localhost``, ``127.1``, ``[::ffff:7f00:1]``),
+    - the address and the port are listed, and
+    - the port is not one of ``protected()``, the ports of melo's own gateway
+      and console and of the model servers, which stay refused when listed.
+
+    It has no port to read in the plain hook call, so :func:`_let_through`
+    asks :meth:`allows` instead; called as a plain hook it refuses.
+    """
+
+    def __init__(
+        self,
+        sites: Iterable[tuple[str, int]],
+        protected: Callable[[], Collection[int]] | None = None,
+    ) -> None:
+        self.sites = frozenset(sites)
+        self._protected = protected
+
+    def __call__(self, host: str, ip: IPAddress) -> bool:
+        return False
+
+    def allows(self, host: str, ip: IPAddress, port: int) -> bool:
+        """Whether the address *ip* at *port*, written as *host* in the URL, is listed."""
+        if host != str(ip) or not ip.is_loopback or (host, port) not in self.sites:
+            return False
+        return self._protected is None or port not in self._protected()
+
+
+def _let_through(allow: AllowHook | None, host: str, ip: IPAddress, port: int) -> bool:
+    """Whether the hook *allow* lets the non-public *ip* at *port* through, as *host*."""
+    if allow is None:
+        return False
+    if isinstance(allow, LocalAllow):
+        return allow.allows(host, ip, port)
+    return allow(host, ip)
+
+
 def address_problem(ip: IPAddress) -> str | None:
     """What *ip* is when ``web_fetch`` must not reach it; ``None`` for a public address."""
     if isinstance(ip, ipaddress.IPv6Address) and ip.scope_id:
@@ -218,8 +270,13 @@ def _split_netloc(netloc: str) -> tuple[str, str | None]:
     return (host, port) if colon else (netloc, None)
 
 
-def check_url(url: str) -> Target:
-    """The checked :class:`Target` of *url*; :class:`AddressError` with why it is not read."""
+def check_url(url: str, allow: AllowHook | None = None) -> Target:
+    """The checked :class:`Target` of *url*; :class:`AddressError` with why it is not read.
+
+    An address written in the URL that is not public is refused unless *allow*
+    is a :class:`LocalAllow` that lists it with its port. No other hook is
+    asked here: a host name is checked by its answers (:func:`checked_addresses`).
+    """
     text = url.strip() if isinstance(url, str) else ""
     if not text:
         raise AddressError("Give an http or https address.")
@@ -281,7 +338,9 @@ def check_url(url: str) -> Target:
                 raise _not_public(host, problem)
     if ip is not None:
         problem = address_problem(ip)
-        if problem:
+        if problem and not (
+            isinstance(allow, LocalAllow) and allow.allows(host, ip, port)
+        ):
             raise _not_public(host, f"it is {problem}")
     shown = f"[{host}]" if ":" in host else host
     port_part = "" if port == SCHEMES[scheme] else f":{port}"
@@ -383,7 +442,7 @@ async def checked_addresses(
             local = local_problem(ip, port)
             if local:
                 what = f"{ip} is {local}" if target.ip is None else f"it is {local}"
-        if what and not (allow is not None and allow(target.host, ip)):
+        if what and not _let_through(allow, target.host, ip, port):
             raise _not_public(target.host, what)
         if (ip, port) not in checked:
             checked.append((ip, port))
@@ -408,4 +467,5 @@ __all__ = [
     "checked_addresses",
     "local_problem",
     "system_resolver",
+    "LocalAllow",
 ]

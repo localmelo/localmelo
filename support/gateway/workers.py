@@ -2295,7 +2295,7 @@ class TaskWorkers:
                         # A task reads public pages too (it has no browser); a
                         # site its words do not name asks the chat that owns it.
                         *(
-                            [WebFetchProvider(task=True)]
+                            [WebFetchProvider(task=True, cfg=self.settings())]
                             if self.settings().tools.web_fetch is True
                             else []
                         ),
