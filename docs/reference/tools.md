@@ -87,11 +87,12 @@ call itself asks nothing; each site passes the site gate below first.
     for this chat" covers `web_fetch` and the browser tools, and `/new` or `/approvals forget`
     takes it back;
   - in auto mode, an unnamed site is reviewed by your model, as a site the browser would open is.
-    A verdict that lets it read covers that site's other addresses with no query (`?`) and a
-    path of at most 120 characters for the rest of the chat, so its plain pages are not
-    reviewed one by one; an address with a query or a longer path, which can carry data out,
-    or one longer than 300 characters, is reviewed by itself, and a verdict that blocks covers
-    only its own address. melo keeps the last 512 verdicts of a chat;
+    A verdict that lets it read covers that site's other addresses with no query (`?`), no
+    fragment (`#`), no user name and a path of at most 120 characters, up to 10 of them until
+    your next message, so its plain pages are not reviewed one by one. Any other address, which
+    can carry more data out, is reviewed by itself, and so is one longer than 300 characters or
+    one that an earlier review did not let through. A verdict that blocks covers only its own
+    address. melo keeps the last 512 verdicts of a chat;
   - a task asks the chat that owns it; a task with nobody to ask reads no site.
   The address (its path and query, and its name through your resolver) is the one thing
   `web_fetch` sends out, which is why a site you did not name asks first.

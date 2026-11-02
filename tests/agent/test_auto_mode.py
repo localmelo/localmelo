@@ -1162,7 +1162,7 @@ DOCS = "https://docs.example"
 
 @pytest.mark.asyncio
 async def test_one_routine_verdict_reads_a_site_s_plain_pages(tmp_path: Path) -> None:
-    urls = [f"{DOCS}/a", f"{DOCS}/b", f"{DOCS}/c?q=notes", f"{DOCS}/d#top"]
+    urls = [f"{DOCS}/a", f"{DOCS}/b", f"{DOCS}/c?q=notes", f"{DOCS}/d"]
     llm, reader = await _read_pages(tmp_path, urls, [verdict(), verdict()])
     # /a is reviewed and its verdict covers /b and /d; the query is reviewed.
     assert len(llm.review_requests) == 2
@@ -1368,3 +1368,101 @@ async def test_one_verdict_covers_a_path_of_at_most_120_characters(
     llm, reader = await _read_pages(tmp_path, urls, [verdict(), verdict()])
     assert len(llm.review_requests) == reviews
     assert reader.read == urls
+
+
+# ── Review round: limits on one verdict for a site's plain pages ──
+
+
+def test_an_address_with_a_user_or_a_fragment_gets_no_site_verdict() -> None:
+    question = {"site": "docs.example", "origin": "https://docs.example"}
+    name = "browser:https://docs.example"
+    plain = {**question, "url": f"{DOCS}/a"}
+    assert _step_review.plain_page_key(name, plain, None)
+    for url in (
+        f"{DOCS}/a#notes",
+        "https://me@docs.example/a",
+        "https://a:b@docs.example/",
+    ):
+        assert _step_review.plain_page_key(name, {**question, "url": url}, None) == ""
+
+
+@pytest.mark.asyncio
+async def test_a_fragment_is_reviewed_by_itself(tmp_path: Path) -> None:
+    llm, _ = await _read_pages(
+        tmp_path, [f"{DOCS}/a", f"{DOCS}/b#x"], [verdict(), verdict()]
+    )
+    assert len(llm.review_requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_one_site_verdict_serves_at_most_ten_pages_a_turn(tmp_path: Path) -> None:
+    reader = ReadsPages()
+    urls = [f"{DOCS}/p{n}" for n in range(12)]
+    plan = _calls(
+        *(("read_page", {"url": url}, f"call_{n}") for n, url in enumerate(urls))
+    )
+    llm = FakeModel([plan, _answer("done")], [verdict(), verdict()])
+    (tmp_path / "ws").mkdir()
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset(),
+            tool_exposure="all",
+            workspace_root=str(tmp_path / "ws"),
+        ),
+        tool_providers=[reader],
+    )
+    agent.chat.sleep = _no_wait
+
+    await agent.run_task("what changed in the release?", approval=AutoPolicy())
+
+    # p0 is reviewed, p1-p10 ride its verdict, p11 is reviewed by itself.
+    assert len(llm.review_requests) == 2
+    assert f"{DOCS}/p11" in _review_text(llm.review_requests[1])
+    assert reader.read == urls
+
+
+@pytest.mark.asyncio
+async def test_a_page_blocked_before_is_reviewed_again_not_waved_through_by_its_site() -> (
+    None
+):
+    from localmelo.melo.contracts.review import ActionReview
+
+    replies = deque(
+        [
+            verdict(verdict="ask", fits_request="no", category="beyond_request"),
+            verdict(),
+        ]
+        + [verdict()]
+    )
+
+    class Chat:
+        asked = 0
+
+        async def _request(self, messages: Any, tools: Any, **_: Any) -> Message:
+            Chat.asked += 1
+            return replies.popleft()
+
+    chat = Chat()
+    reviewer = _step_review.StepReviewer(lambda: chat)  # type: ignore[arg-type,return-value]
+    reviewer.user_message("what changed in the release?")
+    shared = "site|docs"
+
+    async def review(key: str) -> ActionReview:
+        return await reviewer.review(
+            _step_review.RunReviews(),
+            tool_name="browser:https://docs.example",
+            arguments={"url": key},
+            preview=key,
+            review=ActionReview("undecided"),
+            mode="auto",
+            key=key,
+            workspace=None,
+            shared=shared,
+        )
+
+    assert (await review("/p")).verdict == "high"  # blocked
+    assert (await review("/a")).verdict == "routine"  # the site's verdict
+    reviewer.user_message("and the changelog?")  # a message mid-run
+    await review("/p")
+    assert Chat.asked == 3, "the blocked page is asked about again"

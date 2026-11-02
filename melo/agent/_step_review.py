@@ -79,6 +79,9 @@ REVIEWS_KEPT: Final = 512
 # The longest path of an address one verdict on its site covers: a longer
 # one, which can carry more data out, is reviewed by itself.
 PLAIN_PATH_CHARS: Final = 120
+# Addresses one verdict on a site lets through until the user's next
+# message; past that, each is reviewed by itself.
+PLAIN_PAGES_PER_TURN: Final = 10
 
 Purpose = Literal["undecided", "consent"]
 
@@ -219,20 +222,23 @@ def plain_page_key(
     """The key a routine verdict on a site's plain pages is kept under, or ``""``.
 
     For a site question that carries the address it reads (web_fetch's
-    ``url``): when the address has no query, is shown whole and its path
-    has at most :data:`PLAIN_PATH_CHARS` characters, the question without
-    it, so one review lets the site's other plain pages be read in this
-    chat. An address with a query or a longer path, which can carry data
-    out, is reviewed by itself, and so is one cut short.
+    ``url``): when the address has no query, no fragment and no user name,
+    is shown whole and its path has at most :data:`PLAIN_PATH_CHARS`
+    characters, the question without it, so one review lets the site's
+    other plain pages be read in this chat (at most
+    :data:`PLAIN_PAGES_PER_TURN` until the user's next message). Any other
+    address, which can carry more data out, is reviewed by itself.
     """
     url = arguments.get("url")
-    if not isinstance(url, str) or not url.strip() or "?" in url or url.endswith("…"):
+    if not isinstance(url, str) or not url.strip() or url.endswith("…"):
+        return ""
+    if any(mark in url for mark in "?#"):
         return ""
     try:
-        path = urlsplit(url.strip()).path
+        parts = urlsplit(url.strip())
     except ValueError:
         return ""
-    if len(path) > PLAIN_PATH_CHARS:
+    if "@" in parts.netloc or len(parts.path) > PLAIN_PATH_CHARS:
         return ""
     rest = {name: value for name, value in arguments.items() if name != "url"}
     return "site|" + step_key(tool_name, rest, workspace)
@@ -270,6 +276,8 @@ class StepReviewer:
         self._requests: deque[str] = deque(maxlen=EARLIER_REQUESTS + 1)
         self._marker = 0
         self._cache: OrderedDict[str, tuple[ActionReview, int, Purpose]] = OrderedDict()
+        # Addresses each site verdict let through since the user's last message.
+        self._shared_used: dict[str, int] = {}
         self._blocks: deque[_Block] = deque(maxlen=BLOCKS_KEPT)
         if new_chat:
             self.since = self._wall()
@@ -286,6 +294,7 @@ class StepReviewer:
         # A message counts even with no words (an attachment): a consent or a
         # block of the last message does not carry over to it.
         self._marker += 1
+        self._shared_used.clear()
         if text.strip():
             self._requests.append(text[:MAX_REQUEST_CHARS])
 
@@ -371,8 +380,17 @@ class StepReviewer:
             and cached[0].verdict == "routine"
         ):
             return cached[0]
-        kept = self._kept(shared) if shared else None
+        # A site's verdict never lets through an address judged otherwise
+        # before, and only so many a turn.
+        kept = (
+            self._kept(shared)
+            if shared
+            and (cached is None or cached[0].verdict == "routine")
+            and self._shared_used.get(shared, 0) < PLAIN_PAGES_PER_TURN
+            else None
+        )
         if kept is not None and kept[2] == "undecided" and kept[0].verdict == "routine":
+            self._shared_used[shared] = self._shared_used.get(shared, 0) + 1
             return kept[0]
         runner = bool(review.changed)
         used = run.runner_used if runner else run.used

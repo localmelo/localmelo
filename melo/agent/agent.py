@@ -142,6 +142,7 @@ from localmelo.melo.contracts.review import (
     SITE_KEY,
     TITLES,
     ActionReview,
+    address_keys,
     block_words,
     loose_keys,
     reaches_unread_site,
@@ -2174,7 +2175,12 @@ class _ToolAsk:
                 name,
                 request.arguments,
                 self._workspace_root,
-                also=_question_keys(name, request.arguments),
+                # An address nested in its path (a reader, an archive) too:
+                # only to refuse, never kept with a refusal.
+                also=(
+                    *_question_keys(name, request.arguments),
+                    *address_keys(str(request.arguments.get("url") or "")),
+                ),
             )
         )
         if found is None:

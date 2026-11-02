@@ -19,7 +19,7 @@ import json
 import os
 import re
 import shlex
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 from urllib.parse import unquote, urlsplit
@@ -395,26 +395,56 @@ SITE_KEY: Final = "ask:site:"
 # one site (a percent-encoding or an international name that does not
 # decode): refused wherever a site was refused, never anywhere else.
 UNREADABLE_SITE: Final = "ask:site-unreadable"
-_ADDRESS: Final = re.compile(r"https?://[^\s<>\"'`]+", re.IGNORECASE)
+# The scheme and authority of each http(s) address in a text. The authority
+# stops at "/", so an address nested in another one's path is found too.
+_AUTHORITY: Final = re.compile(r"https?://[^\s<>\"'`/?#]*", re.IGNORECASE)
 # What a host built at run time has: a variable, a template, a format
 # placeholder (``%s``, a ``%`` without two hex digits), an f-string's value.
 _BUILT: Final = re.compile(r"[$`{}\x00]|%(?![0-9a-fA-F]{2})")
 # A host melo reads as one site, once encoded: labels of letters, digits,
 # ``-`` and ``_``.
 _HOST_NAME: Final = re.compile(r"[a-z0-9_-]+(?:\.[a-z0-9_-]+)*")
+# An IPv4 address in any form a client accepts: 1 to 4 parts, each decimal,
+# octal (a leading 0) or hex (0x).
+_NUMERIC: Final = re.compile(r"(?:0x[0-9a-f]*|\d+)(?:\.(?:0x[0-9a-f]*|\d+)){0,3}")
 # One brace group a shell (or curl) expands into words: ``{a,b}``.
 _BRACES: Final = re.compile(r"^([^{}]*)\{([^{}]*,[^{}]*)\}([^{}]*)$")
 # Characters after a host that end a sentence or a call, not the host.
 _HOST_END: Final = ")],;!'\""
+# The longest host name; a longer host text is not one site.
+_HOST_CHARS: Final = 253
 # A value an f-string fills in: no host is read through it.
 _FILLED: Final = "\x00"
+
+
+def _ipv4(host: str) -> str | None:
+    """*host* as a dotted-quad IPv4 address when it is one in another form (``16909060``)."""
+    if not _NUMERIC.fullmatch(host):
+        return None
+    numbers = []
+    for part in host.split("."):
+        try:
+            if part.startswith("0x"):
+                numbers.append(int(part[2:] or "0", 16))
+            elif len(part) > 1 and part.startswith("0"):
+                numbers.append(int(part, 8))
+            else:
+                numbers.append(int(part))
+        except ValueError:
+            return None
+    *head, last = numbers
+    if any(n > 255 for n in head) or last >= 256 ** (4 - len(head)):
+        return None
+    value = sum(n << (8 * (3 - at)) for at, n in enumerate(head)) + last
+    return str(ipaddress.IPv4Address(value))
 
 
 def site_host(host: str) -> str | None:
     """*host* as one site: in ASCII (IDNA), lower case, without one final dot.
 
-    An IP address is written the one standard way (``::1``). ``None`` when
-    it is empty or cannot be encoded. What
+    An IP address is written the one standard way (``::1``, and an IPv4
+    address written as one number, in hex or octal as dotted decimal).
+    ``None`` when it is empty or cannot be encoded. What
     :func:`~localmelo.melo.contracts.approvals.site_key` uses, so one site
     has one key however its name is spelt.
     """
@@ -425,6 +455,9 @@ def site_host(host: str) -> str | None:
         return None
     host = host.lower()
     host = host[:-1] if host.endswith(".") else host
+    numeric = _ipv4(host)
+    if numeric is not None:
+        return numeric
     try:
         return str(ipaddress.ip_address(host))
     except ValueError:
@@ -475,7 +508,7 @@ def _raw_hosts(address: str) -> set[str]:
 def _host_key(raw: str) -> str | None:
     """The loose key of one host text, :data:`UNREADABLE_SITE`, or ``None`` (unknown)."""
     raw = raw.rstrip(_HOST_END)
-    if not raw:
+    if not raw or len(raw) > _HOST_CHARS:
         return None
     if _BUILT.search(raw):
         return None  # built at run time: the review judges it
@@ -497,20 +530,66 @@ def _host_key(raw: str) -> str | None:
 
 def _expanded(raw: str) -> list[str]:
     """*raw* with one brace group expanded, as a shell or curl does: ``{a,b}.x``."""
-    found = _BRACES.match(raw)
+    found = _BRACES.match(raw) if len(raw) <= _HOST_CHARS else None
     if found is None:
         return [raw]
     head, choices, tail = found.groups()
     return [head + choice + tail for choice in choices.split(",")]
 
 
-def _address_keys(text: str) -> Iterator[str]:
-    for address in _ADDRESS.findall(text):
-        for raw in _raw_hosts(address):
-            for host in _expanded(raw):
-                key = _host_key(host)
-                if key is not None:
-                    yield key
+def _host_sites(raw: str) -> tuple[set[str], bool]:
+    """The keys one host text gives, and whether some reading of it gives none."""
+    raw = raw.rstrip(_HOST_END)
+    if not raw:
+        return set(), False
+    keys: set[str] = set()
+    unread = False
+    for host in _expanded(raw):
+        key = _host_key(host)
+        if key is None:
+            unread = True
+        else:
+            keys.add(key)
+    return keys, unread
+
+
+def _decoded(text: str) -> list[str]:
+    """*text*, and it percent-decoded once and twice when that changes it."""
+    texts = [text]
+    for _ in range(2):
+        if "%" not in texts[-1]:
+            break
+        plain = unquote(texts[-1])
+        if plain == texts[-1]:
+            break
+        texts.append(plain)
+    return texts
+
+
+def _address_sites(text: str) -> tuple[set[str], bool]:
+    """The keys of every http(s) address in *text*, nested and encoded ones too.
+
+    The second value: some address in it has a host that gives no key
+    (built at run time, a pattern, too long): melo cannot read it.
+    """
+    keys: set[str] = set()
+    unread = False
+    for form in _decoded(text):
+        for found in _AUTHORITY.finditer(form):
+            for raw in _raw_hosts(found.group(0)):
+                more, hidden = _host_sites(raw)
+                keys |= more
+                unread = unread or hidden
+    return keys, unread
+
+
+def _address_keys(text: str) -> set[str]:
+    return _address_sites(text)[0]
+
+
+def address_keys(text: str) -> list[str]:
+    """The site keys of every http(s) address in *text*, nested or encoded ones too."""
+    return sorted(_address_keys(text))
 
 
 # ── Network steps: scheme-less curl and wget addresses, hosts melo cannot read ──
@@ -558,6 +637,11 @@ _WGET_LONG_NAMES: Final = """accept accept-regex append-output base bind-address
     use-askpass user user-agent wait waitretry warc-cdx warc-dedup warc-file
     warc-header warc-max-size warc-tempdir"""
 _WGET_LONG: Final = frozenset(_WGET_LONG_NAMES.split())
+# curl options whose value is a host or an address it connects through.
+_CURL_PROXIES: Final = frozenset(
+    {"x", "proxy", "preproxy", "socks4", "socks4a", "socks5", "socks5-hostname"}
+    | {"doh-url"}
+)
 # Options that take the addresses from a file: melo cannot read them.
 _FROM_FILE: Final = {"curl": ("K", "config"), "wget": ("i", "input-file")}
 # Options that only print something: no address is needed.
@@ -567,8 +651,16 @@ _INFO: Final = frozenset({"version", "help", "manual", "V", "h", "M"})
 _BARE: Final = re.compile(
     r"(?:[^\s/?#@]+@)?([^\s/?#@:\[\]]+\.[^\s/?#@:\[\].]+\.?)(?::\d+)?(?:[/?#]\S*)?"
 )
+_BARE_CHARS: Final = 2048
 # Text a shell or Python fills in when the step runs.
 _EXPANDS: Final = re.compile(r"[$`\x00]")
+# A proxy setting in any word: ``https_proxy=…``, ``-e http_proxy=…``,
+# ``git -c http.proxy=…``.
+_PROXY_WORD: Final = re.compile(
+    r"(?i)(?:-e)?(?:(?:https?|ftp|all|socks)_proxy|(?:[\w-]+\.)+proxy)=(.*)"
+)
+# Settings that make curl or wget read their options from a file.
+_CONFIG_HOMES: Final = frozenset({"CURL_HOME", "WGETRC", "XDG_CONFIG_HOME", "CURLRC"})
 # Programs that reach other computers whose targets melo does not key.
 _NETWORK: Final = frozenset(
     {"nc", "ncat", "netcat", "telnet", "socat", "websocat", "ssh", "scp", "sftp"}
@@ -588,39 +680,107 @@ _WRAPPERS: Final[dict[str, frozenset[str]]] = {
     "nice": frozenset({"-n"}),
     "timeout": frozenset({"-s", "-k"}),
 }
-_ASSIGNMENT: Final = re.compile(r"[A-Za-z_]\w*=")
+# Shell words that open or close a compound command: the command follows.
+_KEYWORDS: Final = frozenset(
+    {"if", "then", "else", "elif", "fi", "do", "done", "while", "until", "!", "{"}
+    | {"}", "time", "coproc"}
+)
+_ASSIGNMENT: Final = re.compile(r"([A-Za-z_]\w*)=(.*)", re.S)
+# What separates two commands, or redirects one, in a shell's text.
+_OPERATORS: Final = ";&|()<>`\n"
 # Python: calls that fetch an address, and calls that connect to a host.
 _PY_URL_CALLS: Final = frozenset({"urlopen", "urlretrieve", "Request"})
 _PY_METHODS: Final = frozenset(
     {"get", "post", "put", "patch", "delete", "head", "options", "request", "stream"}
 )
-_PY_CLIENT_MODULES: Final = frozenset({"requests", "httpx", "urllib3", "aiohttp"})
+_PY_CLIENT_MODULES: Final = frozenset(
+    {"requests", "httpx", "urllib3", "aiohttp", "httplib2", "pycurl"}
+)
 _PY_CLIENTS: Final = frozenset(
-    {"Session", "Client", "AsyncClient", "PoolManager", "ClientSession"}
+    {"Session", "Client", "AsyncClient", "PoolManager", "ClientSession", "Http"}
+    | {"Curl"}
 )
 _PY_HOST_CALLS: Final = frozenset(
     {"HTTPConnection", "HTTPSConnection", "create_connection", "open_connection"}
 )
+_PY_SPAWNERS: Final = frozenset({"subprocess", "os"})
 _DEPTH: Final = 3
 
 Sites = tuple[set[str], bool]
 
 
+def _shell_tokens(text: str) -> list[str]:
+    """*text* as a shell reads it: words, and operators (``;``, ``&&``, ``(``, ``>``) apart.
+
+    Quotes are kept together; text that does not parse is read line by
+    line, and a line that does not parse is split at spaces and operators.
+    """
+
+    def split(part: str) -> list[str]:
+        lexer = shlex.shlex(part, posix=True, punctuation_chars=_OPERATORS)
+        lexer.whitespace = " \t\r"
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        return list(lexer)
+
+    try:
+        return split(text)
+    except ValueError:
+        pass
+    tokens: list[str] = []
+    for line in text.split("\n"):
+        try:
+            tokens += split(line)
+        except ValueError:
+            tokens += re.findall(r"[;&|()<>`]+|[^\s;&|()<>`]+", line)
+        tokens.append("\n")
+    return tokens
+
+
+def _shell_commands_of(tokens: Sequence[str]) -> list[list[str]]:
+    """The simple commands in *tokens*: split at operators, redirections dropped."""
+    commands: list[list[str]] = []
+    current: list[str] = []
+    target = False
+    for token in tokens:
+        if token and all(c in _OPERATORS for c in token):
+            if "(" in token or ")" in token or not ("<" in token or ">" in token):
+                if current:
+                    commands.append(current)
+                current, target = [], False
+            else:
+                target = True  # the word after it is where it redirects
+            continue
+        if target:
+            target = False
+            continue
+        current.append(token)
+    if current:
+        commands.append(current)
+    return commands
+
+
 def _shell_words(command: Any) -> list[str]:
     if isinstance(command, list):
         return [str(word) for word in command]
-    text = str(command or "")
-    try:
-        return shlex.split(text)
-    except ValueError:
-        return text.split()
+    return _shell_tokens(str(command or ""))
 
 
-def _unwrapped(words: Sequence[str]) -> list[str]:
-    """*words* from the program they run: assignments and wrappers (``sudo``, ``xargs``) dropped."""
+def _unwrapped(words: Sequence[str]) -> tuple[list[str], list[tuple[str, str]]]:
+    """*words* from the program they run, and the assignments before it.
+
+    Shell keywords (``if``, ``do``, ``!``, ``{``), assignments and wrappers
+    (``sudo``, ``xargs``, ``env``) are dropped.
+    """
     rest = list(words)
+    assigned: list[tuple[str, str]] = []
     while rest:
-        if _ASSIGNMENT.match(rest[0]):
+        if rest[0] in _KEYWORDS:
+            rest = rest[1:]
+            continue
+        found = _ASSIGNMENT.fullmatch(rest[0])
+        if found:
+            assigned.append((found.group(1), found.group(2)))
             rest = rest[1:]
             continue
         wrapper = _program(rest[0])
@@ -632,15 +792,57 @@ def _unwrapped(words: Sequence[str]) -> list[str]:
             rest = rest[2:] if rest[0] in valued else rest[1:]
         if rest and wrapper == "timeout":
             rest = rest[1:]  # its duration
-    return rest
+    return rest, assigned
+
+
+def _proxy_sites(value: str) -> Sites:
+    """The keys of a proxy (``host:port``, ``socks5://host``), and whether it is unread."""
+    value = value.strip()
+    if not value:
+        return set(), False
+    if _EXPANDS.search(value):
+        return set(), True
+    plain = re.sub(r"^[A-Za-z][\w+.-]*://", "", value)
+    keys, unread = _address_sites("http://" + plain)
+    return keys, unread or not keys
+
+
+def _route_sites(value: str, fields: Sequence[int]) -> Sites:
+    """The hosts of a ``--connect-to`` or ``--resolve`` value: some of its ``:`` fields."""
+    if _EXPANDS.search(value):
+        return set(), True
+    parts = value.split(":")
+    keys: set[str] = set()
+    unread = False
+    for at in fields:
+        for host in (parts[at].split(",") if at < len(parts) else []):
+            more, hidden = _host_sites(host.strip("[]"))
+            keys |= more
+            unread = unread or hidden
+    return keys, unread
+
+
+def _target_sites(target: str) -> Sites:
+    """What one curl or wget address reaches: its keys, and whether melo cannot read it."""
+    if _EXPANDS.search(target) or len(target) > _BARE_CHARS:
+        return set(), True
+    if "://" in target:
+        return _address_sites(target)
+    if _BARE.fullmatch(target):
+        keys, unread = _address_sites("http://" + target)
+        return keys, unread or not keys
+    if re.search(r"[{}\[\]]", target):
+        return set(), True  # a host to expand or glob
+    return set(), False
 
 
 def _fetcher_sites(program: str, args: Sequence[str]) -> Sites:
-    """What a ``curl`` or ``wget`` command reaches: keys of its scheme-less addresses."""
+    """What a ``curl`` or ``wget`` command reaches: keys of its addresses and proxies."""
     curl = program == "curl"
     short, long_ = (_CURL_SHORT, _CURL_LONG) if curl else (_WGET_SHORT, _WGET_LONG)
     file_short, file_long = _FROM_FILE[program]
     targets: list[str] = []
+    values: list[tuple[str, str]] = []
     from_file, info_only, ended, index = False, True, False, 0
     while index < len(args):
         arg = args[index]
@@ -652,61 +854,97 @@ def _fetcher_sites(program: str, args: Sequence[str]) -> Sites:
         elif arg.startswith("--"):
             name, joined, value = arg[2:].partition("=")
             info_only = info_only and name in _INFO
-            from_file = from_file or name == file_long
-            if name in long_ and not joined:
+            # --expand-<option> (curl 8.3) fills in variables: unread.
+            from_file = from_file or name == file_long or name.startswith("expand-")
+            if (name in long_ or name.startswith("expand-")) and not joined:
                 value = args[index] if index < len(args) else ""
                 index += 1
-            if curl and name == "url":
+            if curl and name in ("url", "expand-url"):
                 targets.append(value)
+            elif joined or name in long_:
+                values.append((name, value))
         else:
             info_only = info_only and all(c in _INFO for c in arg[1:])
             for at, letter in enumerate(arg[1:], 1):
                 from_file = from_file or letter == file_short
                 if letter in short:
-                    index += at == len(arg) - 1  # its value is the next word
+                    if at < len(arg) - 1:
+                        values.append((letter, arg[at + 1 :]))
+                    elif index < len(args):
+                        values.append((letter, args[index]))
+                        index += 1
                     break
     keys: set[str] = set()
     unread = from_file or not targets and not info_only
     for target in targets:
-        if _EXPANDS.search(target):
-            unread = True
-        elif "://" not in target and _BARE.fullmatch(target):
-            keys.update(_address_keys("http://" + target))
+        more, hidden = _target_sites(target)
+        keys |= more
+        unread = unread or hidden
+    for name, value in values:
+        if curl and name in _CURL_PROXIES:
+            more, hidden = _proxy_sites(value)
+        elif curl and name in ("connect-to", "resolve"):
+            more, hidden = _route_sites(value, (0, 2))
+        else:
+            continue
+        keys |= more
+        unread = unread or hidden
     return keys, unread
 
 
 def _command_sites(words: Sequence[str], depth: int) -> Sites:
-    words = _unwrapped(words)
+    words, assigned = _unwrapped(words)
+    keys: set[str] = set()
+    unread = False
+    for name, value in assigned:
+        if _PROXY_WORD.fullmatch(f"{name}={value}"):
+            more, hidden = _proxy_sites(value)
+            keys |= more
+            unread = unread or hidden
     if not words:
-        return set(), False
+        return keys, unread
     program, args = _program(words[0]), list(words[1:])
+    found: Sites = (set(), False)
     if program in ("curl", "wget"):
-        return _fetcher_sites(program, args)
-    if "-c" in args[:-1] and (program in _SHELLS or program == "python"):
-        code = args[args.index("-c") + 1]
-        if depth >= _DEPTH:
-            return set(), bool(_EXPANDS.search(code))
-        if program == "python":
-            return _python_sites(code, depth + 1)
-        return _shell_sites(code, depth + 1)
-    plain = [arg for arg in args if not arg.startswith("-")]
-    if (
-        program in _NETWORK
-        or program == "git"
-        and plain[:1]
-        and plain[0] in _GIT_NETWORK
-    ):
-        return set(), any(_EXPANDS.search(arg) for arg in args)
-    return set(), False
+        found = _fetcher_sites(program, args)
+        unread = unread or any(name in _CONFIG_HOMES for name, _ in assigned)
+    elif program in _SHELLS or program == "python":
+        flag = next(
+            (
+                at
+                for at, arg in enumerate(args[:-1])
+                if re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", arg)
+            ),
+            None,
+        )
+        if flag is not None:
+            code = args[flag + 1]
+            if depth >= _DEPTH:
+                found = (set(), bool(_EXPANDS.search(code)))
+            elif program == "python":
+                found = _python_sites(code, depth + 1)
+            else:
+                found = _shell_sites(code, depth + 1)
+    else:
+        plain = [arg for arg in args if not arg.startswith("-")]
+        network = program in _NETWORK or (
+            program == "git" and bool(set(plain) & _GIT_NETWORK)
+        )
+        if network:
+            found = (set(), any(_EXPANDS.search(arg) for arg in args))
+    return keys | found[0], unread or found[1]
 
 
 def _shell_sites(command: Any, depth: int = 0) -> Sites:
     words = _shell_words(command)
-    keys = {key for word in words for key in _address_keys(word)}
+    keys: set[str] = set()
+    for word in words:
+        keys |= _address_keys(word)
+        proxy = _PROXY_WORD.match(word)
+        if proxy is not None:
+            keys |= _proxy_sites(proxy.group(1))[0]
     unread = False
-    commands = (
-        [words] if isinstance(command, list) else _shell_commands(str(command or ""))
-    )
+    commands = [words] if isinstance(command, list) else _shell_commands_of(words)
     for found in commands:
         more, hidden = _command_sites(found, depth)
         keys |= more
@@ -760,11 +998,26 @@ def _call_name(node: ast.Call) -> tuple[str, ast.expr | None]:
 
 
 class _PythonNames:
-    """What the names of a snippet hold: one literal each, and the clients made."""
+    """What the names of a snippet hold: imports, one literal each, the clients made."""
 
     def __init__(self, tree: ast.AST) -> None:
+        self.modules: dict[str, str] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.asname:
+                        self.modules[alias.asname] = alias.name
+                    else:
+                        top = alias.name.split(".")[0]
+                        self.modules[top] = top
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                for alias in node.names:
+                    self.modules[alias.asname or alias.name] = (
+                        f"{node.module}.{alias.name}"
+                    )
         bound: dict[str, list[ast.expr | None]] = {}
-        self.clients: set[str] = set()
+        # Names that hold a client (``requests.Session()``), by its maker.
+        self.clients: dict[str, str] = {}
         self.sockets: set[str] = set()
         for node in ast.walk(tree):
             pairs: list[tuple[ast.expr, ast.expr | None]] = []
@@ -784,14 +1037,32 @@ class _PythonNames:
                         single = value if target is name else None
                         bound.setdefault(name.id, []).append(single)
                 if isinstance(target, ast.Name) and isinstance(value, ast.Call):
-                    made = _call_name(value)[0]
-                    if made in _PY_CLIENTS:
-                        self.clients.add(target.id)
-                    elif made == "socket":
+                    maker = self.client_maker(value)
+                    if maker:
+                        self.clients[target.id] = maker
+                    elif _call_name(value)[0] == "socket":
                         self.sockets.add(target.id)
         self.values = {
             name: values[0] for name, values in bound.items() if len(values) == 1
         }
+
+    def dotted(self, node: ast.expr | None) -> str:
+        """The dotted name *node* stands for, imports resolved (``r.get`` → ``requests.get``)."""
+        if isinstance(node, ast.Name):
+            return self.modules.get(node.id, node.id)
+        if isinstance(node, ast.Attribute):
+            head = self.dotted(node.value)
+            return f"{head}.{node.attr}" if head else ""
+        return ""
+
+    def client_maker(self, node: ast.Call) -> str:
+        """``Session``, ``Http``… when *node* makes an HTTP client, else ``""``."""
+        dotted = self.dotted(node.func)
+        name = dotted.rsplit(".", 1)[-1]
+        top = dotted.split(".")[0]
+        if name in _PY_CLIENTS or name == "session" and top in _PY_CLIENT_MODULES:
+            return "Session" if name == "session" else name
+        return ""
 
     def text(self, node: ast.expr | None, depth: int = 0) -> str | None:
         """The literal text *node* holds (an f-string's values marked), or ``None``."""
@@ -803,10 +1074,16 @@ class _PythonNames:
             return self.text(self.values.get(node.id), depth + 1)
         return None
 
-    def client(self, node: ast.expr | None) -> bool:
+    def client(self, node: ast.expr | None) -> str:
+        """The maker of the client *node* is (a module counts as ``module``), or ``""``."""
         if isinstance(node, ast.Name):
-            return node.id in _PY_CLIENT_MODULES or node.id in self.clients
-        return isinstance(node, ast.Call) and _call_name(node)[0] in _PY_CLIENTS
+            if node.id in self.clients:
+                return self.clients[node.id]
+            top = self.modules.get(node.id, node.id).split(".")[0]
+            return "module" if top in _PY_CLIENT_MODULES else ""
+        if isinstance(node, ast.Call):
+            return self.client_maker(node)
+        return ""
 
 
 def _argument(node: ast.Call, position: int, *names: str) -> ast.expr | None:
@@ -815,34 +1092,64 @@ def _argument(node: ast.Call, position: int, *names: str) -> ast.expr | None:
     return next((k.value for k in node.keywords if k.arg in names), None)
 
 
+def _url_sites(url: str | None) -> Sites:
+    """What an address passed to a Python HTTP call reaches."""
+    if url is None:
+        return set(), True
+    if "://" not in url:
+        return set(), bool(_EXPANDS.search(url))  # no scheme: it does not run
+    return _address_sites(url)
+
+
 def _python_call_sites(node: ast.Call, names: _PythonNames, depth: int) -> Sites:
     name, receiver = _call_name(node)
+    dotted = names.dotted(node.func)
+    top = dotted.split(".")[0]
     if name in _RUNS and node.args:
+        spawns = top in _PY_SPAWNERS
         first = node.args[0]
         if isinstance(first, ast.List | ast.Tuple):
             words = [names.text(item) for item in first.elts]
+            if not words:
+                return set(), False
+            if words[0] is None:
+                return set(), spawns
             return _command_sites(
-                [w if w is not None else _FILLED for w in words], depth
+                [word if word is not None else _FILLED for word in words], depth
             )
         command = names.text(first)
-        return _shell_sites(command, depth) if command is not None else (set(), False)
-    if name in _PY_URL_CALLS or name in _PY_METHODS and names.client(receiver):
-        position = 1 if name == "request" else 0
-        url = names.text(_argument(node, position, "url"))
-        if url is None:
-            return set(), True
-        keys = set(_address_keys(url))
-        return keys, "://" in url and not keys
+        if command is None:
+            return set(), spawns  # a command built at run time
+        return _shell_sites(command, depth)
+    if name == "setopt" and len(node.args) >= 2:
+        option = node.args[0]
+        what = option.attr if isinstance(option, ast.Attribute) else ""
+        if what in ("URL", "PROXY"):
+            text = names.text(node.args[1])
+            if text is None:
+                return set(), True
+            if what == "PROXY":
+                return _proxy_sites(text)
+            return _target_sites(text)
+    maker = names.client(receiver) if receiver is not None else ""
+    from_client = isinstance(node.func, ast.Name) and top in _PY_CLIENT_MODULES
+    if name in _PY_URL_CALLS or name in _PY_METHODS and (maker or from_client):
+        # requests.request(method, url); httplib2's Http().request(url, …).
+        position = 1 if name == "request" and maker != "Http" else 0
+        return _url_sites(names.text(_argument(node, position, "url", "uri")))
     is_socket = isinstance(receiver, ast.Name) and receiver.id in names.sockets
-    if name in _PY_HOST_CALLS or name == "connect" and is_socket:
-        target = _argument(node, 0, "host", "address")
+    target = _argument(node, 0, "host", "address")
+    if (
+        name in _PY_HOST_CALLS
+        or name == "connect"
+        and (is_socket or isinstance(target, ast.Tuple))
+    ):
         if isinstance(target, ast.Tuple) and target.elts:
             target = target.elts[0]
         host = names.text(target)
         if host is None or _EXPANDS.search(host):
             return set(), True
-        key = _host_key(host)
-        return ({key} if key is not None else set()), False
+        return _host_sites(host)
     return set(), False
 
 
@@ -851,7 +1158,9 @@ def _python_sites(code: str, depth: int = 0) -> Sites:
         tree = ast.parse(code)
     except (SyntaxError, ValueError, RecursionError):
         return set(), False  # it does not run
-    keys = {key for text in _texts(tree) for key in _address_keys(text)}
+    keys: set[str] = set()
+    for text in _texts(tree):
+        keys |= _address_keys(text)
     unread = False
     names = _PythonNames(tree)
     for node in ast.walk(tree):
@@ -873,18 +1182,22 @@ def _sites(tool_name: str, arguments: Mapping[str, Any]) -> Sites:
 def site_keys(tool_name: str, arguments: Mapping[str, Any]) -> list[str]:
     """The loose keys of the sites a ``shell_exec`` or ``python_exec`` step names (#433).
 
-    One ``ask:site:<host>`` (:func:`site_host`) per address in it: each
-    literal ``http://`` or ``https://`` address in a word of a command or a
-    string of Python code (an address passed to ``urllib``, ``requests`` or
-    ``httpx``, kept in a variable, or in an f-string whose host is written
-    out); each address ``curl`` or ``wget`` is given without a scheme (a
-    word that is not an option's value and is a dotted host, perhaps with a
-    port and a path); and the literal host of ``http.client``'s
-    connections and of ``socket.create_connection``. A percent-encoded host
-    is decoded first; one that does not decode into a site gives
-    :data:`UNREADABLE_SITE`. A host built at run time (``$HOST``,
-    ``{host}``, ``%s``) gives nothing (see :func:`reaches_unread_site`).
-    They only ever refuse a step that names a site refused earlier
+    One ``ask:site:<host>`` (:func:`site_host`) per address in it: every
+    ``http://`` or ``https://`` address in a word of a command or a string
+    of Python code, nested in another one's path or percent-encoded in its
+    query too (an address passed to ``urllib``, ``requests`` or ``httpx``,
+    kept in a variable, or in an f-string whose host is written out); each
+    address ``curl`` or ``wget`` is given without a scheme (a word that is
+    not an option's value and is a dotted host, perhaps with a port and a
+    path), wherever the command stands in the shell's syntax (``if``,
+    ``( … )``, ``bash -c``); the proxy it goes through (``-x``,
+    ``https_proxy=``, ``-e http_proxy=``, ``git -c http.proxy=``); and the
+    literal host of ``http.client``'s connections and of a socket's. A
+    percent-encoded host is decoded first; one that does not decode into a
+    site gives :data:`UNREADABLE_SITE`. A host built at run time
+    (``$HOST``, ``{host}``, ``%s``) gives nothing (see
+    :func:`reaches_unread_site`). They only ever refuse a step that names
+    a site refused earlier
     (:class:`~localmelo.melo.contracts.approvals.EarlierBlocks`): a blocked
     step never keeps them, since what was refused was the step.
     """
@@ -894,14 +1207,15 @@ def site_keys(tool_name: str, arguments: Mapping[str, Any]) -> list[str]:
 def reaches_unread_site(tool_name: str, arguments: Mapping[str, Any]) -> bool:
     """Whether a ``shell_exec`` or ``python_exec`` step reaches a host melo cannot read.
 
-    ``curl`` or ``wget`` with an address the shell fills in (``$URL``,
-    ``https://$H/``), one read from a file (``-K``, ``-i``) or none at all
-    (``xargs curl``); another network program (``nc``, ``ssh``, ``git
-    clone``…) with an argument the shell fills in; Python that fetches an
-    address or connects to a host not written out in the code (a variable
-    from elsewhere, text joined at run time, an f-string that fills in the
-    host), or runs ``curl`` with such an argument. While a site is refused
-    in the task, such a step is reviewed instead of running as routine
-    (#433).
+    ``curl`` or ``wget`` with an address or a proxy whose host gives no key
+    (one the shell fills in, ``$URL``; brace groups or ranges to expand;
+    ``--expand-url``), one read from a file (``-K``, ``-i``, a config home)
+    or none at all (``xargs curl``); another network program (``nc``,
+    ``ssh``, ``git clone``…) with an argument the shell fills in; Python
+    that fetches an address or connects to a host not written out in the
+    code (a variable from elsewhere, text joined at run time, an f-string
+    that fills in the host), or runs a command built at run time. While a
+    site is refused in the task, such a step is reviewed instead of running
+    as routine (#433).
     """
     return _sites(tool_name, arguments)[1]

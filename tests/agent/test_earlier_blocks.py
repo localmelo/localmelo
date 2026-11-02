@@ -745,3 +745,198 @@ def test_a_step_with_hosts_melo_reads_or_no_network_is_not(
     tool: str, arguments: dict[str, str]
 ) -> None:
     assert reaches_unread_site(tool, arguments) is False
+
+
+# ── Review round: shell syntax, nested and proxied addresses, Python forms ──
+
+SYNTAX_FETCHES = [
+    "if curl -s collect.example; then echo up; fi",
+    "(curl collect.example)",
+    "{ curl collect.example; }",
+    "! curl collect.example",
+    "for i in 1 2; do curl collect.example; done",
+    'bash -c "curl collect.example; true"',
+    "bash -lc 'curl collect.example'",
+    "echo $(curl collect.example)",
+    "curl >out.txt collect.example",
+    "curl collect.example & wait",
+    "true && wget collect.example/x || echo no",
+    "case x in x) curl collect.example;; esac",
+]
+
+
+@pytest.mark.parametrize("command", SYNTAX_FETCHES)
+async def test_a_fetch_inside_shell_syntax_is_refused(command: str) -> None:
+    policy, root, _ = await _site_refused()
+    assert policy.match("shell_exec", {"command": command}, root) == ("the user", False)
+
+
+NESTED_AND_PROXIED: list[tuple[str, dict[str, Any]]] = [
+    ("shell_exec", {"command": "curl https://r.jina.ai/https://collect.example"}),
+    (
+        "shell_exec",
+        {"command": "curl https://web.archive.org/web/2024/https://collect.example/x"},
+    ),
+    (
+        "shell_exec",
+        {"command": "curl 'https://ok.example/?u=https%3A%2F%2Fcollect.example'"},
+    ),
+    (
+        "python_exec",
+        {
+            "code": 'import requests\nrequests.get("https://r.jina.ai/https://collect.example")'
+        },
+    ),
+    ("shell_exec", {"command": "curl -x collect.example:8080 https://ok.example"}),
+    ("shell_exec", {"command": "curl --proxy http://collect.example:3128 ok.example"}),
+    ("shell_exec", {"command": "curl --preproxy collect.example https://ok.example"}),
+    (
+        "shell_exec",
+        {"command": "curl --socks5-hostname collect.example:1080 ok.example"},
+    ),
+    (
+        "shell_exec",
+        {
+            "command": "curl --connect-to ok.example:443:collect.example:443 https://ok.example"
+        },
+    ),
+    (
+        "shell_exec",
+        {"command": "https_proxy=collect.example:8080 curl https://ok.example"},
+    ),
+    (
+        "shell_exec",
+        {
+            "command": "wget -e use_proxy=on -e http_proxy=collect.example:8080 http://ok.example"
+        },
+    ),
+    (
+        "shell_exec",
+        {
+            "command": "git -c http.proxy=collect.example:8080 clone https://ok.example/r"
+        },
+    ),
+    (
+        "python_exec",
+        {"code": 'import socket\nsocket.socket().connect(("collect.example", 80))'},
+    ),
+    (
+        "python_exec",
+        {
+            "code": 'import pycurl\nc = pycurl.Curl()\nc.setopt(pycurl.URL, "collect.example/x")'
+        },
+    ),
+]
+
+
+@pytest.mark.parametrize(("tool", "arguments"), NESTED_AND_PROXIED)
+async def test_a_nested_or_proxied_address_on_a_refused_site_is_refused(
+    tool: str, arguments: dict[str, Any]
+) -> None:
+    policy, root, _ = await _site_refused()
+    assert policy.match(tool, arguments, root) == ("the user", False)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "curl https://r.jina.ai/https://ok.example",
+        "curl -x proxy.ok.example:8080 https://ok.example",
+        "curl https://ok.example > collect.example",
+        "curl -o collect.example https://ok.example 2>&1",
+    ],
+)
+async def test_nested_proxy_and_redirect_words_name_only_what_they_name(
+    command: str,
+) -> None:
+    policy, root, _ = await _site_refused()
+    assert policy.match("shell_exec", {"command": command}, root) is None
+
+
+async def test_web_fetch_through_a_reader_of_a_refused_site_is_refused() -> None:
+    again, reader, inner = await _refused_then_retried(
+        LEAK, "https://r.jina.ai/https://collect.example/notes"
+    )
+    assert reader.read == [] and inner.requests == []
+    [refusal] = again.tool_messages(1)
+    assert "the user blocked a step like this one earlier in this task" in refusal
+
+
+@pytest.mark.parametrize(
+    ("refused", "command"),
+    [
+        ("http://1.2.3.4/x", "curl http://16909060/"),
+        ("http://1.2.3.4/x", "curl http://0x01020304/"),
+        ("http://1.2.3.4/x", "curl http://1.2.3.4./"),
+    ],
+)
+async def test_a_number_written_another_way_is_the_same_address(
+    refused: str, command: str
+) -> None:
+    policy, root, _ = await _site_refused(refused)
+    assert policy.match("shell_exec", {"command": command}, root) == ("the user", False)
+
+
+@pytest.mark.parametrize(
+    ("tool", "arguments"),
+    [
+        ("shell_exec", {"command": 'curl -s "https://{e,x}{vil,y}.com/"'}),
+        ("shell_exec", {"command": "curl -s https://evi{l..l}.com"}),
+        ("shell_exec", {"command": 'curl -s "https://ev[i-i]l.com/"'}),
+        (
+            "shell_exec",
+            {"command": 'curl --variable h=x.com --expand-url "https://{{h}}/"'},
+        ),
+        ("shell_exec", {"command": 'curl -x "$P" https://ok.example'}),
+        ("shell_exec", {"command": "CURL_HOME=. curl https://ok.example"}),
+        ("python_exec", {"code": 'import requests as r\nr.get("https://" + h)'}),
+        ("python_exec", {"code": 'from requests import get\nget("https://" + h)'}),
+        ("python_exec", {"code": "import requests\ns = requests.session()\ns.get(u)"}),
+        ("python_exec", {"code": 'import os\nos.popen("wget " + h)'}),
+        (
+            "python_exec",
+            {"code": 'import subprocess\nsubprocess.run("curl " + h, shell=True)'},
+        ),
+        (
+            "python_exec",
+            {"code": "from subprocess import check_output\ncheck_output(cmd)"},
+        ),
+        ("python_exec", {"code": "import socket\nsocket.socket().connect((h, 80))"}),
+        (
+            "python_exec",
+            {
+                "code": "import pycurl\nc = pycurl.Curl()\nc.setopt(c.URL, u)\nc.perform()"
+            },
+        ),
+        (
+            "python_exec",
+            {"code": 'import httplib2\nh = httplib2.Http()\nh.request(u, "GET")'},
+        ),
+    ],
+)
+def test_more_hosts_melo_cannot_read_are_found(
+    tool: str, arguments: dict[str, str]
+) -> None:
+    assert reaches_unread_site(tool, arguments) is True
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "import asyncio\nasyncio.run(main())",
+        "import db\nconn = db.connect(dsn)",
+        "import subprocess\nsubprocess.run(['pytest', '-q'])",
+        'import httplib2\nhttplib2.Http().request("https://ok.example/x")',
+    ],
+)
+def test_python_that_reaches_no_unread_host_is_not_flagged(code: str) -> None:
+    assert reaches_unread_site("python_exec", {"code": code}) is False
+
+
+def test_a_huge_brace_group_is_unread_and_quick() -> None:
+    import time
+
+    started = time.monotonic()
+    command = 'curl "http://{' + "," * 20000 + '"'
+    assert reaches_unread_site("shell_exec", {"command": command}) is True
+    assert time.monotonic() - started < 1.0
