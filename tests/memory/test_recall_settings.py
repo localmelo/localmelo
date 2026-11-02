@@ -138,6 +138,7 @@ def test_the_defaults_are_the_numbers_recall_always_used() -> None:
         OPEN_CHARS,
         False,
         False,
+        False,
     )
     assert (cfg.recall_min_cosine, cfg.recall_min_coverage) == (0.55, 0.6)
     assert (MIN_COSINE, MIN_COVERAGE) == (0.55, 0.6)
@@ -153,6 +154,7 @@ def test_the_defaults_are_the_numbers_recall_always_used() -> None:
         cfg.compress_at_chars,
         cfg.compress_cache,
     ) == ("turns", "off", 12000, "")
+    assert cfg.excerpt_open == "off"
     assert TURN_CHARS == 234
 
 
