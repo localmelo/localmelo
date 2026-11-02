@@ -477,6 +477,10 @@ CHAT_TURN: contextvars.ContextVar[ChatTurn | None] = contextvars.ContextVar(
 _TASK_KINDS: Final = ("task", "front_bg")
 
 
+def _chunk_of(doc: Any) -> int:
+    return int(doc.chunk)
+
+
 def is_owner_question(info: object) -> bool:
     """Whether turn *info* is a turn the person did not begin, such as a task's
     question to its owner chat (``origin`` is ``ask_owner``): agent data, never
@@ -1554,15 +1558,20 @@ class ChatMemory:
         other words or another language (:meth:`_by_meaning`); with ``model``, the
         model's own conclusion from what the user typed is kept as ``inferred``. A
         page or file the user did not point to supports nothing, and one the user
-        called someone else's supports no note about the user. What a page, a file or
-        a result supports is what it states (:func:`note_gate.material_text`): its
-        hidden text and its paragraphs that order the assistant are left out.
+        called someone else's supports no note about the user. A page read in the
+        browser supports nothing either; the refusal says so
+        (:data:`note_gate.NOT_BROWSER`). What a page, a file or a result supports is
+        what it states (:func:`note_gate.material_text`): its hidden text and its
+        paragraphs that order the assistant are left out.
         """
         if note_gate.is_instruction(note):
             return note_gate.NOT_A_FACT
         if not records.unsupported(note, said):
             return Admission(note_gate.TYPED)
-        material = await self._pointed(turn)
+        everything = await self._pointed(turn)
+        # A page read in the browser supports no note; it only explains a refusal.
+        browsed = [m for m in everything if m.browser]
+        material = [m for m in everything if not m.browser]
         about = note_gate.about_user(note)
         usable = [m for m in material if not (about and m.other)]
         pages = [m.text for m in usable]
@@ -1574,9 +1583,13 @@ class ChatMemory:
         if not records.unsupported(note, evidence):
             return Admission(note_gate.RESULT)
         if about and len(usable) < len(material):
-            everything = said + [m.text for m in material] + results
-            if not records.unsupported(note, everything):
+            held = said + [m.text for m in material] + results
+            if not records.unsupported(note, held):
                 return note_gate.NOT_THEIRS
+        if browsed and not records.unsupported(
+            note, evidence + [m.text for m in browsed]
+        ):
+            return note_gate.NOT_BROWSER
         if note_gate.level_at_least(gate.level, "meaning"):
             judged = await self._by_meaning(note, said, usable, results, gate)
             if judged is not None:
@@ -1808,8 +1821,10 @@ class ChatMemory:
 
     async def _results(self, turn: ChatTurn) -> list[str]:
         """The finished tasks' results this chat has shown: those it recalled, as they
-        may support a note (:func:`note_gate.result_text`: an answer's hidden text and
-        orders to the assistant left out, what the user asked left as it was)."""
+        may support a note. A recalled result counts whole, all its chunks joined
+        (:func:`note_gate.joined_result`), then cleaned (:func:`note_gate.result_text`:
+        an answer's hidden text and orders to the assistant left out, what the user
+        asked left as it was)."""
         from localmelo.support.sessions.store import MEMORY_EVENT_TYPE
 
         ids = {int(item.key[2:]) for item in turn.memory.used if item.is_turn}
@@ -1828,8 +1843,21 @@ class ChatMemory:
                 break
             after = int(events[-1].id or 0)
         async with self._lock:
-            docs = await self.stores()[1].fetch(ids)
-        return [note_gate.result_text(d.text) for d in docs if d.kind in _TASK_KINDS]
+            index = self.stores()[1]
+            recalled = [d for d in await index.fetch(ids) if d.kind in _TASK_KINDS]
+            # A result comes back whole: a comment or an element that one chunk
+            # opens and a later one closes is one thing for the cleaner.
+            chunks: dict[tuple[str, int], list[Any]] = {}
+            for doc in await index.turn_documents(
+                (d.session_id, d.turn) for d in recalled
+            ):
+                chunks.setdefault((doc.session_id, doc.turn), []).append(doc)
+        return [
+            note_gate.result_text(
+                note_gate.joined_result([d.text for d in sorted(whole, key=_chunk_of)])
+            )
+            for whole in chunks.values()
+        ]
 
     def after_turn(
         self, store: SessionStore, info: TurnInfo, typed: str, answer: str

@@ -1,17 +1,27 @@
 """``extract``: a page as text, without what the page hides from people.
 
-The page reader drops only what no person sees: an element that is not drawn at all,
-and a piece of text whose size is tiny or whose colour is white with no background
-behind it, following the inline styles down the page. ``opacity: 0`` hides nothing
-there (a script fades such text in). The strict rule for a raw file
-(:func:`hidden_style`) is the one the note gate uses. Synthetic HTML only.
+The page reader drops only what no person sees: an element that is not drawn at all
+(by its own style or a simple rule of a style block), and a piece of text whose size
+is tiny, whose colour is clear, or whose colour is white with no background behind
+it, following the inline styles down the page. ``opacity: 0`` hides nothing there (a
+script fades such text in). The strict rule for a raw file (:func:`hidden_style`) is
+the one the note gate uses. Synthetic HTML only.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import pytest
 
-from localmelo.support.web.extract import extract, hidden_style, hides
+from localmelo.support.web.extract import (
+    extract,
+    hidden_style,
+    hides,
+    sheet_of,
+    style_blocks,
+)
+from localmelo.tests.linear import assert_linear
 from localmelo.tests.web.pages import PAGE
 
 BASE = "https://pages.test/"
@@ -307,6 +317,45 @@ def test_stray_end_tags_and_unclosed_elements_are_read_in_linear_time() -> None:
         ("display:none !IMPORTANT", True),
         ("/* display:none */ color: black", False),
         ("a;;b:;:c;display", False),
+        # Zero in any unit, with a sign or an exponent, is nothing.
+        ("font-size: 0vw", True),
+        ("font-size: 0vmin", True),
+        ("font-size: +0px", True),
+        ("font-size: -0", True),
+        ("font-size: 0e3px", True),
+        ("font-size: 1e-9px", True),
+        ("font-size: 1e3px", False),
+        ("font-size: -1px", False),
+        ("font: 0vw serif", True),
+        ("font-size: calc(0px)", False),
+        ("font-size: 1vw", False),
+        # A clear colour draws nothing; so does an opacity of 0 in any spelling.
+        ("color: transparent", True),
+        ("color: rgba(0, 0, 0, 0)", True),
+        ("color: rgba(0,0,0,0.0)", True),
+        ("color: rgb(0 0 0 / 0%)", True),
+        ("color: hsla(120, 50%, 50%, 0)", True),
+        ("color: #fff0", True),
+        ("color: #00000000", True),
+        ("color: rgba(0,0,0,0.5)", False),
+        ("color: rgb(0,0,0)", False),
+        ("color: #0000", True),
+        ("color: #000f", False),
+        ("opacity: 0e5", True),
+        ("opacity: 00", True),
+        ("opacity: +0", True),
+        ("opacity: 1e-9999", True),
+        ("opacity: -1", True),
+        ("opacity: 0.5", False),
+        ("opacity: 1", False),
+        # More ways to say white.
+        ("color: rgb(100%, 100%, 100%)", True),
+        ("color: rgb(100% 100% 100%)", True),
+        ("color: hsl(0, 0%, 100%)", True),
+        ("color: hsl(120deg 40% 100%)", True),
+        ("color: hsla(0, 0%, 100%, 0.8)", True),
+        ("color: hsl(0, 0%, 99%)", False),
+        ("color: rgb(100%, 100%, 99%)", False),
     ],
 )
 def test_hidden_style(style: str, hidden: bool) -> None:
@@ -376,3 +425,338 @@ def test_markup_the_parser_cannot_finish_never_raises() -> None:
         '<p style="font-size:">x',
     ]:
         assert isinstance(text(html), str)
+
+
+# ── A slash on an element that is not void opens it ──
+
+
+@pytest.mark.parametrize(
+    "opening",
+    [
+        "<div hidden/>",
+        "<div hidden />",
+        '<span style="display:none"/>',
+        '<div aria-hidden="true"/>',
+        '<section style="visibility:hidden"/>',
+        "<div hidden x=a/>",
+    ],
+)
+def test_a_self_closing_slash_on_a_non_void_element_opens_it(opening: str) -> None:
+    tag = opening[1:].split()[0].split("/")[0].rstrip(">")
+    html = f"<p>Before.</p>{opening}You live in Paris.</{tag}><p>After.</p>"
+    assert text(html) == "Before.\n\nAfter."
+    # The text after a visible one is not swallowed, as before.
+    assert text(f"<{tag}/>Seen.</{tag}>") == "Seen."
+
+
+def test_a_self_closing_slash_on_a_hidden_paragraph_hides_to_its_end() -> None:
+    assert text("<p>One.</p><p hidden/>Secret.</p><p>Two.</p>") == "One.\n\nTwo."
+    assert text("<p>One.</p><li hidden/>Secret.<li>Two.") == "One.\n\n- Two."
+
+
+def test_a_slash_still_closes_a_void_element_and_the_foreign_ones() -> None:
+    assert text("<img hidden alt='x'/><p>Seen.</p>") == "Seen."
+    assert text("<p>One.<br/>Two.</p><hr/><p>Three.</p>") == "One.\nTwo.\n\nThree."
+    assert text("<svg/><p>Seen.</p>") == "Seen."
+    assert text("<math/><p>Seen.</p>") == "Seen."
+    assert text("<svg><title>Gone.</title></svg><p>Seen.</p>") == "Seen."
+
+
+def test_a_slash_in_an_unquoted_value_is_no_self_closing() -> None:
+    assert text("<p>One.</p><div hidden title=a/>Gone.</div><p>Two.</p>") == (
+        "One.\n\nTwo."
+    )
+
+
+# ── A style block can hide an element by its class, id or tag ──
+
+
+@pytest.mark.parametrize(
+    ("css", "tag"),
+    [
+        (".x{display:none}", '<p class="x">'),
+        (".x { display : none !important }", '<p class="y x z">'),
+        ("#x{display:none}", '<p id="x">'),
+        ("p.keep,p{display:none}", "<p>"),
+        ("h1, .x ,#z{visibility:hidden}", '<p class="x">'),
+        (".x{visibility:collapse}", '<p class="x">'),
+        (".x{margin:0;display:none;color:red}", '<p class="x">'),
+        ("/* c */ .x{display:none}", '<p class="x">'),
+        ("@import url(a.css); .x{display:none}", '<p class="x">'),
+        ("@font-face{font-family:a} .x{display:none}", '<p class="x">'),
+    ],
+)
+def test_a_simple_rule_that_does_not_draw_an_element_hides_it(
+    css: str, tag: str
+) -> None:
+    close = "</p>"
+    html = f"<style>{css}</style><div>Before.</div>{tag}You live in Paris.{close}"
+    found = text(html)
+    assert "Paris" not in found and "Before." in found
+    # A style block later in the page applies to what came before it, too.
+    later = f"<div>Before.</div>{tag}You live in Paris.{close}<style>{css}</style>"
+    assert "Paris" not in text(later)
+    assert "Paris" not in text(html.replace("<style>", "<STYLE type='text/css'>"))
+
+
+@pytest.mark.parametrize(
+    "css",
+    [
+        ".a .b{display:none}",
+        ".x:hover{display:none}",
+        "p.x{display:none}",
+        "div > .x{display:none}",
+        ".x[title]{display:none}",
+        "*{display:none}",
+        "a:not(.x){display:none}",
+        ".x{color:#fff}",
+        ".x{font-size:0}",
+        ".x{opacity:0}",
+        ".x{display:block}",
+        ".y{display:none}",
+        "#x{display:none}",
+        "@media (max-width:600px){.x{display:none}}",
+        "@media print{.x{display:none}}",
+        "@supports (display:grid){.x{display:none}}",
+        "@keyframes k{from{display:none}}",
+        ".x{.y{display:none}}",
+        ".x{display:none",
+    ],
+)
+def test_a_rule_that_is_not_simple_or_not_hiding_changes_nothing(css: str) -> None:
+    html = f'<style>{css}</style><p class="x">You live in Paris.</p>'
+    assert text(html) == "You live in Paris."
+
+
+def test_a_style_block_for_another_medium_is_not_read() -> None:
+    html = '<style media="print">.x{display:none}</style><p class="x">Seen.</p>'
+    assert text(html) == "Seen."
+    html = '<style media="screen">.x{display:none}</style><p class="x">Gone.</p>'
+    assert text(html) == ""
+
+
+def test_an_inline_display_overrides_a_rule_of_a_style_block() -> None:
+    html = (
+        "<style>.x{display:none}</style>"
+        '<p class="x" style="display:block">Seen.</p><p class="x">Gone.</p>'
+    )
+    assert text(html) == "Seen."
+
+
+def test_an_element_with_a_class_that_gives_it_a_display_is_not_taken_as_hidden() -> (
+    None
+):
+    html = (
+        "<style>.d-none{display:none!important}"
+        "@media (min-width:768px){.d-md-block{display:block!important}}"
+        ".d-lg-block{display:block}</style>"
+        '<p class="d-none d-md-block">Seen on a wide screen.</p>'
+        '<p class="d-none">Gone.</p>'
+    )
+    assert text(html) == "Seen on a wide screen."
+
+
+def test_style_blocks_are_found_without_a_parser() -> None:
+    html = (
+        "<STYLE>.a{x:y}</STYLE>text<style\nmedia=print>.p{}</style>"
+        "<style/>.s{}</style><style>.never{"
+    )
+    assert style_blocks(html) == [".a{x:y}", ".s{}", ".never{"]
+    assert style_blocks(html, screen_only=False) == [
+        ".a{x:y}",
+        ".p{}",
+        ".s{}",
+        ".never{",
+    ]
+    assert style_blocks("<styled>x</styled> <p>") == []
+
+
+def test_a_sheet_of_the_strict_reading_takes_every_flagged_rule() -> None:
+    css = ".w{color:#fff} #t{color:transparent} @media print{.m{display:none}} q{opacity:0}"
+    strict = sheet_of([css], strict=True)
+    assert strict.classes == {"w", "m"} and strict.ids == {"t"} and strict.tags == {"q"}
+    lenient = sheet_of([css], strict=False)
+    assert not (lenient.classes or lenient.ids or lenient.tags)
+    assert strict.hides("p", {"class": "a w"})
+    assert strict.hides("q", {})
+    assert not strict.hides("p", {"class": "a"})
+
+
+# ── A colour that is clear, and a size that is nothing ──
+
+
+@pytest.mark.parametrize(
+    "colour",
+    [
+        "transparent",
+        "rgba(0,0,0,0)",
+        "rgba(255, 255, 255, 0)",
+        "rgb(0 0 0 / 0%)",
+        "hsla(0, 0%, 0%, 0)",
+        "#0000",
+        "#ffffff00",
+    ],
+)
+def test_text_with_a_clear_colour_is_not_extracted(colour: str) -> None:
+    html = f'<p>Before.</p><span style="color:{colour}">Gone.</span><p>After.</p>'
+    assert text(html) == "Before.\n\nAfter."
+    on_dark = f'<div style="background:#111"><b style="color:{colour}">Gone.</b></div>'
+    assert text(on_dark) == ""
+    font = f'<p>Before.</p><font color="{colour}">Gone.</font><p>After.</p>'
+    assert text(font) == "Before.\n\nAfter."
+
+
+def test_text_with_a_clear_colour_over_a_clipped_background_is_the_background() -> None:
+    html = (
+        '<h1 style="color:transparent;background:linear-gradient(red,blue);'
+        '-webkit-background-clip:text">Seen.</h1>'
+    )
+    assert text(html) == "# Seen."
+
+
+@pytest.mark.parametrize(
+    "background",
+    [
+        "rgba(0,0,0,0)",
+        "rgba(0, 0, 0, 0)",
+        "#fff0",
+        "#ffffff00",
+        "transparent",
+        "hsla(0, 0%, 0%, 0)",
+        "rgb(0 0 0 / 0)",
+        "none",
+    ],
+)
+def test_a_clear_background_is_no_background(background: str) -> None:
+    html = f'<div style="color:#fff;background:{background}">Gone.</div>'
+    assert text(html) == ""
+    html = f'<div style="background-color:{background};color:#fff">Gone.</div>'
+    assert text(html) == ""
+    dark = f'<div style="background:#111"><p style="background:{background};color:#fff">Seen.</p></div>'
+    assert text(dark) == "Seen."
+
+
+@pytest.mark.parametrize(
+    "white",
+    [
+        "hsl(0, 0%, 100%)",
+        "hsl(240 100% 100%)",
+        "hsla(0, 0%, 100%, 1)",
+        "rgb(100%, 100%, 100%)",
+        "rgb(100% 100% 100%)",
+    ],
+)
+def test_more_spellings_of_white_are_white(white: str) -> None:
+    assert text(f'<p style="color:{white}">Gone.</p><p>Seen.</p>') == "Seen."
+    on_dark = f'<div style="background:#000"><p style="color:{white}">Seen.</p></div>'
+    assert text(on_dark) == "Seen."
+    over_white = f'<p style="color:{white};background:{white}">Gone.</p>'
+    assert text(over_white) == ""
+
+
+@pytest.mark.parametrize(
+    "size", ["0vw", "0vmin", "+0px", "-0", "0e3px", "1e-9px", "0.0001em", "0%"]
+)
+def test_a_size_that_is_nothing_hides_the_text(size: str) -> None:
+    html = f'<p>Before.</p><span style="font-size:{size}">Gone.</span><p>After.</p>'
+    assert text(html) == "Before.\n\nAfter."
+    child = (
+        f'<div style="font-size:{size}"><span style="font-size:16px">Seen.</span></div>'
+    )
+    assert text(child) == "Seen."
+
+
+@pytest.mark.parametrize(
+    "size", ["calc(0px)", "1vw", "-1px", "1e3px", "larger", "x-small"]
+)
+def test_a_size_it_cannot_read_is_a_visible_one(size: str) -> None:
+    assert text(f'<span style="font-size:{size}">Seen.</span>') == "Seen."
+
+
+def test_a_background_image_or_gradient_still_counts_as_a_dark_background() -> None:
+    for background in (
+        "url(hero.jpg) center",
+        "linear-gradient(#fff, #fff)",
+        "image-set(url(a.png) 1x)",
+    ):
+        html = f'<section style="background:{background}"><h1 style="color:#fff">Seen.</h1></section>'
+        assert text(html) == "# Seen."
+
+
+# ── Time: every parse is linear ──
+
+
+def _page(shape: str) -> Callable[[int], str]:
+    def make(size: int) -> str:
+        unit = {
+            "digits": '<p style="font-size:' + "1" * size + '!">t</p>',
+            "spaces": '<p style="color: a' + " " * size + 'b">t</p>',
+            "important": '<p style="a:b' + " " * size + '!x">t</p>',
+            "bangs": '<p style="a:b' + "!" * size + '">t</p>',
+            "zeros": '<p style="font-size:' + "0" * size + 'x">t</p>',
+            "rgb": '<p style="color:rgb(255' + " " * size + '">t</p>',
+            "hsl": '<p style="color:hsl(0' + ", 0" * (size // 3) + '">t</p>',
+            "eq": "<p a" + "=b" * (size // 2) + ">t</p>",
+            "long_name": "<p " + "a" * size + ">t</p>",
+        }
+        if shape in unit:
+            return unit[shape]
+        repeat = {
+            "auto": ("<p hidden>" + "<b>" * (size // 6) + "<i></i>" * (size // 14)),
+            "stray": "<div hidden>" + "<i>" * (size // 6) + "</b>" * (size // 8),
+            "slash": "<div hidden/>x" * (size // 14),
+            "slash_p": "<p hidden/>x" * (size // 12),
+            "styles": "<style>.a{display:none}</style>x" * (size // 33),
+            "unclosed_styles": "<style>x" * (size // 8),
+            "braces": "<style>" + "{" * size + "</style>",
+            "closing": "<style>" + "}" * size + "</style>",
+            "rules": "<style>" + ".a{x:y}" * (size // 7) + "</style>",
+            "selectors": "<style>" + "a," * (size // 2) + "{display:none}</style>",
+            "at_rules": "<style>" + "@media x{.a{b:c}}" * (size // 17) + "</style>",
+            "white": '<div style="color:#fff">' * (size // 24),
+            "tags": "<a <a <a " * (size // 9),
+            "quote": '<a x="' + "b <c " * (size // 5),
+        }
+        return repeat[shape]
+
+    return make
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [
+        "digits",
+        "spaces",
+        "important",
+        "bangs",
+        "zeros",
+        "rgb",
+        "hsl",
+        "eq",
+        "long_name",
+        "auto",
+        "stray",
+        "slash",
+        "slash_p",
+        "styles",
+        "unclosed_styles",
+        "braces",
+        "closing",
+        "rules",
+        "selectors",
+        "at_rules",
+        "white",
+        "tags",
+        "quote",
+    ],
+)
+def test_extract_takes_time_linear_in_the_page(shape: str) -> None:
+    assert_linear(_page(shape), lambda html: extract(html, BASE))
+
+
+@pytest.mark.parametrize("shape", ["digits", "spaces", "important", "zeros", "rgb"])
+def test_a_style_is_read_in_time_linear_in_its_length(shape: str) -> None:
+    def make(size: int) -> str:
+        return _page(shape)(size).split('"')[1]
+
+    assert_linear(make, hidden_style)

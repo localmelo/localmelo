@@ -875,24 +875,50 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   the assistant (#442). A résumé whose hidden white-on-white line told the assistant to save a
   false fact about you was counted as your material, so a note with that fact was kept as
   `pointed`. Now a page, a file and an answer in a finished task's result are first cleaned:
-  HTML and Markdown comments, elements hidden by `hidden`, `aria-hidden="true"` or a style
-  (`display: none`, `visibility: hidden`, a font of 0 to 2 pixels, `opacity: 0`, white text),
-  and zero-width and other invisible characters are left out; so is every paragraph (a line of
-  only `>` marks ends one in a quoted block) with an order to the assistant in it, such as "save
-  a note that …", "update your memory" or "ignore previous instructions", because the facts the
-  order wants kept follow it as plain statements. The note is then refused with the usual "no
-  source supports it". This holds for a finished task's result at `typed` as well. What you
-  typed is never cleaned. A page or file with none of that, in any language, is read exactly as
-  before. A sentence that starts with a verb such as "Use" or "Open" counts as an order and
-  takes its paragraph with it, so a résumé paragraph written that way may support nothing.
-  So does a sentence that opens by naming the assistant it speaks to ("AI assistant: …", "Any AI
-  agent, …", "To the model: …"); an ordinary noun such as "The model, trained on …" does not.
-  In a raw file or body the gate reads, white text and `opacity: 0` count as hidden whatever
-  the background. A page that `web_fetch` reads now also drops a hidden `<p>` or `<li>`, text in
-  a font of 2 pixels or less, and white text with no coloured background behind it, where it
-  kept them before. It follows the inline styles down the page, so what a person sees stays:
-  white text on a dark background, text a script fades in from `opacity: 0`, and a child that
-  sets its own size under a `font-size: 0` parent. A page with none of these reads as before.
+  HTML and Markdown comments; elements hidden by `hidden`, `aria-hidden="true"`, a style
+  (`display: none`, `visibility: hidden`, a font of 0 to 2 pixels of any unit, `opacity: 0`,
+  white or clear text) or a simple rule of a `<style>` block (`.class`, `#id` or a tag name,
+  alone or in a comma list); every other tag, with its attributes (`title`, `alt`, `data-*`,
+  `value`, `aria-label`), since only text nodes are text; and zero-width and other invisible
+  characters. A Markdown autolink (`<https://example.com>`, `<user@example.com>`) and a plain
+  `a < b` are no tags and stay. Then every paragraph (a line of only `>` marks ends one in a
+  quoted block) with an order to the assistant in it, such as "save a note that …", "update
+  your memory" or "ignore previous instructions", is dropped, because the facts the order wants
+  kept follow it as plain statements. The note is then refused with the usual "no source
+  supports it". What you typed is never cleaned. A page or file with none of that, in any
+  language, is read exactly as before.
+- The scan reads markup as a browser does: a `/>` on an element that is not void or foreign
+  (`<div hidden/>`) opens it; the text of `textarea`, `title`, `xmp`, `noscript`, `iframe`,
+  `noembed`, `noframes`, `script` and `style` holds no tags and `plaintext` runs to the end; a
+  `<!…>` or `<?…>` that is no comment ends at the first `>`; an unquoted attribute value runs to
+  white space or `>`; a comment, tag or element never closed hides the rest of the text.
+- A sentence that starts with a verb such as "Use" or "Open" counts as an order and takes its
+  paragraph with it in a page or a file, so a résumé paragraph written that way may support
+  nothing. In a finished task's result, which is a model's answer, a bare imperative ("Check in
+  24 hours before. Your flight is UA123 on May 4.") is no order and the paragraph stays, so the
+  default level keeps notes grounded in results; "save a note that …", "remember that …",
+  "ignore previous instructions", a sentence that opens by naming the assistant it speaks to
+  ("AI assistant: …", "To the model: …") and `SYSTEM:`-style lines still drop it.
+- A page read in the browser supports no note at any level above `typed`, and the refusal says
+  so: the browser's text holds labels and hidden controls a reader does not see (`browser_open`,
+  `browser_read`, `browser_follow`, `browser_back`). A page fetched with `web_fetch` does.
+- The parts of one page or file read one after the other (`web_fetch` `part`, `file_read`
+  start and end lines) are cleaned as one text, and so are the chunks of a recalled result; a
+  later part read without the one before it drops its text up to a stray `-->` or end tag, so a
+  comment or hidden element split across a boundary hides what follows it.
+- In a raw file or body the gate reads, white text (also `hsl(…, 100%)` and
+  `rgb(100%,100%,100%)`), clear text (`transparent`, an alpha of 0, `#fff0`) and `opacity: 0`
+  count as hidden whatever the background, and a clear background is no background. A page that
+  `web_fetch` reads now also drops a hidden `<p>` or `<li>`, an element that a `<style>` rule
+  with `display: none` or `visibility: hidden` hides, text in a font of 2 pixels or less (any
+  unit, a sign or an exponent), clear text, and white text with no coloured background behind
+  it, where it kept them before. It follows the inline styles down the page, so what a person
+  sees stays: white text on a dark background (a background image or gradient counts as dark),
+  text a script fades in from `opacity: 0`, and a child that sets its own size under a
+  `font-size: 0` parent. A page with none of these reads as before.
+- The cleaning takes time linear in the text: a megabyte of it is read in under a second
+  whatever its shape (long style values, many comments or hidden elements, deep nesting,
+  unclosed tags). A style value is read to its first 2,000 characters.
 - A short follow-up such as "go look it up", "continue" or "去查一下" recalls from what
   you said just before, not from its own words (#452). Searched by those words alone, it
   matched whatever held them (turns about who you are, say) and put them in the prompt.

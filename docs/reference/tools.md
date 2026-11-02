@@ -106,10 +106,14 @@ call itself asks nothing; each site passes the site gate below first.
 - **HTML.** The title, headings (`# …`), the main text (only `<main>` or `<article>` when it
   holds enough text), list items, table cells joined with ` | `, and up to 40 links. Scripts,
   styles and text a reader could not see are left out: an element with `hidden`,
-  `aria-hidden` or an inline `display: none` or `visibility: hidden`, text in a font of 2 px
-  or less, and white text with no coloured background behind it. What a person sees stays:
-  white text on a dark background, text a script fades in from `opacity: 0`, and a child that
-  sets its own size under a parent whose font size is 0. `text/*`,
+  `aria-hidden`, an inline `display: none` or `visibility: hidden`, or one that a rule of the
+  page's `<style>` block with one of those (`.class`, `#id` or a tag name, alone or in a comma
+  list) hides; text in a font of 2 px or less (zero in any unit counts); clear text
+  (`transparent`, an alpha of 0); and white text with no coloured background behind it. A
+  `/>` on an element that is not void opens it, as in a browser. What a person sees stays:
+  white text on a dark background (a background image or gradient counts as dark), text a
+  script fades in from `opacity: 0`, and a child that sets its own size under a parent whose
+  font size is 0. `text/*`,
   JSON and XML come back as they are; PDFs, images and other files are refused with their type.
 - **Server text.** Nothing a server writes in its status line or headers reaches the model: an
   error says the status code only, and a media type or an encoding is named only when it is a

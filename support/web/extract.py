@@ -7,14 +7,19 @@ sees:
 
 * an element the page does not draw, with everything in it: the ``hidden``
   attribute, ``aria-hidden="true"``, ``display: none``, ``visibility: hidden`` or
-  ``collapse`` (also an element a browser closes by itself, such as ``<p hidden>``);
-* a piece of text whose font size is tiny (2 px or less) or whose colour is white
-  with no coloured background behind it, following the inline styles down the page
-  (the nearest font size, colour and background set on an open element win, so a
-  child that resets a size or sits on a dark background shows its own text).
+  ``collapse`` (also an element a browser closes by itself, such as ``<p hidden>``),
+  by its own style or by a simple rule of a ``<style>`` block (``.class``, ``#id`` or
+  ``tag``);
+* a piece of text whose font size is tiny (2 px or less), whose colour is clear
+  (``transparent``, an alpha of 0), or whose colour is white with no coloured
+  background behind it, following the inline styles down the page (the nearest font
+  size, colour and background set on an open element win, so a child that resets a
+  size or sits on a dark background shows its own text). A background image or
+  gradient counts as a dark background, since white text over a photo is a common
+  design; the note gate's order filter still applies to that text.
 
 ``opacity: 0`` hides nothing here (a script usually fades such text in), and a
-background or colour that comes from a style sheet is not seen. The stricter rule
+colour or background that comes from a style sheet is not seen. The stricter rule
 for a raw file the note gate reads is :func:`hidden_style` and :func:`hides`.
 When the page marks its main part (``<main>``, ``role="main"`` or
 ``<article>``) with enough text in it, only that part is kept, so menus and
@@ -26,7 +31,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import NamedTuple
@@ -133,6 +138,9 @@ LINE = frozenset(
         "tr",
     }
 )
+# The elements whose ``/>`` closes them (foreign content); on any other a ``/>`` is
+# ignored, as in a browser.
+FOREIGN = frozenset({"svg", "math"})
 HEADINGS = {"h1": 1, "h2": 2, "h3": 3, "h4": 4, "h5": 5, "h6": 6}
 # The start tags that end an open element of an auto-closed kind besides one of its
 # own name: a block opens, so the paragraph before it is over.
@@ -150,15 +158,21 @@ _ENDED_BY = {
 # uses it, and text it takes for hidden costs at most a note. The page reader
 # (:class:`_Reader`) is what the model reads a page by, so it drops only what no
 # person sees: it leaves out an element that is not drawn at all (``hidden``,
-# ``aria-hidden="true"``, ``display: none``, ``visibility: hidden`` or ``collapse``),
-# and it follows how font size, text colour and background cascade through the
-# inline styles, dropping a piece of text whose size is tiny or whose colour is
-# white with no opaque background behind it. ``opacity: 0`` hides nothing there: a
-# script fades such text in.
+# ``aria-hidden="true"``, ``display: none``, ``visibility: hidden`` or ``collapse``,
+# also by a simple rule of a ``<style>`` block), and it follows how font size, text
+# colour and background cascade through the inline styles, dropping a piece of text
+# whose size is tiny, whose colour is clear, or whose colour is white with no coloured
+# background behind it. ``opacity: 0`` hides nothing there: a script fades such text in.
+#
+# Every parse here is bounded: a style value is read to its first
+# :data:`MAX_VALUE_CHARS` characters, and no pattern backtracks over a run.
 
 _CSS_COMMENT = re.compile(r"/\*.*?(?:\*/|\Z)", re.DOTALL)
-# Font sizes in pixels per unit; with no unit only 0 is a size. A relative unit
-# (``em``, ``%``, ``ex``, ``ch``) is a share of the size around it, 16 px at the top.
+# The longest style value that is read, in characters; the rest is ignored.
+MAX_VALUE_CHARS = 2_000
+# Font sizes in pixels per unit; a number with no unit is a size only when it is 0. A
+# relative unit (``em``, ``%``, ``ex``, ``ch``) is a share of the size around it, 16 px
+# at the top. Zero is nothing in any unit, a viewport unit included.
 _PIXELS = {
     "px": 1.0,
     "pt": 4 / 3,
@@ -174,31 +188,40 @@ _PIXELS = {
     "in": 96.0,
 }
 _RELATIVE = frozenset({"em", "%", "ex", "ch"})
-_SIZE = re.compile(r"(\d+\.?\d*|\.\d+)\s*([a-z%]*)")
+# A number, with an optional sign and exponent, and its unit. ``\d+(?:\.\d*)?`` cannot
+# split a run of digits two ways, so a long run is read in one pass.
+_NUMBER = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?"
+_SIZE = re.compile(rf"({_NUMBER})\s*([a-z%]*)")
+_OPACITY = re.compile(rf"{_NUMBER}%?")
+# Colours are read after their white space is folded to single spaces.
+_FULL = r"(?:255|100%)"
 _WHITE = re.compile(
     r"white|#f{3}|#f{4}|#f{6}|#f{8}"
-    r"|rgba?\(\s*255\s*[,\s]\s*255\s*[,\s]\s*255\s*(?:[,/][^)]*)?\)"
+    rf"|rgba?\( ?{_FULL} ?[, ] ?{_FULL} ?[, ] ?{_FULL} ?(?:[,/][^)]*)?\)"
+    r"|hsla?\( ?[^,) ]+ ?[, ] ?[^,) ]+ ?[, ] ?100% ?(?:[,/][^)]*)?\)"
 )
+_COLOUR_FUNCTION = re.compile(r"(?:rgb|hsl)a?\( ?([^)]*)\)")
+_ALPHA_ZERO = re.compile(r"\+?(?:0+(?:\.0*)?|\.0+)%?")
+_SHORT_HEX = re.compile(r"#[0-9a-f]{3}0|#[0-9a-f]{6}00")
 # The largest font size, in pixels, that counts as hidden, and the usual one.
 TINY_PIXELS = 2.0
 _NORMAL_PIXELS = 16.0
 _INHERITED = frozenset({"inherit", "unset", "currentcolor"})
 # What a background property says when it puts nothing behind the text.
-_NO_BACKGROUND = frozenset(
-    {"", "none", "transparent", "inherit", "initial", "unset", "currentcolor"}
-)
+_NO_BACKGROUND = frozenset({"", "none", "inherit", "initial", "unset", "currentcolor"})
 
 
 def _size_px(value: str, base: float) -> float | None:
     """A font size in pixels, a relative unit taken against *base*; ``None`` when
-    *value* is no size this reads (a keyword, ``calc()``, a viewport unit)."""
+    *value* is no size this reads (a keyword, ``calc()``, a viewport unit, a negative
+    number a browser ignores)."""
     found = _SIZE.fullmatch(value)
     if not found:
         return None
     number, unit = float(found.group(1)), found.group(2)
-    if not unit:
-        return 0.0 if number == 0 else None
-    if unit not in _PIXELS:
+    if number == 0:
+        return 0.0
+    if not unit or unit not in _PIXELS or number < 0:
         return None
     return number * _PIXELS[unit] * (base / _NORMAL_PIXELS if unit in _RELATIVE else 1)
 
@@ -208,8 +231,30 @@ def _tiny(value: str) -> bool:
     return size is not None and size <= TINY_PIXELS
 
 
+def _folded(value: str) -> str:
+    return " ".join(value.lower().split())[:MAX_VALUE_CHARS]
+
+
 def _is_white(value: str) -> bool:
-    return _WHITE.fullmatch(" ".join(value.lower().split())) is not None
+    return _WHITE.fullmatch(_folded(value)) is not None
+
+
+def _is_clear(value: str) -> bool:
+    """Whether a colour *value* is ``transparent`` or has an alpha of 0 (``rgba(0, 0,
+    0, 0)``, ``rgb(0 0 0 / 0%)``, ``#fff0``, ``#ffffff00``): it draws nothing."""
+    folded = _folded(value)
+    if folded == "transparent" or _SHORT_HEX.fullmatch(folded):
+        return True
+    found = _COLOUR_FUNCTION.fullmatch(folded)
+    if found is None:
+        return False
+    body = found.group(1)
+    if "/" in body:
+        alpha = body.rsplit("/", 1)[1].strip()
+    else:
+        parts = [part for part in re.split(r"[, ]+", body.strip()) if part]
+        alpha = parts[3] if len(parts) == 4 else ""
+    return _ALPHA_ZERO.fullmatch(alpha) is not None
 
 
 def _font_size_of(value: str) -> str | None:
@@ -222,9 +267,18 @@ def _font_size_of(value: str) -> str | None:
     return None
 
 
+def _unimportant(value: str) -> str:
+    """*value* without a trailing ``!important`` (in any spacing)."""
+    bang = value.rfind("!")
+    if bang >= 0 and value[bang + 1 :].strip() == "important":
+        return value[:bang].rstrip()
+    return value
+
+
 def _declarations(style: str) -> list[tuple[str, str]]:
     """The ``(property, value)`` pairs of an inline *style* in order, both in lower
-    case, the value without ``!important``; CSS comments are dropped."""
+    case, the value without ``!important`` and read to its first
+    :data:`MAX_VALUE_CHARS` characters; CSS comments are dropped."""
     if not style:
         return []
     pairs = []
@@ -233,101 +287,294 @@ def _declarations(style: str) -> list[tuple[str, str]]:
         pairs.append(
             (
                 name.strip().lower(),
-                re.sub(r"\s*!\s*important\s*$", "", value.strip().lower()),
+                _unimportant(value.strip().lower())[:MAX_VALUE_CHARS],
             )
         )
     return pairs
+
+
+def _hides_text(name: str, value: str) -> bool:
+    """Whether one style declaration keeps the text of its element from being drawn,
+    by the strict rule."""
+    if name == "display":
+        return value == "none"
+    if name == "visibility":
+        return value in ("hidden", "collapse")
+    if name == "opacity":
+        found = _OPACITY.fullmatch(value)
+        return found is not None and float(value.rstrip("%")) <= 0
+    if name == "font-size":
+        return _tiny(value)
+    if name == "font":
+        size = _font_size_of(value)
+        return size is not None and _tiny(size)
+    if name == "color":
+        return _is_white(value) or _is_clear(value)
+    return False
 
 
 def hidden_style(style: str) -> bool:
     """Whether the inline *style* (an attribute value, character references already
     decoded) keeps the text of its element from being drawn, as a raw file's markup
     says it: ``display: none``, ``visibility: hidden`` or ``collapse``, a font of 0
-    to :data:`TINY_PIXELS` pixels (also in a ``font`` shorthand), ``opacity: 0``, or
-    a text colour of white (``white``, ``#fff``, ``#ffffff``, ``rgb(255, 255,
-    255)``). Names and values are read in any case and spacing, with ``!important``
-    and CSS comments. This is the strict rule: it knows nothing of a dark background
-    behind white text or of a child that sets its own size, which the page reader
-    follows."""
-    for name, value in _declarations(style):
-        if (
-            (name == "display" and value == "none")
-            or (name == "visibility" and value in ("hidden", "collapse"))
-            or (
-                name == "opacity"
-                and re.fullmatch(r"(?:0+\.?0*|\.0+)%?", value) is not None
-            )
-            or (name == "font-size" and _tiny(value))
-            or (name == "color" and _is_white(value))
+    to :data:`TINY_PIXELS` pixels (also in a ``font`` shorthand, and a zero of any
+    unit, sign or exponent), ``opacity: 0``, or a text colour of white (``white``,
+    ``#fff``, ``#ffffff``, ``rgb(255, 255, 255)``, ``rgb(100%, 100%, 100%)``,
+    ``hsl(0, 0%, 100%)``) or clear (``transparent``, an alpha of 0). Names and values
+    are read in any case and spacing, with ``!important`` and CSS comments, and a
+    value to its first :data:`MAX_VALUE_CHARS` characters. This is the strict rule: it
+    knows nothing of a dark background behind white text or of a child that sets its
+    own size, which the page reader follows."""
+    return any(_hides_text(name, value) for name, value in _declarations(style))
+
+
+def _drawn_never(name: str, value: str) -> bool:
+    """Whether one style declaration leaves its element out of the page altogether."""
+    return (name == "display" and value == "none") or (
+        name == "visibility" and value in ("hidden", "collapse")
+    )
+
+
+# ── Rules of a style sheet that hide an element ──
+#
+# A ``<style>`` block can hide an element by its class, id or tag. Only simple
+# selectors are read: ``.class``, ``#id``, ``tag`` and comma lists of them; anything
+# else (``.a .b``, ``a:hover``, ``p.x``) changes nothing.
+
+_SIMPLE_SELECTOR = re.compile(r"([.#]?)(-?[_A-Za-z][\w-]*)")
+_BRACES = re.compile(r"[{}]")
+# The at-rules whose rules apply under a condition: read by the strict rule only.
+_CONDITIONAL = frozenset({"media", "supports", "layer", "container", "document"})
+_STYLE_OPEN = re.compile(r"<style(?=[\s/>])", re.IGNORECASE)
+_STYLE_CLOSE = re.compile(r"</style(?=[\s/>])", re.IGNORECASE)
+_MEDIA = re.compile(
+    r"""\bmedia\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", re.IGNORECASE
+)
+
+
+class Sheet(NamedTuple):
+    """The elements a style sheet hides: by class, by id and by tag name. *shown*
+    holds the classes, ids and tags a rule gives some other display, so an element
+    that also carries one of them (``d-none d-md-block``) is not taken as hidden by
+    the page reader."""
+
+    classes: frozenset[str] = frozenset()
+    ids: frozenset[str] = frozenset()
+    tags: frozenset[str] = frozenset()
+    shown: frozenset[str] = frozenset()
+
+    def hides(self, tag: str, attrs: Mapping[str, str | None]) -> bool:
+        """Whether a rule of the sheet hides an element of this *tag* and these
+        attributes (names in lower case, values decoded)."""
+        if not (self.classes or self.ids or self.tags):
+            return False
+        names = (attrs.get("class") or "").split()
+        ident = (attrs.get("id") or "").strip()
+        if not (
+            tag in self.tags
+            or ident in self.ids
+            or any(name in self.classes for name in names)
         ):
-            return True
-        if name == "font":
-            size = _font_size_of(value)
-            if size is not None and _tiny(size):
-                return True
-    return False
+            return False
+        return not (
+            tag in self.shown
+            or ident in self.shown
+            or any(name in self.shown for name in names)
+        )
 
 
-def hides(tag: str, attrs: Mapping[str, str | None]) -> bool:
+def _rules(css: str) -> list[tuple[str, str, bool]]:
+    """The rules of a style sheet as ``(selector, declarations, conditional)``, the
+    last true for a rule inside ``@media`` and the like. Rules inside any other
+    at-rule (``@font-face``, ``@keyframes``) and nested rules are not read."""
+    css = _CSS_COMMENT.sub("", css)
+    rules: list[tuple[str, str, bool]] = []
+    stack: list[str] = []  # "group", "skip" or "rule": what each open brace opens
+    starts: list[int] = []
+    prelude = 0
+    for found in _BRACES.finditer(css):
+        if found.group() == "{":
+            head = css[prelude : found.start()].rsplit(";", 1)[-1].strip()
+            if "rule" in stack or "skip" in stack:
+                stack.append("skip")
+            elif head.startswith("@"):
+                word = re.match(r"@([A-Za-z-]+)", head)
+                kind = (
+                    "group"
+                    if word and word.group(1).lower() in _CONDITIONAL
+                    else "skip"
+                )
+                stack.append(kind)
+            else:
+                stack.append("rule")
+                starts.append(found.end())
+                rules.append((head, "", "group" in stack))
+        elif stack:
+            if stack.pop() == "rule":
+                selector, _, conditional = rules[-1]
+                rules[-1] = (selector, css[starts.pop() : found.start()], conditional)
+        prelude = found.end()
+    # A rule never closed has no declarations.
+    return [(s, d, c) for s, d, c in rules if d and "{" not in d]
+
+
+def sheet_of(css: Iterable[str], *, strict: bool) -> Sheet:
+    """The :class:`Sheet` of some style blocks' text. The strict reading (a raw file,
+    by the note gate) takes every rule :func:`hidden_style` flags, the ones under
+    ``@media`` too; the page reader takes only ``display: none`` and ``visibility:
+    hidden`` or ``collapse`` in a rule outside any at-rule."""
+    classes: set[str] = set()
+    ids: set[str] = set()
+    tags: set[str] = set()
+    shown: set[str] = set()
+    for block in css:
+        for selector, body, conditional in _rules(block):
+            pairs = _declarations(body)
+            if strict:
+                hiding = any(_hides_text(name, value) for name, value in pairs)
+            else:
+                hiding = not conditional and any(
+                    _drawn_never(name, value) for name, value in pairs
+                )
+            display = any(
+                (name == "display" and value != "none")
+                or (name == "visibility" and value == "visible")
+                for name, value in pairs
+            )
+            for item in selector.split(","):
+                found = _SIMPLE_SELECTOR.fullmatch(item.strip())
+                if found is None:
+                    continue
+                kind, word = found.groups()
+                word = word if kind else word.lower()
+                target = classes if kind == "." else ids if kind == "#" else tags
+                if hiding:
+                    target.add(word)
+                if display and not strict:
+                    shown.add(word)
+    return Sheet(frozenset(classes), frozenset(ids), frozenset(tags), frozenset(shown))
+
+
+def style_blocks(html: str, *, screen_only: bool = True) -> list[str]:
+    """The text of each ``<style>`` block of *html* in order (one never closed runs to
+    the end), the ones for the screen only unless *screen_only* is off: a block with
+    a ``media`` that names neither ``screen`` nor ``all`` is for another medium. A
+    scan for the block's tags, not a parser."""
+    blocks: list[str] = []
+    at = 0
+    while True:
+        opening = _STYLE_OPEN.search(html, at)
+        if opening is None:
+            return blocks
+        end = html.find(">", opening.end())
+        if end < 0:
+            return blocks
+        closing = _STYLE_CLOSE.search(html, end + 1)
+        stop = closing.start() if closing else len(html)
+        media = _MEDIA.search(html, opening.end(), end)
+        medium = next((g for g in (media.groups() if media else ()) if g), "")
+        if (
+            not screen_only
+            or not medium
+            or any(word in medium.lower() for word in ("all", "screen"))
+        ):
+            blocks.append(html[end + 1 : stop])
+        if closing is None:
+            return blocks
+        at = closing.end()
+
+
+def hides(
+    tag: str, attrs: Mapping[str, str | None], sheet: Sheet | None = None
+) -> bool:
     """Whether an element of this *tag* and these attributes (names in lower case,
     values decoded) is not shown, by the strict rule for a raw file: the ``hidden``
     attribute, ``aria-hidden="true"``, a style that hides it (:func:`hidden_style`),
-    or the old ``<font color=white>``."""
+    the old ``<font color=white>`` (or a clear one), or a rule of the page's
+    :class:`Sheet`."""
     return (
         "hidden" in attrs
         or (attrs.get("aria-hidden") or "").strip().lower() == "true"
         or hidden_style(attrs.get("style") or "")
-        or (tag == "font" and _is_white(attrs.get("color") or ""))
+        or (
+            tag == "font"
+            and (
+                _is_white(attrs.get("color") or "")
+                or _is_clear(attrs.get("color") or "")
+            )
+        )
+        or (sheet is not None and sheet.hides(tag, attrs))
     )
 
 
-def _never_drawn(attrs: Mapping[str, str | None], style: list[tuple[str, str]]) -> bool:
+def _never_drawn(
+    tag: str,
+    attrs: Mapping[str, str | None],
+    style: list[tuple[str, str]],
+    sheet: Sheet,
+) -> bool:
     """Whether the page reader leaves out the element and all it holds: the
     ``hidden`` attribute, ``aria-hidden="true"``, ``display: none``, ``visibility:
-    hidden`` or ``collapse``."""
-    return (
+    hidden`` or ``collapse``, by its own style or by a simple rule of the page's
+    style sheet (which an inline ``display`` or ``visibility`` overrides)."""
+    if (
         "hidden" in attrs
         or (attrs.get("aria-hidden") or "").strip().lower() == "true"
-        or any(
-            (name == "display" and value == "none")
-            or (name == "visibility" and value in ("hidden", "collapse"))
-            for name, value in style
-        )
-    )
+        or any(_drawn_never(name, value) for name, value in style)
+    ):
+        return True
+    if not sheet.hides(tag, attrs):
+        return False
+    return not any(name in ("display", "visibility") for name, _ in style)
 
 
 class _Look(NamedTuple):
     """What cascades through the open elements of a page: the font size in pixels,
-    whether the text colour is white, and whether the nearest background set is
-    one other than white."""
+    whether the text colour is white or clear, and whether the nearest background set
+    is one other than white."""
 
     size: float = _NORMAL_PIXELS
     white: bool = False
     dark: bool = False
+    clear: bool = False
 
     @property
     def shown(self) -> bool:
-        """Whether text here is seen: not tiny, and not white with no background."""
-        return self.size > TINY_PIXELS and not (self.white and not self.dark)
+        """Whether text here is seen: not tiny, not clear, and not white with no
+        background."""
+        return (
+            self.size > TINY_PIXELS
+            and not self.clear
+            and not (self.white and not self.dark)
+        )
 
 
 def _background(value: str) -> bool | None:
     """What a ``background``, ``background-color`` or ``background-image`` value
     does: ``True`` for a colour that is not white or an image, ``False`` for white,
-    ``None`` for nothing (it leaves what is behind as it was)."""
+    ``None`` for nothing (it leaves what is behind as it was, as ``transparent`` and
+    an alpha of 0 do)."""
     if "url(" in value or "gradient(" in value:
         return True
-    first = re.match(r"rgba?\([^)]*\)|\S+", value)
+    first = re.match(r"(?:rgb|hsl)a?\([^)]*\)|\S+", value)
     if first is None or first.group(0) in _NO_BACKGROUND:
         return None
-    return not _is_white(first.group(0))
+    token = first.group(0)
+    if _is_clear(token):
+        return None
+    return not _is_white(token)
 
 
 def _size_after(value: str, around: float) -> float:
+    """The font size *value* sets inside an element of size *around*: a size it
+    reads, else the one around it (inherit, larger, a negative size a
+    browser ignores), else the usual 16 px (a keyword, calc(), a viewport unit)."""
     if value in _INHERITED or value in ("larger", "smaller"):
         return around
     size = _size_px(value, around)
-    return _NORMAL_PIXELS if size is None else size
+    if size is not None:
+        return size
+    return around if value.startswith("-") else _NORMAL_PIXELS
 
 
 def _look_of(
@@ -339,12 +586,18 @@ def _look_of(
     """The :class:`_Look` of an element inside one that looks as *around*: what its
     inline style (and ``<font color>``, ``bgcolor``) sets, else what it inherits.
     A value this does not read is taken as the visible one."""
-    size, white, dark = around
+    size, white, dark, clear = around
     if tag == "font" and attrs.get("color"):
-        white = _is_white(attrs["color"] or "")
+        colour = attrs["color"] or ""
+        clear = _is_clear(colour)
+        white = _is_white(colour) and not clear
     background = (attrs.get("bgcolor") or "").strip().lower()
     if background and (state := _background(background)) is not None:
         dark = state
+    clipped = any(
+        name in ("background-clip", "-webkit-background-clip") and value == "text"
+        for name, value in style
+    )
     for name, value in style:
         if name == "font-size":
             size = _size_after(value, size)
@@ -352,13 +605,15 @@ def _look_of(
             named = _font_size_of(value)
             size = _size_after(named, size) if named else _size_after(value, size)
         elif name == "color" and value not in _INHERITED:
-            white = _is_white(value)
+            # Text with a clear colour over a clipped background is the background.
+            clear = _is_clear(value) and not clipped
+            white = _is_white(value) and not clear
         elif (
             name in ("background", "background-color", "background-image")
             and (state := _background(value)) is not None
         ):
             dark = state
-    return _Look(size, white, dark)
+    return _Look(size, white, dark, clear)
 
 
 @dataclass
@@ -388,9 +643,10 @@ class _Piece:
 
 
 class _Reader(HTMLParser):
-    def __init__(self, base: str) -> None:
+    def __init__(self, base: str, sheet: Sheet | None = None) -> None:
         super().__init__(convert_charrefs=True)
         self.base = base
+        self.sheet = sheet or Sheet()
         self.pieces: list[_Piece] = []
         self.links: list[tuple[Link, bool, bool]] = []
         self.title = ""
@@ -400,6 +656,7 @@ class _Reader(HTMLParser):
         # The open elements inside a hidden element a browser closes by itself, the
         # hidden one first; ``None`` when there is none.
         self._auto: list[str] | None = None
+        self._auto_count: Counter[str] = Counter()
         # The open elements that are drawn, with how each looks (:class:`_Look`),
         # and how many of each name are open.
         self._looks: list[tuple[str, _Look]] = []
@@ -455,6 +712,15 @@ class _Reader(HTMLParser):
                 if name == tag:
                     break
 
+    def _auto_pop(self, stack: list[str]) -> str:
+        name = stack.pop()
+        self._auto_count[name] -= 1
+        return name
+
+    def _auto_end(self) -> None:
+        self._auto = None
+        self._auto_count.clear()
+
     def _in_auto(self, tag: str, *, closing: bool) -> bool:
         """Whether *tag*, a start or an end tag, is still inside the hidden element a
         browser closes by itself that is open (``_auto``). It ends at its own end
@@ -467,13 +733,13 @@ class _Reader(HTMLParser):
         if stack is None:
             return False
         if closing:
-            if tag in stack:
-                while stack.pop() != tag:
+            if self._auto_count[tag] > 0:
+                while self._auto_pop(stack) != tag:
                     pass
                 if not stack:
-                    self._auto = None
+                    self._auto_end()
                 return True
-            self._auto = None  # the parent ends, and the hidden element with it
+            self._auto_end()  # the parent ends, and the hidden element with it
             return False
         if tag in VOID:
             return True
@@ -482,11 +748,12 @@ class _Reader(HTMLParser):
             and stack[-1] in AUTO_CLOSED
             and (tag == stack[-1] or tag in _ENDED_BY.get(stack[-1], ()))
         ):
-            stack.pop()
+            self._auto_pop(stack)
         if not stack:
-            self._auto = None
+            self._auto_end()
             return False
         stack.append(tag)
+        self._auto_count[tag] += 1
         return True
 
     # ── the parser's calls ──
@@ -510,13 +777,14 @@ class _Reader(HTMLParser):
             self._in_title = not self.title  # the first title is the page's
             return
         style = _declarations(values.get("style") or "")
-        never = _never_drawn(values, style)
+        never = _never_drawn(tag, values, style, self.sheet)
         if tag in SKIP or (tag not in VOID and tag not in AUTO_CLOSED and never):
             if tag not in VOID:
                 self._skip.append(tag)
             return
         if tag in AUTO_CLOSED and never:
             self._auto = [tag]
+            self._auto_count = Counter({tag: 1})
             return
         self._open(tag, values, style)
         shown = self._look().shown
@@ -556,8 +824,11 @@ class _Reader(HTMLParser):
             self._link = (href, []) if href and shown else None
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        # A ``/>`` on an element that is not void opens it, as a browser reads it
+        # (``<div hidden/>`` hides what follows); only ``svg`` and ``math``, whose
+        # elements are foreign content, close themselves.
         self.handle_starttag(tag, attrs)
-        if tag not in VOID:
+        if tag in FOREIGN:
             self.handle_endtag(tag)
 
     def handle_endtag(self, tag: str) -> None:
@@ -653,7 +924,7 @@ def _amount(pieces: list[_Piece]) -> int:
 
 def extract(html: str, base: str) -> Extracted:
     """The title, text and links of *html*, its links made absolute against *base*."""
-    reader = _Reader(base)
+    reader = _Reader(base, sheet_of(style_blocks(html), strict=False))
     try:
         reader.feed(html)
         reader.close()
