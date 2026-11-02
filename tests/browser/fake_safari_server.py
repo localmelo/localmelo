@@ -30,6 +30,7 @@ import json
 import os
 import sys
 from typing import Any
+from urllib.parse import urlsplit
 
 MODE = os.environ.get("FAKE_SAFARI_MODE") or (
     sys.argv[1] if len(sys.argv) > 2 else ""  # `fake_safari_server.py MODE --mcp`
@@ -143,6 +144,17 @@ def run_script(source: str) -> Any:
     here = tabs[current]["history"]
     if source == "1+1":
         return 2
+    if source == "location.href":
+        return here[-1]
+    if source.startswith("location.origin === "):
+        # The wait's guard: the condition holds only on the page's own site.
+        wanted, _, source = source.removeprefix("location.origin === ").partition(
+            " && "
+        )
+        parts = urlsplit(here[-1])
+        if json.loads(wanted) != f"{parts.scheme}://{parts.netloc}":
+            return False
+        source = source.removeprefix("(").removesuffix(")")
     if "document.readyState" in source:
         polls += 1
         state = "loading" if MODE == "slow_load" and polls <= 2 else "complete"
