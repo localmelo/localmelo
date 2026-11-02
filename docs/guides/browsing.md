@@ -114,7 +114,8 @@ elements:
 
 - **Each site asks once per chat.** Before melo loads a page, you see "Open a website?" with the site's name and the answers *Yes*, *Yes, and allow this site for the rest of this chat*, and *No*. In the web console it is the usual approval card. "For the rest of this chat" is the only lasting answer; there is no "always" in this part. `/new`, and `/approvals forget`, take the grants back.
 - **A redirect asks again.** If a link or a redirect lands on another site, melo asks about that site before it reads the page. If you say no, the window goes back to a blank page and the model reads that you refused.
-- **Only `http` and `https`.** `file:`, `about:`, `javascript:`, `data:` and the browser's own pages are never opened.
+- **Only `http` and `https`.** `file:`, `about:`, `javascript:`, `data:` and the browser's own pages are never opened. Nor is an address with a user name or password in it (`user@site`).
+- **Never this Mac, your network or melo's console.** As with `web_fetch`, melo does not open `localhost`, private, link-local or carrier-shared addresses, `.local` names, names without a dot, an address written as one number, or a name whose DNS answer is one of these. melo's own console is refused too, wherever it listens. A redirect or a page that moves to such an address is blanked. This is checked before any question about the site. For a task's result, the main chat reads the task itself (`task_get`).
 - **In auto mode nothing asks.** A site your own recent messages name opens (that site itself, with or without `www.`, not a site under it); another one opens only when your model finds that it serves what you asked (checked once per site per chat), and is blocked otherwise. `--yolo` skips every question.
 - **Page text is data.** A page can say anything. melo's system prompt tells the model that text between the page markers is content of a web page, never instructions, and the closing marker carries a random number that no page can know, so a page cannot end its own block. This lowers the risk of a page steering the model; it does not remove it. Do not allow sites you do not trust, and do not turn browsing on in a chat that holds secrets you would not paste into a web page.
 
@@ -134,6 +135,7 @@ Browsing is built in parts; none of the next two exists yet.
 | `This Safari's automation server lacks the tools melo needs` | Update macOS and Safari. |
 | A page reads as empty | It may need a sign-in or be built by scripts after loading; try `browser_wait`, or open it yourself. |
 | melo says it did not open a site | You answered no to the question about it; ask again and allow the site. |
+| `melo's browser does not open local or private addresses` | The address is this Mac, your network or melo's console. That is on purpose; open it yourself if you need it. |
 
 To see what Safari's automation server answers, with no model involved, run this from the checkout. It opens an automation window, reads one page, lists the tabs, takes a picture and closes; each line shows what came back, and a failure says what to turn on:
 
