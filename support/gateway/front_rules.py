@@ -549,9 +549,147 @@ def polite_request(typed: str) -> bool:
     return bool(_REQUEST.match(norm(typed))) and acts(typed)
 
 
+# A request in steps (#440): look somewhere first, then tell or do something with
+# what was found. Looking alone is no verb that acts (_DOES), and the question the
+# person wants answered sits in the second step ("…然后告诉我什么工作适合我"), so
+# the message reads as a question; the steps make it a request.
+_LOOKS: Final = re.compile(
+    r"\b(?:look\s+(?:\w+\s+)?(?:at|into|through|over|up)|go\s+(?:to|through|over|into)|"
+    r"visit|open|read|check(?:\s+out)?|browse|scan|skim|dig\s+into|search|study|"
+    r"research|review|analy[sz]e|compare)\b"
+    r"|去[^，。；！？,;!?\n]{0,24}?(?:看|读|查|找|搜|浏览)|看一下|看一看|看下|看看|瞧瞧|读一下"
+    r"|读读|阅读|浏览|查一下|查查|查看|翻一下|翻翻|搜一下|搜搜|搜索|打开|访问|了解一下"
+    r"|(?:^|(?<=[，,。；;：:\s])|(?<=帮我)|(?<=请)|(?<=去))(?:研究|调研)|分析|对比|比较"
+)
+# What a request in steps looks at: something outside the chat (a link, a file,
+# a site, a repo or folder, a document, the person's own things). "看看天气然后
+# 告诉我" and "look at this and tell me" are talk.
+_OUTSIDE: Final = re.compile(
+    r"\b(?:my|our)\s+\w"
+    r"|\b(?:site|website|web\s*page|page|link|url|repo|repository|folder|directory|"
+    r"files?|docs?|documentation|cv|r[ée]sum[ée]|project|codebase|code\s+base|paper|"
+    r"article|pdf)s?\b"
+    r"|我的|我们的|网站|网页|页面|链接|仓库|代码库|文件夹|目录|文件|文档|项目|简历|论文|文章"
+)
+# A task named: what is looked at is a task, so its state answers.
+_NAMES_TASK: Final = re.compile(r"\b(?:tasks?|workers?)\b|任务")
+# A message that opens by asking to be told, explained or translated something:
+# what follows is the subject, not a request in steps.
+_OPENS_TELLING: Final = re.compile(
+    r"^(?:(?:please|pls|can\s+you|could\s+you|would\s+you)\s+)?"
+    r"(?:explain|tell\s+me|translate|describe)\b"
+    r"|^(?:请|帮我|麻烦你?)?(?:解释|说说|讲讲|介绍|告诉我|翻译)"
+)
+# Text to work on, given after a colon: "解释一下：…", "翻译成英文：…",
+# "translate into English: …". The chat answers it, unless it names a file or a link.
+_MATERIAL: Final = re.compile(
+    r"^(?:(?:please|pls|can\s+you|could\s+you)\s+)?"
+    r"(?:explain|translate|summari[sz]e|paraphrase|proofread|rephrase|define)\b[^:\n]{0,30}:"
+    r"|^(?:请|帮我|麻烦你?)?(?:解释|翻译|总结|概括|润色|改写|说明)[^：:\n]{0,12}[：:]"
+)
+# The second step: tell, list, recommend or write something from what was found.
+_THEN_TELLS: Final = re.compile(
+    r"\b(?:tell\s+me|let\s+me\s+know|give\s+me|show\s+me|list|recommend|suggest|"
+    r"summari[sz]e|write|draft|rank|pick|explain|report)\b"
+    r"|告诉我|跟我说|和我说|对我说|给我(?:讲|说|列|写|推荐|总结|一|个|份|点|些)|说说|讲讲|总结"
+    r"|归纳|列出|列一下|推荐|建议|写(?:一|个|份|篇|成|到|进|下|出|入)|整理|评估|判断|解释"
+    r"|挑出|选出|找出"
+)
+# What asks how something went, not for it to be done: "did you read it and …?".
+_ASKS_HOW: Final = re.compile(
+    r"^(?:did|do|does|have|has|had|is|are|was|were|why|what|how|when|where|who|which)\b"
+)
+# A polite Chinese opening: "你能…吗？" asks for work however it ends.
+_POLITE_ZH: Final = re.compile(r"^(?:请|能不能|你能|能否|可以|可不可以|麻烦|帮我|帮忙)")
+_ENDS_ASKING_ZH: Final = re.compile(r"(?:吗|呢|没有|没)[\s?？!！。.~]*$")
+
+
+def steps_request(typed: str) -> bool:
+    """Whether *typed* asks melo to look somewhere first and then tell or do something.
+
+    "去我的网站看一下我的简历，然后告诉我什么工作适合我", "look at my website and
+    tell me which jobs fit me", "分析一下这个仓库告诉我它的结构": a looking verb
+    not under a negation, something outside the chat to look at (a link, a file,
+    a site, a repo or folder, a document, the person's own things), then a step
+    that tells, lists, recommends or writes. Not one: looking at a task (its
+    state answers), at nothing outside ("看看天气然后告诉我", "look at this and
+    tell me"), a message that opens by asking to be told, explained or
+    translated, one that asks how it went ("did you read it and …?", "你看了…
+    然后告诉我了吗"), or anything said in quotation marks; a polite "你能…吗？" is.
+    """
+    text = norm(_QUOTED.sub(" ", typed or ""))
+    if not text or _ASKS_HOW.match(text) or _OPENS_TELLING.match(text):
+        return False
+    if _ENDS_ASKING_ZH.search(text) and not _POLITE_ZH.match(text):
+        return False
+    for look in _LOOKS.finditer(text):
+        if _NEGATION.search(text[: look.start()]):
+            continue
+        rest = text[look.end() :]
+        tell = _THEN_TELLS.search(rest)
+        if tell is None or len(rest[: tell.start()].strip(" ,，、")) < 2:
+            continue
+        looked = text[look.start() : look.end() + tell.start()]
+        if _NAMES_TASK.search(looked):
+            continue
+        if _URL.search(looked) or names_files(looked) or _OUTSIDE.search(looked):
+            return True
+    return False
+
+
 def asks_only(typed: str) -> bool:
-    """Whether *typed* is a question to answer, not a request to act (a polite request acts)."""
-    return is_question(typed) and not polite_request(typed)
+    """Whether *typed* is a question to answer, not a request to act.
+
+    A polite request acts, and so does a request in steps whose second step
+    asks a question (:func:`steps_request`).
+    """
+    return is_question(typed) and not polite_request(typed) and not steps_request(typed)
+
+
+# Words that ask how a task stands: done, finished, its progress or result, what it found or said.
+_STATE_WORDS: Final = re.compile(
+    r"\b(?:done|finish(?:ed)?|complete(?:d)?|ready|over|progress|status|going|"
+    r"running|results?|outcome|found|said)\b"
+    r"|\bdid\s+(?:\w+\s+){0,3}?(?:find|say)\b"
+    r"|跑完|跑好|完成|做完|做好|弄完|弄好|搞定|好了|结束|进度|状态|怎么样了|如何了|到哪|结果|跑通"
+    r"|找到|发现|说了"
+)
+# What a task finds or says, when the words name a task: "what does the task say?".
+# "What does report.md say?" asks about a file, not a task.
+_TASK_SAYS: Final = re.compile(r"\b(?:find|finds|say|says)\b")
+# "what did it find?", "has the task found …": the verb asks for a result, not for work.
+_ASKS_RESULT: Final = re.compile(
+    r"(\b(?:did|does|do|has|have|had)\s+(?:\w+\s+){0,3}?)(?:find|say)\b"
+)
+
+
+def status_question(typed: str) -> bool:
+    """Whether *typed* asks how a task stands: "is it done?", "跑完了吗", "didn't it finish?".
+
+    A word of state (done, finished, progress, result, found, said; 跑完, 完成,
+    进度, 结果, 找到, 说了) and no verb that acts ("Is the report ready? If
+    not, write it …" asks for work), in a question that is no request in steps,
+    or in words that name a task and ask to look or be told ("look at the
+    slides task and tell me its progress", "看一下那个任务然后告诉我结果").
+    "what did it find?" asks for a result, and looking at a task ("check the
+    slides task …") reads its state: neither verb asks for work. The main chat
+    answers it from the tasks' state and result, never with a task.
+    """
+    text = norm(typed)
+    bare = norm(_QUOTED.sub(" ", typed or ""))
+    names_task = bool(_NAMES_TASK.search(bare))
+    if not (_STATE_WORDS.search(text) or (names_task and _TASK_SAYS.search(bare))):
+        return False
+    asked = _ASKS_RESULT.sub(r"\1", bare)
+    if names_task:
+        asked = _LOOKS.sub(" ", asked)
+    if acts(asked):
+        return False
+    if is_question(typed):
+        return not steps_request(typed)
+    return names_task and bool(
+        _LOOKS.search(bare) or _TELLS.search(bare) or _THEN_TELLS.search(bare)
+    )
 
 
 # The person says not to act: explain, describe or answer only, change nothing, start nothing.
@@ -563,7 +701,11 @@ _HANDS_OFF: Final = re.compile(
     r"(?:a\s+task|anything(?:\s+else)?|any\s+(?:other\s+)?(?:code|files?)|it|"
     r"(?:the|my|this|other)\s+(?:code|files?|repo(?:sitory)?|project|folder))\b"
     r"|\b(?:make\s+)?no\s+changes?\b"
-    r"|只(?:是)?(?:说|讲|解释|回答|告诉我|介绍)|不要(?:开始|开)?任务|先别(?:动手|做|改)"
+    r"|\bno\s+need\s+for\s+(?:a\s+)?(?:new\s+)?task\b"
+    r"|\b(?:don['’]?t|do\s+not)\s+(?:make|create|open|start|add)\s+(?:a\s+)?(?:new\s+)?task\b"
+    r"|只(?:是)?(?:说|讲|解释|回答|告诉我|介绍)|先别(?:动手|做|改)"
+    r"|(?:不要|不用|不需要|无需|不必)(?:开始|开|建|新建|创建)?(?:一个|个)?任务"
+    r"|别(?:开始|开|建|新建|创建)(?:一个|个)?任务"
     r"|不用(?:动手|做|改)|别(?:动手|改|动|碰)|不要(?:改|动|修改|碰|删)"
 )
 
@@ -586,13 +728,20 @@ def start_rule(typed: str) -> StartRule:
     - ``offer`` for no typed words (an attachment alone, a retry), and for
       words that steer a task (cancel, stop, pause, continue, follow up on …),
       whether or not they name one;
+    - ``answer`` for a question about how a task stands
+      (:func:`status_question`: "is it done?", "跑完了吗"): the chat answers
+      it from the tasks' state and result;
+    - ``answer`` for text given after a colon to explain, translate or
+      summarize ("翻译成英文：…", "translate into English: …"), unless it
+      names a file or a link;
     - ``offer`` for words that say not to act (:func:`hands_off`) and ask for
       nothing else (:func:`acts`): "fix the bug without changing anything
       else" asks for the fix;
     - ``answer`` for a polite opening, or one that asks to be told, with no
       verb that acts ("please explain …", "帮我看看 …"), and for what
       :func:`route` answers (a greeting, a brief or short plain question),
-      unless it is a polite request for work ("can you commit this?");
+      unless it is a polite request for work ("can you commit this?") or a
+      request in steps (:func:`steps_request`: "去…看一下…然后告诉我…");
     - ``offer`` for words code read as something else (a chore, a reminder,
       a task named) and for a question (:func:`asks_only`);
     - ``answer`` for a short message with no verb that acts ("ok", "thanks",
@@ -604,14 +753,22 @@ def start_rule(typed: str) -> StartRule:
     text = norm(typed)
     if _STEERS.match(text):
         return "offer"
-    doing = acts(typed)
+    if status_question(typed):
+        return "answer"
+    # Text given to explain or translate is answered here, unless it names a file or a link.
+    if _MATERIAL.match(text) and not names_files(text) and not _URL.search(text):
+        return "answer"
+    # A request in steps acts too, unless the words say not to act.
+    steps = steps_request(typed) and not hands_off(typed)
+    doing = acts(typed) or steps
     if hands_off(typed) and not doing:
         return "offer"
     if not doing and (_REQUEST.match(text) or _EXPLAINS.match(text)):
         return "answer"
     found = route(typed).route
-    # A polite request for work is a request, however short ("can you commit this?").
-    if polite_request(typed) and found == "answer":
+    # A polite request for work is a request, however short ("can you commit
+    # this?"), and so is a request in steps whose second step asks a question.
+    if (polite_request(typed) or steps) and found == "answer":
         found = "plan"
     if found == "answer":
         return "answer"
@@ -1070,6 +1227,8 @@ def route(
         and is_question(text)
         and not _NAMES_THING.search(text)
         and not _ACTION_VERBS.search(text)
+        # "去…看一下…然后告诉我什么…" asks for steps, not a short answer.
+        and not steps_request(stripped)
     ):
         return Routed("answer")
     return Routed("plan")
@@ -1114,6 +1273,8 @@ __all__ = [
     "route",
     "short_title",
     "start_rule",
+    "status_question",
+    "steps_request",
     "title_matches",
     "triage",
     "work_request",

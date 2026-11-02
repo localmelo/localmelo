@@ -409,3 +409,32 @@ async def test_a_site_refused_earlier_stays_refused_though_the_request_names_it(
     assert f"melo did not read {pages.HOST}" in named
     assert "the user blocked a step like this one earlier" in named
     assert "the user blocked a step like this one earlier" in other_scheme
+
+
+async def test_auto_mode_reviews_a_site_s_plain_pages_once(
+    server: dict[str, Any],
+) -> None:
+    """One routine verdict reads the site's pages with no query; a query is reviewed."""
+    from localmelo.tests.agent.test_auto_mode import FakeModel, verdict
+
+    person = Person()
+    pages_read = [PAGE, f"http://{pages.HOST}/plain", f"http://{pages.HOST}/json?x=1"]
+    llm = FakeModel(
+        [*(_fetch(url) for url in pages_read), _say("ok")], [verdict(), verdict()]
+    )
+    fetcher = WebFetcher(resolver=_resolver(server), allow=_allow)
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(builtins=frozenset(), tool_exposure="all"),
+        tool_providers=[WebFetchProvider(fetcher=fetcher)],
+    )
+    try:
+        await agent.run_task(
+            "garden notes?", approval=ChatPolicy(person.ask, mode="auto")
+        )
+    finally:
+        await agent.close()
+    assert person.asked == []
+    assert len(llm.review_requests) == 2
+    assert "json?x=1" in "\n".join(m.content for m in llm.review_requests[1])
+    assert [r["path"] for r in server["requests"]] == ["/page", "/plain", "/json?x=1"]

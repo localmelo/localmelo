@@ -79,6 +79,13 @@ TASKS = [SLIDES, CI, PHOTOS, DONE]
         ("stop worrying about the slides font and make it bigger please", "plan"),
         ("don't stop the slides", "plan"),
         ("别停 Fix CI", "plan"),
+        # A request in steps is no short question, though its last step asks one.
+        (
+            "你去我的网站看一下我的简历 然后告诉我什么工作适合我 特别是大公司的什么岗位",
+            "plan",
+        ),
+        ("什么工作适合我？", "answer"),
+        ("跑完了吗", "answer"),
     ],
 )
 def test_routes(typed: str, expected: str) -> None:

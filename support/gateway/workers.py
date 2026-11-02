@@ -84,6 +84,7 @@ from localmelo.support.gateway.task_endings import (
     stash_floor,
 )
 from localmelo.support.gateway.task_endings import decide as decide_ending
+from localmelo.support.gateway.task_files import asked_files
 from localmelo.support.gateway.task_policy import (
     TaskPolicyError,
     TaskSpec,
@@ -2749,6 +2750,7 @@ class TaskWorkers:
                 asks_commit=any(asks_commit(text) for text in asked),
                 asks_tests=any(asks_tests(text) for text in asked),
                 finishing=finishing,
+                asked_files=asked_files(asked),
             )
         except Exception:
             log.exception("Could not check how task %s ended", task_id)

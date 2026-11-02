@@ -35,16 +35,19 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Final, Literal, Protocol, get_args, runtime_checkable
-from urllib.parse import urlsplit
 
 from localmelo.melo.contracts.folders import OutsideAccess
 from localmelo.melo.contracts.review import (
     CATEGORY_WORDS,
+    SITE_KEY,
+    UNREADABLE_SITE,
     ActionReview,
     because,
     block_words,
     loose_keys,
+    site_keys,
     step_key,
+    url_site,
 )
 from localmelo.melo.schema import ToolTier
 
@@ -372,8 +375,9 @@ BLOCKED_EARLIER: Final = (
 )
 # A step alike (the same command spelt another way, the same install): refused too.
 BLOCKED_ALIKE: Final = (
-    "{who} blocked a step like this one earlier in this task (the same command "
-    "or install), so it does not run again; find another way that does not need it"
+    "{who} blocked a step like this one earlier in this task (the same command, "
+    "install or site), so it does not run again; find another way that does not "
+    "need it"
 )
 
 
@@ -406,20 +410,8 @@ def site_key(arguments: Mapping[str, Any]) -> str | None:
     question names no such origin.
     """
     origin = arguments.get("origin")
-    if not isinstance(origin, str):
-        return None
-    try:
-        parts = urlsplit(origin.strip())
-        host = parts.hostname or ""
-        if not host.isascii():
-            host = host.encode("idna").decode("ascii")
-    except (ValueError, UnicodeError):
-        return None
-    host = host.lower()
-    host = host[:-1] if host.endswith(".") else host
-    if parts.scheme.lower() not in ("http", "https") or not host:
-        return None
-    return f"ask:site:{host}"
+    host = url_site(origin) if isinstance(origin, str) else None
+    return None if host is None else SITE_KEY + host
 
 
 class EarlierBlocks:
@@ -435,6 +427,12 @@ class EarlierBlocks:
     allowed once since (its step key has an allowance in the inner
     :class:`AutoPolicy`) is not refused, nor is a call alike to it. It never
     allows anything.
+
+    A site refused earlier (a block with an ``ask:site:<host>`` key, kept
+    from a tool's own site question) stays refused for a ``shell_exec`` or
+    ``python_exec`` step that names an address on it (#433,
+    :func:`~localmelo.melo.contracts.review.site_keys`), and one naming an
+    address whose encoded host does not decode is refused while any site is.
     """
 
     def __init__(
@@ -471,14 +469,32 @@ class EarlierBlocks:
         found = self._blocks.get(exact)
         if found is not None and not self._lifted(found[1]):
             return found[0], True
-        alike = set(loose_keys(tool_name, arguments)) | set(also)
+        alike = {*loose_keys(tool_name, arguments), *site_keys(tool_name, arguments)}
+        alike |= set(also)
         if not alike:
             return None
+        unreadable = UNREADABLE_SITE in alike
         for key, keys in self._loose.items():
             kept = self._blocks.get(key)
-            if kept is not None and keys & alike and not self._lifted(kept[1]):
+            if kept is None or self._lifted(kept[1]):
+                continue
+            if keys & alike or (
+                unreadable and any(k.startswith(SITE_KEY) for k in keys)
+            ):
                 return kept[0], False
         return None
+
+    def refused_sites(self) -> list[str]:
+        """The hosts of the sites refused earlier and not allowed since, oldest first."""
+        hosts: dict[str, None] = {}
+        for key, keys in self._loose.items():
+            kept = self._blocks.get(key)
+            if kept is None or self._lifted(kept[1]):
+                continue
+            for name in sorted(keys):
+                if name.startswith(SITE_KEY):
+                    hosts[name[len(SITE_KEY) :]] = None
+        return list(hosts)
 
     def blocked(
         self,
