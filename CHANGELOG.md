@@ -14,7 +14,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   start with it, before the question and the reasons, and show the code under it. For a command
   or a script the sentence is always melo's own, built from the call, and names every effect it
   finds in order ("Operate Safari, then delete files"; a command too long to show ends "and 2
-  more"); nothing asks a model for it, and the question and the reasons still come only from
+  more"), reads a command the way a shell does (a `;` or `&&` inside quotes cuts nothing, and a
+  command shows as it was written) and always adds what the rules found (a script that deletes
+  files, even when its code does not show it); nothing asks a model for it, and the question and the reasons still come only from
   melo's rules. The model's own words (a `why` argument, or a comment at the top of the code) are
   shown beside it, always labelled "melo says: …": as the sentence when the rules found nothing,
   and below the sentence when they found something, so they can never make a step look

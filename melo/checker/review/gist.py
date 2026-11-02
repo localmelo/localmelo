@@ -38,7 +38,7 @@ from urllib.parse import urlsplit
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.review import apps as app_names
 from localmelo.melo.checker.review.paths import loopback
-from localmelo.melo.contracts.review import ActionReview, commands_of
+from localmelo.melo.contracts.review import ActionReview, command_steps
 
 # The argument that carries the model's own words about a call. Another
 # argument (``description``, ``purpose``) is often the content a tool sends,
@@ -64,6 +64,8 @@ SAY_IDS: Final = (
     "operate",
     "effect_delete",
     "effect_send_out",
+    "script_effect_delete",
+    "script_effect_send_out",
     "then",
     "more",
 )
@@ -120,6 +122,8 @@ _WRAPPER_VALUES: Final[dict[str, frozenset[str]]] = {
     "xargs": frozenset(["-I", "-n", "-P", "-L", "-s", "-d", "-E", "-a"]),
 }
 # The ends of a block, which name no command of their own.
+# ``command -v rm``: a lookup of a program, not a run of it.
+_LOOKUP: Final = re.compile(r"-[pvV]*[vV][pvV]*")
 _CLOSERS: Final = frozenset(["done", "fi", "esac", "}", ")", ";;"])
 _DELETE_PROGRAMS: Final = frozenset(["rm", "rmdir", "unlink", "shred", "srm", "trash"])
 _SEND_PROGRAMS: Final = frozenset(
@@ -197,6 +201,9 @@ class _Item:
     kind: str
     text: str = ""
     apps: tuple[str, ...] = ()
+    # An effect only the rules saw, in a script whose code shows nothing: the
+    # sentence says it is a script that does it.
+    script: bool = False
 
 
 def step_gist(
@@ -210,9 +217,19 @@ def step_gist(
         return None
     words = _words(tool_name, arguments)
     items = _items(tool_name, arguments) if tool_name in _RUNNERS else []
+    for effect in _EFFECTS:
+        # What the rules found that the code does not show (a string run with
+        # exec, a command built at run time) is part of the sentence.
+        if (
+            review is not None
+            and effect in review.categories
+            and not any(item.kind == effect for item in items)
+        ):
+            items = [
+                *items,
+                _Item(effect, script=tool_name == "python_exec" and not items),
+            ]
     gone = _unmentioned(items, review, words) if words else ""
-    if gone and not any(item.kind == gone for item in items):
-        items = [*items, _Item(gone)]
     apps = _apps(review)
     if apps and not any(item.kind == "operate" for item in items):
         # The rules read an app out of a script the call builds from a variable.
@@ -324,15 +341,18 @@ def _items(tool_name: str, arguments: Mapping[str, Any]) -> list[_Item]:
     if tool_name == "python_exec":
         return _python_items(str(arguments.get("code") or ""))
     found: list[_Item] = []
-    for words in commands_of(tool_name, arguments):
-        item = _classify(words)
+    for words, text in command_steps(tool_name, arguments):
+        item = _classify(words, text)
         if item is not None:
             found.append(item)
     return found
 
 
-def _classify(words: list[str]) -> _Item | None:
-    """What one command does: an effect, an app it operates, or just a command to name."""
+def _classify(words: list[str], text: str = "") -> _Item | None:
+    """What one command does: an effect, an app it operates, or just a command to name.
+
+    *text* is the command as written; without it the words are quoted again.
+    """
     if not words or words[0].startswith("#") or words[0] in _CLOSERS:
         return None
     program, rest = _program(words)
@@ -346,7 +366,8 @@ def _classify(words: list[str]) -> _Item | None:
         named = app_names.open_app(rest)
     if named:
         return _Item("operate", apps=(named,))
-    return _Item("command", text=shlex.join([_unformatted(word) for word in words]))
+    shown = text or shlex.join(words)
+    return _Item("command", text=_unformatted(shown))
 
 
 def _program(words: list[str]) -> tuple[str, list[str]]:
@@ -355,6 +376,13 @@ def _program(words: list[str]) -> tuple[str, list[str]]:
     while at < len(words):
         word = words[at]
         base = word.replace("\\", "/").rsplit("/", 1)[-1].lower()
+        if base == "command" and _LOOKUP.fullmatch(
+            words[at + 1] if at + 1 < len(words) else ""
+        ):
+            return (
+                base,
+                words[at + 1 :],
+            )  # command -v rm looks rm up, it does not run it
         opening = base.lstrip("({")  # a group: (rm x), { rm x; }
         if word in _WRAPPER_VALUES.get(wrapper, ()):
             at += 2
@@ -594,8 +622,8 @@ def _python_items(code: str) -> list[_Item]:
             source = ast.unparse(node)
         except (ValueError, RecursionError):
             continue
-        for words in commands_of("python_exec", {"code": source}):
-            item = _classify(words)
+        for words, text in command_steps("python_exec", {"code": source}):
+            item = _classify(words, text)
             if item is not None:
                 found.append(item)
     return found
@@ -643,6 +671,8 @@ def _runs(items: Sequence[_Item]) -> list[tuple[str, list[str]]]:
     runs: list[tuple[str, list[str]]] = []
     for item in items:
         values = [item.text] if item.kind == "command" else list(item.apps)
+        if item.script:
+            values = ["script"]
         if runs and runs[-1][0] == item.kind:
             if item.kind == "command":
                 runs[-1][1].extend(values)
@@ -691,7 +721,7 @@ def _chain(items: Sequence[_Item], script: bool) -> dict[str, Any]:
         elif kind == "operate":
             parts.append(_say("operate", apps=list(values)))
         else:
-            parts.append(_say(f"effect_{kind}"))
+            parts.append(_say(("script_" if values else "") + f"effect_{kind}"))
     sentence = parts[-1]
     for part in reversed(parts[:-1]):
         sentence = _say("then", first=part, next=sentence)

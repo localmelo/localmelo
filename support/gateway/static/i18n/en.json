@@ -707,6 +707,8 @@
   "gist.say.operate": "Operate {apps}",
   "gist.say.script": "Run a Python script",
   "gist.say.script_command": "Run {command} from a Python script",
+  "gist.say.script_effect_delete": "Run a Python script that deletes files",
+  "gist.say.script_effect_send_out": "Run a Python script that sends data to another computer",
   "gist.say.then": "{first}, then {next}",
   "gist.say.tool": "Use the {tool} tool",
   "gist.say.write": "Write {name}",

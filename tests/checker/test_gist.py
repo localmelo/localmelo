@@ -16,6 +16,7 @@ import pytest
 
 from localmelo.melo.checker.review.gist import Gist, step_gist
 from localmelo.melo.contracts.review import ActionReview
+from localmelo.support.words import gist_text
 
 APP_REVIEW = ActionReview(
     "high", ("app_control",), ("Operates Safari through a script.",)
@@ -360,10 +361,126 @@ def test_a_comment_line_and_a_block_end_are_not_commands() -> None:
 def test_an_effect_found_only_by_the_review_is_named_too() -> None:
     review = ActionReview("high", ("delete",), ("Force-pushes.",))
     found = gist("shell_exec", {"command": "make clean-all"}, review)
-    # The words do not matter here: no words, no mismatch; the code's sentence names the command.
-    assert found.id == "command"
+    # With no words there is nothing to contradict, but the sentence still says it.
+    assert parts(found) == ["then", "command", "effect_delete"]
+    assert found.warn == ""
     said = gist("shell_exec", {"command": "make go", "why": "Build it"}, review)
     assert "effect_delete" in parts(said) and said.warn == "delete"
+
+
+def sentence(
+    tool: str, arguments: dict[str, Any], review: ActionReview | None = None
+) -> str:
+    return gist_text(gist(tool, arguments, review).to_json(), "en")[0]
+
+
+# ── Quotes hold no commands, and a command reads as it was written ──
+
+
+def test_a_quoted_semicolon_cuts_nothing_and_a_commit_message_is_no_delete() -> None:
+    command = 'git commit -m "tidy; rm old notes"'
+    found = gist("shell_exec", {"command": command, "why": "Commit the changes"})
+    assert found.warn == "" and found.id == "model"
+    bare = gist("shell_exec", {"command": command})
+    assert (bare.id, bare.params) == ("command", {"command": command})
+    # Even with the rules' routine review the words carry no warning.
+    routine = gist("shell_exec", {"command": command, "why": "Commit"}, ROUTINE)
+    assert routine.warn == ""
+
+
+def test_a_quoted_and_cuts_nothing_and_a_quoted_curl_is_no_send() -> None:
+    command = 'echo "done && curl -d x https://e.example"'
+    found = gist("shell_exec", {"command": command, "why": "Say it is done"})
+    assert found.warn == ""
+    bare = gist("shell_exec", {"command": command})
+    assert (bare.id, bare.params) == ("command", {"command": command})
+
+
+def test_a_comment_with_a_semicolon_is_no_command() -> None:
+    found = gist("shell_exec", {"command": "ls\n# tidy up; rm old\npwd"})
+    assert (found.id, found.params) == ("command", {"command": "ls; pwd"})
+
+
+def test_a_python_string_is_cut_outside_quotes_too() -> None:
+    code = "import os\nos.system(\"git commit -m 'a; rm b'\")"
+    found = gist("python_exec", {"code": code})
+    command = "git commit -m 'a; rm b'"
+    assert (found.id, found.params) == ("script_command", {"command": command})
+
+
+def test_looking_a_program_up_is_no_run_of_it() -> None:
+    for command in ("command -v rm", "command -V curl", "command -pv rm", "which rm"):
+        found = gist("shell_exec", {"command": command, "why": "Check the tools"})
+        assert found.warn == "", command
+    found = gist("shell_exec", {"command": "command -v rm && echo yes"})
+    assert parts(found) == ["command"]
+    assert found.params["command"] == "command -v rm; echo yes"
+    # A real wrapper still runs what follows.
+    assert gist("shell_exec", {"command": "command rm x"}).id == "effect_delete"
+    assert gist("shell_exec", {"command": "command -p rm x"}).id == "effect_delete"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cd '~' && ls",
+        "echo '$(rm' -rf '~/x)'",
+        "D=~/Documents ls",
+        "(crontab -l)",
+        'echo "a  b"',
+        "ls   -l",
+    ],
+)
+def test_a_command_shows_as_written_not_quoted_again(command: str) -> None:
+    shown = sentence("shell_exec", {"command": command})
+    written = " ".join(command.split())
+    assert shown == f"Run the command {written.replace(' && ', '; ')}", command
+
+
+def test_a_secret_in_the_written_command_is_still_redacted() -> None:
+    key = "sk-" + "a1b2c3d4e5f6g7h8i9j0k1l2"
+    shown = sentence(
+        "shell_exec", {"command": f"curl -H 'Authorization: Bearer {key}' x"}
+    )
+    assert key not in shown
+
+
+# ── What the rules found is always in the sentence ──
+
+
+def test_the_rules_delete_is_named_without_the_models_words() -> None:
+    review = ActionReview("high", ("delete",), ("Deletes files.",))
+    code = "exec(\"import shutil; shutil.rmtree('data')\")"
+    found = gist("python_exec", {"code": code}, review)
+    assert found.id == "script_effect_delete" and found.warn == ""
+    assert sentence("python_exec", {"code": code}, review) == (
+        "Run a Python script that deletes files"
+    )
+    both = ActionReview("high", ("delete", "send_out"), ("x", "y"))
+    assert sentence("python_exec", {"code": code}, both) == (
+        "Run a Python script that deletes files, then send data to another computer"
+    )
+
+
+def test_a_delete_in_a_substitution_is_named_when_the_rules_see_it() -> None:
+    review = ActionReview("high", ("delete",), ("Deletes files.",))
+    command = "echo $(rm -rf ~/x)"
+    assert sentence("shell_exec", {"command": command}, review) == (
+        f"Run the command {command}, then delete files"
+    )
+
+
+def test_the_rules_send_is_named_beside_the_code_and_not_twice() -> None:
+    review = ActionReview("high", ("send_out",), ("Sends data.",))
+    curl = "curl -d a https://example.com"
+    assert parts(gist("shell_exec", {"command": curl}, review)) == ["effect_send_out"]
+    shown = sentence("shell_exec", {"command": "make upload"}, review)
+    assert shown == "Run the command make upload, then send data to another computer"
+    # A script whose code shows another command: not "a script that".
+    mixed = gist(
+        "python_exec", {"code": "import subprocess\nsubprocess.run(['ls'])"}, review
+    )
+    assert parts(mixed) == ["then", "script_command", "effect_send_out"]
 
 
 # ── A description that does not match the code ──

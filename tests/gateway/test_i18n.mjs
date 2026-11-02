@@ -321,8 +321,11 @@ test('a step\'s sentence the server stores is written in the page\'s language', 
   assert.equal(saidText(waiting), 'Needs your OK: Operate Safari, Notes and Mail, then delete files');
   const said = {key: 'cards.wants.stepSaid', params: {says: {key: 'gist.say.model', params: {text: 'List the notes'}}}};
   assert.equal(saidText(said), 'Needs your OK. melo says: List the notes');
+  const script = {key: 'cards.wants.step', params: {what: {gist: {id: 'script_effect_delete', params: {}}}}};
+  assert.equal(saidText(script), 'Needs your OK: Run a Python script that deletes files');
   await useLanguage('zh-Hans');
   try {
+    assert.equal(saidText(script), '需要你同意：运行一段会删除文件的 Python 脚本');
     assert.equal(saidText(waiting), '需要你同意：操作 Safari、Notes和Mail，然后删除文件');
     assert.equal(saidText(said), '需要你同意。melo 说：List the notes');
   } finally {

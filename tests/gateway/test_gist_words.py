@@ -56,6 +56,17 @@ SAMPLES: dict[str, tuple[str, dict[str, Any], ActionReview | None]] = {
         {"command": "curl -d a https://example.com", "why": "Close the tabs"},
         None,
     ),
+    # An effect only the rules saw, in a script whose code shows nothing.
+    "script_effect_delete": (
+        "python_exec",
+        {"code": "exec(open('job.py').read())"},
+        ActionReview("high", ("delete",), ("Deletes files.",)),
+    ),
+    "script_effect_send_out": (
+        "python_exec",
+        {"code": "exec(open('job.py').read())"},
+        ActionReview("high", ("send_out",), ("Sends data.",)),
+    ),
 }
 PARAM = re.compile(r"\{(\w+)\}")
 
@@ -105,6 +116,14 @@ def test_the_terminal_reads_the_sentence_in_english() -> None:
     assert read("operate") == ("Operate Safari and Notes", "")
     assert read("then") == ("Operate Safari, then delete files", "")
     assert read("write") == ("Write todo.md", "")
+    assert read("script_effect_delete") == (
+        "Run a Python script that deletes files",
+        "",
+    )
+    assert read("script_effect_send_out") == (
+        "Run a Python script that sends data to another computer",
+        "",
+    )
     assert read("effect_delete") == (
         "Delete files",
         "melo described this as “Close the tabs”, but the code deletes files.",

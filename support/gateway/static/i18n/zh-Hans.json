@@ -684,6 +684,8 @@
   "gist.say.operate": "操作 {apps}",
   "gist.say.script": "运行一段 Python 脚本",
   "gist.say.script_command": "通过 Python 脚本运行 {command}",
+  "gist.say.script_effect_delete": "运行一段会删除文件的 Python 脚本",
+  "gist.say.script_effect_send_out": "运行一段会向另一台电脑发送数据的 Python 脚本",
   "gist.say.then": "{first}，然后{next}",
   "gist.say.tool": "使用 {tool} 工具",
   "gist.say.write": "写入 {name}",

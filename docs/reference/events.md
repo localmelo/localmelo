@@ -352,7 +352,9 @@ The number of `tool.started` events is `RunResult.n_tool`.
   {id, params}, note?, apps?}`. `say.id` is one of `model` (the model's own
   words, in `params.text`, only for a step the rules found nothing in), `command`,
   `script`, `script_command`, `operate` (`params.apps`, a list of names), `write`,
-  `edit`, `tool`, `effect_delete` and `effect_send_out`, or `then` and `more`,
+  `edit`, `tool`, `effect_delete` and `effect_send_out` (or `script_effect_delete` and
+  `script_effect_send_out`, "a Python script that deletes files": an effect only the
+  rules saw, in a script whose code shows nothing), or `then` and `more`,
   whose params hold other sentences (`first` and `next`; `list` and `count`) and
   name every effect of a compound step in order. `note` holds the model's words
   when the rules found something: they stand below the sentence, and a client
