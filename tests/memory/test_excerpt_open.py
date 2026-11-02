@@ -26,6 +26,7 @@ from localmelo.support.memory.recall import (
     BLOCK_HEADER,
     CUT_GUIDE,
     HEADS,
+    ITEM_CHARS,
     LIST_GUIDE,
     TURN_CHARS,
     WHOLE,
@@ -77,6 +78,8 @@ async def store(tmp_path: Path) -> AsyncIterator[SessionStore]:
 
 
 def memory_of(tmp_path: Path, **settings: object) -> tuple[ChatMemory, Config]:
+    """A memory with these ``[memory]`` settings. A test that needs a turn cut names
+    its room (``recall_item_chars``), so it does not depend on the shipped default."""
     cfg = config(**settings)
     return ChatMemory(lambda: cfg, directory=str(tmp_path / "memory")), cfg
 
@@ -187,8 +190,9 @@ def test_a_reserved_id_takes_its_characters_from_the_room_of_a_cut_line() -> Non
                     assert still
                     assert room_used(again) <= chars - reserve, (chars, typed_size)
                     assert room_used(again) <= room_used(said)
-    # At the default room the user's words keep their 234 (as far as the room holds
-    # them): with a 7-character id they have 7 less, and the reply is left out.
+    # At a room of 234 (the head a turn had before the room grew) the user's words
+    # keep their 234, as far as the room holds them: with a 7-character id they have
+    # 7 less, and the reply is left out.
     text = f"User: {'a' * 300}\nmelo: {'b' * 300}"
     assert turn_excerpt(text, Shown.of(234, None, True))[0] == (
         f"the user said “{'a' * 233}…”"
@@ -253,18 +257,26 @@ def test_a_line_with_an_id_reads_as_the_line_without_it_otherwise() -> None:
 # ── Off is today ──
 
 
+# The shipped room of a recalled turn (None: not set, so the default), and two
+# explicit rooms, one of them the 234-character head the default used to be.
+ROOMS = [None, TURN_CHARS, 400]
+
+
+@pytest.mark.parametrize("room", ROOMS)
 async def test_off_is_the_block_the_search_result_and_the_tools_as_they_were(
-    tmp_path: Path, store: SessionStore
+    tmp_path: Path, store: SessionStore, room: int | None
 ) -> None:
-    memory, cfg = memory_of(tmp_path)
+    sized = {} if room is None else {"recall_item_chars": room}
+    memory, cfg = memory_of(tmp_path, **sized)
     try:
         await teach(memory, store, await _turn(store, "Stakes"), NOTE)
         at = time.time() - 3 * DAY
         await add_turn(memory, store, SHORT_TYPED, LONG_ANSWER, at=at, title="Beds")
-        room = TURN_CHARS - len(SHORT_TYPED)
+        # The user's words whole, melo's reply cut to what is left of the room.
+        left = (ITEM_CHARS if room is None else room) - len(SHORT_TYPED)
         line = (
             f"the user said “{SHORT_TYPED}”; melo replied “"
-            f"{snippet(' '.join(LONG_ANSWER.split()), room)}” (chat “Beds”, {day(at)})"
+            f"{snippet(' '.join(LONG_ANSWER.split()), left)}” (chat “Beds”, {day(at)})"
         )
         assert line.count("…") == 1  # the reply is cut
         found = await ask(memory, store)
@@ -295,10 +307,12 @@ async def test_off_is_the_block_the_search_result_and_the_tools_as_they_were(
 # ── On: the block ──
 
 
+@pytest.mark.parametrize("room", ROOMS)
 async def test_a_cut_turn_starts_with_its_id_and_a_whole_turn_has_none(
-    tmp_path: Path, store: SessionStore
+    tmp_path: Path, store: SessionStore, room: int | None
 ) -> None:
-    memory, _ = memory_of(tmp_path, excerpt_open="on")
+    sized = {} if room is None else {"recall_item_chars": room}
+    memory, _ = memory_of(tmp_path, excerpt_open="on", **sized)
     try:
         await teach(memory, store, await _turn(store, "Stakes"), NOTE)
         at = time.time() - 3 * DAY
@@ -315,11 +329,15 @@ async def test_a_cut_turn_starts_with_its_id_and_a_whole_turn_has_none(
         )
         found = await ask(memory, store)
         cut, whole = turn_lines(found.block)
-        # The id is counted in the room: 234 less its 7 or more characters.
-        room = TURN_CHARS - len(f"[t{long_id}] ") - len(SHORT_TYPED)
+        # The id is counted in the room: the room less its 7 or more characters.
+        left = (
+            (ITEM_CHARS if room is None else room)
+            - len(f"[t{long_id}] ")
+            - len(SHORT_TYPED)
+        )
         assert cut == (
             f"[t{long_id}] the user said “{SHORT_TYPED}”; melo replied “"
-            f"{snippet(' '.join(LONG_ANSWER.split()), room)}” (chat “Long”, {day(at)})"
+            f"{snippet(' '.join(LONG_ANSWER.split()), left)}” (chat “Long”, {day(at)})"
         )
         assert whole == (
             "the user said “Which tomato garden bed needs stakes?”; melo replied "
@@ -351,7 +369,7 @@ async def test_a_cut_turn_starts_with_its_id_and_a_whole_turn_has_none(
 async def test_the_guide_appears_only_when_a_line_carries_an_id(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    memory, _ = memory_of(tmp_path, excerpt_open="on")
+    memory, _ = memory_of(tmp_path, excerpt_open="on", recall_item_chars=TURN_CHARS)
     tools = MemoryTools(memory)
     try:
         await teach(memory, store, await _turn(store, "Stakes"), NOTE)
@@ -416,23 +434,27 @@ async def test_the_more_mark_follows_the_chunks_when_a_turn_is_indexed_again(
     tmp_path: Path, store: SessionStore
 ) -> None:
     memory, _ = memory_of(tmp_path, excerpt_open="on", recall_item_chars=2000)
+    typed = "Where is the shed key?"
     try:
-        session_id, _ = await add_turn(memory, store, "Where?", "Over there.")
+        session_id, _ = await add_turn(memory, store, typed, "Over there.")
 
         async def heads() -> list[bool]:
-            await ask(memory, store, "where")
+            # A question with content of its own: one with none (a follow-up such as
+            # "where") is searched with the chat's recent words, and a new chat has
+            # none, so nothing would be searched and the corpus not filled.
+            await ask(memory, store, "shed key")
             items = memory._corpus.items.values()
             return [i.more for i in items if i.is_turn and i.chunk == 0]
 
         assert await heads() == [False]
         # The same turn, longer: new chunks, the head knows.
         await add_turn(
-            memory, store, "Where?", numbered(5000), session_id=session_id, turn=1
+            memory, store, typed, numbered(5000), session_id=session_id, turn=1
         )
         assert await heads() == [True]
         # Shorter again: one chunk, nothing more.
         await add_turn(
-            memory, store, "Where?", "Over there.", session_id=session_id, turn=1
+            memory, store, typed, "Over there.", session_id=session_id, turn=1
         )
         assert await heads() == [False]
         assert all(not i.chunk for i in memory._corpus.items.values() if i.is_turn)
@@ -547,7 +569,12 @@ async def test_open_memory_is_offered_and_search_says_what_an_id_line_is(
 async def test_an_id_from_the_block_or_the_search_opens_the_whole_turn_cut_at_recall_open_chars(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    memory, cfg = memory_of(tmp_path, excerpt_open="on", recall_open_chars=1000)
+    memory, cfg = memory_of(
+        tmp_path,
+        excerpt_open="on",
+        recall_item_chars=TURN_CHARS,
+        recall_open_chars=1000,
+    )
     tools = MemoryTools(memory)
     try:
         at = time.time() - 3 * DAY
@@ -619,7 +646,7 @@ async def test_the_id_of_a_chunk_opens_the_whole_turn_and_a_turn_never_shown_is_
 async def test_the_chats_own_past_has_an_id_and_opens_until_the_window_holds_it(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    memory, _ = memory_of(tmp_path, excerpt_open="on")
+    memory, _ = memory_of(tmp_path, excerpt_open="on", recall_item_chars=TURN_CHARS)
     tools = MemoryTools(memory)
     try:
         info = await _turn(store, "Garden")
@@ -653,7 +680,7 @@ async def test_the_chats_own_past_has_an_id_and_opens_until_the_window_holds_it(
 async def test_the_memory_event_names_what_was_opened_as_for_the_list_form(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    memory, _ = memory_of(tmp_path, excerpt_open="on")
+    memory, _ = memory_of(tmp_path, excerpt_open="on", recall_item_chars=TURN_CHARS)
     tools = MemoryTools(memory)
     emitted: list[dict[str, Any]] = []
     try:
