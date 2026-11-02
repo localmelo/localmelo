@@ -58,6 +58,10 @@ _LAUNCHABLE = (
     ".prefpane",
     ".jar",
 )
+# What stands for an argument melo cannot see (the words ``xargs`` adds, the
+# files a ``find -exec`` hands over). It is not a name a shell variable can
+# have, so it is never taken for one.
+UNKNOWN_ARG = "$(?)"
 _DRIVES = re.compile(
     r"\btell\s+(application|app)\b|do shell script|run script|Application\(|doShellScript"
     r"|\bdo script\b|«",
@@ -436,14 +440,20 @@ def _heredocs(command: str) -> tuple[str, list[str]]:
     return "\n".join(out), bodies
 
 
-def _segments(command: str) -> list[tuple[str, list[str], list[tuple[str, str]]]]:
-    """The simple commands: the operator before each, its argv, its redirections."""
+def _tokens(command: str) -> list[str]:
+    """*command* as words and operators (``;``, ``&&``, ``(``, ``>``…), quote-aware."""
     lexer = shlex.shlex(command, posix=True, punctuation_chars="();<>|&\n")
     lexer.whitespace, lexer.whitespace_split, lexer.commenters = " \t\r", True, ""
     tokens: list[str] = []
     for token in lexer:
         punct = token and all(c in "();<>|&\n" for c in token)
         tokens += _OPS.findall(token) if punct else [token]
+    return tokens
+
+
+def _segments(command: str) -> list[tuple[str, list[str], list[tuple[str, str]]]]:
+    """The simple commands: the operator before each, its argv, its redirections."""
+    tokens = _tokens(command)
     argv: list[str] = []
     redirs: list[tuple[str, str]] = []
     out, op, i = [], "", 0
@@ -460,6 +470,95 @@ def _segments(command: str) -> list[tuple[str, list[str], list[tuple[str, str]]]
             argv.append(tokens[i])
         i += 1
     return [s for s in [*out, (op, argv, redirs)] if s[1] or s[2]]
+
+
+def _backticks(text: str) -> list[str]:
+    """The commands written between backquotes (outside single quotes), as their own text.
+
+    A backquoted command with spaces is several words to the lexer, so the
+    pairs are found in the text itself, as ``$(…)`` is a command of its own.
+    """
+    found: list[str] = []
+    at, quote = 0, ""
+    while at < len(text):
+        char = text[at]
+        if char == "\\" and quote != "'":
+            at += 2
+            continue
+        if char in "'\"" and quote in ("", char):
+            quote = "" if quote else char
+        elif char == "`" and quote != "'":
+            end = at + 1
+            while end < len(text) and text[end] != "`":
+                end += 2 if text[end] == "\\" else 1
+            found.append(text[at + 1 : end].replace("\\`", "`"))
+            at = end
+        at += 1
+    return found
+
+
+_ASSIGN = re.compile(r"([A-Za-z_]\w*)(?:\[[^\]]*\])?\+?=(.*)", re.S)
+_DECLARERS = frozenset(
+    ["export", "local", "declare", "typeset", "readonly", "builtin", "command"]
+)
+_READERS = frozenset(["read", "mapfile", "readarray", "getopts", "select", "printf"])
+
+
+def _own_pids(text: str) -> set[str]:
+    """The shell variables that only ever hold a process this command started.
+
+    A name counts when every way the text gives it a value is ``name=$!`` in
+    the command's own shell (not inside parentheses, where a subshell sets
+    its own copy). Any other value (``name=123``, ``name=$(pgrep x)``,
+    ``for name in …``, ``read name``, ``export name=…``), or an ``eval`` that
+    could set one, takes the name out.
+    """
+    if "$!" not in text and "${!}" not in text:
+        return set()  # no process was started here (and nothing to lex again)
+    try:
+        tokens = _tokens(text)
+    except ValueError:
+        return set()
+    held: set[str] = set()
+    other: set[str] = set()
+    words: list[str] = []
+    depth = 0
+    for token in [*tokens, ";"]:
+        if token not in _SEPARATORS:
+            if not _OPS.fullmatch(token):
+                words.append(token)
+            continue
+        if words:
+            if words[0] == "eval":
+                return set()
+            _bindings(words, depth, held, other)
+        words = []
+        if token == "(":
+            depth += 1
+        elif token == ")":
+            depth = max(0, depth - 1)
+    return held - other
+
+
+def _bindings(words: list[str], depth: int, held: set[str], other: set[str]) -> None:
+    """Sort the names one simple command gives a value into *held* (``$!``) and *other*."""
+    if words[0] in ("for", "select") and len(words) > 1:
+        other.add(words[1])
+    elif words[0] in _READERS:
+        other.update(w for w in words[1:] if re.fullmatch(r"[A-Za-z_]\w*", w))
+    core = words[1:] if words[0] in _DECLARERS else words
+    mine = [_ASSIGN.fullmatch(w) for w in core]
+    for word, found in zip(core, mine, strict=True):
+        if found is None:
+            continue
+        name, value = found.group(1), found.group(2)
+        alone = all(m is not None for m in mine) and "[" not in word.split("=")[0]
+        if value in ("$!", "${!}") and alone and depth == 0:
+            held.add(name)
+        else:
+            other.add(name)
+    if words[0] in _DECLARERS:
+        other.update(w for w in words[1:] if re.fullmatch(r"[A-Za-z_]\w*", w))
 
 
 def review_shell(
@@ -526,6 +625,21 @@ def _review_shell(
     except ValueError:
         return f.doubt("Has a quote that does not close.")
     _pipe_status(f, text, segments, status_read)
+    outer, f.started = f.started, _own_pids(text)
+    try:
+        for inner in _backticks(text):
+            review_shell(ctx.deeper(), f, inner)
+        _run_segments(ctx, f, segments, bodies)
+    finally:
+        f.started = outer
+
+
+def _run_segments(
+    ctx: Context,
+    f: Findings,
+    segments: list[tuple[str, list[str], list[tuple[str, str]]]],
+    bodies: list[str],
+) -> None:
     cwd, before, url, bare_before = ctx.root, "", "", False
     said: str | None = None  # what the last command printed, when literal
     # The last command's site, and the folders it searched when it was a find.
@@ -551,12 +665,10 @@ def _review_shell(
                 review_shell(ctx.deeper(), f, inner[0] or inner[1])
         if argv[1:2] == ["run"] and os.path.basename(argv[0]) in _RUN_WRAPPERS:
             file_rules.runner(ctx, f, f"{os.path.basename(argv[0])} run")
-        if argv and all(re.fullmatch(r"[A-Za-z_]\w*=\$(?:!|\{!\})", a) for a in argv):
-            f.started.update(a.split("=")[0] for a in argv)  # pid=$! : started here
-        argv = _unwrap(f, argv)
+        argv = _unwrap(f, _past_keywords(argv))
         if not argv:
             continue
-        prog = os.path.basename(argv[0])
+        prog = os.path.basename(argv[0]).lower()
         piped = said if op in ("|", "|&") else None
         said = _literal_output(argv, body, piped)
         _writes_code(ctx, f, argv, said, writes, cwd)
@@ -601,6 +713,19 @@ def _review_shell(
         searched = _find_roots(argv[1:]) if prog == "find" else []
 
 
+# Words that start a part of a loop, a condition or a group and are followed
+# by the command it runs: `for x in a; do CMD; done`, `if c; then CMD; fi`.
+_KEYWORDS = frozenset(["do", "then", "else", "elif", "if", "while", "until", "!", "{"])
+
+
+def _past_keywords(argv: list[str]) -> list[str]:
+    """*argv* without the shell keywords in front of the command (``do``, ``then``, ``if``…)."""
+    at = 0
+    while at < len(argv) and argv[at] in _KEYWORDS:
+        at += 1
+    return argv[at:]
+
+
 def _unwrap(f: Findings, argv: list[str]) -> list[str]:
     """*argv* without ``VAR=x`` prefixes and wrappers such as ``nice`` or ``uv run``.
 
@@ -609,7 +734,7 @@ def _unwrap(f: Findings, argv: list[str]) -> list[str]:
     """
     local = ""
     while argv:
-        prog = os.path.basename(argv[0])
+        prog = os.path.basename(argv[0]).lower()
         if re.match(r"[A-Za-z_]\w*=", argv[0]):
             _runs_var(f, argv[0])
             local = local or _local_path(argv[0])
@@ -643,7 +768,7 @@ def _unwrap(f: Findings, argv: list[str]) -> list[str]:
         if prog == "flock" and i < len(rest):
             i += 1  # its lock file, then the command
         # xargs adds arguments melo cannot see.
-        argv = rest[i:] + (["$value"] if prog == "xargs" and rest[i:] else [])
+        argv = rest[i:] + ([UNKNOWN_ARG] if prog == "xargs" and rest[i:] else [])
     if local and argv and "/" not in argv[0]:
         argv = [os.path.join(local, argv[0]), *argv[1:]]
     return argv
@@ -761,7 +886,7 @@ def run_argv(
     *stdin* says its input is given (a pipe, a heredoc, ``input=``): an
     interpreter with no program of its own runs that input.
     """
-    prog, args = os.path.basename(argv[0]), argv[1:]
+    prog, args = os.path.basename(argv[0]).lower(), argv[1:]
     prog = _GNU_NAMES.get(prog, prog)
     if re.search(r"[$`]", argv[0]):
         f.doubt("Runs a program melo could not name.")
@@ -824,7 +949,7 @@ def run_argv(
             if rest:
                 # A launcher gets each file found, which melo cannot name.
                 found = (
-                    "$value" if os.path.basename(rest[0]) in _ELSEWHERE else roots[0]
+                    UNKNOWN_ARG if os.path.basename(rest[0]) in _ELSEWHERE else roots[0]
                 )
                 run_argv(ctx, f, [found if a == "{}" else a for a in rest], cwd)
     elif prog in _WRITERS and not re.search(r"\s[\w.-]+@?[\w.-]*:", line):
@@ -846,16 +971,16 @@ def run_argv(
             f.add("opaque", "Runs text built at run time (eval).")
         else:
             review_shell(ctx.deeper(), f, " ".join(args))
-    elif prog in _SHELLS and "-c" in args[:-1]:
-        code = args[args.index("-c") + 1]
-        if re.search(r"(\$\(|`)\s*(curl|wget)\b", code):
-            f.add("remote_code", "Runs a script downloaded from the internet.")
-        review_shell(ctx.deeper(), f, code)
-    elif prog in _SHELLS and (inline := _cluster_code(args)) is not None:
-        # `bash -lc 'cmd'`: its text is read as with `-c`. What it did before
-        # stays: the text is also taken for a script file melo cannot read.
-        review_shell(ctx.deeper(), f, inline)
-        script(ctx, f, words[0], "shell", cwd)
+    elif prog in _SHELLS and (texts := _shell_texts(args)):
+        # `bash -c 'cmd'`, `bash -lc 'cmd'`, `bash -c -l 'cmd'`: the text is
+        # the command. A cluster such as `-lc` is also taken, as before, for
+        # a script file melo cannot read.
+        for code in texts:
+            if re.search(r"(\$\(|`)\s*(curl|wget)\b", code):
+                f.add("remote_code", "Runs a script downloaded from the internet.")
+            review_shell(ctx.deeper(), f, code)
+        if _cluster_code(args) is not None:
+            script(ctx, f, words[0], "shell", cwd)
     elif prog in _SHELLS and words:
         script(ctx, f, words[0], "shell", cwd)
     elif "/" in argv[0]:
@@ -890,7 +1015,15 @@ def run_argv(
         file_rules.hooks(ctx, f, f"git {plain[0]}")
 
 
-_SHELL_C = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
+def _is_cluster(arg: str) -> bool:
+    """Whether *arg* is a cluster of letters with a ``c`` in it (``-lc``, ``-ic``, ``-euc``)."""
+    return (
+        len(arg) > 2
+        and arg[0] == "-"
+        and arg[1:].isascii()
+        and arg[1:].isalpha()
+        and "c" in arg
+    )
 
 
 def _cluster_code(args: list[str]) -> str | None:
@@ -900,9 +1033,42 @@ def _cluster_code(args: list[str]) -> str | None:
     ``-lc``, or ``None`` when there is none.
     """
     for at, arg in enumerate(args[:-1]):
-        if arg != "-c" and _SHELL_C.fullmatch(arg):
+        if arg != "-c" and _is_cluster(arg):
             return args[at + 1]
     return None
+
+
+def _shell_texts(args: list[str]) -> list[str]:
+    """The command texts a shell is given with ``-c``, as the shell reads them.
+
+    A shell reads its options first (``-c``, a cluster such as ``-lc``,
+    ``-o name``, ``--``) and takes the first word that is not one of them as
+    the command: ``bash -c -l 'cmd'`` and ``bash -c -- 'cmd'`` run ``cmd``.
+    The word right after a ``-c`` or a cluster is read too, as before.
+    """
+    found: list[str] = []
+    if "-c" in args[:-1]:
+        found.append(args[args.index("-c") + 1])
+    inline = _cluster_code(args)
+    if inline is not None:
+        found.append(inline)
+    at, with_c = 0, False
+    while at < len(args):
+        word = args[at]
+        if word == "--":
+            at += 1
+            break
+        if word.startswith("--"):
+            at += 2 if word in ("--rcfile", "--init-file") else 1
+        elif word[:1] in ("-", "+") and len(word) > 1:
+            with_c = with_c or (word[0] == "-" and "c" in word[1:])
+            # -o and -O (alone or ending a cluster) take the next word.
+            at += 2 if word[-1] in ("o", "O") else 1
+        else:
+            break
+    if with_c and at < len(args) and args[at] not in found:
+        found.append(args[at])
+    return found
 
 
 def _destroys(ctx: Context, f: Findings, prog: str, args: list[str], cwd: str) -> None:
@@ -918,6 +1084,14 @@ def _destroys(ctx: Context, f: Findings, prog: str, args: list[str], cwd: str) -
         if reason:
             f.add("system", reason)
             f.add("delete", reason)
+    elif (
+        prog.startswith("newfs_")
+        or prog == "newfs"
+        or (prog == "asr" and {"-erase", "--erase"} & set(args))
+    ):
+        reason = f"Erases or formats a disk ({prog})."
+        f.add("system", reason)
+        f.add("delete", reason)
     elif prog == "git":
         sub, rest = destroys.git_sub(args)
         plain = [a for a in rest if not a.startswith("-")]
@@ -932,6 +1106,8 @@ def _destroys(ctx: Context, f: Findings, prog: str, args: list[str], cwd: str) -
         reason = destroys.stops_others(prog, args, f.started)
         if reason:
             f.add("system", reason)
+    elif prog == "launchctl" and args[:1] == ["kill"]:
+        f.add("system", "Stops a job that launchd runs (launchctl kill).")
 
 
 def _searched(args: list[str]) -> list[str]:
@@ -987,7 +1163,7 @@ def _elsewhere(
     words = [a for a in args if not a.startswith("-")]
     if prog == "open":
         if {"-a", "-b"} & set(args) or any(
-            re.fullmatch(r"-\w*[ab]\w*", a) for a in args
+            re.fullmatch(r"-\w+", a) and ("a" in a or "b" in a) for a in args
         ):
             return _open_app(f, args)
         for word in words:

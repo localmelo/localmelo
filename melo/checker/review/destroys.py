@@ -31,24 +31,43 @@ _DISK_VERBS: Final = frozenset(
     + ["randomdisk", "secureerase", "mergepartitions", "splitpartition"]
     + ["resizevolume"]
 )
-# What ``diskutil apfs`` and ``diskutil coreStorage`` can delete or erase.
+# What ``diskutil apfs``, ``coreStorage`` and ``appleRAID`` can delete or erase.
 _APFS_VERBS: Final = frozenset(
     ["deletecontainer", "deletevolume", "erasevolume", "resizecontainer"]
-    + ["delete", "deletelvg", "deletelv"]
+    + ["delete", "deletelvg", "deletelv", "destroy"]
 )
-_DISK_GROUPS: Final = frozenset(["apfs", "ap", "corestorage", "cs"])
+_DISK_GROUPS: Final = frozenset(["apfs", "ap", "corestorage", "cs", "appleraid", "ar"])
 
 # git's options that take a value before the subcommand.
-_GIT_VALUED: Final = frozenset(["-C", "-c", "--git-dir", "--work-tree", "--namespace"])
+_GIT_VALUED: Final = frozenset(
+    ["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"]
+    + ["--super-prefix", "--attr-source"]
+)
 # Words of ``git checkout`` that make it overwrite files or ask what to keep.
 _CHECKOUT_FORCES: Final = frozenset(
     ["--force", "--ours", "--theirs", "--merge", "--patch", "--discard-changes"]
 )
+# The letters of ``git clean``, ``restore`` and ``switch`` that take a value.
+_CLEAN_VALUED: Final = "e"
+_RESTORE_VALUED: Final = "sU"
+_SWITCH_VALUED: Final = "cC"
 _CHECKOUT_LETTERS: Final = frozenset("fpm")
 # The options of ``git checkout`` / ``switch`` that name a new branch.
 _NEW_BRANCH: Final = frozenset(["-b", "-B", "--orphan", "-c", "-C"])
 # ``kill`` and its relatives: signal 0 only asks whether the process exists.
 _SIGNAL_WORDS: Final = frozenset(["-s", "-n", "--signal"])
+# The options of each that take a value in the next word, and the signals'
+# names (a name is one word of its own, not a cluster of letters).
+_VALUED_WORDS: Final[dict[str, frozenset[str]]] = {
+    "killall": frozenset(["-u", "-t", "-c"]),
+}
+_PKILL_VALUED: Final = "FGPUdgstu"
+_SIGNAL_NAMES: Final = frozenset(
+    ["HUP", "INT", "QUIT", "ILL", "TRAP", "ABRT", "EMT", "FPE", "KILL", "BUS"]
+    + ["SEGV", "SYS", "PIPE", "ALRM", "TERM", "URG", "STOP", "TSTP", "CONT"]
+    + ["CHLD", "TTIN", "TTOU", "IO", "XCPU", "XFSZ", "VTALRM", "PROF", "WINCH"]
+    + ["INFO", "USR1", "USR2", "EXIT"]
+)
 _DOLLAR_BANG: Final = re.compile(r"\$!|\$\{!\}")
 _SHELL_PID: Final = re.compile(r"\$\$|\$\{\$\}")
 _VARIABLE: Final = re.compile(r"\$\{?([A-Za-z_]\w*)\}?")
@@ -96,20 +115,43 @@ def git_sub(args: Sequence[str]) -> tuple[str, list[str]]:
     return "", []
 
 
-def _letters(args: Sequence[str]) -> set[str]:
-    """The letters of the single-dash options in *args* (``-fd`` gives ``f`` and ``d``)."""
-    found: set[str] = set()
+def _options(args: Sequence[str], valued: str = "") -> tuple[set[str], list[str]]:
+    """The letters of the single-dash options of *args*, and the plain words before ``--``.
+
+    A cluster is read left to right: a letter of *valued* takes the rest of
+    the cluster as its value (``-enode_modules``), or the next word when it
+    ends the cluster (``-e node_modules``), so the letters of a value are
+    never read as options.
+    """
+    letters: set[str] = set()
+    words: list[str] = []
+    skip = False
     for arg in args:
-        if arg.startswith("-") and not arg.startswith("--") and len(arg) > 1:
-            found |= set(arg[1:])
-    return found
+        if skip:
+            skip = False
+        elif arg == "--":
+            break
+        elif arg.startswith("-") and not arg.startswith("--") and len(arg) > 1:
+            for at, char in enumerate(arg[1:], 1):
+                letters.add(char)
+                if char in valued:
+                    skip = at == len(arg) - 1
+                    break
+        elif not arg.startswith("-"):
+            words.append(arg)
+    return letters, words
 
 
-def _paths(args: Sequence[str]) -> tuple[str, ...]:
+def _paths(args: Sequence[str], valued: str = "") -> tuple[str, ...]:
     """The path words of a git command: those after ``--``, else every plain word."""
     if "--" in args:
         return tuple(args[list(args).index("--") + 1 :])
-    return tuple(a for a in args if not a.startswith("-"))
+    return tuple(_options(args, valued)[1])
+
+
+def _abbreviates(arg: str, option: str) -> bool:
+    """Whether *arg* is *option* or an unambiguous shortening git accepts (``--har``)."""
+    return arg == option or (len(arg) >= 5 and option.startswith(arg))
 
 
 def _checkout(args: list[str]) -> Discard | None:
@@ -117,7 +159,9 @@ def _checkout(args: list[str]) -> Discard | None:
     reason = "Discards uncommitted changes (git checkout)."
     if "--" in args and args.index("--") + 1 < len(args):
         return Discard(reason, tuple(args[args.index("--") + 1 :]))
-    if _CHECKOUT_FORCES & set(args):
+    if _CHECKOUT_FORCES & set(args) or any(
+        a.startswith("--pathspec-from-file") for a in args
+    ):
         return Discard(reason)
     for arg in args:
         if arg.startswith("-") and not arg.startswith("--"):
@@ -137,12 +181,14 @@ def _checkout(args: list[str]) -> Discard | None:
 
 def _restore(args: list[str]) -> Discard | None:
     """``git restore`` that writes the working tree: all but ``--staged`` alone."""
-    letters = _letters(args)
+    letters, _ = _options(args, _RESTORE_VALUED)
     staged = "--staged" in args or "S" in letters
     worktree = "--worktree" in args or "W" in letters
     if staged and not worktree:
         return None
-    return Discard("Discards uncommitted changes (git restore).", _paths(args))
+    return Discard(
+        "Discards uncommitted changes (git restore).", _paths(args, _RESTORE_VALUED)
+    )
 
 
 def git_discards(args: Sequence[str], exists: bool = False) -> Discard | None:
@@ -165,34 +211,93 @@ def git_discards(args: Sequence[str], exists: bool = False) -> Discard | None:
                 )
         return found
     if sub == "switch":
-        if {"--force", "--discard-changes"} & set(rest) or "f" in _letters(rest):
+        letters, _ = _options(rest, _SWITCH_VALUED)
+        if {"--force", "--discard-changes"} & set(rest) or "f" in letters:
             return Discard("Discards uncommitted changes (git switch).")
         return None
     if sub == "restore":
         return _restore(rest)
     if sub == "reset":
-        if "--hard" in rest:
+        if any(_abbreviates(a, "--hard") for a in rest):
             return Discard("Resets with --hard, which discards uncommitted changes.")
         return None
     if sub == "clean":
-        if "--dry-run" in rest or "n" in _letters(rest):
+        letters, _ = _options(rest, _CLEAN_VALUED)
+        if "--dry-run" in rest or "n" in letters:
             return None
-        if any(re.fullmatch(r"-\w*[xX]\w*", a) for a in rest):
-            return Discard(
-                "Deletes untracked and ignored files (git clean -x).", _paths(rest)
-            )
-        return Discard("Deletes untracked files (git clean).", _paths(rest))
-    if sub == "stash" and rest[:1] in (["drop"], ["clear"]):
-        return Discard(f"Deletes stashed work (git stash {rest[0]}).")
+        paths = _paths(rest, _CLEAN_VALUED)
+        if "x" in letters or "X" in letters:
+            return Discard("Deletes untracked and ignored files (git clean -x).", paths)
+        return Discard("Deletes untracked files (git clean).", paths)
+    if sub == "stash":
+        verb = next((a for a in rest if not a.startswith("-")), "")
+        if verb in ("drop", "clear"):
+            return Discard(f"Deletes stashed work (git stash {verb}).")
     return None
 
 
-def _signal_zero(args: Sequence[str]) -> bool:
-    """Whether the signal is ``0`` (``-0``, ``-s 0``, ``-n 0``): no signal is sent."""
-    for at, arg in enumerate(args):
-        if arg == "-0":
+def _leading(prog: str, args: Sequence[str]) -> tuple[list[str], list[str]]:
+    """The options before the first target of ``kill``, ``pkill`` or ``killall``, and the targets.
+
+    These programs stop reading options at the first target: a ``-0`` or
+    ``-s`` after it is one more target, not an option. A ``--`` ends the
+    options. An option that takes a value takes the next word as well. For
+    ``kill`` only the first word can be an option (a signal, ``-s sig``,
+    ``-l``): a later ``-123`` is a process group.
+    """
+    if prog == "kill":
+        first = args[0] if args else ""
+        if first in _SIGNAL_WORDS:
+            options, at = list(args[:2]), 2
+        elif first.startswith("-") and len(first) > 1 and first != "--":
+            options, at = [first], 1
+        else:
+            options, at = [], 0
+        if args[at : at + 1] == ["--"]:
+            at += 1
+        return options, list(args[at:])
+    valued = _VALUED_WORDS.get(prog, frozenset())
+    options = []
+    at = 0
+    while at < len(args):
+        word = args[at]
+        if word == "--":
+            at += 1
+            break
+        if not word.startswith("-") or len(word) < 2:
+            break
+        options.append(word)
+        at += 1
+        takes = word in valued
+        if prog != "killall" and word[1:2] != "-" and not _is_signal(word):
+            # pkill and its relatives: a cluster of letters, one of which may
+            # take the rest of the word, or the next word when it ends it.
+            for place, char in enumerate(word[1:], 1):
+                if char in _PKILL_VALUED:
+                    takes = place == len(word) - 1
+                    break
+        if takes and at < len(args):
+            options.append(args[at])
+            at += 1
+    return options, list(args[at:])
+
+
+def _is_signal(word: str) -> bool:
+    """Whether *word* is a signal given as an option: ``-9``, ``-HUP``, ``-SIGKILL``."""
+    name = word[1:]
+    return name.isdigit() or name.removeprefix("SIG") in _SIGNAL_NAMES
+
+
+def _signal_zero(options: Sequence[str], valued: bool) -> bool:
+    """Whether the signal is ``0``: ``-0``, or (for ``kill``) ``-s 0`` / ``-n 0``.
+
+    For ``pkill`` and ``killall`` the ``-s`` option is something else (a
+    session, print only), so only ``-0`` counts there.
+    """
+    for at, option in enumerate(options):
+        if option == "-0":
             return True
-        if arg in _SIGNAL_WORDS and args[at + 1 : at + 2] == ["0"]:
+        if valued and option in _SIGNAL_WORDS and options[at + 1 : at + 2] == ["0"]:
             return True
     return False
 
@@ -213,34 +318,24 @@ def _started(word: str, started: set[str]) -> bool:
 def stops_others(prog: str, args: Sequence[str], started: set[str]) -> str | None:
     """The sentence for ``pkill``, ``killall`` or a ``kill`` of another process, else ``None``.
 
-    Signal ``0`` (an existence check), listing the signals (``-l``) and
-    ``killall -s`` (print only) stay ``None``. ``kill`` of ``$!``, a job
-    (``%1``), the step's own shell (``$$``) or a variable *started* holds
-    (``pid=$!``) is a process this step started; any other target is not.
+    Only the options before the first target count (see :func:`_leading`).
+    Signal ``0`` (an existence check), ``kill -l`` and ``killall -l`` (list
+    the signals) and ``killall -s`` (print only) stay ``None``; ``pkill -l``
+    is long output and still kills. ``kill`` of ``$!``, a job (``%1``), the
+    step's own shell (``$$``) or a variable *started* holds (``pid=$!``) is a
+    process this step started; any other target is not.
     """
-    if prog in ("pkill", "killall", "skill", "killall5"):
-        if _signal_zero(args) or {"-l", "--list", "-L"} & set(args):
+    if prog not in ("kill", "pkill", "killall", "skill", "killall5"):
+        return None
+    options, targets = _leading(prog, args)
+    if _signal_zero(options, prog == "kill"):
+        return None
+    if prog == "kill":
+        if {"-l", "-L", "--list"} & set(options) or not targets:
             return None
-        if prog == "killall" and "-s" in args:
+        if all(_started(word, started) for word in targets):
             return None
-        return f"Stops other programs by signalling them ({prog})."
-    if prog != "kill":
+        return "Signals a process this step did not start (kill)."
+    if prog == "killall" and {"-l", "-s"} & set(options):
         return None
-    if _signal_zero(args) or {"-l", "-L"} & set(args):
-        return None
-    targets = list(args)
-    while (
-        targets and targets[0].startswith("-") and not re.fullmatch(r"-\d+", targets[0])
-    ):
-        # A signal's name (-KILL, -TERM) or -s / -n with its value.
-        takes = targets[0] in _SIGNAL_WORDS
-        targets = targets[2:] if takes else targets[1:]
-    if targets[:1] and re.fullmatch(r"-\d+", targets[0]) and len(targets) > 1:
-        targets = targets[1:]  # -9 is the signal when a target follows
-    if targets[:1] == ["--"]:
-        targets = targets[1:]
-    if not targets:
-        return None
-    if all(_started(word, started) for word in targets):
-        return None
-    return "Signals a process this step did not start (kill)."
+    return f"Stops other programs by signalling them ({prog})."

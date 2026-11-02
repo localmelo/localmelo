@@ -1,12 +1,17 @@
 """No command or script is judged more leniently than it was.
 
-``data/review_baseline.json`` holds what the rules said about 626 commands and
-scripts before the hardening of steps that reach macOS or destroy work (rules
-version 2): the 420 that the review of the approval sentence was checked
-against (scripting bridges, ``open``, wrappers, Python process calls), and the
-cases of this hardening. Every case is run again. A verdict may go from
-``routine`` to ``undecided`` or ``high``, and a category may be added; it may
-never go the other way, and a category the rules found must still be found.
+``data/review_baseline.json`` holds what the rules said about a large set of
+commands and scripts before the hardening of steps that reach macOS or destroy
+work (rules version 2): the ones the review of the approval sentence was
+checked against (scripting bridges, ``open``, wrappers, Python process calls),
+the cases of this hardening, and the cases that later reviews of it found.
+Every case is run again. A verdict may go from ``routine`` to ``undecided`` or
+``high``, and a category may be added; it may never go the other way, and a
+category the rules found must still be found.
+
+When the rules version is raised again, regenerate the file from a checkout
+of the release before the change (never from the working tree), so the
+promise moves forward with the release and does not weaken.
 """
 
 from __future__ import annotations

@@ -112,10 +112,12 @@ _AGREES: Final[dict[str, re.Pattern[str]]] = {
 _EFFECTS: Final = ("delete", "send_out")
 # What an honest description of a git command that discards work says besides
 # "delete": reverting, restoring, resetting, rolling back. These cover only a
-# step whose every delete is such a command.
+# step that is nothing but such commands (checkout, restore, switch, stash):
+# those were not read as deleting before, so no older warning is hidden. A
+# ``git clean`` or a ``reset --hard`` was, so only the words for deleting cover it.
 _GIT_AGREES: Final = re.compile(
     r"(?i)\b(?:revert|restor|reset|undo|roll\s?back|throw\s+away|check\s?out"
-    r"|stash|clear|drop|abandon|reject)\w*|还原|撤销|回滚|放弃|重置|恢复"
+    r"|clear|drop|abandon|reject)\w*|还原|撤销|回滚|放弃|重置|恢复"
 )
 # Words that start a command line and run the command after them, with the
 # options of each that take a value (so the value is not read as the program).
@@ -162,8 +164,15 @@ _PY_RUNS: Final = frozenset(
 )
 _PY_SOCKETS: Final = frozenset(["sendall", "sendto"])
 _SUBSTITUTION: Final = re.compile(r"\$\(|\$\{|`")
+# A disk or volume a disk command names: disk2, disk2s1, /dev/rdisk3, /Volumes/Backup.
+_DISK: Final = re.compile(r"(?:/dev/)?r?disk\d+(?:s\d+)*|/Volumes/[^\s]+")
 # git options before the subcommand that take a value.
-_GIT_VALUED: Final = frozenset(["-C", "-c", "--git-dir", "--work-tree", "--namespace"])
+_GIT_VALUED: Final = frozenset(
+    ["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"]
+    + ["--super-prefix", "--attr-source"]
+)
+# The git commands that discard work and were not read as deleting before.
+_GIT_UNREAD: Final = frozenset(["checkout", "restore", "switch", "stash"])
 
 
 @dataclass(frozen=True)
@@ -223,7 +232,8 @@ class _Item:
     # and whether some place melo cannot read (a variable, the folder itself).
     places: tuple[str, ...] = ()
     blind: bool = False
-    # A delete that is a git command discarding work (see :data:`_GIT_AGREES`).
+    # A delete that is a git command discarding work and was not read as a
+    # delete before (see :data:`_GIT_AGREES`).
     git: bool = False
 
 
@@ -359,7 +369,7 @@ def _mismatch(
     if review is not None:
         found |= set(_EFFECTS) & set(review.categories)
     for effect in _EFFECTS:
-        if effect in found and not _agrees(effect, items, words):
+        if effect in found and not _agrees(effect, items, review, words):
             return effect, {}
     for effect in _EFFECTS:
         if effect in found:
@@ -369,24 +379,47 @@ def _mismatch(
     return "", {}
 
 
-def _agrees(effect: str, items: Sequence[_Item], words: str) -> bool:
+def _agrees(
+    effect: str, items: Sequence[_Item], review: ActionReview | None, words: str
+) -> bool:
     """Whether the *words* say the step does *effect*."""
     if _AGREES[effect].search(words):
         return True
-    mine = [item for item in items if item.kind == effect]
+    # The git words (revert, restore…) cover a step that is nothing but git
+    # commands that discard work, and in which the rules found nothing else.
     return (
         effect == "delete"
-        and bool(mine)
-        and all(item.git for item in mine)
+        and any(item.git for item in items)
+        and all(item.git or _harmless(item) for item in items)
+        and (review is None or set(review.categories) <= {"delete"})
         and _GIT_AGREES.search(words) is not None
     )
 
 
-def _elsewhere_target(effect: str, items: Sequence[_Item], words: str) -> str:
-    """The places the code acts on, as text, when none is what the *words* name, else ``""``.
+# Commands that cannot delete, which may stand beside a git discard.
+_HARMLESS: Final = frozenset(
+    ["cd", "pushd", "popd", "echo", "printf", "true", "pwd", "ls"]
+)
+_HARMLESS_GIT: Final = frozenset(["status", "diff", "log", "show", "add"])
 
-    Nothing is said when the words name no such place, when the code's places
-    cannot all be read, or when one of them is what the words name.
+
+def _harmless(item: _Item) -> bool:
+    """Whether *item* is a command that cannot delete (``cd``, ``echo``, ``git status``)."""
+    if item.kind != "command" or _SUBSTITUTION.search(item.text):
+        return False
+    words = item.text.split()
+    if words[:1] == ["git"]:
+        return _git_sub(words[1:])[0] in _HARMLESS_GIT
+    return words[:1] != [] and words[0] in _HARMLESS
+
+
+def _elsewhere_target(effect: str, items: Sequence[_Item], words: str) -> str:
+    """The places the code acts on that the *words* do not name, as text, else ``""``.
+
+    The words must name a place of the same kind (a file or folder, a host).
+    Nothing is said when they name none, or when some place the code acts on
+    cannot be read (a variable). Every place the code acts on has to be
+    named: one that is not is the warning, even when another is.
     """
     mine = [item for item in items if item.kind == effect]
     if not mine or any(item.blind or not item.places for item in mine):
@@ -395,21 +428,36 @@ def _elsewhere_target(effect: str, items: Sequence[_Item], words: str) -> str:
     if effect == "delete":
         named = targets.named_paths(words)
         matches = targets.path_matches
+        # After a `cd`, a bare `*` or `.` means a folder melo cannot name.
+        if any(item.kind == "command" and _changes_folder(item.text) for item in items):
+            places = [p for p in places if not targets.broad(p)]
     else:
         named = targets.named_hosts(words)
         matches = targets.host_matches
-    if not named:
+    if not named or not places:
         return ""
-    if any(matches(place, name) for place in places for name in named):
+    elsewhere = [
+        place
+        for place in places
+        if not any(matches(place, name) for name in named)
+        and not _spelt(effect, place, words)
+    ]
+    if not elsewhere:
         return ""
-    spelt = targets.bare_words(words)
-    for place in places:
-        base = place.rstrip("/").rsplit("/", 1)[-1].casefold()
-        # A plain word that spells a place (the "build" of "the build folder").
-        if base and base in spelt:
-            return ""
-    shown = [_short_place(place) for place in places[:MAX_TARGETS]]
-    return ", ".join(shown) + (", …" if len(places) > MAX_TARGETS else "")
+    shown = [_short_place(place) for place in elsewhere[:MAX_TARGETS]]
+    return ", ".join(shown) + (", …" if len(elsewhere) > MAX_TARGETS else "")
+
+
+def _changes_folder(text: str) -> bool:
+    return text.split(None, 1)[:1] in (["cd"], ["pushd"], ["popd"])
+
+
+def _spelt(effect: str, place: str, words: str) -> bool:
+    """Whether the words write the place's own name (the "build" of "the build folder")."""
+    if effect != "delete":
+        return False
+    base = place.rstrip("/").rsplit("/", 1)[-1]
+    return bool(base) and not targets.broad(place) and targets.spells(words, base)
 
 
 def _short_place(text: str) -> str:
@@ -440,10 +488,16 @@ def _classify(words: list[str], text: str = "") -> _Item | None:
     if not words or words[0].startswith("#") or words[0] in _CLOSERS:
         return None
     program, rest = _program(words)
-    effect = _command_effect(program, rest)
+    discard = destroys.git_discards(rest) if program == "git" else None
+    effect = _command_effect(program, rest, discard)
     if effect:
-        places, blind = _places(effect, program, rest)
-        return _Item(effect, places=places, blind=blind, git=program == "git")
+        places, blind = _places(effect, program, rest, discard)
+        return _Item(
+            effect,
+            places=places,
+            blind=blind,
+            git=program == "git" and _git_sub(rest)[0] in _GIT_UNREAD,
+        )
     named = None
     if program == "osascript":
         named = app_names.osascript_app(rest)
@@ -501,8 +555,14 @@ def _git_sub(rest: list[str]) -> tuple[str, list[str]]:
     return "", []
 
 
-def _command_effect(program: str, rest: list[str]) -> str:
-    """``delete`` or ``send_out`` when a command clearly does it, else ``""``."""
+def _command_effect(
+    program: str, rest: list[str], discard: destroys.Discard | None = None
+) -> str:
+    """``delete`` or ``send_out`` when a command clearly does it, else ``""``.
+
+    *discard* is what :func:`~localmelo.melo.checker.review.destroys.git_discards`
+    says of a ``git`` call (read once by the caller).
+    """
     if program in _DELETE_PROGRAMS:
         return "delete"
     if program == "find" and ("-delete" in rest or _after_exec(rest, _DELETE_PROGRAMS)):
@@ -510,9 +570,13 @@ def _command_effect(program: str, rest: list[str]) -> str:
     if program == "diskutil":
         return "delete" if destroys.diskutil_erases(rest) else ""
     if program == "git":
-        if destroys.git_discards(rest):
+        sub, args = _git_sub(rest)
+        if discard or (
+            # as before: every clean not spelt as a dry run, whatever its options
+            sub == "clean"
+            and not {"-n", "--dry-run"} & set(args)
+        ):
             return "delete"
-        sub, _ = _git_sub(rest)
         return "send_out" if sub == "push" else ""
     sends = (
         program == "curl"
@@ -554,8 +618,12 @@ def _command_effect(program: str, rest: list[str]) -> str:
 
 
 def _path_places(paths: Sequence[str]) -> tuple[tuple[str, ...], bool]:
-    """*paths* as places, and whether one cannot be read or none was given."""
-    kept = [p for p in paths if targets.parts(p) is not None]
+    """*paths* as places, and whether one cannot be read or none was given.
+
+    A place that holds everything around it (``.``, ``~``, ``./*``) is a
+    place: it is known, and it is more than any one file.
+    """
+    kept = [p for p in paths if targets.parts(p) is not None or targets.broad(p)]
     return tuple(kept), not paths or len(kept) != len(paths)
 
 
@@ -583,7 +651,12 @@ def _hosts_places(hosts: Sequence[str]) -> tuple[tuple[str, ...], bool]:
     return tuple(dict.fromkeys(named)), not named or len(named) != len(hosts)
 
 
-def _places(effect: str, program: str, rest: list[str]) -> tuple[tuple[str, ...], bool]:
+def _places(
+    effect: str,
+    program: str,
+    rest: list[str],
+    discard: destroys.Discard | None = None,
+) -> tuple[tuple[str, ...], bool]:
     """Where a command's effect lands as written, and whether some place is unreadable.
 
     Deleted paths for ``delete``, hosts (or a bucket, a remote) for
@@ -599,8 +672,10 @@ def _places(effect: str, program: str, rest: list[str]) -> tuple[tuple[str, ...]
         if program == "find":
             return _find_places(rest)
         if program == "git":
-            found = destroys.git_discards(rest)
-            return _path_places(found.paths) if found else ((), True)
+            return _path_places(discard.paths) if discard else ((), True)
+        if program == "diskutil":
+            disks = [a for a in plain if _DISK.fullmatch(a)]
+            return tuple(disks), not disks
         return (), True
     if program in ("curl", "wget"):
         return _hosts_places([a for a in rest if "://" in a])

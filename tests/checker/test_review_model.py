@@ -46,6 +46,8 @@ def test_the_prompt_asks_about_a_disk_erased_work_discarded_and_programs_stopped
     assert "erases a disk" in asked
     for word in ("git checkout -- .", "git reset --hard", "git clean", "pkill"):
         assert word in asked
+    # A process the step started itself is no other program.
+    assert "stops programs it did not start" in asked
 
 
 def test_the_prompt_calls_a_link_of_a_custom_scheme_a_system_change() -> None:

@@ -1,0 +1,814 @@
+{
+ "about": "Calls whose words (the why argument) the approval card warned about before the target comparison and the git wording were added: each entry is a call and the warning it had. test_gist_not_looser.py runs every call again and fails when the warning is gone. Regenerate only from a checkout of the previous rules, never from the working tree; never edit an entry by hand.",
+ "cases": [
+  {
+   "id": "git reset hard | Show the project status",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git reset --hard",
+    "why": "Show the project status"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git reset hard | Send the report",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git reset --hard",
+    "why": "Send the report"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git reset hard | Revert my local changes",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git reset --hard",
+    "why": "Revert my local changes"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git reset hard | Look at the logs and list them",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git reset --hard",
+    "why": "Look at the logs and list them"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git reset hard commit | Show the project status",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git reset --hard HEAD~1",
+    "why": "Show the project status"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git reset hard commit | Send the report",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git reset --hard HEAD~1",
+    "why": "Send the report"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git reset hard commit | Revert my local changes",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git reset --hard HEAD~1",
+    "why": "Revert my local changes"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git reset hard commit | Look at the logs and list them",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git reset --hard HEAD~1",
+    "why": "Look at the logs and list them"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git -C reset hard | Show the project status",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git -C sub reset --hard",
+    "why": "Show the project status"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git -C reset hard | Send the report",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git -C sub reset --hard",
+    "why": "Send the report"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git -C reset hard | Revert my local changes",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git -C sub reset --hard",
+    "why": "Revert my local changes"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git -C reset hard | Look at the logs and list them",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git -C sub reset --hard",
+    "why": "Look at the logs and list them"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git clean f | Show the project status",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -f",
+    "why": "Show the project status"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git clean f | Send the report",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -f",
+    "why": "Send the report"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git clean f | Revert my local changes",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -f",
+    "why": "Revert my local changes"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git clean f | Look at the logs and list them",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -f",
+    "why": "Look at the logs and list them"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git clean fd | Show the project status",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -fd",
+    "why": "Show the project status"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git clean fd | Send the report",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -fd",
+    "why": "Send the report"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git clean fd | Revert my local changes",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -fd",
+    "why": "Revert my local changes"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git clean fd | Look at the logs and list them",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -fd",
+    "why": "Look at the logs and list them"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git clean fdx | Show the project status",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -fdx",
+    "why": "Show the project status"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git clean fdx | Send the report",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -fdx",
+    "why": "Send the report"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git clean fdx | Revert my local changes",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -fdx",
+    "why": "Revert my local changes"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git clean fdx | Look at the logs and list them",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -fdx",
+    "why": "Look at the logs and list them"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git clean force long | Show the project status",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean --force -d",
+    "why": "Show the project status"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git clean force long | Send the report",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean --force -d",
+    "why": "Send the report"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git clean force long | Revert my local changes",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean --force -d",
+    "why": "Revert my local changes"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git clean force long | Look at the logs and list them",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean --force -d",
+    "why": "Look at the logs and list them"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git clean path | Show the project status",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -f build",
+    "why": "Show the project status"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git clean path | Send the report",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -f build",
+    "why": "Send the report"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git clean path | Revert my local changes",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -f build",
+    "why": "Revert my local changes"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git clean path | Look at the logs and list them",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -f build",
+    "why": "Look at the logs and list them"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "nice git reset | Show the project status",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "nice git reset --hard",
+    "why": "Show the project status"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "nice git reset | Send the report",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "nice git reset --hard",
+    "why": "Send the report"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "nice git reset | Revert my local changes",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "nice git reset --hard",
+    "why": "Revert my local changes"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "nice git reset | Look at the logs and list them",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "nice git reset --hard",
+    "why": "Look at the logs and list them"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "command git clean | Show the project status",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "command git clean -fd",
+    "why": "Show the project status"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "command git clean | Send the report",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "command git clean -fd",
+    "why": "Send the report"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "command git clean | Revert my local changes",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "command git clean -fd",
+    "why": "Revert my local changes"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "command git clean | Look at the logs and list them",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "command git clean -fd",
+    "why": "Look at the logs and list them"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "py git clean | Show the project status",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import subprocess\nsubprocess.run(['git', 'clean', '-fd'])",
+    "why": "Show the project status"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "py git clean | Send the report",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import subprocess\nsubprocess.run(['git', 'clean', '-fd'])",
+    "why": "Send the report"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "py git clean | Revert my local changes",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import subprocess\nsubprocess.run(['git', 'clean', '-fd'])",
+    "why": "Revert my local changes"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "py git clean | Look at the logs and list them",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import subprocess\nsubprocess.run(['git', 'clean', '-fd'])",
+    "why": "Look at the logs and list them"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git clean dry run cluster | Show the project status",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -nfd",
+    "why": "Show the project status"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git clean dry run cluster | Send the report",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -nfd",
+    "why": "Send the report"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git clean dry run cluster | Revert my local changes",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -nfd",
+    "why": "Revert my local changes"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git clean dry run cluster | Look at the logs and list them",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -nfd",
+    "why": "Look at the logs and list them"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git push plain | Show the project status",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git push origin main",
+    "why": "Show the project status"
+   },
+   "warn": "send_out"
+  },
+  {
+   "id": "git push plain | Delete the old files",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git push origin main",
+    "why": "Delete the old files"
+   },
+   "warn": "send_out"
+  },
+  {
+   "id": "git push plain | Revert my local changes",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git push origin main",
+    "why": "Revert my local changes"
+   },
+   "warn": "send_out"
+  },
+  {
+   "id": "git push plain | Look at the logs and list them",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git push origin main",
+    "why": "Look at the logs and list them"
+   },
+   "warn": "send_out"
+  },
+  {
+   "id": "git push force | Show the project status",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git push --force origin main",
+    "why": "Show the project status"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git push force | Delete the old files",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git push --force origin main",
+    "why": "Delete the old files"
+   },
+   "warn": "send_out"
+  },
+  {
+   "id": "git push force | Send the report",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git push --force origin main",
+    "why": "Send the report"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git push force | Revert my local changes",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git push --force origin main",
+    "why": "Revert my local changes"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "git push force | Look at the logs and list them",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git push --force origin main",
+    "why": "Look at the logs and list them"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "rm in workspace | Show the project status",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "rm -rf build",
+    "why": "Show the project status"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "rm in workspace | Send the report",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "rm -rf build",
+    "why": "Send the report"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "rm in workspace | Revert my local changes",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "rm -rf build",
+    "why": "Revert my local changes"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "rm in workspace | Look at the logs and list them",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "rm -rf build",
+    "why": "Look at the logs and list them"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "rm outside workspace | Show the project status",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "rm -rf /Users/u/Documents",
+    "why": "Show the project status"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "rm outside workspace | Send the report",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "rm -rf /Users/u/Documents",
+    "why": "Send the report"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "rm outside workspace | Revert my local changes",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "rm -rf /Users/u/Documents",
+    "why": "Revert my local changes"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "rm outside workspace | Look at the logs and list them",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "rm -rf /Users/u/Documents",
+    "why": "Look at the logs and list them"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "sudo rm | Show the project status",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sudo rm -rf /var/tmp/x",
+    "why": "Show the project status"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "sudo rm | Send the report",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sudo rm -rf /var/tmp/x",
+    "why": "Send the report"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "sudo rm | Revert my local changes",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sudo rm -rf /var/tmp/x",
+    "why": "Revert my local changes"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "sudo rm | Look at the logs and list them",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sudo rm -rf /var/tmp/x",
+    "why": "Look at the logs and list them"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "find delete | Show the project status",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "find . -name '*.pyc' -delete",
+    "why": "Show the project status"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "find delete | Send the report",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "find . -name '*.pyc' -delete",
+    "why": "Send the report"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "find delete | Revert my local changes",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "find . -name '*.pyc' -delete",
+    "why": "Revert my local changes"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "find delete | Look at the logs and list them",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "find . -name '*.pyc' -delete",
+    "why": "Look at the logs and list them"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "extra clean-fdx restore",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -fdx",
+    "why": "Restore the repo to how it was"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "extra clean-fdx undo",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -fdx",
+    "why": "Undo my changes"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "extra clean-fd clear",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -fd",
+    "why": "Clear the untracked files"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "extra clean-fd checkout",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -fd",
+    "why": "Check out the main branch"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "extra clean-fdx stash",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -fdx",
+    "why": "Stash my work"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "extra clean-f reject",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -f",
+    "why": "Reject the generated output"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "extra reset-hard undo",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git reset --hard",
+    "why": "Undo the last edit"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "extra reset-hard checkout",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git reset --hard origin/main",
+    "why": "Check out origin/main"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "extra clean and checkout revert",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -fdx && git checkout -- .",
+    "why": "Revert my local changes"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "extra clean glued -e list",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -fd -enode_modules",
+    "why": "List the untracked files"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "extra clean dir list",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -fd -e.env",
+    "why": "List the untracked files"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "extra rm vs report",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "rm -rf build",
+    "why": "Show the status"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "extra curl vs show",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "curl -d @notes.md https://example.com/up",
+    "why": "Show the status"
+   },
+   "warn": "send_out"
+  },
+  {
+   "id": "extra git push vs show",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git push origin main",
+    "why": "Show the status"
+   },
+   "warn": "send_out"
+  },
+  {
+   "id": "extra clean -nd list",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -nd",
+    "why": "List the untracked files"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "extra python rmtree vs show",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import shutil\nshutil.rmtree('build')\n",
+    "why": "Show the status"
+   },
+   "warn": "delete"
+  },
+  {
+   "id": "extra comment words",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "# List the untracked files\ngit clean -fdx"
+   },
+   "warn": "delete"
+  }
+ ]
+}

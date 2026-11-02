@@ -1,5 +1,5 @@
 {
- "about": "What the review rules said about each command or script before the hardening of steps that reach macOS or destroy work (rules version 2). test_review_not_looser.py runs every case again and fails when one has become less strict. Regenerate only from a checkout of the rules to compare against; never edit a verdict by hand.",
+ "about": "What the review rules said about each command or script before the hardening of steps that reach macOS or destroy work (rules version 2), with the cases of later reviews of that hardening (read from the same rules). test_review_not_looser.py runs every case again and fails when one has become less strict. Regenerate only from a checkout of the previous rules, never from the working tree; never edit a verdict by hand.",
  "rules_version": 2,
  "cases": [
   {
@@ -6446,6 +6446,2536 @@
    "categories": [
     "delete"
    ]
+  },
+  {
+   "id": "probe: pkill plain",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "pkill Safari"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: pkill -l (macOS: long output, still kills)",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "pkill -l Safari"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: pkill -L",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "pkill -F /tmp/p.pid -L"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: pkill trailing -0",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "pkill Safari -0"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: killall trailing -s",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "killall Safari -s"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: kill trailing -0",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "kill -9 1234 -0"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: kill -0 alone",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "kill -0 1234"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: kill reassigned",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; pid=1234; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: kill for-loop var",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; for pid in $(pgrep Safari); do kill $pid; done"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: kill read var",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; read pid < /tmp/p; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: kill subshell started",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "export pid=1234; (sleep 9 & pid=$!); kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: kill $(..) reassigned",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; pid=$(pgrep Safari); kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: xargs kill after value=$!",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & value=$!; pgrep Safari | xargs kill"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: kill own",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: Kill caps",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "PKILL Safari"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: Diskutil caps",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "DiskUtil eraseDisk APFS X disk9"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: diskutil sudo",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sudo diskutil eraseVolume APFS X disk9s1"
+   },
+   "verdict": "high",
+   "categories": [
+    "system"
+   ]
+  },
+  {
+   "id": "probe: diskutil env nice",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "env A=1 nice -n 5 /usr/sbin/diskutil zeroDisk disk9"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: diskutil xargs",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo disk9 | xargs diskutil eraseDisk APFS X"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: diskutil bash -lc",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "bash -lc 'diskutil eraseDisk APFS X disk9'"
+   },
+   "verdict": "undecided",
+   "categories": []
+  },
+  {
+   "id": "probe: diskutil zsh -c",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "zsh -c \"diskutil partitionDisk disk9 GPT APFS X 100%\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: diskutil sh -euc",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sh -euc 'diskutil eraseDisk APFS X disk9'"
+   },
+   "verdict": "undecided",
+   "categories": []
+  },
+  {
+   "id": "probe: diskutil bash -c -l",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "bash -c -l 'diskutil eraseDisk APFS X disk9'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: diskutil heredoc",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "bash <<'EOF'\ndiskutil eraseDisk APFS X disk9\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: diskutil $()",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo $(diskutil eraseDisk APFS X disk9)"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: diskutil backtick",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo `diskutil eraseDisk APFS X disk9`"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: diskutil time",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "time diskutil eraseDisk APFS X disk9"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: diskutil command",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "command diskutil eraseDisk APFS X disk9"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: diskutil exec",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "exec diskutil eraseDisk APFS X disk9"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: diskutil eval",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "eval 'diskutil eraseDisk APFS X disk9'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: diskutil caffeinate",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "caffeinate -i diskutil eraseDisk APFS X disk9"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: diskutil script -q",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "script -q /dev/null diskutil eraseDisk APFS X disk9"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: diskutil apfs deleteContainer",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "diskutil apfs deleteContainer disk9"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: diskutil ap eraseVolume",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "diskutil ap eraseVolume disk9s1 -name X"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: diskutil unmountDisk force",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "diskutil unmountDisk force disk9"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: diskutil list",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "diskutil list"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: diskutil apfs list",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "diskutil apfs list"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: diskutil apfs addVolume",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "diskutil apfs addVolume disk9 APFS X"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: diskutil appleRAID delete",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "diskutil appleRAID delete disk9"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: diskutil ar delete",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "diskutil ar delete disk9"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: diskutil image (26)",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "diskutil image create blank --size 1g x.dmg"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: hdiutil",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "hdiutil eject disk9"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: asr restore",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sudo asr restore --source a.dmg --target /Volumes/X --erase"
+   },
+   "verdict": "high",
+   "categories": [
+    "system"
+   ]
+  },
+  {
+   "id": "probe: newfs",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "newfs_apfs /dev/disk9s1"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git checkout --",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git checkout -- ."
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git checkout pathspec-file",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git checkout --pathspec-from-file=list.txt"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git checkout HEAD file",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git checkout HEAD notes.md"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git checkout existing file",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git checkout notes.md"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git reset --har (abbrev)",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git reset --har"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git reset --hard",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git reset --hard"
+   },
+   "verdict": "high",
+   "categories": [
+    "delete"
+   ]
+  },
+  {
+   "id": "probe: git -c alias reset",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git -c alias.zz='reset --hard' zz"
+   },
+   "verdict": "undecided",
+   "categories": []
+  },
+  {
+   "id": "probe: git --config-env reset",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git --config-env core.x=HOME reset --hard"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git clean -fd",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -fd"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git clean -fd -e-n",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -fd -e-n"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git clean -fdenode_modules",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -fdenode_modules"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git clean -fn",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -fn"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git clean --dry-run -f",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean --dry-run -f"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git stash drop",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git stash drop"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git stash clear",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git stash clear"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git stash -q drop",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git stash -q drop"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git restore file",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git restore notes.md"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git restore -S",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git restore -S notes.md"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git restore -sS (source S)",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git restore -sS notes.md"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git switch -f",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git switch -f main"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git branch -D",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git branch -D feature"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git worktree remove -f",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git worktree remove -f ../x"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git rm",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git rm -r src"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git status",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git status"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git -C x reset --hard",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git -C /tmp/r reset --hard"
+   },
+   "verdict": "high",
+   "categories": [
+    "delete"
+   ]
+  },
+  {
+   "id": "probe: Git caps reset",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "GIT reset --hard"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git checkout main",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git checkout main"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git checkout -b x",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git checkout -b x"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git checkout -fb x",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git checkout -bf x"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: xargs git checkout",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo notes.md | xargs git checkout --"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: open shortcuts",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "open 'shortcuts://run-shortcut?name=X'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: open -u shortcuts",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "open -u 'shortcuts://run-shortcut?name=X'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: open SHORTCUTS caps",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "open 'SHORTCUTS://run-shortcut?name=X'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: open -a Shortcuts url",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "open -a Shortcuts 'shortcuts://run-shortcut?name=X'"
+   },
+   "verdict": "high",
+   "categories": [
+    "system"
+   ]
+  },
+  {
+   "id": "probe: open -g shortcuts",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "open -g 'shortcuts://run-shortcut?name=X'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: open mailto",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "open mailto:a@b.c"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: open x-apple.systemprefs",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "open 'x-apple.systempreferences:com.apple.preference.security'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: open http",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "open https://example.com"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: open file url",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "open file:///tmp/x.txt"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: open -- shortcuts",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "open -- 'shortcuts://run-shortcut?name=X'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: open $var url",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "u='shortcuts://run-shortcut?name=X'; open \"$u\""
+   },
+   "verdict": "undecided",
+   "categories": []
+  },
+  {
+   "id": "probe: open via xargs",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo 'shortcuts://run-shortcut?name=X' | xargs open"
+   },
+   "verdict": "undecided",
+   "categories": []
+  },
+  {
+   "id": "probe: osascript open location shortcuts",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'open location \"shortcuts://run-shortcut?name=X\"'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: osascript name of app",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'name of application \"Safari\"'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: osascript display notification",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'display notification \"done\" with title \"melo\"'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: osascript framework",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'use framework \"Foundation\"' -e \"set t to current application's NSTask\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: osascript pipes identifier",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'set |--| to application \"Finder\"' -e 'tell |--| to get name'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: jxa space",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -l JavaScript -e 'Application (\"Terminal\").activate()'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: jxa glued -l concat",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -lJavaScript -e 'this[\"Applic\"+\"ation\"](\"Finder\").name()'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: jxa template",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -l JavaScript -e '`${this[\"Applic\"+\"ation\"](\"Finder\").name()}`'"
+   },
+   "verdict": "undecided",
+   "categories": []
+  },
+  {
+   "id": "probe: jxa constructor",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -l JavaScript -e '[][\"constructor\"][\"constructor\"](\"return 1\")()'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: jxa regex quote",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -l JavaScript -e 'var r = /\"/; var s = \"x\"; s.length'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: py os.kill",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import os\nos.kill(1234, 9)"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: py from os import kill",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "from os import kill\nkill(1234, 9)"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: py os alias",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import os as o\no.kill(1234, 9)"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: py getattr os kill",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import os\ngetattr(os, 'kill')(1234, 9)"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: py signal.pthread_kill",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import signal\nsignal.pthread_kill(1234, 9)"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: py psutil kill",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import psutil\npsutil.Process(1234).kill()"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: py psutil terminate iter",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import psutil\nfor p in psutil.process_iter():\n    p.terminate()"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: py popen own",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import subprocess, os\np = subprocess.Popen(['sleep','9'])\nos.kill(p.pid, 9)"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: py popen pid attr reassigned",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import subprocess, os\np = subprocess.Popen(['sleep','9'])\np.pid = 1234\nos.kill(p.pid, 9)"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: py subprocess pkill",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import subprocess\nsubprocess.run(['pkill', 'Safari'])"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: py os.system diskutil",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import os\nos.system('diskutil eraseDisk APFS X disk9')"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: py subprocess shell git",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import subprocess\nsubprocess.run('git reset --hard', shell=True)"
+   },
+   "verdict": "high",
+   "categories": [
+    "delete"
+   ]
+  },
+  {
+   "id": "probe: py os.execvp pkill",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import os\nos.execvp('pkill', ['pkill', 'Safari'])"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: py os.spawnlp",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import os\nos.spawnlp(os.P_WAIT, 'pkill', 'pkill', 'Safari')"
+   },
+   "verdict": "undecided",
+   "categories": []
+  },
+  {
+   "id": "probe: py asyncio exec",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import asyncio\nasyncio.run(asyncio.create_subprocess_exec('pkill', 'Safari'))"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: py webbrowser custom",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import webbrowser\nwebbrowser.open('shortcuts://run-shortcut?name=X')"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: py webbrowser open_new_tab",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import webbrowser\nwebbrowser.open_new_tab('shortcuts://run-shortcut?name=X')"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: py webbrowser get().open",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import webbrowser\nwebbrowser.get().open('shortcuts://run-shortcut?name=X')"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: py subprocess open custom",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import subprocess\nsubprocess.run(['open', 'shortcuts://run-shortcut?name=X'])"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: python -m webbrowser",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "python3 -m webbrowser 'shortcuts://run-shortcut?name=X'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: python -m webbrowser -t",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "python3 -m webbrowser -t 'shortcuts://run-shortcut?name=X'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: bash -lc echo",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "bash -lc 'echo hi'"
+   },
+   "verdict": "undecided",
+   "categories": []
+  },
+  {
+   "id": "probe: kill 1234",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "kill 1234"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: kill -9 1234",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "kill -9 1234"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: kill $pid unstarted",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: kill -s KILL 1234",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "kill -s KILL 1234"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: kill -- -1",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "kill -- -1"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: kill %1",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "kill %1"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: kill $$",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "kill $$"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: kill $!",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "kill $!"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: kill $! no bg job",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "pgrep Safari; kill $!"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: pkill -0",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "pkill -0 Safari"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: killall -s first",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "killall -s Safari"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: killall -l",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "killall -l"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: kill -l",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "kill -l"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: pgrep",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "pgrep Safari"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: /bin/kill",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "/bin/kill 1234"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: sudo kill",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sudo kill 1234"
+   },
+   "verdict": "high",
+   "categories": [
+    "system"
+   ]
+  },
+  {
+   "id": "probe: sh -c pkill",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sh -c 'pkill Safari'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: xargs kill",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "pgrep Safari | xargs kill"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: lsof kill $()",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "kill $(lsof -ti :8000)"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: lsof xargs kill -9",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "lsof -ti :8000 | xargs kill -9"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: bash -c -l rm home",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "bash -c -l 'rm -rf ~'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: bash -c -- rm home",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "bash -c -- 'rm -rf ~'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: backtick rm home",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo `rm -rf ~`"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: RM caps home",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "RM -rf ~"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: launchctl kill",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "launchctl kill 9 gui/501/com.apple.Safari"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: timeout -s KILL",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "timeout -s KILL 5 sleep 9"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: rm -rf ~",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "rm -rf ~"
+   },
+   "verdict": "high",
+   "categories": [
+    "delete"
+   ]
+  },
+  {
+   "id": "probe: rm -rf /Users/x",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "rm -rf /Users/x"
+   },
+   "verdict": "high",
+   "categories": [
+    "delete"
+   ]
+  },
+  {
+   "id": "probe: backtick rm /Users/x",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo `rm -rf /Users/x`"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: $() rm /Users/x",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo $(rm -rf /Users/x)"
+   },
+   "verdict": "high",
+   "categories": [
+    "delete"
+   ]
+  },
+  {
+   "id": "probe: RM caps /Users/x",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "RM -rf /Users/x"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: bash -c -l rm /Users/x",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "bash -c -l 'rm -rf /Users/x'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: bash -c rm /Users/x",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "bash -c 'rm -rf /Users/x'"
+   },
+   "verdict": "high",
+   "categories": [
+    "delete"
+   ]
+  },
+  {
+   "id": "probe: backtick git reset",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo `git reset --hard`"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: backtick pkill",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "x=`pkill Safari`"
+   },
+   "verdict": "undecided",
+   "categories": []
+  },
+  {
+   "id": "probe: name of application",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'name of application \"Safari\"'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: app is running",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'application \"Safari\" is running'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: id of app",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'id of application \"Safari\"'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: version of app",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'version of app \"Safari\"'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: open location https",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'open location \"https://example.com\"'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: POSIX path of desktop",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'POSIX path of (path to desktop folder)'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: path to desktop as text",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'path to desktop as text'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: the clipboard",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'the clipboard'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: display dialog",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'display dialog \"Done\"'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: display notification",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'display notification \"Done\"'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: say",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'say \"done\"'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: get volume settings",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'get volume settings'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: system info",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'system info'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: frontmost app via SE",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'tell application \"System Events\" to get name of first process whose frontmost is true'"
+   },
+   "verdict": "high",
+   "categories": [
+    "system"
+   ]
+  },
+  {
+   "id": "probe: tell Safari get URL",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'tell application \"Safari\" to get URL of front document'"
+   },
+   "verdict": "high",
+   "categories": [
+    "app_control"
+   ]
+  },
+  {
+   "id": "probe: tell Music pause",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'tell application \"Music\" to pause'"
+   },
+   "verdict": "high",
+   "categories": [
+    "system"
+   ]
+  },
+  {
+   "id": "probe: JXA dialog idiom",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -l JavaScript -e 'var a = Application.currentApplication(); a.includeStandardAdditions = true; a.displayDialog(\"hi\")'"
+   },
+   "verdict": "high",
+   "categories": [
+    "system"
+   ]
+  },
+  {
+   "id": "probe: JXA Safari name",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -l JavaScript -e 'Application(\"Safari\").name()'"
+   },
+   "verdict": "high",
+   "categories": [
+    "app_control"
+   ]
+  },
+  {
+   "id": "probe: JXA math",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -l JavaScript -e 'Math.max(1,2)'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: JXA $ template",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -l JavaScript -e 'var x = 1; `v=${x}`'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: open mailto (compose)",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "open 'mailto:me@example.com?subject=hi'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: open vscode://",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "open 'vscode://file/tmp/x.py'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: open notes.md",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "open notes.md"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: open C:-like file",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "open 'report:2026.txt'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: open https",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "open https://example.com"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: kill own server",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "python3 -m http.server 8000 & pid=$!; sleep 1; curl -s localhost:8000 >/dev/null; kill $pid"
+   },
+   "verdict": "high",
+   "categories": [
+    "service"
+   ]
+  },
+  {
+   "id": "probe: kill port 8000",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "kill $(lsof -ti :8000)"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: pkill -f server",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "pkill -f 'python3 -m http.server'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git checkout file",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git checkout -- notes.md"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "probe: git stash; ...; git stash pop",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git stash && pytest -q; git stash pop"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: pkill -l Safari",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "pkill -l Safari"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: pkill -L -F /tmp/p.pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "pkill -L -F /tmp/p.pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: pkill -fl node",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "pkill -fl node"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: pkill Safari -0",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "pkill Safari -0"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: killall Safari -s",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "killall Safari -s"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: kill -9 1234 -0",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "kill -9 1234 -0"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: kill -9 -1234",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "kill -9 -1234"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: pkill -s 0 Safari",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "pkill -s 0 Safari"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: pkill -STOP name -0",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "pkill -STOP name -0"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: killall -l",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "killall -l"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: kill -l",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "kill -l"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: pkill -0 Safari",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "pkill -0 Safari"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: kill -0 1234",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "kill -0 1234"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: killall -s Safari",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "killall -s Safari"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: pkill -0 -f node",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "pkill -0 -f node"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: kill -s 0 1234",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "kill -s 0 1234"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: kill -- -1234",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "kill -- -1234"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: git clean -fd -enode_modules",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -fd -enode_modules"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: git clean -fd -e.env",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -fd -e.env"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: git clean -fd -e n",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -fd -e n"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: git restore -sS .",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git restore -sS ."
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: git restore -S -s HEAD .",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git restore -S -s HEAD ."
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: git clean -nd",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -nd"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: git clean -n -e x",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -n -e x"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: git clean -fdx",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git clean -fdx"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: git restore --staged .",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git restore --staged ."
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: git restore -S .",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git restore -S ."
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: sleep 9 & pid=$!; pid=1234; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; pid=1234; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: sleep 9 & pid=$!; for pid in $(pgrep Safari); do kill $pid; done",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; for pid in $(pgrep Safari); do kill $pid; done"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: sleep 9 & pid=$!; read pid < /tmp/p; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; read pid < /tmp/p; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: export pid=1234; (sleep 9 & pid=$!); kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "export pid=1234; (sleep 9 & pid=$!); kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: sleep 9 & pid=$!; pid=$(pgrep Safari); kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; pid=$(pgrep Safari); kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: sleep 9 & value=$!; pgrep Safari | xargs kill",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & value=$!; pgrep Safari | xargs kill"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: sleep 9 & pid=$!; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: sleep 9 & pid=$!; wait $pid; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; wait $pid; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: for i in 1 2; do sleep 9 & pid=$!; done; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "for i in 1 2; do sleep 9 & pid=$!; done; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: sleep 9 & export pid=$!; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & export pid=$!; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: sleep 9 & pid=$!; declare pid=1234; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; declare pid=1234; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: PKILL Safari",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "PKILL Safari"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: RM -rf ~/Documents/x",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "RM -rf ~/Documents/x"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: GIT reset --hard",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "GIT reset --hard"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: DiskUtil eraseDisk APFS X disk9",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "DiskUtil eraseDisk APFS X disk9"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: Kill 123",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "Kill 123"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: GIT status",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "GIT status"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: bash -c -l 'rm -rf ~/Documents/x'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "bash -c -l 'rm -rf ~/Documents/x'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: bash -c -- 'rm -rf ~/Documents/x'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "bash -c -- 'rm -rf ~/Documents/x'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: bash -c -l 'git reset --hard'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "bash -c -l 'git reset --hard'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: bash -c 'rm -rf ~/Documents/x'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "bash -c 'rm -rf ~/Documents/x'"
+   },
+   "verdict": "high",
+   "categories": [
+    "delete"
+   ]
+  },
+  {
+   "id": "edge: bash -lc 'rm -rf ~/Documents/x'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "bash -lc 'rm -rf ~/Documents/x'"
+   },
+   "verdict": "undecided",
+   "categories": []
+  },
+  {
+   "id": "edge: bash -o pipefail -c 'rm -rf ~/Documents/x'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "bash -o pipefail -c 'rm -rf ~/Documents/x'"
+   },
+   "verdict": "high",
+   "categories": [
+    "delete"
+   ]
+  },
+  {
+   "id": "edge: echo `rm -rf ~/Documents/x`",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo `rm -rf ~/Documents/x`"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: echo `git reset --hard`",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo `git reset --hard`"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: echo `pkill Safari`",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo `pkill Safari`"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: echo `date +%Y`",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo `date +%Y`"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: echo 'a `rm -rf ~/Documents/x` b'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo 'a `rm -rf ~/Documents/x` b'"
+   },
+   "verdict": "high",
+   "categories": [
+    "delete"
+   ]
+  },
+  {
+   "id": "edge: osascript -e 'set |--| to application \"Finder\"' -e 'tell |--| to activate'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'set |--| to application \"Finder\"' -e 'tell |--| to activate'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: osascript -lJavaScript -e 'this[\"App\"+\"lication\"](\"Finder\").activate()'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -lJavaScript -e 'this[\"App\"+\"lication\"](\"Finder\").activate()'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: osascript -l JavaScript -e '1+1'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -l JavaScript -e '1+1'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: osascript -l JavaScript -e 'var x = `${Application(\"Finder\")}`'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -l JavaScript -e 'var x = `${Application(\"Finder\")}`'"
+   },
+   "verdict": "high",
+   "categories": [
+    "system"
+   ]
+  },
+  {
+   "id": "edge: osascript -l JavaScript -e 'Application(\"Safari\").activate()'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -l JavaScript -e 'Application(\"Safari\").activate()'"
+   },
+   "verdict": "high",
+   "categories": [
+    "app_control"
+   ]
+  },
+  {
+   "id": "edge: osascript -e 'tell application \"Safari\" to activate'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'tell application \"Safari\" to activate'"
+   },
+   "verdict": "high",
+   "categories": [
+    "app_control"
+   ]
+  },
+  {
+   "id": "edge: osascript -e 'display dialog \"hi\"'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'display dialog \"hi\"'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: osascript -e 'display notification \"done\"'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "osascript -e 'display notification \"done\"'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: git stash -q drop",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git stash -q drop"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: git checkout --pathspec-from-file=list.txt",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git checkout --pathspec-from-file=list.txt"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: git reset --har",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git reset --har"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: git --config-env=x.y=Z checkout -- .",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git --config-env=x.y=Z checkout -- ."
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: diskutil appleRAID delete x",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "diskutil appleRAID delete x"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: diskutil ar delete x",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "diskutil ar delete x"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: newfs_apfs disk9",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "newfs_apfs disk9"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: launchctl kill 9 system/x",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "launchctl kill 9 system/x"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: asr restore --erase --source x --target /Volumes/y",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "asr restore --erase --source x --target /Volumes/y"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: diskutil list",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "diskutil list"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: git stash list",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git stash list"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: git stash -q list",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git stash -q list"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: for f in a; do rm -rf ~/Documents/x; done",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "for f in a; do rm -rf ~/Documents/x; done"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: if true; then rm -rf ~/Documents/x; fi",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "if true; then rm -rf ~/Documents/x; fi"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: for f in a; do pkill Safari; done",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "for f in a; do pkill Safari; done"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: while true; do git reset --hard; done",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "while true; do git reset --hard; done"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: f() { rm -rf ~/Documents/x; }; f",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "f() { rm -rf ~/Documents/x; }; f"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: for f in a; do echo $f; done",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "for f in a; do echo $f; done"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: if [ -f x ]; then echo ok; fi",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "if [ -f x ]; then echo ok; fi"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: bash -c 'echo hi'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "bash -c 'echo hi'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: bash -lc 'echo hi'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "bash -lc 'echo hi'"
+   },
+   "verdict": "undecided",
+   "categories": []
+  },
+  {
+   "id": "edge: bash script.sh",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "bash script.sh"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: import psutil ; psutil.Process(1234).kill()",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import psutil\npsutil.Process(1234).kill()"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: import psutil ; p = psutil.Process(1234) ; p.terminate()",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import psutil\np = psutil.Process(1234)\np.terminate()"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: import psutil ; for p in psutil.process_iter(): ;     p.send_signal(9)",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import psutil\nfor p in psutil.process_iter():\n    p.send_signal(9)"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: import psutil, subprocess ; p = subprocess.Popen(['sleep','9']) ; p.kill()",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import psutil, subprocess\np = subprocess.Popen(['sleep','9'])\np.kill()"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: import webbrowser ; webbrowser.get().open('shortcuts://run-shortcut?name=x')",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import webbrowser\nwebbrowser.get().open('shortcuts://run-shortcut?name=x')"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: import webbrowser ; b = webbrowser.get('safari') ; b.open_new('obsidian://open?vault=x')",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import webbrowser\nb = webbrowser.get('safari')\nb.open_new('obsidian://open?vault=x')"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: import webbrowser ; webbrowser.get().open('https://example.com')",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import webbrowser\nwebbrowser.get().open('https://example.com')"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "edge: import os ; os.kill(1234, 9)",
+   "tool": "python_exec",
+   "arguments": {
+    "code": "import os\nos.kill(1234, 9)"
+   },
+   "verdict": "routine",
+   "categories": []
   }
  ]
 }

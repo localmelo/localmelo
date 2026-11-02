@@ -18,13 +18,14 @@ from __future__ import annotations
 
 import fnmatch
 import re
+import unicodedata
 from typing import Final
 from urllib.parse import urlsplit
 
 # A domain or a path chunk: ASCII only, so words beside it in another
 # script (a Chinese sentence) do not stick to it.
 _CHUNK: Final = re.compile(r"[A-Za-z0-9_.~/@+\-]+")
-_URL: Final = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]*://[^\s\"'“”‘’<>`]+")
+_URL: Final = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]{0,31}://[^\s\"'“”‘’<>`]+")
 _QUOTED: Final = re.compile(
     r"'([\w.\-/~*]{1,80})'|\"([\w.\-/~*]{1,80})\"|`([\w.\-/~*]{1,80})`"
     r"|“([\w.\-/~*]{1,80})”|‘([\w.\-/~*]{1,80})’"
@@ -54,6 +55,11 @@ _BUILT: Final = re.compile(r"[$`{}]|\$\(")
 _BROAD: Final = frozenset([".", "..", "/", "~", "*", "**", ""])
 
 
+def _norm(text: str) -> str:
+    """*text* in compatibility form (NFKC), so a full-width spelling is the plain one."""
+    return unicodedata.normalize("NFKC", text)
+
+
 def built(text: str) -> bool:
     """Whether *text* is made at run time (``$DIR``, ``$(…)``, a backquote)."""
     return _BUILT.search(text) is not None
@@ -62,17 +68,36 @@ def built(text: str) -> bool:
 def parts(path: str) -> list[str] | None:
     """The folder and file names of *path* in lower case, or ``None`` when it cannot be read.
 
-    ``./build/``, ``build`` and ``/tmp/x/build`` end in ``build``. Variables
-    in the folders are allowed (``$TMP/build`` reads as ``build``); a name
-    that is itself built, or a place such as ``.`` or ``~``, is not readable.
+    ``./build/``, ``build`` and ``/tmp/x/build`` end in ``build``; ``src/*``
+    ends in a glob inside ``src``. Variables in the folders are allowed
+    (``$TMP/build`` reads as ``build``); a name that is itself built is not
+    readable, and neither is a place that holds everything around it (see
+    :func:`broad`).
     """
-    text = path.strip().strip("'\"")
-    if not text:
-        return None
+    text = _norm(path).strip().strip("'\"")
     found = [p for p in text.split("/") if p not in ("", ".", "~")]
-    if not found or found[-1] in _BROAD or built(found[-1]):
+    if not found or built(found[-1]) or broad(path):
         return None
+    if _glob_only(found[-1]) and any(built(p) for p in found[:-1]):
+        return None  # everything in a folder melo cannot name
     return [p.casefold() for p in found]
+
+
+def broad(path: str) -> bool:
+    """Whether *path* is a place that holds everything around it (``.``, ``~``, ``/``, ``*``, ``..``).
+
+    Deleting one is known to be much more than any one file the words name,
+    so it is compared (and never matches), unlike a path built at run time.
+    """
+    text = _norm(path).strip().strip("'\"")
+    if not text or built(text):
+        return False
+    found = [p for p in text.split("/") if p not in ("", ".", "~")]
+    return not found or found[-1] == ".." or (len(found) == 1 and found[0] in _BROAD)
+
+
+def _wild(name: str) -> bool:
+    return any(char in name for char in "*?[")
 
 
 def _glob_only(name: str) -> bool:
@@ -82,23 +107,34 @@ def _glob_only(name: str) -> bool:
 def path_matches(target: str, named: str) -> bool:
     """Whether the code's *target* is what the words' *named* path names.
 
-    Equal names match (a glob in the target matches the names it covers), and
-    so does a target inside the named folder (``build/out.o`` for ``build``).
-    A target that is the folder holding the named file does not: the code
-    deletes more than the words say.
+    Equal names match, and so does a target inside the named folder
+    (``build/out.o`` for ``build``). A target that is the folder holding the
+    named file does not: the code deletes more than the words say. Nor does
+    a glob match one named file it covers (``src/*`` for ``src/a.py``): it
+    matches only an equal glob, the extension it ends in (``*.log`` for
+    ``.log``) or the named folder it lists.
     """
     have, want = parts(target), parts(named)
     if have is None or want is None:
         return False
-    if _glob_only(have[-1]):
-        # build/* : everything in the folder before it
-        return bool(set(want) & set(have[:-1]))
-    return fnmatch.fnmatchcase(want[-1], have[-1]) or want[-1] in have[:-1]
+    if _wild(have[-1]):
+        if want[-1] in have[:-1]:
+            return True  # the folder the glob lists (or one above it)
+        last = have[-1]
+        return want[-1] == last or (
+            last.startswith("*.") and not _wild(last[1:]) and want[-1] == last[1:]
+        )
+    # A named glob covers the target it matches (``*.log`` for ``debug.log``).
+    return (
+        want[-1] == have[-1]
+        or want[-1] in have[:-1]
+        or (_wild(want[-1]) and fnmatch.fnmatchcase(have[-1], want[-1]))
+    )
 
 
 def host_name(text: str) -> str:
     """The host of an address, ``user@host:path`` or a bare host, lower case, else ``""``."""
-    text = text.strip().strip("'\"")
+    text = _norm(text).strip().strip("'\"")
     if "://" in text:
         try:
             host = urlsplit(text).hostname or ""
@@ -113,13 +149,14 @@ def host_name(text: str) -> str:
 def host_matches(target: str, named: str) -> bool:
     """Whether the code's *target* host is the host the words name (or one of its subdomains).
 
-    A name with no dot (a bucket, a remote) matches a label of the named host.
+    A name with no dot (a bucket, a remote) matches only the same name
+    written the same way: it is not a part of a domain.
     """
     have, want = host_name(target), host_name(named)
     if not have or not want:
         return False
-    if "." not in have:
-        return have in want.split(".")
+    if "." not in have or "." not in want:
+        return have == want
     return have == want or have.endswith("." + want) or want.endswith("." + have)
 
 
@@ -144,7 +181,7 @@ def _explicit_path(chunk: str) -> bool:
 
 def named_paths(words: str) -> list[str]:
     """The files and folders the *words* name by writing them as such."""
-    text = _URL.sub(" ", words)
+    text = _URL.sub(" ", _norm(words))
     found: list[str] = []
     for quoted in _QUOTED.findall(text):
         name = next(q for q in quoted if q)
@@ -165,6 +202,7 @@ def named_paths(words: str) -> list[str]:
 def named_hosts(words: str) -> list[str]:
     """The hosts the *words* name: web addresses, domains, addresses of mail, IPv4."""
     found: list[str] = []
+    words = _norm(words)
 
     def add(host: str) -> None:
         if host and host not in found:
@@ -193,4 +231,34 @@ def named_hosts(words: str) -> list[str]:
 
 def bare_words(words: str) -> set[str]:
     """The words of *words* as written, lower case, without the punctuation around them."""
-    return {w.casefold() for w in (_strip(w) for w in words.split()) if w}
+    return {w.casefold() for w in (_strip(w) for w in _norm(words).split()) if w}
+
+
+# A word that says where a thing is, not what it is: "old.txt in Documents".
+_PLACE_BEFORE: Final = (
+    r"(?:in|inside|within|from|under|beneath|below|of|at|on|into)\s+"
+    r"(?:(?:the|my|our|your|this|that|its)\s+)?(?:[\w.\-]+\s+)?"
+)
+_PLACE_AFTER: Final = r"\s*(?:里|中|下|内|目录下|文件夹里|文件夹中|目录里|目录中)"
+_PLACE_ZH: Final = "(?:在|于|从)\\s*"
+
+
+def spells(words: str, name: str) -> bool:
+    """Whether *words* write *name* as the thing itself, not as the place of another.
+
+    The "build" of "the build folder" or "build and dist" spells the name; the
+    "Documents" of "old.txt in Documents" or "src里的old.tmp" says where the
+    named file is, so deleting that folder is not what the words say.
+    """
+    low = _norm(words).casefold()
+    word = re.escape(name.casefold())
+    for found in re.finditer(rf"(?<![\w.\-/]){word}(?![\w\-/]|\.\w)", low):
+        before, after = low[: found.start()], low[found.end() :]
+        located = (
+            re.search(rf"\b{_PLACE_BEFORE}$", before)
+            or re.match(_PLACE_AFTER, after)
+            or re.search(rf"{_PLACE_ZH}$", before)
+        )
+        if not located:
+            return True
+    return False

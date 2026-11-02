@@ -762,7 +762,11 @@ class _Review:
             )
         ):
             self.process(node, name, attr, kw)
-        elif module == "webbrowser" and attr.startswith("open") and first:
+        elif (
+            (module == "webbrowser" or self.browser(base))
+            and attr.startswith("open")
+            and first
+        ):
             # A browser opens a local file with the app it belongs to.
             for url in self.fold(first):
                 if not isinstance(url, str):
@@ -773,6 +777,8 @@ class _Review:
                     shell.opened(ctx, f, url, ctx.root)
         elif name in ("os.kill", "os.killpg"):
             self.stop(node)
+        elif attr in ("kill", "terminate", "send_signal") and self.psutil():
+            self.stop_process(base)
         elif attr == "open" and module != "os":
             at = 0 if method else 1
             mode = self.fold(node.args[at] if len(node.args) > at else kw.get("mode"))
@@ -1094,7 +1100,9 @@ class _Review:
                 shell.review_shell(ctx.deeper(), f, argv, status)
             elif not in_shell and any(isinstance(p, str) for p in parts):
                 program = parts[0] if isinstance(parts[0], str) else "?"
-                rest = [p if isinstance(p, str) else "$value" for p in parts[1:]]
+                rest = [
+                    p if isinstance(p, str) else shell.UNKNOWN_ARG for p in parts[1:]
+                ]
                 # Wrappers (env, nice, xargs…) run the program they name; input
                 # given to it (input=, stdin=) is code for an interpreter.
                 given = "input" in kw or "stdin" in kw
@@ -1102,6 +1110,41 @@ class _Review:
                 shell.run_argv(ctx.deeper(), f, ran, ctx.root, given)
             else:
                 f.doubt("Runs a command melo could not read.")
+
+    def browser(self, node: ast.AST | None) -> bool:
+        """Whether *node* is a browser object of the ``webbrowser`` module.
+
+        ``webbrowser.get()``, ``webbrowser.get("safari")``, a browser class
+        made in place, or a name that holds only such objects.
+        """
+        if isinstance(node, ast.Call):
+            return self.name(node.func).split(".")[0] == "webbrowser"
+        if isinstance(node, ast.Name) and node.id not in self.unsure:
+            values = self.bound.get(node.id, [])
+            return bool(values) and all(self.browser(v) for v in values)
+        return False
+
+    def psutil(self) -> bool:
+        """Whether the script imports ``psutil``, which stops a process by its id."""
+        return any(target.split(".")[0] == "psutil" for target in self.alias.values())
+
+    def stop_process(self, owner: ast.AST | None) -> None:
+        """``kill()``, ``terminate()`` or ``send_signal()`` of a process object (psutil).
+
+        A process this code started with ``Popen`` is its own; any other
+        (a ``Process`` of an id, one found by ``process_iter``) is not.
+        """
+        values = (
+            self.bound.get(owner.id, [])
+            if isinstance(owner, ast.Name) and owner.id not in self.unsure
+            else [owner]
+        )
+        if values and all(
+            isinstance(v, ast.Call) and self.name(v.func).endswith("Popen")
+            for v in values
+        ):
+            return
+        self.f.add("system", "Signals a process this step did not start (psutil).")
 
     def stop(self, node: ast.Call) -> None:
         """``os.kill`` / ``os.killpg``: signal 0 only asks; a process this code started is its own."""

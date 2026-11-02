@@ -261,76 +261,89 @@ _REACHES: Final = re.compile(
     r"|\bPOSIX\b|\bopen\s+location\b|\bmount\s+volume\b",
     re.IGNORECASE,
 )
-# The same in JavaScript for Automation: the ``Application`` function under
-# any name, ``eval``, a computed global, the ObjC bridge by index, libraries.
-_REACHES_JS: Final = re.compile(
-    r"\bApplication\b|\bcurrentApplication\b|\beval\b|\bFunction\b|\bglobalThis\b"
-    r"|\bthis\s*\[|\$\s*[.\[(]|\bLibrary\b|\bObjC\b"
-)
 
 
-def _code_only(script: str, javascript: bool) -> str | None:
-    """*script* with its strings and comments blanked, or ``None`` when one does not close.
+def _code_only(script: str) -> str | None:
+    """AppleScript *script* with its strings and comments blanked, or ``None`` when it cannot be read.
 
-    AppleScript has ``"…"`` strings and ``--``, ``#`` and ``(* *)`` comments;
-    JavaScript has ``'…'``, ``"…"`` and template strings and ``//`` and
-    ``/* */`` comments. What a string or comment holds is not run, so a word
-    in one (``"The application finished"``) does not count. A string or
-    comment left open is not a script either language runs, so it is refused.
+    AppleScript has ``"…"`` strings and ``--``, ``#`` and ``(* *)`` comments.
+    What a string or comment holds is not run, so a word in one (``"The
+    application finished"``) does not count. A string or comment left open
+    is not a script AppleScript runs, so it is refused, and so is a
+    ``|name|`` identifier: it can hold any character, a comment mark among
+    them, so where the comments start cannot be told from the text.
     """
     out: list[str] = []
     at, size = 0, len(script)
-    quotes = "\"'`" if javascript else '"'
     while at < size:
         char, pair = script[at], script[at : at + 2]
-        if char in quotes:
+        if char == '"':
             end = at + 1
-            while end < size and script[end] != char:
+            while end < size and script[end] != '"':
                 end += 2 if script[end] == "\\" else 1
             if end >= size:
                 return None
             at = end + 1
             out.append('""')
-        elif pair == "/*" if javascript else pair == "(*":
-            end = script.find("*/" if javascript else "*)", at + 2)
+        elif pair == "(*":
+            end = script.find("*)", at + 2)
             if end < 0:
                 return None
             at = end + 2
             out.append(" ")
-        elif pair == "//" if javascript else pair == "--" or char == "#":
+        elif pair == "--" or char == "#":
             end = script.find("\n", at)
             at = size if end < 0 else end
+        elif char == "|":
+            return None
         else:
             out.append(char)
             at += 1
     return "".join(out)
 
 
-def reaches_out(args: Sequence[str]) -> bool:
-    """Whether an ``osascript -e`` script uses a way to reach another app or the system.
+def _script_parts(args: Sequence[str]) -> tuple[list[str], str]:
+    """The ``-e`` pieces of an ``osascript`` call and its language, lower case.
 
-    It is checked outside the script's strings and comments, so the plain
-    forms (a notification, a dialog) are not caught; whatever else is
-    (:func:`osascript_app` then decides) and a script that does not parse as
-    code are.
+    ``-l`` and ``-e`` are read apart (``-l JavaScript``) or glued to their
+    value (``-lJavaScript``, ``-e'…'``), as the program's option parser does.
     """
     pieces: list[str] = []
     language = "applescript"
     at = 0
     while at < len(args):
-        if args[at] == "-e" and at + 1 < len(args):
-            pieces.append(args[at + 1])
+        arg = args[at]
+        if arg in ("-e", "-l") and at + 1 < len(args):
+            if arg == "-e":
+                pieces.append(args[at + 1])
+            else:
+                language = args[at + 1].lower()
             at += 2
-        elif args[at] == "-l" and at + 1 < len(args):
-            language = args[at + 1].lower()
-            at += 2
-        else:
-            at += 1
-    javascript = language in ("javascript", "jxa")
-    code = _code_only("\n".join(pieces), javascript)
-    if code is None:
+            continue
+        if arg.startswith("-e") and len(arg) > 2:
+            pieces.append(arg[2:])
+        elif arg.startswith("-l") and len(arg) > 2:
+            language = arg[2:].lower()
+        at += 1
+    return pieces, language
+
+
+def reaches_out(args: Sequence[str]) -> bool:
+    """Whether an ``osascript -e`` script uses a way to reach another app or the system.
+
+    AppleScript is checked outside the script's strings and comments, so the
+    plain forms (a notification, a dialog) are not caught; whatever else is
+    (:func:`osascript_app` then decides) and a script that does not parse as
+    code are. JavaScript for Automation is not read this way: it can build
+    any name at run time, so every script of another language than AppleScript
+    counts, the plain one-liner :func:`jxa_app` names included (it is then
+    ``app_control`` or ``system``, never routine).
+    """
+    pieces, language = _script_parts(args)
+    if language != "applescript":
         return True
-    return bool(_REACHES.search(code) or (javascript and _REACHES_JS.search(code)))
+    code = _code_only("\n".join(pieces))
+    return code is None or bool(_REACHES.search(code))
 
 
 def open_app(args: Sequence[str]) -> str | None:

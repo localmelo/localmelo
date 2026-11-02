@@ -60,7 +60,7 @@ processes, shell startup files, git hooks);
 - reads or uses passwords, keys, tokens, cookies or the keychain;
 - changes system settings, or uses sudo;
 - erases a disk, discards uncommitted work (git checkout -- ., git reset --hard, \
-git clean), or stops other programs (kill, pkill, killall);
+git clean), or stops programs it did not start (kill, pkill, killall);
 - operates another app through a script (AppleScript, osascript);
 - opens a network service that other computers can reach;
 - sends the user's data or files to another computer;
