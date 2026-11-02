@@ -199,6 +199,10 @@ class Item:
     sources: tuple[tuple[str, int], ...] = ()
     replaced_by: str = ""
     conflicts: tuple[int, ...] = ()
+    # Where a note came from when it is not the user's own words: ``pointed`` (a
+    # page or file the user pointed to; ``where`` then reads ``from example.com,
+    # Oct 30``) or ``inferred`` (the model's own conclusion). ``""`` for the rest.
+    how: str = ""
     shown: str = field(default="", compare=False)
 
     @property
@@ -228,7 +232,12 @@ class Item:
 
     @property
     def source(self) -> str:
-        said = ("you said it · " if self.is_record else "") + self.where
+        if self.is_record and self.how == "pointed":
+            said = self.where
+        elif self.is_record and self.how == "inferred":
+            said = f"melo inferred it · {self.where}"
+        else:
+            said = ("you said it · " if self.is_record else "") + self.where
         return f"{said} · {self.older}" if self.older else said
 
     @property
@@ -243,8 +252,10 @@ class Item:
 
         A record reads as the user's words when it has them; without, a note in
         the second person says it is written to the user ("you" is the user),
-        and one in the first person says it is the user's own. A turn says who
-        spoke (:func:`turn_said`). The date has the year when it is not *now*'s
+        and one in the first person says it is the user's own; a note a page or
+        file gave reads so with that host or file name as its place (``from
+        example.com, Oct 30``), and one the model inferred says ``melo inferred``.
+        A turn says who spoke (:func:`turn_said`). The date has the year when it is not *now*'s
         (the pinned or real time by default), and the time of day with *timed*
         (:func:`times`). *show* says how much of a turn is shown (:class:`Shown`).
         """
@@ -256,7 +267,9 @@ class Item:
             return f"{said} ({where}){older}{self._conflict()}"
         if not self.is_record:
             return f"{turn_said(self.text, show)} ({where}){older}"
-        if self.quote:
+        if self.how == "inferred":
+            said = f"melo inferred “{self.text}”"
+        elif self.quote:
             said = f"the user said “{self.quote}”"
         elif _FIRST_PERSON.match(self.text):
             said = f"the user's note “{self.text}”"

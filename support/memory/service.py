@@ -68,6 +68,8 @@ from localmelo.melo.schema import (
 )
 from localmelo.support.config import (
     MEMORY_COMPRESS_AT_CHARS,
+    MEMORY_NOTE_GATE,
+    MEMORY_NOTE_MIN_COSINE,
     MEMORY_RECALL_CHARS,
     MEMORY_RECALL_DOCS,
     MEMORY_RECALL_ITEM_CHARS,
@@ -77,7 +79,7 @@ from localmelo.support.config import (
     MEMORY_RECALL_OPEN_CHARS,
     MEMORY_RECALL_RECORDS,
 )
-from localmelo.support.memory import hippo_encode, records
+from localmelo.support.memory import hippo_encode, note_gate, records
 from localmelo.support.memory import sleep as sleeping
 from localmelo.support.memory.hippo_route import Route, Router
 from localmelo.support.memory.importer import (
@@ -185,6 +187,8 @@ WRITE_IN_YOU: Final = (
     'melo explains …").'
 )
 _BATCH: Final = 16
+# Longest the embedding of a note and the windows of its sources may take: one call.
+NOTE_EMBED_TIMEOUT_S: Final = INDEX_EMBED_TIMEOUT_S
 # The size of the window a chat is encoded in, and where the encoder's replies are
 # kept, when the settings say nothing.
 COMPRESS_AT_CHARS: Final = 12_000
@@ -272,6 +276,24 @@ class RecallSettings(NamedTuple):
     def shown(self, question: str) -> Shown:
         """How a recalled turn is shown for *question* under these settings."""
         return Shown.of(self.item_chars, question if self.match else None)
+
+
+class NoteSettings(NamedTuple):
+    """The ``[memory]`` settings of the note gate (:mod:`.note_gate`): its *level*,
+    ``typed`` (today's rule), ``pointed``, ``meaning`` or ``model``, and *min_cosine*,
+    the least similarity of meaning that counts as a source's support."""
+
+    level: str = note_gate.TYPED
+    min_cosine: float = note_gate.MIN_COSINE
+
+
+class Admission(NamedTuple):
+    """Where the note gate found a note's support: its *source* (``typed``,
+    ``pointed``, ``result`` or ``inferred``) and, for ``pointed``, the page's
+    address or the file's name as *ref*."""
+
+    source: str
+    ref: str = ""
 
 
 class Embedded(NamedTuple):
@@ -469,10 +491,20 @@ def _same_folder(a: object, b: object) -> bool:
 
 def _record_item(entry: StoredEntry) -> Item:
     provenance = entry.provenance
+    # A note the note gate kept from a page or file, or inferred, says so; a note
+    # from the user's own words, an import or sleep reads as it always did.
+    how = str(provenance.get("source") or "")
+    how = how if how in (note_gate.POINTED, note_gate.INFERRED) else ""
+    place = (
+        f"from {note_gate.name_of(str(provenance['from']))}"
+        if how == note_gate.POINTED and provenance.get("from")
+        else str(provenance.get("chat") or "a chat")
+    )
     return Item(
         key=f"r:{entry.id}",
         text=entry.text,
-        where=f"{provenance.get('chat') or 'a chat'}, {day(entry.created_at)}",
+        where=f"{place}, {day(entry.created_at)}",
+        how=how,
         session_id=entry.session_id,
         turn=int(provenance.get("turn") or 0),
         created_at=entry.created_at,
@@ -748,6 +780,22 @@ class ChatMemory:
             bounded("recall_open_chars", OPEN_CHARS, MEMORY_RECALL_OPEN_CHARS),
             getattr(memory, "recall_source", "turns") == "items",
             getattr(memory, "open_sources", "off") == "on",
+        )
+
+    def note_settings(self) -> NoteSettings:
+        """The note gate's settings of the settings now: ``[memory] note_gate`` and
+        ``note_min_cosine``. A value out of its bounds or of the wrong type reads as
+        its default (``typed``, 0.55), as :meth:`recall_settings` reads its own."""
+        cfg = self._settings()
+        if cfg is None:
+            return NoteSettings()
+        level = getattr(cfg.memory, "note_gate", note_gate.TYPED)
+        bar = getattr(cfg.memory, "note_min_cosine", note_gate.MIN_COSINE)
+        low, high = MEMORY_NOTE_MIN_COSINE
+        fits = isinstance(bar, int | float) and not isinstance(bar, bool)
+        return NoteSettings(
+            level if level in MEMORY_NOTE_GATE else note_gate.TYPED,
+            float(bar) if fits and low <= bar <= high else note_gate.MIN_COSINE,
         )
 
     def chat_provider(self) -> BaseLLMProvider | None:
@@ -1311,6 +1359,12 @@ class ChatMemory:
         holds. A note that says "I" or "my" and nothing of the user otherwise is
         kept in the second person (:func:`records.second_person`), as the user's
         own words are.
+
+        That is the rule at ``[memory] note_gate = "typed"``, the default. Above it
+        (:meth:`_admit`) a page or file the user pointed to is a source too, a note
+        may say the same in other words, and an instruction to the assistant is
+        refused; the note is then kept with where it came from, and the reply and
+        the turn's event say so (``source``).
         """
         turn = CHAT_TURN.get()
         if not self.enabled or turn is None or turn.memory.recall is None:
@@ -1333,22 +1387,33 @@ class ChatMemory:
                 return WRITE_IN_YOU
             note = records.second_person(note, protect=True)
         said = [turn.typed, *await self._said(turn)]
-        admitted = "user_statement"
-        missing = records.unsupported(note, said)
-        if missing:
-            admitted = "outcome"
-            missing = records.unsupported(note, said + await self._results(turn))
-        if missing:
-            return (
-                "Not remembered: not something the user said. "
-                f"{', '.join(missing[:3])}: not in what the user typed in this "
-                "chat or in a finished task's result shown here. Keep only what "
-                "the user told you, in their words."
-                + (
-                    " Write it in the language the user used."
-                    if records.other_script(missing, said)
-                    else ""
+        gate = self.note_settings()
+        admission: Admission | None = None
+        if gate.level == note_gate.TYPED:
+            admitted = "user_statement"
+            missing = records.unsupported(note, said)
+            if missing:
+                admitted = "outcome"
+                missing = records.unsupported(note, said + await self._results(turn))
+            if missing:
+                return (
+                    "Not remembered: not something the user said. "
+                    f"{', '.join(missing[:3])}: not in what the user typed in this "
+                    "chat or in a finished task's result shown here. Keep only what "
+                    "the user told you, in their words."
+                    + (
+                        " Write it in the language the user used."
+                        if records.other_script(missing, said)
+                        else ""
+                    )
                 )
+        else:
+            found = await self._admit(turn, note, said, gate)
+            if isinstance(found, str):
+                return found
+            admission = found
+            admitted = (
+                "user_statement" if found.source == note_gate.TYPED else "outcome"
             )
         if topic not in records.TOPICS:
             topic = records.topic_of(note, request=False)
@@ -1358,6 +1423,14 @@ class ChatMemory:
         cand = records.Candidate(note, quote, topic, admitted)
         vectors, model, _ = await self._embed([note], EMBED_TIMEOUT_S, query=False)
         source = await self._source(turn.store, turn.info)
+        if admission is not None and admission.source in (
+            note_gate.POINTED,
+            note_gate.INFERRED,
+        ):
+            # Where the note came from stays with it: recall says so.
+            source = {**source, "source": admission.source}
+            if admission.ref:
+                source["from"] = admission.ref
         async with self._lock:
             written = await records.write(
                 self.stores()[0],
@@ -1368,9 +1441,155 @@ class ChatMemory:
             )
         if not written:
             return f"Already remembered: {note}"
+        label = ""
+        if admission is not None:
+            written = [replace(w, source=admission.source) for w in written]
+            label = f" (source: {admission.source}"
+            if admission.source == note_gate.POINTED:
+                label += f", from {note_gate.name_of(admission.ref)}"
+            label += ")"
         turn.kept.extend(written)
         turn.publish()
-        return f"Remembered: {note} The user sees it and can undo it."
+        return f"Remembered{label}: {note} The user sees it and can undo it."
+
+    async def _admit(
+        self, turn: ChatTurn, note: str, said: list[str], gate: NoteSettings
+    ) -> Admission | str:
+        """Where the support of *note* is, at the note gate's level, or why it is
+        refused (a message for the model). Not asked at the ``typed`` level.
+
+        An instruction to the assistant is refused first. Then the sources, most
+        trusted first: what the user typed (the ``typed`` rule: its words), a page or
+        file the user pointed to, a finished task's result shown in the chat. With
+        ``meaning``, a note whose key tokens are all found may also say the same in
+        other words or another language (:meth:`_by_meaning`); with ``model``, the
+        model's own conclusion from what the user typed is kept as ``inferred``. A
+        page or file the user did not point to supports nothing, and one the user
+        called someone else's supports no note about the user.
+        """
+        if note_gate.is_instruction(note):
+            return note_gate.NOT_A_FACT
+        if not records.unsupported(note, said):
+            return Admission(note_gate.TYPED)
+        material = await self._pointed(turn)
+        about = note_gate.about_user(note)
+        usable = [m for m in material if not (about and m.other)]
+        pages = [m.text for m in usable]
+        if usable and not records.unsupported(note, said + pages):
+            best = note_gate.best_material(note, usable)
+            return Admission(note_gate.POINTED, best.ref)
+        results = await self._results(turn)
+        evidence = said + pages + results
+        if not records.unsupported(note, evidence):
+            return Admission(note_gate.RESULT)
+        if about and len(usable) < len(material):
+            everything = said + [m.text for m in material] + results
+            if not records.unsupported(note, everything):
+                return note_gate.NOT_THEIRS
+        if note_gate.level_at_least(gate.level, "meaning"):
+            judged = await self._by_meaning(note, said, usable, results, gate)
+            if judged is not None:
+                return judged
+        missing = records.unsupported(note, evidence)
+        return (
+            note_gate.NOT_SUPPORTED
+            + f"{', '.join(missing[:3])}."
+            + (
+                " Write it in the language the user used."
+                if records.other_script(missing, evidence)
+                else ""
+            )
+        )
+
+    async def _by_meaning(
+        self,
+        note: str,
+        said: list[str],
+        usable: list[note_gate.Material],
+        results: list[str],
+        gate: NoteSettings,
+    ) -> Admission | str | None:
+        """The note gate's judgement of *note* by meaning, at ``meaning`` and above.
+
+        A key token (:func:`note_gate.key_tokens`) that no source holds refuses the
+        note, named. Then the embedding of the note is compared with each source's
+        windows (:func:`note_gate.windows`): the first source, most trusted first, whose
+        best window is at least ``note_min_cosine`` close is the note's source. At
+        ``model``, a note about the user whose best typed window is within
+        :data:`note_gate.INFERRED_SLACK` of that bar is kept as ``inferred``.
+        ``None`` when meaning cannot be judged (no embedding model, a failure, nothing
+        to compare): the words check stands.
+        """
+        pages = [m.text for m in usable]
+        keys = note_gate.unsupported_keys(note, [*said, *pages, *results])
+        if keys:
+            return f"Not remembered: {', '.join(keys[:3])}: {note_gate.NOT_FOUND}"
+        wanted = note_gate.keys_of(note)
+        typed = note_gate.recent_windows(said, note_gate.TYPED_WINDOWS)
+        pointed = note_gate.keyed_windows(usable, wanted, note_gate.POINTED_WINDOWS)
+        shown = note_gate.recent_windows(results, note_gate.RESULT_WINDOWS)
+        texts = [*typed, *(w for _, w in pointed), *shown]
+        if not texts:
+            return None
+        embedded = await self._embed([note, *texts], NOTE_EMBED_TIMEOUT_S, query=False)
+        if embedded.vectors is None:
+            return None
+        mine, rest = embedded.vectors[0], embedded.vectors[1:]
+        close = [note_gate.cosine(mine, vector) for vector in rest]
+        split = len(typed), len(typed) + len(pointed)
+        nearest = {
+            note_gate.TYPED: max(close[: split[0]], default=0.0),
+            note_gate.POINTED: max(close[split[0] : split[1]], default=0.0),
+            note_gate.RESULT: max(close[split[1] :], default=0.0),
+        }
+        for source in (note_gate.TYPED, note_gate.POINTED, note_gate.RESULT):
+            if nearest[source] >= gate.min_cosine:
+                if source != note_gate.POINTED:
+                    return Admission(source)
+                scores = close[split[0] : split[1]]
+                return Admission(source, pointed[scores.index(max(scores))][0])
+        if (
+            gate.level == "model"
+            and note_gate.about_user(note)
+            and nearest[note_gate.TYPED] >= gate.min_cosine - note_gate.INFERRED_SLACK
+        ):
+            return Admission(note_gate.INFERRED)
+        return note_gate.TOO_FAR
+
+    async def _pointed(self, turn: ChatTurn) -> list[note_gate.Material]:
+        """The pages and files this chat read that the user pointed to, from the
+        chat's stored tool events (:func:`note_gate.pointed_material`): each
+        ``tool.started`` with its ``tool.finished`` output, in turns the user began
+        and did not undo, the turn under way included."""
+        typed: dict[int, str] = {}
+        for earlier in await turn.store.list_turns(turn.info.session_id):
+            if earlier.turn < turn.info.turn and not (
+                earlier.undone or is_owner_question(earlier)
+            ):
+                typed[earlier.turn] = (
+                    earlier.typed_text if earlier.attachments else earlier.user_text
+                )
+        typed[turn.info.turn] = turn.typed
+        events: list[tuple[int | None, dict[str, Any]]] = []
+        started: set[tuple[int | None, str]] = set()
+        after = 0
+        while True:
+            page = await turn.store.list_events(
+                turn.info.session_id, after_id=after, limit=1000
+            )
+            for stored in page:
+                data = stored.event.get("data") or {}
+                call = (stored.turn, str(data.get("call_id") or ""))
+                kind = stored.event.get("type")
+                if kind == "tool.started" and note_gate.reads(data.get("name")):
+                    started.add(call)
+                    events.append((stored.turn, stored.event))
+                elif kind == "tool.finished" and call in started:
+                    events.append((stored.turn, stored.event))
+            if len(page) < 1000:
+                break
+            after = int(page[-1].id or 0)
+        return note_gate.pointed_material(events, typed)
 
     async def keep_statements(self, info: TurnInfo) -> list[records.Written]:
         """After the chat turn *info* ran: keep the lasting facts its typed words
@@ -2380,6 +2599,26 @@ REMEMBER: Final = ToolDef(
 )
 
 
+# The one sentence ``remember`` adds with ``[memory] note_gate = "model"``.
+INFER_SENTENCE: Final = (
+    " Keep what the conversation shows about the user's goals, situation and "
+    "preferences, even when they did not ask you to remember it."
+)
+
+
+def remember_inferring() -> ToolDef:
+    """``remember`` for ``[memory] note_gate = "model"``: the same tool, its text
+    with :data:`INFER_SENTENCE` added, so the model judges what to keep from the
+    conversation. The other levels' text is :data:`REMEMBER` unchanged."""
+    return ToolDef(
+        name=REMEMBER.name,
+        description=REMEMBER.description + INFER_SENTENCE,
+        parameters=copy.deepcopy(REMEMBER.parameters),
+        semantic_tags=list(REMEMBER.semantic_tags),
+        annotations=REMEMBER.annotations,
+    )
+
+
 def search_memory_listing(list_max: int, items: bool = False) -> ToolDef:
     """``search_memory`` for the list form (``[memory] recall_form = "list"``): chat
     turns come as lines with an id, so *k* may reach *list_max* and the text says
@@ -2529,24 +2768,33 @@ def _item_text(opened: OpenedItem, chars: int) -> str:
 
 class MemoryTools(BaseToolProvider):
     """``search_memory`` and ``remember`` for a chat's Agent (never for workers);
-    with ``[memory] recall_form = "list"``, ``open_memory`` too."""
+    with ``[memory] recall_form = "list"``, ``open_memory`` too, and with
+    ``[memory] note_gate = "model"``, ``remember`` has one more sentence."""
 
     def __init__(self, memory: ChatMemory) -> None:
         self._memory = memory
 
     async def start(self) -> list[ProvidedTool]:
         settings = self._memory.recall_settings()
+        remember = ProvidedTool(
+            definition=(
+                remember_inferring()
+                if self._memory.note_settings().level == "model"
+                else REMEMBER
+            ),
+            function=self.remember,
+        )
         if not settings.listing:
             return [
                 ProvidedTool(definition=SEARCH_MEMORY, function=self.search),
-                ProvidedTool(definition=REMEMBER, function=self.remember),
+                remember,
             ]
         return [
             ProvidedTool(
                 definition=search_memory_listing(settings.list_max, settings.items),
                 function=self.search,
             ),
-            ProvidedTool(definition=REMEMBER, function=self.remember),
+            remember,
             ProvidedTool(
                 definition=(
                     open_memory_items(settings.open_sources)
