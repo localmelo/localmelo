@@ -141,7 +141,7 @@ asyncio.run(main())
 | `assistant.message` | 步骤的规划回复到达时。 | `step`, `content`, `thinking`, `tool_calls`, `usage`, `prefix`, `duration_s` |
 | `note` | 在压缩模式中，当笔记、反思的笔记或尝试摘要进入仅驻留 RAM 的笔记存储时。 | `step`, `attempt`, `note_id`, `kind`, `source`, `text`, `chars`, `drafts`, `remember`, `stage` |
 | `tool.started` | 每次工具调用交给执行器之前，也包括之后被检查拒绝的调用。 | `step`, `call_id`, `name`, `arguments`, `preview` |
-| `tool.finished` | 该调用完成、被拒绝、被取消或异常终止时。 | `step`, `call_id`, `name`, `status`, `error_category`, `output`, `output_chars`, `error`, `duration_s`, `images`, `approval`, `exit_code` |
+| `tool.finished` | 该调用完成、被拒绝、被取消或异常终止时。 | `step`, `call_id`, `name`, `status`, `error_category`, `output`, `output_chars`, `error`, `duration_s`, `images`, `approval`, `exit_code`, `tool_asks` |
 | `notice` | 一次尝试结束时、模型给出空回复或只含未完成思考的回复时，或模型请求被重试时。 | `kind`, `message`, `step`, `attempt`, `detail` |
 | `recall` | 召回块进入请求时：在 `start`、`attempt`、`step`，或由 `recall` 工具触发。 | `step`, `attempt`, `trigger`, `retriever`, `query`, `hits`, `chars`, `ms`, `fallback`, `placement` |
 | `reflection.started` | 在一次尝试之后的反思开始之前。 | `attempt`, `failure_type` |
@@ -239,6 +239,7 @@ asyncio.run(main())
 - `images`：工具返回的图片，每张都是 `{sha256, mime_type, size_bytes}`。`AgentEvent.images` 保存图片本身。
 - `approval`：未询问审批策略时为 `null`：对于不需要审批的工具、没有策略的运行，以及在策略会被询问之前就被拒绝的调用。否则为 `{request_id, allowed, reason, remember, origin}`，其中 `origin` 是决定的来源（`user`、`session`、`policy`、`timeout` 或 `auto`）；策略失败时为 `error`；运行在策略做决定期间被取消时为 `withdrawn`。在自动模式下，以及对审查结果不是明确常规的调用，它还带有 `mode`（`"auto"`）、`review`（审查结果：`verdict`、`categories`、`reasons`、`paths`、`by`（`rules` 或 `model`）、`rules_version`，以及询问过模型时的 `model`：`{verdict, category, fits_request, user_asked, reason, ms}` 或 `{error, ms}`）和 `step_key`（32 个十六进制字符：同一文件夹中的同一步骤）；被允许一次的步骤带有 `allowance: "once"`。来源为 `auto` 且 `allowed: false` 表示自动模式拦下的步骤；此时 `reason` 用几个词说明它（`installs software`）；控制台的[允许一次](api-v2.md#ask-and-auto)按 `request_id` 找到它。见[审批工具调用](../guides/python.md#approve-tool-calls)。
 - `exit_code`：`shell_exec` 或 `python_exec` 所运行的子进程的退出状态；负值 `-N` 表示被信号 `N` 结束。对于其他工具、子进程从未启动的调用，以及工具因超时或取消而杀死子进程的情况，它为 `null`。非零退出不会改变 `status`：`shell_exec` 仍然成功，其文本以 `[exit code <n>]` 开头；`python_exec` 则以 `Python exited with code <n>` 失败。
+- `tool_asks`：只有当调用的工具自己问了一个问题并被拒绝时才有（`web_fetch` 或浏览器要打开的网站，以 `browser:<origin>` 询问）：每个被拒绝的问题一项，`{request_id, tool, allowed: false, origin, reason, preview}`。被你、自动模式或策略拒绝的问题还带有 `call_key` 和 `loose_keys`（其中有 `ask:<tool>`，网站还有 `ask:site:<host>`），所以对话自己继续的任务不会再问它，也不会再问那个主机的其他任何内容，不管地址怎么写；对这种重复的拒绝带有 `earlier`（最先拒绝它的是谁），没有 `call_key`。其他调用，以及在加入这个键之前存储的事件，没有 `tool_asks`。
 
 <a id="note"></a>
 

@@ -47,6 +47,13 @@ from localmelo.melo.schema import (
 )
 from localmelo.tests.legacy_options import LEGACY_ANSWER_OPTIONS
 
+# The keys an event may lack: run.finished's reviews without an approval
+# policy (#339), tool.finished's tool_asks when no question was refused (#431).
+OPTIONAL_KEYS: dict[str, set[str]] = {
+    "run.finished": {"reviews"},
+    "tool.finished": {"tool_asks"},
+}
+
 # ── Fakes ───────────────────────────────────────────────────────────────────
 
 
@@ -356,8 +363,9 @@ async def check_guarantees(
     stamps = [event.ts for event in events]
     assert stamps == sorted(stamps)
     for event in events:
-        # Only a run with an approval policy has run.finished's reviews (#339).
-        absent = {"reviews"} if event.type == "run.finished" else set()
+        # Only a run with an approval policy has run.finished's reviews (#339),
+        # and only a call whose tool had a question refused has tool_asks (#431).
+        absent = OPTIONAL_KEYS.get(event.type, set())
         assert set(event.data) <= EVENT_FIELDS[event.type], event.type
         assert EVENT_FIELDS[event.type] - set(event.data) <= absent, event.type
         envelope = event.to_dict()
@@ -533,6 +541,7 @@ class TestFields:
                 "images",
                 "approval",
                 "exit_code",
+                "tool_asks",
             },
             "memory": {
                 "candidate_id",
@@ -741,8 +750,9 @@ class TestFields:
         # Budget events need an opted-in run; test_request_accounting pins one.
         assert seen == set(EVENT_FIELDS) - {"memory", "context_budget"}
         for event in events:
-            # These runs have no approval policy: no reviews key (#339).
-            no_policy = {"reviews"} if event.type == "run.finished" else set()
+            # These runs have no approval policy: no reviews key (#339), and no
+            # tool asked a question: no tool_asks key (#431).
+            no_policy = OPTIONAL_KEYS.get(event.type, set())
             assert set(event.data) == EVENT_FIELDS[event.type] - no_policy
         details = {
             event.data["kind"]: set(event.data["detail"])

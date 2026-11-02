@@ -51,6 +51,7 @@ EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
                 "images",
                 "approval",
                 "exit_code",
+                "tool_asks",
             }
         ),
         "note": frozenset(
@@ -145,13 +146,17 @@ EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
 )
 # Keys that a stored event from an older release may lack. Events the agent
 # emits now carry every key of EVENT_FIELDS, but run.finished's reviews only
-# for a run with an approval policy; a session store accepts the older shape
-# too.
+# for a run with an approval policy, and tool.finished's tool_asks only for a
+# call whose tool asked a question that was refused; a session store accepts
+# the older shape too.
 OPTIONAL_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
     {
         "assistant.message": frozenset({"prefix"}),
         # A run's reviews (#339): only a run with an approval policy has it.
         "run.finished": frozenset({"reviews"}),
+        # The questions the call's tool asked and was refused (#431): a site
+        # web_fetch or the browser would open. Only when there is one.
+        "tool.finished": frozenset({"tool_asks"}),
         "reflection": frozenset(
             {
                 "prefix",

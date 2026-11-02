@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {useLanguage} from '../../support/gateway/static/i18n.mjs';
-import {answered, askTurn, echoActions, echoNodes, mergeEchoes, readEcho} from '../../support/gateway/static/main-chat.mjs';
+import {answered, askTurn, echoActions, echoDone, echoNodes, endedTasks, mergeEchoes, readCard, readEcho} from '../../support/gateway/static/main-chat.mjs';
 import {canContinue, canRetry} from '../../support/gateway/static/turns.mjs';
 
 const NOON = new Date(2026, 9, 31, 12, 0, 0).getTime() / 1000;
@@ -231,4 +231,66 @@ test('a follow-up melo began stands in for the person\'s bubble and says melo st
   } finally {
     await useLanguage('en');
   }
+});
+
+// ── #431: Stop stays while the task or the chat's follow-up on it can still run ──
+
+const TASK = '0123456789ab';
+const card = (id, at, data = {}) => readCard({id, ts: at, data: {source_id: TASK, source_kind: 'task', title: 'Fix tests', at, state: 'stopped', ...data}});
+const followed = (id, at, did) => row(id, {echo: 'followed', did, question: '', ts: at});
+const stopShows = (cards, echoes) => {
+  const started = row(1, {echo: 'started', line: 'Started: Fix tests · P2', level: 2});
+  const all = [started, ...echoes];
+  return echoActions(started, echoDone(started, answered(all), endedTasks(cards, all))).some(([, does]) => does === 'stop');
+};
+
+test('a started row keeps Stop while the chat follows up on its task, and loses it once nothing more runs', () => {
+  const end = card(10, NOON + 10, {follow_up: true});
+  assert.equal(end.followUp, true);
+  // No end yet: it runs.
+  assert.equal(stopShows([], []), true);
+  // An end with no follow-up: nothing more runs (cards from before #431 read the same).
+  assert.equal(stopShows([card(10, NOON + 10)], []), false);
+  // An end its chat follows up on: the follow-up may continue the task.
+  assert.equal(stopShows([end], []), true);
+  // It continued the task: the task runs again, until its next end says otherwise.
+  const continued = {...followed(11, NOON + 20, 'continued'), at: NOON + 20};
+  assert.equal(stopShows([end], [continued]), true);
+  assert.equal(stopShows([end, card(12, NOON + 30, {follow_up: true})], [continued]), true);
+  assert.equal(stopShows([end, card(12, NOON + 30)], [continued]), false);
+  // It asked, reported, was skipped or stopped: nothing more runs.
+  for (const did of ['asked', 'reported', 'skipped', 'stopped']) {
+    assert.equal(stopShows([end], [{...followed(11, NOON + 20, did), at: NOON + 20}]), false, did);
+  }
+  // A follow-up told in the same second as the end it follows still comes after it.
+  assert.equal(stopShows([end], [{...followed(11, NOON + 10, 'reported'), at: NOON + 10}]), false);
+});
+
+test('what a follow-up did draws nothing: it only tells the page whether more runs', () => {
+  const echo = followed(5, NOON, 'skipped');
+  assert.equal(echo.kind, 'followed');
+  assert.deepEqual(echoNodes({doc: fakeDoc(), echo, act: () => assert.fail('nothing to act on')}), []);
+});
+
+test('a later end of the task wins over a follow-up on an earlier end, whenever each row was written', () => {
+  // The first end (event 5) is followed up and the follow-up continued the task; the task ended again (event 9).
+  const first = card(10, NOON + 10, {follow_up: true, end_id: 5});
+  const second = card(12, NOON + 20, {end_id: 9});
+  assert.equal(second.endId, 9);
+  // The follow-up's row was written after the second end's card: the second end still decides.
+  const continued = {...followed(13, NOON + 30, 'continued'), end_id: 5, at: NOON + 30};
+  assert.equal(stopShows([first, second], [continued]), false);
+  // A second end its chat follows up on keeps Stop until that follow-up says what it did,
+  const again = card(12, NOON + 20, {follow_up: true, end_id: 9});
+  assert.equal(stopShows([first, again], [continued]), true);
+  // even when the clock wrote that row a little before the end's card.
+  const reported = {...followed(14, NOON + 15, 'reported'), end_id: 9, at: NOON + 15};
+  assert.equal(stopShows([first, again], [continued, reported]), false);
+});
+
+test('a Stop that found nothing left to stop has no Undo', () => {
+  const nothing = row(2, {echo: 'control', action: 'stop', line: 'Stopped: Fix tests', undo: null});
+  assert.deepEqual(echoActions(nothing, false), []);
+  const stopped = row(3, {echo: 'control', action: 'stop', line: 'Stopped: Fix tests', undo: {again: true}});
+  assert.deepEqual(echoActions(stopped, false).map(([, does]) => does), ['undo']);
 });

@@ -35,6 +35,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Final, Literal, Protocol, get_args, runtime_checkable
+from urllib.parse import urlsplit
 
 from localmelo.melo.contracts.folders import OutsideAccess
 from localmelo.melo.contracts.review import (
@@ -201,7 +202,10 @@ class ApprovalPolicy(Protocol):
 # to. The arguments are the tool name the policy sees (a grant of the run
 # covers that name), the arguments to show and a one-line preview. It raises
 # like the policy does; unset (no policy) means nobody is asked. The agent's
-# also answers ``names_host(host)``: whether the user's own words name a site.
+# also answers ``names_host(host)``: whether the user's own words name a site,
+# and ``refused_earlier(name, arguments, preview)``: the refusal of a question
+# blocked earlier in the task (#431), which a tool checks before it lets a
+# named site through.
 ToolAsk = Callable[[str, Mapping[str, Any], str], Awaitable[ApprovalDecision]]
 TOOL_ASK: ContextVar[ToolAsk | None] = ContextVar("localmelo_tool_ask", default=None)
 
@@ -381,6 +385,43 @@ def call_key(
     return step_key(tool_name, arguments, workspace_root)
 
 
+def question_key(name: str) -> str:
+    """The loose key of a question a running tool asked (``TOOL_ASK``) under *name*.
+
+    A tool asks under a name of its own choosing, such as ``browser:<origin>``
+    for a site, and a grant of that name covers every question with it; so a
+    refusal does too: a later question under the same name (another page of a
+    refused site, by either tool) is a step alike (#431).
+    """
+    return f"ask:{name}"
+
+
+def site_key(arguments: Mapping[str, Any]) -> str | None:
+    """The loose key of a question about a site: ``ask:site:<host>`` (#431).
+
+    The host of the question's http(s) ``origin`` argument, in ASCII (IDNA),
+    lower case and without one final dot, so a refused site stays refused
+    whatever scheme, port or spelling a later address gives it; another host
+    (``www.`` too, or a parent domain) is another site. None when the
+    question names no such origin.
+    """
+    origin = arguments.get("origin")
+    if not isinstance(origin, str):
+        return None
+    try:
+        parts = urlsplit(origin.strip())
+        host = parts.hostname or ""
+        if not host.isascii():
+            host = host.encode("idna").decode("ascii")
+    except (ValueError, UnicodeError):
+        return None
+    host = host.lower()
+    host = host[:-1] if host.endswith(".") else host
+    if parts.scheme.lower() not in ("http", "https") or not host:
+        return None
+    return f"ask:site:{host}"
+
+
 class EarlierBlocks:
     """A policy that refuses again, before any review, a step blocked earlier (#411).
 
@@ -388,10 +429,12 @@ class EarlierBlocks:
     and, for a block auto mode kept, its step key. *loose* maps the same
     call keys to their :func:`~localmelo.melo.contracts.review.loose_keys`,
     so a call alike (the same command spelt another way, the same install)
-    is refused too. The agent's gate asks :meth:`match` first; :meth:`decide`
-    is the *inner* policy's. A block the person allowed once since (its step
-    key has an allowance in the inner :class:`AutoPolicy`) is not refused,
-    nor is a call alike to it. It never allows anything.
+    is refused too. The agent's gate asks :meth:`match` first, and so does
+    a running tool's own question (a site web_fetch or the browser would
+    open, #431); :meth:`decide` is the *inner* policy's. A block the person
+    allowed once since (its step key has an allowance in the inner
+    :class:`AutoPolicy`) is not refused, nor is a call alike to it. It never
+    allows anything.
     """
 
     def __init__(
@@ -417,13 +460,18 @@ class EarlierBlocks:
         tool_name: str,
         arguments: Mapping[str, Any],
         workspace_root: str | None,
+        also: Iterable[str] = (),
     ) -> tuple[str, bool] | None:
-        """Who blocked this call, or one alike, earlier, and whether it was this exact call."""
+        """Who blocked this call, or one alike, earlier, and whether it was this exact call.
+
+        *also* are further loose keys of the call: a tool's own question
+        adds its :func:`question_key`.
+        """
         exact = call_key(tool_name, arguments, workspace_root)
         found = self._blocks.get(exact)
         if found is not None and not self._lifted(found[1]):
             return found[0], True
-        alike = set(loose_keys(tool_name, arguments))
+        alike = set(loose_keys(tool_name, arguments)) | set(also)
         if not alike:
             return None
         for key, keys in self._loose.items():

@@ -11,6 +11,7 @@ import pytest
 from localmelo.melo.contracts.approvals import TOOL_ASK, ApprovalDecision
 from localmelo.melo.contracts.tools import ProvidedTool
 from localmelo.melo.executor.models import ToolOutput
+from localmelo.support.browser import sites
 from localmelo.support.browser.driver import BrowserError, Element
 from localmelo.support.browser.provider import PAGE_NOTE, BrowserToolProvider
 from localmelo.tests.browser.fakes import FakeDriver, link, page
@@ -126,6 +127,35 @@ async def test_only_http_and_https_are_opened_and_nobody_is_asked(url: str) -> N
     with asking(asks):
         out = await run(tools, "browser_open", url=url)
     assert out.is_error and not asks.asked and not driver.calls[1:]
+
+
+@pytest.mark.parametrize(
+    ("url", "origin"),
+    [
+        ("HTTPS://Example.COM./x", "https://example.com"),
+        ("https://example.com:443/", "https://example.com"),
+        ("http://example.com:8080/", "http://example.com:8080"),
+        ("https://bücher.example/x", "https://xn--bcher-kva.example"),
+        ("https://XN--BCHER-KVA.example./", "https://xn--bcher-kva.example"),
+        ("http://[::1]:8080/", "http://[::1]:8080"),
+    ],
+)
+def test_one_site_has_one_origin_however_its_address_is_spelt(
+    url: str, origin: str
+) -> None:
+    # The host as web_fetch reads it: ASCII, lower case, no final dot (#431).
+    assert sites.origin_of(url) == origin
+
+
+@pytest.mark.parametrize(
+    "url", ["https://coll%65ct.example/x", "http://[fe80::1%25en0]:8080/"]
+)
+def test_a_host_with_a_percent_sign_is_not_opened(url: str) -> None:
+    # A browser decodes `coll%65ct.example` to `collect.example`: an encoded host
+    # would reach a site refused earlier under another name, so it is not opened.
+    assert sites.origin_of(url) is None
+    with pytest.raises(sites.BrowserError):
+        sites.require_origin(url)
 
 
 async def test_a_redirect_to_another_site_asks_after_it_lands() -> None:

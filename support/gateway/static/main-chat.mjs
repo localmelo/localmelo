@@ -72,6 +72,10 @@ export function readCard(row) {
     ...(data.reminder === true ? {reminder: true} : {}),
     // A task's card: how it ended, as code decided it.
     ...(readEnding(data.ending) ? {ending: readEnding(data.ending)} : {}),
+    // Its chat follows up on this end (#431): the task's lines keep their buttons until it says what it did.
+    ...(data.follow_up === true ? {followUp: true} : {}),
+    // Which end of its task this card is (the gateway's event id): a follow-up's row names the end it follows.
+    ...(endOf(data.end_id) !== null ? {endId: endOf(data.end_id)} : {}),
     // A step Auto blocked in a task (#369): the block as the task's page has it, with Allow once.
     ...(state === "blocked" ? {
       stepKey: String(data.step_key ?? ""),
@@ -266,7 +270,7 @@ export function cardNode({doc, card, open, resume = null, approval = null, block
 
 const ECHO_KINDS = new Set(["started", "control", "level", "suggest", "ask", "undone", "failed", "sent", "chore", "chore_saved", "checkin", "sleep",
   "task_ask", "task_answered", "task_escalate", "ask_end", "queued", "dequeued", "answer_sent", "answer_delivered", "earlier", "revoked",
-  "followup"]);
+  "followup", "followed"]);
 const MARKS = {started: "+", level: "↕", suggest: "?", ask: "?", undone: "↺", failed: "!", sent: "→", chore: "◷", chore_saved: "◷", checkin: "◷", sleep: "☾",
   stop: "■", pause: "‖", resume: "▶", first: "↑", send: "→", task_ask: "?", task_answered: "↩", task_escalate: "!", ask_end: "·", queued: "…", answer_sent: "↩",
   earlier: "✓", revoked: "↺", followup: "↻"};
@@ -320,9 +324,48 @@ export function unansweredSleep(echoes) {
 }
 
 /**
+ * The tasks nothing more will run for (#431), from *cards* and *echoes* as the page keeps them: those whose
+ * newest end is a card no follow-up comes after, or the chat's follow-up on it (`followed`) that did not continue
+ * it. A card the gateway marked `followUp` keeps the task live until the follow-up says what it did: continued
+ * (the task runs again, and its next end decides), or asked, reported, skipped or stopped (nothing more runs).
+ * Newest goes by end (`endId`, and the row's `end_id`) when both name theirs, never by when each was written.
+ */
+export function endedTasks(cards, echoes = []) {
+  const newest = new Map();
+  const note = (task, end) => {
+    const seen = newest.get(task);
+    if (!seen || later(end, seen)) newest.set(task, end);
+  };
+  for (const card of cards) {
+    if (["done", "failed", "stopped"].includes(card.state)) {
+      note(card.sourceId, {at: Number(card.at) || 0, end: card.endId ?? null, row: false, live: card.followUp === true});
+    }
+  }
+  // After the cards: a follow-up is told after the end it follows, so it wins a tie.
+  for (const echo of echoes) {
+    if (echo.kind === "followed" && echo.task_id) {
+      note(String(echo.task_id), {at: Number(echo.at) || 0, end: endOf(echo.end_id), row: true, live: echo.did === "continued"});
+    }
+  }
+  return new Set([...newest].filter(([, end]) => !end.live).map(([task]) => task));
+}
+
+/** A card's or a follow-up row's end id, or null (rows from before ends were named have none). */
+function endOf(value) {
+  const id = value === null || value === undefined || value === "" ? NaN : Number(value);
+  return Number.isInteger(id) ? id : null;
+}
+
+/** Whether *end* comes after *seen*: by end when both name theirs (a follow-up's row after its end's card), else by time. */
+function later(end, seen) {
+  if (end.end === null || seen.end === null) return end.at >= seen.at;
+  return end.end > seen.end || (end.end === seen.end && (end.row || !seen.row));
+}
+
+/**
  * Whether *echo*'s buttons go: a later echo answered it (ids in *done*), or its task ended (ids in
- * *ended*). A step that ran on the person's earlier approval keeps Revoke after its task ends: the
- * approval is the chat's, and later tasks could use it.
+ * *ended*, see `endedTasks`). A step that ran on the person's earlier approval keeps Revoke after its task ends:
+ * the approval is the chat's, and later tasks could use it.
  */
 export function echoDone(echo, done, ended) {
   return done.has(echo.id) || (echo.kind !== "earlier" && ended.has(echo.task_id));
@@ -342,7 +385,8 @@ export function echoActions(echo, done) {
     // A task the chat started (#410): its priority, and Stop until it ends.
     return echo.kind === "started" ? [[t("mainChat.echo.change"), "level"], [t("common.stop"), "stop"]] : [undo];
   }
-  if (echo.kind === "control") return [undo];
+  // A Stop that found nothing left to stop has no Undo: Undo would start the task again.
+  if (echo.kind === "control") return echo.undo === null ? [] : [undo];
   // A message sent as a task's answer can be taken back until it is delivered.
   if (echo.kind === "answer_sent") return [undo];
   if (echo.kind === "suggest") {
@@ -367,8 +411,9 @@ export function echoNodes({doc, echo, done = false, act}) {
     return node;
   };
   const nodes = [];
-  // A queued message that ran is its turn's bubble now; the mark that it ran shows nothing.
-  if (echo.kind === "dequeued" || echo.kind === "answer_delivered" || (echo.kind === "queued" && done)) return nodes;
+  // A queued message that ran is its turn's bubble now; the mark that it ran shows nothing. What a follow-up did
+  // only tells the page whether more runs for its task (#431).
+  if (echo.kind === "dequeued" || echo.kind === "answer_delivered" || echo.kind === "followed" || (echo.kind === "queued" && done)) return nodes;
   if (echo.typed) {
     const article = el("article", "msg user");
     article.append(el("div", echo.kind === "queued" ? "user-bubble queued" : "user-bubble", echo.typed));

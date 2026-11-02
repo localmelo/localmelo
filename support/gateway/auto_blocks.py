@@ -200,37 +200,48 @@ async def denied_steps(
     ``reason``, the ``step_key`` of an auto block, its tool ``name`` and its
     ``preview``. Only real denials carry a call key. A call a stopped turn never
     reviewed, a refusal of a repeat, and a record from before call keys were
-    kept are left out.
+    kept are left out. A question the call's tool asked itself and had refused
+    (``tool_asks``: a site web_fetch or the browser would open, #431) is a
+    blocked step too, with the question's own preview ("read <address>").
     """
     records = await store.denied_records(session_id, limit=limit)
     out: list[dict[str, Any]] = []
     for stored in records:
-        approval, raw = _approval(stored.event), stored.event.get("data")
+        raw = stored.event.get("data")
         data: dict[str, Any] = raw if isinstance(raw, dict) else {}
-        key = approval.get("call_key")
-        if (
-            not isinstance(key, str)
-            or not key
-            or approval.get("earlier")
-            or approval.get("reason") == _STOPPED
-        ):
-            continue
-        loose = approval.get("loose_keys")
-        out.append(
-            {
-                "call_key": key,
-                "loose_keys": (
-                    [str(k) for k in loose] if isinstance(loose, list) else []
-                ),
-                "who": BLOCKERS.get(str(approval.get("origin")), "melo's rules"),
-                "reason": str(approval.get("reason") or ""),
-                "step_key": str(approval.get("step_key") or ""),
-                "name": str(data.get("name") or ""),
-                "call_id": data.get("call_id"),
-                "turn": stored.turn,
-                "preview": "",
-            }
-        )
+        asks = data.get("tool_asks")
+        denials = [_approval(stored.event)] + [
+            ask
+            for ask in (asks if isinstance(asks, list) else [])
+            if isinstance(ask, dict)
+            and ask.get("allowed") is False
+            and ask.get("origin") in BLOCKERS
+        ]
+        for approval in denials:
+            key = approval.get("call_key")
+            if (
+                not isinstance(key, str)
+                or not key
+                or approval.get("earlier")
+                or approval.get("reason") == _STOPPED
+            ):
+                continue
+            loose = approval.get("loose_keys")
+            out.append(
+                {
+                    "call_key": key,
+                    "loose_keys": (
+                        [str(k) for k in loose] if isinstance(loose, list) else []
+                    ),
+                    "who": BLOCKERS.get(str(approval.get("origin")), "melo's rules"),
+                    "reason": str(approval.get("reason") or ""),
+                    "step_key": str(approval.get("step_key") or ""),
+                    "name": str(data.get("name") or ""),
+                    "call_id": data.get("call_id"),
+                    "turn": stored.turn,
+                    "preview": str(approval.get("preview") or ""),
+                }
+            )
     for turn in sorted({b["turn"] for b in out if b["turn"] is not None}):
         events = await store.list_events(session_id, turns=(turn, turn))
         previews = {
@@ -240,6 +251,6 @@ async def denied_steps(
             and isinstance(e.event.get("data"), dict)
         }
         for block in out:
-            if block["turn"] == turn:
+            if block["turn"] == turn and not block["preview"]:
                 block["preview"] = previews.get(block["call_id"], "")
     return out

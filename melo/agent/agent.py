@@ -118,7 +118,9 @@ from localmelo.melo.contracts.approvals import (
     find_auto,
     find_earlier,
     find_folder_asker,
+    question_key,
     review_mode,
+    site_key,
 )
 from localmelo.melo.contracts.events import EventSink
 from localmelo.melo.contracts.folders import OutsideAccess, home_label
@@ -2001,6 +2003,13 @@ class _ToolAsk:
     routine when the user's words name it, otherwise the user's model asks
     whether it serves the request (cached per site for the chat), and a
     block is kept as the gate keeps one.
+
+    A question refused is a blocked step like any other (#431): it is kept
+    in *refused* (the call's ``tool_asks``) with its ``call_key`` and its
+    ``loose_keys`` (:func:`question_key` and, for a site, :func:`site_key`
+    among them), and a run its chat continued on its own refuses the same
+    question, one under the same name, or one about the same host however
+    its address is spelt, before any review or prompt (:class:`EarlierBlocks`).
     """
 
     def __init__(
@@ -2010,21 +2019,33 @@ class _ToolAsk:
         call: ToolCall,
         workspace_root: str | None,
         reviewer: StepReviewer | None = None,
+        refused: list[dict[str, Any]] | None = None,
     ) -> None:
         self._policy = policy
         self._run = run
         self._call = call
         self._workspace_root = workspace_root
         self._reviewer = reviewer
+        self.refused: list[dict[str, Any]] = [] if refused is None else refused
 
     def names_host(self, host: str) -> bool:
         """Whether the user's recent messages name *host* itself (``www.`` aside)."""
         return self._reviewer is not None and self._reviewer.names_host(host)
 
-    async def __call__(
+    def refused_earlier(
         self, tool_name: str, arguments: Mapping[str, Any], preview: str
-    ) -> ApprovalDecision:
-        request = ApprovalRequest(
+    ) -> ApprovalDecision | None:
+        """The refusal of a question blocked earlier in this task, or one alike, or None.
+
+        Asked before anything lets the question through without asking, such
+        as a site the user's words name: a block stands over that (#431).
+        """
+        return self._earlier(self._request(tool_name, arguments, preview))
+
+    def _request(
+        self, tool_name: str, arguments: Mapping[str, Any], preview: str
+    ) -> ApprovalRequest:
+        return ApprovalRequest(
             request_id=uuid.uuid4().hex,
             run_id=self._run.task_id,
             call_id=self._call.id,
@@ -2034,6 +2055,14 @@ class _ToolAsk:
             workspace_root=self._workspace_root,
             tier="network",
         )
+
+    async def __call__(
+        self, tool_name: str, arguments: Mapping[str, Any], preview: str
+    ) -> ApprovalDecision:
+        request = self._request(tool_name, arguments, preview)
+        earlier = self._earlier(request)
+        if earlier is not None:
+            return earlier
         reviewer = self._reviewer
         auto = review_mode(self._policy, request) == "auto" and reviewer is not None
         key = step_key(tool_name, request.arguments, self._workspace_root)
@@ -2069,6 +2098,14 @@ class _ToolAsk:
                 "not an ApprovalDecision"
             )
         if (
+            not decided.allow
+            and decided.origin in ("user", "auto", "policy")
+            and not isinstance(decided, Withdrawal)
+        ):
+            # A person's Deny, an auto block, a policy's refusal of the step:
+            # a task its chat continues on its own never asks it again.
+            self._keep(request, decided)
+        if (
             auto
             and reviewer is not None
             and not decided.allow
@@ -2087,6 +2124,51 @@ class _ToolAsk:
             )
             return dataclasses.replace(decided, reason=note)
         return decided
+
+    def _earlier(self, request: ApprovalRequest) -> ApprovalDecision | None:
+        """A refusal of a question refused earlier in this task, or one alike, before any review."""
+        blocks = find_earlier(self._policy)
+        name = request.tool_name
+        found = (
+            None
+            if blocks is None
+            else blocks.match(
+                name,
+                request.arguments,
+                self._workspace_root,
+                also=_question_keys(name, request.arguments),
+            )
+        )
+        if found is None:
+            return None
+        who, exact = found
+        reason = (BLOCKED_EARLIER if exact else BLOCKED_ALIKE).format(who=who)
+        # A refusal of a repeat is no new block: it keeps no call key.
+        self.refused.append(
+            {"request_id": request.request_id, "tool": name, "allowed": False,
+             "origin": "policy", "reason": reason, "earlier": who,
+             "preview": request.preview}
+        )  # fmt: skip
+        return ApprovalDecision(False, reason, origin="policy")
+
+    def _keep(self, request: ApprovalRequest, decided: ApprovalDecision) -> None:
+        """Keep a refused question as a blocked step: its call key and keys alike."""
+        name, arguments = request.tool_name, request.arguments
+        categories = () if request.review is None else request.review.categories
+        self.refused.append(
+            {"request_id": request.request_id, "tool": name, "allowed": False,
+             "origin": decided.origin, "reason": decided.reason,
+             "preview": request.preview,
+             "call_key": call_key(name, arguments, self._workspace_root),
+             "loose_keys": [*loose_keys(name, arguments, categories),
+                            *_question_keys(name, arguments)]}
+        )  # fmt: skip
+
+
+def _question_keys(name: str, arguments: Mapping[str, Any]) -> tuple[str, ...]:
+    """The loose keys of a running tool's question: its name, and its site's host."""
+    site = site_key(arguments)
+    return (question_key(name),) if site is None else (question_key(name), site)
 
 
 class _ToolSetupError(Exception):
@@ -4465,6 +4547,8 @@ class Agent:
         slot = TOOL_EXIT_CODE.set(exit_codes) if exit_codes is not None else None
         gate = None
         ask_slot = None
+        # The questions the call's tool asked itself that were refused (#431).
+        refused: list[dict[str, Any]] = []
         switch = self._auto_confinement
         if switch is not None:
             # A call auto mode decides runs confined; the gate settles it.
@@ -4495,6 +4579,7 @@ class Agent:
                     call,
                     self.executor.workspace_root,
                     self._reviewer,
+                    refused,
                 )
             )
         try:
@@ -4553,6 +4638,7 @@ class Agent:
                 exit_codes=exit_codes,
                 not_started=run.waiting_call_id == call.id,
                 approval=None if gate is None else gate.asked,
+                asks=refused,
             )
             raise
         finally:
@@ -4569,6 +4655,7 @@ class Agent:
             exported,
             exit_codes=exit_codes,
             approval=None if gate is None else gate.asked,
+            asks=refused,
         )
         run.note(
             lambda trace: trace.tool(

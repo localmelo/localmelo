@@ -307,8 +307,9 @@ class WebFetchProvider(BaseToolProvider):
     async def _admit(self, target: Target) -> None:
         """Let *target*'s site be read, or raise why not: before its name is looked up.
 
-        A host the person's recent messages name (itself, ``www.`` aside;
-        not a parent domain) is read at once. Any other is put to the run's
+        A site refused earlier in the task is refused again first (#431). A
+        host the person's recent messages name (itself, ``www.`` aside; not a
+        parent domain) is read at once. Any other is put to the run's
         approval policy as the browser's question about its origin
         (``browser:<origin>``, worded "read <url>" and carrying the address),
         so a grant of either tool covers both. With no policy, a chat reads
@@ -322,12 +323,16 @@ class WebFetchProvider(BaseToolProvider):
                     f"melo did not read {host}: this task has nobody to ask about a site."
                 )
             return
-        named = getattr(ask, "names_host", None)
-        if callable(named) and named(host):
-            return
         origin = sites.origin_of(target.url)
         if origin is None:
             raise AddressError("That is not an http or https address.")
+        # A site refused earlier in the task stays refused, named or not (#431).
+        refused = sites.refused_earlier(origin, via="web_fetch", url=target.url)
+        if refused is not None:
+            raise AddressError(refused)
+        named = getattr(ask, "names_host", None)
+        if callable(named) and named(host):
+            return
         try:
             await sites.require_site(origin, via="web_fetch", url=target.url)
         except BrowserError as exc:

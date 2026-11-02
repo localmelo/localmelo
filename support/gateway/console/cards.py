@@ -54,11 +54,12 @@ from localmelo.support.sessions.display import (
     status_text,
     title_width,
 )
-from localmelo.support.sessions.store import SessionInfo, StoredEvent
+from localmelo.support.sessions.store import SessionInfo, StoredEvent, TurnInfo
 
 from ..auto_blocks import blocked_steps
 from ..chore_store import REMINDER_PREFIX, REMINDER_REASON
-from ..finishing import NOT_CONTINUED, is_out_of_steps, not_committed
+from ..finishing import NOT_CONTINUED, OUT_OF_STEPS, is_out_of_steps, not_committed
+from ..front_rules import FINISHED
 from ..task_endings import default_ending
 from ..task_store import TaskStoreError
 from .activity import answer_lines, answer_word, left_line
@@ -219,6 +220,9 @@ class MainChatCards:
             await self._write_heard(main)
 
     async def _write_heard(self, main: str) -> None:
+        if self._heard_events:
+            # Every end heard was looked at: its card says whether a follow-up comes.
+            await self._console.followups.settle()
         heard, self._heard_events = self._heard_events, []
         self._unanswered = None
         # What is stored reads the same to every reader: English, whoever asked.
@@ -328,18 +332,20 @@ class MainChatCards:
             turn, state = 0, _TASK_ENDS[str(data.get("state"))]
         else:
             return None
-        turns = await store.list_turns(
-            info.id, limit=1, before=turn + 1 if turn else None
-        )
-        last = turns[-1] if turns else None
+        note = ""
+        if info.kind == "task":
+            # The run this end closed, never a later one (#431).
+            last, note = await self._own_run(info.id, stored, data)
+        else:
+            turns = await store.list_turns(
+                info.id, limit=1, before=turn + 1 if turn else None
+            )
+            last = turns[-1] if turns else None
         if last is not None and last.origin:
             return None  # a side chat answering a task's question is no news (#369)
         ended: dict[str, Any]
-        note = ""
-        if state == "failed" and info.kind == "task":
-            note = (await self._console.workers.tasks.get_task(info.id)).wait_reason
-            if is_out_of_steps(state, note):
-                state = "stopped"  # out of steps: it can continue, so it did not fail
+        if info.kind == "task" and is_out_of_steps(state, note):
+            state = "stopped"  # out of steps: it can continue, so it did not fail
         if state == "done":
             ended = {"line": answer_lines(last.answer) if last is not None else ""}
         elif state == "stopped":
@@ -351,15 +357,13 @@ class MainChatCards:
             ended = {"line": note}
         elif last is not None and last.status != "completed":
             ended = {"line": _reason(last.status, last.cause, last.result)}
+        elif note == "invalid_workspace":
+            problem = await self._console.workers.folder_problem(info.id)
+            ended = _words("cards.folderRefused", problem=problem)
+        elif note:
+            ended = {"line": note}
         else:
-            record = await self._console.workers.tasks.get_task(info.id)
-            if record.wait_reason == "invalid_workspace":
-                problem = await self._console.workers.folder_problem(info.id)
-                ended = _words("cards.folderRefused", problem=problem)
-            elif record.wait_reason:
-                ended = {"line": record.wait_reason}
-            else:
-                ended = _words("cards.stoppedEarly")
+            ended = _words("cards.stoppedEarly")
         if info.kind == "task" and last is not None:
             # A task whose commit is all that is left says so, with the command.
             left = await not_committed(last.answer, info.workspace)
@@ -368,11 +372,16 @@ class MainChatCards:
             # How this end ended, decided by code with its transition (never a later one).
             found = data.get("ending")
             if not isinstance(found, dict):
-                record = await self._console.workers.tasks.get_task(info.id)
-                found = default_ending(str(data.get("state")), record.wait_reason)
+                found = default_ending(str(data.get("state")), note)
             if found is not None:
                 keys = ("state", "proposed", "reasons", "question", "notes")
                 card["ending"] = {key: found[key] for key in keys if key in found}
+            # Which end this is: a follow-up's row names the end it follows, so the
+            # page orders the two by end and not by when each was written (#431).
+            card["end_id"] = stored.id
+            if self._console.followups.comes_after(stored.id):
+                # Its chat follows up on this end: more may run (#431).
+                card["follow_up"] = True
         words = await self._reminder_words(info.id) if info.kind == "task" else None
         if words is not None:
             # A reminder's card shows the person's words even when its run failed.
@@ -380,6 +389,52 @@ class MainChatCards:
             if state == "failed":
                 ended = _words("cards.reminderFailed", words=words)
         return {**card, "state": state, **ended}
+
+    async def _own_run(
+        self, task_id: str, stored: StoredEvent, data: dict[str, Any]
+    ) -> tuple[TurnInfo | None, str]:
+        """The turn of the run that *stored* (a task's end) closed, and that end's reason.
+
+        A card is written after its end, maybe once the task ran again (its
+        chat continued it): its turn is the one the end names
+        (``ending.turn``), else the newest that began before the end, and
+        none when no run began before it. The reason is the task's while no
+        later run was queued or began; after one, it is what the end and its
+        turn say: out of steps, or none.
+        """
+        store = self._console.store
+        record = await self._console.workers.tasks.get_task(task_id)
+        ending = data.get("ending")
+        found = ending.get("turn") if isinstance(ending, dict) else None
+        turn = found if isinstance(found, int) and not isinstance(found, bool) else None
+        if stored.id is None:
+            # Not a stored end: the newest run is the one there is.
+            turns = await store.list_turns(task_id, limit=1)
+            return (turns[-1] if turns else None), record.wait_reason
+        if turn is None:
+            began = await store.events_of_type(
+                task_id, "turn.started", before_id=stored.id, limit=1
+            )
+            turn = began[-1].turn if began else None
+        last = None
+        if turn is not None:
+            turns = await store.list_turns(task_id, limit=1, before=turn + 1)
+            last = turns[-1] if turns else None
+        later = record.state not in FINISHED
+        for kind in ("sched.resumed", "turn.started"):
+            if not later:
+                later = bool(
+                    await store.events_of_type(
+                        task_id, kind, after_id=stored.id, limit=1
+                    )
+                )
+        if not later:
+            return last, record.wait_reason
+        reasons = ending.get("reasons") if isinstance(ending, dict) else None
+        stopped = (isinstance(reasons, list) and "out_of_steps" in reasons) or (
+            last is not None and last.status == "budget_exhausted"
+        )
+        return last, OUT_OF_STEPS if stopped else ""
 
     async def _blocked_card(
         self, info: SessionInfo, card: dict[str, Any], request_id: str
