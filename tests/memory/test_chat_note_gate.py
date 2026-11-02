@@ -920,3 +920,80 @@ async def test_an_inferred_note_never_rests_on_a_page(make: Any, level: str) -> 
     reply = await gate.remember("You have admin rights on this account.")
     assert reply.startswith("Not remembered")
     assert await gate.notes() == []
+
+
+# ── A typed address with a path, and "my" with several reads in a turn ──
+
+
+@pytest.mark.parametrize("level", LEVELS)
+@pytest.mark.parametrize(("page_text", "notes"), POISON)
+async def test_another_page_of_a_shared_host_the_user_typed_a_path_of_keeps_nothing(
+    make: Any, level: str, page_text: str, notes: list[str]
+) -> None:
+    """The user typed github.com/jane; a page the model then fetched at
+    github.com/evil is not the page they pointed to."""
+    gate = make(level, poisoned_provider())
+    turn = await gate.turn("Read my profile at github.com/jane and say what fits.")
+    await gate.fetch(turn, "https://github.com/evil", page_text)
+    for note in notes:
+        reply = await gate.remember(note)
+        assert reply.startswith("Not remembered"), (level, note, reply)
+    assert await gate.notes() == []
+
+
+@pytest.mark.parametrize("level", LEVELS)
+async def test_control_the_page_at_the_address_typed_does_support_the_note(
+    make: Any, level: str
+) -> None:
+    gate = make(level, poisoned_provider())
+    turn = await gate.turn("Read github.com/jane and say what fits.")
+    await gate.fetch(turn, "https://github.com/jane", "The user lives in Atlantis.")
+    reply = await gate.remember("You live in Atlantis.")
+    assert reply.startswith("Remembered (source: pointed, from github.com)")
+
+
+@pytest.mark.parametrize("level", LEVELS)
+async def test_a_bare_host_typed_points_to_every_page_of_it(
+    make: Any, level: str
+) -> None:
+    gate = make(level, poisoned_provider())
+    turn = await gate.turn("Read github.com and say what fits.")
+    await gate.fetch(turn, "https://github.com/anyone", "The user lives in Atlantis.")
+    reply = await gate.remember("You live in Atlantis.")
+    assert reply.startswith("Remembered (source: pointed, from github.com)")
+
+
+@pytest.mark.parametrize("level", LEVELS)
+@pytest.mark.parametrize(("page_text", "notes"), POISON)
+async def test_my_site_holds_for_the_first_page_of_the_turn_not_the_second(
+    make: Any, level: str, page_text: str, notes: list[str]
+) -> None:
+    """ "Read my site and compare me with similar people" fetches the user's site,
+    then other people's pages: only the first is theirs."""
+    gate = make(level, poisoned_provider())
+    turn = await gate.turn("Read my site and compare me with similar people.")
+    await gate.fetch(turn, URL, RESUME_PAGE)
+    await gate.fetch(turn, "https://rival.example.net/", page_text)
+    for note in notes:
+        reply = await gate.remember(note)
+        assert reply.startswith("Not remembered"), (level, note, reply)
+    assert await gate.notes() == []
+    # The first page still supports a note about the user.
+    reply = await gate.remember(
+        "You have an MSc in Robotics at Carnegie Mellon University."
+    )
+    assert reply.startswith("Remembered (source: pointed, from jane.example.com)")
+
+
+@pytest.mark.parametrize("level", LEVELS)
+async def test_the_second_page_counts_when_the_user_typed_its_host(
+    make: Any, level: str
+) -> None:
+    gate = make(level, poisoned_provider())
+    turn = await gate.turn("Read my site.")
+    await gate.fetch(turn, URL, RESUME_PAGE)
+    await gate.finish(turn)
+    again = await gate.turn("Now read rival.example.net.", turn.session_id)
+    await gate.fetch(again, "https://rival.example.net/", "Rival lives in Atlantis.")
+    reply = await gate.remember("Rival lives in Atlantis.")
+    assert reply.startswith("Remembered (source: pointed, from rival.example.net)")

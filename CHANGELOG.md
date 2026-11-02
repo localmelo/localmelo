@@ -13,9 +13,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   what the conversation shows (#442). `[memory] note_gate` has four levels, each including the
   ones before it, and `-X memory.note_gate=pointed` sets one for a run. `typed`, the default,
   is the rule as always and changes nothing. `pointed` also accepts a page or file the chat read
-  that the user pointed to (its host or file name is in what they typed, or the turn that read
-  it calls it theirs: "my website", "my resume"), read from the chat's stored tool results; a
-  page the user did not point to, or called someone else's, never supports a note about them.
+  that the user pointed to, read from the chat's stored tool results: a host they typed points
+  to every page of it, an address with a path (`github.com/jane`) to that page and the pages
+  below it and not to the rest of the host (`github.com/evil`), a file by its name, and a turn
+  that calls it theirs ("my website", "my resume") without saying which, to the first page or
+  file that turn read only (a later read of it counts only for the same page or file again, or
+  one the user typed); a page the user did not point to, or called someone else's, never
+  supports a note about them.
   `meaning` also accepts a note that says the same in other words or another language: its key
   tokens (numbers, dates, addresses, e-mail addresses, Latin-script names) must be found in a
   source, and its embedding must be at least `note_min_cosine` (0.55, 0.20 to 0.95) close to a

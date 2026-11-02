@@ -30,11 +30,14 @@ level before this module is asked.
 
 from __future__ import annotations
 
+import contextlib
+import itertools
 import os
 import re
 import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Final, NamedTuple
+from urllib.parse import unquote, urlsplit
 
 import numpy as np
 
@@ -104,6 +107,15 @@ THEIRS: Final = (
 _THEIRS = re.compile(
     "|".join(rf"\b{re.escape(p)}\b" if p.isascii() else re.escape(p) for p in THEIRS)
 )
+# "My profile at github.com/jane", "my resume.pdf": the user names what the phrase
+# means, in a few words after it, so the phrase does not stand for any other page.
+_BOUND = re.compile(
+    "(?:"
+    + "|".join(rf"\b{re.escape(p)}\b" if p.isascii() else re.escape(p) for p in THEIRS)
+    + r")(?:\.[a-z0-9]{1,5}\b|(?:[\s,:;()\[\]\-\u2013\u2014]|\b(?:at|on|in|is|are|its?|here|see"
+    r"|which|that|located|hosted|url|link|address|page|the|this)\b|['\u2019]s)*"
+    r"(?:https?://)?(?:[\w-]+\.)+[a-z0-9]{2,}\b)"
+)
 _THING = (
     "page|site|website|web page|webpage|profile|resume|cv|homepage|portfolio|blog"
     "|file|document"
@@ -125,8 +137,13 @@ _PAGE_CALLS: Final = {"web_fetch": "url", "browser_open": "url"}
 _PAGE_BLOCKS: Final = frozenset({"browser_read", "browser_follow", "browser_back"})
 _FILE_TOOLS: Final = frozenset({"file_read", "read", "read_file", "read_text_file"})
 _FILE_KEYS: Final = ("path", "file_path", "filename")
+_PAGE_ALL: Final = frozenset(_PAGE_CALLS) | _PAGE_BLOCKS
 _ORIGIN = re.compile(r"<<page [^>\n]*?\borigin=([^\s>]+)")
+_TAB = re.compile(r"<<page [^>\n]*?\btab=([^\s>]+)")
 _MARKER = re.compile(r"^<<(?:end )?page .*>>[ \t]*$", re.MULTILINE)
+# What ends a typed address: the user's sentence goes on after it.
+_ADDRESS_END = "\\s<>\"'`，。）)、；：！？"
+_PATH_END = ".,;:!?)]}>'\"/"
 
 
 class Material(NamedTuple):
@@ -148,16 +165,103 @@ def fold(text: str) -> str:
     return "".join(c for c in plain if not unicodedata.combining(c)).casefold()
 
 
-def _origin_of(call: Mapping[str, Any], output: str) -> str:
-    """The address a page tool's result is for, or ``""``."""
-    name, arguments = str(call.get("name") or ""), call.get("arguments")
-    key = _PAGE_CALLS.get(name)
-    if key and isinstance(arguments, Mapping) and isinstance(arguments.get(key), str):
-        return str(arguments[key]).strip()
-    if name in _PAGE_BLOCKS:
-        found = _ORIGIN.search(output)
-        return found.group(1) if found else ""
-    return ""
+class Place(NamedTuple):
+    """Where a page is: its *host* (as :func:`named_sites` has it) and its *path*.
+
+    The path is ``"/jane"`` or ``"/p?id=3"``: percent-decoded, without a trailing
+    slash, so the root is ``""``. A page the browser read without its address has no
+    path (``None``). In the words the user typed, an empty path is the whole host.
+    """
+
+    host: str
+    path: str | None
+
+
+def _tail(path: str, query: str) -> str:
+    """A path and its query as places compare them."""
+    return (unquote(path) + (f"?{query}" if query else "")).rstrip(_PATH_END)
+
+
+def _place_of(address: str) -> Place | None:
+    """The :class:`Place` of a page address (the scheme may be left out)."""
+    text = address.strip()
+    try:
+        parts = urlsplit(text if "://" in text else "//" + text)
+        netloc = parts.netloc.rpartition("@")[2]
+    except ValueError:
+        return None
+    host = next(iter(named_sites("http://" + netloc)), "") if netloc else ""
+    return Place(host, _tail(parts.path, parts.query)) if host else None
+
+
+def _spellings(host: str) -> set[str]:
+    """The ways a host may be typed: as is, and in Unicode if it is punycode."""
+    names = {host}
+    with contextlib.suppress(UnicodeError):
+        names.add(host.encode("ascii").decode("idna"))
+    return names
+
+
+def typed_places(text: str) -> list[Place]:
+    """The places *text* (what the user typed) names: a host alone is every page of
+    it (the path ``""``), an address with a path is that page and what is below it.
+
+    The scheme, ``www.``, a trailing slash, a fragment and the punctuation after
+    the address are not part of it: ``see https://www.github.com/jane/.`` names
+    ``github.com`` at ``/jane``.
+    """
+    places: list[Place] = []
+    for host in sorted(named_sites(text)):
+        names = "|".join(re.escape(name) for name in sorted(_spellings(host)))
+        pattern = re.compile(
+            r"(?<![\w.@-])(?:https?://)?(?:www\.)?(?:" + names + r")(?::\d+)?"
+            rf"(?P<path>/[^{_ADDRESS_END}]*)?",
+            re.IGNORECASE,
+        )
+        found = list(pattern.finditer(text))
+        for match in found:
+            rest = urlsplit(match.group("path") or "")
+            places.append(Place(host, _tail(rest.path, rest.query)))
+        if not found:
+            places.append(Place(host, ""))
+    return places
+
+
+def _covers(typed: Place, page: Place) -> bool:
+    """Whether the place the user typed holds *page*: the same host and, for a typed
+    path, that path or one below it (``/jane`` holds ``/jane/repo``, not ``/janet``)."""
+    prefix = typed.path or ""
+    if typed.host != page.host:
+        return False
+    if not prefix:
+        return True
+    path = page.path
+    if path is None or not path.startswith(prefix):
+        return False
+    return len(path) == len(prefix) or path[len(prefix)] in "/?&"
+
+
+class _Seen(NamedTuple):
+    """A page or file a turn read: for a page its host, path and the browser's view
+    (one landing of a tab: a read of the same tab page repeats the view)."""
+
+    kind: str
+    key: str
+    path: str | None
+    view: int | None
+
+
+def _again(first: _Seen, seen: _Seen) -> bool:
+    """Whether *seen* is the page or file that *first* is (or a read of it again)."""
+    if first == seen:
+        return True
+    if first.kind != seen.kind or first.key != seen.key:
+        return False
+    if seen.kind == "file":
+        return True
+    return (seen.view is not None and seen.view == first.view) or (
+        seen.path is not None and seen.path == first.path
+    )
 
 
 def _file_of(call: Mapping[str, Any]) -> str:
@@ -181,6 +285,59 @@ def reads(name: object) -> bool:
     )
 
 
+class _Tabs:
+    """The browser's tabs as the chat's page reads show them, in order.
+
+    A page block names its tab and host, not its address. Opening an address puts
+    that page in the tab; reading the tab again shows the same page; following a
+    link or going back lands on a page whose address is not known. So a page read
+    is placed by what the chat did to its tab, and a read after a move has no path.
+    """
+
+    def __init__(self) -> None:
+        self._views = itertools.count(1)
+        self._tabs: dict[str, tuple[int, Place]] = {}
+
+    def land(
+        self, call: Mapping[str, Any], output: str
+    ) -> tuple[Place, int | None, str] | None:
+        """The place a finished page read is of, the browser's view of it (``None``
+        for a fetch) and the address to show; ``None`` when it has none."""
+        name, arguments = str(call.get("name") or ""), call.get("arguments")
+        asked = ""
+        if isinstance(arguments, Mapping):
+            value = arguments.get(_PAGE_CALLS.get(name, ""))
+            asked = value.strip() if isinstance(value, str) else ""
+        if name == "web_fetch":
+            place = _place_of(asked)
+            return (place, None, asked) if place else None
+        origin = _ORIGIN.search(output)
+        landed = _place_of(origin.group(1)) if origin else None
+        tab = _TAB.search(output)
+        tab_id = tab.group(1) if tab else ""
+        if name == "browser_open":
+            place = _place_of(asked)
+            if place is None or (landed is not None and landed.host != place.host):
+                return None  # not the page that was asked for: a redirect led away
+            return place, self._set(tab_id, place), asked
+        if landed is None or origin is None:
+            return None
+        here = self._tabs.get(tab_id)
+        if name == "browser_read" and here is not None and here[1].host == landed.host:
+            return here[1], here[0], origin.group(1)
+        return (
+            Place(landed.host, None),
+            self._set(tab_id, Place(landed.host, None)),
+            origin.group(1),
+        )
+
+    def _set(self, tab: str, place: Place) -> int:
+        view = next(self._views)
+        if tab:
+            self._tabs[tab] = (view, place)
+        return view
+
+
 def pointed_material(
     events: Iterable[tuple[int | None, Mapping[str, Any]]], typed: Mapping[int, str]
 ) -> list[Material]:
@@ -189,20 +346,30 @@ def pointed_material(
     *events* are the chat's stored events, oldest first, as ``(turn, event)``;
     *typed* maps each turn the user began (not an undone one, not a task's
     question) to what they typed in it, the turn under way included. A tool call
-    counts when it finished with a result and the user pointed to its page or
-    file: the page's host, or the file's name, is in the typed words of some turn
-    up to now, or the typed words of the turn that read it call it theirs
-    (:data:`THEIRS`). It is someone else's (``other``) when the words of that turn,
-    or of a turn that names it, say so. A page or file the user did not point to is
-    left out, as is every call of a turn the user did not begin.
+    counts when it finished with a result and the user pointed to its page or file:
+
+    - a page, when the user typed its address (:func:`typed_places`) in some turn up
+      to now: a host alone points to every page of it, an address with a path to that
+      page and what is below it (``github.com/jane`` is not ``github.com/evil``);
+    - a file, when its name is in the typed words of some turn up to now;
+    - the first page or file a turn read, when the typed words of that turn call it
+      theirs (:data:`THEIRS`) without saying which: "my profile at github.com/jane"
+      means that address and no other. A later read of that turn is the user's only
+      if it is the same page or file again, or the user typed its address or name.
+
+    It is someone else's (``other``) when the words of that turn, or of a turn that
+    names it, say so. A page or file the user did not point to is left out, as is
+    every call of a turn the user did not begin.
     """
     folded = {turn: fold(text) for turn, text in typed.items()}
-    hosts = {turn: named_sites(text) for turn, text in typed.items()}
-    started: dict[tuple[int, str], Mapping[str, Any]] = {}
+    places = {turn: typed_places(text) for turn, text in typed.items()}
+    started: dict[tuple[int | None, str], Mapping[str, Any]] = {}
+    tabs = _Tabs()
+    first: dict[int, _Seen] = {}
     found: list[Material] = []
     for began, event in events:
         data = event.get("data")
-        if not isinstance(data, Mapping) or began is None or began not in typed:
+        if not isinstance(data, Mapping):
             continue
         key = (began, str(data.get("call_id") or ""))
         if event.get("type") == "tool.started":
@@ -217,28 +384,44 @@ def pointed_material(
         text = _MARKER.sub("", output).strip()
         if not text:
             continue
+        # The tabs follow every page the chat read, the user's turns or not.
+        landing = (
+            tabs.land(call, output) if str(call.get("name")) in _PAGE_ALL else None
+        )
+        if began is None or began not in typed:
+            continue
         named: list[int] = []
-        address = _origin_of(call, output)
-        path = _file_of(call)
-        if address:
-            host = next(iter(named_sites(address)), "")
-            if not host:
-                continue
-            kind, ref = "page", address
-            named = [t for t, names in hosts.items() if host in names]
-        elif path:
+        if landing is not None:
+            place, view, ref = landing
+            kind = "page"
+            seen = _Seen(kind, place.host, place.path, view)
+            named = [
+                t
+                for t, wanted in places.items()
+                if any(_covers(p, place) for p in wanted)
+            ]
+        elif path := _file_of(call):
             name = os.path.basename(path.rstrip("/\\"))
             if not name:
                 continue
             kind, ref = "file", name
-            wanted = fold(name)
-            pattern = re.escape(wanted)
-            if wanted.isascii():
+            seen = _Seen(kind, name, None, None)
+            wanted_name = fold(name)
+            pattern = re.escape(wanted_name)
+            if wanted_name.isascii():
                 pattern = rf"(?<![\w-]){pattern}(?!\w)"
             named = [t for t, words in folded.items() if re.search(pattern, words)]
         else:
             continue
-        theirs = _THEIRS.search(folded[began]) is not None
+        opener = first.setdefault(began, seen)
+        opener = first.setdefault(began, seen)
+        # "My site at example.com": the address typed is what the phrase means, so
+        # no other page is "my site".
+        theirs = (
+            _THEIRS.search(folded[began]) is not None
+            and _BOUND.search(folded[began]) is None
+            and _again(opener, seen)
+        )
         if not named and not theirs:
             continue
         other = any(_OTHERS.search(folded[t]) for t in {began, *named})

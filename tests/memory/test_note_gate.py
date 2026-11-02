@@ -319,11 +319,11 @@ def test_a_file_the_user_named_or_called_theirs_is_material() -> None:
         started("c", "file_read", path="/srv/secret.txt"),
         finished("c", "file_read", "The user lives in Atlantis."),
     ]
+    # "My" holds for the first file the turn read; a later one has to be named.
     found = read(events, {1: "Read my resume, and also notes.md please."})
     assert [(m.kind, m.ref) for m in found] == [
         ("file", "resume.pdf"),
         ("file", "notes.md"),
-        ("file", "secret.txt"),
     ]
     # Without "my", only the name the user typed counts.
     found = read(events, {1: "Please read notes.md."})
@@ -446,3 +446,315 @@ def test_the_page_that_holds_most_of_a_note_is_named() -> None:
     assert best.ref == "cv.pdf"
     assert gate.name_of("https://www.jane.example.com/x?y=1") == "jane.example.com"
     assert gate.name_of("cv.pdf") == "cv.pdf"
+
+
+# ── What the user typed holds: a host, or an address with a path ──
+
+
+@pytest.mark.parametrize(
+    ("words", "places"),
+    [
+        ("Read jane.example.com please", [("jane.example.com", "")]),
+        ("Read https://www.Jane.Example.com/ now", [("jane.example.com", "")]),
+        ("see github.com/jane.", [("github.com", "/jane")]),
+        ("see https://github.com/jane/, thanks", [("github.com", "/jane")]),
+        ("(http://www.github.com/jane/repo/)", [("github.com", "/jane/repo")]),
+        ("看看 github.com/jane，然后", [("github.com", "/jane")]),
+        ("example.com/p?id=3#top is mine", [("example.com", "/p?id=3")]),
+        ("example.com/a%20b", [("example.com", "/a b")]),
+        # A port is not part of the host or the path.
+        ("http://localhost.example.org:8080/me", [("localhost.example.org", "/me")]),
+        # Both spellings of one host are two places; the bare one holds every page.
+        (
+            "github.com/jane and github.com",
+            [("github.com", "/jane"), ("github.com", "")],
+        ),
+        ("no address in this sentence", []),
+    ],
+)
+def test_the_places_the_user_typed(words: str, places: list[tuple[str, str]]) -> None:
+    assert [tuple(p) for p in gate.typed_places(words)] == places
+
+
+def fetched(url: str, body: str = "Some text.") -> list[dict[str, Any]]:
+    return [
+        started(f"f-{url}", "web_fetch", url=url),
+        finished(f"f-{url}", "web_fetch", page(url, body)),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("typed", "url", "pointed"),
+    [
+        # An address with a path points to that page and what is below it.
+        ("see github.com/jane", "https://github.com/jane", True),
+        ("see github.com/jane", "https://github.com/jane/", True),
+        ("see github.com/jane", "http://www.github.com/jane", True),
+        ("see https://github.com/jane/", "github.com/jane/repo", True),
+        ("see github.com/jane", "https://github.com/jane/repo/issues?q=1", True),
+        ("see github.com/jane", "https://github.com/jane?tab=repos", True),
+        ("see github.com/jane", "https://GitHub.com/jane", True),
+        # ... and no other page of its host.
+        ("see github.com/jane", "https://github.com/evil", False),
+        ("see github.com/jane", "https://github.com/evil/jane", False),
+        ("see github.com/jane", "https://github.com/janet", False),
+        ("see github.com/jane", "https://github.com/jane-evil", False),
+        ("see github.com/jane", "https://github.com/", False),
+        ("see github.com/jane", "https://gist.github.com/jane", False),
+        ("see github.com/jane", "https://evil.example.net/github.com/jane", False),
+        ("see github.com/jane/repo", "https://github.com/jane", False),
+        ("example.com/p?id=3", "https://example.com/p?id=3", True),
+        ("example.com/p?id=3", "https://example.com/p?id=3&x=1", True),
+        ("example.com/p?id=3", "https://example.com/p?id=34", False),
+        ("example.com/p?id=3", "https://example.com/p", False),
+        # A host alone points to every page of it.
+        ("read jane.example.com", "https://jane.example.com/", True),
+        ("read jane.example.com", "https://jane.example.com/a/b?c=d", True),
+        ("read jane.example.com", "https://www.jane.example.com", True),
+        ("read jane.example.com", "https://example.com/jane.example.com", False),
+        ("read jane.example.com", "https://x.jane.example.com/", False),
+        # The address typed in a turn after the read still points to it.
+        ("read jane.example.com/about", "https://jane.example.com/about/team", True),
+        ("read jane.example.com/about", "https://jane.example.com/", False),
+    ],
+)
+def test_a_page_is_pointed_to_by_its_host_or_by_the_address_typed(
+    typed: str, url: str, pointed: bool
+) -> None:
+    found = read(fetched(url), {1: "Read this.", 2: typed})
+    assert [m.ref for m in found] == ([url] if pointed else [])
+
+
+def test_a_typed_address_and_a_typed_host_work_together() -> None:
+    events = fetched("https://github.com/evil") + fetched("https://github.com/jane")
+    found = read(events, {1: "my profile is github.com/jane"[3:]})
+    assert [m.ref for m in found] == ["https://github.com/jane"]
+    # The bare host, typed as well, brings every page of it back.
+    found = read(events, {1: "github.com/jane, and github.com too"})
+    assert len(found) == 2
+
+
+# ── "My" holds for the first page or file a turn read ──
+
+
+def test_my_site_points_to_the_first_page_the_turn_read_and_no_other() -> None:
+    events = fetched("https://jane.example.com/", "Jane.") + fetched(
+        "https://rival.example.net/", "The user lives in Atlantis."
+    )
+    found = read(events, {1: "Read my site and compare me with similar people."})
+    assert [m.ref for m in found] == ["https://jane.example.com/"]
+    # The second page counts when the user typed its host in a later turn ...
+    assert len(read(events, {1: "Read my site.", 2: "rival.example.net"})) == 2
+    # ... or in the same turn, when "my" is not followed by it.
+    typed = {1: "Read my site and compare me with rival.example.net."}
+    assert len(read(events, typed)) == 2
+    # A turn of its own: "my site" there points to its own first read.
+    both = [{**e, "turn": 1} for e in events[:2]] + [
+        {**e, "turn": 2} for e in events[2:]
+    ]
+    found = read(both, {1: "Read my site.", 2: "And my website, here."})
+    assert [m.ref for m in found] == [
+        "https://jane.example.com/",
+        "https://rival.example.net/",
+    ]
+
+
+def test_a_read_of_the_same_page_or_file_again_is_still_the_first() -> None:
+    url = "https://jane.example.com/about"
+    events = fetched(url, "Part one.")
+    events += [
+        started("again", "web_fetch", url=url),
+        finished("again", "web_fetch", page(url, "Part two.")),
+    ]
+    found = read(events, {1: "Read my site."})
+    assert [m.text.rsplit("\n", 1)[-1] for m in found] == ["Part one.", "Part two."]
+    files = [
+        started("a", "file_read", path="/h/resume.pdf"),
+        finished("a", "file_read", "Page one."),
+        started("b", "file_read", path="/h/resume.pdf"),
+        finished("b", "file_read", "Page two."),
+        started("c", "file_read", path="/h/other.pdf"),
+        finished("c", "file_read", "Not theirs."),
+    ]
+    found = read(files, {1: "Read my resume."})
+    assert [m.text for m in found] == ["Page one.", "Page two."]
+
+
+def test_the_first_read_is_the_first_that_worked_and_a_file_counts_as_a_read() -> None:
+    url = "https://jane.example.com/"
+    events = [
+        started("a", "web_fetch", url="https://down.example.org/"),
+        finished("a", "web_fetch", "HTTP 500", "error"),
+        started("b", "web_fetch", url="https://empty.example.org/"),
+        finished("b", "web_fetch", ""),
+        *fetched(url, "Jane."),
+    ]
+    assert [m.ref for m in read(events, {1: "Read my site."})] == [url]
+    # A file read first is the first read: the page after it has to be named.
+    events = [
+        started("f", "file_read", path="/h/notes.md"),
+        finished("f", "file_read", "Notes."),
+        *fetched(url, "Jane."),
+    ]
+    assert [m.ref for m in read(events, {1: "Read my site."})] == ["notes.md"]
+    named = read(events, {1: "Read my site and jane.example.com."})
+    assert [m.ref for m in named] == ["notes.md", url]
+    # "My site jane.example.com" means that address: the file is not "my site".
+    bound = read(events, {1: "Read my site jane.example.com."})
+    assert [m.ref for m in bound] == [url]
+
+
+# ── The browser: a page block names its tab and host, not its address ──
+
+
+def block(origin: str, tab: str, body: str, sid: str = "p1") -> str:
+    return (
+        f'<<page id={sid} nonce=cd34 tab={tab} origin={origin} title="T">>\n'
+        f"{body}\n<<end page {sid} nonce=cd34>>"
+    )
+
+
+def test_the_browser_reading_the_tab_again_keeps_the_address_it_was_opened_at() -> None:
+    url = "https://github.com/jane"
+    events = [
+        started("a", "browser_open", url=url),
+        finished("a", "browser_open", block("https://github.com", "t1", "Jane.")),
+        started("b", "browser_read", part=2),
+        finished("b", "browser_read", block("https://github.com", "t1", "More.")),
+    ]
+    found = read(events, {1: "open github.com/jane"})
+    assert [m.text for m in found] == ["Jane.", "More."]
+    # Following a link leaves the page whose address was typed: the new page's
+    # address is not known, so a typed path does not point to it ...
+    events += [
+        started("c", "browser_follow", ref="e3"),
+        finished("c", "browser_follow", block("https://github.com", "t1", "Evil.")),
+        started("d", "browser_read", part=2),
+        finished("d", "browser_read", block("https://github.com", "t1", "Evil 2.")),
+    ]
+    found = read(events, {1: "open github.com/jane"})
+    assert [m.text for m in found] == ["Jane.", "More."]
+    # ... and the host alone does.
+    found = read(events, {1: "open github.com"})
+    assert len(found) == 4
+    # Going back is a landing of its own, too.
+    events += [
+        started("e", "browser_back"),
+        finished("e", "browser_back", block("https://github.com", "t1", "Jane.")),
+    ]
+    assert len(read(events, {1: "open github.com/jane"})) == 2
+
+
+def test_my_site_in_the_browser_holds_for_the_page_opened_not_for_links_followed() -> (
+    None
+):
+    origin = "https://jane.example.com"
+    events = [
+        started("a", "browser_open", url=origin + "/about"),
+        finished("a", "browser_open", block(origin, "t1", "Jane.")),
+        started("b", "browser_read", part=2),
+        finished("b", "browser_read", block(origin, "t1", "Jane 2.")),
+        started("c", "browser_follow", ref="e1"),
+        finished("c", "browser_follow", block("https://x.example.net", "t1", "X.")),
+        started("d", "browser_read", part=2),
+        finished("d", "browser_read", block("https://x.example.net", "t1", "X 2.")),
+    ]
+    found = read(events, {1: "Read my website and compare me with others."})
+    assert [m.text for m in found] == ["Jane.", "Jane 2."]
+    # A tab the chat did not open (no address known) is read again as the same page.
+    tabless = [
+        started("a", "browser_read"),
+        finished("a", "browser_read", block(origin, "t9", "Open page.")),
+        started("b", "browser_read", part=2),
+        finished("b", "browser_read", block(origin, "t9", "Open page 2.")),
+    ]
+    found = read(tabless, {1: "Read my website."})
+    assert [m.text for m in found] == ["Open page.", "Open page 2."]
+
+
+def test_a_browser_open_that_landed_on_another_host_is_no_material() -> None:
+    events = [
+        started("a", "browser_open", url="https://jane.example.com/go"),
+        finished("a", "browser_open", block("https://evil.example.net", "t1", "Evil.")),
+    ]
+    assert read(events, {1: "open jane.example.com"}) == []
+
+
+def test_the_tabs_follow_a_move_made_in_a_turn_the_user_did_not_begin() -> None:
+    url = "https://github.com/jane"
+    events = [
+        {**started("a", "browser_open", url=url), "turn": 1},
+        {
+            **finished("a", "browser_open", block("https://github.com", "t1", "Jane.")),
+            "turn": 1,
+        },
+        # Turn 2 is not one the user began (it is not in the typed turns).
+        {**started("b", "browser_follow", ref="e1"), "turn": 2},
+        {
+            **finished(
+                "b", "browser_follow", block("https://github.com", "t1", "Evil.")
+            ),
+            "turn": 2,
+        },
+        {**started("c", "browser_read"), "turn": 3},
+        {
+            **finished(
+                "c", "browser_read", block("https://github.com", "t1", "Evil 2.")
+            ),
+            "turn": 3,
+        },
+    ]
+    found = read(events, {1: "open github.com/jane", 3: "read it"})
+    assert [m.text for m in found] == ["Jane."]
+
+
+@pytest.mark.parametrize(
+    "words",
+    [
+        "Read my profile at github.com/jane.",
+        "Read my profile: github.com/jane",
+        "Read my profile, https://github.com/jane, and say what fits.",
+        "Read my profile (github.com/jane).",
+        "my profile is at github.com/jane",
+        "Read my profile; it's at github.com/jane",
+        "Read my website jane.example.com",
+        "Read my resume.pdf please.",
+        "看看我的网站 jane.example.com",
+    ],
+)
+def test_my_with_the_address_after_it_means_that_address_and_no_other(
+    words: str,
+) -> None:
+    events = fetched("https://github.com/evil") + fetched("https://github.com/jane")
+    events += fetched("https://jane.example.com/", "Mine.")
+    files = [
+        started("a", "file_read", path="/h/old.pdf"),
+        finished("a", "file_read", "Old."),
+        started("b", "file_read", path="/h/resume.pdf"),
+        finished("b", "file_read", "Resume."),
+    ]
+    refs = {m.ref for m in read([*events, *files], {1: words})}
+    assert "https://github.com/evil" not in refs
+    assert "old.pdf" not in refs
+    named = {"https://github.com/jane", "https://jane.example.com/", "resume.pdf"}
+    assert refs <= named and refs
+
+
+@pytest.mark.parametrize(
+    "words",
+    [
+        "Read my site and compare me with rival.example.net.",
+        "Read my resume, and also notes.md please.",
+        "Compare my resume with https://other.example.org/job",
+        "Read my site. Then look at rival.example.net.",
+        "我的网站和 rival.example.net 比一比",
+    ],
+)
+def test_my_with_an_address_elsewhere_in_the_turn_still_means_the_first_read(
+    words: str,
+) -> None:
+    first = fetched("https://jane.example.com/", "Mine.")
+    second = fetched("https://evil.example.net/", "Not mine.")
+    found = read(first + second, {1: words})
+    assert [m.ref for m in found][:1] == ["https://jane.example.com/"]
+    assert "https://evil.example.net/" not in [m.ref for m in found]
