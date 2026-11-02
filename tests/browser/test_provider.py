@@ -9,7 +9,11 @@ from typing import Any
 import pytest
 
 from localmelo.melo.checker.tiers import tier_of
-from localmelo.melo.contracts.approvals import TOOL_ASK, ApprovalDecision, asks_itself
+from localmelo.melo.contracts.approvals import (
+    SELF_ASKING_TOOLS,
+    TOOL_ASK,
+    ApprovalDecision,
+)
 from localmelo.melo.contracts.tools import ProvidedTool
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.support.browser import sites
@@ -97,9 +101,11 @@ async def test_the_tools_are_a_group_of_eleven_and_only_the_readers_are_read_onl
                 "destructiveHint": False,
                 "idempotentHint": False,
             }
-            assert asks_itself(name)
+            assert tool.asks_itself
+            assert name in SELF_ASKING_TOOLS
             assert tier_of(tool.definition) == "write"
         else:
+            assert not tool.asks_itself
             assert tool.definition.annotations == {"readOnlyHint": True}
             assert tier_of(tool.definition) == "read"
         assert tool.definition.parameters["type"] == "object"

@@ -42,13 +42,17 @@ Every text melo types is its own question too, with all of the text, asked each
 time. Enter in a box that is in no form is asked about as well, and says the page
 decides where it goes.
 
-Melo never directs the browser to a local or private address. It cannot stop a
-page from doing that itself, so after each action every tab the action touched
-(the one acted on, and every tab that appeared during it) is checked, by the
-address the browser reports, before anything is read from any of them; one that
-is refused is blanked in place, so Back does not return to it (a tab made by
-``browser_open`` is closed when blanking fails), and nothing from it reaches the
-model. This is a check after the page has acted, not a block on the network.
+Melo itself never opens a local or private address. It cannot stop a page from
+doing that itself, so after each action every tab the action touched (the one
+acted on, and up to :data:`MAX_NEW_TABS` tabs that appeared during it; a further
+new tab is neither checked, read nor closed) is checked, by the address the
+browser reports, before anything is read from any of them; one that is refused is
+blanked in place, so Back does not return to it (a tab made by ``browser_open``
+is closed when blanking fails), and nothing from it reaches the model. If the
+replacing did not take and the browser's own navigation had to blank the tab, Back
+can reach the refused page: ``browser_back`` checks where it lands like any read,
+refuses that page and blanks the tab again. This is a check after the page has
+acted, not a block on the network.
 """
 
 from __future__ import annotations
@@ -60,6 +64,7 @@ import logging
 import re
 from typing import Any, NoReturn
 
+from localmelo.melo.contracts.approvals import SELF_ASKING_TOOLS
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool, ToolFunction
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.schema import ImagePart, ToolDef
@@ -132,8 +137,9 @@ def _def(
         # site instead. A tool that acts is not read-only (a surface that trusts
         # the read tier must not get it). It asks its own questions, per site,
         # for every text it types and for every form it sends, so the gate's
-        # generic question is skipped for it by its name
-        # (``contracts.approvals.SELF_ASKING_TOOLS``), not by an annotation.
+        # generic question is skipped for it by ``ProvidedTool.asks_itself`` from
+        # this provider and its name on ``contracts.approvals.SELF_ASKING_TOOLS``,
+        # never by an annotation.
         annotations=(
             {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False}
             if acts
@@ -315,7 +321,14 @@ class BrowserToolProvider(BaseToolProvider):
             # No timeout of its own: a call may wait for the person's answer about
             # a site, so the run's tool timeout applies, and the driver bounds
             # each call to the browser.
-            ProvidedTool(definition=tool, function=impls[tool.name], group=GROUP)
+            ProvidedTool(
+                definition=tool,
+                function=impls[tool.name],
+                group=GROUP,
+                # The tools that act ask their own questions; the agent knows
+                # them by this word from melo's own provider and by their names.
+                asks_itself=tool.name in SELF_ASKING_TOOLS,
+            )
             for tool in TOOLS
         ]
 
@@ -810,8 +823,8 @@ class BrowserToolProvider(BaseToolProvider):
     ) -> tuple[list[str], dict[str, str]]:
         """Check where every tab the action touched is, before anything is read from any of them.
 
-        The touched tabs are the one acted on and every tab that appeared
-        meanwhile. Each address is the browser's own report. One that is on a
+        The touched tabs are the one acted on and up to :data:`MAX_NEW_TABS` tabs
+        that appeared meanwhile. Each address is the browser's own report. One that is on a
         local or private address, or that cannot be told, is blanked in place
         (see :meth:`_refuse_tab`) and its readings go; the first such problem
         is raised after all of them were dealt with.

@@ -208,16 +208,14 @@ NEVER_GRANTED: Final = ("browser-submit:", "browser-type:")
 
 # The tools melo ships that ask their own questions (per site, and for every text they
 # type or form they send), so the gate puts no second, empty question about the call.
-# A fixed list of names in melo, never a tool's own annotation: a tool from outside
-# (an MCP server) cannot claim to ask for itself and skip the gate.
+# Two things must hold for a call to skip the gate: its name is on this fixed list in
+# melo, and the tool came from melo's own browser provider, which says so with
+# ``ProvidedTool.asks_itself``. A tool's annotation never counts (an MCP server cannot
+# claim to ask for itself), and neither does a name alone: a tool that library code
+# registers as ``browser_type`` keeps its approval.
 SELF_ASKING_TOOLS: Final = frozenset(
     {"browser_click", "browser_type", "browser_select"}
 )
-
-
-def asks_itself(tool_name: str) -> bool:
-    """Whether *tool_name* is one of melo's own tools that ask their questions themselves."""
-    return tool_name in SELF_ASKING_TOOLS
 
 
 def never_granted(tool_name: str) -> bool:

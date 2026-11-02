@@ -110,6 +110,7 @@ from localmelo.melo.contracts.approvals import (
     ALLOWED_ONCE,
     BLOCKED_ALIKE,
     BLOCKED_EARLIER,
+    SELF_ASKING_TOOLS,
     STOPPED_NOTE,
     TOOL_ASK,
     ApprovalDecision,
@@ -118,7 +119,6 @@ from localmelo.melo.contracts.approvals import (
     AutoPolicy,
     ReviewMode,
     Withdrawal,
-    asks_itself,
     block_note,
     call_key,
     find_auto,
@@ -2410,6 +2410,9 @@ class Agent:
         self._provided_names: frozenset[str] = frozenset()
         # Of those, the ones in a group, which "retrieve" offers on every step.
         self._grouped_names: frozenset[str] = frozenset()
+        # Of those, melo's own browser tools that ask their questions themselves:
+        # the only calls the approval gate does not ask a second question about.
+        self._self_asking_names: frozenset[str] = frozenset()
         # close() or begin_exit() has begun: no tool provider is started
         # from then on.
         self._closing = False
@@ -4152,6 +4155,13 @@ class Agent:
             self._grouped_names = frozenset(
                 tool.definition.name for tool in provided if tool.group
             )
+            # Both the provider's word and melo's list: a name alone does not
+            # count, and a flag on any other name does nothing.
+            self._self_asking_names = frozenset(
+                tool.definition.name
+                for tool in provided
+                if tool.asks_itself and tool.definition.name in SELF_ASKING_TOOLS
+            )
             self.chat.add_system_notes(
                 [note for provider in started for note in provider.system_notes()]
             )
@@ -4692,7 +4702,7 @@ class Agent:
                 self._reviewer,
                 destructive=hints.get("destructiveHint") is True,
                 confinement=switch,
-                asks_itself=asks_itself(call.tool_name),
+                asks_itself=call.tool_name in self._self_asking_names,
             )
             ask_slot = TOOL_ASK.set(
                 _ToolAsk(

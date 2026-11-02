@@ -513,7 +513,27 @@ async def test_typing_is_only_for_text_boxes_and_has_a_limit() -> None:
 
 
 @pytest.mark.parametrize(
-    "text", ["a\u200bb", "a\u202eb", "a\x1b[2Jb", "a\rb", "\ufeffa", "a\u2028b"]
+    "text",
+    [
+        # Control, format, separator characters.
+        "a\u200bb",
+        "a\u202eb",
+        "a\x1b[2Jb",
+        "a\rb",
+        "\ufeffa",
+        "a\u2028b",
+        "a\U000e0041b",
+        # Characters that draw nothing: Hangul fillers, blank Braille cell, combining
+        # grapheme joiner, variation selectors (both ranges).
+        "a\u3164b",
+        "a\uffa0b",
+        "a\u2800b",
+        "a\u034fb",
+        "a\ufe00b",
+        "a\ufe0fb",
+        "a\U000e0100b",
+        "a\U000e01efb",
+    ],
 )
 async def test_text_a_question_could_not_show_is_not_typed(text: str) -> None:
     driver = world(textbox("Search"))
@@ -535,6 +555,17 @@ async def test_new_lines_tabs_and_text_in_any_language_are_typed() -> None:
     text = "line one\n\tline two \u4f60\u597d \U0001f468\u200d\U0001f469"
     out = await run(tools, "browser_type", ref="e1", text=text)
     assert not out.is_error and driver.acts[0].text == text
+
+
+async def test_the_two_joiners_are_typed_between_letters_of_a_script_that_needs_them() -> (
+    None
+):
+    driver = world(textbox("Notes"))
+    tools = await tools_of(driver)
+    await run(tools, "browser_open", url=HOME)
+    joined = "\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645"
+    out = await run(tools, "browser_type", ref="e1", text=joined)
+    assert not out.is_error and driver.acts[0].text == joined
 
 
 async def test_every_typing_asks_with_all_of_its_text_and_is_never_a_chat_grant() -> (

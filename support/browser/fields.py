@@ -153,20 +153,36 @@ def refuse_typing(attrs: FieldAttrs | None) -> None:
 # New lines, tabs and the two joiners (emoji and a few scripts need them) show or join.
 _SHOWN_ANYWAY = frozenset("\n\t\u200c\u200d")
 _UNSHOWN = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
+# Characters outside those categories that draw nothing or nearly nothing: the Hangul
+# fillers (U+3164, U+FFA0), the blank Braille cell (U+2800) and the combining grapheme
+# joiner (U+034F).
+_BLANK = frozenset("\u3164\uffa0\u2800\u034f")
+# Variation selectors change how the character before them is drawn and have no look of
+# their own: U+FE00-FE0F and U+E0100-E01EF.
+_VARIATION = ((0xFE00, 0xFE0F), (0xE0100, 0xE01EF))
+
+
+def _invisible(char: str) -> bool:
+    if char in _SHOWN_ANYWAY:
+        return False
+    if char in _BLANK or unicodedata.category(char) in _UNSHOWN:
+        return True
+    code = ord(char)
+    return any(low <= code <= high for low, high in _VARIATION)
 
 
 def unshowable(text: str) -> str:
     """What in *text* a question could not show a person, in words; ``""`` when all of it shows.
 
-    Control characters and the invisible ones (zero-width spaces, direction
-    overrides, a byte-order mark) would make the question say less than what is
-    typed, so a text with them is not typed.
+    These would make the question say less than what is typed, so a text with
+    one is not typed: control, format (zero-width spaces, direction overrides,
+    a byte-order mark, tag), surrogate, private-use and unassigned characters,
+    line and paragraph separators, the Hangul fillers U+3164 and U+FFA0, the
+    blank Braille cell U+2800, the combining grapheme joiner U+034F and the
+    variation selectors (U+FE00-FE0F, U+E0100-E01EF). New lines, tabs and the
+    two joiners U+200C and U+200D are allowed.
     """
-    bad = [
-        c
-        for c in text
-        if c not in _SHOWN_ANYWAY and unicodedata.category(c) in _UNSHOWN
-    ]
+    bad = [c for c in text if _invisible(c)]
     return f"{len(bad)} control or invisible character(s)" if bad else ""
 
 

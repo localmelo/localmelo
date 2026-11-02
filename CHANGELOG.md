@@ -28,13 +28,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   page sends that it did not ask about and a link whose address changed when it was pressed;
   that is a best-effort guard that only holds while melo acts, and a page can get around it.
   After each action melo takes the address Safari reports for every tab the action touched, the
-  one acted on and each one that appeared meanwhile, and checks them all before it reads any: a
+  one acted on and up to three that appeared meanwhile (a further new tab is neither checked, read
+  nor closed), and checks them all before it reads any: a
   tab on a local or private address, or whose address cannot be told, is blanked in place (so
-  Back does not return to it; a tab melo made is closed if that fails) and nothing from it
-  reaches the model, and a failed action is checked the same way. A page that melo reads is
+  Back does not return to it; if the replacement does not take, melo opens a blank page the
+  browser's own way, Back can then reach the refused page, and melo refuses it and blanks it
+  again; a tab melo made is closed if blanking fails altogether) and nothing from it reaches
+  the model, and a failed action is checked the same way. A page that melo reads is
   compared with the address Safari reported just before, and a page that moved in between is
-  not read. melo never sends the browser to a local or private address itself, and a link or
-  form that points at one is refused before it is used. A page that sends its own tab there
+  not read. melo itself never opens a local or private address (apart from Back reaching a
+  refused page as described above), and a link or form that points at one is refused before it
+  is used. A page that sends its own tab there
   with its own script is noticed afterwards and blanked before anything is read; this is a
   check on what melo reads, not a network block, and Safari still makes the requests a page
   asks for. melo never types into a password, card number or one-time-code field, and when it
@@ -47,9 +51,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   handlers ran, and clears a field that turned secret. A page with a card number or card
   expiry field is not read. melo cannot see where a page's own scripts send what is typed. It
   never reads cookies or page storage. Clicking and choosing on a site ask once per site and
-  chat apart from reading. Typing asks every time, shows all of the text (control and
-  invisible characters are refused, since the question could not show them) and has no "allow
-  for this chat". A click on a button that sends a form, or typing that presses Enter, asks by
+  chat apart from reading. Typing asks every time, shows all of the text (a text with a
+  control, format, surrogate, private-use or unassigned character, a line or paragraph
+  separator, a Hangul filler, the blank Braille cell, the combining grapheme joiner or a
+  variation selector is refused, since the question could not show it; new lines, tabs and the
+  two joiners U+200C and U+200D are allowed) and has no "allow for this chat". A click on a button that sends a form, or typing that presses Enter, asks by
   itself every time and shows where the form goes (or that the page decides, when Enter is
   pressed outside a form) and what it holds as melo last read it, with secret-looking and
   token-like values hidden; a site other than the page's is asked about first. A send has no
