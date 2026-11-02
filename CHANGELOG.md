@@ -875,6 +875,43 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- The review rules no longer pass several kinds of step as routine (part of #456). Auto
+  runs a routine step without a review, and Ask shows it as plain code; these now get the
+  same treatment as other system-level or destructive steps, and no step became less
+  strict. `RULES_VERSION` is 3, so stored verdicts are read again.
+  - A script that reaches macOS without naming an app is `system`, not `routine`:
+    AppleScript that loads a framework (`use framework`) or uses `current application`,
+    `load script`, `open for access`, `POSIX`, `open location` or `mount volume`, and JXA
+    that writes `Application ("Terminal")` with a space, calls `Application` through a
+    variable, or uses `eval`, `Function`, `globalThis`, `$.` or the ObjC bridge. A keyword
+    inside a string or a comment does not count, so `display dialog "The application
+    finished"` stays routine.
+  - `open` of a link whose scheme is not `http`, `https` or `file` is `system`
+    (`open shortcuts://…`, `open -u`, `python -m webbrowser`, `webbrowser.open`). A
+    custom scheme is never `app_control`: the app that handles it is whichever one is
+    installed, so melo cannot name it. A `shortcuts://` link reads like `shortcuts run`.
+  - Erasing or repartitioning a disk is `system` and `delete` (`diskutil eraseDisk`,
+    `eraseVolume`, `partitionDisk`, `zeroDisk`, `secureErase`, the apfs and coreStorage
+    delete verbs), also through `sudo`, `env`, a path, `sh -c` and `bash -lc`.
+  - Discarding uncommitted work is `delete`: `git checkout -- <paths>`, `git checkout .`,
+    `git restore` (unless it only unstages), `git switch -f`, `git reset --hard`,
+    `git clean` (unless a dry run) and `git stash drop` or `clear`.
+  - `pkill`, `killall`, `skill`, `kill` of a process the step did not start, and
+    `os.kill` of another process are `system`. Signal 0, listing signals, and a process
+    the step started itself (`$!`, `%1`, `$$`, `pid=$!`) stay routine.
+  - `git status`, `git diff`, `diskutil list`, `diskutil info`, `pgrep` and `kill -0`
+    stay routine. A comparison of 626 commands against the verdicts from before this
+    change found none looser and 146 stricter.
+- The approval card now compares targets as well as effects. When melo's words describe
+  the right effect (delete, send data out) but name a file, folder or website that the
+  code does not act on, the card warns: “melo described this as “Delete notes.tmp”, but
+  the code deletes build/.” A target inside a named folder matches; the folder that holds
+  a named file does not. The warning is new in `delete_target` and `send_out_target`
+  (`warn.params`: `said`, `target`), in English and Chinese; nothing is warned when the
+  words name no file, folder or site, and the sentence never changes the verdict.
+- The model review prompt grew from 2,653 to 2,844 characters (+191) to name the new
+  kinds. No recorded prompt changed.
+
 - The browser tools never open this computer, its local network or melo's
   own console. `localhost`, private, link-local, carrier-shared and
   unspecified addresses (also written as IPv6 or as one number), local and

@@ -367,7 +367,7 @@ from-the-child
   ↑↓ select · enter confirm · 1-2 · v view all · esc stop the turn
 ```
 
-按普通名称操作一个应用的脚本（用 `osascript` 让 Safari 关闭标签页、`open -a Notes`）是单独的一类，**Control an app?**，理由里会写明应用名。它和系统设置一样需要点按钮。这是一份允许清单：运行 shell、按键、操作 System Events、指名终端或编辑器、给出路径或第二个应用的脚本，以及 `shortcuts run`，仍然是 **Change system settings?**。一轮中被拦下的步骤那一行下面带有同样的句子。
+按普通名称操作一个应用的脚本（用 `osascript` 让 Safari 关闭标签页、`open -a Notes`）是单独的一类，**Control an app?**，理由里会写明应用名。它和系统设置一样需要点按钮。这是一份允许清单：运行 shell、按键、操作 System Events、指名终端或编辑器、给出路径或第二个应用的脚本，以及 `shortcuts run`，仍然是 **Change system settings?**。不指名应用就接触 macOS 的脚本、`open` 一个不是 `http`、`https` 或 `file` 的链接（`open shortcuts://…`）、擦除磁盘和停止其他程序（`pkill`、对调用没有启动的进程使用 `kill`）也一样；丢弃未提交的工作（`git checkout -- .`、`git restore`、`git clean`、`git stash drop`）会问 **Delete files that cannot be restored?**。一轮中被拦下的步骤那一行下面带有同样的句子。
 
 ```text
 ╭─ Control an app? ──────────────────────────────────────────────────────────╮

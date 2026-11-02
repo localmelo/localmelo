@@ -359,8 +359,11 @@ The number of `tool.started` events is `RunResult.n_tool`.
   name every effect of a compound step in order. `note` holds the model's words
   when the rules found something: they stand below the sentence, and a client
   labels them with `gist.say.model` ("melo says: …"). `warn` is set only when the
-  model's words disagree with what the code does (`delete`, `send_out`) and quotes
-  them; `apps` names the apps a script operates. It is absent for a tool whose
+  model's words disagree with what the code does and quotes them (`params.said`):
+  `delete` and `send_out` when the words name no such effect, `delete_target` and
+  `send_out_target` (with `params.target`, the files, folders or hosts the code acts on,
+  at most three, as written) when the words give the right effect but name another
+  file, folder or host; `apps` names the apps a script operates. It is absent for a tool whose
   card has a sentence of its own.
 - `exit_code`: the exit status of the child process that `shell_exec` or
   `python_exec` ran; a negative value `-N` means that signal `N` ended it. It
