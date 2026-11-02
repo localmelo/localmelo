@@ -310,7 +310,7 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 
 ### 高影响调用
 
-在策略决策之前，检查器会用固定规则审查每次 `shell_exec`、`python_exec` 和 `file_write` 调用：命令按 Shell 的方式拆分（`$(…)`、反引号以及会展开内容的 here-document 里的命令也会被审查），Python 代码只解析不运行，调用运行的本地脚本会读取一次。调用分为**常规**、**高影响**和**无法判定**三类。
+在策略决策之前，检查器会用固定规则审查每次 `shell_exec`、`python_exec` 和 `file_write` 调用：命令按 Shell 的方式拆分（`$(…)`、反引号以及会展开内容的 here-document 里的命令也会被审查；here-document 或命令替换无法被精确读取时，调用为“无法判定”），Python 代码只解析不运行，调用运行的本地脚本会读取一次。调用分为**常规**、**高影响**和**无法判定**三类。
 
 以下调用属于高影响：
 

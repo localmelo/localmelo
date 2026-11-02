@@ -286,7 +286,7 @@ When a file tool's path is outside the workspace, in a chat or task you started,
 
 ### High-impact calls
 
-Before the policy decides, the checker reviews each `shell_exec`, `python_exec` and `file_write` call with fixed rules: a command is split as the shell splits it (the commands inside `$(…)`, backquotes and a here-document that expands them are reviewed too), Python code is parsed (nothing runs), and a local script the call runs is read once. A call is **routine**, **high-impact** or **undecided**.
+Before the policy decides, the checker reviews each `shell_exec`, `python_exec` and `file_write` call with fixed rules: a command is split as the shell splits it (the commands inside `$(…)`, backquotes and a here-document that expands them are reviewed too; a here-document or substitution melo cannot read exactly makes the call undecided), Python code is parsed (nothing runs), and a local script the call runs is read once. A call is **routine**, **high-impact** or **undecided**.
 
 It is high-impact when it:
 
