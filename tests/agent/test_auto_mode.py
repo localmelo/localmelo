@@ -655,7 +655,7 @@ class ActsOnSite(OpensSite):
             arguments.update(
                 to="https://collect.example/post", fields=[["email", "me@example.org"]]
             )
-        if how == "type":
+        if access == "type":
             arguments.update(text="hello there")
         decision = await ask(
             f"browser-{access}:https://{site}", arguments, f"{access} on {site}"
@@ -730,7 +730,8 @@ async def test_typing_is_reviewed_by_itself_while_a_click_or_choice_stays_routin
     reviewed: int,
 ) -> None:
     tool = ActsOnSite()
-    call = ("act_on_site", {"site": "news.example", "access": "act", "how": how}, "c1")
+    access = "type" if how == "type" else "act"
+    call = ("act_on_site", {"site": "news.example", "access": access, "how": how}, "c1")
     llm = FakeModel([_calls(call), _answer("done")], reviews)
     (tmp_path / "ws").mkdir()
     agent = Agent(
@@ -752,6 +753,36 @@ async def test_typing_is_reviewed_by_itself_while_a_click_or_choice_stays_routin
     if reviewed:
         words = json.dumps([m.content for m in llm.review_requests[0]])
         assert "types text on news.example" in words and "hello there" in words
+
+
+@pytest.mark.asyncio
+async def test_typing_the_same_text_twice_is_two_reviews(tmp_path: Path) -> None:
+    tool = ActsOnSite()
+    typing = {"site": "news.example", "access": "type", "how": "type"}
+    llm = FakeModel(
+        [
+            _calls(("act_on_site", typing, "call_1")),
+            _calls(("act_on_site", typing, "call_2")),
+            _answer("done"),
+        ],
+        [verdict(), verdict()],
+    )
+    (tmp_path / "ws").mkdir()
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset(),
+            tool_exposure="all",
+            workspace_root=str(tmp_path / "ws"),
+        ),
+        tool_providers=[tool],
+    )
+    agent.chat.sleep = _no_wait
+
+    await agent.run_task("log in to news.example for me", approval=AutoPolicy())
+
+    assert [answer.allow for answer in tool.answers] == [True, True]
+    assert len(llm.review_requests) == 2, "a typing verdict is never reused"
 
 
 @pytest.mark.asyncio

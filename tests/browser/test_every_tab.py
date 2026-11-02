@@ -56,7 +56,9 @@ async def test_one_local_tab_among_three_refuses_all_and_none_is_read() -> None:
     out = await run(tools, "browser_click", ref="e1")
     assert_refused(out)
     assert reads(driver) == before, "no tab was read after the click"
-    assert ("close_tab", "t3") in driver.calls, "the local one is closed"
+    # The local one is blanked in place and left open: melo did not make the tab.
+    assert ("blank", "t3") in driver.calls and ("close_tab", "t3") not in driver.calls
+    assert driver.tabs_["t3"] == ["about:blank"]
     listing = (await run(tools, "browser_tabs", action="list")).text
     assert SECRET not in listing and "127.0.0.1" not in listing
 
@@ -103,13 +105,50 @@ async def test_a_tab_that_cannot_be_blanked_is_closed() -> None:
     assert "t1" not in (await run(tools, "browser_tabs", action="list")).text
 
 
-async def test_a_popup_that_cannot_be_blanked_is_closed_too() -> None:
+async def test_a_popup_that_cannot_be_blanked_is_let_go_of_not_closed() -> None:
     driver = world(button("Open"))
     driver.popups["Open"] = CONSOLE
     driver.blank_fails = True
     tools = await opened_home(driver)
     assert_refused(await run(tools, "browser_click", ref="e1"))
-    assert list(driver.tabs_) == ["t1"]
+    # melo did not make the tab, so it does not close it; it just stops using it.
+    assert list(driver.tabs_) == ["t1", "t2"]
+    assert ("close_tab", "t2") not in driver.calls
+    listing = (await run(tools, "browser_tabs", action="list")).text
+    assert "t2" not in listing and "127.0.0.1" not in listing
+    assert (await run(tools, "browser_read", tab="t2")).is_error
+
+
+# ── Back never returns to a page that was refused ──
+
+
+async def test_back_never_returns_to_a_refused_address() -> None:
+    driver = world(button("Check in"))
+    driver.lands["Check in"] = CONSOLE  # the page sends the tab to a local address
+    tools = await opened_home(driver)
+    assert_refused(await run(tools, "browser_click", ref="e1"))
+    # The refused page was swapped for an empty one in the history, so nothing
+    # after the home page remembers the local address.
+    assert not any(CONSOLE in entry for entry in driver.tabs_["t1"])
+    before = reads(driver)
+    out = await run(tools, "browser_back")
+    assert CONSOLE not in out.text and SECRET not in out.text
+    assert not any(CONSOLE in entry for entry in driver.tabs_["t1"])
+    assert reads(driver) == before + ["t1"], "the page it went back to was read"
+    assert "Welcome" in out.text
+
+
+async def test_back_onto_a_refused_address_blanks_it_and_reads_nothing() -> None:
+    # A history the helper could not keep clean (its blank was a new entry):
+    # Back lands on the local address, which is checked before anything is read.
+    driver = world(button("Check in"))
+    tools = await opened_home(driver)
+    driver.tabs_["t1"][:] = [CONSOLE, HOME]
+    before = reads(driver)
+    out = await run(tools, "browser_back")
+    assert_refused(out)
+    assert reads(driver) == before
+    assert ("blank", "t1") in driver.calls
 
 
 # ── An action that fails ──
@@ -302,8 +341,9 @@ async def test_typed_text_is_in_the_question_for_the_site() -> None:
     tools = await opened_home(driver)
     with asking(asks):
         await run(tools, "browser_type", ref="e1", text="my own words")
-    [(_, arguments, _)] = [a for a in asks.asked if a[0].startswith("browser-act:")]
+    [(_, arguments, _)] = [a for a in asks.asked if a[0].startswith("browser-type:")]
     assert arguments["how"] == "type" and arguments["text"] == "my own words"
+    assert not [a for a in asks.asked if a[0].startswith("browser-act:")]
 
 
 @pytest.mark.parametrize("ref_kind", ["click", "select"])

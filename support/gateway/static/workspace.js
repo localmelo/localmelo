@@ -1873,25 +1873,28 @@ function approvalCard(request, view = chatApproval, asked = "") {
       content = String(args.url);
       what = t("approval.readAddress");
     }
-  } else if (tool.startsWith("browser-act:") || tool.startsWith("browser-submit:")) {
-    // Acting on a page asks apart from reading it: clicks and typing are one question per site and
-    // chat, and a form sent from the page is its own, with the address it goes to.
+  } else if (tool.startsWith("browser-act:") || tool.startsWith("browser-type:") || tool.startsWith("browser-submit:")) {
+    // Acting on a page asks apart from reading it: clicks and choices are one question per site and
+    // chat. Typing is its own question that shows all the text, and a form sent from the page is
+    // another, with the address it goes to; both ask every time.
     const sending = tool.startsWith("browser-submit:");
+    const typing = tool.startsWith("browser-type:");
     const site = String(args.site || tool.slice(tool.indexOf(":") + 1));
     what = t("approval.willDo");
-    title = t(sending ? "approval.submitSite" : "approval.actSite", { site });
-    caption = t(sending ? "approval.submitCaption" : "approval.actCaption");
-    rule = t(sending ? "approval.rule.submitOnce" : "approval.rule.act", { site, scope });
-    content = t(sending ? "approval.submitContent" : "approval.actContent", { site });
+    title = t(sending ? "approval.submitSite" : typing ? "approval.typeSite" : "approval.actSite", { site });
+    caption = t(sending ? "approval.submitCaption" : typing ? "approval.typeCaption" : "approval.actCaption");
+    rule = t(sending ? "approval.rule.submitOnce" : typing ? "approval.rule.typeOnce" : "approval.rule.act", { site, scope });
+    content = t(sending ? "approval.submitContent" : typing ? "approval.typeContent" : "approval.actContent", { site });
     if (sending) {
       // Where the form goes (or that the page decides) and what it holds, nothing secret in it.
       why = content;
       const rows = Array.isArray(args.fields) ? args.fields.map(([name, value]) => `${name}: ${value}`) : [];
       content = [args.to ? String(args.to) : t("approval.submitPage"), ...(rows.length ? ["", t("approval.submitFields"), ...rows] : [])].join("\n");
       what = t("approval.submitAddress");
-    } else if (args.how === "type" && args.text) {
+    } else if (typing) {
+      // The whole text, uncut: it is what goes into the page.
       why = content;
-      content = String(args.text);
+      content = String(args.text ?? "");
       what = t("approval.actTyped");
     }
   }
@@ -1970,8 +1973,8 @@ function approvalCard(request, view = chatApproval, asked = "") {
   deny.dataset.approvalDeny = "";
   deny.dataset.approvalFocus = "deny";
   // The answers offered: a folder outside the workspace that may be kept has four.
-  // A form's send asks every time, like a high-impact call: its answer is never kept for the chat.
-  const everyTime = high || tool.startsWith("browser-submit:");
+  // Typing and a form's send ask every time, like a high-impact call: their answers are never kept for the chat.
+  const everyTime = high || tool.startsWith("browser-submit:") || tool.startsWith("browser-type:");
   const offered = everyTime ? [once, deny] : outside ? (grantable ? [once, session, always, deny] : [once, deny]) : [once, session, deny];
   actions.append(...offered);
   card.append(actions);

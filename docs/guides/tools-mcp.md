@@ -90,7 +90,7 @@ What else the file and the servers do:
 | `require_approval` | Must be `true`, `false` or a list of strings, else a usage error. A listed name the server does not offer is logged as a warning. |
 | Transport | Only stdio servers work. Another `type` is a usage error: `only stdio servers are supported (got type 'sse')`. So is an entry with a `url` and no `command`: `'command' must be a non-empty string (HTTP/SSE servers are not supported)`. |
 | Tool names | `mcp__<server>__<tool>`. Characters other than letters, digits, `_` and `-` become `_`. A name over 64 characters is cut to 64 and ends with a short hash; `config.tools` shows the names used. |
-| `annotations` | Kept as the server gives them; they decide the tier of a tool that is not a built-in (see [Permission tiers](#permission-tiers)). A malformed value is ignored and the tool still lists. |
+| `annotations` | Kept as the server gives them; they decide the tier of a tool that is not a built-in (see [Permission tiers](#permission-tiers)). A malformed value is ignored and the tool still lists. The key `asksItself` is melo's own and is dropped from a server's annotations: no MCP tool can use it to skip the approval question. |
 | Start | The servers start with the run. One that cannot start ends it as `setup_error`, for example `MCP server 'notes' exited (code 1)`. |
 | Where | Direct mode and the [Python API](../reference/python-api.md#tool-providers-and-mcp). Gateway sessions have no MCP tools. |
 | `structuredContent` | Sent as text only when the result has no text and no picture: a screenshot server that repeats the base64 there sends the picture, not its base64. |

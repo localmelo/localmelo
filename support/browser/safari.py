@@ -31,10 +31,12 @@ import tempfile
 import uuid
 from base64 import b64encode
 from typing import Any, cast
+from urllib.parse import urlsplit
 
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.support.browser import fields
 from localmelo.support.browser.driver import (
+    MAX_TYPED_CHARS,
     Act,
     BrowserError,
     BrowserSetupError,
@@ -94,12 +96,18 @@ _STALE = {
     "dest": "Where that element leads or sends changed since it was read, so melo did not use it. Use browser_read for current refs.",
     "field": "That field changed since it was read, so melo did not use it. Use browser_read for current refs.",
     "grew": "That field turned into a protected one while melo typed, so melo cleared it. Ask the person to fill it in themselves.",
+    "frame": "melo could not set up its safe page checks on this page, so it did nothing. Use browser_read to try again.",
 }
+NO_CHECKS_NOTE = (
+    "(melo could not set up its safe page checks on this page, so no links, buttons "
+    "or fields are listed.)"
+)
 _BLOCKED = {
     "send": "The page tried to send a form that melo had not asked about, so melo stopped it. To send a form, click its button: melo asks first.",
     "link": "The page changed where that link goes while it was clicked, so melo stopped it.",
 }
 POLL_S = 0.4
+BLANK_TRIES = 4
 
 # The page script's pieces, shared by reading a page and by acting on it, so
 # an element is found again by the same rules that listed it. ``SEL`` lists
@@ -110,18 +118,11 @@ POLL_S = 0.4
 # ``P`` holds the page-reading built-ins taken from a fresh, hidden frame, so
 # a page that replaced ``getAttribute`` or ``JSON.stringify`` for itself does
 # not change what these checks see. When the frame cannot be made, or one of
-# its functions does not work, the page's own are used.
+# its functions does not work, ``P`` is null: the page's own built-ins are never
+# used instead, so a page is then read as text only and nothing is done on it.
 COMMON_JS = (
     r"""
 var P = (function () {
-  var own = {
-    qsa: Document.prototype.querySelectorAll, qs: Element.prototype.querySelector,
-    ga: Element.prototype.getAttribute, ra: Element.prototype.removeAttribute,
-    json: JSON.stringify, gcs: window.getComputedStyle, add: EventTarget.prototype.addEventListener,
-    req: HTMLFormElement.prototype.requestSubmit, sub: HTMLFormElement.prototype.submit,
-    click: HTMLElement.prototype.click, dispatch: EventTarget.prototype.dispatchEvent,
-    rm: EventTarget.prototype.removeEventListener
-  };
   var frame = null;
   try {
     frame = document.createElement("iframe");
@@ -134,7 +135,8 @@ var P = (function () {
       json: w.JSON.stringify, gcs: w.getComputedStyle.bind(window), add: w.EventTarget.prototype.addEventListener,
       req: w.HTMLFormElement.prototype.requestSubmit, sub: w.HTMLFormElement.prototype.submit,
       click: w.HTMLElement.prototype.click, dispatch: w.EventTarget.prototype.dispatchEvent,
-      rm: w.EventTarget.prototype.removeEventListener
+      rm: w.EventTarget.prototype.removeEventListener, closest: w.Element.prototype.closest,
+      cdp: w.Node.prototype.compareDocumentPosition
     };
     // The fresh functions are tried on their own terms, never against the page's.
     var probe = w.document.createElement("div");
@@ -144,7 +146,7 @@ var P = (function () {
     for (var k in fresh) if (typeof fresh[k] !== "function") throw new Error(k);
     return fresh;
   } catch (e) {
-    return own;
+    return null;  // never the page's own: nothing is listed or done without the fresh ones
   } finally {
     if (frame && frame.parentNode) frame.parentNode.removeChild(frame);
   }
@@ -171,7 +173,7 @@ var defaultButton = function (form) {
 var textOf = function (id) { var t = document.getElementById(id); return t ? cap(t.textContent, 80) : ""; };
 var refsText = function (n, a) { return attr(n, a).split(/\s+/).filter(Boolean).slice(0, 4).map(textOf).join(" "); };
 var legendOf = function (n) {
-  var f = n.closest ? n.closest("fieldset") : null, l = f ? inside(f, "legend") : null;
+  var f = P.closest.call(n, "fieldset"), l = f ? inside(f, "legend") : null;
   return l ? cap(l.textContent, 80) : "";
 };
 var textBefore = function (n) {
@@ -185,7 +187,27 @@ var textBefore = function (n) {
 var labelsOf = function (n) {
   return n.labels ? Array.prototype.map.call(n.labels, function (l) { return cap(l.innerText || l.textContent, 80); }).join(" ") : "";
 };
-var fingerprint = function (n) {
+var HEADINGS = null;
+var headingBefore = function (n) {
+  if (!HEADINGS) HEADINGS = Array.prototype.slice.call(P.qsa.call(document, "h1,h2,h3,h4,h5,h6,[role=heading]"));
+  var lo = 0, hi = HEADINGS.length - 1, found = null;
+  while (lo <= hi) {
+    var mid = (lo + hi) >> 1;
+    if (P.cdp.call(HEADINGS[mid], n) & 4) { found = HEADINGS[mid]; lo = mid + 1; } else hi = mid - 1;
+  }
+  return found;
+};
+// The words around an element: its row's text, else the heading above it. A page that
+// redraws a list in place leaves the same tags and labels at the same places; the
+// items they belong to are what changed.
+var contextOf = function (n) {
+  var row = P.closest.call(n, "tr,li,[role=row],[role=listitem],article,[role=article]");
+  var text = row && row !== n ? cap(row.innerText || row.textContent, 100) : "";
+  if (text) return "r:" + text;
+  var head = headingBefore(n);
+  return head ? "h:" + cap(head.innerText || head.textContent, 80) : "";
+};
+var fingerprint = function (n, nth) {
   var parts = [], cur = n, depth = 0;
   while (cur && cur.nodeType === 1 && depth < 12) {
     var i = 1, sib = cur;
@@ -193,14 +215,25 @@ var fingerprint = function (n) {
     parts.push(cur.tagName.toLowerCase() + (i > 1 ? ":" + i : ""));
     cur = cur.parentElement; depth++;
   }
-  return [n.tagName.toLowerCase(), attr(n, "type").toLowerCase(), attr(n, "role").toLowerCase(), cap(n.id, 40), cap(attr(n, "name"), 40), parts.reverse().join(">")].join("|");
+  return [n.tagName.toLowerCase(), attr(n, "type").toLowerCase(), attr(n, "role").toLowerCase(), cap(n.id, 40), cap(attr(n, "name"), 40), parts.reverse().join(">"), "#" + nth, contextOf(n)].join("|");
 };
 var attrsOf = function (n, st, labels, aria, ph) {
   var tag = n.tagName.toLowerCase(), type = attr(n, "type").toLowerCase();
   var max = parseInt(attr(n, "maxlength") || "0", 10);
+  if (isNaN(max) || max < 0) max = 0;
+  var mode = attr(n, "inputmode").toLowerCase();
+  // The shape of a code without the attributes that usually say so: a digits-only
+  // pattern ("[0-9]{6}", "\\d{4,6}") gives the length and makes the box numeric, and
+  // so does an all-9s max on a number box.
+  var shape = /^\^?(?:\[0-9\]|\\d)(?:[*+]|\{(\d+)(?:,(\d+))?\})\$?$/.exec(attr(n, "pattern").trim());
+  if (shape) {
+    if (!mode) mode = "numeric";
+    if (!max && shape[1]) max = parseInt(shape[2] || shape[1], 10);
+  }
+  if (!max && type === "number" && /^9{4,8}$/.test(attr(n, "max").trim())) max = attr(n, "max").trim().length;
   var words = [attr(n, "name"), n.id, aria, attr(n, "title"), ph, labels, refsText(n, "aria-labelledby"), refsText(n, "aria-describedby"), legendOf(n), textBefore(n)].join(" ");
   var masked = String(st.webkitTextSecurity || st.getPropertyValue("-webkit-text-security") || "none") !== "none";
-  return {type: tag === "textarea" ? "textarea" : tag === "select" ? "select" : type || "text", autocomplete: attr(n, "autocomplete").toLowerCase(), words: cap(words, 400), inputmode: attr(n, "inputmode").toLowerCase(), maxlength: isNaN(max) ? 0 : max, masked: masked};
+  return {type: tag === "textarea" ? "textarea" : tag === "select" ? "select" : type || "text", autocomplete: attr(n, "autocomplete").toLowerCase(), words: cap(words, 400), inputmode: mode, maxlength: max, masked: masked};
 };
 var formFields = function (form) {
   var out = [], list = form.elements;
@@ -217,7 +250,7 @@ var formFields = function (form) {
   }
   return out;
 };
-var lookAt = function (n) {
+var lookAt = function (n, counts) {
   var tag = n.tagName.toLowerCase(), type = attr(n, "type").toLowerCase(), role = attr(n, "role").toLowerCase();
   var r = n.getBoundingClientRect(), st = P.gcs(n);
   if (st.visibility === "hidden" || st.display === "none" || (r.width === 0 && r.height === 0)) return {skip: 1};
@@ -227,7 +260,7 @@ var lookAt = function (n) {
   if (!native && !known) {
     // A plain element that only looks clickable: it must say so, hold no other target,
     // and not sit inside one (the target is then the outer element).
-    if (inside(n, SEL) || (n.parentElement && n.parentElement.closest(NESTED))) return {skip: 0};
+    if (inside(n, SEL) || (n.parentElement && P.closest.call(n.parentElement, NESTED))) return {skip: 0};
     if (!attr(n, "onclick") && st.cursor !== "pointer") return {skip: 0};
   }
   var labels = labelsOf(n);
@@ -279,7 +312,9 @@ var lookAt = function (n) {
   var other = aria && aria !== el.label ? aria : (title && title !== el.label ? title : "");
   if (other) el.also = other;
   if (el.sensitive) { el.value = ""; el.label = ""; el.also = ""; el.options = []; el.form = []; }
-  el.fp = fingerprint(n);
+  // Which of the same-labelled elements before it in the document this one is (counts
+  // is how many came before; none given means the fingerprint is not wanted).
+  if (counts) el.fp = fingerprint(n, (counts[el.kind + "|" + el.label] || 0) + 1);
   return {el: el};
 };
 """
@@ -288,15 +323,27 @@ var lookAt = function (n) {
 # Returns JSON: the page's text (the main part when there is one) and its
 # visible links, buttons and fields, each with its place (``at``) among the
 # page's possible targets. Secret fields are marked, their values never read.
-PAGE_JS = r"""(function () {""" + COMMON_JS + r"""
+PAGE_JS = (
+    r"""(function () {"""
+    + COMMON_JS
+    + r"""
   var out = {url: location.href, doc: docId(), title: document.title || "", text: "", elements: [], skipped: 0, frames: []};
   var main = document.querySelector("main,[role=main],article");
   var root = main && (main.innerText || "").length > 300 ? main : document.body;
   out.text = root ? String(root.innerText || "").slice(0, 200000) : "";
-  var nodes = P.qsa.call(document, SEL);
+  if (!P) {
+    // The safe checks could not be set up: the text is read, nothing is listed to act on.
+    out.text = """
+    + json.dumps(NO_CHECKS_NOTE)
+    + r""" + "\n" + out.text;
+    return JSON.stringify(out);
+  }
+  var nodes = P.qsa.call(document, SEL), counts = {};
   for (var i = 0; i < nodes.length && i < 4000; i++) {
-    var d = lookAt(nodes[i]);
+    var d = lookAt(nodes[i], counts);
     if (!d.el) { out.skipped += d.skip; continue; }
+    var key = d.el.kind + "|" + d.el.label;
+    counts[key] = (counts[key] || 0) + 1;
     if (out.elements.length >= 400) { out.skipped += 1; continue; }
     d.el.at = i;
     out.elements.push(d.el);
@@ -310,8 +357,7 @@ PAGE_JS = r"""(function () {""" + COMMON_JS + r"""
   }
   return P.json(out);
 })()"""
-
-MAX_TYPED_CHARS = 2000
+)
 
 
 def act_script(spec: dict[str, Any]) -> str:
@@ -322,20 +368,28 @@ def act_script(spec: dict[str, Any]) -> str:
     fingerprint, kind, label, address and the address its form is sent to, and
     for a text box the same field attributes). It looks again after the field
     has focus, after the text is in and after the page's own handlers ran, and
-    clears the field if it turned into a secret one. While it works, a form
-    the page sends that melo did not ask about is stopped, and so is a link
-    whose address is no longer the one that was read when it is pressed or
-    clicked. It guards only while it runs.
+    clears the field if it turned into a secret one. While it works it tries
+    to stop a form the page sends that melo did not ask about, and a link whose
+    address is no longer the one that was read when it is pressed or clicked.
+    That guard is best effort and lasts only while the script runs: a page can
+    send later (a timer, a request from a script, a function it saved earlier),
+    and once a text is in a page the page may send it itself. When the fresh
+    built-ins (``P``) cannot be had it does nothing.
     """
     data = json.dumps(spec).replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
     return r"""(function (spec) {""" + COMMON_JS + r"""
+  if (!P) return JSON.stringify({ok: false, stale: "frame"});  // nothing is done without the fresh built-ins
   var say = function (o) { return P.json(o); };
   var blocked = [];
   if (location.href !== spec.url) return say({ok: false, stale: "page"});
   if (docId() !== spec.doc) return say({ok: false, stale: "doc"});
-  var n = P.qsa.call(document, SEL)[spec.at];
+  var nodes = P.qsa.call(document, SEL), n = nodes[spec.at], counts = {};
+  for (var j = 0; j < spec.at && j < nodes.length; j++) {  // which of its label this one is
+    var before = lookAt(nodes[j]).el;
+    if (before) { var key = before.kind + "|" + before.label; counts[key] = (counts[key] || 0) + 1; }
+  }
   var same = function () {
-    var d = n ? lookAt(n) : {}, el = d.el;
+    var d = n ? lookAt(n, counts) : {}, el = d.el;
     if (!el || el.fp !== spec.fp || el.kind !== spec.kind || el.label !== spec.label || (el.href || "") !== spec.href) return "gone";
     if ((el.submit || "") !== spec.submit) return "dest";
     if (spec.attrs) {
@@ -354,7 +408,7 @@ def act_script(spec: dict[str, Any]) -> str:
     if (!allowed(e.target, e.submitter)) { e.preventDefault(); e.stopImmediatePropagation(); blocked.push("send"); }
   };
   var onClick = function (e) {
-    var t = e.target, a = t && t.closest ? t.closest("a[href]") : null;
+    var t = e.target, a = t && t.nodeType === 1 ? P.closest.call(t, "a[href]") : null;
     if (spec.kind === "link" && a && hrefOf(a) !== spec.href) { e.preventDefault(); e.stopImmediatePropagation(); blocked.push("link"); }
   };
   var proto = HTMLFormElement.prototype;
@@ -428,6 +482,30 @@ FOCUS_JS = r"""(function () {
   var t = (a.getAttribute("type") || "").toLowerCase(), ac = (a.getAttribute("autocomplete") || "").toLowerCase();
   return t === "password" || ac === "one-time-code" || ac.indexOf("cc-") === 0 || ac.indexOf("-password") > 0;
 })()"""
+
+
+def same_page(left: str, right: Any) -> bool:
+    """Whether two addresses are one page: scheme, host, port, path and query (not the fragment).
+
+    The scheme and the host are compared in lower case, a missing path is ``/``
+    and a port that is the scheme's own does not count. An address that cannot
+    be read is a different page.
+    """
+    if not isinstance(right, str):
+        return False
+    try:
+        a, b = urlsplit(left), urlsplit(right)
+        keys = []
+        for part in (a, b):
+            port = part.port
+            if port == {"http": 80, "https": 443}.get(part.scheme):
+                port = None
+            keys.append(
+                (part.scheme, part.hostname, port, part.path or "/", part.query)
+            )
+    except ValueError:
+        return False
+    return keys[0] == keys[1]
 
 
 def _decode(text: str) -> Any:
@@ -760,6 +838,13 @@ class SafariAutomationDriver:
         data = await self._eval(PAGE_JS)
         if not isinstance(data, dict):
             raise BrowserError("Safari returned a page melo could not read.")
+        # The address was checked before the script ran. If the page is no longer
+        # there, what the script read belongs to a page nobody checked.
+        if url and not same_page(url, data.get("url")):
+            raise BrowserError(
+                "The page moved while melo was reading it, so melo did not read it. "
+                "Use browser_read to try again."
+            )
         elements = [e for e in map(_element, data.get("elements") or []) if e]
         skipped, frames = data.get("skipped"), data.get("frames")
         return RawPage(
@@ -846,15 +931,39 @@ class SafariAutomationDriver:
                 os.unlink(path)  # a link is removed, never followed
 
     async def blank(self, tab: str | None) -> None:
+        """Leave the page in *tab* for an empty one, in its place in the history.
+
+        ``location.replace`` swaps the page's own history entry, so Back never
+        returns to the page that was refused (it is an unforgeable property, a
+        page cannot swap it for its own). Only when that does not take, the
+        browser's own navigation is used, which adds an entry after the page.
+        """
         await self._focus(tab)
-        try:  # the browser's own navigation, not a script the page could have changed
-            await self._call("open", url="about:blank")
+        try:
+            await self._eval("(location.replace('about:blank'), true)")
+            if await self._settled_blank(tab):
+                return
         except BrowserSetupError:
             raise
         except BrowserError:
-            await self._eval("(location.replace('about:blank'), true)")
+            pass
+        await self._call("open", url="about:blank")
+
+    async def _settled_blank(self, tab: str | None) -> bool:
+        """Whether the browser says *tab* is empty now (it may take a moment to say so)."""
+        for attempt in range(BLANK_TRIES):
+            if attempt:
+                await asyncio.sleep(POLL_S)
+            with contextlib.suppress(BrowserError):
+                if await self._address(tab) == "about:blank":
+                    return True
+        return False
 
     async def act(self, tab: str | None, act: Act) -> str:
+        if len(act.text) > MAX_TYPED_CHARS:
+            raise BrowserError(
+                f"melo types at most {MAX_TYPED_CHARS} characters at a time."
+            )
         await self._focus(tab)
         item = act.element
         spec: dict[str, Any] = {
@@ -867,7 +976,7 @@ class SafariAutomationDriver:
             "label": item.label,
             "href": item.href,
             "submit": item.submit,
-            "text": act.text[:MAX_TYPED_CHARS],
+            "text": act.text,
             "enter": act.enter,
             "send": act.send,
         }

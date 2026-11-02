@@ -140,7 +140,7 @@ async def test_a_refused_click_does_nothing_and_says_whose_answer_it_was() -> No
     with asking(asks):
         await run(tools, "browser_open", url=HOME)
         out = await run(tools, "browser_click", ref="e1")
-    assert out.is_error and "melo did not click or type on example.com" in out.text
+    assert out.is_error and "melo did not click or choose on example.com" in out.text
     assert "The user denied this call: not this one" in out.text
     assert not acts(driver)
 
@@ -294,7 +294,7 @@ async def test_a_link_to_a_local_address_is_not_clicked(url: str) -> None:
     ]
 
 
-async def test_a_click_that_opens_a_local_address_in_a_new_tab_is_refused_and_closed() -> (
+async def test_a_click_that_opens_a_local_address_in_a_new_tab_is_refused_and_blanked() -> (
     None
 ):
     driver = world(button("Open"))
@@ -303,13 +303,13 @@ async def test_a_click_that_opens_a_local_address_in_a_new_tab_is_refused_and_cl
     await run(tools, "browser_open", url=HOME)
     out = await run(tools, "browser_click", ref="e1")
     assert_refused(out)
-    assert (
-        "close_tab",
-        "t2",
-    ) in driver.calls  # a tab the click opened is closed outright
-    assert list(driver.tabs_) == ["t1"]
+    # The tab is blanked, in place. It was not made by browser_open, so melo
+    # does not close it: it may be the person's, or the page's own popup.
+    assert ("blank", "t2") in driver.calls
+    assert ("close_tab", "t2") not in driver.calls
+    assert driver.tabs_["t2"] == ["about:blank"]
     listing = (await run(tools, "browser_tabs", action="list")).text
-    assert "t2" not in listing and SECRET not in listing
+    assert SECRET not in listing and "127.0.0.1" not in listing
 
 
 async def test_a_click_that_opens_a_page_in_a_new_tab_adopts_that_tab() -> None:
@@ -324,7 +324,9 @@ async def test_a_click_that_opens_a_page_in_a_new_tab_adopts_that_tab() -> None:
     assert "* t2 https://example.com/done" in listing and "  t1 " in listing
 
 
-async def test_a_page_that_opens_many_tabs_has_the_extra_ones_closed() -> None:
+async def test_a_page_that_opens_many_tabs_has_three_adopted_and_the_rest_left_alone() -> (
+    None
+):
     driver = world(button("Open"))
 
     async def act(tab: str | None, act: Any) -> None:
@@ -337,7 +339,15 @@ async def test_a_page_that_opens_many_tabs_has_the_extra_ones_closed() -> None:
     tools = await tools_of(driver)
     await run(tools, "browser_open", url=HOME)
     await run(tools, "browser_click", ref="e1")
-    assert len(driver.tabs_) == 1 + 3, "three adopted, three closed"
+    assert len(driver.tabs_) == 1 + 6, "three adopted, three left as they are"
+    assert not [call for call in driver.calls if call[0] == "close_tab"]
+    listing = (await run(tools, "browser_tabs", action="list")).text
+    assert [t for t in ("t1", "t2", "t3", "t4", "t5") if t in listing] == [
+        "t1",
+        "t2",
+        "t3",
+        "t4",
+    ], "only the adopted tabs are melo's"
 
 
 # ── A form that sends data (attacker side) ──
@@ -492,9 +502,84 @@ async def test_typing_is_only_for_text_boxes_and_has_a_limit() -> None:
     await run(tools, "browser_open", url=HOME)
     out = await run(tools, "browser_type", ref="e1", text="x")
     assert out.is_error and "button, not a text box" in out.text
-    long = await run(tools, "browser_type", ref="e2", text="x" * 2001)
-    assert long.is_error and "2001 characters" in long.text
+    long = await run(tools, "browser_type", ref="e2", text="x" * 1001)
+    assert (
+        long.is_error and "1001 characters" in long.text and "at most 1000" in long.text
+    )
     assert not driver.acts
+    # Exactly the limit is typed, whole.
+    fits = await run(tools, "browser_type", ref="e2", text="x" * 1000)
+    assert not fits.is_error and driver.acts[0].text == "x" * 1000
+
+
+@pytest.mark.parametrize(
+    "text", ["a\u200bb", "a\u202eb", "a\x1b[2Jb", "a\rb", "\ufeffa", "a\u2028b"]
+)
+async def test_text_a_question_could_not_show_is_not_typed(text: str) -> None:
+    driver = world(textbox("Search"))
+    asks = Asks()
+    tools = await tools_of(driver)
+    with asking(asks):
+        await run(tools, "browser_open", url=HOME)
+        out = await run(tools, "browser_type", ref="e1", text=text)
+    assert out.is_error and "cannot show" in out.text
+    assert not driver.acts and not any(
+        n.startswith("browser-type:") for n in asks.names
+    )
+
+
+async def test_new_lines_tabs_and_text_in_any_language_are_typed() -> None:
+    driver = world(textbox("Notes"))
+    tools = await tools_of(driver)
+    await run(tools, "browser_open", url=HOME)
+    text = "line one\n\tline two \u4f60\u597d \U0001f468\u200d\U0001f469"
+    out = await run(tools, "browser_type", ref="e1", text=text)
+    assert not out.is_error and driver.acts[0].text == text
+
+
+async def test_every_typing_asks_with_all_of_its_text_and_is_never_a_chat_grant() -> (
+    None
+):
+    asks = Asks()
+    driver = world(textbox("Notes"), button("Check in"))
+    tools = await tools_of(driver)
+    long = ("word " * 150).strip() + " THE END"  # far past the old cut of 200
+    with asking(asks):
+        await run(tools, "browser_open", url=HOME)
+        await run(tools, "browser_type", ref="e1", text=long)
+        # The click and the choice keep one answer for the site; typing asks again.
+        await run(tools, "browser_click", ref="e4")  # the page was read again: new refs
+        await run(tools, "browser_open", url=HOME)
+        await run(tools, "browser_type", ref="e6", text="second")
+    typing = [(n, a, p) for n, a, p in asks.asked if n.startswith("browser-type:")]
+    assert [n for n, _, _ in typing] == ["browser-type:https://example.com"] * 2
+    first, second = typing[0][1], typing[1][1]
+    assert first == {
+        "site": "example.com",
+        "access": "type",
+        "how": "type",
+        "text": long,
+    }
+    assert second["text"] == "second"
+    assert typing[0][2] == f"type {len(long)} character(s) on example.com in Safari"
+    assert not any(
+        n.startswith("browser-act:") and a.get("how") == "type"
+        for n, a, _ in asks.asked
+    )
+
+
+async def test_typing_the_person_refused_types_nothing_and_a_click_is_not_asked_again() -> (
+    None
+):
+    asks = Asks(deny=("browser-type:",))
+    driver = world(textbox("Notes"), button("Check in"))
+    tools = await tools_of(driver)
+    with asking(asks):
+        await run(tools, "browser_open", url=HOME)
+        out = await run(tools, "browser_type", ref="e1", text="hello")
+    assert out.is_error and "melo did not type on example.com" in out.text
+    assert not driver.acts
+    assert "browser-act:https://example.com" not in asks.names, "typing asks apart"
 
 
 # Every way a page can dress a secret field as an ordinary one. The element is

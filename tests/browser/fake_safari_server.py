@@ -30,6 +30,10 @@ tiny set of pages. ``screenshot`` answers as the real one does: text only,
 - ``no_url``: ``list_tabs`` rows carry no address or title
 - ``no_ids``: ``list_tabs`` rows carry no handle (only their place in the list)
 - ``focus_stays``: ``create_tab`` leaves the old tab current, as a browser may
+- ``page_moves``: the first page-reading script finds the tab on another address
+  than ``list_tabs`` just said (a page that navigates between the two calls)
+- ``replace_fails``: ``location.replace('about:blank')`` does nothing, so only the
+  browser's own navigation can leave a page
 
 A script that acts (melo's ``act_script``) is answered from the tiny page
 model too: an element may say ``goes`` (the address a click lands on), and a
@@ -129,6 +133,7 @@ tabs: list[dict[str, Any]] = [{"id": tab_id(1), "history": ["about:blank"]}]
 typed: dict[str, str] = {}
 current = 0
 polls = 0
+moved = False
 STYLE_RETURN = MODE == "return_style"
 
 
@@ -239,7 +244,7 @@ def do_act(spec: dict[str, Any]) -> dict[str, Any]:
 
 
 def run_script(source: str) -> Any:
-    global polls
+    global polls, moved
     if STYLE_RETURN and not source.startswith("return "):
         raise SyntaxError("Unexpected token")
     source = source.removeprefix("return ")
@@ -269,13 +274,17 @@ def run_script(source: str) -> Any:
     if source.startswith("JSON.stringify({url"):
         return json.dumps({"url": here[-1], "title": page_now().get("title", "")})
     if "getBoundingClientRect" in source:
+        if MODE == "page_moves" and not moved:
+            moved = True
+            here.append("https://example.com/news")  # moved before the script ran
         return json.dumps(page_now())
     if "history.back" in source:
         if len(here) > 1:
             here.pop()
         return True
     if "about:blank" in source:
-        here.append("about:blank")
+        if MODE != "replace_fails":
+            here[-1] = "about:blank"  # location.replace: the entry is swapped
         return True
     if "activeElement" in source:
         return MODE == "focus_secret"

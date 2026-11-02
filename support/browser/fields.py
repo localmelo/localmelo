@@ -11,11 +11,16 @@ it holds a secret:
   (``cc-number``, ``cc-csc``, any ``cc-*``);
 - the words that name it (its name, id, ``aria-label``, ``aria-labelledby``
   and ``aria-describedby`` text, title, placeholder, the text of its labels, its
-  fieldset's legend and the text just before it) say password, PIN, card,
-  expiry, security code, verification code, token or a bare "code", in
-  English or Chinese (a postal, promo or country code is not one);
-- it is a box for one character (a split code), or a numeric, telephone or
-  number field of four to eight characters, the shape of a code.
+  fieldset's legend and the text just before it) say password, PIN (also
+  written into another word: "PINcode"), card, CVC or CVV with a digit after
+  it, expiry, security code, verification code, token or a bare "code" (also
+  at the end of a longer word: "Bestätigungscode"), in English, Chinese and a
+  few other languages (a postal, promo or country code is not one);
+- it is a box for one character (a split code), a numeric, telephone or
+  number field of four to eight characters, or a short box of four to eight
+  characters whose names say nothing ("q", "f1"): the shape of a code. The page script
+  takes the length from a digits-only ``pattern`` or an all-9s ``max`` when the
+  box has no ``maxlength``, and a digits-only ``pattern`` counts as numeric.
 
 When it is unclear, the field counts as secret: melo asks the person to fill
 it in, which costs a sentence, and typing into a code field costs more.
@@ -32,6 +37,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 
 from localmelo.support.browser.driver import BrowserError, FieldAttrs, Sensitive
 
@@ -39,10 +45,13 @@ _PASSWORD_AUTOCOMPLETE = frozenset({"current-password", "new-password"})
 PASSWORD_WORDS = (
     r"password|passwd|passphrase|passcode|pwd|\bpin\b|密码|口令|passwort"
     r"|contraseña|contrasena|mot de passe|パスワード|비밀번호"
+    # PIN written together with another word: "PINcode", "atmpin", "newpin".
+    r"|\bpin(code|number|num|no|entry|input|pad|feld|field)\b"
+    r"|(my|new|old|atm|bank|sim|card|current|confirm|enter|user|login)pin\b"
 )
 CARD_WORDS = (
     r"card ?(number|num|no)\b|cardnumber|credit ?card|debit ?card|\bcard\b|\bcards\b"
-    r"|\bcc ?(num|number|no|exp)|\bcvv\b|\bcvc\b|\bcsc\b|\bcvn\b|\bcid\b"
+    r"|\bcc ?(num|number|no|exp)|\bcv[cvn]\d?\b|\bcsc\b|\bcid\b"
     r"|expir|\bexp ?(date|month|year|mm|yy)|\bmm ?yy\b|\bmm ?yyyy\b"
     r"|kartennummer|\bkarte\b|numero de carte|numéro de carte|tarjeta|carta di credito"
     r"|卡号|银行卡|信用卡|有效期|カード番号|카드번호"
@@ -54,12 +63,18 @@ CODE_WORDS = (
     r"|two ?factor|2 ?factor|passcode|one time"
     r"|验证码|校验码|动态码|认证码|安全码|验证|驗證碼|驗證|二次验证|认证|確認コード|인증"
 )
-# A bare "code" or "token" is secret unless it is plainly another sort of code.
-BARE_CODE_WORDS = r"\bcode\b|\bcodes\b|\btoken\b|\btokens\b|\bkey\b"
+# A bare "code" or "token" is secret unless it is plainly another sort of code. A
+# word that ends in one ("Bestätigungscode", "csrftoken") is the same thing, and
+# so is the word for code in a few other languages.
+BARE_CODE_WORDS = (
+    r"\bcodes?\b|\btokens?\b|\bkey\b|\w{3,}codes?\b|\w{3,}tokens?\b"
+    r"|código|codigo|codice|\bkod\b|コード|코드|代码|代碼"
+)
 BENIGN_CODE_WORDS = (
-    r"zip|postal|post ?code|promo|coupon|voucher|discount|referral|invit|area code"
-    r"|country|dial|language|colou?r|\bhex\b|source|captcha|barcode|bar code|qr"
-    r"|product|item code|sku|isbn|api key|ssh key|public key|邮编|邮政|优惠|折扣|邀请"
+    r"zip|postal|post ?code|promo|coupon|voucher|discount|referral|invit|area"
+    r"|country|dial|language|colou?r|\bhex|source|captcha|barcode|bar code|qr"
+    r"|product|item code|sku|isbn|api key|ssh key|public key|unicode|geo|currenc"
+    r"|plz|postleitzahl|邮编|邮政|优惠|折扣|邀请|源代码|源碼|国家|地区|区号"
 )
 _PASSWORD = re.compile(PASSWORD_WORDS, re.ASCII)
 _CARD = re.compile(CARD_WORDS, re.ASCII)
@@ -70,6 +85,11 @@ _CAMEL = re.compile(r"([a-z])([A-Z])")
 _NOT_WORDS = re.compile(r"[\W_]+")
 _DIGITS_INPUTMODE = frozenset({"numeric", "decimal", "tel"})
 _DIGITS_TYPE = frozenset({"tel", "number"})
+_BOX_TYPES = frozenset({"", "text", "tel", "number"})
+# Words that name a field: three Latin letters in a row, or any letter of another script
+# ("q", "f1" or an empty name say nothing).
+NAMED_WORDS = r"[a-z]{3,}|[^\x00-\x7f]"
+_NAMED = re.compile(NAMED_WORDS)
 
 # What the plain reason says, by kind. The text box is named by what it is for,
 # never by the page's words for it.
@@ -115,6 +135,8 @@ def sensitive_kind(attrs: FieldAttrs | None) -> Sensitive:
         return "code"
     if digits and 4 <= attrs.maxlength <= 8:
         return "code"
+    if not _NAMED.search(words) and 4 <= attrs.maxlength <= 8 and kind in _BOX_TYPES:
+        return "code"  # a short box that names nothing: shaped like a code
     return ""
 
 
@@ -126,6 +148,26 @@ def refuse_typing(attrs: FieldAttrs | None) -> None:
             f"That is {REASONS[kind]}: melo never types into passwords, payment "
             "cards or one-time codes. Ask the person to fill it in themselves."
         )
+
+
+# New lines, tabs and the two joiners (emoji and a few scripts need them) show or join.
+_SHOWN_ANYWAY = frozenset("\n\t\u200c\u200d")
+_UNSHOWN = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
+
+
+def unshowable(text: str) -> str:
+    """What in *text* a question could not show a person, in words; ``""`` when all of it shows.
+
+    Control characters and the invisible ones (zero-width spaces, direction
+    overrides, a byte-order mark) would make the question say less than what is
+    typed, so a text with them is not typed.
+    """
+    bad = [
+        c
+        for c in text
+        if c not in _SHOWN_ANYWAY and unicodedata.category(c) in _UNSHOWN
+    ]
+    return f"{len(bad)} control or invisible character(s)" if bad else ""
 
 
 HIDDEN = "(hidden)"
@@ -175,6 +217,8 @@ JS_RULES = (
     + _js(BARE_CODE_WORDS)
     + ", RX_BENIGN = "
     + _js(BENIGN_CODE_WORDS)
+    + ", RX_NAMED = "
+    + _js(NAMED_WORDS)
     + ";\n"
     + r"""
 var wordsOf = function (s) {
@@ -196,6 +240,7 @@ var secretKind = function (a) {
   var max = a.maxlength || 0;
   if (max === 1) return "code";
   if (digits && max >= 4 && max <= 8) return "code";
+  if (!RX_NAMED.test(words) && max >= 4 && max <= 8 && /^(|text|tel|number)$/.test(kind)) return "code";
   return "";
 };
 """

@@ -121,6 +121,76 @@ test('a page that replaced the built-ins it uses is still read with the real one
   assert.ok(byLabel(page, 'Search'), 'the elements were found');
 });
 
+test('a box has the shape of a code by its pattern, its max or its length, with or without a name', () => {
+  const dom = load(`<input id="a" type="text" pattern="[0-9]{6}" aria-label="Entry">
+    <input id="b" type="number" max="999999" aria-label="Field">
+    <input id="c" type="text" pattern="\\d{4,6}" aria-label="Reference">
+    <input id="d" type="number" max="100" aria-label="Quantity">
+    <input id="e" type="text" maxlength="6" aria-label="Nickname">
+    <input id="f" type="text" maxlength="6">
+    <input id="g" type="text" pattern="[0-9]*" aria-label="Amount">`);
+  const page = readPage(dom);
+  assert.deepEqual(page.elements.map((el) => el.sensitive || ''), ['code', 'code', 'code', '', '', 'code', '']);
+  const [a, , c, , , , g] = page.elements;
+  assert.deepEqual([a.attrs.inputmode, a.attrs.maxlength], ['numeric', 6]);
+  assert.deepEqual([c.attrs.inputmode, c.attrs.maxlength], ['numeric', 6]);
+  assert.deepEqual([g.attrs.inputmode, g.attrs.maxlength], ['numeric', 0], 'digits only, but no length: not a code');
+});
+
+test('a ref is bound to which of its label it is and to the words around it', () => {
+  const dom = load('<h2>People</h2><ul><li>Alice <button>Delete</button></li><li>Bob <button>Delete</button></li></ul>');
+  const page = readPage(dom);
+  const [first, second] = page.elements;
+  assert.ok(first.fp.includes('|#1|r:Alice'), first.fp);
+  assert.ok(second.fp.includes('|#2|r:Bob'), second.fp);
+  const loose = load('<h2>Inbox</h2><button>Archive</button><h2>Sent</h2><button>Archive</button>');
+  const [inbox, sent] = readPage(loose).elements;
+  assert.ok(inbox.fp.endsWith('|h:Inbox') && sent.fp.endsWith('|h:Sent'), `${inbox.fp} ${sent.fp}`);
+});
+
+test('a ref does not act after its row was replaced in place', () => {
+  const dom = load('<h2>People</h2><ul><li>Alice <button>Delete</button></li><li>Bob <button>Delete</button></li></ul>');
+  const page = readPage(dom);
+  const bobs = page.elements[1];
+  // The page redraws the list in place: the same tags, labels and places, other people.
+  dom.window.document.querySelector('ul').innerHTML = '<li>Carol <button>Delete</button></li><li>Dave <button>Delete</button></li>';
+  const clicks = [];
+  dom.window.document.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => clicks.push(b.parentNode.textContent)));
+  assert.deepEqual(run(dom, specFor(page, bobs)), {ok: false, stale: 'gone'});
+  assert.deepEqual(clicks, [], 'nothing was clicked');
+  // The same list, untouched, is acted on.
+  const same = load('<h2>People</h2><ul><li>Alice <button>Delete</button></li><li>Bob <button>Delete</button></li></ul>');
+  const again = readPage(same);
+  assert.deepEqual(run(same, specFor(again, again.elements[1])), {ok: true});
+});
+
+test('a ref under a heading does not act once the heading above it changed', () => {
+  const dom = load('<h2>Inbox</h2><button>Archive</button>');
+  const page = readPage(dom);
+  dom.window.document.querySelector('h2').textContent = 'Spam';
+  assert.deepEqual(run(dom, specFor(page, page.elements[0])), {ok: false, stale: 'gone'});
+});
+
+test('a page that breaks the frame the checks come from is read as text and acted on never', () => {
+  const breakers = [
+    `document.createElement = function () { throw new Error('no'); };`,
+    `var make = document.createElement; document.createElement = function (t) { return make.call(document, 'div'); };`,
+    `Node.prototype.appendChild = function () { throw new Error('no'); };`,
+  ];
+  const good = load(FORM);
+  const spec = specFor(readPage(good), byLabel(readPage(good), 'Go'), {send: true});
+  for (const before of breakers) {
+    const dom = load(FORM, {before});
+    const page = readPage(dom);
+    assert.deepEqual(page.elements, [], before);
+    assert.match(page.text, /could not set up its safe page checks/);
+    assert.equal(page.url, 'https://example.com/');
+    // The act script comes first, with a spec from a normal read of the same page.
+    assert.deepEqual(run(dom, spec), {ok: false, stale: 'frame'}, before);
+    assert.equal(sends(dom).length, 0);
+  }
+});
+
 // ── Acting ──
 
 test('a link is clicked, its ping is removed, and an act on another document is refused', () => {

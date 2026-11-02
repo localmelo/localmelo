@@ -12,6 +12,9 @@ from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
 ElementKind = Literal["link", "button", "textbox", "checkbox", "select"]
+# The most characters one text is typed with. The question that asks to type shows
+# all of it, so it is short enough to read before it is allowed.
+MAX_TYPED_CHARS = 1000
 # Why a field is never read or typed into: "" for an ordinary one.
 Sensitive = Literal["", "password", "code", "card"]
 
@@ -28,6 +31,9 @@ class BrowserSetupError(BrowserError):
 class FieldAttrs:
     """How a page describes a text box, as the page script read it.
 
+    ``maxlength`` is the longest text the field takes: its ``maxlength``, or the
+    length a digits-only ``pattern`` or an all-9s ``max`` gives it (0 when
+    unknown); a digits-only ``pattern`` makes ``inputmode`` ``numeric``.
     ``words`` joins what names the field: its name, id, ``aria-label``, the text
     ``aria-labelledby`` and ``aria-describedby`` point at, title, placeholder,
     the text of its labels, its fieldset's legend and the text just before it.
@@ -131,8 +137,10 @@ class Act:
     :class:`FieldAttrs`), and says so with :class:`StaleElementError`. ``text``
     is what to type, or the option to choose; ``enter`` presses Enter after
     typing. ``send`` says the action is an approved send of ``element.submit``
-    (a click on its submit button, or Enter): any other attempt by the page to
-    send a form while the action runs is stopped.
+    (a click on its submit button, or Enter): a driver tries to stop any other
+    attempt by the page to send a form while the action runs. That is best
+    effort and holds only that long; once a text is in a page, the page may send
+    it itself.
     """
 
     kind: ActionKind

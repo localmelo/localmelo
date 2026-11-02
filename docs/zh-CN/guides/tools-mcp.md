@@ -98,7 +98,7 @@ melo --mcp mcp.json "What time is it in Tokyo?"
 | `require_approval` | 必须是 `true`、`false` 或字符串列表，否则属于用法错误。列表中的名称若不是服务器提供的工具，会记录一条警告。 |
 | 传输方式 | 仅支持 stdio 服务器。其他 `type` 属于用法错误：`only stdio servers are supported (got type 'sse')`。提供 `url` 却没有 `command` 的配置项也是：`'command' must be a non-empty string (HTTP/SSE servers are not supported)`。 |
 | 工具名称 | `mcp__<server>__<tool>`。字母、数字、`_` 和 `-` 以外的字符会变为 `_`。超过 64 个字符的名称会缩短至 64 个字符，并以短哈希结尾；`config.tools` 显示实际使用的名称。 |
-| `annotations` | 按服务器提供的原样保留；非内置工具的权限级别由它决定（见[权限级别](#permission-tiers)）。格式错误的值会被忽略，工具仍会列出。 |
+| `annotations` | 按服务器提供的原样保留；非内置工具的权限级别由它决定（见[权限级别](#permission-tiers)）。格式错误的值会被忽略，工具仍会列出。键 `asksItself` 是 melo 自己的，服务器的注解里带它会被丢弃：任何 MCP 工具都不能用它跳过批准询问。 |
 | 启动 | 服务器在运行开始时启动。无法启动的服务器会使运行以 `setup_error` 状态结束，例如 `MCP server 'notes' exited (code 1)`。 |
 | 适用范围 | 直接模式和 [Python API](../reference/python-api.md#tool-providers-and-mcp)。网关会话没有 MCP 工具。 |
 | `structuredContent` | 只在结果既没有文本也没有图片时才作为文本发送：截图服务器若在其中重复图片的 base64，发送的是图片本身，而不是它的 base64。 |

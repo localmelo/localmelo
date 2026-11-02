@@ -1110,7 +1110,8 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
     ['demo_lookup', {query: 'x'}, null, 'Let melo use demo_lookup?', 'demo_lookup'],
     ['browser:https://example.com', {site: 'example.com', access: 'read'}, null, 'Let melo open example.com?', 'browser · read only'],
     ['browser:https://example.com', {site: 'example.com', access: 'read', via: 'web_fetch'}, null, 'Let melo read example.com?', 'web_fetch · read only'],
-    ['browser-act:https://example.com', {site: 'example.com', access: 'act'}, null, 'Let melo click, type and choose on example.com?', 'browser · acts on the page'],
+    ['browser-act:https://example.com', {site: 'example.com', access: 'act'}, null, 'Let melo click and choose on example.com?', 'browser · acts on the page'],
+    ['browser-type:https://example.com', {site: 'example.com', access: 'type', how: 'type', text: 'hi'}, null, 'Let melo type on example.com?', 'browser · types text'],
     ['browser-submit:https://example.com', {site: 'example.com', access: 'submit', to: 'https://other.org/post', how: 'click'}, null, 'Let melo send a form from example.com?', 'browser · sends a form'],
   ];
   for (const [tool, args, target, title, caption] of asks) {
@@ -1140,7 +1141,7 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
   assert.equal(sending.attributes['aria-label'], 'Where the form goes');
 });
 
-test('a form send shows what it holds, says when the page decides, and offers no answer that is kept', async () => {
+test('a form send and typing show what goes, say when the page decides, and offer no answer that is kept', async () => {
   const h = harness(baseRoutes());
   await h.run('init()');
   const focuses = (card) => findNodes(card, (node) => 'approvalFocus' in node.dataset).map((node) => node.dataset.approvalFocus);
@@ -1157,13 +1158,23 @@ test('a form send shows what it holds, says when the page decides, and offers no
     arguments: {site: 'example.com', access: 'submit', to: '', how: 'enter', fields: [['typed', 'cats']]}, workspace_label: '~/w'};
   const page = findNode(h.run('approvalCard(request)'), (node) => node.className === 'approval-content');
   assert.equal(page.textContent, 'melo cannot say where this goes: the page decides.\n\nWhat the form holds\ntyped: cats');
-  // Typing shows the text, since what melo types is what the person is allowing.
-  h.context.request = {request_id: 'typing', tool_name: 'browser-act:https://example.com',
-    arguments: {site: 'example.com', access: 'act', how: 'type', text: 'hello there'}, workspace_label: '~/w'};
+  // Typing shows all of the text, since what melo types is what the person is allowing, and asks every time.
+  const long = 'a long line of words '.repeat(45) + 'THE END';
+  h.context.request = {request_id: 'typing', tool_name: 'browser-type:https://example.com',
+    arguments: {site: 'example.com', access: 'type', how: 'type', text: long}, workspace_label: '~/w'};
   const typing = h.run('approvalCard(request)');
   const text = findNode(typing, (node) => node.className === 'approval-content');
-  assert.equal(text.textContent, 'hello there');
+  assert.equal(text.textContent, long);
   assert.equal(text.attributes['aria-label'], 'The text it will type');
+  assert.match(findNode(typing, (node) => node.className === 'approval-note').textContent, /the page may send it on its own/);
+  assert.match(findNode(typing, (node) => node.className === 'approval-warning').textContent, /Typing always asks/);
+  assert.deepEqual(focuses(typing).filter((name) => name !== 'reason'), ['once', 'deny'], 'no "allow for this chat" on typing');
+  // A click or a choice keeps its chat-wide answer, and says typing still asks.
+  h.context.request = {request_id: 'clicking', tool_name: 'browser-act:https://example.com',
+    arguments: {site: 'example.com', access: 'act', how: 'click'}, workspace_label: '~/w'};
+  const clicking = h.run('approvalCard(request)');
+  assert.ok(focuses(clicking).includes('session'));
+  assert.match(findNode(clicking, (node) => node.className === 'approval-warning').textContent, /Typing still asks every time/);
 });
 
 // A file write over a file, as the gateway reports it: `target.diff` (docs/reference/api-v2.md).

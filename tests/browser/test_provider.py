@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.checker.tiers import tier_of
-from localmelo.melo.contracts.approvals import TOOL_ASK, ApprovalDecision
+from localmelo.melo.contracts.approvals import TOOL_ASK, ApprovalDecision, asks_itself
 from localmelo.melo.contracts.tools import ProvidedTool
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.support.browser import sites
@@ -90,13 +90,14 @@ async def test_the_tools_are_a_group_of_eleven_and_only_the_readers_are_read_onl
         assert tool.group == "browser"
         if name in acting:
             # Not read-only: a surface that trusts the read tier must not get
-            # them. They ask their own questions, so the generic gate is skipped.
+            # them. They ask their own questions, so the generic gate is skipped
+            # for them by name, never by an annotation.
             assert tool.definition.annotations == {
                 "readOnlyHint": False,
                 "destructiveHint": False,
                 "idempotentHint": False,
-                "asksItself": True,
             }
+            assert asks_itself(name)
             assert tier_of(tool.definition) == "write"
         else:
             assert tool.definition.annotations == {"readOnlyHint": True}

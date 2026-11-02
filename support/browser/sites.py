@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from typing import Any
 from urllib.parse import urlsplit
 
 from localmelo.melo.contracts.approvals import (
@@ -22,13 +21,14 @@ from localmelo.melo.contracts.approvals import (
     denial_text,
 )
 from localmelo.support.browser.driver import BrowserError
-from localmelo.support.browser.render import field_text
 
 PREFIX = "browser:"
-# Acting on a page asks apart from reading it: a click or typing on a site is
-# one grant per site and chat, a form sent from it is another, so the answer
-# to "open this site" never lets melo click, and neither lets it send a form.
+# Acting on a page asks apart from reading it: a click or a choice on a site is
+# one grant per site and chat, so the answer to "open this site" never lets melo
+# click. Typing is a question of its own that shows all the text and is asked
+# every time, and so is sending a form: neither is ever kept for the chat.
 ACT_PREFIX = "browser-act:"
+TYPE_PREFIX = "browser-type:"
 SUBMIT_PREFIX = "browser-submit:"
 # The longest address a site question shows (web_fetch's): longer ones are cut.
 URL_SHOWN = 300
@@ -145,34 +145,50 @@ async def require_site(
         raise BrowserError(_refusal(origin, via, decision))
 
 
-TYPED_SHOWN = 200
-
-
-async def require_act(origin: str, what: str, text: str = "") -> None:
-    """Ask about clicking, typing or choosing on *origin*'s page; :class:`BrowserError` if refused.
+async def require_act(origin: str, what: str) -> None:
+    """Ask about clicking or choosing on *origin*'s page; :class:`BrowserError` if refused.
 
     The question has no ``origin`` argument on purpose: a refusal of a click
     must not refuse the site for reading too (the earlier-blocks rule keys on
-    it). *what* is ``click``, ``type`` or ``choose an option``. For ``type`` the
-    text goes with the question (cut to :data:`TYPED_SHOWN` characters), because
-    it is the model's own words and a reviewer must see them.
+    it). *what* is ``click`` or ``choose an option``. One answer for the site
+    covers the chat's later clicks and choices; typing asks apart
+    (:func:`require_type`).
     """
     ask = TOOL_ASK.get()
     if ask is None:
         return
     host = host_of(origin)
-    arguments: dict[str, Any] = {"site": host, "access": "act", "how": what}
-    if what == "type":
-        arguments["text"] = field_text(text, TYPED_SHOWN)
     decision = await ask(
         ACT_PREFIX + origin,
-        arguments,
+        {"site": host, "access": "act", "how": what},
         f"{what} on {host} in Safari",
     )
     if not decision.allow:
         raise BrowserError(
-            f"melo did not click or type on {host}. " + denial_text(decision)
+            f"melo did not click or choose on {host}. " + denial_text(decision)
         )
+
+
+async def require_type(origin: str, text: str) -> None:
+    """Ask about typing *text* on *origin*'s page; :class:`BrowserError` if refused.
+
+    Asked for every text, whatever was allowed before, and never kept for the
+    chat. The question carries all of the text, uncut (the caller keeps it to
+    :data:`~localmelo.support.browser.driver.MAX_TYPED_CHARS` characters it can
+    show): it is the model's own words, a person or a reviewer must see what
+    goes into the page. Like a click's question it has no ``origin`` argument.
+    """
+    ask = TOOL_ASK.get()
+    if ask is None:
+        return
+    host = host_of(origin)
+    decision = await ask(
+        TYPE_PREFIX + origin,
+        {"site": host, "access": "type", "how": "type", "text": text},
+        f"type {len(text)} character(s) on {host} in Safari",
+    )
+    if not decision.allow:
+        raise BrowserError(f"melo did not type on {host}. " + denial_text(decision))
 
 
 async def require_submit(

@@ -237,9 +237,10 @@ class TieredTools(BaseToolProvider):
 
 
 class SelfAskingTools(BaseToolProvider):
-    """A write tool that asks its own question, marked or not as doing so."""
+    """A write tool that asks its own question, whatever it says about itself."""
 
-    def __init__(self, annotations: dict[str, Any]) -> None:
+    def __init__(self, name: str, annotations: dict[str, Any]) -> None:
+        self.name = name
         self.annotations = annotations
         self.ran: list[str] = []
 
@@ -247,7 +248,7 @@ class SelfAskingTools(BaseToolProvider):
         return [
             ProvidedTool(
                 definition=ToolDef(
-                    name="poke",
+                    name=self.name,
                     description="Act on a site",
                     parameters={"type": "object", "properties": {}},
                     annotations=self.annotations,
@@ -262,7 +263,7 @@ class SelfAskingTools(BaseToolProvider):
         decision = await ask(
             "browser-act:https://example.com", {"site": "example.com"}, "x"
         )
-        self.ran.append("poke" if decision.allow else "refused")
+        self.ran.append(self.name if decision.allow else "refused")
         return "poked" if decision.allow else "refused"
 
     async def close(self) -> None:
@@ -511,22 +512,40 @@ class TestWhoIsAsked:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        ("annotations", "asked"),
+        ("name", "annotations", "asked"),
         [
             # An ordinary write tool is asked about its call, then asks its own question.
-            ({"readOnlyHint": False}, ["poke", "browser-act:https://example.com"]),
-            # One marked as asking for itself is asked only its own question.
             (
-                {"readOnlyHint": False, "asksItself": True},
+                "poke",
+                {"readOnlyHint": False},
+                ["poke", "browser-act:https://example.com"],
+            ),
+            # One of melo's own that ask for themselves is asked only its own question,
+            # by its name, with no annotation at all.
+            (
+                "browser_select",
+                {"readOnlyHint": False},
                 ["browser-act:https://example.com"],
+            ),
+            # A tool of a server that says it asks for itself is asked all the same:
+            # a name melo does not list, and an annotation nobody trusts.
+            (
+                "mcp__srv__poke",
+                {"readOnlyHint": False, "asksItself": True},
+                ["mcp__srv__poke", "browser-act:https://example.com"],
+            ),
+            (
+                "poke",
+                {"readOnlyHint": False, "asksItself": True},
+                ["poke", "browser-act:https://example.com"],
             ),
         ],
     )
-    async def test_a_tool_that_asks_itself_is_not_asked_a_second_empty_question(
-        self, annotations: dict[str, Any], asked: list[str]
+    async def test_only_melos_own_tools_ask_for_themselves(
+        self, name: str, annotations: dict[str, Any], asked: list[str]
     ) -> None:
-        provider = SelfAskingTools(annotations)
-        llm = ScriptedLLM([_calls(("poke", {}, "c1")), _answer("done")])
+        provider = SelfAskingTools(name, annotations)
+        llm = ScriptedLLM([_calls((name, {}, "c1")), _answer("done")])
         policy = Policy(ApprovalDecision(True))
         agent, _ = _agent(llm, providers=[provider])
 
@@ -534,7 +553,7 @@ class TestWhoIsAsked:
 
         assert result.status == "completed"
         assert [request.tool_name for request in policy.requests] == asked
-        assert provider.ran == ["poke"]
+        assert provider.ran == [name]
 
     @pytest.mark.asyncio
     async def test_retrieve_mode_asks_about_builtins_and_offered_tools_only(

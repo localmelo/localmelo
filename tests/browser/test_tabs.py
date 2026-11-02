@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from localmelo.support.browser.provider import BrowserToolProvider
-from localmelo.tests.browser.fakes import FakeDriver, link, page, safari_id
+from localmelo.tests.browser.fakes import FakeDriver, button, link, page, safari_id
 from localmelo.tests.browser.test_provider import run, tools_of
 
 HOME = "https://example.com/"
@@ -231,6 +231,64 @@ async def test_tabs_melo_opened_are_closed_when_the_chat_ends() -> None:
     await provider.close()
     assert list(driver.tabs_) == ["persons-tab"], "only the person's own tab is left"
     assert driver.calls[-1] == ("close", "")
+
+
+# ── Tabs that appeared are not melo's to close ──
+
+
+def popup_world() -> FakeDriver:
+    driver = FakeDriver(
+        page(HOME, "Welcome.", button("Open"), title="Home"),
+        page(NEWS, "Today's news.", link("Home", HOME), title="News"),
+    )
+    driver.popups["Open"] = NEWS
+    return driver
+
+
+async def test_a_tab_that_appeared_in_an_action_is_left_open_when_the_chat_ends() -> (
+    None
+):
+    driver = popup_world()
+    provider, tools = await provider_of(driver)
+    await run(tools, "browser_open", url=HOME)
+    out = await run(tools, "browser_click", ref="e1")
+    assert "It opened t2." in out.text and "Today's news." in out.text
+    # t2 was read: melo may use it while the chat lasts.
+    assert (await run(tools, "browser_read", tab="t2")).text.startswith("<<page")
+    await provider.close()
+    assert list(driver.tabs_) == ["t2"], "only the tab browser_open made was closed"
+    assert ("close_tab", "t2") not in driver.calls
+
+
+async def test_a_new_chat_and_the_idle_tidy_leave_appeared_tabs_open_and_forgotten() -> (
+    None
+):
+    driver = popup_world()
+    provider, tools = await provider_of(driver, idle_close_s=0.05)
+    await run(tools, "browser_open", url=HOME)
+    await run(tools, "browser_click", ref="e1")
+    await provider.end_chat()
+    assert list(driver.tabs_) == ["t1", "t2"], "t1 is kept blank, t2 left alone"
+    assert driver.tabs_["t1"][-1] == "about:blank" and driver.tabs_["t2"] == [NEWS]
+    # Let go of: it is no tab of this chat any more.
+    gone = await run(tools, "browser_read", tab="t2")
+    assert gone.is_error and "not a tab of this chat" in gone.text
+    await provider.close()
+
+
+async def test_a_plain_open_never_reuses_a_tab_that_appeared() -> None:
+    driver = popup_world()
+    driver.pages[OTHER] = page(OTHER, "Elsewhere.", title="Other")
+    provider, tools = await provider_of(driver)
+    await run(tools, "browser_open", url=HOME)
+    await run(tools, "browser_click", ref="e1")  # t2 appeared and is now current
+    await run(tools, "browser_open", url=OTHER)
+    assert driver.tabs_["t2"] == [NEWS], "the popup was not navigated away"
+    assert driver.tabs_["t1"][-1] == OTHER, "the tab melo made is the one reused"
+    # A tab the model names itself is its own call.
+    await run(tools, "browser_open", url=HOME, tab="t2")
+    assert driver.tabs_["t2"][-1] == HOME
+    await provider.close()
 
 
 async def test_keep_tabs_leaves_the_tabs_open() -> None:

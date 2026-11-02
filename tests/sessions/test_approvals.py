@@ -242,7 +242,12 @@ async def test_a_high_impact_answer_never_grants_the_tool() -> None:
     assert policy.allowed_tools == frozenset()
 
 
-async def test_sending_a_form_is_never_granted_for_the_session() -> None:
+@pytest.mark.parametrize(
+    "name", ["browser-submit:https://example.com", "browser-type:https://example.com"]
+)
+async def test_sending_a_form_and_typing_are_never_granted_for_the_session(
+    name: str,
+) -> None:
     asked: list[str] = []
 
     async def ask(req: ApprovalRequest) -> ApprovalDecision:
@@ -250,12 +255,17 @@ async def test_sending_a_form_is_never_granted_for_the_session() -> None:
         return ApprovalDecision(True, remember=True)
 
     policy = RememberingPolicy(ask)
-    send = request("browser-submit:https://example.com")
+    send = request(name)
     # Whatever a client sends, the answer allows this send and nothing after it.
     assert await policy.decide(send) == ApprovalDecision(True)
     assert policy.allowed_tools == frozenset()
     assert await policy.decide(send) == ApprovalDecision(True)
-    assert asked == ["browser-submit:https://example.com"] * 2
+    assert asked == [name] * 2
+    # A click or a choice keeps its one answer for the site.
+    assert await policy.decide(request("browser-act:https://example.com")) == (
+        ApprovalDecision(True, remember=True)
+    )
+    assert policy.allowed_tools == frozenset({"browser-act:https://example.com"})
 
 
 async def test_a_grant_is_silent_only_for_its_tool() -> None:

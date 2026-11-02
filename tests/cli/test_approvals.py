@@ -181,8 +181,9 @@ def test_acting_on_a_page_and_sending_a_form_ask_apart_from_opening_a_site() -> 
         acting.header.startswith("example.com") and "acts on the page" in acting.header
     )
     words = " ".join(line for _, line in acting.body)
-    assert "click, type and choose on example.com" in words
-    assert "never types passwords" in words
+    assert "click and choose on example.com" in words
+    assert "click, type" not in words, "typing is a question of its own"
+    assert "asked about apart, every time" in words
     address = "https://other.org/post"
     sending = panel_text(
         _request(
@@ -227,18 +228,26 @@ def test_a_form_panel_shows_what_it_holds_and_when_the_page_decides() -> None:
     words = " ".join(line for _, line in entering.body)
     assert "the page decides where this goes" in words.lower()
     assert "typed: cats" in words
-    # Typing shows the text melo will type.
+
+
+def test_a_typing_panel_shows_all_the_text_and_says_the_page_may_send_it() -> None:
+    text = "hello there\n" + "a long line of words " * 40 + "THE END"
     typing = panel_text(
         _request(
-            "browser-act:https://example.com",
+            "browser-type:https://example.com",
             site="example.com",
-            access="act",
+            access="type",
             how="type",
-            text="hello there",
+            text=text,
         ),
         width=80,
     )
-    assert "It will type: hello there" in " ".join(line for _, line in typing.body)
+    assert typing.title == "Type on a website?" and "types text" in typing.header
+    words = " ".join(line for _, line in typing.body)
+    assert "hello there" in [line for _, line in typing.body]
+    assert "".join(text.split()) in "".join(words.split()), "none of the text is cut"
+    assert "never types passwords" in words
+    assert "the page may send it on its own" in words
 
 
 def test_the_chat_wide_answer_names_what_it_allows() -> None:
@@ -248,7 +257,7 @@ def test_the_chat_wide_answer_names_what_it_allows() -> None:
     assert option("browser:https://example.com") == (
         "Yes, and allow example.com for the rest of this chat"
     )
-    assert "clicking and typing on example.com" in option(
+    assert "clicking and choosing on example.com" in option(
         "browser-act:https://example.com"
     )
 
@@ -1142,17 +1151,31 @@ async def test_every_other_call_still_offers_the_session_choice(
     assert await asking == ApprovalDecision(True, remember=True)
 
 
-async def test_a_form_send_has_no_session_choice_and_a_session_answer_does_nothing() -> (
-    None
-):
+@pytest.mark.parametrize(
+    "request_",
+    [
+        _request(
+            "browser-submit:https://example.com",
+            site="example.com",
+            access="submit",
+            to="https://other.org/post",
+            how="click",
+        ),
+        _request(
+            "browser-type:https://example.com",
+            site="example.com",
+            access="type",
+            how="type",
+            text="hello",
+        ),
+    ],
+    ids=["send", "type"],
+)
+async def test_a_form_send_and_typing_have_no_session_choice_and_a_session_answer_does_nothing(
+    request_: ApprovalRequest,
+) -> None:
     approver = TerminalApprover()
-    request = _request(
-        "browser-submit:https://example.com",
-        site="example.com",
-        access="submit",
-        to="https://other.org/post",
-        how="click",
-    )
+    request = request_
     asking = asyncio.ensure_future(approver.ask(request, offer_session=True))
     await asyncio.sleep(0)
     pending = approver.pending

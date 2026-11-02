@@ -11,10 +11,12 @@ so a chat that never browses opens nothing.
 Tabs belong to the chat. ``browser_open`` reuses the tab melo opened unless
 the model asks for ``tab="new"``, every tab has a short id (``t1``, ``t2``)
 that melo hands out and every tool accepts, and the driver's own ids never
-reach the model, so none is cut or guessed. The tabs melo opened are closed
-when the chat ends and after a while without a browser call (the last one is
-left blank, to keep the automation session); ``[browser] keep_tabs`` leaves
-them. A tab melo did not open is never listed, read or closed.
+reach the model, so none is cut or guessed. The tabs ``browser_open`` made are
+closed when the chat ends and after a while without a browser call (the last
+one is left blank, to keep the automation session); ``[browser] keep_tabs``
+leaves them. A tab melo did not make is never listed, read or closed, except
+that a tab which appeared during an action is checked and may be read (it is
+left open at the end). A tab melo did not see appear is never listed.
 
 No tool opens or reads this computer, its local network or melo's own
 console (:mod:`localmelo.support.browser.addresses`): the address is checked
@@ -34,15 +36,19 @@ however the page names it (:mod:`localmelo.support.browser.fields`). A click
 that sends a form, or Enter in a field, is its own question every time, with
 where the form goes and what it holds: that address is checked like any other
 (never this computer, and its site asked about) before anything is sent, and the
-page script stops any other send while it acts. Enter in a box that is in no
-form is asked about too, and says the page decides where it goes.
+page script tries to stop any other send while it acts (best effort: once a text
+is in a page, the page may send it itself, and melo cannot stop every such send).
+Every text melo types is its own question too, with all of the text, asked each
+time. Enter in a box that is in no form is asked about as well, and says the page
+decides where it goes.
 
 Melo never directs the browser to a local or private address. It cannot stop a
 page from doing that itself, so after each action every tab the action touched
 (the one acted on, and every tab that appeared during it) is checked, by the
 address the browser reports, before anything is read from any of them; one that
-is refused is blanked, or closed when blanking fails, and nothing from it reaches
-the model. This is a check after the page has acted, not a block on the network.
+is refused is blanked in place, so Back does not return to it (a tab made by
+``browser_open`` is closed when blanking fails), and nothing from it reaches the
+model. This is a check after the page has acted, not a block on the network.
 """
 
 from __future__ import annotations
@@ -59,6 +65,7 @@ from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.schema import ImagePart, ToolDef
 from localmelo.support.browser import addresses, fields, render, sites
 from localmelo.support.browser.driver import (
+    MAX_TYPED_CHARS,
     Act,
     BrowserDriver,
     BrowserError,
@@ -74,9 +81,7 @@ WAIT_DEFAULT_S = 10.0
 WAIT_MAX_S = 30.0
 # Tabs melo opened are closed after this long without a browser call.
 IDLE_CLOSE_S = 600.0
-# The most characters one browser_type call types.
-MAX_TYPED_CHARS = 2000
-# The most tabs one click may open (a page that opens more has the rest closed).
+# The most tabs one action adopts (a page that opens more has the rest left alone).
 MAX_NEW_TABS = 3
 # After an action a tab's address is read until two reads agree (a navigation the
 # page starts a moment later is then seen), at most this many times, this far apart.
@@ -125,16 +130,12 @@ def _def(
         # Reading is the read tier on purpose: the executor's per-tool approval
         # would cover every site after one grant, and the site gate asks per
         # site instead. A tool that acts is not read-only (a surface that trusts
-        # the read tier must not get it), and it asks its own questions, per site
-        # and for every form it sends, so the executor's generic question is
-        # skipped for it (``asksItself``).
+        # the read tier must not get it). It asks its own questions, per site,
+        # for every text it types and for every form it sends, so the gate's
+        # generic question is skipped for it by its name
+        # (``contracts.approvals.SELF_ASKING_TOOLS``), not by an annotation.
         annotations=(
-            {
-                "readOnlyHint": False,
-                "destructiveHint": False,
-                "idempotentHint": False,
-                "asksItself": True,
-            }
+            {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False}
             if acts
             else {"readOnlyHint": True}
         ),
@@ -188,12 +189,16 @@ TOOLS: tuple[ToolDef, ...] = (
     _def(
         "browser_type",
         "Type into a text box from the last reading (its text is replaced). Never "
-        "a password, card or one-time-code field. With submit=true, press Enter "
-        "afterwards, which sends the form.",
+        "a password, card or one-time-code field. The person is asked about every "
+        "text and sees all of it. With submit=true, press Enter afterwards, which "
+        "sends the form.",
         ("ref", "text"),
         acts=True,
         ref=_p("string", "A textbox ref such as e7 from the last reading."),
-        text=_p("string", f"At most {MAX_TYPED_CHARS} characters."),
+        text=_p(
+            "string",
+            f"At most {MAX_TYPED_CHARS} characters, in plain text (new lines and tabs allowed).",
+        ),
         submit=_p("boolean", "Press Enter after typing. Default false."),
         tab=_TAB,
     ),
@@ -270,6 +275,10 @@ class BrowserToolProvider(BaseToolProvider):
         # the driver's id never leaves this class. Short ids are not reused.
         self._raw: dict[str, str] = {}
         self._short: dict[str, str] = {}
+        # Which of them browser_open made. Only those are melo's to close; a tab that
+        # appeared during an action is checked and may be read, but it is left open
+        # when the chat ends (it may be the person's, or the page's popup).
+        self._made: set[str] = set()
         self._tab_n = 0
         self._snaps: dict[str, render.Snapshot] = {}  # the newest reading per tab
         self._origins: dict[str, str] = (
@@ -375,12 +384,15 @@ class BrowserToolProvider(BaseToolProvider):
             self._short.pop(raw, None)
         self._snaps.pop(short, None)
         self._origins.pop(short, None)
+        self._made.discard(short)
         if self._tab == short:
             self._tab = None
 
     def _newest(self) -> str | None:
-        """The tab melo opened last that is still open, or None."""
-        return max(self._raw, key=lambda t: int(t[1:]), default=None)
+        """The tab browser_open made last that is still open, or None."""
+        return max(
+            self._made & self._raw.keys(), key=lambda t: int(t[1:]), default=None
+        )
 
     async def _gone(self, short: str) -> bool:
         """Whether the driver no longer has *short*; False when it cannot say."""
@@ -391,20 +403,25 @@ class BrowserToolProvider(BaseToolProvider):
         return self._raw[short] not in listed
 
     async def _close_tabs(self, *, keep_one: bool) -> None:
-        """Close the tabs melo opened; with *keep_one*, the current one is blanked and kept.
+        """Close the tabs browser_open made; with *keep_one*, the current one is blanked and kept.
 
-        Closing the last tab may end Safari's automation session, so a tidy
-        that goes on keeps one tab, empty, and nothing in it stays approved.
+        A tab that appeared during an action is only let go of: it stays open in
+        the browser and is no longer melo's. Closing the last tab may end
+        Safari's automation session, so a tidy that goes on keeps one tab,
+        empty, and nothing in it stays approved.
         """
         shorts = sorted(self._raw, key=lambda t: int(t[1:]))
+        made = [short for short in shorts if short in self._made]
         keep = None
-        if keep_one and shorts:
-            keep = self._tab if self._tab in self._raw else shorts[-1]
+        if keep_one and made:
+            keep = self._tab if self._tab in self._made else made[-1]
         for short in shorts:
-            if short != keep:
+            if short == keep:
+                continue
+            if short in self._made:
                 with contextlib.suppress(BrowserError):
                     await self._driver.close_tab(self._raw[short])
-                self._forget_tab(short)
+            self._forget_tab(short)
         if keep is not None:
             with contextlib.suppress(BrowserError):
                 await self._driver.blank(self._raw[keep])
@@ -463,7 +480,7 @@ class BrowserToolProvider(BaseToolProvider):
                 if self._origins.get(tab) != origin:
                     await sites.require_site(origin)
             except BrowserError:
-                await self._refuse_tab(tab, close=False)  # leave the page it led to
+                await self._refuse_tab(tab)  # leave the page it led to
                 raise
             done.add(origin)
         self._origins[tab] = origin
@@ -518,7 +535,7 @@ class BrowserToolProvider(BaseToolProvider):
                 sites.require_origin(url)
                 await addresses.require_public(url)
             except BrowserError:
-                await self._refuse_tab(tab, close=False)
+                await self._refuse_tab(tab)
                 raise
 
     def _drop_reading(self, tab: str) -> None:
@@ -526,26 +543,24 @@ class BrowserToolProvider(BaseToolProvider):
         self._snaps.pop(tab, None)
         self._origins.pop(tab, None)
 
-    async def _refuse_tab(self, tab: str, *, close: bool) -> None:
-        """Leave a page that was refused: blank its tab, and close it when that fails.
+    async def _refuse_tab(self, tab: str) -> None:
+        """Leave a page that was refused: blank its tab (in place, so Back does not return to it).
 
-        A tab a page or a click opened (*close*) is closed outright. Nothing
-        read from the tab is kept, so no ref of it works any more.
+        Nothing read from the tab is kept, so no ref of it works any more. When
+        blanking fails, a tab browser_open made is closed; any other is let go
+        of and left open (it may not be melo's to close). Either way melo reads
+        nothing more from it.
         """
         self._drop_reading(tab)
         raw = self._raw.get(tab)
         if raw is None:
             return
-        blanked = False
-        if not close:
-            try:
-                await self._driver.blank(raw)
-                blanked = True
-            except BrowserError:
-                pass
-        if not blanked:
-            with contextlib.suppress(BrowserError):
-                await self._driver.close_tab(raw)
+        try:
+            await self._driver.blank(raw)
+        except BrowserError:
+            if tab in self._made:
+                with contextlib.suppress(BrowserError):
+                    await self._driver.close_tab(raw)
             self._forget_tab(tab)
 
     def _open_target(self, tab: str) -> str | None:
@@ -554,11 +569,11 @@ class BrowserToolProvider(BaseToolProvider):
         if word == "new":
             return None
         if word == "current":
-            if self._tab in self._raw:
+            if self._tab in self._made:
                 return self._tab
-            return (
-                self._newest()
-            )  # tabs stay open after /new; nothing in them is approved
+            # A tab that appeared in an action is not reused unasked, and tabs stay
+            # open after /new with nothing in them approved.
+            return self._newest()
         return self._known(word)
 
     async def _go(self, url: str, tab: str, same_site: str = "") -> str:
@@ -569,6 +584,7 @@ class BrowserToolProvider(BaseToolProvider):
             await sites.require_site(origin)
         target = self._open_target(tab)
         info: TabInfo
+        fresh = target is None
         if target is None:
             info = await self._driver.open(url, new_tab=True)
         else:
@@ -581,7 +597,11 @@ class BrowserToolProvider(BaseToolProvider):
                     raise
                 self._forget_tab(target)  # the helper lost it: go on in a new one
                 info = await self._driver.open(url, new_tab=True)
-        return await self._read_tab(self._own(info), {origin})
+                fresh = True
+        own = self._own(info)
+        if fresh:
+            self._made.add(own.id)  # melo made this tab, so melo closes it
+        return await self._read_tab(own, {origin})
 
     def _current(self, tab: str | None) -> str:
         """The short id of *tab*, the current tab when None or ``current``."""
@@ -694,18 +714,26 @@ class BrowserToolProvider(BaseToolProvider):
         await sites.require_submit(snap.origin, item.submit, how, rows)
 
     async def _acting(
-        self, tab_id: str, snap: render.Snapshot, what: str, text: str = ""
+        self,
+        tab_id: str,
+        snap: render.Snapshot,
+        what: str,
+        typed: str | None = None,
     ) -> set[str] | None:
         """Everything that must hold before melo does something on a page, and the tabs there are now.
 
-        The tab's address is read again, the site is asked about for acting, and
-        the window's tabs are listed so the ones the action opens are known for
+        The tab's address is read again, the person is asked (about the site
+        for a click or a choice, about the whole text for typing), and the
+        window's tabs are listed so the ones the action opens are known for
         what they are. A window that cannot be listed is not acted in.
         """
         await self._recheck(
             tab_id
         )  # where the tab is now, before anything is done on it
-        await sites.require_act(snap.origin, what, text)
+        if typed is None:
+            await sites.require_act(snap.origin, what)
+        else:
+            await sites.require_type(snap.origin, typed)
         before = await self._tabs_now()
         if before is None:
             raise BrowserError(
@@ -741,11 +769,13 @@ class BrowserToolProvider(BaseToolProvider):
             return None
 
     async def _adopt(self, before: set[str]) -> list[str]:
-        """The short ids of the tabs that appeared since *before*: tabs the action opened are melo's.
+        """The short ids of the tabs that appeared since *before*, at most :data:`MAX_NEW_TABS`.
 
         Only a tab seen to appear during melo's own action is adopted, by its
-        browser handle. A window that cannot be listed now is an error: a tab
-        the action opened could be on any address.
+        browser handle. An adopted tab is checked and may be read, but it was not
+        made by browser_open, so melo never closes it on its own. A window that
+        cannot be listed now is an error: a tab the action opened could be on any
+        address.
         """
         try:
             now = await self._driver.tabs()
@@ -760,9 +790,7 @@ class BrowserToolProvider(BaseToolProvider):
                 continue
             if len(opened) < MAX_NEW_TABS:
                 opened.append(self._own(tab).id)
-            else:
-                with contextlib.suppress(BrowserError):
-                    await self._driver.close_tab(tab.id)
+            # The rest are not adopted, read or closed: they are not melo's.
         return opened
 
     async def _settled(self, short: str) -> str:
@@ -784,9 +812,9 @@ class BrowserToolProvider(BaseToolProvider):
 
         The touched tabs are the one acted on and every tab that appeared
         meanwhile. Each address is the browser's own report. One that is on a
-        local or private address, or that cannot be told, is blanked (closed
-        when blanking fails; a new tab is closed at once) and its readings go;
-        the first such problem is raised after all of them were dealt with.
+        local or private address, or that cannot be told, is blanked in place
+        (see :meth:`_refuse_tab`) and its readings go; the first such problem
+        is raised after all of them were dealt with.
         """
         opened = await self._adopt(before)
         problem: BrowserError | None = None
@@ -803,7 +831,7 @@ class BrowserToolProvider(BaseToolProvider):
                 urls[short] = url
             except BrowserError as exc:
                 problem = problem or exc
-                await self._refuse_tab(short, close=short in opened)
+                await self._refuse_tab(short)
         if problem is not None:
             raise problem
         return opened, urls
@@ -818,15 +846,7 @@ class BrowserToolProvider(BaseToolProvider):
             said += f" It opened {landed}."
         if landed not in urls:
             raise BrowserError(_NO_ADDRESS)
-        try:
-            page = await self._read_tab(TabInfo(landed, urls[landed]), done)
-        except BrowserError:
-            for short in opened:  # a refused page's popups are not left on screen
-                if short in self._raw and short not in self._origins:
-                    with contextlib.suppress(BrowserError):
-                        await self._driver.close_tab(self._raw[short])
-                    self._forget_tab(short)
-            raise
+        page = await self._read_tab(TabInfo(landed, urls[landed]), done)
         return f"{said}\n{page}"
 
     @_guarded
@@ -868,7 +888,13 @@ class BrowserToolProvider(BaseToolProvider):
         if len(typed) > MAX_TYPED_CHARS:
             raise BrowserError(
                 f"That text is {len(typed)} characters; melo types at most "
-                f"{MAX_TYPED_CHARS} at a time."
+                f"{MAX_TYPED_CHARS} at a time, because the person is shown all of it "
+                "before it is typed. Type it in parts."
+            )
+        if hidden := fields.unshowable(typed):
+            raise BrowserError(
+                f"That text has {hidden}, which a question cannot show, so melo "
+                "does not type it."
             )
         before = await self._acting(tab_id, snap, "type", typed)
         assert before is not None

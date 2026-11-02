@@ -236,7 +236,9 @@ class FakeDriver:
             raise BrowserError("Safari's automation helper reported a problem: blank.")
         here = tab or self.current or ""
         if here in self.tabs_:
-            self.tabs_[here].append("about:blank")
+            # As the real driver does it, with location.replace: the page's own
+            # entry is swapped, so Back never returns to the page that was refused.
+            self.tabs_[here][-1:] = ["about:blank"]
 
     async def act(self, tab: str | None, act: Act) -> str:
         self.calls.append(("act", f"{act.kind}:{act.element.label}"))

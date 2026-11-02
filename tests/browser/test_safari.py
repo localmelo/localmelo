@@ -26,6 +26,7 @@ from localmelo.support.browser.safari import (
     SETUP_MESSAGE,
     TOOL_NAMES,
     SafariAutomationDriver,
+    same_page,
 )
 from localmelo.support.mcp import StdioMcpClient
 
@@ -499,5 +500,80 @@ async def test_a_list_without_handles_gives_no_tab_to_name() -> None:
         assert await safari.tabs() == []
         with pytest.raises(BrowserError, match="could not tell which tab"):
             await safari.open("https://example.com/", new_tab=True)
+    finally:
+        await safari.close()
+
+
+# ── Where a page is when it is read ──
+
+
+async def test_a_page_that_moves_between_the_address_read_and_the_script_is_refused() -> (
+    None
+):
+    safari = driver_for("page_moves")
+    await safari.start()
+    try:
+        await safari.open("https://example.com/", new_tab=True)
+        # The tab list said the home page; by the time the script ran the page
+        # had gone to another, which nobody checked.
+        with pytest.raises(BrowserError, match="moved while melo was reading"):
+            await safari.page(None)
+        # Read again, with nothing moving, it is the page that is there.
+        assert (await safari.page(None)).url == "https://example.com/news"
+    finally:
+        await safari.close()
+
+
+@pytest.mark.parametrize(
+    ("listed", "script", "same"),
+    [
+        ("https://example.com/", "https://example.com/", True),
+        ("https://EXAMPLE.com", "https://example.com/", True),
+        ("https://example.com:443/a?b=1", "https://example.com/a?b=1", True),
+        ("https://example.com/a#top", "https://example.com/a#end", True),
+        ("https://example.com/a", "https://example.com/b", False),
+        ("https://example.com/a?b=1", "https://example.com/a?b=2", False),
+        ("https://example.com/", "https://example.com:8443/", False),
+        ("https://example.com/", "http://example.com/", False),
+        ("https://example.com/", "https://127.0.0.1/", False),
+        ("https://example.com/", None, False),
+        ("https://example.com/", "https://[::1", False),
+    ],
+)
+def test_two_addresses_are_one_page_by_site_path_and_query(
+    listed: str, script: object, same: bool
+) -> None:
+    assert same_page(listed, script) is same
+
+
+# ── Leaving a refused page ──
+
+
+async def test_a_blanked_page_is_replaced_in_the_history_not_followed_by_a_blank() -> (
+    None
+):
+    safari = driver_for()
+    await safari.start()
+    try:
+        info = await safari.open("https://example.com/", new_tab=True)
+        await safari.open("https://example.com/news", new_tab=False, tab=info.id)
+        await safari.blank(info.id)
+        assert await safari.location(info.id) == "about:blank"
+        # Back goes to the page before the refused one, never to the refused one.
+        assert (await safari.back(info.id)).url == "https://example.com/"
+    finally:
+        await safari.close()
+
+
+async def test_a_blank_that_does_not_take_falls_back_to_the_browsers_own_navigation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("localmelo.support.browser.safari.POLL_S", 0.0)
+    safari = driver_for("replace_fails")
+    await safari.start()
+    try:
+        info = await safari.open("https://example.com/", new_tab=True)
+        await safari.blank(info.id)
+        assert await safari.location(info.id) == "about:blank"
     finally:
         await safari.close()

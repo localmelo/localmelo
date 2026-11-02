@@ -118,6 +118,7 @@ from localmelo.melo.contracts.approvals import (
     AutoPolicy,
     ReviewMode,
     Withdrawal,
+    asks_itself,
     block_note,
     call_key,
     find_auto,
@@ -1632,9 +1633,10 @@ class _ApprovalGate:
         if earlier is not None:
             return earlier
         if self._asks_itself:
-            # A tool that is not read-only but asks its own questions (the browser
-            # tools that act: per site, and for every form they send) is not asked
-            # a second, empty question here about its call.
+            # One of melo's own tools that ask their questions themselves (the
+            # browser tools that act: per site, for every text typed and every
+            # form sent) is not asked a second, empty question here about its
+            # call. Only the names melo lists count, never a tool's annotation.
             return ApprovalDecision(True, origin="policy")
         if request.outside is not None:
             return await self._folder(request, request.outside)
@@ -2043,12 +2045,13 @@ def _folder_scope(decision: ApprovalDecision) -> str:
 
 
 # The words of auto mode's review of a site question, by what the tool wants to
-# do there: open it (no ``access``), act on a page, or send a form from it.
+# do there: open it (no ``access``), click or choose on a page, type on it, or
+# send a form from it.
 _SITE_ROUTINE = {"": "Opens", "read": "Opens", "act": "Acts on"}
 _SITE_DOUBT = {
     "": "Opens {site}, a site the request did not name.",
     "read": "Opens {site}, a site the request did not name.",
-    "act": "Clicks, types or chooses on {site}, a site the request did not name.",
+    "act": "Clicks or chooses on {site}, a site the request did not name.",
     "submit": "Sends a form from {site}, which needs its own review.",
 }
 _TYPING_DOUBT = (
@@ -2140,9 +2143,9 @@ class _ToolAsk:
             # A click or a choice on a site is reviewed as opening it. Typed text
             # is the model's own data and a form sent from a page leaves the
             # computer: each is reviewed by itself, even on a site you named, and
-            # a send's verdict is never kept for the next one.
+            # the verdict of one is never kept for the next.
             sends = access == "submit"
-            typing = access == "act" and arguments.get("how") == "type"
+            typing = access == "type"
             if not (sends or typing) and reviewer.names_host(site):
                 review = ActionReview(
                     "routine",
@@ -2167,7 +2170,7 @@ class _ToolAsk:
                         ),
                     ),
                     mode="auto",
-                    key=f"{key}|{self._call.id}" if sends else key,
+                    key=f"{key}|{self._call.id}" if sends or typing else key,
                     workspace=self._workspace_root,
                     # One routine verdict reads the site's plain pages.
                     shared=(
@@ -4689,7 +4692,7 @@ class Agent:
                 self._reviewer,
                 destructive=hints.get("destructiveHint") is True,
                 confinement=switch,
-                asks_itself=hints.get("asksItself") is True,
+                asks_itself=asks_itself(call.tool_name),
             )
             ask_slot = TOOL_ASK.set(
                 _ToolAsk(

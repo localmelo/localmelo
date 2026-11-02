@@ -59,13 +59,17 @@ async def test_tools_list_each_tool_and_whether_it_is_granted(
         assert by_name["python_exec"]["parameters"]["type"] == "object"
 
 
-async def test_a_form_send_is_never_recorded_as_a_grant_of_the_chat(
+async def test_a_form_send_and_typing_are_never_recorded_as_a_grant_of_the_chat(
     tmp_path: Path,
 ) -> None:
     async with console_with(tmp_path) as (console, _client, _):
         granted_at: dict[str, float] = {}
         ask = console.sessions._timed_ask("s1", granted_at)
-        for tool in ("browser-submit:https://example.com", "file_write"):
+        for tool in (
+            "browser-submit:https://example.com",
+            "browser-type:https://example.com",
+            "file_write",
+        ):
             request = ApprovalRequest(
                 request_id=f"r-{tool}",
                 run_id="",
