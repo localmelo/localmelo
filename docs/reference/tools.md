@@ -169,11 +169,13 @@ computer. `[tools] web_fetch_allow_local` is empty, so off, by default.
 - **It is read when a chat or a task starts.** A chat or task takes the list, and the ports
   above, from its config when its `web_fetch` is made; a change to the file reaches the chats
   and tasks started after it, not the ones already open.
-- **A listed server always asks the person.** The site gate above lets a site the user's words
+- **A listed server asks the person.** The site gate above lets a site the user's words
   name be read at once; a listed server is not read that way, because naming `127.0.0.1` does not
-  name a port, and a page may have steered the model to a listed one. It is put to the run's
-  approval policy like any other site (in Auto it is reviewed), and when nobody can be asked (a
-  run with `--yolo`, a task with no approval policy) it is not read.
+  name a port, and a page may have steered the model to a listed one. A chat with a person puts it
+  to the run's approval policy like any other site. In Auto it is reviewed by itself: the user's
+  words never make it routine, and one review never covers other pages of the same server. Where
+  nobody can be asked (`--yolo`, an unattended run with no approval policy) it is read, because
+  the developer listed it.
 - **The address must be written as listed.** A name that resolves to a listed address
   (`localhost`, `pages.test`) and another way of writing it (`127.1`, `[::ffff:127.0.0.1]`) are
   refused, as is every other local address and every other port.

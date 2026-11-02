@@ -989,15 +989,24 @@ async def test_a_redirect_to_another_listed_server_asks_about_it(
 
 
 @pytest.mark.parametrize("task", [False, True])
-async def test_a_listed_server_is_not_read_when_nobody_can_be_asked(
-    server: dict[str, Any], task: bool
+async def test_a_listed_server_is_read_when_nobody_can_be_asked(
+    server: dict[str, Any], other: dict[str, Any], task: bool
 ) -> None:
-    """No approval policy (--yolo, a bare tool) reads a public page, never a listed server."""
-    cfg = _cfg(_listed(server))
-    provider = WebFetchProvider(task=task, fetcher=web_local.fetcher(cfg))
-    error = _error(await _call(provider, _url(server), ask=None))
-    assert "melo did not read 127.0.0.1" in error and "nobody to ask" in error
-    assert _paths(server) == []
+    """No approval policy (--yolo, an unattended run): the developer listed it, so it is read.
+
+    Only that: an unlisted port is still refused, and a task with no policy
+    still reads no public site.
+    """
+    provider = WebFetchProvider(
+        task=task, fetcher=web_local.fetcher(_cfg(_listed(server)))
+    )
+    assert "# Tomatoes" in _text(await _call(provider, _url(server), ask=None))
+    assert _paths(server) == ["/page"]
+    assert "loopback" in _error(await _call(provider, _url(other), ask=None))
+    assert _paths(other) == []
+    if task:
+        public = f"http://{pages.HOST}/page"
+        assert "nobody to ask" in _error(await _call(provider, public, ask=None))
 
 
 def test_a_list_can_name_only_these_two_addresses() -> None:

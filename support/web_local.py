@@ -21,9 +21,10 @@ rule that ``web_fetch`` never reaches this computer (see
   passes its own live config: ``melo serve --port N`` sets the gateway port
   in memory only, so the saved file does not know it. A model server that is
   in neither the config nor the run's URLs is not protected.
-- The list is read when a session's ``web_fetch`` is made. A site on it asks
-  the person every time (see ``WebFetchProvider._admit``), and a call of the
-  shell or Python cannot set it (the shell review keeps :data:`KEY`'s full
+- The list is read when a session's ``web_fetch`` is made. A chat with a
+  person asks about a site on it (see ``WebFetchProvider._admit``; in auto
+  mode each URL is reviewed by itself), an unattended run reads it, and a call
+  of the shell or Python cannot set it (the shell review keeps :data:`KEY`'s full
   name, ``tools.web_fetch_allow_local``, among the settings it guards).
 - The list reaches only ``web_fetch``'s fetcher, as its ``allow`` hook
   (:class:`~localmelo.support.web.guard.LocalAllow`); the browser tools use

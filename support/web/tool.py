@@ -22,9 +22,10 @@ every mode; any other asks once per chat through the browser's site question (``
 one "allow for this chat" covers both tools, and auto mode reviews it as it
 reviews a site the browser would open. A task asks the chat that owns it;
 a task with nobody to ask is refused. A test server that the developer
-setting ``[tools] web_fetch_allow_local`` lists is the one exception to the
-first rule: it always asks, whatever the person's words name, and it is not
-read when nobody can be asked.
+setting ``[tools] web_fetch_allow_local`` lists is the exception to the first
+rule: a chat with a person asks, whatever the person's words name, and in auto
+mode it is reviewed by itself; where nobody can be asked (``--yolo``, an
+unattended run) it is read, since the developer listed it on purpose.
 """
 
 from __future__ import annotations
@@ -364,21 +365,18 @@ class WebFetchProvider(BaseToolProvider):
         (nobody is asked, as with ``--yolo``) and a task does not.
 
         A test server that ``[tools] web_fetch_allow_local`` lists is the
-        exception to both shortcuts: the person's words naming the host do not
-        read it at once (they name a host, not its port, and a page may have
-        steered the model to a listed port), and with no policy it is not
-        read at all, since nobody can be asked.
+        exception to the first shortcut: the person's words naming the host
+        do not read it at once (they name a host, not its port, and a page
+        may have steered the model to a listed port), so a chat with a person
+        asks. With no policy at all (``--yolo``, an unattended run) nobody can
+        be asked and the developer listed it on purpose, so it is read.
         """
         host = target.host
         listed = self.fetcher.listed(target)
         ask = TOOL_ASK.get()
         if ask is None:
             if listed:
-                raise AddressError(
-                    f"melo did not read {host}:{target.port}: it is a test server on "
-                    "this computer, which is read only after the person allows it, "
-                    "and this run has nobody to ask."
-                )
+                return
             if self.task:
                 raise AddressError(
                     f"melo did not read {host}: this task has nobody to ask about a site."

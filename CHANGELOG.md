@@ -18,10 +18,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   gateway and console (the one it really listens on, `melo serve --port` included, and a running
   gateway's) and of any model server the config names or the run's `-u` URL names stays refused
   even when listed; a model server in neither is not protected, and a chat or task reads the list
-  when it starts. A listed server always asks the person, even when their words name the host,
-  and is not read when nobody can be asked. A shell or Python call that runs `melo config set`
-  or `-X` on the key counts as a change to localmelo itself: it asks every time, and Auto mode
-  blocks it. The address must be written as listed,
+  when it starts. A listed server asks the person, even when their words name the host; in Auto it
+  is reviewed by itself, and where nobody can be asked (`--yolo`, an unattended run) it is read.
+  A shell or Python call that runs `melo config set` or `-X` on the key counts as a change to
+  localmelo itself: it asks every time, and Auto mode blocks it. The address must be written as
+  listed,
   a redirect meets the same list (a listed address cannot send melo to an unlisted one, and a
   page that is not itself listed cannot send it to a listed one), and only `web_fetch` reads
   it: the browser tools never do, and the model, the console and the API cannot set it. A fetch
