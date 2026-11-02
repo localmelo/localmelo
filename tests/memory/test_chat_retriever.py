@@ -49,6 +49,7 @@ KEYS = {
     "candidates",
     "used",
     "block_chars",
+    "query_from",
 }
 
 

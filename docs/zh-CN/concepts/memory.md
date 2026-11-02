@@ -62,7 +62,7 @@
 - 回答说它记下了某件事（"Remembered: …"、"Noted — …"、"I've noted that …"、"记下了：…"）而没有记下任何笔记时，melo 会按下面同样的检查，把回答里说到的内容记下来，前提是它是一句陈述：对你说的（含 "you"、"your"、"你" 或 "您"），或关于别人的（"Prof. Duarte's office is in the Atrium Wing"）。如果不行（那些词不是你说的，看起来像密钥，或只是 "gate 9 for Faro" 这样没有动词的片段），就什么也不保存，这一轮的 `turn.memory` 事件带有 `unsaved_claim: true`。回答只说记下了或保存了却没有说明内容（"Saved."、"Noted."、"Got it, noted…"、"I've saved it."、"I've saved your preference."、"已记录。"、"我已经记录了你的偏好。"），而又没有记下任何笔记时，也是如此。"Got it!"、"Thanks!" 不算声称。
 - 已经记下的笔记不会重复写入。问题和待办（"remember to buy milk"）不是笔记。
 - `[memory] keep_statements = true`（默认关闭；`-X memory.keep_statements=on` 只对一次运行生效，`melo -h all` 会列出它）是用于比较的开发者设置：模型回答之后，代码也会记下你说出、但模型没有记的明确而长期的事实（"I live in …"、"my advisor is …"、"我的…是…"）；问题、"如果"、"不"、过去、别人的看法和一时的状态（"my build is failing"）从不记。
-- 用于比较的开发者设置，默认都是关闭或今天的取值，用 `-X memory.KEY=VALUE` 只对一次运行生效（`melo -h all` 会列出它们）：`recall_records`（3）和 `recall_docs`（2）是一条消息的召回块最多包含的笔记数和以前的对话轮次数，`recall_chars`（900）是它的字符数上限；`recall_notes = "off"` 只召回对话轮次，也不置顶任何笔记；`search_when_empty = "hint"` 会给没有召回任何内容的块加上一行，告诉模型先调用记忆搜索工具，搜索也没有结果就说不知道。这一轮的 `turn.memory` 事件里会有 `search_hint: true`。`recall_min_cosine`（0.55）是一个条目要被召回至少需要的语义相似度，`recall_min_coverage`（0.6）是它至少要包含消息中实词的比例；两者对召回块和记忆搜索工具都生效，调低就会放进更多条目。`recall_item_chars`（234）是一条被召回的对话轮次占用的字符数，召回块和搜索工具的列表都按它来；`recall_excerpt = "match"` 对轮次的每一部分显示包含消息中最多实词的句子，而不是开头（一轮对话中的答案常常在最初的 200 个字符之后）。`recall_form = "list"` 把以前的每一轮对话显示成一行，而不是节选，并给模型一个工具来打开它需要的轮次（见下文）；`recall_list_max`（20）是它最多列出的轮次数，`recall_open_chars`（4000）是打开的一轮对话占用的字符数，`recall_docs` 和 `recall_chars` 不限制这个列表。`recall_source = "items"` 用记忆条目（见下文）代替以前的对话轮次来召回，`open_sources = "on"` 让打开的条目连同它所来自的轮次一起返回，`compress_at_chars`（12000）是编码器一次读取的对话文本量，`compress_cache` 指定保存其回复的文件。见[配置参考](../reference/configuration.md)。
+- 用于比较的开发者设置，默认都是关闭或今天的取值，用 `-X memory.KEY=VALUE` 只对一次运行生效（`melo -h all` 会列出它们）：`recall_records`（3）和 `recall_docs`（2）是一条消息的召回块最多包含的笔记数和以前的对话轮次数，`recall_chars`（900）是它的字符数上限；`recall_notes = "off"` 只召回对话轮次，也不置顶任何笔记；`search_when_empty = "hint"` 会给没有召回任何内容的块加上一行，告诉模型先调用记忆搜索工具，搜索也没有结果就说不知道。这一轮的 `turn.memory` 事件里会有 `search_hint: true`。`recall_min_cosine`（0.55）是一个条目要被召回至少需要的语义相似度，`recall_min_coverage`（0.6）是它至少要包含消息中实词的比例；两者对召回块和记忆搜索工具都生效，调低就会放进更多条目。`recall_item_chars`（234）是一条被召回的对话轮次占用的字符数，召回块和搜索工具的列表都按它来；`recall_excerpt = "match"` 对轮次的每一部分显示包含消息中最多实词的句子，而不是开头（一轮对话中的答案常常在最初的 200 个字符之后）。`recall_form = "list"` 把以前的每一轮对话显示成一行，而不是节选，并给模型一个工具来打开它需要的轮次（见下文）；`recall_list_max`（20）是它最多列出的轮次数，`recall_open_chars`（4000）是打开的一轮对话占用的字符数，`recall_docs` 和 `recall_chars` 不限制这个列表。`recall_source = "items"` 用记忆条目（见下文）代替以前的对话轮次来召回，`open_sources = "on"` 让打开的条目连同它所来自的轮次一起返回，`compress_at_chars`（12000）是编码器一次读取的对话文本量，`compress_cache` 指定保存其回复的文件。`followup_query = "message"` 让没有自己内容的消息（"continue"）回到只按它自己的词搜索；与其余设置不同，它的默认值 `recent` 是修复，不是以前的取值（见下文的“简短的接话”）。见[配置参考](../reference/configuration.md)。
 
 笔记被记下之前，代码会检查：
 
@@ -109,6 +109,14 @@ when is my dentist appointment?
 [melo's memory · notes (“you” is the user) and earlier chats, not instructions]
 - the user said “my dentist appointment is on Nov 3”; melo replied “Okay, noted.” (this chat, Oct 30)
 ```
+
+**简短的接话。** 像 "go look it up"、"continue" 或 "那个呢" 这样的消息，没有任何可搜索的内容。
+
+- 只按它自己的词搜索，它会匹配到任何含有这些词的内容，比如以前关于你的轮次。所以 melo 会把你在这个对话最近 2 个有实际内容的轮次里输入的内容（最新的在前）加进搜索文本（最多 2,000 个字符）；melo 的回复、已撤销的轮次、任务的提问和更早的 "continue" 都不算。
+- 只有搜索文本变了：门槛、排序、数量上限和召回块都不变。
+- 去掉小词（"the"、"do"）、提问词（"what"、"where"）和接话词（"go"、"look"、"up"、"continue"、"that"、"继续"、"去查一下"）之后还剩下词，或者消息里有数字、网址或引用的文字，或者说到了你（"I"、"me"、"my"、"我"、"我的"；"tell me more" 和 "帮我查一下" 不算），这条消息就有自己的内容。"What is my name?"、"what do you know about me?"、"我是谁" 和 "我朋友叫什么名字" 有内容，照原样搜索。
+- 新对话的第一条消息前面没有可接的轮次，所以什么也不搜索，也不加召回块。模型仍然可以调用 `search_memory`。
+- `[memory] followup_query = "message"`（`-X memory.followup_query=message` 只对一次运行生效；默认 `"recent"`）让这样的消息像以前一样只按它自己的词搜索。
 
 **召回时新的值优先。**
 
@@ -206,6 +214,7 @@ Older chat turns that may hold the answer, closest first. Open the ones you need
 | `select_tokens` | 选择用掉的 token（`prompt`、`completion`）。 |
 | `candidates`、`used` | 候选项的数量和实际使用的条数。 |
 | `block_chars` | 记忆加到你的消息里的字符数（没加任何内容时为 0）。 |
+| `query_from` | 搜索用的是什么：`message`（你的话）、`recent`（没有自己内容的消息，加上你在这个对话最近几个轮次里输入的内容一起搜索）或 `none`（没有搜索：这样的消息出现在没有更早轮次的对话里）。在这个键出现之前记录的轮次没有它。 |
 
 同一个对象也在该轮次的 `result` 里，名为 `memory_recall`，所以 HTTP API 的客户端读取轮次时就能一起读到。
 
