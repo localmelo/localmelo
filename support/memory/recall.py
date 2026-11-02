@@ -23,6 +23,10 @@ line, its id, date, chat, title and similarity (:meth:`Item.listed`), under a li
 that tells the model to open the turns it needs with ``open_memory``; the list is
 not bound by the chats' cap or the block's room (:func:`block`, :func:`pick`), and
 :func:`whole_turn` and :func:`cut_at_sentence` give a turn the model opens.
+With ``[memory] excerpt_open = "on"`` an excerpt that shows less than the whole turn
+(it was cut, or the line is a piece of a longer turn) starts with the turn's id,
+``[t123]``, under a line that says to open such a turn with ``open_memory``
+(:data:`CUT_GUIDE`); a line that shows the whole turn has no id (:meth:`Item.excerpt`).
 With ``[memory] recall_source = "items"`` the items a chat model encoded from the
 chats (key ``m:<id>``, :mod:`.hippo_encode`) take the place of the turns: they are
 ranked, picked and listed the same way, an item is shown as its title and text
@@ -54,10 +58,14 @@ MIN_COVERAGE: Final = 0.6
 MIN_COSINE: Final = 0.55
 HALF_LIFE_DAYS: Final = 30.0
 PER_SESSION: Final = 2
-# What one turn recalls by itself, and the room its block may take.
+# What one turn recalls by itself, and the room its block may take. The last two are
+# the shipped defaults of ``[memory] recall_chars`` (the block) and
+# ``recall_item_chars`` (one recalled turn): a larger room answered more questions
+# from earlier chats (#349). They are not the head :data:`TURN_CHARS` of a turn.
 AUTO_RECORDS: Final = 3
 AUTO_DOCS: Final = 2
-BLOCK_CHARS: Final = 900
+BLOCK_CHARS: Final = 4_000
+ITEM_CHARS: Final = 900
 # What the block says about the message's own words: kept as notes, or refused.
 # It forbids saving that fact again, not keeping another fact of the message.
 KEPT_LINE: Final = (
@@ -106,6 +114,12 @@ ITEM_LIST_GUIDE: Final = (
     "need with open_memory before you answer from them; a title is not the content."
 )
 CUT_MARK: Final = "… (cut)"
+# With ``[memory] excerpt_open = "on"``: the line under the excerpts when one of them
+# starts with its turn's id, because it shows less than the whole turn.
+CUT_GUIDE: Final = (
+    "A line that starts with an id such as [t123] is cut; open it with open_memory "
+    "when the answer may be in the rest."
+)
 # Words that ask rather than say what is asked about; never a content word. The
 # last five ask for an older value (:func:`asks_about_past`).
 _ASKING_WORDS: Final = (
@@ -135,16 +149,22 @@ class Shown(NamedTuple):
     had). With *terms*, the question's content
     terms (``[memory] recall_excerpt = "match"``), each part of a turn shows the
     sentences that hold most of them rather than its head (:func:`turn_said`).
-    The defaults are the head of every turn, as it always was.
+    With *ids* (``[memory] excerpt_open = "on"``) a turn's line that shows less than
+    the whole turn starts with the turn's id (:meth:`Item.excerpt`), the id counted
+    in the room. The defaults are the head of every turn, as it always was.
     """
 
     chars: int = TURN_CHARS
     terms: frozenset[str] = frozenset()
+    ids: bool = False
 
     @classmethod
-    def of(cls, chars: int = TURN_CHARS, question: str | None = None) -> Shown:
+    def of(
+        cls, chars: int = TURN_CHARS, question: str | None = None, ids: bool = False
+    ) -> Shown:
         """*chars* of room, and the best matching sentences of *question* if given."""
-        return cls(chars, frozenset(gate_terms(question)) if question else frozenset())
+        terms = frozenset(gate_terms(question)) if question else frozenset()
+        return cls(chars, terms, ids)
 
 
 HEADS: Final = Shown()  # the head of every turn, in :data:`TURN_CHARS`
@@ -165,7 +185,10 @@ class Item:
     its subject key (``""`` for none). ``older`` is how such a turn reads
     when a newer one replaced it: :data:`OLDER` or :data:`OLDER_TURN`. A
     document's ``chunk`` is 0 for the head of a turn and 1 and up for the later
-    pieces of a long one (:mod:`.index`). ``similarity`` is the cosine of a
+    pieces of a long one (:mod:`.index`); ``more`` is set on the head of a turn that
+    has later pieces, when the corpus is filled (:meth:`ChatMemory._sync`), so a
+    line can tell, without a lookup, that it shows only a part of its turn.
+    ``similarity`` is the cosine of a
     turn to the message when a search matched it by meaning (the list form
     shows it); it is set on a copy for one search, never stored. ``shown`` is
     the line the model read for the item, as the recall block or the memory
@@ -194,6 +217,7 @@ class Item:
     said: tuple[tuple[str, str], ...] = ()
     older: str = ""
     chunk: int = 0
+    more: bool = False
     similarity: float | None = None
     title: str = ""
     sources: tuple[tuple[str, int], ...] = ()
@@ -266,7 +290,7 @@ class Item:
             said = f"“{self.title}”: {text}" if self.title else text
             return f"{said} ({where}){older}{self._conflict()}"
         if not self.is_record:
-            return f"{turn_said(self.text, show)} ({where}){older}"
+            return self._turn_line(where, older, show)[0]
         if self.how == "inferred":
             said = f"melo inferred “{self.text}”"
         elif self.quote:
@@ -276,6 +300,33 @@ class Item:
         else:
             said = f"a note to the user “{self.text}”"
         return f"{said} ({where}){older}"
+
+    def excerpt(
+        self, now: float | None = None, *, timed: bool = False, show: Shown = HEADS
+    ) -> tuple[str, bool]:
+        """:meth:`line`, and whether it starts with the turn's id (``[t123] …``).
+
+        That is only with ``show.ids`` (``[memory] excerpt_open = "on"``), for a
+        chat turn whose line shows less than the whole turn: :func:`turn_excerpt`
+        cut what the user said or melo replied (or left the reply out), or the
+        document is a piece of a longer turn (:attr:`chunk` above 0, or :attr:`more`).
+        A note, a memory item and a turn shown whole read exactly as :meth:`line`
+        writes them. The id is counted in the room (:func:`turn_excerpt`).
+        """
+        if not (show.ids and self.is_turn):
+            return self.line(now, timed=timed, show=show), False
+        where = self._dated(clock.now() if now is None else now, timed)
+        older = f" ({self.older})" if self.older else ""
+        return self._turn_line(where, older, show)
+
+    def _turn_line(self, where: str, older: str, show: Shown) -> tuple[str, bool]:
+        """A turn's line, and whether it carries its id (see :meth:`excerpt`)."""
+        said, cut = turn_excerpt(self.text, show)
+        if show.ids and (cut or self.chunk or self.more):
+            prefix = f"[{self.ref}] "
+            said = turn_excerpt(self.text, show, len(prefix))[0]
+            return f"{prefix}{said} ({where}){older}", True
+        return f"{said} ({where}){older}", False
 
     def _dated(self, now: float, timed: bool) -> str:
         """:attr:`where` with its date as :func:`day` writes it for *now*; a
@@ -442,38 +493,55 @@ def turn_said(text: str, show: Shown = HEADS) -> str:
     With ``show.terms`` a part that does not fit shows the window that holds the
     most of them instead (:func:`_matching`).
     """
-    plain = show.chars + _LINE_CHARS - TURN_CHARS
+    return turn_excerpt(text, show)[0]
+
+
+def turn_excerpt(text: str, show: Shown = HEADS, reserve: int = 0) -> tuple[str, bool]:
+    """:func:`turn_said`, and whether it shows less than the whole text: the
+    user's words or melo's reply are shortened, or the reply is left out.
+
+    With *reserve*, that many characters of the room are taken for something the
+    line carries besides (the turn's id, ``[t123] ``): the two parts and a plain
+    text keep their own bounds (the user's room of :data:`TURN_CHARS` too), but
+    the room they share is *reserve* shorter. Called with a *reserve* on a text
+    that is cut already, so the cut stays.
+    """
+    plain = show.chars + _LINE_CHARS - TURN_CHARS - reserve
     body = text.partition("\n")[2] if text.startswith("Task: ") else text
     if not body.startswith("User: "):
-        return snippet(text, plain)
+        return snippet(text, plain), len(" ".join(text.split())) > plain
     typed, marker, answer = body[len("User: ") :].partition("\nmelo: ")
     if not marker:
-        return snippet(text, plain)
+        return snippet(text, plain), len(" ".join(text.split())) > plain
     typed, answer = " ".join(typed.split()), " ".join(answer.split())
-    if len(typed) + len(answer) > show.chars:
-        picked = _matching(typed, answer, show) if show.terms else None
+    room = show.chars - reserve
+    cut = len(typed) + len(answer) > room
+    if cut:
+        picked = _matching(typed, answer, show, room) if show.terms else None
         if picked is not None:
             typed, answer = picked
         else:
             user_room = show.chars - _REPLY_CHARS
             if show.chars >= TURN_CHARS:
                 user_room = max(user_room, TURN_CHARS)
-            typed = snippet(typed, user_room if answer else show.chars)
-            room = show.chars - len(typed)
-            answer = snippet(answer, room) if answer and room >= _REPLY_MIN else ""
+            typed = snippet(typed, min(user_room, room) if answer else room)
+            left = room - len(typed)
+            answer = snippet(answer, left) if answer and left >= _REPLY_MIN else ""
     said = [f"the user said “{typed}”"] if typed else []
-    return "; ".join(said + ([f"melo replied “{answer}”"] if answer else []))
+    return "; ".join(said + ([f"melo replied “{answer}”"] if answer else [])), cut
 
 
-def _matching(typed: str, answer: str, show: Shown) -> tuple[str, str] | None:
-    """The two parts of a turn too long for *show*, each as the window that holds
-    the most of ``show.terms``; ``None`` when neither part holds one.
+def _matching(
+    typed: str, answer: str, show: Shown, room: int
+) -> tuple[str, str] | None:
+    """The two parts of a turn too long for *room* characters (``show.chars`` less
+    what the line carries besides), each as the window that holds the most of
+    ``show.terms``; ``None`` when neither part holds one.
 
     The user's words stay whole when they fit in :data:`_USER_SHARE` of the room
     and melo's reply has the rest; a part that is short leaves its room to the
     other. A part with no term shows its head.
     """
-    room = show.chars
     own = int(room * _USER_SHARE)
     if not answer:
         shares = (room, 0)
@@ -1058,6 +1126,11 @@ def block(
     With *listing* (``[memory] recall_form = "list"``) the notes are added so, and
     the turns follow as :data:`LIST_GUIDE` and one line each (:meth:`Item.listed`),
     all of them: *chars* does not bound the list, and *guide* is the line above it.
+
+    With ``show.ids`` (``[memory] excerpt_open = "on"``) a turn whose excerpt shows
+    less than the whole turn starts with its id (:meth:`Item.excerpt`), and
+    :data:`CUT_GUIDE` follows the excerpts when at least one line has an id. That
+    line counts toward *chars* as the others do, so the block stays within it.
     """
     lines = [BLOCK_HEADER, *kept]
     fixed = len(lines)
@@ -1070,25 +1143,33 @@ def block(
     def listed(item: Item) -> bool:
         return listing and not item.is_record
 
+    guided = False  # the line under the excerpts is counted once, with the first id
     for item in candidates:
         if listed(item):
             used.append(item)
             continue
-        line = f"- {item.line(now, timed=item.key in same_day, show=show)}"
-        if size + len(line) + 1 > chars:
+        said, carries = item.excerpt(now, timed=item.key in same_day, show=show)
+        line = f"- {said}"
+        extra = len(CUT_GUIDE) + 1 if carries and not guided else 0
+        if size + len(line) + 1 + extra > chars:
             continue
         lines.append(line)
         used.append(item)
-        size += len(line) + 1
+        size += len(line) + 1 + extra
+        guided = guided or carries
     # An item whose same-day partner did not fit needs no time: shorter, so it fits.
     # What is written here is what the model reads; each item keeps its own line.
     same_day = times(used)
     read: dict[int, str] = {}
     lines = lines[:fixed]
+    opens = False
     for n, item in enumerate(used):
         if not listed(item):
-            read[n] = item.line(now, timed=item.key in same_day, show=show)
+            read[n], carries = item.excerpt(now, timed=item.key in same_day, show=show)
+            opens = opens or carries
             lines.append(f"- {read[n]}")
+    if opens:
+        lines.append(CUT_GUIDE)
     turns = [n for n, item in enumerate(used) if listed(item)]
     if turns:
         lines.append(guide)

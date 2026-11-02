@@ -9,6 +9,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Developer only, not visible by default: a cut excerpt can be opened whole. With
+  `[memory] excerpt_open = "on"` (`-X memory.excerpt_open=on` for one run; the default, `"off"`,
+  changes nothing) recall keeps its excerpts of earlier chat turns, but a line that shows less
+  than the whole turn starts with the turn's id, `[t123] the user said “…”; melo replied “…”`,
+  in the recall block and in the memory search tool alike. A line shows less when the excerpt cut
+  what you said or what melo replied (or left the reply out), or when it is a piece of a longer
+  turn; a line that shows the whole turn, and every note, reads as before. The id counts toward
+  the line's room and the block stays within `recall_chars`. One line under the excerpts says that
+  a line that starts with an id is cut and can be opened with `open_memory`, and it appears only
+  when a line has an id. With the setting on, the chat's model also gets `open_memory`, which
+  returns the whole turn up to `recall_open_chars`; `turn.memory` lists what it opened as
+  `opened`, and each entry's `shown` keeps the exact line, id included. It has no effect with
+  `recall_form = "list"` or `recall_source = "items"`. Part of #428.
 - melo can now click, type and choose in its browser, inside its own Safari automation
   window (it does not move your mouse or use other apps; full-screen computer use stays a
   separate feature). With browsing on, three tools join the eight: `browser_click` presses a
@@ -627,6 +640,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- A recalled chat turn now shows up to 900 characters by default, and the recall block holds
+  up to 4000 (#349), where it showed 234 and 900. On a public long-memory benchmark, a model that
+  reads earlier chats answered 71.1% of questions instead of 58.9% (90 questions, 2 repeats;
+  16 better, 3 worse). The first request grows by about 220 tokens, its time to first byte does
+  not change, and the whole turn is faster because the model searches less.
+  `[memory] recall_item_chars` is 900 (was 234) and `recall_chars` is 4000 (was 900); the
+  ranges, the list form, `recall_open_chars` and `recall_source` are unchanged. A config that
+  sets either key keeps its value (`recall_item_chars = 234` with `recall_chars = 900` reads a
+  turn exactly as before), and a config without them gets the new defaults. A message that
+  needs no memory carries the same prompt.
 - The main chat's turns flow without extra taps (#440). A request in steps
   starts at once in Chinese as in English (`去这个网站看一下，然后告诉我最新的价格`,
   `look at this site and tell me the latest prices`), even when its last part
