@@ -62,10 +62,9 @@
             </ul>
           </div>
           <div class="board-col">
-            <h3>接下来 <small>6</small></h3>
+            <h3>接下来 <small>5</small></h3>
             <ul>
               <li class="board-card"><strong>浏览器里的计算机操作</strong><span>melo 在你能看到的窗口里操作网页，重要的操作先问你。</span></li>
-              <li class="board-card"><strong>Melo 工作时的更多姿势</strong><span>胶囊和桌面宠物为 melo 工作的时刻画出更多姿势。</span></li>
               <li class="board-card"><strong>在 melo 里安装模型服务器</strong><span>什么都没装时，确认一次就能得到第一个答案。</span></li>
               <li class="board-card"><strong>其他智能体把工作交给 melo</strong><span>任务 API 上的 worker，以及供编程智能体使用的 MCP 服务器。</span></li>
               <li class="board-card"><strong>共享同一项目的 worker</strong><span>并行的 worker 共用一段已缓存的开头；每个任务彼此独立。</span></li>
@@ -84,7 +83,7 @@
           </div>
         </div>
         <div class="board-done">
-          <h3>已完成 <small>14</small></h3>
+          <h3>已完成 <small>17</small></h3>
           <ul>
             <li class="board-card"><strong>主对话和旁支对话</strong><span>一个对话：自己回答，或按优先级把更大的工作交给任务；终端打开的是同一个对话。</span><span class="chip done">已完成</span></li>
             <li class="board-card"><strong>看得见的记忆</strong><span>跨对话的笔记，新的值取代旧的；在“记忆”标签页里编辑或删除。</span><span class="chip done">已完成</span></li>
@@ -100,6 +99,9 @@
             <li class="board-card"><strong>停下后可继续</strong><span>步数用完的任务显示“已停止”，点“继续”就从停下的地方接着做。</span><span class="chip done">已完成</span></li>
             <li class="board-card"><strong>在这个仓库上自用</strong><span>已完成三轮；第三轮在“自动”下，melo 没有问过一次就修好了自己代码里的两件事。</span><span class="chip done">已完成</span></li>
             <li class="board-card"><strong>带入其他助手的记忆</strong><span>首次设置时，或在“记忆”标签页里，melo 读取你电脑上其他编程助手保存的笔记，带入你选中的那些，可撤销。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>主对话开始任务</strong><span>用平常的话提出工作，主对话就开始任务；任务失败时，它跟进一次。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>Melo 会动了</strong><span>Melo 会醒来、在笔记本电脑前打字、歪着头、举起爪子、休息和玩耍，在控制台和你的桌面上都是。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>换上你自己的 Melo 美术</strong><span>一条命令检查一个文件夹或 zip 里的美术，并替换 Melo 的每一张图片。</span><span class="chip done">已完成</span></li>
           </ul>
         </div>
         <p class="more-link"><a href="https://github.com/localmelo/localmelo/issues/2">GitHub 上的完整计划</a>；尚未实现的记忆设计见<a href="./memory-design.html">记忆设计</a>。</p>
@@ -110,12 +112,46 @@
         <p class="more-link">每一项变化的细节见<a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>。</p>
         <section class="day" id="day-2026-11-01">
           <h3><time datetime="2026-11-01">11 月 1 日</time></h3>
-          <ul class="day-points">
-            <li>Melo 会动了，在控制台的面板里和你的桌面上：它会醒来，melo 工作时在笔记本电脑前打字，模型作答时歪着头，需要你时举起爪子，平时休息或玩耍。</li>
-            <li>你不在时整理笔记已经做好，测试期间默认关闭。运行后主对话会说明整理了什么，点一下或输入 <code class="wrap">/memory undo</code> 就全部放回。</li>
-            <li>本地模型把工具调用写成文字而没有运行时，melo 会让它再试一次，不再显示 “text” 这样的损坏回复。</li>
-            <li>完成的任务如实说明怎么结束的：只有拿出证据才算“已就绪”，否则是“完成但未收尾”，附上原因和一键“收尾”。</li>
-          </ul>
+          <div class="day-entry" id="u-2026-11-01-melo-moves">
+            <h4>Melo 会动了</h4>
+            <figure class="shot compact"><picture><source media="(prefers-reduced-motion: reduce)" srcset="../assets/img/melo-moves-still-zh.webp"><img src="../assets/img/melo-moves-zh.webp" alt="秋田犬 Melo 依次醒来、在笔记本电脑前打字、歪着头、举起爪子、休息和玩耍，旁边是每个动作含义的列表，屏幕上正在播放的那一项被标出。" width="640" height="336" loading="lazy"></picture></figure>
+            <ul class="day-points">
+              <li>页面或应用打开时 Melo 会醒来，没有任务运行时休息，偶尔玩耍。</li>
+              <li>melo 工作时它在笔记本电脑前打字，模型作答时它歪着头。</li>
+              <li>有事等你批准时，它立刻举起爪子。</li>
+              <li>这些动作在控制台的面板里和你的桌面上都会播放；开启“减弱动态效果”时，每个动作是一张静态图片。</li>
+            </ul>
+          </div>
+          <div class="day-entry" id="u-2026-11-01-chat-starts-tasks">
+            <h4>主对话替你开始任务</h4>
+            <figure class="shot"><a href="../assets/img/main-chat-starts-task-zh.webp"><img src="../assets/img/main-chat-starts-task-zh.webp" alt="主对话：它启动的任务没有完成，卡片写着没有完成；对话跟进了一次，说明安装步骤被拦下，改用另一种方式继续任务，最后任务完成并回来一张卡片；旁边是 Melo 的面板。" width="1280" height="800" loading="lazy"></a></figure>
+            <ul class="day-points">
+              <li>用平常的话提出较大的工作，比如 <code class="wrap">make a bar chart of sales.csv</code>，主对话会自己开始任务，并带有“更改”和“停止”。</li>
+              <li>它开始的任务失败、步数用完或需要你时，对话会跟进一次：换一种方式继续任务，或只问你一个清楚的问题。</li>
+              <li>它用一两句话说明做完了什么，而不是只留给你一个“失败”。</li>
+              <li>被拦下的步骤不会再试，换个写法也一样。</li>
+            </ul>
+            <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#when-a-task-it-started-stops-the-chat-follows-up">指南里的跟进</a></p>
+          </div>
+          <div class="day-entry" id="u-2026-11-01-art-pack">
+            <h4>换上你自己的 Melo 美术</h4>
+            <figure class="shot compact"><img src="../assets/img/art-pack-moves.webp" alt="Melo 六个状态各自的海报图，附状态名：startup、thinking、working、attention、idle_rest 和 idle_play。" width="880" height="648" loading="lazy"></figure>
+            <ul class="day-points">
+              <li>一条命令检查一个文件夹或 zip 里的美术，并替换 Melo 的每一张图片：宠物、控制台的画像、各种脸、图标和标志。</li>
+              <li><code>check</code> 什么都不改，只说明缺了什么；<code>apply</code> 一次替换全部，并留下一张预览图。</li>
+              <li>一个美术包有六个动作，每个最多 16 帧，另有可选的静态图、头像和品牌图片。</li>
+              <li>zip 在写入任何东西之前先检查，包里的任何内容都不会被运行。</li>
+            </ul>
+            <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/art-pack.md">美术包指南</a>，以及给开发者的<a href="./developers.html#art-pack">命令</a>。</p>
+          </div>
+          <div class="day-entry" id="u-2026-11-01-also">
+            <h4>另外</h4>
+            <ul class="day-points">
+              <li>你不在时整理笔记已经做好，测试期间默认关闭。运行后主对话会说明整理了什么，点一下或输入 <code class="wrap">/memory undo</code> 就全部放回。</li>
+              <li>本地模型把工具调用写成文字而没有运行时，melo 会让它再试一次，不再显示 “text” 这样的损坏回复。</li>
+              <li>完成的任务如实说明怎么结束的：只有拿出证据才算“已就绪”，否则是“完成但未收尾”，附上原因和一键“收尾”。</li>
+            </ul>
+          </div>
         </section>
         <section class="day" id="day-2026-10-31">
           <h3><time datetime="2026-10-31">10 月 31 日</time></h3>

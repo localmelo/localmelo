@@ -26,6 +26,27 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   run. Your own Deny, an unanswered question and the same refused call again
   always count. `Agent.closing_answer(query, note=)` asks once, without tools, for an
   answer from what a finished run found.
+- Developer only, not visible by default: notes from material the user points to and from
+  what the conversation shows (#442). `[memory] note_gate` has four levels, each including the
+  ones before it, and `-X memory.note_gate=pointed` sets one for a run. `typed`, the default,
+  is the rule as always and changes nothing. `pointed` also accepts a page or file the chat read
+  that the user pointed to, read from the chat's stored tool results: a host they typed points
+  to every page of it, an address with a path (`github.com/jane`) to that page and the pages
+  below it and not to the rest of the host (`github.com/evil`), a file by its name, and a turn
+  that calls it theirs ("my website", "my resume") without saying which, to the first page or
+  file that turn read only (a later read of it counts only for the same page or file again, or
+  one the user typed); a page the user did not point to, or called someone else's, never
+  supports a note about them.
+  `meaning` also accepts a note that says the same in other words or another language: its key
+  tokens (numbers, dates, addresses, e-mail addresses, Latin-script names) must be found in a
+  source, and its embedding must be at least `note_min_cosine` (0.55, 0.20 to 0.95) close to a
+  window of one. `model` also keeps a note about the user that no source supports as
+  inferred, and adds one sentence to the `remember` tool text. Above `typed`, a note that is an
+  instruction to the assistant is refused, and the tool text says that what the user pointed to
+  may support a note. A note keeps its source (`typed`, `pointed`, `result` or `inferred`, and
+  the page or file): the reply to the model, the `turn.memory` entry (`source`), the notes page
+  and recall say so. Known limit: a page fetched in the same step as the `remember` call may
+  not be stored yet, and the note is refused. Part of #442.
 
 - The `turn.memory` event records the exact text the model read. Each entry of
   `used` (the recall block's items) and `searched` (what `search_memory`
@@ -465,8 +486,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - The main chat's turns flow without extra taps (#440). A request in steps
   starts at once in Chinese as in English (`去这个网站看一下，然后告诉我最新的价格`,
   `look at this site and tell me the latest prices`), even when its last part
-  asks a question. A question about a task (`is it done?`, `跑完了吗`) is
-  answered from the task's state and answer, unless it also asks for work
+  asks a question. A question about a task (`is it done?`, `what did it find?`,
+  `跑完了吗`) is answered from the task's state and answer, unless it also asks for work
   (`Is the report ready? If not, write it to report.md`). A request in steps
   starts only for something outside the chat (a site, a link, a file, a repo or
   folder, your own things); `看看天气然后告诉我`, text to translate or explain
@@ -481,6 +502,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   report.csv`) ends **Ready** only when that file is in its folder; otherwise
   **Done, not finished** with `A file it was asked to write is missing: …`
   (`ending.reason` `file_missing`, names in `ending.missing`).
+- Memory items written from chats (`melo memory ingest FILE -X ingest=compress`,
+  a developer setting) keep what everyday talk shows about the person's daily
+  life, routines, mood and personality. Only exchanges that carry no
+  information, such as "ok" or "thanks", are left out. Small talk was left out
+  before.
 
 - The main chat starts a task itself when your request needs tools it lacks
   (running commands, changing files, many steps), with one line, **Change** and
@@ -673,6 +699,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- The browser tools never open this computer, its local network or melo's
+  own console. `localhost`, private, link-local, carrier-shared and
+  unspecified addresses (also written as IPv6 or as one number), local and
+  dotless names, and a name whose DNS answer is one of these are refused
+  before any question about the site and before the page loads, as
+  `web_fetch` refuses them. The console is refused wherever its settings or
+  the running gateway say it listens, even at a public address. A redirect,
+  a followed link or a page that moves to such an address is blanked and
+  refused. A picture or a wait works only on a page melo opened in that tab,
+  reads where the tab is before and after, and a wait counts only what it
+  sees on that page's own site. The tab list shows a tab's address and title
+  only while it is on the site melo checked for it. An address with a user
+  name or password in it, an address melo cannot take apart, and a name that
+  is not found are not opened either. The model is told to use `task_get`
+  for a task's result. [#439]
 - A site that a task's `web_fetch` or browser asked about, and that you, Auto
   or melo's rules refused, is now a blocked step like any other. When the chat
   continues that task on its own, that address however it is written (other

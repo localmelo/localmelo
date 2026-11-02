@@ -72,7 +72,7 @@ uv run --with pillow==13.0.0 pytest tests/test_moves_assets.py tests/cli/test_ma
 uv run python scripts/build_macos_app.py --install
 ```
 
-`docs/assets/img` 里的截图显示的还是旧美术下的控制台和应用；图片变了就重新截图。
+`docs/assets/img` 里的截图显示的是当前美术下的控制台和应用；图片变了就重新截图。
 
 <a id="the-pack"></a>
 

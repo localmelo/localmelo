@@ -236,6 +236,13 @@ text = '''
 python3 -m http.server 8080 --bind 127.0.0.1 --directory docs
 '''
 
+[block.art-pack]
+title = ["Replace Melo's art", "替换 Melo 的美术"]
+text = '''
+uv run --with pillow==13.0.0 python scripts/art_pack.py check melo-pack.zip
+uv run --with pillow==13.0.0 python scripts/art_pack.py apply melo-pack.zip
+'''
+
 [block.app-install]
 title = ["Build the app", "构建 App"]
 svg = true
@@ -295,7 +302,7 @@ href = "quickstart.html#interactive-conversations"
 title = ["Hand it a task", "交给它一个任务"]
 line = ["Ask for bigger work in the chat: it becomes a task and comes back as a card.", "在对话里提出更大的工作：它会成为任务，完成后以卡片回来。"]
 image = "cards.webp"
-alt = ["Three cards in the main chat: a finished task with what it changed and its tests, an approval that was answered, and one that waits for you.", "主对话中的三张卡片：一个已完成的任务（改了什么、跑了哪些测试）、一个已答复的批准请求和一个在等你的批准请求。"]
+alt = ["Three cards in the main chat: Done, not finished, with what is left and a Finish it button; Needs you, with the question to answer; and Ready, with the task's summary.", "主对话中的三张卡片：Done, not finished（还差什么，有 Finish it 按钮）、Needs you（要你回答的问题）和 Ready（任务的小结）。"]
 
 [[step]]
 id = "memory"

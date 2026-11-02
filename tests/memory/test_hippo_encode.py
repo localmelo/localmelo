@@ -128,7 +128,9 @@ async def test_the_request_is_english_json_only_at_temperature_zero_and_bounded(
         '"The user said ...", "melo recommended ..."',
         "not an instruction",
         "numbers of the exchanges",
-        "greetings, thanks and small talk",
+        "carry no information at",
+        "Small talk is not ignored",
+        "daily life, routines, habits, mood",
     ):
         assert rule in system, rule
     (prompt,) = stub.prompts
@@ -359,7 +361,7 @@ async def test_items_come_in_time_order_stamped_with_their_newest_sources_time()
         turns[5].answered_at,
         turns[7].answered_at,
     ]
-    assert {p.encoder for p in result.pieces} == {"1:stub-encoder"}
+    assert {p.encoder for p in result.pieces} == {"2:stub-encoder"}
 
 
 # ── One-shot strong signal ──
@@ -475,7 +477,7 @@ async def test_the_key_is_the_prompt_version_the_model_and_the_text_with_its_dat
     assert hippo.window_key("m", "p") == hippo.window_key("m", "p")
     assert len({hippo.window_key("m", "p"), hippo.window_key("n", "p")}) == 2
     assert hippo.window_key("m", "p") != hippo.window_key("mp", "")
-    assert hippo.PROMPT_VERSION == "1"
+    assert hippo.PROMPT_VERSION == "2"
 
 
 async def test_a_window_that_failed_is_not_cached_and_a_bad_line_is_skipped(

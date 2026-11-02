@@ -406,8 +406,19 @@ class SafariAutomationDriver:
         if self._current == tab:
             self._current = None
 
+    async def location(self, tab: str | None) -> str:
+        await self._focus(tab)
+        where = await self._eval("location.href")
+        return where if isinstance(where, str) else ""
+
     async def wait(
-        self, tab: str | None, until: str, text: str, seconds: float
+        self,
+        tab: str | None,
+        until: str,
+        text: str,
+        seconds: float,
+        *,
+        origin: str = "",
     ) -> bool:
         await self._focus(tab)
         probe = {
@@ -415,6 +426,8 @@ class SafariAutomationDriver:
             "text": f"(document.body.innerText || '').indexOf({json.dumps(text)}) >= 0",
             "gone": f"(document.body.innerText || '').indexOf({json.dumps(text)}) < 0",
         }[until]
+        if origin:
+            probe = f"location.origin === {json.dumps(origin)} && ({probe})"
         loop = asyncio.get_running_loop()
         end = loop.time() + seconds
         while True:
