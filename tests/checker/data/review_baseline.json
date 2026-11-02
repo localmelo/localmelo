@@ -9617,6 +9617,1205 @@
    },
    "verdict": "routine",
    "categories": []
+  },
+  {
+   "id": "round 4: cat <<E\"O\"F\\nx\\nEOF\\nE\"O\"F",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<E\"O\"F\nx\nEOF\nE\"O\"F"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF.txt\\nx\\nEOF.txt",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF.txt\nx\nEOF.txt"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<-EOF\\n\tx\\n\tEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<-EOF\n\tx\n\tEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<A <<B\\nx\\nA\\ny\\nB",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<A <<B\nx\nA\ny\nB"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\nx",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\nx"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\nx\\nEOF ",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\nx\nEOF "
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<E\"O\"F\\nx\\nEOF\\nrm -rf ~/Documents\\nE\"O\"F",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<E\"O\"F\nx\nEOF\nrm -rf ~/Documents\nE\"O\"F"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<E'O'F\\nx\\nEOF\\nrm -rf ~/Documents\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<E'O'F\nx\nEOF\nrm -rf ~/Documents\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF.txt\\nx\\nEOF.txt\\nrm -rf ~/Documents",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF.txt\nx\nEOF.txt\nrm -rf ~/Documents"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<\"EOF\"x\\nx\\nEOFx\\nrm -rf ~/Documents",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<\"EOF\"x\nx\nEOFx\nrm -rf ~/Documents"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<$X\\nx\\nrm -rf ~/Documents",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<$X\nx\nrm -rf ~/Documents"
+   },
+   "verdict": "high",
+   "categories": [
+    "delete"
+   ]
+  },
+  {
+   "id": "round 4: cat <<\\EOF\\nx\\nEOF\\nrm -rf ~/Documents",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<\\EOF\nx\nEOF\nrm -rf ~/Documents"
+   },
+   "verdict": "high",
+   "categories": [
+    "delete"
+   ]
+  },
+  {
+   "id": "round 4: cat <<-EOF\\n\tx\\n\tEOF\\nrm -rf ~/Documents",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<-EOF\n\tx\n\tEOF\nrm -rf ~/Documents"
+   },
+   "verdict": "high",
+   "categories": [
+    "delete"
+   ]
+  },
+  {
+   "id": "round 4: cat <<A <<B\\nx\\nA\\ny\\nB\\nrm -rf ~/Documents",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<A <<B\nx\nA\ny\nB\nrm -rf ~/Documents"
+   },
+   "verdict": "high",
+   "categories": [
+    "delete"
+   ]
+  },
+  {
+   "id": "round 4: cat <<EOF\\nx\\nrm -rf ~/Documents",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\nx\nrm -rf ~/Documents"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\nx\\nEOF \\nrm -rf ~/Documents",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\nx\nEOF \nrm -rf ~/Documents"
+   },
+   "verdict": "high",
+   "categories": [
+    "delete"
+   ]
+  },
+  {
+   "id": "round 4: cat <<EOF\\nx\\n EOF\\nrm -rf ~/Documents",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\nx\n EOF\nrm -rf ~/Documents"
+   },
+   "verdict": "high",
+   "categories": [
+    "delete"
+   ]
+  },
+  {
+   "id": "round 4: cat <<EOF \\\\n> out\\nx\\nEOF\\nrm -rf ~/Documents",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF \\\n> out\nx\nEOF\nrm -rf ~/Documents"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: rm -rf ~/Documents; cat <<EOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "rm -rf ~/Documents; cat <<EOF"
+   },
+   "verdict": "high",
+   "categories": [
+    "delete"
+   ]
+  },
+  {
+   "id": "round 4: echo \"<<EOF\"\\nrm -rf ~/Documents\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"<<EOF\"\nrm -rf ~/Documents\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: echo '<<EOF'\\nrm -rf ~/Documents\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo '<<EOF'\nrm -rf ~/Documents\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: # cat <<EOF\\nrm -rf ~/Documents\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "# cat <<EOF\nrm -rf ~/Documents\nEOF"
+   },
+   "verdict": "high",
+   "categories": [
+    "delete"
+   ]
+  },
+  {
+   "id": "round 4: echo hi # cat <<EOF\\nrm -rf ~/Documents\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo hi # cat <<EOF\nrm -rf ~/Documents\nEOF"
+   },
+   "verdict": "high",
+   "categories": [
+    "delete"
+   ]
+  },
+  {
+   "id": "round 4: echo a <<< EOF\\nrm -rf ~/Documents\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo a <<< EOF\nrm -rf ~/Documents\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\n$(echo \"$(echo \")\")\" ; rm -rf ~/Documents)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(echo \"$(echo \")\")\" ; rm -rf ~/Documents)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\n$(echo \")\"; rm -rf ~/Documents)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(echo \")\"; rm -rf ~/Documents)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\n$(echo '(' ; rm -rf ~/Documents)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(echo '(' ; rm -rf ~/Documents)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\n$(echo \"a $(echo b) c\" ; rm -rf ~/Documents)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(echo \"a $(echo b) c\" ; rm -rf ~/Documents)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\n$(echo $((1 + 2)); rm -rf ~/Documents)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(echo $((1 + 2)); rm -rf ~/Documents)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\n$(echo ${x:-y}; rm -rf ~/Documents)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(echo ${x:-y}; rm -rf ~/Documents)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\n$(echo a; (echo b); rm -rf ~/Documents)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(echo a; (echo b); rm -rf ~/Documents)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; wait \"$pid\"; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; wait \"$pid\"; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; printf '%s\\n' $pid; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; printf '%s\\n' $pid; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; printf -v line %s 1; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; printf -v line %s 1; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; read -r line < /tmp/p; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; read -r line < /tmp/p; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; read -ra words < /tmp/p; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; read -ra words < /tmp/p; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; mapfile -t lines < /tmp/p; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; mapfile -t lines < /tmp/p; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; arr[1]=x; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; arr[1]=x; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; echo ${arr[1]}; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; echo ${arr[1]}; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; [[ $pid -eq 5 ]]; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; [[ $pid -eq 5 ]]; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; [ -n \"$pid\" ]; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; [ -n \"$pid\" ]; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; [[ -n $pid ]]; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; [[ -n $pid ]]; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; declare -a list; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; declare -a list; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; declare -x flag=1; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; declare -x flag=1; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; tail -f log --pid=$pid; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; tail -f log --pid=$pid; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; exec 3< /tmp/p; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; exec 3< /tmp/p; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; coproc other { sleep 1; }; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; coproc other { sleep 1; }; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; echo $(( 1 + 2 )); kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; echo $(( 1 + 2 )); kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\n$(case x in a) rm -rf ~/Documents;; esac)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(case x in a) rm -rf ~/Documents;; esac)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\n$(echo `date`)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(echo `date`)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\n$(echo \"unclosed)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(echo \"unclosed)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\n$(echo 'unclosed)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(echo 'unclosed)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\n$(echo ${x:-\")\"})\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(echo ${x:-\")\"})\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\n$(echo a # ) b\\nrm -rf ~/Documents)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(echo a # ) b\nrm -rf ~/Documents)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\n$(cat <<'IN'\\ninner\\nIN\\n)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(cat <<'IN'\ninner\nIN\n)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\n$(echo $(echo $(echo $(echo $(echo $(echo $(echo $(echo x))))))))\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(echo $(echo $(echo $(echo $(echo $(echo $(echo $(echo x))))))))\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\n$(echo a\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(echo a\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\n`echo \\`date\\``\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n`echo \\`date\\``\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\n`echo a\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n`echo a\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\nhello\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\nhello\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat > notes.txt <<EOF\\nhello $USER\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat > notes.txt <<EOF\nhello $USER\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<'EOF' > script.sh\\n#!/bin/bash\\necho \"$1\"\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<'EOF' > script.sh\n#!/bin/bash\necho \"$1\"\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<\"EOF\"\\nliteral $(rm -rf ~/Documents)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<\"EOF\"\nliteral $(rm -rf ~/Documents)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: python3 <<'PY'\\nprint('hi')\\nPY",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "python3 <<'PY'\nprint('hi')\nPY"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: python3 - <<PY\\nimport os\\nprint(os.getcwd())\\nPY",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "python3 - <<PY\nimport os\nprint(os.getcwd())\nPY"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: bash <<'EOF'\\necho hi\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "bash <<'EOF'\necho hi\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: git commit -m \"$(cat <<'EOF'\\nFix the parser\\n\\nLonger text here.\\nEOF\\n)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git commit -m \"$(cat <<'EOF'\nFix the parser\n\nLonger text here.\nEOF\n)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: git commit -m \"$(cat <<EOF\\nFix the parser\\nEOF\\n)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git commit -m \"$(cat <<EOF\nFix the parser\nEOF\n)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\nuser: $(whoami) in $(pwd)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\nuser: $(whoami) in $(pwd)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\nversion: $(git describe --tags)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\nversion: $(git describe --tags)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\n$(basename \"$PWD\")\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(basename \"$PWD\")\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\n$(dirname \"$(pwd)\")\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(dirname \"$(pwd)\")\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\n$(printf '%s\\n' \"$HOME\")\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(printf '%s\\n' \"$HOME\")\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\n${HOME}/bin and $((1 + 2))\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n${HOME}/bin and $((1 + 2))\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\n`date`\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n`date`\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<A > a.txt\\nx\\nA\\ncat <<B > b.txt\\ny\\nB",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<A > a.txt\nx\nA\ncat <<B > b.txt\ny\nB"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF | sort\\nb\\na\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF | sort\nb\na\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: tee out.txt <<EOF\\ndata\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "tee out.txt <<EOF\ndata\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: while read line; do echo \"$line\"; done <<EOF\\na\\nb\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "while read line; do echo \"$line\"; done <<EOF\na\nb\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\ndon't stop\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\ndon't stop\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\nline1\\n\\nline3\\nEOF\\nls",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\nline1\n\nline3\nEOF\nls"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF\\n# not a comment\\n#!/bin/sh\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n# not a comment\n#!/bin/sh\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: echo \"$(date)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(date)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: echo $(date +%s)",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo $(date +%s)"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: x=$(ls | wc -l); echo $x",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "x=$(ls | wc -l); echo $x"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: echo \"$(basename \"$0\")\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(basename \"$0\")\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: echo \"files: $(ls \"$HOME\")\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"files: $(ls \"$HOME\")\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: latest=$(ls -t | head -1)",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "latest=$(ls -t | head -1)"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: out=$(git rev-parse --short HEAD) && echo \"$out\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "out=$(git rev-parse --short HEAD) && echo \"$out\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: echo \"a<<b\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"a<<b\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: echo '<<EOF'; ls",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo '<<EOF'; ls"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: awk 'BEGIN{print 1<<2}'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "awk 'BEGIN{print 1<<2}'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: python3 -c 'print(1 << 3)'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "python3 -c 'print(1 << 3)'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: echo $((1 + 2))",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo $((1 + 2))"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: cat <<EOF >> ~/notes.txt\\nentry\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF >> ~/notes.txt\nentry\nEOF"
+   },
+   "verdict": "high",
+   "categories": [
+    "outside_write"
+   ]
+  },
+  {
+   "id": "round 4: ssh host <<'EOF'\\nls\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "ssh host <<'EOF'\nls\nEOF"
+   },
+   "verdict": "undecided",
+   "categories": []
+  },
+  {
+   "id": "round 4: result=$(cat <<EOF\\ntext\\nEOF\\n)\\necho \"$result\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "result=$(cat <<EOF\ntext\nEOF\n)\necho \"$result\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; printf -vpid %s 1234; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; printf -vpid %s 1234; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; printf -v pid %s 1234; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; printf -v pid %s 1234; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; printf -v 'pid[0]' %s 1234; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; printf -v 'pid[0]' %s 1234; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; read -apid < /tmp/p; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; read -apid < /tmp/p; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; read -a pid < /tmp/p; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; read -a pid < /tmp/p; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; read -rapid < /tmp/p; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; read -rapid < /tmp/p; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; mapfile -t pid < /tmp/p; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; mapfile -t pid < /tmp/p; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; readarray pid < /tmp/p; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; readarray pid < /tmp/p; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; wait -n -ppid; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; wait -n -ppid; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; wait -n -p pid; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; wait -n -p pid; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; getopts ab pid; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; getopts ab pid; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; read 'pid[0]' < /tmp/p; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; read 'pid[0]' < /tmp/p; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; arr[pid=5]=1; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; arr[pid=5]=1; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; echo ${arr[pid=5]}; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; echo ${arr[pid=5]}; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; echo $[ pid=5 ]; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; echo $[ pid=5 ]; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; [[ pid=5 -eq 5 ]]; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; [[ pid=5 -eq 5 ]]; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; [[ arr[pid=7] -eq 1 ]]; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; [[ arr[pid=7] -eq 1 ]]; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; declare -a list=([pid=5]=x); kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; declare -a list=([pid=5]=x); kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; declare -i n; n='pid=7'; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; declare -i n; n='pid=7'; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; typeset -i n; n='pid=7'; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; typeset -i n; n='pid=7'; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; local -i n; n='pid=7'; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; local -i n; n='pid=7'; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; declare -ai n; n='pid=7'; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; declare -ai n; n='pid=7'; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; ref=pid; printf -v \"$ref\" %s 1; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; ref=pid; printf -v \"$ref\" %s 1; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; ref=pid; printf -v$ref %s 1; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; ref=pid; printf -v$ref %s 1; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; ref=pid; read $ref < /tmp/p; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; ref=pid; read $ref < /tmp/p; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; ref=pid; unset \"$ref\"; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; ref=pid; unset \"$ref\"; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; ref=pid; wait -p $ref; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; ref=pid; wait -p $ref; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; exec {pid}< /tmp/p; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; exec {pid}< /tmp/p; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: sleep 9 & pid=$!; coproc pid { sleep 1; }; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; coproc pid { sleep 1; }; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: echo $((1 << 3))",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo $((1 << 3))"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: x=$((1<<4)); echo $x",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "x=$((1<<4)); echo $x"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 4: (( y = 1 << 2 )); echo $y",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "(( y = 1 << 2 )); echo $y"
+   },
+   "verdict": "routine",
+   "categories": []
   }
  ]
 }

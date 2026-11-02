@@ -145,7 +145,11 @@ _WRITES = set([">", ">>", "&>", "&>>", ">|", ">&"])
 _PY = re.compile(r"python(\d(\.\d+)?)?w?$")
 _SHELLS = set(["sh", "bash", "zsh", "dash", "fish"])
 _BARE = _SHELLS | set(["node", "perl", "ruby", "php", "deno", "bun"])
-_HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_]\w*)\1")
+# The delimiter of a here-document that is read exactly: a plain word, or one
+# in a pair of quotes of its own, and ending where the shell word ends.
+_DELIMITER = re.compile(
+    r"""[ \t]*(?:([A-Za-z_]\w*)|'([A-Za-z_]\w*)'|"([A-Za-z_]\w*)")(?=[\s;&|()<>]|$)"""
+)
 LARGE = re.compile(
     r"\.(dmg|pkg|zip|tar|tgz|gz|xz|bz2|7z|whl|gguf|safetensors|bin|iso|pt|onnx)$"
     r"|(^|/)(get-pip\.py|install\.sh|installer\.sh)$"
@@ -427,90 +431,218 @@ def _uncomment(command: str) -> str:
     return "".join(out)
 
 
-def _heredocs(command: str) -> tuple[str, list[str]]:
-    """*command* without its here-document bodies, and the bodies in order."""
-    text, bodies, _ = _heredoc_bodies(command)
-    return text, bodies
+def _split_heredocs(command: str) -> tuple[str, list[str], list[str], bool]:
+    """*command* without its here-document bodies, the bodies, which ones expand, and whether all were read exactly.
 
-
-def _heredoc_bodies(command: str) -> tuple[str, list[str], list[str]]:
-    """*command* without its here-document bodies, the bodies, and which ones the shell expands.
-
-    The third list holds the bodies whose delimiter is not quoted: the shell
-    runs the ``$(…)`` and backquoted commands written in them.
+    A here-document is read only in its plain forms: ``<<WORD``, ``<<'WORD'``
+    or ``<<"WORD"``, one on a line, outside quotes and comments, with its
+    delimiter alone on a line later in the text. Anything else with a ``<<``
+    in it (``<<-``, a delimiter that is partly quoted, escaped or followed by
+    more word, two on a line, a delimiter that never comes, a line continued
+    with a backslash) is not read at all: the text is returned as it is (so
+    that nothing after it is taken for a body) with the flag false, and the
+    caller makes the step undecided. The third list holds the bodies whose
+    delimiter is not quoted: the shell runs the ``$(…)`` and backquoted
+    commands written in them.
     """
-    lines, out, bodies, expanded, i = command.split("\n"), [], [], [], 0
-    while i < len(lines):
-        out.append(lines[i])
-        i += 1
-        for match in _HEREDOC.finditer(out[-1]):
-            start = i
-            while i < len(lines) and lines[i].strip() != match.group(2):
-                i += 1
-            bodies.append("\n".join(lines[start:i]))
-            if not match.group(1):
-                expanded.append(bodies[-1])
-            i += 1
-    return "\n".join(out), bodies, expanded
+    if "<<" not in command:
+        return command, [], [], True
+    unreadable: tuple[str, list[str], list[str], bool] = (command, [], [], False)
+    kept: list[str] = []
+    bodies: list[str] = []
+    expanded: list[str] = []
+    n, at, mark, quote = len(command), 0, 0, ""
+    pending: tuple[str, bool] | None = None  # delimiter, quoted
+    doubtful = False  # a substitution inside double quotes: the quotes may be off
+    while at < n:
+        char = command[at]
+        if char == "\\" and quote != "'":
+            if pending and command[at + 1 : at + 2] == "\n":
+                return unreadable
+            at += 2
+            continue
+        if quote:
+            if char == quote:
+                quote = ""
+            elif char == "\n" and pending:
+                return unreadable
+            elif quote == '"' and (char == "`" or command.startswith("$(", at)):
+                doubtful = True
+            at += 1
+            continue
+        if char in "'\"":
+            quote = char
+        elif command.startswith("$'", at):
+            return unreadable
+        elif char == "#" and (at == 0 or command[at - 1] in " \t\n;&|()"):
+            end = command.find("\n", at)
+            at = n if end < 0 else end
+            continue
+        elif command.startswith("<<<", at):
+            at += 3
+            continue
+        elif command.startswith("<<", at):
+            found = _DELIMITER.match(command, at + 2)
+            if found is None or command.startswith("<<-", at) or pending or doubtful:
+                return unreadable
+            word = found.group(1) or found.group(2) or found.group(3)
+            pending = (word, found.group(1) is None)
+            at = found.end()
+            continue
+        elif char == "\n" and pending is not None:
+            placed = _terminator(command, at + 1, pending[0])
+            if placed is None:
+                return unreadable
+            line, resume = placed
+            body = command[at + 1 : line - 1] if line > at + 1 else ""
+            kept.append(command[mark : at + 1])
+            bodies.append(body)
+            if not pending[1]:
+                expanded.append(body)
+            at = mark = resume
+            pending = None
+            continue
+        at += 1
+    if pending is not None:
+        return unreadable  # the line of the operator is the last: no body
+    kept.append(command[mark:])
+    return "".join(kept), bodies, expanded, True
 
 
-def _group_end(text: str, at: int) -> int:
-    """Where the ``(`` group that *text* has open at *at* ends (the index of its ``)``)."""
-    depth, n = 1, len(text)
+def _terminator(text: str, at: int, word: str) -> tuple[int, int] | None:
+    """Where the line that is exactly *word* starts and where the text goes on after it, else ``None``."""
+    n = len(text)
+    while at <= n:
+        eol = text.find("\n", at)
+        stop = n if eol < 0 else eol
+        if text[at:stop] == word:
+            return at, min(n, stop + 1)
+        if eol < 0:
+            return None
+        at = eol + 1
+    return None
+
+
+# How deep a command substitution may nest in a here-document to be read exactly.
+_MAX_NEST = 6
+_BRACES = re.compile(r"[(){}'\"`]")
+
+
+def _substitution_end(text: str, at: int, depth: int = 0) -> int | None:
+    """The index of the ``)`` that closes the ``$(`` whose body starts at *at*, else ``None``.
+
+    The body is read exactly or not at all: a quote is followed to its own
+    end (a double quote reads a ``$(`` in it as a group of its own), parentheses
+    must balance, and anything this reader does not follow (a backquote, a
+    comment, a nested here-document, ``${…}`` holding a quote or a bracket,
+    nesting deeper than :data:`_MAX_NEST`, a missing end) gives ``None``.
+    """
+    if depth > _MAX_NEST:
+        return None
+    n, level = len(text), 1
     while at < n:
         char = text[at]
         if char == "\\":
-            at += 1
-        elif char in "'\"":
-            end = text.find(char, at + 1) if char == "'" else _double_end(text, at + 1)
-            at = end if end >= 0 else n
-        elif char == "(":
-            depth += 1
-        elif char == ")":
-            depth -= 1
-            if depth == 0:
+            at += 2
+        elif char == "'":
+            close = text.find("'", at + 1)
+            if close < 0:
+                return None
+            at = close + 1
+        elif char == '"':
+            after = _quote_end(text, at + 1, depth)
+            if after is None:
+                return None
+            at = after
+        elif (
+            char == "`"
+            or text.startswith("<<", at)
+            or (
+                char == "#"
+                and text[at - 1 : at] in ("", " ", "\t", "\n", ";", "(", "&", "|")
+            )
+        ):
+            return None
+        elif text.startswith("${", at):
+            close = text.find("}", at)
+            if close < 0 or _BRACES.search(text, at + 2, close):
+                return None
+            at = close + 1
+        elif text.startswith("$(", at) and not text.startswith("$((", at):
+            nested = _substitution_end(text, at + 2, depth + 1)
+            if nested is None:
+                return None
+            at = nested + 1
+        else:
+            level += (char == "(") - (char == ")")
+            if level == 0:
                 return at
-        at += 1
-    return n
-
-
-def _double_end(text: str, at: int) -> int:
-    """The index of the ``"`` that closes a double-quoted string starting at *at*, else ``-1``."""
-    while at < len(text):
-        if text[at] == "\\":
             at += 1
-        elif text[at] == '"':
-            return at
-        at += 1
-    return -1
+    return None
 
 
-def _expanded_commands(bodies: list[str]) -> list[str]:
-    """The commands written as ``$(…)`` or between backquotes in here-document *bodies*.
+def _quote_end(text: str, at: int, depth: int) -> int | None:
+    """The index after the ``"`` that closes a double-quoted string whose text starts at *at*, else ``None``."""
+    n = len(text)
+    while at < n:
+        char = text[at]
+        if char == "\\":
+            at += 2
+        elif char == '"':
+            return at + 1
+        elif char == "`":
+            return None
+        elif text.startswith("${", at):
+            close = text.find("}", at)
+            if close < 0 or _BRACES.search(text, at + 2, close):
+                return None
+            at = close + 1
+        elif text.startswith("$(", at) and not text.startswith("$((", at):
+            nested = _substitution_end(text, at + 2, depth + 1)
+            if nested is None:
+                return None
+            at = nested + 1
+        else:
+            at += 1
+    return None
+
+
+def _expanded_commands(bodies: list[str]) -> tuple[list[str], bool]:
+    """The commands written as ``$(…)`` or between backquotes in here-document *bodies*, and whether all were read exactly.
 
     A backslash keeps a ``$`` or a backquote from starting one. Arithmetic
-    (``$((…))``) is not a command.
+    (``$((…))``) is not a command. A command that cannot be balanced exactly
+    (see :func:`_substitution_end`), or that holds a ``case``, is still
+    returned as far as it can be read, and the flag is false.
     """
     found: list[str] = []
+    exact = True
     for body in bodies:
-        at = 0
-        while at < len(body):
+        at, n = 0, len(body)
+        while at < n:
             char = body[at]
             if char == "\\":
                 at += 2
             elif body.startswith("$(", at) and not body.startswith("$((", at):
-                end = _group_end(body, at + 2)
-                found.append(body[at + 2 : end])
-                at = end + 1
+                end = _substitution_end(body, at + 2)
+                inner = body[at + 2 : n if end is None else end]
+                exact = exact and end is not None and not _CASE.search(inner)
+                found.append(inner)
+                at = n if end is None else end + 1
             elif char == "`":
                 end = at + 1
-                while end < len(body) and body[end] != "`":
+                while end < n and body[end] != "`":
                     end += 2 if body[end] == "\\" else 1
-                found.append(body[at + 1 : end].replace("\\`", "`"))
+                inner = body[at + 1 : min(end, n)]
+                exact = exact and end < n and "\\" not in inner
+                found.append(inner)
                 at = end + 1
             else:
                 at += 1
-    return found
+    return found, exact
+
+
+_CASE = re.compile(r"\b(case|esac)\b")
 
 
 def _tokens(command: str) -> list[str]:
@@ -620,6 +752,18 @@ _ARITH = re.compile(
 _PARAMETER = re.compile(r"\$\{([A-Za-z_]\w*):?=")
 # declare -n, typeset -gn …: the name becomes a reference to another one.
 _NAMEREF = re.compile(r"-[A-Za-z]*n[A-Za-z]*")
+# declare -i, local -ai …: a value given to the name is evaluated as arithmetic.
+_INTEGER = re.compile(r"-[A-Za-z]*i[A-Za-z]*")
+# What is between brackets may be arithmetic (``a[n=1]=x``, ``${a[n=1]}``, ``[[ n=1 -eq 1 ]]``).
+_SUBSCRIPT = re.compile(r"\[([^\]\n]{0,200})\]")
+# ``exec {name}<file`` gives the name a descriptor number.
+_FD_NAME = re.compile(r"\{([A-Za-z_]\w*)\}\s*[<>]")
+# A name, or an element of one (``name[0]``), to the end of a word.
+_NAME_AT = re.compile(r"([A-Za-z_]\w*)(?:\[.*\])?$", re.S)
+# The builtins that give a value to the name they are given instead of an expansion.
+_NAME_TARGETS = frozenset(
+    ["read", "mapfile", "readarray", "getopts", "unset", "select"]
+)
 
 
 def _arith_names(text: str) -> set[str]:
@@ -666,15 +810,64 @@ def _arithmetic(tokens: list[str]) -> set[str]:
     return found
 
 
+def _unknowable(head: list[str]) -> bool:
+    """Whether the command *head* (from its program on) could give a value to a name it does not spell out.
+
+    That is ``eval``, ``source``, a name reference or an integer variable
+    (a value given to one is evaluated as arithmetic), a name built by an
+    expansion (``read $name``, ``printf -v "$name"``), and an option word too
+    long to be told from a name attached to it.
+    """
+    if not head:
+        return False
+    prog, args = head[0], head[1:]
+    if prog in ("eval", "source", "."):
+        return True
+    if prog in _DECLARERS and any(
+        _NAMEREF.fullmatch(w) or _INTEGER.fullmatch(w) for w in args
+    ):
+        return True
+    if prog in _READERS and any(w[:1] == "-" and len(w) > 64 for w in args):
+        return True
+    if prog in _NAME_TARGETS:
+        return any("$" in w and w[:1] != "-" for w in args)
+    flag = {"printf": "-v", "wait": "-p"}.get(prog)
+    if flag:
+        for at, word in enumerate(args):
+            if word == flag and "$" in "".join(args[at + 1 : at + 2]):
+                return True
+            if word.startswith(flag) and word != flag and "$" in word:
+                return True
+    return False
+
+
+def _written(args: list[str]) -> set[str]:
+    """The names the words of ``read``, ``printf -v``, ``wait -p``… may write.
+
+    A word that is a name (or an element, ``name[0]``), and an option with the
+    name attached (``-vpid``, ``-apid``, ``-ppid``).
+    """
+    names: set[str] = set()
+    for word in args:
+        for start in range(1, len(word)) if word[:1] == "-" else (0,):
+            found = _NAME_AT.match(word, start)
+            if found:
+                names.add(found.group(1))
+    return names
+
+
 def _own_pids(text: str) -> set[str]:
     """The shell variables that only ever hold a process this command started.
 
     A name counts when every way the text gives it a value is ``name=$!`` in
     the command's own shell (not inside parentheses or a pipeline, where a
-    subshell sets its own copy). Any other value (``name=123``,
-    ``name=$(pgrep x)``, ``for name in …``, ``read name``, ``(( name = 1 ))``,
-    ``export name=…``), or a command that could set one (``eval``, ``source``,
-    a name reference) takes the name out.
+    subshell sets its own copy). Any other mention of the name where it may be
+    written takes it out: another value (``name=123``, ``name=$(pgrep x)``,
+    ``export name=…``), a loop or a ``read`` (``read -a name``, ``printf -v
+    name``, ``wait -pname``), arithmetic (``(( name = 1 ))``, ``let``,
+    ``a[name=1]``, an integer variable), a descriptor (``{name}<file``), and a
+    command that could set one without spelling it out (``eval``, ``source``,
+    a name reference, ``read $x``), which takes all names out.
     """
     if "$!" not in text and "${!}" not in text:
         return set()  # no process was started here (and nothing to lex again)
@@ -684,6 +877,9 @@ def _own_pids(text: str) -> set[str]:
         return set()
     held: set[str] = set()
     other: set[str] = _arithmetic(tokens) | set(_PARAMETER.findall(text))
+    other |= set(_FD_NAME.findall(text))
+    for inside in _SUBSCRIPT.findall(text):
+        other |= _arith_names(inside)
     words: list[str] = []
     depth, before = 0, ""
     for token in [*tokens, ";"]:
@@ -693,11 +889,7 @@ def _own_pids(text: str) -> set[str]:
             continue
         piped = token in ("|", "|&")
         if words:
-            head = _head(words)
-            if head[:1] and (
-                head[0] in ("eval", "source", ".")
-                or (head[0] in _DECLARERS and any(map(_NAMEREF.fullmatch, head[1:])))
-            ):
+            if _unknowable(_head(words)):
                 return set()
             if piped and words[-1] == "}":
                 return set()  # a group that is piped runs in a subshell
@@ -719,10 +911,15 @@ def _bindings(
     of its own: what it sets is not the shell's.
     """
     head = _head(words)
+    lead = words
+    while lead and lead[0] in _KEYWORDS:
+        lead = lead[1:]
+    if lead[:1] == ["coproc"] and lead[2:3] == ["{"] and _NAME.fullmatch(lead[1]):
+        other.add(lead[1])  # coproc NAME { …; } makes NAME an array
     if head[:1] in (["for"], ["select"]) and len(head) > 1:
         other.add(head[1])
     elif head[:1] and head[0] in _READERS:
-        other.update(w for w in head[1:] if _NAME.fullmatch(w))
+        other.update(_written(head[1:]))
     elif head[:1] == ["let"]:
         other.update(_arith_names(" ".join(head[1:])))
     core = words[1:] if words[0] in _DECLARERS else words
@@ -798,7 +995,10 @@ def _pipe_status(
 def _review_shell(
     ctx: Context, f: Findings, command: str, status_read: bool = False
 ) -> None:
-    text, bodies = _heredocs(_uncomment(command))
+    stripped, bodies, expanded, exact = _split_heredocs(command)
+    text = _uncomment(stripped)
+    if not exact:
+        f.doubt("Has a here-document that melo cannot read exactly.")
     if _ansi_c(text):
         f.doubt("Uses a quote melo cannot read ($'…').")
     try:
@@ -813,11 +1013,13 @@ def _review_shell(
             f.doubt("Has a backquote that does not close.")
         for inner in ticked:
             review_shell(ctx.deeper(), f, inner)
-        if "<<" in command:
-            # The shell runs what an unquoted here-document holds in $(…) or
-            # backquotes; the bodies are read from the text as written.
-            for inner in _expanded_commands(_heredoc_bodies(command)[2]):
-                review_shell(ctx.deeper(), f, inner)
+        # The shell runs what an unquoted here-document holds in $(…) or
+        # backquotes.
+        inners, readable = _expanded_commands(expanded)
+        if not readable:
+            f.doubt("Has a command in a here-document that melo cannot read exactly.")
+        for inner in inners:
+            review_shell(ctx.deeper(), f, inner)
         _run_segments(ctx, f, segments, bodies, set(ticked))
     finally:
         f.started = outer
