@@ -265,11 +265,13 @@ def test_kept_lines_come_first_and_the_budget_holds() -> None:
     ]
     quotes = [f"fact {n} " + "y" * 300 for n in range(5)]
     lines = kept_lines(quotes, refused=True)
-    text, used = block(items, lines)
+    text, used = block(items, lines, chars=900)  # the bound that the items overflow
     assert text.split("\n")[:2] == [BLOCK_HEADER, lines[0]]
     assert lines[0].count("“") == 3 and "and 2 more" in lines[0]
     assert lines[1] == NOT_KEPT_LINE and "y" * 130 not in text
-    assert len(text) <= BLOCK_CHARS and 0 < len(used) < len(items)
+    assert len(text) <= 900 and 0 < len(used) < len(items)
+    # The shipped bound is larger: the same items all fit in it.
+    assert len(block(items, lines)[1]) == len(items)
     assert block([], []) == ("", []) and block([], lines[:1])[0].count("\n") == 1
 
 

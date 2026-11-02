@@ -54,10 +54,14 @@ MIN_COVERAGE: Final = 0.6
 MIN_COSINE: Final = 0.55
 HALF_LIFE_DAYS: Final = 30.0
 PER_SESSION: Final = 2
-# What one turn recalls by itself, and the room its block may take.
+# What one turn recalls by itself, and the room its block may take. The last two are
+# the shipped defaults of ``[memory] recall_chars`` (the block) and
+# ``recall_item_chars`` (one recalled turn): a larger room answered more questions
+# from earlier chats (#349). They are not the head :data:`TURN_CHARS` of a turn.
 AUTO_RECORDS: Final = 3
 AUTO_DOCS: Final = 2
-BLOCK_CHARS: Final = 900
+BLOCK_CHARS: Final = 4_000
+ITEM_CHARS: Final = 900
 # What the block says about the message's own words: kept as notes, or refused.
 # It forbids saving that fact again, not keeping another fact of the message.
 KEPT_LINE: Final = (

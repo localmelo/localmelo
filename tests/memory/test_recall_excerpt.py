@@ -1,9 +1,10 @@
 """How much of a recalled chat turn is shown, and which part of it.
 
-``[memory] recall_item_chars`` (default 234, the room one turn takes in the
-block and in the search tool's list) and ``recall_excerpt`` (``head``, the start
-of each part, or ``match``, the sentences of each part that hold most of the
-question's content words). The defaults read exactly as a turn always did.
+``[memory] recall_item_chars`` (the room one turn takes in the block and in the
+search tool's list; the shipped default is 900, and 234 reads a turn exactly as it
+always did) and ``recall_excerpt`` (``head``, the start of each part, or
+``match``, the sentences of each part that hold most of the question's content
+words). The default head, :data:`HEADS`, reads exactly as a turn always did.
 Synthetic turns, words only, no model.
 """
 
@@ -344,7 +345,7 @@ async def memory_with(
 async def test_the_recall_block_follows_the_two_settings(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    cfg = config(recall_chars=4000)
+    cfg = config(recall_chars=4000, recall_item_chars=TURN_CHARS)
     memory = await memory_with(tmp_path, store, cfg, english())
     try:
 
@@ -380,7 +381,7 @@ async def test_the_recall_block_follows_the_two_settings(
 async def test_the_search_tool_follows_the_two_settings_too(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    cfg = config()
+    cfg = config(recall_item_chars=TURN_CHARS)
     memory = await memory_with(tmp_path, store, cfg, english())
     tools = MemoryTools(memory)
     try:

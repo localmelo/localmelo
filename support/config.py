@@ -383,10 +383,10 @@ class MemoryConfig:
     ``rules`` (no model call), ``model`` (rules then a bounded model pass), or
     ``model+tags`` (the same call limit, tagged turns first). ``sleep_lock`` is
     an optional path whose presence prevents model requests. Five more developer
-    settings, each defaulting to today's behaviour, shape the recall block a chat
-    message carries: ``recall_records`` notes and ``recall_docs`` chat turns at
-    most (0-20 each) in a block of at most ``recall_chars`` characters
-    (200-8000); ``recall_notes = "off"`` leaves notes out of the block and the
+    settings shape the recall block a chat message carries: ``recall_records``
+    notes (3 by default) and ``recall_docs`` chat turns (2) at most (0-20 each) in a
+    block of at most ``recall_chars`` characters (200-8000, 4000 by default);
+    ``recall_notes = "off"`` leaves notes out of the block and the
     pinned lines, so only turns are recalled; and ``search_when_empty = "hint"``
     adds one line to a block that recalls nothing, telling the model to call the
     memory search tool first. Two more set the bars an item must pass to be
@@ -395,7 +395,7 @@ class MemoryConfig:
     ``recall_min_coverage`` (0.10-1.00), the least share of the question's
     content words that a note or turn must hold. Two more set how much of a
     recalled chat turn is shown, in the block and in the search tool:
-    ``recall_item_chars`` (120-2000), the room one turn takes, and
+    ``recall_item_chars`` (120-2000, 900 by default), the room one turn takes, and
     ``recall_excerpt``, ``head`` (the start of each part, the default) or
     ``match`` (the sentences of each part that hold most of the question's
     content words). Three more set how recalled chat turns are shown at all:
@@ -443,12 +443,12 @@ class MemoryConfig:
     sleep_lock: str = ""  # Optional lock path: no model calls while it exists.
     recall_records: int = 3  # Most notes a chat message's recall block holds.
     recall_docs: int = 2  # Most chat turns it holds.
-    recall_chars: int = 900  # Its size bound, in characters.
+    recall_chars: int = 4000  # Its size bound, in characters.
     recall_notes: str = "on"  # on | off: no notes in the block or the pinned lines.
     search_when_empty: str = "off"  # off | hint: a line when nothing was recalled.
     recall_min_cosine: float = 0.55  # Least similarity of meaning to be recalled.
     recall_min_coverage: float = 0.6  # Least share of the question's words held.
-    recall_item_chars: int = 234  # The room one recalled chat turn takes.
+    recall_item_chars: int = 900  # The room one recalled chat turn takes.
     recall_excerpt: str = "head"  # head | match: which part of a turn is shown.
     recall_form: str = "excerpt"  # excerpt | list: turns as excerpts, or as a list.
     recall_list_max: int = 20  # The most turns the list form lists.

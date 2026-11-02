@@ -315,11 +315,11 @@ def test_keys_lists_value_default_and_source(
         # The memory recall settings (#349) have "recall" in their names too.
         "memory.recall_records": ["3", "3", "default"],
         "memory.recall_docs": ["2", "2", "default"],
-        "memory.recall_chars": ["900", "900", "default"],
+        "memory.recall_chars": ["4000", "4000", "default"],
         "memory.recall_notes": ['"on"', '"on"', "default"],
         "memory.recall_min_cosine": ["0.55", "0.55", "default"],
         "memory.recall_min_coverage": ["0.6", "0.6", "default"],
-        "memory.recall_item_chars": ["234", "234", "default"],
+        "memory.recall_item_chars": ["900", "900", "default"],
         "memory.recall_excerpt": ['"head"', '"head"', "default"],
         "memory.recall_form": ['"excerpt"', '"excerpt"', "default"],
         "memory.recall_list_max": ["20", "20", "default"],

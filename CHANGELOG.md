@@ -627,6 +627,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- A recalled chat turn now shows up to 900 characters by default, and the recall block holds
+  up to 4000 (#349), where it showed 234 and 900. On a public long-memory benchmark, a model that
+  reads earlier chats answered 71.1% of questions instead of 58.9% (90 questions, 2 repeats;
+  16 better, 3 worse). The first request grows by about 220 tokens, its time to first byte does
+  not change, and the whole turn is faster because the model searches less.
+  `[memory] recall_item_chars` is 900 (was 234) and `recall_chars` is 4000 (was 900); the
+  ranges, the list form, `recall_open_chars` and `recall_source` are unchanged. A config that
+  sets either key keeps its value (`recall_item_chars = 234` with `recall_chars = 900` reads a
+  turn exactly as before), and a config without them gets the new defaults. A message that
+  needs no memory carries the same prompt.
 - The main chat's turns flow without extra taps (#440). A request in steps
   starts at once in Chinese as in English (`去这个网站看一下，然后告诉我最新的价格`,
   `look at this site and tell me the latest prices`), even when its last part

@@ -1,4 +1,4 @@
-"""``[memory]`` recall settings: developer settings that default to today's recall.
+"""``[memory]`` recall settings: developer settings with their shipped defaults.
 
 ``recall_records``, ``recall_docs``, ``recall_chars``, ``recall_notes``,
 ``search_when_empty``, ``recall_min_cosine``, ``recall_min_coverage``,
@@ -24,7 +24,7 @@ from localmelo.support.config import RECALL_KEYS, Config, MemoryConfig, save
 CHANGED = {
     "recall_records": 8,
     "recall_docs": 0,
-    "recall_chars": 4000,
+    "recall_chars": 2500,
     "recall_notes": "off",
     "search_when_empty": "hint",
     "recall_min_cosine": 0.45,
@@ -88,7 +88,7 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
         save(cfg)
         text = path.read_text()
         assert (
-            "[memory]\nrecall_records = 8\nrecall_docs = 0\nrecall_chars = 4000\n"
+            "[memory]\nrecall_records = 8\nrecall_docs = 0\nrecall_chars = 2500\n"
             'recall_notes = "off"\nsearch_when_empty = "hint"\n'
             "recall_min_cosine = 0.45\nrecall_min_coverage = 0.4\n"
             'recall_item_chars = 800\nrecall_excerpt = "match"\n'
@@ -105,6 +105,38 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
             keys = [line.split(" ")[0] for line in path.read_text().splitlines()]
             assert [key for key in keys if key in CHANGED] == [name]
             assert config.load().memory == cfg.memory
+
+
+def test_a_saved_value_is_kept_and_a_missing_one_is_the_larger_default(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "config.toml"
+    with (
+        mock.patch.object(config, "CONFIG_PATH", str(path)),
+        mock.patch.object(config, "CONFIG_DIR", str(tmp_path)),
+    ):
+        # A config with no value for either key gets the shipped defaults (#349).
+        path.write_text('chat_backend = "vllm"\n[memory]\nrecall_docs = 5\n')
+        memory = config.load().memory
+        assert (memory.recall_chars, memory.recall_item_chars) == (4000, 900)
+        assert memory.recall_docs == 5
+        # A config that saved the earlier defaults keeps them: its value is read as
+        # written, and saving it again writes both keys, since neither is the default.
+        path.write_text("[memory]\nrecall_chars = 900\nrecall_item_chars = 234\n")
+        cfg = config.load()
+        assert (cfg.memory.recall_chars, cfg.memory.recall_item_chars) == (900, 234)
+        save(cfg)
+        assert "recall_chars = 900\nrecall_item_chars = 234\n" in path.read_text()
+        memory = config.load().memory
+        assert (memory.recall_chars, memory.recall_item_chars) == (900, 234)
+        # The shipped default itself is never written.
+        cfg.memory = MemoryConfig(recall_chars=4000, recall_item_chars=900)
+        save(cfg)
+        assert "recall_" not in path.read_text()
+        assert (MemoryConfig().recall_chars, MemoryConfig().recall_item_chars) == (
+            4000,
+            900,
+        )
 
 
 def test_a_file_without_followup_query_gets_the_new_default(tmp_path: Path) -> None:
