@@ -10816,6 +10816,1064 @@
    },
    "verdict": "routine",
    "categories": []
+  },
+  {
+   "id": "round 5: pkill foo",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "pkill foo"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sudo ls",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sudo ls"
+   },
+   "verdict": "high",
+   "categories": [
+    "system"
+   ]
+  },
+  {
+   "id": "round 5: killall Dock",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "killall Dock"
+   },
+   "verdict": "high",
+   "categories": [
+    "system"
+   ]
+  },
+  {
+   "id": "round 5: defaults write com.example key 1",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "defaults write com.example key 1"
+   },
+   "verdict": "high",
+   "categories": [
+    "system"
+   ]
+  },
+  {
+   "id": "round 5: shutdown now",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "shutdown now"
+   },
+   "verdict": "high",
+   "categories": [
+    "system"
+   ]
+  },
+  {
+   "id": "round 5: echo \"$(echo \")\"; pkill foo)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \")\"; pkill foo)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(echo \")\"; sudo ls)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \")\"; sudo ls)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(echo \")\"; killall Dock)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \")\"; killall Dock)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(echo \")\"; defaults write com.example key 1)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \")\"; defaults write com.example key 1)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(echo \")\"; shutdown now)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \")\"; shutdown now)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(echo \"(\" ; pkill foo)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \"(\" ; pkill foo)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(echo \"(\" ; sudo ls)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \"(\" ; sudo ls)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(echo \"(\" ; killall Dock)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \"(\" ; killall Dock)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(echo \"(\" ; defaults write com.example key 1)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \"(\" ; defaults write com.example key 1)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(echo \"(\" ; shutdown now)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \"(\" ; shutdown now)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(printf '%s' ')'; pkill foo)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(printf '%s' ')'; pkill foo)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(printf '%s' ')'; sudo ls)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(printf '%s' ')'; sudo ls)\""
+   },
+   "verdict": "high",
+   "categories": [
+    "system"
+   ]
+  },
+  {
+   "id": "round 5: echo \"$(printf '%s' ')'; killall Dock)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(printf '%s' ')'; killall Dock)\""
+   },
+   "verdict": "high",
+   "categories": [
+    "system"
+   ]
+  },
+  {
+   "id": "round 5: echo \"$(printf '%s' ')'; defaults write com.example key 1)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(printf '%s' ')'; defaults write com.example key 1)\""
+   },
+   "verdict": "high",
+   "categories": [
+    "system"
+   ]
+  },
+  {
+   "id": "round 5: echo \"$(printf '%s' ')'; shutdown now)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(printf '%s' ')'; shutdown now)\""
+   },
+   "verdict": "high",
+   "categories": [
+    "system"
+   ]
+  },
+  {
+   "id": "round 5: echo \"a $(echo \"b $(echo \")\"; pkill foo)\")\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"a $(echo \"b $(echo \")\"; pkill foo)\")\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"a $(echo \"b $(echo \")\"; sudo ls)\")\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"a $(echo \"b $(echo \")\"; sudo ls)\")\""
+   },
+   "verdict": "high",
+   "categories": [
+    "system"
+   ]
+  },
+  {
+   "id": "round 5: echo \"a $(echo \"b $(echo \")\"; killall Dock)\")\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"a $(echo \"b $(echo \")\"; killall Dock)\")\""
+   },
+   "verdict": "high",
+   "categories": [
+    "system"
+   ]
+  },
+  {
+   "id": "round 5: echo \"a $(echo \"b $(echo \")\"; defaults write com.example key 1)\")\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"a $(echo \"b $(echo \")\"; defaults write com.example key 1)\")\""
+   },
+   "verdict": "high",
+   "categories": [
+    "system"
+   ]
+  },
+  {
+   "id": "round 5: echo \"a $(echo \"b $(echo \")\"; shutdown now)\")\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"a $(echo \"b $(echo \")\"; shutdown now)\")\""
+   },
+   "verdict": "high",
+   "categories": [
+    "system"
+   ]
+  },
+  {
+   "id": "round 5: echo \"$(echo \"x\") $(echo \")\"; pkill foo)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \"x\") $(echo \")\"; pkill foo)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(echo \"x\") $(echo \")\"; sudo ls)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \"x\") $(echo \")\"; sudo ls)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(echo \"x\") $(echo \")\"; killall Dock)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \"x\") $(echo \")\"; killall Dock)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(echo \"x\") $(echo \")\"; defaults write com.example key 1)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \"x\") $(echo \")\"; defaults write com.example key 1)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(echo \"x\") $(echo \")\"; shutdown now)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \"x\") $(echo \")\"; shutdown now)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(echo \"a\" \"$(echo \")\"; pkill foo)\")\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \"a\" \"$(echo \")\"; pkill foo)\")\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(echo \"a\" \"$(echo \")\"; sudo ls)\")\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \"a\" \"$(echo \")\"; sudo ls)\")\""
+   },
+   "verdict": "high",
+   "categories": [
+    "system"
+   ]
+  },
+  {
+   "id": "round 5: echo \"$(echo \"a\" \"$(echo \")\"; killall Dock)\")\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \"a\" \"$(echo \")\"; killall Dock)\")\""
+   },
+   "verdict": "high",
+   "categories": [
+    "system"
+   ]
+  },
+  {
+   "id": "round 5: echo \"$(echo \"a\" \"$(echo \")\"; defaults write com.example key 1)\")\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \"a\" \"$(echo \")\"; defaults write com.example key 1)\")\""
+   },
+   "verdict": "high",
+   "categories": [
+    "system"
+   ]
+  },
+  {
+   "id": "round 5: echo \"$(echo \"a\" \"$(echo \")\"; shutdown now)\")\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \"a\" \"$(echo \")\"; shutdown now)\")\""
+   },
+   "verdict": "high",
+   "categories": [
+    "system"
+   ]
+  },
+  {
+   "id": "round 5: x=\"$(echo \")\"; pkill foo)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "x=\"$(echo \")\"; pkill foo)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: x=\"$(echo \")\"; sudo ls)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "x=\"$(echo \")\"; sudo ls)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: x=\"$(echo \")\"; killall Dock)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "x=\"$(echo \")\"; killall Dock)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: x=\"$(echo \")\"; defaults write com.example key 1)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "x=\"$(echo \")\"; defaults write com.example key 1)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: x=\"$(echo \")\"; shutdown now)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "x=\"$(echo \")\"; shutdown now)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: d=\"$(cd \"$(dirname \"$0\")\" && echo \")\"; pkill foo)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "d=\"$(cd \"$(dirname \"$0\")\" && echo \")\"; pkill foo)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: d=\"$(cd \"$(dirname \"$0\")\" && echo \")\"; sudo ls)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "d=\"$(cd \"$(dirname \"$0\")\" && echo \")\"; sudo ls)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: d=\"$(cd \"$(dirname \"$0\")\" && echo \")\"; killall Dock)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "d=\"$(cd \"$(dirname \"$0\")\" && echo \")\"; killall Dock)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: d=\"$(cd \"$(dirname \"$0\")\" && echo \")\"; defaults write com.example key 1)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "d=\"$(cd \"$(dirname \"$0\")\" && echo \")\"; defaults write com.example key 1)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: d=\"$(cd \"$(dirname \"$0\")\" && echo \")\"; shutdown now)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "d=\"$(cd \"$(dirname \"$0\")\" && echo \")\"; shutdown now)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: a=\"$(echo \")\"; pkill foo)\" && b=\"$(echo \"(\" ; true)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "a=\"$(echo \")\"; pkill foo)\" && b=\"$(echo \"(\" ; true)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: a=\"$(echo \")\"; sudo ls)\" && b=\"$(echo \"(\" ; true)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "a=\"$(echo \")\"; sudo ls)\" && b=\"$(echo \"(\" ; true)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: a=\"$(echo \")\"; killall Dock)\" && b=\"$(echo \"(\" ; true)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "a=\"$(echo \")\"; killall Dock)\" && b=\"$(echo \"(\" ; true)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: a=\"$(echo \")\"; defaults write com.example key 1)\" && b=\"$(echo \"(\" ; true)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "a=\"$(echo \")\"; defaults write com.example key 1)\" && b=\"$(echo \"(\" ; true)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: a=\"$(echo \")\"; shutdown now)\" && b=\"$(echo \"(\" ; true)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "a=\"$(echo \")\"; shutdown now)\" && b=\"$(echo \"(\" ; true)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: cat <<EOF\\n\"$(echo \")\"; pkill foo)\"\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n\"$(echo \")\"; pkill foo)\"\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: cat <<EOF\\n\"$(echo \")\"; sudo ls)\"\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n\"$(echo \")\"; sudo ls)\"\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: cat <<EOF\\n\"$(echo \")\"; killall Dock)\"\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n\"$(echo \")\"; killall Dock)\"\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: cat <<EOF\\n\"$(echo \")\"; defaults write com.example key 1)\"\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n\"$(echo \")\"; defaults write com.example key 1)\"\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: cat <<EOF\\n\"$(echo \")\"; shutdown now)\"\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n\"$(echo \")\"; shutdown now)\"\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: cat <<EOF\\n$(echo \"$(echo \")\")\" ; pkill foo)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(echo \"$(echo \")\")\" ; pkill foo)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: cat <<EOF\\n$(echo \"$(echo \")\")\" ; sudo ls)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(echo \"$(echo \")\")\" ; sudo ls)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: cat <<EOF\\n$(echo \"$(echo \")\")\" ; killall Dock)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(echo \"$(echo \")\")\" ; killall Dock)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: cat <<EOF\\n$(echo \"$(echo \")\")\" ; defaults write com.example key 1)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(echo \"$(echo \")\")\" ; defaults write com.example key 1)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: cat <<EOF\\n$(echo \"$(echo \")\")\" ; shutdown now)\\nEOF",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cat <<EOF\n$(echo \"$(echo \")\")\" ; shutdown now)\nEOF"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(echo ')'; python3 -c 'import os; os.kill(1, 9)')\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo ')'; python3 -c 'import os; os.kill(1, 9)')\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(echo \"'\")\"; pkill foo; echo \"'\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \"'\")\"; pkill foo; echo \"'\""
+   },
+   "verdict": "undecided",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(echo \"a\" \"b #c\")\"; pkill foo",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \"a\" \"b #c\")\"; pkill foo"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(echo \\\")\"; pkill foo)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \\\")\"; pkill foo)\""
+   },
+   "verdict": "undecided",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(case x in a) echo \")\"; pkill foo;; esac)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(case x in a) echo \")\"; pkill foo;; esac)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(case x in a) echo 1; pkill foo;; esac)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(case x in a) echo 1; pkill foo;; esac)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(echo \"x\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \"x\""
+   },
+   "verdict": "undecided",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(echo 'x)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo 'x)\""
+   },
+   "verdict": "undecided",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(dirname \"$0\")\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(dirname \"$0\")\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(basename \"$f\")\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(basename \"$f\")\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: cd \"$(dirname \"$0\")\" && ls",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "cd \"$(dirname \"$0\")\" && ls"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: d=\"$(cd \"$(dirname \"$0\")\" && pwd)\"; echo \"$d\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "d=\"$(cd \"$(dirname \"$0\")\" && pwd)\"; echo \"$d\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"Today: $(date +\"%Y-%m-%d\")\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"Today: $(date +\"%Y-%m-%d\")\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(printf '%s\\n' \"$x\")\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(printf '%s\\n' \"$x\")\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(echo \"a b\")\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo \"a b\")\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(ls \"$HOME\" | wc -l)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(ls \"$HOME\" | wc -l)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: files=\"$(find . -name \"*.py\" | head -3)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "files=\"$(find . -name \"*.py\" | head -3)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(grep -c \"x\" f.txt)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(grep -c \"x\" f.txt)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"version: $(python3 -c \"print(1)\")\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"version: $(python3 -c \"print(1)\")\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(echo `date`)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(echo `date`)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"$(cat <<'EOF'\\nhello\\nEOF\\n)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"$(cat <<'EOF'\nhello\nEOF\n)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: git commit -m \"$(cat <<'EOF'\\nDon't break \"it\"\\n\\nMore (text).\\nEOF\\n)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git commit -m \"$(cat <<'EOF'\nDon't break \"it\"\n\nMore (text).\nEOF\n)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: git commit -m \"$(cat <<EOF\\nFix \"the\" parser\\nEOF\\n)\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "git commit -m \"$(cat <<EOF\nFix \"the\" parser\nEOF\n)\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo '$(echo \")\")'",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo '$(echo \")\")'"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo \"one\" \"$(echo \"two\")\" \"$(echo \"three\")\"",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo \"one\" \"$(echo \"two\")\" \"$(echo \"three\")\""
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: for f in \"$(ls \"$d\")\"; do echo \"$f\"; done",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "for f in \"$(ls \"$d\")\"; do echo \"$f\"; done"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; arr[pid=5                                                                [235]",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; arr[pid=5                                                                                                                                                                                                  ]=1; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; arr[pid=5                                                                [236]",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; arr[pid=5                                                                                                                                                                                                   ]=1; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; arr[pid=5                                                                [237]",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; arr[pid=5                                                                                                                                                                                                    ]=1; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; arr[pid=5                                                                [436]",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; arr[pid=5                                                                                                                                                                                                                                                                                                                                                                                                           ]=1; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; echo ${arr[pid=5                                                         [241]",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; echo ${arr[pid=5                                                                                                                                                                                                  ]}; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; echo ${arr[pid=5                                                         [242]",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; echo ${arr[pid=5                                                                                                                                                                                                   ]}; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; echo ${arr[pid=5                                                         [243]",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; echo ${arr[pid=5                                                                                                                                                                                                    ]}; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; echo ${arr[pid=5                                                         [442]",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; echo ${arr[pid=5                                                                                                                                                                                                                                                                                                                                                                                                           ]}; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; echo $[pid=5                                                             [236]",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; echo $[pid=5                                                                                                                                                                                                  ]; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; echo $[pid=5                                                             [237]",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; echo $[pid=5                                                                                                                                                                                                   ]; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; echo $[pid=5                                                             [238]",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; echo $[pid=5                                                                                                                                                                                                    ]; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; echo $[pid=5                                                             [437]",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; echo $[pid=5                                                                                                                                                                                                                                                                                                                                                                                                           ]; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; [[pid=5                                                                  [232]",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; [[pid=5                                                                                                                                                                                                  ]]; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; [[pid=5                                                                  [233]",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; [[pid=5                                                                                                                                                                                                   ]]; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; [[pid=5                                                                  [234]",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; [[pid=5                                                                                                                                                                                                    ]]; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; [[pid=5                                                                  [433]",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; [[pid=5                                                                                                                                                                                                                                                                                                                                                                                                           ]]; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; arr[other=5                                                              [236]",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; arr[other=5                                                                                                                                                                                                 ]=1; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; arr[other=5                                                              [237]",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; arr[other=5                                                                                                                                                                                                  ]=1; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; arr[other=5                                                              [636]",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; arr[other=5                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 ]=1; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; [[ pid=5 -eq\\n 5 ]]; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; [[ pid=5 -eq\n 5 ]]; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; arr[\\npid=5]=1; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; arr[\npid=5]=1; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; echo ${arr[ 1 +\\n (pid=5) ]}; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; echo ${arr[ 1 +\n (pid=5) ]}; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; echo [a-z]*; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; echo [a-z]*; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; [ -n \"$pid\" ] && kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; [ -n \"$pid\" ] && kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; [[ $pid -gt 1 ]]; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; [[ $pid -gt 1 ]]; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; echo ']'; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; echo ']'; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: sleep 9 & pid=$!; echo '[' ; kill $pid",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "sleep 9 & pid=$!; echo '[' ; kill $pid"
+   },
+   "verdict": "routine",
+   "categories": []
+  },
+  {
+   "id": "round 5: echo [xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx [5007]",
+   "tool": "shell_exec",
+   "arguments": {
+    "command": "echo [xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx]"
+   },
+   "verdict": "routine",
+   "categories": []
   }
  ]
 }
