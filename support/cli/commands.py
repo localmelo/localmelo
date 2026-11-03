@@ -82,6 +82,13 @@ COMMANDS: Final[tuple[Command, ...]] = (
         "Show or switch approvals: ask, auto, deny, forget",
         True,
     ),
+    Command(
+        "grants",
+        (),
+        "[revoke N]",
+        "List what you allowed, or revoke one",
+        True,
+    ),
     Command("progress", (), "", "Show this turn's progress facts", True),
     Command(
         "browser",

@@ -354,7 +354,7 @@ async def test_a_site_allowed_for_the_chat_lasts_until_removed(tmp_path: Path) -
         removed = await client.delete(
             f"/api/sessions/{sid}/grants/{name.replace(':', '%3A').replace('/', '%2F')}"
         )
-        assert removed.status_code == 204
+        assert removed.status_code == 200 and removed.json()["everywhere"] is False
         await client.post(f"/api/sessions/{sid}/turns", json={"text": "once more"})
         card = await pending(client, sid)
         await client.post(

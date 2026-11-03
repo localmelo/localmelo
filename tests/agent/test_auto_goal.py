@@ -454,7 +454,7 @@ async def test_paying_or_an_account_change_asks_even_when_asked_for_and_on_the_g
     card = Card(ApprovalDecision(True, remember=True))
     policy = ChatPolicy(card, "auto")
     # Clicking on the forum was allowed for the chat before.
-    policy.ask._granted.add(f"browser-act:https://{FORUM}")
+    policy.ask.grants.grant_now(f"browser-act:https://{FORUM}")
 
     await agent.run_task(f"buy premium on {FORUM}", approval=policy)
 

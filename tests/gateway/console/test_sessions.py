@@ -154,6 +154,7 @@ async def test_a_session_with_its_tokens_and_agent_state(
         "pending_approvals",
         "grants",
         "granted_at",
+        "grants_everywhere",
         "mcp_error",
         "agent",
         "tokens",
@@ -169,12 +170,12 @@ async def test_a_session_with_its_tokens_and_agent_state(
     assert body["tokens"] == 7
 
     entry = await open_session(console.sessions, turn.session_id)
-    entry.policy.ask._granted.add("python_exec")
-    entry.granted_at["python_exec"] = 123.0
+    grant = await entry.policy.ask.grants.grant("python_exec")
+    assert grant is not None
     body = client.get(f"/api/sessions/{turn.session_id}").json()
     assert body["agent"] == "open"
     assert body["grants"] == ["python_exec"]
-    assert body["granted_at"] == {"python_exec": 123.0}
+    assert body["granted_at"] == {"python_exec": grant.granted_at}
 
     await console.sessions.keep(turn.session_id)
     body = client.get(f"/api/sessions/{turn.session_id}").json()
@@ -240,8 +241,8 @@ async def test_a_pending_high_impact_call_carries_its_review_and_is_never_grante
         review=review,
     )
     # The chat holds a routine grant of the tool from an hour ago.
-    entry.policy.ask._granted.add("shell_exec")
-    entry.granted_at["shell_exec"] = 123.0
+    grant = await entry.policy.ask.grants.grant("shell_exec")
+    assert grant is not None
     deciding = asyncio.create_task(entry.policy.decide(request))
     for _ in range(10):
         if console.broker.pending(turn.session_id):
@@ -266,7 +267,7 @@ async def test_a_pending_high_impact_call_carries_its_review_and_is_never_grante
     assert not (await deciding).remember
     body = client.get(f"/api/sessions/{turn.session_id}").json()
     assert body["grants"] == ["shell_exec"]
-    assert body["granted_at"] == {"shell_exec": 123.0}
+    assert body["granted_at"] == {"shell_exec": grant.granted_at}
 
 
 async def test_a_pending_routine_call_has_a_review_without_a_title(

@@ -61,6 +61,7 @@ CONVERTED_JS = (
     "memory.mjs",
     "mode.mjs",
     "panel.mjs",
+    "permissions-tab.mjs",
     "pictures.mjs",
     "running.mjs",
     "scheduled-tab.mjs",

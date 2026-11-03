@@ -23,6 +23,7 @@ import pytest
 
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.support.browser import provider as provider_mod
+from localmelo.support.browser.desktop import Front
 from localmelo.support.browser.driver import Element
 from localmelo.support.browser.provider import BrowserToolProvider
 from localmelo.support.sessions.approvals import RememberingPolicy
@@ -422,3 +423,28 @@ async def test_cards_end_when_the_chat_is_forgotten_or_closed(screen: Screen) ->
                 assert not provider._cards and all(card.done() for card in cards), how
         finally:
             await provider.close()
+
+
+async def test_an_app_the_person_did_not_allow_is_not_named_when_it_comes_back_to_the_front(
+    screen: Screen,
+) -> None:
+    # Denied once: when the same app later comes to the front with no new window,
+    # the name-only line must not name it either.
+    person = Person(DENY)
+    provider, tools = await opened(
+        world(button("Quick sign-in")), watch(screen, strict=True)
+    )
+    try:
+        with asking(person):
+            screen.clock.at(1.0, lambda: screen.show(SIGN_IN))
+            first = await run(tools, "browser_click", ref="e1")
+            await settled(provider)
+            screen.front = Front("Safari", "com.apple.Safari", 10)
+            read = await run(tools, "browser_read")
+            chat = Front(SIGN_IN["app_name"], SIGN_IN["bundle"], SIGN_IN["pid"])
+            screen.clock.at(1.0, lambda: setattr(screen, "front", chat))
+            again = await run(tools, "browser_click", ref=ref_of(read))
+            await settled(provider)
+    finally:
+        await provider.close()
+    assert "Chat" not in told(first, read, again)

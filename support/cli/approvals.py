@@ -52,6 +52,7 @@ from localmelo.support.sessions.approvals import (
     RememberingPolicy,
 )
 from localmelo.support.sessions.display import display_path, folder_name, home_label
+from localmelo.support.sessions.grants import SessionGrants
 from localmelo.support.words import gist_note, gist_text
 
 # Keys other than Esc and Ctrl+C do nothing this long after the panel opens,
@@ -104,6 +105,8 @@ class PendingApproval:
     target: edits.Target | None = None
     selected: int = 0
     reason: bool = False  # the reason field is open
+    # The main chat's own request: what it allows for the chat counts in every chat.
+    everywhere: bool = False
 
 
 @dataclass(frozen=True)
@@ -521,15 +524,28 @@ def _outside_panel(
     return PanelText(title, header, body, escaped)
 
 
-def folder_options(request: ApprovalRequest) -> tuple[str, str]:
-    """The labels of "this folder for this chat" and "always this folder" (#405)."""
+def folder_options(
+    request: ApprovalRequest, *, everywhere: bool = False
+) -> tuple[str, str]:
+    """The labels of "this folder for this chat" and "always this folder" (#405).
+
+    In the main chat (*everywhere*) the first says it counts in every chat.
+    """
     outside = request.outside
     folder = home_label(outside.folder) if outside is not None else "this folder"
     shown, _ = escape_arguments(folder)
     return (
-        f"Yes, and allow {shown} for this chat",
+        f"Yes, and allow {shown} {'in every chat' if everywhere else 'for this chat'}",
         f"Yes, and always allow {shown} (kept in Settings)",
     )
+
+
+# Under the options of the main chat's own question that may be kept: its
+# "allow" counts in every chat.
+EVERYWHERE_RULE: Final = (
+    "In the main chat this counts in every chat, the tasks you start and the "
+    "terminal, until you take it back with /grants."
+)
 
 
 # Under the options of a read outside the workspace that may be granted.
@@ -539,25 +555,28 @@ FOLDER_RULE: Final = (
 )
 
 
-def session_option(request: ApprovalRequest) -> str:
-    """The label of the answer that allows *request* for the rest of the session."""
+def session_option(request: ApprovalRequest, *, everywhere: bool = False) -> str:
+    """The label of the answer that allows *request* for the rest of the session.
+
+    In the main chat (*everywhere*) it says the answer counts in every chat.
+    """
     if request.outside is not None:
-        return folder_options(request)[0]
+        return folder_options(request, everywhere=everywhere)[0]
+    rest = "in every chat" if everywhere else "for the rest of this chat"
     if request.tool_name.startswith("browser:"):
         site = str(request.arguments.get("site") or "this site")
-        return f"Yes, and allow {site} for the rest of this chat"
+        return f"Yes, and allow {site} {rest}"
     if request.tool_name.startswith("browser-act:"):
         site = str(request.arguments.get("site") or "this site")
-        return (
-            f"Yes, and allow clicking and choosing on {site} for the rest of this chat"
-        )
+        return f"Yes, and allow clicking and choosing on {site} {rest}"
     if request.tool_name.startswith("handoff:"):
         app = str(request.arguments.get("app") or "that app")
-        return f"Yes, and let pages open {app} for the rest of this chat"
+        return f"Yes, and let pages open {app} {rest}"
     if request.tool_name.startswith("window-read:"):
         app, _ = escape_arguments(str(request.arguments.get("app") or "this app"))
-        return f"Yes, and allow {app} in this chat"
-    return f"Yes, and allow every {request.tool_name} call in this session"
+        return f"Yes, and allow {app} {'everywhere' if everywhere else 'in this chat'}"
+    where = "in every chat" if everywhere else "in this session"
+    return f"Yes, and allow every {request.tool_name} call {where}"
 
 
 def session_warning(tool: str, workspace: str) -> list[str]:
@@ -597,14 +616,20 @@ class TerminalApprover:
         self.pending: PendingApproval | None = None
 
     async def ask(
-        self, request: ApprovalRequest, *, offer_session: bool | None = None
+        self,
+        request: ApprovalRequest,
+        *,
+        offer_session: bool | None = None,
+        everywhere: bool = False,
     ) -> ApprovalDecision:
         """Show the panel for *request* and wait for the answer.
 
         The session choice is offered unless *offer_session* says no or the
         request is a high-impact call, which a grant never covers; that
-        panel starts on No. A cancellation (a stop, a shutdown) withdraws
-        the panel and propagates: a withdrawn prompt is not a denial.
+        panel starts on No. *everywhere* is the main chat's own request,
+        whose session choice says it counts in every chat. A cancellation (a
+        stop, a shutdown) withdraws the panel and propagates: a withdrawn
+        prompt is not a denial.
         """
         target: edits.Target | None = None
         if request.tool_name == "file_write":
@@ -629,6 +654,7 @@ class TerminalApprover:
             target=target,
             selected=2 if outside is not None and outside.access == "write" else 0,
             offer_always=outside is not None and offered,
+            everywhere=everywhere,
         )
         if outside is None and not offered:
             self.pending.selected = 2
@@ -878,7 +904,13 @@ def terminal_watch(
 
 
 class Approvals:
-    """The session's approval mode and policy, which keeps the grants."""
+    """The session's approval mode and policy, which keeps the grants.
+
+    With *grants* (the terminal's own chat), the grants live in the table
+    of the terminal's sessions file and hold in the session that gave them,
+    beside what the person allowed in the main chat; without, in this
+    object only.
+    """
 
     def __init__(
         self,
@@ -887,9 +919,11 @@ class Approvals:
         *,
         snapshots: EditSnapshots | None = None,
         watch: AskWatch | None = None,
+        grants: SessionGrants | None = None,
     ) -> None:
         self.mode: Mode = mode
         self._ask = ask
+        self.grants = grants
         self.snapshots = snapshots if snapshots is not None else EditSnapshots()
         self._policy = self._asking()
         # Auto mode's policy, kept across turns for its allowances; a step it
@@ -900,7 +934,9 @@ class Approvals:
 
     def _asking(self) -> RememberingPolicy:
         # It also asks about a folder outside the workspace (#405).
-        return RememberingPolicy(self._ask, folders=True, saved=SavedFolders())
+        return RememberingPolicy(
+            self._ask, folders=True, saved=SavedFolders(), grants=self.grants
+        )
 
     def policy(self) -> ApprovalPolicy | None:
         """The policy for a turn: None with ``--yolo``, so nothing asks.
@@ -944,7 +980,11 @@ class Approvals:
         return self._policy.allowed_folders
 
     def reset(self) -> None:
-        """Forget every grant: a new session starts with none."""
+        """Start the next session without this one's grants.
+
+        Kept grants stay with the session that gave them (a resumed session
+        has its own again); grants kept in this object only are forgotten.
+        """
         self._policy = self._asking()
         self._auto = AutoPolicy(asking=self._policy, watch=self._watch)
         self.snapshots.clear()

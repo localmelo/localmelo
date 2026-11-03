@@ -143,6 +143,7 @@ from localmelo.support.sessions.approvals import (
     RememberingPolicy,
     chat_mode,
 )
+from localmelo.support.sessions.grants import GrantBook
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.identity import ACTING_RULE
 from localmelo.support.sessions.runner import SessionRunner
@@ -596,6 +597,10 @@ class TaskWorkers:
         # once that chat is gone), what a step that ran on an earlier
         # approval shows, and what starts when a task asks the person.
         self.ledger = ledger or ApprovalLedger()
+        # Every grant, in the store's table (the console sets its book): a
+        # task keeps what the person allowed for it; its chat's grants and the
+        # main chat's reach it through its chat (#369).
+        self.grants = GrantBook()
         self.chat_of: Callable[[str | None], Awaitable[str | None]] | None = None
         self.on_earlier: Callable[[ApprovalUse], Awaitable[None]] | None = None
         self.on_ask: Callable[[str, ApprovalRequest], None] | None = None
@@ -2463,6 +2468,7 @@ class TaskWorkers:
                 runner.observe(paused_ask),
                 folders=_remembers(record.origin),
                 saved=SavedFolders(),
+                grants=self.grants.view(task_id, "task", inherit=False),
             )
             policy: ApprovalPolicy = asking
             if task_mode == "auto":

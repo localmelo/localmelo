@@ -188,7 +188,7 @@ accepted completed run
 
 `localmelo.support.sessions.approvals` 为会询问人的界面提供两个辅助工具：
 
-- **`RememberingPolicy(ask)`**，一个审批策略：它通过 `ask(request)` 询问，并把“本会话内允许”（带 `remember=True` 的回答）保留为该工具名称的一项授权。`allowed_tools` 列出这些授权，`forget(tool_name=None)` 收回一项或全部。授权从不保存。
+- **`RememberingPolicy(ask, grants=None)`**，一个审批策略：它通过 `ask(request)` 询问，并把“本会话内允许”（带 `remember=True` 的回答）保留为该工具名称的一项授权。`allowed_tools` 列出这些授权，`granted(name)` 检查其中一项，`forget(tool_name=None)` 收回一项或全部。传入 `grants`（某个会话对 `localmelo.support.sessions.grants.GrantBook` 的视图）时，授权保存在会话文件的 `grants` 表里：在主对话里允许的在所有会话里都算，其他的只在它自己的会话里算。不传时，授权只属于这个策略对象，从不保存。
 - **`ApprovalBroker(timeout_s=None)`** 保存等待来自别处（例如网页）的回答的请求：`asker(session_id)` 是一个询问函数，`pending(session_id)` 列出等待中的请求，`answer(request_id, decision)` 返回 `resolved`、`already_resolved` 或 `unknown`，`withdraw_all(reason=...)` 拒绝等待中的请求。
 
 用 `runner.observe(ask)` 包装询问函数，例如 `RememberingPolicy(runner.observe(broker.asker(session_id)))`，并把该策略作为 `approval` 传给 `run_turn` 或 `start_turn`：会话的事件随后会显示 `approval.requested` 和 `approval.resolved`。

@@ -84,8 +84,9 @@ call itself asks nothing; each site passes the site gate below first.
     own words, so a site in a pasted log or page names it too;
   - any other site asks once per chat with the browser's site question, worded "Let melo read
     example.com?", showing the full address it asks for (cut at 300 characters): one "allow
-    for this chat" covers `web_fetch` and the browser tools, and `/new` or `/approvals forget`
-    takes it back;
+    for this chat" covers `web_fetch` and the browser tools, holds in every chat when given in
+    the main chat, and `/grants revoke N`, Settings → Permissions or `/approvals forget` takes it
+    back;
   - in auto mode, an unnamed site is reviewed by your model, as a site the browser would open is.
     A verdict that lets it read covers that site's other addresses with no query (`?`), no
     fragment (`#`), no user name and a path of at most 120 characters, up to 10 of them until

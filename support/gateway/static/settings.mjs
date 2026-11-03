@@ -1,5 +1,6 @@
 import { folderChoices, folderName } from "./folder.mjs";
 import { formatTime, t } from "./i18n.mjs";
+import { setupPermissionsTab } from "./permissions-tab.mjs";
 import { whenWords } from "./scheduled-tab.mjs";
 
 // A message that tells the user to run a melo command ("... (run 'melo setup')") is advice for a
@@ -12,7 +13,7 @@ const WORD_NAMES = ["description", "adapter", "url", "urlHint", "discover", "nee
 const wordsOf = (set) => Object.fromEntries(WORD_NAMES.map((name) => [name, t(`settings.${set}.${name}`)]));
 
 /** The sections, in the order of the list; each is named `settings.section.<id>`. Developer is listed in developer mode only. */
-export const SECTIONS = ["model", "memory", "chats", "scheduled", "appearance", "developer"];
+export const SECTIONS = ["model", "memory", "chats", "permissions", "scheduled", "appearance", "developer"];
 const THEMES = ["system", "light", "dark"];
 const RECALL = ["auto", "bm25", "embedding", "llm"];
 // How memory finds notes, in the words of the Memory section and the phone's list.
@@ -71,7 +72,8 @@ export function keyWords(key) {
  * the settings load; `health()` the last `GET /api/health`; `sessions()` the listed chats, for the recent folders;
  * `openTab(id)` closes the dialog and opens the panel's Memory or Scheduled tab; `desktop()` and `folders()` are the
  * macOS app's message handlers (none in a browser); `narrow()` says whether the dialog is the phone's sheet;
- * `reloadPage()` loads the page again once a new language is saved, so every screen reads in it.
+ * `reloadPage()` loads the page again once a new language is saved, so every screen reads in it. The Permissions
+ * section (`permissions-tab.mjs`) lists what the person allowed and revokes it; it reads the list each time it is chosen.
  * Returns `open(section)`.
  */
 export function setupSettings({
@@ -95,6 +97,10 @@ export function setupSettings({
   const envStatus = $("s-key-env-status");
   const testButton = $("settings-test");
   const testStatus = $("settings-test-status");
+
+  // What the person allowed (`GET /api/grants`): the section draws and revokes by itself and tells the list when its count changes.
+  const permissions = setupPermissionsTab({ doc: document, api, clock, onChange: () => notes() });
+  $("s-permissions").append(permissions.root);
 
   let theme = "system";
   try {
@@ -165,6 +171,7 @@ export function setupSettings({
     if (show) view("section");
     if (focus) $(`settings-tab-${name}`).focus?.();
     if (name === "scheduled") loadCheckin();
+    if (name === "permissions") permissions.show();
   }
   for (const id of SECTIONS) {
     const tab = $(`settings-tab-${id}`);
@@ -717,6 +724,8 @@ export function setupSettings({
     const on = $("s-across-chats").checked;
     put("memory", on ? t("settings.note.memoryOn", {how: recallWords(settings.memory_retriever)}) : t("common.off"));
     put("chats", folderName(settings.workspace));
+    const granted = permissions.count();
+    put("permissions", granted === null ? "" : granted ? t("settings.note.grants", {n: granted}) : t("settings.note.grantsNone"));
     put("scheduled", checkin ? t(checkin.on ? "settings.note.checkinOn" : "settings.note.checkinOff") : "");
     put("appearance", t(`settings.note.theme.${theme}`));
     put("developer", t("settings.note.count", {n: (settings.developer_settings || []).reduce((sum, group) => sum + group.keys.length, 0)}));
@@ -1088,6 +1097,7 @@ export function setupSettings({
     checkin = null;
     helper = null;
     helperAsked = false;
+    permissions.reset();
     invalidateTest();
     enable(false);
     showError("");

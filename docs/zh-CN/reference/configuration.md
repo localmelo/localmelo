@@ -447,9 +447,25 @@ chat_model = "Qwen/Qwen3-8B"
 | `~/.cache/localmelo/config.toml` | 配置。 | 由设置向导创建。 |
 | `~/.cache/localmelo/memory/` | `history.db`、`procedures.db`（程序性记忆，每次运行结束时写入），以及使用嵌入后端时的 `long_term.db`。 | 智能体在设置了 `LOCALMELO_PERSIST_MEMORY` 时启动，权限为 0700。已存在且允许组或其他用户读写的目录会被设为 0700。 |
 | `--memory-dir` 指定的目录 | 同上的文件，供那次运行使用。 | 运行开始时创建；新目录的权限为 0700。 |
+| `~/.cache/localmelo/gateway/sessions.db` | 控制台的对话和任务，以及你在其中允许过的事（`grants` 表；见[你允许过的事](#what-you-allowed)）。 | 由网关创建。 |
+| `~/.cache/localmelo/cli/sessions.db` | 终端自己的对话，以及终端自己的对话的授权。 | 终端收到第一条消息时。 |
 | `~/.cache/localmelo/playground/` | 旧版 playground 的记忆。 | 默认关闭的 playground 启动时（security-1b 进行中）。 |
 | `~/.localmelo/logs/` | 后台服务的日志。 | 由 `melo --daemon install` 创建。 |
 | `~/Library/LaunchAgents/ai.localmelo.gateway.plist` | 后台服务的定义。 | 由 `melo --daemon install` 创建。 |
+
+<a id="what-you-allowed"></a>
+
+## 你允许过的事
+
+“为这个对话允许”的回答就是授权。它们放在会话文件的同一张表 `grants` 里（组件 `grants`，版本 1）；没有配置键控制它们。
+
+- **列：** `id`、`session_id`、`session_kind`、`scope`、`kind`、`key`、`label`、`target`、`decided_by`、`granted_at`、`request_id`、`revoked_at`。
+- **收回与保留：** 收回会设置 `revoked_at`。已收回的行在存储的思考保留期之后删除（默认 30 天；见 `LOCALMELO_THINKING_RETENTION_DAYS`）。
+- **随会话：** 会话的行随会话一起删除（`ON DELETE CASCADE`）。
+- **失败时关闭：** 违反规则的行在读取时被忽略，所以改过的文件无法扩大权限：不是本人在主对话里给出的 `global` 行、超过读取网站的 Auto 行、必须每次都询问的键，或从不提供的文件夹。
+- **不是授权：** **总是允许这个文件夹** 记在 `[workspace] extra_folders` 里。
+
+面向读者的规则见[你允许过的事](../guides/terminal.md#what-you-allowed)和[授权](../guides/web-console.md#permissions)；路由见 [API v2](api-v2.md#get-apigrants)。
 
 <a id="upgrading-from-an-older-config"></a>
 

@@ -387,7 +387,7 @@ test('cloud candidate includes key environment name but never key status or revi
   assert.equal(JSON.stringify(body).includes('api_key_set'), false);
 });
 
-const SECTION_IDS = ['model', 'memory', 'chats', 'scheduled', 'appearance', 'developer'];
+const SECTION_IDS = ['model', 'memory', 'chats', 'permissions', 'scheduled', 'appearance', 'developer'];
 
 test('developer mode lists the Developer section, and the layout is chosen before the settings load', async () => {
   const slow = deferred();
@@ -971,6 +971,68 @@ test('the check-in switch shows the next time, saves with PUT /checkin and can b
   assert.equal(down.element('s-checkin-state').dataset.text, 'Could not read the schedule');
 });
 
+const grantOf = (id, extra = {}) => ({id, scope: 'global', session_id: 'main', session_kind: 'main', chat_title: '', kind: 'tool', key: 'shell_exec',
+  label: 'Run shell commands', action: 'tool', target: 'shell_exec', by: 'person', granted_at: NOW / 1000 - 300, ...extra});
+const buttonsOf = (item) => [...(item.tag === 'button' ? [item] : []), ...(item.children || []).flatMap(buttonsOf)];
+
+test('Permissions reads the grants when chosen, revokes one from the list and keeps the phone\'s note in step', async () => {
+  let grants = [grantOf('a1'), grantOf('b2', {scope: 'session', session_id: 's1', session_kind: 'side', chat_title: 'Trip', action: 'open', target: 'example.com'})];
+  const h = harness({
+    'GET /settings': full(),
+    'GET /grants': () => ({grants}),
+    'DELETE /grants/a1': () => { grants = grants.filter((item) => item.id !== 'a1'); return {}; },
+    'DELETE /grants/b2': () => { grants = []; return {}; },
+  });
+  await h.open();
+  await flush();
+  assert.equal(h.calls.some((call) => call.path === '/grants'), false, 'nothing is read until the section is chosen');
+  assert.equal(h.element('settings-panel-permissions').hidden, true);
+  await h.element('settings-tab-permissions').emit('click');
+  await flush();
+  assert.equal(h.element('settings-panel-permissions').hidden, false);
+  assert.deepEqual(h.calls.filter((call) => call.path === '/grants').map((call) => call.options.method ?? 'GET'), ['GET']);
+  const list = words(h.element('s-permissions'));
+  assert.match(list, /Everywhere.*Run shell commands.*From the main chat · You · 5 min ago.*Per chat.*Trip.*Open example\.com/);
+  assert.equal(h.element('settings-note-permissions').textContent, '2 things allowed');
+  await buttonsOf(h.element('s-permissions'))[0].emit('click');
+  await flush();
+  assert.deepEqual(h.calls.at(-1), {path: '/grants/a1', options: {method: 'DELETE'}});
+  assert.doesNotMatch(words(h.element('s-permissions')), /Everywhere/, 'the group goes with its last row');
+  assert.match(words(h.element('s-permissions')), /^Revoked: Run shell commands\. melo asks again next time\./);
+  assert.equal(h.element('settings-note-permissions').textContent, '1 thing allowed');
+  await buttonsOf(h.element('s-permissions'))[0].emit('click');
+  await flush();
+  assert.match(words(h.element('s-permissions')), /Nothing allowed yet/);
+  assert.equal(h.element('settings-note-permissions').textContent, 'Nothing allowed');
+  // The dialog opened again starts the section over, and reads the list when it is the section in view.
+  h.element('settings-dialog').close();
+  grants = [grantOf('c3')];
+  await h.open('permissions');
+  await flush();
+  assert.equal(h.calls.filter((call) => call.path === '/grants' && !call.options.method).length, 2);
+  assert.match(words(h.element('s-permissions')), /Run shell commands/);
+});
+
+test('Permissions reads in Simplified Chinese, and a list that cannot be read says so with Retry', async () => {
+  const {useLanguage} = await import('../../support/gateway/static/i18n.mjs');
+  await useLanguage('zh-Hans');
+  try {
+    let fail = true;
+    const h = harness({'GET /settings': full(), 'GET /grants': () => { if (fail) throw new Error('boom'); return {grants: [grantOf('a1')]}; }});
+    await h.open('permissions');
+    await flush();
+    assert.equal(h.element('settings-note-permissions').textContent, '', 'no count without a list');
+    assert.match(words(h.element('s-permissions')), /boom.*重试/);
+    fail = false;
+    await buttonsOf(h.element('s-permissions')).find((item) => item.textContent === '重试').emit('click');
+    await flush();
+    assert.match(words(h.element('s-permissions')), /所有对话.*运行 shell 命令.*来自主对话 · 你 · 5 分钟前/);
+    assert.equal(h.element('settings-note-permissions').textContent, '已允许 1 项');
+  } finally {
+    await useLanguage('en');
+  }
+});
+
 test('Melo on the desktop shows only in the app, mirrors its menu and saves through it', async () => {
   const browser = harness({'GET /settings': full()});
   await browser.open('appearance');
@@ -1088,8 +1150,8 @@ test('the phone\'s list says the state of each section on its second line', asyn
     {health: () => ({model_server: {reachable: false, checked_s_ago: 3}})});
   await h.open();
   await flush();
-  assert.deepEqual(['model', 'memory', 'chats', 'scheduled', 'appearance'].map((id) => h.element(`settings-note-${id}`).textContent),
-    ['Not reachable · old', 'On · words and meaning', 'ws', 'Check-in off', 'System theme']);
+  assert.deepEqual(['model', 'memory', 'chats', 'permissions', 'scheduled', 'appearance'].map((id) => h.element(`settings-note-${id}`).textContent),
+    ['Not reachable · old', 'On · words and meaning', 'ws', '', 'Check-in off', 'System theme'], 'Permissions says its count once the list was read');
 });
 
 test('checked words read naturally', () => {
