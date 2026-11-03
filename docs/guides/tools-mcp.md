@@ -105,7 +105,7 @@ A tool can return pictures, such as an MCP server's screenshot.
 
 | Value | What the model gets |
 |---|---|
-| `auto` (default) | The pixels when the server says the model reads images: oMLX's `GET /v1/models/status` gives the model `model_type` `vlm`, or Ollama's `POST /api/show` lists `vision` in its `capabilities`. localmelo asks once, when a tool first returns a picture. Any other answer, or none (vLLM, SGLang and MLC do not say), counts as `off`. |
+| `auto` (default) | The pixels when the server says the model reads images: oMLX's `GET /v1/models/status` gives the model `model_type` `vlm`, or Ollama's `POST /api/show` lists `vision` in its `capabilities`. localmelo asks once, when a tool first returns a picture. For a hosted service the preset answers instead of the server: see [Hosted models](hosted-models.md#pictures). Any other answer, or none (vLLM, SGLang and MLC do not say), counts as `off`. |
 | `on` | The pixels, without asking. |
 | `off` | Only the line that names each picture, as before this setting. |
 

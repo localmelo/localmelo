@@ -27,7 +27,19 @@ const APPROVAL_MODES = ["ask", "auto"];
 const GROUPS = new Set(["agent", "retrieval", "memory", "endpoint", "sessions", "cli", "ui", "scheduler", "browser", "tools", "gateway", "console", "workspace"]);
 const groupName = (section) => (section === "" ? t("settings.group.general") : GROUPS.has(section) ? t(`settings.group.${section}`) : section);
 const LOCAL_FIELDS = ["chat_url", "chat_model"];
-const CLOUD_FIELDS = ["api_key_env", "base_url", "chat_model"];
+const CLOUD_FIELDS = ["api_key_env", "api_key", "base_url", "chat_model", "thinking"];
+// What the keychain reports about a service's saved key, by what a settings section calls it.
+const KEY_STATES = {keychain: "saved", missing: "missing", locked: "locked", unavailable: "unavailable"};
+// The words for a key that cannot be used, by what the keychain reported.
+const KEY_PROBLEMS = {missing: "settings.hosted.keyMissing", locked: "settings.hosted.keyLocked", unavailable: "settings.hosted.keyUnavailable"};
+// How long "Remove" waits for its second click.
+const REMOVE_WAIT_MS = 5000;
+
+/** Whether a hosted service's model thinks: the person's choice, else the model's default in its preset. */
+export function thinks(preset, data) {
+  if (data.thinking === "on" || data.thinking === "off") return data.thinking === "on";
+  return !(preset.thinking_off_models || []).includes(data.chat_model);
+}
 
 /** "checked just now", "checked 12 s ago", "checked 3 min ago" or "checked at 9:05 AM". */
 export function checkedWords(secondsAgo, now = Date.now()) {
@@ -73,6 +85,9 @@ export function setupSettings({
   const status = $("settings-status");
   const modelStatus = $("discover-status");
   const keyStatus = $("s-key-status");
+  // The line under the key: `quiet` text is announced to a screen reader and not drawn.
+  const keySays = (text, quiet = false) => { keyStatus.className = quiet ? "field-hint sr-only" : "field-hint"; keyStatus.textContent = text; };
+  const envStatus = $("s-key-env-status");
   const testButton = $("settings-test");
   const testStatus = $("settings-test-status");
 
@@ -93,8 +108,8 @@ export function setupSettings({
   }
   applyTheme(theme);
 
-  const inputIds = ["s-adapter", "s-chat-url", "s-key-env", "s-base-url", "s-chat-model", "s-embed-backend", "s-embed-url",
-    "s-embed-model", "s-embed-use"];
+  const inputIds = ["s-adapter", "s-chat-url", "s-key-env", "s-key-input", "s-key-save", "s-key-replace", "s-key-remove", "s-base-url",
+    "s-chat-model", "s-thinking", "s-embed-backend", "s-embed-url", "s-embed-model", "s-embed-use"];
   // Each saves on its own; they wait while a change is being saved.
   const switchIds = ["s-across-chats", "s-web-fetch", "s-follow-up", "s-developer", ...RECALL.map((name) => `s-recall-${name}`),
     ...LANGUAGE_SETTINGS.map((name) => `s-language-${name}`), ...APPROVAL_MODES.map((name) => `s-approvals-${name}`)];
@@ -103,6 +118,7 @@ export function setupSettings({
   let generation = 0;
   let discoveryVersion = 0;
   let keyVersion = 0;
+  let keychainVersion = 0;
   let testVersion = 0;
   let busy = false;
   let saving = false;
@@ -111,6 +127,12 @@ export function setupSettings({
   let current = "model";
   // The embedding model the last "Discover models" listed on the chat server; "" before one did.
   let offered = "";
+  // The hosted services (`choices.hosted`) and what the keychain holds for each, as last asked or changed.
+  let presets = [];
+  const keychain = new Map();
+  // Whether the saved key is being replaced, and whether "Remove" waits for its second click.
+  let replacing = false;
+  let removeArmed = null;
   // The last test of this dialog: {at, ok, failed} (`failed` is "chat" or "embedding"), or null.
   let tested = null;
   let checkin = null;
@@ -209,20 +231,37 @@ export function setupSettings({
     testButton.disabled = !ready || !chosen;
   }
 
-  function isCloud(key = chat.value) {
-    return settings?.choices.chat_backends.find((choice) => choice.key === key)?.kind === "cloud";
+  // A hosted service is a preset; the select's value is a preset's id for it, a backend's key for a local server.
+  const preset = (id = chat.value) => presets.find((item) => item.id === id);
+  const isCloud = (id = chat.value) => preset(id) !== undefined;
+
+  // The preset the saved connection is on: a hosted backend's section names it, an older one is its backend's own.
+  function savedPreset(loaded = settings) {
+    const backend = loaded?.chat_backend;
+    if (!backend) return undefined;
+    return presets.find((item) => item.id === loaded.sections[backend]?.preset) ?? presets.find((item) => item.id === backend);
   }
 
-  function options(node, choices, selected, blank = "") {
+  function option(choice) {
+    const node = document.createElement("option");
+    node.value = choice.key;
+    node.textContent = choice.label;
+    return node;
+  }
+
+  /** Fill a select with `choices`, or with named `groups` of choices; `blank` adds an empty first entry. */
+  function options(node, choices, selected, blank = "", groups = null) {
     const all = blank ? [{key: "", label: blank}, ...choices] : choices;
     node.replaceChildren();
-    for (const choice of all) {
-      const option = document.createElement("option");
-      option.value = choice.key;
-      option.textContent = choice.label;
-      node.append(option);
+    for (const choice of all) node.append(option(choice));
+    for (const group of groups || []) {
+      const holder = document.createElement("optgroup");
+      holder.label = group.label;
+      for (const choice of group.choices) holder.append(option(choice));
+      node.append(holder);
     }
-    node.value = all.some((choice) => choice.key === selected) ? selected : all[0]?.key || "";
+    const every = [...all, ...(groups || []).flatMap((group) => group.choices)];
+    node.value = every.some((choice) => choice.key === selected) ? selected : every[0]?.key || "";
   }
 
   function section(key) {
@@ -231,22 +270,49 @@ export function setupSettings({
 
   function drafts(loaded) {
     sections = {};
+    presets = loaded.choices.hosted || [];
+    keychain.clear();
+    replacing = false;
+    removeArmed = null;
     // Only writable fields go back to the server; never copy api_key_set.
-    for (const choice of loaded.choices.chat_backends) {
-      const fields = choice.kind === "cloud" ? ["api_key_env", "chat_model", "base_url"]
-        : ["chat_url", "chat_model", "embedding_url", "embedding_model"];
+    const local = loaded.choices.chat_backends.filter((choice) => choice.kind !== "cloud");
+    for (const choice of local) {
+      const fields = ["chat_url", "chat_model", "embedding_url", "embedding_model"];
       const saved = loaded.sections[choice.key] || {};
       const defaults = loaded.defaults[choice.key] || {};
       sections[choice.key] = Object.fromEntries(fields.map((field) => [field, saved[field] || defaults[field] || ""]));
     }
-    options(chat, loaded.choices.chat_backends, loaded.chat_backend, loaded.chat_backend ? "" : t("settings.chooseServer"));
+    const on = savedPreset(loaded);
+    for (const item of presets) {
+      const mine = sectionOf(loaded, item);
+      const defaults = loaded.defaults[item.backend] || {};
+      // A service that shares its section with another (DeepSeek and OpenAI) starts from its own defaults.
+      sections[item.id] = item === on
+        ? {api_key_env: mine.api_key_env || "", api_key: mine.api_key || "", base_url: mine.base_url || item.stored_url,
+          chat_model: mine.chat_model || item.models[0] || "", thinking: mine.thinking || ""}
+        : {api_key_env: "", api_key: "", base_url: item.stored_url, chat_model: item.models[0] || defaults.chat_model || "", thinking: ""};
+    }
+    if (on && KEY_STATES[sectionOf(loaded, on).key]) keychain.set(on.id, KEY_STATES[sectionOf(loaded, on).key]);
+    options(chat, [], on?.id ?? loaded.chat_backend, loaded.chat_backend ? "" : t("settings.chooseServer"), [
+      {label: t("settings.choose.local"), choices: local},
+      {label: t("settings.choose.hosted"), choices: presets.map((item) => ({key: item.id, label: item.label}))},
+    ]);
     options(embedding, loaded.choices.embedding_backends, loaded.embedding_backend || "none");
     offered = "";
   }
 
+  // The saved section of the preset's backend.
+  const sectionOf = (loaded, item) => loaded.sections[item.backend] || {};
+
+  function fillModels(...lists) {
+    const names = [...new Set(lists.flat().filter(Boolean))];
+    $("s-model-options").replaceChildren(...names.map((name) => Object.assign(document.createElement("option"), {value: name})));
+  }
+
   function renderChat() {
     discoveryVersion += 1;
-    const cloud = isCloud();
+    const item = preset();
+    const cloud = item !== undefined;
     const data = section(chat.value);
     $("s-chat-url-field").hidden = cloud;
     $("s-cloud-fields").hidden = !cloud;
@@ -254,11 +320,64 @@ export function setupSettings({
     $("s-chat-model").value = data.chat_model || "";
     $("s-key-env").value = data.api_key_env || "";
     $("s-base-url").value = data.base_url || "";
-    $("s-model-options").replaceChildren();
-    modelStatus.textContent = cloud ? t("settings.typeModel") : words.discover;
+    fillModels(cloud ? item.models : []);
+    modelStatus.textContent = cloud ? t(item.models.length ? "settings.hosted.modelHint" : "settings.typeModel") : words.discover;
+    discover.hidden = cloud;
     discover.disabled = busy || cloud || !chat.value;
-    if (cloud) checkKey();
-    else { keyVersion += 1; keyStatus.textContent = ""; }
+    replacing = false;
+    removeArmed = null;
+    if (cloud) renderHosted(item);
+    else { keyVersion += 1; envStatus.textContent = ""; keySays(""); }
+  }
+
+  // The part of the form that is the hosted service's: its address, its key, and its thinking switch.
+  function renderHosted(item) {
+    const data = section(item.id);
+    $("s-base-url-field").hidden = !item.free_address;
+    $("s-address-text").hidden = item.free_address;
+    $("s-address-text").textContent = t("settings.hosted.addressIs", {address: data.base_url || item.base_url});
+    $("s-key-env-details").open = !!data.api_key_env;
+    $("s-thinking-field").hidden = !item.thinking_switch;
+    $("s-thinking").checked = thinks(item, data);
+    keySays("");
+    renderKey();
+    if (!keychain.has(item.id)) askKeychain(item);
+    checkKey();
+  }
+
+  // The key row: "Saved in the keychain" with Replace and Remove, or a field to paste it in.
+  function renderKey() {
+    const item = preset();
+    if (!item) return;
+    const data = section(item.id);
+    const have = keychain.get(item.id) === "saved" && !!data.api_key;
+    $("s-key-saved").hidden = !have || replacing;
+    $("s-key-entry").hidden = have && !replacing;
+    $("s-key-help").hidden = have && !replacing;
+    $("s-key-remove").textContent = t(removeArmed ? "settings.hosted.removeSure" : "settings.hosted.remove");
+    const problem = KEY_PROBLEMS[keychain.get(item.id)];
+    if (have) state("s-key-state", "ok", t("settings.hosted.keySavedState"));
+    else if (problem && data.api_key) state("s-key-state", "error", t(problem));
+    $("s-key-input").disabled = busy || !settings;
+    $("s-key-save").disabled = busy || !settings;
+  }
+
+  // Whether the keychain holds a key for the service; no key is read.
+  async function askKeychain(item) {
+    const version = ++keychainVersion;
+    const currentGeneration = generation;
+    try {
+      const result = await api(`/settings/key-status?${new URLSearchParams({preset: item.id})}`);
+      if (version !== keychainVersion || currentGeneration !== generation || !dialog.open) return;
+      keychain.set(item.id, result.keychain || "unknown");
+      // A key saved earlier is the service's key from now on.
+      const data = section(item.id);
+      if (result.keychain === "saved" && !data.api_key) data.api_key = item.key_ref;
+    } catch {
+      if (version !== keychainVersion || currentGeneration !== generation || !dialog.open) return;
+      keychain.set(item.id, "unknown");
+    }
+    renderKey();
   }
 
   function renderEmbedding() {
@@ -286,31 +405,37 @@ export function setupSettings({
     $("s-change").textContent = t(open ? "common.close" : "settings.change");
   }
 
+  // The environment variable is optional: it is checked when a name is typed, and says it wins when it is set.
   async function checkKey() {
     const version = ++keyVersion;
     const currentGeneration = generation;
     const name = $("s-key-env").value;
-    if (!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(name)) {
-      keyStatus.textContent = t(name ? "settings.key.invalid" : "settings.key.empty");
+    if (!name) {
+      envStatus.textContent = "";
       return;
     }
-    keyStatus.textContent = t("settings.key.checking");
+    if (!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(name)) {
+      envStatus.textContent = t("settings.key.invalid");
+      return;
+    }
+    envStatus.textContent = t("settings.key.checking");
     try {
       const result = await api(`/settings/key-status?${new URLSearchParams({name})}`);
       if (version === keyVersion && currentGeneration === generation && dialog.open) {
-        keyStatus.textContent = t(result.set ? "settings.key.set" : "settings.key.notSet");
+        envStatus.textContent = t(result.set ? "settings.key.set" : "settings.key.notSet");
       }
     } catch {
       if (version === keyVersion && currentGeneration === generation && dialog.open) {
-        keyStatus.textContent = t("settings.key.failed");
+        envStatus.textContent = t("settings.key.failed");
       }
     }
   }
 
   function candidate() {
     const chatData = section(chat.value);
-    const selectedSections = {[chat.value]: isCloud()
-      ? {api_key_env: chatData.api_key_env, base_url: chatData.base_url, chat_model: chatData.chat_model}
+    const item = preset();
+    const selectedSections = {[item ? item.backend : chat.value]: item
+      ? Object.fromEntries(CLOUD_FIELDS.map((field) => [field, String(chatData[field] ?? "")]))
       : {chat_url: chatData.chat_url, chat_model: chatData.chat_model}};
     if (embedding.value !== "none") {
       const data = section(embedding.value);
@@ -320,14 +445,22 @@ export function setupSettings({
         embedding_model: data.embedding_model,
       };
     }
-    return {chat_backend: chat.value, embedding_backend: embedding.value, workspace: settings.workspace, sections: selectedSections};
+    return {chat_backend: item ? item.backend : chat.value, embedding_backend: embedding.value, workspace: settings.workspace, sections: selectedSections};
+  }
+
+  // Whether the form holds the connection that is saved now, field for field.
+  function draftIsSaved() {
+    if (!settings || !chat.value) return false;
+    const {chat_backend: backend, embedding_backend: embed, sections: fields} = candidate();
+    const now = savedConnection(settings);
+    return JSON.stringify([backend, embed, fields]) === JSON.stringify([now.chat_backend, now.embedding_backend, now.sections]);
   }
 
   // The connection as `loaded` saved it, for Undo: its writable fields only.
   function savedConnection(loaded) {
     const backend = loaded.chat_backend;
     const embed = loaded.embedding_backend || "none";
-    const fields = isCloud(backend) ? CLOUD_FIELDS : LOCAL_FIELDS;
+    const fields = savedPreset(loaded) ? CLOUD_FIELDS : LOCAL_FIELDS;
     const pick = (data, names) => Object.fromEntries(names.map((name) => [name, String(data?.[name] ?? "")]));
     const out = {[backend]: pick(loaded.sections[backend], fields)};
     if (embed !== "none") out[embed] = {...out[embed], ...pick(loaded.sections[embed], ["embedding_url", "embedding_model"])};
@@ -362,8 +495,8 @@ export function setupSettings({
     if (!backend) state("s-chat-state", "off", said("notSetUp"), said("chooseBelow"));
     else if (tested?.ok || (tested && tested.failed === "embedding")) state("s-chat-state", "ok", said("connected"), {text: name, mono: true}, ago(tested.at));
     else if (tested) state("s-chat-state", "error", said("unreachable"), {text: name, mono: true}, ago(tested.at));
-    else if (isCloud(backend)) {
-      const set = saved.api_key_set === true;
+    else if (savedPreset()) {
+      const set = saved.key === "env" || saved.key === "keychain";
       state("s-chat-state", set ? "ok" : "error", said(set ? "keySet" : "keyNotSet"), {text: name, mono: true});
     } else if (probe?.reachable === true) state("s-chat-state", "ok", said("connected"), {text: name, mono: true}, checkedWords(probe.checked_s_ago));
     else if (probe?.reachable === false) state("s-chat-state", "error", said("unreachable"), {text: name, mono: true}, checkedWords(probe.checked_s_ago));
@@ -377,10 +510,19 @@ export function setupSettings({
     else state("s-embed-state", "busy", said("notChecked"), {text: embedName, mono: true});
 
     const choice = settings.choices.chat_backends.find((item) => item.key === backend);
-    $("s-server-address").textContent = !backend ? t("settings.server.none") : isCloud(backend) ? saved.base_url || t("settings.server.ownAddress") : saved.chat_url || "";
+    const hosted = savedPreset();
+    $("s-server-address").textContent = !backend ? t("settings.server.none") : hosted ? saved.base_url || hosted.base_url || t("settings.server.ownAddress") : saved.chat_url || "";
     $("s-server-kind").textContent = !choice ? t("settings.server.chooseBelow")
-      : isCloud(backend) ? t("settings.server.keyIn", {label: choice.label, env: saved.api_key_env || t("settings.server.anEnvVar")}) : choice.label;
+      : hosted ? hostedKind(hosted, saved) : choice.label;
     notes();
+  }
+
+  // "DeepSeek · key in the keychain", "OpenAI · key in OPENAI_API_KEY" or "DeepSeek · no key yet".
+  function hostedKind(item, data) {
+    if (data.key === "env") return t("settings.server.keyIn", {label: item.label, env: data.api_key_env || t("settings.server.anEnvVar")});
+    if (data.key === "keychain") return t("settings.server.keyKeychain", {label: item.label});
+    if (data.api_key_env) return t("settings.server.keyIn", {label: item.label, env: data.api_key_env});
+    return t("settings.server.keyNone", {label: item.label});
   }
 
   function recall() {
@@ -832,12 +974,28 @@ export function setupSettings({
     enable(!busy);
   }
 
+  // A key typed and not saved does not stay in the page when the dialog closes or opens again.
+  function forgetKey() {
+    $("s-key-input").value = "";
+    if (removeArmed) clearTimeout(removeArmed);
+    removeArmed = null;
+    replacing = false;
+  }
+
+  // The address of a free-form service is needed: left empty it would be OpenAI's own.
+  function addressProblem() {
+    const item = preset();
+    return item?.free_address && !section(item.id).base_url?.trim() ? t("settings.hosted.needAddress") : "";
+  }
+
   // --- open, load, test, save the connection ----------------------------------------------------------------
 
   async function open(name) {
     const currentGeneration = ++generation;
     discoveryVersion += 1;
     keyVersion += 1;
+    keychainVersion += 1;
+    forgetKey();
     settings = null;
     busy = true;
     saving = false;
@@ -849,7 +1007,8 @@ export function setupSettings({
     saved("", null);
     status.textContent = t("settings.loading");
     modelStatus.textContent = "";
-    keyStatus.textContent = "";
+    keySays("");
+    envStatus.textContent = "";
     dialog.dataset.ready = "false";
     layout(developer());
     // A named section opens as itself; otherwise a phone starts on the list.
@@ -889,6 +1048,8 @@ export function setupSettings({
     generation += 1;
     discoveryVersion += 1;
     keyVersion += 1;
+    keychainVersion += 1;
+    forgetKey();
     saving = false;
     invalidateTest();
   });
@@ -914,6 +1075,8 @@ export function setupSettings({
       section(chat.value)[field] = $(id).value;
       invalidateTest();
       if (id === "s-key-env") checkKey();
+      if (id === "s-chat-model" && isCloud()) $("s-thinking").checked = thinks(preset(), section(chat.value));
+      if (id === "s-base-url") $("s-address-text").textContent = t("settings.hosted.addressIs", {address: $(id).value});
       if (id === "s-chat-url") {
         discoveryVersion += 1;
         $("s-model-options").replaceChildren();
@@ -922,6 +1085,84 @@ export function setupSettings({
       }
     });
   }
+  $("s-thinking").addEventListener("change", (event) => {
+    if (!isCloud()) return;
+    section(chat.value).thinking = event.target.checked ? "on" : "off";
+    invalidateTest();
+  });
+
+  // The key is sent once, over this page's own session with the gateway, and leaves the field at once.
+  async function saveKey() {
+    const item = preset();
+    const key = $("s-key-input").value.trim();
+    if (!item || busy || !settings) return;
+    if (!key) {
+      keySays(t("settings.hosted.keyEmpty"));
+      return;
+    }
+    const currentGeneration = generation;
+    $("s-key-save").disabled = true;
+    keySays(t("settings.hosted.keySaving"));
+    try {
+      const result = await api("/settings/key", {method: "PUT", body: {preset: item.id, key}});
+      if (currentGeneration !== generation || !dialog.open) return;
+      $("s-key-input").value = "";
+      const data = section(item.id);
+      data.api_key = result.api_key || item.key_ref;
+      // A key pasted on purpose is the one to use: a variable named before it would win over it.
+      const cleared = !!data.api_key_env;
+      if (cleared) { data.api_key_env = ""; $("s-key-env").value = ""; envStatus.textContent = ""; }
+      keychain.set(item.id, "saved");
+      replacing = false;
+      invalidateTest();
+      renderKey();
+      // The saved row already shows "Saved in the keychain", so a plain save is only announced, not shown twice.
+      keySays(t(cleared ? "settings.hosted.keySavedCleared" : "settings.hosted.keySaved"), !cleared);
+    } catch (err) {
+      if (currentGeneration !== generation || !dialog.open) return;
+      keySays(err.message || t("settings.hosted.keyFailed"));
+    } finally {
+      if (currentGeneration === generation && dialog.open) $("s-key-save").disabled = busy || !settings;
+    }
+  }
+  $("s-key-save").addEventListener("click", saveKey);
+  $("s-key-input").addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.isComposing) return;
+    event.preventDefault();
+    saveKey();
+  });
+  $("s-key-replace").addEventListener("click", () => {
+    replacing = true;
+    keySays("");
+    renderKey();
+    $("s-key-input").focus?.();
+  });
+  // Removing a key cannot be undone (a service may not show it again), so it takes two clicks.
+  $("s-key-remove").addEventListener("click", async () => {
+    const item = preset();
+    if (!item || busy || !settings) return;
+    if (!removeArmed) {
+      removeArmed = setTimeout(() => { removeArmed = null; renderKey(); }, REMOVE_WAIT_MS);
+      renderKey();
+      return;
+    }
+    clearTimeout(removeArmed);
+    removeArmed = null;
+    const currentGeneration = generation;
+    try {
+      await api(`/settings/key?${new URLSearchParams({preset: item.id})}`, {method: "DELETE"});
+      if (currentGeneration !== generation || !dialog.open) return;
+      section(item.id).api_key = "";
+      keychain.set(item.id, "missing");
+      invalidateTest();
+      keySays(t("settings.hosted.keyRemoved"));
+    } catch (err) {
+      if (currentGeneration !== generation || !dialog.open) return;
+      keySays(err.message || t("settings.hosted.keyFailed"));
+    }
+    renderKey();
+  });
+
   for (const [id, field] of [["s-embed-url", "embedding_url"], ["s-embed-model", "embedding_model"]]) {
     $(id).addEventListener("input", () => { section(embedding.value)[field] = $(id).value; invalidateTest(); });
   }
@@ -959,6 +1200,12 @@ export function setupSettings({
 
   testButton.addEventListener("click", async () => {
     if (busy || !settings || testButton.disabled) return;
+    const missing = addressProblem();
+    if (missing) {
+      testStatus.textContent = missing;
+      testStatus.dataset.state = "error";
+      return;
+    }
     const version = ++testVersion;
     const currentGeneration = generation;
     testButton.disabled = true;
@@ -969,13 +1216,22 @@ export function setupSettings({
     try {
       const result = await api("/settings/test", {method: "POST", body: candidate()});
       if (version !== testVersion || currentGeneration !== generation || !dialog.open) return;
+      // A hosted service answers in a sentence of its own, and lists the models it has.
+      const hosted = typeof result.result === "string";
+      if (hosted && Array.isArray(result.models) && result.models.length) {
+        fillModels(preset()?.models || [], result.models);
+        modelStatus.textContent = t("settings.hosted.modelsListed", {n: result.models.length});
+      }
+      // The saved connection's rows show a test only when the form is that connection: a service tried
+      // in the form says so beside the button and leaves the saved one's state alone.
+      const mine = draftIsSaved();
       if (result.ok === true) {
-        tested = {at: clock(), ok: true};
-        testStatus.textContent = t(both ? "settings.test.both" : "settings.test.chat");
+        tested = mine ? {at: clock(), ok: true} : null;
+        testStatus.textContent = hosted ? result.message : t(both ? "settings.test.both" : "settings.test.chat");
         testStatus.dataset.state = "success";
       } else {
-        tested = {at: clock(), ok: false, failed: result.failed === "embedding" ? "embedding" : "chat"};
-        testStatus.textContent = t("settings.test.failed", {problem: firstLine(result.error)});
+        tested = mine ? {at: clock(), ok: false, failed: result.failed === "embedding" ? "embedding" : "chat"} : null;
+        testStatus.textContent = hosted ? firstLine(result.error) : t("settings.test.failed", {problem: firstLine(result.error)});
         testStatus.dataset.state = "error";
       }
     } catch (err) {
@@ -992,6 +1248,11 @@ export function setupSettings({
 
   save.addEventListener("click", async () => {
     if (busy || saving || !settings || !chat.value) return;
+    const missing = addressProblem();
+    if (missing) {
+      showError(missing);
+      return;
+    }
     const currentGeneration = generation;
     const before = settings;
     const across = settings.across_chats === undefined ? {} : {across_chats: $("s-across-chats").checked};

@@ -1011,7 +1011,7 @@ def test_default_menu_shows_the_summary_once_and_numbered_steps_on_request(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    script = iter([1, 1, 3])  # Show how to set one up, again, then Quit.
+    script = iter([1, 1, 4])  # Show how to set one up, again, then Quit.
     asked: list[tuple[str, list[str], int, int | None]] = []
 
     def choose(title: str, rows: Any, default: int, escape: int | None = None) -> int:
@@ -1027,9 +1027,15 @@ def test_default_menu_shows_the_summary_once_and_numbered_steps_on_request(
     assert result is None and not config_path.exists()
     detect.assert_awaited_once()  # Showing the steps never looks for a server.
     listed.assert_not_called()
-    rows = ["Check again", "Show how to set one up", "Enter an address", "Quit"]
+    rows = [
+        "Check again",
+        "Show how to set one up",
+        "Enter an address",
+        "Use a hosted service",
+        "Quit",
+    ]
     assert [a[1] for a in asked] == [rows] * 3
-    assert all(a[2] == 0 and a[3] == 3 for a in asked)  # Check again is the default.
+    assert all(a[2] == 0 and a[3] == 4 for a in asked)  # Check again is the default.
     out = capsys.readouterr().out
     assert "Set up and start" not in out and "Review setup" not in out
     assert "No approval" not in out and "Show manual steps" not in out
@@ -1056,7 +1062,7 @@ def test_default_menu_summary_is_printed_again_only_when_a_look_changed_it(
     real = setup_plan.detect()
     readings = iter([real, real, replace(real, missing_model_bytes=0)])
     monkeypatch.setattr(setup_plan, "detect_bounded", lambda: next(readings))
-    script = iter([0, 0, 3])  # Check again twice (nothing, then a change), Quit.
+    script = iter([0, 0, 4])  # Check again twice (nothing, then a change), Quit.
     monkeypatch.setattr(onboard, "_arrow_keys", lambda: True)
     monkeypatch.setattr(onboard, "_choose_from", lambda *args: next(script))
     result, detect, _ = _first_setup(_Answers(), found=None)
@@ -1085,7 +1091,7 @@ def test_a_failed_look_that_cannot_be_planned_keeps_the_screen_as_it_was(
             raise RuntimeError("setup metadata unavailable") from exc
 
     monkeypatch.setattr(setup_plan, "detect_bounded", bounded)
-    script = iter([0, 3])
+    script = iter([0, 4])
     monkeypatch.setattr(onboard, "_arrow_keys", lambda: True)
     monkeypatch.setattr(onboard, "_choose_from", lambda *args: next(script))
     result, _, _ = _first_setup(_Answers(), found=None)
@@ -1101,7 +1107,7 @@ def test_developer_review_keeps_its_menu_and_details_without_reprinting_the_summ
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     script = iter(
-        [1, 1, 2, 0, 3, 4, 3]
+        [1, 1, 2, 0, 3, 4, 4]
     )  # Review, lifetime, manual, start, details, back, quit.
     asked: list[tuple[str, list[str], int, int | None]] = []
     displayed: list[setup_plan.SetupPlan] = []
@@ -1132,6 +1138,7 @@ def test_developer_review_keeps_its_menu_and_details_without_reprinting_the_summ
         "Check again",
         "Review setup plan",
         "Enter an address",
+        "Use a hosted service",
         "Quit",
     ]
     assert asked[1][1] == [
@@ -1143,7 +1150,7 @@ def test_developer_review_keeps_its_menu_and_details_without_reprinting_the_summ
     ]
     assert asked[2][1][1] == "Keep available after melo closes: On"
     assert asked[0][2] == 0  # Check again remains the safe default.
-    assert asked[1][3] == 4 and asked[-1][3] == 3
+    assert asked[1][3] == 4 and asked[-1][3] == 4
     assert all("(preview)" not in row for _, rows, _, _ in asked for row in rows)
     out = capsys.readouterr().out
     assert out.count(displayed[0].digest) == 1  # not printed per choice
@@ -1839,10 +1846,12 @@ def test_the_cloud_wizard_offers_the_configs_key_and_model(config_path: Path) ->
         "MY_OPENAI_KEY",
         "gpt-x",
     )
-    assert answers.prompts[:3] == [
+    # A variable the config already names stays the default key choice.
+    assert answers.prompts[:4] == [
         "  Chat backend [5]: ",
+        "  API key [2]: ",
         "  API key env var [MY_OPENAI_KEY]: ",
-        "  Chat model [gpt-x]: ",
+        "  Chat model [1]: ",
     ]
 
 
@@ -2246,3 +2255,282 @@ def test_the_wizard_spells_a_listed_omlx_server_omlx(config_path: Path) -> None:
     assert config_path.read_text(encoding="utf-8").startswith(
         'chat_backend = "omlx"\nembedding_backend = "none"\n'
     )
+
+
+# ── Hosted services: the same presets as Settings ──
+
+SECRET = "sk-test-0123456789abcdef"
+HOSTED_ROWS = [
+    "OpenAI",
+    "Google Gemini",
+    "Anthropic",
+    "NVIDIA",
+    "DeepSeek",
+    "Other (OpenAI format)",
+]
+
+
+def _typed_secret(*keys: str) -> mock.Mock:
+    """``_ask_secret`` answering from *keys*; the real one reads without echo."""
+    return mock.Mock(side_effect=list(keys))
+
+
+def test_the_setup_list_offers_every_hosted_preset() -> None:
+    names = [name for _, name in onboard.SETUP_CHOICES]
+    assert names[4:] == HOSTED_ROWS
+    for key, _ in onboard.SETUP_CHOICES:
+        assert key in onboard._CHAT_SETUP, key
+
+
+def test_the_setup_picker_saves_deepseek_with_its_key_in_the_keychain(
+    config_path: Path,
+    fake_keychain: Any,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    answers = _Answers(
+        "9",  # Chat backend: DeepSeek
+        "",  # API key: paste (the default, nothing saved yet)
+        "",  # Chat model: deepseek-flash
+        "",  # Save and continue?
+        "",  # Embedding backend: none
+    )
+    secret = _typed_secret(SECRET)
+    with (
+        mock.patch("builtins.input", answers),
+        mock.patch.object(onboard, "_ask_secret", secret),
+        mock.patch.object(onboard, "_run_probes", return_value=True),
+    ):
+        cfg = run_backend_setup()
+    assert cfg is not None
+    assert cfg.chat_backend == "openai"
+    assert cfg.openai.base_url == "https://api.deepseek.com/v1"
+    assert cfg.openai.chat_model == "deepseek-flash"
+    assert cfg.openai.api_key == "keychain:localmelo.deepseek"
+    assert cfg.openai.api_key_env == ""
+    assert fake_keychain.items == {("localmelo.deepseek", "localmelo"): SECRET}
+    # The key was typed hidden and went to the keychain on stdin, nowhere else.
+    secret.assert_called_once()
+    assert SECRET not in "".join(answers.prompts)
+    assert SECRET not in fake_keychain.argv_text()
+    assert SECRET not in capsys.readouterr().out
+    assert SECRET not in config_path.read_text(encoding="utf-8")
+    saved = tomllib.loads(config_path.read_text(encoding="utf-8"))["openai"]
+    assert saved["api_key"] == "keychain:localmelo.deepseek"
+    assert "api_key_env" not in saved or saved["api_key_env"] == ""
+
+
+def test_the_setup_picker_asks_the_address_of_other_and_the_model_by_name(
+    config_path: Path, fake_keychain: Any
+) -> None:
+    answers = _Answers(
+        "10",  # Chat backend: Other (OpenAI format)
+        "",  # the address: asked again when empty
+        "https://llm.example.com/v1",
+        "",  # API key: paste
+        "some-model",  # Model name
+        "",  # Save and continue?
+        "",  # Embedding backend: none
+    )
+    with (
+        mock.patch("builtins.input", answers),
+        mock.patch.object(onboard, "_ask_secret", _typed_secret(SECRET)),
+        mock.patch.object(onboard, "_run_probes", return_value=True),
+        mock.patch("builtins.print"),
+    ):
+        cfg = run_backend_setup()
+    assert cfg is not None
+    assert cfg.chat_backend == "openai"
+    assert (cfg.openai.base_url, cfg.openai.chat_model) == (
+        "https://llm.example.com/v1",
+        "some-model",
+    )
+    assert cfg.openai.api_key == "keychain:localmelo.other"
+    assert fake_keychain.items == {("localmelo.other", "localmelo"): SECRET}
+
+
+def test_a_key_that_is_not_one_is_asked_for_again_and_never_saved(
+    fake_keychain: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cfg = Config()
+    secret = _typed_secret("", "two words", SECRET)
+    with (
+        mock.patch("builtins.input", _Answers("1", "", "")),
+        mock.patch.object(onboard, "_ask_secret", secret),
+        mock.patch.object(onboard, "_confirm", return_value=True),
+    ):
+        assert onboard._onboard_hosted(cfg, "deepseek")
+    assert secret.call_count == 3
+    assert list(fake_keychain.items.values()) == [SECRET]
+    assert "two words" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("locked", [True, False])
+def test_a_keychain_that_cannot_be_used_says_why_and_falls_back_to_a_variable(
+    fake_keychain: Any,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    locked: bool,
+) -> None:
+    from localmelo.support import keychain
+
+    if locked:
+        fake_keychain.locked = True
+    else:
+        monkeypatch.setattr(keychain, "available", lambda: False)
+    cfg = Config()
+    # With no keychain there is no key list: the variable's name is asked at once.
+    answers = _Answers(*(["1"] if locked else []), "DEEPSEEK_API_KEY", "")
+    with (
+        mock.patch("builtins.input", answers),
+        mock.patch.object(onboard, "_ask_secret", _typed_secret(SECRET)),
+        mock.patch.object(onboard, "_confirm", return_value=True),
+    ):
+        assert onboard._onboard_hosted(cfg, "deepseek")
+    out = capsys.readouterr().out
+    assert ("keychain is locked" in out) is locked
+    assert SECRET not in out
+    assert (cfg.openai.api_key, cfg.openai.api_key_env) == ("", "DEEPSEEK_API_KEY")
+    assert fake_keychain.items == {}
+
+
+def test_a_saved_key_is_kept_by_enter(config_path: Path, fake_keychain: Any) -> None:
+    from localmelo.support import keychain
+
+    keychain.write("localmelo.deepseek", SECRET)
+    cfg = Config()
+    cfg.chat_backend = "openai"
+    cfg.openai.base_url = "https://api.deepseek.com/v1"
+    cfg.openai.api_key = "keychain:localmelo.deepseek"
+    cfg.openai.chat_model = "deepseek-v4-pro"
+    secret = _typed_secret()
+    answers = _Answers("", "")
+    with (
+        mock.patch("builtins.input", answers),
+        mock.patch.object(onboard, "_ask_secret", secret),
+        mock.patch.object(onboard, "_confirm", return_value=True),
+        mock.patch("builtins.print"),
+    ):
+        assert onboard._onboard_hosted(cfg, "deepseek")
+    secret.assert_not_called()
+    assert answers.prompts == ["  API key [1]: ", "  Chat model [1]: "]
+    assert cfg.openai.api_key == "keychain:localmelo.deepseek"
+    assert (
+        cfg.openai.chat_model == "deepseek-v4-pro"
+    )  # the current model is the default
+
+
+def test_moving_from_openai_to_deepseek_drops_the_old_key(fake_keychain: Any) -> None:
+    cfg = Config()
+    cfg.chat_backend = "openai"
+    cfg.openai.api_key_env = "OPENAI_API_KEY"
+    cfg.openai.chat_model = "gpt-4o"
+    answers = _Answers("2", "DEEPSEEK_API_KEY", "")  # env row, its name, first model
+    with (
+        mock.patch("builtins.input", answers),
+        mock.patch.object(onboard, "_confirm", return_value=True),
+        mock.patch("builtins.print"),
+    ):
+        assert onboard._onboard_hosted(cfg, "deepseek")
+    assert cfg.openai.api_key_env == "DEEPSEEK_API_KEY"
+    assert cfg.openai.chat_model == "deepseek-flash"
+    assert cfg.openai.base_url == "https://api.deepseek.com/v1"
+
+
+def test_the_setup_picker_starts_on_the_saved_hosted_service(
+    config_path: Path,
+) -> None:
+    cfg = Config(chat_backend="openai", embedding_backend="none")
+    cfg.openai.base_url = "https://api.deepseek.com/v1"
+    cfg.openai.api_key_env = "DEEPSEEK_API_KEY"
+    config.save(cfg)
+    answers = _Answers(*[""] * 8)
+    with (
+        mock.patch("builtins.input", answers),
+        mock.patch.object(onboard, "_run_probes", return_value=True),
+        mock.patch("builtins.print"),
+    ):
+        run_backend_setup()
+    assert answers.prompts[0] == "  Chat backend [9]: "
+
+
+@pytest.mark.parametrize(
+    ("status", "words"),
+    [
+        (401, "did not accept the key (401)"),
+        (403, "refused this account (403)"),
+        (404, "has no model called gpt-4o"),
+        (429, "is busy"),
+        (500, ""),
+        (None, ""),
+    ],
+)
+def test_a_hosted_service_that_refuses_the_check_says_why_in_plain_words(
+    capsys: pytest.CaptureFixture[str], status: int | None, words: str
+) -> None:
+    cfg = _configured()
+    cfg.chat_backend = "openai"
+    cfg.openai.chat_model = "gpt-4o"
+    with (
+        mock.patch("builtins.input", _Answers("")),
+        mock.patch.object(
+            onboard, "probe_chat", mock.AsyncMock(side_effect=_probe_failure(status))
+        ),
+    ):
+        onboard._run_probes(cfg)
+    out = capsys.readouterr().out
+    if words:
+        assert words in out
+    else:
+        assert "did not accept" not in out and "refused this account" not in out
+
+
+def test_the_first_run_can_start_from_a_hosted_service(
+    config_path: Path, fake_keychain: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Hosted service: DeepSeek (5th); key: paste; model: the first; save.
+    choices = iter([5, 1, 1])
+    with (
+        mock.patch.object(
+            onboard, "_ask_choice", lambda *args, **kwargs: next(choices)
+        ),
+        mock.patch.object(onboard, "_ask_secret", _typed_secret(SECRET)),
+        mock.patch.object(onboard, "_confirm", return_value=True),
+        mock.patch.object(onboard, "_run_probes", return_value=True),
+    ):
+        result = onboard._first_hosted_service()
+    assert result == FirstSetup(
+        url="https://api.deepseek.com/v1", model="deepseek-flash", saved=True
+    )
+    saved = config.load()
+    assert saved.chat_backend == "openai" and saved.embedding_backend == "none"
+    assert saved.openai.api_key == "keychain:localmelo.deepseek"
+    assert SECRET not in config_path.read_text(encoding="utf-8")
+    assert SECRET not in capsys.readouterr().out
+
+
+def test_choosing_a_hosted_service_in_the_no_server_list_leads_to_the_hosted_setup(
+    config_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(onboard, "_arrow_keys", lambda: True)
+    monkeypatch.setattr(onboard, "_choose_from", lambda *args: 3)  # the hosted row
+    first = mock.Mock(return_value=FirstSetup(url="u", model="m", saved=True))
+    monkeypatch.setattr(onboard, "_first_hosted_service", first)
+    result, _, _ = _first_setup(_Answers(), found=None)
+    assert result == FirstSetup(url="u", model="m", saved=True)
+    first.assert_called_once_with()
+
+
+def test_a_cancelled_hosted_setup_saves_nothing(
+    config_path: Path, fake_keychain: Any
+) -> None:
+    choices = iter([5, 1, 1])
+    with (
+        mock.patch.object(
+            onboard, "_ask_choice", lambda *args, **kwargs: next(choices)
+        ),
+        mock.patch.object(onboard, "_ask_secret", _typed_secret(SECRET)),
+        mock.patch.object(onboard, "_confirm", return_value=False),
+        mock.patch("builtins.print"),
+    ):
+        assert onboard._first_hosted_service() is None
+    assert not config_path.exists()

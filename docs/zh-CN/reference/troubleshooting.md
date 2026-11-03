@@ -105,7 +105,7 @@ No model server is running yet.
 ```
 
 - **原因：** 四个常用端口（8000、8400、11434、30000，或 `LOCALMELO_DETECT_URLS` 中的 URL）都没有响应 `GET /v1/models`。
-- **修复：** 在受支持的 Apple silicon Mac 上，选择 `Show how to set one up`，会得到最多六步的编号步骤。自动设置即将推出；其他系统保留手动服务器指南，管道和 `TERM=dumb` 输出指南链接，而不是无法选择的列表项。自行启动服务器后选择 `Check again`；使用非默认端口时选择 `Enter an address`。`Quit`（或 Esc）不保存任何内容。设置检查出错或耗时过长时，手动指南仍然可用。若已经保存后端但没有找到服务器，`melo setup` 会打开完整后端菜单。网页/应用设置卡片保留手动命令，并自动再次检查。
+- **修复：** 在受支持的 Apple silicon Mac 上，选择 `Show how to set one up`，会得到最多六步的编号步骤。自动设置即将推出；其他系统保留手动服务器指南，管道和 `TERM=dumb` 输出指南链接，而不是无法选择的列表项。自行启动服务器后选择 `Check again`；使用非默认端口时选择 `Enter an address`；选择 `Use a hosted service` 则改为设置一个云端服务（见[云端模型](../guides/hosted-models.md)）。`Quit`（或 Esc）不保存任何内容。设置检查出错或耗时过长时，手动指南仍然可用。若已经保存后端但没有找到服务器，`melo setup` 会打开完整后端菜单。网页/应用设置卡片保留手动命令，并自动再次检查。
 
 ### A model server cannot be used at the first run
 
@@ -126,14 +126,18 @@ No model server is running yet.
 
 ```text
   Configuration errors:
-  - [openai] environment variable $OPENAI_API_KEY is not set. Export it before starting the gateway.
+  - [openai] environment variable $OPENAI_API_KEY is not set. Export it before starting the gateway, or paste the key in Settings.
 ```
 
 `melo` 会在运行之前停止，退出码为 1。每一行都指出一个问题：
 
 | 消息包含 | 修复 |
 |---|---|
-| `environment variable $… is not set` | 在当前 shell 中导出 API 密钥。 |
+| `environment variable $… is not set` | 在当前 shell 中导出 API 密钥，或在设置里粘贴（见[云端模型](../guides/hosted-models.md)）。 |
+| `the key … is not in the keychain` | 打开设置，选择模型服务器并重新粘贴密钥，或运行 `melo setup`。 |
+| `the keychain is locked` | 先解锁（打开“钥匙串访问”，或重新登录这台 Mac），然后再试一次。 |
+| `the keychain is not available on this computer` | 把 `api_key_env` 设置为保存密钥的变量名。 |
+| `api_key: … is not a keychain reference` | 写成 `api_key = "keychain:localmelo.<name>"`，或留空。 |
 | `embedding_url is empty`, `embedding_model is empty` | 在后端的表中添加这两项，或设置 `embedding_backend = "none"`。 |
 | `request_timeout_s must be a finite number of seconds > 0` | 写成不带引号的数字，例如 `request_timeout_s = 600`。 |
 | `extra_body must not set 'model'` | 从 `extra_body` 中删除该键。 |
@@ -249,7 +253,7 @@ melo: run ended with status failed: empty replies
 melo: run ended with status failed: melo did not finish an answer
 ```
 
-- **原因：** 模型在思考中、给出回答之前停下了，localmelo 再问一次时又是如此。它的思考作为思考保留（终端中用 `/thinking on`，控制台中是折叠的思考），绝不作为回答。
+- **原因：** 模型在思考中、给出回答之前停下了，localmelo 再问一次时又是如此。它的思考作为思考保留（终端中用 `/thinking on`，控制台中是折叠的思考），绝不作为回答。只有思考在回复里被截断时才会因此结束运行；如果服务器报告了模型的推理，会关闭思考再问一次，仍为空时，思考的最后几行成为回答，并标注 `(from melo's thinking)`。
 - **修复：** 再试一次（终端中用 `/retry`，控制台中点 Try again）。如果反复出现，在服务器上提高模型的输出上限，或换一个模型。
 
 ### budget_exhausted: Max steps reached

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
 
+from localmelo.support import hosted
 from localmelo.support.backends.base import BaseBackend
 from localmelo.support.backends.openai_compat import build_openai_chat
 
@@ -30,18 +30,7 @@ class GeminiBackend(BaseBackend):
         return "Gemini"
 
     def validate(self, cfg: Config) -> list[str]:
-        errors: list[str] = []
-        if not cfg.gemini.api_key_env:
-            errors.append(
-                "[gemini] api_key_env is empty. "
-                "Set the environment variable name that holds your API key "
-                "(e.g. GEMINI_API_KEY)."
-            )
-        elif not os.environ.get(cfg.gemini.api_key_env):
-            errors.append(
-                f"[gemini] environment variable ${cfg.gemini.api_key_env} "
-                "is not set. Export it before starting the gateway."
-            )
+        errors = hosted.key_errors("gemini", cfg.gemini, "GEMINI_API_KEY")
         if not cfg.gemini.chat_model:
             errors.append(
                 "[gemini] chat_model is empty. "
@@ -57,12 +46,14 @@ class GeminiBackend(BaseBackend):
 
     def build_chat_provider(self, cfg: Config) -> BaseLLMProvider:
         base_url = cfg.gemini.base_url or _DEFAULT_BASE_URL
-        api_key = os.environ.get(cfg.gemini.api_key_env, "")
+        api_key = hosted.api_key(cfg.gemini)
         return build_openai_chat(
             base_url=base_url,
             model=cfg.gemini.chat_model,
             api_key=api_key,
-            extra_body=cfg.gemini.extra_body,
+            extra_body=hosted.request_body("gemini", cfg.gemini),
+            thinking_off_body=hosted.retry_body("gemini", cfg.gemini),
+            **hosted.image_args("gemini", cfg.gemini),
             timeout=cfg.request_timeout_s,
             reasoning_field=getattr(cfg.gemini, "reasoning_field", "") or None,
             requires_reasoning_replay=getattr(

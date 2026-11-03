@@ -184,9 +184,16 @@ class LocalBackendConfig:
 class CloudVendorConfig:
     """Config shape shared by all cloud vendor backends."""
 
-    api_key_env: str = ""  # env var name, e.g. OPENAI_API_KEY
+    api_key_env: str = ""  # env var name, e.g. OPENAI_API_KEY; wins when it is set
     chat_model: str = ""
     base_url: str = ""  # optional override; each vendor has a built-in default
+    # A reference to the key in the macOS keychain, "keychain:localmelo.<name>"
+    # (see support.keychain); the key itself is never in the config.
+    api_key: str = ""
+    # Whether the model thinks before it answers, for a service with such a
+    # switch (see support.hosted): "" follows the preset's default for the
+    # model, "on" and "off" decide.
+    thinking: str = ""
     # Extra top-level fields merged into every chat request body.
     extra_body: dict[str, Any] = field(default_factory=dict)
     # See LocalBackendConfig: the reasoning field and whether the server
@@ -722,6 +729,7 @@ class Config:
         errors.extend(chat_errors)
         errors.extend(self._validate_extra_body())
         errors.extend(self._validate_reasoning_fields())
+        errors.extend(self._validate_hosted_fields())
 
         # -- Delegate embedding backend validation (skip if "none") --
         if self.embedding_backend != "none":
@@ -1197,6 +1205,17 @@ class Config:
                     f"[{section_name}] requires_reasoning_replay must be a bool, "
                     f"got {section.requires_reasoning_replay!r}"
                 )
+        return errors
+
+    def _validate_hosted_fields(self) -> list[str]:
+        """Each hosted section's ``api_key`` reference and ``thinking`` value."""
+        from localmelo.support import hosted
+
+        errors: list[str] = []
+        for section_name in _CLOUD_SECTIONS:
+            errors.extend(
+                hosted.hosted_fields_errors(section_name, getattr(self, section_name))
+            )
         return errors
 
     def _validate_extra_body(self) -> list[str]:
@@ -1868,8 +1887,12 @@ def save(cfg: Config) -> None:
         sec = getattr(cfg, section)
         lines.append(f"[{section}]")
         lines.append(f"api_key_env = {_toml_string(sec.api_key_env)}")
+        if sec.api_key:
+            lines.append(f"api_key = {_toml_string(sec.api_key)}")
         lines.append(f"chat_model = {_toml_string(sec.chat_model)}")
         lines.append(f"base_url = {_toml_string(sec.base_url)}")
+        if sec.thinking:
+            lines.append(f"thinking = {_toml_string(sec.thinking)}")
         if sec.extra_body:
             lines.append(f"extra_body = {_toml_value(sec.extra_body)}")
         if sec.reasoning_field:

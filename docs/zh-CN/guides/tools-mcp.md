@@ -115,7 +115,7 @@ melo --mcp mcp.json "What time is it in Tokyo?"
 
 | 值 | 模型得到的内容 |
 |---|---|
-| `auto`（默认） | 服务器表明模型能读图时发送像素：oMLX 的 `GET /v1/models/status` 给出该模型的 `model_type` 为 `vlm`，或 Ollama 的 `POST /api/show` 在 `capabilities` 中列出 `vision`。localmelo 在工具第一次返回图片时询问一次。其他回答或没有回答（vLLM、SGLang 和 MLC 不提供此信息）都按 `off` 处理。 |
+| `auto`（默认） | 服务器表明模型能读图时发送像素：oMLX 的 `GET /v1/models/status` 给出该模型的 `model_type` 为 `vlm`，或 Ollama 的 `POST /api/show` 在 `capabilities` 中列出 `vision`。localmelo 在工具第一次返回图片时询问一次。对云端服务，由预设代替服务器回答：见[云端模型](hosted-models.md#pictures)。其他回答或没有回答（vLLM、SGLang 和 MLC 不提供此信息）都按 `off` 处理。 |
 | `on` | 不询问，直接发送像素。 |
 | `off` | 只发送注明每张图片的那一行，与引入此设置之前相同。 |
 

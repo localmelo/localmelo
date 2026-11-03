@@ -9,17 +9,29 @@ function deferred() {
   return {promise, resolve, reject};
 }
 
+const preset = (id, label, backend, base_url, models, extra = {}) => ({
+  id, label, backend, base_url, stored_url: id === backend ? '' : base_url, models, key_env: '', key_ref: `keychain:localmelo.${id}`,
+  free_address: id === 'other', thinking_switch: false, thinking_off_models: [], ...extra,
+});
+const PRESETS = [
+  preset('openai', 'OpenAI', 'openai', 'https://api.openai.com/v1', ['gpt-4o']),
+  preset('deepseek', 'DeepSeek', 'openai', 'https://api.deepseek.com/v1', ['deepseek-flash', 'deepseek-v4-pro'],
+    {thinking_switch: true, thinking_off_models: ['deepseek-flash']}),
+  preset('other', 'Other (OpenAI format)', 'openai', '', []),
+];
+
 function fixture(overrides = {}) {
   return {
     chat_backend: 'mlc', embedding_backend: 'none', workspace: '~/ws', revision: 'rev1', errors: [],
     choices: {
       chat_backends: [{key: 'mlc', label: 'MLC', kind: 'local'}, {key: 'vllm', label: 'vLLM', kind: 'local'}, {key: 'openai', label: 'OpenAI', kind: 'cloud'}],
       embedding_backends: [{key: 'mlc', label: 'MLC'}, {key: 'vllm', label: 'vLLM'}, {key: 'none', label: 'None'}],
+      hosted: PRESETS,
     },
     sections: {
       mlc: {chat_url: 'http://localhost/v1', chat_model: 'old', embedding_url: '', embedding_model: ''},
       vllm: {chat_url: '', chat_model: '', embedding_url: 'http://embed/v1', embedding_model: 'embed'},
-      openai: {api_key_env: 'OPENAI_API_KEY', api_key_set: true, chat_model: 'cloud', base_url: ''},
+      openai: {api_key_env: 'OPENAI_API_KEY', api_key_set: true, api_key: '', key: 'env', chat_model: 'cloud', base_url: '', thinking: '', preset: 'openai'},
     },
     defaults: {mlc: {}, vllm: {chat_url: 'http://vllm/v1'}, openai: {}}, ...overrides,
   };
@@ -155,7 +167,7 @@ test('unconfigured defaults, cloud manual model and safe key status', async () =
   const value = fixture({chat_backend: '', embedding_backend: '', revision: ''});
   const h = harness({
     'GET /settings': value,
-    'GET /settings/key-status?name=OPENAI_API_KEY': {set: true},
+    'GET /settings/key-status?preset=openai': {keychain: 'missing', env_set: false},
     'GET /settings/key-status?name=OTHER_KEY': {set: false},
     'PUT /settings': value,
   });
@@ -165,15 +177,16 @@ test('unconfigured defaults, cloud manual model and safe key status', async () =
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(h.element('s-cloud-fields').hidden, false);
   assert.equal(h.element('discover-btn').disabled, true);
-  assert.equal(h.element('s-key-status').textContent, 'Key is set.');
+  assert.equal(h.element('s-key-env').value, '', 'a new service starts with the keychain, not a variable');
+  assert.equal(h.element('s-key-entry').hidden, false);
   await change(h, 's-key-env', 'OTHER_KEY');
   await new Promise((resolve) => setImmediate(resolve));
-  assert.match(h.element('s-key-status').textContent, /not set/);
+  assert.match(h.element('s-key-env-status').textContent, /not set/);
   await change(h, 's-chat-model', 'manual-cloud-model');
   await h.element('create-btn').emit('click');
   const body = h.calls.at(-1).options.body;
   assert.equal(body.revision, '');
-  assert.deepEqual(body.sections, {openai: {api_key_env: 'OTHER_KEY', base_url: '', chat_model: 'manual-cloud-model'}});
+  assert.deepEqual(body.sections, {openai: {api_key_env: 'OTHER_KEY', api_key: '', base_url: '', chat_model: 'manual-cloud-model', thinking: ''}});
   assert.equal(JSON.stringify(body).includes('api_key_set'), false);
 });
 
@@ -239,18 +252,19 @@ test('stale discovery and key-status responses cannot overwrite current backend'
   const h = harness({
     'GET /settings': fixture(),
     'GET /models?backend=mlc&url=http%3A%2F%2Flocalhost%2Fv1': () => models.promise,
-    'GET /settings/key-status?name=OPENAI_API_KEY': () => key.promise,
+    'GET /settings/key-status?preset=openai': () => key.promise,
   });
   await h.open();
   const pendingModels = h.element('discover-btn').emit('click');
   await change(h, 's-adapter', 'openai', 'change');
   await change(h, 's-adapter', 'vllm', 'change');
   models.resolve({models: ['stale']});
-  key.resolve({set: true});
+  key.resolve({keychain: 'saved'});
   await pendingModels;
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(h.element('s-model-options').children, []);
   assert.equal(h.element('s-key-status').textContent, '');
+  assert.equal(h.element('s-key-env-status').textContent, '');
   assert.equal(h.element('s-chat-url').value, 'http://vllm/v1');
 });
 
@@ -368,7 +382,7 @@ test('cloud candidate includes key environment name but never key status or revi
   await change(h, 's-adapter', 'openai', 'change');
   await h.element('settings-test').emit('click');
   const body = h.calls.find((call) => call.path === '/settings/test').options.body;
-  assert.deepEqual(body.sections, {openai: {api_key_env: 'OPENAI_API_KEY', base_url: '', chat_model: 'cloud'}});
+  assert.deepEqual(body.sections, {openai: {api_key_env: '', api_key: '', base_url: '', chat_model: 'gpt-4o', thinking: ''}});
   assert.equal('revision' in body, false);
   assert.equal(JSON.stringify(body).includes('api_key_set'), false);
 });
@@ -659,7 +673,7 @@ test('a cloud server says whether its key is set and names the variable, never t
   await h.open();
   assert.equal(h.element('s-chat-state').dataset.text, 'Key is set · cloud');
   assert.equal(h.element('s-server-kind').textContent, 'OpenAI · key in OPENAI_API_KEY');
-  assert.equal(h.element('s-server-address').textContent, "The service's own address");
+  assert.equal(h.element('s-server-address').textContent, 'https://api.openai.com/v1', 'a preset shows its own address');
 });
 
 test('saving the connection offers Undo, which sends the old connection without the key status', async () => {
@@ -679,7 +693,7 @@ test('saving the connection offers Undo, which sends the old connection without 
   await flush();
   const body = h.puts().at(-1).options.body;
   assert.equal(body.revision, 'rev2');
-  assert.deepEqual(body.sections, {openai: {api_key_env: 'OPENAI_API_KEY', base_url: '', chat_model: 'cloud'}});
+  assert.deepEqual(body.sections, {openai: {api_key_env: 'OPENAI_API_KEY', api_key: '', base_url: '', chat_model: 'cloud', thinking: ''}});
   assert.equal(body.chat_backend, 'openai');
   assert.equal(JSON.stringify(body).includes('api_key_set'), false);
 });
@@ -993,4 +1007,255 @@ test('the extra folders read in Simplified Chinese', async () => {
   } finally {
     await useLanguage('en');
   }
+});
+
+// --- hosted services: presets, the key in the keychain, the Test button ---------------------------------------
+
+const SECRET = 'sk-test-0123456789abcdef';
+const DEEPSEEK_REF = 'keychain:localmelo.deepseek';
+const hostedFixture = (overrides = {}) => full({
+  chat_backend: 'openai',
+  sections: {
+    ...full().sections,
+    openai: {api_key_env: '', api_key: DEEPSEEK_REF, key: 'keychain', chat_model: 'deepseek-flash', base_url: 'https://api.deepseek.com/v1', thinking: '', preset: 'deepseek'},
+  },
+  ...overrides,
+});
+
+test('choosing a hosted service fills the address, the models and the thinking switch from its preset', async () => {
+  const h = harness({'GET /settings': full(), 'GET /settings/key-status?preset=deepseek': {keychain: 'missing'}});
+  await h.open();
+  const choices = h.element('s-adapter').children.map((item) => item.label || item.textContent);
+  assert.ok(choices.includes('Hosted services'), 'the hosted presets are a group of their own');
+  await change(h, 's-adapter', 'deepseek', 'change');
+  await flush();
+  assert.equal(h.element('s-cloud-fields').hidden, false);
+  assert.equal(h.element('s-chat-model').value, 'deepseek-flash');
+  assert.deepEqual(h.element('s-model-options').children.map((item) => item.value), ['deepseek-flash', 'deepseek-v4-pro']);
+  assert.equal(h.element('s-address-text').textContent, 'Address: https://api.deepseek.com/v1');
+  assert.equal(h.element('s-base-url-field').hidden, true, 'a known service has no address field');
+  assert.equal(h.element('s-thinking-field').hidden, false);
+  assert.equal(h.element('s-thinking').checked, false, 'deepseek-flash starts with thinking off');
+  await change(h, 's-chat-model', 'deepseek-v4-pro');
+  assert.equal(h.element('s-thinking').checked, true, 'another model follows its own default');
+  await change(h, 's-adapter', 'openai', 'change');
+  await flush();
+  assert.equal(h.element('s-thinking-field').hidden, true, 'a service with no switch shows none');
+  assert.equal(h.element('s-chat-model').value, 'gpt-4o');
+});
+
+test('a hosted service is sent as its backend, with its address and the thinking choice only when made', async () => {
+  const h = harness({'GET /settings': full(), 'GET /settings/key-status?preset=deepseek': {keychain: 'missing'}, 'POST /settings/test': {ok: true, result: 'works', message: 'Works.'}});
+  await h.open();
+  await change(h, 's-adapter', 'deepseek', 'change');
+  await flush();
+  await h.element('settings-test').emit('click');
+  let body = h.calls.find((call) => call.path === '/settings/test').options.body;
+  assert.equal(body.chat_backend, 'openai');
+  assert.deepEqual(body.sections.openai, {api_key_env: '', api_key: '', base_url: 'https://api.deepseek.com/v1', chat_model: 'deepseek-flash', thinking: ''});
+  h.element('s-thinking').checked = true;
+  await h.element('s-thinking').emit('change');
+  await h.element('settings-test').emit('click');
+  body = h.calls.filter((call) => call.path === '/settings/test').at(-1).options.body;
+  assert.equal(body.sections.openai.thinking, 'on');
+});
+
+test('the key is sent once, leaves the field at once and only its keychain reference stays in the page', async () => {
+  const put = [];
+  const h = harness({
+    'GET /settings': full(),
+    'GET /settings/key-status?preset=deepseek': {keychain: 'missing'},
+    'PUT /settings/key': (body) => { put.push(body); return {keychain: 'saved', api_key: DEEPSEEK_REF}; },
+    'POST /settings/test': {ok: true, result: 'works', message: 'Works.'},
+    'PUT /settings': (body) => hostedFixture({revision: 'rev2', chat_backend: body.chat_backend}),
+  });
+  await h.open();
+  await change(h, 's-adapter', 'deepseek', 'change');
+  await flush();
+  assert.equal(h.element('s-key-entry').hidden, false);
+  assert.equal(h.element('s-key-saved').hidden, true);
+  await h.element('s-key-save').emit('click');
+  assert.equal(h.element('s-key-status').textContent, 'Paste your key first.');
+  assert.equal(put.length, 0, 'an empty field sends nothing');
+  h.element('s-key-input').value = `  ${SECRET} `;
+  await h.element('s-key-save').emit('click');
+  await flush();
+  assert.deepEqual(put, [{preset: 'deepseek', key: SECRET}]);
+  assert.equal(h.element('s-key-input').value, '', 'the field is cleared at once');
+  assert.equal(h.element('s-key-saved').hidden, false);
+  assert.equal(h.element('s-key-entry').hidden, true);
+  assert.equal(h.element('s-key-state').dataset.text, 'Saved in the keychain');
+  assert.equal(h.element('s-key-status').textContent, 'Saved in the keychain.');
+  assert.match(h.element('s-key-status').className, /sr-only/, 'announced, not drawn twice beside the saved row');
+  await h.element('settings-test').emit('click');
+  await h.element('create-btn').emit('click');
+  await flush();
+  const sent = h.calls.filter((call) => call.path !== '/settings/key');
+  for (const call of sent) assert.equal(JSON.stringify(call).includes(SECRET), false, `${call.path} carries no key`);
+  const body = h.puts().find((call) => call.path === '/settings').options.body;
+  assert.equal(body.sections.openai.api_key, DEEPSEEK_REF);
+  assert.equal(body.sections.openai.api_key_env, '');
+  for (const id of ['s-key-saved', 's-key-state', 's-key-status', 's-key-help', 's-key-env-status']) {
+    assert.equal(words(h.element(id)).includes(SECRET), false, `${id} does not show the key`);
+  }
+});
+
+test('a key pasted on purpose replaces the variable name, and a failed save keeps the field and says why', async () => {
+  const h = harness({
+    'GET /settings': full(),
+    'GET /settings/key-status?preset=openai': {keychain: 'missing'},
+    'GET /settings/key-status?name=OPENAI_API_KEY': {set: true},
+    'PUT /settings/key': () => { throw new Error('The keychain is locked.'); },
+  });
+  await h.open();
+  await h.element('s-change').emit('click');
+  await change(h, 's-adapter', 'openai', 'change');
+  await flush();
+  await change(h, 's-key-env', 'OPENAI_API_KEY');
+  await flush();
+  h.element('s-key-input').value = SECRET;
+  await h.element('s-key-save').emit('click');
+  await flush();
+  assert.equal(h.element('s-key-status').textContent, 'The keychain is locked.');
+  assert.equal(h.element('s-key-env').value, 'OPENAI_API_KEY', 'a failed save changes nothing');
+  assert.equal(h.element('s-key-saved').hidden, true);
+});
+
+test('Remove takes two clicks, deletes the keychain item and brings back the empty key field', async () => {
+  const h = harness({
+    'GET /settings': hostedFixture(),
+    'DELETE /settings/key?preset=deepseek': {keychain: 'missing'},
+  });
+  await h.open();
+  await h.element('s-change').emit('click');
+  assert.equal(h.element('s-key-saved').hidden, false);
+  assert.equal(h.element('s-key-remove').textContent, 'Remove');
+  await h.element('s-key-remove').emit('click');
+  assert.equal(h.element('s-key-remove').textContent, 'Remove for good?');
+  assert.equal(h.calls.some((call) => call.options.method === 'DELETE'), false, 'one click deletes nothing');
+  await h.element('s-key-remove').emit('click');
+  await flush();
+  assert.equal(h.calls.filter((call) => call.options.method === 'DELETE').length, 1);
+  assert.equal(h.element('s-key-status').textContent, 'Removed from the keychain.');
+  assert.equal(h.element('s-key-entry').hidden, false);
+  assert.equal(h.element('s-key-saved').hidden, true);
+  await h.element('create-btn').emit('click');
+  assert.equal(h.puts().at(-1).options.body.sections.openai.api_key, '', 'the removed reference is not saved again');
+});
+
+test('a saved key the keychain no longer has says so in words, and a locked keychain too', async () => {
+  const missing = harness({'GET /settings': hostedFixture({sections: {...full().sections, openai: {...hostedFixture().sections.openai, key: 'missing'}}})});
+  await missing.open();
+  await missing.element('s-change').emit('click');
+  assert.equal(missing.element('s-chat-state').dataset.state, 'error');
+  assert.equal(missing.element('s-server-kind').textContent, 'DeepSeek · no key yet');
+  const locked = harness({
+    'GET /settings': hostedFixture({sections: {...full().sections, openai: {...hostedFixture().sections.openai, key: 'locked'}}}),
+  });
+  await locked.open();
+  await locked.element('s-change').emit('click');
+  assert.equal(locked.element('s-key-state').dataset.text, 'The keychain is locked');
+  assert.equal(locked.element('s-key-entry').hidden, false, 'the key can be pasted again');
+});
+
+test('Test lists what the service offers, and says in plain words when it fails', async () => {
+  let reply = {ok: true, result: 'works', message: 'It works. deepseek-flash answered and called a tool.', models: ['deepseek-flash', 'deepseek-v4-pro', 'deepseek-extra']};
+  const h = harness({
+    'GET /settings': hostedFixture(),
+    'POST /settings/test': () => reply,
+  });
+  await h.open();
+  await h.element('s-change').emit('click');
+  await h.element('settings-test').emit('click');
+  assert.equal(h.element('settings-test-status').textContent, 'It works. deepseek-flash answered and called a tool.');
+  assert.equal(h.element('settings-test-status').dataset.state, 'success');
+  assert.deepEqual(h.element('s-model-options').children.map((item) => item.value), ['deepseek-flash', 'deepseek-v4-pro', 'deepseek-extra']);
+  assert.equal(h.element('discover-status').textContent, 'The service offers 3 models. Pick one or type one.');
+  reply = {ok: false, result: 'wrong_key', error: 'The service does not accept this key (401).\nPaste the key again.'};
+  await h.element('settings-test').emit('click');
+  assert.equal(h.element('settings-test-status').textContent, 'The service does not accept this key (401).');
+  assert.equal(h.element('settings-test-status').dataset.state, 'error');
+});
+
+test('a free-form service needs its address before Test or Save will go', async () => {
+  const h = harness({
+    'GET /settings': full(),
+    'GET /settings/key-status?preset=other': {keychain: 'missing'},
+    'POST /settings/test': {ok: true, result: 'works', message: 'It works.'},
+    'PUT /settings': (body) => full({revision: 'rev2', chat_backend: body.chat_backend}),
+  });
+  await h.open();
+  await h.element('s-change').emit('click');
+  await change(h, 's-adapter', 'other', 'change');
+  await flush();
+  assert.equal(h.element('s-base-url-field').hidden, false);
+  assert.equal(h.element('s-address-text').hidden, true);
+  await change(h, 's-chat-model', 'some-model');
+  await h.element('settings-test').emit('click');
+  assert.equal(h.element('settings-test-status').textContent, "Enter the service's address.");
+  assert.equal(h.calls.some((call) => call.path === '/settings/test'), false);
+  await h.element('create-btn').emit('click');
+  assert.equal(h.puts().length, 0, 'Save waits for the address too');
+  await change(h, 's-base-url', 'https://llm.example.com/v1');
+  assert.equal(h.element('s-address-text').textContent, 'Address: https://llm.example.com/v1');
+  await h.element('settings-test').emit('click');
+  const body = h.calls.find((call) => call.path === '/settings/test').options.body;
+  assert.equal(body.chat_backend, 'openai');
+  assert.equal(body.sections.openai.base_url, 'https://llm.example.com/v1');
+});
+
+test('Cancel drops a preset chosen in the form, and the saved service comes back', async () => {
+  const h = harness({'GET /settings': hostedFixture(), 'GET /settings/key-status?preset=openai': {keychain: 'missing'}});
+  await h.open();
+  assert.equal(h.element('s-server-kind').textContent, 'DeepSeek · key in the keychain');
+  await h.element('s-change').emit('click');
+  assert.equal(h.element('s-adapter').value, 'deepseek');
+  await change(h, 's-adapter', 'openai', 'change');
+  await h.element('s-editor-cancel').emit('click');
+  assert.equal(h.element('s-adapter').value, 'deepseek');
+  assert.equal(h.element('s-chat-model').value, 'deepseek-flash');
+});
+
+test('the hosted setup reads in Simplified Chinese', async () => {
+  const {useLanguage} = await import('../../support/gateway/static/i18n.mjs');
+  await useLanguage('zh-Hans');
+  try {
+    const h = harness({
+      'GET /settings': hostedFixture(),
+      'POST /settings/test': {ok: false, result: 'wrong_key', error: '服务不接受这个密钥（401）。'},
+    });
+    await h.open();
+    assert.equal(h.element('s-server-kind').textContent, 'DeepSeek · 密钥在钥匙串里');
+    await h.element('s-change').emit('click');
+    assert.equal(h.element('s-key-state').dataset.text, '已保存在钥匙串里');
+    assert.equal(h.element('s-key-remove').textContent, '删除');
+    await h.element('s-key-remove').emit('click');
+    assert.equal(h.element('s-key-remove').textContent, '确定删除？');
+    assert.equal(h.element('s-address-text').textContent, '地址：https://api.deepseek.com/v1');
+    await h.element('settings-test').emit('click');
+    assert.equal(h.element('settings-test-status').textContent, '服务不接受这个密钥（401）。');
+  } finally {
+    await useLanguage('en');
+  }
+});
+
+test('a service tried in the form does not change the saved connection\'s state rows', async () => {
+  const h = harness({
+    'GET /settings': full(),
+    'GET /settings/key-status?preset=deepseek': {keychain: 'missing'},
+    'POST /settings/test': {ok: false, result: 'wrong_key', error: 'The service did not accept the key (401). Paste the key again.'},
+  });
+  await h.open();
+  const before = h.element('s-chat-state').dataset.text;
+  await h.element('s-change').emit('click');
+  await change(h, 's-adapter', 'deepseek', 'change');
+  await flush();
+  await h.element('settings-test').emit('click');
+  assert.equal(h.element('settings-test-status').textContent, 'The service did not accept the key (401). Paste the key again.');
+  assert.equal(h.element('s-chat-state').dataset.text, before, 'the saved server is not marked unreachable by another service\'s test');
+  const same = harness({'GET /settings': full(), 'POST /settings/test': {ok: true}});
+  await same.open();
+  await same.element('s-change').emit('click');
+  await same.element('settings-test').emit('click');
+  assert.match(same.element('s-chat-state').dataset.text, /^Connected · old/, 'the saved connection tested as it is shows its result');
 });

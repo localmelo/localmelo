@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
 
+from localmelo.support import hosted
 from localmelo.support.backends.base import BaseBackend
 from localmelo.support.backends.openai_compat import build_openai_chat
 
@@ -30,18 +30,7 @@ class AnthropicBackend(BaseBackend):
         return "Anthropic"
 
     def validate(self, cfg: Config) -> list[str]:
-        errors: list[str] = []
-        if not cfg.anthropic.api_key_env:
-            errors.append(
-                "[anthropic] api_key_env is empty. "
-                "Set the environment variable name that holds your API key "
-                "(e.g. ANTHROPIC_API_KEY)."
-            )
-        elif not os.environ.get(cfg.anthropic.api_key_env):
-            errors.append(
-                f"[anthropic] environment variable ${cfg.anthropic.api_key_env} "
-                "is not set. Export it before starting the gateway."
-            )
+        errors = hosted.key_errors("anthropic", cfg.anthropic, "ANTHROPIC_API_KEY")
         if not cfg.anthropic.chat_model:
             errors.append(
                 "[anthropic] chat_model is empty. "
@@ -57,12 +46,14 @@ class AnthropicBackend(BaseBackend):
 
     def build_chat_provider(self, cfg: Config) -> BaseLLMProvider:
         base_url = cfg.anthropic.base_url or _DEFAULT_BASE_URL
-        api_key = os.environ.get(cfg.anthropic.api_key_env, "")
+        api_key = hosted.api_key(cfg.anthropic)
         return build_openai_chat(
             base_url=base_url,
             model=cfg.anthropic.chat_model,
             api_key=api_key,
-            extra_body=cfg.anthropic.extra_body,
+            extra_body=hosted.request_body("anthropic", cfg.anthropic),
+            thinking_off_body=hosted.retry_body("anthropic", cfg.anthropic),
+            **hosted.image_args("anthropic", cfg.anthropic),
             timeout=cfg.request_timeout_s,
             reasoning_field=getattr(cfg.anthropic, "reasoning_field", "") or None,
             requires_reasoning_replay=getattr(

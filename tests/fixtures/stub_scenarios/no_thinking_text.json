@@ -1,0 +1,35 @@
+{
+  "sequential": true,
+  "replies": [
+    {
+      "content": "",
+      "usage": {
+        "prompt_tokens": 120,
+        "completion_tokens": 9,
+        "completion_tokens_details": {
+          "reasoning_tokens": 9
+        }
+      }
+    },
+    {
+      "content": "",
+      "usage": {
+        "prompt_tokens": 120,
+        "completion_tokens": 9,
+        "completion_tokens_details": {
+          "reasoning_tokens": 9
+        }
+      }
+    },
+    {
+      "content": "",
+      "usage": {
+        "prompt_tokens": 120,
+        "completion_tokens": 9,
+        "completion_tokens_details": {
+          "reasoning_tokens": 9
+        }
+      }
+    }
+  ]
+}

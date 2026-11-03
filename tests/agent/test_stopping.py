@@ -718,8 +718,8 @@ class TestEmptyReplies:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "reply",
-        [_empty(), _answer(" \n\t"), _empty(thinking="I should answer")],
-        ids=["empty", "whitespace", "thinking only"],
+        [_empty(), _answer(" \n\t")],
+        ids=["empty", "whitespace"],
     )
     async def test_two_in_a_row_fail_the_run(self, reply: Message) -> None:
         llm = FakeLLM([reply, reply])
@@ -734,6 +734,18 @@ class TestEmptyReplies:
         task = await agent.hippo.get_task(result.task_id)
         assert task is not None
         assert (task.status, task.result) == ("failed", "empty replies")
+
+    @pytest.mark.asyncio
+    async def test_two_in_a_row_with_thinking_end_with_its_last_lines(self) -> None:
+        # #469: the answer may be in the thinking; it is marked as taken from it.
+        reply = _empty(thinking="I should answer.\nThe answer is 42.")
+        llm = FakeLLM([reply, reply])
+        result = await _agent(llm).run_task("what is the answer")
+        assert (result.status, result.error) == ("completed", "")
+        assert result.result == (
+            "I should answer.\nThe answer is 42.\n\n(from melo's thinking)"
+        )
+        assert (result.steps, result.attempts) == (2, 1)
 
     @pytest.mark.asyncio
     async def test_a_tool_call_breaks_the_row(self) -> None:
