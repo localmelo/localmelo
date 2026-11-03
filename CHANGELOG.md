@@ -9,9 +9,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
-- Developer only, not visible by default: a cut excerpt can be opened whole. With
-  `[memory] excerpt_open = "on"` (`-X memory.excerpt_open=on` for one run; the default, `"off"`,
-  changes nothing) recall keeps its excerpts of earlier chat turns, but a line that shows less
+- A cut excerpt can be opened whole (`[memory] excerpt_open`, on by default: see Changed).
+  Recall keeps its excerpts of earlier chat turns, but a line that shows less
   than the whole turn starts with the turn's id, `[t123] the user said “…”; melo replied “…”`,
   in the recall block and in the memory search tool alike. A line shows less when the excerpt cut
   what you said or what melo replied (or left the reply out), or when it is a piece of a longer
@@ -640,6 +639,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- A cut excerpt of an earlier chat turn can be opened whole, by default. When recall shows
+  less than the whole turn, the line starts with the turn's id, such as `[t123]`, a line under
+  the excerpts says it can be opened, and the chat's model has `open_memory` to read the turn
+  whole. On a public long-memory benchmark this answered 77.2% of questions against 71.1%, for
+  about 230 more prompt tokens and about a second more per turn. `-X memory.excerpt_open=off`
+  (or `excerpt_open = "off"` under `[memory]`) gives the old behaviour; the key is saved only
+  when it is `off`. Part of #428.
 - A recalled chat turn now shows up to 900 characters by default, and the recall block holds
   up to 4000 (#349), where it showed 234 and 900. On a public long-memory benchmark, a model that
   reads earlier chats answered 71.1% of questions instead of 58.9% (90 questions, 2 repeats;

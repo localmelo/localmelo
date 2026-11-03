@@ -9,12 +9,14 @@ Synthetic turns, words only, no model.
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
 
+from localmelo.support.config import MemoryConfig
 from localmelo.support.memory import ChatMemory
 from localmelo.support.memory.index import Document, document_text
 from localmelo.support.memory.recall import (
@@ -72,6 +74,13 @@ def read(line: str) -> str:
     return line[: line.rindex(" (")]
 
 
+def id_prefix(line: str) -> str:
+    """The id a cut line starts with (``[t1] ``): it must be there, by default."""
+    found = re.match(r"\[t\d+\] ", line)
+    assert found, line
+    return found.group()
+
+
 def user_words(shown: str) -> str:
     """The user's part of a turn's recall line, without its quotes."""
     said = read(shown).removeprefix("the user said “")
@@ -96,16 +105,21 @@ async def test_with_no_config_a_turn_takes_900_characters(
         found = await memory.before_turn(store, await _turn(store, "Ask"), QUESTION)
         assert len(found.used) == 2  # recall_docs, as ever
         # A turn's two parts take 900 characters together: the user's words whole
-        # (they fit) and melo's reply in the rest.
+        # (they fit) and melo's reply in the rest. By default a cut line starts
+        # with its id (``[t1] ``), which takes its characters from the same room.
         for item in found.used:
-            user, reply = parts(read(item.shown))
+            prefix = id_prefix(item.shown)
+            user, reply = parts(read(item.shown.removeprefix(prefix)))
             assert user == TYPED
-            assert len(user) + len(reply) == ITEM_CHARS and reply.endswith("…")
+            assert len(user) + len(reply) == ITEM_CHARS - len(prefix)
+            assert reply.endswith("…")
         assert 1800 < len(found.block) <= BLOCK_CHARS + 2
         # The search tool's list reads a turn in the same room.
         said = (await MemoryTools(memory).search(query=QUESTION)).split("\n")
-        user, reply = parts(read(said[0]).removeprefix("1. "))
-        assert len(user) + len(reply) == ITEM_CHARS
+        line = said[0].removeprefix("1. ")
+        prefix = id_prefix(line)
+        user, reply = parts(read(line).removeprefix(prefix))
+        assert len(user) + len(reply) == ITEM_CHARS - len(prefix)
     finally:
         await memory.aclose()
 
@@ -134,7 +148,7 @@ async def test_with_no_size_set_the_block_holds_turns_up_to_4000_characters(
 async def test_the_default_config_and_no_config_read_alike(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    cfg = config()
+    cfg = config(excerpt_open=MemoryConfig().excerpt_open)  # the shipped default
     with_cfg = ChatMemory(lambda: cfg, directory=str(tmp_path / "with"))
     without = ChatMemory(lambda: None, directory=str(tmp_path / "without"))
     try:
@@ -157,7 +171,9 @@ async def test_a_config_with_the_earlier_numbers_reads_exactly_as_it_did(
     older = config(recall_item_chars=234, recall_chars=900)
     memory = await build_note_and_turns(tmp_path, store, older)
     try:
-        assert memory.recall_settings() == RecallSettings(chars=900, item_chars=234)
+        assert memory.recall_settings() == RecallSettings(
+            chars=900, item_chars=234, excerpt_open=False
+        )
         found = await memory.before_turn(store, await _turn(store, "Ask"), QUESTION)
         data = found.event()
         assert data is not None

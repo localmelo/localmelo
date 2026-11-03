@@ -26,9 +26,9 @@ among them within :data:`SELECT_TIMEOUT_S`, no embedding calls). With the
 developer setting ``[memory] recall_form = "list"`` the recall block and the
 search tool show each chat turn as one line, not an excerpt, and the chat's model
 opens the turns it needs with ``open_memory`` (:meth:`ChatMemory.open_turn`). With
-``[memory] excerpt_open = "on"`` the excerpt form stays, but a turn whose excerpt
-shows less than the whole turn starts with its id and the model has ``open_memory``
-too.
+``[memory] excerpt_open = "on"`` (the default) the excerpt form stays, but a turn
+whose excerpt shows less than the whole turn starts with its id and the model has
+``open_memory`` too; ``off`` is the developer comparison without them.
 With ``[memory] recall_source = "items"`` recall draws on memory items in place of the
 turns: items a chat model encoded from the chats (:meth:`ChatMemory.compress_chat`,
 :mod:`.hippo_encode`) and routed against the items kept (:mod:`.hippo_route`), shown
@@ -277,11 +277,11 @@ class RecallSettings(NamedTuple):
     memory items in place of the chat turns, and *open_sources* that an opened item
     also shows the turns it came from. *followup* says a message with no content of
     its own is searched with the user's words of the chat's last turns (``[memory]
-    followup_query = "recent"``, the default) instead of its own. *excerpt_open* says
+    followup_query = "recent"``, the default) instead of its own. *excerpt_open* (on by default) says
     an excerpt that shows less than the whole turn carries the turn's id and the model
     may open it (:attr:`opens_excerpts`). The defaults are the shipped ones: a block
-    of :data:`BLOCK_CHARS` and a turn of :data:`ITEM_CHARS` (#349), *followup* on,
-    and what recall did before these were settings for the rest.
+    of :data:`BLOCK_CHARS` and a turn of :data:`ITEM_CHARS` (#349), *followup* and
+    *excerpt_open* on, and what recall did before these were settings for the rest.
     """
 
     records: int = AUTO_RECORDS
@@ -299,7 +299,7 @@ class RecallSettings(NamedTuple):
     items: bool = False
     open_sources: bool = False
     followup: bool = True
-    excerpt_open: bool = False
+    excerpt_open: bool = True
 
     @property
     def opens_excerpts(self) -> bool:
@@ -890,7 +890,7 @@ class ChatMemory:
             getattr(memory, "recall_source", "turns") == "items",
             getattr(memory, "open_sources", "off") == "on",
             getattr(memory, "followup_query", "recent") != "message",
-            getattr(memory, "excerpt_open", "off") == "on",
+            getattr(memory, "excerpt_open", "on") != "off",
         )
 
     def note_settings(self) -> NoteSettings:
