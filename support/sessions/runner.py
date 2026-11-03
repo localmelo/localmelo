@@ -156,6 +156,8 @@ class _Turn:
     routine: str | None = None
     # Who began a turn the person did not (``TurnInfo.origin``); "" for theirs.
     origin: str = ""
+    # The pictures the person added to the message, with their data.
+    images: tuple[ImagePart, ...] = ()
     queue: asyncio.Queue[tuple[Any, ...]] = field(default_factory=asyncio.Queue)
     # The task that runs the turn: the runner's own (start_turn) or the
     # caller's (run_turn).
@@ -515,6 +517,7 @@ class SessionRunner:
         attachments: Sequence[TextAttachment] = (),
         words: str | None = None,
         origin: str = "",
+        images: Sequence[ImagePart] = (),
     ) -> TurnInfo:
         """Begin a turn of *text* and return it once its row exists.
 
@@ -523,7 +526,9 @@ class SessionRunner:
         ``routine=``), passed only when given. *words* are the person's own
         words when *text* is not (``Agent.run_task``'s ``user_words=``; the
         typed text otherwise). *origin* marks a turn the person did not
-        begin (``SessionStore.begin_turn``). With *client_request_id*, a
+        begin (``SessionStore.begin_turn``). *images* are the pictures the
+        person added: stored with the turn and sent to the model with *text*
+        (``Agent.run_task(images=...)``). With *client_request_id*, a
         key already accepted raises ``SubmissionRepeated`` with the stored
         turn and starts nothing, a withdrawn one ``SubmissionWithdrawn``,
         and one used for another text ``SubmissionConflict``.
@@ -538,6 +543,7 @@ class SessionRunner:
             own_task=True,
             words=words,
             origin=origin,
+            images=tuple(images),
         )
         return turn.turn
 
@@ -566,8 +572,11 @@ class SessionRunner:
         own_task: bool,
         words: str | None = None,
         origin: str = "",
+        images: tuple[ImagePart, ...] = (),
     ) -> _Turn:
         self._check_open()
+        if images and self._worker:
+            raise ValueError("worker sessions do not support pictures")
         typed_text = text
         if attachments:
             if self._worker:
@@ -620,6 +629,7 @@ class SessionRunner:
                 typed_text,
                 words,
                 origin,
+                images,
             )
         )
         self._begin = begin
@@ -663,6 +673,7 @@ class SessionRunner:
         typed_text: str,
         words: str | None = None,
         origin: str = "",
+        images: tuple[ImagePart, ...] = (),
     ) -> _Turn:
         try:
             # The last turn's end must be stored before the next turn: in a
@@ -679,6 +690,7 @@ class SessionRunner:
                 attachments=attachments,
                 typed_text=typed_text if attachments else None,
                 origin=origin,
+                images=images,
             )
             self._create_scope_key = False
         finally:
@@ -697,6 +709,7 @@ class SessionRunner:
             typed="" if origin else typed_text,
             words=words,
             origin=origin,
+            images=images,
         )
         turn.writer = asyncio.create_task(self._write_events(turn))
         turn.lease = asyncio.create_task(self._keep_lease(turn))
@@ -805,6 +818,8 @@ class SessionRunner:
             }
             if turn.routine is not None:
                 kwargs["routine"] = turn.routine
+            if turn.images:
+                kwargs["images"] = turn.images
             if self._inbox is not None:
                 kwargs["inbox"] = self._inbox
             kwargs["user_words"] = turn.typed if turn.words is None else turn.words

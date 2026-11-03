@@ -71,6 +71,7 @@ from . import (
     routes_status,
     routes_tasks,
     routes_turns,
+    uploads,
 )
 from .asks import OwnerAsks
 from .cards import CARD_EVENT, MainChatCards
@@ -84,6 +85,8 @@ from .notes import ChatNotes
 from .probe import ModelServerProbe, Probe
 from .registry import SWEEP_INTERVAL_S, AgentBuilder, ConsoleSessions, default_builder
 from .shapes import session_json
+from .uploads import PictureStage
+from .vision import Vision
 from .worker_reader import WorkerReader
 
 if TYPE_CHECKING:
@@ -153,6 +156,9 @@ class ConsoleOptions:
     explainer: Explainer | None = None
     # The idle sleep's clock, beats and readers of the GPU lock and the power; a test replaces them.
     idle_sleep: IdleSleepOptions | None = None
+    # Whether the chat model reads pictures; None asks the model's provider.
+    # A test passes one, so no request leaves the machine.
+    vision: Vision | None = None
 
 
 class Console:
@@ -221,6 +227,9 @@ class Console:
         self.workers.on_earlier = self._used_earlier
         self.workers.on_ask = self.explanations.start
         self.probe: Probe = self.options.probe or ModelServerProbe(cfg)
+        # Pictures uploaded and not yet sent, and whether the model reads them.
+        self.pictures = PictureStage()
+        self.vision: Vision = self.options.vision or Vision(self)
         # The one main chat of the store's file, once it is open; and the
         # cards that come back to it from side chats and tasks.
         self.main_id: str | None = None
@@ -462,6 +471,7 @@ class Console:
         routes_details.add_routes(app, self)
         routes_page.add_routes(app, self)
         routes_pictures.add_routes(app, self)
+        uploads.add_routes(app, self)
         routes_memory.add_routes(app, self)
         routes_tasks.add_routes(app, self)
         routes_chores.add_routes(app, self)
@@ -614,6 +624,8 @@ class Console:
                     await self.memory.aclose()
                 with contextlib.suppress(Exception):
                     await self.probe.aclose()
+                with contextlib.suppress(Exception):
+                    await self.vision.aclose()
 
     # ── Store state ──
 

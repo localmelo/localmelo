@@ -18,6 +18,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse, Response
 
 from localmelo.melo.checker import Checker, GatewayIngressPayload
+from localmelo.melo.checker.validators import MAX_QUERY_LEN
 from localmelo.melo.contracts.approvals import ApprovalDecision, grant_offered
 from localmelo.support.gateway.auto_blocks import (
     BlockError,
@@ -28,6 +29,13 @@ from localmelo.support.gateway.front_rules import short_title
 from localmelo.support.gateway.i18n import t
 from localmelo.support.gateway.task_policy import TaskPolicyError
 from localmelo.support.gateway.task_store import TaskStoreError
+from localmelo.support.sessions.attachments import (
+    MAX_ATTACHMENTS,
+    MAX_TOTAL_BYTES,
+    compose_user_text,
+    snapshot,
+)
+from localmelo.support.sessions.picture_input import MAX_PICTURES
 from localmelo.support.sessions.store import (
     SessionBusyError,
     SessionInfo,
@@ -46,7 +54,7 @@ from localmelo.support.sessions.submissions import (
 from .asks import MAX_NOTE_CHARS
 from .bodies import Body
 from .errors import ApiError
-from .registry import STOP_REASON
+from .registry import STOP_REASON, TurnExtras
 from .shapes import submission_json, turn_json
 from .task_submissions import (
     conflict,
@@ -55,6 +63,7 @@ from .task_submissions import (
     started_echo,
     submission_of,
 )
+from .uploads import images_of
 
 if TYPE_CHECKING:
     from localmelo.support.sessions.runner import ResumeInfo
@@ -76,7 +85,10 @@ class _Attachment(Body):
 
 class TurnRequest(Body):
     text: str
+    # Text files the person added, read by the page (at most 8).
     attachments: list[_Attachment] = []
+    # Pictures the person added: ids from ``POST /api/uploads`` (at most 4).
+    images: list[str] = []
     client_request_id: str | None = None
     # The composer's Run as a task: the chat starts it as a task.
     as_task: bool = False
@@ -132,7 +144,7 @@ def _key(value: str | None) -> str | None:
         raise ApiError(400, "invalid_request", str(exc)) from exc
 
 
-def _compose(request: TurnRequest | CancelRequest) -> str:
+def _compose(request: CancelRequest) -> str:
     """The user text of a turn: the typed text, trimmed as the checker trims it.
 
     The trim happens here, so the text the store judges by length, keeps in
@@ -165,9 +177,78 @@ def _check_text(console: Console, text: str, session_id: str | None) -> str:
     return str(sanitized.query)
 
 
-def _turn_text(console: Console, request: TurnRequest, session_id: str | None) -> str:
-    """The composed text of a turn: checked, and trimmed by the checker."""
-    return _check_text(console, _compose(request), session_id)
+class _Sent:
+    """A checked send: its words, the whole text a code rule reads, and what it carries."""
+
+    def __init__(self, words: str, whole: str, extras: TurnExtras) -> None:
+        self.words = words
+        self.whole = whole
+        self.extras = extras
+
+
+def _marker(pictures: int, files: list[str]) -> str:
+    """The words of a message sent with a picture or a file and no words."""
+    parts = []
+    if pictures:
+        parts.append(f"[{pictures} picture{'' if pictures == 1 else 's'}]")
+    if files:
+        parts.append(f"[attached: {', '.join(files)}]")
+    return " ".join(parts)
+
+
+async def _sent(
+    console: Console, request: TurnRequest, session_id: str | None
+) -> _Sent:
+    """The checked send for a turn request: its text, files and pictures.
+
+    400 for a file that is binary, too large or too many, a picture that is
+    gone from the stage or too many, and a text over the checker's limit; 409
+    ``model_text_only`` when the chat model is known not to read pictures.
+    """
+    attached = []
+    total = 0
+    if len(request.attachments) > MAX_ATTACHMENTS:
+        raise ApiError(
+            400, "invalid_request", t("errors.tooManyFiles", n=MAX_ATTACHMENTS)
+        )
+    for item in request.attachments:
+        try:
+            file = snapshot(item.name, item.text)
+        except ValueError as exc:
+            raise ApiError(
+                400,
+                "invalid_request",
+                t("errors.fileRefused", name=item.name[:80], why=str(exc)),
+            ) from exc
+        total += len(file.text.encode("utf-8"))
+        attached.append(file)
+    if total > MAX_TOTAL_BYTES:
+        raise ApiError(
+            400,
+            "invalid_request",
+            t("errors.filesTooLarge", kb=MAX_TOTAL_BYTES // 1024),
+        )
+    if len(request.images) > MAX_PICTURES:
+        raise ApiError(
+            400, "invalid_request", t("errors.tooManyPictures", n=MAX_PICTURES)
+        )
+    if len(set(request.images)) != len(request.images):
+        raise ApiError(400, "invalid_request", t("errors.pictureTwice"))
+    staged = console.pictures.resolve(request.images)
+    if staged and await console.vision.reads() is False:
+        raise ApiError(409, "model_text_only", t("errors.modelTextOnly"))
+    words = request.text.strip()
+    if not words:
+        if not staged and not attached:
+            raise ApiError(400, "invalid_request", t("errors.blankMessage"))
+        words = _marker(len(staged), [file.name for file in attached])
+    words = _check_text(console, words, session_id)
+    whole = compose_user_text(words, attached)
+    if len(whole) > MAX_QUERY_LEN:
+        raise ApiError(
+            400, "invalid_request", t("errors.filesTooLong", n=MAX_QUERY_LEN)
+        )
+    return _Sent(words, whole, TurnExtras(tuple(attached), tuple(images_of(staged))))
 
 
 async def _store_call(
@@ -335,13 +416,17 @@ def add_routes(app: FastAPI, console: Console) -> None:
     async def create_session(body: CreateRequest) -> JSONResponse:
         console.require_store()
         first: tuple[str, str] | None = None
+        sent: _Sent | None = None
         if body.turn is not None:
-            composed = _turn_text(console, body.turn, None)
-            first = (body.turn.text, composed)
+            sent = await _sent(console, body.turn, None)
+            first = (body.turn.text, sent.words)
         # The key is judged after the text, as 2.4 orders the checks.
         key = None if body.turn is None else _key(body.turn.client_request_id)
         if body.turn is not None and body.turn.as_task:
-            return await _create_for_task(console, body, composed, key)
+            assert sent is not None
+            if sent.extras.images:
+                raise ApiError(400, "invalid_request", t("errors.picturesNoTask"))
+            return await _create_for_task(console, body, sent.whole, key)
         try:
             entry, turn = await _sessions_call(
                 console,
@@ -351,6 +436,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
                     client_request_id=key,
                     mode=body.approvals,
                     admit=lambda: _refuse_task_key(console, key),
+                    extras=None if sent is None else sent.extras,
                 ),
             )
         except SubmissionRepeated as exc:
@@ -377,28 +463,40 @@ def add_routes(app: FastAPI, console: Console) -> None:
         # The session is judged first: a malformed id is 404, as it is on
         # every read of the same path, not the checker's 400.
         info = await _require_session(console, session_id)
-        composed = _turn_text(console, body, session_id)
+        sent = await _sent(console, body, session_id)
         # The key is judged after the text, as 2.4 orders the checks.
         key = _key(body.client_request_id)
         if info.kind in ("front", "chat"):
+            pictured = bool(sent.extras.images)
+            if pictured and body.as_task:
+                raise ApiError(400, "invalid_request", t("errors.picturesNoTask"))
             # Code's rules first: a task to start or to change takes no model
             # call. A side chat has the same rules as the main chat, and its
-            # tasks are its own.
-            echo = await _store_call(
-                console,
-                console.front_for(session_id).route(
-                    body.text, composed, as_task=body.as_task, key=key
-                ),
-                session_id,
+            # tasks are its own. A message with a picture is a message to the
+            # model: no rule reads it, so none can swallow the picture.
+            echo = (
+                None
+                if pictured
+                else await _store_call(
+                    console,
+                    console.front_for(session_id).route(
+                        body.text, sent.whole, as_task=body.as_task, key=key
+                    ),
+                    session_id,
+                )
             )
             if echo is not None:
                 return JSONResponse(status_code=200, content={"echo": echo})
             if console.asks.holds(session_id):
+                if pictured:
+                    raise ApiError(
+                        409, "chat_answering", t("errors.picturesWhileAnswering")
+                    )
                 # The chat is answering a task's question: the message waits,
                 # shown as queued, and runs as the chat's next turn (#369).
                 echo = await _store_call(
                     console,
-                    console.asks.queue(session_id, body.text, composed, key),
+                    console.asks.queue(session_id, body.text, sent.whole, key),
                     session_id,
                 )
                 return JSONResponse(status_code=200, content={"echo": echo})
@@ -410,8 +508,9 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 console.sessions.start_turn(
                     session_id,
                     body.text,
-                    composed,
+                    sent.words,
                     client_request_id=key,
+                    extras=sent.extras,
                 ),
                 session_id,
             )

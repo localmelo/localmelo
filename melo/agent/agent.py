@@ -111,7 +111,12 @@ from localmelo.melo.checker.policy import builtin_set_for
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.review.gist import step_gist
 from localmelo.melo.checker.tiers import tier_of, tier_requires_approval
-from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN, _sanitize_images
+from localmelo.melo.checker.validators import (
+    MAX_IMAGES_PER_RESULT,
+    MAX_MEMORY_TEXT_LEN,
+    _sanitize_images,
+    image_problem,
+)
 from localmelo.melo.contracts.approvals import (
     ALLOWED_ONCE,
     BLOCKED_ALIKE,
@@ -6268,6 +6273,7 @@ class Agent:
         from_person: bool = True,
         hide_tools: Collection[str] = (),
         earlier_turns: Sequence[tuple[str, str]] | None = None,
+        images: Sequence[ImagePart] = (),
     ) -> RunResult:
         """Run one task and report how it ended.
 
@@ -6476,6 +6482,16 @@ class Agent:
         words still count (#465); their answers never do. ``None`` or none
         adds nothing.
 
+        *images* are pictures the person added to the query, with their data.
+        The query message keeps reference copies, as a tool result does, and the
+        store keeps the payloads of the newest few (see
+        :meth:`~localmelo.melo.agent._tool_images.ToolImageStore.keep_user`), so
+        each planning request carries them; once a payload is gone, the model
+        reads a line that names the picture instead. ``ValueError`` before the
+        run for a picture the checker would refuse (see
+        :func:`~localmelo.melo.checker.validators.image_problem`), or more than
+        :data:`~localmelo.melo.checker.validators.MAX_IMAGES_PER_RESULT`.
+
         Before the run starts, ``TypeError`` is raised when *on_event* or
         *observe* is not callable or is a coroutine function, when both
         are given, when *approval* has no ``async def decide``, when
@@ -6497,6 +6513,12 @@ class Agent:
         turns_before = (
             check_earlier_turns(earlier_turns) if earlier_turns is not None else []
         )
+        pictures = list(images)
+        if len(pictures) > MAX_IMAGES_PER_RESULT:
+            raise ValueError(f"at most {MAX_IMAGES_PER_RESULT} pictures per message")
+        for picture in pictures:
+            if problem := image_problem(picture):
+                raise ValueError(f"picture refused: {problem}")
         earlier = earlier_block(turns_before)
         place = self._run_place()
         started = time.perf_counter()
@@ -6596,7 +6618,11 @@ class Agent:
                         await self._ensure_tools()
                     except Exception as exc:
                         raise _ToolSetupError(str(exc) or _exception_text(exc)) from exc
-                    query_msg = Message(role="user", content=query)
+                    query_msg = Message(
+                        role="user",
+                        content=query,
+                        images=self._tool_images.keep_user(pictures),
+                    )
                     run.window_had_turns = any(
                         msg.role != "system" for msg in self.hippo.working.get_window()
                     )

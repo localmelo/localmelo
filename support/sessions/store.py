@@ -172,7 +172,7 @@ RUN_STATUSES: Final = frozenset(
 SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
     {
         "turn.started": frozenset(
-            {"turn", "turn_id", "user_text", "client_request_id", "origin"}
+            {"turn", "turn_id", "user_text", "client_request_id", "origin", "images"}
         ),
         "turn.finished": frozenset({"turn", "turn_id", "status", "error", "cause"}),
         "turn.undone": frozenset({"turn", "turn_id"}),
@@ -224,7 +224,8 @@ SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
 # message carried the other chats' digest (#452).
 OPTIONAL_SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
     {
-        "turn.started": frozenset({"origin"}),
+        # images: the pictures the person added, as references into blobs.
+        "turn.started": frozenset({"origin", "images"}),
         # searched and opened: only once a memory search found something, or the
         # model opened a turn, in the turn.
         "turn.memory": frozenset({"searched", "opened", "search_hint", "digest"}),
@@ -2038,6 +2039,19 @@ class SessionStore:
             )
         return (rows[0][0], bytes(rows[0][1])) if rows else None
 
+    async def turn_images(self, session_id: str, turn: int) -> list[ImagePart]:
+        """The pictures the person added to *turn*, with their data; ``[]`` if none or lost."""
+        first = await self.list_events(session_id, turns=(turn, turn), limit=1)
+        data = first[0].event.get("data") if first else None
+        listed = data.get("images") if isinstance(data, dict) else None
+        found: list[ImagePart] = []
+        for item in listed if isinstance(listed, list) else ():
+            blob = await self.get_blob(session_id, str(item.get("sha256", "")))
+            if blob is None:
+                return []
+            found.append(ImagePart.from_bytes(blob[1], blob[0]))
+        return found
+
     async def get_window(self, session_id: str) -> StoredWindow | None:
         """The session's window checkpoint, or ``None``."""
         async with self._lock:
@@ -2283,6 +2297,7 @@ class SessionStore:
         attachments: Sequence[TextAttachment] = (),
         typed_text: str | None = None,
         origin: str = "",
+        images: Sequence[ImagePart] = (),
     ) -> TurnInfo:
         """Start a turn of *user_text* under *holder*, in one transaction (T-5).
 
@@ -2300,7 +2315,10 @@ class SessionStore:
         text, else the user text), the submission, and the events
         ``turn.started`` and, with that title, ``session.title``. *origin*
         (:data:`TURN_ORIGINS`) marks a turn the person did not begin, which
-        gives the session no title.
+        gives the session no title. *images* are the pictures the person added:
+        their payloads go to ``blobs`` in the same transaction and
+        ``turn.started`` lists them (``sha256``, ``mime_type``, ``size_bytes``),
+        so they show again after a reload.
         """
         if origin not in TURN_ORIGINS:
             raise ValueError(f"origin must be one of {sorted(TURN_ORIGINS)}")
@@ -2409,6 +2427,15 @@ class SessionStore:
                         origin,
                     ),
                 )
+                for image in images:
+                    raw = decode_base64(image.data) if image.data else None
+                    if raw is None:
+                        raise ValueError("a picture of a turn needs its data")
+                    await conn.execute(
+                        "INSERT OR IGNORE INTO blobs (session_id, sha256, mime_type, "
+                        "data) VALUES (?, ?, ?, ?)",
+                        (session_id, image.sha256, image.mime_type, raw),
+                    )
                 # 6. The lease, and 7. the first title.
                 new_title = None
                 if not current_title and not origin:
@@ -2452,6 +2479,20 @@ class SessionStore:
                             "client_request_id": client_request_id,
                             # Only on a turn the person did not begin (#369).
                             **({"origin": origin} if origin else {}),
+                            **(
+                                {
+                                    "images": [
+                                        {
+                                            "sha256": image.sha256,
+                                            "mime_type": image.mime_type,
+                                            "size_bytes": image.size_bytes,
+                                        }
+                                        for image in images
+                                    ]
+                                }
+                                if images
+                                else {}
+                            ),
                         },
                         now,
                     ),

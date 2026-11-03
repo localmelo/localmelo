@@ -32,6 +32,7 @@ from localmelo.support.gateway.console.front import (
     front_options,
 )
 from localmelo.support.gateway.console.running import item_activity
+from localmelo.support.gateway.console.vision import Vision
 from localmelo.support.gateway.workers import ASK_FIELDS, MAX_ASKS, AskOwner
 from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.store import (
@@ -126,6 +127,7 @@ async def ask_console(
     workers: list[list[Reply]] | None = None,
     gate: ChatGate | None = None,
     run: bool = True,
+    vision: Vision | None = None,
 ) -> AsyncIterator[tuple[Console, httpx.AsyncClient, dict[str, Any]]]:
     """A console whose main chat, side chats and workers run on scripted models, through *gate*."""
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -186,6 +188,7 @@ async def ask_console(
             front_builder=front,
             probe=FakeProbe(),
             gate=gate or quiet_gate(),
+            vision=vision,
         ),
     )
     holder.append(console)

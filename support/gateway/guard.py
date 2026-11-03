@@ -52,6 +52,24 @@ BODY_BYTES_LIMIT = 1_048_576
 _TOO_LARGE_ERROR = f"Request body too large (max {BODY_BYTES_LIMIT} bytes)."
 _UNSUPPORTED_MEDIA_TYPE_ERROR = "Content-Type must be application/json."
 
+# The one route that takes raw bytes: a picture for the composer. It has its
+# own limit and its own Content-Types; every other API route is unchanged.
+UPLOAD_PATH = "/api/uploads"
+UPLOAD_BYTES_LIMIT = 20 * 1024 * 1024
+UPLOAD_CONTENT_TYPES = frozenset(
+    {
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+        "image/heic",
+        "image/heif",
+        "application/octet-stream",
+    }
+)
+_UPLOAD_TOO_LARGE_ERROR = f"Picture too large (max {UPLOAD_BYTES_LIMIT} bytes)."
+_UPLOAD_MEDIA_TYPE_ERROR = "Content-Type must be an image type."
+
 # The headers of an API v2 refusal: the console's middleware never sees it,
 # because the guard is outermost, so it sets no-store itself.
 _API_REFUSAL_HEADERS = {"cache-control": "no-store"}
@@ -122,6 +140,22 @@ def _is_api_path(scope: Scope) -> bool:
     return path == "/api" or path.startswith("/api/")
 
 
+def is_upload_request(scope: Scope) -> bool:
+    """Whether the request is ``POST /api/uploads``, which takes a picture's bytes."""
+    path = "/" + str(scope.get("path", "")).lstrip("/")
+    return (
+        str(scope.get("method", "")).upper() == "POST"
+        and path.rstrip("/") == UPLOAD_PATH
+    )
+
+
+def is_upload_content_type(values: list[str]) -> bool:
+    """Whether *values* is a single image Content-Type the upload route takes."""
+    return len(values) == 1 and (
+        values[0].split(";", 1)[0].strip().lower() in UPLOAD_CONTENT_TYPES
+    )
+
+
 def _one_of(values: list[str], allowed: frozenset[str]) -> bool:
     """Whether a header's *values* are a single value in *allowed*, ignoring case."""
     return len(values) == 1 and values[0].lower() in allowed
@@ -148,13 +182,13 @@ def is_json_content_type(values: list[str]) -> bool:
     return True
 
 
-def _content_length_too_large(values: list[str]) -> bool:
-    """Whether any ``Content-Length`` header exceeds :data:`BODY_BYTES_LIMIT`."""
+def _content_length_too_large(values: list[str], limit: int = BODY_BYTES_LIMIT) -> bool:
+    """Whether any ``Content-Length`` header exceeds *limit* (:data:`BODY_BYTES_LIMIT`)."""
     for raw in values:
         text = raw.strip()
         if not text.isdigit():
             continue
-        if int(text) > BODY_BYTES_LIMIT:
+        if int(text) > limit:
             return True
     return False
 
@@ -400,6 +434,8 @@ class LoopbackGuard:
         chunks: list[bytes] = []
         total = 0
         disconnected = False
+        upload = is_upload_request(scope)
+        limit = UPLOAD_BYTES_LIMIT if upload else BODY_BYTES_LIMIT
         while True:
             message = await receive()
             if message["type"] == "http.disconnect":
@@ -408,8 +444,12 @@ class LoopbackGuard:
             chunk = message.get("body", b"")
             if chunk:
                 total += len(chunk)
-                if total > BODY_BYTES_LIMIT:
-                    return receive, (413, "too_large", _TOO_LARGE_ERROR)
+                if total > limit:
+                    return receive, (
+                        413,
+                        "too_large",
+                        _UPLOAD_TOO_LARGE_ERROR if upload else _TOO_LARGE_ERROR,
+                    )
                 chunks.append(chunk)
             if not message.get("more_body", False):
                 break
@@ -420,7 +460,14 @@ class LoopbackGuard:
                 for name, value in scope.get("headers", ())
                 if name.lower() == b"content-type"
             ]
-            if not is_json_content_type(content_types):
+            if upload:
+                if not is_upload_content_type(content_types):
+                    return receive, (
+                        415,
+                        "unsupported_media_type",
+                        _UPLOAD_MEDIA_TYPE_ERROR,
+                    )
+            elif not is_json_content_type(content_types):
                 return receive, (
                     415,
                     "unsupported_media_type",
@@ -483,20 +530,35 @@ class LoopbackGuard:
 
         if scope["type"] == "http":
             content_lengths = headers.get(b"content-length", [])
-            if _content_length_too_large(content_lengths):
-                return 413, "too_large", _TOO_LARGE_ERROR
+            upload = is_upload_request(scope)
+            if _content_length_too_large(
+                content_lengths, UPLOAD_BYTES_LIMIT if upload else BODY_BYTES_LIMIT
+            ):
+                return (
+                    413,
+                    "too_large",
+                    _UPLOAD_TOO_LARGE_ERROR if upload else _TOO_LARGE_ERROR,
+                )
             if (
                 _is_api_path(scope)
                 and any(
                     raw.strip().isdigit() and int(raw.strip()) > 0
                     for raw in content_lengths
                 )
-                and not is_json_content_type(headers.get(b"content-type", []))
+                and not (
+                    is_upload_content_type(headers.get(b"content-type", []))
+                    if upload
+                    else is_json_content_type(headers.get(b"content-type", []))
+                )
             ):
                 return (
                     415,
                     "unsupported_media_type",
-                    _UNSUPPORTED_MEDIA_TYPE_ERROR,
+                    (
+                        _UPLOAD_MEDIA_TYPE_ERROR
+                        if upload
+                        else _UNSUPPORTED_MEDIA_TYPE_ERROR
+                    ),
                 )
 
         return None

@@ -9,16 +9,17 @@ from __future__ import annotations
 
 import os
 import stat
-import unicodedata
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.support.sessions.attachments import (
+    MAX_ATTACHMENTS,
+    MAX_FILE_BYTES,
+    MAX_TOTAL_BYTES,
+)
+from localmelo.support.sessions.attachments import clean_text as _clean
 from localmelo.support.sessions.worker import sensitive_read
-
-MAX_ATTACHMENTS = 8
-MAX_FILE_BYTES = 256 * 1024
-MAX_TOTAL_BYTES = 512 * 1024
 
 
 class AttachmentError(ValueError):
@@ -32,12 +33,6 @@ class Attachment:
     size_bytes: int  # Original UTF-8 bytes, before redaction/sanitization.
     characters: int  # Characters in the snapshot shown to the user.
     changed: bool
-
-
-def _clean(text: str) -> str:
-    return "".join(
-        c for c in text if c in "\n\t" or unicodedata.category(c) not in {"Cc", "Cf"}
-    )
 
 
 def _identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
