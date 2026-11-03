@@ -141,7 +141,7 @@ def test_the_defaults_are_the_shipped_numbers() -> None:
         False,
         False,
         True,  # followup: a message with no content recalls from the recent turns
-        False,  # excerpt_open
+        True,  # excerpt_open: a cut excerpt can be opened, by default
     )
     assert cfg.followup_query == "recent"
     assert (cfg.recall_min_cosine, cfg.recall_min_coverage) == (0.55, 0.6)
@@ -160,7 +160,7 @@ def test_the_defaults_are_the_shipped_numbers() -> None:
         cfg.compress_at_chars,
         cfg.compress_cache,
     ) == ("turns", "off", 12000, "")
-    assert cfg.excerpt_open == "off"
+    assert cfg.excerpt_open == "on"
     # The head of a turn is a floor, not a default: it stays what it was.
     assert TURN_CHARS == 234
 
