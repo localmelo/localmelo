@@ -1,0 +1,22 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Notice</title>
+<style>body{font:16px sans-serif;margin:40px}</style>
+<main>
+  <h1>Leave a note</h1>
+  <form id="f" action="/note" method="post">
+    <label for="note">Note</label> <input id="note" name="note">
+    <button id="save">Save</button>
+  </form>
+  <div id="status" role="status"></div>
+</main>
+<script>
+  // The form is sent in the background; a notice shows when the site answers.
+  document.getElementById("f").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var body = new URLSearchParams(new FormData(this));
+    fetch("/note", {method: "POST", body: body}).then(function (r) { return r.text(); }).then(function (t) {
+      document.getElementById("status").textContent = t;
+    });
+  });
+</script>
