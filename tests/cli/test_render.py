@@ -342,9 +342,10 @@ def test_an_empty_output_says_so() -> None:
             "allowed by a session grant",
         ),
         ({"allowed": True, "origin": "policy", "remember": False}, "auto-allowed"),
+        # A card nobody answered is declined, not failed (#465).
         (
             {"allowed": False, "origin": "timeout", "remember": False},
-            "not answered in time",
+            "No answer in time",
         ),
         (
             {"allowed": False, "origin": "error", "remember": False, "reason": "boom"},
@@ -404,7 +405,62 @@ def test_a_denial_shows_its_reason() -> None:
         )
         .text()
     )
-    assert "⊘ ± file_write  todo.md (68 chars) · denied: keep the item first\n" in text
+    # A Deny is no failure: amber, one plain line, never the model's note (#465).
+    assert "⊘ ± file_write  todo.md (68 chars) · Not allowed\n" in text
+    assert "Not run: you declined it. Your note: keep the item first" in text
+
+
+@pytest.mark.parametrize(
+    ("origin", "code", "word", "line"),
+    [
+        ("user", {}, "Not allowed", "Not run: you declined it"),
+        (
+            "timeout",
+            {"unanswered": "time", "wait_s": 60.0},
+            "No answer in time",
+            "Not run: no answer within 1 minute",
+        ),
+        (
+            "timeout",
+            {"unanswered": "left"},
+            "No answer in time",
+            "Not run: the chat was closed before an answer",
+        ),
+    ],
+)
+@pytest.mark.parametrize("where", ["gate", "site"])
+def test_a_declined_step_is_amber_with_one_plain_line(
+    origin: str, code: dict[str, Any], word: str, line: str, where: str
+) -> None:
+    note = "Do not try it again in this turn or reach the same result another way."
+    # The record's code decides, never its text.
+    asked = {"allowed": False, "origin": origin, "reason": "x", "mode": "auto", **code}
+    if where == "gate":
+        turn = Turn().tool(
+            "python_exec",
+            "x",
+            status="blocked",
+            error_category="approval_denied",
+            error=note,
+            approval=asked,
+        )
+    else:
+        turn = Turn().tool(
+            "browser_open",
+            "example.net",
+            status="error",
+            error=f"melo did not open example.net. {note}",
+            tool_asks=[{**asked, "tool": "browser:https://example.net"}],
+        )
+    text = turn.text()
+    header = next(
+        row
+        for row in text.split("\n")
+        if ("python_exec" in row or "browser_open" in row)
+    )
+    assert header.startswith("⊘") and header.endswith(word), header
+    assert line in text
+    assert note not in text and "✗" not in text
 
 
 def test_a_blocked_row_says_what_the_step_would_have_done() -> None:
@@ -2825,3 +2881,19 @@ def test_a_file_name_cannot_act_on_the_terminal() -> None:
     text = Writes().write(name, "x\n").done()
     assert "\x1b" not in text and "\x07" not in text
     assert _after_footer(text) == ["  Changed + ab.txt (+1)"]
+
+
+def test_a_declined_line_takes_its_wait_from_the_record() -> None:
+    from localmelo.melo.contracts.approvals import AUTO_ASK_WAIT_S
+    from localmelo.support.cli.render import Declined, declined_line
+
+    assert declined_line(Declined("unanswered", wait_s=AUTO_ASK_WAIT_S)) == (
+        "Not run: no answer within 1 minute"
+    )
+    assert declined_line(Declined("unanswered", wait_s=120)) == (
+        "Not run: no answer within 2 minutes"
+    )
+    assert declined_line(Declined("unanswered")) == "Not run: no answer in time"
+    assert declined_line(Declined("denied", "not now")) == (
+        "Not run: you declined it. Your note: not now"
+    )

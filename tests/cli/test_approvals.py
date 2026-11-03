@@ -15,6 +15,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     ApprovalRequest,
     AutoPolicy,
+    Chosen,
     DenyAllPolicy,
 )
 from localmelo.melo.contracts.review import ActionReview
@@ -27,11 +28,13 @@ from localmelo.support.cli.approvals import (
     PanelText,
     TerminalApprover,
     approval_words,
+    grant_listed,
     panel_text,
     session_option,
     session_warning,
+    terminal_watch,
 )
-from localmelo.support.cli.render import LiveState
+from localmelo.support.cli.render import LiveState, declined_line, declined_step
 from localmelo.support.cli.text import cells
 from localmelo.support.sessions.approvals import RememberingPolicy
 from localmelo.tests.cli.ui_helpers import (
@@ -79,8 +82,8 @@ def _request(
         (
             "auto",
             ["shell_exec"],
-            "works without asking; blocks risky steps and steps you did not ask "
-            "for, and explains them",
+            "works on its own; asks before a step you did not ask for, blocks the "
+            "riskiest steps and explains them",
         ),
         ("deny", [], "never runs commands or changes files"),
         ("yolo", [], "runs everything without asking (--yolo)"),
@@ -898,7 +901,9 @@ def test_the_modes_wrap_the_policy() -> None:
     assert Approvals(ask, "yolo").policy() is None
 
 
-async def test_auto_mode_blocks_a_high_impact_call_without_asking() -> None:
+async def test_auto_mode_asks_on_the_panel_and_blocks_what_only_a_click_allows() -> (
+    None
+):
     asked: list[ApprovalRequest] = []
 
     async def ask(request: ApprovalRequest) -> ApprovalDecision:
@@ -912,16 +917,77 @@ async def test_auto_mode_blocks_a_high_impact_call_without_asking() -> None:
         _request("shell_exec", command="pip install x"),
         review=ActionReview("high", ("install",), ("Installs x with pip.",)),
     )
+    sudo = dataclasses.replace(
+        _request("shell_exec", command="sudo pmset -a sleep 0"),
+        review=ActionReview("high", ("system",), ("Runs a command as root.",)),
+    )
     ls = dataclasses.replace(_request(), review=ActionReview("routine"))
     assert await policy.decide(ls) == ApprovalDecision(True, origin="auto")
-    assert await policy.decide(pip) == ApprovalDecision(
-        False, "installs software", origin="auto"
+    assert await policy.decide(sudo) == ApprovalDecision(
+        False, "changes system settings", origin="auto"
     )
-    assert asked == []  # nobody is asked in auto mode
+    assert asked == []  # a routine step runs, a system one is blocked unasked
+    # A step the person may allow asks on the panel (#465).
+    decided = await policy.decide(pip)
+    assert asked == [pip]
+    assert isinstance(decided, Chosen)
+    assert (decided.allow, decided.reason) == (False, "no")
     # A new chat forgets the allowances of the old one.
     old = approvals._auto
     approvals.reset()
     assert approvals._auto is not old
+
+
+@pytest.mark.parametrize("how", ["piped stdin", "auto_asks off"])
+async def test_auto_with_nobody_at_the_terminal_blocks_and_never_waits(
+    monkeypatch: pytest.MonkeyPatch, how: str
+) -> None:
+    import io
+
+    asked: list[ApprovalRequest] = []
+
+    async def ask(request: ApprovalRequest) -> ApprovalDecision:
+        asked.append(request)
+        await asyncio.Event().wait()  # a panel nobody answers
+        raise AssertionError("unreachable")
+
+    if how == "piped stdin":
+        monkeypatch.setattr("sys.stdin", io.StringIO("go ahead\n"))
+        watch = terminal_watch(TerminalApprover())
+    else:
+        watch = terminal_watch(
+            TerminalApprover(), auto_asks=False, present=lambda: True
+        )
+    policy = Approvals(ask, "auto", watch=watch).policy()
+    assert policy is not None
+    pip = dataclasses.replace(
+        _request("shell_exec", command="pip install x"),
+        review=ActionReview("high", ("install",), ("Installs x with pip.",)),
+    )
+    decided = await asyncio.wait_for(policy.decide(pip), 5)
+    assert decided == ApprovalDecision(False, "installs software", origin="auto")
+    assert asked == []
+
+
+async def test_a_panel_nobody_answers_ends_through_the_approver() -> None:
+    approver = TerminalApprover()
+    shown = _request("shell_exec", command="pip install x")
+    waiting = asyncio.ensure_future(approver.ask(shown))
+    await asyncio.sleep(0)
+    unanswered = ApprovalDecision(False, "no answer within 1 minute", origin="timeout")
+    assert not approver.ends("another", unanswered)
+    assert approver.ends(shown.request_id, unanswered)
+    assert await waiting == unanswered and approver.pending is None
+    assert not approver.ends(shown.request_id, unanswered)  # gone, left as it is
+    # The row says it was not run for want of an answer, not that it failed.
+    record = {"allowed": False, "origin": "timeout", "reason": unanswered.reason}
+    finished = {"status": "blocked", "approval": {**record, "unanswered": "time"}}
+    declined = declined_step(
+        {**finished, "approval": {**record, "unanswered": "time", "wait_s": 60}}
+    )
+    assert declined is not None and declined.how == "unanswered"
+    assert declined_line(declined) == "Not run: no answer within 1 minute"
+    assert declined_line(declined_step(finished)) == "Not run: no answer in time"  # type: ignore[arg-type]
 
 
 async def test_grants_survive_auto_and_ask_until_forgotten() -> None:
@@ -1379,3 +1445,69 @@ async def test_the_panel_warns_when_the_description_and_the_code_differ(
         now[0] += 1
         app.type("1")
         await asyncio.wait_for(asking, 3)
+
+
+# ── Auto's card in the terminal: the same list (#465) ──
+
+_NOT_ASKED = ActionReview(
+    "high", ("beyond_request",), ("Does something the request did not ask for.",)
+)
+
+
+def _site_stop(review: ActionReview = _NOT_ASKED) -> ApprovalRequest:
+    return dataclasses.replace(
+        _request(
+            "browser-act:https://news.example",
+            site="news.example",
+            access="act",
+            how="click",
+        ),
+        review=review,
+    )
+
+
+async def test_a_site_auto_stopped_as_not_asked_for_offers_the_chat_on_the_list() -> (
+    None
+):
+    approver = TerminalApprover()
+    asking = asyncio.ensure_future(approver.ask(_site_stop()))
+    await asyncio.sleep(0)
+    pending = approver.pending
+    assert pending is not None and pending.offer_session is True
+    assert session_option(pending.request) == (
+        "Yes, and allow clicking and choosing on news.example for the rest of this chat"
+    )
+    approver.answer("session")
+    assert await asking == ApprovalDecision(True, remember=True)
+    # One the review stopped as risky offers no session choice.
+    risky = _site_stop(ActionReview("high", ("send_out",), ("Sends data.",)))
+    asking = asyncio.ensure_future(approver.ask(risky))
+    await asyncio.sleep(0)
+    assert approver.pending is not None and approver.pending.offer_session is False
+    approver.answer("deny", "not there")
+    assert await asking == ApprovalDecision(False, "not there")
+
+
+async def test_the_terminal_lists_a_site_by_its_site_and_forgets_it_by_name() -> None:
+    async def ask(request: ApprovalRequest) -> ApprovalDecision:
+        return ApprovalDecision(True, remember=True)
+
+    approvals = Approvals(ask, "auto")
+    policy = approvals.policy()
+    assert policy is not None
+    await policy.decide(_site_stop())
+    await approvals._policy.decide(_request("shell_exec"))
+    assert approvals.allowed_tools == {"browser-act:https://news.example", "shell_exec"}
+    assert grant_listed("browser-act:https://news.example") == (
+        "news.example (clicking and choosing)"
+    )
+    assert grant_listed("browser:https://www.docs.example") == (
+        "www.docs.example (opening)"
+    )
+    assert grant_listed("shell_exec") == "shell_exec"
+    # Auto names the sites it may use, the only grants it reads.
+    assert approval_words("auto", approvals.allowed_tools).endswith(
+        "· allowed this session: clicking and choosing on news.example"
+    )
+    approvals.forget("www.news.example")
+    assert approvals.allowed_tools == {"shell_exec"}

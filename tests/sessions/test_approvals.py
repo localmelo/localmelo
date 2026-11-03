@@ -5,19 +5,26 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import uuid
+from collections.abc import Awaitable, Callable
 
 import pytest
 
 from localmelo.melo.contracts.approvals import (
+    AUTO_ASK_WAIT_S,
+    LEFT_UNANSWERED,
+    NO_ANSWER,
     ApprovalDecision,
     ApprovalPolicy,
     ApprovalRequest,
+    Chosen,
     Withdrawal,
 )
 from localmelo.melo.contracts.review import ActionReview
 from localmelo.support.sessions.approvals import (
+    CARD_LEFT_S,
     RESOLVED_IDS_KEPT,
     ApprovalBroker,
+    CardWatch,
     RememberingPolicy,
 )
 
@@ -280,3 +287,147 @@ async def test_a_grant_is_silent_only_for_its_tool() -> None:
     await policy.decide(reviewed(ActionReview("routine")))
     assert policy.silent_for(reviewed(UNDECIDED))
     assert not policy.silent_for(request("shell_exec"))
+
+
+# ── Auto's card: who sees it and how long it waits (#465) ──────────────────
+
+
+class FakeTime:
+    """A clock that moves only when the code under test sleeps; *at* runs a step at a time."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.at: dict[float, Callable[[], object]] = {}
+
+    def clock(self) -> float:
+        return self.now
+
+    async def sleep(self, seconds: float) -> None:
+        self.now += seconds
+        step = self.at.pop(self.now, None)
+        if step is not None:
+            step()
+        await asyncio.sleep(0)
+
+
+def counted(viewers: list[int]) -> Callable[[], Awaitable[int]]:
+    async def count() -> int:
+        return viewers[0]
+
+    return count
+
+
+def watched_card(
+    viewers: list[int], time_: FakeTime, broker: ApprovalBroker
+) -> CardWatch:
+    return CardWatch(
+        counted(viewers), broker.ends, clock=time_.clock, sleep=time_.sleep
+    )
+
+
+async def test_a_card_nobody_answers_in_a_minute_ends_as_a_timeout() -> None:
+    broker, time_, viewers = ApprovalBroker(), FakeTime(), [1]
+    asked = request()
+
+    decided = await asyncio.wait_for(
+        watched_card(viewers, time_, broker).ask(
+            asked, RememberingPolicy(broker.asker("s"))
+        ),
+        5,
+    )
+
+    assert decided == Chosen(
+        False, NO_ANSWER, origin="timeout", unanswered="time", wait_s=AUTO_ASK_WAIT_S
+    )
+    assert time_.now == AUTO_ASK_WAIT_S == 60.0  # not a second earlier
+    assert broker.pending("s") == []
+    assert broker.answer(asked.request_id, ApprovalDecision(True)) == "already_resolved"
+
+
+async def test_an_answer_before_the_minute_is_the_persons() -> None:
+    broker, time_, viewers = ApprovalBroker(), FakeTime(), [1]
+    asked = request()
+    time_.at[AUTO_ASK_WAIT_S - 1] = lambda: broker.answer(
+        asked.request_id, ApprovalDecision(True)
+    )
+
+    decided = await asyncio.wait_for(
+        watched_card(viewers, time_, broker).ask(
+            asked, RememberingPolicy(broker.asker("s"))
+        ),
+        5,
+    )
+
+    assert decided == ApprovalDecision(True)
+
+
+async def test_the_last_viewer_leaving_ends_the_card() -> None:
+    broker, time_, viewers = ApprovalBroker(), FakeTime(), [2]
+    asked = request()
+    time_.at[10.0] = lambda: viewers.__setitem__(0, 0)
+
+    decided = await asyncio.wait_for(
+        watched_card(viewers, time_, broker).ask(
+            asked, RememberingPolicy(broker.asker("s"))
+        ),
+        5,
+    )
+
+    assert decided == Chosen(
+        False, LEFT_UNANSWERED, origin="timeout", unanswered="left"
+    )
+    # A full grace from the first check that found nobody.
+    assert time_.now == 10.0 + CARD_LEFT_S < AUTO_ASK_WAIT_S
+
+
+async def test_a_reload_of_the_page_does_not_end_the_card() -> None:
+    broker, time_, viewers = ApprovalBroker(), FakeTime(), [1]
+    asked = request()
+    # The stream closes and opens again within the grace, then the person answers.
+    time_.at[10.0] = lambda: viewers.__setitem__(0, 0)
+    time_.at[12.0] = lambda: viewers.__setitem__(0, 1)
+    time_.at[30.0] = lambda: broker.answer(asked.request_id, ApprovalDecision(False))
+
+    decided = await asyncio.wait_for(
+        watched_card(viewers, time_, broker).ask(
+            asked, RememberingPolicy(broker.asker("s"))
+        ),
+        5,
+    )
+
+    assert decided == ApprovalDecision(False)  # the person's Deny, not a timeout
+
+
+async def test_a_card_not_up_yet_is_ended_once_it_is() -> None:
+    time_, tries = FakeTime(), []
+    answer: asyncio.Future[ApprovalDecision] = (
+        asyncio.get_running_loop().create_future()
+    )
+
+    def end(request_id: str, decision: ApprovalDecision) -> bool:
+        tries.append(request_id)
+        if len(tries) < 3:
+            return False  # its event is still being written
+        answer.set_result(decision)
+        return True
+
+    class Waits:
+        async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
+            return await answer
+
+    watch = CardWatch(counted([1]), end, clock=time_.clock, sleep=time_.sleep)
+    decided = await asyncio.wait_for(watch.ask(request(), Waits()), 5)
+
+    assert decided.origin == "timeout" and len(tries) == 3
+
+
+async def test_a_count_that_fails_watches_nobody() -> None:
+    async def broken() -> int:
+        raise RuntimeError("the hub is closed")
+
+    def ends(request_id: str, decision: ApprovalDecision) -> bool:
+        return True
+
+    assert not await CardWatch(broken, ends).watched()
+    assert not await CardWatch(counted([0]), ends).watched()
+    assert await CardWatch(counted([1]), ends).watched()

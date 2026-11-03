@@ -246,8 +246,115 @@ test('a denied approval blocks the call and says why', () => {
   assert.equal(card.status, 'blocked');
   assert.deepEqual(view.grants, []);
   push('tool.finished', {step: 1, call_id: 'call-1', name: 'file_write', status: 'blocked', error_category: 'approval_denied', output: '', output_chars: 0, error: '', duration_s: 0, images: [], approval: {request_id: 'req-1', allowed: false, reason: 'wrong file pick another', remember: false, origin: 'user'}, exit_code: null});
-  assert.deepEqual(toolState(card), {state: 'blocked', mark: '⊘', text: 'denied: wrong file pick another'});
+  // A Deny is no failure: the step was not allowed, in the approval card's amber (#465).
+  assert.deepEqual(toolState(card), {state: 'declined', mark: '⊘', text: 'Not allowed'});
+  assert.equal(turns.declinedLine(turns.declinedStep(card)), 'Not run: you declined it. Your note: wrong file pick another');
   assert.equal(deniedCount(turn), 1);
+  assert.equal(failedCount(turn), 0);
+});
+
+// The three ways a step is declined (#465): by the person, by no answer, by
+// closing the chat. A step's own card (Auto's python_exec) or a question its
+// tool asked itself (a site the browser would open), in either language.
+const MODEL_NOTE = 'The user did not answer the card for this step (no answer within 1 minute), so it counts as Don\'t allow and the step did not run.\nDo not try it again in this turn.';
+
+function declinedTurn(how, where) {
+  const {turn, push} = fullTurn();
+  const asked = {
+    request_id: 'req-1',
+    allowed: false,
+    remember: false,
+    origin: how === 'denied' ? 'user' : 'timeout',
+    reason: {denied: 'not this site', unanswered: 'no answer within 1 minute', closed: 'the chat was closed before an answer'}[how],
+    ...{denied: {}, unanswered: {unanswered: 'time', wait_s: 60}, closed: {unanswered: 'left'}}[how],
+  };
+  if (where === 'site') {
+    push('tool.started', {step: 1, call_id: 'call-1', name: 'browser_open', arguments: {url: 'https://example.net/teapot'}, preview: ''});
+    push('tool.finished', {step: 1, call_id: 'call-1', name: 'browser_open', status: 'error', error_category: 'runtime_error', output: '', output_chars: 0, error: `melo did not open example.net. ${MODEL_NOTE}`, duration_s: 7, images: [], approval: null, exit_code: null, tool_asks: [{...asked, tool: 'browser:https://example.net', preview: 'open example.net'}]});
+  } else {
+    push('tool.started', {step: 1, call_id: 'call-1', name: 'python_exec', arguments: {code: 'x'}, preview: 'x'});
+    push('tool.finished', {step: 1, call_id: 'call-1', name: 'python_exec', status: 'blocked', error_category: 'approval_denied', output: '', output_chars: 0, error: MODEL_NOTE, duration_s: 0, images: [], approval: {...asked, mode: 'auto'}, exit_code: null});
+  }
+  push('turn.finished', {turn: 1, turn_id: 'turn-1', status: 'completed', error: '', cause: 'run'});
+  return {turn, card: turn.items.find((item) => item.kind === 'tool')};
+}
+
+const DECLINED = {
+  en: {
+    denied: ['Not allowed', 'Not run: you declined it. Your note: not this site'],
+    unanswered: ['No answer in time', 'Not run: no answer within 1 minute'],
+    closed: ['No answer in time', 'Not run: the chat was closed before an answer'],
+  },
+  'zh-Hans': {
+    denied: ['未允许', '未运行：你拒绝了。你的说明：not this site'],
+    unanswered: ['没有及时回答', '未运行：1 分钟内没有回答'],
+    closed: ['没有及时回答', '未运行：回答之前对话已关闭'],
+  },
+};
+
+for (const [language, cases] of Object.entries(DECLINED)) {
+  test(`a declined step shows a neutral status and one plain line (${language})`, async () => {
+    const {useLanguage} = await import('../../support/gateway/static/i18n.mjs');
+    await useLanguage(language);
+    try {
+      for (const [how, [word, line]] of Object.entries(cases)) {
+        for (const where of ['gate', 'site']) {
+          const {turn, card} = declinedTurn(how, where);
+          assert.deepEqual(toolState(card), {state: 'declined', mark: '⊘', text: word}, `${how} ${where}`);
+          assert.equal(turns.declinedLine(turns.declinedStep(card)), line, `${how} ${where}`);
+          assert.equal(failedCount(turn), 0, 'Nothing went wrong');
+          assert.equal(deniedCount(turn), 1);
+          assert.ok(!workSummary(turn).includes(t('turns.summary.failed', {n: 1})), workSummary(turn));
+        }
+      }
+    } finally {
+      await useLanguage('en');
+    }
+  });
+}
+
+test('a declined step\'s details show the plain line, never the note the model reads', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const turn = h.state().view.turns[0];
+  const {card} = declinedTurn('unanswered', 'site');
+  card.expanded = true;
+  turn.items = [card];
+  turn.finishedAt = 30;
+  turn.status = 'completed';
+  await h.run('renderMessages(false)');
+  const shown = findNode(h.element('messages'), (node) => node.classList?.contains('tool-card'));
+  assert.equal(shown.dataset.state, 'declined');
+  const plain = findNodes(shown, (node) => node.className === 'tool-approval').map((node) => node.textContent);
+  assert.deepEqual(plain, ['Not run: no answer within 1 minute']);
+  assert.equal(findNode(shown, (node) => node.className === 'tool-error'), null, 'No red text');
+  assert.ok(!JSON.stringify(shown.textContent ?? '').includes('Do not try it again'));
+});
+
+test('a declined step reads the record\'s code, and its wait in words', async () => {
+  const {card} = declinedTurn('closed', 'gate');
+  card.approval.reason = 'any text at all';
+  assert.equal(turns.declinedStep(card).how, 'closed', 'The code decides, not the text');
+  card.approval.unanswered = 'time';
+  card.approval.wait_s = 120;
+  assert.equal(turns.declinedLine(turns.declinedStep(card)), 'Not run: no answer within 2 minutes');
+  delete card.approval.wait_s;
+  assert.equal(turns.declinedLine(turns.declinedStep(card)), 'Not run: no answer in time');
+  assert.deepEqual([60, 120, 45, 1].map(turns.waitWords), ['1 minute', '2 minutes', '45 seconds', '1 second']);
+  const {useLanguage} = await import('../../support/gateway/static/i18n.mjs');
+  await useLanguage('zh-Hans');
+  try {
+    assert.deepEqual([60, 120, 45].map(turns.waitWords), ['1 分钟', '2 分钟', '45 秒']);
+  } finally {
+    await useLanguage('en');
+  }
+});
+
+test('a site the tool opened after another was refused is no declined step', () => {
+  const {card} = declinedTurn('denied', 'site');
+  card.status = 'success';
+  assert.equal(turns.declinedStep(card), null);
+  assert.equal(toolState(card).state, 'success');
 });
 
 test('a retried request counts down and replaces the notice of its step', () => {
@@ -1339,6 +1446,42 @@ test('a routine or undecided card stays the plain card, and says what the grant 
   }
 });
 
+// A click Auto stopped only because the request did not ask for it (#465): the server offers the chat.
+const siteStop = (extra = {}) => ({
+  request_id: 'site', tool_name: 'browser-act:https://news.example',
+  arguments: {site: 'news.example', access: 'act', how: 'click'}, arguments_complete: true,
+  workspace_label: '~/melo_test_workspace',
+  review: {verdict: 'high', title: 'Do something you did not ask for?', reasons: ['Does something the request did not ask for.'], categories: ['beyond_request']},
+  offers_chat: true,
+  ...extra,
+});
+
+test('Auto\'s card for a site stopped as not asked for offers the chat, and says why', async () => {
+  const h = harness(baseRoutes({'POST /approvals/site': {outcome: 'allowed', remember: true}}));
+  await h.run('init()');
+  h.context.request = siteStop();
+  h.run('S.view.pending.set("site", request)');
+  const card = h.run('approvalCard(request, chatApproval, "check the news")');
+  const text = (name) => findNode(card, (node) => node.className === name)?.textContent;
+  assert.equal(card.dataset.impact, undefined, 'not the high-impact card');
+  assert.equal(text('approval-title'), 'Let melo click and choose on news.example?');
+  assert.equal(text('approval-why'), 'Why melo asks');
+  assert.equal(text('approval-asked'), 'You asked: “check the news”');
+  const actions = findNode(card, (node) => node.className === 'approval-actions');
+  assert.deepEqual(actions.children.map((node) => node.textContent), ['Allow once', 'Allow for this chat', 'Deny']);
+  assert.match(findNode(card, (node) => node.id === 'approval-scope-site').textContent, /will not ask again before clicking or choosing on news\.example in this chat/);
+  h.run('approvalStates.get("site").mountedAt -= 1000');
+  h.timers.findLast((timer) => timer.ms <= 500).handler();
+  await findNode(card, (node) => node.textContent === 'Allow for this chat').click();
+  assert.deepEqual(h.net.callsTo('/approvals/site')[0].body, {choice: 'session'});
+  // Without the server's word, a high-impact review keeps the card that asks every time.
+  h.context.request = siteStop({request_id: 'site2', offers_chat: false});
+  const strict = h.run('approvalCard(request)');
+  assert.equal(strict.dataset.impact, 'high');
+  const offered = findNode(strict, (node) => node.className === 'approval-actions').children.map((node) => node.textContent);
+  assert.deepEqual(offered, ['Allow once', 'Deny']);
+});
+
 test('a high-impact card: Allow once and Deny answer, there is no session answer, and Review lands on Deny', async () => {
   const h = harness(baseRoutes({'POST /approvals/high': {outcome: 'allowed'}}));
   await h.run('init()');
@@ -2285,7 +2428,7 @@ test('the page boots from /api and renders a session\'s turns', async () => {
   assert.equal(h.element('machine-state').hidden, true);
   assert.equal(h.element('connection-label').textContent, 'Ready');
   assert.equal(h.element('header-title').textContent, 'New chat');
-  assert.equal(h.stream().url, '/api/sessions/a/events?after=7');
+  assert.equal(h.stream().url, '/api/sessions/a/events?after=7&watch=true');
   assert.equal(h.root.dataset.ready, '1', 'The first load marks the page ready');
 });
 
@@ -2470,7 +2613,7 @@ test('a send in a new chat creates the chat with its first turn', async () => {
   assert.equal(h.state().activeId, 'b');
   assert.equal(h.context.location.hash, '#/s/b');
   assert.equal(h.element('input').value, '');
-  assert.equal(h.stream().url, '/api/sessions/b/events?after=0');
+  assert.equal(h.stream().url, '/api/sessions/b/events?after=0&watch=true');
   assert.match(h.text('messages'), /The answer\./);
 });
 
@@ -2635,7 +2778,7 @@ test('a chat left before its load finishes keeps no stream', async () => {
   await first;
   assert.equal(h.state().activeId, 'b');
   assert.equal(FakeEventSource.instances.length, 1, 'The abandoned load opens no second stream');
-  assert.equal(h.stream().url, '/api/sessions/b/events?after=0');
+  assert.equal(h.stream().url, '/api/sessions/b/events?after=0&watch=true');
 });
 
 test('a repeated send reloads the chat and reopens its stream', async () => {
@@ -2647,7 +2790,7 @@ test('a repeated send reloads the chat and reopens its stream', async () => {
   h.element('input').value = 'Only once';
   await h.run('send()');
   assert.equal(FakeEventSource.instances.length, 2, 'The rebuilt view reopens the stream from its cursor');
-  assert.equal(h.stream().url, '/api/sessions/a/events?after=0');
+  assert.equal(h.stream().url, '/api/sessions/a/events?after=0&watch=true');
 });
 
 test('a level change lands on the chat it was made for', async () => {
@@ -2818,7 +2961,7 @@ test('a running turn draws the live row with the terminal\'s facts', async () =>
     'GET /sessions/a/turns?limit=10': {turns: [running], has_earlier: false, replay_from: 0},
   }));
   await h.run('init()');
-  assert.equal(h.stream().url, '/api/sessions/a/events?after=0');
+  assert.equal(h.stream().url, '/api/sessions/a/events?after=0&watch=true');
   h.stream().emit({id: 21, turn: 1, ts: 51, type: 'step.started', data: {step: 1, attempt: 1}});
   h.stream().emit({id: 22, turn: 1, ts: 52, type: 'run.progress', data: {level: 1, state: 'running', step: 2, attempt: 1, phase: 'Verify', cycle: 0, tests: {passed: 3, failed: 0, total: 3}, items: null, past: {runs: 1, last_steps: 4, last_wall_s: 60}, basis: {match: 'exact'}}});
   const live = flatten(h.element('messages'));
@@ -3101,7 +3244,7 @@ test('Escape and a click outside close the running list before Escape stops the 
 test('a closed stream reopens from the last event id', async () => {
   const h = harness(baseRoutes());
   await h.run('init()');
-  assert.equal(h.stream().url, '/api/sessions/a/events?after=7');
+  assert.equal(h.stream().url, '/api/sessions/a/events?after=7&watch=true');
   h.stream().emit({id: 12, turn: 1, ts: 30, type: 'turn.undone', data: {turn: 1, turn_id: 'turn-1'}});
   h.stream().fail();
   assert.equal(h.state().stream.status, 'paused');
@@ -3110,7 +3253,7 @@ test('a closed stream reopens from the last event id', async () => {
   await timer.handler();
   assert.equal(h.net.callsTo('/sessions/a').length, 2, 'The chat is checked before the stream reopens');
   assert.equal(FakeEventSource.instances.length, 2);
-  assert.equal(h.stream().url, '/api/sessions/a/events?after=12');
+  assert.equal(h.stream().url, '/api/sessions/a/events?after=12&watch=true');
 });
 
 test('the open chat\'s row follows the frames the page sees', async () => {
@@ -4067,7 +4210,7 @@ test('a running task card gains a step and a tool call as they are recorded, wit
     'GET /sessions/t1/status': {session_id: 't1', segments: ['cache 50%']},
   });
   const panel = h.element('task-panel');
-  assert.equal(taskStream(h).url, '/api/sessions/t1/events?after=1', 'the stream starts after the last event read');
+  assert.equal(taskStream(h).url, '/api/sessions/t1/events?after=1&watch=true', 'the stream starts after the last event read');
   assert.equal(liveBox(h).hidden, true, 'a task with no step yet shows no Live heading');
   const heading = panel.children[0];
   const stream = taskStream(h);
@@ -4095,7 +4238,7 @@ test('the approval card and the live tail sit side by side, and a frame redraws 
   assert.ok(card);
   assert.match(flatten(liveBox(h)), /file_read/, 'a held task keeps showing its work');
   assert.equal(panel.children.indexOf(liveBox(h)), panel.children.indexOf(card) + 1);
-  assert.equal(taskStream(h).url, '/api/sessions/t1/events?after=2', 'a held task is followed');
+  assert.equal(taskStream(h).url, '/api/sessions/t1/events?after=2&watch=true', 'a held task is followed');
   taskStream(h).emit(liveTool(3, {data: {step: 2, call_id: 'c3', name: 'shell_exec', arguments: {command: 'make test'}, preview: 'make test'}}));
   h.timers.findLast((timer) => !timer.interval && timer.ms === 150 && !timer.cleared).handler();
   assert.match(flatten(liveBox(h)), /shell_exec/);
@@ -4209,7 +4352,7 @@ test('the live stream closes in a hidden tab, resumes after the last id, and end
   assert.equal(first.closed, true);
   h.context.document.visibilityState = 'visible';
   visibility();
-  assert.equal(taskStream(h).url, '/api/sessions/t1/events?after=2');
+  assert.equal(taskStream(h).url, '/api/sessions/t1/events?after=2&watch=true');
   assert.notEqual(taskStream(h), first);
   const second = taskStream(h);
   state = 'done';
@@ -4240,7 +4383,7 @@ test('leaving the task card, or opening another task, closes the live stream and
   assert.equal(first.closed, true, 'the stream of the task that was left is closed');
   assert.doesNotMatch(flatten(liveBox(h)), /file_read/, 'the other task shows none of its tail');
   const second = FakeEventSource.instances.at(-1);
-  assert.equal(second.url, '/api/sessions/t2/events?after=5');
+  assert.equal(second.url, '/api/sessions/t2/events?after=5&watch=true');
   h.context.location.hash = '#/tasks';
   await h.windowListeners.hashchange[0](); await settle();
   assert.equal(second.closed, true, 'the task list follows nothing');
@@ -5169,6 +5312,47 @@ test('the Ask/Auto chip switches the open chat from its menu', async () => {
   assert.deepEqual(patch.body, {approvals: 'auto'});
   assert.equal(h.element('mode-btn').dataset.mode, 'auto');
   assert.match(h.text('notice'), /This chat is in Auto now, from melo’s next step\./);
+});
+
+test('the Ask/Auto menu lists the sites this chat allowed, each with Remove (#465)', async () => {
+  const name = 'browser-act:https://news.example';
+  const h = harness(baseRoutes({
+    'GET /settings': {mode: 'default', approvals: 'ask'},
+    'GET /sessions/a': {
+      session: session('a', {approvals: 'auto'}), pending_approvals: [], grants: ['python_exec', name, 'browser:https://docs.example'],
+      granted_at: {}, mcp_error: '', agent: 'not_loaded', tokens: 0,
+    },
+    [`DELETE /sessions/a/grants/${encodeURIComponent(name)}`]: {status: 204},
+  }));
+  await h.run('init()');
+  h.element('mode-btn').click();
+  const menu = h.element('mode-menu');
+  assert.match(flatten(menu), /Allowed in this chat/);
+  const rows = [];
+  const walk = (node) => { if (node.className === 'mode-grant-what') rows.push(node.textContent); (node.children ?? []).forEach(walk); };
+  walk(menu);
+  assert.deepEqual(rows, ['Click and choose on news.example', 'Open and read docs.example'], 'a tool grant is not a site');
+  const remove = findNode(menu, (node) => node.getAttribute?.('aria-label') === 'Remove: Click and choose on news.example');
+  assert.ok(remove, 'each site has its Remove');
+  await remove.click();
+  await settle();
+  assert.equal(h.net.callsTo(`/sessions/a/grants/${encodeURIComponent(name)}`)[0].method, 'DELETE');
+  assert.deepEqual(h.state().view.grants, ['python_exec', 'browser:https://docs.example']);
+  assert.doesNotMatch(flatten(h.element('mode-menu')), /news\.example/);
+});
+
+test('a chat that allowed no site shows no list in its menu', async () => {
+  const h = harness(baseRoutes({'GET /settings': {mode: 'default', approvals: 'ask'}}));
+  await h.run('init()');
+  h.element('mode-btn').click();
+  assert.doesNotMatch(flatten(h.element('mode-menu')), /Allowed in this chat/);
+});
+
+test('siteGrants reads a grant\'s kind and site and leaves other grants out', () => {
+  assert.deepEqual(modeChip.siteGrants(['shell_exec', 'browser:https://a.example', 'browser-act:https://b.example:8443', 'browser-type:https://c.example']), [
+    {name: 'browser:https://a.example', kind: 'open', site: 'a.example'},
+    {name: 'browser-act:https://b.example:8443', kind: 'act', site: 'b.example'},
+  ]);
 });
 
 test('a new chat takes the chip\'s choice with its first turn', async () => {

@@ -242,7 +242,7 @@ WRITES: dict[tuple[str, str], dict[str, Any] | None] = {
     },
     ("PATCH", "/api/sessions/{session_id}"): {"title": "no"},
     ("DELETE", "/api/sessions/{session_id}"): None,
-    ("DELETE", "/api/sessions/{session_id}/grants/{tool}"): None,
+    ("DELETE", "/api/sessions/{session_id}/grants/{tool:path}"): None,
     ("DELETE", "/api/sessions/{session_id}/grants"): None,
     ("DELETE", "/api/sessions/{session_id}/approvals/{entry_id}"): None,
     ("DELETE", "/api/sessions/{session_id}/folders"): None,
@@ -292,7 +292,9 @@ async def test_every_write_route_refuses_a_worker_run(
                     for k, v in body.items()
                 }
             )
-            resp = client.request(method, path.format(**ids), json=payload)
+            # ``{tool:path}`` is the route's converter, not a format spec.
+            url = path.replace(":path}", "}").format(**ids)
+            resp = client.request(method, url, json=payload)
             want = 409 if "cancel" in path and "turns" in path else 404
             assert resp.status_code == want, (method, path, resp.status_code)
         stored = await store.get_session(sid)

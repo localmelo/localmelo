@@ -122,7 +122,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 | Ctrl+L | 清屏。 |
 | Ctrl+Z | 无操作（此版本的 melo 不会挂起）。 |
 
-- **Shift+Tab** 用一个按键完成 `/approvals ask` 和 `/approvals auto` 做的事：状态栏显示当前模式（`ask · shift+tab` 或 `auto · shift+tab`，Auto 用自己的颜色），并有一行淡色的话说明变了什么：`Auto: routine steps run; risky ones are blocked with the reason.` 或 `Ask: melo asks before running commands or changing files.` 有问题或列表打开时它什么都不做（绝不替你回答），但轮次运行期间可以用：状态栏立刻变化，那行话会说明何时生效——在终端自己的对话里是 `from your next message`（一轮会沿用它开始时的策略），在主对话和侧边对话里是 `from the next step`。它不会切到 Deny；使用 `--yolo` 时，它只说明 YOLO 已开启，不带 `--yolo` 重新启动才会打开询问；`/approvals ask` 说的也是这句，因为 `/approvals` 同样不会离开 YOLO。
+- **Shift+Tab** 用一个按键完成 `/approvals ask` 和 `/approvals auto` 做的事：状态栏显示当前模式（`ask · shift+tab` 或 `auto · shift+tab`，Auto 用自己的颜色），并有一行淡色的话说明变了什么：`Auto: routine steps run; melo asks about the rest, the riskiest are blocked.` 或 `Ask: melo asks before running commands or changing files.` 有问题或列表打开时它什么都不做（绝不替你回答），但轮次运行期间可以用：状态栏立刻变化，那行话会说明何时生效——在终端自己的对话里是 `from your next message`（一轮会沿用它开始时的策略），在主对话和侧边对话里是 `from the next step`。它不会切到 Deny；使用 `--yolo` 时，它只说明 YOLO 已开启，不带 `--yolo` 重新启动才会打开询问；`/approvals ask` 说的也是这句，因为 `/approvals` 同样不会离开 YOLO。
 - **队列。** 一次只能有一条消息等待，显示为 `↳ Queued for the next turn: …`；如果当前轮次以 `completed` 以外的状态结束，消息会返回输入框，不会发送。
 - **停止。** Esc 立即停止当前轮次（`■ Stopped`）；回答输出后，melo 最多花 2 秒记录运行步骤（参见[程序性记忆](../concepts/procedures.md)），下一条消息会等待记录完成。
 - **历史记录。** 消息和命令保存在 `~/.cache/localmelo/cli_history` 中（权限为 0600；超过 1 MB 时保留最新的 1,000 条），文件内容绝不会保存到其中；无法打开该文件时，会话在内存中保留历史记录并提示你。
@@ -407,12 +407,13 @@ from-the-child
 
 ### 自动模式
 
-在自动模式下什么都不会询问：常规步骤直接运行，有风险的步骤或你没要求的步骤会被拦下并说明原因。
+在自动模式下 melo 自己做：常规步骤直接运行；遇到你没要求的步骤，或只有你能允许的步骤，melo 会用和询问模式相同的列表问你；风险最高的步骤会被拦下并说明原因。
 
 - **切换：** 按 Shift+Tab（见[按键](#keys)），或输入 `/approvals auto` 为这个对话打开它，`/approvals ask` 关闭它。在主对话和侧边对话里，切换会发给网关上的那个对话，所以控制台和应用也会看到；`deny` 和 `forget` 仍只在终端自己的对话里可用。`[approvals] mode`（控制台的 **新对话开始时**，或单次运行用 `-X approvals.mode=auto`）让终端自己的对话以它开始。
 - **会运行什么：** 在文件夹内、不安装、不下载、不发送、不删除任何东西的步骤；melo 无法判断的步骤先交给你的模型。它的 `shell_exec` 和 `python_exec` 调用在写入沙箱中运行，所以即使没有规则发现，写入文件夹之外也会失败，而且它们既读不到 melo 的登录令牌，也连不上 melo 自己的 API。自动模式是审查，不是围墙：把工作交给另一个应用或程序的步骤由审查来判断（拦下，或交给你的模型检查），而不是由沙箱隔离。
-- **会拦下什么：** 安装、下载、更改文件夹外的文件、删除、密码和密钥、系统设置、操作另一个应用的脚本以及来自网络的代码，除非你自己的话要求这样做；更改 localmelo 本身的步骤永远不会运行。那一行会写明原因（`⊘ … · blocked: installs software`），melo 会在回答里说明它想做什么，以及还有哪些别的办法。
-- **允许它：** 说“go ahead”（继续），melo 会再试一次；你的模型会核对你的话确实要求了它。只有点按钮才能允许的步骤（密码或密钥、系统设置、操作另一个应用的脚本、以后自动运行的东西、来自网络的代码或 melo 无法检查的代码）需要用控制台的 **Allow once**。
+- **你的话算数：** 你最近几条消息要求的步骤，或点名了它要操作的对象（软件包、文件、网站、页面上的输入框或按钮）的步骤，不经询问直接运行；先说“帮我签到”，再说“我登录好了”，签到仍算你要求的。只算你自己打的字，melo 的回答、网页内容和召回的笔记都不算。
+- **会询问什么：** 其他的安装、下载、更改文件夹外的文件、删除、向外发送数据、开启网络服务、melo 无法检查的代码，或你没要求的网站、点击或输入，会打开审批列表并等待：`Yes`、`No, and tell melo why`（melo 会读到你的说明，并且在你发下一条消息之前不再问同一步），对于你没要求的网站还有 `Yes, and allow … for the rest of this chat`，它让同一网站上的同类步骤在本对话余下时间内直接运行。在页面上输入文字和发送表单每次都会询问，高影响步骤永远不会沿用这种允许。`/approvals` 列出已允许的网站（`news.example (clicking and choosing)`），`/approvals forget news.example` 收回，`/new` 从空白开始。列表等待 1 分钟：没有回答就算 `No`，这一行显示为 `⊘ … · No answer in time`，下面一行是 `Not run: no answer within 1 minute`（选 `No` 时显示 `Not allowed`，下面是 `Not run: you declined it` 和你的说明；都不算失败）。输入是管道传入时没有人能回答，所以这一步会像以前一样立即被拦下。
+- **会拦下什么：** 密码和密钥、系统设置、操作另一个应用的脚本、以后自动运行的东西以及来自网络的代码；更改 localmelo 本身的步骤永远不会运行。那一行会写明原因（`⊘ … · blocked: uses passwords or keys`），melo 会在回答里说明它想做什么，以及还有哪些别的办法。这样的步骤只能用控制台的 **Allow once** 运行，或在你把对话切换到询问模式之后运行。
 
 <a id="the-workspace"></a>
 

@@ -268,11 +268,16 @@ class ApprovalsConfig:
     """The ``[approvals]`` table: the mode a new chat starts in (#339).
 
     ``ask``: melo asks before it runs commands or changes files. ``auto``:
-    nobody is asked; routine steps run, risky steps and steps the person did
-    not ask for are blocked and explained. Each chat keeps its own mode.
+    routine steps run; a step the person did not ask for asks on the chat's
+    card while someone sees the chat, and the riskiest are blocked and
+    explained. Each chat keeps its own mode.
+
+    ``auto_asks`` (developer setting, #465): ``false`` never asks in Auto,
+    so every step it stops is blocked, as before #465 (for benchmarks).
     """
 
     mode: str = "ask"  # ask | auto
+    auto_asks: bool = True
 
 
 @dataclass
@@ -1062,12 +1067,17 @@ class Config:
         return extra_folders_errors(self.workspace.extra_folders)
 
     def _validate_approvals(self) -> list[str]:
-        """``[approvals] mode`` is ``ask`` or ``auto``."""
-        if self.approvals.mode in APPROVAL_MODES:
-            return []
-        return [
-            f"[approvals] mode={self.approvals.mode!r} is not one of {APPROVAL_MODES}"
-        ]
+        """``[approvals] mode`` is ``ask`` or ``auto``; ``auto_asks`` is a boolean."""
+        errors: list[str] = []
+        if self.approvals.mode not in APPROVAL_MODES:
+            errors.append(
+                f"[approvals] mode={self.approvals.mode!r} is not one of {APPROVAL_MODES}"
+            )
+        if not isinstance(self.approvals.auto_asks, bool):
+            errors.append(
+                f"[approvals] auto_asks={self.approvals.auto_asks!r} must be true or false"
+            )
+        return errors
 
     def _validate_request_timeout(self) -> list[str]:
         """``request_timeout_s`` is unset or a finite number of seconds > 0."""
@@ -1760,6 +1770,9 @@ def _load_file() -> Config:
         cfg.console.language = data["console"].get("language", cfg.console.language)
     if isinstance(data.get("approvals"), dict):
         cfg.approvals.mode = data["approvals"].get("mode", cfg.approvals.mode)
+        cfg.approvals.auto_asks = data["approvals"].get(
+            "auto_asks", cfg.approvals.auto_asks
+        )
     # A bad value is kept for Config.setting_errors; extra_folders() ignores it.
     if isinstance(data.get("workspace"), dict):
         found = data["workspace"].get("extra_folders", [])
@@ -2144,7 +2157,10 @@ def save(cfg: Config) -> None:
             ["[console]", f"language = {_toml_value(cfg.console.language)}", ""]
         )
     if cfg.approvals != ApprovalsConfig():
-        lines.extend(["[approvals]", f"mode = {_toml_value(cfg.approvals.mode)}", ""])
+        lines.extend(["[approvals]", f"mode = {_toml_value(cfg.approvals.mode)}"])
+        if cfg.approvals.auto_asks is not True:
+            lines.append(f"auto_asks = {_toml_value(cfg.approvals.auto_asks)}")
+        lines.append("")
     # Only a list that holds a folder is written; a bad value is kept as it is.
     if cfg.workspace.extra_folders:
         folders = cfg.workspace.extra_folders

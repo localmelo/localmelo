@@ -136,6 +136,7 @@ from localmelo.support.sessions.approvals import (
     ApprovalBroker,
     ApprovalLedger,
     ApprovalUse,
+    CardWatch,
     ChatMode,
     OwnedTaskPolicy,
     RememberingPolicy,
@@ -2460,8 +2461,17 @@ class TaskWorkers:
             )
             policy: ApprovalPolicy = asking
             if task_mode == "auto":
-                # Nobody is asked, so nothing holds the task (#339).
-                policy = self._auto.setdefault(task_id, AutoPolicy(task=True))
+                auto = self._auto.setdefault(task_id, AutoPolicy(task=True))
+                # A task the person started asks through its chat about a step
+                # Auto stops that they may allow (#465), while someone sees the
+                # task or its chat; any other (a chore, one melo or another
+                # agent started) has nobody to ask, so the step is blocked and
+                # nothing holds the task (#339).
+                auto.asking = None
+                if _remembers(record.origin):
+                    auto.asking = asking
+                    auto.watch = self._card_watch(task_id)
+                policy = auto
             if _remembers(record.origin):
                 # Its chat's grants and the person's earlier Allows first (#369).
                 policy = OwnedTaskPolicy(
@@ -2740,6 +2750,26 @@ class TaskWorkers:
                             "Task %s could not go on with its messages", task_id
                         )
                 await self._schedule()
+
+    def _card_watch(self, task_id: str) -> CardWatch:
+        """Who sees the card Auto shows for *task_id*, and how long it waits (#465).
+
+        The task's page and the chat that owns the task at each check (the
+        main chat once its own chat was deleted: :meth:`_owner_chat`), as the
+        hub counts their viewers; none with ``[approvals] auto_asks`` off, so
+        Auto blocks as before. A card nobody answers is ended through the
+        broker.
+        """
+
+        async def viewers() -> int:
+            if not self.settings().approvals.auto_asks:
+                return 0
+            chat_id = await self._owner_chat(task_id)
+            return self.hub.viewers(task_id) + (
+                self.hub.viewers(chat_id) if chat_id else 0
+            )
+
+        return CardWatch(viewers, self.broker.ends)
 
     async def _owner_chat(self, task_id: str) -> str | None:
         """The chat that owns *task_id* now: the one that started it, else the main chat."""

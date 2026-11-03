@@ -35,6 +35,8 @@ from localmelo.tests.agent.test_auto_mode import (
 )
 
 DELETE = "import shutil\nshutil.rmtree('.git', ignore_errors=True)"
+# A step only a click allows: Auto blocks it even when it could ask (#465).
+KEYS = "import os\nprint(open(os.path.expanduser('~/.ssh/id_rsa')).read())"
 ROUTINE = "print(sorted(__import__('os').listdir('.')))"
 
 
@@ -53,7 +55,7 @@ async def test_a_switch_to_auto_applies_from_the_chat_s_next_step(
     policy = ChatPolicy(ask)
     plans = [
         _calls(("python_exec", {"code": ROUTINE}, "call_1")),
-        _calls(("python_exec", {"code": DELETE}, "call_2")),
+        _calls(("python_exec", {"code": KEYS}, "call_2")),
         _answer("done"),
     ]
     agent, fake = _agent(FakeModel(plans), tmp_path / "ws")
@@ -308,11 +310,11 @@ async def test_a_block_hears_of_an_allowance_only_for_its_own_tool(
     tmp_path: Path, tool: str, told: bool
 ) -> None:
     async def ask(request: ApprovalRequest) -> ApprovalDecision:
-        raise AssertionError("auto mode asks nobody")
+        raise AssertionError("auto mode asks nobody about a step only a click allows")
 
     policy = ChatPolicy(ask, "auto")
-    policy.auto.allow_once("another-step", ["delete"], tool)
-    llm = FakeModel(_plans_of(DELETE))
+    policy.auto.allow_once("another-step", ["credentials"], tool)
+    llm = FakeModel(_plans_of(KEYS))
     agent, fake = _agent(llm, tmp_path / "ws")
 
     await agent.run_task("tidy the notes", approval=policy)

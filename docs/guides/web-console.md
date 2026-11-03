@@ -208,7 +208,7 @@ worker runs did** (once a run or a terminal chat exists, and always in developer
 - **"Allow for this chat" covers its tasks.** A tool you allowed for a chat runs its routine steps in that chat's tasks too, as in the chat. Another chat's approvals never count.
 - **What always asks.** A high-impact step (installs, downloads, deletes, sends data out, changes outside the folder, uses your keys, changes melo itself) asks every time, however often you allowed it before. So does a step melo could not see all of (a file too big to read, a command built while it runs), and every call of a tool melo's rules do not read (a web or MCP tool, such as one that pays an invoice). Chores, and tasks another program or melo itself started, never use or record your approvals. Auto's **Allow once** is one step, once, and is never recorded. A task you create with your gateway token (`melo task new`) is yours, and uses the main chat's approvals.
 - **Revoke.** **Revoke** on the chat's row, on the task's page, or under **Steps you approved here** in a chat's **Details** (developer mode) takes an approval back: that step asks again; what ran stays done. Approvals live in memory: restarting the gateway or deleting the chat forgets them.
-- **In Auto.** A step Auto blocked in a task shows in its chat too, with what was blocked, why, and **Allow once**. An earlier approval never lifts Auto's block: Auto blocks only steps that are not routine, and those are never kept.
+- **In Auto.** A step Auto stops in a task you started asks in its chat, on the same card, and the task waits. A step Auto blocked in a task shows in its chat too, with what was blocked, why, and **Allow once**. An earlier approval never lifts Auto's stop: Auto stops only steps that are not routine, and those are never kept.
 
 ## When a task it started stops, the chat follows up
 
@@ -843,9 +843,10 @@ its thinking. Try again, or rephrase the request.`, and the filled button
 
 ## Auto mode
 
-In **Auto**, melo works without asking: routine steps run, and a risky step
-or a step you did not ask for is blocked and explained. **Ask**, the default,
-asks before commands and file changes.
+In **Auto**, melo works on its own: routine steps run; before a step you did
+not ask for, or one only you can allow, melo asks you on the usual card; the
+riskiest steps are blocked and explained. **Ask**, the default, asks before
+commands and file changes.
 
 - **Switch.** The chip beside the model under the message box reads **Ask**
   or **Auto**; its menu, "How melo works in this chat", switches the chat
@@ -859,7 +860,7 @@ asks before commands and file changes.
   the folder fails in Auto even when no rule caught it: its output says
   `writing outside the workspace is not allowed in auto mode`. A step in
   Auto can neither read melo's sign-in token nor reach melo's own API.
-- **A reviewer, not a wall.** Auto blocks risky steps and steps that stray
+- **A reviewer, not a wall.** Auto stops risky steps and steps that stray
   from what you asked. Its sandbox keeps a step's files in the folder and
   away from melo's sign-in, but a step that hands work to another app or
   program (opening an app or a script, scripting another app, code for
@@ -867,28 +868,54 @@ asks before commands and file changes.
   by the review, not walled off: such steps are blocked or checked by your
   model, never run as routine. The sandbox also keeps a step from talking to
   a container engine.
-- **What is blocked.** Installs, downloads, changes outside the folder,
-  deletes, passwords and keys, system settings, scripts that operate another
-  app, code from the internet and the like, unless your own words ask for them; a change to localmelo itself
-  never runs; in a folder that holds the copy of localmelo that is running,
-  a write under that copy is refused. The step's row reads
-  `blocked: installs software`, a card under
-  the work says what and why and shows the step, and melo's answer gives the
-  other ways.
-- **Allow it.** **Allow once** runs that exact step once, within 30 minutes,
-  and sends "Go ahead with the step melo blocked: install software." as your
-  message; or reply "go ahead". Steps that use passwords or keys, change
-  system settings, operate another app through a script, set up something that
-  runs later, or run code from the
-  internet or code melo cannot check need the button. While melo works the
+- **Your words count.** A step your own recent messages ask for, or whose
+  target they name (a package, a file, a site, a box or a button on a page),
+  runs without asking: after "choose a mood and write a line in the comment
+  box", the message "I signed in" still asks for the line. Only what you
+  typed counts, never melo's answers, a page or recalled notes.
+- **What asks.** Any other install, download, change outside the folder,
+  delete, data sent out, network service, code melo cannot check, or a site,
+  click or text you did not ask for shows the approval card in the chat and
+  waits, as in Ask: **Allow once**, **Deny** with a note for melo, and, for a
+  site you did not ask for, **Allow for this chat**. melo reads what you
+  chose and your note; after **Deny** it does not ask about that step again
+  until your next message.
+- **Only while you watch.** The card waits only while the chat is open in the
+  console, the app or the terminal. With nobody watching, the step is blocked,
+  as before. A card nobody answers within 1 minute, or that you close the chat
+  on, counts as **Deny**: the step reads "No answer in time", with one line
+  under it ("Not run: no answer within 1 minute").
+- **Not allowed is not failed.** A step you denied, or that nobody answered,
+  shows in amber with one plain line ("Not run: you declined it" and
+  your note), never as a failure and never with the note melo reads. Ask's
+  **Deny** shows the same way.
+- **Allowed in this chat.** **Allow for this chat** on a site's card lets the
+  same kind of step on that site (opening and reading it, or clicking and
+  choosing on it) run for the rest of the chat. The chip's menu lists the
+  sites the chat allowed, each with **Remove**. Typing on a page and sending
+  a form ask every time, a high-impact step never rides an allowance, and a
+  new chat starts with none.
+- **What is blocked.** Passwords and keys, system settings, scripts that
+  operate another app, something that runs later and code from the internet
+  are blocked without a card; a change to localmelo itself never runs; in a
+  folder that holds the copy of localmelo that is running, a write under
+  that copy is refused. The step's row reads `blocked: uses passwords or
+  keys`, a card under the work says what and why and shows the step, and
+  melo's answer gives the other ways.
+- **Allow a blocked step.** **Allow once** on its card runs that exact step
+  once, within 30 minutes, and sends "Go ahead with the step melo blocked:
+  use your passwords or keys." as your message. While melo works the
   button waits; afterwards the card reads `Allowed once · ran at 14:02` or
   `Allowance expired`.
-- **Tasks.** A task keeps the mode its chat had when it was made. Its page
-  shows **Mode** and lists **Blocked steps**, each opening the same card; the
-  task goes on without them, and **Allow once** there sends the message to the
-  task. A scheduled chore takes its chat's mode each time it runs.
-- Allowances live in memory: restarting localmelo forgets them, and one the
-  retried turn did not use goes when that turn ends.
+- **Tasks.** A task keeps the mode its chat had when it was made. A task you
+  started asks in its chat, as in Ask, and waits for your answer. A
+  scheduled chore takes its chat's mode each time it runs, and in Auto,
+  with nobody watching, it blocks the step instead: its page shows **Mode**
+  and lists **Blocked steps**, each opening the same card; the task goes on
+  without them, and **Allow once** there sends the message to the task.
+- Allowances and sites allowed for a chat live in memory: restarting
+  localmelo forgets them, and an allowance the retried turn did not use goes
+  when that turn ends.
 
 ## Persistence and limits
 

@@ -44,6 +44,7 @@ from rich.text import Text
 from rich.theme import Theme
 
 from localmelo.melo.checker.tiers import BUILTIN_TIERS
+from localmelo.melo.contracts.approvals import wait_words
 from localmelo.melo.schema import (
     TOOL_CALL_TEXT_ERROR,
     UNFINISHED_ANSWER_ERROR,
@@ -382,6 +383,66 @@ def approval_tag(status: str, approval: Mapping[str, Any] | None) -> str:
     if origin == "user":
         return f"denied: {reason}" if reason else "denied"
     return ""
+
+
+# A declined step's status word, by how it was declined (#465).
+_DECLINED_WORDS: Final = {
+    "denied": "Not allowed",
+    "unanswered": "No answer in time",
+    "closed": "No answer in time",
+}
+
+
+class Declined(NamedTuple):
+    """How a finished call was declined (#465).
+
+    ``how`` is ``denied`` (the person's Deny, in Ask or Auto), ``unanswered``
+    (no answer in ``wait_s`` seconds) or ``closed`` (every viewer left
+    first): the record's ``unanswered`` code, never its text. ``note`` is the
+    person's note of a Deny.
+    """
+
+    how: str
+    note: str = ""
+    wait_s: float | None = None
+
+
+def declined_step(data: Mapping[str, Any]) -> Declined | None:
+    """How a finished call was declined, else None: no failure, nothing went wrong.
+
+    The call's own approval says so, or a question its tool asked itself
+    (``tool_asks``: a site): ``allowed`` false with origin ``user`` or
+    ``timeout``.
+    """
+    if str(data.get("status") or "") in ("success", "running"):
+        return None
+    asks = data.get("tool_asks")
+    asked = [data.get("approval"), *(asks if isinstance(asks, list) else [])]
+    for one in asked:
+        if (
+            not isinstance(one, Mapping)
+            or one.get("allowed") is not False
+            or one.get("origin") not in ("user", "timeout")
+        ):
+            continue
+        if one.get("origin") == "user":
+            return Declined("denied", " ".join(str(one.get("reason") or "").split()))
+        if one.get("unanswered") == "left":
+            return Declined("closed")
+        return Declined("unanswered", wait_s=_float(one.get("wait_s")))
+    return None
+
+
+def declined_line(declined: Declined) -> str:
+    """The one plain line a declined step shows the person, in place of the model's note."""
+    if declined.how == "denied":
+        line = "Not run: you declined it"
+        return f"{line}. Your note: {declined.note}" if declined.note else line
+    if declined.how == "unanswered":
+        if declined.wait_s:
+            return f"Not run: no answer within {wait_words(declined.wait_s)}"
+        return "Not run: no answer in time"
+    return "Not run: the chat was closed before an answer"
 
 
 # What a person does next, by status; a status that is not here has no action.
@@ -1019,6 +1080,10 @@ class TurnRenderer:
         text = str(data.get("output") or "")
         error = str(data.get("error") or "")
         exit_code = data.get("exit_code")
+        declined = declined_step(data)
+        if declined is not None:
+            # A declined step is a refused one, never a failure (#465).
+            status, error = "blocked", declined_line(declined)
         self.tool_outputs.append(
             ToolOutput(
                 ref=f"{self._turn}.{self._call_number}",
@@ -1373,6 +1438,19 @@ class TurnRenderer:
         output = str(data.get("output") or "")
         error = str(data.get("error") or "")
         symbols = self.symbols
+        declined = declined_step(data)
+        if declined is not None:
+            # Not run, and nothing went wrong: amber, one plain line; the note
+            # the model reads is for the model (#465).
+            header = self._header(
+                symbols.blocked,
+                "blocked",
+                name,
+                preview,
+                [_DECLINED_WORDS[declined.how]],
+            )
+            line = Text(declined_line(declined), style="muted")
+            return Group(header, Hung(line, self.symbols))
         tag = approval_tag(status, approval)
         if status == "cancelled":
             withdrawn = approval is not None and approval.get("origin") == "withdrawn"

@@ -99,7 +99,9 @@ def test_shift_tab_switches_ask_and_auto_and_the_bar_follows(
     term.see("Ask melo")
     assert _bar(term, 100).endswith("ask · shift+tab")
     term.type(b"\x1b[Z")  # Shift+Tab
-    term.see("Auto: routine steps run; risky ones are blocked with the reason.")
+    term.see(
+        "Auto: routine steps run; melo asks about the rest, the riskiest are blocked."
+    )
     assert _bar(term, 100).endswith("auto · shift+tab")
     term.type(b"\x1b[Z")
     term.see("Ask: melo asks before running commands or changing files.")
@@ -142,7 +144,7 @@ def test_shift_tab_during_a_turn_switches_at_once_and_says_when_it_applies(
     term.type("hold on\r")
     term.see("esc to stop")
     term.type(b"\x1b[Z")  # not refused: the turn runs on under its own policy
-    term.see("blocked with the reason, from your next message.")
+    term.see("the riskiest are blocked, from your next message.")
     assert _bar(term, 120).endswith("auto · shift+tab")
     term.type(b"\x1b")
     term.see("Stopped")

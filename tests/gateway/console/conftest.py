@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, cast
@@ -366,3 +369,29 @@ def run_result(
     }
     data.update(extra)
     return data
+
+
+# How long a test waits for a page's stream to open.
+VIEWER_TIMEOUT_S = 10.0
+
+
+@contextlib.asynccontextmanager
+async def viewer(console: Console, session_id: str) -> AsyncIterator[None]:
+    """A page that shows *session_id*: the viewer a ``watch=true`` stream registers in the hub."""
+    events = console.hub.subscribe(session_id, viewer=True)
+
+    async def read() -> None:
+        async for _ in events:
+            pass
+
+    reader = asyncio.ensure_future(read())
+    deadline = time.monotonic() + VIEWER_TIMEOUT_S
+    while console.hub.viewers(session_id) < 1:
+        assert time.monotonic() < deadline, "the page did not open"
+        await asyncio.sleep(0.01)
+    try:
+        yield
+    finally:
+        reader.cancel()
+        await asyncio.gather(reader, return_exceptions=True)
+        await events.aclose()

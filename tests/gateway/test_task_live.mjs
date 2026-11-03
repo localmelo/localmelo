@@ -59,7 +59,7 @@ test('a running task is read once, then a step and a tool call are folded in wit
   await settle();
   assert.deepEqual(f.calls, ['/sessions/t/turns?limit=50&events=true']);
   assert.equal(f.sources.length, 1);
-  assert.equal(f.sources[0].url, '/api/sessions/t/events?after=1', 'the stream resumes after the last event read');
+  assert.equal(f.sources[0].url, '/api/sessions/t/events?after=1&watch=true', 'the stream resumes after the last event read');
   const [source] = f.sources;
   const drawn = f.draws;
   source.emit(step(2));
@@ -132,7 +132,7 @@ test('a task that stops and is resumed is followed again after the last id', asy
   assert.equal(f.sources[0].closed, true);
   f.live.sync(task({state: 'running'}));
   assert.equal(f.sources.length, 2);
-  assert.equal(f.sources[1].url, '/api/sessions/t/events?after=2');
+  assert.equal(f.sources[1].url, '/api/sessions/t/events?after=2&watch=true');
 });
 
 test('a hidden tab stops following and a shown one catches up from the last id', async () => {
@@ -144,7 +144,7 @@ test('a hidden tab stops following and a shown one catches up from the last id',
   assert.equal(f.sources[0].closed, true);
   f.show('visible');
   assert.equal(f.sources.length, 2);
-  assert.equal(f.sources[1].url, '/api/sessions/t/events?after=2');
+  assert.equal(f.sources[1].url, '/api/sessions/t/events?after=2&watch=true');
   f.show('visible');
   assert.equal(f.sources.length, 2, 'a stream that is open is not opened twice');
 });
@@ -158,7 +158,7 @@ test('a stream that fails is opened again by the next poll, after the last id', 
   assert.equal(f.sources[0].closed, true);
   f.live.sync(task());
   assert.equal(f.sources.length, 2);
-  assert.equal(f.sources[1].url, '/api/sessions/t/events?after=2');
+  assert.equal(f.sources[1].url, '/api/sessions/t/events?after=2&watch=true');
 });
 
 test('leaving or opening another task drops a read that answers late', async () => {
@@ -173,7 +173,7 @@ test('leaving or opening another task drops a read that answers late', async () 
   await settle();
   assert.equal(f.live.state.id, 'b');
   assert.equal(f.live.state.view.id, 'b');
-  assert.deepEqual(f.sources.map((source) => source.url), ['/api/sessions/b/events?after=1']);
+  assert.deepEqual(f.sources.map((source) => source.url), ['/api/sessions/b/events?after=1&watch=true']);
 });
 
 test('a task without a session shows nothing, and a failed read says so and is tried again', async () => {

@@ -49,7 +49,8 @@ export function taskLive({api, changed, open = defaultOpen, schedule = setTimeou
   // True when a stream is open or is waiting for the tab; false where there is no EventSource.
   function connect() {
     if (follow.source || !wants || doc?.visibilityState === 'hidden') return true;
-    const source = open(`/api/sessions/${encodeURIComponent(state.id)}/events?after=${state.view.lastEventId}`);
+    // `watch=true`: the person sees the task here, so its card may ask (#465).
+    const source = open(`/api/sessions/${encodeURIComponent(state.id)}/events?after=${state.view.lastEventId}&watch=true`);
     if (!source) return false;
     follow.source = source;
     source.onmessage = (message) => frame(source, message);

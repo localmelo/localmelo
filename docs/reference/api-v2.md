@@ -960,7 +960,18 @@ token total.
   playwright with pip into .signin_venv (downloads about 42 MB)."), secrets
   redacted. `categories` are the rules' categories, strongest first
   (`install`, `download`, `outside_write`, `system`, `app_control`, ...). A `high` call asks every time and the card offers no `session`
-  answer.
+  answer, except a site Auto stopped only because the request did not ask for
+  it (categories `["beyond_request"]` on a `browser:` or `browser-act:`
+  question), whose `session` answer is a grant of that site question for the
+  chat.
+- A `pending_approvals` entry's `offers_chat` says whether the card may offer
+  `session` ("Allow for this chat"): true for a routine or unreviewed call of a
+  tool whose answers may be kept and for such an Auto site stop, false for a
+  high-impact call, typing, a form sent and a path outside the workspace
+  (whose folder answers are in `outside`). In Auto, a step the review stops
+  whose every category a person may allow (those words can allow, and
+  `opaque`) waits here like any other card; a run with nobody to ask (a
+  chore) blocks it instead.
 - A `pending_approvals` entry's `gist` is the sentence the card starts with, as
   `{say: {id, params}, by, warn?: {id, params}, note?, apps?}`, or `null` for a tool
   whose card says it itself (a browser site). For a command or a script `by` is
@@ -1254,6 +1265,13 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 - `follow=false` sends the stored events after the start point, up to the
   newest event id the request read, and then ends the response; it is
   one-shot catch-up, and a turn that starts while it pages adds no frames.
+- `watch=true` says the client shows the chat to a person; the console, the
+  app and the terminal send it. While such a stream of a chat (or of a task,
+  or its chat) is open, a step Auto stops that the person may allow asks on
+  the chat's card. With none open, Auto blocks the step at once, as for a
+  script that reads the stream without `watch`. A card nobody answers within
+  1 minute, or whose last viewer is gone for 5 seconds, is declined:
+  `approval.resolved` with `outcome` `denied` and `origin` `timeout`.
 - The stream ends when the client disconnects, when the session no longer
   exists (a reconnect then gets 404), and when the gateway shuts down. A
   browser reconnects with `Last-Event-ID` and receives every event it
@@ -1894,6 +1912,9 @@ Take back one session grant, so the tool asks again next time.
 - 404 `not_found` when the session is not open or the tool has no grant.
   `DELETE /api/sessions/{id}/grants` without a tool forgets every grant and
   answers 204, whether or not the session is open.
+- A site's grant is named after the question, such as
+  `browser-act:https://news.example`; the name may hold slashes, and is sent
+  percent-encoded or as it is.
 
 ## DELETE /api/sessions/{id}/approvals/{entry_id}
 

@@ -1537,6 +1537,7 @@ dialog::backdrop {
   color: var(--error);
 }
 .tool-card[data-state="blocked"] .tool-mark,
+.tool-card[data-state="declined"] .tool-mark,
 .tool-card[data-state="interrupted"] .tool-mark,
 .tool-card[data-state="held"] .tool-mark,
 .tool-card[data-state="waiting_approval"] .tool-mark,
@@ -2480,6 +2481,12 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .mode-item-text { display: grid; gap: 2px; min-width: 0; }
 .mode-item-name { font-size: var(--text-body); font-weight: 600; }
 .mode-item-words { font-size: var(--text-small); color: var(--ink-2); line-height: 1.45; }
+/* The sites this chat allowed for its rest (#465), each with Remove. */
+.mode-grants { margin: var(--space-1) 0 0; padding: var(--space-1) var(--space-2) var(--space-2); border-top: 1px solid var(--line); }
+.mode-grants-title { margin: 0 0 var(--space-1); font-size: var(--text-caption); color: var(--ink-3); }
+.mode-grant { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-height: 32px; font-size: var(--text-small); color: var(--ink); }
+.mode-grant-what { min-width: 0; overflow-wrap: anywhere; }
+.mode-grant-remove { flex: none; }
 .mode-menu-foot { margin: var(--space-1) 0 0; padding: var(--space-2); border-top: 1px solid var(--line); font-size: var(--text-caption); color: var(--ink-3); }
 .mode-menu-foot a { color: var(--accent); }
 
@@ -2495,7 +2502,6 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .block-step { display: block; margin-left: calc(1.25em + var(--space-2)); padding: var(--space-2) var(--space-3); overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-control); color: var(--ink); font: var(--text-caption)/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: normal; text-overflow: ellipsis; white-space: nowrap; }
 .block-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin: var(--space-3) 0 0 calc(1.25em + var(--space-2)); font-size: var(--text-small); }
 .block-allow { background: var(--surface); color: var(--ink); font-weight: 600; }
-.block-or { color: var(--ink-2); }
 .block-once { margin-left: auto; color: var(--ink-3); font-size: var(--text-caption); }
 .block-done { color: var(--ink-2); }
 .block-card[data-state="used"] .block-done { color: var(--ok); }
@@ -2517,7 +2523,7 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 @media (max-width: 700px) {
   .mode-picker { position: static; }
   .mode-menu { right: 0; width: auto; }
-  .mode-chip, .mode-item, .block-allow { min-height: 44px; }
+  .mode-chip, .mode-item, .block-allow, .mode-grant-remove { min-height: 44px; }
   .block-why, .block-step, .block-code, .block-foot, .block-error { margin-left: 0; padding-left: 0; }
   .block-step { padding: var(--space-2) var(--space-3); }
   .block-once { flex-basis: 100%; margin-left: 0; }

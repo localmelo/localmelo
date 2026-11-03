@@ -123,6 +123,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalPolicy,
     ApprovalRequest,
     AutoPolicy,
+    Chosen,
     ReviewMode,
     Withdrawal,
     block_note,
@@ -1754,6 +1755,24 @@ class _ApprovalGate:
             # The turn already stopped: the step's later calls do not run.
             self._record(asking, origin="auto", reason="the turn stopped")
             return ApprovalDecision(False, STOPPED_NOTE, origin="auto")
+        if self._mode == "auto":
+            again = run.reviews.declined_again(
+                [
+                    call_key(
+                        request.tool_name, request.arguments, self._workspace_root
+                    ),
+                    *loose_keys(request.tool_name, request.arguments),
+                ]
+            )
+            if again is not None:
+                # This step, or one alike, was declined on the card earlier in
+                # this turn (the person's Don't allow, or no answer): nobody is
+                # asked again (#465).
+                self._record(asking, origin=again.origin, reason=again.reason)
+                assert self.asked is not None
+                self.asked["declined"] = True
+                self.asked.update(again.record())
+                return again
         run.waiting_call_id = call.id
         try:
             if (
@@ -1816,9 +1835,11 @@ class _ApprovalGate:
             self._record(asking, origin="error", reason=_exception_text(no_decision))
             raise no_decision
         # Who decided, not the mode the call began in: a chat may switch
-        # while the call is reviewed.
+        # while the call is reviewed. Auto's card nobody answered is auto
+        # mode's decision (#465).
         allowance = decided.origin == "user" and decided.reason == ALLOWED_ONCE
-        if decided.origin == "auto" or allowance:
+        unanswered = isinstance(decided, Chosen) and decided.origin == "timeout"
+        if decided.origin == "auto" or allowance or unanswered:
             self._mode = "auto"
             auto = find_auto(self._policy) or auto
         elif self._mode == "auto":
@@ -1842,6 +1863,24 @@ class _ApprovalGate:
             and decided.origin in ("user", "auto", "policy")
             and not isinstance(decided, Withdrawal),
         )
+        if isinstance(decided, Chosen) and not decided.allow:
+            # Don't allow on the card, or no answer, holds for the rest of the
+            # turn (#465); a card nobody answered keeps why, for the surfaces.
+            assert self.asked is not None
+            self.asked.update(decided.record())
+            run.reviews.decline(
+                [
+                    call_key(
+                        request.tool_name, request.arguments, self._workspace_root
+                    ),
+                    *loose_keys(
+                        request.tool_name,
+                        request.arguments,
+                        () if self.review is None else self.review.categories,
+                    ),
+                ],
+                decided,
+            )
         if not decided.allow and decided.origin == "auto":
             return dataclasses.replace(
                 decided, reason=self._block(asking, auto, decided.reason)
@@ -2188,6 +2227,19 @@ class _ToolAsk:
         if auto and reviewer is not None and self._run.reviews.stop:
             # The turn already stopped: no site opens either.
             return ApprovalDecision(False, STOPPED_NOTE, origin="auto")
+        declined = _question_keys(tool_name, request.arguments)
+        again = self._run.reviews.declined_again(declined) if auto else None
+        if again is not None:
+            # The same question was declined on the card earlier in this turn
+            # (the person's Don't allow, or no answer): nobody is asked again
+            # (#465). A repeat is no new refusal: it keeps no call key.
+            self.refused.append(
+                {"request_id": request.request_id, "tool": tool_name,
+                 "allowed": False, "origin": again.origin,
+                 "reason": again.reason, "declined": True, "preview": preview,
+                 **again.record()}
+            )  # fmt: skip
+            return again
         if auto and reviewer is not None:
             site = str(arguments.get("site") or "")
             access = str(arguments.get("access") or "")
@@ -2248,6 +2300,19 @@ class _ToolAsk:
             # A person's Deny, an auto block, a policy's refusal of the step:
             # a task its chat continues on its own never asks it again.
             self._keep(request, decided)
+        if isinstance(decided, Chosen) and not decided.allow:
+            # Don't allow on the card, or no answer, holds for the rest of the
+            # turn (#465).
+            self._run.reviews.decline(declined, decided)
+            if decided.origin == "timeout":
+                # Nobody's denial of the step (no call key), but the call's
+                # tool_asks say why it did not run, for the surfaces.
+                self.refused.append(
+                    {"request_id": request.request_id, "tool": tool_name,
+                     "allowed": False, "origin": "timeout",
+                     "reason": decided.reason, "preview": preview,
+                     **decided.record()}
+                )  # fmt: skip
         if (
             auto
             and reviewer is not None
@@ -6405,8 +6470,11 @@ class Agent:
         query (a window that began the run empty is not) carry them as one
         data block (see
         :func:`~localmelo.melo.agent._earlier.earlier_block`). A short request
-        such as "go look it up" then stays on what the chat is about. ``None``
-        or none adds nothing.
+        such as "go look it up" then stays on what the chat is about. When
+        the step review's window starts over (a reload), the newest of their
+        user words go into it before the query's, so the person's earlier
+        words still count (#465); their answers never do. ``None`` or none
+        adds nothing.
 
         Before the run starts, ``TypeError`` is raised when *on_event* or
         *observe* is not callable or is a coroutine function, when both
@@ -6426,9 +6494,10 @@ class Agent:
                 raise TypeError("routine must be a str")
             if not routine.strip():
                 raise ValueError("routine must not be blank")
-        earlier = earlier_block(
+        turns_before = (
             check_earlier_turns(earlier_turns) if earlier_turns is not None else []
         )
+        earlier = earlier_block(turns_before)
         place = self._run_place()
         started = time.perf_counter()
         task = TaskRecord(query=query)
@@ -6456,6 +6525,9 @@ class Agent:
         )
         self._earlier_block = earlier
         # The user's own words, which a step review reads (never tool output).
+        # A window that starts over takes the person's earlier words first,
+        # never the answers (#465).
+        self._reviewer.earlier_words([words for words, _ in turns_before])
         if from_person:
             self._reviewer.user_message(query if user_words is None else user_words)
         if chat_started is not None:

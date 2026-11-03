@@ -200,11 +200,12 @@ async def test_a_failed_switch_leaves_browsing_as_it_was(chat: Any) -> None:
     assert factory.browser_driver == "off"
 
 
-async def test_auto_mode_asks_nobody_and_reviews_an_unnamed_site() -> None:
-    # Auto mode (#339): nobody is asked. A site the person named opens; one
-    # they did not name opens only when their model finds it serves the
-    # request (the agent reviews it, once per site per chat), else it is
-    # blocked. Here the policy reads the review the agent attached.
+async def test_auto_mode_asks_about_an_unnamed_site_the_review_stopped() -> None:
+    # Auto mode (#339): a site the person named opens; one they did not name
+    # opens only when their model finds it serves the request (the agent
+    # reviews it, once per site per chat). One the review stops is asked
+    # about on the card (#465), and a site nothing reviewed stays blocked.
+    # Here the policy reads the review the agent attached.
     import dataclasses
 
     from localmelo.melo.contracts.approvals import find_auto, review_mode
@@ -241,11 +242,13 @@ async def test_auto_mode_asks_nobody_and_reviews_an_unnamed_site() -> None:
             ("Does something the request did not ask for.",),
         ),
     )
-    blocked = await policy.decide(unnamed)
-    assert (blocked.allow, blocked.origin) == (False, "auto")
-    # A site nothing reviewed does not open either.
-    assert not (await policy.decide(_ask("other.example"))).allow
-    assert asked == []  # nobody is asked in auto mode
+    chosen = await policy.decide(unnamed)
+    assert (chosen.allow, chosen.origin) == (True, "user")
+    assert asked == ["browser:https://tracker.example"]
+    # A site nothing reviewed does not open, and nobody is asked about it.
+    refused = await policy.decide(_ask("other.example"))
+    assert (refused.allow, refused.origin) == (False, "auto")
+    assert asked == ["browser:https://tracker.example"]
     approvals = Approvals(ask, "yolo")
     assert approvals.policy() is None  # --yolo asks about nothing
 

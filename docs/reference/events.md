@@ -342,7 +342,14 @@ The number of `tool.started` events is `RunResult.n_tool`.
   `paths`, `by` (`rules` or `model`), `rules_version`, `gist` and, when the model was
   asked, `model`: `{verdict, category, fits_request, user_asked, reason, ms}` or
   `{error, ms}`) and `step_key` (32 hex characters: the same step in the same
-  folder); a step allowed once has `allowance: "once"`. Origin `auto` with
+  folder); a step allowed once has `allowance: "once"`. In auto mode a step the
+  review stops that a person may allow is asked on the card: the person's answer
+  has origin `user` (or `session` when a site allowed for the chat covers it),
+  and `reason` is their note on a denial; a step they declined earlier in the
+  same run, tried again, is refused unasked with origin `user` and
+  `declined: true`. A card nobody answered is declined with origin `timeout`
+  and `unanswered`: `time` (with `wait_s`, the seconds it waited) or `left`
+  (every viewer left first); `reason` is only its human text. Origin `auto` with
   `allowed: false` is a step auto mode blocked; `reason` then names it in a few
   words (`installs software`); the console's
   [Allow once](api-v2.md#ask-and-auto) finds it by `request_id`. See

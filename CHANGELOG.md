@@ -748,6 +748,42 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   about 230 more prompt tokens and about a second more per turn. `-X memory.excerpt_open=off`
   (or `excerpt_open = "off"` under `[memory]`) gives the old behaviour; the key is saved only
   when it is `off`. Part of #428.
+- In Auto, a step you did not ask for now asks you instead of being blocked. When the review
+  stops a step that you may allow (an install, a download, a change outside the folder, a
+  delete, data sent out, a network service, code melo cannot check, or a site, click or text
+  you did not ask for), the chat shows the usual approval card and waits: **Allow once**,
+  **Deny** with an optional note, and for a site you did not ask for, **Allow for this chat**.
+  The same choices appear in the terminal's list, the web console and the macOS app, and a
+  task you started asks in its chat. melo reads what you chose and your note, and after
+  **Deny** it does not ask about the same step again until your next message. Nothing asks
+  you to type a permission any more: "reply go ahead" is gone from the block card and from
+  melo's notes. Steps that use passwords or keys, change system settings, drive another app
+  through a script, set up something that runs later or run code from the internet stay
+  blocked, with **Allow once** on their card, and a scheduled chore, which nobody watches,
+  keeps blocking. Part of #465.
+- In Auto, **Allow for this chat** on a site's card lasts: the same kind of step on that site
+  (opening and reading it, or clicking and choosing on it) runs for the rest of the chat. The
+  Ask/Auto chip's menu lists the sites a chat allowed, each with **Remove**; in the terminal
+  `/approvals` lists them by site and `/approvals forget SITE` takes them back. Typing on a
+  page and sending a form still ask every time, a high-impact step never rides it, and a new
+  chat starts with none. Part of #465.
+- In Auto, your earlier words in the chat still count: "I signed in" after "choose a mood and
+  write a line in the comment box" still asks for the line, also after the chat was opened
+  again. Only what you typed counts, never melo's answers, a page or recalled notes. A box or
+  a button your words name counts as asked for, so typing into the comment box you named is
+  no longer stopped as sending data out. The review prompt grows by 156 characters. Part of
+  #465.
+- In Auto, a card waits only while someone sees it: the web console, the macOS app or the
+  terminal with the chat open. With nobody watching (a script that sends messages over HTTP,
+  a terminal whose input is piped), the step is blocked at once, as before. A card nobody
+  answers within 1 minute, or one whose last viewer closes the chat, counts as **Deny**:
+  melo reads that you did not answer, does not ask about the step again in that turn, and the
+  step shows "No answer in time". A step you denied (in Auto or in Ask), or that nobody
+  answered, now shows in amber with one plain line, such as "Not run: you declined
+  it" and your note, instead of a red failure with the note melo reads; it no longer
+  counts as failed. Benchmarks can turn the card off with the developer
+  setting `[approvals] auto_asks = false`. Part of #465.
+
 - A recalled chat turn now shows up to 900 characters by default, and the recall block holds
   up to 4000 (#349), where it showed 234 and 900. On a public long-memory benchmark, a model that
   reads earlier chats answered 71.1% of questions instead of 58.9% (90 questions, 2 repeats;

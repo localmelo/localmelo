@@ -510,7 +510,8 @@ class GatewayClient:
             async with self._client().stream(
                 "GET",
                 _path(session_id, "events"),
-                params={"after": after},
+                # The person sees the chat here: a step Auto stops may ask (#465).
+                params={"after": after, "watch": "true"},
                 timeout=timeout,
             ) as response:
                 if response.status_code != 200:

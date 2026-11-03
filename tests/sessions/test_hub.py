@@ -161,3 +161,27 @@ def test_a_hub_needs_the_gateways_store(tmp_path: Path) -> None:
         SessionHub(SessionStore(tmp_path / "c.db", writer="cli"))
     with pytest.raises(ValueError):
         SessionHub(SessionStore(tmp_path / "g.db", writer="gateway"), queue_size=0)
+
+
+async def test_only_a_stream_opened_as_a_viewer_counts_as_one(tmp_path: Path) -> None:
+    # A surface that shows the chat to a person subscribes as a viewer
+    # (#465); a script that reads the stream does not, so it never counts.
+    store = SessionStore(tmp_path / "s.db", writer="gateway")
+    hub = SessionHub(store)
+    turn = await running(store)
+    sid = turn.session_id
+    viewer = hub.subscribe(sid, viewer=True)
+    script = hub.subscribe(sid)
+    try:
+        assert hub.viewers(sid) == 0  # nothing subscribed until it reads
+        await take(script, 1)
+        assert hub.viewers(sid) == 0
+        await take(viewer, 1)
+        assert hub.viewers(sid) == 1 and hub.viewers("other") == 0
+        await viewer.aclose()
+        assert hub.viewers(sid) == 0
+    finally:
+        await viewer.aclose()
+        await script.aclose()
+        await hub.aclose()
+        await store.aclose()

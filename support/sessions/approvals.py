@@ -29,23 +29,28 @@ from typing import Any, Final, Literal, Protocol
 
 from localmelo.melo.contracts.approvals import (
     ALLOWED_ONCE,
+    AUTO_ASK_WAIT_S,
+    LEFT_UNANSWERED,
+    NO_ANSWER,
     ApprovalDecision,
     ApprovalPolicy,
     ApprovalRequest,
+    AskWatch,
     AutoPolicy,
+    Chosen,
     ReviewMode,
     Withdrawal,
     find_auto,
     find_folder_asker,
-    never_granted,
+    grant_offered,
     review_mode,
+    site_grant,
 )
 from localmelo.melo.contracts.folders import covers
 from localmelo.melo.contracts.review import (
     RULED_TOOLS,
     ActionReview,
     covered_by_grant,
-    offers_grant,
     step_key,
 )
 
@@ -91,6 +96,10 @@ class RememberingPolicy:
     so it allows that call and grants nothing. Under a grant the agent's
     gate first lets the user's model review an undecided call
     (:meth:`silent_for`); one it finds routine then runs on the grant.
+    In auto mode it is the policy that asks about a step Auto stopped
+    (#465): a site Auto stopped only as not asked for may be granted for
+    the chat, and a grant of that site question covers it after
+    (:func:`~localmelo.melo.contracts.approvals.site_grant`).
     Grants are per tool name and per policy object, and never stored.
 
     With *folders*, it is also asked about a file tool's path outside the
@@ -211,12 +220,12 @@ class RememberingPolicy:
                 "a folder outside the workspace needs its own question",
                 origin="policy",
             )
-        if request.tool_name in self._granted and covered_by_grant(request.review):
+        if request.tool_name in self._granted and (
+            covered_by_grant(request.review) or site_grant(request)
+        ):
             return ApprovalDecision(True, origin="session")
         decision = await self._ask(request)
-        if isinstance(decision, ApprovalDecision) and (
-            not offers_grant(request.review) or never_granted(request.tool_name)
-        ):
+        if isinstance(decision, ApprovalDecision) and not grant_offered(request):
             decision = dataclasses.replace(decision, remember=False)
         if (
             isinstance(decision, ApprovalDecision)
@@ -225,6 +234,91 @@ class RememberingPolicy:
         ):
             self._granted.add(request.tool_name)
         return decision
+
+
+# How often a card auto mode shows checks that someone still sees it, and how
+# long nobody may have seen it (from the first check that found nobody) before
+# it counts as closed: a reload of the page or a reconnect of its stream takes
+# less (#465).
+CARD_POLL_S: Final = 1.0
+CARD_LEFT_S: Final = 5.0
+
+
+class CardWatch:
+    """Who sees the card auto mode shows, and how long it waits (#465).
+
+    *viewers* counts the surfaces that show the card now, read again at each
+    check (a task's chat may change while its card waits): on the gateway,
+    the chat's event streams a console, the app or the terminal opened as a
+    viewer (``watch=true``); 0 with ``[approvals] auto_asks`` off. Auto mode
+    asks only while one is open (:meth:`watched`); with none it blocks the
+    step as before. A card waits at most :data:`AUTO_ASK_WAIT_S`; when nobody
+    answers in that time, or every viewer is gone for :data:`CARD_LEFT_S`,
+    *end* answers it as auto mode's Don't allow, a :class:`Chosen` with origin
+    ``timeout`` and its code (``unanswered`` ``time`` with ``wait_s``, or
+    ``left``; :data:`NO_ANSWER`, :data:`LEFT_UNANSWERED` as its text). *end*
+    takes the request id and the decision and says whether the card was up
+    (answered now or before); it is the answer of the broker or of the
+    terminal's panel, so the card ends as an answered one. *clock* and
+    *sleep* are a test's fake time.
+    """
+
+    def __init__(
+        self,
+        viewers: Callable[[], Awaitable[int]],
+        end: Callable[[str, ApprovalDecision], bool],
+        *,
+        wait_s: float | None = None,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], Awaitable[object]] = asyncio.sleep,
+    ) -> None:
+        self._viewers = viewers
+        self._end = end
+        self.wait_s = AUTO_ASK_WAIT_S if wait_s is None else wait_s
+        self._clock = clock
+        self._sleep = sleep
+
+    async def watched(self) -> bool:
+        try:
+            return await self._viewers() > 0
+        except Exception:
+            logger.warning("Could not count who sees the chat", exc_info=True)
+            return False
+
+    async def ask(
+        self, request: ApprovalRequest, asking: ApprovalPolicy
+    ) -> ApprovalDecision:
+        expiry = asyncio.ensure_future(self._expire(request))
+        try:
+            return await asking.decide(request)
+        finally:
+            expiry.cancel()
+            await asyncio.gather(expiry, return_exceptions=True)
+
+    async def _expire(self, request: ApprovalRequest) -> None:
+        """Answer the card of *request* once nobody answered or nobody sees it."""
+        start = self._clock()
+        gone: float | None = None  # when a check first found nobody
+        decision = Chosen(
+            False, NO_ANSWER, origin="timeout", unanswered="time", wait_s=self.wait_s
+        )
+        while True:
+            await self._sleep(CARD_POLL_S)
+            now = self._clock()
+            if await self.watched():
+                gone = None
+            else:
+                gone = now if gone is None else gone
+                if now - gone >= CARD_LEFT_S:
+                    decision = Chosen(
+                        False, LEFT_UNANSWERED, origin="timeout", unanswered="left"
+                    )
+                    break
+            if now - start >= self.wait_s:
+                break
+        # A card not up yet (its event is still being written) is tried again.
+        while not self._end(request.request_id, decision):
+            await self._sleep(CARD_POLL_S)
 
 
 ChatMode = Literal["ask", "auto"]
@@ -261,10 +355,14 @@ class ChatPolicy:
         mode: ChatMode = "ask",
         *,
         saved: SavedFolders | None = None,
+        watch: AskWatch | None = None,
     ) -> None:
         self.mode: ChatMode = mode
         self.ask = RememberingPolicy(ask, folders=True, saved=saved)
-        self.auto = AutoPolicy()
+        # A step Auto stops that the person may allow asks them on the
+        # chat's card while *watch* says someone sees the chat, and an
+        # answer for the chat is a grant of the Ask policy (#465).
+        self.auto = AutoPolicy(asking=self.ask, watch=watch)
         self.asks_folders = True
 
     @property
@@ -397,6 +495,13 @@ class ApprovalBroker:
             for entry in self._pending.values()
             if entry.session_id == session_id and not entry.answer.done()
         ]
+
+    def ends(self, request_id: str, decision: ApprovalDecision) -> bool:
+        """Answer *request_id* for a :class:`CardWatch`; whether its card was up.
+
+        A card answered before counts as up: its answer stays.
+        """
+        return self.answer(request_id, decision) != "unknown"
 
     def answer(
         self, request_id: str, decision: ApprovalDecision

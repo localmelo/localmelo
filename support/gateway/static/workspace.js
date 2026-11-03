@@ -40,6 +40,8 @@ import {
   canContinue,
   canRetry,
   cleanOutput,
+  declinedLine,
+  declinedStep,
   formatBytes,
   formatDuration,
   formatPast,
@@ -852,8 +854,10 @@ function newChat({ saveCurrent = true } = {}) {
 
 // ── The event stream ──
 
+// `watch=true`: this page shows the chat to the person, so a step Auto stops
+// asks on the card while it is open (#465).
 function eventsUrl(id) {
-  return `/api/sessions/${encodeURIComponent(id)}/events?after=${S.view?.lastEventId ?? 0}`;
+  return `/api/sessions/${encodeURIComponent(id)}/events?after=${S.view?.lastEventId ?? 0}&watch=true`;
 }
 
 function startStream(id) {
@@ -1908,10 +1912,13 @@ function approvalCard(request, view = chatApproval, asked = "") {
     }
   }
   // A high-impact call (installs, downloads, changes outside the folder) asks every time: the
-  // card says why, offers no chat-wide allow, and starts on Deny.
+  // card says why, offers no chat-wide allow, and starts on Deny. A site Auto stopped only because the
+  // request did not ask for it (#465) says why too, but may be allowed for the chat: the server says so.
   const review = request.review;
-  const high = review?.verdict === "high";
-  const reviewed = high ? reviewWords({ ...review, gist: request.gist }, folder) : { title: "", reasons: [] };
+  const stopped = review?.verdict === "high";
+  const siteChoice = stopped && request.offers_chat === true;
+  const high = stopped && !siteChoice;
+  const reviewed = stopped ? reviewWords({ ...review, gist: request.gist }, folder) : { title: "", reasons: [] };
   if (high) {
     card.dataset.impact = "high";
     title = reviewed.title || title;
@@ -1945,13 +1952,13 @@ function approvalCard(request, view = chatApproval, asked = "") {
   if (gist?.note) card.append(el("p", "approval-says", gist.note));
   card.append(el("p", "approval-title", title), el("p", "approval-caption", caption));
   if (outside) card.append(folderBox(outside, tool, outsideFolder));
-  if (high && reviewed.reasons.length) {
+  if (stopped && reviewed.reasons.length) {
     card.append(el("p", "approval-why", t("approval.why")));
     const reasons = el("ul", "approval-reasons");
     for (const reason of reviewed.reasons) reasons.append(el("li", "", reason));
     card.append(reasons);
   }
-  if (high && asked) {
+  if (stopped && asked) {
     const text = asked.length > 200 ? `${asked.slice(0, 200).trimEnd()}…` : asked;
     card.append(el("p", "approval-asked", t("approval.youAsked", { text })));
   }
@@ -2222,10 +2229,14 @@ function toolBody(item, context = {}) {
     section.append(pre);
     body.append(section);
   }
-  const tag = approvalTag(item.status, item.errorCategory, item.approval);
+  const declined = declinedStep(item);
+  const tag = declined ? null : approvalTag(item.status, item.errorCategory, item.approval);
+  // A step the person declined, or nobody answered, says so in one plain line:
+  // the note the model reads is for the model (#465).
+  if (declined) body.append(el("p", "tool-approval", declinedLine(declined)));
   if (tag) body.append(el("p", "tool-approval", tag.long));
-  if (item.error) body.append(el("p", "tool-error", cleanOutput(item.error)));
-  if (item.output) body.append(outputBlock(item, context));
+  if (item.error && !declined) body.append(el("p", "tool-error", cleanOutput(item.error)));
+  if (item.output && !declined) body.append(outputBlock(item, context));
   for (const image of item.images ?? []) {
     const node = document.createElement("img");
     node.className = "tool-image";
@@ -3168,7 +3179,20 @@ const modeChip = setupModeChip({
       fallback: S.defaultMode,
       visible: S.ready && !workerMode && !setupShown() && (!session || session.kind !== "task"),
       busy: S.modeSaving,
+      // The chat's grants: the menu lists the sites it allowed for its rest (#465).
+      grants: S.activeId && S.view?.id === S.activeId ? S.view.grants ?? [] : [],
     };
+  },
+  remove: async (name) => {
+    const id = S.activeId;
+    if (!id) return;
+    try {
+      await api(`/sessions/${encodeURIComponent(id)}/grants/${encodeURIComponent(name)}`, { method: "DELETE" });
+      if (S.view?.id === id) S.view.grants = (S.view.grants ?? []).filter((grant) => grant !== name);
+      notify(t("auto.menu.removed"));
+    } catch (error) {
+      notify(t("auto.menu.removeFailed", { problem: error.message }), { sticky: true });
+    }
   },
   pick: async (mode) => {
     try {

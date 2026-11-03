@@ -10,9 +10,9 @@ settings) and deny; a write there offers allow once and deny, and starts on
 deny. :class:`Approvals` is the session's policy:
 in ``ask`` mode a :class:`RememberingPolicy` that asks through the panel
 and keeps session grants, in ``auto`` mode an
-:class:`~localmelo.melo.contracts.approvals.AutoPolicy`: nothing asks, a
-routine call runs and any other is blocked and explained (#339); with
-``--yolo`` no policy at all.
+:class:`~localmelo.melo.contracts.approvals.AutoPolicy`: a routine call
+runs, a stopped one the person may allow asks on the same panel (#465), and
+any other is blocked and explained (#339); with ``--yolo`` no policy at all.
 
 The panel shows what will run escaped, never cleaned: approval is the only
 control before a shell command or Python code runs, so every byte shows.
@@ -24,6 +24,7 @@ import asyncio
 import dataclasses
 import json
 import os
+import sys
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
@@ -34,15 +35,21 @@ from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     ApprovalPolicy,
     ApprovalRequest,
+    AskWatch,
     AutoPolicy,
     DenyAllPolicy,
+    grant_offered,
     never_granted,
 )
-from localmelo.melo.contracts.review import because, offers_grant, review_title
+from localmelo.melo.contracts.review import because, review_title, url_site
 from localmelo.support.cli import edits
 from localmelo.support.cli.text import escape_arguments, wrap_cells
 from localmelo.support.config import SavedFolders
-from localmelo.support.sessions.approvals import AskFunction, RememberingPolicy
+from localmelo.support.sessions.approvals import (
+    AskFunction,
+    CardWatch,
+    RememberingPolicy,
+)
 from localmelo.support.sessions.display import display_path, folder_name, home_label
 from localmelo.support.words import gist_note, gist_text
 
@@ -63,15 +70,15 @@ Mode = Literal["ask", "auto", "deny", "yolo"]
 DENY_REASON: Final = "approvals are set to deny"
 _MODE_WORDS: Final = {
     "ask": "asks before running commands or changing files",
-    "auto": "works without asking; blocks risky steps and steps you did not ask "
-    "for, and explains them",
+    "auto": "works on its own; asks before a step you did not ask for, blocks the "
+    "riskiest steps and explains them",
     "deny": "never runs commands or changes files",
     "yolo": "runs everything without asking (--yolo)",
 }
 # The quiet line a switch leaves in the transcript (the key and /approvals say the same).
 MODE_SWITCHED: Final = {
     "ask": "Ask: melo asks before running commands or changing files.",
-    "auto": "Auto: routine steps run; risky ones are blocked with the reason.",
+    "auto": "Auto: routine steps run; melo asks about the rest, the riskiest are blocked.",
 }
 # What a session grant covers, in the words of the panel that asked.
 _GRANT_WORDS: Final = {
@@ -518,7 +525,7 @@ class TerminalApprover:
         # A grant never covers a high-impact call, whatever the caller says;
         # a folder outside the workspace is offered only when it may be kept.
         outside = request.outside
-        offered = offers_grant(request.review) if outside is None else outside.grantable
+        offered = grant_offered(request) if outside is None else outside.grantable
         # An answer to typing or to a form's send is never kept for the chat: no session choice.
         grantable = offered and not never_granted(request.tool_name)
         self.pending = PendingApproval(
@@ -538,6 +545,18 @@ class TerminalApprover:
         finally:
             self.pending = None
             self.on_change()
+
+    def ends(self, request_id: str, decision: ApprovalDecision) -> bool:
+        """End the panel of *request_id* with *decision*, for a card nobody answered (#465).
+
+        Whether that panel was up; one already answered is gone and left as it is.
+        """
+        pending = self.pending
+        if pending is None or pending.request.request_id != request_id:
+            return False
+        if not pending.future.done():
+            pending.future.set_result(decision)
+        return True
 
     def guarded(self) -> bool:
         """Whether the panel opened too recently for a key to answer it."""
@@ -681,12 +700,86 @@ def next_mode(mode: Mode) -> Literal["ask", "auto"] | None:
     return "auto" if mode == "ask" else "ask"
 
 
+# A site question's grant in words (#465): its prefix, and what it lets melo do.
+_SITE_GRANT_WORDS: Final = (
+    ("browser-act:", "clicking and choosing on {site}"),
+    ("browser:", "opening {site}"),
+)
+
+
+def grant_site(name: str) -> str:
+    """The host a site question's grant *name* is about, or ``""`` for any other grant."""
+    for prefix, _ in _SITE_GRANT_WORDS:
+        if name.startswith(prefix):
+            rest = name[len(prefix) :]
+            return url_site(rest) or rest
+    return ""
+
+
+def grant_words(name: str) -> str:
+    """A grant in words: ``shell commands``, ``clicking and choosing on example.com``."""
+    if name in _GRANT_WORDS:
+        return _GRANT_WORDS[name]
+    for prefix, words in _SITE_GRANT_WORDS:
+        if name.startswith(prefix):
+            return words.format(site=grant_site(name))
+    return name
+
+
+def grant_listed(name: str) -> str:
+    """A grant as ``/approvals`` lists it: a tool by its name, a site's by its site.
+
+    ``shell_exec``; ``example.com (clicking and choosing)``: the name or the
+    site is what ``/approvals forget`` takes.
+    """
+    site = grant_site(name)
+    if not site:
+        return name
+    what = "clicking and choosing" if name.startswith("browser-act:") else "opening"
+    return f"{site} ({what})"
+
+
 def approval_words(mode: Mode, grants: Iterable[str]) -> str:
-    """What the approval *mode* does, and in ask mode what the session allowed already."""
-    allowed = ", ".join(_GRANT_WORDS.get(tool, tool) for tool in sorted(grants))
-    if mode == "ask" and allowed:
+    """What the approval *mode* does, and what the session allowed already.
+
+    In Ask every grant; in Auto the sites allowed for the chat (#465), the
+    only grants it uses.
+    """
+    names = sorted(grants)
+    if mode == "auto":
+        names = [name for name in names if grant_site(name)]
+    allowed = ", ".join(grant_words(name) for name in names)
+    if mode in ("ask", "auto") and allowed:
         return f"{_MODE_WORDS[mode]} · allowed this session: {allowed}"
     return _MODE_WORDS[mode]
+
+
+def at_terminal() -> bool:
+    """Whether a person can answer the panel: stdin and stdout are a terminal (#465)."""
+    try:
+        return sys.stdin.isatty() and sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def terminal_watch(
+    approver: TerminalApprover,
+    *,
+    auto_asks: bool = True,
+    present: Callable[[], bool] = at_terminal,
+) -> CardWatch:
+    """Who sees the panel Auto shows in the terminal, and how long it waits (#465).
+
+    The person at the terminal, while stdin and stdout are one (*present*):
+    with stdin piped or no terminal, or with ``[approvals] auto_asks`` off,
+    Auto blocks as before and never waits. A panel nobody answers ends
+    through *approver*.
+    """
+
+    async def viewers() -> int:
+        return int(auto_asks and present())
+
+    return CardWatch(viewers, approver.ends)
 
 
 class Approvals:
@@ -698,13 +791,17 @@ class Approvals:
         mode: Mode,
         *,
         snapshots: EditSnapshots | None = None,
+        watch: AskWatch | None = None,
     ) -> None:
         self.mode: Mode = mode
         self._ask = ask
         self.snapshots = snapshots if snapshots is not None else EditSnapshots()
         self._policy = self._asking()
-        # Auto mode's policy, kept across turns for its allowances.
-        self._auto = AutoPolicy()
+        # Auto mode's policy, kept across turns for its allowances; a step it
+        # stops that the person may allow asks on the panel while *watch*
+        # says someone is at the terminal (#465).
+        self._watch = watch
+        self._auto = AutoPolicy(asking=self._policy, watch=watch)
 
     def _asking(self) -> RememberingPolicy:
         # It also asks about a folder outside the workspace (#405).
@@ -730,8 +827,18 @@ class Approvals:
         self.mode = mode
 
     def forget(self, tool_name: str | None = None) -> None:
-        """Take back one tool's grant, or every grant."""
-        self._policy.forget(tool_name)
+        """Take back one grant, or every grant.
+
+        *tool_name* is a grant's name, or a site: every grant of that site
+        goes (#465).
+        """
+        if tool_name is None or tool_name in self._policy.allowed_tools:
+            self._policy.forget(tool_name)
+            return
+        site = tool_name.lower().removeprefix("www.")
+        for name in self._policy.allowed_tools:
+            if grant_site(name).removeprefix("www.") == site:
+                self._policy.forget(name)
 
     @property
     def allowed_tools(self) -> frozenset[str]:
@@ -744,5 +851,5 @@ class Approvals:
     def reset(self) -> None:
         """Forget every grant: a new session starts with none."""
         self._policy = self._asking()
-        self._auto = AutoPolicy()
+        self._auto = AutoPolicy(asking=self._policy, watch=self._watch)
         self.snapshots.clear()

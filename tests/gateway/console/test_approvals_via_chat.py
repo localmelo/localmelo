@@ -31,10 +31,12 @@ from localmelo.tests.agent.test_approvals import _answer, _calls
 from localmelo.tests.agent.test_auto_mode import FakeModel
 from localmelo.tests.sessions.helpers import started_agent
 
-from .conftest import PORT, FakeProbe, all_events, make_cfg, quiet_gate
+from .conftest import PORT, FakeProbe, all_events, make_cfg, quiet_gate, viewer
 
 TIMEOUT_S = 10.0
 DELETE = "import shutil\nshutil.rmtree('.git', ignore_errors=True)"
+# A step only a click allows: Auto blocks it even for a task that could ask (#465).
+KEYS = "import os\nprint(open(os.path.expanduser('~/.ssh/id_rsa')).read())"
 OUTPUT = "TOOL-OUTPUT-7731"
 # A tool melo's review rules do not read: Ask mode reviews its calls as routine unread.
 PAY = ToolDef(
@@ -750,7 +752,7 @@ async def test_without_an_explanation_the_card_shows_and_answers(
 async def test_an_auto_tasks_block_shows_in_its_chat_with_allow_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    plans = plan(DELETE) + plan(DELETE)
+    plans = plan(KEYS) + plan(KEYS)
     async with chat_console(tmp_path, monkeypatch, plans) as s:
         main = s.console.main_id or ""
         await s.console.store.update_session(main, meta_update={"approvals": "auto"})
@@ -765,17 +767,108 @@ async def test_an_auto_tasks_block_shows_in_its_chat_with_allow_once(
 
         blocked = await until(card, "no blocked row in the chat")
         assert blocked["source_id"] == task and blocked["can_allow"] is True
-        assert blocked["review"]["categories"] == ["delete"]
-        assert blocked["name"] == "python_exec" and "rmtree" in blocked["preview"]
-        assert blocked["line"] == "Blocked: deletes files"
+        assert blocked["review"]["categories"] == ["credentials"]
+        assert blocked["name"] == "python_exec" and "id_rsa" in blocked["preview"]
+        assert blocked["line"] == "Blocked: uses passwords or keys"
         allowed = await s.client.post(
             f"/api/tasks/{task}/blocks/{blocked['request_id']}/allow"
         )
         assert allowed.status_code == 202, allowed.text
 
         async def ran() -> Any:
-            return s.ran.codes == [DELETE]
+            return s.ran.codes == [KEYS]
 
         await until(ran, "the allowed step did not run")
         # Allow once is one step, once: nothing is recorded for the chat.
         assert s.console.approvals.entries(main) == []
+
+
+async def test_an_auto_task_the_person_started_asks_through_its_chat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with chat_console(tmp_path, monkeypatch, plan(DELETE)) as s:
+        main = s.console.main_id or ""
+        await s.console.store.update_session(main, meta_update={"approvals": "auto"})
+        # The person has the chat open: a step Auto stops that they may allow
+        # waits on the card (#465).
+        async with viewer(s.console, main):
+            task = await start(s)
+            request = await waiting(s, task)
+            assert request["review"]["categories"] == ["delete"]
+            await answer(s, request["request_id"])
+            assert (await ended(s, task))["state"] == "done"
+        assert s.ran.codes == [DELETE]
+        [approval] = await approvals_of(s, task)
+        assert (approval["origin"], approval["allowed"]) == ("user", True)
+        # The card's Allow once is one step, once: nothing is kept for the chat.
+        assert s.console.approvals.entries(main) == []
+
+
+@pytest.mark.parametrize("main_watched", [True, False])
+async def test_a_tasks_card_follows_it_when_its_chat_is_deleted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, main_watched: bool
+) -> None:
+    import localmelo.support.sessions.approvals as approvals_mod
+
+    monkeypatch.setattr(approvals_mod, "CARD_POLL_S", 0.02)
+    monkeypatch.setattr(approvals_mod, "CARD_LEFT_S", 0.2)
+    async with chat_console(tmp_path, monkeypatch, plan(DELETE)) as s:
+        created = await s.client.post(
+            "/api/sessions", json={"workspace": str(s.folder), "approvals": "auto"}
+        )
+        assert created.status_code == 201, created.text
+        side, main = str(created.json()["session"]["id"]), s.console.main_id or ""
+        async with contextlib.AsyncExitStack() as pages:
+            if main_watched:
+                await pages.enter_async_context(viewer(s.console, main))
+            async with viewer(s.console, side):
+                task = await start(s, front_id=side)
+                request = await waiting(s, task)
+                gone = await s.client.delete(f"/api/sessions/{side}")
+                assert gone.status_code == 204, gone.text
+            # The side chat's page went with it; the task and its card are the
+            # main chat's now (#465).
+            if main_watched:
+                await asyncio.sleep(approvals_mod.CARD_LEFT_S * 3)
+                assert [r.request_id for r in s.console.broker.pending(task)] == [
+                    request["request_id"]
+                ]
+                await answer(s, request["request_id"])
+            assert (await ended(s, task))["state"] == "done"
+        [approval] = await approvals_of(s, task)
+        if main_watched:
+            assert (approval["origin"], approval["allowed"]) == ("user", True)
+            assert s.ran.codes == [DELETE]
+        else:
+            assert (approval["origin"], approval["allowed"]) == ("timeout", False)
+            assert approval["reason"] == "the chat was closed before an answer"
+            assert approval["unanswered"] == "left"
+            assert s.ran.codes == []
+
+
+async def test_an_auto_task_nobody_watches_blocks_the_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with chat_console(tmp_path, monkeypatch, plan(DELETE)) as s:
+        main = s.console.main_id or ""
+        await s.console.store.update_session(main, meta_update={"approvals": "auto"})
+        # The person's task, but no page shows it or its chat: no card.
+        task = await start(s)
+        assert (await ended(s, task))["state"] == "done"
+        assert s.ran.codes == [] and await asked(s, task) == 0
+        [approval] = await approvals_of(s, task)
+        assert (approval["origin"], approval["allowed"]) == ("auto", False)
+
+
+async def test_an_auto_task_with_nobody_to_ask_blocks_the_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with chat_console(tmp_path, monkeypatch, plan(DELETE)) as s:
+        main = s.console.main_id or ""
+        await s.console.store.update_session(main, meta_update={"approvals": "auto"})
+        # A chore runs unwatched on a rule set before: nobody is asked.
+        task = await start(s, origin="user_rule")
+        assert (await ended(s, task))["state"] == "done"
+        assert s.ran.codes == [] and await asked(s, task) == 0
+        [approval] = await approvals_of(s, task)
+        assert (approval["origin"], approval["allowed"]) == ("auto", False)

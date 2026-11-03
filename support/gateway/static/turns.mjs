@@ -860,6 +860,8 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
       item.durationS = num(data.duration_s);
       item.images = Array.isArray(data.images) ? data.images : [];
       item.approval = isObject(data.approval) ? data.approval : null;
+      // A question the call's tool asked itself and that was refused (a site).
+      item.toolAsks = Array.isArray(data.tool_asks) ? data.tool_asks.filter(isObject) : [];
       item.exitCode = int(data.exit_code);
       item.pendingRequestId = null;
       break;
@@ -1009,20 +1011,70 @@ export function toolCount(turn) {
     .length;
 }
 
-/** The calls that failed: `error`, `timeout` or `crashed`. */
+/**
+ * A step that did not run because the person declined it, or because nobody
+ * answered its card (#465), else null: `{how, note, waitS}`, `how` being
+ * `denied`, `unanswered` or `closed` (the record's `unanswered` code: `time`
+ * or `left`), `note` the person's note for `denied` and `waitS` how long the
+ * card waited. The step's own card (a Deny in Ask or in Auto) or a question
+ * its tool asked itself (a site) says so; nothing went wrong, so it is no
+ * failure.
+ */
+export function declinedStep(item) {
+  if (item.kind !== "tool" || ["success", "running", "waiting_approval"].includes(item.status)) {
+    return null;
+  }
+  const asked = [item.approval, ...(item.toolAsks ?? [])].filter(isObject);
+  const found = asked.find(
+    (one) => one.allowed === false && (one.origin === "user" || one.origin === "timeout"),
+  );
+  if (!found) return null;
+  if (found.origin === "user") {
+    const note = String(found.reason ?? "").split(/\s+/).filter(Boolean).join(" ");
+    return {how: "denied", note, waitS: null};
+  }
+  if (found.unanswered === "left") return {how: "closed", note: "", waitS: null};
+  return {how: "unanswered", note: "", waitS: num(found.wait_s)};
+}
+
+/** How long a card waited, in words: `1 minute`, `2 minutes`, `45 seconds` (`1 分钟`). */
+export function waitWords(seconds) {
+  if (seconds >= 60 && seconds % 60 === 0) return t("turns.wait.minutes", {n: seconds / 60});
+  return t("turns.wait.seconds", {n: seconds});
+}
+
+/** The one plain line a declined step shows the person, in place of the note the model reads. */
+export function declinedLine(declined) {
+  if (declined.how === "denied") {
+    return declined.note
+      ? t("turns.declined.deniedNote", {note: declined.note})
+      : t("turns.declined.denied");
+  }
+  if (declined.how === "unanswered") {
+    return declined.waitS
+      ? t("turns.declined.unanswered", {wait: waitWords(declined.waitS)})
+      : t("turns.declined.unansweredInTime");
+  }
+  return t("turns.declined.closed");
+}
+
+/** The calls that failed: `error`, `timeout` or `crashed`; a declined step is not one. */
 export function failedCount(turn) {
   return turn.items.filter(
-    (item) => item.kind === "tool" && ["error", "timeout", "crashed"].includes(item.status),
+    (item) =>
+      item.kind === "tool" &&
+      ["error", "timeout", "crashed"].includes(item.status) &&
+      declinedStep(item) === null,
   ).length;
 }
 
-/** The calls an approval denied. */
+/** The calls an approval denied, or that the person declined or nobody answered. */
 export function deniedCount(turn) {
   return turn.items.filter(
     (item) =>
       item.kind === "tool" &&
-      item.status === "blocked" &&
-      item.errorCategory === "approval_denied",
+      ((item.status === "blocked" && item.errorCategory === "approval_denied") ||
+        declinedStep(item) !== null),
   ).length;
 }
 
@@ -1144,6 +1196,12 @@ export function liveFacts(turn) {
  */
 export function toolState(item, {held = "", now = 0} = {}) {
   const duration = item.durationS === null ? null : formatDuration(item.durationS);
+  const declined = declinedStep(item);
+  if (declined) {
+    // Not run, and nothing went wrong: the approval card's amber, not a failure.
+    const word = declined.how === "denied" ? t("turns.tool.declined") : t("turns.tool.unanswered");
+    return {state: "declined", mark: "⊘", text: word};
+  }
   const tag = approvalTag(item.status, item.errorCategory, item.approval);
   switch (item.status) {
     case "running": {

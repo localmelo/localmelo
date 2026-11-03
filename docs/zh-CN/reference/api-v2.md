@@ -477,7 +477,8 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `tokens` 汇总该会话已结束轮次的 `completion_tokens`，与回答所报告的字段相同。
 - `last_event_id` 是该会话最新一条已存事件的 id（没有事件时为 0）：客户端从这个 id 之后读取 `GET /api/sessions/{id}/events?after=`，只会收到之后的事件。
 - `pending_approvals` 条目的 `arguments_complete` 仅当 JSON 安全的 `arguments` 保留了原始值、未经截断或转换时才为 true。当它为 false 或缺失时，客户端不应允许该请求；拒绝仍然可用。仅审批事件中的参数可能被截断，因此在允许之前请获取会话详情。
-- `pending_approvals` 条目的 `review` 是 melo 的规则在 `shell_exec`、`python_exec` 或 `file_write` 调用中发现的内容，其他工具为 `null`：`verdict` 为 `routine`、`high` 或 `undecided`；`title` 是 `high` 调用的卡片问题（“Install software?”），其他为 `""`；`reasons` 是最多三句说明 melo 为何询问的话（“Installs playwright with pip into .signin_venv (downloads about 42 MB).”），其中的密钥已被遮盖；`categories` 是规则的类别，最强的在前（`install`、`download`、`outside_write`、`system`、`app_control` 等）。`high` 调用每次都会询问，卡片不提供 `session` 回答。
+- `pending_approvals` 条目的 `review` 是 melo 的规则在 `shell_exec`、`python_exec` 或 `file_write` 调用中发现的内容，其他工具为 `null`：`verdict` 为 `routine`、`high` 或 `undecided`；`title` 是 `high` 调用的卡片问题（“Install software?”），其他为 `""`；`reasons` 是最多三句说明 melo 为何询问的话（“Installs playwright with pip into .signin_venv (downloads about 42 MB).”），其中的密钥已被遮盖；`categories` 是规则的类别，最强的在前（`install`、`download`、`outside_write`、`system`、`app_control` 等）。`high` 调用每次都会询问，卡片不提供 `session` 回答，只有一种例外：自动模式只因请求没有要求而拦住的网站（`browser:` 或 `browser-act:` 问题，类别为 `["beyond_request"]`），它的 `session` 回答会把这个网站问题授权给整个对话。
+- `pending_approvals` 条目的 `offers_chat` 表示卡片能否提供 `session`（“本对话允许”）：对于回答可以保留的工具的常规或未审查调用，以及上面那种自动模式下的网站，为 true；对于高影响调用、输入文字、发送表单和工作区之外的路径（它的文件夹回答在 `outside` 里），为 false。在自动模式下，审查拦住、而且每个类别都是人可以允许的步骤（话语能允许的类别，以及 `opaque`），会像其他卡片一样在这里等待；没有人可问的运行（例行任务）则直接拦下它。
 - `pending_approvals` 条目的 `gist` 是卡片开头的那句话，形如 `{say: {id, params}, by, warn?: {id, params}, note?, apps?}`；卡片自带一句话的工具（浏览器网站）为 `null`。对命令或脚本，`by` 为 `code`：`say` 由 melo 根据调用生成，并按顺序写出每个效果（`then` 含两句话，`more` 含一句话和一个数量；参数可以是另一个 `{id, params}` 或一组名称）。只有规则什么都没发现时，`by` 才是 `model`，这句话是模型自己的话（`why` 参数，或脚本开头的注释；`say.params.text`）；规则发现了风险时，这些话放在 `note` 里。客户端用标签 `gist.say.model`（`melo says: …`）显示它们，所以它们总是读作模型的话。客户端用目录项 `gist.say.<id>` 以自己的语言说出一切，并用 `gist.list.*` 连接 `apps`；模型的话与代码不符时设置 `warn` 并引用它们（`params.said`）：效果不同时是 `delete` 或 `send_out`，效果相同但代码操作的文件、文件夹或主机有话里没点名的时是 `delete_target` 或 `send_out_target`（带 `params.target`）。这句话只供阅读：调用是否询问由 `review` 决定，按普通名称操作一个应用的脚本在 `categories` 中是 `app_control`（只能点按钮，和 `system` 一样）；擦除磁盘、停止其他程序和打开自定义协议的链接是 `system`，丢弃未提交的工作是 `delete`。
 - `pending_approvals` 条目的 `target` 仅为 `file_write` 设置：路径 `path_label`（相对于工作区；否则以 `~` 代表主目录）、文件是否 `exists`，以及其 `size_bytes`（在生成响应时读取）。其他工具的 `target` 为 `null`。
 - 对已有文件写入文本的 `file_write`，其 `target` 还带有 `diff`，即这次写入会替换的内容；它在生成响应时读取，显示方式与终端的审批面板相同。新文件或没有文本的调用，`target` 没有 `diff`。
@@ -588,6 +589,7 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 - `retry: 2000` 只发送一次。每当静默 15 秒，就发送一次 `: keepalive`。
 - `after` 默认为 0。当两者同时存在时，`Last-Event-ID` 请求头优先；这正是浏览器的 `EventSource` 在重连时发送的内容；此时无效的 `after` 不会被读取。否则它必须是有符号 64 位整数范围内的十进制数字：负数、`+1`、`1_0`、非数字以及过大的值，都是 400 `invalid_request`。
 - `follow=false` 发送起点之后已保存的事件，直到该请求读取到的最新事件 id，然后结束响应；它是一次性的追赶，而在它分页期间开始的轮次不会增加任何帧。
+- `watch=true` 表示客户端把这个对话显示给一个人；控制台、应用和终端都会发送它。当一个对话（或一个任务，或它的对话）有这样的流打开时，Auto 拦下的、这个人可以允许的步骤会在对话的卡片上询问。没有这样的流打开时，Auto 会立即拦下该步骤，就像对一个不带 `watch` 读取流的脚本一样。1 分钟内没有人回答的卡片，或者最后一个查看者离开 5 秒的卡片，算作拒绝：`approval.resolved`，`outcome` 为 `denied`，`origin` 为 `timeout`。
 - 当客户端断开连接、会话不再存在（此时重连会得到 404），以及网关关闭时，流即结束。浏览器使用 `Last-Event-ID` 重连，并且恰好一次地收到它错过的每个事件。
 - worker 运行（CLI 文件中的会话）从 CLI 文件提供，帧、`after`、`follow` 和 `Last-Event-ID` 都相同。该文件由另一个进程写入，因此跟随的流约每秒读取一次，发送带 id 的新事件，并在运行不再持有有效租约且最后一个事件已发送后结束（会话对象中 `busy` 为 false）。没有有效租约的运行（例如崩溃后留下的）会被回放并立即结束。保活与对话相同；每个打开的流是该文件的一个读取者，客户端离开时关闭。
 - 终端对话以同样方式流式提供，并经过脱敏。当它的某个轮次在终端的租约下运行时它处于活动状态，因此该轮次结束时流也结束；请再次读取会话对象，查看是否有另一个轮次在运行。
@@ -986,6 +988,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 
 - 204 且无响应体；`GET /api/sessions/{id}` 的 `grants` 和 `granted_at` 都会去掉它。
 - 会话未打开或该工具没有授权时返回 404 `not_found`。`DELETE /api/sessions/{id}/grants` 不带工具名时，会忘记每一项授权，并返回 204，无论会话是否打开。
+- 网站的授权以问题命名，例如 `browser-act:https://news.example`；名称里可以有斜杠，可以百分号编码后发送，也可以原样发送。
 
 ## DELETE /api/sessions/{id}/approvals/{entry_id}
 

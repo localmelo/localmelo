@@ -47,7 +47,9 @@ from localmelo.support.cli.approvals import (
     Mode,
     TerminalApprover,
     approval_words,
+    grant_listed,
     next_mode,
+    terminal_watch,
 )
 from localmelo.support.cli.attachments import (
     Attachment,
@@ -243,6 +245,7 @@ class CliSession:
         pricing: Mapping[str, Mapping[str, float]] | None = None,
         work: WorkBeside | None = None,
         welcome: Callable[[], None] | None = None,
+        auto_asks: bool = True,
     ) -> None:
         self.developer = developer
         # Draws the welcome again after /clear (launch owns what it shows).
@@ -269,7 +272,14 @@ class CliSession:
         self.renderer.tool_tiers = lambda: {
             tool.name: tool.tier for tool in self.agent.list_tools()
         }
-        self.approvals = Approvals(self._ask, mode, snapshots=self.approver.snapshots)
+        # [approvals] auto_asks: Auto asks on the panel while someone is at
+        # the terminal (#465).
+        self.approvals = Approvals(
+            self._ask,
+            mode,
+            snapshots=self.approver.snapshots,
+            watch=terminal_watch(self.approver, auto_asks=auto_asks),
+        )
         self.runner: SessionRunner | None = None
         self.app: InteractiveApp | None = None
         self.queued: str | None = None
@@ -1583,7 +1593,11 @@ class CliSession:
                     )
                 )
                 return
-        grants = ", ".join(sorted(approvals.allowed_tools)) or "none"
+        # A site's grant by its site, the name /approvals forget takes (#465).
+        grants = (
+            ", ".join(grant_listed(name) for name in sorted(approvals.allowed_tools))
+            or "none"
+        )
         # Folders outside the workspace allowed for reading in this chat (#405).
         folders = ", ".join(home_label(f) for f in approvals.allowed_folders)
         shown = f" · folders: {folders}" if folders else ""

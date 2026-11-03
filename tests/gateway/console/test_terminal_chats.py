@@ -319,7 +319,9 @@ async def test_every_write_route_refuses_a_terminal_chat(
                     for k, v in body.items()
                 }
             )
-            resp = client.request(method, path.format(**ids), json=payload)
+            # ``{tool:path}`` is the route's converter, not a format spec.
+            url = path.replace(":path}", "}").format(**ids)
+            resp = client.request(method, url, json=payload)
             want = 409 if "cancel" in path and "turns" in path else 404
             assert resp.status_code == want, (method, path, resp.status_code)
         stored = await store.get_session(sid)

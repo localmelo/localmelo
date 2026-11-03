@@ -198,6 +198,9 @@ class FakeGateway:
             if self.lose_stream:
                 return _error(503, "store_unavailable", "The store is not open.")
             after = int(request.url.params.get("after", 0))
+            # The terminal shows the chat to a person: a step Auto stops may
+            # ask on its card (#465).
+            assert request.url.params.get("watch") == "true"
             return httpx.Response(200, headers={"content-type": "text/event-stream"},
                                   content=self._stream(parts[2], after))  # fmt: skip
         if parts[:2] == ["api", "approvals"]:
