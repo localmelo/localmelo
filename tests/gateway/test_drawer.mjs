@@ -287,6 +287,18 @@ test('the Tools tab lists the steps the person approved in this chat, and Revoke
   assert.doesNotMatch(h.text(), /Steps you approved here/);
 });
 
+test('a folder the main chat allowed is taken back everywhere, and the drawer says so', async () => {
+  let count = 0;
+  const withFolder = {...emptyTools, folders: [{path: '/Users/me/Documents/letters', label: '~/Documents/letters'}]};
+  const h = harness({
+    'GET /sessions/s%2F1/tools': () => ++count === 1 ? withFolder : emptyTools,
+    'DELETE /sessions/s%2F1/folders?path=%2FUsers%2Fme%2FDocuments%2Fletters': {revoked: [{key: '/Users/me/Documents/letters', scope: 'global'}], everywhere: true},
+  });
+  await h.drawer.open();
+  await h.find('Revoke').click();
+  assert.match(h.text(), /Taken back everywhere\./);
+});
+
 test('the folders this chat may read are listed, and Revoke takes one back by its path', async () => {
   let count = 0;
   const withFolder = {...emptyTools, folders: [{path: '/Users/me/Documents/letters', label: '~/Documents/letters'}]};

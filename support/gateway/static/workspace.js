@@ -2008,7 +2008,8 @@ function approvalCard(request, view = chatApproval, asked = "") {
     what = t("approval.seeWindow");
     title = t("approval.seeTitle", { app });
     caption = t("approval.seeCaption");
-    rule = everywhere ? t("approval.rule.seeMain", { app }) : t("approval.rule.see", { app });
+    rule = everywhere ? t("approval.rule.seeMain", { app })
+      : t(view.scope === "task" ? "approval.rule.seeTask" : "approval.rule.see", { app });
     content = String(args.window || "");
   }
   // A high-impact call (installs, downloads, changes outside the folder) asks every time: the
@@ -2099,7 +2100,8 @@ function approvalCard(request, view = chatApproval, asked = "") {
   const seeing = tool.startsWith("window-read:");
   const seeApp = String(args.app || "");
   const sessionWords = outside ? (everywhere ? t("approval.outside.everywhere") : t("approval.outside.chat", { scope }))
-    : seeing ? (everywhere ? t("approval.seeEverywhere", { app: seeApp }) : t("approval.seeChat", { app: seeApp }))
+    : seeing ? (everywhere ? t("approval.seeEverywhere", { app: seeApp })
+      : t(view.scope === "task" ? "approval.seeTask" : "approval.seeChat", { app: seeApp }))
       : everywhere ? t("approval.allowEverywhere") : t("approval.allowFor", { scope });
   const session = button("outline-button", sessionWords, () => view.answer(request, state, "session"));
   session.dataset.approvalFocus = "session";

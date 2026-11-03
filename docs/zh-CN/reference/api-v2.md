@@ -1078,7 +1078,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 - 没有同名授权在该对话里算数时返回 404 `not_found`。对话不必处于打开状态。
 - `DELETE /api/sessions/{id}/grants` 不带名称时，会收回这个对话自己的授权并返回 200，响应体为 `{"revoked": N, "still_everywhere": M}`：旁支对话里还有 `M` 项主对话的授权仍然算数；在主对话里则收回每一项 `global` 授权。
 - 存储无法保存收回时返回 503 `store_unavailable`；检查已经不再使用这项授权，但重启后它会回来。
-- `DELETE /api/sessions/{id}/folders?path=PATH` 收回对话里允许读取的一个文件夹（204；没有这样的授权时返回 404 `not_found`；存储无法保存时返回 503）。对话不处于打开状态时也可用。
+- `DELETE /api/sessions/{id}/folders?path=PATH` 收回对话里允许读取的一个文件夹，回答和收回具名授权一样是 200：主对话允许的文件夹会在所有对话里一并收回，这时 `everywhere` 为 `true`（没有这样的授权时返回 404 `not_found`；存储无法保存时返回 503）。对话不处于打开状态时也可用。
 - 网站的授权以问题命名，例如 `browser-act:https://news.example`；名称里可以有斜杠，可以百分号编码后发送，也可以原样发送。
 
 ## DELETE /api/sessions/{id}/approvals/{entry_id}

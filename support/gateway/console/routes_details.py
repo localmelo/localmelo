@@ -161,19 +161,31 @@ def add_routes(app: FastAPI, console: Console) -> None:
         )
 
     @app.delete("/api/sessions/{session_id}/folders")
-    async def forget_folder(session_id: str, path: str = "") -> Response:
+    async def forget_folder(session_id: str, path: str = "") -> JSONResponse:
         """Take back the chat's grant of one folder outside the workspace (#405).
 
         The folder is the ``path`` query parameter; without one, or for a
-        folder the chat was not granted, the answer is 404.
+        folder the chat was not granted, the answer is 404. The answer is a
+        named revoke's: a folder the main chat allowed goes everywhere, and
+        ``everywhere`` says so.
         """
         console.require_store()
         await _require_session(console, session_id)
-        if not path or not await _sessions_call(
-            console, console.sessions.forget_folder(session_id, path), session_id
-        ):
+        gone = (
+            await _sessions_call(
+                console, console.sessions.forget_folder(session_id, path), session_id
+            )
+            if path
+            else []
+        )
+        if not gone:
             raise ApiError(404, "not_found", t("errors.noGrant"))
-        return Response(status_code=204)
+        return JSONResponse(
+            content={
+                "revoked": [{"key": g.key, "scope": g.scope} for g in gone],
+                "everywhere": any(g.scope == "global" for g in gone),
+            }
+        )
 
     @app.delete("/api/sessions/{session_id}/approvals/{entry_id}")
     async def revoke_approval(session_id: str, entry_id: str) -> Response:

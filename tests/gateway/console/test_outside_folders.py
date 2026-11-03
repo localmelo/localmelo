@@ -90,7 +90,11 @@ async def test_the_card_names_the_folder_and_this_chat_is_a_grant_to_take_back(
         again = await client.delete(
             f"/api/sessions/{session_id}/folders", params={"path": str(letters)}
         )
-        assert (gone.status_code, again.status_code) == (204, 404)
+        assert (gone.status_code, again.status_code) == (200, 404)
+        assert gone.json() == {
+            "revoked": [{"key": str(letters), "scope": "session"}],
+            "everywhere": False,
+        }
         listed = (await client.get(f"/api/sessions/{session_id}/tools")).json()
         assert listed["folders"] == []
 

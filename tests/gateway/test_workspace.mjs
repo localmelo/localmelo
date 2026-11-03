@@ -6222,6 +6222,10 @@ test('a side chat\'s card says this chat, and a task\'s card says this task, eve
   assert.match(findNode(task, (node) => node.className === 'approval-remembered').textContent, /^Your Allow also lets later tasks from the same chat/);
   main.context.request = outsideRead();
   assert.equal(answersOf(main.run('approvalCard(request, {...chatApproval, scope: "task"})'))[1], 'Allow this folder for this task');
+  main.context.request = askOf({request_id: 'see-task', tool_name: 'window-read:com.example.chat', arguments: {app: 'Chat', window: 'x'}, offers_chat: true});
+  const seeTask = main.run('approvalCard(request, {...chatApproval, scope: "task"})');
+  assert.equal(answersOf(seeTask)[1], 'Allow Chat for this task');
+  assert.match(ruleOf(seeTask, 'see-task'), /“Allow Chat for this task” lets melo see Chat's later windows in this task/);
   // The chat before any is open (no main chat in the list) is not the main chat.
   const none = harness(baseRoutes());
   await none.run('init()');

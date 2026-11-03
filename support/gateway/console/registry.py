@@ -551,12 +551,13 @@ class ConsoleSessions:
         """
         return await self.book.forget(session_id, tool_name)
 
-    async def forget_folder(self, session_id: str, folder: str) -> bool:
-        """Take back a folder's grant that holds in *session_id*; whether one did.
+    async def forget_folder(self, session_id: str, folder: str) -> list[Grant]:
+        """Take back a folder's grant that holds in *session_id*; the grants taken back.
 
-        A write that fails raises :class:`SessionStoreError`.
+        A main chat's grant of the folder holds everywhere, so it goes
+        everywhere. A write that fails raises :class:`SessionStoreError`.
         """
-        return bool(await self.book.forget(session_id, folder, folders=True))
+        return await self.book.forget(session_id, folder, folders=True)
 
     async def _forget_moved(self, session_id: str) -> None:
         """A chat in another folder starts without its own grants (the main chat's still hold)."""
