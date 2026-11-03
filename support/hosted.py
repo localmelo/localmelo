@@ -3,8 +3,8 @@
 A preset is a row of product data, not a new backend. Each one names the config
 section it fills (``backend``: ``openai``, ``anthropic``, ``gemini`` or
 ``nvidia``), the address of the service, the models worth suggesting, the
-environment variable that held the key before the keychain, and the request
-fields that turn the model's thinking off. A service that speaks the OpenAI
+environment variable that held the key before the keychain, the request
+fields that turn the model's thinking off, and which models read images. A service that speaks the OpenAI
 format (DeepSeek, and the free-form "Other") uses the ``openai`` backend with its
 own address, so the section's address tells the presets apart.
 
@@ -44,7 +44,9 @@ class Preset:
     backend uses the backend's built-in address, which the config leaves empty.
     *thinking_off* holds the request fields that turn thinking off (empty: the
     service has no such switch), and *off_models* the models that start with
-    thinking off.
+    thinking off. *image_models* and *text_models* are lowercase name prefixes of
+    the models known to read images and known not to; a service's model listing
+    does not say, so ``[agent] tool_images = "auto"`` follows these.
     """
 
     id: str
@@ -55,6 +57,8 @@ class Preset:
     key_env: str
     thinking_off: Mapping[str, Any] = field(default_factory=dict)
     off_models: tuple[str, ...] = ()
+    image_models: tuple[str, ...] = ()
+    text_models: tuple[str, ...] = ()
 
     @property
     def service(self) -> str:
@@ -80,6 +84,7 @@ PRESETS: Final[tuple[Preset, ...]] = (
         "https://api.openai.com/v1",
         ("gpt-4o", "gpt-4o-mini"),
         "OPENAI_API_KEY",
+        image_models=("gpt-4o", "gpt-4.1", "gpt-5"),
     ),
     Preset(
         "gemini",
@@ -88,6 +93,7 @@ PRESETS: Final[tuple[Preset, ...]] = (
         "https://generativelanguage.googleapis.com/v1beta/openai",
         ("gemini-2.0-flash",),
         "GEMINI_API_KEY",
+        image_models=("gemini-",),
     ),
     Preset(
         "anthropic",
@@ -96,6 +102,7 @@ PRESETS: Final[tuple[Preset, ...]] = (
         "https://api.anthropic.com/v1",
         ("claude-sonnet-4-20250514",),
         "ANTHROPIC_API_KEY",
+        image_models=("claude-3", "claude-sonnet", "claude-opus", "claude-haiku"),
     ),
     Preset(
         "nvidia",
@@ -104,6 +111,7 @@ PRESETS: Final[tuple[Preset, ...]] = (
         "https://integrate.api.nvidia.com/v1",
         ("nvidia/llama-3.1-nemotron-70b-instruct",),
         "NVIDIA_API_KEY",
+        text_models=("nvidia/llama-3.1-nemotron",),
     ),
     Preset(
         "deepseek",
@@ -114,6 +122,7 @@ PRESETS: Final[tuple[Preset, ...]] = (
         "DEEPSEEK_API_KEY",
         thinking_off=_DEEPSEEK_THINKING_OFF,
         off_models=("deepseek-flash",),
+        text_models=("deepseek-flash",),
     ),
     Preset(OTHER_ID, "Other (OpenAI format)", "openai", "", (), ""),
 )
@@ -202,6 +211,38 @@ def retry_body(backend: str, section: CloudVendorConfig) -> Mapping[str, Any]:
     if any(name in section.extra_body for name in preset.thinking_off):
         return {}
     return dict(preset.thinking_off)
+
+
+def reads_images(backend: str, section: CloudVendorConfig) -> bool | None:
+    """Whether the section's model reads images, as its preset declares.
+
+    ``True`` for a model the preset names as reading images, ``False`` for one it
+    names as text only, ``None`` for any other (unknown, so ``tool_images = "auto"``
+    sends no pixels).
+    """
+    preset = preset_for(backend, section)
+    if preset is None:
+        return None
+    model = section.chat_model.strip().lower().removeprefix("models/")
+    if any(model.startswith(prefix) for prefix in preset.image_models):
+        return True
+    if any(model.startswith(prefix) for prefix in preset.text_models):
+        return False
+    return None
+
+
+def image_args(backend: str, section: CloudVendorConfig) -> dict[str, Any]:
+    """The provider arguments that answer ``takes_images`` for the section.
+
+    A service the presets know is not asked: its host has no oMLX or Ollama route,
+    so the preset's answer stands. The free-form address may be one of those behind
+    a proxy, so it is still asked.
+    """
+    preset = preset_for(backend, section)
+    return {
+        "reads_images": reads_images(backend, section),
+        "probe_images": preset is None or preset.free_address,
+    }
 
 
 def presets_json() -> list[dict[str, Any]]:

@@ -53,6 +53,7 @@ class AnthropicBackend(BaseBackend):
             api_key=api_key,
             extra_body=hosted.request_body("anthropic", cfg.anthropic),
             thinking_off_body=hosted.retry_body("anthropic", cfg.anthropic),
+            **hosted.image_args("anthropic", cfg.anthropic),
             timeout=cfg.request_timeout_s,
             reasoning_field=getattr(cfg.anthropic, "reasoning_field", "") or None,
             requires_reasoning_replay=getattr(

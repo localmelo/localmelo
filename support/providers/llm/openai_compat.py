@@ -434,6 +434,14 @@ class OpenAICompatLLM(BaseLLMProvider):
         Whether the server rejects requests that omit a reply's reasoning.
         The agent then evicts whole units instead of cutting or skipping
         reasoning. ``False`` by default.
+    reads_images : bool | None
+        What the caller already knows about the model reading images (a hosted
+        service's preset), or ``None``. A known answer is returned by
+        :meth:`takes_images` without asking the server.
+    probe_images : bool
+        Whether :meth:`takes_images` asks the server (oMLX's and Ollama's routes)
+        when *reads_images* is ``None``. ``True`` by default; a hosted service has
+        no such routes, so its backend turns it off.
     """
 
     def __init__(
@@ -449,6 +457,8 @@ class OpenAICompatLLM(BaseLLMProvider):
         reasoning_field: str | None = None,
         requires_reasoning_replay: bool = False,
         thinking_off_body: Mapping[str, Any] | None = None,
+        reads_images: bool | None = None,
+        probe_images: bool = True,
         **kwargs: Any,
     ) -> None:
         if reasoning_field not in (None, "auto", "reasoning_content", "reasoning"):
@@ -464,6 +474,8 @@ class OpenAICompatLLM(BaseLLMProvider):
         }
         self.reasoning_field = reasoning_field
         self.requires_reasoning_replay = requires_reasoning_replay
+        self.reads_images = reads_images
+        self.probe_images = probe_images
         self.thinking_off = thinking_disabled(
             {**self.extra_body, **self.extra_body_by_kind.get("plan", {})}
         )
@@ -808,7 +820,11 @@ class OpenAICompatLLM(BaseLLMProvider):
         yield StreamFragment(kind="reply", reply=reply, finish_reason=finish)
 
     async def takes_images(self) -> bool | None:
-        """Whether the server says the model reads images (oMLX, Ollama); else None."""
+        """Whether the model reads images: the caller's answer, else the server's (oMLX, Ollama); else None."""
+        if self.reads_images is not None:
+            return self.reads_images
+        if not self.probe_images:
+            return None
         root = str(self._http.base_url).rstrip("/").removesuffix("/v1")
         return await server_takes_images(
             self._http, self.model, status="/models/status", show=f"{root}/api/show"

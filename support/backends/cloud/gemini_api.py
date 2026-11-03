@@ -53,6 +53,7 @@ class GeminiBackend(BaseBackend):
             api_key=api_key,
             extra_body=hosted.request_body("gemini", cfg.gemini),
             thinking_off_body=hosted.retry_body("gemini", cfg.gemini),
+            **hosted.image_args("gemini", cfg.gemini),
             timeout=cfg.request_timeout_s,
             reasoning_field=getattr(cfg.gemini, "reasoning_field", "") or None,
             requires_reasoning_replay=getattr(

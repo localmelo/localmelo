@@ -38,6 +38,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   a field of the section's `extra_body` wins. A short measurement against the service (a
   two-tool task, five runs each) finished 5 of 5 for `deepseek-flash` with thinking on,
   `deepseek-flash` with thinking off and `deepseek-v4-pro`.
+- `[agent] tool_images = "auto"` follows the hosted service's preset: a model the preset
+  names as reading images (GPT-4o, GPT-4.1 and GPT-5, Gemini, Claude) gets the pictures that
+  tools return, such as browser screenshots; `deepseek-flash` and NVIDIA's `nemotron` do not,
+  and any other model is unknown and gets none (set `tool_images = "on"` for one that reads
+  images). A hosted service is no longer asked for oMLX's and Ollama's routes.
 - A guide for hosted models, [Hosted models](docs/guides/hosted-models.md), in English and
   Chinese.
 

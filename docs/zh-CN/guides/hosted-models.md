@@ -100,6 +100,14 @@ melo setup
 - 完全没有思考内容的空回复仍然会失败，和以前一样。
 - DeepSeek：`deepseek-flash` 默认关闭思考；`deepseek-v4-pro` 保持它自己的默认。可以用复选框或配置里的 `thinking` 来改。
 
+<a id="pictures"></a>
+
+## 图片
+
+- 有些工具会返回图片，例如浏览器截图。当 `[agent] tool_images = "auto"` 时，melo 会在已知模型能读图的情况下把图片发给它。
+- 服务的模型列表不会说明这一点，所以每个服务自己列出哪些模型能读图：GPT-4o、GPT-4.1 和 GPT-5（OpenAI）、所有 Gemini 模型以及 Claude 系列能读图；`deepseek-flash` 和 NVIDIA 的 `nemotron` 不能。
+- 其他模型按未知处理，不会收到图片。如果你的模型能读图，请设置 `tool_images = "on"`。
+
 <a id="the-config-file"></a>
 
 ## 配置文件
