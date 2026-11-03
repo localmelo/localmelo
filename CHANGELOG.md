@@ -694,7 +694,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   a terminal whose input is piped), the step is blocked at once, as before. A card nobody
   answers within 1 minute, or one whose last viewer closes the chat, counts as **Deny**:
   melo reads that you did not answer, does not ask about the step again in that turn, and the
-  step shows "declined: no answer". Benchmarks can turn the card off with the developer
+  step shows "No answer in time". A step you denied (in Auto or in Ask), or that nobody
+  answered, now shows in amber with one plain line, such as "Not run: you chose Don't
+  allow" and your note, instead of a red failure with the note melo reads; it no longer
+  counts as failed. Benchmarks can turn the card off with the developer
   setting `[approvals] auto_asks = false`. Part of #465.
 
 - A recalled chat turn now shows up to 900 characters by default, and the recall block holds

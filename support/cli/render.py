@@ -356,9 +356,6 @@ def approval_tag(status: str, approval: Mapping[str, Any] | None) -> str:
     reason = " ".join(str(approval.get("reason") or "").split())
     if origin == "error":
         return "approval failed"
-    if origin == "timeout" and approval.get("mode") == "auto":
-        # Auto's card nobody answered counts as Don't allow (#465).
-        return "declined: no answer"
     if origin == "timeout":
         return "not answered in time"
     if approval.get("allowed"):
@@ -385,6 +382,53 @@ def approval_tag(status: str, approval: Mapping[str, Any] | None) -> str:
     if origin == "user":
         return f"denied: {reason}" if reason else "denied"
     return ""
+
+
+# The reason a card whose last viewer left before an answer is given
+# (LEFT_UNANSWERED in melo/contracts/approvals.py).
+_LEFT_UNANSWERED: Final = "the chat was closed before an answer"
+# A declined step's status word and its one plain line, by how it was declined.
+_DECLINED_WORDS: Final = {
+    "denied": "Not allowed",
+    "unanswered": "No answer in time",
+    "closed": "No answer in time",
+}
+_DECLINED_LINES: Final = {
+    "denied": "Not run: you chose Don't allow",
+    "unanswered": "Not run: no answer within 1 minute",
+    "closed": "Not run: the chat was closed before an answer",
+}
+
+
+def declined_step(data: Mapping[str, Any]) -> tuple[str, str] | None:
+    """How a finished call was declined (#465), else None: ``(how, note)``.
+
+    ``how`` is ``denied`` (the person's Deny, in Ask or Auto), ``unanswered``
+    or ``closed`` (nobody answered its card); ``note`` is the person's note
+    of a Deny. The call's own approval says so, or a question its tool asked
+    itself (``tool_asks``: a site). Nothing went wrong: it is no failure.
+    """
+    if str(data.get("status") or "") in ("success", "running"):
+        return None
+    asks = data.get("tool_asks")
+    asked = [data.get("approval"), *(asks if isinstance(asks, list) else [])]
+    for one in asked:
+        if (
+            isinstance(one, Mapping)
+            and one.get("allowed") is False
+            and one.get("origin") in ("user", "timeout")
+        ):
+            note = " ".join(str(one.get("reason") or "").split())
+            if one.get("origin") == "user":
+                return "denied", note
+            return ("closed" if note == _LEFT_UNANSWERED else "unanswered"), ""
+    return None
+
+
+def declined_line(how: str, note: str = "") -> str:
+    """The one plain line a declined step shows the person, in place of the model's note."""
+    line = _DECLINED_LINES[how]
+    return f"{line}. Your note: {note}" if how == "denied" and note else line
 
 
 # What a person does next, by status; a status that is not here has no action.
@@ -1022,6 +1066,10 @@ class TurnRenderer:
         text = str(data.get("output") or "")
         error = str(data.get("error") or "")
         exit_code = data.get("exit_code")
+        declined = declined_step(data)
+        if declined is not None:
+            # A declined step is a refused one, never a failure (#465).
+            status, error = "blocked", declined_line(*declined)
         self.tool_outputs.append(
             ToolOutput(
                 ref=f"{self._turn}.{self._call_number}",
@@ -1370,6 +1418,16 @@ class TurnRenderer:
         output = str(data.get("output") or "")
         error = str(data.get("error") or "")
         symbols = self.symbols
+        declined = declined_step(data)
+        if declined is not None:
+            # Not run, and nothing went wrong: amber, one plain line; the note
+            # the model reads is for the model (#465).
+            how, note = declined
+            header = self._header(
+                symbols.blocked, "blocked", name, preview, [_DECLINED_WORDS[how]]
+            )
+            line = Text(declined_line(how, note), style="muted")
+            return Group(header, Hung(line, self.symbols))
         tag = approval_tag(status, approval)
         if status == "cancelled":
             withdrawn = approval is not None and approval.get("origin") == "withdrawn"

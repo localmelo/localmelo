@@ -246,8 +246,95 @@ test('a denied approval blocks the call and says why', () => {
   assert.equal(card.status, 'blocked');
   assert.deepEqual(view.grants, []);
   push('tool.finished', {step: 1, call_id: 'call-1', name: 'file_write', status: 'blocked', error_category: 'approval_denied', output: '', output_chars: 0, error: '', duration_s: 0, images: [], approval: {request_id: 'req-1', allowed: false, reason: 'wrong file pick another', remember: false, origin: 'user'}, exit_code: null});
-  assert.deepEqual(toolState(card), {state: 'blocked', mark: '⊘', text: 'denied: wrong file pick another'});
+  // A Deny is no failure: the step was not allowed, in the approval card's amber (#465).
+  assert.deepEqual(toolState(card), {state: 'declined', mark: '⊘', text: 'Not allowed'});
+  assert.equal(turns.declinedLine(turns.declinedStep(card)), 'Not run: you chose Don\'t allow. Your note: wrong file pick another');
   assert.equal(deniedCount(turn), 1);
+  assert.equal(failedCount(turn), 0);
+});
+
+// The three ways a step is declined (#465): by the person, by no answer, by
+// closing the chat. A step's own card (Auto's python_exec) or a question its
+// tool asked itself (a site the browser would open), in either language.
+const MODEL_NOTE = 'The user did not answer the card for this step (no answer within 1 minute), so it counts as Don\'t allow and the step did not run.\nDo not try it again in this turn.';
+
+function declinedTurn(how, where) {
+  const {turn, push} = fullTurn();
+  const asked = {
+    request_id: 'req-1',
+    allowed: false,
+    remember: false,
+    origin: how === 'denied' ? 'user' : 'timeout',
+    reason: {denied: 'not this site', unanswered: 'no answer within 1 minute', closed: 'the chat was closed before an answer'}[how],
+  };
+  if (where === 'site') {
+    push('tool.started', {step: 1, call_id: 'call-1', name: 'browser_open', arguments: {url: 'https://example.net/teapot'}, preview: ''});
+    push('tool.finished', {step: 1, call_id: 'call-1', name: 'browser_open', status: 'error', error_category: 'runtime_error', output: '', output_chars: 0, error: `melo did not open example.net. ${MODEL_NOTE}`, duration_s: 7, images: [], approval: null, exit_code: null, tool_asks: [{...asked, tool: 'browser:https://example.net', preview: 'open example.net'}]});
+  } else {
+    push('tool.started', {step: 1, call_id: 'call-1', name: 'python_exec', arguments: {code: 'x'}, preview: 'x'});
+    push('tool.finished', {step: 1, call_id: 'call-1', name: 'python_exec', status: 'blocked', error_category: 'approval_denied', output: '', output_chars: 0, error: MODEL_NOTE, duration_s: 0, images: [], approval: {...asked, mode: 'auto'}, exit_code: null});
+  }
+  push('turn.finished', {turn: 1, turn_id: 'turn-1', status: 'completed', error: '', cause: 'run'});
+  return {turn, card: turn.items.find((item) => item.kind === 'tool')};
+}
+
+const DECLINED = {
+  en: {
+    denied: ['Not allowed', 'Not run: you chose Don\'t allow. Your note: not this site'],
+    unanswered: ['No answer in time', 'Not run: no answer within 1 minute'],
+    closed: ['No answer in time', 'Not run: the chat was closed before an answer'],
+  },
+  'zh-Hans': {
+    denied: ['未允许', '未运行：你选择了不允许。你的说明：not this site'],
+    unanswered: ['没有及时回答', '未运行：1 分钟内没有回答'],
+    closed: ['没有及时回答', '未运行：回答之前对话已关闭'],
+  },
+};
+
+for (const [language, cases] of Object.entries(DECLINED)) {
+  test(`a declined step shows a neutral status and one plain line (${language})`, async () => {
+    const {useLanguage} = await import('../../support/gateway/static/i18n.mjs');
+    await useLanguage(language);
+    try {
+      for (const [how, [word, line]] of Object.entries(cases)) {
+        for (const where of ['gate', 'site']) {
+          const {turn, card} = declinedTurn(how, where);
+          assert.deepEqual(toolState(card), {state: 'declined', mark: '⊘', text: word}, `${how} ${where}`);
+          assert.equal(turns.declinedLine(turns.declinedStep(card)), line, `${how} ${where}`);
+          assert.equal(failedCount(turn), 0, 'Nothing went wrong');
+          assert.equal(deniedCount(turn), 1);
+          assert.ok(!workSummary(turn).includes(t('turns.summary.failed', {n: 1})), workSummary(turn));
+        }
+      }
+    } finally {
+      await useLanguage('en');
+    }
+  });
+}
+
+test('a declined step\'s details show the plain line, never the note the model reads', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const turn = h.state().view.turns[0];
+  const {card} = declinedTurn('unanswered', 'site');
+  card.expanded = true;
+  turn.items = [card];
+  turn.finishedAt = 30;
+  turn.status = 'completed';
+  await h.run('renderMessages(false)');
+  const shown = findNode(h.element('messages'), (node) => node.classList?.contains('tool-card'));
+  assert.equal(shown.dataset.state, 'declined');
+  const plain = findNodes(shown, (node) => node.className === 'tool-approval').map((node) => node.textContent);
+  assert.deepEqual(plain, ['Not run: no answer within 1 minute']);
+  assert.equal(findNode(shown, (node) => node.className === 'tool-error'), null, 'No red text');
+  assert.ok(!JSON.stringify(shown.textContent ?? '').includes('Do not try it again'));
+});
+
+test('a site the tool opened after another was refused is no declined step', () => {
+  const {card} = declinedTurn('denied', 'site');
+  card.status = 'success';
+  assert.equal(turns.declinedStep(card), null);
+  assert.equal(toolState(card).state, 'success');
 });
 
 test('a retried request counts down and replaces the notice of its step', () => {
@@ -450,8 +537,6 @@ test('an approval tag follows the call\'s end', () => {
   assert.equal(approvalTag('blocked', 'approval_denied', {allowed: false, origin: 'policy', reason: 'rule'}).short, 'denied by policy: rule');
   assert.deepEqual(approvalTag('cancelled', 'cancelled', {allowed: false, origin: 'withdrawn'}), {short: 'not run', long: 'Not run: the turn was stopped'});
   assert.equal(approvalTag('cancelled', 'none', {origin: 'timeout'}).short, 'not answered in time');
-  // Auto's card nobody answered counts as Don't allow (#465).
-  assert.equal(approvalTag('blocked', 'approval_denied', {origin: 'timeout', mode: 'auto', allowed: false}).short, 'declined: no answer');
   assert.equal(approvalTag('success', 'none', null), null, 'A call nobody asked about has no tag');
 });
 

@@ -342,9 +342,10 @@ def test_an_empty_output_says_so() -> None:
             "allowed by a session grant",
         ),
         ({"allowed": True, "origin": "policy", "remember": False}, "auto-allowed"),
+        # A card nobody answered is declined, not failed (#465).
         (
             {"allowed": False, "origin": "timeout", "remember": False},
-            "not answered in time",
+            "No answer in time",
         ),
         (
             {"allowed": False, "origin": "error", "remember": False, "reason": "boom"},
@@ -404,7 +405,61 @@ def test_a_denial_shows_its_reason() -> None:
         )
         .text()
     )
-    assert "⊘ ± file_write  todo.md (68 chars) · denied: keep the item first\n" in text
+    # A Deny is no failure: amber, one plain line, never the model's note (#465).
+    assert "⊘ ± file_write  todo.md (68 chars) · Not allowed\n" in text
+    assert "Not run: you chose Don't allow. Your note: keep the item first" in text
+
+
+@pytest.mark.parametrize(
+    ("origin", "reason", "word", "line"),
+    [
+        ("user", "", "Not allowed", "Not run: you chose Don't allow"),
+        (
+            "timeout",
+            "no answer within 1 minute",
+            "No answer in time",
+            "Not run: no answer within 1 minute",
+        ),
+        (
+            "timeout",
+            "the chat was closed before an answer",
+            "No answer in time",
+            "Not run: the chat was closed before an answer",
+        ),
+    ],
+)
+@pytest.mark.parametrize("where", ["gate", "site"])
+def test_a_declined_step_is_amber_with_one_plain_line(
+    origin: str, reason: str, word: str, line: str, where: str
+) -> None:
+    note = "Do not try it again in this turn or reach the same result another way."
+    asked = {"allowed": False, "origin": origin, "reason": reason, "mode": "auto"}
+    if where == "gate":
+        turn = Turn().tool(
+            "python_exec",
+            "x",
+            status="blocked",
+            error_category="approval_denied",
+            error=note,
+            approval=asked,
+        )
+    else:
+        turn = Turn().tool(
+            "browser_open",
+            "example.net",
+            status="error",
+            error=f"melo did not open example.net. {note}",
+            tool_asks=[{**asked, "tool": "browser:https://example.net"}],
+        )
+    text = turn.text()
+    header = next(
+        row
+        for row in text.split("\n")
+        if ("python_exec" in row or "browser_open" in row)
+    )
+    assert header.startswith("⊘") and header.endswith(word), header
+    assert line in text
+    assert note not in text and "✗" not in text
 
 
 def test_a_blocked_row_says_what_the_step_would_have_done() -> None:

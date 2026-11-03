@@ -1537,6 +1537,7 @@ dialog::backdrop {
   color: var(--error);
 }
 .tool-card[data-state="blocked"] .tool-mark,
+.tool-card[data-state="declined"] .tool-mark,
 .tool-card[data-state="interrupted"] .tool-mark,
 .tool-card[data-state="held"] .tool-mark,
 .tool-card[data-state="waiting_approval"] .tool-mark,

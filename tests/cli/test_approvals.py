@@ -34,7 +34,7 @@ from localmelo.support.cli.approvals import (
     session_warning,
     terminal_watch,
 )
-from localmelo.support.cli.render import LiveState, approval_tag
+from localmelo.support.cli.render import LiveState, declined_line, declined_step
 from localmelo.support.cli.text import cells
 from localmelo.support.sessions.approvals import RememberingPolicy
 from localmelo.tests.cli.ui_helpers import (
@@ -962,9 +962,11 @@ async def test_a_panel_nobody_answers_ends_through_the_approver() -> None:
     assert approver.ends(shown.request_id, unanswered)
     assert await waiting == unanswered and approver.pending is None
     assert not approver.ends(shown.request_id, unanswered)  # gone, left as it is
-    tag = approval_tag("blocked", {"origin": "timeout", "mode": "auto"})
-    assert tag == "declined: no answer"
-    assert approval_tag("blocked", {"origin": "timeout"}) == "not answered in time"
+    # The row says it was not run for want of an answer, not that it failed.
+    record = {"allowed": False, "origin": "timeout", "reason": unanswered.reason}
+    finished = {"status": "blocked", "approval": record}
+    assert declined_step(finished) == ("unanswered", "")
+    assert declined_line("unanswered") == "Not run: no answer within 1 minute"
 
 
 async def test_grants_survive_auto_and_ask_until_forgotten() -> None:

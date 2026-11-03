@@ -40,6 +40,8 @@ import {
   canContinue,
   canRetry,
   cleanOutput,
+  declinedLine,
+  declinedStep,
   formatBytes,
   formatDuration,
   formatPast,
@@ -2227,10 +2229,14 @@ function toolBody(item, context = {}) {
     section.append(pre);
     body.append(section);
   }
-  const tag = approvalTag(item.status, item.errorCategory, item.approval);
+  const declined = declinedStep(item);
+  const tag = declined ? null : approvalTag(item.status, item.errorCategory, item.approval);
+  // A step the person declined, or nobody answered, says so in one plain line:
+  // the note the model reads is for the model (#465).
+  if (declined) body.append(el("p", "tool-approval", declinedLine(declined)));
   if (tag) body.append(el("p", "tool-approval", tag.long));
-  if (item.error) body.append(el("p", "tool-error", cleanOutput(item.error)));
-  if (item.output) body.append(outputBlock(item, context));
+  if (item.error && !declined) body.append(el("p", "tool-error", cleanOutput(item.error)));
+  if (item.output && !declined) body.append(outputBlock(item, context));
   for (const image of item.images ?? []) {
     const node = document.createElement("img");
     node.className = "tool-image";

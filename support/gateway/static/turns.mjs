@@ -445,10 +445,6 @@ export function approvalTag(status, errorCategory, approval) {
   if (origin === "error") {
     return {short: t("turns.approval.error.short"), long: t("turns.approval.error.long")};
   }
-  // Auto's card nobody answered in time counts as Don't allow (#465).
-  if (origin === "timeout" && approval.mode === "auto") {
-    return {short: t("turns.approval.unanswered.short"), long: t("turns.approval.unanswered.long")};
-  }
   if (origin === "timeout") {
     return {short: t("turns.approval.timeout.short"), long: t("turns.approval.timeout.long")};
   }
@@ -864,6 +860,8 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
       item.durationS = num(data.duration_s);
       item.images = Array.isArray(data.images) ? data.images : [];
       item.approval = isObject(data.approval) ? data.approval : null;
+      // A question the call's tool asked itself and that was refused (a site).
+      item.toolAsks = Array.isArray(data.tool_asks) ? data.tool_asks.filter(isObject) : [];
       item.exitCode = int(data.exit_code);
       item.pendingRequestId = null;
       break;
@@ -1013,20 +1011,58 @@ export function toolCount(turn) {
     .length;
 }
 
-/** The calls that failed: `error`, `timeout` or `crashed`. */
+// The reason the server gives a card whose last viewer left before an answer
+// (LEFT_UNANSWERED in melo/contracts/approvals.py); data, never shown.
+const LEFT_UNANSWERED = /^the chat was closed before an answer$/;
+
+/**
+ * A step that did not run because the person declined it, or because nobody
+ * answered its card (#465), else null: `{how, note}`, `how` being `denied`,
+ * `unanswered` or `closed` and `note` the person's note for `denied`. The
+ * step's own card (a Deny in Ask or in Auto) or a question its tool asked
+ * itself (a site) says so; nothing went wrong, so it is no failure.
+ */
+export function declinedStep(item) {
+  if (item.kind !== "tool" || ["success", "running", "waiting_approval"].includes(item.status)) {
+    return null;
+  }
+  const asked = [item.approval, ...(item.toolAsks ?? [])].filter(isObject);
+  const found = asked.find(
+    (one) => one.allowed === false && (one.origin === "user" || one.origin === "timeout"),
+  );
+  if (!found) return null;
+  const note = String(found.reason ?? "").split(/\s+/).filter(Boolean).join(" ");
+  if (found.origin === "user") return {how: "denied", note};
+  return {how: LEFT_UNANSWERED.test(note) ? "closed" : "unanswered", note: ""};
+}
+
+/** The one plain line a declined step shows the person, in place of the note the model reads. */
+export function declinedLine(declined) {
+  if (declined.how === "denied") {
+    return declined.note
+      ? t("turns.declined.deniedNote", {note: declined.note})
+      : t("turns.declined.denied");
+  }
+  return t(`turns.declined.${declined.how}`);
+}
+
+/** The calls that failed: `error`, `timeout` or `crashed`; a declined step is not one. */
 export function failedCount(turn) {
   return turn.items.filter(
-    (item) => item.kind === "tool" && ["error", "timeout", "crashed"].includes(item.status),
+    (item) =>
+      item.kind === "tool" &&
+      ["error", "timeout", "crashed"].includes(item.status) &&
+      declinedStep(item) === null,
   ).length;
 }
 
-/** The calls an approval denied. */
+/** The calls an approval denied, or that the person declined or nobody answered. */
 export function deniedCount(turn) {
   return turn.items.filter(
     (item) =>
       item.kind === "tool" &&
-      item.status === "blocked" &&
-      item.errorCategory === "approval_denied",
+      ((item.status === "blocked" && item.errorCategory === "approval_denied") ||
+        declinedStep(item) !== null),
   ).length;
 }
 
@@ -1148,6 +1184,12 @@ export function liveFacts(turn) {
  */
 export function toolState(item, {held = "", now = 0} = {}) {
   const duration = item.durationS === null ? null : formatDuration(item.durationS);
+  const declined = declinedStep(item);
+  if (declined) {
+    // Not run, and nothing went wrong: the approval card's amber, not a failure.
+    const word = declined.how === "denied" ? t("turns.tool.declined") : t("turns.tool.unanswered");
+    return {state: "declined", mark: "⊘", text: word};
+  }
   const tag = approvalTag(item.status, item.errorCategory, item.approval);
   switch (item.status) {
     case "running": {

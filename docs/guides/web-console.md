@@ -869,7 +869,12 @@ commands and file changes.
 - **Only while you watch.** The card waits only while the chat is open in the
   console, the app or the terminal. With nobody watching, the step is blocked,
   as before. A card nobody answers within 1 minute, or that you close the chat
-  on, counts as **Deny** and reads "declined: no answer".
+  on, counts as **Deny**: the step reads "No answer in time", with one line
+  under it ("Not run: no answer within 1 minute").
+- **Not allowed is not failed.** A step you denied, or that nobody answered,
+  shows in amber with one plain line ("Not run: you chose Don't allow" and
+  your note), never as a failure and never with the note melo reads. Ask's
+  **Deny** shows the same way.
 - **Allowed in this chat.** **Allow for this chat** on a site's card lets the
   same kind of step on that site (opening and reading it, or clicking and
   choosing on it) run for the rest of the chat. The chip's menu lists the
