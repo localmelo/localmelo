@@ -20,7 +20,7 @@ from typing import Any
 
 import pytest
 
-from localmelo.support.config import Config
+from localmelo.support.config import Config, MemoryConfig
 from localmelo.support.memory import ChatMemory
 from localmelo.support.memory.recall import (
     BLOCK_HEADER,
@@ -111,10 +111,12 @@ def turn_lines(text: str) -> list[str]:
 # ── The setting and its effect on one line ──
 
 
-def test_the_setting_is_off_by_default_and_has_no_effect_with_the_list_form() -> None:
-    assert config().memory.excerpt_open == "off"
-    assert RecallSettings().excerpt_open is False
-    assert not RecallSettings().opens_excerpts
+def test_the_setting_is_on_by_default_and_has_no_effect_with_the_list_form() -> None:
+    assert MemoryConfig().excerpt_open == "on" and Config().memory.excerpt_open == "on"
+    assert config().memory.excerpt_open == "off"  # this file's helper pins it off
+    assert RecallSettings().excerpt_open is True
+    assert RecallSettings().opens_excerpts
+    assert not RecallSettings(excerpt_open=False).opens_excerpts
     assert RecallSettings(excerpt_open=True).opens_excerpts
     # The list form always offers open_memory and shows no excerpt; items are not turns.
     assert not RecallSettings(excerpt_open=True, listing=True).opens_excerpts
@@ -122,18 +124,19 @@ def test_the_setting_is_off_by_default_and_has_no_effect_with_the_list_form() ->
     assert Shown.of(300, None, True).ids and not Shown.of(300).ids
     assert RecallSettings(excerpt_open=True).shown("tomato").ids
     assert not RecallSettings(excerpt_open=True, listing=True).shown("tomato").ids
-    assert not RecallSettings().shown("tomato").ids
+    assert RecallSettings().shown("tomato").ids
+    assert not RecallSettings(excerpt_open=False).shown("tomato").ids
 
 
-async def test_a_bad_value_reads_as_off(tmp_path: Path) -> None:
+async def test_a_bad_value_reads_as_the_default_on(tmp_path: Path) -> None:
     memory, cfg = memory_of(tmp_path)
     try:
-        assert memory.recall_settings().excerpt_open is False
+        assert memory.recall_settings().excerpt_open is False  # pinned off here
         cfg.memory.excerpt_open = "on"
         assert memory.recall_settings().excerpt_open is True
         for bad in ("maybe", True, 1, None):
             cfg.memory.excerpt_open = bad  # type: ignore[assignment]
-            assert memory.recall_settings().excerpt_open is False, bad
+            assert memory.recall_settings().excerpt_open is True, bad
     finally:
         await memory.aclose()
 
@@ -254,7 +257,7 @@ def test_a_line_with_an_id_reads_as_the_line_without_it_otherwise() -> None:
     assert not memory_item.line(now, show=show).startswith("[")
 
 
-# ── Off is today ──
+# ── Off is the block, the search result and the tools as they were ──
 
 
 # The shipped room of a recalled turn (None: not set, so the default), and two
@@ -267,7 +270,7 @@ async def test_off_is_the_block_the_search_result_and_the_tools_as_they_were(
     tmp_path: Path, store: SessionStore, room: int | None
 ) -> None:
     sized = {} if room is None else {"recall_item_chars": room}
-    memory, cfg = memory_of(tmp_path, **sized)
+    memory, cfg = memory_of(tmp_path, excerpt_open="off", **sized)
     try:
         await teach(memory, store, await _turn(store, "Stakes"), NOTE)
         at = time.time() - 3 * DAY
@@ -289,7 +292,7 @@ async def test_off_is_the_block_the_search_result_and_the_tools_as_they_were(
         assert [t.definition.name for t in tools] == ["search_memory", "remember"]
         assert tools[0].definition is SEARCH_MEMORY and tools[1].definition is REMEMBER
         assert CUT_GUIDE not in SEARCH_MEMORY.description
-        # Naming the default changes nothing, byte for byte.
+        # Naming it again changes nothing, byte for byte.
         cfg.memory.excerpt_open = "off"
         again = await ask(memory, store)
         assert again.block == found.block
@@ -300,6 +303,41 @@ async def test_off_is_the_block_the_search_result_and_the_tools_as_they_were(
         assert (await ask(memory, store)).block != found.block
         cfg.memory.excerpt_open = "off"
         assert (await ask(memory, store)).block == found.block
+    finally:
+        await memory.aclose()
+
+
+# ── On is the default: no setting, no config ──
+
+
+@pytest.mark.parametrize("configured", [False, True])
+async def test_with_no_setting_a_cut_line_has_an_id_the_guide_and_open_memory(
+    tmp_path: Path, store: SessionStore, configured: bool
+) -> None:
+    cfg = Config(chat_backend="vllm", embedding_backend="none")
+    memory = ChatMemory(
+        (lambda: cfg) if configured else (lambda: None),
+        directory=str(tmp_path / "memory"),
+    )
+    try:
+        assert memory.recall_settings().opens_excerpts
+        _, (long_id,) = await add_turn(
+            memory, store, SHORT_TYPED, LONG_ANSWER, title="Long"
+        )
+        found = await ask(memory, store)
+        (cut,) = turn_lines(found.block)
+        assert cut.startswith(f"[t{long_id}] the user said “{SHORT_TYPED}”")
+        assert found.block.endswith(f"\n{CUT_GUIDE}")
+        reply = await MemoryTools(memory).search(query=QUESTION)
+        assert f"[t{long_id}] " in reply and reply.endswith(CUT_GUIDE)
+        tools = await MemoryTools(memory).start()
+        assert [t.definition.name for t in tools] == [
+            "search_memory",
+            "remember",
+            "open_memory",
+        ]
+        assert tools[0].definition.description.endswith(CUT_GUIDE)
+        assert tools[2].definition is OPEN_MEMORY
     finally:
         await memory.aclose()
 

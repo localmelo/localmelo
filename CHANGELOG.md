@@ -13,6 +13,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - Developer only, not visible by default: a cut excerpt can be opened whole. With
   `[memory] excerpt_open = "on"` (`-X memory.excerpt_open=on` for one run; the default, `"off"`,
   changes nothing) recall keeps its excerpts of earlier chat turns, but a line that shows less
+- A cut excerpt can be opened whole (`[memory] excerpt_open`, on by default: see Changed).
+  Recall keeps its excerpts of earlier chat turns, but a line that shows less
   than the whole turn starts with the turn's id, `[t123] the user said “…”; melo replied “…”`,
   in the recall block and in the memory search tool alike. A line shows less when the excerpt cut
   what you said or what melo replied (or left the reply out), or when it is a piece of a longer
@@ -641,6 +643,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- A cut excerpt of an earlier chat turn can be opened whole, by default. When recall shows
+  less than the whole turn, the line starts with the turn's id, such as `[t123]`, a line under
+  the excerpts says it can be opened, and the chat's model has `open_memory` to read the turn
+  whole. On a public long-memory benchmark this answered 77.2% of questions against 71.1%, for
+  about 230 more prompt tokens and about a second more per turn. `-X memory.excerpt_open=off`
+  (or `excerpt_open = "off"` under `[memory]`) gives the old behaviour; the key is saved only
+  when it is `off`. Part of #428.
 - A recalled chat turn now shows up to 900 characters by default, and the recall block holds
   up to 4000 (#349), where it showed 234 and 900. On a public long-memory benchmark, a model that
   reads earlier chats answered 71.1% of questions instead of 58.9% (90 questions, 2 repeats;
@@ -1017,6 +1026,83 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- With `[memory] note_gate` above `typed` (a developer setting), a page, a file or a finished
+  task's result no longer supports a note by text a reader of it would not see, or by an order to
+  the assistant (#442). A résumé whose hidden white-on-white line told the assistant to save a
+  false fact about you was counted as your material, so a note with that fact was kept as
+  `pointed`. Now a page and a file count only for the text that is plainly drawn, and a result is
+  read only for plain injection forms. The page reader behind `web_fetch` is unchanged; a test
+  pins its output.
+- A file or a page body is read from left to right by one tokenizer that never reads inside a
+  token: comments (a comment ends only at `-->`) and `<!…>`, `<?…>` (to the first `>`), the text
+  of `script`, `style`, `textarea`, `title`, `xmp`, `noscript`, `iframe`, `noembed` and
+  `noframes` (`plaintext` runs to the end), and tags with their quoted or unquoted attributes. A
+  `<!--` or a `>` in an attribute value or a script therefore starts no comment and ends no tag.
+  A raw text element ends at its own end tag only (`</script` and then a space, `/` or `>`), and
+  a script that holds `<!--` runs to the end unless its end tag comes first. Only a Markdown
+  autolink (`<https://…>` and the other usual schemes, `<user@example.com>`) and a plain
+  `a < b` are no tags and stay text; anything else that starts with `<` and a letter is a tag.
+  A comment, tag or element never closed hides the rest of the text.
+- What counts as drawn is an allow-list, and no style is read at all. Text counts only when every
+  element around it is a plain one: a tag from a short list (`div`, `span`, `p`, headings, lists,
+  tables, `b`, `i`, `a`, `code` and the like) that carries only plain attributes (`href`, `title`,
+  `class`, `id`, `lang`, `colspan` and the like, and no `width` or `height` of 0). Any other tag
+  (`font`, `svg`, `details`, `template`, `select`, a tag no one knows) or attribute (`style`,
+  `hidden`, `aria-hidden`, `bgcolor`, `data-*`, `on*`) hides the element and all it holds, up to
+  its own end tag, and to the end of the text when that end tag is not clean (a child never
+  closed, a mismatched end tag, no end tag). A file with a style sheet (a `<style>` element, a
+  `<link rel="stylesheet">`, an `@import`) supports no note at all, because a rule of it could
+  hide anything: a styled HTML file supports no note. Every other tag is a space, and Markdown
+  link comments and zero-width and other invisible characters (the joiners of some scripts too)
+  are removed.
+- Then every paragraph (a line of only `>` marks ends one in a quoted block) with an order to the
+  assistant in it, such as "save a note that …", "update your memory" or "ignore previous
+  instructions", is dropped, because the facts the order wants kept follow it as plain
+  statements. In a page or a file a sentence that starts with a verb such as "Use" or "Open"
+  counts as an order too. The note is then refused with the usual "no source supports it". What
+  you typed is never cleaned. The order rule is a keyword filter, not a judgement of meaning.
+- A finished task's result is melo's own answer, so it is read for plain injection forms only
+  and no markup is read in it. In it "you" is the user, so a paragraph is dropped only for a form
+  no honest answer has: "ignore previous instructions" ("disregard", "forget" and "override"
+  too, with "all", "prior" or "your"), an
+  order to keep something in the assistant's memory ("save this to your memory", "update your
+  memory", "remember that the user …"; "memory" must end the order, so "save the photos to your
+  memory card" and "remember that the users table …" are not one), or a lead that names an AI and is followed by a comma or
+  a colon ("Dear AI assistant, …", "Note to any AI: …"; "Dear Assistant Professor Lee," is not
+  one). Advice and plain statements stay ("Check in 24 hours before.", "You must always check in
+  online.", "From now on you should arrive early.", "Remember to bring a passport.", "System: macOS 27.2" and
+  "Assistant: Maria Lopez" as field labels, a command in
+  a code block), and code spans and fenced blocks are not read for orders. The chunks of a
+  recalled result are read as one text, from the chunk that holds the answer.
+- A page read in the browser supports no note at any level above `typed`, and the refusal says
+  so: the browser's text holds labels and hidden controls a reader does not see (`browser_open`,
+  `browser_read`, `browser_follow`, `browser_back`). A page fetched with `web_fetch` does. This is
+  a stopgap until the browser's text is cleaned at its source.
+- The parts of one page or file read one after the other (`web_fetch` `part`, `file_read`
+  start and end lines) are read as one text, each part right after the one before it; a file
+  read that gives no end line does not say where it ended, so no later read counts as following
+  it. A text that does not start at part 1 or line 1 (a later page part, or lines of a file that
+  do not start at line 1 while the earlier lines were not read) is dropped whole when it holds
+  any `-->` or a closer with no opener in it (an end tag), since it may begin inside a comment
+  or a hidden element. A part with no such closer is read as it is. The pages and files are
+  cleaned newest first, and only until the newest twenty that have something left are found.
+- A note kept from a page, a file or a task's result, or inferred, is never shown to the model as
+  your words: at recall such a note never reads `the user said “…”`, even when it carries a quote
+  (source monitoring). A note from your own words reads as before.
+- The scans take time linear in the text for the shapes the tests time: many comments, tags or
+  hidden elements, deep nesting, unclosed tags and quotes, raw text end tags, tags shaped like
+  autolinks, and style sheets of many rules beside many elements (a sheet is not read, so these
+  cost no more than any other text).
+- Known limits. Text a fetched page hides with white colour, a tiny size, opacity or a class or
+  style sheet reaches the gate as plain text, because the page reader keeps it; the order rule still
+  applies, and a page you did not point to supports nothing. The allow-list hides more than a
+  browser does: a styled HTML file, or text inside a `font`, `details`, `svg` or any other
+  element that is not a plain one, supports no note even when a reader sees it (a note refused
+  costs one note). The order rule is a keyword filter, so an order phrased another way may pass.
+  A result is read as written and only for plain injection forms, so an order phrased another way
+  may pass there too; the page text it quotes was flattened by the page reader, so markup in a
+  result is not read. A later part of a page or file read without its predecessor and holding no
+  stray closer is read as plain text.
 - Developer only: memory ingest no longer loses a long stretch of chat whose items do not fit one reply: the stretch is split and asked again in parts, and one very long exchange is read in parts instead of being cut. Part of #428.
 - Memory items: the encoder asks a local model with thinking off, as step reviews do (#428).
   A local server whose chat template thinks by default spent the encoder's whole reply

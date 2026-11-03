@@ -82,8 +82,12 @@ async def _finish(store: SessionStore, turn: TurnInfo, answer: str = "Noted.") -
 async def test_the_tool_sits_beside_search_memory_and_asks_no_approval(
     memory: ChatMemory,
 ) -> None:
-    search, remember = await memory.tools().start()
-    assert (search.definition, remember.definition) == (SEARCH_MEMORY, REMEMBER)
+    search, remember, opener = (
+        await memory.tools().start()
+    )  # open_memory is on by default
+    assert search.definition.name == SEARCH_MEMORY.name
+    assert search.definition.description.startswith(SEARCH_MEMORY.description)
+    assert (remember.definition, opener.definition.name) == (REMEMBER, "open_memory")
     assert remember.definition.name == "remember"
     assert remember.definition.parameters["required"] == ["text", "topic"]
     topic = remember.definition.parameters["properties"]["topic"]

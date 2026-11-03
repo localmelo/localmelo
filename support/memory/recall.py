@@ -171,6 +171,12 @@ HEADS: Final = Shown()  # the head of every turn, in :data:`TURN_CHARS`
 WHOLE: Final = Shown(10**9)  # every turn whole: no room limit
 
 
+# The source tags of a record whose quote is the user's own words: what the user
+# typed (``typed``, or no tag at all, as every record had before the note gate). A
+# record tagged ``pointed``, ``result`` or ``inferred`` never reads as the user's.
+USER_SOURCES: Final = ("", "typed")
+
+
 @dataclass
 class Item:
     """One record (key ``r:<id>``), document (``d:<id>``) or memory item
@@ -274,11 +280,13 @@ class Item:
     ) -> str:
         """The item as the model reads it, with where and when it came from.
 
-        A record reads as the user's words when it has them; without, a note in
-        the second person says it is written to the user ("you" is the user),
-        and one in the first person says it is the user's own; a note a page or
-        file gave reads so with that host or file name as its place (``from
-        example.com, Oct 30``), and one the model inferred says ``melo inferred``.
+        A record reads as the user's words when it has them and its source is the
+        user's (:data:`USER_SOURCES`: words from a page, a file or a task's result
+        are never shown as the user's, quote or not); without, a note in the second
+        person says it is written to the user ("you" is the user), and one in the
+        first person says it is the user's own; a note a page or file gave reads so
+        with that host or file name as its place (``from example.com, Oct 30``), and
+        one the model inferred says ``melo inferred``.
         A turn says who spoke (:func:`turn_said`). The date has the year when it is not *now*'s
         (the pinned or real time by default), and the time of day with *timed*
         (:func:`times`). *show* says how much of a turn is shown (:class:`Shown`).
@@ -293,7 +301,7 @@ class Item:
             return self._turn_line(where, older, show)[0]
         if self.how == "inferred":
             said = f"melo inferred “{self.text}”"
-        elif self.quote:
+        elif self.quote and self.how in USER_SOURCES:
             said = f"the user said “{self.quote}”"
         elif _FIRST_PERSON.match(self.text):
             said = f"the user's note “{self.text}”"

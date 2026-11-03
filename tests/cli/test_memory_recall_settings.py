@@ -34,7 +34,7 @@ CHANGED = {
     "recall_form": "list",
     "recall_list_max": 35,
     "recall_open_chars": 9000,
-    "excerpt_open": "on",
+    "excerpt_open": "off",  # "on" is the default
     "recall_source": "items",
     "open_sources": "on",
     "compress_at_chars": 20000,
@@ -85,9 +85,11 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
             recall_notes="on",
             recall_min_cosine=0.55,
             followup_query="recent",
+            excerpt_open="on",
         )
         save(cfg)
         assert "[memory]" not in path.read_text()
+        assert "excerpt_open" not in path.read_text()
         cfg.memory = MemoryConfig(**CHANGED)  # type: ignore[arg-type]
         save(cfg)
         text = path.read_text()
@@ -97,7 +99,7 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
             "recall_min_cosine = 0.45\nrecall_min_coverage = 0.4\n"
             'recall_item_chars = 800\nrecall_excerpt = "match"\n'
             'recall_form = "list"\nrecall_list_max = 35\nrecall_open_chars = 9000\n'
-            'excerpt_open = "on"\nrecall_source = "items"\nopen_sources = "on"\n'
+            'excerpt_open = "off"\nrecall_source = "items"\nopen_sources = "on"\n'
             'compress_at_chars = 20000\ncompress_parallel = 4\ncompress_cache = "cache/compress.jsonl"\n'
             'note_gate = "model"\nnote_min_cosine = 0.65\n'
             'followup_query = "message"\n'
@@ -109,6 +111,40 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
             keys = [line.split(" ")[0] for line in path.read_text().splitlines()]
             assert [key for key in keys if key in CHANGED] == [name]
             assert config.load().memory == cfg.memory
+
+
+def test_excerpt_open_is_on_by_default_and_saved_only_when_off(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    cfg = Config(chat_backend="vllm", embedding_backend="none")
+    assert MemoryConfig().excerpt_open == "on" and cfg.memory.excerpt_open == "on"
+    with (
+        mock.patch.object(config, "CONFIG_PATH", str(path)),
+        mock.patch.object(config, "CONFIG_DIR", str(tmp_path)),
+    ):
+        # The default is not written, and a config without the key reads as on.
+        save(cfg)
+        assert "excerpt_open" not in path.read_text()
+        assert config.load().memory.excerpt_open == "on"
+        cfg.memory = MemoryConfig(excerpt_open="on")
+        save(cfg)
+        assert "excerpt_open" not in path.read_text() and "[memory]" not in (
+            path.read_text()
+        )
+        # Off is written, read back, and written again the same.
+        cfg.memory = MemoryConfig(excerpt_open="off")
+        save(cfg)
+        text = path.read_text()
+        assert '[memory]\nexcerpt_open = "off"\n' in text
+        loaded = config.load()
+        assert loaded.memory.excerpt_open == "off"
+        save(loaded)
+        assert path.read_text() == text
+        # A file that still says "on" is the default, and saves without the key.
+        path.write_text('chat_backend = "vllm"\n[memory]\nexcerpt_open = "on"\n')
+        loaded = config.load()
+        assert loaded.memory.excerpt_open == "on"
+        save(loaded)
+        assert "excerpt_open" not in path.read_text()
 
 
 def test_a_saved_value_is_kept_and_a_missing_one_is_the_larger_default(
