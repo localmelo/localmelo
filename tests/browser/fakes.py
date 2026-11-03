@@ -13,10 +13,12 @@ from localmelo.support.browser.driver import (
     BrowserSetupError,
     Changes,
     Element,
+    PointHit,
     RawPage,
     Shot,
     StaleElementError,
     TabInfo,
+    View,
 )
 from localmelo.support.browser.sites import origin_of
 
@@ -94,7 +96,7 @@ class FakeDriver:
     as the real helper does when it loses one. ``via`` is the way an act says
     it used, ``changes`` maps a label to what an act on it changed, and
     ``redraw`` maps a label to the address whose page an act on it finds
-    redrawn (stale, once).
+    redrawn (stale, once). ``hits`` maps a rounded point to what is there.
     """
 
     name = "fake"
@@ -129,6 +131,9 @@ class FakeDriver:
         self.via = "browser"
         self.changes: dict[str, Changes] = {}
         self.redraw: dict[str, RawPage] = {}
+        self.hits: dict[tuple[int, int], PointHit] = {}
+        self.marks: list[tuple[View, float, float] | None] = []
+        self.shot_view: View | None = View("", "d1", 1000.0, 500.0)
 
     def _new_tab(self) -> str:
         self.made += 1
@@ -235,8 +240,20 @@ class FakeDriver:
             return False  # the condition holds only on the page's own site
         return text != "never"
 
-    async def screenshot(self, tab: str | None) -> Shot:
-        return Shot("image/png", PNG)
+    async def screenshot(
+        self, tab: str | None, mark: tuple[View, float, float] | None = None
+    ) -> Shot:
+        self.marks.append(mark)
+        view = self.shot_view
+        if view is not None:
+            view = dataclasses.replace(view, url=self._url(tab))
+        return Shot("image/png", PNG, view)
+
+    async def hit(self, tab: str | None, view: View, x: float, y: float) -> PointHit:
+        self.calls.append(("hit", f"{x:g},{y:g}"))
+        if self._url(tab) != view.url:
+            raise StaleElementError("The page is not the one that was read.", "page")
+        return self.hits.get((round(x), round(y)), PointHit("none"))
 
     async def blank(self, tab: str | None) -> None:
         self.calls.append(("blank", tab or ""))
@@ -258,14 +275,14 @@ class FakeDriver:
                 "The page was reloaded or replaced since it was read.", "doc"
             )
         label = act.element.label
-        if label in self.redraw:
+        if label in self.redraw and act.point is None:
             # The page redrew itself since it was read: the element is there again,
             # under another place, and the act on the old reading is stale.
             self.pages[self._url(tab)] = self.redraw.pop(label)
             raise StaleElementError("That element is no longer on the page.", "gone")
         self.acts.append(act)
         key = ("enter:" if act.enter else "") + label
-        via = self.via
+        via = "point" if act.point is not None else self.via
         result = ActResult(
             self.stopped,
             via,  # type: ignore[arg-type]

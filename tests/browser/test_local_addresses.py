@@ -349,9 +349,9 @@ async def test_a_tab_whose_page_cannot_be_checked_is_not_pictured_or_watched(
 
 
 class MovesWhilePictured(Anywhere):
-    async def screenshot(self, tab: str | None) -> Shot:
+    async def screenshot(self, tab: str | None, mark: Any = None) -> Shot:
         self.tabs_["t1"].append(CONSOLE)  # the page moved while the picture was taken
-        return await super().screenshot(tab)
+        return await super().screenshot(tab, mark)
 
 
 async def test_a_picture_taken_while_the_page_moved_is_dropped() -> None:

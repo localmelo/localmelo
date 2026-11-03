@@ -528,3 +528,23 @@ test('an element that only looks clickable is marked plain; a control is not', (
   assert.equal(div.plain, true);
   assert.equal(button.plain, undefined);
 });
+
+test('a frame from the same site is read and acted in as part of the page', () => {
+  const dom = load('<main><p>Outer.</p><iframe id="f"></iframe></main>');
+  const frame = dom.window.document.getElementById('f');
+  const fw = frame.contentWindow;
+  Object.defineProperty(fw.HTMLElement.prototype, 'innerText', {get() { return this.textContent; }, configurable: true});
+  fw.Element.prototype.getBoundingClientRect = function () { return {width: 10, height: 10, top: 0, left: 0, right: 10, bottom: 10}; };
+  fw.Element.prototype.scrollIntoView = function () {};
+  frame.contentDocument.body.innerHTML = '<p>Sign in here.</p><button id="in">Continue</button>';
+  dom.window.eval(`window.clicked = 0; document.getElementById('f').contentDocument.getElementById('in').addEventListener('click', function () { window.clicked++; });`);
+  const page = readPage(dom);
+  const cont = byLabel(page, 'Continue');
+  assert.equal(cont.frame, '0');
+  assert.ok(cont.fp.includes('|f:'), cont.fp);
+  assert.match(page.text, /Sign in here\./);
+  assert.deepEqual(run(dom, specFor(page, cont, {frame: '0'})), {ok: true});
+  assert.equal(dom.window.eval('window.clicked'), 1);
+  // A frame that went elsewhere since it was read is another page.
+  assert.deepEqual(run(dom, specFor(page, cont, {frame: '1'})), {ok: false, stale: 'gone'});
+});

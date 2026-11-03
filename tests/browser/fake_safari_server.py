@@ -50,7 +50,8 @@ real server's ``textTree`` lines; its own input acts on that node and is recorde
 ``native`` (and in ``FAKE_SAFARI_LOG``, a file a test reads); an element that
 says ``trusted_only`` ignores the page script's click, ``notice`` is text the
 page shows after a click, ``redraw`` makes every click redraw the page (new
-fingerprints), ``covered`` puts another element over it.
+fingerprints), ``covered`` puts another element over it. A page's ``points``
+say what is at a point of the view (``"x,y"``).
 """
 
 from __future__ import annotations
@@ -159,6 +160,33 @@ PAGES: dict[str, dict[str, Any]] = {
                 "covered": True,
             },
         ],
+        "points": {
+            "300,100": {
+                "surface": "canvas",
+                "el": {"kind": "button", "label": "", "at": -1, "fp": "canvas|1"},
+                "words": "",
+            },
+            "500,250": {
+                "surface": "frame",
+                "site": "https://accounts.example.org/box",
+                "el": {"kind": "button", "label": "", "fp": "iframe|1"},
+            },
+        },
+    },
+    # A sign-in box from another site: the page script cannot read into it, the
+    # browser's own reading lists its controls.
+    "https://example.com/box": {
+        "title": "Box",
+        "text": "Sign in to post.",
+        "elements": [{"kind": "button", "label": "Post", "fp": "button|post|1"}],
+        "unreached": ["https://accounts.example.org/login"],
+        "box": [
+            "\tiframe uid=88 title='Sign-in box' origin=accounts.example.org",
+            "\t\tinput uid=2_1_89 type=email label=Email name=email ''",
+            "\t\tinput uid=2_1_90 type=password label=Password name=pw ''",
+            "\t\tinput uid=2_1_91 label=Answer name=a ''",
+            "\t\tbutton uid=2_1_92 'Continue'",
+        ],
     },
 }
 TOOLS = json.loads(
@@ -254,12 +282,12 @@ def page_now() -> dict[str, Any]:
         {**{k: e[k] for k in keep if k in e}, "at": i, "fp": fp_of(url, e)}
         for i, e in enumerate(found["elements"])
     ]
-    info = {k: v for k, v in found.items() if k != "elements"}
+    info = {k: v for k, v in found.items() if k not in ("elements", "points", "box")}
     return {"url": url, "doc": DOC, **info, "elements": elements}
 
 
 def spec_of(source: str) -> tuple[dict[str, Any], str]:
-    """The spec an act script carries, and what follows it (the node lookups)."""
+    """The spec an act or point script carries, and what follows it (the node lookups)."""
     start = source.rindex('})({"')
     spec, end = json.JSONDecoder().raw_decode(source, start + 3)
     return spec, source[end:]
@@ -319,6 +347,30 @@ TAGS = {
 def do_act(spec: dict[str, Any]) -> dict[str, Any]:
     """What melo's act script answers, on the page model above."""
     global armed
+    if spec.get("point") and spec["at"] < 0:
+        # A drawing or a box from another site, known by its place on the view.
+        here = tabs[current]["history"]
+        spot = (
+            PAGES.get(here[-1], {})
+            .get("points", {})
+            .get(f"{spec['point']['x']:g},{spec['point']['y']:g}")
+        )
+        if spec["url"] != here[-1] or not spot or spot["el"]["fp"] != spec["fp"]:
+            return {"ok": False, "stale": "point"}
+        key = spec.get("key", "")
+        armed = key
+        looks[key] = {"doc": DOC, "spec": spec, "url": here[-1], "before": "{}"}
+        if spec.get("mode") == "arm":
+            return {
+                "ok": True,
+                "uid": "",
+                "bound": 0,
+                "frame": spot["surface"] == "frame",
+            }
+        if spot["surface"] == "frame":
+            return {"ok": False, "stale": "reach"}
+        looks[key]["seen"] = {"click": 1}
+        return {"ok": True}
     element, stale = element_of(spec)
     if element is None:
         return {"ok": False, "stale": stale}
@@ -365,7 +417,7 @@ def do_act(spec: dict[str, Any]) -> dict[str, Any]:
 
 
 def interact(args: dict[str, Any]) -> dict[str, Any]:
-    """The browser's own input, on node ``100 + at`` of the current page."""
+    """The browser's own input, on node ``100 + at`` of the current page, or at a point."""
     item = (args.get("interactions") or [{}])[0]
     if MODE == "native_error":
         return text("Could not perform the interaction.", error=True)
@@ -378,6 +430,16 @@ def interact(args: dict[str, Any]) -> dict[str, Any]:
     if MODE == "native_redirect":
         look["blocked"] = ["moved"]
         return text("Clicked.")
+    if "point" in item:
+        spot = page.get("points", {}).get(
+            f"{item['point']['x']:g},{item['point']['y']:g}"
+        )
+        look.setdefault("seen", {})["click"] = 1
+        if spot and spot.get("goes"):
+            here.append(spot["goes"])
+        return text("Clicked.")
+    if "_" in str(item.get("node", "")):
+        return text("Clicked in the frame.")  # a node in a frame from another site
     at = int(item.get("node", "0")) - 100
     elements = page["elements"]
     if not 0 <= at < len(elements):
@@ -412,6 +474,10 @@ def content(args: dict[str, Any]) -> dict[str, Any]:
         lines.append(f"\t{tag}{uid}{named}{said}")
         if MODE == "twins":
             lines.append(f"\t{tag} uid={500 + e['at']}{named}{said}")
+    box = PAGES.get(page["url"], {}).get("box", [])
+    # As the real server: a frame from another site is a line; what is inside it is
+    # read only with includeSubframes.
+    lines.extend(box if args.get("includeSubframes") is True else box[:1])
     body = json.dumps({"content": "\n".join(lines), "url": page["url"]})
     target = args.get("savePath")
     if target:
@@ -451,6 +517,29 @@ def run_script(source: str) -> Any:
             "seen": look.get("seen", {}),
             "count": look.get("count", 0),
         }
+    if source.startswith("(function (at)"):
+        spec, _ = spec_of(source)
+        if spec["url"] != here[-1]:
+            return {"stale": "page"}
+        spot = (
+            PAGES.get(here[-1], {})
+            .get("points", {})
+            .get(f"{spec['x']:g},{spec['y']:g}")
+        )
+        return spot or {"surface": "none"}
+    if source.startswith("(function (view)"):
+        return {
+            "url": here[-1],
+            "doc": DOC,
+            "w": 1000,
+            "h": 500,
+            "x": 0,
+            "y": 0,
+            "dpr": 2,
+        }
+    if source.startswith("(function (mark)"):
+        log("mark " + source[source.rindex("})(") + 3 : -1])
+        return True
     if source == "1+1":
         return 2
     if source == "location.href":

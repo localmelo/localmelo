@@ -39,6 +39,7 @@ OPTION_CHARS = 40
 OPTIONS_SHOWN = 10
 HREF_CHARS = 120
 TITLE_CHARS = 120
+MAX_UNREACHED = 4  # boxes from other sites named in a reading
 
 _UNSAFE = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f‎‏‪-‮⁦-⁩]")
 _ANGLES_OPEN = re.compile("<{2,}")
@@ -147,6 +148,9 @@ class Snapshot:
     skipped: int = (
         0  # elements the page script left out (hidden, disabled, over its cap)
     )
+    unreached: tuple[
+        str, ...
+    ] = ()  # origins of frames from another site melo cannot read
 
 
 def make_snapshot(
@@ -156,6 +160,9 @@ def make_snapshot(
     snap = Snapshot(
         sid, tab, raw.url, origin, raw.title, [""], doc=raw.doc, skipped=raw.skipped
     )
+    snap.unreached = tuple(
+        dict.fromkeys(o for o in map(_origin, raw.unreached) if o and o != origin)
+    )[:MAX_UNREACHED]
     kept: list[Element] = []
     for item in raw.elements:
         secret = item.sensitive or (
@@ -164,7 +171,15 @@ def make_snapshot(
             else ""
         )
         if secret:
-            item = Element(item.kind, "", sensitive=secret, at=item.at, fp=item.fp)
+            item = Element(
+                item.kind,
+                "",
+                sensitive=secret,
+                at=item.at,
+                fp=item.fp,
+                frame=item.frame,
+                site=item.site,
+            )
         elif not (item.label.strip() or item.also.strip() or item.href):
             continue
         if kept and kept[-1] == item and item.kind == "link":
@@ -176,6 +191,20 @@ def make_snapshot(
     snap.parts = split_parts(raw.text)
     snap.elements = {f"e{first_ref + i}": item for i, item in enumerate(kept)}
     return snap
+
+
+def _origin(url: str) -> str:
+    """``scheme://host[:port]`` of *url*, or ``""``."""
+    match = re.match(r"(https?://[^/?#\s]+)", url.strip(), re.IGNORECASE)
+    return match.group(1).lower() if match else ""
+
+
+def unreached_line(origin: str) -> str:
+    host = field_text(origin.split("://", 1)[-1], 80)
+    return (
+        f"[a box from {host} that melo can't reach: browser_screenshot, "
+        "then browser_click_point, can click in it]"
+    )
 
 
 def changes_lines(changes: list[str]) -> list[str]:
@@ -203,6 +232,14 @@ def address(href: str, origin: str) -> str:
 
 
 def element_line(ref: str, item: Element, origin: str = "") -> str:
+    line = _line(ref, item, origin)
+    if item.site:
+        host = field_text(item.site.split("://", 1)[-1], 80)
+        line = f"{line[:-1]} in a box from {host}]"
+    return line
+
+
+def _line(ref: str, item: Element, origin: str) -> str:
     if item.sensitive:
         return f"[{ref} {_SENSITIVE_WORDS[item.sensitive]}: melo never types here]"
     label = field_text(item.label or item.also, LABEL_CHARS)
@@ -254,6 +291,8 @@ def render_page(
         if len(snap.elements) > len(shown):
             more = len(snap.elements) - len(shown)
             lines.append(f"[{more} more elements: browser_find searches them]")
+    if view != "text" and (part == 1 or view == "elements"):
+        lines.extend(unreached_line(origin) for origin in snap.unreached)
     if view != "elements" and part < total:
         lines.append(
             f"[part {part} of {total}: browser_read part={part + 1} continues]"

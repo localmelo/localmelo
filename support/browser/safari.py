@@ -52,12 +52,15 @@ from localmelo.support.browser.driver import (
     BrowserSetupError,
     Changes,
     Element,
+    ElementKind,
     FieldAttrs,
+    PointHit,
     RawPage,
     Sensitive,
     Shot,
     StaleElementError,
     TabInfo,
+    View,
 )
 from localmelo.support.mcp import McpError, McpServerConfig, McpTool, StdioMcpClient
 from localmelo.support.mcp.results import tool_result_to_output
@@ -110,6 +113,9 @@ _STALE = {
     "field": "That field changed since it was read, so melo did not use it. Use browser_read for current refs.",
     "grew": "That field turned into a protected one while melo typed, so melo cleared it. Ask the person to fill it in themselves.",
     "frame": "melo could not set up its safe page checks on this page, so it did nothing. Use browser_read to try again.",
+    "point": "What is at that point is not what melo found there a moment ago, so it did not click. Take a new browser_screenshot.",
+    "scrolled": "The page scrolled since the picture, so a point on it is no longer where it was. Take a new browser_screenshot.",
+    "reach": "That point is inside a box from another site, and this Safari cannot click there for melo.",
 }
 # Why the browser's own input was passed over for the page script (the result says it).
 _PASSED = {
@@ -117,6 +123,7 @@ _PASSED = {
     "covered": "another element covers it, so only the page script reaches it",
     "name": "the browser could not name that element",
     "missed": "the browser's own input did not reach it",
+    "frame": "it is in a frame, where only the page script reaches",
 }
 _MOVED = (
     "A real click or key press landed on another element than the one melo checked, "
@@ -167,7 +174,9 @@ var P = (function () {
       req: w.HTMLFormElement.prototype.requestSubmit, sub: w.HTMLFormElement.prototype.submit,
       click: w.HTMLElement.prototype.click, dispatch: w.EventTarget.prototype.dispatchEvent,
       rm: w.EventTarget.prototype.removeEventListener, closest: w.Element.prototype.closest,
-      cdp: w.Node.prototype.compareDocumentPosition, rect: w.Element.prototype.getBoundingClientRect
+      cdp: w.Node.prototype.compareDocumentPosition, matches: w.Element.prototype.matches,
+      rect: w.Element.prototype.getBoundingClientRect,
+      inner: Object.getOwnPropertyDescriptor(w.HTMLIFrameElement.prototype, "contentDocument").get
     };
     // The fresh functions are tried on their own terms, never against the page's.
     var probe = w.document.createElement("div");
@@ -175,7 +184,7 @@ var P = (function () {
     if (fresh.ga.call(probe, "lang") !== "x" || fresh.json({a: 1}) !== '{"a":1}' ||
         typeof fresh.qsa.call(document, "html").length !== "number" || typeof fresh.gcs(document.documentElement).display !== "string") throw new Error("frame");
     for (var k in fresh) if (typeof fresh[k] !== "function") throw new Error(k);
-    // Only the check that nothing covers an element needs this one.
+    // Only what is at a point needs this one; without it no point is resolved.
     var efp = w.Document.prototype.elementFromPoint;
     fresh.efp = typeof efp === "function" ? efp : null;
     return fresh;
@@ -349,10 +358,54 @@ var lookAt = function (n, counts) {
   if (el.sensitive) { el.value = ""; el.label = ""; el.also = ""; el.options = []; el.form = []; }
   // Which of the same-labelled elements before it in the document this one is (counts
   // is how many came before; none given means the fingerprint is not wanted).
-  if (counts) el.fp = fingerprint(n, (counts[el.kind + "|" + el.label] || 0) + 1);
+  if (counts) el.fp = fingerprint(n, (counts[el.kind + "|" + el.label] || 0) + 1) + frameMark(n);
   return {el: el};
 };
+// A frame of the page from the same site is read and acted in as part of the page.
+// Its place is the index of each frame on the way down ("2", "2.0"), and an element
+// in it is bound to the frame's address too, so a frame that moved is another page.
+var frameMark = function (n) {
+  var d = n.ownerDocument;
+  return d && d !== document ? "|f:" + cap(d.URL, 300) : "";
+};
+var subdoc = function (f) {
+  try { return /^iframe$/i.test(f.tagName) ? P.inner.call(f) : f.contentDocument; } catch (e) { return null; }
+};
+var docAt = function (path) {
+  var D = document, parts = path ? String(path).split(".") : [];
+  for (var i = 0; i < parts.length && D; i++) {
+    var f = P.qsa.call(D, "iframe,frame")[+parts[i]];
+    D = f ? subdoc(f) : null;
+  }
+  return D || null;
+};
 var within = function (n, t) { return !!t && (t === n || !!(P.cdp.call(n, t) & 16)); };
+// What is at a point of the view: the element hit, in the frames of the same site too,
+// and the control it belongs to. A label moves to its field; a drawing, picture or
+// video takes the click itself; a frame from another site is a box melo cannot see into.
+var hitAt = function (x, y) {
+  if (!P.efp) return {node: null, surface: "none", doc: document, path: "", x: x, y: y};
+  var D = document, h = P.efp.call(D, x, y), path = "", depth = 0;
+  while (h && /^(iframe|frame)$/i.test(h.tagName) && depth < 3) {
+    var sub = subdoc(h);
+    if (!sub) return {node: h, surface: "frame", doc: D, path: path, x: x, y: y};
+    var r = P.rect.call(h), list = P.qsa.call(D, "iframe,frame");
+    path = (path ? path + "." : "") + Array.prototype.indexOf.call(list, h);
+    x -= r.left + h.clientLeft; y -= r.top + h.clientTop;
+    D = sub; h = P.efp.call(D, x, y); depth++;
+  }
+  if (!h || h.nodeType !== 1) return {node: null, surface: "none", doc: D, path: path, x: x, y: y};
+  var lab = P.closest.call(h, "label");
+  if (lab && lab.control) return {node: lab.control, surface: "control", doc: D, path: path, x: x, y: y, raw: h, label: lab};
+  for (var c = h, i = 0; c && c.nodeType === 1 && i < 8; c = c.parentElement, i++) {
+    if (P.matches.call(c, SEL) && lookAt(c).el) return {node: c, surface: "control", doc: D, path: path, x: x, y: y, raw: h};
+  }
+  for (c = h, i = 0; c && c.nodeType === 1 && i < 3; c = c.parentElement, i++) {
+    if (/^(canvas|img|svg|video|embed|object)$/i.test(c.tagName)) return {node: c, surface: "canvas", doc: D, path: path, x: x, y: y, raw: h};
+  }
+  if (P.gcs(h).cursor === "pointer") return {node: h, surface: "control", doc: D, path: path, x: x, y: y, raw: h};
+  return {node: null, surface: "none", doc: D, path: path, x: x, y: y};
+};
 // The state of an element that an action may change, never the value of a secret field.
 var stateOf = function (n) {
   if (!n || !n.isConnected) return {gone: true};
@@ -385,7 +438,7 @@ PAGE_JS = (
     r"""(function () {"""
     + COMMON_JS
     + r"""
-  var out = {url: location.href, doc: docId(), title: document.title || "", text: "", elements: [], skipped: 0, frames: []};
+  var out = {url: location.href, doc: docId(), title: document.title || "", text: "", elements: [], skipped: 0, frames: [], unreached: []};
   var main = document.querySelector("main,[role=main],article");
   var root = main && (main.innerText || "").length > 300 ? main : document.body;
   out.text = root ? String(root.innerText || "").slice(0, 200000) : "";
@@ -396,22 +449,37 @@ PAGE_JS = (
     + r""" + "\n" + out.text;
     return JSON.stringify(out);
   }
-  var nodes = P.qsa.call(document, SEL), counts = {};
-  for (var i = 0; i < nodes.length && i < 4000; i++) {
-    var d = lookAt(nodes[i], counts);
-    if (!d.el) { out.skipped += d.skip; continue; }
-    var key = d.el.kind + "|" + d.el.label;
-    counts[key] = (counts[key] || 0) + 1;
-    if (out.elements.length >= 400) { out.skipped += 1; continue; }
-    d.el.at = i;
-    out.elements.push(d.el);
+  // The page and its frames from the same site (two levels down); a visible frame
+  // from another site is named, since melo cannot read into it.
+  var docs = [[document, ""]];
+  for (var q = 0; q < docs.length && q < 12; q++) {
+    var here = docs[q][0], path = docs[q][1], list = P.qsa.call(here, "iframe,frame");
+    for (var k = 0; k < list.length && k < 20; k++) {
+      var f = list[k], sub = subdoc(f), u = "";
+      try { u = String(f.contentWindow.location.href); } catch (e) { u = ""; }
+      if (!u || u === "about:blank") u = String(attr(f, "src") ? f.src : "");
+      if (u && u !== "about:blank") out.frames.push(u.slice(0, 500));
+      if (sub && sub.documentElement) {
+        if (!path || path.split(".").length < 2) docs.push([sub, (path ? path + "." : "") + k]);
+      } else if (/^https?:/i.test(u)) {
+        var fr = P.rect.call(f), fs = P.gcs(f);
+        if (fr.width >= 20 && fr.height >= 20 && fs.visibility !== "hidden" && fs.display !== "none") out.unreached.push(u.slice(0, 500));
+      }
+    }
   }
-  var frames = P.qsa.call(document, "iframe,frame");
-  for (var k = 0; k < frames.length && k < 20; k++) {
-    var u = "";
-    try { u = String(frames[k].contentWindow.location.href); } catch (e) { u = ""; }
-    if (!u || u === "about:blank") u = String(frames[k].src || "");
-    if (u) out.frames.push(u.slice(0, 500));
+  for (var di = 0; di < docs.length; di++) {
+    var D = docs[di][0], nodes = P.qsa.call(D, SEL), counts = {};
+    for (var i = 0; i < nodes.length && i < 4000; i++) {
+      var d = lookAt(nodes[i], counts);
+      if (!d.el) { out.skipped += d.skip; continue; }
+      var key = d.el.kind + "|" + d.el.label;
+      counts[key] = (counts[key] || 0) + 1;
+      if (out.elements.length >= 400) { out.skipped += 1; continue; }
+      d.el.at = i;
+      if (docs[di][1]) d.el.frame = docs[di][1];
+      out.elements.push(d.el);
+    }
+    if (di > 0 && D.body) out.text += "\n\n[frame " + cap(D.URL, 200) + "]\n" + String(D.body.innerText || "").slice(0, 20000);
   }
   return P.json(out);
 })()"""
@@ -432,9 +500,12 @@ def act_script(spec: dict[str, Any]) -> str:
     """The script that does, or prepares, one :class:`Act`, given its *spec* as plain data.
 
     It does nothing, and says why, unless the page is the one that was read:
-    the same address in the same document, and at ``at`` the same element (its
-    fingerprint, kind, label, address and the address its form is sent to, and
-    for a text box the same field attributes).
+    the same address in the same document, and at ``at`` (in the frame
+    ``frame`` of the same site) the same element (its fingerprint, kind, label,
+    address and the address its form is sent to, and for a text box the same
+    field attributes). With ``point`` the element must also be what is at that
+    point of the view (``at`` -1: a drawing or a frame from another site,
+    known by its place only), and the view must not have scrolled.
 
     ``mode`` says what it does once that holds:
 
@@ -448,9 +519,10 @@ def act_script(spec: dict[str, Any]) -> str:
       covers its middle and describes it (tag, role, text, label, name, id), so
       melo can find it in the browser's own reading of the page.
     - ``arm`` keeps the same guards up while the browser itself acts on the
-      node melo found (``uid``): also, until the first look after the act, a
-      real press, click or keystroke that lands on another element is stopped
-      (``moved``).
+      node melo found (``uid``), or at the point: also, until
+      the first look after the act, a real press, click or keystroke that lands
+      on another element is stopped (``moved``). With a ``point`` the place is
+      shown by a short-lived ring that takes no clicks.
 
     With ``key``, an observer set before the act keeps what the page shows new
     and the element's state for :data:`SETTLE_JS` and :data:`DISARM_JS`, which
@@ -467,12 +539,27 @@ def act_script(spec: dict[str, Any]) -> str:
   var blocked = [], seen = {__proto__: null}, undo = [];
   if (location.href !== spec.url) return say({ok: false, stale: "page"});
   if (docId() !== spec.doc) return say({ok: false, stale: "doc"});
-  var nodes = P.qsa.call(document, SEL), n = nodes[spec.at], counts = {};
-  for (var j = 0; j < spec.at && j < nodes.length; j++) {  // which of its label this one is
-    var before = lookAt(nodes[j]).el;
-    if (before) { var key = before.kind + "|" + before.label; counts[key] = (counts[key] || 0) + 1; }
+  var pt = spec.point || null;
+  if (pt && (Math.abs(window.scrollX - pt.sx) > 2 || Math.abs(window.scrollY - pt.sy) > 2)) return say({ok: false, stale: "scrolled"});
+  var D = docAt(spec.frame || ""), n = null, counts = {};
+  if (spec.at >= 0) {
+    if (!D) return say({ok: false, stale: "gone"});
+    var nodes = P.qsa.call(D, SEL);
+    n = nodes[spec.at];
+    for (var j = 0; j < spec.at && j < nodes.length; j++) {  // which of its label this one is
+      var before = lookAt(nodes[j]).el;
+      if (before) { var key = before.kind + "|" + before.label; counts[key] = (counts[key] || 0) + 1; }
+    }
   }
+  var hit = null;
+  if (pt) {
+    hit = hitAt(pt.x, pt.y);
+    if (spec.at >= 0 ? hit.node !== n : !hit.node || fingerprint(hit.node, 0) + frameMark(hit.node) !== spec.fp) return say({ok: false, stale: "point"});
+    if (spec.at < 0) { n = hit.node; D = hit.doc; }
+  }
+  var W = (D && D.defaultView) || window;
   var same = function () {
+    if (spec.at < 0) return n && n.isConnected && fingerprint(n, 0) + frameMark(n) === spec.fp ? "" : "gone";
     var d = n ? lookAt(n, counts) : {}, el = d.el;
     if (!el || el.fp !== spec.fp || el.kind !== spec.kind || el.label !== spec.label || (el.href || "") !== spec.href) return "gone";
     if ((el.submit || "") !== spec.submit) return "dest";
@@ -487,7 +574,7 @@ def act_script(spec: dict[str, Any]) -> str:
   if (why) return say({ok: false, stale: why});
   var mode = spec.mode || "script";
   var setValue = function (v) {
-    Object.getOwnPropertyDescriptor(n.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, "value").set.call(n, v);
+    Object.getOwnPropertyDescriptor(n.tagName === "TEXTAREA" ? W.HTMLTextAreaElement.prototype : W.HTMLInputElement.prototype, "value").set.call(n, v);
   };
   var pick = function () {  // the one option the words name, or the count of those they fit
     var want = String(spec.text).trim().toLowerCase(), opts = Array.prototype.slice.call(n.options || []);
@@ -497,7 +584,7 @@ def act_script(spec: dict[str, Any]) -> str:
   };
   if (mode === "scroll") {
     n.scrollIntoView({block: "center", inline: "center"});
-    var r = P.rect.call(n), top = P.efp ? P.efp.call(document, r.left + r.width / 2, r.top + r.height / 2) : n;
+    var r = P.rect.call(n), top = D && P.efp ? P.efp.call(D, r.left + r.width / 2, r.top + r.height / 2) : n;
     var tag = n.tagName.toLowerCase();
     return say({ok: true, covered: !within(n, top), tag: tag, role: attr(n, "role").toLowerCase(),
       text: cap(tag === "input" ? "" : n.innerText || n.textContent, 200), value: tag === "input" && /^(submit|button|reset)$/.test(attr(n, "type").toLowerCase()) ? cap(n.value, 120) : "",
@@ -510,6 +597,7 @@ def act_script(spec: dict[str, Any]) -> str:
     if (typeof option === "number") return say({ok: false, option: option});
   }
   var wins = [window];
+  if (W !== window) wins.push(W);
   var listen = function (target, type, fn, capture, list) {
     P.add.call(target, type, fn, capture);
     (list || undo).push(function () { P.rm.call(target, type, fn, capture); });
@@ -548,7 +636,10 @@ def act_script(spec: dict[str, Any]) -> str:
   // Until the first look after the browser's own act: a real press, click or keystroke
   // must land on the element that was checked, or it is stopped.
   var held = [];
-  var inZone = function (t) { return within(n, t); };
+  var zone = [n];  // where a real input may land: the element, and what is at a point
+  if (hit && hit.raw) zone.push(hit.raw);
+  if (hit && hit.label) zone.push(hit.label);
+  var inZone = function (t) { return zone.some(function (z) { return within(z, t); }); };
   var contain = function () {
     var on = function (e) {
       if (inZone(e.target)) { seen[e.type] = (seen[e.type] || 0) + 1; return; }
@@ -561,28 +652,50 @@ def act_script(spec: dict[str, Any]) -> str:
     var count = function (e) { if (inZone(e.target)) seen[e.type] = (seen[e.type] || 0) + 1; };
     wins.forEach(function (w) { listen(w, "input", count, true); listen(w, "change", count, true); });
   };
+  var ring = null;
+  var mark = function () {
+    try {
+      ring = document.createElement("div");
+      ring.setAttribute("aria-hidden", "true");
+      ring.setAttribute("style", "position:fixed;left:" + (pt.x - 14) + "px;top:" + (pt.y - 14) + "px;width:28px;height:28px;box-sizing:border-box;" +
+        "border:3px solid #ff3b30;border-radius:50%;background:rgba(255,59,48,.2);box-shadow:0 0 0 2px #fff;pointer-events:none;z-index:2147483647");
+      (document.body || document.documentElement).appendChild(ring);
+      undo.push(function () { if (ring.parentNode) ring.parentNode.removeChild(ring); });
+    } catch (e) { ring = null; }
+  };
   // What the page shows new from now on, and the element's state before.
   var watch = function () {
     var s0 = P.json(stateOf(n)), before = {__proto__: null}, texts = [], count = 0, last = Date.now(), done = false;
-    linesOf(document.body, [], 5000).forEach(function (t) { before[t] = 1; });
+    [document, D].forEach(function (d, i) {
+      if (d && !(i && d === document)) linesOf(d.body, [], 5000).forEach(function (t) { before[t] = 1; });
+    });
     var take = function (el) {
-      if (!el || el.nodeType !== 1 || texts.length >= 8) return;
+      if (!el || el.nodeType !== 1 || texts.length >= 8 || (ring && within(ring, el))) return;
       if (String(el.textContent || "").length > 20000 || !el.getClientRects().length) return;
       linesOf(el, [], 50).forEach(function (t) { if (!before[t] && texts.indexOf(t) < 0 && texts.length < 8) texts.push(t); });
+    };
+    var mine = function (r) {
+      if (!ring) return false;
+      var touches = function (list) { return Array.prototype.indexOf.call(list || [], ring) >= 0; };
+      return within(ring, r.target) || touches(r.addedNodes) || touches(r.removedNodes);
     };
     var MO = window.MutationObserver;
     if (MO) {
       var mo = new MO(function (records) {
+        var theirs = false;
         for (var i = 0; i < records.length && i < 300; i++) {
           var r = records[i];
+          if (mine(r)) continue;
+          theirs = true;
           if (r.type === "childList") {
             for (var a = 0; a < r.addedNodes.length && a < 50; a++) { var x = r.addedNodes[a]; take(x.nodeType === 1 ? x : x.parentElement); }
           } else take(r.type === "characterData" ? r.target.parentElement : r.target);
         }
-        count++; last = Date.now();
+        if (theirs) { count++; last = Date.now(); }
       });
       var opts = {subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["class", "style", "hidden", "open", "aria-hidden"]};
       mo.observe(document, opts);
+      if (D && D !== document) mo.observe(D, opts);
       undo.push(function () { mo.disconnect(); });
     }
     var finish = function () {
@@ -609,6 +722,7 @@ def act_script(spec: dict[str, Any]) -> str:
   };
   if (mode === "arm") {
     try {
+      if (pt) mark();
       guard();
       contain();
       watch();
@@ -616,7 +730,7 @@ def act_script(spec: dict[str, Any]) -> str:
       unguard(held); unguard(undo);
       return say({ok: false, stale: "frame"});
     }
-    return say({ok: true, option: option ? cap(option.text, 60) : ""});
+    return say({ok: true, option: option ? cap(option.text, 60) : "", frame: !!(hit && hit.surface === "frame")});
   }
   // The page-script act: its guards hold while it runs; the observer stays for the look after.
   var done = function (o) { blocked.length && (o.blocked = blocked.slice()); return say(o); };
@@ -625,19 +739,24 @@ def act_script(spec: dict[str, Any]) -> str:
     return done({ok: false, stale: stale});
   };
   var fire = function (type) { P.dispatch.call(n, new Event(type, {bubbles: true})); };
-  var mouse = function (type) { P.dispatch.call(n, new MouseEvent(type, {bubbles: true, cancelable: true, view: window})); };
+  var mouse = function (type) {
+    var o = {bubbles: true, cancelable: true, view: W};
+    if (hit) { o.clientX = hit.x; o.clientY = hit.y; }
+    P.dispatch.call(n, new MouseEvent(type, o));
+  };
   var temp = [];
   try {
-    if (spec.key) watch();
+    if (spec.key) { if (pt) mark(); watch(); }
     temp = undo; undo = [];
     guard();
-    n.scrollIntoView({block: "center", inline: "center"});
+    if (!pt) n.scrollIntoView({block: "center", inline: "center"});
     if (spec.act === "click") {
+      if (hit && hit.surface === "frame") return done({ok: false, stale: "reach"});
       if (n.tagName === "A" || n.tagName === "AREA") P.ra.call(n, "ping");
       mouse("mousedown"); mouse("mouseup");
       var moved = same();  // a handler of the press may have changed where this goes
       if (moved) return done({ok: false, stale: moved === "gone" ? "dest" : moved});
-      if (n instanceof HTMLElement) P.click.call(n);
+      if (n instanceof W.HTMLElement && !hit) P.click.call(n);
       else mouse("click");
     } else if (spec.act === "type") {
       n.focus();
@@ -683,6 +802,90 @@ DISARM_JS = r"""(function (disarm) {
   var S = window[disarm.key];
   return S ? S.finish() : '{"lost":true}';
 })(%s)"""
+
+
+def hit_script(spec: dict[str, Any]) -> str:
+    """The script that says what is at a point of the view (``x``, ``y`` in page pixels).
+
+    It answers only on the page that was pictured (``url``, ``doc``) and when
+    the view has not scrolled since (``sx``, ``sy``). The answer is the
+    element the point resolves to, as :data:`PAGE_JS` lists elements (with its
+    place ``at`` and ``frame``), or a surface known by its place only, and the
+    words around it, which melo checks for consent and terms.
+    """
+    return r"""(function (at) {""" + COMMON_JS + r"""
+  var spec = at;
+  if (!P) return JSON.stringify({stale: "frame"});
+  if (location.href !== spec.url) return P.json({stale: "page"});
+  if (docId() !== spec.doc) return P.json({stale: "doc"});
+  if (Math.abs(window.scrollX - spec.sx) > 2 || Math.abs(window.scrollY - spec.sy) > 2) return P.json({stale: "scrolled"});
+  var h = hitAt(spec.x, spec.y), out = {surface: h.surface};
+  if (!h.node) return P.json(out);
+  if (h.surface === "frame") {
+    var u = "";
+    try { u = String(h.node.src || ""); } catch (e) { u = ""; }
+    out.site = u.slice(0, 500);
+    out.el = {kind: "button", label: cap(attr(h.node, "title") || attr(h.node, "aria-label") || attr(h.node, "name"), 120), fp: fingerprint(h.node, 0) + frameMark(h.node)};
+    return P.json(out);
+  }
+  var nodes = P.qsa.call(h.doc, SEL), at = Array.prototype.indexOf.call(nodes, h.node), counts = {};
+  for (var j = 0; at > 0 && j < at; j++) {
+    var b = lookAt(nodes[j]).el;
+    if (b) { var key = b.kind + "|" + b.label; counts[key] = (counts[key] || 0) + 1; }
+  }
+  var d = at >= 0 ? lookAt(h.node, counts) : {}, el = d.el;
+  if (el && h.surface === "control") {
+    el.at = at;
+    if (h.path) el.frame = h.path;
+    if (h.label && !h.path) {
+      // A label hit moves to its field, when the field itself is there to click.
+      var r = P.rect.call(h.node), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      if (r.width > 0 && r.height > 0 && within(h.node, P.efp.call(document, cx, cy))) { out.x = cx; out.y = cy; }
+    }
+  } else {
+    var t = h.node;
+    out.surface = h.surface === "control" ? "control" : h.surface;
+    el = {kind: "button", label: cap(attr(t, "aria-label") || attr(t, "title") || attr(t, "alt") || t.innerText || t.textContent, 120), at: -1, fp: fingerprint(t, 0) + frameMark(t)};
+    if (h.path) el.frame = h.path;
+  }
+  var row = P.closest.call(h.node, "label,tr,li,p,fieldset,[role=row],[role=listitem],[role=dialog]");
+  out.words = cap([el.label, el.also, el.attrs ? el.attrs.words : "", row ? row.innerText || row.textContent : ""].join(" "), 400);
+  out.el = el;
+  return P.json(out);
+})(""" + _data(spec) + ")"
+
+
+# The view a picture shows: the page and how far it is scrolled, in page pixels.
+VIEW_JS = r"""(function (view) {
+  return JSON.stringify({url: location.href, doc: String(performance.timeOrigin), w: window.innerWidth, h: window.innerHeight,
+    x: window.scrollX, y: window.scrollY, dpr: window.devicePixelRatio || 1});
+})(0)"""
+
+
+def mark_script(ring: str, view: View, x: float, y: float, on: bool) -> str:
+    """Show (*on*) or take away the ring *ring* at (*x*, *y*) for a picture, only on the page and view *view*."""
+    spec = {
+        "id": ring,
+        "doc": view.doc,
+        "sx": view.x,
+        "sy": view.y,
+        "x": x,
+        "y": y,
+        "on": on,
+    }
+    return r"""(function (mark) {
+  var old = document.getElementById(mark.id);
+  if (old && old.parentNode) old.parentNode.removeChild(old);
+  if (!mark.on || String(performance.timeOrigin) !== mark.doc) return false;
+  if (Math.abs(window.scrollX - mark.sx) > 2 || Math.abs(window.scrollY - mark.sy) > 2) return false;
+  var ring = document.createElement("div");
+  ring.id = mark.id;
+  ring.setAttribute("aria-hidden", "true");
+  ring.setAttribute("style", "position:fixed;left:" + (mark.x - 14) + "px;top:" + (mark.y - 14) + "px;width:28px;height:28px;box-sizing:border-box;" +
+    "border:3px solid #ff3b30;border-radius:50%;background:rgba(255,59,48,.2);box-shadow:0 0 0 2px #fff;pointer-events:none;z-index:2147483647");
+  (document.body || document.documentElement).appendChild(ring);
+  return true;
+})(""" + _data(spec) + ")"
 
 
 FOCUS_JS = r"""(function () {
@@ -783,6 +986,7 @@ def _element(item: Any) -> Element | None:
         at=place if isinstance(place, int) else -1,
         fp=str(item.get("fp") or ""),
         form=fields.form_pairs(rows) if isinstance(rows, list) else (),
+        frame=str(item.get("frame") or ""),
         plain=item.get("plain") is True,
     )
 
@@ -841,6 +1045,7 @@ class SafariAutomationDriver:
         self._shots: str | None = (
             None  # melo's private folder for the files Safari saves for it
         )
+        self._ring = f"melo-ring-{uuid.uuid4().hex[:12]}"
 
     @property
     def tool_names(self) -> list[str]:
@@ -1072,6 +1277,21 @@ class SafariAutomationDriver:
             )
         elements = [e for e in map(_element, data.get("elements") or []) if e]
         skipped, frames = data.get("skipped"), data.get("frames")
+        unreached = data.get("unreached")
+        boxes = (
+            tuple(dict.fromkeys(str(f) for f in unreached))[:10]
+            if isinstance(unreached, list)
+            else ()
+        )
+        if boxes and self._has("content"):
+            # A frame from another site: its controls as the browser's own reading
+            # names them, acted on by that reading's node ids.
+            reached = foreign_elements(
+                await self._nodes("entire_page", frames=True), boxes
+            )
+            elements += reached
+            got = {e.site for e in reached}
+            boxes = tuple(b for b in boxes if sites_origin(b) not in got)
         return RawPage(
             url,
             str(data.get("title") or ""),
@@ -1080,6 +1300,7 @@ class SafariAutomationDriver:
             skipped=skipped if isinstance(skipped, int) and skipped > 0 else 0,
             doc=str(data.get("doc") or ""),
             frames=tuple(str(f) for f in frames) if isinstance(frames, list) else (),
+            unreached=boxes,
         )
 
     async def back(self, tab: str | None) -> TabInfo:
@@ -1134,12 +1355,19 @@ class SafariAutomationDriver:
                 return False
             await asyncio.sleep(POLL_S)
 
-    async def screenshot(self, tab: str | None) -> Shot:
+    async def screenshot(
+        self, tab: str | None, mark: tuple[View, float, float] | None = None
+    ) -> Shot:
         await self._focus(tab)
         if await self._eval(FOCUS_JS) is True:
             raise BrowserError(
                 "A password, code or card field has focus, so melo took no picture."
             )
+        view = _view(await self._eval(VIEW_JS))
+        ring = False
+        if mark is not None and view is not None:
+            with contextlib.suppress(BrowserError):
+                ring = await self._eval(mark_script(self._ring, *mark, on=True)) is True
         # Safari saves the picture to a file and answers with text only. melo
         # names the file, in a folder only it can enter, reads that path and
         # never one it finds in the reply, and deletes the file whatever happens.
@@ -1147,17 +1375,45 @@ class SafariAutomationDriver:
         try:
             out = await self._call("shot", save_path=path)
             if out.images:
-                return Shot(out.images[0].mime_type, out.images[0].data)
-            return _read_picture(path)
+                return Shot(out.images[0].mime_type, out.images[0].data, view)
+            picture = _read_picture(path)
+            return Shot(picture.mime_type, picture.data, view)
         finally:
             with contextlib.suppress(OSError):
                 os.unlink(path)  # a link is removed, never followed
+            if ring and mark is not None:
+                with contextlib.suppress(BrowserError):
+                    await self._eval(mark_script(self._ring, *mark, on=False))
 
     def _folder(self) -> str:
         """melo's private folder for the files Safari saves for it (mode 0700)."""
         if self._shots is None:
             self._shots = tempfile.mkdtemp(prefix="melo-safari-")
         return self._shots
+
+    async def hit(self, tab: str | None, view: View, x: float, y: float) -> PointHit:
+        await self._focus(tab)
+        spec = {"url": view.url, "doc": view.doc, "sx": view.x, "sy": view.y}
+        data = await self._eval(hit_script({**spec, "x": x, "y": y}))
+        if not isinstance(data, dict):
+            raise BrowserError("Safari returned an answer melo could not read.")
+        if data.get("stale"):
+            why = str(data["stale"])
+            raise StaleElementError(_STALE.get(why, _STALE["gone"]), why)
+        surface = data.get("surface")
+        if surface not in ("control", "canvas", "frame"):
+            return PointHit("none")
+        item = _element(data.get("el"))
+        site = str(data.get("site") or "") if surface == "frame" else ""
+        mx, my = data.get("x"), data.get("y")
+        moved = isinstance(mx, int | float) and isinstance(my, int | float)
+        return PointHit(
+            cast(Any, surface),
+            item,
+            site=site,
+            consent=fields.consent(str(data.get("words") or "")),
+            at=(_number(mx), _number(my)) if moved else None,
+        )
 
     async def blank(self, tab: str | None) -> None:
         """Leave the page in *tab* for an empty one, in its place in the history.
@@ -1195,7 +1451,7 @@ class SafariAutomationDriver:
         one the browser names: the page script checks the element as it was
         read, brings it into view and finds its node id among those the
         browser's own reading of the view gives (``get_page_content``), keeps
-        its guards up, and then the browser acts on that node.
+        its guards up, and then the browser acts on that node, or at the point.
         When the browser cannot act (no such tool, no node id, another element
         covering it) or its input did not reach the element, the page script
         acts instead and the result says why. After either way melo looks at
@@ -1206,6 +1462,8 @@ class SafariAutomationDriver:
                 f"melo types at most {MAX_TYPED_CHARS} characters at a time."
             )
         await self._focus(tab)
+        if act.element.frame.startswith("x"):
+            return await self._foreign_act(act)
         spec = _spec(act)
         done = await self._native(spec, act)
         if isinstance(done, ActResult):
@@ -1233,14 +1491,18 @@ class SafariAutomationDriver:
         """The act by the browser's own input; else why not."""
         if not self._has("interact"):
             return _PASSED["tool"]
-        if not self._has("content"):
-            return _PASSED["tool"]
-        ready = await self._script(act_script({**spec, "mode": "scroll"}))
-        if ready.get("covered") is True:
-            return _PASSED["covered"]
-        uid = bind(ready, await self._nodes())
-        if not uid:
-            return _PASSED["name"]
+        uid = ""
+        if act.point is None:
+            if act.element.frame:
+                return _PASSED["frame"]
+            if not self._has("content"):
+                return _PASSED["tool"]
+            ready = await self._script(act_script({**spec, "mode": "scroll"}))
+            if ready.get("covered") is True:
+                return _PASSED["covered"]
+            uid = bind(ready, await self._nodes())
+            if not uid:
+                return _PASSED["name"]
         key = _key()
         armed = await self._script(
             act_script({**spec, "mode": "arm", "key": key, "uid": uid})
@@ -1261,10 +1523,17 @@ class SafariAutomationDriver:
         blocked = [str(k) for k in data.get("blocked") or []]
         if "moved" in blocked:
             raise BrowserError(_MOVED)
-        if not _reached(act, data):
+        if not _reached(act, data, frame=armed.get("frame") is True):
+            if act.point is not None and armed.get("frame") is True:
+                raise BrowserError(_STALE["reach"])
             return _PASSED["missed"]
         self._check_typed(act, data)
-        return ActResult(_stopped(blocked), "browser", "", _changes(data, quiet))
+        return ActResult(
+            _stopped(blocked),
+            "point" if act.point is not None else "browser",
+            "",
+            _changes(data, quiet),
+        )
 
     async def _scripted(self, spec: dict[str, Any], act: Act, passed: str) -> ActResult:
         """The act by the page script, with the look after it."""
@@ -1285,22 +1554,57 @@ class SafariAutomationDriver:
         ]
         return ActResult(
             _stopped(blocked),
-            "page-script",
+            "point" if act.point is not None else "page-script",
             passed,
             _changes(data, quiet),
         )
+
+    async def _foreign_act(self, act: Act) -> ActResult:
+        """An act on a control in a frame from another site, by the browser's own input.
+
+        No page script reaches into that frame, so the checks are the
+        browser's: the node must still be in its reading with the same tag and
+        words, and the browser acts on it. melo asked the person first.
+        """
+        if not self._has("interact") or not self._has("content"):
+            raise BrowserError(_STALE["reach"])
+        if await self._address(None) != act.url:
+            raise StaleElementError(_STALE["page"], "page")
+        uid = act.element.frame[1:]
+        now = foreign_elements(
+            await self._nodes("entire_page", frames=True), (act.element.site,)
+        )
+        if not any(e.frame == act.element.frame and e == act.element for e in now):
+            raise StaleElementError(_STALE["gone"], "gone")
+        try:
+            await self._call_with(
+                "interact", {"interactions": [_interaction(act, uid, {})]}
+            )
+        except BrowserSetupError:
+            raise
+        except BrowserError as exc:
+            if "stale" in str(exc).lower():
+                raise StaleElementError(_STALE["gone"], "gone") from None
+            raise
+        await asyncio.sleep(QUIET_S)
+        with contextlib.suppress(BrowserError):
+            await self._ready()
+        return ActResult(via="browser")
 
     @staticmethod
     def _check_typed(act: Act, data: dict[str, Any]) -> None:
         if act.kind == "type" and data.get("stale") in ("field", "grew"):
             raise StaleElementError(_STALE["grew"], "grew")
 
-    async def _nodes(self) -> list[Node]:
-        """The nodes the browser itself names in the view (its own reading of the page), in order.
+    async def _nodes(
+        self, region: str = "viewport", frames: bool = False
+    ) -> list[Node]:
+        """The nodes the browser itself names in *region* (its own reading of the page), in order.
 
-        The reading goes to a file melo names in its private folder (a long one
-        would otherwise land in a file the server picks); only the node lines are
-        taken from it.
+        With *frames* the reading goes into frames from other sites too (their
+        nodes have ids like ``2_1_90``). The reading goes to a file melo names in
+        its private folder (a long one would otherwise land in a file the server
+        picks); only the node lines are taken from it.
         """
         path = os.path.join(self._folder(), f"{uuid.uuid4().hex}.txt")
         try:
@@ -1309,7 +1613,8 @@ class SafariAutomationDriver:
                 {
                     "format": "textTree",
                     "nodeIds": "interactive",
-                    "region": "viewport",
+                    "region": region,
+                    "includeSubframes": frames,
                     "includeURLs": False,
                     "maxWordsPerParagraph": 40,
                     "savePath": path,
@@ -1428,6 +1733,97 @@ def parse_nodes(reply: str) -> list[Node]:
     return nodes
 
 
+_TEXT_TYPES = frozenset({"text", "email", "search", "tel", "url"})
+
+
+def sites_origin(url: str) -> str:
+    """``scheme://host[:port]`` of *url* in lower case, or ``""``."""
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return ""
+    return (
+        f"{parts.scheme}://{parts.netloc}".lower()
+        if parts.scheme and parts.netloc
+        else ""
+    )
+
+
+def foreign_elements(nodes: list[Node], boxes: tuple[str, ...]) -> list[Element]:
+    """The controls the browser's reading names inside frames from the sites of *boxes*.
+
+    A frame line says ``origin=host:port``; its controls are the deeper lines
+    after it, with ids like ``2_1_90``. A field is a text box only when the
+    reading names its type as plain text and no rule takes it for a secret;
+    any other field counts as a secret one. At most 20 a frame.
+    """
+    known = {
+        urlsplit(b).netloc.lower(): sites_origin(b) for b in boxes if sites_origin(b)
+    }
+    out: list[Element] = []
+    frame: tuple[int, str] | None = None
+    count = 0
+    for node in nodes:
+        if frame is not None and node.depth <= frame[0]:
+            frame = None
+        if node.tag == "iframe":
+            site = known.get(node.attrs.get("origin", "").lower(), "")
+            frame, count = ((node.depth, site), 0) if site else (None, 0)
+            continue
+        if frame is None or "_" not in node.uid or count >= 20:
+            continue
+        item = _foreign(node, frame[1])
+        if item is not None:
+            out.append(item)
+            count += 1
+    return out
+
+
+def _foreign(node: Node, site: str) -> Element | None:
+    """One control of a frame from another site, as an element melo lists; None for anything else."""
+    words = " ".join(
+        node.attrs.get(k, "")
+        for k in ("label", "name", "id", "placeholder", "aria-label")
+    ).strip()
+    label = (node.attrs.get("label") or node.attrs.get("aria-label") or "").strip()
+
+    def made(
+        kind: ElementKind,
+        name: str,
+        sensitive: Sensitive = "",
+        attrs: FieldAttrs | None = None,
+    ) -> Element:
+        return Element(
+            kind,
+            name,
+            sensitive=sensitive,
+            attrs=attrs,
+            frame="x" + node.uid,
+            site=site,
+            fp="uid:" + node.uid,
+        )
+
+    if node.tag in ("input", "textarea"):
+        kind = node.attrs.get("type", "text" if node.tag == "textarea" else "").lower()
+        if kind in ("checkbox", "radio"):
+            return made("checkbox", label or node.text)
+        if kind in ("submit", "button"):
+            return made("button", node.text or label)
+        attrs = FieldAttrs(type=kind or "unknown", words=words)
+        plain_text = kind in _TEXT_TYPES or node.tag == "textarea"
+        secret = fields.sensitive_kind(attrs) or ("" if plain_text else "password")
+        if secret:
+            return made("textbox", "", sensitive=secret)
+        return made("textbox", label or node.attrs.get("placeholder", ""), attrs=attrs)
+    if node.tag in ("button", "a", "link") or node.attrs.get("role") in (
+        "button",
+        "link",
+    ):
+        name = node.text or label
+        return made("button", name) if name else None
+    return None
+
+
 def _plain(words: Any) -> str:
     return " ".join(str(words or "").split()).lower()
 
@@ -1501,6 +1897,7 @@ def _spec(act: Act) -> dict[str, Any]:
         "text": act.text,
         "enter": act.enter,
         "send": act.send,
+        "frame": item.frame,
     }
     if item.attrs is not None:
         spec["attrs"] = {
@@ -1511,11 +1908,28 @@ def _spec(act: Act) -> dict[str, Any]:
             "maxlength": item.attrs.maxlength,
             "masked": item.attrs.masked,
         }
+    if act.point is not None and act.view is not None:
+        spec["point"] = {
+            "x": act.point[0],
+            "y": act.point[1],
+            "sx": act.view.x,
+            "sy": act.view.y,
+        }
     return spec
 
 
 def _interaction(act: Act, uid: str, armed: dict[str, Any]) -> dict[str, Any]:
-    """The one ``page_interactions`` step that does *act* on node *uid*."""
+    """The one ``page_interactions`` step that does *act* on node *uid* (or at its point)."""
+    if act.point is not None:
+        # Safari's helper reads a point as if the screen had two pixels to a page
+        # pixel: it is scaled by the screen's own ratio, so the click lands there.
+        ratio = (act.view.ratio if act.view is not None else 2.0) / 2.0
+        x, y = act.point
+        return {
+            "type": "click",
+            "point": {"x": round(x * ratio, 1), "y": round(y * ratio, 1)},
+            "purpose": "Click the checked point",
+        }
     if act.kind == "type":
         return {
             "type": "type",
@@ -1539,9 +1953,13 @@ def _number(value: Any) -> float:
     return float(value) if isinstance(value, int | float) else 0.0
 
 
-def _reached(act: Act, data: dict[str, Any]) -> bool:
-    """Whether the browser's own input shows on the page: events on the element, a change, a new document."""
-    if data.get("lost"):
+def _reached(act: Act, data: dict[str, Any], *, frame: bool = False) -> bool:
+    """Whether the browser's own input shows on the page: events on the element, a change, a new document.
+
+    A click inside a frame from another site leaves nothing melo can see, so
+    it counts as done.
+    """
+    if data.get("lost") or frame:
         return True
     seen = data.get("seen")
     seen = seen if isinstance(seen, dict) else {}
@@ -1614,6 +2032,25 @@ def _changes(data: dict[str, Any], quiet: bool) -> Changes | None:
     after = _decode(str(data.get("after") or ""))
     changed = _number(data.get("count")) > 0 or before != after
     return Changes(shown, _target_words(before, after), quiet, changed)
+
+
+def _view(data: Any) -> View | None:
+    """The view :data:`VIEW_JS` read, or None when it read nothing usable."""
+    if not isinstance(data, dict) or not isinstance(data.get("doc"), str):
+        return None
+    width, height = _number(data.get("w")), _number(data.get("h"))
+    if width <= 0 or height <= 0:
+        return None
+    ratio = _number(data.get("dpr"))
+    return View(
+        str(data.get("url") or ""),
+        data["doc"],
+        width,
+        height,
+        _number(data.get("x")),
+        _number(data.get("y")),
+        ratio if ratio > 0 else 2.0,
+    )
 
 
 def _read_text(path: str) -> str | None:
