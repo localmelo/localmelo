@@ -250,15 +250,17 @@ var contextOf = function (n) {
   var head = headingBefore(n);
   return head ? "h:" + cap(head.innerText || head.textContent, 80) : "";
 };
-// The text next to an element that is no control's own: that of the nearer of its two
-// closest containers holding some (a card's name, say), cut short.
+// The text next to an element that is no button's or field's own: that of the nearer of
+// its two closest containers holding some (a card's name, say, even when it is a link),
+// cut short.
+var LINKS = "a[href],[role=link]";
 var nearText = function (n) {
   for (var c = n.parentElement, i = 0; c && i < 2 && c !== document.body && c !== document.documentElement; c = c.parentElement, i++) {
     var out = [], stack = [c], seen = 0, size = 0;
     while (stack.length && seen < 120 && size < 120) {
       var x = stack.pop(); seen++;
       if (x.nodeType === 3) { var t = cap(x.nodeValue, 80); if (t) { out.push(t); size += t.length + 1; } continue; }
-      if (x.nodeType !== 1 || /^(SCRIPT|STYLE|TEMPLATE)$/.test(x.tagName) || (x !== c && P.matches.call(x, SEL))) continue;
+      if (x.nodeType !== 1 || /^(SCRIPT|STYLE|TEMPLATE)$/.test(x.tagName) || (x !== c && P.matches.call(x, SEL) && !P.matches.call(x, LINKS))) continue;
       for (var k = x.childNodes.length - 1; k >= 0; k--) stack.push(x.childNodes[k]);
     }
     if (out.length) return cap(out.join(" "), 120);

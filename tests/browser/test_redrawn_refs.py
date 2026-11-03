@@ -9,11 +9,17 @@ look-alike.
 from __future__ import annotations
 
 import dataclasses
+import json
+import shutil
+import subprocess
+from pathlib import Path
+from typing import Any
 
 import pytest
 
-from localmelo.support.browser.driver import Element, FieldAttrs
-from localmelo.tests.browser.fakes import button, link, page
+from localmelo.support.browser.driver import Element, FieldAttrs, StaleElementError
+from localmelo.support.browser.safari import PAGE_JS, _element
+from localmelo.tests.browser.fakes import FakeDriver, button, link, page
 from localmelo.tests.browser.test_acting import HOME, Asks, asking, world
 from localmelo.tests.browser.test_provider import run, tools_of
 
@@ -138,6 +144,102 @@ async def test_a_redrawn_element_under_another_heading_stays_stale() -> None:
     driver = world(at("Archive"))
     elsewhere = MOODS.replace("Pick a mood", "Shared with me")
     driver.redraw["Archive"] = page(HOME, "Welcome.", at("Archive", elsewhere))
+    tools = await tools_of(driver)
+    await run(tools, "browser_open", url=HOME)
+    out = await run(tools, "browser_click", ref="e1")
+    assert out.is_error and not driver.acts
+
+
+JS = Path(__file__).with_name("js")
+needs_jsdom = pytest.mark.skipif(
+    shutil.which("node") is None or not (JS / "node_modules" / "jsdom").is_dir(),
+    reason="needs node and jsdom (npm ci --prefix tests/browser/js)",
+)
+
+
+def read_in_js(*pages: str) -> list[tuple[Element, ...]]:
+    """The elements melo's page script reads on each page, run in jsdom."""
+    ran = subprocess.run(
+        ["node", str(JS / "read_pages.mjs")],
+        input=json.dumps({"script": PAGE_JS, "pages": list(pages)}),
+        cwd=JS,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert ran.returncode == 0, ran.stderr
+    return [
+        tuple(e for e in map(_element, reading["elements"]) if e)
+        for reading in json.loads(ran.stdout)
+    ]
+
+
+def card(title: str, record: str) -> str:
+    """A record's card: its title is a link, its Share sends a hidden id to one address."""
+    return (
+        f'<div class="card"><a href="/records/{record}">{title}</a>'
+        '<form action="/share" method="post">'
+        f'<input type="hidden" name="id" value="{record}"><button>Share</button>'
+        "</form></div>"
+    )
+
+
+def records(*cards: str) -> str:
+    return "<main><h2>Shared with me</h2>" + "".join(cards) + "</main>"
+
+
+@needs_jsdom
+async def test_a_card_whose_linked_title_changed_is_another_record() -> None:
+    """Record A goes and record B is drawn in its place, in the same document."""
+    a, b, a_again = read_in_js(
+        records(card("Trip notes", "a")),
+        records(card("Tax papers", "b")),
+        records(card("Trip notes", "a")),
+    )
+    # The link titles are what tells the two apart: same address, same hidden field.
+    assert a[1].submit == b[1].submit and a[1].form == b[1].form
+    assert a[1].context != b[1].context
+    for redrawn, recovered in ((b, False), (a_again, True)):
+        driver = world(*a)
+        driver.redraw["Share"] = page(HOME, "Records.", *redrawn)
+        tools = await tools_of(driver)
+        with asking(Asks()):
+            await run(tools, "browser_open", url=HOME)
+            out = await run(tools, "browser_click", ref="e2")
+        if recovered:  # the same record, redrawn: found again
+            assert not out.is_error and "is the one element like it now" in out.text
+            assert [x.element.label for x in driver.acts] == ["Share"]
+        else:
+            assert out.is_error and not driver.acts, out.text
+
+
+async def test_a_ref_is_never_carried_over_to_a_reloaded_page() -> None:
+    """A reload at the same address is another document: stale, even when the one there looks the same."""
+    first = at("Share", submit=HOME + "share")
+    driver = world(first)
+    tools = await tools_of(driver)
+    await run(tools, "browser_open", url=HOME)
+    driver.docs["t1"] = "d2"  # reloaded, and now shows another record's card
+    reloaded = page(HOME, "Records.", at("Share", submit=HOME + "share"))
+    driver.pages[HOME] = dataclasses.replace(reloaded, doc="d2")
+    out = await run(tools, "browser_click", ref="e1")
+    assert out.is_error and "reloaded" in out.text and not driver.acts
+
+
+class ReloadsWhenRead(FakeDriver):
+    """The element is gone as it was read, and by the time melo reads again the page reloaded."""
+
+    async def act(self, tab: str | None, act: Any) -> Any:
+        try:
+            return await super().act(tab, act)
+        except StaleElementError:
+            self.docs["t1"] = "d2"
+            raise
+
+
+async def test_a_redraw_whose_new_reading_is_another_document_stays_stale() -> None:
+    driver = ReloadsWhenRead(page(HOME, "Records.", at("Share")))
+    driver.redraw["Share"] = page(HOME, "Records.", at("Share"))
     tools = await tools_of(driver)
     await run(tools, "browser_open", url=HOME)
     out = await run(tools, "browser_click", ref="e1")

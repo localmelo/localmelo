@@ -853,9 +853,10 @@ class BrowserToolProvider(BaseToolProvider):
     ) -> tuple[render.Snapshot, str, Element] | None:
         """The one element like *item* in a new reading of a page that redrew itself, or None.
 
-        Only a page that redrew (the element is gone as it was read, or the page
-        was reloaded at the same address) is read again, and only on the site
-        the act was approved for. Like means the same kind, label, destination,
+        Only a page that redrew itself in the same document (the element is
+        gone as it was read) is read again, and only on the site the act was
+        approved for; after a reload or another document a ref stays stale,
+        and so does one whose new reading is another document already. Like means the same kind, label, destination,
         form address and form fields and, for a text box, the same field; where
         several are, a control by its tag or role wins over an element that only
         looks clickable. It must also belong where it did: the same row or
@@ -864,7 +865,7 @@ class BrowserToolProvider(BaseToolProvider):
         was approved on, so a "Delete" of another record is never taken for
         the one that went. Anything else stays stale.
         """
-        if stale.why not in ("gone", "doc") or not item.context:
+        if stale.why != "gone" or not item.context:
             return None
         twins = [
             e
@@ -874,8 +875,12 @@ class BrowserToolProvider(BaseToolProvider):
         if len(twins) != 1:
             return None
         fresh = await self._reading(TabInfo(tab_id), set())
-        if fresh.origin != snap.origin or not _same_page(fresh.url, snap.url):
-            return None
+        if (
+            fresh.origin != snap.origin
+            or fresh.doc != snap.doc
+            or not _same_page(fresh.url, snap.url)
+        ):
+            return None  # another document: a ref of the old one is never carried over
         like = [(r, e) for r, e in fresh.elements.items() if _like(e, item)]
         if len(like) > 1:
             like = [(r, e) for r, e in like if not e.plain]

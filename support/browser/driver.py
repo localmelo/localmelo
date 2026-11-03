@@ -265,8 +265,8 @@ class StaleElementError(BrowserError):
     ``why`` is the page script's word for it: ``page`` (another address),
     ``doc`` (reloaded), ``gone`` (no longer there as it was read), ``dest`` (it
     leads or sends elsewhere now), ``field``, ``grew`` or ``frame``. Only a
-    page that redrew itself (``gone``, ``doc`` on the same address) may have the
-    same element under another ref.
+    page that redrew itself in the same document (``gone``) may have the same
+    element under another ref.
     """
 
     def __init__(self, message: str, why: str = "") -> None:

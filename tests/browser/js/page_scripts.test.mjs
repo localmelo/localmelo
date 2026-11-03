@@ -561,6 +561,9 @@ test('where an element belongs: its row, its heading and the text next to it, fo
   const [first, second] = readPage(cards).elements;
   assert.match(first.context, /Record A/);
   assert.notEqual(first.context, second.context);
+  // A card's title that is a link counts as the text next to its button.
+  const linked = load('<h2>Records</h2><div><a href="/r/a">Trip notes</a><form action="/s"><button>Share</button></form></div>');
+  assert.match(byLabel(readPage(linked), 'Share').context, /Trip notes/);
 
   // A list that redraws itself (new elements, one more button) under the same heading.
   const moods = load('<main><h1>Pick a mood</h1><div id="m"><div><button>Happy</button><button>Calm</button></div></div></main>');
