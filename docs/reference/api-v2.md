@@ -1191,6 +1191,13 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 - `follow=false` sends the stored events after the start point, up to the
   newest event id the request read, and then ends the response; it is
   one-shot catch-up, and a turn that starts while it pages adds no frames.
+- `watch=true` says the client shows the chat to a person; the console, the
+  app and the terminal send it. While such a stream of a chat (or of a task,
+  or its chat) is open, a step Auto stops that the person may allow asks on
+  the chat's card. With none open, Auto blocks the step at once, as for a
+  script that reads the stream without `watch`. A card nobody answers within
+  1 minute, or whose last viewer is gone for 5 seconds, is declined:
+  `approval.resolved` with `outcome` `denied` and `origin` `timeout`.
 - The stream ends when the client disconnects, when the session no longer
   exists (a reconnect then gets 404), and when the gateway shuts down. A
   browser reconnects with `Last-Event-ID` and receives every event it

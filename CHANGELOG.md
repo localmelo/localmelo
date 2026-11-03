@@ -689,6 +689,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   a button your words name counts as asked for, so typing into the comment box you named is
   no longer stopped as sending data out. The review prompt grows by 156 characters. Part of
   #465.
+- In Auto, a card waits only while someone sees it: the web console, the macOS app or the
+  terminal with the chat open. With nobody watching (a script that sends messages over HTTP,
+  a terminal whose input is piped), the step is blocked at once, as before. A card nobody
+  answers within 1 minute, or one whose last viewer closes the chat, counts as **Deny**:
+  melo reads that you did not answer, does not ask about the step again in that turn, and the
+  step shows "declined: no answer". Benchmarks can turn the card off with the developer
+  setting `[approvals] auto_asks = false`. Part of #465.
 
 - A recalled chat turn now shows up to 900 characters by default, and the recall block holds
   up to 4000 (#349), where it showed 234 and 900. On a public long-memory benchmark, a model that

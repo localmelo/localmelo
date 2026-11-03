@@ -866,6 +866,10 @@ commands and file changes.
   site you did not ask for, **Allow for this chat**. melo reads what you
   chose and your note; after **Deny** it does not ask about that step again
   until your next message.
+- **Only while you watch.** The card waits only while the chat is open in the
+  console, the app or the terminal. With nobody watching, the step is blocked,
+  as before. A card nobody answers within 1 minute, or that you close the chat
+  on, counts as **Deny** and reads "declined: no answer".
 - **Allowed in this chat.** **Allow for this chat** on a site's card lets the
   same kind of step on that site (opening and reading it, or clicking and
   choosing on it) run for the rest of the chat. The chip's menu lists the
