@@ -52,6 +52,7 @@ class GeminiBackend(BaseBackend):
             model=cfg.gemini.chat_model,
             api_key=api_key,
             extra_body=hosted.request_body("gemini", cfg.gemini),
+            thinking_off_body=hosted.retry_body("gemini", cfg.gemini),
             timeout=cfg.request_timeout_s,
             reasoning_field=getattr(cfg.gemini, "reasoning_field", "") or None,
             requires_reasoning_replay=getattr(

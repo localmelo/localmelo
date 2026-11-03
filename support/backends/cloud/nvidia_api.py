@@ -52,6 +52,7 @@ class NvidiaBackend(BaseBackend):
             model=cfg.nvidia.chat_model,
             api_key=api_key,
             extra_body=hosted.request_body("nvidia", cfg.nvidia),
+            thinking_off_body=hosted.retry_body("nvidia", cfg.nvidia),
             timeout=cfg.request_timeout_s,
             reasoning_field=getattr(cfg.nvidia, "reasoning_field", "") or None,
             requires_reasoning_replay=getattr(

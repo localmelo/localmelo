@@ -5,11 +5,13 @@ import re
 import time
 from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
 from datetime import datetime
+from types import MappingProxyType
 from typing import Any
 
 import httpx
 
 from localmelo.melo.contracts.providers import (
+    LLM_REQUEST_EXTRA_BODY,
     LLM_REQUEST_KIND,
     BaseLLMProvider,
     ProviderError,
@@ -423,6 +425,11 @@ class OpenAICompatLLM(BaseLLMProvider):
         back under: ``None`` (the default, never), ``"auto"`` (the key the
         last reply's reasoning came from), ``"reasoning_content"`` or
         ``"reasoning"``. Any other value raises ``ValueError``.
+    thinking_off_body : Mapping[str, Any] | None
+        The request fields that turn the model's thinking off, for the one
+        retry of a reply that was only thinking (``BaseLLMProvider.
+        thinking_off_body``). Ignored when the requests already ask for no
+        thinking.
     requires_reasoning_replay : bool
         Whether the server rejects requests that omit a reply's reasoning.
         The agent then evicts whole units instead of cutting or skipping
@@ -441,6 +448,7 @@ class OpenAICompatLLM(BaseLLMProvider):
         transport: httpx.AsyncBaseTransport | None = None,
         reasoning_field: str | None = None,
         requires_reasoning_replay: bool = False,
+        thinking_off_body: Mapping[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         if reasoning_field not in (None, "auto", "reasoning_content", "reasoning"):
@@ -458,6 +466,11 @@ class OpenAICompatLLM(BaseLLMProvider):
         self.requires_reasoning_replay = requires_reasoning_replay
         self.thinking_off = thinking_disabled(
             {**self.extra_body, **self.extra_body_by_kind.get("plan", {})}
+        )
+        self.thinking_off_body = (
+            MappingProxyType(prepare_extra_body(thinking_off_body))
+            if thinking_off_body and not self.thinking_off
+            else MappingProxyType({})
         )
         # Set once the server has answered a request for a stream with a whole
         # reply (see stream_chat); later stream_chat calls then do not ask it
@@ -489,6 +502,7 @@ class OpenAICompatLLM(BaseLLMProvider):
         payload: dict[str, Any] = {
             **self.extra_body,
             **self.extra_body_by_kind.get(LLM_REQUEST_KIND.get(), {}),
+            **LLM_REQUEST_EXTRA_BODY.get(),
             "model": self.model,
             "messages": _messages_to_openai(messages, reasoning_key=reasoning_key),
         }

@@ -55,6 +55,7 @@ class OpenAIBackend(BaseBackend):
             model=cfg.openai.chat_model,
             api_key=api_key,
             extra_body=hosted.request_body("openai", cfg.openai),
+            thinking_off_body=hosted.retry_body("openai", cfg.openai),
             timeout=cfg.request_timeout_s,
             reasoning_field=getattr(cfg.openai, "reasoning_field", "") or None,
             requires_reasoning_replay=getattr(

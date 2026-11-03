@@ -60,6 +60,14 @@ EMPTY_REPLY_NUDGE = (
 # thinking and it goes the way of an empty reply. The run's error when the
 # reply that ends it, or one before it in the row, was such a reply.
 UNFINISHED_ANSWER_ERROR = "melo did not finish an answer"
+# What marks an answer taken from a model's thinking, because its reply to the
+# last request had none (#469). It ends the answer's text, so a chat shows where
+# the words came from.
+THINKING_ANSWER_NOTE = "(from melo's thinking)"
+# The most text taken from the end of a model's thinking, and the least it
+# tries to take (the last lines until they add up to this much).
+MAX_THINKING_ANSWER_CHARS = 1200
+MIN_THINKING_ANSWER_CHARS = 160
 # A planning reply that writes a tool call out as text, with no real tool
 # call (see broken_tool_call), is no answer either. It goes the way of an
 # empty reply with a label, nudge and error of its own, so the model learns
@@ -366,6 +374,33 @@ def unfinished_as_thinking(content: str, thinking: str) -> str:
     if not _same_words(text, thinking):
         parts.append(text)
     return "\n\n".join(part for part in parts if part)
+
+
+def thinking_answer(thinking: str) -> str:
+    """The end of *thinking* as an answer, marked, or "" when it has no words (#469).
+
+    For a model whose last reply to a request had no answer text but did think:
+    the last line, and the lines before it until there are
+    :data:`MIN_THINKING_ANSWER_CHARS` characters, at most
+    :data:`MAX_THINKING_ANSWER_CHARS` (cut at a word, with an ellipsis), then
+    :data:`THINKING_ANSWER_NOTE` on a line of its own.
+    """
+    lines = [line.strip() for line in thinking.splitlines() if line.strip()]
+    if not has_content("\n".join(lines)):
+        return ""
+    taken: list[str] = []
+    for line in reversed(lines):
+        taken.append(line)
+        if sum(len(item) for item in taken) >= MIN_THINKING_ANSWER_CHARS:
+            break
+    text = "\n".join(reversed(taken))
+    if len(text) > MAX_THINKING_ANSWER_CHARS:
+        text = text[-MAX_THINKING_ANSWER_CHARS:]
+        first_space = text.find(" ")
+        if 0 <= first_space < 80:
+            text = text[first_space + 1 :]
+        text = "\u2026" + text
+    return f"{text}\n\n{THINKING_ANSWER_NOTE}"
 
 
 # Tags in which a model writes a tool call out as text, in any letter case. A
