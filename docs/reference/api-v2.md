@@ -936,8 +936,10 @@ token total.
 }
 ```
 
-- `grants` are the tools allowed for the rest of the session; `granted_at`
-  maps each one to when the grant began.
+- `grants` are the names allowed in the chat (tools, sites, windows), whether
+  the chat is open or not: its own and, for a side chat, the main chat's, which
+  hold everywhere; `granted_at` maps each one to when the grant began.
+  [`GET /api/grants`](#get-apigrants) lists the same grants with their details.
 - `mcp_error` is why this session runs without MCP tools, or `""`. It is
   always `""` today: MCP in the console is not built yet.
 - `agent` is `open`, `paused` (closed, its conversation kept) or
@@ -1312,6 +1314,10 @@ rows.
 - `during_turn` is `true` (runs while a turn runs), `false` (refused then) or
   `"show"` (runs then only without arguments). `action` is what the page does
   with the command; `everyday` names the commands `/help` lists first.
+- `grants` (`[revoke N]`) is in the table with `action` `grants`: the page
+  lists what the person allowed and takes one back, as
+  [`GET /api/grants`](#get-apigrants) and
+  [`DELETE /api/grants/{id}`](#delete-apigrantsid) do.
 - A message is a command only when it starts with `/` and a lowercase name
   followed by whitespace or its end. The page runs a command itself and never
   sends it to a chat.
@@ -1759,8 +1765,11 @@ event stream, or from `pending_approvals`.
   another choice is 400 `invalid_request`.
 - 404 `not_found` for an unknown or expired request; 409 `already_answered`
   for one answered already, so two clients racing one card get one answer.
-- Approvals live in the gateway's memory. A turn waiting on one when the
-  gateway stops is finished `cancelled` with cause `shutdown`, and its card
+- A `session` answer that is kept becomes a grant in the table that
+  [`GET /api/grants`](#get-apigrants) lists: in the main chat it holds
+  everywhere (`scope` `global`), in any other chat in that chat only.
+- A waiting approval lives in the gateway's memory. A turn waiting on one when
+  the gateway stops is finished `cancelled` with cause `shutdown`, and its card
   is stored as withdrawn.
 
 ### A task's approvals go through its chat
@@ -1775,17 +1784,18 @@ chat's recorded approvals; a model never decides a match.
   `shell_exec`, `file_write`, `file_edit`) that the rules themselves found
   `routine`, in no category. Auto's Allow once, a chore's Allow and an Allow
   answered after the chat was deleted are never recorded. Records live in
-  the gateway's memory; a restart or deleting the chat forgets them. A
-  waiting approval's `remembered` says, by code, whether its Allow will be
-  recorded.
+  the gateway's memory only (grants are kept in a table instead); a restart
+  or deleting the chat forgets them. A waiting approval's `remembered` says,
+  by code, whether its Allow will be recorded.
 - **Matched.** A task's step runs without asking, with approval `origin`
   `earlier`, when a record of its chat has the same tool, the same step
   (Python by its syntax tree, a command by its exact text, a file write by
   its path and content, the files the rules read for it unchanged) and the
   same folder, and the step is reusable too. The chat gets an `earlier` echo
   and the task's `earlier` lists the step (`live` until the record is
-  revoked). A session grant of the chat covers its tasks' routine calls of
-  that tool. A task that uses its chat's records or grants is reviewed with
+  revoked). A grant that holds in the chat, its own or the main chat's, covers
+  its tasks' routine calls of that tool; a task's own grant holds in that task
+  only. A task that uses its chat's records or grants is reviewed with
   every file changed since that chat began, so a file an earlier task wrote
   is read before a record or grant covers a step; when the chat's start
   cannot be read, neither applies and the person is asked.
@@ -1839,8 +1849,8 @@ Auto, or several at once.
 - `title` is stripped and must be 1 to 200 characters; another length is
   400 `invalid_request`. A rename is never replaced by the automatic title.
 - `workspace` moves the session: a new Agent is built in the new folder
-  with the session's conversation, and the session's tool grants are
-  forgotten. The rules are a create's: absolute or `~/`, an existing
+  with the session's conversation, and the session's own grants are taken back
+  (the main chat's still hold). The rules are a create's: absolute or `~/`, an existing
   directory, else 400 `invalid_workspace`. 409 `session_busy` while a turn
   runs; a refused move leaves the row as it was.
 - `approvals` is `ask` or `auto`: the chat's [mode](#ask-and-auto) from its
@@ -1983,8 +1993,8 @@ Every tool the session's Agent offers, with whether this session allows it.
   ([a task's approvals](#a-tasks-approvals-go-through-its-chat)).
 
 - `source` is `builtin`, `provided` (an MCP server's tool) or `custom`.
-  `requires_approval` says a call of it asks first; `granted` says this
-  session allows it for the rest of the gateway run.
+  `requires_approval` says a call of it asks first; `granted` says a grant
+  holds in this session: its own, the main chat's, or a site Auto let it read.
 - A console session is gateway mode: it lists `file_read`, `file_write`,
   `list_files` and `python_exec`, never `shell_exec`.
 - A task session returns 409 `task_session_read_only`; this route cannot open it as a chat.
@@ -1995,19 +2005,75 @@ Every tool the session's Agent offers, with whether this session allows it.
   `mcp_config_label` is always `""` and `mcp_error` always says
   `MCP is not built in the console yet`.
 
+## GET /api/grants
+
+Every "allow ... for this chat" the person gave and has not taken back, in one
+list: the data of **Settings › Permissions** and of `/grants`.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/grants
+```
+
+```json
+{"grants": [
+  {"id": "5c1e0a9d47b2", "scope": "global", "session_id": "7b0f3c2e9a41", "session_kind": "main", "chat_title": "Main chat", "kind": "tool", "key": "shell_exec", "label": "Run shell commands", "action": "tool", "target": "shell_exec", "by": "person", "granted_at": 1793482098.4},
+  {"id": "a83d11f6c05e", "scope": "session", "session_id": "3f9c2a7b1d4e", "session_kind": "side", "chat_title": "Trip plans", "kind": "site", "key": "browser:https://example.com", "label": "Open example.com", "action": "open", "target": "example.com", "by": "person", "granted_at": 1793482131.9}
+]}
+```
+
+- `id` is 12 hex characters. `scope` is `global` (given in the main chat, so
+  it holds in every chat, task and terminal) or `session` (it holds in
+  `session_id` only). `session_kind` is `main`, `side`, `task` or `terminal`;
+  `chat_title` is that chat's title (`Main chat` for the main chat).
+- `kind` is `tool`, `site`, `folder` or `window`. `key` is the exact name a
+  check matches: `shell_exec`, `browser:https://example.com`,
+  `browser-act:https://example.com`, a folder path, `window-read:<app>`.
+- `label` is the words the page shows, in English. `action` is `tool`, `open`,
+  `act` (click and choose), `read` (a site Auto let the chat read), `folder`
+  or `window`. `target` is the tool name, the site, the folder as `~/…` or the
+  app.
+- `by` is `person` or `auto`; `granted_at` is Unix seconds. Auto's grants are
+  site reads and hold in their chat only, the main chat included.
+- The order is the one the page and `/grants` number: `global` grants first,
+  newest first, then each chat, the chat with the newest grant first.
+- Never kept, so never listed: **Allow once**, typing, sending a form, a click
+  on a password, code or card field, a consent control or a box from another
+  site, a press in another app's window, paying, changing an account's
+  settings, and every high-impact step.
+- Behind the same token and origin guard as every route: 401 without the
+  token, 403 `foreign_origin` from another origin.
+
+## DELETE /api/grants/{id}
+
+Take back one grant. It stops counting at once, in chats that are running too;
+the next step that needs it asks again.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X DELETE http://127.0.0.1:8401/api/grants/a83d11f6c05e
+```
+
+- 204 with no body.
+- 404 `not_found` for an unknown or already revoked id.
+- The same token and origin guard as every route.
+
 ## DELETE /api/sessions/{id}/grants/{tool}
 
-Take back one session grant, so the tool asks again next time.
+Take back one grant that holds in the chat, so the tool asks again next time.
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X DELETE http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/grants/python_exec
 ```
 
 - 204 with no body; both `grants` and `granted_at` of
-  `GET /api/sessions/{id}` drop it.
-- 404 `not_found` when the session is not open or the tool has no grant.
-  `DELETE /api/sessions/{id}/grants` without a tool forgets every grant and
-  answers 204, whether or not the session is open.
+  `GET /api/sessions/{id}` drop it. It takes back the chat's own grant of that
+  name and a main-chat grant of that name, which is taken back everywhere.
+- 404 `not_found` when no grant of that name holds in the chat. The chat need
+  not be open.
+- `DELETE /api/sessions/{id}/grants` without a name takes back the chat's own
+  grants and answers 204; in the main chat it takes back every `global` grant.
+- `DELETE /api/sessions/{id}/folders?path=PATH` takes back a folder allowed
+  for reading in the chat (204; 404 `not_found` when none holds there). It
+  works for a chat that is not open too.
 - A site's grant is named after the question, such as
   `browser-act:https://news.example`; the name may hold slashes, and is sent
   percent-encoded or as it is.

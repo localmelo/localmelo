@@ -224,7 +224,7 @@ def describe(
         if request is not None:
             app = _plain(request.arguments.get("app"), 80)
         app = app or key[len(WINDOW_PREFIX) :]
-        return f"See and answer {app} windows", app
+        return f"See {app} windows", app
     words = TOOL_WORDS.get(key)
     if words is None and request is not None and ":" in key:
         words = _plain(request.preview, LABEL_CHARS)

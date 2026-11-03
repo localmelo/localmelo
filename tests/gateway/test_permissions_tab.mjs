@@ -80,7 +80,7 @@ test('the words of a grant: what it allows, in which chat, who decided and when'
   assert.equal(words({action: 'act', target: 'example.com'}), 'Click and choose on example.com');
   assert.equal(words({action: 'read', target: 'docs.example.org'}), 'Read docs.example.org');
   assert.equal(words({action: 'folder', target: '~/Documents'}), 'Read files in ~/Documents');
-  assert.equal(words({action: 'window', target: 'Messages'}), 'See and answer Messages windows');
+  assert.equal(words({action: 'window', target: 'Messages'}), 'See Messages windows');
   assert.equal(words({action: 'teleport', label: 'Do something new', target: 'x'}), 'Do something new', 'an action this page does not know reads as the gateway worded it');
   assert.equal(words({action: undefined, label: '', target: 'x'}), 'x');
 
@@ -308,7 +308,7 @@ test('the section reads in Simplified Chinese', async () => {
     assert.deepEqual(h.titles(), ['所有对话', '单个对话', '未命名对话', '任务：整理照片', '终端对话']);
     const lines = h.rows().map(h.words);
     assert.equal(lines[0], '运行 shell 命令 来自主对话 · 你 · 10 分钟前');
-    assert.equal(lines[1], '查看并回应 Messages 的窗口 来自主对话 · 自动模式 · 刚刚');
+    assert.equal(lines[1], '查看 Messages 的窗口 来自主对话 · 自动模式 · 刚刚');
     assert.equal(lines[2], '读取 ~/Documents 里的文件 你 · 10 分钟前');
     assert.equal(lines[3], '在 example.com 上点击和选择 你 · 10 分钟前');
     assert.match(lines[4], /^编辑文件 你 · 昨天 /);

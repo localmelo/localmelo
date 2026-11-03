@@ -1234,7 +1234,7 @@
   "permissions.what.folder": "Read files in {folder}",
   "permissions.what.open": "Open {site}",
   "permissions.what.read": "Read {site}",
-  "permissions.what.window": "See and answer {app} windows",
+  "permissions.what.window": "See {app} windows",
   "permissions.when.minutes": "{n} min ago",
   "permissions.when.now": "just now",
   "permissions.when.today": "today at {clock}",

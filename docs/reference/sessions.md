@@ -299,11 +299,15 @@ accepted completed run
 `localmelo.support.sessions.approvals` has two helpers for surfaces that ask
 a person:
 
-- **`RememberingPolicy(ask)`**, an approval policy: it asks through
+- **`RememberingPolicy(ask, grants=None)`**, an approval policy: it asks through
   `ask(request)` and keeps "allow for the session" (an answer with
   `remember=True`) as a grant of the tool's name. `allowed_tools` lists the
-  grants, and `forget(tool_name=None)` takes one or all back. Grants are
-  never stored.
+  grants, `granted(name)` checks one, and `forget(tool_name=None)` takes one
+  or all back. With `grants` (a session's view of a
+  `localmelo.support.sessions.grants.GrantBook`) the grants live in the
+  sessions file's `grants` table: what the person allows in the main chat
+  counts in every session, anything else in its own session. Without it,
+  the grants are the policy object's own and never stored.
 - **`ApprovalBroker(timeout_s=None)`** keeps the requests that wait for an
   answer from elsewhere, such as a web page: `asker(session_id)` is an ask
   function, `pending(session_id)` lists the waiting requests,

@@ -1178,7 +1178,7 @@
   "permissions.what.folder": "读取 {folder} 里的文件",
   "permissions.what.open": "打开 {site}",
   "permissions.what.read": "阅读 {site}",
-  "permissions.what.window": "查看并回应 {app} 的窗口",
+  "permissions.what.window": "查看 {app} 的窗口",
   "permissions.when.minutes": "{n} 分钟前",
   "permissions.when.now": "刚刚",
   "permissions.when.today": "今天 {clock}",
