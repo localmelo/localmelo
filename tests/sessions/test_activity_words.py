@@ -69,6 +69,13 @@ def test_a_leading_done_gives_way_to_what_followed_it(
             "web",
         ),
         ("browser_open", {"url": "not a url"}, "Opening a page", "web"),
+        (
+            "web_search",
+            {"query": "python asyncio TaskGroup"},
+            "Searching the web for “python asyncio TaskGroup”",
+            "web",
+        ),
+        ("web_search", {}, "Searching the web for …", "web"),
         ("browser_read", {}, "Reading the page", "web"),
         ("browser_follow", {"ref": "e12"}, "Following a link", "web"),
         ("browser_click", {"ref": "e12"}, "Clicking on the page", "web"),

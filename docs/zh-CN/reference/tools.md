@@ -129,6 +129,26 @@ melo 自身环境中的 API 密钥不会到达任何工具，除非被显式点�
   `[This address is a test server on this computer, which [tools] web_fetch_allow_local lists.]`，出错时
   也一样。列表中有条目时，模型关于 `web_fetch` 的说明会多一句，点明这个例外。
 
+<a id="searching-the-web"></a>
+
+## 搜索网页
+
+`web_search` 在公开的搜索引擎上查关键词，返回一份结果列表。`[web] search` 开启时，每个对话（终端的、网页控制台的和 App 的）和每个控制台任务都有它；默认关闭，直接运行从不获得它。它的级别是 `read`，所以调用本身不会询问；唯一会询问的情况见下面。指南是[用 melo 搜索网页](../guides/web-search.md)。
+
+- **输入。** `query`（关键词）和 `count`（1 到 8；默认是 `[web] search_count`，即 6）。`query` 中的空白会被合并，最多发出 300 个字符。
+- **输出。** 一行 `Searched the web for “…” with <engine>: N results.`，然后是放在一个块里的结果，`<<page id=sN nonce=N type=search way=KEY results=N>>` … `<<end page sN nonce=N>>`，带编号，每条有标题、地址和摘要（分别最多 120、300 和 240 个字符，和网页文字一样经过清理），最后是 melo 自己的说明：`[<engine> <reason>; … <engine> answered.]` 列出没有给出答案的方式，以及没有任何方式给出贴合关键词的结果时的一条说明。
+- **方式**，按 `[web] search_order`（默认 `bing-rss`、`browser`、`baidu`）依次尝试，直到有一个给出贴合的结果：
+  - `bing-rss`：`https://www.bing.com/search?format=rss`，用 `web_fetch` 的读取器读取（一次 `GET`，不带 cookie，`User-Agent: localmelo-web-fetch/1.0`，地址检查和重定向检查与它相同）；
+  - `browser`：在浏览工具所用的 Safari 自动化窗口里加载 `html.duckduckgo.com/html/`，用独立的标签页，用完关闭（对话自己的标签页和当前标签页保持原样）；`[browser] driver` 为 `off` 时略过，最多等待 25 秒。它由浏览器提供者自己读取（`BrowserToolProvider.read_for_search`），所以浏览工具的检查都会运行：加载前地址必须是公网地址，页面落到的地方和它的框架会再检查，被拒绝的页面会被清空，付款页面不读取，敏感字段的值会被遮盖。搜索引擎自己的网站不询问（开启网页搜索就是允许它）；其他网站一律拒绝而不询问，所以重定向或跳到另一个网站或本地地址的页面不会有结果，这种方式会报告为 `gave a page melo's browser does not read`；
+  - `baidu`：`https://www.baidu.com/s`，读取方式同 `bing-rss`。
+- **贴合。** 前五条结果中至少有两条含有关键词三分之一的词（三个字母以上、去掉常见词的拉丁词，以及相邻的两个汉字）。没有任何方式通过时，返回最接近的结果并附一条说明。
+- **某种方式没有给出答案的原因**来自一组固定的句子，从不是服务器写的文字：`asked for a check`（对 202、401、403、407、429 和 451 还会带 `(HTTP N)`）、`answered HTTP N`、`could not be reached`、`gave a page melo could not read results from`、`gave a page melo's browser does not read` 和 `gave results that did not match the words`。所有方式都失败时，这次调用是一个列出它们的错误。
+- **礼貌。** 一次搜索里每种方式只请求一次，同一个搜索引擎的两次请求至少间隔 2 秒，不登录，不使用本人的 Safari 个人资料。结果里的地址只有在 `web_fetch` 也能访问时才保留。
+- **询问。** 关键词里含有机密的值（记忆同样拒绝保存的那几种形状：密钥或令牌、紧跟在词后面的验证码、私钥、银行卡号或证件号），或看起来是粘贴来的（超过 200 个字符，或分成多行），发出之前会先询问，问题名称是 `web_search:<digest>`，所以一次回答，即使是“在这个对话里允许”，也只对这些关键词有效。拒绝会返回 `melo did not search.` 和原因。没有人可问时（完全没有批准策略，例如用 `--yolo` 或库调用），这样的搜索不会发出，对话和任务都一样。只出现 `password` 这个词不会触发询问。
+- **打开某条结果**是一次 `web_fetch` 调用：上面的网站关卡原样适用。
+- **告诉模型**的内容（仅在工具开启时）是约 300 个字符的系统说明：什么时候搜索（先搜索再问你一个词的意思、两步失败之后、会变化的事实），结果是标记之间的数据，以及不要把机密放进搜索。开启浏览时，说明会多一句：搜索也可以用 Safari。
+- **显示为**带着关键词的一行（最多 60 个字符，其中的机密会被隐藏）：进行中是“正在搜索网页：…”，完成后是“搜索了网页：…”，有英文和简体中文。
+
 <a id="how-tools-are-offered"></a>
 
 ## 如何提供工具

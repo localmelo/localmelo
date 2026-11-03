@@ -640,8 +640,10 @@ save carries the revision it read, so a change made elsewhere meanwhile asks you
 - **Chats and folders**: the default folder of a new chat (**Change…** opens the app's
   folder panel, or a path field in a browser), how new chats start (**New chats start in**),
   **Read web pages** (on by default; it lets chats and tasks read public pages with
-  [`web_fetch`](../reference/tools.md#reading-a-public-web-page)), **Other folders melo may
-  read** (the folders you chose **Always allow this folder** for, each with **Remove**; see
+  [`web_fetch`](../reference/tools.md#reading-a-public-web-page)), **Web search** (off by
+  default; it lets chats and tasks look things up with
+  [`web_search`](../reference/tools.md#searching-the-web), and the words searched for leave
+  this computer), **Other folders melo may read** (the folders you chose **Always allow this folder** for, each with **Remove**; see
   [Folders outside the workspace](tools-mcp.md#folders-outside-the-workspace)) and the recent
   folders, each with **Make default**.
 - **Scheduled**: the check-in switch with its next time, and **Open Scheduled** for the chores.

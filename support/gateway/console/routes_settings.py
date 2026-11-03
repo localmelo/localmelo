@@ -137,6 +137,8 @@ class SettingsPutBody(_SettingsBaseBody):
     extra_folders: list[StrictStr] | None = None
     # ``[tools] web_fetch``: whether chats and tasks read public web pages; absent leaves it.
     web_fetch: StrictBool | None = None
+    # ``[web] search``: whether every chat and task may search the web; absent leaves it.
+    web_search: StrictBool | None = None
     # ``[tasks] follow_up``: whether a chat follows up on a task it started that
     # stopped (#411, a developer setting); absent leaves it.
     follow_up: StrictBool | None = None
@@ -449,6 +451,7 @@ def settings_json() -> dict[str, Any]:
         "browser": cfg.browser.driver != "off",
         "extra_folders": _extra_folders(cfg),
         "web_fetch": cfg.tools.web_fetch is True,
+        "web_search": cfg.web.search is True,
         "follow_up": cfg.tasks.follow_up is True,
         "advanced_options": _advanced_options(),
         "developer_settings": _developer_settings(cfg),
@@ -618,6 +621,9 @@ def _build_candidate(
     web_fetch = getattr(body, "web_fetch", None)
     if web_fetch is not None:
         candidate.tools.web_fetch = web_fetch
+    web_search = getattr(body, "web_search", None)
+    if web_search is not None:
+        candidate.web.search = web_search
     follow_up = getattr(body, "follow_up", None)
     if follow_up is not None:
         candidate.tasks.follow_up = follow_up
@@ -696,6 +702,8 @@ def _changed_fields(before: config.Config, after: config.Config) -> list[str]:
         changed.append("extra_folders")
     if before.tools.web_fetch != after.tools.web_fetch:
         changed.append("web_fetch")
+    if before.web.search != after.web.search:
+        changed.append("web_search")
     if before.tasks.follow_up != after.tasks.follow_up:
         changed.append("follow_up")
     for sec_name in config._LOCAL_SECTIONS:

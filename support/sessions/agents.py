@@ -264,6 +264,7 @@ async def build_session_agent(
     mcp_config: str | None = None,
     browser_driver: str = "off",
     web_fetch: bool = False,
+    web_search: bool = False,
     wrap_llm: LLMWrapper | None = None,
     wrap_embedding: EmbeddingWrapper | None = None,
     identify: bool = False,
@@ -291,6 +292,9 @@ async def build_session_agent(
     *web_fetch* gives it the ``web_fetch`` tool (see
     :mod:`localmelo.support.web`): the chats and the console's tasks pass
     ``[tools] web_fetch``; direct runs pass nothing, so they never have it.
+    *web_search* gives it ``web_search`` (see :mod:`localmelo.support.web.search_tool`):
+    the same surfaces pass ``[web] search``, and the tool may use the browser
+    window when there is one.
 
     *wrap_llm* and *wrap_embedding* are called with the provider the builder
     made, and the Agent is made with what they return, so the provider its
@@ -361,6 +365,15 @@ async def build_session_agent(
                 ),
             )
         )
+    if web_search:
+        from localmelo.support.browser import BrowserToolProvider
+        from localmelo.support.web.search_tool import WebSearchProvider
+
+        # The browser window the chat has, if it has one, is a way to search.
+        window = next(
+            (p for p in providers if isinstance(p, BrowserToolProvider)), None
+        )
+        providers.append(WebSearchProvider(browser=window, cfg=cfg))
     llm: BaseLLMProvider | None = None
     embedding: BaseEmbeddingProvider | None = None
     from_config = False
