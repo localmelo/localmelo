@@ -6,9 +6,10 @@ import base64
 import os
 import re
 import shlex
+from collections.abc import Collection
 from urllib.parse import urlparse
 
-from localmelo.melo.checker.review import apps
+from localmelo.melo.checker.review import apps, destroys
 from localmelo.melo.checker.review import files as file_rules
 from localmelo.melo.checker.review import python as py_rules
 from localmelo.melo.checker.review.paths import (
@@ -58,6 +59,10 @@ _LAUNCHABLE = (
     ".prefpane",
     ".jar",
 )
+# What stands for an argument melo cannot see (the words ``xargs`` adds, the
+# files a ``find -exec`` hands over). It is not a name a shell variable can
+# have, so it is never taken for one.
+UNKNOWN_ARG = "$(?)"
 _DRIVES = re.compile(
     r"\btell\s+(application|app)\b|do shell script|run script|Application\(|doShellScript"
     r"|\bdo script\b|«",
@@ -80,6 +85,7 @@ _ELSEWHERE |= set(["colima", "multipass", "orb", "orbctl"])
 _CONTAINERS = set(["docker", "podman", "nerdctl", "finch"])
 _VMS = set(["lima", "limactl", "colima", "multipass", "orb", "orbctl"])
 # Interpreters melo does not read, with the options that give them code inline.
+# Keyed by the lower-case program name: that is what the lookup uses.
 _INTERPRETERS: dict[str, set[str]] = {
     "perl": {"-e", "-E"},
     "ruby": {"-e"},
@@ -94,8 +100,8 @@ _INTERPRETERS: dict[str, set[str]] = {
     "swift": {"-e"},
     "deno": {"eval"},
     "bun": {"-e", "--eval", "eval"},
-    "Rscript": {"-e"},
-    "R": {"-e"},
+    "rscript": {"-e"},
+    "r": {"-e"},
     "julia": {"-e", "--eval", "-E"},
     "pwsh": {"-c", "-Command", "-command"},
     "groovy": {"-e"},
@@ -139,7 +145,11 @@ _WRITES = set([">", ">>", "&>", "&>>", ">|", ">&"])
 _PY = re.compile(r"python(\d(\.\d+)?)?w?$")
 _SHELLS = set(["sh", "bash", "zsh", "dash", "fish"])
 _BARE = _SHELLS | set(["node", "perl", "ruby", "php", "deno", "bun"])
-_HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_]\w*)\1")
+# The delimiter of a here-document that is read exactly: a plain word, or one
+# in a pair of quotes of its own, and ending where the shell word ends.
+_DELIMITER = re.compile(
+    r"""[ \t]*(?:([A-Za-z_]\w*)|'([A-Za-z_]\w*)'|"([A-Za-z_]\w*)")(?=[\s;&|()<>]|$)"""
+)
 LARGE = re.compile(
     r"\.(dmg|pkg|zip|tar|tgz|gz|xz|bz2|7z|whl|gguf|safetensors|bin|iso|pt|onnx)$"
     r"|(^|/)(get-pip\.py|install\.sh|installer\.sh)$"
@@ -421,29 +431,368 @@ def _uncomment(command: str) -> str:
     return "".join(out)
 
 
-def _heredocs(command: str) -> tuple[str, list[str]]:
-    """*command* without its here-document bodies, and the bodies in order."""
-    lines, out, bodies, i = command.split("\n"), [], [], 0
-    while i < len(lines):
-        out.append(lines[i])
-        i += 1
-        for match in _HEREDOC.finditer(out[-1]):
-            start = i
-            while i < len(lines) and lines[i].strip() != match.group(2):
-                i += 1
-            bodies.append("\n".join(lines[start:i]))
-            i += 1
-    return "\n".join(out), bodies
+def _split_heredocs(command: str) -> tuple[str, list[str], list[str], bool, str]:
+    """*command* without its here-document bodies, the bodies, which ones expand, whether all were read exactly, and *command* with the bodies cut but the delimiter lines kept.
+
+    A here-document is read only in its plain forms: ``<<WORD``, ``<<'WORD'``
+    or ``<<"WORD"``, one on a line, outside quotes and comments, with its
+    delimiter alone on a line later in the text. Anything else with a ``<<``
+    in it (``<<-``, a delimiter that is partly quoted, escaped or followed by
+    more word, two on a line, a delimiter that never comes, a line continued
+    with a backslash) is not read at all: the text is returned as it is (so
+    that nothing after it is taken for a body) with the flag false, and the
+    caller makes the step undecided. The third list holds the bodies whose
+    delimiter is not quoted: the shell runs the ``$(…)`` and backquoted
+    commands written in them. The last text still has what a reader of
+    ``$(…)`` needs to find where a here-document inside one ends.
+    """
+    if "<<" not in command:
+        return command, [], [], True, command
+    unreadable: tuple[str, list[str], list[str], bool, str] = (
+        command,
+        [],
+        [],
+        False,
+        command,
+    )
+    kept: list[str] = []
+    kept_lines: list[str] = []
+    bodies: list[str] = []
+    expanded: list[str] = []
+    n, at, mark, quote = len(command), 0, 0, ""
+    pending: tuple[str, bool] | None = None  # delimiter, quoted
+    doubtful = False  # a substitution inside double quotes: the quotes may be off
+    while at < n:
+        char = command[at]
+        if char == "\\" and quote != "'":
+            if pending and command[at + 1 : at + 2] == "\n":
+                return unreadable
+            at += 2
+            continue
+        if quote:
+            if char == quote:
+                quote = ""
+            elif char == "\n" and pending:
+                return unreadable
+            elif quote == '"' and (char == "`" or command.startswith("$(", at)):
+                doubtful = True
+            at += 1
+            continue
+        if char in "'\"":
+            quote = char
+        elif command.startswith("$'", at):
+            return unreadable
+        elif char == "#" and (at == 0 or command[at - 1] in " \t\n;&|()"):
+            end = command.find("\n", at)
+            at = n if end < 0 else end
+            continue
+        elif command.startswith("<<<", at):
+            at += 3
+            continue
+        elif command.startswith("<<", at):
+            found = _DELIMITER.match(command, at + 2)
+            if found is None or command.startswith("<<-", at) or pending or doubtful:
+                return unreadable
+            word = found.group(1) or found.group(2) or found.group(3)
+            pending = (word, found.group(1) is None)
+            at = found.end()
+            continue
+        elif char == "\n" and pending is not None:
+            placed = _terminator(command, at + 1, pending[0])
+            if placed is None:
+                return unreadable
+            line, resume = placed
+            body = command[at + 1 : line - 1] if line > at + 1 else ""
+            kept.append(command[mark : at + 1])
+            kept_lines.append(command[mark : at + 1] + command[line:resume])
+            bodies.append(body)
+            if not pending[1]:
+                expanded.append(body)
+            at = mark = resume
+            pending = None
+            continue
+        at += 1
+    if pending is not None:
+        return unreadable  # the line of the operator is the last: no body
+    kept.append(command[mark:])
+    kept_lines.append(command[mark:])
+    return "".join(kept), bodies, expanded, True, "".join(kept_lines)
 
 
-def _segments(command: str) -> list[tuple[str, list[str], list[tuple[str, str]]]]:
-    """The simple commands: the operator before each, its argv, its redirections."""
+def _terminator(text: str, at: int, word: str) -> tuple[int, int] | None:
+    """Where the line that is exactly *word* starts and where the text goes on after it, else ``None``."""
+    n = len(text)
+    while at <= n:
+        eol = text.find("\n", at)
+        stop = n if eol < 0 else eol
+        if text[at:stop] == word:
+            return at, min(n, stop + 1)
+        if eol < 0:
+            return None
+        at = eol + 1
+    return None
+
+
+# How deep a command substitution may nest to be read exactly.
+_MAX_NEST = 6
+_BRACES = re.compile(r"[(){}'\"`]")
+
+
+def _backtick_end(text: str, at: int) -> int | None:
+    """The index after the backquote that closes the one at *at*, else ``None``."""
+    end, n = at + 1, len(text)
+    while end < n and text[end] != "`":
+        end += 2 if text[end] == "\\" else 1
+    return end + 1 if end < n else None
+
+
+def _substitution_end(
+    text: str, at: int, depth: int = 0, inline: bool = False
+) -> int | None:
+    """The index of the ``)`` that closes the ``$(`` whose body starts at *at*, else ``None``.
+
+    The body is read exactly or not at all: a quote is followed to its own
+    end (a double quote reads a ``$(`` in it as a group of its own), parentheses
+    must balance, and anything this reader does not follow (a comment,
+    ``${…}`` holding a quote or a bracket, nesting deeper than
+    :data:`_MAX_NEST`, a missing end) gives ``None``. In the body of a
+    here-document a backquote and a nested here-document give ``None`` too.
+    With *inline* (the substitution is in the command text itself) a backquoted
+    command is skipped to its own end, and a plain here-document is read to
+    its delimiter line, as the shell does, so what it holds is not scanned.
+    """
+    if depth > _MAX_NEST:
+        return None
+    n, level = len(text), 1
+    pending: str | None = None  # the delimiter of a here-document whose body is next
+    while at < n:
+        char = text[at]
+        if char == "\\":
+            if pending is not None and text[at + 1 : at + 2] == "\n":
+                return None
+            at += 2
+        elif char == "'":
+            close = text.find("'", at + 1)
+            if close < 0 or (pending is not None and "\n" in text[at:close]):
+                return None
+            at = close + 1
+        elif char == '"':
+            after = _quote_end(text, at + 1, depth, inline)
+            if after is None or (pending is not None and "\n" in text[at:after]):
+                return None
+            at = after
+        elif char == "`":
+            end = _backtick_end(text, at) if inline else None
+            if end is None:
+                return None
+            at = end
+        elif char == "#" and text[at - 1 : at] in (
+            "",
+            " ",
+            "\t",
+            "\n",
+            ";",
+            "(",
+            "&",
+            "|",
+        ):
+            return None
+        elif text.startswith("<<<", at) and inline:
+            at += 3
+        elif text.startswith("<<", at):
+            found = _DELIMITER.match(text, at + 2) if inline else None
+            if found is None or text.startswith("<<-", at) or pending is not None:
+                return None
+            pending = found.group(1) or found.group(2) or found.group(3)
+            at = found.end()
+        elif char == "\n" and pending is not None:
+            placed = _terminator(text, at + 1, pending)
+            if placed is None:
+                return None
+            at, pending = placed[1], None
+        elif text.startswith("${", at):
+            close = text.find("}", at)
+            if close < 0 or _BRACES.search(text, at + 2, close):
+                return None
+            at = close + 1
+        elif text.startswith("$(", at) and not text.startswith("$((", at):
+            nested = _substitution_end(text, at + 2, depth + 1, inline)
+            if nested is None:
+                return None
+            at = nested + 1
+        else:
+            level += (char == "(") - (char == ")")
+            if level == 0:
+                return at if pending is None else None
+            at += 1
+    return None
+
+
+def _quote_end(text: str, at: int, depth: int, inline: bool = False) -> int | None:
+    """The index after the ``"`` that closes a double-quoted string whose text starts at *at*, else ``None``."""
+    n = len(text)
+    while at < n:
+        char = text[at]
+        if char == "\\":
+            at += 2
+        elif char == '"':
+            return at + 1
+        elif char == "`":
+            end = _backtick_end(text, at) if inline else None
+            if end is None:
+                return None
+            at = end
+        elif text.startswith("${", at):
+            close = text.find("}", at)
+            if close < 0 or _BRACES.search(text, at + 2, close):
+                return None
+            at = close + 1
+        elif text.startswith("$(", at) and not text.startswith("$((", at):
+            nested = _substitution_end(text, at + 2, depth + 1, inline)
+            if nested is None:
+                return None
+            at = nested + 1
+        else:
+            at += 1
+    return None
+
+
+def _expanded_commands(bodies: list[str]) -> tuple[list[str], bool]:
+    """The commands written as ``$(…)`` or between backquotes in here-document *bodies*, and whether all were read exactly.
+
+    A backslash keeps a ``$`` or a backquote from starting one. Arithmetic
+    (``$((…))``) is not a command. A command that cannot be balanced exactly
+    (see :func:`_substitution_end`), or that holds a ``case``, is still
+    returned as far as it can be read, and the flag is false.
+    """
+    found: list[str] = []
+    exact = True
+    for body in bodies:
+        at, n = 0, len(body)
+        while at < n:
+            char = body[at]
+            if char == "\\":
+                at += 2
+            elif body.startswith("$(", at) and not body.startswith("$((", at):
+                end = _substitution_end(body, at + 2)
+                inner = body[at + 2 : n if end is None else end]
+                exact = exact and end is not None and not _CASE.search(inner)
+                found.append(inner)
+                at = n if end is None else end + 1
+            elif char == "`":
+                end = at + 1
+                while end < n and body[end] != "`":
+                    end += 2 if body[end] == "\\" else 1
+                inner = body[at + 1 : min(end, n)]
+                exact = exact and end < n and "\\" not in inner
+                found.append(inner)
+                at = end + 1
+            else:
+                at += 1
+    return found, exact
+
+
+_CASE = re.compile(r"\b(case|esac)\b")
+# What can make the lexer and the shell read a command substitution differently:
+# a quote or a backslash in it, or a ``case`` (whose patterns end in ``)``).
+_TRICKY = re.compile(r"""['"\\]|\b(?:case|esac)\b""")
+
+
+# What a comment can follow.
+_BLANKS = " \t\n;&|()"
+
+
+def _lexer_state(text: str, quote: str) -> str:
+    """The quote the lexer is in after reading *text* from the quote *quote* (``""``, ``'"'`` or ``"'"``).
+
+    ``"#"`` if the lexer would take a comment to start in it (it drops the
+    rest of the line, the end of the substitution with it).
+    """
+    at, n = 0, len(text)
+    while at < n:
+        char = text[at]
+        if quote == "'":
+            quote = "" if char == "'" else quote
+        elif char == "\\":
+            if quote == "" or text[at + 1 : at + 2] in ('"', "\\"):
+                at += 1
+        elif char == '"':
+            quote = "" if quote else '"'
+        elif char == "'" and not quote:
+            quote = "'"
+        elif char == "#" and not quote and (text[at - 1] if at else "(") in _BLANKS:
+            return "#"  # the lexer would drop the rest of the line
+        at += 1
+    return quote
+
+
+def _quoted_substitutions(text: str) -> tuple[list[str], bool]:
+    """The commands written as ``$(…)`` in *text* that have a quote, a backslash or a ``case`` in them, and whether all were read exactly.
+
+    The lexer that cuts *text* into commands does not know ``$(``: a double
+    quote inside a substitution inside double quotes ends the string for it,
+    so a command can look like quoted text, and where the quotes of the
+    substitution do not pair the way the shell pairs them, the text after it
+    is read in the wrong quote. Each such command is therefore read from the
+    text itself, to its own end, and reviewed as a command of its own, and
+    the flag is false when its end cannot be found, it holds a ``case``, or the
+    lexer ends it in another quote than it began (the rest of the text is not
+    read right). A substitution in single quotes is not one.
+    """
+    found: list[str] = []
+    exact = True
+    at, n, quote = 0, len(text), ""
+    while at < n:
+        char = text[at]
+        if quote == "'":
+            close = text.find("'", at)
+            if close < 0:
+                break
+            at, quote = close + 1, ""
+        elif char == "\\":
+            at += 2
+        elif char == "#" and not quote and (text[at - 1] if at else " ") in _BLANKS:
+            eol = text.find("\n", at)
+            at = n if eol < 0 else eol
+        elif char == "'" and not quote:
+            quote, at = "'", at + 1
+        elif char == '"':
+            quote, at = ("" if quote else '"'), at + 1
+        elif char == "`":
+            end = _backtick_end(text, at)
+            if end is None:
+                break
+            at = end
+        elif text.startswith("$(", at) and not text.startswith("$((", at):
+            end = _substitution_end(text, at + 2, 0, True)
+            if end is None:
+                exact, at = False, at + 2
+                continue
+            body = text[at + 2 : end]
+            if _TRICKY.search(body):
+                found.append(body)
+                if _CASE.search(body) or _lexer_state(body, quote) != quote:
+                    exact = False
+            at = end + 1
+        else:
+            at += 1
+    return found, exact
+
+
+def _tokens(command: str) -> list[str]:
+    """*command* as words and operators (``;``, ``&&``, ``(``, ``>``…), quote-aware."""
     lexer = shlex.shlex(command, posix=True, punctuation_chars="();<>|&\n")
     lexer.whitespace, lexer.whitespace_split, lexer.commenters = " \t\r", True, ""
     tokens: list[str] = []
     for token in lexer:
         punct = token and all(c in "();<>|&\n" for c in token)
         tokens += _OPS.findall(token) if punct else [token]
+    return tokens
+
+
+def _segments(command: str) -> list[tuple[str, list[str], list[tuple[str, str]]]]:
+    """The simple commands: the operator before each, its argv, its redirections."""
+    tokens = _tokens(command)
     argv: list[str] = []
     redirs: list[tuple[str, str]] = []
     out, op, i = [], "", 0
@@ -460,6 +809,295 @@ def _segments(command: str) -> list[tuple[str, list[str], list[tuple[str, str]]]
             argv.append(tokens[i])
         i += 1
     return [s for s in [*out, (op, argv, redirs)] if s[1] or s[2]]
+
+
+def _ansi_c(text: str) -> bool:
+    """Whether *text* has an ANSI-C quote (``$'…'``) outside other quotes.
+
+    The lexer ends such a quote at the first ``'``; the shell skips an
+    escaped one (``$'\\''``). The two then disagree on where the next command
+    starts, so a text with one is not read at all.
+    """
+    if "$'" not in text:
+        return False
+    quote, at = "", 0
+    while at < len(text):
+        char = text[at]
+        if char == "\\" and quote != "'":
+            at += 2
+            continue
+        if not quote:
+            if text.startswith("$'", at):
+                return True
+            if char in "'\"":
+                quote = char
+        elif char == quote:
+            quote = ""
+        at += 1
+    return False
+
+
+def _backticks(text: str) -> tuple[list[str], bool]:
+    """The commands written between backquotes (outside single quotes), as their own text.
+
+    A backquoted command with spaces is several words to the lexer, so the
+    pairs are found in the text itself, as ``$(…)`` is a command of its own.
+    The flag is false when a backquote is never closed (a shell refuses such
+    a text, so the rest is not a command).
+    """
+    found: list[str] = []
+    at, quote = 0, ""
+    while at < len(text):
+        char = text[at]
+        if char == "\\" and quote != "'":
+            at += 2
+            continue
+        if char in "'\"" and quote in ("", char):
+            quote = "" if quote else char
+        elif char == "`" and quote != "'":
+            end = at + 1
+            while end < len(text) and text[end] != "`":
+                end += 2 if text[end] == "\\" else 1
+            if end >= len(text):
+                return found, False
+            found.append(text[at + 1 : end].replace("\\`", "`"))
+            at = end
+        at += 1
+    return found, True
+
+
+_ASSIGN = re.compile(r"([A-Za-z_]\w*)(?:\[[^\]]*\])?\+?=(.*)", re.S)
+_NAME = re.compile(r"[A-Za-z_]\w*")
+_DECLARERS = frozenset(
+    ["export", "local", "declare", "typeset", "readonly", "builtin", "command"]
+)
+_READERS = frozenset(
+    ["read", "mapfile", "readarray", "getopts", "select", "printf", "unset", "wait"]
+)
+# Words in front of a command that do not change which command it is.
+_PREFIXES = frozenset(["builtin", "command", "exec", "time"])
+# A name given a value inside arithmetic: ``n = 5``, ``n += 1``, ``n++``, ``++n``.
+_ARITH = re.compile(
+    r"(?<![\w$])([A-Za-z_]\w*)(?:\[[^\]]*\])?\s*(?:[-+*/%&|^]|<<|>>)?=(?!=)"
+    r"|(?<![\w$])([A-Za-z_]\w*)\s*(?:\+\+|--)"
+    r"|(?:\+\+|--)\s*([A-Za-z_]\w*)"
+)
+# ``${name:=value}`` and ``${name=value}`` give the name a value as well.
+_PARAMETER = re.compile(r"\$\{([A-Za-z_]\w*):?=")
+# declare -n, typeset -gn …: the name becomes a reference to another one.
+_NAMEREF = re.compile(r"-[A-Za-z]*n[A-Za-z]*")
+# declare -i, local -ai …: a value given to the name is evaluated as arithmetic.
+_INTEGER = re.compile(r"-[A-Za-z]*i[A-Za-z]*")
+# What is between brackets may be arithmetic (``a[n=1]=x``, ``${a[n=1]}``, ``[[ n=1 -eq 1 ]]``).
+# Only an expression up to this many characters is scanned; a longer one is not
+# skipped, it takes the standing from every name.
+_MAX_SUBSCRIPT = 200
+_BRACKET = re.compile(r"[\[\]]")
+# ``exec {name}<file`` gives the name a descriptor number.
+_FD_NAME = re.compile(r"\{([A-Za-z_]\w*)\}\s*[<>]")
+# A name, or an element of one (``name[0]``), to the end of a word.
+_NAME_AT = re.compile(r"([A-Za-z_]\w*)(?:\[.*\])?$", re.S)
+# The builtins that give a value to the name they are given instead of an expansion.
+_NAME_TARGETS = frozenset(
+    ["read", "mapfile", "readarray", "getopts", "unset", "select"]
+)
+
+
+def _subscripts(text: str) -> list[str] | None:
+    """The text between each pair of brackets (a pair inside another counts as well), else ``None``.
+
+    ``None`` when one is longer than :data:`_MAX_SUBSCRIPT`: it cannot be
+    scanned for a name given a value, and must not be skipped. A line break
+    does not end one (``[[ n=1 -eq\\n 1 ]]`` goes on). The cost stays linear:
+    a pair is cut out once it closes, and the first one that is too long ends
+    the reading.
+    """
+    found: list[str] = []
+    opened: list[int] = []
+    for bracket in _BRACKET.finditer(text):
+        at = bracket.start()
+        if text[at] == "[":
+            opened.append(at)
+        elif opened:
+            start = opened.pop()
+            if at - start - 1 > _MAX_SUBSCRIPT:
+                return None
+            found.append(text[start + 1 : at])
+    return found
+
+
+def _arith_names(text: str) -> set[str]:
+    """The names *text* (arithmetic) gives a value."""
+    return {name for found in _ARITH.findall(text) for name in found if name}
+
+
+def _head(words: list[str]) -> list[str]:
+    """*words* from the command word on: past ``do``/``then``/``while``, ``VAR=x`` and ``command``.
+
+    ``IFS= read -r pid`` and ``while read pid`` both run ``read``.
+    """
+    rest = _past_keywords(words)
+    at = 0
+    while at < len(rest) and (_ASSIGN.fullmatch(rest[at]) or rest[at] in _PREFIXES):
+        at += 1
+        while rest[at - 1] in _PREFIXES and at < len(rest) and rest[at][:1] == "-":
+            at += 1
+    return rest[at:]
+
+
+def _arithmetic(tokens: list[str]) -> set[str]:
+    """The names given a value in ``(( … ))`` / ``$(( … ))`` / ``for (( … ))`` groups.
+
+    A group opens with two ``(`` in a row and ends where the parentheses
+    balance again; the tokens between are read as arithmetic. An unclosed
+    group runs to the end, and reading goes on after a group, so the cost
+    stays linear.
+    """
+    found: set[str] = set()
+    at = 0
+    while at < len(tokens) - 1:
+        if tokens[at] == "(" and tokens[at + 1] == "(":
+            depth, end = 0, at
+            while end < len(tokens):
+                depth += (tokens[end] == "(") - (tokens[end] == ")")
+                end += 1
+                if depth == 0:
+                    break
+            found |= _arith_names(" ".join(tokens[at:end]))
+            at = end
+        else:
+            at += 1
+    return found
+
+
+def _unknowable(head: list[str]) -> bool:
+    """Whether the command *head* (from its program on) could give a value to a name it does not spell out.
+
+    That is ``eval``, ``source``, a name reference or an integer variable
+    (a value given to one is evaluated as arithmetic), a name built by an
+    expansion (``read $name``, ``printf -v "$name"``), and an option word too
+    long to be told from a name attached to it.
+    """
+    if not head:
+        return False
+    prog, args = head[0], head[1:]
+    if prog in ("eval", "source", "."):
+        return True
+    if prog in _DECLARERS and any(
+        _NAMEREF.fullmatch(w) or _INTEGER.fullmatch(w) for w in args
+    ):
+        return True
+    if prog in _READERS and any(w[:1] == "-" and len(w) > 64 for w in args):
+        return True
+    if prog in _NAME_TARGETS:
+        return any("$" in w and w[:1] != "-" for w in args)
+    flag = {"printf": "-v", "wait": "-p"}.get(prog)
+    if flag:
+        for at, word in enumerate(args):
+            if word == flag and "$" in "".join(args[at + 1 : at + 2]):
+                return True
+            if word.startswith(flag) and word != flag and "$" in word:
+                return True
+    return False
+
+
+def _written(args: list[str]) -> set[str]:
+    """The names the words of ``read``, ``printf -v``, ``wait -p``… may write.
+
+    A word that is a name (or an element, ``name[0]``), and an option with the
+    name attached (``-vpid``, ``-apid``, ``-ppid``).
+    """
+    names: set[str] = set()
+    for word in args:
+        for start in range(1, len(word)) if word[:1] == "-" else (0,):
+            found = _NAME_AT.match(word, start)
+            if found:
+                names.add(found.group(1))
+    return names
+
+
+def _own_pids(text: str) -> set[str]:
+    """The shell variables that only ever hold a process this command started.
+
+    A name counts when every way the text gives it a value is ``name=$!`` in
+    the command's own shell (not inside parentheses or a pipeline, where a
+    subshell sets its own copy). Any other mention of the name where it may be
+    written takes it out: another value (``name=123``, ``name=$(pgrep x)``,
+    ``export name=…``), a loop or a ``read`` (``read -a name``, ``printf -v
+    name``, ``wait -pname``), arithmetic (``(( name = 1 ))``, ``let``,
+    ``a[name=1]``, an integer variable), a descriptor (``{name}<file``), and a
+    command that could set one without spelling it out (``eval``, ``source``,
+    a name reference, ``read $x``), which takes all names out.
+    """
+    if "$!" not in text and "${!}" not in text:
+        return set()  # no process was started here (and nothing to lex again)
+    try:
+        tokens = _tokens(text)
+    except ValueError:
+        return set()
+    held: set[str] = set()
+    other: set[str] = _arithmetic(tokens) | set(_PARAMETER.findall(text))
+    other |= set(_FD_NAME.findall(text))
+    subscripts = _subscripts(text)
+    if subscripts is None:
+        return set()  # a bracket expression too long to scan: trust no name
+    for inside in subscripts:
+        other |= _arith_names(inside)
+    words: list[str] = []
+    depth, before = 0, ""
+    for token in [*tokens, ";"]:
+        if token not in _SEPARATORS:
+            if not _OPS.fullmatch(token):
+                words.append(token)
+            continue
+        piped = token in ("|", "|&")
+        if words:
+            if _unknowable(_head(words)):
+                return set()
+            if piped and words[-1] == "}":
+                return set()  # a group that is piped runs in a subshell
+            _bindings(words, depth, held, other, piped or before in ("|", "|&"))
+        words, before = [], token
+        if token == "(":
+            depth += 1
+        elif token == ")":
+            depth = max(0, depth - 1)
+    return held - other
+
+
+def _bindings(
+    words: list[str], depth: int, held: set[str], other: set[str], piped: bool = False
+) -> None:
+    """Sort the names one simple command gives a value into *held* (``$!``) and *other*.
+
+    *piped* says the command is part of a pipeline, which runs in a subshell
+    of its own: what it sets is not the shell's.
+    """
+    head = _head(words)
+    lead = words
+    while lead and lead[0] in _KEYWORDS:
+        lead = lead[1:]
+    if lead[:1] == ["coproc"] and lead[2:3] == ["{"] and _NAME.fullmatch(lead[1]):
+        other.add(lead[1])  # coproc NAME { …; } makes NAME an array
+    if head[:1] in (["for"], ["select"]) and len(head) > 1:
+        other.add(head[1])
+    elif head[:1] and head[0] in _READERS:
+        other.update(_written(head[1:]))
+    elif head[:1] == ["let"]:
+        other.update(_arith_names(" ".join(head[1:])))
+    core = words[1:] if words[0] in _DECLARERS else words
+    mine = [_ASSIGN.fullmatch(w) for w in core]
+    for word, found in zip(core, mine, strict=True):
+        if found is None:
+            continue
+        name, value = found.group(1), found.group(2)
+        alone = all(m is not None for m in mine) and "[" not in word.split("=")[0]
+        if value in ("$!", "${!}") and alone and depth == 0 and not piped:
+            held.add(name)
+        else:
+            other.add(name)
+    if words[0] in _DECLARERS:
+        other.update(w for w in words[1:] if _NAME.fullmatch(w))
 
 
 def review_shell(
@@ -520,12 +1158,48 @@ def _pipe_status(
 def _review_shell(
     ctx: Context, f: Findings, command: str, status_read: bool = False
 ) -> None:
-    text, bodies = _heredocs(_uncomment(command))
+    stripped, bodies, expanded, exact, scan = _split_heredocs(command)
+    text = _uncomment(stripped)
+    if not exact:
+        f.doubt("Has a here-document that melo cannot read exactly.")
+    if _ansi_c(text):
+        f.doubt("Uses a quote melo cannot read ($'…').")
     try:
         segments = _segments(text)
     except ValueError:
         return f.doubt("Has a quote that does not close.")
     _pipe_status(f, text, segments, status_read)
+    outer, f.started = f.started, _own_pids(text)
+    try:
+        ticked, closed = _backticks(text)
+        if not closed:
+            f.doubt("Has a backquote that does not close.")
+        for inner in ticked:
+            review_shell(ctx.deeper(), f, inner)
+        quoted, sure = _quoted_substitutions(scan)
+        if not sure:
+            f.doubt("Has a command in $(…) that melo cannot read exactly.")
+        for inner in quoted:
+            review_shell(ctx.deeper(), f, inner)
+        # The shell runs what an unquoted here-document holds in $(…) or
+        # backquotes.
+        inners, readable = _expanded_commands(expanded)
+        if not readable:
+            f.doubt("Has a command in a here-document that melo cannot read exactly.")
+        for inner in inners:
+            review_shell(ctx.deeper(), f, inner)
+        _run_segments(ctx, f, segments, bodies, set(ticked))
+    finally:
+        f.started = outer
+
+
+def _run_segments(
+    ctx: Context,
+    f: Findings,
+    segments: list[tuple[str, list[str], list[tuple[str, str]]]],
+    bodies: list[str],
+    ticked: Collection[str] = (),
+) -> None:
     cwd, before, url, bare_before = ctx.root, "", "", False
     said: str | None = None  # what the last command printed, when literal
     # The last command's site, and the folders it searched when it was a find.
@@ -548,13 +1222,15 @@ def _review_shell(
                 body = bodies.pop(0)
         for token in argv:
             for inner in re.findall(r"\$\((.*)\)|`([^`]*)`", token, re.S):
-                review_shell(ctx.deeper(), f, inner[0] or inner[1])
+                # A backquoted command that was read from the text is done.
+                if (inner[0] or inner[1]) not in ticked:
+                    review_shell(ctx.deeper(), f, inner[0] or inner[1])
         if argv[1:2] == ["run"] and os.path.basename(argv[0]) in _RUN_WRAPPERS:
             file_rules.runner(ctx, f, f"{os.path.basename(argv[0])} run")
-        argv = _unwrap(f, argv)
+        argv = _unwrap(f, _past_keywords(argv))
         if not argv:
             continue
-        prog = os.path.basename(argv[0])
+        prog = os.path.basename(argv[0]).lower()
         piped = said if op in ("|", "|&") else None
         said = _literal_output(argv, body, piped)
         _writes_code(ctx, f, argv, said, writes, cwd)
@@ -599,6 +1275,31 @@ def _review_shell(
         searched = _find_roots(argv[1:]) if prog == "find" else []
 
 
+# Words that start a part of a loop, a condition or a group and are followed
+# by the command it runs: `for x in a; do CMD; done`, `if c; then CMD; fi`.
+_KEYWORDS = frozenset(["do", "then", "else", "elif", "if", "while", "until", "!", "{"])
+
+
+def _past_keywords(argv: list[str]) -> list[str]:
+    """*argv* without the shell keywords in front of the command.
+
+    Those are ``do``, ``then``, ``if``… and the head of a function or a
+    coprocess that has the command inside it: ``function NAME {`` and
+    ``coproc NAME {`` (``coproc`` alone is followed by the command itself).
+    """
+    at = 0
+    while at < len(argv):
+        if argv[at] in _KEYWORDS:
+            at += 1
+        elif argv[at] == "function" and at + 1 < len(argv):
+            at += 2
+        elif argv[at] == "coproc":
+            at += 2 if argv[at + 2 : at + 3] == ["{"] else 1
+        else:
+            break
+    return argv[at:]
+
+
 def _unwrap(f: Findings, argv: list[str]) -> list[str]:
     """*argv* without ``VAR=x`` prefixes and wrappers such as ``nice`` or ``uv run``.
 
@@ -607,7 +1308,7 @@ def _unwrap(f: Findings, argv: list[str]) -> list[str]:
     """
     local = ""
     while argv:
-        prog = os.path.basename(argv[0])
+        prog = os.path.basename(argv[0]).lower()
         if re.match(r"[A-Za-z_]\w*=", argv[0]):
             _runs_var(f, argv[0])
             local = local or _local_path(argv[0])
@@ -641,7 +1342,7 @@ def _unwrap(f: Findings, argv: list[str]) -> list[str]:
         if prog == "flock" and i < len(rest):
             i += 1  # its lock file, then the command
         # xargs adds arguments melo cannot see.
-        argv = rest[i:] + (["$value"] if prog == "xargs" and rest[i:] else [])
+        argv = rest[i:] + ([UNKNOWN_ARG] if prog == "xargs" and rest[i:] else [])
     if local and argv and "/" not in argv[0]:
         argv = [os.path.join(local, argv[0]), *argv[1:]]
     return argv
@@ -759,7 +1460,7 @@ def run_argv(
     *stdin* says its input is given (a pipe, a heredoc, ``input=``): an
     interpreter with no program of its own runs that input.
     """
-    prog, args = os.path.basename(argv[0]), argv[1:]
+    prog, args = os.path.basename(argv[0]).lower(), argv[1:]
     prog = _GNU_NAMES.get(prog, prog)
     if re.search(r"[$`]", argv[0]):
         f.doubt("Runs a program melo could not name.")
@@ -822,7 +1523,7 @@ def run_argv(
             if rest:
                 # A launcher gets each file found, which melo cannot name.
                 found = (
-                    "$value" if os.path.basename(rest[0]) in _ELSEWHERE else roots[0]
+                    UNKNOWN_ARG if os.path.basename(rest[0]) in _ELSEWHERE else roots[0]
                 )
                 run_argv(ctx, f, [found if a == "{}" else a for a in rest], cwd)
     elif prog in _WRITERS and not re.search(r"\s[\w.-]+@?[\w.-]*:", line):
@@ -844,11 +1545,16 @@ def run_argv(
             f.add("opaque", "Runs text built at run time (eval).")
         else:
             review_shell(ctx.deeper(), f, " ".join(args))
-    elif prog in _SHELLS and "-c" in args[:-1]:
-        code = args[args.index("-c") + 1]
-        if re.search(r"(\$\(|`)\s*(curl|wget)\b", code):
-            f.add("remote_code", "Runs a script downloaded from the internet.")
-        review_shell(ctx.deeper(), f, code)
+    elif prog in _SHELLS and (texts := _shell_texts(args)):
+        # `bash -c 'cmd'`, `bash -lc 'cmd'`, `bash -c -l 'cmd'`: the text is
+        # the command. A cluster such as `-lc` is also taken, as before, for
+        # a script file melo cannot read.
+        for code in texts:
+            if re.search(r"(\$\(|`)\s*(curl|wget)\b", code):
+                f.add("remote_code", "Runs a script downloaded from the internet.")
+            review_shell(ctx.deeper(), f, code)
+        if _cluster_code(args) is not None:
+            script(ctx, f, words[0], "shell", cwd)
     elif prog in _SHELLS and words:
         script(ctx, f, words[0], "shell", cwd)
     elif "/" in argv[0]:
@@ -875,11 +1581,107 @@ def run_argv(
         _reaches(f, args, sending)
     if prog in _ELSEWHERE:
         _elsewhere(ctx, f, prog, args, cwd, stdin)
+    _destroys(ctx, f, prog, args, cwd)
     _inline(f, prog, args, stdin)
     if _runs_project(prog, words):
         file_rules.runner(ctx, f, prog)
     if prog == "git" and set(plain[:1]) & _HOOKED:
         file_rules.hooks(ctx, f, f"git {plain[0]}")
+
+
+def _is_cluster(arg: str) -> bool:
+    """Whether *arg* is a cluster of letters with a ``c`` in it (``-lc``, ``-ic``, ``-euc``)."""
+    return (
+        len(arg) > 2
+        and arg[0] == "-"
+        and arg[1:].isascii()
+        and arg[1:].isalpha()
+        and "c" in arg
+    )
+
+
+def _cluster_code(args: list[str]) -> str | None:
+    """The command text of a shell started with ``-c`` in a cluster of flags (``-lc``, ``-ic``).
+
+    ``-c`` alone is read elsewhere; here is the text after a word such as
+    ``-lc``, or ``None`` when there is none.
+    """
+    for at, arg in enumerate(args[:-1]):
+        if arg != "-c" and _is_cluster(arg):
+            return args[at + 1]
+    return None
+
+
+def _shell_texts(args: list[str]) -> list[str]:
+    """The command texts a shell is given with ``-c``, as the shell reads them.
+
+    A shell reads its options first (``-c``, a cluster such as ``-lc``,
+    ``-o name``, ``--``) and takes the first word that is not one of them as
+    the command: ``bash -c -l 'cmd'`` and ``bash -c -- 'cmd'`` run ``cmd``.
+    The word right after a ``-c`` or a cluster is read too, as before.
+    """
+    found: list[str] = []
+    if "-c" in args[:-1]:
+        found.append(args[args.index("-c") + 1])
+    inline = _cluster_code(args)
+    if inline is not None:
+        found.append(inline)
+    at, with_c = 0, False
+    while at < len(args):
+        word = args[at]
+        if word == "--":
+            at += 1
+            break
+        if word.startswith("--"):
+            at += 2 if word in ("--rcfile", "--init-file") else 1
+        elif word[:1] in ("-", "+") and len(word) > 1:
+            with_c = with_c or (word[0] == "-" and "c" in word[1:])
+            # Each -o and -O in a cluster (-ol, -Ol, -oo) takes a word of its own.
+            at += 1 + sum(char in "oO" for char in word[1:])
+        else:
+            break
+    if with_c and at < len(args) and args[at] not in found:
+        found.append(args[at])
+    return found
+
+
+def _destroys(ctx: Context, f: Findings, prog: str, args: list[str], cwd: str) -> None:
+    """A disk erased, uncommitted work discarded, or another process stopped.
+
+    Rules of :mod:`~localmelo.melo.checker.review.destroys`: a disk or other
+    processes are a ``system`` change, discarded work is ``delete``. The
+    read-only forms of the same programs (``diskutil list``, ``kill -0``,
+    ``git status``) are not findings.
+    """
+    if prog == "diskutil":
+        reason = destroys.diskutil_erases(args)
+        if reason:
+            f.add("system", reason)
+            f.add("delete", reason)
+    elif (
+        prog.startswith("newfs_")
+        or prog == "newfs"
+        or (prog == "asr" and {"-erase", "--erase"} & set(args))
+    ):
+        reason = f"Erases or formats a disk ({prog})."
+        f.add("system", reason)
+        f.add("delete", reason)
+    elif prog == "git":
+        sub, rest = destroys.git_sub(args)
+        plain = [a for a in rest if not a.startswith("-")]
+        there = False
+        if sub == "checkout" and len(plain) == 1:
+            path = resolve(ctx, plain[0], cwd)
+            there = bool(path) and os.path.lexists(path or "")
+        found = destroys.git_discards(args, there)
+        if found:
+            f.add("delete", found.reason)
+    elif prog in ("kill", "pkill", "killall", "skill", "killall5"):
+        reason = destroys.stops_others(prog, args, f.started)
+        if reason:
+            f.add("system", reason)
+    elif prog == "launchctl" and args[:1] == ["kill"]:
+        f.add("system", "Stops a job that launchd runs (launchctl kill).")
 
 
 def _searched(args: list[str]) -> list[str]:
@@ -935,22 +1737,25 @@ def _elsewhere(
     words = [a for a in args if not a.startswith("-")]
     if prog == "open":
         if {"-a", "-b"} & set(args) or any(
-            re.fullmatch(r"-\w*[ab]\w*", a) for a in args
+            re.fullmatch(r"-\w+", a) and ("a" in a or "b" in a) for a in args
         ):
             return _open_app(f, args)
         for word in words:
-            if "://" in word and not word.startswith("file:"):
+            scheme = link_scheme(word)
+            if scheme in ("http", "https"):
                 if own_api(word, sending=False):
                     reach_own(f, word)
-                continue
-            opened(ctx, f, word, cwd)
+            elif scheme in ("", "file"):
+                opened(ctx, f, word, cwd)
+            else:
+                custom_link(f, word)
     elif prog == "osascript":
         code = " ".join(" ".join(args).split())
         given = "-e" in args
         if not given:
             # A script file, or its input when it names none: melo reads neither.
             f.add("system", "Drives another app or a shell through AppleScript.")
-        elif _DRIVES.search(code) or _BRIDGE.search(code):
+        elif _DRIVES.search(code) or _BRIDGE.search(code) or apps.reaches_out(args):
             _script_apps(f, args)
     elif prog == "shortcuts" and words[:1] == ["run"]:
         f.add("system", "Runs a Shortcut, which can control other apps.")
@@ -1000,6 +1805,37 @@ def _open_app(f: Findings, args: list[str]) -> None:
         f.add("system", "Opens a program through macOS, outside melo's limits.")
     else:
         f.add("app_control", f"Opens {named} through macOS, outside melo's limits.")
+
+
+_SCHEME = re.compile(r"([A-Za-z][A-Za-z0-9+.\-]*):")
+
+
+def link_scheme(target: str) -> str:
+    """The scheme of a link (``shortcuts`` for ``shortcuts://run``), lower case, else ``""``."""
+    found = _SCHEME.match(target)
+    return found.group(1).lower() if found else ""
+
+
+def custom_link(f: Findings, target: str) -> bool:
+    """Record a link of a custom scheme (anything but http, https and file) as ``system``.
+
+    The app that answers such a link is whichever one the person installed,
+    and the link can make it run things (``shortcuts://``, ``obsidian://``,
+    ``ssh://``), so it is never ``app_control``, which is only for an app the
+    script names and the allow-list knows. A Shortcut gets the sentence
+    ``shortcuts run`` has. Returns whether *target* was such a link.
+    """
+    scheme = link_scheme(target)
+    if scheme in ("", "http", "https", "file"):
+        return False
+    if scheme == "shortcuts":
+        f.add("system", "Runs a Shortcut, which can control other apps.")
+    else:
+        f.add(
+            "system",
+            f"Opens a {scheme}: link, which another app acts on outside melo's limits.",
+        )
+    return True
 
 
 def opened(ctx: Context, f: Findings, target: str, cwd: str) -> None:
@@ -1332,6 +2168,9 @@ def _python(ctx: Context, f: Findings, argv: list[str], cwd: str) -> None:
 
 
 def _module(ctx: Context, f: Findings, interp: str, name: str, args: list[str]) -> None:
+    if name == "webbrowser":  # python -m webbrowser <link>
+        for word in args:
+            custom_link(f, word)
     if name == "pip":
         _pip(ctx, f, args, interp)
     elif name == "ensurepip" and not {"--version", "-h"} & set(args):

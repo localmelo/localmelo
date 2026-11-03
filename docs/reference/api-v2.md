@@ -899,10 +899,14 @@ token total.
   `gist.say.model` (`melo says: …`), so the words always read as the model's. A
   client says everything in its own language with the catalog entries
   `gist.say.<id>`, and joins `apps` with `gist.list.*`; `warn` is set when the
-  model's words disagree with what the code does (`delete` or `send_out`) and
-  quotes them. The sentence is for reading: `review` decides whether the call
+  model's words disagree with what the code does and quotes them (`params.said`):
+  `delete` or `send_out` for another effect, `delete_target` or `send_out_target`
+  (with `params.target`) for the same effect on a file, folder or host the words did
+  not name. The sentence is for reading: `review` decides whether the call
   asks, and `categories` has `app_control` for a script that operates one app by
-  its plain name (click-only, like `system`).
+  its plain name (click-only, like `system`). Erasing a disk, stopping other programs
+  and opening a link of a custom scheme are `system`; discarding uncommitted work is
+  `delete`.
 - A `pending_approvals` entry's `target` is set for a `file_write`: the
   path `path_label` (relative to the workspace, else with the home folder
   as `~`), whether the file `exists`, and its `size_bytes`, read when the

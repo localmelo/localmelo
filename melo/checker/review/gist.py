@@ -11,7 +11,10 @@ are ever shown beside it, always labelled as the model's:
 - a step the rules found risky: the sentence stays the code's, and the words
   go below it as a note, so they can never make the step look safer;
 - words that clearly disagree with what the code does (it deletes files, it
-  sends data out): a warning that quotes them.
+  sends data out): a warning that quotes them. When the words do agree on the
+  effect but name a file, folder or host, and none of the places the code
+  deletes or sends to is what they name, a second warning says where the code
+  acts (``delete_target``, ``send_out_target``).
 
 The checks are a few clear patterns on a program's name or a call in the
 syntax tree, never on text in a string.
@@ -37,8 +40,9 @@ from urllib.parse import urlsplit
 
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.review import apps as app_names
+from localmelo.melo.checker.review import destroys, targets
 from localmelo.melo.checker.review.paths import loopback
-from localmelo.melo.contracts.review import ActionReview, command_steps
+from localmelo.melo.contracts.review import MAX_TEXT, ActionReview, command_steps
 
 # The argument that carries the model's own words about a call. Another
 # argument (``description``, ``purpose``) is often the content a tool sends,
@@ -69,7 +73,11 @@ SAY_IDS: Final = (
     "then",
     "more",
 )
-WARN_IDS: Final = ("delete", "send_out")
+WARN_IDS: Final = ("delete", "send_out", "delete_target", "send_out_target")
+# The most places a target warning lists before it says "…".
+MAX_TARGETS: Final = 3
+# The longest a place in a target warning is.
+TARGET_CHARS: Final = 60
 # Sentences built by code that a card's question ("Create notes.md?") already says.
 PLAIN_IDS: Final = frozenset(["write", "edit", "tool"])
 
@@ -102,6 +110,15 @@ _AGREES: Final[dict[str, re.Pattern[str]]] = {
     ),
 }
 _EFFECTS: Final = ("delete", "send_out")
+# What an honest description of a git command that discards work says besides
+# "delete": reverting, restoring, resetting, rolling back. These cover only a
+# step that is nothing but such commands (checkout, restore, switch, stash):
+# those were not read as deleting before, so no older warning is hidden. A
+# ``git clean`` or a ``reset --hard`` was, so only the words for deleting cover it.
+_GIT_AGREES: Final = re.compile(
+    r"(?i)\b(?:revert|restor|reset|undo|roll\s?back|throw\s+away|check\s?out"
+    r"|clear|drop|abandon|reject)\w*|还原|撤销|回滚|放弃|重置|恢复"
+)
 # Words that start a command line and run the command after them, with the
 # options of each that take a value (so the value is not read as the program).
 _WRAPPERS: Final = frozenset(
@@ -147,8 +164,15 @@ _PY_RUNS: Final = frozenset(
 )
 _PY_SOCKETS: Final = frozenset(["sendall", "sendto"])
 _SUBSTITUTION: Final = re.compile(r"\$\(|\$\{|`")
+# A disk or volume a disk command names: disk2, disk2s1, /dev/rdisk3, /Volumes/Backup.
+_DISK: Final = re.compile(r"(?:/dev/)?r?disk\d+(?:s\d+)*|/Volumes/[^\s]+")
 # git options before the subcommand that take a value.
-_GIT_VALUED: Final = frozenset(["-C", "-c", "--git-dir", "--work-tree", "--namespace"])
+_GIT_VALUED: Final = frozenset(
+    ["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"]
+    + ["--super-prefix", "--attr-source"]
+)
+# The git commands that discard work and were not read as deleting before.
+_GIT_UNREAD: Final = frozenset(["checkout", "restore", "switch", "stash"])
 
 
 @dataclass(frozen=True)
@@ -204,6 +228,13 @@ class _Item:
     # An effect only the rules saw, in a script whose code shows nothing: the
     # sentence says it is a script that does it.
     script: bool = False
+    # The places an effect acts on as written (deleted paths, hosts sent to),
+    # and whether some place melo cannot read (a variable, the folder itself).
+    places: tuple[str, ...] = ()
+    blind: bool = False
+    # A delete that is a git command discarding work and was not read as a
+    # delete before (see :data:`_GIT_AGREES`).
+    git: bool = False
 
 
 def step_gist(
@@ -216,7 +247,12 @@ def step_gist(
     if tool_name.startswith("browser:"):
         return None
     words = _words(tool_name, arguments)
-    items = _items(tool_name, arguments) if tool_name in _RUNNERS else []
+    # A text over the limit is not read by the rules either (see MAX_TEXT).
+    items = (
+        _items(tool_name, arguments)
+        if tool_name in _RUNNERS and len(_source(tool_name, arguments)) <= MAX_TEXT
+        else []
+    )
     for effect in _EFFECTS:
         # What the rules found that the code does not show (a string run with
         # exec, a command built at run time) is part of the sentence.
@@ -227,9 +263,13 @@ def step_gist(
         ):
             items = [
                 *items,
-                _Item(effect, script=tool_name == "python_exec" and not items),
+                _Item(
+                    effect,
+                    script=tool_name == "python_exec" and not items,
+                    blind=True,
+                ),
             ]
-    gone = _unmentioned(items, review, words) if words else ""
+    gone, where = _mismatch(items, review, words) if words else ("", {})
     apps = _apps(review)
     if apps and not any(item.kind == "operate" for item in items):
         # The rules read an app out of a script the call builds from a variable.
@@ -237,7 +277,7 @@ def step_gist(
     apps = apps or tuple(dict.fromkeys(n for item in items for n in item.apps))
     built = replace(_built(tool_name, arguments, items), apps=apps)
     if gone:
-        return replace(built, warn=gone, warn_params={"said": words})
+        return replace(built, warn=gone, warn_params={"said": words, **where})
     if not words:
         return built
     if _risky(review):
@@ -320,17 +360,129 @@ def _comment(tool_name: str, arguments: Mapping[str, Any]) -> str:
     return ""
 
 
-def _unmentioned(
+def _mismatch(
     items: Sequence[_Item], review: ActionReview | None, words: str
-) -> str:
-    """The effect of the code that the model's *words* do not cover, or ``""``."""
+) -> tuple[str, dict[str, str]]:
+    """How the model's *words* disagree with the code, as a warning id and its parameters.
+
+    First the kind of effect: the code deletes or sends and the words do not
+    say so. Then, for an effect the words do cover, the place: the words name
+    a file, folder or host and none of the places the code acts on is it.
+    ``("", {})`` when they agree, or when melo cannot tell.
+    """
     found = {item.kind for item in items} & set(_EFFECTS)
     if review is not None:
         found |= set(_EFFECTS) & set(review.categories)
     for effect in _EFFECTS:
-        if effect in found and not _AGREES[effect].search(words):
-            return effect
-    return ""
+        if effect in found and not _agrees(effect, items, review, words):
+            return effect, {}
+    for effect in _EFFECTS:
+        if effect in found:
+            elsewhere = _elsewhere_target(effect, items, words)
+            if elsewhere:
+                return f"{effect}_target", {"target": elsewhere}
+    return "", {}
+
+
+def _agrees(
+    effect: str, items: Sequence[_Item], review: ActionReview | None, words: str
+) -> bool:
+    """Whether the *words* say the step does *effect*."""
+    if _AGREES[effect].search(words):
+        return True
+    # The git words (revert, restore…) cover a step that is nothing but git
+    # commands that discard work, and in which the rules found nothing else.
+    return (
+        effect == "delete"
+        and any(item.git for item in items)
+        and all(item.git or _harmless(item) for item in items)
+        and (review is None or set(review.categories) <= {"delete"})
+        and _GIT_AGREES.search(words) is not None
+    )
+
+
+# Commands that cannot delete, which may stand beside a git discard.
+_HARMLESS: Final = frozenset(
+    ["cd", "pushd", "popd", "echo", "printf", "true", "pwd", "ls"]
+)
+_HARMLESS_GIT: Final = frozenset(["status", "diff", "log", "show", "add"])
+
+
+def _harmless(item: _Item) -> bool:
+    """Whether *item* is a command that cannot delete (``cd``, ``echo``, ``git status``)."""
+    if item.kind != "command" or _SUBSTITUTION.search(item.text):
+        return False
+    words = item.text.split()
+    if words[:1] == ["git"]:
+        return _git_sub(words[1:])[0] in _HARMLESS_GIT
+    return words[:1] != [] and words[0] in _HARMLESS
+
+
+def _elsewhere_target(effect: str, items: Sequence[_Item], words: str) -> str:
+    """The places the code acts on that the *words* do not name, as text, else ``""``.
+
+    The words must name a place of the same kind (a file or folder, a host).
+    Nothing is said when they name none, or when some place the code acts on
+    cannot be read (a variable). Every place the code acts on has to be
+    named: one that is not is the warning, even when another is.
+    """
+    mine = [item for item in items if item.kind == effect]
+    if not mine or any(item.blind or not item.places for item in mine):
+        return ""
+    # After a `cd`, a bare `*` or `.` means a folder melo cannot name; before
+    # it, it is the folder the step started in.
+    moved = next(
+        (
+            at
+            for at, item in enumerate(items)
+            if item.kind == "command" and _changes_folder(item.text)
+        ),
+        len(items),
+    )
+    places = list(
+        dict.fromkeys(
+            place
+            for at, item in enumerate(items)
+            if item.kind == effect
+            for place in item.places
+            if effect != "delete" or at < moved or not targets.broad(place)
+        )
+    )
+    if effect == "delete":
+        named = targets.named_paths(words)
+        matches = targets.path_matches
+    else:
+        named = targets.named_hosts(words)
+        matches = targets.host_matches
+    if not named or not places:
+        return ""
+    elsewhere = [
+        place
+        for place in places
+        if not any(matches(place, name) for name in named)
+        and not _spelt(effect, place, words)
+    ]
+    if not elsewhere:
+        return ""
+    shown = [_short_place(place) for place in elsewhere[:MAX_TARGETS]]
+    return ", ".join(shown) + (", …" if len(elsewhere) > MAX_TARGETS else "")
+
+
+def _changes_folder(text: str) -> bool:
+    return text.split(None, 1)[:1] in (["cd"], ["pushd"], ["popd"])
+
+
+def _spelt(effect: str, place: str, words: str) -> bool:
+    """Whether the words write the place's own name (the "build" of "the build folder")."""
+    if effect != "delete":
+        return False
+    base = place.rstrip("/").rsplit("/", 1)[-1]
+    return bool(base) and not targets.broad(place) and targets.spells(words, base)
+
+
+def _short_place(text: str) -> str:
+    text = _clean(text)
+    return text if len(text) <= TARGET_CHARS else text[: TARGET_CHARS - 1] + "…"
 
 
 # ── What the code does ──
@@ -356,9 +508,16 @@ def _classify(words: list[str], text: str = "") -> _Item | None:
     if not words or words[0].startswith("#") or words[0] in _CLOSERS:
         return None
     program, rest = _program(words)
-    effect = _command_effect(program, rest)
+    discard = destroys.git_discards(rest) if program == "git" else None
+    effect = _command_effect(program, rest, discard)
     if effect:
-        return _Item(effect)
+        places, blind = _places(effect, program, rest, discard)
+        return _Item(
+            effect,
+            places=places,
+            blind=blind,
+            git=program == "git" and _git_sub(rest)[0] in _GIT_UNREAD,
+        )
     named = None
     if program == "osascript":
         named = app_names.osascript_app(rest)
@@ -416,15 +575,27 @@ def _git_sub(rest: list[str]) -> tuple[str, list[str]]:
     return "", []
 
 
-def _command_effect(program: str, rest: list[str]) -> str:
-    """``delete`` or ``send_out`` when a command clearly does it, else ``""``."""
+def _command_effect(
+    program: str, rest: list[str], discard: destroys.Discard | None = None
+) -> str:
+    """``delete`` or ``send_out`` when a command clearly does it, else ``""``.
+
+    *discard* is what :func:`~localmelo.melo.checker.review.destroys.git_discards`
+    says of a ``git`` call (read once by the caller).
+    """
     if program in _DELETE_PROGRAMS:
         return "delete"
     if program == "find" and ("-delete" in rest or _after_exec(rest, _DELETE_PROGRAMS)):
         return "delete"
+    if program == "diskutil":
+        return "delete" if destroys.diskutil_erases(rest) else ""
     if program == "git":
         sub, args = _git_sub(rest)
-        if sub == "clean" and not {"-n", "--dry-run"} & set(args):
+        if discard or (
+            # as before: every clean not spelt as a dry run, whatever its options
+            sub == "clean"
+            and not {"-n", "--dry-run"} & set(args)
+        ):
             return "delete"
         return "send_out" if sub == "push" else ""
     sends = (
@@ -464,6 +635,85 @@ def _command_effect(program: str, rest: list[str]) -> str:
     ):
         return "send_out"
     return ""
+
+
+def _path_places(paths: Sequence[str]) -> tuple[tuple[str, ...], bool]:
+    """*paths* as places, and whether one cannot be read or none was given.
+
+    A place that holds everything around it (``.``, ``~``, ``./*``) is a
+    place: it is known, and it is more than any one file.
+    """
+    kept = [p for p in paths if targets.parts(p) is not None or targets.broad(p)]
+    return tuple(kept), not paths or len(kept) != len(paths)
+
+
+def _find_places(rest: list[str]) -> tuple[tuple[str, ...], bool]:
+    """What a ``find … -delete`` removes: its name patterns, else its folders."""
+    roots: list[str] = []
+    for word in rest:
+        if word.startswith(("-", "(", "!")):
+            break
+        roots.append(word)
+    patterns = [
+        rest[at + 1]
+        for at, word in enumerate(rest[:-1])
+        if word in ("-name", "-iname", "-path", "-ipath")
+    ]
+    if not patterns:
+        return _path_places(roots)
+    kept, blind = _path_places(patterns)
+    inside, _ = _path_places([r for r in roots if targets.parts(r) is not None])
+    return (*kept, *inside), blind
+
+
+def _hosts_places(hosts: Sequence[str]) -> tuple[tuple[str, ...], bool]:
+    named = [h for h in (targets.host_name(h) for h in hosts) if h]
+    return tuple(dict.fromkeys(named)), not named or len(named) != len(hosts)
+
+
+def _places(
+    effect: str,
+    program: str,
+    rest: list[str],
+    discard: destroys.Discard | None = None,
+) -> tuple[tuple[str, ...], bool]:
+    """Where a command's effect lands as written, and whether some place is unreadable.
+
+    Deleted paths for ``delete``, hosts (or a bucket, a remote) for
+    ``send_out``. A place melo cannot name (a variable, the current folder,
+    a command that gives none) makes the effect *blind*: it is never compared
+    with the words.
+    """
+    plain = [a for a in rest if not a.startswith("-")]
+    if effect == "delete":
+        if program in _DELETE_PROGRAMS:
+            after = rest[rest.index("--") + 1 :] if "--" in rest else plain
+            return _path_places(after)
+        if program == "find":
+            return _find_places(rest)
+        if program == "git":
+            return _path_places(discard.paths) if discard else ((), True)
+        if program == "diskutil":
+            disks = [a for a in plain if _DISK.fullmatch(a)]
+            return tuple(disks), not disks
+        return (), True
+    if program in ("curl", "wget"):
+        return _hosts_places([a for a in rest if "://" in a])
+    if program in ("scp", "rsync"):
+        return _hosts_places([a for a in rest if _REMOTE.match(a)])
+    if program in _SOCKET_PROGRAMS or program in ("sftp", "ftp", "lftp"):
+        first = [a for a in plain if not a.isdigit()][:1]
+        return _hosts_places(first)
+    if program in _SEND_PROGRAMS and program not in ("sftp", "ftp", "lftp"):
+        return _hosts_places([a.rsplit("@", 1)[-1] for a in plain if "@" in a])
+    if program in ("aws", "gsutil"):
+        buckets = [a.split("://", 1)[1].split("/", 1)[0] for a in rest if "://" in a]
+        return tuple(dict.fromkeys(b for b in buckets if b)), not buckets
+    if program == "gh":
+        return ("github.com",), False
+    if program == "rclone" and rest and _REMOTE.match(rest[-1]):
+        return (rest[-1].split(":", 1)[0],), False
+    return (), True
 
 
 def _after_exec(rest: list[str], programs: frozenset[str]) -> bool:
@@ -597,6 +847,29 @@ def _python_effect(node: ast.Call, names: Mapping[str, str]) -> str:
     return ""
 
 
+def _python_places(
+    node: ast.Call, names: Mapping[str, str], effect: str
+) -> tuple[tuple[str, ...], bool]:
+    """Where a call in a script deletes or sends, when it names the place with a literal."""
+    func = node.func
+    if effect == "delete":
+        target = node.args[0] if node.args else None
+        if (
+            isinstance(func, ast.Attribute)
+            and func.attr in ("unlink", "rmdir")
+            and isinstance(func.value, ast.Call)
+            and _dotted(func.value.func, names).rpartition(".")[2]
+            in ("Path", "PurePath")
+        ):
+            target = func.value.args[0] if func.value.args else None
+        text = _text_of(target)
+        return _path_places([text]) if text else ((), True)
+    url = _text_of(node.args[0] if node.args else None) or next(
+        (_text_of(kw.value) for kw in node.keywords if kw.arg == "url"), ""
+    )
+    return _hosts_places([url]) if "://" in url else ((), True)
+
+
 def _python_items(code: str) -> list[_Item]:
     """What a script does, in the order of its calls: effects, and the commands it runs."""
     try:
@@ -614,7 +887,8 @@ def _python_items(code: str) -> list[_Item]:
     for node in calls[:400]:
         effect = _python_effect(node, names)
         if effect:
-            found.append(_Item(effect))
+            places, blind = _python_places(node, names, effect)
+            found.append(_Item(effect, places=places, blind=blind))
             continue
         if _dotted(node.func, names).rpartition(".")[2] not in _PY_RUNS:
             continue

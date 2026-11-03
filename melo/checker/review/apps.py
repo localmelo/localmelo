@@ -253,6 +253,99 @@ def osascript_app(args: Sequence[str]) -> str | None:
     return None
 
 
+# What a script can use to reach another app or the system without a ``tell
+# application`` line: an app held in a variable, a framework, a loaded script,
+# a file opened for access, a link opened by the system, a mounted volume.
+_REACHES: Final = re.compile(
+    r"\bapp(?:lication)?\b|\bframework\b|\bload\s+script\b|\bopen\s+for\s+access\b"
+    r"|\bPOSIX\b|\bopen\s+location\b|\bmount\s+volume\b",
+    re.IGNORECASE,
+)
+
+
+def _code_only(script: str) -> str | None:
+    """AppleScript *script* with its strings and comments blanked, or ``None`` when it cannot be read.
+
+    AppleScript has ``"…"`` strings and ``--``, ``#`` and ``(* *)`` comments.
+    What a string or comment holds is not run, so a word in one (``"The
+    application finished"``) does not count. A string or comment left open
+    is not a script AppleScript runs, so it is refused, and so is a
+    ``|name|`` identifier: it can hold any character, a comment mark among
+    them, so where the comments start cannot be told from the text.
+    """
+    out: list[str] = []
+    at, size = 0, len(script)
+    while at < size:
+        char, pair = script[at], script[at : at + 2]
+        if char == '"':
+            end = at + 1
+            while end < size and script[end] != '"':
+                end += 2 if script[end] == "\\" else 1
+            if end >= size:
+                return None
+            at = end + 1
+            out.append('""')
+        elif pair == "(*":
+            end = script.find("*)", at + 2)
+            if end < 0:
+                return None
+            at = end + 2
+            out.append(" ")
+        elif pair == "--" or char == "#":
+            end = script.find("\n", at)
+            at = size if end < 0 else end
+        elif char == "|":
+            return None
+        else:
+            out.append(char)
+            at += 1
+    return "".join(out)
+
+
+def _script_parts(args: Sequence[str]) -> tuple[list[str], str]:
+    """The ``-e`` pieces of an ``osascript`` call and its language, lower case.
+
+    ``-l`` and ``-e`` are read apart (``-l JavaScript``) or glued to their
+    value (``-lJavaScript``, ``-e'…'``), as the program's option parser does.
+    """
+    pieces: list[str] = []
+    language = "applescript"
+    at = 0
+    while at < len(args):
+        arg = args[at]
+        if arg in ("-e", "-l") and at + 1 < len(args):
+            if arg == "-e":
+                pieces.append(args[at + 1])
+            else:
+                language = args[at + 1].lower()
+            at += 2
+            continue
+        if arg.startswith("-e") and len(arg) > 2:
+            pieces.append(arg[2:])
+        elif arg.startswith("-l") and len(arg) > 2:
+            language = arg[2:].lower()
+        at += 1
+    return pieces, language
+
+
+def reaches_out(args: Sequence[str]) -> bool:
+    """Whether an ``osascript -e`` script uses a way to reach another app or the system.
+
+    AppleScript is checked outside the script's strings and comments, so the
+    plain forms (a notification, a dialog) are not caught; whatever else is
+    (:func:`osascript_app` then decides) and a script that does not parse as
+    code are. JavaScript for Automation is not read this way: it can build
+    any name at run time, so every script of another language than AppleScript
+    counts, the plain one-liner :func:`jxa_app` names included (it is then
+    ``app_control`` or ``system``, never routine).
+    """
+    pieces, language = _script_parts(args)
+    if language != "applescript":
+        return True
+    code = _code_only("\n".join(pieces))
+    return code is None or bool(_REACHES.search(code))
+
+
 def open_app(args: Sequence[str]) -> str | None:
     """The app ``open -a <name>`` (or ``-b com.apple.<Name>``) starts, or ``None``.
 

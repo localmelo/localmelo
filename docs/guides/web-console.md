@@ -768,11 +768,16 @@ with pip into .signin_venv (downloads about 42 MB)."). **You asked:** repeats
 the message that started the turn, so you can compare it with what melo is
 about to do. When the model's words and the code disagree about deleting
 files or sending data out, the card shows a red warning that quotes the words
-("melo described this as “Close the tabs”, but the code deletes files."). A script
+("melo described this as “Close the tabs”, but the code deletes files."). When the
+words do say the right thing but name a file, folder or website and the code deletes or sends
+to a place they do not name as well, it says where ("…but the code deletes build/."). A script
 that operates one app by its plain name (AppleScript telling Safari to close
 tabs, `open -a Notes`) asks **Control an app?** and names the app; a script that
 runs a shell, presses keys, drives System Events, names a terminal or a path,
-or runs a Shortcut stays **Change system settings?**. The card has **Allow once** and **Deny** only, and **Deny** is the
+or runs a Shortcut stays **Change system settings?**, and so do a script that reaches macOS
+without naming an app, a link that is not `http`, `https` or `file` (`open shortcuts://…`),
+erasing a disk and stopping other programs. Discarding uncommitted work (`git checkout -- .`,
+`git restore`, `git clean`) asks **Delete files that cannot be restored?**. The card has **Allow once** and **Deny** only, and **Deny** is the
 filled button: there is no chat-wide allow, and the line under the buttons
 says so ("A chat-wide allow never covers installs, downloads or changes outside
 ~/demo-project."). A call melo cannot read, or that it asks about for another

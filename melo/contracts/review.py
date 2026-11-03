@@ -26,8 +26,15 @@ from urllib.parse import unquote, urlsplit
 
 Verdict = Literal["routine", "high", "undecided"]
 # The version of the rules a review recorded: 2 added the ``app_control`` kind
-# (an allow-list of plain scripts) and the sentence of an approval card (#454).
-RULES_VERSION: Final = 2
+# (an allow-list of plain scripts) and the sentence of an approval card (#454);
+# 3 reviews what 2 let pass as routine: a script that reaches macOS without
+# naming an app, a link of a custom scheme, erasing a disk, discarding
+# uncommitted work and stopping other processes.
+RULES_VERSION: Final = 3
+# The longest command or code (in characters) the rules read, and the card's
+# sentence is built from. A longer text is undecided without being read: no
+# real step is that long, and reading it would cost more than it is worth.
+MAX_TEXT: Final = 256 * 1024
 
 # The card's title per category, strongest first: a call's title and the
 # order of its reasons follow this order.
