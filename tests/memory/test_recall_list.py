@@ -68,6 +68,7 @@ async def store(tmp_path: Path) -> AsyncIterator[SessionStore]:
 
 
 def config(**memory: object) -> Config:
+    memory.setdefault("excerpt_open", "off")  # the excerpt form as it was, no ids
     cfg = Config(chat_backend="vllm", embedding_backend="none")
     cfg.memory = MemoryConfig(**memory)  # type: ignore[arg-type]
     return cfg
@@ -184,7 +185,8 @@ async def test_the_excerpt_form_is_the_default_and_reads_exactly_as_it_did(
     memory = fill.memory
     try:
         settings = memory.recall_settings()
-        assert settings == RecallSettings() and not settings.listing
+        assert settings == RecallSettings(excerpt_open=False)
+        assert not settings.listing
         found = await ask(memory, store)
         # A note and two turns, as the block always held them.
         said = (

@@ -30,14 +30,19 @@ characters is cut there and counted as ``trimmed``.
 With ``ingest=compress`` (:data:`MODES`) everything above happens first, so one ingest
 serves every way of recalling, and then each chat is encoded into memory items by the
 chat model (:meth:`~localmelo.support.memory.service.ChatMemory.compress_chat`):
-windows of the chat, one model request each, then the items routed against the ones
-kept, the chats oldest first as they were written. The report says, for each chat by
+windows of the chat, one model request each (a window whose reply runs out of room is
+split and its halves are asked in its place; one very long exchange is read in parts;
+with ``[memory] compress_parallel`` above
+1, the windows of all the chats are asked for together, that many requests at most in
+flight, and the result is the same), then the items routed against the ones kept, the
+chats oldest first as they were written, one chat after the other. The report says, for each chat by
 its id in the file, what became of every exchange. It does not check the GPU lock:
 it is an explicit developer command, for whoever holds the GPU.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -131,6 +136,11 @@ class Report:
             data["ingest"] = "compress"
             data["model_calls"] = self.stats.calls
             data["cache_hits"] = self.stats.cache_hits
+            # Sub-windows asked for windows whose reply ran out of room, and how many
+            # of them failed, over every chat (each chat's own are in its windows).
+            rows = [w for chat in self.compress.values() for w in chat["windows"]]
+            data["split"] = sum(w["split"] for w in rows)
+            data["failed_parts"] = sum(w["failed_parts"] for w in rows)
             if self.stats.reported:
                 data["input_tokens"] = self.stats.prompt_tokens
                 data["output_tokens"] = self.stats.completion_tokens
@@ -304,7 +314,8 @@ def _chat_report(label: str, encoded: Compressed) -> dict[str, Any]:
     chat as the file gives it) and file id *label*.
 
     ``windows`` (``exchanges``, ``chars``, ``cached``, ``failed``, ``cut``,
-    ``dropped``), ``gate`` (``kept``, ``ignored``, ``unmentioned``, ``forced``:
+    ``dropped``, ``split``, ``failed_parts``, ``part``: ``[k, m]`` for part *k* of
+    *m* of one long exchange, else ``null``), ``gate`` (``kept``, ``ignored``, ``unmentioned``, ``forced``:
     exchange indexes), ``items`` (each stored: ``id``, ``title``, ``text``,
     ``kind``, ``sources`` as ``[file id, exchange index]``) and ``routes`` (each routed item:
     ``item`` (its id, ``null`` when ignored), ``action``, ``target``, ``reason``,
@@ -435,7 +446,25 @@ async def run(
         report.compress = {}
         router = Router(memory.stores()[1])
         cache = memory.compress_cache()
-        for label, session_id, title, mine in encode:
+        parallel = memory.compress_parallel()
+        encodings: list[hippo_encode.Encoding | None] = [None] * len(encode)
+        if parallel > 1:
+            # Every chat's windows go out together, at most *parallel* requests in
+            # flight; routing below stays serial, chat by chat, in the same order.
+            limit = asyncio.Semaphore(parallel)
+            encodings = list(
+                await hippo_encode.gather(
+                    [
+                        memory.encode_chat(
+                            title, mine, stats=report.stats, cache=cache, limit=limit
+                        )
+                        for _, _, title, mine in encode
+                    ]
+                )
+            )
+        for (label, session_id, title, mine), encoding in zip(
+            encode, encodings, strict=True
+        ):
             encoded = await memory.compress_chat(
                 session_id,
                 title,
@@ -443,6 +472,7 @@ async def run(
                 stats=report.stats,
                 router=router,
                 cache=cache,
+                encoding=encoding,
             )
             report.compress[label] = _chat_report(label, encoded)
             report.items += sum(

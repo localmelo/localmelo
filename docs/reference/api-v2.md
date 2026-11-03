@@ -557,6 +557,14 @@ Tools run with the user's permissions, not in a sandbox.
 - `GET /api/tasks` returns `{"tasks": [...]}`; optional `state` and integer
   `level` query parameters filter the rows. `GET /api/tasks/{task_id}`
   returns `{"task": ...}` or 404 `not_found`.
+- A task's `spec` also holds what melo gave it when it was made, each field
+  only when set and never accepted in a request: `context_pack` (the notes),
+  `own_words` (what the person typed, when the objective does not hold it),
+  `chat_turns` (the starting chat's newest earlier turns, `- the user: …` with
+  an indented `melo: …` line each) and `chat_picked` (one `- ` line for each
+  thing that chat's turn opened, searched or recalled). The task reads them as
+  data after its request; the task page folds them under "What melo told the
+  task".
 - A task whose run ended `budget_exhausted` is stored `failed` with
   `wait_reason` `Out of steps`, and every task body says `out_of_steps`
   (`true` for it). `GET /api/tasks/{task_id}` also gives such a task `left`,

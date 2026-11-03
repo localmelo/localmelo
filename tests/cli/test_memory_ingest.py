@@ -279,3 +279,34 @@ def test_the_summary_line_of_a_compress_run_says_how_many_items_and_calls(
     line = capsys.readouterr().out
     assert line.startswith("Ingested 2 sessions, 3 turns, 3 documents")
     assert " Encoded " in line and "(2 model calls, 0 from the cache)." in line
+
+
+def test_x_memory_key_sets_compress_parallel_for_the_run_and_a_bad_one_is_refused(
+    developer: None,
+    path: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    seen: list[int] = []
+    stub = StubEncoder(says())
+    monkeypatch.setattr(ChatMemory, "chat_provider", lambda self: stub)
+    real = ChatMemory.compress_parallel
+
+    def watch(self: ChatMemory) -> int:
+        seen.append(real(self))
+        return seen[-1]
+
+    monkeypatch.setattr(ChatMemory, "compress_parallel", watch)
+    try:
+        for bad in ("memory.compress_parallel=9", "memory.compress_parallel=many"):
+            with pytest.raises(SystemExit) as exit_:
+                memory_cli.main(["ingest", path, "-X", bad])
+            assert exit_.value.code == 2
+            assert "memory.compress_parallel" in capsys.readouterr().err
+        assert _held() == (0, 0)
+        argv = ["ingest", path, "-X", "ingest=compress"]
+        assert memory_cli.main([*argv, "-X", "memory.compress_parallel=4"]) == 0
+        assert seen == [4]
+        assert len(stub.prompts) == 2
+    finally:
+        config.set_overrides({})
