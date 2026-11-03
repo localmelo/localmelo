@@ -142,6 +142,9 @@ class SettingsPutBody(_SettingsBaseBody):
     # ``[tasks] follow_up``: whether a chat follows up on a task it started that
     # stopped (#411, a developer setting); absent leaves it.
     follow_up: StrictBool | None = None
+    # ``[agent] reflection``: whether a task still unfinished after many steps makes
+    # a reflection before it goes on; absent leaves it.
+    reflection: StrictBool | None = None
 
 
 class KeyBody(BaseModel):
@@ -453,6 +456,7 @@ def settings_json() -> dict[str, Any]:
         "web_fetch": cfg.tools.web_fetch is True,
         "web_search": cfg.web.search is True,
         "follow_up": cfg.tasks.follow_up is True,
+        "reflection": cfg.agent.reflection is not False,
         "advanced_options": _advanced_options(),
         "developer_settings": _developer_settings(cfg),
         "run_options": _run_options(),
@@ -627,6 +631,9 @@ def _build_candidate(
     follow_up = getattr(body, "follow_up", None)
     if follow_up is not None:
         candidate.tasks.follow_up = follow_up
+    reflection = getattr(body, "reflection", None)
+    if reflection is not None:
+        candidate.agent.reflection = reflection
     for sec_name, sec_fields in body.sections.items():
         target = getattr(candidate, sec_name)
         for field_name, field_val in sec_fields.items():
@@ -706,6 +713,8 @@ def _changed_fields(before: config.Config, after: config.Config) -> list[str]:
         changed.append("web_search")
     if before.tasks.follow_up != after.tasks.follow_up:
         changed.append("follow_up")
+    if before.agent.reflection != after.agent.reflection:
+        changed.append("reflection")
     for sec_name in config._LOCAL_SECTIONS:
         b_sec = getattr(before, sec_name)
         a_sec = getattr(after, sec_name)

@@ -32,10 +32,28 @@ LEGACY_ANSWER_OPTIONS: dict[str, Any] = {
 }
 
 
+# The run length before the long attempts: ``max_steps`` is now 100 and
+# ``steps_per_attempt`` 50 (``-s 30 -X agent.steps_per_attempt=10`` set the earlier
+# ones). Bench runs that pin ``--max-steps 30`` with ``--attempt-policy none`` are
+# unchanged: ``steps_per_attempt`` does not matter without reflection.
+LEGACY_STEP_OPTIONS: dict[str, Any] = {
+    "max_steps": 30,
+    "steps_per_attempt": 10,
+}
+
+
 def legacy_options(**options: Any) -> AgentOptions:
     """``AgentOptions(**options)`` with the earlier defaults, unless given.
 
-    The earlier cache defaults (:data:`LEGACY_CACHE_OPTIONS`) and the earlier gate
-    and answer request (:data:`LEGACY_ANSWER_OPTIONS`).
+    The earlier cache defaults (:data:`LEGACY_CACHE_OPTIONS`), the earlier gate
+    and answer request (:data:`LEGACY_ANSWER_OPTIONS`) and the earlier run length
+    (:data:`LEGACY_STEP_OPTIONS`).
     """
-    return AgentOptions(**{**LEGACY_CACHE_OPTIONS, **LEGACY_ANSWER_OPTIONS, **options})
+    return AgentOptions(
+        **{
+            **LEGACY_CACHE_OPTIONS,
+            **LEGACY_ANSWER_OPTIONS,
+            **LEGACY_STEP_OPTIONS,
+            **options,
+        }
+    )

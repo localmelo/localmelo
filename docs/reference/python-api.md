@@ -37,9 +37,9 @@ agent = Agent(llm=llm, options=AgentOptions(builtins=["file_read"], timeout_s=60
 
 | Field | Default | Description |
 |---|---|---|
-| `max_steps` | `30` | The most planning steps per run. |
+| `max_steps` | `100` | The most planning steps per run. |
 | `attempt_policy` | `"reflect"` | `"reflect"`: attempts with a reflection after each. `"none"`: one attempt. |
-| `steps_per_attempt` | `10` | The most steps per attempt, with `"reflect"`. |
+| `steps_per_attempt` | `50` | The most steps per attempt, with `"reflect"`: a run reflects once it has used them without an answer. |
 | `max_attempts` | `5` | The most attempts per run, with `"reflect"`. |
 | `reflection_gate` | `"patient"` | `"patient"`, `"flags"` or `"utility"`, with `"reflect"`; see [Reflection](../concepts/how-it-works.md#reflection). |
 | `answer_on_stop` | `True` | `True`: a run that ends `gate_stopped` or `budget_exhausted` with no answer makes one more request, without tools, for the answer from the evidence gathered, and an answer that lacks the closing line the task asks for gets it from one more; `False` sends neither. See [Run results](run-results.md#statuses). |

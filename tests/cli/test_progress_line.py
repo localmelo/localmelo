@@ -243,7 +243,7 @@ def test_printable_keeps_the_joiners_of_emoji_sequences() -> None:
 
 def test_level_0_shows_the_facts() -> None:
     assert line(level0(), tool=PYTEST_41S) == (
-        "step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s"
+        "step 4 of 30 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s"
     )
 
 
@@ -252,7 +252,7 @@ def test_attempt_1_is_not_shown() -> None:
 
 
 def test_a_later_attempt_follows_the_step() -> None:
-    assert line(level0(attempt=2)).startswith("step 4 · attempt 2 · Verify")
+    assert line(level0(attempt=2)).startswith("step 4 of 30 · attempt 2 · Verify")
 
 
 def test_no_cycle_before_the_first() -> None:
@@ -262,7 +262,7 @@ def test_no_cycle_before_the_first() -> None:
 
 
 def test_no_phase_before_the_first_tool_call() -> None:
-    assert line(level0(phase=None, cycle=0, tests=None)) == "step 4 · 1m03s"
+    assert line(level0(phase=None, cycle=0, tests=None)) == "step 4 of 30 · 1m03s"
 
 
 def test_tests_only_when_counted() -> None:
@@ -281,10 +281,17 @@ def test_before_the_first_event_the_time_only() -> None:
     assert line(payload(), elapsed=3) == "starting · 3s"
 
 
-def test_never_step_of_the_budget() -> None:
-    text = line(level0(step=4, limits={**LIMITS, "max_steps": 30}))
-    assert "/30" not in text
-    assert "of" not in text
+def test_the_step_is_shown_against_the_runs_cap_not_as_an_estimate() -> None:
+    assert line(level0(step=4, limits={**LIMITS, "max_steps": 100})).startswith(
+        "step 4 of 100 · "
+    )
+    # Without a cap in the payload there is only the step.
+    assert line(level0(step=4, limits=None)).startswith("step 4 · ")
+    assert "of" not in line(level0(step=4, limits=None))
+    # A bar tells the position itself, so its step carries no cap.
+    text = line(level1(level=2, fraction=0.57, expected_steps=7))
+    assert "step 4 of ~7" in text
+    assert "of 30" not in text
 
 
 @pytest.mark.parametrize("level", [0, 1])
@@ -302,14 +309,14 @@ def test_never_a_percent_or_a_bar_below_level_2(level: int) -> None:
 
 def test_level_1_after_one_past_run() -> None:
     assert line(level1()) == (
-        "step 4 · Write (cycle 1) · 1m03s · last time 6 steps, 2m10s: "
+        "step 4 of 30 · Write (cycle 1) · 1m03s · last time 6 steps, 2m10s: "
         "Read test_parser.py ✓ · Edit parser.py + pytest (×2) ◐ · git commit"
     )
 
 
 def test_level_1_after_several_past_runs() -> None:
     assert line(level1(past=dict(THREE_PAST_RUNS))) == (
-        "step 4 · Write (cycle 1) · 1m03s · past 5-8 steps, 2-3 min · "
+        "step 4 of 30 · Write (cycle 1) · 1m03s · past 5-8 steps, 2-3 min · "
         "last time: Read test_parser.py ✓ · Edit parser.py + pytest (×2) ◐ · "
         "git commit"
     )
@@ -337,11 +344,11 @@ def test_level_1_items_marks() -> None:
 
 def test_level_1_without_items_or_past() -> None:
     assert line(level1(items=None)) == (
-        "step 4 · Write (cycle 1) · 1m03s · last time 6 steps, 2m10s"
+        "step 4 of 30 · Write (cycle 1) · 1m03s · last time 6 steps, 2m10s"
     )
-    assert line(level1(items=[], past=None)) == "step 4 · Write (cycle 1) · 1m03s"
+    assert line(level1(items=[], past=None)) == "step 4 of 30 · Write (cycle 1) · 1m03s"
     assert line(level1(past=None)) == (
-        "step 4 · Write (cycle 1) · 1m03s · last time: Read test_parser.py ✓ · "
+        "step 4 of 30 · Write (cycle 1) · 1m03s · last time: Read test_parser.py ✓ · "
         "Edit parser.py + pytest (×2) ◐ · git commit"
     )
 
@@ -376,26 +383,26 @@ def test_a_similar_tasks_past_is_a_hint() -> None:
     it names the routine the steps are from (spec 5.4, P3 follow-up).
     """
     assert line(level1(basis=SIMILAR)) == (
-        "step 4 · Write (cycle 1) · 1m03s · like Fix the parser tests: 6 steps, "
+        "step 4 of 30 · Write (cycle 1) · 1m03s · like Fix the parser tests: 6 steps, "
         "2m10s: Read test_parser.py ✓ · Edit parser.py + pytest (×2) ◐ · git commit"
     )
     assert line(level1(basis=SIMILAR, past=dict(THREE_PAST_RUNS))) == (
-        "step 4 · Write (cycle 1) · 1m03s · like Fix the parser tests: 5-8 steps, "
+        "step 4 of 30 · Write (cycle 1) · 1m03s · like Fix the parser tests: 5-8 steps, "
         "2-3 min · its steps: Read test_parser.py ✓ · "
         "Edit parser.py + pytest (×2) ◐ · git commit"
     )
     assert line(level1(basis=SIMILAR, past=None)) == (
-        "step 4 · Write (cycle 1) · 1m03s · like Fix the parser tests: "
+        "step 4 of 30 · Write (cycle 1) · 1m03s · like Fix the parser tests: "
         "Read test_parser.py ✓ · Edit parser.py + pytest (×2) ◐ · git commit"
     )
     assert line(level1(basis=SIMILAR, items=None)) == (
-        "step 4 · Write (cycle 1) · 1m03s · like Fix the parser tests: 6 steps, 2m10s"
+        "step 4 of 30 · Write (cycle 1) · 1m03s · like Fix the parser tests: 6 steps, 2m10s"
     )
 
 
 def test_a_similar_match_without_a_title_keeps_the_generic_hint() -> None:
     assert line(level1(basis=_basis("similar"))) == (
-        "step 4 · Write (cycle 1) · 1m03s · like a similar task: 6 steps, 2m10s: "
+        "step 4 of 30 · Write (cycle 1) · 1m03s · like a similar task: 6 steps, 2m10s: "
         "Read test_parser.py ✓ · Edit parser.py + pytest (×2) ◐ · git commit"
     )
 
@@ -441,7 +448,7 @@ def test_item_labels_cannot_write_escape_sequences() -> None:
 def test_every_payload_is_read_afresh() -> None:
     # Facts at level 1, then a payload without them: nothing is kept.
     assert "last time" in line(level1())
-    assert line(level0(tests=None, phase=None)) == "step 4 · 1m03s"
+    assert line(level0(tests=None, phase=None)) == "step 4 of 30 · 1m03s"
 
 
 # ── format_past: the past facts and items alone ─────────────────────────────
@@ -615,21 +622,21 @@ def test_parts_are_left_out_in_order_as_the_width_shrinks() -> None:
         past=dict(THREE_PAST_RUNS),
     )
     stages = [
-        "step 4 · attempt 2 · Write (cycle 1) · tests 3/8 · 1m03s · "
+        "step 4 of 30 · attempt 2 · Write (cycle 1) · tests 3/8 · 1m03s · "
         "past 5-8 steps, 2-3 min · last time: Read test_parser.py ✓ · "
         "Edit parser.py + pytest (×2) ◐ · git commit",
         # past times first
-        "step 4 · attempt 2 · Write (cycle 1) · tests 3/8 · 1m03s · "
+        "step 4 of 30 · attempt 2 · Write (cycle 1) · tests 3/8 · 1m03s · "
         "past 5-8 steps · last time: Read test_parser.py ✓ · "
         "Edit parser.py + pytest (×2) ◐ · git commit",
         # then tests
-        "step 4 · attempt 2 · Write (cycle 1) · 1m03s · past 5-8 steps · "
+        "step 4 of 30 · attempt 2 · Write (cycle 1) · 1m03s · past 5-8 steps · "
         "last time: Read test_parser.py ✓ · Edit parser.py + pytest (×2) ◐ · "
         "git commit",
         # then the items
-        "step 4 · attempt 2 · Write (cycle 1) · 1m03s · past 5-8 steps",
+        "step 4 of 30 · attempt 2 · Write (cycle 1) · 1m03s · past 5-8 steps",
         # then the attempt
-        "step 4 · Write (cycle 1) · 1m03s · past 5-8 steps",
+        "step 4 of 30 · Write (cycle 1) · 1m03s · past 5-8 steps",
     ]
     for stage in stages:
         assert line(data, width=pl.display_width(stage)) == stage
@@ -643,7 +650,7 @@ def test_parts_are_left_out_in_order_as_the_width_shrinks() -> None:
 
 
 def test_one_past_run_keeps_its_steps_last() -> None:
-    narrow = "step 4 · Write (cycle 1) · 1m03s · last time 6 steps"
+    narrow = "step 4 of 30 · Write (cycle 1) · 1m03s · last time 6 steps"
     assert line(level1(), width=len(narrow)) == narrow
 
 
@@ -921,10 +928,10 @@ def test_a_run_drawn_from_start_to_finish(
     line_.observe(_event("run.finished", 8, result={}))
     assert stream.draws() == [
         "starting · 0s",
-        "step 1 · 2s",
-        "step 1 · pytest 0:00 · 2s",
-        "step 1 · 43s",
-        "step 1 · Verify · tests 3/8 · 43s",
+        "step 1 of 30 · 2s",
+        "step 1 of 30 · pytest 0:00 · 2s",
+        "step 1 of 30 · 43s",
+        "step 1 of 30 · Verify · tests 3/8 · 43s",
     ]
     text = stream.getvalue()
     assert text.endswith(ERASE)  # erased at the end
@@ -1003,7 +1010,7 @@ def test_a_payload_never_outlives_the_next(
     line_.observe(_event("run.progress", 2, **payload(step=5)))
     draws = stream.draws()
     assert "last time 6 steps" in draws[-2]
-    assert draws[-1] == "step 5 · 0s"
+    assert draws[-1] == "step 5 of 30 · 0s"
 
 
 def test_a_tool_that_finished_leaves_no_timer(
@@ -1167,7 +1174,7 @@ def test_events_never_wait_long_on_a_terminal_that_takes_no_output() -> None:
     assert line_._thread is not None
     line_._thread.join(5)
     assert not line_._thread.is_alive()
-    assert stream.draws() == ["starting · 0s", "step 1 · 0s"]
+    assert stream.draws() == ["starting · 0s", "step 1 of 30 · 0s"]
 
 
 def test_closing_never_waits_long_on_a_terminal_that_takes_no_output() -> None:
@@ -1257,7 +1264,7 @@ def test_no_line_while_melo_runs_in_the_background(
         foreground[0] = os.getpgrp()  # fg
         line_.observe(_event("run.progress", 2, **payload(step=3)))
         line_.close()
-        assert received() == "careful now\n" + ERASE + "step 3 · 0s" + ERASE
+        assert received() == "careful now\n" + ERASE + "step 3 of 30 · 0s" + ERASE
 
 
 def test_a_line_left_in_the_background_is_not_erased(foreground: list[int]) -> None:
@@ -1303,11 +1310,11 @@ def test_a_warning_goes_above_the_line(
     quiet_logger.warning("Could not save the record: %s", "locked")
     assert stream.getvalue().endswith(
         ERASE
-        + "step 2 · 0s"
+        + "step 2 of 30 · 0s"
         + ERASE
         + "Could not save the record: locked\n"
         + ERASE
-        + "step 2 · 0s"
+        + "step 2 of 30 · 0s"
     )
     assert "not shown" not in stream.getvalue()
     line_.close()
@@ -1364,7 +1371,7 @@ def test_a_record_logged_while_the_line_is_drawn(
         assert not worker.is_alive(), "the draw waits for itself"
         # The record above the line, and the line drawn again below it.
         assert _wait_for(
-            lambda: message + "\n" + ERASE + "step 2 · 0s" in stream.getvalue()
+            lambda: message + "\n" + ERASE + "step 2 of 30 · 0s" in stream.getvalue()
         ), stream.getvalue()
     finally:
         gc.callbacks.remove(log_from_gc)

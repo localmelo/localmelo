@@ -224,9 +224,9 @@ def test_a_real_run_on_a_terminal(
     text = tty.getvalue()
     draws = [part for part in text.split(ERASE) if part]
     assert draws[0] == "starting · 0s"
-    assert "step 1 · Read test_parser.py 0:00 · 0s" in draws
-    assert "step 3 · Verify (cycle 1) · tests 7/8 · 0s" in draws
-    assert "step 5 · Finishing (cycle 2) · tests 8/8 · 0s" in draws
+    assert "step 1 of 100 · Read test_parser.py 0:00 · 0s" in draws
+    assert "step 3 of 100 · Verify (cycle 1) · tests 7/8 · 0s" in draws
+    assert "step 5 of 100 · Finishing (cycle 2) · tests 8/8 · 0s" in draws
     assert "\n" not in text
     assert text.endswith(ERASE)
     assert capsys.readouterr().out == "Fixed.\n"

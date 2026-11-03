@@ -1199,6 +1199,39 @@ def test_the_settings_carry_the_follow_up_switch_and_save_it_only_when_sent(
     assert any("[tasks] follow_up must be a bool" in e for e in bad.setting_errors())
 
 
+def test_the_settings_carry_the_reflection_switch_and_save_it_only_when_off(
+    client: TestClient, isolated_config: Path
+) -> None:
+    """``[agent] reflection``: on by default, so off is written; the attempt length is a developer key."""
+    _saved_cfg()
+    loaded = client.get("/api/settings").json()
+    assert loaded["reflection"] is True
+    keys = {
+        key["key"]: (group["section"], key["issue"])
+        for group in loaded["developer_settings"]
+        for key in group["keys"]
+    }
+    assert keys["agent.reflection"] == ("agent", "")
+    assert keys["agent.steps_per_attempt"] == ("agent", "#185")
+    off = client.put(
+        "/api/settings", json=_put_body(loaded["revision"], reflection=False)
+    )
+    assert off.status_code == 200 and off.json()["reflection"] is False
+    assert config.load().agent.reflection is False
+    assert "reflection = false" in isolated_config.read_text()
+    kept = client.put("/api/settings", json=_put_body(off.json()["revision"]))
+    assert kept.json()["reflection"] is False, "absent leaves it as it is"
+    on = client.put(
+        "/api/settings", json=_put_body(kept.json()["revision"], reflection=True)
+    )
+    assert on.status_code == 200 and on.json()["reflection"] is True
+    assert "reflection" not in isolated_config.read_text(), "the default is not written"
+    word = client.put(
+        "/api/settings", json=_put_body(on.json()["revision"], reflection="off")
+    )
+    assert word.status_code == 400
+
+
 def test_the_developer_section_lists_every_key_by_section_with_its_value(
     client: TestClient,
 ) -> None:

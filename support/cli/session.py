@@ -397,7 +397,11 @@ class CliSession:
         step = live.step
         if isinstance(progress, Mapping) and isinstance(progress.get("step"), int):
             step = max(step, progress["step"])
-        figure = step_figure(step, learned=learned_total(progress))
+        figure = step_figure(
+            step,
+            learned=learned_total(progress),
+            limit=self.agent.options.max_steps,
+        )
         dot = f" {self.renderer.symbols.dot} "
         return dot.join(part for part in (figure, f"{STEPS_KEY} steps") if part)
 
@@ -1372,12 +1376,16 @@ class CliSession:
         )
         options = self.agent.options
         limit = format_duration(SESSION_TOOL_TIMEOUT_S)
-        self._row(
-            "limits",
-            f"{options.max_steps} steps a turn, "
-            f"{options.steps_per_attempt} an attempt, "
-            f"{options.max_attempts} attempts · commands stop after {limit}",
+        steps = (
+            f"{options.max_steps} steps a turn, no reflection"
+            if options.attempt_policy == "none"
+            else (
+                f"{options.max_steps} steps a turn, "
+                f"{options.steps_per_attempt} an attempt, "
+                f"{options.max_attempts} attempts"
+            )
         )
+        self._row("limits", f"{steps} · commands stop after {limit}")
         for row in usage_lines(
             self.renderer.usage,
             local=backend.local,

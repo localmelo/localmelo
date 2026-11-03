@@ -358,8 +358,8 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | `--captured-history on\|off` | `off` | 把有界的、经过模式脱敏的捕获结果与模型预览分开存储；见[配置](configuration.md#context-accounting)。 |
 | `--brief-items on\|off` | `off` | 实验性。配合 `--brief`，在每个反思请求中，以及最后一次尝试结束前两步，指出简报中尚未被任何编辑触及的编号条目；见[运行 worker 任务](#brief-items)。它会覆盖 `[agent] brief_items`；没有 `--brief` 时不起作用。 |
 | `--context-window N`、`--output-reserve N`、`--safety-margin N` | 未设置 | 选择启用逐次请求的上下文记账；三者都必须解析为正整数，且窗口必须大于另外两者之和。 |
-| `--max-steps N` | `30` | 整个运行最多可以使用的规划步数。 |
-| `--attempt-policy reflect\|none` | `reflect` | `reflect`：每次尝试之后都进行一次反思。`none`：只做一次尝试，不进行反思。 |
+| `--max-steps N` | `100` | 整个运行最多可以使用的规划步数（也可写作 `-s N`）。 |
+| `--attempt-policy reflect\|none` | `reflect` | `reflect`：每次尝试（`agent.steps_per_attempt`，50 步）之后都进行一次反思。`none`：只做一次 `--max-steps` 步的尝试，不进行反思。`[agent] reflection = false`（设置中的 **Reflect when stuck after many steps**，或一次运行用 `-X agent.reflection=off`）让每个读取配置的运行都是 `none`；这个选项优先于它。 |
 | `--reflection-gate flags\|utility\|patient` | `patient` | 反思之后，当它选择 `continue` 且三项检查都成立时（`flags`），开始下一次尝试；或者还要求其效用分数达到 0.1（`utility`，即本选项出现之前的行为）；或者与 `flags` 相同，但每次运行中有一次，下一步不新时也开始下一次尝试（`patient`，默认）。 |
 | `--tool-exposure retrieve\|all` | `retrieve` | 每个步骤向模型提供哪些工具。 |
 | `--builtins all\|none\|NAME,...` | 所在模式的默认集合 | 要注册的内置工具。不带该旗标时，直接运行获得 `file_read`、`file_write` 和 `python_exec`；`all` 会加上 `shell_exec` 和 `list_files`（交互式界面默认保留全部五个）。 |
@@ -390,7 +390,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 
 - `--workspace`：不指定时，任务在当前文件夹中运行，与以前完全一致。指定后，`~` 会被展开，路径的解析方式与交互式界面相同，运行在该文件夹中：文件工具只能在其中操作，`shell_exec` 和 `python_exec` 从这里启动。它不增加任何审批（见[带工作区根目录](../guides/tools-mcp.md#with-a-workspace-root)）。不是文件夹的路径是用法错误（退出码 2，只输出一行）；见[用法错误](#usage-errors)。`melo ""` 和 `--serve` 拒绝该旗标。
 - 三个上下文旗标分别覆盖对应的 `[agent]` 键，在直接模式和交互式界面中均如此。超出预算的请求会在副本上做适配，否则运行以 `context_budget_exceeded` 结束；输出预留不是生成长度上限。见[上下文记账](configuration.md#context-accounting)。
-- `--max-steps`：至少为 1。使用 `reflect` 时，一次运行的每次尝试最多 10 个步骤，最多 5 次尝试，总步骤数最多为 `--max-steps`。见[localmelo 如何工作](../concepts/how-it-works.md#the-run-loop)。如果要限制每一个模型请求（规划、反思及其他请求），可设置 `-X agent.max_calls=N`（开发者设置，不小于 2 的整数，没有单独的选项）：运行会在会超出 `N` 的那个请求之前自行停止，并以 `budget_exhausted` 结束，错误是 `Call budget reached: ...`。`agent.answer_on_stop` 开启（默认）时，最后一次调用留作不带工具、根据证据索要最终答案的那一次请求，因此运行发出 `N - 1` 个请求，再发这一个。两者都出现在 `melo -h all` 中，记录里有什么见[运行结果](run-results.md#statuses)。
+- `--max-steps`（`-s`，默认 100）：至少为 1。使用 `reflect` 时，一次运行的每次尝试最多 50 个步骤（`-X agent.steps_per_attempt=N`），最多 5 次尝试，总步骤数最多为 `--max-steps`；`-X agent.reflection=off`（或 `--attempt-policy none`）直接做到总步数。见[localmelo 如何工作](../concepts/how-it-works.md#the-run-loop)。如果要限制每一个模型请求（规划、反思及其他请求），可设置 `-X agent.max_calls=N`（开发者设置，不小于 2 的整数，没有单独的选项）：运行会在会超出 `N` 的那个请求之前自行停止，并以 `budget_exhausted` 结束，错误是 `Call budget reached: ...`。`agent.answer_on_stop` 开启（默认）时，最后一次调用留作不带工具、根据证据索要最终答案的那一次请求，因此运行发出 `N - 1` 个请求，再发这一个。两者都出现在 `melo -h all` 中，记录里有什么见[运行结果](run-results.md#statuses)。
 - `--reflection-gate`：见[反思](../concepts/how-it-works.md#reflection)。与 `--attempt-policy none` 一起使用时无效。`--reflection-gate flags` 给出 `patient` 成为默认值之前的判定（`-X agent.reflection_gate=flags` 仅对一次运行生效）。
 - `--tool-exposure`：见[工具的提供方式](tools.md#how-tools-are-offered)。
 - `--builtins`：`all`、`none`，或以逗号分隔的 `file_read`、`file_write`、`list_files`、`python_exec` 和 `shell_exec` 列表。直接运行的默认集合不包含 `shell_exec`：`--builtins all`（或点名 `shell_exec`）会重新开启它，而且由于直接模式没有策略，它会在无需审批的情况下运行。`recall` 只有与 `--recall-at tool` 同用时才被接受，后者会注册它；没有该触发点时，它是用法错误。
@@ -633,24 +633,24 @@ fd 通道关闭了工具写入的这条路径，但它不是身份认证：已�
 在终端中以文本形式输出时，`melo -- "<task>"` 会在 stderr 上用一行显示任务所处的位置。每次步骤和工具调用时，以及每秒，该行都会重绘；在输出结果和状态行之前，它会被擦除，因此不会留在滚动历史中：
 
 ```text
-step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
+step 4 of 100 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
 ```
 
 - **何时显示。** 使用默认的 `--progress auto` 时，只有当 stderr 是终端、`TERM` 不是 `dumb` 且输出为文本时才显示。使用 `--output-format json`（无论是否在终端上）时不绘制任何内容；stderr 为管道或文件时（例如在脚本和基准测试中）、使用 `--progress off` 时，或在 `melo ""` 循环中，也都不绘制，运行的启动方式与没有该选项时完全相同。stdout 在两种情况下都一样。当 `melo` 在后台运行时（`melo "<task>" &`，或 Ctrl+Z 然后 `bg`），该行不会绘制，因此不会覆盖 shell 的提示符；使用 `fg` 切回前台后它会再次出现。
-- **首次运行：事实。** `step 4` 统计规划步骤；`attempt 2` 从第二次尝试开始出现。阶段根据目前的工具调用读取：编辑之前为 `Explore`，编辑中为 `Write`，运行测试中为 `Verify`，测试通过之后为 `Finishing`；从第一次编辑之后的第一次测试运行开始，带有 `(cycle n)`，n 统计这样的编辑后再测试的轮次。之后是正在进行的工具调用及其耗时（`pytest 0:41`），最近一次测试摘要中的计数（`tests 3/8`：通过数 / 总数），以及运行的耗时（`1m03s`）。
+- **首次运行：事实。** `step 4 of 100` 统计规划步骤，并对照运行最多可以走的步数；`attempt 2` 从第二次尝试开始出现。阶段根据目前的工具调用读取：编辑之前为 `Explore`，编辑中为 `Write`，运行测试中为 `Verify`，测试通过之后为 `Finishing`；从第一次编辑之后的第一次测试运行开始，带有 `(cycle n)`，n 统计这样的编辑后再测试的轮次。之后是正在进行的工具调用及其耗时（`pytest 0:41`），最近一次测试摘要中的计数（`tests 3/8`：通过数 / 总数），以及运行的耗时（`1m03s`）。
 - **重复的任务：也显示过去的运行。** 一旦某个任务的[例程](../concepts/procedures.md#how-it-works)在同一模型上以相同选项完成过（或者作为提示，同一文件夹中相似的任务完成过），该行就会添加那些运行做了什么，从不显示百分比：
 
   ```text
-  step 4 · Write (cycle 1) · 1m03s · last time 6 steps, 2m10s: Read test_parser.py ✓ · Edit parser.py + pytest (×2) ◐ · git commit
-  step 4 · Write (cycle 1) · 1m03s · past 5-8 steps, 2-3 min · last time: Read test_parser.py ✓ · Edit parser.py ◐ · git commit
+  step 4 of 100 · Write (cycle 1) · 1m03s · last time 6 steps, 2m10s: Read test_parser.py ✓ · Edit parser.py + pytest (×2) ◐ · git commit
+  step 4 of 100 · Write (cycle 1) · 1m03s · past 5-8 steps, 2-3 min · last time: Read test_parser.py ✓ · Edit parser.py ◐ · git commit
   ```
 
-  这些步骤来自过去的运行：`✓` 表示已完成，`◐` 表示当前步骤，`–` 表示跳过，尚未到达的步骤没有标记（本次运行不必全部完成）；`(×2)` 标记重复出现的模式。本版本不显示百分比进度条。步骤数从不与 `--max-steps` 对照显示，因为后者是限制，而不是计划。
+  这些步骤来自过去的运行：`✓` 表示已完成，`◐` 表示当前步骤，`–` 表示跳过，尚未到达的步骤没有标记（本次运行不必全部完成）；`(×2)` 标记重复出现的模式。本版本不显示百分比进度条。步骤数会与 `--max-steps` 对照显示（`step 4 of 100`），后者是限制，而不是计划：多数运行远在它之前结束。
 
   相似任务的运行只是提示，因此该行从不对它们显示 `last time`；它们会跟在 `like <routine title>:` 之后，并注明来源任务（例程的名称，否则为查询的开头部分），其步骤则用 `its steps:` 标示：
 
   ```text
-  step 4 · Write (cycle 1) · 1m03s · like Fix the parser tests: 6 steps, 2m10s: Read test_parser.py ✓ · Edit parser.py ◐ · git commit
+  step 4 of 100 · Write (cycle 1) · 1m03s · like Fix the parser tests: 6 steps, 2m10s: Read test_parser.py ✓ · Edit parser.py ◐ · git commit
   ```
 - **过去的运行需要持久化。** 每次 `melo` 都是一个新进程，除非在运行之间保留记忆，否则程序性记忆只存在于内存中。使用 `LOCALMELO_PERSIST_MEMORY=1` 或 `--memory-dir DIR` 运行（见[记忆](../guides/memory.md#keep-memory-between-runs)）；否则每次运行只显示事实。
 - **窄终端。** 当该行比终端宽时，它会按以下顺序省略：过去运行的耗时、测试计数、过去运行中的具名步骤、尝试次数，然后用 `…` 截断其余部分。在中文、日文或韩文的区域设置中（`LC_ALL`、`LC_CTYPE` 和 `LANG` 中第一个已设置的值以 `zh`、`ja` 或 `ko` 开头），`·` 和 `…` 等标记按两个单元格计算，与把模糊宽度字符设为宽字符的终端绘制方式一致，因此该行在那里从不会换行。

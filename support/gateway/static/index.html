@@ -424,6 +424,10 @@
                   <div class="st-text"><label class="st-label" for="s-follow-up" data-i18n="settings.followUp.title">Follow up on tasks</label><span class="st-key" data-developer hidden>tasks.follow_up</span><p class="st-hint" data-i18n="settings.followUp.hint">When a task a chat started fails or stops, that chat continues it once, works around a blocked step, or asks you one question, then says what got done.</p></div>
                   <span class="st-switch"><input type="checkbox" role="switch" id="s-follow-up" disabled /><span class="st-track" aria-hidden="true"></span></span>
                 </li>
+                <li class="st-row" id="s-reflection-row" hidden>
+                  <div class="st-text"><label class="st-label" for="s-reflection" data-i18n="settings.reflection.title">Reflect when stuck after many steps</label><span class="st-key" data-developer hidden>agent.reflection</span><p class="st-hint" data-i18n="settings.reflection.hint">If a task is still not done after 50 steps, melo reflects on what went wrong before it goes on; that costs one more model request. Off, it keeps going straight to 100 steps.</p></div>
+                  <span class="st-switch"><input type="checkbox" role="switch" id="s-reflection" disabled /><span class="st-track" aria-hidden="true"></span></span>
+                </li>
               </ul>
               <h4 class="st-group-title" id="s-extra-title" data-i18n="html.sExtraTitle">Other folders melo may read</h4>
               <p class="st-hint st-group-hint" id="s-extra-hint" data-i18n="html.sExtraHint">Folders outside a chat's own folder that you chose “Always allow” for. melo reads in them without asking; writing there still asks every time.</p>
