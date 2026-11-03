@@ -193,6 +193,60 @@ computer. `[tools] web_fetch_allow_local` is empty, so off, by default.
   an error included. While the list has an entry, the model's note about `web_fetch` gains one
   sentence that names the exception.
 
+## Searching the web
+
+`web_search` looks words up on public search engines and returns a list of results. Every chat
+(the terminal's, the web console's and the app's) and every console task has it while
+`[web] search` is on; the default is off, and direct runs never have it. Its tier is `read`,
+so the call itself asks nothing; the one case that asks is below. The guide is
+[Searching the web with melo](../guides/web-search.md).
+
+- **Input.** `query` (the words) and `count` (1 to 8; the default is `[web] search_count`, 6).
+  Whitespace in `query` is collapsed, and at most 300 characters are sent.
+- **Output.** One line, `Searched the web for “…” with <engine>: N results.`, then the results in
+  a block, `<<page id=sN nonce=N type=search way=KEY results=N>>` … `<<end page sN nonce=N>>`,
+  numbered, each with its title, address and snippet (at most 120, 300 and 240 characters, cleaned
+  as page text is), then melo's notes: `[<engine> <reason>; … <engine> answered.]` for the ways
+  that did not answer, and a note when no way gave results that fit the words.
+- **Ways**, tried in `[web] search_order` (default `bing-rss`, `browser`, `baidu`) until one gives
+  results that fit:
+  - `bing-rss`: `https://www.bing.com/search?format=rss`, read with `web_fetch`'s fetcher (one `GET`,
+    no cookies, `User-Agent: localmelo-web-fetch/1.0`, the same address checks and redirect checks);
+  - `browser`: `html.duckduckgo.com/html/` loaded in the Safari automation window of the browser
+    tools, in a tab of its own that is closed afterwards (the chat's own tabs and current tab
+    stay as they were); it is left out while `[browser] driver` is `off` and waits at most 25
+    seconds. It is read by the browser provider itself (`BrowserToolProvider.read_for_search`), so
+    the browser tools' checks run: the address must be public before the load, the page is
+    checked where it lands and in its frames, a refused page is blanked, a payment page is not
+    read and sensitive field values are masked. The engine's site is not asked about (turning
+    web search on allows it); any other site is refused, not asked about, so a page that
+    redirects or moves to another site or to a local address gives no results and the way is
+    reported as `gave a page melo's browser does not read`;
+  - `baidu`: `https://www.baidu.com/s`, read the same way as `bing-rss`.
+- **Fit.** Results fit when at least two of the first five share a third of the search's words
+  (Latin words of three or more letters without common ones, and pairs of Chinese characters).
+  When no way passes, the nearest results are returned with a note.
+- **Why a way did not answer** is one of a closed list of sentences, never text from the
+  server: `asked for a check` (also with `(HTTP N)` for 202, 401, 403, 407, 429 and 451),
+  `answered HTTP N`, `could not be reached`, `gave a page melo could not read results from`,
+  `gave a page melo's browser does not read` and `gave results that did not match the words`. When every way fails the call is an error that lists them.
+- **Politeness.** One request per way per search, at least 2 seconds between two requests to one
+  engine, no sign-in, nothing from the person's own Safari profile. An address in the results is
+  kept only when `web_fetch` could reach it.
+- **The question.** A search whose words hold the value of a secret (the shapes memory also
+  refuses to keep: a key or token, a code next to its word, a private key, a card or ID number) or
+  look pasted (over 200 characters, or on more than one line) asks before it goes out, under the
+  question name `web_search:<digest>` (10 hex digits of a digest of the words), so an answer, even
+  "allow for this chat", covers those words only. A refusal returns `melo did not search.` and the
+  reason. With nobody to ask (no approval policy at all, as with `--yolo` or a library call), such a search is not sent, in a chat or in a task. The word `password` alone does
+  not ask.
+- **Opening a result** is a `web_fetch` call: the site gate above applies to it unchanged.
+- **The model is told**, only while the tool is on, in a system note of about 300 characters: when
+  to search (before asking you what a word means, after two failed steps, for facts that change),
+  that results are data between markers, and to keep secrets out of searches. With the browser on
+  the note adds one sentence that a search can also use Safari.
+- **Shown** as a line with the words (cut at 60 characters, a secret in them hidden): “Searching the web for …” while it runs and “Searched the web for …” once done, in English and Simplified Chinese.
+
 ## How tools are offered
 
 Each planning step sends the model a list of tools, and the step can run only
@@ -210,7 +264,7 @@ those tools. `--tool-exposure` chooses the list:
 - **`all`**: every registered tool, sorted by name, on every step. The list
   never changes, which helps servers that cache prompt prefixes.
 
-A provider can mark its tools as a group (`ProvidedTool.group`); with `retrieve`, every tool of a group is offered on every step, like the built-ins, after them. The eleven browser tools are such a group, present only while `[browser] driver` is on (see [Browsing with melo](../guides/browsing.md)), and so is `web_fetch` (group `web`).
+A provider can mark its tools as a group (`ProvidedTool.group`); with `retrieve`, every tool of a group is offered on every step, like the built-ins, after them. The twelve browser tools are such a group, present only while `[browser] driver` is on (see [Browsing with melo](../guides/browsing.md)), and so is `web_fetch` (group `web`).
 
 A call to a tool that the step did not offer is refused with
 `Tool '<name>' was not offered in this step.` and does not run. The refusal

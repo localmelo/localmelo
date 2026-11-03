@@ -111,7 +111,7 @@ export function setupSettings({
   const inputIds = ["s-adapter", "s-chat-url", "s-key-env", "s-key-input", "s-key-save", "s-key-replace", "s-key-remove", "s-base-url",
     "s-chat-model", "s-thinking", "s-embed-backend", "s-embed-url", "s-embed-model", "s-embed-use"];
   // Each saves on its own; they wait while a change is being saved.
-  const switchIds = ["s-across-chats", "s-web-fetch", "s-follow-up", "s-developer", ...RECALL.map((name) => `s-recall-${name}`),
+  const switchIds = ["s-across-chats", "s-web-fetch", "s-web-search", "s-follow-up", "s-developer", ...RECALL.map((name) => `s-recall-${name}`),
     ...LANGUAGE_SETTINGS.map((name) => `s-language-${name}`), ...APPROVAL_MODES.map((name) => `s-approvals-${name}`)];
   let settings = null;
   let sections = {};
@@ -563,6 +563,9 @@ export function setupSettings({
     // Reading public web pages (`[tools] web_fetch`); a gateway that does not report it has no switch.
     $("s-web-fetch-row").hidden = settings.web_fetch === undefined;
     $("s-web-fetch").checked = settings.web_fetch !== false;
+    // Searching the web (`[web] search`, off until switched on); a gateway that does not report it has no switch.
+    $("s-web-search-row").hidden = settings.web_search === undefined;
+    $("s-web-search").checked = settings.web_search === true;
     followUp();
     notes();
   }
@@ -773,6 +776,12 @@ export function setupSettings({
     if (saving || !settings || settings.web_fetch === undefined) { event.target.checked = !on; return; }
     const words = (value) => t(value ? "settings.webFetch.on" : "settings.webFetch.off");
     settingCommit("web_fetch", on, words(on), !on, words(!on));
+  });
+  $("s-web-search").addEventListener("change", (event) => {
+    const on = event.target.checked;
+    if (saving || !settings || settings.web_search === undefined) { event.target.checked = !on; return; }
+    const words = (value) => t(value ? "settings.webSearch.on" : "settings.webSearch.off");
+    settingCommit("web_search", on, words(on), !on, words(!on));
   });
   $("s-follow-up").addEventListener("change", (event) => {
     const on = event.target.checked;

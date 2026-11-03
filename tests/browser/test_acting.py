@@ -19,6 +19,7 @@ import pytest
 from localmelo.melo.contracts.approvals import TOOL_ASK, ApprovalDecision
 from localmelo.support.browser import render, safari
 from localmelo.support.browser.driver import (
+    ActResult,
     BrowserDriver,
     Element,
     FieldAttrs,
@@ -99,7 +100,9 @@ async def test_a_click_acts_on_the_page_and_reads_it_again() -> None:
     tools = await tools_of(driver)
     await run(tools, "browser_open", url=HOME)
     out = await run(tools, "browser_click", ref="e1")
-    assert not out.is_error and out.text.startswith("Clicked e1.\n<<page id=s2")
+    assert not out.is_error and out.text.startswith(
+        "Clicked e1 (via browser).\n<<page id=s2"
+    )
     assert "Checked in." in out.text and '[e2 button "Again"]' in out.text
     assert acts(driver) == [("act", "click:Check in")]
     # The reading is new: the old ref belongs to a page that is gone.
@@ -115,7 +118,7 @@ async def test_what_a_click_says_never_carries_page_words_outside_the_block() ->
     await run(tools, "browser_open", url=HOME)
     out = await run(tools, "browser_click", ref="e1")
     head = out.text.split("<<page", 1)[0]
-    assert head == "Clicked e1.\n"
+    assert head == "Clicked e1 (via browser).\n"
 
 
 async def test_a_click_asks_to_act_on_the_site_apart_from_reading_it() -> None:
@@ -329,11 +332,12 @@ async def test_a_page_that_opens_many_tabs_has_three_adopted_and_the_rest_left_a
 ):
     driver = world(button("Open"))
 
-    async def act(tab: str | None, act: Any) -> None:
+    async def act(tab: str | None, act: Any) -> ActResult:
         driver.calls.append(("act", f"{act.kind}:{act.element.label}"))
         for _ in range(6):
             driver.current = driver._new_tab()
             driver.tabs_[driver.current].append(DONE)
+        return ActResult()
 
     driver.act = act  # type: ignore[assignment]
     tools = await tools_of(driver)
@@ -457,8 +461,11 @@ async def test_enter_in_a_field_is_a_form_send_that_asks_by_itself() -> None:
         assert not any(name.startswith("browser-submit:") for name in asks.names)
         # The page was read again after typing: its refs are new (e2 is the box).
         sent = await run(tools, "browser_type", ref="e2", text="cats", submit=True)
-    assert not typed.is_error and "Typed 4 character(s) into e1." in typed.text
-    assert not sent.is_error and "and pressed Enter." in sent.text
+    assert (
+        not typed.is_error
+        and "Typed 4 character(s) into e1 (via browser)." in typed.text
+    )
+    assert not sent.is_error and "and pressed Enter (via browser)." in sent.text
     assert "Checked in." in sent.text
     submit = [a for n, a, _ in asks.asked if n.startswith("browser-submit:")]
     assert submit == [
@@ -756,7 +763,9 @@ async def test_choosing_an_option() -> None:
         opened = await run(tools, "browser_open", url=HOME)
         out = await run(tools, "browser_select", ref="e1", option="Spain")
     assert 'options="France | Spain"' in opened.text
-    assert not out.is_error and out.text.startswith("Chose an option in e1.")
+    assert not out.is_error and out.text.startswith(
+        "Chose an option in e1 (via browser)."
+    )
     assert driver.acts[0].kind == "select" and driver.acts[0].text == "Spain"
     assert asks.names[-1] == "browser-act:https://example.com"
 

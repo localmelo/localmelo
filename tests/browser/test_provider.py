@@ -72,13 +72,14 @@ def world() -> FakeDriver:
     )
 
 
-async def test_the_tools_are_a_group_of_eleven_and_only_the_readers_are_read_only() -> (
+async def test_the_tools_are_a_group_of_twelve_and_only_the_readers_are_read_only() -> (
     None
 ):
     tools = await tools_of(world())
     assert sorted(tools) == [
         "browser_back",
         "browser_click",
+        "browser_click_point",
         "browser_find",
         "browser_follow",
         "browser_open",
@@ -89,7 +90,7 @@ async def test_the_tools_are_a_group_of_eleven_and_only_the_readers_are_read_onl
         "browser_type",
         "browser_wait",
     ]
-    acting = {"browser_click", "browser_type", "browser_select"}
+    acting = {"browser_click", "browser_type", "browser_select", "browser_click_point"}
     for name, tool in tools.items():
         assert tool.group == "browser"
         if name in acting:

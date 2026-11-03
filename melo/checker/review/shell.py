@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import os
 import re
-import shlex
 from collections.abc import Collection
 from urllib.parse import urlparse
 
@@ -27,6 +26,7 @@ from localmelo.melo.checker.review.paths import (
     touch,
     where,
 )
+from localmelo.melo.contracts import shell_lexer
 
 MAX_DEPTH = 3
 # Programs that reach a server, and HTTPie's names (method first: http POST url).
@@ -781,7 +781,7 @@ def _quoted_substitutions(text: str) -> tuple[list[str], bool]:
 
 def _tokens(command: str) -> list[str]:
     """*command* as words and operators (``;``, ``&&``, ``(``, ``>``…), quote-aware."""
-    lexer = shlex.shlex(command, posix=True, punctuation_chars="();<>|&\n")
+    lexer = shell_lexer.Lexer(command, posix=True, punctuation_chars="();<>|&\n")
     lexer.whitespace, lexer.whitespace_split, lexer.commenters = " \t\r", True, ""
     tokens: list[str] = []
     for token in lexer:
@@ -1468,7 +1468,7 @@ def run_argv(
     _link_sources(ctx, f, prog, args, cwd)
     _settings(f, argv)
     words = [a for a in args if not a.startswith("-")]
-    for arg in words:
+    for arg in dict.fromkeys(words):  # a word said again names the same place
         path = None if "://" in arg else resolve(ctx, arg.lstrip("@"), cwd)
         if path and where(ctx, path, write=False) == "credentials":
             touch(ctx, f, arg.lstrip("@"), "read", cwd)

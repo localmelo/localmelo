@@ -384,11 +384,18 @@ def _luhn(digits: str) -> bool:
     return total % 10 == 0
 
 
-def sensitive(text: str) -> bool:
-    """Whether *text* holds a secret: a key, a password or code, a card or ID number."""
-    if redact_secrets(text)[1] or _SECRET_WORDS.search(text) or _ID_NUMBER.search(text):
+def holds_secret_value(text: str) -> bool:
+    """Whether *text* holds the value of a secret: a key or token, a code next to its
+    word, a private key, a card or ID number. The words alone (``password``) do not count.
+    """
+    if redact_secrets(text)[1] or _ID_NUMBER.search(text):
         return True
     return any(_luhn(re.sub(r"\D", "", m.group(0))) for m in _CARD.finditer(text))
+
+
+def sensitive(text: str) -> bool:
+    """Whether *text* holds a secret: a key, a password or code, a card or ID number."""
+    return holds_secret_value(text) or _SECRET_WORDS.search(text) is not None
 
 
 def _swap(text: str) -> str:

@@ -21,11 +21,11 @@ import ast
 import json
 import re
 import secrets
-import shlex
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
+from localmelo.melo.contracts import shell_lexer
 from localmelo.melo.contracts.review import ModelAnswer
 from localmelo.melo.memory.block import strip_block
 
@@ -379,7 +379,7 @@ def step_names(tool_name: str, arguments: Mapping[str, Any]) -> set[str]:
         if isinstance(command, list):
             return names(" ".join(map(str, command)))
         try:
-            return names(" ".join(shlex.split(str(command or ""), comments=True)))
+            return names(" ".join(shell_lexer.split(str(command or ""), comments=True)))
         except ValueError:
             return set()
     if tool_name in ("file_write", "file_edit"):

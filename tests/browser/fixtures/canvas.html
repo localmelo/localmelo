@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Canvas</title>
+<style>body{font:16px sans-serif;margin:0}h1{margin:20px 40px}canvas{position:absolute;left:40px;top:120px}</style>
+<h1>Drawn button</h1>
+<canvas id="c" width="300" height="150"></canvas>
+<p id="said" style="position:absolute;top:300px;left:40px"></p>
+<script>
+  // The button is only drawn: no element, no label. Its place is (100..200, 50..100).
+  var c = document.getElementById("c"), g = c.getContext("2d");
+  g.fillStyle = "#2a6"; g.fillRect(100, 50, 100, 50);
+  g.fillStyle = "#fff"; g.font = "16px sans-serif"; g.fillText("Start", 130, 80);
+  c.addEventListener("click", function (e) {
+    var r = c.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+    if (x >= 100 && x <= 200 && y >= 50 && y <= 100) {
+      document.getElementById("said").textContent = "Started (" + (e.isTrusted ? "real" : "script") + " click)";
+    }
+  });
+</script>

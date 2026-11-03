@@ -7,7 +7,6 @@ import base64
 import dataclasses
 import os
 import re
-import shlex
 from collections import Counter
 from itertools import product
 from typing import Any
@@ -29,6 +28,7 @@ from localmelo.melo.checker.review.paths import (
     under,
 )
 from localmelo.melo.checker.review.paths import own_api as shell_own_api
+from localmelo.melo.contracts import shell_lexer
 
 _RUNS = set(
     [
@@ -583,7 +583,8 @@ class _Review:
         if attr == "split" and not args or name == "shlex.split":
             source = args[0] if args else self.fold(base)
             return [
-                tuple(shlex.split(v)) if isinstance(v, str) else None for v in source
+                tuple(shell_lexer.split(v)) if isinstance(v, str) else None
+                for v in source
             ]
         return [None]
 

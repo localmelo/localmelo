@@ -570,6 +570,7 @@ async def main_async(
             saves=choice.saves,
             browser_driver=browser_driver,
             web_fetch=loaded.tools.web_fetch is True,
+            web_search=loaded.web.search is True,
         )
         try:
             agent = await factory.build()

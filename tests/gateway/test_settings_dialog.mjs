@@ -551,6 +551,51 @@ test('Read web pages: hidden for a gateway that does not report it, else a switc
   assert.equal(h.element('s-web-fetch').checked, true);
 });
 
+test('Web search: hidden for a gateway that does not report it, else a switch that saves web_search', async () => {
+  const older = harness({'GET /settings': full()});
+  await older.open('chats');
+  assert.equal(older.element('s-web-search-row').hidden, true);
+  let revision = 1;
+  const h = harness({
+    'GET /settings': full({web_search: false}),
+    'PUT /settings': (body) => full({revision: `rev${++revision}`, web_search: body.web_search ?? false}),
+  });
+  await h.open('chats');
+  assert.equal(h.element('s-web-search-row').hidden, false);
+  assert.equal(h.element('s-web-search').checked, false, 'off until the person turns it on');
+  h.element('s-web-search').checked = true;
+  await h.element('s-web-search').emit('change');
+  await flush();
+  assert.deepEqual(h.puts().at(-1).options.body, {chat_backend: 'mlc', embedding_backend: 'none', workspace: '~/ws',
+    sections: {}, revision: 'rev1', web_search: true});
+  assert.equal(h.element('settings-saved-text').textContent, 'Saved: Web search is on.');
+  assert.equal(h.element('s-web-search').checked, true);
+  await h.element('settings-undo').emit('click');
+  await flush();
+  assert.equal(h.puts().at(-1).options.body.web_search, false);
+  assert.equal(h.element('settings-saved-text').textContent, 'Undone: Web search is off.');
+  assert.equal(h.element('s-web-search').checked, false);
+});
+
+test('Web search says that the words leave the computer, in English and Simplified Chinese', async () => {
+  const {useLanguage, t} = await import('../../support/gateway/static/i18n.mjs');
+  assert.match(t('settings.webSearch.hint'), /leave this computer/);
+  await useLanguage('zh-Hans');
+  try {
+    assert.equal(t('settings.webSearch.title'), '网页搜索');
+    assert.match(t('settings.webSearch.hint'), /离开这台电脑/);
+    const h = harness({'GET /settings': full({web_search: false}),
+      'PUT /settings': (body) => full({revision: 'rev2', web_search: body.web_search})});
+    await h.open('chats');
+    h.element('s-web-search').checked = true;
+    await h.element('s-web-search').emit('change');
+    await flush();
+    assert.match(h.element('settings-saved-text').textContent, /网页搜索/);
+  } finally {
+    await useLanguage('en');
+  }
+});
+
 test('Follow up on tasks: a developer switch that saves follow_up, hidden in default mode', async () => {
   const plain = harness({'GET /settings': full({follow_up: true})});
   await plain.open('chats');

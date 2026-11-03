@@ -8,13 +8,17 @@ from typing import Any
 
 from localmelo.support.browser.driver import (
     Act,
+    ActResult,
     BrowserError,
     BrowserSetupError,
+    Changes,
     Element,
+    PointHit,
     RawPage,
     Shot,
     StaleElementError,
     TabInfo,
+    View,
 )
 from localmelo.support.browser.sites import origin_of
 
@@ -89,7 +93,11 @@ class FakeDriver:
     raises; ``stopped`` is what ``act`` answers (the page's blocked sends);
     ``docs`` maps a tab to the document id its page shows. ``popups``
     maps a label to an address that opens in a new tab. ``lose`` forgets a tab
-    as the real helper does when it loses one.
+    as the real helper does when it loses one. ``via`` is the way an act says
+    it used (``refuse_native`` makes it the page script, with the browser's own
+    input failed for the site), ``changes`` maps a label to what an act on it
+    changed, and ``redraw`` maps a label to the address whose page an act on it
+    finds redrawn (stale, once). ``hits`` maps a rounded point to what is there.
     """
 
     name = "fake"
@@ -121,6 +129,13 @@ class FakeDriver:
         self.blank_fails = False
         self.tabs_fail = False
         self.location_empty: set[str] = set()
+        self.via = "browser"
+        self.refuse_native = False
+        self.changes: dict[str, Changes] = {}
+        self.redraw: dict[str, RawPage] = {}
+        self.hits: dict[tuple[int, int], PointHit] = {}
+        self.marks: list[tuple[View, float, float] | None] = []
+        self.shot_view: View | None = View("", "d1", 1000.0, 500.0)
 
     def _new_tab(self) -> str:
         self.made += 1
@@ -227,8 +242,20 @@ class FakeDriver:
             return False  # the condition holds only on the page's own site
         return text != "never"
 
-    async def screenshot(self, tab: str | None) -> Shot:
-        return Shot("image/png", PNG)
+    async def screenshot(
+        self, tab: str | None, mark: tuple[View, float, float] | None = None
+    ) -> Shot:
+        self.marks.append(mark)
+        view = self.shot_view
+        if view is not None:
+            view = dataclasses.replace(view, url=self._url(tab))
+        return Shot("image/png", PNG, view)
+
+    async def hit(self, tab: str | None, view: View, x: float, y: float) -> PointHit:
+        self.calls.append(("hit", f"{x:g},{y:g}"))
+        if self._url(tab) != view.url:
+            raise StaleElementError("The page is not the one that was read.", "page")
+        return self.hits.get((round(x), round(y)), PointHit("none"))
 
     async def blank(self, tab: str | None) -> None:
         self.calls.append(("blank", tab or ""))
@@ -240,18 +267,36 @@ class FakeDriver:
             # entry is swapped, so Back never returns to the page that was refused.
             self.tabs_[here][-1:] = ["about:blank"]
 
-    async def act(self, tab: str | None, act: Act) -> str:
+    async def act(self, tab: str | None, act: Act) -> ActResult:
         self.calls.append(("act", f"{act.kind}:{act.element.label}"))
         here = tab or self.current or ""
         if self._url(tab) != act.url:
-            raise StaleElementError("The page is not the one that was read.")
+            raise StaleElementError("The page is not the one that was read.", "page")
         if act.doc and act.doc != self.docs.get(here, "d1"):
             raise StaleElementError(
-                "The page was reloaded or replaced since it was read."
+                "The page was reloaded or replaced since it was read.", "doc"
             )
-        self.acts.append(act)
         label = act.element.label
+        if label in self.redraw and act.point is None:
+            # The page redrew itself since it was read: the element is there again,
+            # under another place, and the act on the old reading is stale.
+            self.pages[self._url(tab)] = self.redraw.pop(label)
+            raise StaleElementError("That element is no longer on the page.", "gone")
+        self.acts.append(act)
         key = ("enter:" if act.enter else "") + label
+        via = "point" if act.point is not None else self.via
+        failed = False
+        if self.refuse_native and act.native and act.point is None:
+            via, failed = "page-script", True
+        elif not act.native and act.point is None:
+            via = "page-script"
+        result = ActResult(
+            self.stopped,
+            via,  # type: ignore[arg-type]
+            "the browser's own input did not reach it" if failed else "",
+            self.changes.get(label, Changes()),
+            native_failed=failed,
+        )
         if label in self.fails:
             self.tabs_[here].append(self.fails[label])
             raise BrowserError("The page did not take that action.")
@@ -260,7 +305,7 @@ class FakeDriver:
             for address in [wanted] if isinstance(wanted, str) else wanted:
                 self.current = self._new_tab()
                 self.tabs_[self.current].append(address)
-            return self.stopped
+            return result
         landed = self.lands.get(key)
         if landed is None and act.kind == "click" and act.element.kind == "link":
             landed = act.element.href
@@ -269,4 +314,4 @@ class FakeDriver:
         if key in self.then:
             self.queue[here] = [self._url(here), self.then[key]]
             self.tabs_[here].append(self.then[key])
-        return self.stopped
+        return result

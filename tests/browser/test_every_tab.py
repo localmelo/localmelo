@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from localmelo.support.browser.driver import Act
+from localmelo.support.browser.driver import Act, ActResult
 from localmelo.support.browser.fields import form_pairs
 from localmelo.tests.browser.fakes import FakeDriver, button, page
 from localmelo.tests.browser.test_acting import (
@@ -69,7 +69,7 @@ async def test_the_opener_moved_to_a_local_address_refuses_a_public_popup_too() 
     tools = await opened_home(driver)
     opening = driver.act
 
-    async def act(tab: str | None, a: Act) -> str:
+    async def act(tab: str | None, a: Act) -> ActResult:
         note = await opening(tab, a)
         driver.tabs_["t1"].append(CONSOLE)  # the page moved itself as it opened one
         return note
@@ -194,7 +194,7 @@ async def test_an_address_that_vanishes_after_the_action_is_not_read() -> None:
     tools = await opened_home(driver)
     acting = driver.act
 
-    async def act(tab: str | None, a: Act) -> str:
+    async def act(tab: str | None, a: Act) -> ActResult:
         note = await acting(tab, a)
         driver.location_empty.add("t1")
         return note
@@ -223,7 +223,7 @@ async def test_a_window_that_cannot_be_listed_after_the_action_is_not_read() -> 
     tools = await opened_home(driver)
     acting = driver.act
 
-    async def act(tab: str | None, a: Act) -> str:
+    async def act(tab: str | None, a: Act) -> ActResult:
         note = await acting(tab, a)
         driver.tabs_fail = True
         return note

@@ -12,6 +12,10 @@ from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
 ElementKind = Literal["link", "button", "textbox", "checkbox", "select"]
+# How an action was done, best first: the browser's own input on the element melo
+# read (trusted events), a page script on that element, or the browser's own click
+# at a point of the last picture.
+Way = Literal["browser", "page-script", "point"]
 # The most characters one text is typed with. The question that asks to type shows
 # all of it, so it is short enough to read before it is allowed.
 MAX_TYPED_CHARS = 1000
@@ -68,7 +72,12 @@ class Element:
     ``form`` is the name and value of every field in that form, with nothing
     secret in it, as the question about sending it shows; ``options`` are the
     choices of a select; ``attrs`` describes a text box or a select (see
-    :class:`FieldAttrs`).
+    :class:`FieldAttrs`). ``frame`` is where it is when not in the page itself
+    (a frame of the same site, or ``x<id>`` in a box from another site, whose
+    ``site`` is that box's origin); ``plain`` marks an element that only looks
+    clickable. ``context`` says where it belongs (what it is, its row or the
+    heading above it, the text next to it), ``""`` when nothing does: a ref the
+    page redrew is found again only with the same.
     """
 
     kind: ElementKind
@@ -84,6 +93,10 @@ class Element:
     at: int = field(default=-1, compare=False)
     fp: str = field(default="", compare=False)
     form: tuple[tuple[str, str], ...] = field(default=(), compare=False)
+    frame: str = field(default="", compare=False)
+    site: str = field(default="", compare=False)
+    plain: bool = field(default=False, compare=False)
+    context: str = field(default="", compare=False)
 
 
 @dataclass(frozen=True)
@@ -93,7 +106,10 @@ class RawPage:
     ``url`` is the address the browser itself reports for the tab (never the
     page's own word for it). ``doc`` identifies the loaded document: it changes
     when the page is reloaded or replaced. ``frames`` are the addresses of the
-    page's frames as far as they can be read.
+    page's frames as far as they can be read. ``unreached`` are the addresses
+    of the visible frames from another site whose insides melo cannot read or
+    act in (a sign-in box from another site, say): the model is told they are
+    there and that a picture and a click at a point can still reach them.
     """
 
     url: str
@@ -105,6 +121,7 @@ class RawPage:
     )
     doc: str = ""
     frames: tuple[str, ...] = ()
+    unreached: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -115,11 +132,93 @@ class TabInfo:
 
 
 @dataclass(frozen=True)
+class View:
+    """What a picture of a page showed: the document, and the part of it in view.
+
+    ``width`` and ``height`` are the size of the view in the page's own pixels
+    (CSS pixels), ``x`` and ``y`` how far it was scrolled, ``ratio`` the
+    screen's pixels to a page pixel. A point on the picture means the same place
+    on the page only while all of these hold.
+    """
+
+    url: str
+    doc: str
+    width: float
+    height: float
+    x: float = 0.0
+    y: float = 0.0
+    ratio: float = 2.0
+
+
+@dataclass(frozen=True)
 class Shot:
-    """An image of the page: ``data`` is base64 without a ``data:`` prefix."""
+    """An image of the page: ``data`` is base64 without a ``data:`` prefix.
+
+    ``view`` is the view the picture showed, when the driver could read it.
+    """
 
     mime_type: str
     data: str
+    view: View | None = None
+
+
+@dataclass(frozen=True)
+class PointHit:
+    """What is at a point of the page, as the page script found it there.
+
+    ``element`` is the control the point resolves to (a label moves to its
+    field), in the same terms as a read element, or None when the point is on
+    nothing melo can name. ``surface`` says what it is: ``control``; ``canvas``
+    (a drawing, picture or video that takes clicks itself); ``frame`` (a box
+    from another site, ``site`` its origin, whose inside melo cannot see); or
+    ``none`` (plain text or background). ``consent`` is set when the control's
+    words agree to terms, consent or a sign-in with another account, which
+    melo asks the person about. ``at`` is where to click instead (page pixels),
+    when the point was on a label and its field can take the click itself.
+    """
+
+    surface: Literal["control", "canvas", "frame", "none"]
+    element: Element | None = None
+    site: str = ""
+    consent: bool = False
+    at: tuple[float, float] | None = None
+
+
+@dataclass(frozen=True)
+class Changes:
+    """What an action changed on the page, as an observer set before it saw.
+
+    ``texts`` is new visible text (a notice, a toast, an error), even text that
+    was gone again by the end; ``target`` the acted-on element's new state in
+    words (``"now checked, disabled"``, ``"gone from the page"``), ``""`` when
+    it did not change. ``changed`` is whether the page changed at all (its
+    document tree, or the element's state). ``quiet`` is False when the page
+    was still changing when melo stopped waiting. These are words from the page.
+    """
+
+    texts: tuple[str, ...] = ()
+    target: str = ""
+    quiet: bool = True
+    changed: bool = False
+
+
+@dataclass(frozen=True)
+class ActResult:
+    """What :meth:`BrowserDriver.act` did.
+
+    ``note`` is a sentence about what the driver stopped the page from doing
+    meanwhile (a send nobody asked about), or ``""``; ``via`` the way it acted
+    and ``why`` the reason a better way was not used (``""`` when none was
+    passed over); ``changes`` what it saw change, or None when the page became
+    another document. ``native_failed`` says the browser's own input did not
+    work there, so the site starts with the page script next time.
+    """
+
+    note: str = ""
+    via: Way = "page-script"
+    why: str = ""
+    changes: Changes | None = None
+    native_failed: bool = False
 
 
 ActionKind = Literal["click", "type", "select"]
@@ -140,7 +239,12 @@ class Act:
     (a click on its submit button, or Enter): a driver tries to stop any other
     attempt by the page to send a form while the action runs. That is best
     effort and holds only that long; once a text is in a page, the page may send
-    it itself.
+    it itself. ``native`` lets the driver use the browser's own input first;
+    False starts with the page script (a site where the browser's own input
+    did not work earlier). ``point`` is a click at that place of ``view`` (page
+    pixels), with the browser's own click, on the control ``element`` that was
+    found there; the driver does nothing unless the point still resolves to it
+    and the view has not scrolled.
     """
 
     kind: ActionKind
@@ -150,10 +254,24 @@ class Act:
     enter: bool = False
     doc: str = ""
     send: bool = False
+    native: bool = True
+    point: tuple[float, float] | None = None
+    view: View | None = None
 
 
 class StaleElementError(BrowserError):
-    """The page is not the one that was read, or the element is no longer there."""
+    """The page is not the one that was read, or the element is no longer there.
+
+    ``why`` is the page script's word for it: ``page`` (another address),
+    ``doc`` (reloaded), ``gone`` (no longer there as it was read), ``dest`` (it
+    leads or sends elsewhere now), ``field``, ``grew`` or ``frame``. Only a
+    page that redrew itself in the same document (``gone``) may have the same
+    element under another ref.
+    """
+
+    def __init__(self, message: str, why: str = "") -> None:
+        super().__init__(message)
+        self.why = why
 
 
 class BrowserDriver(Protocol):
@@ -204,16 +322,29 @@ class BrowserDriver(Protocol):
         so a page that goes elsewhere for a moment answers nothing about it.
         """
 
-    async def screenshot(self, tab: str | None) -> Shot: ...
+    async def screenshot(
+        self, tab: str | None, mark: tuple[View, float, float] | None = None
+    ) -> Shot:
+        """A picture of the view, with the view it showed.
+
+        *mark* is a point melo clicked (the view it was clicked in, and the
+        point in page pixels): it is drawn on the picture when the page still
+        shows that view, so the person and the model see where the click went.
+        """
+
+    async def hit(self, tab: str | None, view: View, x: float, y: float) -> PointHit:
+        """What is at (*x*, *y*) of *view* (page pixels), the view of the last picture.
+
+        Raises :class:`StaleElementError` when the page is not that one, or it scrolled.
+        """
 
     async def blank(self, tab: str | None) -> None:
         """Leave the page: load an empty one (a redirect the person refused)."""
 
-    async def act(self, tab: str | None, act: Act) -> str:
+    async def act(self, tab: str | None, act: Act) -> ActResult:
         """Do *act* on the page of *tab*, then let the page settle.
 
-        Returns a sentence about what the driver stopped the page from doing
-        meanwhile (sending a form nobody asked about), or ``""``. Raises
+        Returns what it did (see :class:`ActResult`). Raises
         :class:`StaleElementError` when the page is not the one that was read,
         and :class:`BrowserError`, in words for the model, when the element
         cannot be used (hidden, disabled, a field melo never types in, an

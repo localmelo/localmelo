@@ -104,6 +104,7 @@ class AgentFactory:
         saves: bool = True,
         browser_driver: str = "off",
         web_fetch: bool = False,
+        web_search: bool = False,
     ) -> None:
         self.backend = backend
         self._cfg = cfg
@@ -132,6 +133,8 @@ class AgentFactory:
         self.browser_driver = browser_driver
         # Whether the Agents may read public pages with web_fetch ([tools] web_fetch).
         self.web_fetch = web_fetch
+        # Whether they may search the web with web_search ([web] search).
+        self.web_search = web_search
         # Whether /model and /backend save their choice as the default: not
         # for a --base-url session whose save question was answered no.
         self.saves = saves
@@ -192,6 +195,7 @@ class AgentFactory:
                 mcp_config=mcp_config,
                 browser_driver=self.browser_driver,
                 web_fetch=self.web_fetch,
+                web_search=self.web_search,
                 identify=True,
             )
         cfg = self._cfg
@@ -209,6 +213,7 @@ class AgentFactory:
             mcp_config=mcp_config,
             browser_driver=self.browser_driver,
             web_fetch=self.web_fetch,
+            web_search=self.web_search,
             identify=True,
         )
 
