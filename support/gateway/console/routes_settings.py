@@ -44,6 +44,7 @@ from localmelo.support import settings as setting_keys
 from localmelo.support.backends import discovery
 from localmelo.support.backends.discovery import DISCOVERY_TIMEOUT_S, DiscoveryError
 from localmelo.support.backends.registry import get_backend
+from localmelo.support.browser import desktop
 from localmelo.support.gateway.console.errors import ApiError
 from localmelo.support.gateway.console.probe import redact_userinfo, url_label
 from localmelo.support.gateway.console.registry import DEFAULT_WORKSPACE
@@ -132,6 +133,9 @@ class SettingsPutBody(_SettingsBaseBody):
     approvals: StrictStr | None = None
     # ``[browser] driver``: true reads web pages in Safari (``/browser on``), false turns it off; absent leaves it.
     browser: StrictBool | None = None
+    # ``[browser] app_windows``: whether melo sees and answers a window another app
+    # opens after its act in the browser; absent leaves it.
+    app_windows: StrictBool | None = None
     # ``[workspace] extra_folders``, the folders "Always allow this folder" kept
     # (#405), as the whole new list; absent leaves it.
     extra_folders: list[StrictStr] | None = None
@@ -449,6 +453,10 @@ def settings_json() -> dict[str, Any]:
             cfg.approvals.mode if cfg.approvals.mode in config.APPROVAL_MODES else "ask"
         ),
         "browser": cfg.browser.driver != "off",
+        "app_windows": cfg.browser.app_windows is True,
+        # Whether the desktop control helper is installed: without it melo can
+        # only name the app that came to the front.
+        "desktop_helper": desktop.helper_command() is not None,
         "extra_folders": _extra_folders(cfg),
         "web_fetch": cfg.tools.web_fetch is True,
         "web_search": cfg.web.search is True,
@@ -616,6 +624,9 @@ def _build_candidate(
     browser = getattr(body, "browser", None)
     if browser is not None:
         candidate.browser.driver = "safari-automation" if browser else "off"
+    app_windows = getattr(body, "app_windows", None)
+    if app_windows is not None:
+        candidate.browser.app_windows = app_windows
     if folders is not None:
         candidate.workspace.extra_folders = list(folders)
     web_fetch = getattr(body, "web_fetch", None)
@@ -698,6 +709,8 @@ def _changed_fields(before: config.Config, after: config.Config) -> list[str]:
         changed.append("approvals")
     if before.browser.driver != after.browser.driver:
         changed.append("browser")
+    if before.browser.app_windows != after.browser.app_windows:
+        changed.append("app_windows")
     if before.workspace.extra_folders != after.workspace.extra_folders:
         changed.append("extra_folders")
     if before.tools.web_fetch != after.tools.web_fetch:

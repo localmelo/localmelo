@@ -553,11 +553,16 @@ class BrowserConfig:
     ``driver`` is ``off`` (the default, no browser tools) or ``safari-automation``
     (Safari's automation windows). Only the terminal chat and the console offer it.
     ``keep_tabs`` leaves the tabs melo opened in the window when a chat ends or
-    sits idle; by default melo closes them.
+    sits idle; by default melo closes them. ``app_windows`` (on by default) lets
+    melo see a window another app opens after its own act in the browser, such
+    as a chat app's sign-in window, and answer it with the person's say, when the
+    desktop control helper is installed; without the helper melo still says which
+    app came to the front (:mod:`localmelo.support.browser.desktop`).
     """
 
     driver: str = "off"  # off | safari-automation
     keep_tabs: bool = False
+    app_windows: bool = True
 
 
 # The most folders ``[workspace] extra_folders`` keeps.
@@ -885,16 +890,16 @@ class Config:
         return errors
 
     def _validate_browser(self) -> list[str]:
-        """``[browser] driver`` names a driver and ``keep_tabs`` is true or false."""
+        """``[browser] driver`` names a driver; ``keep_tabs`` and ``app_windows`` are true or false."""
         errors = []
         if self.browser.driver not in BROWSER_DRIVERS:
             errors.append(
                 f"[browser] driver={self.browser.driver!r} is not one of {BROWSER_DRIVERS}"
             )
-        if not isinstance(self.browser.keep_tabs, bool):
-            errors.append(
-                f"[browser] keep_tabs={self.browser.keep_tabs!r} must be true or false"
-            )
+        for name in ("keep_tabs", "app_windows"):
+            value = getattr(self.browser, name)
+            if not isinstance(value, bool):
+                errors.append(f"[browser] {name}={value!r} must be true or false")
         return errors
 
     def _validate_tools(self) -> list[str]:
@@ -2105,6 +2110,8 @@ def save(cfg: Config) -> None:
         lines.extend(["[browser]", f"driver = {_toml_string(cfg.browser.driver)}"])
         if cfg.browser.keep_tabs is not False:
             lines.append(f"keep_tabs = {_toml_value(cfg.browser.keep_tabs)}")
+        if cfg.browser.app_windows is not True:
+            lines.append(f"app_windows = {_toml_value(cfg.browser.app_windows)}")
         lines.append("")
 
     if cfg.tools != ToolsConfig():

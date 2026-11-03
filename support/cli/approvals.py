@@ -371,6 +371,27 @@ def _tool_panel(
             body,
             escaped_any,
         )
+    if tool.startswith("desktop-act:"):
+        # A button in another app's window that appeared after melo's own step
+        # in the browser: asked every time.
+        app = shown(str(arguments.get("app") or tool[len("desktop-act:") :]))
+        on = shown(str(arguments.get("on") or "a button"))
+        window = shown(str(arguments.get("window") or ""))
+        said = f"melo wants to press {on} in {app}'s window" + (
+            f" “{window}”." if window else "."
+        )
+        note = (
+            "The window appeared after melo's own step in the browser. melo never "
+            "types into other apps, and asks every time it presses."
+        )
+        body = [("", row) for row in _wrapped([said], width)]
+        body += [("muted", row) for row in _wrapped([note], width)]
+        return PanelText(
+            "Press a button in another app?",
+            f"{app}{mark} · another app's window",
+            body,
+            escaped_any,
+        )
     if tool.startswith("browser:"):
         site = shown(str(arguments.get("site") or tool[len("browser:") :]))
         said = f"melo wants to open {site} in Safari and read it."

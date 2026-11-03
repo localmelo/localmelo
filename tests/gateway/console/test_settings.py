@@ -1164,6 +1164,34 @@ def test_the_settings_carry_the_web_search_switch_and_save_it_only_when_sent(
     assert word.status_code == 400
 
 
+def test_the_settings_carry_the_other_apps_windows_switch_and_the_helper(
+    client: TestClient, isolated_config: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``[browser] app_windows``: on by default and not written; off is written; the helper is reported."""
+    _saved_cfg()
+    loaded = client.get("/api/settings").json()
+    assert loaded["app_windows"] is True and loaded["desktop_helper"] is False
+    keys = {
+        key["key"]: group["section"]
+        for group in loaded["developer_settings"]
+        for key in group["keys"]
+    }
+    assert keys["browser.app_windows"] == "browser"
+    off = client.put(
+        "/api/settings", json=_put_body(loaded["revision"], app_windows=False)
+    )
+    assert off.status_code == 200 and off.json()["app_windows"] is False
+    assert config.load().browser.app_windows is False
+    assert "app_windows = false" in isolated_config.read_text()
+    on = client.put(
+        "/api/settings", json=_put_body(off.json()["revision"], app_windows=True)
+    )
+    assert on.json()["app_windows"] is True
+    assert "[browser]" not in isolated_config.read_text(), "the default is not written"
+    monkeypatch.setenv("LOCALMELO_DESKTOP_HELPER", "/opt/helper mcp")
+    assert client.get("/api/settings").json()["desktop_helper"] is True
+
+
 def test_the_settings_carry_the_follow_up_switch_and_save_it_only_when_sent(
     client: TestClient, isolated_config: Path
 ) -> None:

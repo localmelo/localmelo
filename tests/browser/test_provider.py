@@ -261,15 +261,26 @@ async def test_read_views() -> None:
     assert "Welcome." not in elements.text and "[e5 link" in elements.text
 
 
-async def test_find_searches_the_last_reading() -> None:
+async def test_find_reads_the_page_again_and_searches_it() -> None:
     driver = world()
     tools = await tools_of(driver)
     await run(tools, "browser_open", url=HOME)
-    calls = len(driver.calls)
     out = await run(tools, "browser_find", query="new", role="link")
-    assert '1 of 2 elements match "new"' in out.text and '[e1 link "News"' in out.text
-    assert len(driver.calls) == calls
+    assert '1 of 2 elements match "new"' in out.text and '[e3 link "News"' in out.text
+    assert out.text.startswith("<<page id=s2 ") and ("page", "t1") in driver.calls
     assert "0 of 2" in (await run(tools, "browser_find", query="zzz")).text
+
+
+async def test_find_after_a_reload_gives_refs_of_the_page_as_it_is_now() -> None:
+    """A page reloaded since it was read: find never serves the old reading's refs."""
+    driver = world()
+    tools = await tools_of(driver)
+    await run(tools, "browser_open", url=HOME)
+    driver.docs["t1"] = "d2"  # reloaded: another document at the same address
+    found = await run(tools, "browser_find", query="news", role="link")
+    assert '[e3 link "News"' in found.text and "e1 link" not in found.text
+    out = await run(tools, "browser_follow", ref="e3")
+    assert not out.is_error and "Today's news." in out.text
 
 
 async def test_nothing_to_read_before_a_page_is_open() -> None:
@@ -325,11 +336,10 @@ async def test_wait_reports_what_happened() -> None:
         in (await run(tools, "browser_wait", until="text", text="Hi")).text
     )
     assert (
-        "Timed out after 30 s"
-        in (
-            await run(tools, "browser_wait", until="text", text="never", seconds=999)
-        ).text
-    )
+        await run(tools, "browser_wait", until="text", text="never", seconds=999)
+    ).text == "Timed out after 30 s: the text did not appear."
+    gone = await run(tools, "browser_wait", until="gone", text="never", seconds=1)
+    assert gone.text == "Timed out after 1 s: the text did not go away."
     assert ("wait", "text:Hi:10") in driver.calls
     assert (await run(tools, "browser_wait", until="text")).is_error
 

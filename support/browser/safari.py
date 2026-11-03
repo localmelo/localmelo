@@ -1366,10 +1366,13 @@ class SafariAutomationDriver:
         origin: str = "",
     ) -> bool:
         await self._focus(tab)
+        # A page with no body yet (a bot check or an interstitial between two
+        # documents) is not loaded: nothing on it counts, and the wait goes on.
+        words = json.dumps(text)
         probe = {
-            "load": "document.readyState === 'complete'",
-            "text": f"(document.body.innerText || '').indexOf({json.dumps(text)}) >= 0",
-            "gone": f"(document.body.innerText || '').indexOf({json.dumps(text)}) < 0",
+            "load": "document.readyState === 'complete' && !!document.body",
+            "text": f"!!document.body && (document.body.innerText || '').indexOf({words}) >= 0",
+            "gone": f"!!document.body && (document.body.innerText || '').indexOf({words}) < 0",
         }[until]
         if origin:
             probe = f"location.origin === {json.dumps(origin)} && ({probe})"

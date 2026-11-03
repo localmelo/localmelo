@@ -54,6 +54,49 @@ async def test_a_redrawn_ref_is_used_when_one_element_is_like_it() -> None:
     assert asks.names.count("browser-act:https://example.com") == 1
 
 
+def reload(driver: FakeDriver, shown: Any = None) -> None:
+    """The tab's page loads again at the same address: another document (``d2``)."""
+    driver.docs[driver.current or ""] = "d2"
+    driver.pages[HOME] = dataclasses.replace(shown or driver.pages[HOME], doc="d2")
+
+
+async def test_a_ref_from_before_a_reload_is_used_when_one_element_is_like_it() -> None:
+    """The page loaded again at the same address: the one button like the ref is used, and the result says so."""
+    asks = Asks()
+    driver = world(button("Happy"), button("Check in"))
+    tools = await tools_of(driver)
+    with asking(asks):
+        await run(tools, "browser_open", url=HOME)
+        reload(driver)
+        out = await run(tools, "browser_click", ref="e1")
+    assert not out.is_error
+    assert out.text.startswith(
+        "Clicked e3 (via browser). The page reloaded since e1 was read; e3 is the "
+        "one element like it now."
+    )
+    assert (
+        "- the page reloaded since e1 was read; e3 is the one button 'Happy' on it now"
+        in out.text
+    )
+    assert [a.element.label for a in driver.acts] == ["Happy"]
+    assert driver.acts[0].doc == "d2"
+
+
+@pytest.mark.parametrize("after", ["two like it", "a form send"])
+async def test_a_ref_from_before_a_reload_otherwise_stays_stale(after: str) -> None:
+    sends = button("Happy", submit=HOME + "mood")
+    driver = world(sends if after == "a form send" else button("Happy"))
+    tools = await tools_of(driver)
+    with asking(Asks()):
+        await run(tools, "browser_open", url=HOME)
+        if after == "two like it":
+            reload(driver, page(HOME, "Moods.", button("Happy"), button("Happy")))
+        else:
+            reload(driver)  # what the new page would send was not asked about
+        out = await run(tools, "browser_click", ref="e1")
+    assert out.is_error and "reloaded or replaced" in out.text and not driver.acts
+
+
 async def test_a_redrawn_ref_with_two_like_it_stays_stale() -> None:
     driver = world(at("Delete"))
     driver.redraw["Delete"] = page(HOME, "List.", at("Delete"), at("Delete"))

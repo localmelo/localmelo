@@ -250,6 +250,26 @@ def test_a_click_at_a_point_says_what_it_lands_on_and_that_it_asks_every_time() 
     assert "asks every time" in words
 
 
+def test_a_press_in_another_apps_window_names_the_app_and_asks_every_time() -> None:
+    pressing = panel_text(
+        _request(
+            "desktop-act:Chat",
+            app="Chat",
+            access="desktop-act",
+            how="press",
+            on='"Allow"',
+            window="Sign in",
+            button="Allow",
+        ),
+        width=80,
+    )
+    assert pressing.title == "Press a button in another app?"
+    assert pressing.header == "Chat · another app's window"
+    words = " ".join(" ".join(line for _, line in pressing.body).split())
+    assert 'press "Allow" in Chat\'s window “Sign in”.' in words
+    assert "never types into other apps" in words and "asks every time" in words
+
+
 def test_a_typing_panel_shows_all_the_text_and_says_the_page_may_send_it() -> None:
     text = "hello there\n" + "a long line of words " * 40 + "THE END"
     typing = panel_text(

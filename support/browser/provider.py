@@ -74,6 +74,7 @@ from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool, ToolF
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.schema import ImagePart, ToolDef
 from localmelo.support.browser import addresses, fields, render, sites
+from localmelo.support.browser.desktop import DesktopWatch, Mark, seen_lines
 from localmelo.support.browser.driver import (
     MAX_TYPED_CHARS,
     Act,
@@ -99,6 +100,8 @@ MAX_NEW_TABS = 3
 # page starts a moment later is then seen), at most this many times, this far apart.
 SETTLE_TRIES = 5
 SETTLE_S = 0.3
+# While browser_wait waits, the screen is looked at this often for another app's window.
+WATCH_S = 1.0
 
 PAGE_NOTE = (
     "Web pages: the browser_* tools return pages between a start marker "
@@ -118,6 +121,13 @@ PAGE_NOTE = (
     "the window. Each act returns what changed and the page again. Only for what "
     "the element list lacks (a drawing, a box from another site): "
     "browser_screenshot, then browser_click_point."
+)
+DESKTOP_NOTE = (
+    "Other apps' windows: a step's result names a window another app opened "
+    "after your act (a sign-in or permission window, say), with its buttons. "
+    "window_read reads it and window_press presses a button by name; never "
+    "type into other apps. When melo can only name the app, tell the person "
+    "to answer that window."
 )
 
 _ROLES = ["link", "button", "textbox", "checkbox", "select", "any"]
@@ -179,8 +189,8 @@ TOOLS: tuple[ToolDef, ...] = (
     ),
     _def(
         "browser_find",
-        "Search the elements of the last reading (links, buttons, menu items, "
-        "fields) by words in their visible text, aria-label or address.",
+        "Read the page again and search its elements (links, buttons, menu "
+        "items, fields) by words in their visible text, aria-label or address.",
         ("query",),
         tab=_TAB,
         query=_p("string"),
@@ -261,6 +271,34 @@ TOOLS: tuple[ToolDef, ...] = (
 )
 
 
+# Another app's window that appeared after melo's own act (see
+# :mod:`localmelo.support.browser.desktop`): offered when the desktop control
+# helper is installed.
+_WINDOW = _p(
+    "string", "A window id such as w1 from a step's result; default the newest."
+)
+WINDOW_TOOLS: tuple[ToolDef, ...] = (
+    _def(
+        "window_read",
+        "Read a window another app opened after your browser act (w1 ...): its "
+        "text, its buttons by name and a picture of only that window.",
+        window=_WINDOW,
+    ),
+    _def(
+        "window_press",
+        "Press a button by its name in a window another app opened after your "
+        "browser act. Only when the window names none, or a press by name did not "
+        "go through: x and y, 0-1000 across and down its last picture. melo never "
+        "types into other apps.",
+        acts=True,
+        window=_WINDOW,
+        button=_p("string", "The button's name, as window_read shows it."),
+        x=_p("number"),
+        y=_p("number"),
+    ),
+)
+
+
 def _guarded(fn: ToolFunction) -> ToolFunction:
     """Run a tool under the provider's lock; a browser problem becomes the result."""
 
@@ -309,8 +347,14 @@ class BrowserToolProvider(BaseToolProvider):
         keep_tabs: bool = False,
         idle_close_s: float = IDLE_CLOSE_S,
         settle_s: float | None = None,
+        desktop: DesktopWatch | None = None,
     ) -> None:
         self._driver = driver
+        # Other apps' windows around melo's own acts; None: not looked for.
+        self._desktop = desktop
+        self._desk_mark: Mark | None = None
+        # Lines an act adds to "what changed" (a ref found again after a reload).
+        self._act_notes: list[str] = []
         self._keep_tabs = keep_tabs
         self._idle_s = idle_close_s
         self._settle_s = SETTLE_S if settle_s is None else settle_s
@@ -346,6 +390,8 @@ class BrowserToolProvider(BaseToolProvider):
         return self._driver
 
     def system_notes(self) -> tuple[str, ...]:
+        if self._desktop is not None:
+            return (PAGE_NOTE, DESKTOP_NOTE)
         return (PAGE_NOTE,)
 
     async def start(self) -> list[ProvidedTool]:
@@ -362,7 +408,12 @@ class BrowserToolProvider(BaseToolProvider):
             "browser_wait": self._wait,
             "browser_screenshot": self._screenshot,
             "browser_click_point": self._click_point,
+            "window_read": self._window_read,
+            "window_press": self._window_press,
         }
+        offered = TOOLS
+        if self._desktop is not None and self._desktop.can_read:
+            offered = (*TOOLS, *WINDOW_TOOLS)
         return [
             # No timeout of its own: a call may wait for the person's answer about
             # a site, so the run's tool timeout applies, and the driver bounds
@@ -375,7 +426,7 @@ class BrowserToolProvider(BaseToolProvider):
                 # them by this word from melo's own provider and by their names.
                 asks_itself=tool.name in SELF_ASKING_TOOLS,
             )
-            for tool in TOOLS
+            for tool in offered
         ]
 
     async def close(self) -> None:
@@ -386,10 +437,15 @@ class BrowserToolProvider(BaseToolProvider):
             with contextlib.suppress(Exception):
                 async with asyncio.timeout(5):
                     await self._close_tabs(keep_one=False)
+        if self._desktop is not None:
+            with contextlib.suppress(Exception):
+                await self._desktop.close()
         await self._driver.close()
 
     def kill(self) -> None:
         self._cancel_idle()
+        if self._desktop is not None:
+            self._desktop.kill()
         self._driver.kill()
 
     def forget(self) -> None:
@@ -400,6 +456,8 @@ class BrowserToolProvider(BaseToolProvider):
         self._views.clear()
         self._points.clear()
         self._scripted.clear()
+        if self._desktop is not None:
+            self._desktop.forget()
 
     async def end_chat(self) -> None:
         """A new chat starts: nothing is approved, and the tabs of the old one are tidied."""
@@ -755,8 +813,11 @@ class BrowserToolProvider(BaseToolProvider):
     async def _find(
         self, query: str = "", role: str = "any", tab: str | None = None, **_: Any
     ) -> str:
+        # The page as it is now, never an older reading: a page reloaded since it
+        # was read has new refs, and a ref of the old reading only fails.
+        snap = await self._reading(TabInfo(self._current(tab)), set())
         return render.render_find(
-            self._snapshot_of(tab), str(query)[:200], role if role in _ROLES else "any"
+            snap, str(query)[:200], role if role in _ROLES else "any"
         )
 
     @_guarded
@@ -855,6 +916,12 @@ class BrowserToolProvider(BaseToolProvider):
                 "melo could not list the browser's tabs, so it did not act: it "
                 "would not know which tabs the action opens."
             )
+        self._act_notes = []
+        # The screen before the act: a window another app opens because of it
+        # is told apart from the windows that were there.
+        self._desk_mark = None
+        if self._desktop is not None:
+            self._desk_mark = await self._desktop.mark()
         return before
 
     async def _run_act(
@@ -886,7 +953,15 @@ class BrowserToolProvider(BaseToolProvider):
                     found = await self._refind(tab_id, snap, act.element, stale)
                 if found is None:
                     raise
-                fresh, ref, item = found
+                fresh, again, item = found
+                if stale.why == "doc":
+                    # The page loaded again on the same address: say so where
+                    # the result says what changed.
+                    self._act_notes.append(
+                        f"the page reloaded since {ref} was read; {again} is the "
+                        f'one {item.kind} "{item.label or item.also}" on it now'
+                    )
+                ref = again
                 act = dataclasses.replace(
                     act, url=fresh.url, element=item, doc=fresh.doc
                 )
@@ -917,8 +992,10 @@ class BrowserToolProvider(BaseToolProvider):
 
         Only a page that redrew itself in the same document (the element is
         gone as it was read) is read again, and only on the site the act was
-        approved for; after a reload or another document a ref stays stale,
-        and so does one whose new reading is another document already. Like means the same kind, label, destination,
+        approved for; after another document a ref stays stale, and so does
+        one whose new reading is another document already. A page that was
+        reloaded on the same address is the exception (:meth:`_reloaded`).
+        Like means the same kind, label, destination,
         form address and form fields and, for a text box, the same field; where
         several are, a control by its tag or role wins over an element that only
         looks clickable. It must also belong where it did: the same row or
@@ -927,6 +1004,8 @@ class BrowserToolProvider(BaseToolProvider):
         was approved on, so a "Delete" of another record is never taken for
         the one that went. Anything else stays stale.
         """
+        if stale.why == "doc":
+            return await self._reloaded(tab_id, snap, item)
         if stale.why != "gone" or not item.context:
             return None
         twins = [
@@ -944,6 +1023,40 @@ class BrowserToolProvider(BaseToolProvider):
         ):
             return None  # another document: a ref of the old one is never carried over
         like = [(r, e) for r, e in fresh.elements.items() if _like(e, item)]
+        if len(like) > 1:
+            like = [(r, e) for r, e in like if not e.plain]
+        if len(like) != 1:
+            return None
+        ref, found = like[0]
+        return fresh, ref, found
+
+    async def _reloaded(
+        self, tab_id: str, snap: render.Snapshot, item: Element
+    ) -> tuple[render.Snapshot, str, Element] | None:
+        """The one element like *item* on the page reloaded at the same address, or None.
+
+        The page loaded again since it was read (another document, the same
+        address, on the site the act was approved for). Like means the same
+        kind and name, destination, frame and, for a text box, the same field,
+        never a secret one. It must have been the only one of its kind and
+        name in the reading the act was approved on, and be the only one in
+        the new reading (a control wins over a look-alike). A control that
+        sends a form is never carried over: what the reloaded page would send
+        was not asked about. Anything else stays stale.
+        """
+        if item.submit:
+            return None
+        twins = [e for e in snap.elements.values() if _same_control(e, item)]
+        if len(twins) != 1:
+            return None
+        fresh = await self._reading(TabInfo(tab_id), set())
+        if fresh.origin != snap.origin or not _same_page(fresh.url, snap.url):
+            return None
+        like = [
+            (r, e)
+            for r, e in fresh.elements.items()
+            if not e.sensitive and _same_control(e, item) and e.attrs == item.attrs
+        ]
         if len(like) > 1:
             like = [(r, e) for r, e in like if not e.plain]
         if len(like) != 1:
@@ -1051,6 +1164,12 @@ class BrowserToolProvider(BaseToolProvider):
         lines = _change_lines(
             result, url if moved else "", urls[landed], self._origins.get(tab_id, "")
         )
+        lines = [*self._act_notes, *lines]
+        self._act_notes = []
+        others = await self._other_windows()
+        if others:
+            said += " Another app put a window on the screen: see what changed."
+            lines.extend(others)
         changes = result.changes if result is not None else None
         if (
             expect
@@ -1063,13 +1182,25 @@ class BrowserToolProvider(BaseToolProvider):
         page = await self._read_tab(TabInfo(landed, urls[landed]), done, changes=lines)
         return f"{said}\n{page}"
 
+    async def _other_windows(self) -> list[str]:
+        """The "what changed" lines for windows other apps put up since the act began."""
+        mark, self._desk_mark = self._desk_mark, None
+        if self._desktop is None or mark is None:
+            return []
+        return seen_lines(await self._desktop.appeared(mark))
+
     def _done_line(self, verb: str, ref: str, asked: str, result: ActResult) -> str:
         """``Clicked e12 (via browser).``, with why a way was passed over and a ref found again."""
         how = f"via {result.via}"
         if result.why:
             how += f": {result.why}"
         line = f"{verb} {ref} ({how})."
-        if ref != asked:
+        if ref != asked and self._act_notes:
+            line += (
+                f" The page reloaded since {render.field_text(asked, 30)} was read; "
+                f"{ref} is the one element like it now."
+            )
+        elif ref != asked:
             line += (
                 f" The page redrew {render.field_text(asked, 30)}; {ref} is the one "
                 "element like it now."
@@ -1343,23 +1474,57 @@ class BrowserToolProvider(BaseToolProvider):
             limit = min(max(float(seconds), 0.0), WAIT_MAX_S)
         except (TypeError, ValueError):
             limit = WAIT_DEFAULT_S
-        what = {
-            "load": "the page loaded",
-            "text": "the text appeared",
-            "gone": "the text was gone",
+        reached_words, missed_words = {
+            "load": ("the page loaded", "the page did not finish loading"),
+            "text": ("the text appeared", "the text did not appear"),
+            "gone": ("the text was gone", "the text did not go away"),
         }[until]
         tab_id = self._approved(tab)
         await self._recheck(tab_id)
         # The condition counts only on the approved site, read in the same step,
         # and the tab is checked again after: a wait says nothing about a page
         # that went elsewhere while it was watched.
-        reached = await self._driver.wait(
-            self._raw[tab_id], until, str(text), limit, origin=self._origins[tab_id]
-        )
+        reached, others = await self._watched_wait(tab_id, until, str(text), limit)
         await self._recheck(tab_id)
+        if others:
+            block = render.block("screen", "", "\n".join(others))
+            return (
+                "Stopped waiting: another app put a window on the screen "
+                f"(the page was not checked again).\n{block}"
+            )
         if reached:
-            return f"Reached: {what}."
-        return f"Timed out after {limit:g} s: {what} did not happen."
+            return f"Reached: {reached_words}."
+        return f"Timed out after {limit:g} s: {missed_words}."
+
+    async def _watched_wait(
+        self, tab_id: str, until: str, text: str, limit: float
+    ) -> tuple[bool, list[str]]:
+        """Wait for the page; with the desktop watched, stop early when another app's window appears.
+
+        Whether the condition held, and the "what changed" lines of the
+        windows that appeared (none: the wait ran to its end).
+        """
+        raw, origin = self._raw[tab_id], self._origins[tab_id]
+        if self._desktop is None:
+            return await self._driver.wait(raw, until, text, limit, origin=origin), []
+        mark = await self._desktop.mark()
+        loop = asyncio.get_running_loop()
+        end = loop.time() + limit
+        while True:
+            start = loop.time()
+            piece = max(min(WATCH_S, end - start), 0.0)
+            if await self._driver.wait(raw, until, text, piece, origin=origin):
+                return True, []
+            others = seen_lines(await self._desktop.appeared(mark))
+            if others:
+                return False, others
+            now = loop.time()
+            if now >= end:
+                return False, []
+            if (
+                now - start < piece
+            ):  # a driver that answered at once: wait out the piece
+                await asyncio.sleep(piece - (now - start))
 
     @_guarded
     async def _screenshot(self, tab: str | None = None, **_: Any) -> ToolOutput:
@@ -1377,6 +1542,39 @@ class BrowserToolProvider(BaseToolProvider):
             text=f"A picture of {self._origins[tab_id]} was taken and kept with this chat.",
             images=[ImagePart(mime_type=shot.mime_type, data=shot.data)],
         )
+
+    # ── Other apps' windows ──
+
+    def _watch(self) -> DesktopWatch:
+        if self._desktop is None:
+            raise BrowserError("melo does not watch other apps' windows in this chat.")
+        return self._desktop
+
+    @_guarded
+    async def _window_read(self, window: str | None = None, **_: Any) -> ToolOutput:
+        text, images = await self._watch().read(window)
+        return ToolOutput(text=text, images=images)
+
+    @_guarded
+    async def _window_press(
+        self,
+        window: str | None = None,
+        button: str = "",
+        x: Any = None,
+        y: Any = None,
+        **rest: Any,
+    ) -> ToolOutput:
+        watch = self._watch()
+        if str(button or "").strip() and x is None and y is None:
+            return ToolOutput(text=await watch.press(window, str(button)))
+        if x is None and y is None and not any(k in rest for k in _POINT_KEYS):
+            raise BrowserError(
+                "window_press needs a button's name, or x and y (0-1000) on the "
+                "window's last picture."
+            )
+        px, py = parse_point(x, y, rest)
+        text, images = await watch.press_point(window, px, py)
+        return ToolOutput(text=text, images=images)
 
 
 _EARLIER = (
@@ -1466,6 +1664,7 @@ def _point_words(surface: str, item: Element, site: str) -> str:
 
 
 _NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
+_POINT_KEYS = ("point", "point_2d", "coordinate", "coordinates", "xy", "position")
 
 
 def parse_point(x: Any, y: Any, rest: dict[str, Any]) -> tuple[float, float]:
@@ -1496,7 +1695,7 @@ def parse_point(x: Any, y: Any, rest: dict[str, Any]) -> tuple[float, float]:
     take(x)
     take(y)
     if len(numbers) < 2:
-        for key in ("point", "point_2d", "coordinate", "coordinates", "xy", "position"):
+        for key in _POINT_KEYS:
             if key in rest:
                 take(rest[key])
     if len(numbers) < 2:
