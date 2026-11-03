@@ -425,7 +425,7 @@ class AskWatch(Protocol):
     as a deny with origin ``timeout``.
     """
 
-    def watched(self) -> bool:
+    async def watched(self) -> bool:
         """Whether a person can see a card now."""
         ...
 
@@ -549,7 +549,7 @@ class AutoPolicy:
         if (
             asking is not None
             and asks_in_auto(review)
-            and (watch is None or watch.watched())
+            and (watch is None or await watch.watched())
         ):
             # The person chooses on the card instead of a block (#465). A
             # grant of the chat that covers the step answers with origin

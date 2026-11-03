@@ -2462,9 +2462,7 @@ class TaskWorkers:
                 auto.asking = None
                 if _remembers(record.origin):
                     auto.asking = asking
-                    auto.watch = self._card_watch(
-                        task_id, await self._owner_chat(task_id)
-                    )
+                    auto.watch = self._card_watch(task_id)
                 policy = auto
             if _remembers(record.origin):
                 # Its chat's grants and the person's earlier Allows first (#369).
@@ -2745,17 +2743,20 @@ class TaskWorkers:
                         )
                 await self._schedule()
 
-    def _card_watch(self, task_id: str, chat_id: str | None) -> CardWatch:
+    def _card_watch(self, task_id: str) -> CardWatch:
         """Who sees the card Auto shows for *task_id*, and how long it waits (#465).
 
-        The task's page and its chat *chat_id*, as the hub counts their
-        viewers; none with ``[approvals] auto_asks`` off, so Auto blocks as
-        before. A card nobody answers is ended through the broker.
+        The task's page and the chat that owns the task at each check (the
+        main chat once its own chat was deleted: :meth:`_owner_chat`), as the
+        hub counts their viewers; none with ``[approvals] auto_asks`` off, so
+        Auto blocks as before. A card nobody answers is ended through the
+        broker.
         """
 
-        def viewers() -> int:
+        async def viewers() -> int:
             if not self.settings().approvals.auto_asks:
                 return 0
+            chat_id = await self._owner_chat(task_id)
             return self.hub.viewers(task_id) + (
                 self.hub.viewers(chat_id) if chat_id else 0
             )

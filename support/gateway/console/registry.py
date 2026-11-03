@@ -554,7 +554,7 @@ class ConsoleSessions:
         blocks as before. A card nobody answers is ended through the broker.
         """
 
-        def viewers() -> int:
+        async def viewers() -> int:
             if self._viewers is None or not self._settings().approvals.auto_asks:
                 return 0
             return self._viewers(session_id)

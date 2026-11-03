@@ -804,6 +804,47 @@ async def test_an_auto_task_the_person_started_asks_through_its_chat(
         assert s.console.approvals.entries(main) == []
 
 
+@pytest.mark.parametrize("main_watched", [True, False])
+async def test_a_tasks_card_follows_it_when_its_chat_is_deleted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, main_watched: bool
+) -> None:
+    import localmelo.support.sessions.approvals as approvals_mod
+
+    monkeypatch.setattr(approvals_mod, "CARD_POLL_S", 0.02)
+    monkeypatch.setattr(approvals_mod, "CARD_LEFT_S", 0.2)
+    async with chat_console(tmp_path, monkeypatch, plan(DELETE)) as s:
+        created = await s.client.post(
+            "/api/sessions", json={"workspace": str(s.folder), "approvals": "auto"}
+        )
+        assert created.status_code == 201, created.text
+        side, main = str(created.json()["session"]["id"]), s.console.main_id or ""
+        async with contextlib.AsyncExitStack() as pages:
+            if main_watched:
+                await pages.enter_async_context(viewer(s.console, main))
+            async with viewer(s.console, side):
+                task = await start(s, front_id=side)
+                request = await waiting(s, task)
+                gone = await s.client.delete(f"/api/sessions/{side}")
+                assert gone.status_code == 204, gone.text
+            # The side chat's page went with it; the task and its card are the
+            # main chat's now (#465).
+            if main_watched:
+                await asyncio.sleep(approvals_mod.CARD_LEFT_S * 3)
+                assert [r.request_id for r in s.console.broker.pending(task)] == [
+                    request["request_id"]
+                ]
+                await answer(s, request["request_id"])
+            assert (await ended(s, task))["state"] == "done"
+        [approval] = await approvals_of(s, task)
+        if main_watched:
+            assert (approval["origin"], approval["allowed"]) == ("user", True)
+            assert s.ran.codes == [DELETE]
+        else:
+            assert (approval["origin"], approval["allowed"]) == ("timeout", False)
+            assert approval["reason"] == "the chat was closed before an answer"
+            assert s.ran.codes == []
+
+
 async def test_an_auto_task_nobody_watches_blocks_the_step(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

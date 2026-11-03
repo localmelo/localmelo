@@ -379,7 +379,7 @@ class _Watch:
         self.seen = seen
         self.asked: list[str] = []
 
-    def watched(self) -> bool:
+    async def watched(self) -> bool:
         return self.seen
 
     async def ask(

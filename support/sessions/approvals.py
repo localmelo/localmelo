@@ -236,8 +236,9 @@ class RememberingPolicy:
 
 
 # How often a card auto mode shows checks that someone still sees it, and how
-# long nobody may see it before it counts as closed: a reload of the page or a
-# reconnect of its stream takes less (#465).
+# long nobody may have seen it (from the first check that found nobody) before
+# it counts as closed: a reload of the page or a reconnect of its stream takes
+# less (#465).
 CARD_POLL_S: Final = 1.0
 CARD_LEFT_S: Final = 5.0
 
@@ -245,7 +246,8 @@ CARD_LEFT_S: Final = 5.0
 class CardWatch:
     """Who sees the card auto mode shows, and how long it waits (#465).
 
-    *viewers* counts the surfaces that show the card now: on the gateway,
+    *viewers* counts the surfaces that show the card now, read again at each
+    check (a task's chat may change while its card waits): on the gateway,
     the chat's event streams a console, the app or the terminal opened as a
     viewer (``watch=true``); 0 with ``[approvals] auto_asks`` off. Auto mode
     asks only while one is open (:meth:`watched`); with none it blocks the
@@ -261,7 +263,7 @@ class CardWatch:
 
     def __init__(
         self,
-        viewers: Callable[[], int],
+        viewers: Callable[[], Awaitable[int]],
         end: Callable[[str, ApprovalDecision], bool],
         *,
         wait_s: float | None = None,
@@ -274,9 +276,9 @@ class CardWatch:
         self._clock = clock
         self._sleep = sleep
 
-    def watched(self) -> bool:
+    async def watched(self) -> bool:
         try:
-            return self._viewers() > 0
+            return await self._viewers() > 0
         except Exception:
             logger.warning("Could not count who sees the chat", exc_info=True)
             return False
@@ -293,16 +295,19 @@ class CardWatch:
 
     async def _expire(self, request: ApprovalRequest) -> None:
         """Answer the card of *request* once nobody answered or nobody sees it."""
-        start = seen = self._clock()
+        start = self._clock()
+        gone: float | None = None  # when a check first found nobody
         reason = NO_ANSWER
         while True:
             await self._sleep(CARD_POLL_S)
             now = self._clock()
-            if self.watched():
-                seen = now
-            elif now - seen >= CARD_LEFT_S:
-                reason = LEFT_UNANSWERED
-                break
+            if await self.watched():
+                gone = None
+            else:
+                gone = now if gone is None else gone
+                if now - gone >= CARD_LEFT_S:
+                    reason = LEFT_UNANSWERED
+                    break
             if now - start >= self.wait_s:
                 break
         decision = ApprovalDecision(False, reason, origin="timeout")

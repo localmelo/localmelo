@@ -767,7 +767,11 @@ def terminal_watch(
     Auto blocks as before and never waits. A panel nobody answers ends
     through *approver*.
     """
-    return CardWatch(lambda: int(auto_asks and present()), approver.ends)
+
+    async def viewers() -> int:
+        return int(auto_asks and present())
+
+    return CardWatch(viewers, approver.ends)
 
 
 class Approvals:

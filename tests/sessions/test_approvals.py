@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 import pytest
 
@@ -309,11 +309,18 @@ class FakeTime:
         await asyncio.sleep(0)
 
 
+def counted(viewers: list[int]) -> Callable[[], Awaitable[int]]:
+    async def count() -> int:
+        return viewers[0]
+
+    return count
+
+
 def watched_card(
     viewers: list[int], time_: FakeTime, broker: ApprovalBroker
 ) -> CardWatch:
     return CardWatch(
-        lambda: viewers[0], broker.ends, clock=time_.clock, sleep=time_.sleep
+        counted(viewers), broker.ends, clock=time_.clock, sleep=time_.sleep
     )
 
 
@@ -364,7 +371,8 @@ async def test_the_last_viewer_leaving_ends_the_card() -> None:
     )
 
     assert decided == ApprovalDecision(False, LEFT_UNANSWERED, origin="timeout")
-    assert 10.0 <= time_.now <= 10.0 + CARD_LEFT_S < AUTO_ASK_WAIT_S
+    # A full grace from the first check that found nobody.
+    assert time_.now == 10.0 + CARD_LEFT_S < AUTO_ASK_WAIT_S
 
 
 async def test_a_reload_of_the_page_does_not_end_the_card() -> None:
@@ -402,16 +410,19 @@ async def test_a_card_not_up_yet_is_ended_once_it_is() -> None:
         async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
             return await answer
 
-    watch = CardWatch(lambda: 1, end, clock=time_.clock, sleep=time_.sleep)
+    watch = CardWatch(counted([1]), end, clock=time_.clock, sleep=time_.sleep)
     decided = await asyncio.wait_for(watch.ask(request(), Waits()), 5)
 
     assert decided.origin == "timeout" and len(tries) == 3
 
 
-def test_a_count_that_fails_watches_nobody() -> None:
-    def broken() -> int:
+async def test_a_count_that_fails_watches_nobody() -> None:
+    async def broken() -> int:
         raise RuntimeError("the hub is closed")
 
-    assert not CardWatch(broken, lambda request_id, decision: True).watched()
-    assert not CardWatch(lambda: 0, lambda request_id, decision: True).watched()
-    assert CardWatch(lambda: 1, lambda request_id, decision: True).watched()
+    def ends(request_id: str, decision: ApprovalDecision) -> bool:
+        return True
+
+    assert not await CardWatch(broken, ends).watched()
+    assert not await CardWatch(counted([0]), ends).watched()
+    assert await CardWatch(counted([1]), ends).watched()
