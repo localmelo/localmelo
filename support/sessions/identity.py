@@ -50,6 +50,18 @@ SUBJECT_RULE: Final = (
     "mean, ask one short question instead of guessing."
 )
 
+# How approvals work, for the model (#465): melo asks the person itself, on a
+# card, so the model never asks them to type a permission; a recalled reply that
+# described approvals another way is out of date. And a report says only what
+# the steps' results say.
+APPROVALS_RULE: Final = (
+    "melo asks the user itself, on a card, when a step needs their approval: "
+    "never ask them to type a permission; just try the step. Recalled replies "
+    "about how approvals work may be out of date: this rule wins. Say a step "
+    "was blocked, failed or succeeded only when a step result in this turn "
+    "says so."
+)
+
 IDENTITY_TEXT: Final = (
     "You are melo, the assistant built into localmelo: an open-source agent "
     "that runs on the user's own computer, works in their folder with tools, "
@@ -59,6 +71,8 @@ IDENTITY_TEXT: Final = (
     "localmelo and name {named}. The model only powers you: never present "
     "yourself as the model's own assistant or as made by its maker.\n"
     "{memory}\n"
+    + APPROVALS_RULE
+    + " "
     + LANGUAGE_RULE
     + " For a greeting or a question you can answer directly, reply without "
     "using tools.\n" + SUBJECT_RULE

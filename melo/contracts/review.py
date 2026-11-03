@@ -43,6 +43,8 @@ MAX_TEXT: Final = 256 * 1024
 TITLES: Final[dict[str, str]] = {
     "self": "Change localmelo itself?",
     "credentials": "Use your passwords or keys?",
+    "money": "Spend money?",
+    "account": "Change an account's settings?",
     "system": "Change system settings?",
     "app_control": "Control an app?",
     "persistence": "Set up something that runs later?",
@@ -64,6 +66,8 @@ TITLES: Final[dict[str, str]] = {
 CATEGORY_WORDS: Final[dict[str, str]] = {
     "self": "changes localmelo itself",
     "credentials": "uses passwords or keys",
+    "money": "spends money",
+    "account": "changes an account's sign-in or security settings",
     "system": "changes system settings",
     "app_control": "controls an app",
     "persistence": "sets up something that runs later",
@@ -109,6 +113,12 @@ CLICK_ONLY: Final = frozenset(
         "unreviewed",
     }
 )
+# Kinds only the user's model names, for a step on a page or in an app: paying
+# (a purchase, a payment, a subscription, a transfer) and changing an account's
+# sign-in or security settings. However well the step serves the goal, only a
+# person's answer lets it run: never words, the model or a grant of the chat. In
+# auto mode a person who watches is asked on the card (#465).
+CARD_ONLY: Final = frozenset({"money", "account"})
 # The reason a call of the ``self`` category is denied without asking.
 SELF_DENIAL: Final = "melo never lets a call change its own runtime, settings or keys"
 # The tools whose arguments the rules read (melo.checker.review); another

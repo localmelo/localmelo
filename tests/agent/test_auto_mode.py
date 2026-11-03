@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions, _step_review
+from localmelo.melo.checker.review.model import REVIEWS_PER_TURN
 from localmelo.melo.contracts.approvals import (
     ALLOW_ONCE_S,
     TOOL_ASK,
@@ -100,7 +101,9 @@ class FakePython:
         return self.output
 
 
-def _agent(llm: FakeModel, root: Path, output: str = "ok") -> tuple[Agent, FakePython]:
+def _agent(
+    llm: FakeModel, root: Path, output: str = "ok", steps: int = 12
+) -> tuple[Agent, FakePython]:
     root.mkdir(exist_ok=True)
     agent = Agent(
         llm=llm,
@@ -108,7 +111,7 @@ def _agent(llm: FakeModel, root: Path, output: str = "ok") -> tuple[Agent, FakeP
             builtins=frozenset({"python_exec"}),
             tool_exposure="all",
             workspace_root=str(root),
-            steps_per_attempt=12,
+            steps_per_attempt=steps,
         ),
     )
     fake = FakePython(output)
@@ -513,14 +516,17 @@ async def test_under_a_grant_the_model_settles_an_undecided_call(
 
 
 @pytest.mark.asyncio
-async def test_a_turn_sends_at_most_six_reviews_and_reuses_a_verdict(
+async def test_a_turn_sends_at_most_its_reviews_and_reuses_a_verdict(
     tmp_path: Path,
 ) -> None:
-    codes = [POST.replace("hi", str(n)) for n in range(6)]
+    cap = REVIEWS_PER_TURN
+    assert cap == 12  # a check-in that signs in first reviews about ten steps
+    codes = [POST.replace("hi", str(n)) for n in range(cap)]
     llm = FakeModel(
-        _plans(["print(1)", POST, *codes, POST]), [verdict() for _ in range(7)]
+        _plans(["print(1)", POST, *codes, POST], answer="done"),
+        [verdict() for _ in range(cap + 1)],
     )
-    agent, fake = _agent(llm, tmp_path / "ws")
+    agent, fake = _agent(llm, tmp_path / "ws", steps=cap + 4)
     person = Person()
     recorder = Recorder()
 
@@ -528,15 +534,16 @@ async def test_a_turn_sends_at_most_six_reviews_and_reuses_a_verdict(
         "test this API", on_event=recorder, approval=RememberingPolicy(person)
     )
 
-    # Six reviews: POST and five more; the sixth new call is over the limit,
-    # so it is asked (fail closed); the last POST reuses the first verdict.
-    assert len(llm.review_requests) == 6
-    assert [r.call_id for r in person.asked] == ["call_1", "call_8"]
+    # The cap's reviews: POST and the next ones; the call past the limit is
+    # asked (fail closed); the last POST reuses the first verdict.
+    over = f"call_{cap + 2}"
+    assert len(llm.review_requests) == cap
+    assert [r.call_id for r in person.asked] == ["call_1", over]
     assert person.asked[1].review is not None
     assert person.asked[1].review.categories == ("unreviewed",)
-    assert len(fake.ran) == 9
+    assert len(fake.ran) == cap + 3
     reviews = recorder.of("run.finished")[-1].data["reviews"]
-    assert (reviews["undecided"], reviews["model"]) == (8, 6)
+    assert (reviews["undecided"], reviews["model"]) == (cap + 2, cap)
 
 
 # ── A site the browser would open ──
@@ -668,8 +675,9 @@ class ActsOnSite(OpensSite):
 @pytest.mark.parametrize(
     ("access", "reviews", "allowed", "reviewed"),
     [
-        # Clicking on a site the request names is reviewed like opening it: routine.
-        ("act", [], True, 0),
+        # A click on a site the request names is still judged by what it is on
+        # (#465): one review, told that the words name the site.
+        ("act", [verdict()], True, 1),
         # A form sent from it is reviewed by itself, even there.
         ("submit", [verdict()], True, 1),
         ("submit", [verdict(fits_request="no", category="beyond_request")], False, 1),
@@ -705,24 +713,27 @@ async def test_a_click_is_reviewed_like_opening_the_site_and_a_form_by_itself(
     [answer] = tool.answers
     assert answer.allow is allowed
     assert len(llm.review_requests) == reviewed
-    if reviewed:
-        words = json.dumps([m.content for m in llm.review_requests[0]])
+    words = json.dumps([m.content for m in llm.review_requests[0]])
+    if access == "submit":
         assert "collect.example/post" in words
+    else:
+        assert "The user's words name this site" in words
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("how", "reviews", "allowed", "reviewed"),
     [
-        # A click or a choice on a site the request names stays routine.
-        ("click", [], True, 0),
-        ("select", [], True, 0),
+        # A click or a choice on a site the request names is judged on the goal
+        # by what it is on (#465); a verdict that lets it run is kept.
+        ("click", [verdict()], True, 1),
+        ("select", [verdict()], True, 1),
         # Typed text is the model's own: reviewed by itself, even on that site.
         ("type", [verdict()], True, 1),
         ("type", [verdict(fits_request="no", category="beyond_request")], False, 1),
     ],
 )
-async def test_typing_is_reviewed_by_itself_while_a_click_or_choice_stays_routine(
+async def test_typing_is_reviewed_by_itself_and_so_is_a_click_or_choice(
     tmp_path: Path,
     how: str,
     reviews: list[Message],
@@ -750,9 +761,11 @@ async def test_typing_is_reviewed_by_itself_while_a_click_or_choice_stays_routin
     [answer] = tool.answers
     assert answer.allow is allowed
     assert len(llm.review_requests) == reviewed
-    if reviewed:
-        words = json.dumps([m.content for m in llm.review_requests[0]])
+    words = json.dumps([m.content for m in llm.review_requests[0]])
+    if how == "type":
         assert "types text on news.example" in words and "hello there" in words
+    else:
+        assert "clicks or chooses on news.example" in words
 
 
 @pytest.mark.asyncio
@@ -1098,7 +1111,7 @@ async def test_the_model_s_own_reason_is_kept_but_never_shown_as_melo_s(
     assert fake.ran == []
     [approval] = _approvals(recorder)
     assert approval["review"]["reasons"] == [
-        "Your model's review says it sends data from this Mac."
+        "Sends data from this Mac, as your model's review says."
     ]
     assert approval["review"]["model"]["reason"] == said
     assert said not in llm.tool_messages()[0]

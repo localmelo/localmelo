@@ -45,6 +45,7 @@ from localmelo.melo.contracts.approvals import (
     grant_offered,
     review_mode,
     site_grant,
+    stays_for_chat,
 )
 from localmelo.melo.contracts.folders import covers
 from localmelo.melo.contracts.review import (
@@ -62,6 +63,10 @@ AskFunction = Callable[[ApprovalRequest], Awaitable[ApprovalDecision]]
 # already_resolved rather than unknown.
 RESOLVED_IDS_KEPT: Final = 256
 
+
+# The reason of a site question that runs because Auto let the chat use the
+# site earlier (#465).
+PASSED_IN_AUTO: Final = "allowed in auto mode earlier in this chat"
 
 # The reasons of a read that a folder grant let run without asking (#405).
 FOLDER_FOR_CHAT: Final = "folder allowed for this chat"
@@ -99,7 +104,11 @@ class RememberingPolicy:
     In auto mode it is the policy that asks about a step Auto stopped
     (#465): a site Auto stopped only as not asked for may be granted for
     the chat, and a grant of that site question covers it after
-    (:func:`~localmelo.melo.contracts.approvals.site_grant`).
+    (:func:`~localmelo.melo.contracts.approvals.site_grant`). A site
+    question Auto let run (:meth:`passed_in_auto`) stays allowed for the
+    chat: in Ask it runs unasked, as on a grant, but it never covers a step
+    Auto's review stops. Both are listed in :attr:`allowed_tools` and taken
+    back by :meth:`forget`.
     Grants are per tool name and per policy object, and never stored.
 
     With *folders*, it is also asked about a file tool's path outside the
@@ -117,6 +126,8 @@ class RememberingPolicy:
     ) -> None:
         self._ask = ask
         self._granted: set[str] = set()
+        # The site questions auto mode let run in this chat (#465).
+        self._passed: set[str] = set()
         self.asks_folders = folders
         self._saved = saved
         # The folders allowed for reading in this chat, as real paths.
@@ -124,7 +135,12 @@ class RememberingPolicy:
 
     @property
     def allowed_tools(self) -> frozenset[str]:
-        return frozenset(self._granted)
+        """The names granted for the chat, and the sites Auto let it use."""
+        return frozenset(self._granted | self._passed)
+
+    def passed_in_auto(self, tool_name: str) -> None:
+        """Keep a site question auto mode let run: it stays allowed for the chat (#465)."""
+        self._passed.add(tool_name)
 
     @property
     def allowed_folders(self) -> tuple[str, ...]:
@@ -138,9 +154,11 @@ class RememberingPolicy:
         """
         if tool_name is None:
             self._granted.clear()
+            self._passed.clear()
             self._folders.clear()
         else:
             self._granted.discard(tool_name)
+            self._passed.discard(tool_name)
 
     def forget_folder(self, folder: str) -> bool:
         """Take back the chat's grant of *folder*; whether there was one."""
@@ -224,6 +242,13 @@ class RememberingPolicy:
             covered_by_grant(request.review) or site_grant(request)
         ):
             return ApprovalDecision(True, origin="session")
+        if (
+            request.tool_name in self._passed
+            and covered_by_grant(request.review)
+            and stays_for_chat(request)
+        ):
+            # A site Auto let this chat use (#465); never a step Auto stopped.
+            return ApprovalDecision(True, PASSED_IN_AUTO, origin="session")
         decision = await self._ask(request)
         if isinstance(decision, ApprovalDecision) and not grant_offered(request):
             decision = dataclasses.replace(decision, remember=False)

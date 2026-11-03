@@ -30,6 +30,7 @@ from localmelo.melo.contracts.approvals import (
 from localmelo.melo.contracts.folders import OutsideAccess
 from localmelo.melo.contracts.review import ActionReview, ModelAnswer, step_key
 
+KEYS = ActionReview("high", ("credentials",), ("Reads ~/.ssh/id_rsa.",))
 INSTALL = ActionReview(
     "high",
     ("install", "env"),
@@ -190,10 +191,9 @@ def test_the_review_mode_of_a_policy_and_of_its_wrappers() -> None:
 
 
 def test_the_note_tells_the_model_to_explain_and_not_to_retry() -> None:
-    note = block_note(INSTALL)
+    note = block_note(KEYS)
     assert note.split("\n") == [
-        "Auto mode blocked this step, so it did not run. It installs matplotlib with "
-        "pip into .venv; creates a Python environment in .venv.",
+        "Auto mode blocked this step, so it did not run. It reads ~/.ssh/id_rsa.",
         "In your answer, tell the user in plain words:",
         "- what you wanted to do, and why melo blocked it;",
         "- why the task needed it;",
@@ -201,10 +201,28 @@ def test_the_note_tells_the_model_to_explain_and_not_to_retry() -> None:
         "user can do;",
         "- that they can allow this step once from the chat, or switch the chat to "
         "Ask so that melo asks them first.",
+        "Never ask the user to type a permission: when a step needs them, melo asks "
+        "them itself on a card, and when they want it done, you just try the step "
+        "again.",
         "Do not try to reach the same result another way (another command, a "
         "script, another tool): the user chose auto mode so that such steps do not "
         "run without them. Go on with any work that does not need it.",
     ]
+
+
+def test_a_step_the_card_asks_about_says_nobody_could_be_asked_now() -> None:
+    # Auto blocks such a step only when nobody can see the card (#465): the note
+    # says it needs the person, and how they will be asked.
+    note = block_note(INSTALL)
+    assert (
+        "- that this step needs them and nobody could be asked now: they can allow "
+        "this step once from the chat, switch the chat to Ask, or keep the chat "
+        "open so that melo asks them on a card the next time."
+    ) in note.split("\n")
+    assert "Never ask the user to type a permission" in note
+    for kind in ("money", "account"):
+        paying = ActionReview("high", (kind,), ("Does it.",), by="model")
+        assert "nobody could be asked now" in block_note(paying)
 
 
 def test_the_note_s_variants() -> None:

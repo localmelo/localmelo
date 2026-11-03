@@ -38,6 +38,7 @@ from typing import Any, Final, Literal, Protocol, get_args, runtime_checkable
 
 from localmelo.melo.contracts.folders import OutsideAccess
 from localmelo.melo.contracts.review import (
+    CARD_ONLY,
     CATEGORY_WORDS,
     SITE_KEY,
     UNREADABLE_SITE,
@@ -319,6 +320,22 @@ def site_grant(request: ApprovalRequest) -> bool:
     )
 
 
+def stays_for_chat(request: ApprovalRequest) -> bool:
+    """Whether auto mode's run of *request* keeps its question allowed for the chat (#465).
+
+    A question about opening or acting on a site (:data:`SITE_GRANTS`) with a
+    ``site`` argument: a site Auto let the chat read or act on stays allowed
+    for the rest of the chat, in Ask too. Never typing, a form sent, a click
+    at a point (:data:`NEVER_GRANTED`) or a path outside the workspace.
+    """
+    return (
+        request.outside is None
+        and request.tool_name.startswith(SITE_GRANTS)
+        and not never_granted(request.tool_name)
+        and bool(request.arguments.get("site"))
+    )
+
+
 def grant_offered(request: ApprovalRequest) -> bool:
     """Whether an answer to *request* may be kept for the chat ("Allow for this chat").
 
@@ -402,11 +419,12 @@ ALLOW_ONCE_S: Final = 30 * 60
 ALLOWED_ONCE: Final = "allowed once"
 
 # Auto mode (#465): the categories of a stopped step a person may allow from a
-# card: those the user's words can allow, and a step melo could not check. A
-# step with any other category (credentials, system settings, an app driven by a
-# script, something that runs later, code from the internet, a failed review,
-# localmelo itself) stays blocked, as before.
-ASKS_IN_AUTO: Final = WORDS_CAN_ALLOW | {"opaque"}
+# card: those the user's words can allow, a step melo could not check, and the
+# kinds only a person allows (paying, an account's settings). A step with any
+# other category (credentials, system settings, an app driven by a script,
+# something that runs later, code from the internet, a failed review, localmelo
+# itself) stays blocked, as before.
+ASKS_IN_AUTO: Final = WORDS_CAN_ALLOW | {"opaque"} | CARD_ONLY
 
 
 def asks_in_auto(review: ActionReview | None) -> bool:
@@ -478,7 +496,9 @@ class AutoPolicy:
     *asking* (nobody can be asked: a schedule, a benchmark), with nobody
     watching, and for any other stopped call, it is denied with origin
     ``auto`` and the category in a few words as its reason. A call nothing
-    reviewed is blocked too.
+    reviewed is blocked too. A site question it runs (:func:`stays_for_chat`)
+    is told to *asking* through its optional ``passed_in_auto(name)``, so the
+    site stays allowed for the chat in Ask too.
 
     :meth:`allow_once` keeps an allowance for one exact step
     (:func:`~localmelo.melo.contracts.review.step_key`, the files it read
@@ -572,6 +592,12 @@ class AutoPolicy:
         if review is None:
             return ApprovalDecision(False, CATEGORY_WORDS["unreviewed"], origin="auto")
         if review.verdict == "routine":
+            if stays_for_chat(request):
+                # A site Auto let this chat read or act on stays allowed for
+                # the chat (#465): the asking policy keeps it, for Ask.
+                keep = getattr(self.asking, "passed_in_auto", None)
+                if callable(keep):
+                    keep(request.tool_name)
             return ApprovalDecision(True, origin="auto")
         asking, watch = self.asking, self.watch
         if (
@@ -811,7 +837,8 @@ def denial_text(decision: ApprovalDecision, review: ActionReview | None = None) 
 # What the model reads for a step auto mode blocked (#339). ``{it}`` is
 # "It installs x; creates y." (or why the review failed); ``{off_goal}`` is
 # " The user did not ask for it." when the model said so; ``{allow}`` says
-# how the user can let it run.
+# how the user can let it run. melo asks the person itself, on a card: the
+# model never asks them to type a permission (#465).
 BLOCK_NOTE: Final = (
     "Auto mode blocked this step, so it did not run. {it}{off_goal}\n"
     "In your answer, tell the user in plain words:\n"
@@ -820,6 +847,9 @@ BLOCK_NOTE: Final = (
     "- other ways to reach the goal: without this step, or with something "
     "the user can do;\n"
     "- {allow}\n"
+    "Never ask the user to type a permission: when a step needs them, melo "
+    "asks them itself on a card, and when they want it done, you just try "
+    "the step again.\n"
     "Do not try to reach the same result another way (another command, a "
     "script, another tool): the user chose auto mode so that such steps do "
     "not run without them. Go on with any work that does not need it."
@@ -827,6 +857,13 @@ BLOCK_NOTE: Final = (
 ALLOW_IN_CHAT: Final = (
     "that they can allow this step once from the chat, or switch the chat to Ask "
     "so that melo asks them first."
+)
+# A step a person may allow on auto mode's card that was blocked because nobody
+# could be asked now (no one had the chat open, or the run has nobody to ask).
+ALLOW_WHEN_OPEN: Final = (
+    "that this step needs them and nobody could be asked now: they can allow "
+    "this step once from the chat, switch the chat to Ask, or keep the chat open "
+    "so that melo asks them on a card the next time."
 )
 ALLOW_IN_TASK: Final = (
     "that they can allow it once from the task's page; the task goes on " "without it."
@@ -949,7 +986,11 @@ def block_note(
     )
     if review is not None and "self" in review.categories:
         allow = ALLOW_NEVER.format(folder=folder)
+    elif task:
+        allow = ALLOW_IN_TASK
     else:
-        allow = ALLOW_IN_TASK if task else ALLOW_IN_CHAT
+        # A kind the card asks about was blocked only because nobody could be
+        # asked now (#465).
+        allow = ALLOW_WHEN_OPEN if asks_in_auto(review) else ALLOW_IN_CHAT
     note = BLOCK_NOTE.format(it=it, off_goal=off_goal, allow=allow)
     return note + ALLOWED_EXACTLY if changed else note

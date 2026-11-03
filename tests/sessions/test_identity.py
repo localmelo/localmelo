@@ -30,6 +30,7 @@ from localmelo.support.gateway.console.registry import default_builder
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 from localmelo.support.sessions.agents import build_session_agent
 from localmelo.support.sessions.identity import (
+    APPROVALS_RULE,
     KEPT_LEGACY,
     KEPT_TYPED,
     LANGUAGE_RULE,
@@ -76,7 +77,22 @@ def test_the_text_says_who_melo_is_and_how_to_answer() -> None:
         "tools.\n" + SUBJECT_RULE
     ) in text
     assert text.endswith(SUBJECT_RULE)
-    assert len(text) < 1100 + len(SUBJECT_RULE)
+    # The approvals rule (#465) is the paragraph's one addition since then.
+    assert len(text) < 1100 + len(APPROVALS_RULE) + 1 + len(SUBJECT_RULE)
+
+
+def test_the_model_never_asks_for_a_typed_permission_and_reports_only_results() -> None:
+    # melo asks on its card itself; a recalled reply that said otherwise is out
+    # of date, and a report claims only what a step result shows (#465).
+    text = config_identity(local())
+    assert APPROVALS_RULE in text
+    assert "never ask them to type a permission; just try the step" in APPROVALS_RULE
+    assert "may be out of date: this rule wins" in APPROVALS_RULE
+    assert (
+        "Say a step was blocked, failed or succeeded only when a step result in "
+        "this turn says so."
+    ) in APPROVALS_RULE
+    assert text.index(APPROVALS_RULE) < text.index(LANGUAGE_RULE)
 
 
 def test_a_pronoun_means_whom_the_conversation_is_about() -> None:

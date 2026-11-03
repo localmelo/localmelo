@@ -110,6 +110,7 @@ from localmelo.melo.checker.payloads import (
 from localmelo.melo.checker.policy import builtin_set_for
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.review.gist import step_gist
+from localmelo.melo.checker.review.model import recalled_part
 from localmelo.melo.checker.tiers import tier_of, tier_requires_approval
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN, _sanitize_images
 from localmelo.melo.contracts.approvals import (
@@ -2135,18 +2136,39 @@ def _folder_scope(decision: ApprovalDecision) -> str:
 
 
 # The words of auto mode's review of a site question, by what the tool wants to
-# do there: open it (no ``access``), click or choose on a page, type on it, or
-# send a form from it.
-_SITE_ROUTINE = {"": "Opens", "read": "Opens", "act": "Acts on"}
+# do there: open it (no ``access``), click or choose on a page, click at a
+# point, type on it, or send a form from it. The step is judged on the goal of
+# the chat (#465), so nothing here says the request did not name it.
 _SITE_DOUBT = {
-    "": "Opens {site}, a site the request did not name.",
-    "read": "Opens {site}, a site the request did not name.",
-    "act": "Clicks or chooses on {site}, a site the request did not name.",
+    "": "Opens {site}.",
+    "read": "Opens {site}.",
+    "act": "Clicks or chooses on {site}.",
+    "point": "Clicks at a point on {site}.",
     "submit": "Sends a form from {site}, which needs its own review.",
 }
 _TYPING_DOUBT = (
     "Types text on {site}, which needs its own review: the text is the model's own."
 )
+# A click on a site the person's words name: still reviewed, by what it is on.
+_NAMED_SITE = " The user's words name this site."
+# A click whose target melo cannot tell (#465): the person is asked.
+_UNKNOWN_TARGET = "Clicks on {site} where melo cannot tell what it clicks."
+
+
+def _site_doubt(access: str, site: str, preview: str) -> str:
+    """What a running tool's question does, for its review.
+
+    A question of a kind this table does not know (another tool's, such as
+    pressing a button in an app's window) is described by its preview.
+    """
+    if access == "type":
+        return _TYPING_DOUBT.format(site=site)
+    if access in _SITE_DOUBT:
+        return _SITE_DOUBT[access].format(site=site)
+    said = " ".join(preview.split())[:200].rstrip(".")
+    return (
+        f"{said[:1].upper()}{said[1:]}." if said else _SITE_DOUBT[""].format(site=site)
+    )
 
 
 class _ToolAsk:
@@ -2227,7 +2249,7 @@ class _ToolAsk:
         if auto and reviewer is not None and self._run.reviews.stop:
             # The turn already stopped: no site opens either.
             return ApprovalDecision(False, STOPPED_NOTE, origin="auto")
-        declined = _question_keys(tool_name, request.arguments)
+        declined = _declined_keys(tool_name, request.arguments, self._workspace_root)
         again = self._run.reviews.declined_again(declined) if auto else None
         if again is not None:
             # The same question was declined on the card earlier in this turn
@@ -2243,35 +2265,35 @@ class _ToolAsk:
         if auto and reviewer is not None:
             site = str(arguments.get("site") or "")
             access = str(arguments.get("access") or "")
-            # A click or a choice on a site is reviewed as opening it. Typed text
-            # is the model's own data and a form sent from a page leaves the
-            # computer: each is reviewed by itself, even on a site you named, and
-            # the verdict of one is never kept for the next.
+            # Each step is judged on the goal of the chat (#465). A click or a
+            # choice names what it is on, so each target is reviewed by itself
+            # (once a chat); typed text is the model's own data and a form sent
+            # from a page leaves the computer: each is reviewed by itself, even
+            # on a site you named, and the verdict of one is never kept for the
+            # next.
             sends = access == "submit"
             typing = access == "type"
-            if not (sends or typing) and reviewer.names_host(site):
+            reading = access in ("", "read")
+            if arguments.get("target") == "unknown":
+                # melo cannot tell what the click lands on: nobody can judge it
+                # on the goal, so the person is asked (#465).
                 review = ActionReview(
-                    "routine",
-                    (),
-                    (f"{_SITE_ROUTINE.get(access, 'Opens')} {site}, which you named.",),
+                    "high", ("opaque",), (_UNKNOWN_TARGET.format(site=site),)
+                )
+            elif reading and reviewer.names_host(site):
+                review = ActionReview(
+                    "routine", (), (f"Opens {site}, which you named.",)
                 )
             else:
+                doubt = _site_doubt(access, site, preview)
+                if site and not reading and reviewer.names_host(site):
+                    doubt += _NAMED_SITE
                 review = await reviewer.review(
                     self._run.reviews,
                     tool_name=tool_name,
                     arguments=dict(request.arguments),
                     preview=preview,
-                    review=ActionReview(
-                        "undecided",
-                        (),
-                        (
-                            (
-                                _TYPING_DOUBT
-                                if typing
-                                else _SITE_DOUBT.get(access, _SITE_DOUBT[""])
-                            ).format(site=site),
-                        ),
-                    ),
+                    review=ActionReview("undecided", (), (doubt,)),
                     mode="auto",
                     key=f"{key}|{self._call.id}" if sends or typing else key,
                     workspace=self._workspace_root,
@@ -2284,6 +2306,9 @@ class _ToolAsk:
                         )
                     ),
                     refused_sites=_refused_sites(self._policy, self._run),
+                    # Opening, clicking and choosing carry no value: a click on
+                    # a sign-in button is no credential use (#465).
+                    secret_free=not (sends or typing),
                 )
             request = dataclasses.replace(request, review=review)
         decided: object = await self._policy.decide(request)
@@ -2398,6 +2423,25 @@ def _question_keys(name: str, arguments: Mapping[str, Any]) -> tuple[str, ...]:
     """The loose keys of a running tool's question: its name, and its site's host."""
     site = site_key(arguments)
     return (question_key(name),) if site is None else (question_key(name), site)
+
+
+def _declined_keys(
+    name: str, arguments: Mapping[str, Any], workspace_root: str | None
+) -> tuple[str, ...]:
+    """The keys a Don't allow of a running tool's question holds for the turn (#465).
+
+    A click or a choice that names what it is on holds for that exact
+    question: Don't allow on "Pay" does not refuse the check-in button. Any
+    other (typing, a form sent, a click melo cannot tell) holds for every
+    question under its name and site.
+    """
+    if (
+        arguments.get("on")
+        and arguments.get("target") != "unknown"
+        and arguments.get("access") not in ("type", "submit")
+    ):
+        return (call_key(name, arguments, workspace_root),)
+    return _question_keys(name, arguments)
 
 
 class _ToolSetupError(Exception):
@@ -6529,7 +6573,12 @@ class Agent:
         # never the answers (#465).
         self._reviewer.earlier_words([words for words, _ in turns_before])
         if from_person:
-            self._reviewer.user_message(query if user_words is None else user_words)
+            # The notes recalled for this message go along, apart: they count
+            # only where the person's words point to them (#465).
+            self._reviewer.user_message(
+                query if user_words is None else user_words,
+                recalled=recalled_part(query),
+            )
         if chat_started is not None:
             self._reviewer.since = chat_started
         prefix_run = self.chat.begin_prefix()
