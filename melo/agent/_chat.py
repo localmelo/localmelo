@@ -290,8 +290,7 @@ BLOCKED_ANSWER_NOTE = (
     "further step can be taken. Do not call any tool. Write your answer to the "
     "user now, in plain words: what was blocked and why, why the task needed it, "
     "other ways to reach the goal (without that step, or with something the user "
-    "can do), and that they can allow the step once from the chat or say so in "
-    "their next message."
+    "can do), and how they can let it run, as the note on the blocked step says."
 )
 ANSWER_ON_STOP_NOTE = (
     "The run has stopped and no further step can be taken. Give your final "

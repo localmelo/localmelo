@@ -146,3 +146,98 @@ async def test_a_site_stopped_as_not_asked_for_asks_on_the_card(
     assert isinstance(answer, Chosen) and answer.allow
     [asked] = card.asked
     assert asked.tool_name == "browser:https://news.example"
+
+
+# ── No typed permissions: Don't allow is the person's choice, for the turn ──
+
+PIP = "import subprocess\nsubprocess.run(['pip', 'install', 'requests'])"
+PIP3 = "import subprocess\nsubprocess.run(['pip3', 'install', '-q', 'requests'])"
+
+
+@pytest.mark.asyncio
+async def test_dont_allow_hands_the_model_the_choice_and_the_note(
+    tmp_path: Path,
+) -> None:
+    llm = FakeModel(_plans([POST, POST], answer="explained"), [NOT_ASKED])
+    agent, fake = _agent(llm, tmp_path / "ws")
+    card = Card(ApprovalDecision(False, "not this API"))
+    recorder = Recorder()
+
+    result = await agent.run_task(
+        "test this API", on_event=recorder, approval=_auto(card)
+    )
+
+    assert (result.result, fake.ran, len(card.asked)) == ("explained", [], 1)
+    first, second = llm.tool_messages()
+    assert "The user chose Don't allow for this step" in first
+    assert "Their note: not this API." in first
+    assert "melo will not ask them again" in first
+    # The same step again in the turn: refused unasked, and not reviewed again.
+    assert "earlier in this turn" in second and "not asked again" in second
+    assert len(llm.review_requests) == 1
+    one, two = _approvals(recorder)
+    assert (one["origin"], one["allowed"], one["reason"]) == (
+        "user",
+        False,
+        "not this API",
+    )
+    assert (two["origin"], two["allowed"], two["declined"]) == ("user", False, True)
+    assert "call_key" not in two  # a refused repeat is no new denial
+    for text in (first, second):
+        assert BLOCKED not in text and "go ahead" not in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_a_step_alike_is_not_asked_again_in_the_turn_but_is_next_turn(
+    tmp_path: Path,
+) -> None:
+    llm = FakeModel(
+        [*_plans([PIP, PIP3], answer="explained"), *_plans([PIP], answer="installed")]
+    )
+    agent, fake = _agent(llm, tmp_path / "ws")
+    card = Card(ApprovalDecision(False), ApprovalDecision(True))
+    policy = _auto(card)
+
+    await agent.run_task("chart sales.csv", approval=policy)
+
+    assert (fake.ran, len(card.asked)) == ([], 1)
+    assert "earlier in this turn" in llm.tool_messages()[1]
+
+    # A new message is a new turn: the person is asked again.
+    result = await agent.run_task("try again", approval=policy)
+
+    assert (result.result, fake.ran, len(card.asked)) == ("installed", [PIP], 2)
+    assert llm.review_requests == []
+
+
+@pytest.mark.asyncio
+async def test_a_site_declined_on_the_card_is_not_asked_about_again_in_the_turn(
+    tmp_path: Path,
+) -> None:
+    opener = OpensSite()
+    plans = [
+        _calls(("open_site", {"site": "news.example"}, "call_1")),
+        _calls(("open_site", {"site": "news.example"}, "call_2")),
+        _answer("ok"),
+    ]
+    llm = FakeModel(plans, [NOT_ASKED])
+    (tmp_path / "ws").mkdir()
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset(),
+            tool_exposure="all",
+            workspace_root=str(tmp_path / "ws"),
+        ),
+        tool_providers=[opener],
+    )
+    agent.chat.sleep = _no_wait
+    card = Card(ApprovalDecision(False, "not that site"))
+
+    await agent.run_task("what is the weather?", approval=_auto(card))
+
+    first, second = opener.answers
+    assert isinstance(first, Chosen) and not first.again
+    assert isinstance(second, Chosen) and second.again
+    assert second.reason == "not that site"
+    assert len(card.asked) == 1 and len(llm.review_requests) == 1

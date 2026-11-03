@@ -69,13 +69,15 @@ test('the card says what was blocked, shows the step, and offers Allow once', ()
   const card = blockCard(fakeDoc(), facts, {onAllow: () => { allowed += 1; }});
   const words = text(card);
   assert.match(words, /Installs matplotlib with pip into \.venv\. In Auto, melo runs a step like this only when you ask for it\./);
-  assert.match(words, /or reply “go ahead”/);
+  // Never a typed permission (#465): the button is the way.
+  assert.doesNotMatch(words, /go ahead/);
+  assert.equal(byClass(card, 'block-or'), null);
   assert.match(words, /Runs this exact step once, within 30 minutes\./);
   byClass(card, 'block-allow').click();
   assert.equal(allowed, 1);
 });
 
-test('a step only a click can allow has no "go ahead"; a change to localmelo has no button', () => {
+test('a step only a click can allow has Allow once; a change to localmelo has no button', () => {
   const opaque = blockCard(fakeDoc(), blockFacts(item(OPAQUE)));
   assert.ok(byClass(opaque, 'block-allow'));
   assert.equal(byClass(opaque, 'block-or'), null);

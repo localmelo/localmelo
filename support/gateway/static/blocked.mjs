@@ -5,8 +5,8 @@ export const CATEGORIES = new Set([
   'self', 'credentials', 'system', 'app_control', 'persistence', 'remote_code', 'install', 'restore', 'env', 'download',
   'outside_write', 'delete', 'service', 'send_out', 'opaque', 'beyond_request', 'unreviewed',
 ]);
-// What the person's words can allow ("go ahead"); the rest (`app_control` and `system` among them) only an
-// Allow once, and `self` never.
+// What the person's words can allow (their request names the step); the rest (`app_control` and `system`
+// among them) only an Allow once, and `self` never.
 const WORDS_ALLOW = new Set(['install', 'restore', 'env', 'download', 'outside_write', 'delete', 'send_out', 'service', 'beyond_request']);
 // How long an Allow once holds, as the server keeps it.
 export const ALLOW_ONCE_S = 30 * 60;
@@ -81,7 +81,7 @@ export function gistWords(gist) {
  * What a blocked call's card says, or null for a call auto mode did not block. `step` is the call's
  * code or command on one line; `gist` the sentence the card starts with, its warning and the model's note (or null);
  * `allow` whether Allow once may run it (never for `self`, never for a call a stopped turn left
- * unreviewed); `words` whether "go ahead" can allow it too.
+ * unreviewed); `words` whether the person's words could allow it too.
  */
 export function blockFacts({approval, name = '', arguments: args = {}, preview = '', requestId = ''} = {}) {
   if (!isBlock(approval)) return null;
@@ -186,7 +186,6 @@ export function blockCard(doc, facts, {allowing = {state: 'open'}, busy = false,
     allow.disabled = Boolean(busy);
     if (onAllow) allow.addEventListener('click', onAllow);
     foot.append(allow);
-    if (facts.words) foot.append(node('span', 'block-or', t('auto.blocked.orReply')));
     foot.append(node('span', 'block-once', t(busy === 'running' ? 'auto.blocked.afterTurn' : 'auto.blocked.once')));
   } else {
     const words = {

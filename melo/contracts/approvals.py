@@ -640,7 +640,9 @@ class DenyAllPolicy:
 def denial_text(decision: ApprovalDecision, review: ActionReview | None = None) -> str:
     """The text the model reads for a call that *decision* denied.
 
-    A reason is stripped of surrounding whitespace and of a final ``.``,
+    The person's Don't allow on auto mode's card (a :class:`Chosen`) reads
+    :func:`chosen_note`. Otherwise a reason is stripped of surrounding
+    whitespace and of a final ``.``,
     and keeps at most :data:`DENIAL_REASON_CHARS` characters. A timeout's
     text ignores the reason. For a high-impact *review*, the text says
     what the call does and what to do instead. ``ValueError`` if
@@ -648,6 +650,9 @@ def denial_text(decision: ApprovalDecision, review: ActionReview | None = None) 
     """
     if decision.allow:
         raise ValueError("denial_text needs a decision that denies the call")
+    if isinstance(decision, Chosen):
+        # Don't allow on auto mode's card (#465): what the person chose.
+        return chosen_note(decision)
     if decision.origin == "auto":
         # The gate wrote the whole note (every note has a line break, see
         # block_note); a bare policy's short reason gets the plain block.
@@ -690,8 +695,8 @@ BLOCK_NOTE: Final = (
     "not run without them. Go on with any work that does not need it."
 )
 ALLOW_IN_CHAT: Final = (
-    "that they can allow this step once from the chat, or say so in their "
-    "next message."
+    "that they can allow this step once from the chat, or switch the chat to Ask "
+    "so that melo asks them first."
 )
 ALLOW_IN_TASK: Final = (
     "that they can allow it once from the task's page; the task goes on " "without it."
@@ -717,6 +722,41 @@ ALLOWED_EXACTLY: Final = (
     " The user allowed one exact step; this one differs. Run exactly the step "
     "that was blocked, or explain."
 )
+
+
+# What the model reads when the person chose Don't allow on auto mode's card
+# (#465); {note} is " Their note: ..." when they wrote one.
+DONT_ALLOW_NOTE: Final = (
+    "The user chose Don't allow for this step, so it did not run.{note}\n"
+    "Do not try it again in this turn or reach the same result another way: "
+    "melo will not ask them again. Go on with any work that does not need it, "
+    "and say in your answer what you could not do."
+)
+# The same step, or one alike, tried again in the turn: refused without asking.
+DECLINED_AGAIN: Final = (
+    "The user chose Don't allow for this step earlier in this turn, so it did not "
+    "run and they were not asked again.{note}\n"
+    "Do not try it again in this turn or reach the same result another way. Go on "
+    "with any work that does not need it, and say in your answer what you could "
+    "not do."
+)
+
+
+def chosen_note(decision: Chosen) -> str:
+    """What the model reads for the person's Don't allow on auto mode's card (#465).
+
+    That they chose it, their note (whitespace folded, at most
+    :data:`DENIAL_REASON_CHARS` characters) when they wrote one, and not to
+    try the step again in this turn; for a step declined earlier in the turn
+    (``again``), that they were not asked again.
+    """
+    reason = " ".join(decision.reason.split())[:DENIAL_REASON_CHARS]
+    note = ""
+    if reason:
+        note = f" Their note: {reason}"
+        if not reason.endswith((".", "!", "?")):
+            note += "."
+    return (DECLINED_AGAIN if decision.again else DONT_ALLOW_NOTE).format(note=note)
 
 
 def _it(review: ActionReview | None, words: str = "") -> str:

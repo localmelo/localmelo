@@ -421,8 +421,8 @@ async def test_a_blank_closing_answer_leaves_a_fixed_explanation(
     assert result.status == "completed"
     assert result.result == (
         "I stopped here: auto mode blocked a step this needs (install software). "
-        "You can allow it once from the chat, or tell me to go ahead in your next "
-        "message."
+        "You can allow it once from the chat, or switch this chat to Ask so that I "
+        "ask you first."
     )
 
 

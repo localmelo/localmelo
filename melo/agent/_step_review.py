@@ -31,7 +31,7 @@ import os
 import re
 import time
 from collections import OrderedDict, deque
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Final, Literal
 from urllib.parse import urlsplit
@@ -207,6 +207,23 @@ class RunReviews:
     # The hosts of the sites refused in this run, oldest first (#433): the
     # review of a later step is told of them.
     refused_sites: list[str] = field(default_factory=list)
+    # The steps the person chose Don't allow for on auto mode's card in this
+    # run (#465), by each of their keys: the person's note. The same step, or
+    # one alike, is refused again without asking until the run ends.
+    declined: dict[str, str] = field(default_factory=dict)
+
+    def decline(self, keys: Iterable[str], note: str) -> None:
+        """Keep a step the person declined on the card, under each of *keys*."""
+        for key in keys:
+            if key:
+                self.declined.setdefault(key, note)
+
+    def declined_note(self, keys: Iterable[str]) -> str | None:
+        """The person's note when a step with any of *keys* was declined in this run."""
+        for key in keys:
+            if key in self.declined:
+                return self.declined[key]
+        return None
 
     def count(self, review: ActionReview | None) -> None:
         if review is not None:
@@ -600,5 +617,5 @@ def answer_on_block(title: str) -> str:
     )
     return (
         f"I stopped here: auto mode blocked {what}. You can allow it once from "
-        "the chat, or tell me to go ahead in your next message."
+        "the chat, or switch this chat to Ask so that I ask you first."
     )

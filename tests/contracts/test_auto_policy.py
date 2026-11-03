@@ -191,8 +191,8 @@ def test_the_note_tells_the_model_to_explain_and_not_to_retry() -> None:
         "- why the task needed it;",
         "- other ways to reach the goal: without this step, or with something the "
         "user can do;",
-        "- that they can allow this step once from the chat, or say so in their next "
-        "message.",
+        "- that they can allow this step once from the chat, or switch the chat to "
+        "Ask so that melo asks them first.",
         "Do not try to reach the same result another way (another command, a "
         "script, another tool): the user chose auto mode so that such steps do not "
         "run without them. Go on with any work that does not need it.",
@@ -364,3 +364,43 @@ def test_a_chosen_answer_is_the_persons() -> None:
         Chosen(True, again=True)
     with pytest.raises(TypeError):
         Chosen(False, again="yes")  # type: ignore[arg-type]
+
+
+# ── No typed permissions (#465) ──
+
+
+def test_dont_allow_says_what_the_person_chose_and_their_note() -> None:
+    text = denial_text(Chosen(False, "  not on   this site "))
+    assert text.split("\n") == [
+        "The user chose Don't allow for this step, so it did not run. Their note: "
+        "not on this site.",
+        "Do not try it again in this turn or reach the same result another way: "
+        "melo will not ask them again. Go on with any work that does not need it, "
+        "and say in your answer what you could not do.",
+    ]
+    assert denial_text(Chosen(False)).startswith(
+        "The user chose Don't allow for this step, so it did not run.\n"
+    )
+    again = denial_text(Chosen(False, "No!", again=True))
+    assert again.startswith(
+        "The user chose Don't allow for this step earlier in this turn, so it did "
+        "not run and they were not asked again. Their note: No!\n"
+    )
+    assert len(denial_text(Chosen(False, "x" * 2000))) < 900
+
+
+def test_no_note_or_answer_sends_the_person_to_type_a_permission() -> None:
+    from localmelo.melo.agent._chat import BLOCKED_ANSWER_NOTE
+    from localmelo.melo.agent._step_review import answer_on_block
+
+    texts = [
+        block_note(INSTALL),
+        block_note(INSTALL, task=True),
+        answer_on_block("Install software"),
+        BLOCKED_ANSWER_NOTE,
+        denial_text(Chosen(False, "no")),
+    ]
+    for text in texts:
+        lowered = text.lower()
+        for typed in ("go ahead", "next message", "say so", "reply"):
+            assert typed not in lowered, (typed, text)

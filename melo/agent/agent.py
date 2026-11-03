@@ -123,6 +123,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalPolicy,
     ApprovalRequest,
     AutoPolicy,
+    Chosen,
     ReviewMode,
     Withdrawal,
     block_note,
@@ -1740,6 +1741,22 @@ class _ApprovalGate:
             # The turn already stopped: the step's later calls do not run.
             self._record(asking, origin="auto", reason="the turn stopped")
             return ApprovalDecision(False, STOPPED_NOTE, origin="auto")
+        if self._mode == "auto":
+            note = run.reviews.declined_note(
+                [
+                    call_key(
+                        request.tool_name, request.arguments, self._workspace_root
+                    ),
+                    *loose_keys(request.tool_name, request.arguments),
+                ]
+            )
+            if note is not None:
+                # The person chose Don't allow for this step, or one alike, on
+                # the card earlier in this turn: nobody is asked again (#465).
+                self._record(asking, origin="user", reason=note)
+                assert self.asked is not None
+                self.asked["declined"] = True
+                return Chosen(False, note, again=True)
         run.waiting_call_id = call.id
         try:
             if (
@@ -1828,6 +1845,21 @@ class _ApprovalGate:
             and decided.origin in ("user", "auto", "policy")
             and not isinstance(decided, Withdrawal),
         )
+        if isinstance(decided, Chosen) and not decided.allow:
+            # Don't allow on the card holds for the rest of the turn (#465).
+            run.reviews.decline(
+                [
+                    call_key(
+                        request.tool_name, request.arguments, self._workspace_root
+                    ),
+                    *loose_keys(
+                        request.tool_name,
+                        request.arguments,
+                        () if self.review is None else self.review.categories,
+                    ),
+                ],
+                decided.reason,
+            )
         if not decided.allow and decided.origin == "auto":
             return dataclasses.replace(
                 decided, reason=self._block(asking, auto, decided.reason)
@@ -2174,6 +2206,18 @@ class _ToolAsk:
         if auto and reviewer is not None and self._run.reviews.stop:
             # The turn already stopped: no site opens either.
             return ApprovalDecision(False, STOPPED_NOTE, origin="auto")
+        declined = _question_keys(tool_name, request.arguments)
+        note = self._run.reviews.declined_note(declined) if auto else None
+        if note is not None:
+            # The person chose Don't allow for the same question on the card
+            # earlier in this turn: nobody is asked again (#465). A repeat is
+            # no new refusal: it keeps no call key.
+            self.refused.append(
+                {"request_id": request.request_id, "tool": tool_name,
+                 "allowed": False, "origin": "user", "reason": note,
+                 "declined": True, "preview": preview}
+            )  # fmt: skip
+            return Chosen(False, note, again=True)
         if auto and reviewer is not None:
             site = str(arguments.get("site") or "")
             access = str(arguments.get("access") or "")
@@ -2234,6 +2278,9 @@ class _ToolAsk:
             # A person's Deny, an auto block, a policy's refusal of the step:
             # a task its chat continues on its own never asks it again.
             self._keep(request, decided)
+        if isinstance(decided, Chosen) and not decided.allow:
+            # Don't allow on the card holds for the rest of the turn (#465).
+            self._run.reviews.decline(declined, decided.reason)
         if (
             auto
             and reviewer is not None

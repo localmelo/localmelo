@@ -267,7 +267,6 @@
   "auto.blocked.expired": "Allowance expired",
   "auto.blocked.failed": "Could not allow it: {problem}",
   "auto.blocked.once": "Runs this exact step once, within 30 minutes.",
-  "auto.blocked.orReply": "or reply “go ahead”",
   "auto.blocked.pending": "Allowed once · melo can run it until {time}",
   "auto.blocked.self": "melo never changes its own runtime, settings or keys.",
   "auto.blocked.stopped": "Not run: the turn stopped",

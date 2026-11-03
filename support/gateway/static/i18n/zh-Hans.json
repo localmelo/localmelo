@@ -255,7 +255,6 @@
   "auto.blocked.expired": "允许已过期",
   "auto.blocked.failed": "无法允许：{problem}",
   "auto.blocked.once": "只运行这一步一次，30 分钟内有效。",
-  "auto.blocked.orReply": "或回复“继续”",
   "auto.blocked.pending": "已允许一次 · melo 可在 {time} 前运行",
   "auto.blocked.self": "melo 从不更改自己的运行环境、设置或密钥。",
   "auto.blocked.stopped": "未运行：这一轮已停止",
