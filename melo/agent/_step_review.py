@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Final, Literal
 from urllib.parse import urlsplit
 
+from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.review.model import (
     CHAT_REQUESTS,
     EARLIER_REQUESTS,
@@ -69,6 +70,7 @@ from localmelo.melo.contracts.review import (
     because,
     step_key,
 )
+from localmelo.melo.memory.procedures.mask import mask_credentials
 from localmelo.melo.schema import Message
 
 if TYPE_CHECKING:
@@ -299,6 +301,33 @@ def plain_page_key(
     return "site|" + step_key(tool_name, rest, workspace)
 
 
+def _texts(value: object, depth: int = 0) -> Iterable[str]:
+    """The strings in a step's *value*: itself, or a mapping's values and a
+    list's items, at most 4 levels deep."""
+    if isinstance(value, str):
+        yield value
+    elif depth < 4 and isinstance(value, Mapping):
+        for item in value.values():
+            yield from _texts(item, depth + 1)
+    elif depth < 4 and isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _texts(item, depth + 1)
+
+
+def holds_secret(arguments: Mapping[str, Any], preview: str = "") -> bool:
+    """Whether a step's *arguments* or *preview* hold a secret by melo's detectors.
+
+    A key or token shape, a bearer token, a code next to its word or a private
+    key (:func:`~localmelo.melo.checker.redaction.redact_secrets`), and an
+    address's password or a value named as a secret (``token=…``,
+    :func:`~localmelo.melo.memory.procedures.mask.mask_credentials`).
+    """
+    for text in (preview, *_texts(arguments)):
+        if text and (redact_secrets(text)[1] or mask_credentials(text) != text):
+            return True
+    return False
+
+
 def _title(review: ActionReview) -> str:
     first = review.categories[0] if review.categories else "beyond_request"
     return TITLES.get(first, "Run this?").rstrip("?").format(folder="the folder")
@@ -485,9 +514,13 @@ class StepReviewer:
         *refused_sites* are the hosts of the sites refused in this task
         (#433): the model is told of them, and a verdict given before one
         was refused is not used again. *secret_free*: the step carries no
-        value (a site opened, a click, a choice), so a model's
-        ``credentials`` does not hold for it (#465, see :func:`_settle`).
+        value (a click, a choice, a point), so a model's ``credentials`` does
+        not hold for it (#465, see :func:`_settle`), unless melo's own
+        detectors find a secret in its arguments or preview
+        (:func:`holds_secret`): then the answer stands.
         """
+        if secret_free and holds_secret(arguments, preview):
+            secret_free = False
         action = action_text(tool_name, arguments)
         purpose = self._purpose(review, mode, step_names(tool_name, arguments))
         if purpose is None:
@@ -671,9 +704,10 @@ def _settle(
     only when the user's words ask for it. An undecided call the model finds
     on the goal with no high-impact category (:data:`GOAL_DECIDES`) runs:
     whether the user's words name it only ever allows (#465). For a
-    *secret_free* step (a site opened, a click, a choice: no value goes
-    anywhere) a ``credentials`` answer is no credential use: the step is
-    judged on the goal like one with no category.
+    *secret_free* step (a click, a choice or a point with no secret in it: no
+    value goes anywhere) a ``credentials`` answer is no credential use: the
+    step is judged on the goal like one with no category. A read, a search,
+    typed text, a form sent and every gate step are never *secret_free*.
     """
     kind = answer.category
     if secret_free and kind == "credentials":

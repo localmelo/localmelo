@@ -23,7 +23,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.agent._step_review import StepReviewer
+from localmelo.melo.agent._step_review import StepReviewer, holds_secret
 from localmelo.melo.checker.review.model import (
     CHAT_REQUESTS,
     EARLIER_REQUESTS,
@@ -38,11 +38,17 @@ from localmelo.melo.contracts.approvals import (
 )
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.memory.block import BLOCK_HEADER
-from localmelo.melo.schema import Message, ToolDef
-from localmelo.support.sessions.approvals import PASSED_IN_AUTO, ChatPolicy
+from localmelo.melo.schema import Message, ToolCall, ToolDef
+from localmelo.support.browser.provider import BrowserToolProvider
+from localmelo.support.sessions.approvals import (
+    PASSED_IN_AUTO,
+    ChatPolicy,
+    RememberingPolicy,
+)
 from localmelo.tests.agent.test_approvals import Recorder, _answer, _calls, _no_wait
 from localmelo.tests.agent.test_auto_choice import Card
 from localmelo.tests.agent.test_auto_mode import FakeModel, verdict
+from localmelo.tests.browser.fakes import FakeDriver, button, page
 
 FORUM = "www.forum.example"
 SIGN_IN = "auth.forum.example"
@@ -108,6 +114,8 @@ STEPS: dict[str, Q] = {
         FORUM, f"https://{FORUM}/thread/42/reply", [["message", "Hello all"]]
     ),
     "pay": _click(FORUM, 'a button "Pay $10 for premium"'),
+    # A click whose words hold a key: melo's own detectors find it.
+    "key_link": _click(FORUM, f'a link "Use key sk-{"a1B2" * 6}"'),
     "password": _type(FORUM, 'a textbox "Password"', "hunter2-secret"),
     # A click inside a box from another site that melo cannot tell.
     "blind": (
@@ -676,3 +684,156 @@ async def test_a_first_task_that_is_not_text_is_refused(tmp_path: Path) -> None:
     with pytest.raises(TypeError, match="chat_first must be a str"):
         await agent.run_task("signed in", chat_first=b"check in")  # type: ignore[arg-type]
     assert llm.requests == [] and llm.review_requests == []
+
+
+# ── What an allowance from Auto covers in Ask, and what counts as a secret ──
+
+
+@pytest.mark.asyncio
+async def test_a_click_auto_let_run_is_asked_about_again_in_ask(
+    tmp_path: Path,
+) -> None:
+    """In Ask nobody reviews a click, so none rides Auto's run: "Pay" asks."""
+    tool = Steps()
+    llm = FakeModel([*_steps("mood"), *_steps("pay"), *_steps("mood")], [ON_GOAL])
+    agent = _agent(llm, tmp_path / "ws", tool)
+    card = Card(ApprovalDecision(False), ApprovalDecision(True))
+    policy = ChatPolicy(card, "auto")
+
+    await agent.run_task(CHECK_IN, approval=policy)
+    policy.mode = "ask"  # the person switched the chat to Ask
+    await agent.run_task("and buy premium", approval=policy)
+    await agent.run_task("pick happy again", approval=policy)
+
+    assert [(step, d.allow) for step, d in tool.answers] == [
+        ("mood", True),
+        ("pay", False),
+        ("mood", True),
+    ]
+    act = STEPS["mood"][0]
+    assert [r.tool_name for r in card.asked] == [act, act]
+    assert all(r.review is None for r in card.asked)
+    assert policy.allowed_tools == frozenset()
+
+
+def _browse(name: str, **arguments: str) -> Message:
+    call = ToolCall(tool_name=name, arguments=arguments)
+    return Message(role="assistant", tool_call=call)
+
+
+@pytest.mark.asyncio
+async def test_a_buy_button_on_a_site_auto_used_does_nothing_in_ask_until_allowed(
+    tmp_path: Path,
+) -> None:
+    """Through the browser: the read of the site stays allowed, the click asks."""
+    home = "https://example.com/"
+    driver = FakeDriver(
+        page(home, "Welcome.", button("Happy"), button("Buy premium"), title="Shop")
+    )
+    llm = FakeModel(
+        [
+            _browse("browser_open", url=home),
+            _browse("browser_click", ref="e1"),
+            _answer("done"),
+            _browse("browser_open", url=home),
+            _browse("browser_click", ref="e6"),
+            _answer("not bought"),
+        ],
+        [ON_GOAL],
+    )
+    root = tmp_path / "ws"
+    root.mkdir()
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset(), tool_exposure="all", workspace_root=str(root)
+        ),
+        tool_providers=[BrowserToolProvider(driver)],
+    )
+    agent.chat.sleep = _no_wait
+    card = Card(ApprovalDecision(False))
+    policy = ChatPolicy(card, "auto")
+    try:
+        await agent.run_task("pick happy on example.com", approval=policy)
+        assert [c for c in driver.calls if c[0] == "act"] == [("act", "click:Happy")]
+        policy.mode = "ask"
+        await agent.run_task("and buy premium", approval=policy)
+    finally:
+        await agent.close()
+
+    # The read was not asked again; the click on "Buy premium" was, and did nothing.
+    [asked] = card.asked
+    assert asked.tool_name == "browser-act:https://example.com"
+    assert asked.arguments["on"] == 'a button "Buy premium"'
+    assert [c for c in driver.calls if c[0] == "act"] == [("act", "click:Happy")]
+    assert policy.allowed_tools == frozenset({"browser:https://example.com"})
+
+
+def test_only_a_plain_read_stays_allowed_from_auto() -> None:
+    from localmelo.melo.contracts.approvals import ApprovalRequest, stays_for_chat
+    from localmelo.melo.contracts.review import ActionReview
+
+    def request(q: Q, review: ActionReview | None = None, **more: str) -> Any:
+        name, arguments, preview = q
+        return ApprovalRequest(
+            request_id="r",
+            run_id="t",
+            call_id="c",
+            tool_name=name,
+            arguments={**arguments, **more},
+            preview=preview,
+            workspace_root=None,
+            tier="network",
+            review=review,
+        )
+
+    assert stays_for_chat(request(STEPS["open"]))
+    plain = f"https://{FORUM}/today"
+    assert stays_for_chat(request(STEPS["open"], url=plain, via="web_fetch"))
+    for url in (f"{plain}?token=abc", f"{plain}#k", f"https://a@{FORUM}/", plain + "…"):
+        assert not stays_for_chat(request(STEPS["open"], url=url, via="web_fetch"))
+    for step in ("mood", "line", "submit", "change_email", "blind"):
+        assert not stays_for_chat(request(STEPS[step]))
+    for kind in ("money", "account"):
+        review = ActionReview("routine", (kind,), ())
+        assert not stays_for_chat(request(STEPS["open"], review))
+    # The asking policy keeps only a site's read, whatever it is told.
+    policy = RememberingPolicy(Card())
+    policy.passed_in_auto(STEPS["mood"][0])
+    policy.passed_in_auto(STEPS["open"][0])
+    assert policy.allowed_tools == frozenset({STEPS["open"][0]})
+
+
+@pytest.mark.asyncio
+async def test_a_click_whose_words_hold_a_key_keeps_the_credential_finding(
+    tmp_path: Path,
+) -> None:
+    tool = Steps()
+    llm = FakeModel(_steps("key_link"), [SIGN_IN_AS_KEYS])
+    agent = _agent(llm, tmp_path / "ws", tool)
+    card = Card(ApprovalDecision(False))
+
+    await agent.run_task(CHECK_IN, approval=ChatPolicy(card, "auto"))
+
+    # The finding stands: a credential use is blocked, as typing a password is.
+    assert tool.allowed() == {"key_link": False} and card.asked == []
+    assert "It uses passwords or keys" in tool.answers[0][1].reason
+
+
+def test_melo_s_detectors_find_secrets_not_the_words_for_them() -> None:
+    key = "sk-" + "a1B2" * 6
+    for found in (
+        {"on": f'a link "Use key {key}"'},
+        {"url": "https://files.example/report?access_token=abc123"},
+        {"url": "https://user:hunter2@files.example/"},
+        {"fields": [["auth", "Bearer abcdefghijklmnop1234"]]},
+    ):
+        assert holds_secret(found), found
+    assert holds_secret({}, f"open {key}")
+    for plain in (
+        {"on": 'a link "Chat app login"'},
+        {"on": 'a button "Quick login"'},
+        {"on": 'a textbox "Password"'},
+        {"url": "https://files.example/report"},
+    ):
+        assert not holds_secret(plain, "click it"), plain

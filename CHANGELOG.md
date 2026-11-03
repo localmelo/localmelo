@@ -755,7 +755,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   asked for them, and never ride an allowance. A click inside a box from another site is a
   click like any other when melo knows the box (a control it lists there by name, or the box's
   title), and asks you only when melo cannot tell what it is on. A site Auto let the chat open
-  or click on stays allowed for the rest of the chat, in Ask too, and is listed with **Remove**.
+  stays allowed for reading its pages for the rest of the chat, in Ask too (a click on it still
+  asks in Ask), and is listed with **Remove**. An address that holds a key is never read without
+  your answer, even when the task needs it.
   **Don't allow** on one button no longer refuses the other buttons of the site for the turn.
   melo tells the model that it asks the person itself on a card, so the model never asks you
   to type a permission and says a step was blocked, failed or succeeded only when a step result

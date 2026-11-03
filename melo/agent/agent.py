@@ -2153,6 +2153,11 @@ _TYPING_DOUBT = (
 _NAMED_SITE = " The user's words name this site."
 # A click whose target melo cannot tell (#465): the person is asked.
 _UNKNOWN_TARGET = "Clicks on {site} where melo cannot tell what it clicks."
+# The site questions that carry no value of melo's (#465): a click or a choice
+# on a page, a click at a point, a press in an app's window. Only these can
+# turn a model's ``credentials`` into no category; a read (its address can hold
+# a key), a search, typing, a form sent, or any access not listed never does.
+_VALUE_FREE_ACCESS: Final = frozenset({"act", "point", "desktop-act"})
 
 
 def _site_doubt(access: str, site: str, preview: str) -> str:
@@ -2306,9 +2311,10 @@ class _ToolAsk:
                         )
                     ),
                     refused_sites=_refused_sites(self._policy, self._run),
-                    # Opening, clicking and choosing carry no value: a click on
-                    # a sign-in button is no credential use (#465).
-                    secret_free=not (sends or typing),
+                    # A click, a choice or a point carries no value: a click on
+                    # a sign-in button is no credential use (#465). A read's
+                    # address can hold a key, so its review stands.
+                    secret_free=access in _VALUE_FREE_ACCESS,
                 )
             request = dataclasses.replace(request, review=review)
         decided: object = await self._policy.decide(request)
