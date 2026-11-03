@@ -11,6 +11,7 @@ from localmelo.support.gateway.front_rules import (
     allows,
     allows_level,
     allows_message,
+    authorizes,
     brief_question,
     continue_name,
     intention_only,
@@ -24,6 +25,7 @@ from localmelo.support.gateway.front_rules import (
     reply_language,
     route,
     short_title,
+    start_rule,
     title_matches,
     triage,
     work_request,
@@ -579,3 +581,48 @@ def test_work_is_asked_for_only_when_no_prohibition_or_quote_holds_the_verb(
 ) -> None:
     assert work_request(text) is work
     assert (route(text).route == "work") is work
+
+
+@pytest.mark.parametrize(
+    ("typed", "goes_ahead"),
+    [
+        ("I authorize you to apply to them", True),
+        ("I authorize you", True),
+        ("You are authorized to submit them", True),
+        ("Yes, you have my permission", True),
+        ("我授权你去投简历", True),
+        ("我授权你去提交 然后有问题再问我", True),
+        ("我允许你去试一下", True),
+        # Authorization as a topic, a past fact or a refusal is no go-ahead.
+        ("What does authorization mean in OAuth?", False),
+        ("how do I authorize an app on GitHub?", False),
+        ("I authorized the app yesterday", False),
+        ("请解释一下 OAuth 授权", False),
+        ("授权码是什么", False),
+        ("我没授权你删除", False),
+        ("I don't authorize you to touch my files", False),
+    ],
+)
+def test_words_that_authorize_work_are_a_go_ahead(typed: str, goes_ahead: bool) -> None:
+    assert authorizes(typed) is goes_ahead
+
+
+@pytest.mark.parametrize(
+    ("typed", "rule"),
+    [
+        # A go-ahead for work the chat talked about is a request, with no verb of its own.
+        ("我授权你去投简历", "start"),
+        ("I authorize you to apply", "start"),
+        ("You have my permission, go on", "start"),
+        # Small talk, a question about the word, and a go-ahead that says not to act are not.
+        ("谢谢", "answer"),
+        ("explain what authorization means", "answer"),
+        ("What does authorization mean in OAuth?", "answer"),
+        ("我授权你，但只解释一下", "offer"),
+        ("just explain it, I authorize nothing", "offer"),
+    ],
+)
+def test_a_go_ahead_starts_the_work_it_gives_the_go_ahead_for(
+    typed: str, rule: str
+) -> None:
+    assert start_rule(typed) == rule
