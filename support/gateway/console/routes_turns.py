@@ -539,6 +539,20 @@ def add_routes(app: FastAPI, console: Console) -> None:
     async def retry_turn(session_id: str, body: RetryRequest) -> JSONResponse:
         console.require_store()
         await _require_session(console, session_id)
+        # A turn that carried pictures is not sent again to a model known not to
+        # read them (the turn that was refused for them, for one): nothing is undone.
+        newest = await _store_call(
+            console, console.store.list_turns(session_id, limit=1), session_id
+        )
+        if (
+            newest
+            and newest[-1].id == body.turn_id
+            and await _store_call(
+                console, console.store.turn_images(session_id, newest[-1].turn)
+            )
+            and await console.vision.reads() is False
+        ):
+            raise ApiError(409, "model_text_only", t("errors.modelTextOnly"))
         turn, resumed = await _sessions_call(
             console,
             console.sessions.retry(session_id, body.turn_id),

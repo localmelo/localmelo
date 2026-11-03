@@ -507,6 +507,7 @@ class Console:
             self.workers.front_id = main.id
             await self.cards.start(main.id)
             self.followups.listen()
+            self.vision.listen(self.store)
             try:
                 await self.asks.expire_stale()
                 await self.asks.restore_queued()

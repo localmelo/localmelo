@@ -18,6 +18,7 @@ pytest.importorskip("uvicorn")
 
 from fastapi import FastAPI  # noqa: E402
 
+from localmelo.melo.schema import PICTURES_REFUSED_ERROR  # noqa: E402
 from localmelo.support.gateway import webapp  # noqa: E402
 from localmelo.support.gateway.playground import (  # noqa: E402
     _SCENARIOS_PATH,
@@ -394,6 +395,11 @@ async def test_settings_module_is_served_as_javascript(
 def test_the_console_reads_an_unreachable_server_as_the_provider_words_it() -> None:
     turns = (webapp._STATIC / "turns.mjs").read_text(encoding="utf-8")
     assert f'const UNREACHABLE_PREFIX = "{UNREACHABLE_PREFIX}";' in turns
+
+
+def test_the_console_reads_a_refusal_for_pictures_as_the_agent_words_it() -> None:
+    turns = (webapp._STATIC / "turns.mjs").read_text(encoding="utf-8")
+    assert f'export const PICTURES_REFUSED = "{PICTURES_REFUSED_ERROR}";' in turns
 
 
 def test_quickstart_describes_available_workspace_controls() -> None:

@@ -1903,6 +1903,7 @@
   "turns.status.outOfSteps.word": "Out of steps",
   "turns.status.parked.title": "Parked",
   "turns.status.parked.word": "Parked",
+  "turns.status.pictures": "This model can't see pictures; choose one that can in Settings → Model",
   "turns.status.provider.title": "Could not get an answer from the model server",
   "turns.status.provider.word": "Model server error",
   "turns.status.reflected.title": "Stopped after reflection",

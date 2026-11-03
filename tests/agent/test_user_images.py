@@ -14,8 +14,8 @@ import pytest
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._tool_images import USER_KEEP, ToolImageStore
 from localmelo.melo.checker.validators import MAX_IMAGES_PER_RESULT
-from localmelo.melo.contracts.providers import BaseLLMProvider
-from localmelo.melo.schema import ImagePart, Message, ToolDef
+from localmelo.melo.contracts.providers import BaseLLMProvider, ProviderError
+from localmelo.melo.schema import PICTURES_REFUSED_ERROR, ImagePart, Message, ToolDef
 
 
 def picture(n: int) -> ImagePart:
@@ -125,3 +125,63 @@ def test_keep_user_returns_references_and_keeps_the_newest() -> None:
     assert [bool(i.data) for i in hydrated.images] == [False, False] + [
         True
     ] * USER_KEEP
+
+
+# ── A server that refuses the pictures ──
+
+
+class RefusingLLM(ScriptedLLM):
+    """Fails every request with *error*; the model says whether it reads pictures."""
+
+    def __init__(self, error: ProviderError, reads: bool | None) -> None:
+        super().__init__()
+        self.error = error
+        self.reads = reads
+
+    async def chat(
+        self, messages: list[Message], tools: list[ToolDef] | None = None
+    ) -> Message:
+        self.requests.append(list(messages))
+        raise self.error
+
+    async def takes_images(self) -> bool | None:
+        return self.reads
+
+
+BARE_400 = "POST /chat/completions failed with HTTP 400"
+
+
+@pytest.mark.parametrize(
+    ("message", "status", "reads", "sent", "refused"),
+    [
+        # A bare 400 to a request with pictures, from a model not known to read them.
+        (BARE_400, 400, None, True, True),
+        (BARE_400, 415, False, True, True),
+        # The error names the pictures: whatever the model says it reads.
+        (BARE_400 + ": image input is not supported", 400, True, True, True),
+        ("model has no vision support", None, True, True, True),
+        # Not the pictures: the model says it reads them, or the status is not a refusal.
+        (BARE_400, 400, True, True, False),
+        ("POST /chat/completions failed with HTTP 500", 500, None, True, False),
+        # A request with no pictures never counts, whatever the error says.
+        (BARE_400, 400, None, False, False),
+        (BARE_400 + ": image input is not supported", 400, None, False, False),
+    ],
+)
+async def test_a_request_refused_for_its_pictures_ends_with_one_plain_line(
+    message: str, status: int | None, reads: bool | None, sent: bool, refused: bool
+) -> None:
+    llm = RefusingLLM(ProviderError(message, status_code=status), reads)
+    agent = agent_for(llm)
+    result = await agent.run_task("what is this?", images=[picture(7)] if sent else [])
+    assert result.status == "provider_error"
+    assert result.error == (PICTURES_REFUSED_ERROR if refused else message)
+
+
+async def test_a_refusal_for_context_size_is_not_a_refusal_of_pictures() -> None:
+    error = ProviderError(BARE_400, status_code=400, context_overflow=True)
+    result = await agent_for(RefusingLLM(error, None)).run_task(
+        "what is this?", images=[picture(8)]
+    )
+    assert result.status == "provider_error"
+    assert result.error != PICTURES_REFUSED_ERROR

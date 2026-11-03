@@ -16,9 +16,22 @@ import pytest
 
 from localmelo.melo.schema import Message
 from localmelo.support.gateway.console import Console
+from localmelo.support.gateway.console.asks import FORGET_TRIES
 from localmelo.support.gateway.console.notes import NOTE_MARK
+from localmelo.support.sessions.store import SessionStoreError
 
-from .test_ask_owner import Reply, answer, ask_console, held, tool_call, until
+from .test_ask_owner import (
+    ASKS,
+    Reply,
+    answer,
+    answers,
+    ask_console,
+    ended,
+    held,
+    start,
+    tool_call,
+    until,
+)
 from .test_turn_writes import _post_turn, _wait_turn
 
 # A harmless step: the run goes on to another planning request after it.
@@ -293,3 +306,172 @@ async def test_a_note_is_refused_for_a_turn_that_is_not_running_or_a_bad_text(
         assert unknown.json()["error"]["code"] == "turn_not_running"
         ended = await _note(client, turn_id, "too late")
         assert ended.status_code == 409
+
+
+async def _queued(console: Console, session_id: str) -> list[str]:
+    """The typed words of the notes and messages waiting in *session_id*'s queue."""
+    info = await console.store.get_session(session_id)
+    assert info is not None
+    return [q["typed"] for q in info.meta.get("queued") or []]
+
+
+async def test_a_note_is_refused_for_the_turn_that_answers_a_task(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The turn that answers a worker is the system's, not the person's: words cannot join it."""
+    release = asyncio.Event()
+    main: list[Reply] = [held(release, answers("an answer")), answer("Answered.")]
+    async with ask_console(
+        tmp_path, monkeypatch, main=main, workers=[[ASKS, answer("done")]]
+    ) as (console, client, models):
+        main_id = str(console.main_id)
+        task_id = await start(console, "the job")
+        await until(lambda: len(models["main"].requests) == 1)
+        turn = console.sessions._sessions[main_id].runner.current_turn
+        assert turn is not None and turn.origin == "ask_owner"
+        refused = await _note(client, turn.id, "also do this", client_request_id="n1")
+        assert refused.status_code == 409
+        assert refused.json()["error"]["code"] == "not_your_turn"
+        assert await _queued(console, main_id) == []
+        release.set()
+        await until(lambda: console.asks.waiting(task_id) is None)
+        await console.asks.settle()
+        # The refused words reached no turn.
+        assert all(
+            "also do this" not in str(m.content)
+            for request in models["main"].requests
+            for m in request
+        )
+
+
+async def test_a_note_is_refused_for_the_turn_of_a_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A worker's turn is the worker's: the person talks to its chat, never into the run."""
+    release = asyncio.Event()
+    async with ask_console(
+        tmp_path,
+        monkeypatch,
+        workers=[[held(release, answer("done"))]],
+    ) as (console, client, models):
+        task_id = await start(console, "the job")
+        await until(lambda: models["workers"] and models["workers"][0].requests)
+        turns = await console.store.list_turns(task_id)
+        assert [turn.status for turn in turns] == ["running"]
+        refused = await _note(client, turns[0].id, "extra words", client_request_id="w")
+        assert refused.status_code == 409
+        assert refused.json()["error"]["code"] in ("turn_not_running", "not_your_turn")
+        assert await _queued(console, task_id) == []
+        assert await _queued(console, str(console.main_id)) == []
+        release.set()
+        await ended(console, task_id)
+
+
+async def test_a_note_goes_to_the_chat_that_owns_the_turn_and_to_no_other(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main_release, side_release = asyncio.Event(), asyncio.Event()
+    main: list[Reply] = [held(main_release, STEP), answer("Main done.")]
+    side: list[Reply] = [held(side_release, STEP), answer("Side done.")]
+    async with ask_console(
+        tmp_path, monkeypatch, main=main, sides=[side], run=False
+    ) as (console, client, models):
+        main_id = str(console.main_id)
+        main_turn = await _start(client, console, "main work")
+        created = await client.post(
+            "/api/sessions",
+            json={"turn": {"text": "side work"}, "workspace": str(tmp_path / "work")},
+        )
+        side_id = created.json()["session"]["id"]
+        side_turn = str(created.json()["turn_id"])
+        await until(
+            lambda: len(models["main"].requests) == 1
+            and side_id in models
+            and models[side_id].requests
+        )
+        response = await _note(client, side_turn, "for the side chat")
+        assert response.status_code == 202, response.text
+        assert response.json()["note"]["turn_id"] == side_turn
+        assert await _queued(console, side_id) == ["for the side chat"]
+        assert await _queued(console, main_id) == []
+        side_release.set()
+        await _wait_turn(client, side_id)
+        main_release.set()
+        await _wait_turn(client, main_id)
+        assert main_turn
+        assert all(
+            "for the side chat" not in str(m.content)
+            for request in models["main"].requests
+            for m in request
+        )
+        assert any(
+            "for the side chat" in str(m.content)
+            for request in models[side_id].requests
+            for m in request
+        )
+
+
+async def test_a_note_is_refused_once_stop_was_pressed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    never = asyncio.Event()
+    main: list[Reply] = [held(never, answer("Done."))]
+    async with ask_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        models,
+    ):
+        turn_id = await _start(client, console, "go")
+        await until(lambda: len(models["main"].requests) == 1)
+        assert (await client.post(f"/api/turns/{turn_id}/cancel")).status_code == 202
+        # Right after Stop, before the turn is seen to end, the words are not taken.
+        late = await _note(client, turn_id, "wait, also this", client_request_id="late")
+        assert late.status_code == 409
+        assert late.json()["error"]["code"] == "turn_not_running"
+        await _wait_turn(client, str(console.main_id))
+        assert await _queued(console, str(console.main_id)) == []
+
+
+@pytest.mark.parametrize("fails", [1, 99])
+async def test_a_read_note_is_forgotten_by_the_stored_queue_or_never_runs_twice_in_this_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fails: int
+) -> None:
+    """The stored queue is what a restart runs, so removing a read note is tried again.
+
+    One failed write is made good by the next try. If every try fails the note is
+    still read once and starts no turn of its own; it stays stored, which is the
+    known limit of a queue that is written after the fact (a crash then would run
+    it again).
+    """
+    release = asyncio.Event()
+    main: list[Reply] = [held(release, STEP), answer("Done, with your note.")]
+    async with ask_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        models,
+    ):
+        main_id = str(console.main_id)
+        turn_id = await _start(client, console, "go")
+        await until(lambda: len(models["main"].requests) == 1)
+        assert (await _note(client, turn_id, "read once")).status_code == 202
+        assert await _queued(console, main_id) == ["read once"]
+        update = console.store.update_session
+        failed: list[int] = []
+
+        async def flaky(session_id: str, **kwargs: Any) -> Any:
+            if len(failed) < fails and "queued" in (kwargs.get("meta_update") or {}):
+                failed.append(1)
+                raise SessionStoreError("disk full")
+            return await update(session_id, **kwargs)
+
+        monkeypatch.setattr(console.store, "update_session", flaky)
+        release.set()
+        finished = await _wait_turn(client, main_id)
+        assert finished["status"] == "completed"
+        await console.asks.settle()
+        # Read by the run exactly once, and not a turn of its own.
+        assert _seen(models["main"].requests[1]).endswith(f"{NOTE_MARK}\nread once")
+        assert len(await console.store.list_turns(main_id)) == 1
+        assert not console.asks._people.get(main_id)
+        assert await _queued(console, main_id) == (["read once"] if fails > 1 else [])
+        assert len(failed) == min(fails, FORGET_TRIES)

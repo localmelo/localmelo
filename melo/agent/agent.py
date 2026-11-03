@@ -84,6 +84,7 @@ from localmelo.melo.agent._earlier import (
 )
 from localmelo.melo.agent._events import GateVerdict, _Emitter, check_sink
 from localmelo.melo.agent._json_repair import error_line, rejected_objects, repairs
+from localmelo.melo.agent._picture_refusal import is_body_refusal, names_pictures
 from localmelo.melo.agent._step_review import (
     RunReviews,
     StepReviewer,
@@ -282,6 +283,7 @@ from localmelo.melo.schema import (
     MAX_AGENT_STEPS,
     MAX_REFLECTION_CHARS,
     MIN_AGENT_STEPS,
+    PICTURES_REFUSED_ERROR,
     SHORT_TERM_MAX,
     TOOL_CALL_TEXT_ERROR,
     TOOL_CALL_TEXT_LABEL,
@@ -6691,7 +6693,10 @@ class Agent:
             except ProviderError as exc:
                 # Reported in the result, not a crash: no traceback.
                 logger.info("Task %s ended with provider_error: %s", task.task_id, exc)
-                run.end("provider_error", error=str(exc) or _exception_text(exc))
+                error = str(exc) or _exception_text(exc)
+                if await self._refused_pictures(exc):
+                    error = PICTURES_REFUSED_ERROR
+                run.end("provider_error", error=error)
             except Exception as exc:
                 if (
                     isinstance(exc, TimeoutError)
@@ -7040,6 +7045,29 @@ class Agent:
             raise cancelled
 
     # ── Cancelled interactive runs ──
+
+    async def _refused_pictures(self, exc: ProviderError) -> bool:
+        """Whether *exc* is the server refusing the pictures its request carried.
+
+        True for a request that carried pixels when the error names pictures, or is a
+        refusal of the body (HTTP 400, 415 or 422) from a model not known to read
+        pictures. The model's own answer to ``takes_images()`` is asked for the second
+        case; a model that says it reads them keeps its other refusals as they are.
+        """
+        if not self._tool_images.sent_pixels:
+            return False
+        if names_pictures(exc):
+            return True
+        if not is_body_refusal(exc):
+            return False
+        ask = getattr(self._llm, "takes_images", None)
+        if not callable(ask):
+            return True
+        try:
+            verdict = await asyncio.wait_for(ask(), 4.0)
+        except Exception:
+            return True
+        return verdict is not True
 
     async def _on_cancelled(
         self, query: str, run: _RunState, exc: asyncio.CancelledError

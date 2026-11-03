@@ -57,6 +57,7 @@ import {
   nextAction,
   noteLine,
   noteState,
+  PICTURES_REFUSED,
   printable,
   reflectionLine,
   returnNotes,
@@ -897,6 +898,8 @@ function startStream(id) {
       return;
     }
     applyOutcome(applyEvent(S.view, frame));
+    // A model that cannot read pictures: the pictures waiting in the composer get the warning now.
+    if (frame.type === "turn.finished" && frame.data?.status === "provider_error" && frame.data?.error === PICTURES_REFUSED) media.refusedPictures();
     if (frame.type === "attention.card") holdOrShow(S.view, frame);
     if (frame.type === "attention.echo") S.view.echoes = mergeEchoes(S.view.echoes ?? [], [frame]);
     if (frame.type === "approval.requested") refreshApproval(id, String(frame.data?.request_id ?? ""));
@@ -1643,6 +1646,8 @@ function failureHint(turn, can, error) {
   const sentences = (first) => [first, ...own].join(t("common.sentenceGap"));
   switch (turn.status) {
     case "provider_error": {
+      // The title says all there is to say, and the actions offer the settings.
+      if (error === PICTURES_REFUSED) return "";
       if (serverUnreachable(turn.status, error)) {
         if (S.health?.model?.backend && !localBackend()) return t("failure.network");
         const where = serverAddress(unreachableUrl(error) || S.health?.model_server?.url_label || "");
@@ -1709,7 +1714,7 @@ function statusNode(turn) {
   node.append(heading);
   // An unreachable server's title and hint say all there is to say; its raw error stays under Details.
   // So does the title of a tool call written as text.
-  if (!stopped && error && !serverUnreachable(turn.status, error) && error !== info.title && error !== TOOL_CALL_TEXT) {
+  if (!stopped && error && !serverUnreachable(turn.status, error) && error !== info.title && error !== TOOL_CALL_TEXT && error !== PICTURES_REFUSED) {
     node.append(el("p", "failure-error", cleanOutput(error).split("\n")[0]));
   }
   const hint = stopped ? "" : failureHint(turn, can, error);

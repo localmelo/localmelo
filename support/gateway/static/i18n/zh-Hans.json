@@ -1810,6 +1810,7 @@
   "turns.status.outOfSteps.word": "步数用完",
   "turns.status.parked.title": "已暂停",
   "turns.status.parked.word": "已暂停",
+  "turns.status.pictures": "这个模型看不了图片；请在“设置 → 模型”里选一个能看图片的模型",
   "turns.status.provider.title": "没能从模型服务器得到回答",
   "turns.status.provider.word": "模型服务错误",
   "turns.status.reflected.title": "反思后停止",

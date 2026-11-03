@@ -99,6 +99,7 @@ JS_ENGLISH = {
     "melo did not finish an answer",
     "tool call written as text",
     "cannot reach the model server at",
+    "This model can't see pictures; choose one that can in Settings → Model",
     "noopener noreferrer",
     # The type a drag carries when it holds files (the browser's own word).
     "Files",

@@ -334,11 +334,16 @@ export function serverAddress(url) {
 export const UNFINISHED_ANSWER = "melo did not finish an answer";
 // The error of a run whose replies wrote a tool call as text (`TOOL_CALL_TEXT_ERROR` in `melo/schema.py`).
 export const TOOL_CALL_TEXT = "tool call written as text";
+// The error of a run whose model server refused the request's pictures (`PICTURES_REFUSED_ERROR` in `melo/schema.py`).
+export const PICTURES_REFUSED = "This model can't see pictures; choose one that can in Settings → Model";
 
 /** `status_text`: the word, severity and title of a run's end. `error` tells an unreachable server apart. */
 export function statusText(status, cause = "", error = "") {
   if (serverUnreachable(status, error)) {
     return {...statusWords(STATUS_TEXT.provider_error), title: t("turns.status.unreachable")};
+  }
+  if (status === "provider_error" && error === PICTURES_REFUSED) {
+    return {...statusWords(STATUS_TEXT.provider_error), title: t("turns.status.pictures")};
   }
   if (status === "failed" && error === UNFINISHED_ANSWER) {
     return {...statusWords(STATUS_TEXT.failed), title: t("turns.status.unfinished")};

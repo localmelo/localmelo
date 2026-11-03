@@ -78,6 +78,12 @@ TOOL_CALL_TEXT_NUDGE = (
     "tool through the tool interface, or give your final answer in plain words."
 )
 TOOL_CALL_TEXT_ERROR = "tool call written as text"
+# The run's error when the model server refused a request that carried pictures,
+# because the model cannot read them. The gateway reads it to remember the model
+# as text only, and the console words it for the person.
+PICTURES_REFUSED_ERROR = (
+    "This model can't see pictures; choose one that can in Settings → Model"
+)
 # The stand-ins for a reply that is no answer, and the nudges after them.
 REPLY_LABELS = (EMPTY_REPLY_LABEL, TOOL_CALL_TEXT_LABEL)
 REPLY_NUDGES = (EMPTY_REPLY_NUDGE, TOOL_CALL_TEXT_NUDGE)

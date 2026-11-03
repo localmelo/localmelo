@@ -90,6 +90,9 @@ class ToolImageStore:
         self._repeats: list[ImagePart] = []
         # The pictures the person added: payloads by digest, oldest first.
         self._user: dict[str, ImagePart] = {}
+        # Whether the messages last hydrated carry any pixels (a request the server
+        # refused for its pictures is told apart from one it refused for another reason).
+        self.sent_pixels = False
 
     @property
     def live(self) -> list[ImagePart]:
@@ -153,6 +156,7 @@ class ToolImageStore:
         if not self._live and not any(
             message.role == "user" and message.images for message in messages
         ):
+            self.sent_pixels = False
             return messages
         live = {id(image) for image in self._live}
         repeats = {id(image) for image in self._repeats}
@@ -172,4 +176,7 @@ class ToolImageStore:
                 ]
                 message = dataclasses.replace(message, content=content, images=images)
             out.append(message)
+        self.sent_pixels = any(
+            image.data for message in out for image in message.images
+        )
         return out

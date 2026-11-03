@@ -171,6 +171,25 @@ test('the warning appears with a text-only model and goes when the picture does'
   assert.equal(s.warning.hidden, true);
 });
 
+test('a refusal for pictures warns about the strip until the gateway says the model reads them', async () => {
+  let reads = true;
+  const s = strip({upload: async () => ({id: 'u', size_bytes: 1, width: 1, height: 1, model_reads: reads})});
+  s.media.refusedPictures();
+  assert.equal(s.warning.hidden, true, 'nothing waits to be warned about');
+  await s.media.add([picture('a.png')]);
+  assert.equal(s.warning.hidden, true, 'the gateway says the model reads them');
+  s.media.refusedPictures();
+  assert.equal(s.warning.hidden, false);
+  reads = false;
+  await s.media.add([picture('b.png')]);
+  assert.equal(s.warning.hidden, false, 'still text only');
+  s.media.remove(s.media.items()[0].id);
+  s.media.remove(s.media.items()[0].id);
+  reads = true;
+  await s.media.add([picture('c.png')]);
+  assert.equal(s.warning.hidden, true, 'the gateway answered that the model reads them: the refusal is over');
+});
+
 test('swap shows another chat\'s strip and returns this one; discard forgets what it held', async () => {
   const s = strip();
   await s.media.add([picture('a.png')]);

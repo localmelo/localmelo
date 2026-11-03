@@ -71,6 +71,8 @@ ASK_STEPS: Final = 8
 OWNER_TIMEOUT_S: Final = 600.0
 # How often a chat with a turn running is looked at again.
 IDLE_POLL_S: Final = 0.2
+# Tries to store the queue without an entry that was handled.
+FORGET_TRIES: Final = 3
 MAX_ANSWER_CHARS: Final = 2000
 # Words the person can add to one running turn, and the longest of them.
 MAX_NOTES: Final = 20
@@ -748,12 +750,22 @@ class OwnerAsks:
         await self._forget_started(chat_id)
 
     async def _forget_started(self, chat_id: str) -> None:
-        """Store the queue without the message just handled."""
-        try:
-            await self._keep_queue(chat_id)
-        except Exception:
-            # Kept as started: its key finds the turn after a restart.
-            logger.warning("Could not store the chat's queue", exc_info=True)
+        """Store the queue without the message (or read note) just handled.
+
+        A failed write is tried again a few times, a little later each time: the
+        stored queue is what a restart would run, so an entry left in it after it
+        was handled would run twice. If every try fails the entry stays stored; a
+        message's key then finds its turn after a restart, a read note has none.
+        """
+        for attempt in range(FORGET_TRIES):
+            try:
+                await self._keep_queue(chat_id)
+                return
+            except Exception:
+                logger.warning("Could not store the chat's queue", exc_info=True)
+                if self._stopping():
+                    return
+                await asyncio.sleep(self.idle_s * (attempt + 1))
 
     async def _internal_turn(self, chat_id: str, ask: Ask) -> None:
         if await self.console.store.get_session(chat_id) is None:

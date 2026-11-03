@@ -22,6 +22,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from localmelo.melo.agent._request_accounting import _image_dimensions
+from localmelo.melo.contracts.providers import ProviderError
+from localmelo.melo.schema import PICTURES_REFUSED_ERROR
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.vision import Vision
 from localmelo.support.gateway.guard import UPLOAD_BYTES_LIMIT, LoopbackGuard
@@ -36,7 +38,7 @@ from localmelo.support.sessions.picture_input import (
 )
 
 from .conftest import PORT
-from .test_ask_owner import answer, ask_console, until
+from .test_ask_owner import Script, answer, ask_console, until
 from .test_turn_writes import _post_turn, _wait_turn
 
 needs_sips = pytest.mark.skipif(shutil.which("sips") is None, reason="macOS sips")
@@ -428,6 +430,35 @@ async def test_a_picture_cannot_start_a_task_or_join_a_task_question(
         )
 
 
+async def test_a_picture_is_not_sent_while_the_chat_answers_a_task_question(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half: a message for the model cannot wait in the queue with its picture."""
+    async with ask_console(
+        tmp_path,
+        monkeypatch,
+        main=[answer("A square.")],
+        vision=FakeVision(True),
+        run=False,
+    ) as (console, client, models):
+        main_id = str(console.main_id)
+        picture = await _stage(client)
+        # The chat is busy with a worker's question (the state the queue is for).
+        console.asks._busy[main_id] = object()  # type: ignore[assignment]
+        assert console.asks.holds(main_id)
+        refused = await _post_turn(client, main_id, "look", images=[picture])
+        assert refused.status_code == 409, refused.text
+        assert refused.json()["error"]["code"] == "chat_answering"
+        assert await console.store.list_turns(main_id) == []
+        assert not console.asks._people.get(main_id)
+        # The refusal kept the picture: once the chat is free it can be sent.
+        del console.asks._busy[main_id]
+        sent = await _post_turn(client, main_id, "look", images=[picture])
+        assert sent.status_code == 202, sent.text
+        await _wait_turn(client, main_id)
+        assert len(models["main"].requests) == 1
+
+
 async def test_try_again_sends_the_same_pictures(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -618,3 +649,133 @@ def test_the_composed_text_is_what_the_pages_parser_reads() -> None:
         compose_user_text(fixture["stand_in"]["words"], files)
         == fixture["stand_in"]["composed"]
     )
+
+
+# ── A model that refuses the pictures ──
+
+BARE_400 = "POST /chat/completions failed with HTTP 400"
+
+
+def _fails(message: str, status: int) -> Any:
+    def reply(request: list[Any]) -> Any:
+        raise ProviderError(message, status_code=status)
+
+    return reply
+
+
+@pytest.mark.parametrize(
+    ("message", "status", "verdict", "pictured", "refused"),
+    [
+        # A model not known to read pictures answers them with a bare 400, or names them.
+        (BARE_400, 400, None, True, True),
+        (BARE_400 + ": image input is not supported", 400, None, True, True),
+        # A model the server says reads them keeps a bare 400 as it was.
+        (BARE_400, 400, True, True, False),
+        # A message without pictures says nothing about them.
+        (BARE_400, 400, None, False, False),
+    ],
+)
+async def test_a_turn_refused_for_its_pictures_ends_with_one_line_and_the_model_is_text_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    message: str,
+    status: int,
+    verdict: bool | None,
+    pictured: bool,
+    refused: bool,
+) -> None:
+    async def asked(self: Any) -> bool | None:
+        return verdict
+
+    # The server answers the console's question and the model's own the same way.
+    monkeypatch.setattr(Vision, "_ask", asked)
+    monkeypatch.setattr(Script, "takes_images", asked)
+    async with ask_console(
+        tmp_path, monkeypatch, main=[_fails(message, status)], run=False
+    ) as (console, client, _):
+        main_id = str(console.main_id)
+        extra = {"images": [await _stage(client)]} if pictured else {}
+        sent = await _post_turn(client, main_id, "what is this?", **extra)
+        assert sent.status_code == 202, sent.text
+        finished = await _wait_turn(client, main_id)
+        assert finished["status"] == "provider_error"
+        assert finished["result"]["error"] == (
+            PICTURES_REFUSED_ERROR if refused else message
+        )
+
+        async def settled() -> bool:
+            return await console.vision.reads() is (False if refused else verdict)
+
+        await until(settled)
+        # The composer is told as soon as the next picture is added, and a send is refused.
+        upload = await _upload(client, png(8, 8))
+        assert upload.json()["model_reads"] is (False if refused else verdict)
+        again = await _post_turn(
+            client, main_id, "and this?", images=[upload.json()["id"]]
+        )
+        if refused:
+            assert again.status_code == 409
+            assert again.json()["error"]["code"] == "model_text_only"
+        else:
+            assert again.status_code == 202, again.text
+
+
+async def test_the_refusal_stands_past_the_cache_until_the_model_changes_or_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    server: dict[str, bool | None] = {"says": None}
+
+    async def asked(self: Vision) -> bool | None:
+        return server["says"]
+
+    monkeypatch.setattr(Vision, "_ask", asked)
+    async with ask_console(tmp_path, monkeypatch, run=False) as (console, _, _models):
+        vision = console.vision
+        assert await vision.reads() is None
+        vision.refused()
+        assert await vision.reads() is False
+        # The cached answer is old, and the server still cannot say: the refusal stands.
+        stale = (vision._result[0], None, -1e9)  # type: ignore[index]
+        vision._result = stale
+        assert await vision.reads() is False
+        # Another model of the settings is not the one that refused.
+        monkeypatch.setattr(vision, "_key", lambda: ("other",))
+        assert await vision.reads() is None
+        monkeypatch.undo()
+        monkeypatch.setattr(Vision, "_ask", asked)
+        # The server says the model reads them (it was changed under the same name).
+        vision._result = (vision._result[0], None, -1e9)  # type: ignore[index]
+        server["says"] = True
+        assert await vision.reads() is True
+        server["says"] = None
+        vision._result = (vision._result[0], None, -1e9)  # type: ignore[index]
+        assert await vision.reads() is None
+
+
+async def test_try_again_does_not_send_refused_pictures_to_the_same_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def unknown(self: Any) -> bool | None:
+        return None
+
+    monkeypatch.setattr(Vision, "_ask", unknown)
+    async with ask_console(
+        tmp_path, monkeypatch, main=[_fails(BARE_400, 400)], run=False
+    ) as (console, client, models):
+        main_id = str(console.main_id)
+        picture = await _stage(client)
+        await _post_turn(client, main_id, "what is this?", images=[picture])
+        finished = await _wait_turn(client, main_id)
+        assert finished["result"]["error"] == PICTURES_REFUSED_ERROR
+        await until(lambda: console.vision._refused is not None)
+        retry = await client.post(
+            f"/api/sessions/{main_id}/retry", json={"turn_id": finished["id"]}
+        )
+        assert retry.status_code == 409, retry.text
+        assert retry.json()["error"]["code"] == "model_text_only"
+        # Nothing was undone and no second request went out.
+        turns = (await client.get(f"/api/sessions/{main_id}/turns")).json()["turns"]
+        assert [(row["id"], row.get("undone")) for row in turns] == [
+            (finished["id"], False)
+        ]
+        assert len(models["main"].requests) == 1

@@ -98,6 +98,8 @@ let counter = 0;
 export function setupMedia(host) {
   const { doc, tray, warning, fileInput } = host;
   let items = [];
+  // A turn was refused for its pictures: the model of the settings is text only, whatever an item says.
+  let refused = false;
 
   const node = (tag, className, text) => {
     const made = doc.createElement(tag);
@@ -113,7 +115,7 @@ export function setupMedia(host) {
   const live = (list) => list.filter((item) => !item.removed);
 
   function render() {
-    const textOnly = pictures().some((item) => item.modelReads === false);
+    const textOnly = pictures().some((item) => item.modelReads === false) || (refused && pictures().length > 0);
     warning.hidden = !textOnly;
     if (textOnly) {
       const link = node("button", "link-button", t("composer.textOnlyLink"));
@@ -198,6 +200,8 @@ export function setupMedia(host) {
         height: body.height,
         modelReads: body.model_reads ?? null,
       });
+      // The gateway's answer is the newest word on the model.
+      refused = refused && body.model_reads === false;
     } catch (error) {
       item.removed = true;
       items = live(items);
@@ -276,6 +280,11 @@ export function setupMedia(host) {
     /** Whether a picture is still on its way to the gateway. */
     busy: () => items.some((item) => item.state !== "ready"),
     hasPictures: () => pictures().length > 0,
+    /** A turn was refused for its pictures: warn about the pictures in the strip from now on. */
+    refusedPictures() {
+      refused = true;
+      render();
+    },
     /** What a send carries: the picture ids and the text files. The strip is empty after. */
     take() {
       const taken = items.filter((item) => item.state === "ready");
