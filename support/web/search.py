@@ -89,6 +89,11 @@ class Way:
     read: Callable[[str], list[Hit]]
 
 
+# Where a search service that needs a key goes later: one more entry here (its key
+# name in `way_names()` is then valid in `[web] search_order`), a `read` for its
+# answer, and its key taken from the keychain by the code that stores keys, never
+# from this module or the config file. The searcher, the checks and the tool need
+# no change.
 WAYS: dict[str, Way] = {
     way.key: way
     for way in (
