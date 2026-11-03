@@ -16,14 +16,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   steps, for facts that change). The words of a search leave the computer, and the Settings line says
   so. Ways, as measured with `scripts/search_probe.py` on 24 queries (half English, half Chinese): Bing's
   result feed by a plain request (0.17 s median, but 15 of 24 answers were about something else), DuckDuckGo
-  in the Safari automation window when browsing is on (22 of 24 on topic), then Baidu by a plain request
+  in the Safari automation window when browsing is on (22 of 24 on topic; the page is read with the browser tools' own checks, so a page that leaves the engine's site or goes to a local address is refused), then Baidu by a plain request
   (20 of 24); the other engines turn a plain request away. Every answer is checked against the words, and a
   way that asks for a check, fails or answers off topic falls back to the next and says so. Results sit between
   the nonce markers a `web_fetch` page has, cleaned the same way, and an address in them is opened with
   `web_fetch` and its site gate. With the switch on, a search counts as asked for; words that look like
-  a secret or like pasted text ask first, under a question of their own per search, and a task with nobody
-  to ask does not send them. The chat and the task page show the words, engine and count in English and
-  Simplified Chinese. Developer keys: `[web] search_order`, `[web] search_count`. The benchmark leaves it
+  a secret or like pasted text ask first, under a question of their own per search, and with nobody to ask
+  (no approval policy at all) they are not sent, in a chat or in a task. The chat and the task page show
+  the words, engine and count in English and Simplified Chinese. Developer keys: `[web] search_order`, `[web] search_count`. The benchmark leaves it
   off unless it sets `-X web.search=true`.
 - A task the chat starts now begins with what the chat knew when you asked, so a short request
   such as "go look it up" or "read his résumé first" keeps who or what it is about. After its

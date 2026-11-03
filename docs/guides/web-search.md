@@ -33,7 +33,8 @@ melo -X web.search=true
 - The engine sees the words and the network address of this Mac. Nothing else from your chat is sent.
 - With the switch on, a search counts as asked for, so an ordinary one runs without a question.
 - A search whose words look like a secret (a key, a token, a code, a card or ID number) or like pasted text (long, or on several lines, as text copied from a private note or file is) asks first, on the same card as other approvals. Your answer covers that search only, never a later one, even if you chose "allow for this chat".
-- A task asks the chat that owns it. Where nobody can be asked, a task does not send such a search.
+- A task asks the chat that owns it. Where nobody can be asked (no approval policy at all, as with `--yolo` or a library call), such a search is not sent, in a chat or in a task.
+- The browser way sends the words too: Safari loads the engine's result page with them in its address, so they leave the computer on every way.
 
 ## Where the results come from
 
@@ -48,6 +49,7 @@ melo tries the ways below in order and stops at the first one that gives results
 - A way that asks for a check (a captcha, a wait page, an error) is skipped, and the next one is tried.
 - A feed can answer an unknown client with results that read well and are about something else. melo checks that at least two of the first five results share words with the search, and does not take a way that fails the check for an answer. If no way passes, it gives the nearest results and says they may be about something else.
 - It asks one engine at most once per search, and at least two seconds apart.
+- The Safari way reads the page with the browser tools' own checks: a page that goes to another site or to a local address, or has a frame on one, is refused and not read, and the person is not asked about it. The engine's own site is not asked about either, because turning search on allows it.
 - Safari's window is used only with browsing on. Turn it on with `/browser on` (see [Browsing with melo](browsing.md)); without it, the second way is left out and nothing is said about it.
 
 ## How a search shows

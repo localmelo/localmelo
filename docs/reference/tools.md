@@ -213,16 +213,23 @@ so the call itself asks nothing; the one case that asks is below. The guide is
   - `bing-rss`: `https://www.bing.com/search?format=rss`, read with `web_fetch`'s fetcher (one `GET`,
     no cookies, `User-Agent: localmelo-web-fetch/1.0`, the same address checks and redirect checks);
   - `browser`: `html.duckduckgo.com/html/` loaded in the Safari automation window of the browser
-    tools, in a tab that is closed afterwards; it is left out while `[browser] driver` is `off`
-    and waits at most 25 seconds;
+    tools, in a tab of its own that is closed afterwards (the chat's own tabs and current tab
+    stay as they were); it is left out while `[browser] driver` is `off` and waits at most 25
+    seconds. It is read by the browser provider itself (`BrowserToolProvider.read_for_search`), so
+    the browser tools' checks run: the address must be public before the load, the page is
+    checked where it lands and in its frames, a refused page is blanked, a payment page is not
+    read and sensitive field values are masked. The engine's site is not asked about (turning
+    web search on allows it); any other site is refused, not asked about, so a page that
+    redirects or moves to another site or to a local address gives no results and the way is
+    reported as `gave a page melo's browser does not read`;
   - `baidu`: `https://www.baidu.com/s`, read the same way as `bing-rss`.
 - **Fit.** Results fit when at least two of the first five share a third of the search's words
   (Latin words of three or more letters without common ones, and pairs of Chinese characters).
   When no way passes, the nearest results are returned with a note.
 - **Why a way did not answer** is one of a closed list of sentences, never text from the
   server: `asked for a check` (also with `(HTTP N)` for 202, 401, 403, 407, 429 and 451),
-  `answered HTTP N`, `could not be reached`, `gave a page melo could not read results from`, and
-  `gave results that did not match the words`. When every way fails the call is an error that lists them.
+  `answered HTTP N`, `could not be reached`, `gave a page melo could not read results from`,
+  `gave a page melo's browser does not read` and `gave results that did not match the words`. When every way fails the call is an error that lists them.
 - **Politeness.** One request per way per search, at least 2 seconds between two requests to one
   engine, no sign-in, nothing from the person's own Safari profile. An address in the results is
   kept only when `web_fetch` could reach it.
@@ -231,7 +238,7 @@ so the call itself asks nothing; the one case that asks is below. The guide is
   look pasted (over 200 characters, or on more than one line) asks before it goes out, under the
   question name `web_search:<digest>` (10 hex digits of a digest of the words), so an answer, even
   "allow for this chat", covers those words only. A refusal returns `melo did not search.` and the
-  reason. With nobody to ask, a chat searches and a task does not. The word `password` alone does
+  reason. With nobody to ask (no approval policy at all, as with `--yolo` or a library call), such a search is not sent, in a chat or in a task. The word `password` alone does
   not ask.
 - **Opening a result** is a `web_fetch` call: the site gate above applies to it unchanged.
 - **The model is told**, only while the tool is on, in a system note of about 300 characters: when
