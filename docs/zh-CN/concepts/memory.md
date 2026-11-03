@@ -62,7 +62,7 @@
 - 回答说它记下了某件事（"Remembered: …"、"Noted — …"、"I've noted that …"、"记下了：…"）而没有记下任何笔记时，melo 会按下面同样的检查，把回答里说到的内容记下来，前提是它是一句陈述：对你说的（含 "you"、"your"、"你" 或 "您"），或关于别人的（"Prof. Duarte's office is in the Atrium Wing"）。如果不行（那些词不是你说的，看起来像密钥，或只是 "gate 9 for Faro" 这样没有动词的片段），就什么也不保存，这一轮的 `turn.memory` 事件带有 `unsaved_claim: true`。回答只说记下了或保存了却没有说明内容（"Saved."、"Noted."、"Got it, noted…"、"I've saved it."、"I've saved your preference."、"已记录。"、"我已经记录了你的偏好。"），而又没有记下任何笔记时，也是如此。"Got it!"、"Thanks!" 不算声称。
 - 已经记下的笔记不会重复写入。问题和待办（"remember to buy milk"）不是笔记。
 - `[memory] keep_statements = true`（默认关闭；`-X memory.keep_statements=on` 只对一次运行生效，`melo -h all` 会列出它）是用于比较的开发者设置：模型回答之后，代码也会记下你说出、但模型没有记的明确而长期的事实（"I live in …"、"my advisor is …"、"我的…是…"）；问题、"如果"、"不"、过去、别人的看法和一时的状态（"my build is failing"）从不记。
-- 用于比较的开发者设置，默认都是关闭或出厂取值，用 `-X memory.KEY=VALUE` 只对一次运行生效（`melo -h all` 会列出它们）：`recall_records`（3）和 `recall_docs`（2）是一条消息的召回块最多包含的笔记数和以前的对话轮次数，`recall_chars`（4000）是它的字符数上限；`recall_notes = "off"` 只召回对话轮次，也不置顶任何笔记；`search_when_empty = "hint"` 会给没有召回任何内容的块加上一行，告诉模型先调用记忆搜索工具，搜索也没有结果就说不知道。这一轮的 `turn.memory` 事件里会有 `search_hint: true`。`recall_min_cosine`（0.55）是一个条目要被召回至少需要的语义相似度，`recall_min_coverage`（0.6）是它至少要包含消息中实词的比例；两者对召回块和记忆搜索工具都生效，调低就会放进更多条目。`recall_item_chars`（900）是一条被召回的对话轮次占用的字符数，召回块和搜索工具的列表都按它来（更大的篇幅比原来的 234 能从以前的对话中回答更多问题；设为 `recall_item_chars = 234` 和 `recall_chars = 900` 就和以前一样显示一轮对话）；`recall_excerpt = "match"` 对轮次的每一部分显示包含消息中最多实词的句子，而不是开头（一轮对话中的答案常常在最初的几百个字符之后）。`recall_form = "list"` 把以前的每一轮对话显示成一行，而不是节选，并给模型一个工具来打开它需要的轮次（见下文）；`recall_list_max`（20）是它最多列出的轮次数，`recall_open_chars`（4000）是打开的一轮对话占用的字符数，`recall_docs` 和 `recall_chars` 不限制这个列表。`excerpt_open = "off"` 回到没有编号的节选：默认情况下，显示内容少于整轮的一行以这一轮的编号开头，并给模型 `open_memory`（见下文）。`recall_source = "items"` 用记忆条目（见下文）代替以前的对话轮次来召回，`open_sources = "on"` 让打开的条目连同它所来自的轮次一起返回，`compress_at_chars`（12000）是编码器一次读取的对话文本量，`compress_cache` 指定保存其回复的文件。`followup_query = "message"` 让没有自己内容的消息（"continue"）回到只按它自己的词搜索（见下文的“简短的接话”）。见[配置参考](../reference/configuration.md)。
+- 用于比较的开发者设置，默认都是关闭或出厂取值，用 `-X memory.KEY=VALUE` 只对一次运行生效（`melo -h all` 会列出它们）：`recall_records`（3）和 `recall_docs`（2）是一条消息的召回块最多包含的笔记数和以前的对话轮次数，`recall_chars`（4000）是它的字符数上限；`recall_notes = "off"` 只召回对话轮次，也不置顶任何笔记；`search_when_empty = "hint"` 会给没有召回任何内容的块加上一行，告诉模型先调用记忆搜索工具，搜索也没有结果就说不知道。这一轮的 `turn.memory` 事件里会有 `search_hint: true`。`recall_min_cosine`（0.55）是一个条目要被召回至少需要的语义相似度，`recall_min_coverage`（0.6）是它至少要包含消息中实词的比例；两者对召回块和记忆搜索工具都生效，调低就会放进更多条目。`recall_item_chars`（900）是一条被召回的对话轮次占用的字符数，召回块和搜索工具的列表都按它来（更大的篇幅比原来的 234 能从以前的对话中回答更多问题；设为 `recall_item_chars = 234` 和 `recall_chars = 900` 就和以前一样显示一轮对话）；`recall_excerpt = "match"` 对轮次的每一部分显示包含消息中最多实词的句子，而不是开头（一轮对话中的答案常常在最初的几百个字符之后）。`recall_form = "list"` 把以前的每一轮对话显示成一行，而不是节选，并给模型一个工具来打开它需要的轮次（见下文）；`recall_list_max`（20）是它最多列出的轮次数，`recall_open_chars`（4000）是打开的一轮对话占用的字符数，`recall_docs` 和 `recall_chars` 不限制这个列表。`excerpt_open = "off"` 回到没有编号的节选：默认情况下，显示内容少于整轮的一行以这一轮的编号开头，并给模型 `open_memory`（见下文）。`recall_source = "items"` 用记忆条目（见下文）代替以前的对话轮次来召回，`open_sources = "on"` 让打开的条目连同它所来自的轮次一起返回，`compress_at_chars`（12000）是编码器一次读取的对话文本量，`compress_cache` 指定保存其回复的文件。`followup_query = "message"` 让没有自己内容的消息（"continue"）回到只按它自己的词搜索（见下文的“简短的接话”）。`gather = "wide"` 或 `"guide"` 让列表形式对要求计数、合计或比较的消息看得更宽，门槛降到 `gather_min_cosine`（0.40；见下文）。见[配置参考](../reference/configuration.md)。
 
 笔记被记下之前，代码会检查：
 
@@ -162,6 +162,7 @@ Older chat turns that may hold the answer, closest first. Open the ones you need
 - 一行包括这一轮的编号（`t41`）、日期和对话（写法同上）、标题（这一轮中你的话的第一句，最多 80 个字符），以及它与消息有多接近：靠语义找到时是两位小数的相似度，靠共有的字词找到时是 `words`。被更新的一轮取代的那一轮，行尾带有 `(older; replaced by a newer message)`。
 - 笔记的显示不变。列表不受 `recall_docs` 和 `recall_chars` 限制，同一个对话的轮次数也不设上限：最多 `recall_list_max` 轮，最好的在前。`search_memory` 返回同样的行。
 - `open_memory` 接收这些行里的一到五个编号，把每一轮完整返回：你说的话和 melo 的回复，附上日期和对话，最多 `recall_open_chars` 个字符（更长的一轮在句末截断，并以 `… (cut)` 结尾）。编号不存在、属于你已删除的对话，或不是对话轮次的编号（例如笔记的编号），都不会打开任何内容，并会说明这一点。这一轮的 `turn.memory` 事件用 `opened` 列出打开过的轮次。
+- 开发者设置 `[memory] gather`（默认 `"off"`，什么都不改变；`"wide"` 或 `"guide"`，`-X memory.gather=wide` 只对一次运行生效）针对要求计数、合计、列举或比较的消息（"how many"、"in total"、"each"、"compared"、"一共"、"哪些" 等）。对这样的消息，列表的语义门槛从 `recall_min_cosine` 降到 `gather_min_cosine`（默认 0.40），所以回答需要的每个对话里的条目都会列出来；列表形式的每次 `search_memory` 也用这个较低的门槛。`"guide"` 还会在列表下面加一句话，告诉模型打开每个可能相关的列出条目，对还没有列出的每一类换别的词再搜一次，并且只数条目里说的。节选形式不变。
 
 **可以打开的被截断节选。** 默认情况下（`[memory] excerpt_open = "on"`），召回仍然给出节选，但显示内容少于整轮的一行会以这一轮的编号开头，模型可以把这一轮完整打开：
 
@@ -234,6 +235,7 @@ A line that starts with an id such as [t123] is cut; open it with open_memory wh
 | `candidates`、`used` | 候选项的数量和实际使用的条数。 |
 | `block_chars` | 记忆加到你的消息里的字符数（没加任何内容时为 0）。 |
 | `query_from` | 搜索用的是什么：`message`（你的话）、`recent`（没有自己内容的消息，加上你在这个对话最近几个轮次里输入的内容一起搜索）或 `none`（没有搜索：这样的消息出现在没有更早轮次的对话里）。在这个键出现之前记录的轮次没有它。 |
+| `gather`、`floor` | 只有开发者设置 `[memory] gather` 打开时才有：消息是否要求计数、合计或比较，以及这次搜索用的语义门槛。没有这个设置时，对象里两者都没有。 |
 
 同一个对象也在该轮次的 `result` 里，名为 `memory_recall`，所以 HTTP API 的客户端读取轮次时就能一起读到。
 

@@ -9,6 +9,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Developer only: memory can look wider when a question counts, totals or compares, so items from every chat it needs are listed. Part of #428.
 - Pictures and files in the web console and the app, and words added while melo works. Drop a picture
   or a text file on the page, paste it with Cmd-V or pick it with the paperclip (`/attach` opens the same
   picker; `/attachments` and `/detach N` list and remove). PNG, JPEG, GIF (first frame), WebP and HEIC
