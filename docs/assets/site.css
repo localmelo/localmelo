@@ -1413,6 +1413,25 @@ a.show-card:hover,
   background: var(--surface-2);
 }
 
+/* A part of a box that holds two kinds of thing, such as a brief and a channel. */
+.node-part {
+  margin-top: 6px;
+}
+
+.node-part + .node-part {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.node-part-title {
+  display: block;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
 .node.planned {
   border-style: dashed;
   border-color: var(--muted-2);
