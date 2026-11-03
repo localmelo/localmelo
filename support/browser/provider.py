@@ -59,6 +59,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import functools
 import logging
 import re
@@ -525,6 +526,11 @@ class BrowserToolProvider(BaseToolProvider):
         changes: list[str] | None = None,
     ) -> str:
         """Read the page the tab landed on, after checking where it landed."""
+        snap = await self._reading(info, done)
+        return render.render_page(snap, view=view, changes=changes)
+
+    async def _reading(self, info: TabInfo, done: set[str]) -> render.Snapshot:
+        """A new reading of the tab's page, made the newest: its address checked first."""
         if info.url:
             await self._admit(info.url, info.id, done)
         raw = await self._driver.page(self._raw[info.id])
@@ -544,7 +550,7 @@ class BrowserToolProvider(BaseToolProvider):
         self._ref_n += len(snap.elements)
         self._snaps[info.id] = snap
         self._tab = info.id
-        return render.render_page(snap, view=view, changes=changes)
+        return snap
 
     async def _admit_frames(self, frames: tuple[str, ...], tab: str) -> None:
         """Refuse a page whose frames, as far as they can be read, are on a local address."""
@@ -762,10 +768,34 @@ class BrowserToolProvider(BaseToolProvider):
             )
         return before
 
-    async def _run_act(self, tab_id: str, act: Act, before: set[str]) -> ActResult:
-        """Do *act*; when it fails after it may have run, the tab is checked before anything else."""
+    async def _run_act(
+        self,
+        tab_id: str,
+        snap: render.Snapshot,
+        ref: str,
+        act: Act,
+        before: set[str],
+    ) -> tuple[ActResult, str]:
+        """Do *act*, and the ref it was done on.
+
+        When the page redrew itself since it was read, the element is looked
+        for in a new reading (see :meth:`_refind`) and the act is done on the
+        one element like it, with every check again. When the act fails after
+        it may have run, the tab is checked before anything else.
+        """
+        raw = self._raw[tab_id]
         try:
-            return await self._driver.act(self._raw[tab_id], act)
+            try:
+                result = await self._driver.act(raw, act)
+            except StaleElementError as stale:
+                found = await self._refind(tab_id, snap, act.element, stale)
+                if found is None:
+                    raise
+                fresh, ref, item = found
+                act = dataclasses.replace(
+                    act, url=fresh.url, element=item, doc=fresh.doc
+                )
+                result = await self._driver.act(raw, act)
         except StaleElementError:
             raise  # nothing was done
         except BrowserError as exc:
@@ -775,6 +805,36 @@ class BrowserToolProvider(BaseToolProvider):
                 raise refused from exc
             self._drop_reading(tab_id)  # what it did to the page is not known
             raise
+        return result, ref
+
+    async def _refind(
+        self,
+        tab_id: str,
+        snap: render.Snapshot,
+        item: Element,
+        stale: StaleElementError,
+    ) -> tuple[render.Snapshot, str, Element] | None:
+        """The one element like *item* in a new reading of a page that redrew itself, or None.
+
+        Only a page that redrew (the element is gone as it was read, or the page
+        was reloaded at the same address) is read again, and only on the site
+        the act was approved for. Like means the same kind, label, destination,
+        form address and form fields and, for a text box, the same field; where
+        several are, a control by its tag or role wins over an element that only
+        looks clickable. Anything else stays stale.
+        """
+        if stale.why not in ("gone", "doc"):
+            return None
+        fresh = await self._reading(TabInfo(tab_id), set())
+        if fresh.origin != snap.origin or not _same_page(fresh.url, snap.url):
+            return None
+        like = [(r, e) for r, e in fresh.elements.items() if _like(e, item)]
+        if len(like) > 1:
+            like = [(r, e) for r, e in like if not e.plain]
+        if len(like) != 1:
+            return None
+        ref, found = like[0]
+        return fresh, ref, found
 
     async def _tabs_now(self) -> set[str] | None:
         """The driver's ids of every tab in the window now, or None when it cannot say."""
@@ -888,12 +948,18 @@ class BrowserToolProvider(BaseToolProvider):
         page = await self._read_tab(TabInfo(landed, urls[landed]), done, changes=lines)
         return f"{said}\n{page}"
 
-    def _done_line(self, verb: str, ref: str, result: ActResult) -> str:
-        """``Clicked e12 (via browser).``, with why a better way was passed over."""
+    def _done_line(self, verb: str, ref: str, asked: str, result: ActResult) -> str:
+        """``Clicked e12 (via browser).``, with why a way was passed over and a ref found again."""
         how = f"via {result.via}"
         if result.why:
             how += f": {result.why}"
-        return _said(f"{verb} {ref} ({how}).", result.note)
+        line = f"{verb} {ref} ({how})."
+        if ref != asked:
+            line += (
+                f" The page redrew {render.field_text(asked, 30)}; {ref} is the one "
+                "element like it now."
+            )
+        return _said(line, result.note)
 
     @_guarded
     async def _click(self, ref: str = "", tab: str | None = None, **_: Any) -> str:
@@ -910,12 +976,14 @@ class BrowserToolProvider(BaseToolProvider):
             await self._check_destination(item.href, snap.origin, done)
         elif item.submit:
             await self._submit_checks(snap, item, "click", done)
-        result = await self._run_act(
+        result, used = await self._run_act(
             tab_id,
+            snap,
+            ref,
             Act("click", snap.url, item, doc=snap.doc, send=bool(item.submit)),
             before,
         )
-        said = self._done_line("Clicked", ref, result)
+        said = self._done_line("Clicked", used, ref, result)
         return await self._after(tab_id, said, before, done, result, snap.url)
 
     @_guarded
@@ -949,8 +1017,10 @@ class BrowserToolProvider(BaseToolProvider):
         enter = submit is True or str(submit).lower() == "true"
         if enter:
             await self._submit_checks(snap, item, "enter", done, typed)
-        result = await self._run_act(
+        result, used = await self._run_act(
             tab_id,
+            snap,
+            ref,
             Act(
                 "type",
                 snap.url,
@@ -963,9 +1033,11 @@ class BrowserToolProvider(BaseToolProvider):
             before,
         )
         verb = f"Typed {len(typed)} character(s) into"
-        said = self._done_line(verb, ref, result)
+        said = self._done_line(verb, used, ref, result)
         if enter:
-            said = said.replace(f"{verb} {ref} ", f"{verb} {ref} and pressed Enter ", 1)
+            said = said.replace(
+                f"{verb} {used} ", f"{verb} {used} and pressed Enter ", 1
+            )
         return await self._after(
             tab_id, said, before, done, result, snap.url, expect=enter
         )
@@ -983,12 +1055,14 @@ class BrowserToolProvider(BaseToolProvider):
             raise BrowserError("browser_select needs the option's text.")
         before = await self._acting(tab_id, snap, "choose an option")
         assert before is not None
-        result = await self._run_act(
+        result, used = await self._run_act(
             tab_id,
+            snap,
+            ref,
             Act("select", snap.url, item, text=str(option), doc=snap.doc),
             before,
         )
-        said = self._done_line("Chose an option in", ref, result)
+        said = self._done_line("Chose an option in", used, ref, result)
         return await self._after(
             tab_id, said, before, set(), result, snap.url, expect=False
         )
@@ -1106,6 +1180,22 @@ _NO_ADDRESS = (
 
 def _said(line: str, note: str) -> str:
     return f"{line} {note}" if note else line
+
+
+def _same_page(left: str, right: str) -> bool:
+    """Whether two addresses are one page, the fragment aside."""
+    return left.split("#", 1)[0] == right.split("#", 1)[0]
+
+
+def _like(found: Element, item: Element) -> bool:
+    """Whether *found*, in a new reading, is the element *item* was: what it is, says, leads to and sends."""
+    return (
+        not found.sensitive
+        and (found.kind, found.label, found.href, found.submit)
+        == (item.kind, item.label, item.href, item.submit)
+        and found.attrs == item.attrs
+        and (not item.submit or found.form == item.form)
+    )
 
 
 def _change_lines(

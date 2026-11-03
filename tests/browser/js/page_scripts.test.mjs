@@ -521,3 +521,10 @@ test('another document answers the look as gone', () => {
   assert.deepEqual(disarm(dom, 'k10', 'another'), {lost: true});
   assert.equal(disarm(dom, 'k10', page.doc).count, 0);
 });
+
+test('an element that only looks clickable is marked plain; a control is not', () => {
+  const dom = load('<div class="btn" style="cursor:pointer">Submit</div><button>Submit</button>');
+  const [div, button] = readPage(dom).elements;
+  assert.equal(div.plain, true);
+  assert.equal(button.plain, undefined);
+});

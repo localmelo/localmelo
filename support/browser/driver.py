@@ -87,6 +87,7 @@ class Element:
     at: int = field(default=-1, compare=False)
     fp: str = field(default="", compare=False)
     form: tuple[tuple[str, str], ...] = field(default=(), compare=False)
+    plain: bool = field(default=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -195,7 +196,9 @@ class StaleElementError(BrowserError):
 
     ``why`` is the page script's word for it: ``page`` (another address),
     ``doc`` (reloaded), ``gone`` (no longer there as it was read), ``dest`` (it
-    leads or sends elsewhere now), ``field``, ``grew`` or ``frame``.
+    leads or sends elsewhere now), ``field``, ``grew`` or ``frame``. Only a
+    page that redrew itself (``gone``, ``doc`` on the same address) may have the
+    same element under another ref.
     """
 
     def __init__(self, message: str, why: str = "") -> None:

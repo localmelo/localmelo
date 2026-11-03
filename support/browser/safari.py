@@ -302,6 +302,7 @@ var lookAt = function (n, counts) {
   var title = cap(attr(n, "title") || attr(n, "alt"), 120);
   var shown = cap(n.innerText || n.textContent, 120);
   var el = {};
+  if (!native && !known) el.plain = true;
   if (tag === "select") {
     el.kind = "select";
     el.label = labels || aria || title || cap(n.name, 80);
@@ -782,6 +783,7 @@ def _element(item: Any) -> Element | None:
         at=place if isinstance(place, int) else -1,
         fp=str(item.get("fp") or ""),
         form=fields.form_pairs(rows) if isinstance(rows, list) else (),
+        plain=item.get("plain") is True,
     )
 
 

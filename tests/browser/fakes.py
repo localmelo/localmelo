@@ -92,8 +92,9 @@ class FakeDriver:
     ``docs`` maps a tab to the document id its page shows. ``popups``
     maps a label to an address that opens in a new tab. ``lose`` forgets a tab
     as the real helper does when it loses one. ``via`` is the way an act says
-    it used, and ``changes`` maps a label to what an act on
-    it changed.
+    it used, ``changes`` maps a label to what an act on it changed, and
+    ``redraw`` maps a label to the address whose page an act on it finds
+    redrawn (stale, once).
     """
 
     name = "fake"
@@ -127,6 +128,7 @@ class FakeDriver:
         self.location_empty: set[str] = set()
         self.via = "browser"
         self.changes: dict[str, Changes] = {}
+        self.redraw: dict[str, RawPage] = {}
 
     def _new_tab(self) -> str:
         self.made += 1
@@ -256,6 +258,11 @@ class FakeDriver:
                 "The page was reloaded or replaced since it was read.", "doc"
             )
         label = act.element.label
+        if label in self.redraw:
+            # The page redrew itself since it was read: the element is there again,
+            # under another place, and the act on the old reading is stale.
+            self.pages[self._url(tab)] = self.redraw.pop(label)
+            raise StaleElementError("That element is no longer on the page.", "gone")
         self.acts.append(act)
         key = ("enter:" if act.enter else "") + label
         via = self.via
