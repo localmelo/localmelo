@@ -1784,6 +1784,28 @@ dialog::backdrop {
   font-size: var(--text-caption);
   color: var(--muted);
 }
+/* Words the person added while melo worked: a smaller bubble among the steps, and whether melo has read it. */
+.note-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+  margin: var(--space-2) 0;
+  padding: 0 13px;
+}
+.note-bubble {
+  background: var(--tint);
+  padding: 8px 13px;
+  max-width: 80%;
+  font-size: var(--text-body);
+}
+.note-state {
+  margin: 0;
+  font-size: var(--text-caption);
+  color: var(--muted);
+}
+.note-item[data-state="sending"] .note-bubble { opacity: 0.7; }
+.note-item[data-state="seen"] .note-state { color: var(--accent); }
 .live-row {
   padding: 8px 13px;
   display: grid;

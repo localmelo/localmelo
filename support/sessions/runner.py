@@ -61,6 +61,7 @@ from localmelo.support.sessions.store import (
     CLOSED_ERROR,
     LEASE_S,
     MEMORY_EVENT_TYPE,
+    NOTE_EVENT_TYPE,
     PICTURES_EVENT_TYPE,
     RESERVED_EVENT_PREFIXES,
     RESERVED_EVENT_TYPE_RE,
@@ -1569,6 +1570,39 @@ class SessionRunner:
         if turn is None or not turn.accepting:
             raise RuntimeError("No turn is running")
         self._enqueue(turn, type, data)
+
+    def takes_notes(self, turn_id: str) -> bool:
+        """Whether turn *turn_id* runs and can still read words added to it.
+
+        False for another turn, a turn being stopped or closed, and one whose
+        run has ended: its words would not be read at a next step.
+        """
+        turn = self._active
+        return (
+            turn is not None
+            and turn.turn.id == turn_id
+            and turn.accepting
+            and turn.cause is None
+            and not turn.closing
+            and not self.run_ended
+        )
+
+    def publish_note(self, turn_id: str, note: int, text: str) -> bool:
+        """Queue the ``turn.note`` event of words added to turn *turn_id*.
+
+        *note* is the number the run's inbox reads them by (``inbox.accepted``
+        names it as ``offset``). False, and nothing stored, when the turn no
+        longer takes events.
+        """
+        turn = self._active
+        if turn is None or turn.turn.id != turn_id or not turn.accepting:
+            return False
+        self._enqueue(
+            turn,
+            NOTE_EVENT_TYPE,
+            {"turn": turn.turn.turn, "turn_id": turn_id, "note": note, "text": text},
+        )
+        return True
 
     def _enqueue(self, turn: _Turn, type_: str, data: Mapping[str, Any]) -> None:
         if not turn.accepting:

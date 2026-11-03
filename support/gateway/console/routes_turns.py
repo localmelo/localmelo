@@ -43,6 +43,7 @@ from localmelo.support.sessions.submissions import (
     check_submission,
 )
 
+from .asks import MAX_NOTE_CHARS
 from .bodies import Body
 from .errors import ApiError
 from .registry import STOP_REASON
@@ -90,6 +91,13 @@ class CreateRequest(Body):
 
 class RetryRequest(Body):
     turn_id: str
+
+
+class NoteRequest(Body):
+    """Words the person adds to a turn that runs."""
+
+    text: str
+    client_request_id: str | None = None
 
 
 class PatchRequest(Body):
@@ -448,9 +456,52 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 "turn_not_running",
                 t("errors.turnNotRunning"),
             )
-        return JSONResponse(
-            status_code=202, content={"turn_id": turn_id, "cancelling": True}
+        # Words added to the turn that its run never read do not start another
+        # turn after a Stop: they go back to the composer.
+        unread = await _store_call(
+            console, console.asks.drop_notes(entry.session_id, turn_id)
         )
+        content: dict[str, Any] = {"turn_id": turn_id, "cancelling": True}
+        if unread:
+            content["unread_notes"] = unread
+        return JSONResponse(status_code=202, content=content)
+
+    @app.post("/api/turns/{turn_id}/notes")
+    async def add_note(turn_id: str, body: NoteRequest) -> JSONResponse:
+        """Add words to a turn that runs: its run reads them at its next step (202).
+
+        If the turn ends before another step, they run as the chat's next turn.
+        409 ``turn_not_running`` when the turn is not running, or is being
+        stopped; a client then sends the words as a message.
+        """
+        console.require_store()
+        key = _key(body.client_request_id)
+        repeated = console.asks.noted(turn_id, key)
+        if repeated is not None:
+            return JSONResponse(status_code=202, content={"note": repeated})
+        entry = console.sessions.find_turn(turn_id)
+        if entry is None:
+            raise ApiError(409, "turn_not_running", t("errors.turnNotRunning"))
+        info = await _require_session(console, entry.session_id)
+        current = entry.runner.current_turn
+        if info.kind not in ("front", "chat") or (
+            current is not None and current.origin
+        ):
+            raise ApiError(409, "not_your_turn", t("errors.noteInternalTurn"))
+        text = body.text.strip()
+        if not text:
+            raise ApiError(400, "invalid_request", t("errors.blankMessage"))
+        if len(text) > MAX_NOTE_CHARS:
+            raise ApiError(
+                400, "invalid_request", t("errors.noteTooLong", n=MAX_NOTE_CHARS)
+            )
+        composed = _check_text(console, text, entry.session_id)
+        note = await _store_call(
+            console,
+            console.asks.add_note(entry.session_id, turn_id, text, composed, key),
+            entry.session_id,
+        )
+        return JSONResponse(status_code=202, content={"note": note})
 
     async def _cancel_by_key(
         scope: str | None, client_request_id: str, body: CancelRequest

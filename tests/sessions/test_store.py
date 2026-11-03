@@ -787,6 +787,7 @@ def test_the_session_event_keys_are_pinned() -> None:
         "turn.finished": {"turn", "turn_id", "status", "error", "cause"},
         "turn.undone": {"turn", "turn_id"},
         "turn.pictures": {"turn", "turn_id", "pictures"},
+        "turn.note": {"turn", "turn_id", "note", "text"},
         "turn.memory": {
             "turn",
             "turn_id",

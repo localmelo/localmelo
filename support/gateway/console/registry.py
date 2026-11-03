@@ -30,6 +30,7 @@ from localmelo.melo.contracts.approvals import (
     Withdrawal,
     grant_offered,
 )
+from localmelo.melo.contracts.inbox import InboxSource
 from localmelo.melo.contracts.tools import BaseToolProvider
 from localmelo.melo.schema import Message
 from localmelo.support.browser import configured_driver
@@ -217,6 +218,7 @@ class ConsoleSessions:
         clock: Callable[[], float] = time.time,
         ledger: ApprovalLedger | None = None,
         viewers: Callable[[str], int] | None = None,
+        inbox_for: Callable[[str], InboxSource] | None = None,
     ) -> None:
         if store.writer != "gateway":
             raise ValueError("the console opens the gateway's store")
@@ -225,6 +227,8 @@ class ConsoleSessions:
         # How many surfaces show a chat to a person now (the hub's viewers,
         # #465); None: nobody ever does, so Auto blocks as before.
         self._viewers = viewers
+        # The run inbox of a chat: the words the person adds while it works.
+        self.inbox_for = inbox_for
         # The person's Allows in each chat, which its tasks may use (#369).
         self.ledger = ledger or ApprovalLedger()
         self.ledger.grants_of = self.grants
@@ -269,6 +273,9 @@ class ConsoleSessions:
     @property
     def store(self) -> SessionStore:
         return self._store
+
+    def _inbox(self, session_id: str) -> InboxSource | None:
+        return None if self.inbox_for is None else self.inbox_for(session_id)
 
     def get(self, session_id: str) -> OpenSession | None:
         return self._sessions.get(session_id)
@@ -425,6 +432,7 @@ class ConsoleSessions:
                 progress=True,
                 pictures=True,
                 memory=self._memory,
+                inbox=self._inbox(session_id),
             )
             granted_at: dict[str, float] = {}
             policy = ChatPolicy(
@@ -950,6 +958,7 @@ class ConsoleSessions:
             progress=True,
             pictures=True,
             memory=self._memory,
+            inbox=self._inbox(info.id),
             # A create's key stays where a create looks it up, even though
             # the row was made before the Agent.
             create_scope_key=client_request_id is not None,

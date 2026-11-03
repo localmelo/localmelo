@@ -503,6 +503,91 @@ export function approvalTag(status, errorCategory, approval) {
   return null;
 }
 
+// ── Words added to a turn that runs ──
+
+/**
+ * The person's words added to a turn while melo works. Each is an item of the turn's work:
+ * `{kind: "note", key, note, text, sending, seen, step, returned}`. `note` is the number the
+ * gateway gave it (the run's `inbox.accepted` names it as `offset`); it is null until the
+ * gateway answers or its `turn.note` event arrives, whichever is first. A note is shown as
+ * sending, sent (the run reads it at its next step), seen, or, when its turn ended first,
+ * as the next message, or, after a Stop, as given back to the box.
+ */
+export function startNote(turn, text, key) {
+  const item = {kind: "note", key, note: null, text, sending: true, seen: false, step: 0, returned: false};
+  turn.items.push(item);
+  return item;
+}
+
+/** The note numbered *number* of *turn*, or null. */
+function findNote(turn, number) {
+  return number === null ? null : turn.items.find((item) => item.kind === "note" && item.note === number) ?? null;
+}
+
+/** The gateway answered a send: *item* has its number, unless its event came first and made another item. */
+export function acknowledgeNote(turn, item, number) {
+  const heard = findNote(turn, number);
+  if (heard !== null && heard !== item) {
+    const at = turn.items.indexOf(item);
+    if (at >= 0) turn.items.splice(at, 1);
+    heard.sending = false;
+    return heard;
+  }
+  item.note = number;
+  item.sending = false;
+  return item;
+}
+
+/** A `turn.note` event: a note of this turn, shown once however it came. */
+function noteHeard(turn, number, text) {
+  if (number === null || findNote(turn, number) !== null) return;
+  const local = turn.items.find((item) => item.kind === "note" && item.note === null && item.text === text);
+  if (local) {
+    local.note = number;
+    local.sending = false;
+    return;
+  }
+  turn.items.push({kind: "note", key: "", note: number, text, sending: false, seen: false, step: 0, returned: false});
+}
+
+/** An `inbox.accepted` event: the run read note *offset*. False when the turn has no such note. */
+function noteRead(turn, offset, step) {
+  const item = findNote(turn, offset);
+  if (item === null) return false;
+  item.seen = true;
+  item.step = step ?? 0;
+  return true;
+}
+
+/** Take a note that was not sent off the turn's work. */
+export function dropNote(turn, item) {
+  const at = turn.items.indexOf(item);
+  if (at >= 0) turn.items.splice(at, 1);
+}
+
+/** After a Stop: the notes the gateway gave back (`[{note, text}]`) are in the box again. */
+export function returnNotes(turn, given) {
+  for (const back of given) {
+    const item = findNote(turn, int(back.note));
+    if (item !== null) item.returned = true;
+  }
+}
+
+/** `sending`, `sent`, `seen`, `returned` (stopped and given back), or `next` (its turn ended before another step). */
+export function noteState(turn, item) {
+  if (item.seen) return "seen";
+  if (item.returned) return "returned";
+  if (item.sending) return "sending";
+  return turn.finishedAt ? "next" : "sent";
+}
+
+/** The muted line under a note. */
+export function noteLine(turn, item) {
+  const state = noteState(turn, item);
+  if (state === "seen") return item.step > 0 ? t("turns.note.seenAt", {n: item.step}) : t("turns.note.seen");
+  return t(`turns.note.${state}`);
+}
+
 // ── The view ──
 
 /** A view of one session before its detail and turns arrive. */
@@ -937,8 +1022,22 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
     case "context_budget":
       // The status row shows the numbers; a line per request would bury the work.
       break;
+    case "turn.note": {
+      noteHeard(turn, int(data.note), String(data.text ?? ""));
+      break;
+    }
+    case "inbox.accepted": {
+      // Words the person added to a chat's turn: the note shows it was read. A task's inbox has none of these.
+      if (noteRead(turn, int(data.offset), int(data.step))) break;
+      turn.items.push({
+        kind: "fact",
+        factKind: type,
+        step: int(data.step) ?? turn.step,
+        message: factLine(type, data),
+      });
+      break;
+    }
     case "note":
-    case "inbox.accepted":
     case "memory":
     case "recall": {
       turn.items.push({

@@ -177,6 +177,7 @@ SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
         "turn.finished": frozenset({"turn", "turn_id", "status", "error", "cause"}),
         "turn.undone": frozenset({"turn", "turn_id"}),
         "turn.pictures": frozenset({"turn", "turn_id", "pictures"}),
+        "turn.note": frozenset({"turn", "turn_id", "note", "text"}),
         "turn.memory": frozenset(
             {
                 "turn",
@@ -236,6 +237,8 @@ APPROVAL_EVENT_TYPES: Final = frozenset({"approval.requested", "approval.resolve
 PICTURES_EVENT_TYPE: Final = "turn.pictures"
 # What memory across chats did for a turn (recalled, remembered, refused), stored before its run.
 MEMORY_EVENT_TYPE: Final = "turn.memory"
+# Words the person added to a running turn; the run's ``inbox.accepted`` says when it read them.
+NOTE_EVENT_TYPE: Final = "turn.note"
 # The grammar of an event type with a reserved prefix.
 RESERVED_EVENT_TYPE_RE: Final = re.compile(r"[a-z]+(\.[a-z_]+)+")
 
@@ -2476,7 +2479,7 @@ class SessionStore:
         pinned = EVENT_FIELDS.get(type_)
         if pinned is None and (
             type_ in APPROVAL_EVENT_TYPES
-            or type_ in (PICTURES_EVENT_TYPE, MEMORY_EVENT_TYPE)
+            or type_ in (PICTURES_EVENT_TYPE, MEMORY_EVENT_TYPE, NOTE_EVENT_TYPE)
         ):
             pinned = SESSION_EVENT_FIELDS[type_]
         if pinned is not None:

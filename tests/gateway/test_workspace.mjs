@@ -2949,12 +2949,133 @@ test('stop posts the running turn\'s id', async () => {
     data: {turn: 2, turn_id: 'turn-2', user_text: 'A long task', client_request_id: 'k2'},
   });
   assert.equal(h.element('stop-btn').hidden, false);
-  assert.equal(h.element('send-btn').hidden, true);
+  // Send stays: during a turn it adds words to the work. Stop is its own button.
+  assert.equal(h.element('send-btn').hidden, false);
   await h.run('stop()');
   assert.deepEqual(h.net.callsTo('/turns/turn-2/cancel').map((call) => call.method), ['POST']);
   assert.equal(h.state().cancelling.size, 0);
 });
 
+// ── Words added while melo works ──
+
+/** A chat with a turn that runs, ready for words to be typed. */
+async function runningChat(routes = {}) {
+  const h = harness(baseRoutes(routes));
+  await h.run('init()');
+  h.stream().emit({
+    id: 20, turn: 2, ts: 50, type: 'turn.started',
+    data: {turn: 2, turn_id: 'turn-2', user_text: 'A long task', client_request_id: 'k2'},
+  });
+  return h;
+}
+
+const noteReply = (number, text, extra = {}) => ({status: 202, body: {note: {note: number, turn_id: 'turn-2', text, state: 'sent', ...extra}}});
+
+test('Enter during a running turn posts the words to that turn, shows them as sent, and empties the box', async () => {
+  const h = await runningChat({'POST /turns/turn-2/notes': noteReply(1, 'use the blue one')});
+  assert.equal(h.element('input').placeholder, 'Add to what melo is doing…');
+  assert.equal(h.element('send-btn').title, 'Add this to the work');
+  h.element('input').value = 'use the blue one';
+  h.element('input').listeners.input?.forEach((handler) => handler());
+  assert.equal(h.element('send-btn').disabled, false, 'words can be sent while a turn runs');
+  await h.run('send()');
+  const calls = h.net.callsTo('/turns/turn-2/notes');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].body.text, 'use the blue one');
+  assert.ok(calls[0].body.client_request_id, 'the send carries a key, so a repeat is one note');
+  assert.deepEqual(h.net.callsTo('/sessions/a/turns'), [], 'no second turn is started');
+  assert.equal(h.element('input').value, '');
+  assert.match(h.text('messages'), /use the blue one/);
+  assert.match(h.text('messages'), /Sent\. melo reads it at its next step\./);
+});
+
+test('a note turns to seen at the step that read it, and that step is named', async () => {
+  const h = await runningChat({'POST /turns/turn-2/notes': noteReply(7, 'check the log first')});
+  h.element('input').value = 'check the log first';
+  await h.run('send()');
+  h.stream().emit({id: 21, turn: 2, ts: 51, type: 'turn.note', data: {turn: 2, turn_id: 'turn-2', note: 7, text: 'check the log first'}});
+  assert.equal(h.text('messages').match(/check the log first/g).length, 1, 'the event and the answer are one note');
+  h.stream().emit({id: 22, turn: 2, ts: 52, type: 'inbox.accepted', data: {offset: 7, text: 'check the log first', step: 3, attempt: 1}});
+  assert.match(h.text('messages'), /Seen by melo at step 3/);
+  assert.doesNotMatch(h.text('messages'), /Sent\. melo reads it/);
+});
+
+test('a note that the turn did not read before it ended says it is the next message', async () => {
+  const h = await runningChat({'POST /turns/turn-2/notes': noteReply(1, 'one more thing')});
+  h.element('input').value = 'one more thing';
+  await h.run('send()');
+  h.stream().emit({id: 23, turn: 2, ts: 53, type: 'turn.finished', data: {turn: 2, turn_id: 'turn-2', status: 'completed', error: null, cause: 'run'}});
+  assert.match(h.text('messages'), /melo finished first\. This goes next as your message\./);
+});
+
+test('a note refused because the turn just ended is sent as a message', async () => {
+  const h = await runningChat({
+    'POST /turns/turn-2/notes': {status: 409, body: {error: {code: 'turn_not_running', message: 'that turn is not running'}}},
+    'POST /sessions/a/turns': {status: 202, body: {turn_id: 'turn-3', turn: turnRow({turn_id: 'turn-3', turn: 3, user_text: 'late words'})}},
+  });
+  h.stream().emit({id: 23, turn: 2, ts: 53, type: 'turn.finished', data: {turn: 2, turn_id: 'turn-2', status: 'completed', error: null, cause: 'run'}});
+  // The page still thought it ran when the words were typed.
+  h.element('input').value = 'late words';
+  await h.run('send()');
+  assert.deepEqual(h.net.callsTo('/sessions/a/turns').map((call) => call.body.text), ['late words']);
+  assert.equal(h.net.callsTo('/turns/turn-2/notes').length, 0, 'a finished turn takes no notes');
+});
+
+test('a refused note gives the words back to the box and says why', async () => {
+  const h = await runningChat({'POST /turns/turn-2/notes': {status: 400, body: {error: {code: 'invalid_request', message: 'a turn takes at most 20 added messages'}}}});
+  h.element('input').value = 'too many';
+  await h.run('send()');
+  assert.equal(h.element('input').value, 'too many');
+  assert.doesNotMatch(h.text('messages'), /Sent\. melo reads it/);
+  assert.match(h.text('notice'), /Could not add that: .*at most 20/);
+});
+
+test('Stop gives the unread words back to the box and the turn starts nothing else', async () => {
+  const h = await runningChat({
+    'POST /turns/turn-2/notes': noteReply(4, 'not that way'),
+    'POST /turns/turn-2/cancel': {status: 202, body: {turn_id: 'turn-2', cancelling: true, unread_notes: [{note: 4, text: 'not that way'}]}},
+  });
+  h.element('input').value = 'not that way';
+  await h.run('send()');
+  assert.equal(h.element('input').value, '');
+  await h.run('stop()');
+  assert.equal(h.element('input').value, 'not that way');
+  assert.match(h.text('messages'), /Not read: the turn was stopped\. It is back in the message box\./);
+});
+
+// ── The note reducer on its own ──
+
+test('a note is one item however its answer and its event arrive', () => {
+  const {view, turn} = started();
+  const item = turns.startNote(turn, 'hello', 'k1');
+  assert.equal(turns.noteState(turn, item), 'sending');
+  // The event comes before the answer.
+  applyEvent(view, {id: 2, turn: 1, ts: 101, type: 'turn.note', data: {turn: 1, turn_id: 'turn-1', note: 5, text: 'hello'}});
+  assert.equal(turn.items.filter((entry) => entry.kind === 'note').length, 1);
+  turns.acknowledgeNote(turn, item, 5);
+  assert.equal(turn.items.filter((entry) => entry.kind === 'note').length, 1);
+  assert.equal(turns.noteState(turn, turn.items.find((entry) => entry.kind === 'note')), 'sent');
+});
+
+test('a note read by the run is seen; one read by nobody before the turn ends is next', () => {
+  const {view, turn} = started();
+  applyEvent(view, {id: 2, turn: 1, ts: 101, type: 'turn.note', data: {turn: 1, turn_id: 'turn-1', note: 1, text: 'first'}});
+  applyEvent(view, {id: 3, turn: 1, ts: 102, type: 'turn.note', data: {turn: 1, turn_id: 'turn-1', note: 2, text: 'second'}});
+  applyEvent(view, {id: 4, turn: 1, ts: 103, type: 'inbox.accepted', data: {offset: 1, text: 'first', step: 2, attempt: 1}});
+  const [first, second] = turn.items.filter((entry) => entry.kind === 'note');
+  assert.equal(turns.noteState(turn, first), 'seen');
+  assert.equal(turns.noteLine(turn, first), 'Seen by melo at step 2');
+  assert.equal(turns.noteState(turn, second), 'sent');
+  assert.equal(turn.items.filter((entry) => entry.kind === 'fact').length, 0, 'a read note adds no second line');
+  turn.finishedAt = 110;
+  assert.equal(turns.noteState(turn, second), 'next');
+});
+
+test('an inbox line that is no note of the person stays a fact line', () => {
+  const {view, turn} = started();
+  applyEvent(view, {id: 2, turn: 1, ts: 101, type: 'inbox.accepted', data: {offset: 9, text: 'from a task', step: 1, attempt: 1}});
+  assert.equal(turn.items.filter((entry) => entry.kind === 'fact').length, 1);
+});
 test('a running turn draws the live row with the terminal\'s facts', async () => {
   const running = turnRow({status: 'running', answer: null, finished_at: 0, running_here: true});
   const h = harness(baseRoutes({

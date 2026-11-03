@@ -34,6 +34,7 @@ import { askAboutNotes } from "./memory-tab.mjs";
 import { answered, askTurn, byDay, cardBlock, cardNode, echoDone, echoNodes, endedTasks, isMain, mergeCards, mergeEchoes, shortTime, timeline, unansweredSleep } from "./main-chat.mjs";
 import { reportText } from "./endings.mjs";
 import {
+  acknowledgeNote,
   activity,
   applyEvent,
   approvalTag,
@@ -42,6 +43,7 @@ import {
   cleanOutput,
   declinedLine,
   declinedStep,
+  dropNote,
   formatBytes,
   formatDuration,
   formatPast,
@@ -52,11 +54,15 @@ import {
   newTurn,
   newView,
   nextAction,
+  noteLine,
+  noteState,
   printable,
   reflectionLine,
+  returnNotes,
   serverAddress,
   serverUnreachable,
   shownItems,
+  startNote,
   statusLine,
   statusMark,
   statusText,
@@ -494,7 +500,9 @@ function syncUI() {
   importCard.show(S.ready && !!S.health && !needsModel(S.health) && !setup && mainActive() && !workerMode);
   $("welcome").classList.toggle("needs-model", setup);
   input.disabled = setup;
-  input.placeholder = setup ? t("header.connectToStart") : COMPOSER_PLACEHOLDER;
+  input.placeholder = setup ? t("header.connectToStart") : busy ? t("composer.whileWorking") : COMPOSER_PLACEHOLDER;
+  // While melo works, Enter adds the words to the work; Stop is still its own button.
+  setTextIfChanged($("composer-hint-text"), t(busy ? "composer.hintWorking" : "html.enterToSend"));
   // A new chat shows the folder melo will work in and a few ways to start; a chat shows its folder in the header.
   const fresh = S.ready && !S.activeId && !setup && !workerMode;
   folderPicker.update(fresh);
@@ -523,7 +531,8 @@ function syncUI() {
   setTextIfChanged(lockBanner, lockNote);
   if (!lockNote) lockBanner.hidden = true;
   $("model-btn").textContent = `${model?.name || t("header.chooseModel")}  ⌄`;
-  $("send-btn").hidden = !!busy;
+  $("send-btn").hidden = false;
+  $("send-btn").title = busy ? t("composer.addTitle") : "";
   $("stop-btn").hidden = !busy;
   $("stop-btn").disabled = !busy || S.cancelling.has(busy.id);
   $("stop-btn").textContent = `■ ${t(busy && S.cancelling.has(busy.id) ? "header.stopping" : "common.stop")}`;
@@ -531,7 +540,6 @@ function syncUI() {
   $("send-btn").disabled =
     setup ||
     !S.online ||
-    !!busy ||
     (sending !== null && sending.state !== "failed") ||
     !input.value.trim();
   // Run as a task: a chat starts the message as a task, without asking the model.
@@ -1760,6 +1768,13 @@ function itemNode(item, turn, context = {}) {
     }
     case "fact":
       return el("div", "fact-item", item.message);
+    case "note": {
+      // The person's words added while melo worked: a small bubble, and whether melo has read it.
+      const node = el("div", "note-item");
+      node.dataset.state = noteState(turn, item);
+      node.append(el("div", "user-bubble note-bubble", item.text), el("p", "note-state", noteLine(turn, item)));
+      return node;
+    }
     case "reflection": {
       const card = el("details", "reflection");
       card.open = item.expanded === true;
@@ -2386,7 +2401,9 @@ async function queueMessage(text, {clearInput = false, asTask = false} = {}) {
   if (workerMode) return;
   const slot = S.activeId ?? "new";
   const previous = S.outbox[slot];
-  if (!text || composerTurn() !== null) return;
+  // While melo works, the words join the work: its run reads them at its next step.
+  if (text && composerTurn() !== null) return addNote(text, { clearInput });
+  if (!text) return;
   if (previous && (previous.state !== "failed" || !clearInput)) return;
   // The same text, failed after a check of unknown outcome, keeps its key:
   // the store answers `repeated` instead of running it twice.
@@ -2403,6 +2420,59 @@ async function queueMessage(text, {clearInput = false, asTask = false} = {}) {
   renderMessages(true);
   syncUI();
   await submit(slot, key, text);
+}
+
+/**
+ * Add *text* to the turn that runs. The gateway keeps it for the run's next step, or, when the turn
+ * ends first, sends it as the next message. A turn that ended while the words were typed makes
+ * them a message; a refusal gives the words back to the box.
+ */
+async function addNote(text, { clearInput = false } = {}) {
+  const turn = composerTurn();
+  const sessionId = S.activeId;
+  if (workerMode || !turn?.id || !sessionId) return;
+  const item = startNote(turn, text, newClientRequestId());
+  if (clearInput) {
+    input.value = "";
+    saveDraft();
+    resizeInput();
+  }
+  renderMessages(true);
+  syncUI();
+  const post = () => api(`/turns/${encodeURIComponent(turn.id)}/notes`, { body: { text, client_request_id: item.key } });
+  let body;
+  try {
+    try {
+      body = await post();
+    } catch (error) {
+      // The answer may have been lost on the way: the same key makes the repeat safe.
+      if (typeof error.status === "number") throw error;
+      body = await post();
+    }
+    acknowledgeNote(turn, item, body.note.note);
+    renderMessages(false);
+    syncUI();
+    return;
+  } catch (error) {
+    dropNote(turn, item);
+    if (error.code === "turn_not_running" && S.activeId === sessionId) {
+      // The turn ended first: these words are a message now.
+      await reloadSession(sessionId);
+      if (composerTurn() === null) return queueMessage(text);
+    }
+    giveBack(text);
+    notify(t("composer.noteFailed", { problem: error.message }), { sticky: true });
+  }
+  renderMessages(false);
+  syncUI();
+}
+
+/** Put words back in the box, before what is typed there now. */
+function giveBack(text) {
+  input.value = [text, input.value.trim()].filter(Boolean).join("\n\n");
+  saveDraft();
+  resizeInput();
+  syncUI();
 }
 
 async function submit(slot, key, text) {
@@ -2577,7 +2647,14 @@ async function stop() {
   S.cancelling.add(turn.id);
   syncUI();
   try {
-    await api(`/turns/${encodeURIComponent(turn.id)}/cancel`, { body: {} });
+    const stopped = await api(`/turns/${encodeURIComponent(turn.id)}/cancel`, { body: {} });
+    // Words the run never read do not start another turn after a Stop: they are in the box again.
+    const unread = stopped.unread_notes ?? [];
+    if (unread.length > 0) {
+      returnNotes(turn, unread);
+      renderMessages(false);
+      giveBack(unread.map((note) => note.text).join("\n\n"));
+    }
   } catch (error) {
     if (error.status !== 409 && error.status !== 404) {
       notify(t("chat.stopFailed", { problem: error.message }), { sticky: true });

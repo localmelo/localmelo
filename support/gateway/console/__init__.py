@@ -80,6 +80,7 @@ from .explain import Explainer, Explanations
 from .followups import TaskFollowups
 from .front import Front, FrontAgent, SideAgent, build_front_agent
 from .idle_sleep import IdleSleep, IdleSleepOptions
+from .notes import ChatNotes
 from .probe import ModelServerProbe, Probe
 from .registry import SWEEP_INTERVAL_S, AgentBuilder, ConsoleSessions, default_builder
 from .shapes import session_json
@@ -209,6 +210,8 @@ class Console:
         # A task asks the chat that started it when it is stuck (#369).
         self.asks = OwnerAsks(self)
         self.workers.owner = self.asks
+        # The words the person adds to a chat's running turn reach its run here.
+        self.sessions.inbox_for = lambda chat: ChatNotes(self.asks, chat)
         # A chat follows up on a task it started that failed or stopped (#411).
         self.followups = TaskFollowups(self)
         # A task's approvals go through its chat (#369): its chat's recorded
