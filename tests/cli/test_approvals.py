@@ -15,6 +15,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     ApprovalRequest,
     AutoPolicy,
+    Chosen,
     DenyAllPolicy,
 )
 from localmelo.melo.contracts.review import ActionReview
@@ -79,8 +80,8 @@ def _request(
         (
             "auto",
             ["shell_exec"],
-            "works without asking; blocks risky steps and steps you did not ask "
-            "for, and explains them",
+            "works on its own; asks before a step you did not ask for, blocks the "
+            "riskiest steps and explains them",
         ),
         ("deny", [], "never runs commands or changes files"),
         ("yolo", [], "runs everything without asking (--yolo)"),
@@ -881,7 +882,9 @@ def test_the_modes_wrap_the_policy() -> None:
     assert Approvals(ask, "yolo").policy() is None
 
 
-async def test_auto_mode_blocks_a_high_impact_call_without_asking() -> None:
+async def test_auto_mode_asks_on_the_panel_and_blocks_what_only_a_click_allows() -> (
+    None
+):
     asked: list[ApprovalRequest] = []
 
     async def ask(request: ApprovalRequest) -> ApprovalDecision:
@@ -895,12 +898,21 @@ async def test_auto_mode_blocks_a_high_impact_call_without_asking() -> None:
         _request("shell_exec", command="pip install x"),
         review=ActionReview("high", ("install",), ("Installs x with pip.",)),
     )
+    sudo = dataclasses.replace(
+        _request("shell_exec", command="sudo pmset -a sleep 0"),
+        review=ActionReview("high", ("system",), ("Runs a command as root.",)),
+    )
     ls = dataclasses.replace(_request(), review=ActionReview("routine"))
     assert await policy.decide(ls) == ApprovalDecision(True, origin="auto")
-    assert await policy.decide(pip) == ApprovalDecision(
-        False, "installs software", origin="auto"
+    assert await policy.decide(sudo) == ApprovalDecision(
+        False, "changes system settings", origin="auto"
     )
-    assert asked == []  # nobody is asked in auto mode
+    assert asked == []  # a routine step runs, a system one is blocked unasked
+    # A step the person may allow asks on the panel (#465).
+    decided = await policy.decide(pip)
+    assert asked == [pip]
+    assert isinstance(decided, Chosen)
+    assert (decided.allow, decided.reason) == (False, "no")
     # A new chat forgets the allowances of the old one.
     old = approvals._auto
     approvals.reset()

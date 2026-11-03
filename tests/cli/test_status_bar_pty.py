@@ -99,7 +99,9 @@ def test_shift_tab_switches_ask_and_auto_and_the_bar_follows(
     term.see("Ask melo")
     assert _bar(term, 100).endswith("ask · shift+tab")
     term.type(b"\x1b[Z")  # Shift+Tab
-    term.see("Auto: routine steps run; risky ones are blocked with the reason.")
+    term.see(
+        "Auto: routine steps run; melo asks about the rest, the riskiest are blocked."
+    )
     assert _bar(term, 100).endswith("auto · shift+tab")
     term.type(b"\x1b[Z")
     term.see("Ask: melo asks before running commands or changing files.")

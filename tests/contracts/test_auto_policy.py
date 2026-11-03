@@ -8,10 +8,13 @@ import pytest
 
 from localmelo.melo.contracts.approvals import (
     ALLOW_ONCE_S,
+    ALLOWED_ONCE,
     AllowAllPolicy,
     ApprovalDecision,
     ApprovalRequest,
     AutoPolicy,
+    Chosen,
+    Withdrawal,
     block_note,
     denial_text,
     find_auto,
@@ -231,3 +234,133 @@ def test_a_denial_by_auto_mode_reads_its_note() -> None:
         )
         == note
     )
+
+
+# ── A stopped step asks the person when one can be asked (#465) ──
+
+
+class _Asking:
+    """The policy that asks a person: answers with *answer*, records each request."""
+
+    def __init__(self, answer: ApprovalDecision) -> None:
+        self.answer = answer
+        self.asked: list[ApprovalRequest] = []
+
+    async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
+        self.asked.append(request)
+        return self.answer
+
+
+BEYOND = ActionReview(
+    "high", ("beyond_request",), ("Does something the request did not ask for.",)
+)
+
+
+@pytest.mark.parametrize(
+    "review",
+    [
+        INSTALL,
+        BEYOND,
+        ActionReview("high", ("opaque",), ("Runs code built at run time (eval).",)),
+        ActionReview("high", ("delete",), ("Deletes ~/notes.",)),
+        ActionReview("high", ("send_out",), ("Sends data to a server.",)),
+    ],
+)
+async def test_a_stop_a_person_may_allow_asks_instead_of_blocking(
+    review: ActionReview,
+) -> None:
+    asking = _Asking(ApprovalDecision(True))
+    policy = AutoPolicy(asking=asking)
+
+    decided = await policy.decide(_request(review=review))
+
+    assert len(asking.asked) == 1 and asking.asked[0].review == review
+    assert isinstance(decided, Chosen)
+    assert (decided.allow, decided.origin) == (True, "user")
+
+
+@pytest.mark.parametrize(
+    "categories",
+    [
+        ("credentials",),
+        ("system",),
+        ("app_control",),
+        ("persistence",),
+        ("remote_code",),
+        ("unreviewed",),
+        ("self",),
+        ("install", "system"),
+    ],
+)
+async def test_any_other_stop_stays_blocked_without_asking(
+    categories: tuple[str, ...],
+) -> None:
+    asking = _Asking(ApprovalDecision(True))
+    policy = AutoPolicy(asking=asking)
+
+    decided = await policy.decide(
+        _request(review=ActionReview("high", categories, ("Does it.",)))
+    )
+
+    assert asking.asked == []
+    assert (decided.allow, decided.origin) == (False, "auto")
+    assert not isinstance(decided, Chosen)
+
+
+async def test_nobody_to_ask_keeps_the_block() -> None:
+    decided = await AutoPolicy().decide(_request(review=INSTALL))
+
+    assert decided == ApprovalDecision(False, "installs software", origin="auto")
+
+
+async def test_a_routine_step_and_an_unreviewed_one_never_ask() -> None:
+    asking = _Asking(ApprovalDecision(True))
+    policy = AutoPolicy(asking=asking)
+
+    routine = await policy.decide(_request(review=ActionReview("routine")))
+    unreviewed = await policy.decide(_request())
+    undecided = await policy.decide(_request(review=ActionReview("undecided")))
+
+    assert routine == ApprovalDecision(True, origin="auto")
+    assert (unreviewed.allow, unreviewed.origin) == (False, "auto")
+    assert (undecided.allow, undecided.origin) == (False, "auto")
+    assert asking.asked == []
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        ApprovalDecision(True, origin="session"),
+        ApprovalDecision(False, "No answer within 5 s", origin="timeout"),
+        Withdrawal(False, "the gateway stops", origin="policy"),
+    ],
+)
+async def test_a_grant_a_timeout_or_a_withdrawn_card_stays_what_it_is(
+    answer: ApprovalDecision,
+) -> None:
+    policy = AutoPolicy(asking=_Asking(answer))
+
+    decided = await policy.decide(_request(review=BEYOND))
+
+    assert decided is answer
+
+
+async def test_an_allowance_still_runs_before_the_card() -> None:
+    asking = _Asking(ApprovalDecision(False))
+    policy = AutoPolicy(asking=asking)
+    policy.allow_once(step_key("python_exec", {"code": "x"}, "/ws"), ["install", "env"])
+
+    decided = await policy.decide(_request("x", INSTALL))
+
+    assert (decided.allow, decided.reason) == (True, ALLOWED_ONCE)
+    assert asking.asked == []
+
+
+def test_a_chosen_answer_is_the_persons() -> None:
+    assert Chosen.of(ApprovalDecision(False, "not now")) == Chosen(False, "not now")
+    with pytest.raises(ValueError):
+        Chosen(True, origin="session")
+    with pytest.raises(ValueError):
+        Chosen(True, again=True)
+    with pytest.raises(TypeError):
+        Chosen(False, again="yes")  # type: ignore[arg-type]

@@ -26,12 +26,15 @@ from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.sessions.approvals import ChatPolicy, chat_mode
 from localmelo.support.sessions.store import SessionStore
 from localmelo.tests.agent.test_approvals import _answer, _calls
-from localmelo.tests.agent.test_auto_mode import FakeModel, verdict
+from localmelo.tests.agent.test_auto_mode import FakeModel
 from localmelo.tests.sessions.helpers import started_agent
 
 from .conftest import PORT, FakeProbe, all_events, make_cfg, quiet_gate
 
 DELETE = "import shutil\nshutil.rmtree('.git', ignore_errors=True)"
+# A step only a click allows: Auto blocks it, with Allow once, even in a chat
+# that could ask (#465).
+KEYS = "import os\nprint(open(os.path.expanduser('~/.ssh/id_rsa')).read())"
 SELF = "open('~/.cache/localmelo/config.toml', 'w').write('x')"
 TIMEOUT_S = 10.0
 
@@ -252,6 +255,44 @@ async def test_a_new_chat_starts_in_the_settings_mode_and_switches_by_patch(
         assert kept.workspace == str(tmp_path / "ws")
 
 
+# ── A stopped step asks on the chat's card (#465) ──
+
+
+async def pending(client: httpx.AsyncClient, session_id: str) -> dict[str, Any]:
+    """The chat's first waiting approval, once there is one."""
+    deadline = time.monotonic() + TIMEOUT_S
+    while True:
+        body = (await client.get(f"/api/sessions/{session_id}")).json()
+        if body["pending_approvals"]:
+            return cast(dict[str, Any], body["pending_approvals"][0])
+        if time.monotonic() > deadline:
+            raise AssertionError("no card waits in the chat")
+        await asyncio.sleep(0.01)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("choice", "runs"), [("once", True), ("deny", False)])
+async def test_in_auto_a_stopped_step_asks_on_the_chat_s_card(
+    tmp_path: Path, choice: str, runs: bool
+) -> None:
+    plans = [step(DELETE), _answer("Done.")]
+    async with auto_console(tmp_path, plans) as (console, client, ran, llm):
+        sid = await create(client, tmp_path, "Tidy the notes", approvals="auto")
+        card = await pending(client, sid)
+        assert card["review"]["verdict"] == "high"
+        assert card["review"]["categories"] == ["delete"]
+        body = {"choice": choice, **({"reason": "keep it"} if choice == "deny" else {})}
+        answered = await client.post(f"/api/approvals/{card['request_id']}", json=body)
+        assert answered.status_code == 200, answered.text
+        await wait_turn(client, sid)
+        assert (ran.codes == [DELETE]) is runs
+        [approval] = await approvals(console, sid)
+        assert (approval["origin"], approval["allowed"]) == ("user", runs)
+        session = (await client.get(f"/api/sessions/{sid}")).json()["session"]
+        assert session["allowances"] == {}  # a card's answer is no allowance
+        assert llm.review_requests == []
+
+
 # ── Allow once, end to end ──
 
 
@@ -260,17 +301,15 @@ async def test_allow_once_runs_the_blocked_step_once_then_it_is_blocked_again(
     tmp_path: Path,
 ) -> None:
     plans = [
-        step(DELETE),
+        step(KEYS),
         _answer("I left .git as it is."),
-        step(DELETE, "call_2"),
+        step(KEYS, "call_2"),
         _answer("Done."),
-        step(DELETE, "call_3"),
+        step(KEYS, "call_3"),
         _answer("Blocked again."),
     ]
-    # The third turn comes after a block of the same kind: the review asks
-    # the model, which says the person did not ask for it this time.
-    reviews = [verdict(verdict="ask", category="delete", user_asked="no")]
-    async with auto_console(tmp_path, plans, reviews) as (console, client, ran, llm):
+    # Only a click allows it: no review asks the model about words.
+    async with auto_console(tmp_path, plans) as (console, client, ran, llm):
         sid = await create(client, tmp_path, "Tidy the notes", approvals="auto")
         await wait_turn(client, sid)
         [block] = await approvals(console, sid)
@@ -285,13 +324,12 @@ async def test_allow_once_runs_the_blocked_step_once_then_it_is_blocked_again(
         assert response.status_code == 202, response.text
         body = response.json()
         assert body["step_key"] == block["step_key"]
-        assert body["turn"]["user_text"] == go_ahead_text(["delete"])
+        assert body["turn"]["user_text"] == go_ahead_text(["credentials"])
         assert body["turn"]["user_text"] == (
-            "Go ahead with the step melo blocked: delete files that cannot be "
-            "restored."
+            "Go ahead with the step melo blocked: use your passwords or keys."
         )
         await wait_turn(client, sid)
-        assert ran.codes == [DELETE]
+        assert ran.codes == [KEYS]
         allowed = (await approvals(console, sid))[1]
         assert (allowed["origin"], allowed["allowance"]) == ("user", "once")
         session = (await client.get(f"/api/sessions/{sid}")).json()["session"]
@@ -307,10 +345,10 @@ async def test_allow_once_runs_the_blocked_step_once_then_it_is_blocked_again(
 
         await client.post(f"/api/sessions/{sid}/turns", json={"text": "Do it again"})
         await wait_turn(client, sid)
-        assert ran.codes == [DELETE]
+        assert ran.codes == [KEYS]
         again = (await approvals(console, sid))[2]
         assert (again["origin"], again["allowed"]) == ("auto", False)
-        assert len(llm.review_requests) == 1
+        assert llm.review_requests == []
 
 
 @pytest.mark.asyncio
@@ -344,10 +382,10 @@ async def test_an_allowance_its_turn_did_not_use_goes_and_one_waiting_refuses(
     tmp_path: Path,
 ) -> None:
     plans = [
-        step(DELETE),
+        step(KEYS),
         _answer("I left .git as it is."),
         _answer("I will not delete it after all."),
-        step(DELETE, "call_2"),
+        step(KEYS, "call_2"),
         _answer("Done."),
     ]
     async with auto_console(tmp_path, plans) as (console, client, ran, _llm):
@@ -367,7 +405,7 @@ async def test_an_allowance_its_turn_did_not_use_goes_and_one_waiting_refuses(
         session = (await client.get(f"/api/sessions/{sid}")).json()["session"]
         assert session["allowances"] == {} and ran.codes == []
         # One waiting refuses a second click.
-        entry.policy.auto.allow_once(block["step_key"], ["delete"], "python_exec")
+        entry.policy.auto.allow_once(block["step_key"], ["credentials"], "python_exec")
         waiting = await client.post(url)
         assert (waiting.status_code, waiting.json()["error"]["code"]) == (
             409,
@@ -377,7 +415,7 @@ async def test_an_allowance_its_turn_did_not_use_goes_and_one_waiting_refuses(
         # Allowed again, it runs.
         assert (await client.post(url)).status_code == 202
         await wait_turn(client, sid)
-        assert ran.codes == [DELETE]
+        assert ran.codes == [KEYS]
 
 
 # ── Saved tasks keep their chat's mode ──
@@ -389,9 +427,9 @@ async def test_a_task_made_in_auto_runs_in_auto_and_lists_its_blocks(
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     plans = [
-        step(DELETE),
+        step(KEYS),
         _answer("The task went on without it."),
-        step(DELETE, "call_2"),
+        step(KEYS, "call_2"),
         _answer("Deleted."),
     ]
     async with auto_console(tmp_path, plans, monkeypatch=monkeypatch) as (
@@ -425,7 +463,7 @@ async def test_a_task_made_in_auto_runs_in_auto_and_lists_its_blocks(
             "from the task's page" in m.content for m in llm.requests[-1]
         ), "the task's note"
         steps = await blocked_steps(console.store, task_id)
-        assert steps[0]["review"]["categories"] == ["delete"]
+        assert steps[0]["review"]["categories"] == ["credentials"]
         # A later switch of the chat leaves the task as it was made.
         await console.store.update_session(
             console.main_id, meta_update={"approvals": "ask"}
@@ -443,7 +481,7 @@ async def test_a_task_made_in_auto_runs_in_auto_and_lists_its_blocks(
         while not ran.codes or (await console.workers.get(task_id))["state"] != "done":
             assert time.monotonic() < deadline, "the task did not go ahead"
             await asyncio.sleep(0.02)
-        assert ran.codes == [DELETE]
+        assert ran.codes == [KEYS]
         [blocked] = (await console.workers.get(task_id))["blocked"]
         assert blocked["used_at"] is not None
         missing = await client.post(f"/api/tasks/{task_id}/blocks/nope/allow")

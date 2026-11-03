@@ -32,7 +32,9 @@ from .test_session import setup as setup
 from .ui_helpers import ENTER, ESC, SHIFT_TAB, FakeController, running_app
 
 ASK_LINE = "Ask: melo asks before running commands or changing files."
-AUTO_LINE = "Auto: routine steps run; risky ones are blocked with the reason."
+AUTO_LINE = (
+    "Auto: routine steps run; melo asks about the rest, the riskiest are blocked."
+)
 
 
 # ── What the key switches to ──

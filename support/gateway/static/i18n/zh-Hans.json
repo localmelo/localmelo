@@ -270,7 +270,7 @@
   "auto.mode.ask": "询问",
   "auto.mode.askWords": "melo 在运行命令或更改文件前先问你。",
   "auto.mode.auto": "自动",
-  "auto.mode.autoWords": "melo 不问就做。常规步骤直接运行；有风险的步骤和你没要求的步骤会被拦下，melo 会告诉你原因。",
+  "auto.mode.autoWords": "melo 自己做。常规步骤直接运行；遇到你没要求的步骤，melo 先问你；风险最高的步骤会被拦下，melo 会告诉你原因。",
   "auto.reason.appControlNamed": "这一步会通过脚本操作 {apps}。",
   "auto.reason.app_control": "这一步会通过脚本操作另一个应用。",
   "auto.reason.beyond_request": "这一步做的事超出了你的要求。",

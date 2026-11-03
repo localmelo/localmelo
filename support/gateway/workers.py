@@ -2452,8 +2452,13 @@ class TaskWorkers:
             )
             policy: ApprovalPolicy = asking
             if task_mode == "auto":
-                # Nobody is asked, so nothing holds the task (#339).
-                policy = self._auto.setdefault(task_id, AutoPolicy(task=True))
+                auto = self._auto.setdefault(task_id, AutoPolicy(task=True))
+                # A task the person started asks through its chat about a step
+                # Auto stops that they may allow (#465); any other (a chore,
+                # one melo or another agent started) has nobody to ask, so the
+                # step is blocked and nothing holds the task (#339).
+                auto.asking = asking if _remembers(record.origin) else None
+                policy = auto
             if _remembers(record.origin):
                 # Its chat's grants and the person's earlier Allows first (#369).
                 policy = OwnedTaskPolicy(

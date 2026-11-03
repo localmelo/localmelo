@@ -10,9 +10,9 @@ settings) and deny; a write there offers allow once and deny, and starts on
 deny. :class:`Approvals` is the session's policy:
 in ``ask`` mode a :class:`RememberingPolicy` that asks through the panel
 and keeps session grants, in ``auto`` mode an
-:class:`~localmelo.melo.contracts.approvals.AutoPolicy`: nothing asks, a
-routine call runs and any other is blocked and explained (#339); with
-``--yolo`` no policy at all.
+:class:`~localmelo.melo.contracts.approvals.AutoPolicy`: a routine call
+runs, a stopped one the person may allow asks on the same panel (#465), and
+any other is blocked and explained (#339); with ``--yolo`` no policy at all.
 
 The panel shows what will run escaped, never cleaned: approval is the only
 control before a shell command or Python code runs, so every byte shows.
@@ -63,15 +63,15 @@ Mode = Literal["ask", "auto", "deny", "yolo"]
 DENY_REASON: Final = "approvals are set to deny"
 _MODE_WORDS: Final = {
     "ask": "asks before running commands or changing files",
-    "auto": "works without asking; blocks risky steps and steps you did not ask "
-    "for, and explains them",
+    "auto": "works on its own; asks before a step you did not ask for, blocks the "
+    "riskiest steps and explains them",
     "deny": "never runs commands or changes files",
     "yolo": "runs everything without asking (--yolo)",
 }
 # The quiet line a switch leaves in the transcript (the key and /approvals say the same).
 MODE_SWITCHED: Final = {
     "ask": "Ask: melo asks before running commands or changing files.",
-    "auto": "Auto: routine steps run; risky ones are blocked with the reason.",
+    "auto": "Auto: routine steps run; melo asks about the rest, the riskiest are blocked.",
 }
 # What a session grant covers, in the words of the panel that asked.
 _GRANT_WORDS: Final = {
@@ -695,8 +695,9 @@ class Approvals:
         self._ask = ask
         self.snapshots = snapshots if snapshots is not None else EditSnapshots()
         self._policy = self._asking()
-        # Auto mode's policy, kept across turns for its allowances.
-        self._auto = AutoPolicy()
+        # Auto mode's policy, kept across turns for its allowances; a step it
+        # stops that the person may allow asks on the panel (#465).
+        self._auto = AutoPolicy(asking=self._policy)
 
     def _asking(self) -> RememberingPolicy:
         # It also asks about a folder outside the workspace (#405).
@@ -736,5 +737,5 @@ class Approvals:
     def reset(self) -> None:
         """Forget every grant: a new session starts with none."""
         self._policy = self._asking()
-        self._auto = AutoPolicy()
+        self._auto = AutoPolicy(asking=self._policy)
         self.snapshots.clear()

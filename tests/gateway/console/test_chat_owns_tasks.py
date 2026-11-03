@@ -56,6 +56,13 @@ from .test_turn_writes import _post_turn, _wait_turn
 INSTALL = (
     'import subprocess\nsubprocess.run(["pip", "install", "requests"], check=True)'
 )
+# The same install that also reads a key file: a step only a click allows, so
+# Auto blocks it even in a task that asks its chat (#465).
+INSTALL_KEYS = (
+    "import os, subprocess\n"
+    'subprocess.run(["pip", "install", "requests"], check=True)\n'
+    'print(open(os.path.expanduser("~/.netrc")).read())'
+)
 _FOLLOWUP = re.compile(r"\[localmelo · follow-up on task ([0-9a-f]{12}) · ")
 
 
@@ -559,12 +566,12 @@ async def test_a_blocked_install_is_worked_around_and_never_run_again(
     ]
     workers: list[list[Reply]] = [
         [
-            tool_call("python_exec", {"code": INSTALL}, "w-1"),
+            tool_call("python_exec", {"code": INSTALL_KEYS}, "w-1"),
             answer("The script needs a package I could not install.\nEnding: failed"),
         ],
         [
             # The same install again: refused before any review.
-            tool_call("python_exec", {"code": INSTALL}, "w-2"),
+            tool_call("python_exec", {"code": INSTALL_KEYS}, "w-2"),
             answer("Wrote it with urllib instead.\nEnding: ready"),
         ],
     ]
@@ -737,10 +744,15 @@ async def test_the_chats_note_is_never_the_persons_words(
     ) as (console, client, models, ran):
         await say(client, console, typed)
         task_id = await started_task(console)
-        await until(lambda: len(models["workers"]) == 2)
-        await settled(console)
-        await until(lambda: _is(console, task_id, "done"))
-        await settled(console)
+        # Each install asks the person on the card (#465); they decline both.
+        cards = asyncio.create_task(_decline_cards(console, task_id))
+        try:
+            await until(lambda: len(models["workers"]) == 2)
+            await settled(console)
+            await until(lambda: _is(console, task_id, "done"))
+            await settled(console)
+        finally:
+            cards.cancel()
         assert ran.codes == [], "the note's install never ran"
         first, second = seen[0], seen[1]
         # The continued run's words are the person's request; the note is data.
@@ -752,13 +764,21 @@ async def test_the_chats_note_is_never_the_persons_words(
             for e in await all_events(console.store, task_id)
             if e.event["type"] == "tool.finished"
         ]
-        # Auto blocked it on its own review: the note's words allowed nothing.
+        # The note's words allowed nothing: each install asked the person.
         assert [(a["origin"], a["allowed"]) for a in approvals] == [
-            ("auto", False),
-            ("auto", False),
+            ("user", False),
+            ("user", False),
         ]
         info = await console.store.get_session(task_id)
         assert info is not None and info.meta["followup_guard"] is True
+
+
+async def _decline_cards(console: Console, task_id: str) -> None:
+    """The person at the chat: Don't allow on every card the task shows."""
+    while True:
+        for request in console.broker.pending(task_id):
+            console.broker.answer(request.request_id, ApprovalDecision(False))
+        await asyncio.sleep(0.01)
 
 
 async def test_a_follow_up_does_not_continue_a_task_the_person_continued_meanwhile(

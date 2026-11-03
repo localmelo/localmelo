@@ -264,7 +264,10 @@ class ChatPolicy:
     ) -> None:
         self.mode: ChatMode = mode
         self.ask = RememberingPolicy(ask, folders=True, saved=saved)
-        self.auto = AutoPolicy()
+        # A step Auto stops that the person may allow asks them on the
+        # chat's card, and an answer for the chat is a grant of the Ask
+        # policy (#465).
+        self.auto = AutoPolicy(asking=self.ask)
         self.asks_folders = True
 
     @property

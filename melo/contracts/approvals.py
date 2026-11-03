@@ -41,6 +41,7 @@ from localmelo.melo.contracts.review import (
     CATEGORY_WORDS,
     SITE_KEY,
     UNREADABLE_SITE,
+    WORDS_CAN_ALLOW,
     ActionReview,
     because,
     block_words,
@@ -193,6 +194,40 @@ class Withdrawal(ApprovalDecision):
             raise ValueError("a Withdrawal never allows")
 
 
+@dataclass(frozen=True)
+class Chosen(ApprovalDecision):
+    """The person's answer to the card auto mode shows in place of a block (#465).
+
+    Allow once, allow on this site for this chat (``remember``), or Don't
+    allow with the person's optional note as ``reason``. On a denial,
+    :func:`denial_text` says what they chose and not to try the step again in
+    this turn. ``again`` is set on the refusal of a step the person declined
+    earlier in the turn: nobody was asked this time. Origin ``user``.
+    """
+
+    again: bool = False
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if not isinstance(self.again, bool):
+            raise TypeError(f"Chosen.again must be bool, got {self.again!r}")
+        if self.origin != "user":
+            raise ValueError("a Chosen answer is the person's: origin 'user'")
+        if self.again and self.allow:
+            raise ValueError("Chosen.again needs allow=False")
+
+    @classmethod
+    def of(cls, decision: ApprovalDecision) -> Chosen:
+        """*decision*, a person's answer, as the answer to auto mode's card."""
+        return cls(
+            decision.allow,
+            decision.reason,
+            decision.remember,
+            decision.origin,
+            decision.always,
+        )
+
+
 @runtime_checkable
 class ApprovalPolicy(Protocol):
     """Decides whether a marked tool call may run (see the module docstring)."""
@@ -291,14 +326,40 @@ ALLOW_ONCE_S: Final = 30 * 60
 # The reason of the decision that runs a step on its allowance.
 ALLOWED_ONCE: Final = "allowed once"
 
+# Auto mode (#465): the categories of a stopped step a person may allow from a
+# card: those the user's words can allow, and a step melo could not check. A
+# step with any other category (credentials, system settings, an app driven by a
+# script, something that runs later, code from the internet, a failed review,
+# localmelo itself) stays blocked, as before.
+ASKS_IN_AUTO: Final = WORDS_CAN_ALLOW | {"opaque"}
+
+
+def asks_in_auto(review: ActionReview | None) -> bool:
+    """Whether auto mode asks a person about a step it stopped, when one can be asked (#465).
+
+    A step whose review is not routine and whose every category is in
+    :data:`ASKS_IN_AUTO`. A step nothing reviewed, or one without a
+    category (undecided and never settled), is not asked about.
+    """
+    return (
+        review is not None
+        and review.verdict != "routine"
+        and bool(review.categories)
+        and set(review.categories) <= ASKS_IN_AUTO
+    )
+
 
 class AutoPolicy:
-    """Auto mode (#339): nobody is asked; a call that is not routine is blocked.
+    """Auto mode (#339): a routine call runs; a call that is not routine is stopped.
 
     The agent's gate reviews each call first (the rules, then the user's
     model for an undecided call, or for a high-impact one the user's words
     may cover), so this policy reads only the verdict: ``routine`` runs
-    (origin ``auto``), anything else is denied with origin ``auto`` and the
+    (origin ``auto``). A stopped call that a person may allow
+    (:func:`asks_in_auto`) goes to *asking*, the policy that asks a person
+    (the chat's card, #465), and the answer comes back as :class:`Chosen`;
+    without *asking* (nobody can be asked: a schedule, a benchmark), and for
+    any other stopped call, it is denied with origin ``auto`` and the
     category in a few words as its reason. A call nothing reviewed is
     blocked too.
 
@@ -312,11 +373,18 @@ class AutoPolicy:
     """
 
     def __init__(
-        self, *, task: bool = False, clock: Callable[[], float] = time.time
+        self,
+        *,
+        task: bool = False,
+        clock: Callable[[], float] = time.time,
+        asking: ApprovalPolicy | None = None,
     ) -> None:
         # A saved task's policy: a blocked step is offered on the task's page.
         self.task = task
         self._clock = clock
+        # The policy that asks a person about a stopped step (#465); None
+        # when nobody can be asked, so the step is blocked.
+        self.asking = asking
         # key -> (until, categories, tool) of each allowance not used yet.
         self._allowed: dict[str, tuple[float, frozenset[str], str]] = {}
         self.given: dict[str, float] = {}
@@ -385,6 +453,15 @@ class AutoPolicy:
             return ApprovalDecision(False, CATEGORY_WORDS["unreviewed"], origin="auto")
         if review.verdict == "routine":
             return ApprovalDecision(True, origin="auto")
+        asking = self.asking
+        if asking is not None and asks_in_auto(review):
+            # The person chooses on the card instead of a block (#465). A
+            # grant of the chat that covers the step answers with origin
+            # "session"; a timeout or a withdrawn card stays what it is.
+            decided = await asking.decide(request)
+            if type(decided) is ApprovalDecision and decided.origin == "user":
+                return Chosen.of(decided)
+            return decided
         return ApprovalDecision(
             False, block_words(review) or "needs your approval", origin="auto"
         )

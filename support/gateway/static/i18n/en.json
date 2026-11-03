@@ -282,7 +282,7 @@
   "auto.mode.ask": "Ask",
   "auto.mode.askWords": "melo asks before it runs commands or changes files.",
   "auto.mode.auto": "Auto",
-  "auto.mode.autoWords": "melo works without asking. Routine steps run; risky steps and steps you didn’t ask for are blocked, and melo tells you why.",
+  "auto.mode.autoWords": "melo works on its own. Routine steps run; before a step you didn’t ask for, melo asks you; the riskiest steps are blocked, and melo tells you why.",
   "auto.reason.appControlNamed": "This step operates {apps} through a script.",
   "auto.reason.app_control": "This step operates another app through a script.",
   "auto.reason.beyond_request": "This step does something you did not ask for.",
