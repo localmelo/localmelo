@@ -793,6 +793,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- melo acts for you, in your name. Applying with your resume, signing in, filling in and submitting a form, sending a message as you and booking are done when you ask or authorize them: the model no longer refuses a step because it speaks in your name or cannot be undone, and it does not hand back a list of links or leave the last click to you. The approval cards (Ask) and Auto's review decide which steps you confirm, never the model, and only what would harm other people is declined. Every chat's and every task's instructions say so, the main chat and the side chats add a one-line reminder after your message, and a recalled reply in which melo refused or said a step was blocked is no precedent. The main chat is told that a request to do something online is work (the browser, or a task for the many-step part), not advice, and a go-ahead such as `I authorize you to apply` or `我授权你去投简历` starts that work like any other request.
 - In Auto, the goal decides: the steps a task plainly needs run without asking, and the risky
   ones still ask. On the site or app the chat is about, opening and reading it, signing in the
   way you described, picking options, filling in and sending the task's own form and reading
