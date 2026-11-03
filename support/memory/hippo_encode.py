@@ -27,6 +27,7 @@ document has.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import hashlib
 import json
@@ -34,9 +35,9 @@ import logging
 import os
 import re
 import time
-from collections.abc import Sequence
+from collections.abc import Coroutine, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Any, Final
+from typing import Any, Final, TypeVar
 
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.memory.retrieval.base import Send
@@ -48,6 +49,7 @@ from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.thinking import thinking_off_fields
 
 logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
 
 # Bump it when the prompt or what is asked of the model changes: it is part of the
 # cache key and of every item's ``encoder``.
@@ -363,11 +365,17 @@ class Cache:
     Read whole on first use and appended to on each new reply; a line that cannot
     be read is skipped. The file holds text from chats, so it is private (0600).
     One path may serve several runs, whatever store each writes.
+
+    :meth:`put` is synchronous (no ``await`` between its read and its write), so
+    coroutines of one event loop may call it as their replies arrive.
     """
 
     def __init__(self, path: str) -> None:
         self.path = os.path.expanduser(path)
         self._replies: dict[str, dict[str, Any]] | None = None
+        # Windows being asked for now, by key, so a second ask for the same window
+        # (the same text in two chats of one run) waits for the first one's reply.
+        self.inflight: dict[str, asyncio.Future[None]] = {}
 
     def _load(self) -> dict[str, dict[str, Any]]:
         if self._replies is None:
@@ -462,6 +470,62 @@ async def _ask(
     return None, why
 
 
+async def _window_reply(
+    send: Send,
+    prompt: str,
+    key: str,
+    cache: Cache | None,
+    stats: Stats,
+    limit: asyncio.Semaphore | None,
+) -> tuple[dict[str, Any] | None, bool, str]:
+    """A window's reply JSON (``None`` when the window failed), whether it came from
+    the cache, and why not when it failed.
+
+    A cached reply makes no request. Otherwise the request (:func:`_ask`) runs under
+    *limit* when it is given, and the reply is put in the cache as soon as it comes,
+    so a run that is stopped keeps every window already answered. When the same
+    window is already being asked for (the same text in two chats of one run), this
+    waits for that reply and counts a cache hit, as a later serial ask would.
+    """
+    while cache is not None:
+        raw = cache.get(key)
+        if raw is not None:
+            stats.cache_hits += 1
+            return raw, True, ""
+        waiting = cache.inflight.get(key)
+        if waiting is None:
+            break
+        await asyncio.shield(waiting)
+    mine: asyncio.Future[None] | None = None
+    if cache is not None:
+        mine = cache.inflight[key] = asyncio.get_running_loop().create_future()
+    try:
+        async with limit if limit is not None else contextlib.nullcontext():
+            raw, why = await _ask(send, prompt, stats)
+        if raw is not None and cache is not None:
+            cache.put(key, raw)
+        return raw, False, why
+    finally:
+        if cache is not None and mine is not None:
+            del cache.inflight[key]
+            mine.set_result(None)
+
+
+async def gather(
+    coros: Sequence[Coroutine[Any, Any, _T]],
+) -> list[_T]:
+    """The results of *coros*, run together, in their order. A failure or a
+    cancellation cancels the ones still running and is raised."""
+    tasks = [asyncio.ensure_future(coro) for coro in coros]
+    try:
+        return list(await asyncio.gather(*tasks))
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+
+
 async def encode(
     provider: BaseLLMProvider,
     title: str,
@@ -471,6 +535,7 @@ async def encode(
     cache: Cache | None = None,
     stats: Stats | None = None,
     backend: str | None = None,
+    limit: asyncio.Semaphore | None = None,
 ) -> Encoding:
     """Encode the exchanges *turns* of one chat into items.
 
@@ -479,6 +544,12 @@ async def encode(
     *backend* is the key of the chat backend *provider* runs on, which decides how
     the request turns thinking off (:func:`_quiet`); ``None``, as when a caller
     names none, is a local server named by its URL.
+
+    Without *limit* the windows are asked for one by one, in order. With one, the
+    windows that are not cached are asked for together, each request waiting for
+    the semaphore, which a caller may share across the chats of a run to bound the
+    requests in flight; the result is built in window order all the same, so it is
+    the one the serial path gives. A window that fails fails alone.
     """
     stats = stats if stats is not None else Stats()
     model = str(getattr(provider, "model", "") or "")
@@ -487,23 +558,26 @@ async def encode(
     result = Encoding()
     mentioned: set[int] = set()
     ignored: set[int] = set()
-    for window in pack(turns, window_chars):
-        report = WindowReport(len(window.positions), len(window.text), cut=window.cut)
+    windows = pack(turns, window_chars)
+    prompts = [prompt_of(title, window) for window in windows]
+    keys = [window_key(model, prompt) for prompt in prompts]
+
+    def ask(n: int) -> Coroutine[Any, Any, tuple[dict[str, Any] | None, bool, str]]:
+        return _window_reply(send, prompts[n], keys[n], cache, stats, limit)
+
+    if limit is None:
+        replies = [await ask(n) for n in range(len(windows))]
+    else:
+        replies = await gather([ask(n) for n in range(len(windows))])
+    for window, (raw, cached, why) in zip(windows, replies, strict=True):
+        report = WindowReport(
+            len(window.positions), len(window.text), cached=cached, cut=window.cut
+        )
         result.windows.append(report)
-        prompt = prompt_of(title, window)
-        key = window_key(model, prompt)
-        raw = cache.get(key) if cache is not None else None
-        if raw is not None:
-            report.cached = True
-            stats.cache_hits += 1
-        else:
-            raw, why = await _ask(send, prompt, stats)
-            if raw is None:
-                report.failed = True
-                logger.warning("Hippo encoder: a window failed, %s", why)
-                continue
-            if cache is not None:
-                cache.put(key, raw)
+        if raw is None:
+            report.failed = True
+            logger.warning("Hippo encoder: a window failed, %s", why)
+            continue
         checked = check(raw, window, turns)
         report.dropped = checked.dropped
         for piece in checked.pieces:

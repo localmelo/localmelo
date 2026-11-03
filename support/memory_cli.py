@@ -214,16 +214,27 @@ async def _sleep(variant: str | None) -> int:
 
 async def _ingest(path: str, options: Sequence[str], as_json: bool) -> int:
     settings: dict[str, str] = {"notes": "rules", "ingest": "turns"}
+    memory_keys: list[str] = []
     for option in options:
         key, equals, value = option.partition("=")
+        if equals and key.startswith("memory."):
+            memory_keys.append(option)  # a [memory] setting for this run only
+            continue
         if not equals or key not in settings:
             print(
                 "melo: -X takes notes=rules or notes=none, and ingest=turns or "
-                f"ingest=compress, got {option!r}",
+                f"ingest=compress, or memory.KEY=VALUE, got {option!r}",
                 file=sys.stderr,
             )
             return 2
         settings[key] = value
+    if memory_keys:
+        from localmelo.support import settings as run_settings
+
+        # Checked like every -X (exit 2 and why); config.load then applies them.
+        run_settings.expand(
+            [arg for pair in memory_keys for arg in ("-X", pair)], options=False
+        )
     for key, allowed in (("notes", ingest.NOTES), ("ingest", ingest.MODES)):
         if settings[key] not in allowed:
             print(
@@ -309,7 +320,8 @@ def main(argv: Sequence[str], prog: str = "melo memory") -> int:
             help=(
                 "developer options: notes=rules (the default) or notes=none; "
                 "ingest=turns (the default) or ingest=compress (encode each chat "
-                "into memory items with the chat model)"
+                "into memory items with the chat model); memory.KEY=VALUE sets a "
+                "[memory] setting for this run, such as memory.compress_parallel=4"
             ),
         )
     elif rest[:1] and rest[0] in DEVELOPER_VERBS:

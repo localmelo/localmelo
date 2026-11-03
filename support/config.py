@@ -98,6 +98,9 @@ MEMORY_EXCERPT_OPEN = ("off", "on")
 MEMORY_RECALL_SOURCE = ("turns", "items")
 MEMORY_OPEN_SOURCES = ("off", "on")
 MEMORY_COMPRESS_AT_CHARS = (4000, 60000)
+# How many windows of one ingest the encoder is asked for at once: see
+# MemoryConfig.compress_parallel.
+MEMORY_COMPRESS_PARALLEL = (1, 8)
 # The bars an item must pass to be recalled, and their bounds (inclusive): see
 # MemoryConfig.recall_min_cosine and recall_min_coverage.
 MEMORY_RECALL_MIN_COSINE = (0.20, 0.95)
@@ -136,6 +139,7 @@ RECALL_KEYS = (
     "recall_source",
     "open_sources",
     "compress_at_chars",
+    "compress_parallel",
     "compress_cache",
     "note_gate",
     "note_min_cosine",
@@ -427,7 +431,9 @@ class MemoryConfig:
     ``off`` (the default: an opened item shows its title and text only) or ``on``
     (it also shows its source turns whole, within ``recall_open_chars``);
     ``compress_at_chars`` (4000-60000), the size of the window a chat is cut into
-    for the chat model to encode, one model call each; and ``compress_cache``, the
+    for the chat model to encode, one model call each; ``compress_parallel`` (1-8,
+    default 1), how many of those windows ``melo memory ingest`` has the chat
+    model read at once (the items are the same, only the time changes); and ``compress_cache``, the
     path of the file that keeps each window's reply (empty: ``compress_cache.jsonl``
     in the memory folder). Two more are about where a note the chat's model keeps
     with ``remember`` may come from (#442). ``note_gate``, ``typed`` (the words the
@@ -470,6 +476,7 @@ class MemoryConfig:
     recall_source: str = "turns"  # turns | items: recall draws on turns, or on items.
     open_sources: str = "off"  # off | on: an opened item also shows its source turns.
     compress_at_chars: int = 12000  # The size of a window a chat is encoded in.
+    compress_parallel: int = 1  # Windows an ingest asks the encoder for at once.
     compress_cache: str = (
         ""  # Where encoder replies are kept; empty: in the memory dir.
     )
@@ -779,6 +786,7 @@ class Config:
             ("recall_list_max", MEMORY_RECALL_LIST_MAX),
             ("recall_open_chars", MEMORY_RECALL_OPEN_CHARS),
             ("compress_at_chars", MEMORY_COMPRESS_AT_CHARS),
+            ("compress_parallel", MEMORY_COMPRESS_PARALLEL),
         ):
             value = getattr(self.memory, name)
             if not isinstance(value, int) or isinstance(value, bool):
