@@ -21,6 +21,7 @@ from localmelo.melo.contracts.providers import (
 from localmelo.melo.schema import ImagePart, Message, ToolCall, ToolDef, describe_images
 from localmelo.support.providers._http import (
     RETRYABLE_STATUS_CODES,
+    _body_preview,
     _context_overflow,
     attempt_headers,
     malformed_body,
@@ -646,6 +647,7 @@ class OpenAICompatLLM(BaseLLMProvider):
                         status_code=response.status_code,
                         retryable=response.status_code in RETRYABLE_STATUS_CODES,
                         context_overflow=_context_overflow(error_response),
+                        detail=_body_preview(error_response),
                     )
                 opened = True
                 self.last_limits = rate_limits(response.headers)

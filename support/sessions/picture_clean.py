@@ -31,6 +31,15 @@ _PNG_KEEP: Final = frozenset(
     {b"IHDR", b"PLTE", b"IDAT", b"IEND", b"tRNS", b"gAMA", b"cHRM", b"sRGB", b"cICP"}
 )
 _PNG_MAX_CHUNK: Final = 0x7FFFFFFF
+# The size of each fixed-size colour chunk, and the bit depths each colour type takes.
+_PNG_SIZES: Final = {b"gAMA": 4, b"cHRM": 32, b"sRGB": 1, b"cICP": 4}
+_PNG_DEPTHS: Final = {
+    0: (1, 2, 4, 8, 16),
+    2: (8, 16),
+    3: (1, 2, 4, 8),
+    4: (8, 16),
+    6: (8, 16),
+}
 
 # JPEG markers.
 _SOI, _EOI, _SOS = 0xD8, 0xD9, 0xDA
@@ -51,33 +60,109 @@ def strip(raw: bytes, kind: str) -> bytes | None:
 
 
 def strip_png(raw: bytes) -> bytes | None:
-    """The critical and colour chunks of PNG *raw*, whose checksums hold; None if it is not whole."""
+    """The critical and colour chunks of PNG *raw*; None if it is not whole and in order.
+
+    A chunk is kept only when its checksum holds, its length is the one its kind has
+    and it stands where the format puts it (header first, colour before the palette,
+    the palette before the data, the data in one run, an empty end). Anything else
+    is not a picture a decoder should get, so it is refused, not passed on.
+    """
     if not raw.startswith(_PNG_SIGNATURE):
         return None
     out = bytearray(_PNG_SIGNATURE)
     pos = len(_PNG_SIGNATURE)
-    first = True
-    seen_data = False
+    order = _PngOrder()
     while pos + 12 <= len(raw):
         length = int.from_bytes(raw[pos : pos + 4], "big")
         kind = raw[pos + 4 : pos + 8]
         end = pos + 12 + length
         if length > _PNG_MAX_CHUNK or end > len(raw):
             return None
-        if first and kind != b"IHDR":
-            return None
-        first = False
+        body = raw[pos + 8 : pos + 8 + length]
         if kind in _PNG_KEEP:
-            body = raw[pos + 8 : pos + 8 + length]
             crc = int.from_bytes(raw[pos + 8 + length : end], "big")
             if zlib.crc32(kind + body) != crc:
                 return None
+        if not order.accepts(kind, body):
+            return None
+        if kind in _PNG_KEEP:
             out += raw[pos:end]
-            seen_data = seen_data or kind == b"IDAT"
         pos = end
         if kind == b"IEND":
-            return bytes(out) if seen_data else None
+            return bytes(out)
     return None
+
+
+class _PngOrder:
+    """Where each chunk of a PNG may stand, and how long it may be, as the chunks come."""
+
+    def __init__(self) -> None:
+        self.colour = -1
+        self.depth = 0
+        self.seen: set[bytes] = set()
+        self.palette = 0
+        self.data = 0  # 0: no data yet, 1: inside the run of IDAT, 2: the run is over
+
+    def accepts(self, kind: bytes, body: bytes) -> bool:
+        if self.colour < 0:
+            return kind == b"IHDR" and self._header(body)
+        if self.data == 1 and kind != b"IDAT":
+            self.data = 2
+        if kind == b"IDAT":
+            return self._data()
+        if kind == b"IEND":
+            return not body and self.data == 2
+        if kind not in _PNG_KEEP:
+            return bool(
+                kind[0] & 0x20
+            )  # an unknown critical chunk: not a picture to pass
+        if kind in self.seen or self.data:
+            return False
+        self.seen.add(kind)
+        if kind == b"PLTE":
+            return self._palette(body)
+        if kind == b"tRNS":
+            return self._transparency(body)
+        # gAMA, cHRM, sRGB, cICP: one fixed size, and ahead of the palette.
+        return len(body) == _PNG_SIZES[kind] and b"PLTE" not in self.seen
+
+    def _header(self, body: bytes) -> bool:
+        if len(body) != 13:
+            return False
+        width = int.from_bytes(body[:4], "big")
+        height = int.from_bytes(body[4:8], "big")
+        depth, colour, method, filtering, interlace = body[8:13]
+        if not (1 <= width <= _PNG_MAX_CHUNK and 1 <= height <= _PNG_MAX_CHUNK):
+            return False
+        if depth not in _PNG_DEPTHS.get(colour, ()) or (method, filtering) != (0, 0):
+            return False
+        if interlace > 1:
+            return False
+        self.colour, self.depth = colour, depth
+        self.seen.add(b"IHDR")
+        return True
+
+    def _data(self) -> bool:
+        if self.data == 2 or (self.colour == 3 and not self.palette):
+            return False
+        self.data = 1
+        return True
+
+    def _palette(self, body: bytes) -> bool:
+        entries, extra = divmod(len(body), 3)
+        if self.colour not in (2, 3, 6) or extra or not 1 <= entries <= 256:
+            return False
+        if self.colour == 3 and entries > 1 << self.depth:
+            return False
+        if b"tRNS" in self.seen:
+            return False
+        self.palette = entries
+        return True
+
+    def _transparency(self, body: bytes) -> bool:
+        if self.colour == 3:
+            return bool(self.palette) and 1 <= len(body) <= self.palette
+        return len(body) == {0: 2, 2: 6}.get(self.colour, -1)
 
 
 def _orientation(exif: bytes) -> int | None:

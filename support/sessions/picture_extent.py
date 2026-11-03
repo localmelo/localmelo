@@ -69,9 +69,11 @@ def _gif(raw: bytes) -> list[Size] | None:
     if raw[10] & 0x80:
         pos += 3 << ((raw[10] & 7) + 1)
     frames = 0
+    ended = False
     while pos < len(raw):
         block = raw[pos]
         if block == 0x3B:  # trailer
+            ended = True
             break
         if block == 0x21:  # extension: a label, then data sub-blocks
             after = _gif_blocks(raw, pos + 2)
@@ -95,9 +97,10 @@ def _gif(raw: bytes) -> list[Size] | None:
         if after is None:
             return None
         pos = after
-    if frames == 0:
+    # A file that stops before its trailer was cut short.
+    if frames == 0 or not ended:
         return None
-    return sizes or None
+    return sizes
 
 
 # ── WebP ──
@@ -133,28 +136,30 @@ def _webp_part(tag: bytes, body: bytes, sizes: list[Size], nested: bool) -> bool
 def _webp_chunks(
     raw: bytes, pos: int, end: int, sizes: list[Size], *, nested: bool
 ) -> bool:
-    """Walk the chunks in ``raw[pos:end]``; False if the structure does not hold."""
+    """Walk the chunks in ``raw[pos:end]``; False unless they fill it exactly, pad bytes included."""
     parts = 0
     while pos + 8 <= end:
         tag = raw[pos : pos + 4]
         length = _le(raw[pos + 4 : pos + 8])
         body_end = pos + 8 + length
-        if body_end > end:
-            return False
-        if not _webp_part(tag, raw[pos + 8 : body_end], sizes, nested):
-            return False
         pos = body_end + (length & 1)
+        if pos > end:  # the body, or the pad byte after an odd one, is not there
+            return False
+        if not _webp_part(tag, raw[body_end - length : body_end], sizes, nested):
+            return False
         parts += 1
         if parts > _MAX_PARTS:
             return False
-    return True
+    return pos == end  # not a part of a header left over
 
 
 def _webp(raw: bytes) -> list[Size] | None:
     """The canvas, every frame and the image header of a WebP."""
     if len(raw) < 20 or raw[:4] != b"RIFF" or raw[8:12] != b"WEBP":
         return None
-    end = min(len(raw), 8 + _le(raw[4:8]))
+    end = 8 + _le(raw[4:8])
+    if end > len(raw):  # the length the file gives is more than the file holds
+        return None
     sizes: list[Size] = []
     if not _webp_chunks(raw, 12, end, sizes, nested=False):
         return None
@@ -184,11 +189,12 @@ def _boxes(raw: bytes, pos: int, end: int) -> list[tuple[bytes, int, int]] | Non
         pos += length
         if len(found) > _MAX_PARTS:
             return None
-    return found
+    # Fewer than eight bytes left over are the start of a box that is not there.
+    return found if pos == end else None
 
 
 def _heic(raw: bytes) -> list[Size] | None:
-    """Every ``ispe`` property in ``meta`` > ``iprp`` > ``ipco`` of a HEIC."""
+    """Every ``ispe`` property in ``meta`` > ``iprp`` > ``ipco`` of a HEIC; None if any box is broken."""
     top = _boxes(raw, 0, len(raw))
     if top is None:
         return None
@@ -196,20 +202,52 @@ def _heic(raw: bytes) -> list[Size] | None:
     for kind, start, end in top:
         if kind != b"meta":
             continue
-        # ``meta`` is a full box: four bytes of version and flags come first.
-        inside = _boxes(raw, start + 4, end)
-        for kind2, start2, end2 in inside or []:
-            if kind2 != b"iprp":
-                continue
-            for kind3, start3, end3 in _boxes(raw, start2, end2) or []:
-                if kind3 != b"ipco":
-                    continue
-                for kind4, start4, end4 in _boxes(raw, start3, end3) or []:
-                    if kind4 == b"ispe" and end4 - start4 >= 12:
-                        sizes.append(
-                            (
-                                int.from_bytes(raw[start4 + 4 : start4 + 8], "big"),
-                                int.from_bytes(raw[start4 + 8 : start4 + 12], "big"),
-                            )
-                        )
+        found = _heic_meta(raw, start, end)
+        if found is None:
+            return None
+        sizes += found
     return sizes or None
+
+
+def _heic_meta(raw: bytes, start: int, end: int) -> list[Size] | None:
+    """The sizes in one ``meta`` box, a full box: a version of 0 and flags come first."""
+    if end - start < 4 or raw[start] != 0:
+        return None
+    children = _boxes(raw, start + 4, end)
+    if children is None:
+        return None
+    sizes: list[Size] = []
+    for kind, begin, stop in children:
+        if kind == b"iprp":
+            found = _heic_iprp(raw, begin, stop)
+            if found is None:
+                return None
+            sizes += found
+    return sizes
+
+
+def _heic_iprp(raw: bytes, start: int, end: int) -> list[Size] | None:
+    """The sizes in the ``ipco`` boxes of one ``iprp`` box."""
+    children = _boxes(raw, start, end)
+    if children is None:
+        return None
+    sizes: list[Size] = []
+    for kind, begin, stop in children:
+        if kind != b"ipco":
+            continue
+        properties = _boxes(raw, begin, stop)
+        if properties is None:
+            return None
+        for kind2, begin2, stop2 in properties:
+            if kind2 != b"ispe":
+                continue
+            # A full box: a version of 0 and flags, then the width and the height.
+            if stop2 - begin2 < 12 or raw[begin2] != 0:
+                return None
+            sizes.append(
+                (
+                    int.from_bytes(raw[begin2 + 4 : begin2 + 8], "big"),
+                    int.from_bytes(raw[begin2 + 8 : begin2 + 12], "big"),
+                )
+            )
+    return sizes

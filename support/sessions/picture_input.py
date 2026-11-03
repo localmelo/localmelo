@@ -141,7 +141,9 @@ def normalize(raw: bytes) -> Picture:
         raise PictureRefused(415, "picture_unreadable")
     # Every picture the file mentions (each frame of a GIF, each property of a HEIC)
     # is held to the limit, not only the first.
-    if any(w <= 0 or h <= 0 or w * h > MAX_PIXELS for w, h in sizes):
+    if any(w <= 0 or h <= 0 for w, h in sizes):
+        raise PictureRefused(415, "picture_unreadable")
+    if any(w * h > MAX_PIXELS for w, h in sizes):
         raise PictureRefused(
             413,
             "picture_too_many_pixels",

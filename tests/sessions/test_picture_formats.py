@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import struct
 import subprocess
 import tempfile
 from pathlib import Path
@@ -215,18 +216,105 @@ def test_the_limit_is_on_the_pixels_of_one_picture(
     assert len(seen) == 1
 
 
+def with_second_image_box(first: bytes, second: bytes) -> bytes:
+    """A HEIC whose ``meta`` box holds two ``iprp`` boxes: *first* and *second* (each an ``ipco`` body)."""
+    props = box(b"iprp", box(b"ipco", first)) + box(b"iprp", box(b"ipco", second))
+    return box(b"ftyp", b"heic\0\0\0\0heicmif1") + box(b"meta", b"\0\0\0\0" + props)
+
+
+SMALL_ISPE = box(b"ispe", struct.pack(">III", 0, 8, 8))
+GOOD_WEBP = webp_picture(8, 8, metadata=True)
+GOOD_HEIC = heic_headers((320, 240))
+# A box that claims more than the file holds.
+BROKEN_BOX = struct.pack(">I", 999) + b"ispe" + b"\0" * 12
+
 MALFORMED = {
     "gif: no frame": gif_picture(8, 8, []),
     "gif: cut inside a frame": gif_picture(8, 8, [(8, 8, 0)])[:-30],
     "gif: a block that is not one": gif_picture(8, 8, [(8, 8, 0)]).replace(
         b"\x21\xf9", b"\x77\xf9", 1
     ),
+    "gif: no trailer": gif_picture(8, 8, [(8, 8, 0)])[:-1],
     "webp: a chunk past the end": riff([b"VP8L" + (999).to_bytes(4, "little") + b"x"]),
     "webp: no signature": riff([riff_chunk(b"VP8L", b"\x00" * 10)]),
     "webp: no start code": riff([riff_chunk(b"VP8 ", b"\x10\x02\x00" + b"\x00" * 8)]),
     "webp: no size": riff([riff_chunk(b"EXIF", b"MM")]),
+    "webp: the length of the file is cut short": GOOD_WEBP[:-30],
+    "webp: a length longer than the file": GOOD_WEBP[:4]
+    + struct.pack("<I", len(GOOD_WEBP) + 500)
+    + GOOD_WEBP[8:],
+    "webp: a partial chunk header at the end": riff(
+        [riff_chunk(b"VP8L", vp8l(8, 8, ORANGE)), b"EXI"]
+    ),
+    "webp: a missing pad byte": riff(
+        [
+            riff_chunk(b"VP8L", vp8l(8, 8, ORANGE)),
+            b"EXIF" + struct.pack("<I", 3) + b"abc",
+        ]
+    ),
+    "webp: a pad byte missing after the last chunk": (
+        lambda whole: whole[:4] + struct.pack("<I", len(whole) - 8 - 1) + whole[8:-1]
+    )(riff([riff_chunk(b"VP8L", vp8l(8, 8, ORANGE)), riff_chunk(b"EXIF", b"abc")])),
     "heic: a box past the end": box(b"ftyp", b"heic\0\0\0\0")[:-2] + b"\0\0",
     "heic: no sizes": box(b"ftyp", b"heic\0\0\0\0heic") + box(b"meta", b"\0" * 4),
+    "heic: a partial box header at the end": GOOD_HEIC + b"\0\0\0",
+    "heic: a partial box header inside ipco": box(b"ftyp", b"heic\0\0\0\0heicmif1")
+    + box(
+        b"meta",
+        b"\0\0\0\0" + box(b"iprp", box(b"ipco", SMALL_ISPE + b"\0\0\0")),
+    ),
+    "heic: a size box that is too short": box(b"ftyp", b"heic\0\0\0\0heicmif1")
+    + box(
+        b"meta",
+        b"\0\0\0\0" + box(b"iprp", box(b"ipco", box(b"ispe", b"\0" * 6))),
+    ),
+    "heic: a short size box after a good one in the same ipco": box(
+        b"ftyp", b"heic\0\0\0\0heicmif1"
+    )
+    + box(
+        b"meta",
+        b"\0\0\0\0" + box(b"iprp", box(b"ipco", SMALL_ISPE + box(b"ispe", b"\0" * 6))),
+    ),
+    "heic: a size box of a version nobody wrote": box(b"ftyp", b"heic\0\0\0\0heicmif1")
+    + box(
+        b"meta",
+        b"\0\0\0\0"
+        + box(
+            b"iprp",
+            box(b"ipco", box(b"ispe", struct.pack(">III", 1 << 24, 8, 8))),
+        ),
+    ),
+    "heic: a meta box of a version nobody wrote": box(b"ftyp", b"heic\0\0\0\0heicmif1")
+    + box(
+        b"meta",
+        b"\x01\0\0\0" + box(b"iprp", box(b"ipco", SMALL_ISPE)),
+    ),
+    "heic: a broken box after a good one in the same ipco": box(
+        b"ftyp", b"heic\0\0\0\0heicmif1"
+    )
+    + box(
+        b"meta",
+        b"\0\0\0\0" + box(b"iprp", box(b"ipco", SMALL_ISPE + BROKEN_BOX)),
+    ),
+    "heic: a second ipco that does not parse, after a good one": with_second_image_box(
+        SMALL_ISPE, BROKEN_BOX
+    ),
+    "heic: a second iprp whose children do not parse, after a good one": (
+        box(b"ftyp", b"heic\0\0\0\0heicmif1")
+        + box(
+            b"meta",
+            b"\0\0\0\0"
+            + box(b"iprp", box(b"ipco", SMALL_ISPE))
+            + box(b"iprp", BROKEN_BOX),
+        )
+    ),
+    "heic: a broken box in meta after a good iprp": box(b"ftyp", b"heic\0\0\0\0heic")
+    + box(
+        b"meta",
+        b"\0\0\0\0" + box(b"iprp", box(b"ipco", SMALL_ISPE)) + BROKEN_BOX,
+    ),
+    "heic: meta too short for its version": box(b"ftyp", b"heic\0\0\0\0heic")
+    + box(b"meta", b"\0\0"),
 }
 
 

@@ -666,11 +666,22 @@ def _fails(message: str, status: int) -> Any:
 @pytest.mark.parametrize(
     ("message", "status", "verdict", "pictured", "refused"),
     [
-        # A model not known to read pictures answers them with a bare 400, or names them.
-        (BARE_400, 400, None, True, True),
+        # An error that names the pictures is a refusal of them, whatever the model says.
         (BARE_400 + ": image input is not supported", 400, None, True, True),
-        # A model the server says reads them keeps a bare 400 as it was.
+        (BARE_400 + ": image input is not supported", 400, True, True, True),
+        # An error that says nothing about them is not, for any model.
+        (BARE_400, 400, None, True, False),
         (BARE_400, 400, True, True, False),
+        # A model that reads pictures can still be sent one it cannot decode.
+        (BARE_400 + ": could not decode the image", 400, True, True, False),
+        (
+            BARE_400 + ": invalid image format, send a PNG or a JPEG",
+            400,
+            True,
+            True,
+            False,
+        ),
+        (BARE_400 + ": max_tokens must be at least 1", 400, None, True, False),
         # A message without pictures says nothing about them.
         (BARE_400, 400, None, False, False),
     ],
@@ -720,35 +731,39 @@ async def test_a_turn_refused_for_its_pictures_ends_with_one_line_and_the_model_
             assert again.status_code == 202, again.text
 
 
-async def test_the_refusal_stands_past_the_cache_until_the_model_changes_or_reads(
+async def test_what_a_refusal_taught_expires_like_any_other_verdict(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server: dict[str, bool | None] = {"says": None}
+    """A text-only verdict learned from one error is kept for a minute, then the server is asked again."""
+    server: dict[str, Any] = {"says": None, "asked": 0}
 
     async def asked(self: Vision) -> bool | None:
-        return server["says"]
+        server["asked"] += 1
+        return server["says"]  # type: ignore[no-any-return]
 
     monkeypatch.setattr(Vision, "_ask", asked)
     async with ask_console(tmp_path, monkeypatch, run=False) as (console, _, _models):
         vision = console.vision
         assert await vision.reads() is None
+        before = server["asked"]
         vision.refused()
+        # Within the time it stands, and the server is not asked.
         assert await vision.reads() is False
-        # The cached answer is old, and the server still cannot say: the refusal stands.
-        stale = (vision._result[0], None, -1e9)  # type: ignore[index]
-        vision._result = stale
         assert await vision.reads() is False
-        # Another model of the settings is not the one that refused.
-        monkeypatch.setattr(vision, "_key", lambda: ("other",))
+        assert server["asked"] == before
+        # Past the time the server is asked again; if it cannot say, the model is unknown, not text only.
+        vision._result = (vision._result[0], False, -1e9)  # type: ignore[index]
         assert await vision.reads() is None
-        monkeypatch.undo()
-        monkeypatch.setattr(Vision, "_ask", asked)
-        # The server says the model reads them (it was changed under the same name).
-        vision._result = (vision._result[0], None, -1e9)  # type: ignore[index]
+        assert server["asked"] == before + 1
+        # And if it says the model reads pictures, so be it.
+        vision.refused()
+        vision._result = (vision._result[0], False, -1e9)  # type: ignore[index]
         server["says"] = True
         assert await vision.reads() is True
+        # Another model of the settings was not the one that refused.
         server["says"] = None
-        vision._result = (vision._result[0], None, -1e9)  # type: ignore[index]
+        vision.refused()
+        monkeypatch.setattr(vision, "_key", lambda: ("other",))
         assert await vision.reads() is None
 
 
@@ -760,14 +775,20 @@ async def test_try_again_does_not_send_refused_pictures_to_the_same_model(
 
     monkeypatch.setattr(Vision, "_ask", unknown)
     async with ask_console(
-        tmp_path, monkeypatch, main=[_fails(BARE_400, 400)], run=False
+        tmp_path,
+        monkeypatch,
+        main=[_fails(BARE_400 + ": image input is not supported", 400)],
+        run=False,
     ) as (console, client, models):
         main_id = str(console.main_id)
         picture = await _stage(client)
         await _post_turn(client, main_id, "what is this?", images=[picture])
         finished = await _wait_turn(client, main_id)
         assert finished["result"]["error"] == PICTURES_REFUSED_ERROR
-        await until(lambda: console.vision._refused is not None)
+        await until(
+            lambda: console.vision._result is not None
+            and console.vision._result[1] is False
+        )
         retry = await client.post(
             f"/api/sessions/{main_id}/retry", json={"turn_id": finished["id"]}
         )

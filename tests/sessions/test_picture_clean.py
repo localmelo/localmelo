@@ -11,7 +11,9 @@ where it is missing.
 from __future__ import annotations
 
 import shutil
+import struct
 import subprocess
+import zlib
 from pathlib import Path
 
 import pytest
@@ -291,3 +293,119 @@ def test_what_sips_writes_is_stripped_too(tmp_path: Path) -> None:
         b"sRGB",
         b"cICP",
     }
+
+
+# ── A PNG whose chunks are not whole or not in their place is refused ──
+
+
+def png_made(*chunks: bytes, colour_type: int = 2, bit_depth: int = 8) -> bytes:
+    """A PNG of the framed *chunks* under an IHDR of the given colour type and depth."""
+    header = struct.pack(">IIBBBBB", 8, 8, bit_depth, colour_type, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + png_chunk(b"IHDR", header) + b"".join(chunks)
+
+
+DATA = png_chunk(b"IDAT", zlib.compress(b"\x00" * 200))
+END = png_chunk(b"IEND", b"")
+WHOLE = png_made(DATA, END)
+
+
+BAD_PNGS = {
+    "IEND with content": png_made(DATA, png_chunk(b"IEND", b"x")),
+    "IHDR of the wrong length": b"\x89PNG\r\n\x1a\n"
+    + png_chunk(b"IHDR", struct.pack(">IIBBBBB", 8, 8, 8, 2, 0, 0, 0) + b"\0")
+    + DATA
+    + END,
+    "IHDR twice": png_made(
+        png_chunk(b"IHDR", struct.pack(">IIBBBBB", 8, 8, 8, 2, 0, 0, 0)), DATA, END
+    ),
+    "IHDR with a size of zero": b"\x89PNG\r\n\x1a\n"
+    + png_chunk(b"IHDR", struct.pack(">IIBBBBB", 0, 8, 8, 2, 0, 0, 0))
+    + DATA
+    + END,
+    "IHDR with a depth the colour type does not take": png_made(DATA, END, bit_depth=4),
+    "IHDR with an unknown method": b"\x89PNG\r\n\x1a\n"
+    + png_chunk(b"IHDR", struct.pack(">IIBBBBB", 8, 8, 8, 2, 1, 0, 0))
+    + DATA
+    + END,
+    "gAMA too long": png_made(png_chunk(b"gAMA", b"\0" * 5000), DATA, END),
+    "gAMA too short": png_made(png_chunk(b"gAMA", b"\0\0"), DATA, END),
+    "cHRM of the wrong length": png_made(png_chunk(b"cHRM", b"\0" * 33), DATA, END),
+    "sRGB of the wrong length": png_made(png_chunk(b"sRGB", b"\0\0"), DATA, END),
+    "cICP of the wrong length": png_made(png_chunk(b"cICP", b"\0" * 5), DATA, END),
+    "tRNS too long for the colour type": png_made(
+        png_chunk(b"tRNS", b"\0" * 300), DATA, END
+    ),
+    "tRNS on a colour type that has alpha": png_made(
+        png_chunk(b"tRNS", b"\0\0"), DATA, END, colour_type=6
+    ),
+    "a numeric chunk twice": png_made(
+        png_chunk(b"gAMA", b"\0\0\xb1\x8f"),
+        png_chunk(b"gAMA", b"\0\0\xb1\x8f"),
+        DATA,
+        END,
+    ),
+    "gAMA after the data": png_made(DATA, png_chunk(b"gAMA", b"\0\0\xb1\x8f"), END),
+    "tRNS after the data": png_made(DATA, png_chunk(b"tRNS", b"\0" * 6), END),
+    "gAMA after PLTE": png_made(
+        png_chunk(b"PLTE", b"\0" * 6), png_chunk(b"gAMA", b"\0\0\xb1\x8f"), DATA, END
+    ),
+    "PLTE after the data": png_made(DATA, png_chunk(b"PLTE", b"\0" * 6), END),
+    "PLTE twice": png_made(
+        png_chunk(b"PLTE", b"\0" * 6), png_chunk(b"PLTE", b"\0" * 6), DATA, END
+    ),
+    "PLTE not a multiple of three": png_made(png_chunk(b"PLTE", b"\0" * 7), DATA, END),
+    "PLTE too big": png_made(png_chunk(b"PLTE", b"\0" * 771), DATA, END),
+    "PLTE in a greyscale picture": png_made(
+        png_chunk(b"PLTE", b"\0" * 6), DATA, END, colour_type=0
+    ),
+    "a palette picture with no PLTE": png_made(DATA, END, colour_type=3),
+    "tRNS longer than the palette": png_made(
+        png_chunk(b"PLTE", b"\0" * 6),
+        png_chunk(b"tRNS", b"\0" * 3),
+        DATA,
+        END,
+        colour_type=3,
+    ),
+    "the data split by another chunk": png_made(
+        png_chunk(b"IDAT", zlib.compress(b"\x00" * 100)),
+        png_chunk(b"tEXt", b"Comment\0split"),
+        png_chunk(b"IDAT", zlib.compress(b"\x00" * 100)),
+        END,
+    ),
+    "a critical chunk nobody knows": png_made(png_chunk(b"XYZW", b"abc"), DATA, END),
+}
+
+
+def test_a_whole_png_in_order_is_kept() -> None:
+    assert strip_png(WHOLE) == WHOLE
+
+
+def test_every_chunk_of_a_palette_greyscale_and_numeric_png_is_kept_when_it_is_whole() -> (
+    None
+):
+    palette = png_made(
+        png_chunk(b"gAMA", b"\0\0\xb1\x8f"),
+        png_chunk(b"sRGB", b"\x00"),
+        png_chunk(b"PLTE", b"\0" * 6),
+        png_chunk(b"tRNS", b"\xff\x80"),
+        DATA,
+        END,
+        colour_type=3,
+    )
+    assert strip_png(palette) == palette
+    grey = png_made(png_chunk(b"tRNS", b"\0\x10"), DATA, END, colour_type=0)
+    assert strip_png(grey) == grey
+    numeric = png_made(
+        png_chunk(b"cHRM", b"\0" * 32), png_chunk(b"cICP", b"\1\x0d\0\1"), DATA, END
+    )
+    assert strip_png(numeric) == numeric
+
+
+@pytest.mark.parametrize("raw", BAD_PNGS.values(), ids=BAD_PNGS.keys())
+def test_a_png_whose_chunks_are_not_whole_or_not_in_their_place_is_refused(
+    raw: bytes,
+) -> None:
+    assert strip_png(raw) is None
+    with pytest.raises(PictureRefused) as refused:
+        picture_input.normalize(raw)
+    assert refused.value.code == "picture_unreadable"

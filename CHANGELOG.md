@@ -21,8 +21,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   conversion, and a picture melo cannot scale or rewrite is refused instead of being sent as it is. The
   size limit is read from the file's header before anything opens it, every frame of a GIF included. A model
   known not to read pictures gets a one-line warning that links to Settings → Model; the picture is never
-  dropped silently. A model that refuses a turn because of its pictures is remembered as text-only: the turn
-  ends with one plain line, the composer warns, and Try again does not send the same pictures again. Other files answer `not supported yet`, and a file dropped beside the box never opens in
+  dropped silently. A model whose error says it does not take pictures is treated as text-only for a minute: the turn
+  ends with one plain line, the composer warns, and Try again does not send the same pictures again; a bare 400, a
+  message about length or a picture it could not decode is not taken for that. A GIF without its end, a WebP or
+  HEIC whose boxes do not add up, and a PNG whose chunks have the wrong length or stand out of order are
+  refused as unreadable. Other files answer `not supported yet`, and a file dropped beside the box never opens in
   the window, in the browser or in the app. While a turn runs, Enter now adds your words to it: the run reads
   them at its next step, the bubble shows `Sent` then `Seen by melo`, words the turn ended before reading
   become your next message in order (a restart keeps them, and words that were read leave the kept queue, with a few more tries if the write fails), and Stop gives unread words back to the box.

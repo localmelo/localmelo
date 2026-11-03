@@ -149,23 +149,96 @@ class RefusingLLM(ScriptedLLM):
 
 
 BARE_400 = "POST /chat/completions failed with HTTP 400"
+NOT_SUPPORTED = BARE_400 + ": image input is not supported"
 
 
 @pytest.mark.parametrize(
     ("message", "status", "reads", "sent", "refused"),
     [
-        # A bare 400 to a request with pictures, from a model not known to read them.
-        (BARE_400, 400, None, True, True),
-        (BARE_400, 415, False, True, True),
-        # The error names the pictures: whatever the model says it reads.
-        (BARE_400 + ": image input is not supported", 400, True, True, True),
+        # The error names the pictures, whatever the model says it reads.
+        (NOT_SUPPORTED, 400, True, True, True),
+        (NOT_SUPPORTED, 415, None, True, True),
+        (
+            BARE_400 + ": unknown variant `image_url`, expected `text`",
+            422,
+            None,
+            True,
+            True,
+        ),
         ("model has no vision support", None, True, True, True),
-        # Not the pictures: the model says it reads them, or the status is not a refusal.
+        # The ways servers word it.
+        (
+            BARE_400 + ": image input is not supported - hint: provide the mmproj file",
+            400,
+            None,
+            True,
+            True,
+        ),
+        (
+            BARE_400 + ": At most 0 image(s) may be provided in one prompt.",
+            400,
+            None,
+            True,
+            True,
+        ),
+        (
+            BARE_400 + ": Invalid content type. image_url is only supported by "
+            "certain models.",
+            400,
+            None,
+            True,
+            True,
+        ),
+        # Not the pictures: an error that says nothing about them is not a refusal of
+        # them, whatever the model is known to read, and nor is a status that is no
+        # refusal of the body.
+        (BARE_400, 400, None, True, False),
+        (BARE_400, 415, False, True, False),
         (BARE_400, 400, True, True, False),
+        (BARE_400 + ": max_tokens must be at least 1", 400, None, True, False),
         ("POST /chat/completions failed with HTTP 500", 500, None, True, False),
+        (
+            "POST /chat/completions failed with HTTP 500: could not decode the image",
+            500,
+            None,
+            True,
+            False,
+        ),
+        (
+            BARE_400.replace("400", "401") + ": no access to the image model",
+            401,
+            None,
+            True,
+            False,
+        ),
+        # A model that reads pictures can be sent one it cannot use.
+        (BARE_400 + ": could not decode the image", 400, True, True, False),
+        (
+            BARE_400 + ": invalid image format, send a PNG or a JPEG",
+            400,
+            None,
+            True,
+            False,
+        ),
+        (BARE_400 + ": the image is too large, at most 20 MB", 400, True, True, False),
+        # A problem with a size is not one with the kind of input.
+        (
+            BARE_400 + ": the image tokens exceed the context window",
+            400,
+            None,
+            True,
+            False,
+        ),
+        (
+            BARE_400 + ": too many tokens, the prompt with its image is too long",
+            400,
+            None,
+            True,
+            False,
+        ),
         # A request with no pictures never counts, whatever the error says.
         (BARE_400, 400, None, False, False),
-        (BARE_400 + ": image input is not supported", 400, None, False, False),
+        (NOT_SUPPORTED, 400, None, False, False),
     ],
 )
 async def test_a_request_refused_for_its_pictures_ends_with_one_plain_line(
@@ -179,9 +252,28 @@ async def test_a_request_refused_for_its_pictures_ends_with_one_plain_line(
 
 
 async def test_a_refusal_for_context_size_is_not_a_refusal_of_pictures() -> None:
-    error = ProviderError(BARE_400, status_code=400, context_overflow=True)
-    result = await agent_for(RefusingLLM(error, None)).run_task(
+    """A server's own flag for a context that is too long wins over the word image."""
+    text = BARE_400 + ": the image does not fit, maximum context length is 4096 tokens"
+    error = ProviderError(text, status_code=400, context_overflow=True)
+    result = await agent_for(RefusingLLM(error, False)).run_task(
         "what is this?", images=[picture(8)]
     )
     assert result.status == "provider_error"
-    assert result.error != PICTURES_REFUSED_ERROR
+    assert result.error == text
+
+
+async def test_the_body_of_a_streamed_error_is_read_for_pictures_but_is_not_in_its_words() -> (
+    None
+):
+    """A streamed refusal has only a status in its message; the server's reason is kept apart."""
+    error = ProviderError(
+        BARE_400, status_code=400, detail='{"error":"image input is not supported"}'
+    )
+    result = await agent_for(RefusingLLM(error, None)).run_task(
+        "what is this?", images=[picture(9)]
+    )
+    assert result.error == PICTURES_REFUSED_ERROR
+    assert str(error) == BARE_400
+    # The same body to a request with no pictures is just an error.
+    plain = await agent_for(RefusingLLM(error, None)).run_task("hi", images=[])
+    assert plain.error == BARE_400

@@ -7,10 +7,11 @@ setting. Nothing asks the server until a picture is added: the upload's answer
 and a send that carries pictures wait for :meth:`Vision.reads`.
 
 A model that refuses a turn because of its pictures (the turn ends with
-:data:`~localmelo.melo.schema.PICTURES_REFUSED_ERROR`) is text only from then on:
-:meth:`Vision.listen` hears that end and :meth:`Vision.refused` records it for the
-model setting, until the model setting changes or the server itself says the model
-reads pictures.
+:data:`~localmelo.melo.schema.PICTURES_REFUSED_ERROR`) is text only for the time being:
+:meth:`Vision.listen` hears that end and :meth:`Vision.refused` caches ``False`` for
+the model setting like any other verdict. It lasts :data:`TTL_S` seconds or until the
+model setting changes; then the server is asked again, and what it answers stands. What a
+refusal taught is a guess from one error, so it never outlives the cache.
 """
 
 from __future__ import annotations
@@ -36,7 +37,6 @@ class Vision:
     """The cached verdict on the chat model of the settings."""
 
     _listening = False
-    _refused: tuple[Any, ...] | None = None
 
     def __init__(self, console: Console) -> None:
         self._console = console
@@ -85,10 +85,6 @@ class Vision:
     async def _refresh(self) -> None:
         key = self._key()
         verdict = await self._ask()
-        if verdict is True and self._refused == key:
-            # The server says the model reads pictures after all (it was changed
-            # under the same name): the refusal no longer stands.
-            self._refused = None
         self._result = (key, verdict, time.monotonic())
 
     async def reads(self) -> bool | None:
@@ -98,16 +94,11 @@ class Vision:
                 self._task = asyncio.ensure_future(self._refresh())
             await asyncio.shield(self._task)
         assert self._result is not None
-        verdict = self._result[1] if self._result[0] == self._key() else None
-        if verdict is not True and self._refused == self._key():
-            return False
-        return verdict
+        return self._result[1] if self._result[0] == self._key() else None
 
     def refused(self) -> None:
-        """A turn was refused for its pictures: the model of the settings is text only."""
-        key = self._key()
-        self._refused = key
-        self._result = (key, False, time.monotonic())
+        """A turn was refused for its pictures: the model of the settings is text only, for now."""
+        self._result = (self._key(), False, time.monotonic())
 
     def listen(self, store: Any) -> None:
         """Hear the end of every turn in *store*, once, to learn of a refusal for pictures."""

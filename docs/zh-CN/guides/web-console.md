@@ -205,7 +205,7 @@ melo 回答时，消息框仍然可用。它的提示是 `Add to what melo is do
 - **多少张。** 一条消息最多 4 张图片，每张缩放前最多 20 MB。一张图片会占用模型的上下文（这个尺寸大约一千个 token），而在本机运行的模型窗口是 8,000 到 32,000 个 token，超过四张会挤掉对话本身。
 - **文本文件。** 最多 8 个文件，每个 256 KB，合计 512 KB，随消息一起发送，方式与终端的 `/attach` 相同。其他类型的文件会回答 `report.pdf: this kind of file is not supported yet. Pictures and text files work.`，页面停在原处：拖到消息框以外的文件，在浏览器或应用里都不会在窗口中被打开。
 - **在对话里。** 消息气泡显示图片和文件名。图片随这一轮一起保存，所以重新加载或重新打开的对话仍会显示它们，**Try again** 会再次发送它们。
-- **不能读图片的模型。** 当所选模型已知读不了图片时，缩略图下面会有一行说明，并链接到 设置 → 模型。melo 不会悄悄丢掉图片：仍然发送会被拒绝，并说明 `This model cannot read pictures. Choose a model that can in Settings → Model, or send the message without the picture.`。如果 melo 无法判断，就会发送图片。如果模型或其服务器随后因为图片而拒绝这一轮，这一轮会以一行话结束，`This model can't see pictures; choose one that can in Settings → Model`，从此 melo 把该模型当作只能读文字，直到你换了模型，或服务器表示它读得了图片：输入框会提醒，而这一轮的 **Try again** 会被拒绝（`model_text_only`），不会再次发送同一张图片。
+- **不能读图片的模型。** 当所选模型已知读不了图片时，缩略图下面会有一行说明，并链接到 设置 → 模型。melo 不会悄悄丢掉图片：仍然发送会被拒绝，并说明 `This model cannot read pictures. Choose a model that can in Settings → Model, or send the message without the picture.`。如果 melo 无法判断，就会发送图片。如果模型或其服务器随后因为不接受图片而拒绝这一轮（错误本身这样说才算；只有状态码的错误、关于长度的提示，或图片无法解码的提示，都保持原来的文字），这一轮会以一行话结束，`This model can't see pictures; choose one that can in Settings → Model`，此后一分钟内，或直到你换了模型，melo 把该模型当作只能读文字；之后会再次询问模型的服务器，并以它的回答为准。这期间输入框会提醒，而这一轮的 **Try again** 会被拒绝（`model_text_only`），不会再次发送同一张图片。
 - **等待中的图片留在内存里。** 加了但没发送的图片最多在本机内存里保留 30 分钟（24 张、64 MB），移除或关闭对话后就没有了。消息发送之前不会写入磁盘。
 - **不是任务。** 带图片的消息交给模型，没有任何规则读它，所以不会开始任务；有图片时 **Run as a task** 和 `/task` 会被拒绝（`Pictures cannot start a task. Send them as a message.`）。
 - 客户端用 [`POST /api/uploads`](../../reference/api-v2.md#post-apiuploads)（英文）发送图片，并把它写进这一轮的 `images`。

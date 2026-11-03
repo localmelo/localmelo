@@ -1691,8 +1691,8 @@ Stage a picture for a message. The body is the picture's bytes, not JSON: the on
   text chunks and an embedded color profile do not reach the model. A picture whose structure does not hold
   together is refused as `picture_unreadable`, not passed on.
 - `model_reads` says whether the chat's model reads pictures: `true`, `false` (the page warns at once) or `null`
-  when the gateway cannot tell (a picture is then sent). It is `false` also after a turn was refused for its
-  pictures, until the model changes or its server says it reads them.
+  when the gateway cannot tell (a picture is then sent). It is `false` also for a minute after a turn was
+  refused for its pictures (or until the model changes); then the server is asked again.
 - The picture waits in memory, not on disk: at most 24 pictures and 64 MiB at once, the oldest first, and 30
   minutes. A turn that names its `id` in `images` takes it. 413 `too_large` over 20 MiB; 413 `picture_too_many_pixels`
   over 120 million pixels, judged from the sizes in the file's headers (every frame of a GIF, every image of a HEIC)
