@@ -113,6 +113,9 @@ chat_model = "qwen3:8b"
 | `keep_tabs` | `[browser]` | `false` | melo 打开的标签页是否保持打开。默认情况下 melo 每个对话复用一个标签页，并在对话结束时、以及十分钟没有浏览调用后关闭它打开的标签页（最后一个保留为空白页）。`true` 让它们全部保持打开。不是 melo 打开的标签页从不触碰。见[用 melo 浏览网页](../guides/browsing.md#tabs)。 |
 | `web_fetch` | `[tools]` | `true` | 对话和任务是否可以用 `web_fetch` 工具读取公开网页（只读；从不访问这台电脑或它所在的局域网；你自己最近的消息没有提到的网站每个对话问一次，与浏览器共用；见[工具](tools.md#reading-a-public-web-page)）。`false` 移除这个工具；设置 → 对话和文件夹 → **读取网页** 是同一个开关；`-X tools.web_fetch=off` 仅用于一次运行。直接运行从不获得它。不是布尔值的任何值都是配置错误。 |
 | `web_fetch_allow_local` | `[tools]` | `[]` | 开发者设置，默认为空（关闭），用于需要 `web_fetch` 读取这台电脑上一个测试页面的测试。一个由精确条目组成的列表：`"127.0.0.1:PORT"` 或 `"[::1]:PORT"`（端口 1 到 65535）；`web_fetch` 随后会读取这些地址，不会读取其他任何本机地址。其他任何条目都是配置错误，且永远不会被使用：名字（`localhost`）、其他地址（私有或局域网地址段、`127.0.0.2`、`0.0.0.0`）、端口范围、通配符、没有端口。melo 自己的网关和控制台的端口（它真正监听的端口，包括 `melo serve --port` 设置的，以及正在运行的网关的端口），以及配置里写明的或这次运行的 `-u` URL 指向的任何模型服务器的端口，即使列出也会被拒绝；两者都没有写明的模型服务器不受保护。对话或任务在开始时读取这份列表，已列出的服务器会先问人（自动模式下单独审查；没有人可问时，例如 `--yolo`，会直接读取）。只有 `web_fetch` 读取它，浏览工具从不读取。在文件中设置，或用 `-X tools.web_fetch_allow_local=127.0.0.1:PORT[,…]` 仅用于一次运行：模型、控制台的设置和 API 都不能设置它，运行 `melo config set` 或对它使用 `-X` 的 shell 或 Python 调用算作改动 localmelo 本身（每次都要问，自动模式会拦下）。它放行的读取会在该调用的 `tool.finished` 事件和调用显示的内容中标出。`melo config keys` 会带着警告列出它；规则见[工具](tools.md#test-servers-on-this-computer)。 |
+| `search` | `[web]` | `false` | 对话和任务是否可以用 `web_search` 工具搜索网页（只读；搜索的关键词会离开这台电脑；关键词看起来像机密或粘贴来的文字时会先询问；见[工具](tools.md#searching-the-web)和[用 melo 搜索网页](../guides/web-search.md)）。设置 → 对话和文件夹 → **网页搜索** 是同一个开关，`-X web.search=true` 只在这一次运行中开启，`melo config set web.search true` 会保存它。直接运行从不获得它。 |
+| `search_order` | `[web]` | `[]` | 开发者设置。搜索依次尝试的方式，直到有一个给出贴合关键词的结果：`bing-rss`、`browser`（Safari 窗口，仅在 `[browser] driver` 开启时）、`baidu`。为空表示这个顺序。不是这三个之一的名字，或同一个名字写了两次，都是配置错误。 |
+| `search_count` | `[web]` | `6` | 开发者设置。一次搜索显示多少条结果，1 到 8 的整数；一次调用可以要求更少。 |
 | `follow_up` | `[tasks]` | `true` | 对话开始的任务失败、步数用完、以**做完了，还没收尾**结束或需要你时，这个对话是否跟进：自己走一轮，把任务继续一次、绕开被拦下的步骤或问你一个问题，然后说明做完了什么（见[网页控制台](../guides/web-console.md#when-a-task-it-started-stops-the-chat-follows-up)）。`false` 只留下任务的卡片；设置 → 对话和文件夹 → **跟进任务**（开发者模式）是同一个开关；`-X tasks.follow_up=off` 仅用于一次运行。不是布尔值的任何值都是配置错误。 |
 | `n_srv` | `[scheduler]` | `8` | 模型服务器的槽位数。 |
 | `r_f` | `[scheduler]` | `1` | 为命令行和直接运行保留的槽位数；`n_srv <= 2` 时强制为 0。 |
@@ -376,7 +379,7 @@ enable_thinking = false
 - 对 `ollama` 后端，这些字段进入 Ollama `/api/chat` 的请求体。localmelo 默认向 Ollama 请求模型的思考；`extra_body = { think = false }` 会关闭它。
 - `--base-url` 不读取配置文件，因此 `extra_body` 在那里不适用。
 
-驱动为 `off` 且 `keep_tabs` 为 `false` 的 `[browser]` 表不会写入（`keep_tabs` 仅在为 `true` 时写入），`web_fetch` 为 `true` 且 `web_fetch_allow_local` 为空的 `[tools]` 表、`follow_up` 为 `true` 的 `[tasks]` 表和 `recent_digest_minutes` 为 `30` 的 `[chat]` 表也不会。
+驱动为 `off` 且 `keep_tabs` 为 `false` 的 `[browser]` 表不会写入（`keep_tabs` 仅在为 `true` 时写入），`web_fetch` 为 `true` 且 `web_fetch_allow_local` 为空的 `[tools]` 表、`search` 为 `false`、`search_order` 为空且 `search_count` 为 `6` 的 `[web]` 表、`follow_up` 为 `true` 的 `[tasks]` 表和 `recent_digest_minutes` 为 `30` 的 `[chat]` 表也不会。
 
 <a id="mcp-servers"></a>
 
