@@ -145,6 +145,7 @@ from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.runner import SessionRunner
 from localmelo.support.sessions.store import SessionStore, SessionStoreError
 from localmelo.support.web import WebFetchProvider
+from localmelo.support.web.search_tool import WebSearchProvider
 
 log = logging.getLogger(__name__)
 MAX_WORKERS = 4
@@ -2392,6 +2393,13 @@ class TaskWorkers:
                         *(
                             [WebFetchProvider(task=True, cfg=self.settings())]
                             if self.settings().tools.web_fetch is True
+                            else []
+                        ),
+                        # Searching the web ([web] search), asking the chat that owns
+                        # the task about words that look like a secret.
+                        *(
+                            [WebSearchProvider(task=True, cfg=self.settings())]
+                            if self.settings().web.search is True
                             else []
                         ),
                     ],
