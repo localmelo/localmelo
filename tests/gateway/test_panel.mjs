@@ -136,6 +136,9 @@ test('a step reads as the server words it, in the present while it runs and the 
     ['shell_exec', {command: 'cat pytest.ini'}, 'Running a command'],
     ['python_exec', {code: 'print(1)'}, 'Running Python'],
     ['browser_open', {url: 'https://www.example.com/a?b'}, 'Reading example.com'],
+    ['web_search', {query: 'python asyncio TaskGroup'}, 'Searching the web for “python asyncio TaskGroup”'],
+    ['web_search', {query: ` ${'w'.repeat(80)} `}, `Searching the web for “${'w'.repeat(59)}…”`],
+    ['web_search', {}, 'Searching the web for …'],
     ['browser_follow', {ref: 'e1'}, 'Following a link'],
     ['browser_click', {ref: 'e1'}, 'Clicking on the page'],
     ['browser_type', {ref: 'e2', text: 'my secret'}, 'Typing into a field'],
@@ -147,6 +150,7 @@ test('a step reads as the server words it, in the present while it runs and the 
   ];
   for (const [name, args, words] of cases) assert.equal(stepWords(name, args), words, name);
   assert.equal(stepWords('file_read', {path: 'notes.md'}, true), 'Read notes.md');
+  assert.equal(stepWords('web_search', {query: 'tomato blight'}, true), 'Searched the web for “tomato blight”');
   assert.equal(stepWords('shell_exec', {command: 'cargo test'}, true), 'Ran the tests');
   assert.equal(stepWords('list_files', {}, true), 'Looked through the folder');
   assert.equal(stepWords('remember', {text: 'You prefer tea.'}, true), 'Remembered');
