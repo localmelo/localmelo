@@ -28,7 +28,6 @@ from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     ApprovalRequest,
     Withdrawal,
-    grant_offered,
 )
 from localmelo.melo.contracts.inbox import InboxSource
 from localmelo.melo.contracts.tools import BaseToolProvider
@@ -54,6 +53,12 @@ from localmelo.support.sessions.approvals import (
     chat_mode,
 )
 from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
+from localmelo.support.sessions.grants import (
+    STORED_KINDS,
+    Grant,
+    GrantBook,
+    SessionGrants,
+)
 from localmelo.support.sessions.runner import (
     DEFAULT_RESUME_MODE,
     ResumeInfo,
@@ -191,7 +196,6 @@ class OpenSession:
     session_id: str
     runner: SessionRunner
     policy: ChatPolicy
-    granted_at: dict[str, float]
     agent: Agent | None
     kept: list[Message] | None = None
     mcp_error: str = ""
@@ -201,6 +205,11 @@ class OpenSession:
     last_used: float = 0.0
     # The main chat, which works in the default folder as it is now.
     main: bool = False
+
+    @property
+    def grants(self) -> SessionGrants:
+        """The grants that hold in this chat (its own, and the main chat's)."""
+        return self.policy.grants
 
 
 class ConsoleSessions:
@@ -229,6 +238,7 @@ class ConsoleSessions:
         ledger: ApprovalLedger | None = None,
         viewers: Callable[[str], int] | None = None,
         inbox_for: Callable[[str], InboxSource] | None = None,
+        grants: GrantBook | None = None,
     ) -> None:
         if store.writer != "gateway":
             raise ValueError("the console opens the gateway's store")
@@ -239,6 +249,9 @@ class ConsoleSessions:
         self._viewers = viewers
         # The run inbox of a chat: the words the person adds while it works.
         self.inbox_for = inbox_for
+        # Every chat's grants, in the store's table: what the person allows
+        # in the main chat counts in every chat and task.
+        self.book = grants if grants is not None else GrantBook()
         # The person's Allows in each chat, which its tasks may use (#369).
         self.ledger = ledger or ApprovalLedger()
         self.ledger.grants_of = self.grants
@@ -291,14 +304,21 @@ class ConsoleSessions:
         return self._sessions.get(session_id)
 
     def grants(self, session_id: str) -> frozenset[str]:
-        """The tools chat *session_id* holds a grant of now (none while it is not open)."""
-        entry = self._sessions.get(session_id)
-        return frozenset() if entry is None else entry.policy.allowed_tools
+        """The names chat *session_id* holds a grant of now, open or not (the main chat's too)."""
+        return self.book.allowed_for(session_id)
 
     def folder_grants(self, session_id: str) -> tuple[str, ...]:
         """The folders outside the workspace chat *session_id* allowed for reading (#405)."""
-        entry = self._sessions.get(session_id)
-        return () if entry is None else entry.policy.allowed_folders
+        return self.book.folders_for(session_id)
+
+    def grants_view(self, info: SessionInfo) -> SessionGrants:
+        """The grants of the session *info*: the main chat's count in every chat.
+
+        A task's own view holds only what was allowed for it: its chat's
+        grants reach it through its chat (#369).
+        """
+        kind = STORED_KINDS.get(info.kind, "side")
+        return self.book.view(info.id, kind, inherit=kind != "task")
 
     def entries(self) -> list[OpenSession]:
         return list(self._sessions.values())
@@ -444,18 +464,17 @@ class ConsoleSessions:
                 memory=self._memory,
                 inbox=self._inbox(session_id),
             )
-            granted_at: dict[str, float] = {}
             policy = ChatPolicy(
-                runner.observe(self._timed_ask(session_id, granted_at)),
+                runner.observe(self._timed_ask(session_id)),
                 self.mode_of(info),
                 saved=self.saved_folders,
                 watch=self.card_watch(session_id),
+                grants=self.grants_view(info),
             )
             entry = OpenSession(
                 session_id=session_id,
                 runner=runner,
                 policy=policy,
-                granted_at=granted_at,
                 agent=agent,
                 # MCP is deferred (decision 5 B) and default_builder never
                 # reads mcp_config, so no console Agent has MCP tools yet:
@@ -519,20 +538,25 @@ class ConsoleSessions:
             await entry.runner.resume()
             entry.resumed = entry.runner.last_resume
 
-    def forget_grant(self, session_id: str, tool_name: str | None = None) -> None:
-        """Take back one session grant, or every grant with ``None``.
+    async def forget_grant(
+        self, session_id: str, tool_name: str | None = None
+    ) -> list[Grant]:
+        """Take back one grant that holds in *session_id*, or every grant it gave.
 
-        The grant lives in the policy and its start time in the registry, so
-        both go; a session that is not open has neither.
+        Open or not: the grants live in the table. A grant of the main chat
+        that holds here is taken back everywhere by its name; with ``None``
+        only the chat's own go (in the main chat, every global one). The
+        checks stop using it at once; this waits for the rows.
         """
-        entry = self._sessions.get(session_id)
-        if entry is None:
-            return
-        entry.policy.forget(tool_name)
-        if tool_name is None:
-            entry.granted_at.clear()
-        else:
-            entry.granted_at.pop(tool_name, None)
+        gone = self.book.forget_now(session_id, tool_name)
+        await self.book.flush()
+        return gone
+
+    async def forget_folder(self, session_id: str, folder: str) -> bool:
+        """Take back a folder's grant that holds in *session_id*; whether one did."""
+        gone = self.book.forget_now(session_id, folder, folders=True)
+        await self.book.flush()
+        return bool(gone)
 
     async def keep(self, session_id: str) -> None:
         """Close *session_id*'s Agent, keeping its conversation.
@@ -583,12 +607,12 @@ class ConsoleSessions:
     def _timed_ask(
         self,
         session_id: str | Callable[[], str | None],
-        granted_at: dict[str, float],
     ) -> AskFunction:
-        """The broker's ask, recording when an allowed-with-remember grant began.
+        """The broker's ask, recording the person's Allow for the chat's tasks (#369).
 
         *session_id* may be a callable, for a session whose first turn has
-        not created it yet: the id is read when a request asks.
+        not created it yet: the id is read when a request asks. The chat's
+        grants are its policy's, kept in the table.
         """
 
         async def timed(request: ApprovalRequest) -> ApprovalDecision:
@@ -605,9 +629,6 @@ class ConsoleSessions:
             ):
                 # The person's Allow: this chat's tasks may run the same step (#369).
                 self.ledger.record(current, request)
-                # A folder's "this chat" is a grant of the folder, not of the tool.
-                if decision.remember and grant_offered(request):
-                    granted_at[request.tool_name] = self._clock()
             return decision
 
         return timed
@@ -971,7 +992,6 @@ class ConsoleSessions:
         except BaseException:
             await self._drop_unopened(info.id)
             raise
-        granted_at: dict[str, float] = {}
         runner = SessionRunner(
             agent,
             self._store,
@@ -987,10 +1007,11 @@ class ConsoleSessions:
             create_scope_key=client_request_id is not None,
         )
         policy = ChatPolicy(
-            runner.observe(self._timed_ask(info.id, granted_at)),
+            runner.observe(self._timed_ask(info.id)),
             chat_mode(info.meta),
             saved=self.saved_folders,
             watch=self.card_watch(info.id),
+            grants=self.grants_view(info),
         )
         turn: TurnInfo | None = None
         if has_turn:
@@ -1028,7 +1049,6 @@ class ConsoleSessions:
             session_id=session_id,
             runner=runner,
             policy=policy,
-            granted_at=granted_at,
             agent=agent,
             built_with_mcp=False,
             lock=self.lock(session_id),
@@ -1218,9 +1238,9 @@ class ConsoleSessions:
             entry = self._sessions.get(session_id)
             if entry is None or entry.agent is None:
                 info = await self._store.update_session(session_id, workspace=path)
-                if entry is not None:
-                    entry.policy.forget()
-                    entry.granted_at.clear()
+                # A chat in another folder starts without its grants (the main
+                # chat's still hold), open or not.
+                await self.forget_grant(session_id)
                 return info
             if entry.runner.busy:
                 raise ApiError(
@@ -1264,8 +1284,7 @@ class ConsoleSessions:
             old, entry.agent = entry.agent, agent
             with contextlib.suppress(Exception):
                 await old.close()
-            entry.policy.forget()
-            entry.granted_at.clear()
+            await self.forget_grant(session_id)
             entry.last_used = self._clock()
             return info
 
@@ -1386,6 +1405,8 @@ class ConsoleSessions:
                 raise ApiError(409, "session_busy", t("errors.turnRunning")) from exc
             if not deleted:
                 raise ApiError(404, "not_found", t("errors.sessionNotFound"))
+            # Its grants' rows went with it (ON DELETE CASCADE); the checks forget them now.
+            self.book.forget_session(session_id)
             if self._memory is not None:
                 try:
                     await self._memory.forget_session(session_id)

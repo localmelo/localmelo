@@ -620,6 +620,31 @@ test('/approvals switches the chat\'s mode, forgets a grant, and shows the mode 
   assert.match(lastRow(missing), /No grant for nope in this chat\./);
 });
 
+const GRANTS = {grants: [
+  {id: 'a1', scope: 'global', session_id: 'main', session_kind: 'main', chat_title: '', action: 'tool', target: 'shell_exec', label: 'Run shell commands', by: 'person', granted_at: 1},
+  {id: 'b2', scope: 'session', session_id: 's1', session_kind: 'side', chat_title: 'Trip', action: 'open', target: 'example.com', label: 'Open example.com', by: 'auto', granted_at: 2},
+]};
+
+test('/grants lists what was allowed, numbered as Settings orders it, and /grants revoke N takes one back', async () => {
+  const p = page({routes: {'GET /grants': GRANTS, 'DELETE /grants/b2': {}}});
+  assert.equal(typeof p.slash.actions.grants, 'function');
+  const rows = await p.slash.actions.grants({args: ''});
+  assert.deepEqual(rows.map((row) => row.text), ['1. Run shell commands · everywhere · You', '2. Open example.com · Trip · Auto']);
+  assert.deepEqual(p.calls, [{method: 'GET', path: '/grants', body: undefined}]);
+  assert.deepEqual(await page({routes: {'GET /grants': {grants: []}}}).slash.actions.grants({args: ''}), [{text: 'No grants.', tone: 'muted'}]);
+  await assert.rejects(p.slash.actions.grants({args: 'revoke x'}), {message: 'Use /grants or /grants revoke N.'});
+  await assert.rejects(p.slash.actions.grants({args: 'revoke 7'}), {message: 'There is no grant 7. /grants lists them.'});
+  assert.deepEqual(await p.slash.actions.grants({args: 'revoke 2'}), [{text: 'Revoked: Open example.com.', tone: 'ok'}]);
+  assert.deepEqual(p.calls.at(-1), {method: 'DELETE', path: '/grants/b2', body: undefined});
+  // Typed in the composer, once the terminal's table has the command (tests/fixtures/slash_commands.json), the rows say the same.
+  if (LIST.some((command) => command.name === 'grants')) {
+    await p.slash.handle('/grants');
+    assert.match(lastRow(p), /2\. Open example\.com · Trip · Auto/);
+    await p.slash.handle('/grants revoke x');
+    assert.match(lastRow(p), /Use \/grants or \/grants revoke N\./);
+  }
+});
+
 test('/browser shows whether melo may browse, and /browser on or off saves it through the settings route', async () => {
   const p = page({routes: ROUTES});
   await p.slash.handle('/browser');

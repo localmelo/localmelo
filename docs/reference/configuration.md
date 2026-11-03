@@ -624,9 +624,23 @@ See [Keep memory between runs](../guides/memory.md#keep-memory-between-runs).
 | `~/.cache/localmelo/config.toml` | The configuration. | By the setup wizard. |
 | `~/.cache/localmelo/memory/` | `history.db`, `procedures.db` (procedural memory, written at the end of every run), and `long_term.db` with an embedding backend. | When an agent starts with `LOCALMELO_PERSIST_MEMORY` set, with mode 0700. An existing one that is open to group or others is set to 0700. |
 | The `--memory-dir` directory | The same files, for that run. | When the run starts, with mode 0700 when it is new. |
+| `~/.cache/localmelo/gateway/sessions.db` | The console's chats and tasks, and what you allowed in them (the `grants` table; see [What you allowed](#what-you-allowed)). | By the gateway. |
+| `~/.cache/localmelo/cli/sessions.db` | The terminal's own chats, and the grants of the terminal's own chat. | At the terminal's first message. |
 | `~/.cache/localmelo/playground/` | Legacy playground memory. | When the opt-in playground starts (security-1b in progress). |
 | `~/.localmelo/logs/` | The background service's logs. | By `melo --daemon install`. |
 | `~/Library/LaunchAgents/ai.localmelo.gateway.plist` | The background service's definition. | By `melo --daemon install`. |
+
+## What you allowed
+
+"Allow for this chat" answers are grants. They live in one table, `grants`, in the sessions file (component `grants`, version 1); no config key controls them.
+
+- **Columns:** `id`, `session_id`, `session_kind`, `scope`, `kind`, `key`, `label`, `target`, `decided_by`, `granted_at`, `request_id`, `revoked_at`.
+- **Revoke and retention:** a revoke sets `revoked_at`. Revoked rows are deleted after the store's thinking retention (30 days by default; see `LOCALMELO_THINKING_RETENTION_DAYS`).
+- **With the session:** a session's rows go with it (`ON DELETE CASCADE`).
+- **Fails closed:** a row that breaks a rule is ignored when read, so an edited file cannot widen access: a `global` row that is not the person's in the main chat, an Auto row that is more than a site read, a key that must ask every time, or a folder that is never offered.
+- **Not a grant:** **Always allow this folder** is kept in `[workspace] extra_folders`.
+
+The people-facing rules are in [What you allowed](../guides/terminal.md#what-you-allowed) and [Permissions](../guides/web-console.md#permissions); the routes are in [API v2](api-v2.md#get-apigrants).
 
 ## Upgrading from an older config
 

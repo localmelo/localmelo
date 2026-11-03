@@ -10,6 +10,7 @@ from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.melo.contracts.review import ActionReview
 from localmelo.support.gateway.chat_gate import ChatGate, GatedLLM
 from localmelo.support.gateway.console.registry import default_builder
+from localmelo.support.sessions.approvals import ChatPolicy
 from localmelo.tests.sessions.helpers import answer, tool_call
 
 from .conftest import make_cfg
@@ -63,8 +64,11 @@ async def test_a_form_send_and_typing_are_never_recorded_as_a_grant_of_the_chat(
     tmp_path: Path,
 ) -> None:
     async with console_with(tmp_path) as (console, _client, _):
-        granted_at: dict[str, float] = {}
-        ask = console.sessions._timed_ask("s1", granted_at)
+        info = await console.store.create_session(workspace=str(tmp_path / "ws"))
+        policy = ChatPolicy(
+            console.sessions._timed_ask(info.id),
+            grants=console.sessions.grants_view(info),
+        )
         for tool in (
             "browser-submit:https://example.com",
             "browser-type:https://example.com",
@@ -80,14 +84,16 @@ async def test_a_form_send_and_typing_are_never_recorded_as_a_grant_of_the_chat(
                 workspace_root=str(tmp_path / "ws"),
                 review=ActionReview("undecided"),
             )
-            waiting = asyncio.ensure_future(ask(request))
+            waiting = asyncio.ensure_future(policy.decide(request))
             await asyncio.sleep(0)
             console.broker.answer(
                 request.request_id, ApprovalDecision(True, remember=True, origin="user")
             )
             await waiting
         # Even if a client's answer asked for it, only the other tool is granted.
-        assert set(granted_at) == {"file_write"}
+        await console.grants.flush()
+        assert console.sessions.grants(info.id) == {"file_write"}
+        assert [g.key for g in console.grants.live()] == ["file_write"]
 
 
 async def test_tools_open_a_session_its_agent_was_kept_from(

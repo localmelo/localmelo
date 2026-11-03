@@ -259,7 +259,9 @@ async def test_the_question_shows_a_long_address_cut_short(
 async def test_a_browser_grant_covers_web_fetch(server: dict[str, Any]) -> None:
     person = Person()
     policy = RememberingPolicy(person.ask)
-    policy._granted.add(f"browser:http://{pages.HOST}")  # the browser's "for this chat"
+    policy.grants.grant_now(
+        f"browser:http://{pages.HOST}"
+    )  # the browser's "for this chat"
     llm = ScriptedLLM([_fetch(PAGE), _say("ok")])
     agent = _agent(llm, _resolver(server))
     try:
