@@ -30,6 +30,7 @@ PREFIX = "browser:"
 ACT_PREFIX = "browser-act:"
 TYPE_PREFIX = "browser-type:"
 SUBMIT_PREFIX = "browser-submit:"
+POINT_PREFIX = "browser-point:"
 # The longest address a site question shows (web_fetch's): longer ones are cut.
 URL_SHOWN = 300
 # The most form fields a send question lists.
@@ -229,4 +230,28 @@ async def require_submit(
     if not decision.allow:
         raise BrowserError(
             f"melo did not send the form from {host}. " + denial_text(decision)
+        )
+
+
+async def require_point(origin: str, what: str, how: str = "click") -> None:
+    """Ask about a click (or typing, *how*) on *origin*'s page that lands on *what*; :class:`BrowserError` if refused.
+
+    For a point that lands on a password, code or card field, on a control that
+    agrees to terms, consent or a sign-in with another account, or inside a box
+    from another site that melo cannot check, and for a control listed inside
+    such a box. Asked every time and never kept for the chat: the person sees
+    what it is on.
+    """
+    ask = TOOL_ASK.get()
+    if ask is None:
+        return
+    host = host_of(origin)
+    decision = await ask(
+        POINT_PREFIX + origin,
+        {"site": host, "access": "point", "how": how, "on": what},
+        f"{how} {what} on {host} in Safari",
+    )
+    if not decision.allow:
+        raise BrowserError(
+            f"melo did not {how} there on {host}. " + denial_text(decision)
         )

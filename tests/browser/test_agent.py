@@ -204,3 +204,36 @@ async def test_without_a_provider_the_request_has_no_browser_text_or_tools() -> 
     system = llm.calls[0]["messages"][0].content
     assert "browser" not in system.lower() and "<<page" not in system
     assert all(not t.name.startswith("browser_") for t in llm.calls[0]["tools"] or [])
+
+
+class SeeingLLM(ScriptedLLM):
+    """A model whose server says it reads images (what ``tool_images = "auto"`` asks)."""
+
+    async def takes_images(self) -> bool | None:
+        return True
+
+
+def _call(name: str, **arguments: Any) -> Message:
+    return Message(
+        role="assistant", tool_call=ToolCall(tool_name=name, arguments=arguments)
+    )
+
+
+@pytest.mark.parametrize(
+    ("llm_type", "sees"), [(SeeingLLM, True), (ScriptedLLM, False)]
+)
+async def test_a_picture_of_the_page_reaches_a_model_that_reads_images_in_the_next_step(
+    llm_type: type[ScriptedLLM], sees: bool
+) -> None:
+    llm = llm_type([_open(HOME), _call("browser_screenshot"), _say("I see the page.")])
+    agent = _agent(llm, _driver())
+    try:
+        result = await agent.run_task("look at the page")
+    finally:
+        await agent.close()
+    assert result.status == "completed"
+    after = llm.calls[2]["messages"]  # the request right after the picture
+    pictured = [m for m in after if m.role == "tool" and m.images]
+    assert len(pictured) == 1
+    assert bool(pictured[0].images[0].data) is sees
+    assert "1 image: sha256:" in pictured[0].content

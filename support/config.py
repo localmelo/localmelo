@@ -574,6 +574,31 @@ class ToolsConfig:
     web_fetch_allow_local: list[str] = field(default_factory=list)
 
 
+# The most results one search returns, and the range of ``[web] search_count``.
+WEB_SEARCH_COUNT: Final = (1, 8)
+
+
+@dataclass
+class WebConfig:
+    """The ``[web]`` table: searching the public web.
+
+    ``search`` (off by default) gives every chat and every task's worker a
+    ``web_search`` tool, and tells them when to use it. The words of a search
+    leave the computer, which is why it is a switch and not always on (see
+    :mod:`localmelo.support.web.search`).
+
+    ``search_order`` and ``search_count`` are developer settings. The order is
+    the ways melo tries one after another (the names in
+    :data:`localmelo.support.web.search.WAYS`, then ``browser``); empty means the
+    built-in order. The count is how many results one search shows by default,
+    from 1 to 8 (a call may ask for fewer).
+    """
+
+    search: bool = False
+    search_order: list[str] = field(default_factory=list)
+    search_count: int = 6
+
+
 @dataclass
 class TasksConfig:
     """The ``[tasks]`` table: what a chat does about the tasks it started.
@@ -646,6 +671,7 @@ class Config:
     browser: BrowserConfig = field(default_factory=BrowserConfig)
     workspace: WorkspaceConfig = field(default_factory=WorkspaceConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
+    web: WebConfig = field(default_factory=WebConfig)
     tasks: TasksConfig = field(default_factory=TasksConfig)
     chat: ChatConfig = field(default_factory=ChatConfig)
     # [pricing.<model>]: dollars per million tokens (input, output, and
@@ -693,6 +719,7 @@ class Config:
         errors.extend(self._validate_scheduler())
         errors.extend(self._validate_browser())
         errors.extend(self._validate_tools())
+        errors.extend(self._validate_web())
         errors.extend(self._validate_tasks())
         errors.extend(self._validate_chat())
         # [cli] is a display preference: like [sessions] resume_mode, a bad
@@ -860,6 +887,37 @@ class Config:
             ),
             *web_local.problems(self),
         ]
+
+    def _validate_web(self) -> list[str]:
+        """``[web]``: ``search`` is a bool, the order names known ways, the count is in range."""
+        from localmelo.support.web.search import way_names
+
+        errors: list[str] = []
+        if not isinstance(self.web.search, bool):
+            errors.append(f"[web] search must be a bool, got {self.web.search!r}")
+        order = self.web.search_order
+        if not isinstance(order, list) or not all(isinstance(x, str) for x in order):
+            errors.append(f"[web] search_order must be a list of names, got {order!r}")
+        else:
+            known = way_names()
+            errors.extend(
+                f"[web] search_order: {name!r} is not one of {known}"
+                for name in order
+                if name not in known
+            )
+            if len(set(order)) != len(order):
+                errors.append("[web] search_order names a way twice")
+        count, (low, high) = self.web.search_count, WEB_SEARCH_COUNT
+        if (
+            not isinstance(count, int)
+            or isinstance(count, bool)
+            or not low <= count <= high
+        ):
+            errors.append(
+                f"[web] search_count must be a whole number from {low} to {high}, "
+                f"got {count!r}"
+            )
+        return errors
 
     def _validate_tasks(self) -> list[str]:
         """``[tasks]`` holds bools."""
@@ -1257,6 +1315,7 @@ class Config:
             *self._validate_scheduler(),
             *self._validate_browser(),
             *self._validate_tools(),
+            *self._validate_web(),
             *self._validate_tasks(),
             *self._validate_chat(),
             *self._validate_gateway_workspace(),
@@ -1631,6 +1690,12 @@ def _load_file() -> Config:
             if hasattr(cfg.tools, k):
                 # A bad value is kept for Config.validate; a list is the file's own copy.
                 setattr(cfg.tools, k, list(v) if isinstance(v, list) else v)
+
+    if isinstance(data.get("web"), dict):
+        for k, v in data["web"].items():
+            if hasattr(cfg.web, k):
+                # A bad value is kept for Config.validate; a list is the file's own copy.
+                setattr(cfg.web, k, list(v) if isinstance(v, list) else v)
 
     if isinstance(data.get("tasks"), dict):
         for k, v in data["tasks"].items():
@@ -2010,6 +2075,16 @@ def save(cfg: Config) -> None:
         if cfg.tools.web_fetch_allow_local:
             allowed = _toml_value(cfg.tools.web_fetch_allow_local)
             lines.append(f"web_fetch_allow_local = {allowed}")
+        lines.append("")
+
+    if cfg.web != WebConfig():
+        lines.append("[web]")
+        if cfg.web.search is not False:
+            lines.append(f"search = {_toml_value(cfg.web.search)}")
+        if cfg.web.search_order:
+            lines.append(f"search_order = {_toml_value(cfg.web.search_order)}")
+        if cfg.web.search_count != WebConfig().search_count:
+            lines.append(f"search_count = {_toml_value(cfg.web.search_count)}")
         lines.append("")
 
     if cfg.tasks != TasksConfig():
