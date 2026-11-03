@@ -129,6 +129,8 @@ CAUSES: Final = frozenset(get_args(Cause))
 OUTCOME_CAUSES: Final = ("run", "user_stop")
 # How many of the most recently updated sessions latest_finished_turn looks at.
 RECENT_SESSIONS: Final = 8
+# Rows a look for a chat's first turn of the person's reads at most, oldest first.
+FIRST_TURN_SCAN: Final = 50
 # Characters of an answer that :meth:`SessionStore.day_turns` reads.
 DAY_ANSWER_CHARS: Final = 600
 STALE_ERROR: Final = "The process running this turn stopped before it finished."
@@ -1772,6 +1774,35 @@ class SessionStore:
             conn = await self._ready()
             rows = await _rows(conn, sql, [session_id])
         return _turn_info(rows[0]) if rows else None
+
+    async def first_person_turn(
+        self, session_id: str, *, before: int | None = None
+    ) -> TurnInfo | None:
+        """The oldest turn of *session_id* the person began and kept, or ``None``.
+
+        Not running, not undone, no ``origin``, with words of the person's
+        (typed, or the turn's text), numbered below *before* (any, when
+        ``None``): the task a chat began with, which a step review keeps after
+        a reload (#465). Reads at most :data:`FIRST_TURN_SCAN` rows.
+        """
+        sql = (
+            f"SELECT {_TURN_COLUMNS} FROM turns t WHERE t.session_id = ? "
+            "AND t.origin = '' AND t.undone = 0 AND t.status != 'running'"
+        )
+        args: list[Any] = [session_id]
+        if before is not None:
+            sql += " AND t.turn < ?"
+            args.append(before)
+        sql += " ORDER BY t.turn ASC LIMIT ?"
+        args.append(FIRST_TURN_SCAN)
+        async with self._lock:
+            conn = await self._ready()
+            rows = await _rows(conn, sql, args)
+        for row in rows:
+            turn = _turn_info(row)
+            if (turn.typed_text or turn.user_text).strip():
+                return turn
+        return None
 
     async def latest_finished_turn(self, kinds: Collection[str]) -> FinishedTurn | None:
         """The newest finished turn of a session of *kinds*, or ``None``.

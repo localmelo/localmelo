@@ -117,3 +117,37 @@ They are the defaults now.
   measure the cost of the new defaults on its own.
 - The closing-line request ([Run results](../reference/run-results.md#statuses))
   was added after this comparison, for the runs that finished without the line.
+
+## Long attempts and reflection as an option
+
+Attempts are now 50 steps long and a run is 100 steps (it was 10 and 30), and
+reflection is a switch ([Reflection](../concepts/how-it-works.md#reflection)).
+A run reflects only when it is still not done after 50 steps. This is a
+decision from the evidence below, not a new comparison: nothing was run to
+compare 10-step attempts with 50-step ones.
+
+- **No measured gain from reflecting.** In the [first comparison](#reflection-gate)
+  the default gate and no reflection at all each passed 59/60 runs. Paired by
+  exercise and pass, each passed one pair the other failed.
+- **Where reflections were measured, they cost.** The `utility` gate's 10 lost
+  runs all ended at a reflection. On the same kind of exercises, reflection
+  replies were about 170 output tokens per task, 23% of what a run writes,
+  and each one also costs a request and the wait for it.
+- **A short attempt cut real work.** In a person's test of a task in a
+  browser, a turn ended at its tenth step with "The attempt used its step
+  budget". The 10-step boundary fell in the middle of a sign-in; the reflection
+  that followed could not see a window another program had opened, judged that
+  only the person could go on, and chose `done`. A task that needs 20 or 40
+  steps now runs through its first 49 without a pause.
+- **Not measured:** whether a reflection after 50 steps helps a task that
+  would otherwise run on. The step numbers are developer settings
+  (`-X agent.steps_per_attempt=N`, `-s N`), and `-X agent.reflection=off`
+  turns reflection off for one run.
+
+What changes for runs that were set up before: a run with `--max-steps 30` and
+no other length option now has one attempt of 30 steps, then a final
+reflection. `-s 30 -X agent.steps_per_attempt=10` gives the earlier requests.
+`--attempt-policy none` and `--max-steps 30`, together, send the same requests
+as before. Routines learn their usual steps per set of length options
+([Procedural memory](../concepts/procedures.md)), so a routine's earlier runs
+at 30 and 10 stay with that set, and the new defaults start their own count.

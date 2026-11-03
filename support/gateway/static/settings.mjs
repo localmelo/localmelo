@@ -111,7 +111,7 @@ export function setupSettings({
   const inputIds = ["s-adapter", "s-chat-url", "s-key-env", "s-key-input", "s-key-save", "s-key-replace", "s-key-remove", "s-base-url",
     "s-chat-model", "s-thinking", "s-embed-backend", "s-embed-url", "s-embed-model", "s-embed-use"];
   // Each saves on its own; they wait while a change is being saved.
-  const switchIds = ["s-across-chats", "s-web-fetch", "s-web-search", "s-follow-up", "s-developer", ...RECALL.map((name) => `s-recall-${name}`),
+  const switchIds = ["s-across-chats", "s-web-fetch", "s-web-search", "s-app-windows", "s-follow-up", "s-reflection", "s-developer", ...RECALL.map((name) => `s-recall-${name}`),
     ...LANGUAGE_SETTINGS.map((name) => `s-language-${name}`), ...APPROVAL_MODES.map((name) => `s-approvals-${name}`)];
   let settings = null;
   let sections = {};
@@ -566,7 +566,15 @@ export function setupSettings({
     // Searching the web (`[web] search`, off until switched on); a gateway that does not report it has no switch.
     $("s-web-search-row").hidden = settings.web_search === undefined;
     $("s-web-search").checked = settings.web_search === true;
+    // Other apps' windows (`[browser] app_windows`): shown while browsing is on; a gateway that does not
+    // report it has no switch. Without the desktop control helper, a line says what it needs.
+    $("s-app-windows-row").hidden = settings.app_windows === undefined || settings.browser !== true;
+    $("s-app-windows").checked = settings.app_windows === true;
+    $("s-app-windows-helper").hidden = settings.desktop_helper !== false;
     followUp();
+    // Reflecting after many steps (`[agent] reflection`, on by default); a gateway that does not report it has no switch.
+    $("s-reflection-row").hidden = settings.reflection === undefined;
+    $("s-reflection").checked = settings.reflection !== false;
     notes();
   }
 
@@ -783,11 +791,23 @@ export function setupSettings({
     const words = (value) => t(value ? "settings.webSearch.on" : "settings.webSearch.off");
     settingCommit("web_search", on, words(on), !on, words(!on));
   });
+  $("s-app-windows").addEventListener("change", (event) => {
+    const on = event.target.checked;
+    if (saving || !settings || settings.app_windows === undefined) { event.target.checked = !on; return; }
+    const words = (value) => t(value ? "settings.appWindows.on" : "settings.appWindows.off");
+    settingCommit("app_windows", on, words(on), !on, words(!on));
+  });
   $("s-follow-up").addEventListener("change", (event) => {
     const on = event.target.checked;
     if (saving || !settings || settings.follow_up === undefined) { event.target.checked = !on; return; }
     const words = (value) => t(value ? "settings.followUp.on" : "settings.followUp.off");
     settingCommit("follow_up", on, words(on), !on, words(!on));
+  });
+  $("s-reflection").addEventListener("change", (event) => {
+    const on = event.target.checked;
+    if (saving || !settings || settings.reflection === undefined) { event.target.checked = !on; return; }
+    const words = (value) => t(value ? "settings.reflection.on" : "settings.reflection.off");
+    settingCommit("reflection", on, words(on), !on, words(!on));
   });
   for (const name of RECALL) {
     $(`s-recall-${name}`).addEventListener("change", (event) => {

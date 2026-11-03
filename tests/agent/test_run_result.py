@@ -34,6 +34,7 @@ from localmelo.melo.schema import (
 from localmelo.tests.legacy_options import (
     LEGACY_ANSWER_OPTIONS,
     LEGACY_CACHE_OPTIONS,
+    LEGACY_STEP_OPTIONS,
     legacy_options,
 )
 
@@ -251,7 +252,12 @@ def _options(**kwargs: Any) -> AgentOptions:
     """Options without built-ins, so the test's echo tool is the only tool."""
     return AgentOptions(
         builtins=frozenset(),
-        **{**LEGACY_CACHE_OPTIONS, **LEGACY_ANSWER_OPTIONS, **kwargs},
+        **{
+            **LEGACY_CACHE_OPTIONS,
+            **LEGACY_ANSWER_OPTIONS,
+            **LEGACY_STEP_OPTIONS,
+            **kwargs,
+        },
     )
 
 
@@ -755,13 +761,18 @@ CONFIG_KEYS = [
 class TestConfig:
     @pytest.mark.asyncio
     async def test_default_configuration(self) -> None:
-        agent = Agent(llm=FakeLLM([_answer("ok")]), options=legacy_options())
+        # The earlier gate and cache layout, with the run length of today (100 steps in
+        # attempts of 50): it is the length the config reports.
+        options = legacy_options(
+            max_steps=MAX_AGENT_STEPS, steps_per_attempt=STEPS_PER_ATTEMPT
+        )
+        agent = Agent(llm=FakeLLM([_answer("ok")]), options=options)
         result = await agent.run_task("q")
         assert list(result.config) == CONFIG_KEYS
         assert result.config == {
-            "max_steps": MAX_AGENT_STEPS,
+            "max_steps": 100,
             "attempt_policy": "reflect",
-            "steps_per_attempt": STEPS_PER_ATTEMPT,
+            "steps_per_attempt": 50,
             "max_attempts": MAX_ATTEMPTS,
             "reflection_gate": "flags",
             "tool_exposure": "retrieve",

@@ -328,6 +328,13 @@ class AgentConfig:
     # then answered with the end of its thinking, marked as such
     # (AgentOptions.empty_reply_fallback). "off" ends such a run as failed.
     empty_reply_fallback: str = "on"  # on | off
+    # Reflect when stuck after many steps (AgentOptions.attempt_policy): true runs
+    # attempts of steps_per_attempt steps with a reflection between them; false
+    # never reflects and runs straight to the run's total.
+    reflection: bool = True
+    # Developer setting: steps in one attempt before a reflection
+    # (AgentOptions.steps_per_attempt). None: the built-in (STEPS_PER_ATTEMPT, 50).
+    steps_per_attempt: int | None = None
 
     def window_for(self, backend: str) -> int:
         """The working window's cap: ``window_messages``, else *backend*'s default."""
@@ -553,11 +560,16 @@ class BrowserConfig:
     ``driver`` is ``off`` (the default, no browser tools) or ``safari-automation``
     (Safari's automation windows). Only the terminal chat and the console offer it.
     ``keep_tabs`` leaves the tabs melo opened in the window when a chat ends or
-    sits idle; by default melo closes them.
+    sits idle; by default melo closes them. ``app_windows`` (on by default) lets
+    melo see a window another app opens after its own act in the browser, such
+    as a chat app's sign-in window, and answer it with the person's say, when the
+    desktop control helper is installed; without the helper melo still says which
+    app came to the front (:mod:`localmelo.support.browser.desktop`).
     """
 
     driver: str = "off"  # off | safari-automation
     keep_tabs: bool = False
+    app_windows: bool = True
 
 
 # The most folders ``[workspace] extra_folders`` keeps.
@@ -885,16 +897,16 @@ class Config:
         return errors
 
     def _validate_browser(self) -> list[str]:
-        """``[browser] driver`` names a driver and ``keep_tabs`` is true or false."""
+        """``[browser] driver`` names a driver; ``keep_tabs`` and ``app_windows`` are true or false."""
         errors = []
         if self.browser.driver not in BROWSER_DRIVERS:
             errors.append(
                 f"[browser] driver={self.browser.driver!r} is not one of {BROWSER_DRIVERS}"
             )
-        if not isinstance(self.browser.keep_tabs, bool):
-            errors.append(
-                f"[browser] keep_tabs={self.browser.keep_tabs!r} must be true or false"
-            )
+        for name in ("keep_tabs", "app_windows"):
+            value = getattr(self.browser, name)
+            if not isinstance(value, bool):
+                errors.append(f"[browser] {name}={value!r} must be true or false")
         return errors
 
     def _validate_tools(self) -> list[str]:
@@ -1117,6 +1129,15 @@ class Config:
             errors.append("[agent] confine_direct_runs must be a boolean")
         if not isinstance(self.agent.answer_on_stop, bool):
             errors.append("[agent] answer_on_stop must be a boolean")
+        if not isinstance(self.agent.reflection, bool):
+            errors.append("[agent] reflection must be a boolean")
+        attempt: object = self.agent.steps_per_attempt
+        if attempt is not None and (
+            isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1
+        ):
+            errors.append(
+                f"[agent] steps_per_attempt must be an int >= 1, got {attempt!r}"
+            )
         calls: object = self.agent.max_calls
         if calls is not None and (
             isinstance(calls, bool) or not isinstance(calls, int) or calls < 2
@@ -2023,6 +2044,8 @@ def save(cfg: Config) -> None:
         or cfg.agent.answer_on_stop != defaults.answer_on_stop
         or cfg.agent.max_calls is not None
         or cfg.agent.empty_reply_fallback != defaults.empty_reply_fallback
+        or cfg.agent.reflection != defaults.reflection
+        or cfg.agent.steps_per_attempt is not None
         or any(
             getattr(cfg.agent, name) != getattr(defaults, name) for name in IMAGE_KEYS
         )
@@ -2070,6 +2093,12 @@ def save(cfg: Config) -> None:
                 "empty_reply_fallback = "
                 f"{_toml_string(cfg.agent.empty_reply_fallback)}"
             )
+        if cfg.agent.reflection != defaults.reflection:
+            lines.append(f"reflection = {_toml_value(cfg.agent.reflection)}")
+        if cfg.agent.steps_per_attempt is not None:
+            lines.append(
+                f"steps_per_attempt = {_toml_value(cfg.agent.steps_per_attempt)}"
+            )
         if cfg.agent.tool_env:
             lines.append(f"tool_env = {_toml_value(cfg.agent.tool_env)}")
         for name in ("context_window", "output_reserve", "safety_margin"):
@@ -2105,6 +2134,8 @@ def save(cfg: Config) -> None:
         lines.extend(["[browser]", f"driver = {_toml_string(cfg.browser.driver)}"])
         if cfg.browser.keep_tabs is not False:
             lines.append(f"keep_tabs = {_toml_value(cfg.browser.keep_tabs)}")
+        if cfg.browser.app_windows is not True:
+            lines.append(f"app_windows = {_toml_value(cfg.browser.app_windows)}")
         lines.append("")
 
     if cfg.tools != ToolsConfig():

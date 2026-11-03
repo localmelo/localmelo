@@ -821,6 +821,9 @@ class SessionRunner:
             earlier = await self._earlier_turns(turn)
             if earlier:
                 kwargs["earlier_turns"] = earlier
+            first = await self._first_words(turn)
+            if first:
+                kwargs["chat_first"] = first
             if self._review_since is not None:
                 since: float | None = None
                 with contextlib.suppress(Exception):
@@ -894,6 +897,26 @@ class SessionRunner:
             logger.warning("Could not read this chat's earlier turns", exc_info=True)
             return []
         return [earlier_pair(past) for past in found]
+
+    async def _first_words(self, turn: _Turn) -> str:
+        """The person's words of this chat's first turn before *turn*, or ``""``.
+
+        A step review keeps them as the task the chat began with, after a
+        reload too (``Agent.run_task(chat_first=...)``, #465). ``""`` for a
+        worker's run, a chat with no earlier turn of the person's, or a store
+        that cannot be read.
+        """
+        if self._worker:
+            return ""
+        info = turn.turn
+        try:
+            found = await self._store.first_person_turn(
+                info.session_id, before=info.turn
+            )
+        except Exception:
+            logger.warning("Could not read this chat's first turn", exc_info=True)
+            return ""
+        return "" if found is None else found.typed_text or found.user_text
 
     async def _with_digest(self, turn: _Turn, text: str) -> str:
         """*text* with the digest of the user's other chats, on a chat's first turn.

@@ -438,3 +438,38 @@ async def test_auto_mode_reviews_a_site_s_plain_pages_once(
     assert len(llm.review_requests) == 2
     assert "json?x=1" in "\n".join(m.content for m in llm.review_requests[1])
     assert [r["path"] for r in server["requests"]] == ["/page", "/plain", "/json?x=1"]
+
+
+@pytest.mark.parametrize(
+    "path", ["/report?access_token=AbCdEf0123456789", "/s/AbCdEf0123456789xyz/report"]
+)
+async def test_auto_mode_never_reads_an_address_its_review_finds_holds_a_key(
+    server: dict[str, Any], path: str
+) -> None:
+    """A read's address can carry a credential: the review's finding stands (#465).
+
+    Unlike a click, a read is never judged as carrying no value: the
+    ``credentials`` answer keeps it from running though it serves the goal,
+    with the key in the query or in the path alike, and nothing is sent.
+    """
+    from localmelo.tests.agent.test_auto_mode import FakeModel, verdict
+
+    person = Person(refuse=True)
+    keys = verdict(verdict="ask", category="credentials", user_asked="no")
+    llm = FakeModel([_fetch(f"http://{pages.HOST}{path}"), _say("ok")], [keys])
+    fetcher = WebFetcher(resolver=_resolver(server), allow=_allow)
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(builtins=frozenset(), tool_exposure="all"),
+        tool_providers=[WebFetchProvider(fetcher=fetcher)],
+    )
+    policy = ChatPolicy(person.ask, mode="auto")
+    try:
+        await agent.run_task("get the garden report", approval=policy)
+    finally:
+        await agent.close()
+    assert server["requests"] == [] and person.asked == [], "nothing was sent"
+    assert len(llm.review_requests) == 1
+    [said] = [m.content for m in llm.requests[-1] if m.role == "tool"]
+    assert f"melo did not read {pages.HOST}" in said
+    assert policy.allowed_tools == frozenset()

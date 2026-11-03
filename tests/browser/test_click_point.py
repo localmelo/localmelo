@@ -151,6 +151,46 @@ async def test_a_point_on_a_secret_consent_or_a_box_from_elsewhere_asks_every_ti
     assert out.is_error and "did not click there" in out.text and not refusing.acts
 
 
+async def test_a_point_in_a_box_melo_cannot_tell_says_its_target_is_unknown() -> None:
+    """Auto mode asks the person about it, as nobody can judge it on the goal (#465)."""
+    box = PointHit(
+        "frame",
+        Element("button", "", fp="iframe|1"),
+        site="https://login.example.net/x",
+    )
+    asks = Asks()
+    out = await pointed(point_world(box), asks)
+    assert not out.is_error
+    [(_, arguments, _)] = [q for q in asks.asked if q[0].startswith("browser-point:")]
+    assert arguments["target"] == "unknown"
+
+
+async def test_a_point_in_a_box_melo_knows_by_its_title_is_clicked_like_any_other() -> (
+    None
+):
+    """The box's title says what it is: the click's own question names it (#465)."""
+    box = PointHit(
+        "frame",
+        Element("button", "Quick login", fp="iframe|1"),
+        site="https://login.example.net/x",
+    )
+    asks = Asks()
+    driver = point_world(box)
+    out = await pointed(driver, asks)
+    assert not out.is_error and driver.acts
+    assert not [n for n in asks.names if n.startswith("browser-point:")]
+    [(name, arguments, preview)] = [
+        q for q in asks.asked if q[0].startswith("browser-act:")
+    ]
+    on = 'inside a box "Quick login" from login.example.net'
+    assert (name, arguments["on"]) == ("browser-act:https://example.com", on)
+    assert preview == f"click {on} on example.com in Safari"
+    # A refusal of the click leaves the box alone.
+    refusing = point_world(box)
+    out = await pointed(refusing, Asks(deny=("browser-act:",)))
+    assert out.is_error and not refusing.acts
+
+
 async def test_a_point_in_a_box_from_elsewhere_never_says_nothing_changed() -> None:
     """melo cannot see into that box: what the click did shows in the new picture only."""
     box = PointHit(

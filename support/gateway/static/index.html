@@ -420,9 +420,17 @@
                   <div class="st-text"><label class="st-label" for="s-web-search" data-i18n="settings.webSearch.title">Web search</label><span class="st-key" data-developer hidden>web.search</span><p class="st-hint" data-i18n="settings.webSearch.hint">Melo can search the web when it needs to check something, in every chat and task. The words it searches for leave this computer.</p></div>
                   <span class="st-switch"><input type="checkbox" role="switch" id="s-web-search" disabled /><span class="st-track" aria-hidden="true"></span></span>
                 </li>
+                <li class="st-row" id="s-app-windows-row" hidden>
+                  <div class="st-text"><label class="st-label" for="s-app-windows" data-i18n="settings.appWindows.title">Other apps' windows</label><span class="st-key" data-developer hidden>browser.app_windows</span><p class="st-hint" data-i18n="settings.appWindows.hint">When a page melo uses in the browser opens a window in another app, such as a chat app's sign-in window, melo sees it and can press its buttons with your say. It never types into other apps.</p><p class="st-hint" id="s-app-windows-helper" data-i18n="settings.appWindows.helper" hidden>Needs the desktop control helper. Without it melo only says which app to answer.</p></div>
+                  <span class="st-switch"><input type="checkbox" role="switch" id="s-app-windows" disabled /><span class="st-track" aria-hidden="true"></span></span>
+                </li>
                 <li class="st-row" id="s-follow-up-row" hidden>
                   <div class="st-text"><label class="st-label" for="s-follow-up" data-i18n="settings.followUp.title">Follow up on tasks</label><span class="st-key" data-developer hidden>tasks.follow_up</span><p class="st-hint" data-i18n="settings.followUp.hint">When a task a chat started fails or stops, that chat continues it once, works around a blocked step, or asks you one question, then says what got done.</p></div>
                   <span class="st-switch"><input type="checkbox" role="switch" id="s-follow-up" disabled /><span class="st-track" aria-hidden="true"></span></span>
+                </li>
+                <li class="st-row" id="s-reflection-row" hidden>
+                  <div class="st-text"><label class="st-label" for="s-reflection" data-i18n="settings.reflection.title">Reflect when stuck after many steps</label><span class="st-key" data-developer hidden>agent.reflection</span><p class="st-hint" data-i18n="settings.reflection.hint">If a task is still not done after 50 steps, melo reflects on what went wrong before it goes on; that costs one more model request. Off, it keeps going straight to 100 steps.</p></div>
+                  <span class="st-switch"><input type="checkbox" role="switch" id="s-reflection" disabled /><span class="st-track" aria-hidden="true"></span></span>
                 </li>
               </ul>
               <h4 class="st-group-title" id="s-extra-title" data-i18n="html.sExtraTitle">Other folders melo may read</h4>

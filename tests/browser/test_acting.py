@@ -132,9 +132,15 @@ async def test_a_click_asks_to_act_on_the_site_apart_from_reading_it() -> None:
         "browser-act:https://example.com",
     ]
     # No origin in the question: a refused click must not refuse reading the site.
+    # It names what it is on, so auto mode's review judges the target (#465).
     name, arguments, preview = asks.asked[1]
-    assert arguments == {"site": "example.com", "access": "act", "how": "click"}
-    assert preview == "click on example.com in Safari"
+    assert arguments == {
+        "site": "example.com",
+        "access": "act",
+        "how": "click",
+        "on": 'a button "Check in"',
+    }
+    assert preview == 'click a button "Check in" on example.com in Safari'
 
 
 async def test_a_refused_click_does_nothing_and_says_whose_answer_it_was() -> None:
@@ -597,9 +603,12 @@ async def test_every_typing_asks_with_all_of_its_text_and_is_never_a_chat_grant(
         "access": "type",
         "how": "type",
         "text": long,
+        "on": 'a textbox "Notes"',
     }
     assert second["text"] == "second"
-    assert typing[0][2] == f"type {len(long)} character(s) on example.com in Safari"
+    assert typing[0][2] == (
+        f'type {len(long)} character(s) into a textbox "Notes" on example.com in Safari'
+    )
     assert not any(
         n.startswith("browser-act:") and a.get("how") == "type"
         for n, a, _ in asks.asked
@@ -795,12 +804,13 @@ async def test_find_matches_buttons_by_visible_text_and_by_aria_label() -> None:
     driver = world(*items)
     tools = await tools_of(driver)
     await run(tools, "browser_open", url=HOME)
+    # Each find reads the page again, so its refs are those of a new reading.
     by_text = (await run(tools, "browser_find", query="签到")).text
     by_aria = (await run(tools, "browser_find", query="check-in", role="button")).text
-    assert '1 of 4 elements match "签到"' in by_text and '[e1 button "签到"]' in by_text
-    assert '[e1 button "签到"]' in by_aria
+    assert '1 of 4 elements match "签到"' in by_text and '[e5 button "签到"]' in by_text
+    assert '[e9 button "签到"]' in by_aria
     menu = (await run(tools, "browser_find", query="account")).text
-    assert '[e2 button "Account menu"]' in menu
+    assert '[e14 button "Account menu"]' in menu
     only_links = (await run(tools, "browser_find", query="a", role="link")).text
     assert "button" not in only_links
 

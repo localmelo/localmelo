@@ -2455,6 +2455,7 @@ def _build_direct_mode_agent(
     from localmelo.support.backends.discovery import OPENAI_COMPATIBLE
     from localmelo.support.sessions.agents import (
         CACHE_SETTINGS,
+        configured_attempt_options,
         configured_cache_options,
         configured_context_options,
         configured_fallback_options,
@@ -2564,6 +2565,11 @@ def _build_direct_mode_agent(
     try:
         options = configured_image_options(budget_cfg, options)
         options = configured_fallback_options(budget_cfg, options)
+        options = configured_attempt_options(
+            budget_cfg,
+            options,
+            {"attempt_policy"} if getattr(args, "attempt_policy", None) else set(),
+        )
     except ValueError as exc:
         config_value_error(str(exc))
 

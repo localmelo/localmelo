@@ -34,7 +34,8 @@ SEEDS = tuple(range(1, 21))
 # The wall clock at mono 0: 2026-10-26 08:00 UTC, in µs.
 WALL_START_US = 1_793_001_600_000_000
 
-# The most calls a task makes (MAX_AGENT_STEPS).
+# The most calls a simulated task makes. The workloads were drawn when a run had 30
+# steps (the default is 100 now); they stay as they were so the sweeps compare.
 MAX_CALLS = 30
 
 # An hour and a minute, in seconds.
