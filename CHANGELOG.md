@@ -741,6 +741,27 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- In Auto, the goal decides: the steps a task plainly needs run without asking, and the risky
+  ones still ask. On the site or app the chat is about, opening and reading it, signing in the
+  way you described, picking options, filling in and sending the task's own form and reading
+  the result run with no card, whether or not your latest message names them. melo judges each
+  step against all your messages in the chat (the first one kept, so "signed in" still means
+  the check-in) and, when you point to them ("do it the way I told you"), against the notes it
+  recalled; your words only ever add, and never stop a step the task needs. A click or a choice
+  names what it is on (`a button "Check in"`) and is judged by that target, also on a site your
+  words name. Passwords and keys mean a secret value typed, read or sent, so a click on a
+  sign-in or quick-login button is no longer blocked as one. Paying and changing an account's
+  email, password or sign-in are kinds of their own: they always ask on the card, even when you
+  asked for them, and never ride an allowance. A click inside a box from another site is a
+  click like any other when melo knows the box (a control it lists there by name, or the box's
+  title), and asks you only when melo cannot tell what it is on. A site Auto let the chat open
+  or click on stays allowed for the rest of the chat, in Ask too, and is listed with **Remove**.
+  **Don't allow** on one button no longer refuses the other buttons of the site for the turn.
+  melo tells the model that it asks the person itself on a card, so the model never asks you
+  to type a permission and says a step was blocked, failed or succeeded only when a step result
+  shows it; a blocked note says when the step needs you because nobody could be asked. A turn
+  may send up to 12 reviews (was 6). The review prompt grows from 3,011 to 3,789 characters and
+  the chat's identity paragraph by 296 characters. Part of #465.
 - A cut excerpt of an earlier chat turn can be opened whole, by default. When recall shows
   less than the whole turn, the line starts with the turn's id, such as `[t123]`, a line under
   the excerpts says it can be opened, and the chat's model has `open_memory` to read the turn

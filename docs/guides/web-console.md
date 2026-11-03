@@ -868,18 +868,29 @@ commands and file changes.
   by the review, not walled off: such steps are blocked or checked by your
   model, never run as routine. The sandbox also keeps a step from talking to
   a container engine.
-- **Your words count.** A step your own recent messages ask for, or whose
-  target they name (a package, a file, a site, a box or a button on a page),
-  runs without asking: after "choose a mood and write a line in the comment
-  box", the message "I signed in" still asks for the line. Only what you
-  typed counts, never melo's answers, a page or recalled notes.
-- **What asks.** Any other install, download, change outside the folder,
-  delete, data sent out, network service, code melo cannot check, or a site,
-  click or text you did not ask for shows the approval card in the chat and
-  waits, as in Ask: **Allow once**, **Deny** with a note for melo, and, for a
-  site you did not ask for, **Allow for this chat**. melo reads what you
-  chose and your note; after **Deny** it does not ask about that step again
-  until your next message.
+- **The goal decides.** On the site or app the chat is about, the steps your
+  task plainly needs run without a card, named or not: opening and reading
+  it, signing in the way you described, picking options, filling in and
+  sending the task's own form, reading the result. "Check in on the forum for
+  me" is enough for the sign-in clicks, the mood, the line and the send.
+  melo judges each step, by what it clicks or types into, against all your
+  messages in the chat, and against its recalled notes when you point to
+  them ("do it the way I told you").
+- **Your words only add.** A step your messages ask for, or whose target they
+  name (a package, a file, a site, a box or a button on a page), also runs
+  without asking; words that do not name a step never stop one the task
+  needs. Only what you typed counts as your words, never melo's answers or a
+  page.
+- **What asks.** A step off the goal, and an install, download, change
+  outside the folder, delete, data sent out or a message to other people
+  beyond the task's own form, a network service, code melo cannot check, or
+  a click inside a box from another site that melo cannot tell, shows the
+  approval card in the chat and waits, as in Ask: **Allow once**, **Deny**
+  with a note for melo, and, for a site you did not ask for, **Allow for this
+  chat**. Paying and changing an account's email, password or sign-in always
+  ask, even when you asked for them. melo reads what you chose and your note;
+  after **Deny** it does not ask about that step again until your next
+  message. melo asks you itself: it never asks you to type a permission.
 - **Only while you watch.** The card waits only while the chat is open in the
   console, the app or the terminal. With nobody watching, the step is blocked,
   as before. A card nobody answers within 1 minute, or that you close the chat
@@ -891,13 +902,15 @@ commands and file changes.
   **Deny** shows the same way.
 - **Allowed in this chat.** **Allow for this chat** on a site's card lets the
   same kind of step on that site (opening and reading it, or clicking and
-  choosing on it) run for the rest of the chat. The chip's menu lists the
-  sites the chat allowed, each with **Remove**. Typing on a page and sending
-  a form ask every time, a high-impact step never rides an allowance, and a
-  new chat starts with none.
-- **What is blocked.** Passwords and keys, system settings, scripts that
-  operate another app, something that runs later and code from the internet
-  are blocked without a card; a change to localmelo itself never runs; in a
+  choosing on it) run for the rest of the chat. A site Auto let the chat open
+  or click on stays allowed for the rest of the chat too, also after you
+  switch to Ask. The chip's menu lists the sites the chat allowed, each with
+  **Remove**. Typing on a page and sending a form ask every time, a
+  high-impact step never rides an allowance, and a new chat starts with none.
+- **What is blocked.** Typing or reading a secret (a password, a one-time
+  code, a key; clicking a sign-in button is none), system settings, scripts
+  that operate another app, something that runs later and code from the
+  internet are blocked without a card; a change to localmelo itself never runs; in a
   folder that holds the copy of localmelo that is running, a write under
   that copy is refused. The step's row reads `blocked: uses passwords or
   keys`, a card under the work says what and why and shows the step, and
