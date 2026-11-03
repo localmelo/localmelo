@@ -85,17 +85,32 @@ def configured_cache_options(
 
 # The settings of the pictures that tools return (AgentOptions.tool_images).
 IMAGE_SETTINGS: Final = ("tool_images", "tool_images_keep", "tool_images_retire")
+# The setting of a turn that ends with only thinking
+# (AgentOptions.empty_reply_fallback).
+FALLBACK_SETTINGS: Final = ("empty_reply_fallback",)
 
 
-def configured_image_options(cfg: Config, options: AgentOptions) -> AgentOptions:
-    """*options* with the config's ``tool_images`` keys; ValueError for a bad value."""
-    values = {name: getattr(cfg.agent, name) for name in IMAGE_SETTINGS}
+def _configured_keys(
+    cfg: Config, options: AgentOptions, names: tuple[str, ...]
+) -> AgentOptions:
+    """*options* with the config's ``[agent]`` *names*; ValueError for a bad value."""
+    values = {name: getattr(cfg.agent, name) for name in names}
     if all(getattr(options, name) == value for name, value in values.items()):
         return options
     try:
         return dataclasses.replace(options, **values)
     except ValueError as exc:
         raise ValueError(f"[agent] {exc}") from None
+
+
+def configured_image_options(cfg: Config, options: AgentOptions) -> AgentOptions:
+    """*options* with the config's ``tool_images`` keys; ValueError for a bad value."""
+    return _configured_keys(cfg, options, IMAGE_SETTINGS)
+
+
+def configured_fallback_options(cfg: Config, options: AgentOptions) -> AgentOptions:
+    """*options* with ``[agent] empty_reply_fallback``; ValueError for a bad value."""
+    return _configured_keys(cfg, options, FALLBACK_SETTINGS)
 
 
 def configured_context_options(
@@ -151,6 +166,7 @@ def configured_session_options(
             *CACHE_SETTINGS,
             "captured_history",
             *IMAGE_SETTINGS,
+            *FALLBACK_SETTINGS,
         )
         if name not in explicit
     }
@@ -264,6 +280,7 @@ async def build_session_agent(
     mcp_config: str | None = None,
     browser_driver: str = "off",
     web_fetch: bool = False,
+    web_search: bool = False,
     wrap_llm: LLMWrapper | None = None,
     wrap_embedding: EmbeddingWrapper | None = None,
     identify: bool = False,
@@ -291,6 +308,9 @@ async def build_session_agent(
     *web_fetch* gives it the ``web_fetch`` tool (see
     :mod:`localmelo.support.web`): the chats and the console's tasks pass
     ``[tools] web_fetch``; direct runs pass nothing, so they never have it.
+    *web_search* gives it ``web_search`` (see :mod:`localmelo.support.web.search_tool`):
+    the same surfaces pass ``[web] search``, and the tool may use the browser
+    window when there is one.
 
     *wrap_llm* and *wrap_embedding* are called with the provider the builder
     made, and the Agent is made with what they return, so the provider its
@@ -361,6 +381,15 @@ async def build_session_agent(
                 ),
             )
         )
+    if web_search:
+        from localmelo.support.browser import BrowserToolProvider
+        from localmelo.support.web.search_tool import WebSearchProvider
+
+        # The browser window the chat has, if it has one, is a way to search.
+        window = next(
+            (p for p in providers if isinstance(p, BrowserToolProvider)), None
+        )
+        providers.append(WebSearchProvider(browser=window, cfg=cfg))
     llm: BaseLLMProvider | None = None
     embedding: BaseEmbeddingProvider | None = None
     from_config = False

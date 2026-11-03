@@ -17,9 +17,11 @@
 
 - [交互式终端](guides/terminal.md)：对话、命令、审批和会话。
 - [配置指南](guides/configure.md)和[模型服务器指南](guides/model-servers.md)：设置、后端和维护。
+- [云端模型](guides/hosted-models.md)：使用 OpenAI、Gemini、Anthropic、NVIDIA、DeepSeek 或其他云端服务。
 - [配置嵌入模型](guides/embedding.md)：服务器和连接检查。
 - [工具与 MCP](guides/tools-mcp.md)：工具选择、配置和审批。
 - [浏览](guides/browsing.md)：让 melo 在 Mac 的 Safari 里阅读网页。
+- [网页搜索](guides/web-search.md)：用一个开关，让每个对话和任务都能搜索网页。
 - [美术包](guides/art-pack.md)：用一个装着美术的文件夹或 zip 替换 Melo 的每一张图片。
 - [网关](guides/gateway.md)：启动和安全；[网页控制台](guides/web-console.md)：工作区。
 - [API 客户端](guides/api-client.md)：创建并跟踪一个控制台会话。

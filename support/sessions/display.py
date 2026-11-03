@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Final, Literal
 from urllib.parse import urlsplit
 
+from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.schema import split_thinking as split_thinking
 from localmelo.support.progress_line import run_elapsed
 from localmelo.support.words import said, said_in
@@ -467,6 +468,18 @@ def _host(url: object) -> str:
     return host.removeprefix("www.")
 
 
+# The longest search words an activity line shows.
+_SEARCH_SHOWN: Final = 60
+
+
+def _words_shown(query: object) -> str:
+    """A search's words as a line shows them: ``“asyncio TaskGroup”``, cut when long."""
+    words = " ".join(redact_secrets(str(query or ""))[0].split())
+    if len(words) > _SEARCH_SHOWN:
+        words = words[: _SEARCH_SHOWN - 1] + "…"
+    return f"“{words}”" if words else "…"
+
+
 def _file_name(arguments: Mapping[str, Any]) -> str:
     path = str(arguments.get("path") or "").rstrip("/")
     return path.rsplit("/", 1)[-1]
@@ -503,10 +516,11 @@ def activity_text(
 
     A tool reads by what it does: ``Reading notes.md``, ``Looking through
     ~/talk``, ``Writing slides.md``, ``Running the tests``, ``Running a
-    command``, ``Running Python``, ``Reading example.com``. Only a file's
-    name, a folder relative to *root* (or with ``~``) and a page's host are
-    shown, never a command line, code or text. A tool this table does not
-    know reads ``Using a tool``; no state and no tool reads ``Thinking``.
+    command``, ``Running Python``, ``Reading example.com``, ``Searching the web
+    for “asyncio TaskGroup”``. Only a file's name, a folder relative to *root*
+    (or with ``~``), a page's host and a search's words (a secret in them
+    hidden) are shown, never a command line, code or text. A tool this table
+    does not know reads ``Using a tool``; no state and no tool reads ``Thinking``.
     """
     if state == "held" and reason in _HELD_CODES:
         return _activity(
@@ -545,9 +559,11 @@ def activity_text(
         if host:
             return _doing("read", host, "web")
         return _doing("open", said("steps.aPage"), "web")
+    if name == "web_search":
+        return _doing("search", _words_shown(args.get("query")), "web")
     if name == "browser_follow":
         return _doing("follow", said("steps.aLink"), "web")
-    if name == "browser_click":
+    if name in ("browser_click", "browser_click_point"):
         return _doing("click", said("steps.thePage"), "web")
     if name == "browser_type":
         return _doing("type", said("steps.aField"), "web")

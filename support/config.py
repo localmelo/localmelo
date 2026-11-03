@@ -69,6 +69,7 @@ NOTE_WRITERS = ("auto", "heuristic")
 WINDOW_EVICTIONS = ("slide", "chunk", "boundary")
 CACHE_LAYOUTS = ("v2", "v3")
 TOOL_IMAGES = ("auto", "on", "off")
+EMPTY_REPLY_FALLBACKS = ("on", "off")
 REASONING_FIELDS = ("auto", "reasoning_content", "reasoning")
 RETRIEVAL_MODES = ("auto", "off", "bm25", "llm", "embedding")
 # How memory across chats finds notes: see MemoryConfig.retriever.
@@ -184,9 +185,16 @@ class LocalBackendConfig:
 class CloudVendorConfig:
     """Config shape shared by all cloud vendor backends."""
 
-    api_key_env: str = ""  # env var name, e.g. OPENAI_API_KEY
+    api_key_env: str = ""  # env var name, e.g. OPENAI_API_KEY; wins when it is set
     chat_model: str = ""
     base_url: str = ""  # optional override; each vendor has a built-in default
+    # A reference to the key in the macOS keychain, "keychain:localmelo.<name>"
+    # (see support.keychain); the key itself is never in the config.
+    api_key: str = ""
+    # Whether the model thinks before it answers, for a service with such a
+    # switch (see support.hosted): "" follows the preset's default for the
+    # model, "on" and "off" decide.
+    thinking: str = ""
     # Extra top-level fields merged into every chat request body.
     extra_body: dict[str, Any] = field(default_factory=dict)
     # See LocalBackendConfig: the reasoning field and whether the server
@@ -314,6 +322,12 @@ class AgentConfig:
     tool_images: str = "auto"
     tool_images_keep: int = 3
     tool_images_retire: int = 2
+    # Developer setting: a turn that ends with no answer from a model that did
+    # think (an empty reply, or a reply that ends inside its thinking) is asked
+    # once more with thinking off where the service has a switch for it, and
+    # then answered with the end of its thinking, marked as such
+    # (AgentOptions.empty_reply_fallback). "off" ends such a run as failed.
+    empty_reply_fallback: str = "on"  # on | off
 
     def window_for(self, backend: str) -> int:
         """The working window's cap: ``window_messages``, else *backend*'s default."""
@@ -338,6 +352,16 @@ def tool_images_errors(agent: AgentConfig) -> list[str]:
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             errors.append(f"[agent] {name} must be an int >= 1, got {value!r}")
     return errors
+
+
+def empty_reply_fallback_errors(agent: AgentConfig) -> list[str]:
+    """What is wrong with ``[agent] empty_reply_fallback``."""
+    if agent.empty_reply_fallback in EMPTY_REPLY_FALLBACKS:
+        return []
+    return [
+        f"[agent] empty_reply_fallback {agent.empty_reply_fallback!r} is not "
+        f"recognised. Must be one of {EMPTY_REPLY_FALLBACKS}."
+    ]
 
 
 def default_window_messages(backend: str) -> int:
@@ -572,6 +596,31 @@ class ToolsConfig:
     web_fetch_allow_local: list[str] = field(default_factory=list)
 
 
+# The most results one search returns, and the range of ``[web] search_count``.
+WEB_SEARCH_COUNT: Final = (1, 8)
+
+
+@dataclass
+class WebConfig:
+    """The ``[web]`` table: searching the public web.
+
+    ``search`` (off by default) gives every chat and every task's worker a
+    ``web_search`` tool, and tells them when to use it. The words of a search
+    leave the computer, which is why it is a switch and not always on (see
+    :mod:`localmelo.support.web.search`).
+
+    ``search_order`` and ``search_count`` are developer settings. The order is
+    the ways melo tries one after another (the names in
+    :data:`localmelo.support.web.search.WAYS`, then ``browser``); empty means the
+    built-in order. The count is how many results one search shows by default,
+    from 1 to 8 (a call may ask for fewer).
+    """
+
+    search: bool = False
+    search_order: list[str] = field(default_factory=list)
+    search_count: int = 6
+
+
 @dataclass
 class TasksConfig:
     """The ``[tasks]`` table: what a chat does about the tasks it started.
@@ -644,6 +693,7 @@ class Config:
     browser: BrowserConfig = field(default_factory=BrowserConfig)
     workspace: WorkspaceConfig = field(default_factory=WorkspaceConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
+    web: WebConfig = field(default_factory=WebConfig)
     tasks: TasksConfig = field(default_factory=TasksConfig)
     chat: ChatConfig = field(default_factory=ChatConfig)
     # [pricing.<model>]: dollars per million tokens (input, output, and
@@ -691,6 +741,7 @@ class Config:
         errors.extend(self._validate_scheduler())
         errors.extend(self._validate_browser())
         errors.extend(self._validate_tools())
+        errors.extend(self._validate_web())
         errors.extend(self._validate_tasks())
         errors.extend(self._validate_chat())
         # [cli] is a display preference: like [sessions] resume_mode, a bad
@@ -727,6 +778,7 @@ class Config:
         errors.extend(chat_errors)
         errors.extend(self._validate_extra_body())
         errors.extend(self._validate_reasoning_fields())
+        errors.extend(self._validate_hosted_fields())
 
         # -- Delegate embedding backend validation (skip if "none") --
         if self.embedding_backend != "none":
@@ -857,6 +909,37 @@ class Config:
             ),
             *web_local.problems(self),
         ]
+
+    def _validate_web(self) -> list[str]:
+        """``[web]``: ``search`` is a bool, the order names known ways, the count is in range."""
+        from localmelo.support.web.search import way_names
+
+        errors: list[str] = []
+        if not isinstance(self.web.search, bool):
+            errors.append(f"[web] search must be a bool, got {self.web.search!r}")
+        order = self.web.search_order
+        if not isinstance(order, list) or not all(isinstance(x, str) for x in order):
+            errors.append(f"[web] search_order must be a list of names, got {order!r}")
+        else:
+            known = way_names()
+            errors.extend(
+                f"[web] search_order: {name!r} is not one of {known}"
+                for name in order
+                if name not in known
+            )
+            if len(set(order)) != len(order):
+                errors.append("[web] search_order names a way twice")
+        count, (low, high) = self.web.search_count, WEB_SEARCH_COUNT
+        if (
+            not isinstance(count, int)
+            or isinstance(count, bool)
+            or not low <= count <= high
+        ):
+            errors.append(
+                f"[web] search_count must be a whole number from {low} to {high}, "
+                f"got {count!r}"
+            )
+        return errors
 
     def _validate_tasks(self) -> list[str]:
         """``[tasks]`` holds bools."""
@@ -1040,6 +1123,7 @@ class Config:
         ):
             errors.append(f"[agent] max_calls must be an int >= 2, got {calls!r}")
         errors.extend(tool_images_errors(self.agent))
+        errors.extend(empty_reply_fallback_errors(self.agent))
         if self.agent.reasoning not in REASONING_MODES:
             errors.append(
                 f"[agent] reasoning {self.agent.reasoning!r} is not recognised. "
@@ -1209,6 +1293,17 @@ class Config:
                 )
         return errors
 
+    def _validate_hosted_fields(self) -> list[str]:
+        """Each hosted section's ``api_key`` reference and ``thinking`` value."""
+        from localmelo.support import hosted
+
+        errors: list[str] = []
+        for section_name in _CLOUD_SECTIONS:
+            errors.extend(
+                hosted.hosted_fields_errors(section_name, getattr(self, section_name))
+            )
+        return errors
+
     def _validate_extra_body(self) -> list[str]:
         from localmelo.support.providers.llm._protocol import extra_body_errors
 
@@ -1248,6 +1343,7 @@ class Config:
             *self._validate_scheduler(),
             *self._validate_browser(),
             *self._validate_tools(),
+            *self._validate_web(),
             *self._validate_tasks(),
             *self._validate_chat(),
             *self._validate_gateway_workspace(),
@@ -1623,6 +1719,12 @@ def _load_file() -> Config:
                 # A bad value is kept for Config.validate; a list is the file's own copy.
                 setattr(cfg.tools, k, list(v) if isinstance(v, list) else v)
 
+    if isinstance(data.get("web"), dict):
+        for k, v in data["web"].items():
+            if hasattr(cfg.web, k):
+                # A bad value is kept for Config.validate; a list is the file's own copy.
+                setattr(cfg.web, k, list(v) if isinstance(v, list) else v)
+
     if isinstance(data.get("tasks"), dict):
         for k, v in data["tasks"].items():
             if hasattr(cfg.tasks, k):
@@ -1881,8 +1983,12 @@ def save(cfg: Config) -> None:
         sec = getattr(cfg, section)
         lines.append(f"[{section}]")
         lines.append(f"api_key_env = {_toml_string(sec.api_key_env)}")
+        if sec.api_key:
+            lines.append(f"api_key = {_toml_string(sec.api_key)}")
         lines.append(f"chat_model = {_toml_string(sec.chat_model)}")
         lines.append(f"base_url = {_toml_string(sec.base_url)}")
+        if sec.thinking:
+            lines.append(f"thinking = {_toml_string(sec.thinking)}")
         if sec.extra_body:
             lines.append(f"extra_body = {_toml_value(sec.extra_body)}")
         if sec.reasoning_field:
@@ -1916,6 +2022,7 @@ def save(cfg: Config) -> None:
         or cfg.agent.confine_direct_runs
         or cfg.agent.answer_on_stop != defaults.answer_on_stop
         or cfg.agent.max_calls is not None
+        or cfg.agent.empty_reply_fallback != defaults.empty_reply_fallback
         or any(
             getattr(cfg.agent, name) != getattr(defaults, name) for name in IMAGE_KEYS
         )
@@ -1958,6 +2065,11 @@ def save(cfg: Config) -> None:
         for name in IMAGE_KEYS:
             if getattr(cfg.agent, name) != getattr(defaults, name):
                 lines.append(f"{name} = {_toml_value(getattr(cfg.agent, name))}")
+        if cfg.agent.empty_reply_fallback != defaults.empty_reply_fallback:
+            lines.append(
+                "empty_reply_fallback = "
+                f"{_toml_string(cfg.agent.empty_reply_fallback)}"
+            )
         if cfg.agent.tool_env:
             lines.append(f"tool_env = {_toml_value(cfg.agent.tool_env)}")
         for name in ("context_window", "output_reserve", "safety_margin"):
@@ -2000,6 +2112,16 @@ def save(cfg: Config) -> None:
         if cfg.tools.web_fetch_allow_local:
             allowed = _toml_value(cfg.tools.web_fetch_allow_local)
             lines.append(f"web_fetch_allow_local = {allowed}")
+        lines.append("")
+
+    if cfg.web != WebConfig():
+        lines.append("[web]")
+        if cfg.web.search is not False:
+            lines.append(f"search = {_toml_value(cfg.web.search)}")
+        if cfg.web.search_order:
+            lines.append(f"search_order = {_toml_value(cfg.web.search_order)}")
+        if cfg.web.search_count != WebConfig().search_count:
+            lines.append(f"search_count = {_toml_value(cfg.web.search_count)}")
         lines.append("")
 
     if cfg.tasks != TasksConfig():

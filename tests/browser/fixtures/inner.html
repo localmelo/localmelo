@@ -1,0 +1,13 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Inner</title>
+<style>body{margin:0;font:16px sans-serif;background:#eef}#go{position:absolute;left:20px;top:20px;width:160px;height:40px}</style>
+<button id="go">Continue</button>
+<p id="said" style="position:absolute;top:80px;left:20px"></p>
+<script>
+  // A box from another site: its click is told to its own server.
+  document.getElementById("go").addEventListener("click", function (e) {
+    fetch("/box-clicked?trusted=" + e.isTrusted, {method: "POST"});
+    document.getElementById("said").textContent = "Continued";
+  });
+</script>

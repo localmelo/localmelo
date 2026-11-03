@@ -451,9 +451,14 @@ def timed(ws: Path, command: str) -> float:
     from localmelo.melo.checker.review.gist import step_gist
 
     arguments = {"command": command, "why": "Delete a.txt"}
-    started = time.perf_counter()
-    step_gist("shell_exec", arguments, review(ws, "shell_exec", arguments))
-    return time.perf_counter() - started
+    # CPU time of the fastest of three runs, so that a busy machine (a parallel
+    # test run) cannot fail a bound meant to catch a rule that backtracks.
+    times = []
+    for _ in range(3):
+        started = time.process_time()
+        step_gist("shell_exec", arguments, review(ws, "shell_exec", arguments))
+        times.append(time.process_time() - started)
+    return min(times)
 
 
 @pytest.mark.parametrize(

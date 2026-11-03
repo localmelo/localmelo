@@ -105,7 +105,7 @@ A tool can return pictures, such as an MCP server's screenshot.
 
 | Value | What the model gets |
 |---|---|
-| `auto` (default) | The pixels when the server says the model reads images: oMLX's `GET /v1/models/status` gives the model `model_type` `vlm`, or Ollama's `POST /api/show` lists `vision` in its `capabilities`. localmelo asks once, when a tool first returns a picture. Any other answer, or none (vLLM, SGLang and MLC do not say), counts as `off`. |
+| `auto` (default) | The pixels when the server says the model reads images: oMLX's `GET /v1/models/status` gives the model `model_type` `vlm`, or Ollama's `POST /api/show` lists `vision` in its `capabilities`. localmelo asks once, when a tool first returns a picture. For a hosted service the preset answers instead of the server: see [Hosted models](hosted-models.md#pictures). Any other answer, or none (vLLM, SGLang and MLC do not say), counts as `off`. |
 | `on` | The pixels, without asking. |
 | `off` | Only the line that names each picture, as before this setting. |
 
@@ -140,7 +140,7 @@ On a Mac, melo can read web pages in Safari, and click, type and choose on them 
 
 - Turn it on with `/browser on` in the terminal chat, or `melo -X browser.driver=safari-automation` for one run.
 - In Safari, open Settings > Developer and turn on "Allow remote automation" once.
-- The terminal chat and every chat of the web console and the app then get eleven tools: `browser_open`, `browser_read`, `browser_find`, `browser_follow`, `browser_click`, `browser_type`, `browser_select`, `browser_back`, `browser_tabs`, `browser_wait` and `browser_screenshot`.
+- The terminal chat and every chat of the web console and the app then get twelve tools: `browser_open`, `browser_read`, `browser_find`, `browser_follow`, `browser_click`, `browser_type`, `browser_select`, `browser_back`, `browser_tabs`, `browser_wait`, `browser_screenshot` and `browser_click_point`.
 - They work in Safari's own automation windows, which start without any of your sign-ins.
 - melo asks "Open a website?" before it loads a page, once per site and chat (`auto` mode still asks), asks again before it clicks, types or chooses on a site, and asks by itself, every time, before it sends a form (showing where it goes and what it holds; there is no "allow for this chat" for a send); it works in one tab, never types a password, card number or one-time code, and does not sign in or post for you. Direct runs, workers and saved tasks never get these tools.
 

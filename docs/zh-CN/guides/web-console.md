@@ -326,9 +326,9 @@
 
 侧边栏的 **Settings**（或 macOS app 菜单里的 **Settings…**）按主题分成几个分区。每项更改立即保存，并在底部显示 `Saved: …` 和 **Undo**；保存时带上读取时的修订版本，所以如果文件在此期间被别处改过，会提示你重新加载。
 
-- **Model server**：聊天模型和嵌入模型各自的状态（`Connected · <model> · checked 12 s ago`、`Not reachable`、`Off`）、服务器地址、**Test connection**（绝不显示密钥）和 **Change…**。**Change…** 打开的表单用来选择服务器、地址和模型（**Discover models** 会列出模型）；这是唯一用按钮保存的更改，即 **Save connection**，**Cancel** 恢复已保存的内容。
+- **Model server**：聊天模型和嵌入模型各自的状态（`Connected · <model> · checked 12 s ago`、`Not reachable`、`Off`）、服务器地址、**Test connection**（绝不显示密钥）和 **Change…**。**Change…** 打开的表单用来选择服务器、地址和模型（**Discover models** 会列出模型）；这是唯一用按钮保存的更改，即 **Save connection**，**Cancel** 恢复已保存的内容。在 **Hosted services** 下，列表提供 OpenAI、Google Gemini、Anthropic、NVIDIA、DeepSeek 和 Other (OpenAI format)：表单里会有带 **Save key** 的 **API key** 字段（密钥保存在你 Mac 的钥匙串里，只显示为 **Saved in the keychain**，并带有 **Replace** 和 **Remove**）；对有思考开关的服务，还有 **Let the model think before it answers**。这时 **Test connection** 会列出服务的模型，并试一条带工具的简短对话。见[云端模型](hosted-models.md)。
 - **Memory**：**Remember across chats**、Melo 查找笔记的方式（**By words and meaning** 或 **By words only**；开发者模式再加两种，并显示键 `memory.retriever`），以及打开笔记本身的 **Open Memory**。
-- **Chats and folders**：新对话的默认文件夹（**Change…** 在 app 里打开系统的文件夹面板，在浏览器里显示路径输入框）、新对话的开始方式（**New chats start in**）、**Read web pages**（默认开启；让对话和任务用 [`web_fetch`](../reference/tools.md#reading-a-public-web-page) 读取公开网页）、**melo 可以读取的其他文件夹**（你选了 **总是允许这个文件夹** 的文件夹，每个都有 **移除**；见[工作区之外的文件夹](tools-mcp.md#folders-outside-the-workspace)），以及最近用过的文件夹，每个都有 **Make default**。
+- **Chats and folders**：新对话的默认文件夹（**Change…** 在 app 里打开系统的文件夹面板，在浏览器里显示路径输入框）、新对话的开始方式（**New chats start in**）、**Read web pages**（默认开启；让对话和任务用 [`web_fetch`](../reference/tools.md#reading-a-public-web-page) 读取公开网页）、**Web search**（默认关闭；让对话和任务用 [`web_search`](../reference/tools.md#searching-the-web) 查资料，搜索用的关键词会离开这台电脑）、**melo 可以读取的其他文件夹**（你选了 **总是允许这个文件夹** 的文件夹，每个都有 **移除**；见[工作区之外的文件夹](tools-mcp.md#folders-outside-the-workspace)），以及最近用过的文件夹，每个都有 **Make default**。
 - **Scheduled**：check-in 开关及下一次的时间，以及打开定时事项的 **Open Scheduled**。
 - **Appearance**：主题（System、Light、Dark，记在当前浏览器里）、[语言](#language)（自动、English、简体中文）、macOS app 中的 **Melo on the desktop**（与 app 菜单是同一个选择），以及 **Developer mode**。
 - **Developer**（仅开发者模式）：`melo -h all` 列出的每个设置，按分区分组，显示当前值、小字的 `config.toml` 键、设置它的旧选项，对比实验还标明决定它的 issue；最后是只作用于一次运行的选项。这里只读，用 `melo config set KEY VALUE` 修改。该分区也显示设置文件及其修订版本。
@@ -378,7 +378,7 @@ melo 想要对话文件夹之外的文件时，卡片会询问那个文件夹（
 
 模型服务器完全连不上时，卡片写 `Could not reach the model server`，并问 `Is your model server still running at 127.0.0.1:8000? Start it, then try again.`，其中的地址就是失败的那个地址。卡片不重复错误本身：提供方的原始文字留在 **Details** 中。实心按钮是 **Try again**（该轮次已运行过工具时是 **Continue**，接着做而不是从头开始），**Change the server address** 是打开设置的链接。使用云端模型时，提示是 `Check your network connection, then try again.`，链接仍是 **Open model settings**，因为没有地址可改。以这种方式结束的运行，其工作框也不再列出重试行（卡片已经说过了）；运行仍在重试时它们照常显示。
 
-只含模型未完成思考的回复绝不会显示为回答：它是工作框中折叠的思考项，附有一行 `The model's reply ended inside its thinking; asking it for its answer.`，模型会被再问一次。第二个回复仍没有回答时，卡片标题是 `melo did not finish an answer`，提示是 `The model's reply held only its thinking. Try again, or rephrase the request.`，实心按钮是 **Try again**。
+只含模型未完成思考的回复绝不会显示为回答：它是工作框中折叠的思考项，附有一行 `The model's reply ended inside its thinking; asking it for its answer.`，模型会被再问一次。如果服务报告了模型的思考，melo 会在服务提供相应开关时，关闭思考再问最后一次；回复仍为空时，把思考的最后几行作为回答显示，末尾带有 `(from melo's thinking)`。这两步各会在工作框里加一行（`The model ended its turn with only thinking; asking again with thinking off.` 和 `The model gave no answer after thinking; the answer is the end of its thinking.`）。没有思考可用、且第二个回复仍没有回答时，卡片标题是 `melo did not finish an answer`，提示是 `The model's reply held only its thinking. Try again, or rephrase the request.`，实心按钮是 **Try again**。
 
 <a id="auto-mode"></a>
 

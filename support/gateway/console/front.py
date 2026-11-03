@@ -679,7 +679,8 @@ async def build_front_agent(
     """The main chat's started Agent, gated like every console chat.
 
     It has the browser tools when ``[browser] driver`` names a driver, and
-    ``web_fetch`` unless ``[tools] web_fetch`` is off, as the other chats do.
+    ``web_fetch`` unless ``[tools] web_fetch`` is off, and ``web_search`` when
+    ``[web] search`` is on, as the other chats do.
     """
     llm = None if gate is None else gate.client(session_id)
     return await build_session_agent(
@@ -690,6 +691,7 @@ async def build_front_agent(
         options=front_options(settings),
         browser_driver=configured_driver(settings),
         web_fetch=settings.tools.web_fetch is True,
+        web_search=settings.web.search is True,
         wrap_llm=None if llm is None else (lambda inner: GatedLLM(inner, llm)),
         wrap_embedding=(
             None if llm is None else (lambda inner: GatedEmbedding(inner, llm))

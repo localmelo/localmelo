@@ -233,6 +233,23 @@ def test_a_form_panel_shows_what_it_holds_and_when_the_page_decides() -> None:
     assert "typed: cats" in words
 
 
+def test_a_click_at_a_point_says_what_it_lands_on_and_that_it_asks_every_time() -> None:
+    pointing = panel_text(
+        _request(
+            "browser-point:https://example.com",
+            site="example.com",
+            access="point",
+            how="click",
+            on="a password field",
+        ),
+        width=80,
+    )
+    assert pointing.title == "Click on a website?"
+    words = " ".join(line for _, line in pointing.body)
+    assert "click a password field on example.com" in words
+    assert "asks every time" in words
+
+
 def test_a_typing_panel_shows_all_the_text_and_says_the_page_may_send_it() -> None:
     text = "hello there\n" + "a long line of words " * 40 + "THE END"
     typing = panel_text(

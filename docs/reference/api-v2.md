@@ -307,7 +307,7 @@ file's revision.
   "workspace": "~/localmelo-workspace",
   "sections": {
     "mlc": {"chat_url": "http://127.0.0.1:8400/v1", "chat_model": "qwen3-1.7b", "embedding_url": "", "embedding_model": ""},
-    "openai": {"api_key_env": "OPENAI_API_KEY", "api_key_set": false, "chat_model": "gpt-4o", "base_url": ""}
+    "openai": {"api_key_env": "OPENAI_API_KEY", "api_key_set": false, "api_key": "", "key": "none", "chat_model": "gpt-4o", "base_url": "", "thinking": "", "preset": "openai"}
   },
   "defaults": {
     "mlc": {"chat_url": "http://localhost:8400/v1", "chat_model": "qwen3-1.7b", "embedding_url": "http://localhost:8400/v1", "embedding_model": "nomic-embed"},
@@ -316,7 +316,8 @@ file's revision.
   "errors": [],
   "choices": {
     "chat_backends": [{"key": "mlc", "label": "MLC (local endpoint)", "kind": "local"}, {"key": "openai", "label": "OpenAI", "kind": "cloud"}],
-    "embedding_backends": [{"key": "mlc", "label": "MLC (local endpoint)"}, {"key": "none", "label": "None (no long-term memory)"}]
+    "embedding_backends": [{"key": "mlc", "label": "MLC (local endpoint)"}, {"key": "none", "label": "None (no long-term memory)"}],
+    "hosted": [{"id": "deepseek", "label": "DeepSeek", "backend": "openai", "base_url": "https://api.deepseek.com/v1", "stored_url": "https://api.deepseek.com/v1", "models": ["deepseek-flash", "deepseek-v4-pro"], "key_env": "DEEPSEEK_API_KEY", "key_ref": "keychain:localmelo.deepseek", "free_address": false, "thinking_switch": true, "thinking_off_models": ["deepseek-flash"]}]
   },
   "mode": "default",
   "across_chats": true,
@@ -341,7 +342,15 @@ file's revision.
   `sglang`) and all four cloud sections (`openai`, `gemini`, `anthropic`,
   `nvidia`). Cloud sections report `api_key_env` (the variable name) and
   `api_key_set` (whether that variable is non-empty in the gateway's
-  environment), never a key or a mask of one.
+  environment), never a key or a mask of one. They also report `api_key`
+  (the keychain reference, such as `keychain:localmelo.deepseek`, or `""`),
+  `key` (where the key comes from now: `env`, `keychain`, `missing`,
+  `locked`, `unavailable` or `none`), `thinking` (`""`, `"on"` or `"off"`) and
+  `preset` (the id of the hosted service the section is).
+- `choices.hosted` lists the hosted services (the example shows one of six):
+  their address, suggested models, the variable that held the key before the
+  keychain, the reference a saved key gets, and whether the service has a
+  thinking switch and which models start with it off.
 - `workspace` is `[gateway] workspace`, or `~/localmelo-workspace` when it
   is unset.
 - `revision` is the first 16 hex characters of the file's SHA-256, or `""`
@@ -384,6 +393,10 @@ sessions.
   must not resolve to `/` or the home folder (including through a symlink);
   otherwise 400 `invalid_request`. `api_key_set` is not accepted in
   `sections`.
+- A cloud section may carry `api_key`, which must be empty or a
+  `keychain:localmelo.<name>` reference (otherwise 400 `invalid_request`), and
+  `thinking`, which must be `""`, `"on"` or `"off"`. The key itself is never
+  part of this body: [`PUT /api/settings/key`](#put-apisettingskey) saves it.
 - `mode` is optional: `default` or `developer` sets `[ui] mode` (other values
   are 400 `invalid_request`); omitted, the saved mode is kept. The mode changes
   only what the console and `melo --help` show.
@@ -440,6 +453,22 @@ is a failed probe. These probes can contact the supplied host.
   200 with `{"ok": false, "error": "...", "failed": "chat"}` (`failed` is
   `embedding` when the embedding probe failed); a timed-out one has no
   `failed`.
+- For a hosted chat service the test asks for `GET <address>/models`, then
+  sends one short chat that offers one tool. The body adds `result`, `message`
+  (the plain words, in the console's language), `models` (the chat models the
+  service lists, at most 200) and `tools` (whether the model called the test
+  tool):
+
+  ```json
+  {"ok": false, "result": "wrong_key", "error": "The service did not accept the key (401). Paste the key again.", "message": "The service did not accept the key (401). Paste the key again.", "models": [], "tools": null, "failed": "chat"}
+  ```
+
+  `result` is `works`, `no_key`, `wrong_key` (401), `refused` (402, 403),
+  `no_model` (404, or a model the list lacks), `busy` (429), `timeout`,
+  `unreachable`, `error`, or `keychain_missing`, `keychain_locked`,
+  `keychain_unavailable`, `keychain_bad` and `keychain_failed` when the saved
+  key cannot be read. The key goes to the service in a header only; every
+  `message` and `error` is redacted.
 
 ## GET /api/settings/key-status
 
@@ -456,6 +485,51 @@ Never returns the variable's value.
 
 - `name` must match `^[A-Za-z_][A-Za-z0-9_]{0,127}$`; any other value is 400
   `invalid_request`.
+- `preset=<id>` instead of `name` asks about a hosted service: `{"keychain":
+  "saved", "env_set": false}`, where `keychain` is `saved`, `missing`, `locked`
+  or `unavailable`. It reads no key. An unknown id is 400 `invalid_request`.
+
+## PUT /api/settings/key
+
+Save a hosted service's API key in the macOS keychain, under the service
+`localmelo.<preset>` and the account `localmelo`. This is the one request that
+carries a key.
+
+The request body is JSON. Settings sends it; do not put a key in a command
+line, where `ps` could show it.
+
+```json
+{"preset": "deepseek", "key": "<your key>"}
+```
+
+The reply:
+
+```json
+{"preset": "deepseek", "api_key": "keychain:localmelo.deepseek", "keychain": "saved"}
+```
+
+- The reply holds the reference to the item, never the key. The key reaches
+  `security` on its standard input, not on a command line, and is never logged.
+- A key that is not one run of 8 to 512 printable characters (a leading
+  `Bearer` is dropped) is 400 `invalid_key`; an unknown `preset` is 400
+  `invalid_request`.
+- A locked keychain is 409 `keychain_locked`, a computer without one 409
+  `keychain_unavailable`, and any other refusal 502 `keychain_failed`.
+- It does not change `config.toml`: the page then saves `api_key` with
+  [`PUT /api/settings`](#put-apisettings).
+
+## DELETE /api/settings/key
+
+Remove a hosted service's key from the keychain. Nothing happens when it is
+not there.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X DELETE 'http://127.0.0.1:8401/api/settings/key?preset=deepseek'
+```
+
+```json
+{"preset": "deepseek", "keychain": "missing"}
+```
 
 ## GET /api/models
 

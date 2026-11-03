@@ -268,8 +268,10 @@ class ApprovalPolicy(Protocol):
 # Questions a tool asks itself whose answer is never kept for the chat, whatever a
 # client sends: each call asks again. Sending a form is one (``browser-submit:<site>``)
 # and so is typing (``browser-type:<site>``): a grant would cover every later form
-# or text, whatever it holds and wherever it goes.
-NEVER_GRANTED: Final = ("browser-submit:", "browser-type:")
+# or text, whatever it holds and wherever it goes. A click at a point on a secret
+# field, a consent or terms control, or inside a box from another site
+# (``browser-point:<site>``) is one too.
+NEVER_GRANTED: Final = ("browser-submit:", "browser-type:", "browser-point:")
 
 # The tools melo ships that ask their own questions (per site, and for every text they
 # type or form they send), so the gate puts no second, empty question about the call.
@@ -279,7 +281,7 @@ NEVER_GRANTED: Final = ("browser-submit:", "browser-type:")
 # claim to ask for itself), and neither does a name alone: a tool that library code
 # registers as ``browser_type`` keeps its approval.
 SELF_ASKING_TOOLS: Final = frozenset(
-    {"browser_click", "browser_type", "browser_select"}
+    {"browser_click", "browser_type", "browser_select", "browser_click_point"}
 )
 
 

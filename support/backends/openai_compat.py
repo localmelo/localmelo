@@ -33,6 +33,9 @@ def build_openai_chat(
     *,
     reasoning_field: str | None = None,
     requires_reasoning_replay: bool = False,
+    thinking_off_body: Mapping[str, Any] | None = None,
+    reads_images: bool | None = None,
+    probe_images: bool = True,
 ) -> BaseLLMProvider:
     """Build an :class:`OpenAICompatLLM` with consistent URL handling.
 
@@ -40,7 +43,10 @@ def build_openai_chat(
     :class:`OpenAICompatLLM`). *timeout* is the HTTP timeout of each chat
     request in seconds; None keeps the provider's default (120 s).
     *reasoning_field* and *requires_reasoning_replay* are the provider's
-    reasoning capabilities (see :class:`OpenAICompatLLM`).
+    reasoning capabilities (see :class:`OpenAICompatLLM`). *thinking_off_body*
+    holds the request fields that turn thinking off for one retry. *reads_images*
+    and *probe_images* answer, or stop the asking of, whether the model reads
+    images (see :class:`OpenAICompatLLM`).
     """
     # Passed only when set: httpx reads timeout=None as no timeout at all.
     options: dict[str, Any] = {} if timeout is None else {"timeout": timeout}
@@ -51,6 +57,9 @@ def build_openai_chat(
         extra_body=extra_body,
         reasoning_field=reasoning_field,
         requires_reasoning_replay=requires_reasoning_replay,
+        thinking_off_body=thinking_off_body,
+        reads_images=reads_images,
+        probe_images=probe_images,
         **options,
     )
 

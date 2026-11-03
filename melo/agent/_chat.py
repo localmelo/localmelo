@@ -33,9 +33,11 @@ from localmelo.melo.agent._request_accounting import (
 from localmelo.melo.checker.stream_filter import StreamFilter
 from localmelo.melo.contracts.providers import (
     LLM_REQUEST_ATTEMPT,
+    LLM_REQUEST_EXTRA_BODY,
     LLM_REQUEST_KIND,
     BaseLLMProvider,
     ProviderError,
+    thinking_disabled,
 )
 from localmelo.melo.contracts.streaming import STREAM_DISPLAY, StreamDisplay
 from localmelo.melo.memory.notes import render_note_block
@@ -1079,8 +1081,23 @@ class Chat:
         )
 
     def _thinking_off(self) -> bool:
-        """Whether the provider's requests tell the model not to think (#357)."""
-        return getattr(self.llm, "thinking_off", False) is True
+        """Whether the provider's requests tell the model not to think (#357).
+
+        Also while the agent retries a request with thinking turned off
+        (:meth:`thinking_retry_body`), which sets the fields for it.
+        """
+        return getattr(self.llm, "thinking_off", False) is True or thinking_disabled(
+            LLM_REQUEST_EXTRA_BODY.get()
+        )
+
+    def thinking_retry_body(self) -> Mapping[str, Any]:
+        """The request fields that turn thinking off for one retry (#469).
+
+        Empty when the provider has no such switch, or its requests already ask
+        for no thinking.
+        """
+        body = getattr(self.llm, "thinking_off_body", None)
+        return body if isinstance(body, Mapping) else {}
 
     def _reasoning_tokens(self) -> int | None:
         """The reasoning tokens the provider counted for its last reply, if any."""

@@ -7,7 +7,8 @@ call asks every time and is never granted. Under a grant, and in auto
 mode, the user's model reviews an undecided call (``by="model"``). In auto
 mode (#339) nobody is asked: a call that is not routine is blocked, unless
 the user allowed that exact step once (:func:`step_key`) or asked for it in
-their own words. This module imports only the standard library.
+their own words. This module imports only the standard library and
+:mod:`~localmelo.melo.contracts.shell_lexer`, which does too.
 """
 
 from __future__ import annotations
@@ -18,11 +19,12 @@ import ipaddress
 import json
 import os
 import re
-import shlex
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 from urllib.parse import unquote, urlsplit
+
+from localmelo.melo.contracts import shell_lexer
 
 Verdict = Literal["routine", "high", "undecided"]
 # The version of the rules a review recorded: 2 added the ``app_control`` kind
@@ -321,7 +323,7 @@ def _shell_commands(text: str) -> list[list[str]]:
     found = []
     for part in _SHELL_SPLIT.split(text):
         try:
-            words = shlex.split(part)
+            words = shell_lexer.split(part)
         except ValueError:
             words = part.split()
         if words:
@@ -402,7 +404,7 @@ def _shell_steps(text: str) -> list[Step]:
     found: list[Step] = []
     for part in _shell_parts(text):
         try:
-            words = shlex.split(part)
+            words = shell_lexer.split(part)
         except ValueError:
             words = part.split()
         if words:
@@ -889,7 +891,7 @@ def _shell_tokens(text: str) -> list[str]:
     text = _joined_lines(text)
 
     def split(part: str) -> list[str]:
-        lexer = shlex.shlex(part, posix=True, punctuation_chars=_OPERATORS)
+        lexer = shell_lexer.Lexer(part, posix=True, punctuation_chars=_OPERATORS)
         lexer.whitespace = " \t\r"
         lexer.whitespace_split = True
         lexer.commenters = ""

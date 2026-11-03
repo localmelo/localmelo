@@ -9,6 +9,90 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Web search, one switch for every chat and task (#468). `[web] search` (off by default; Settings →
+  Chats and folders → **Web search**, `melo config set web.search true`, `-X web.search=true`) gives the
+  terminal chat, every console and app chat and every console task a read-only `web_search` tool and a
+  300-character rule for when to use it (before asking you what a word means, after two failed
+  steps, for facts that change). The words of a search leave the computer, and the Settings line says
+  so. Ways, as measured with `scripts/search_probe.py` on 24 queries (half English, half Chinese): Bing's
+  result feed by a plain request (0.17 s median, but 15 of 24 answers were about something else), DuckDuckGo
+  in the Safari automation window when browsing is on (22 of 24 on topic; the page is read with the browser tools' own checks, so a page that leaves the engine's site or goes to a local address is refused), then Baidu by a plain request
+  (20 of 24); the other engines turn a plain request away. Every answer is checked against the words, and a
+  way that asks for a check, fails or answers off topic falls back to the next and says so. Results sit between
+  the nonce markers a `web_fetch` page has, cleaned the same way, and an address in them is opened with
+  `web_fetch` and its site gate. With the switch on, a search counts as asked for; words that look like
+  a secret or like pasted text ask first, under a question of their own per search, and with nobody to ask
+  (no approval policy at all) they are not sent, in a chat or in a task. The chat and the task page show
+  the words, engine and count in English and Simplified Chinese. Developer keys: `[web] search_order`, `[web] search_count`. The benchmark leaves it
+  off unless it sets `-X web.search=true`.
+- Browsing finishes page tasks more often. A click, a text or a choice is done by Safari
+  itself on the element melo checked (real events, as yours are), so a page that ignores
+  clicks made by a script, such as a check-in button, now works; when Safari cannot reach the
+  element, melo's page script does it, and each answer names the way (`via browser`, `via
+  page-script` and why, `via point`). A site where Safari's own input did not work starts with
+  the page script for the rest of the chat. After each action melo waits until the page is
+  quiet (about 0.3 seconds without a change; after a click up to 2 seconds for the site to
+  answer) and the answer opens with what changed: a new address, new text such as a notice or
+  an error (even one that is gone again) and the element's new state, or that nothing changed.
+  When the page rebuilt its elements since it was read, without loading again, melo acts on the
+  one element with the same kind, name, address and form that still belongs where it did (the same
+  row or heading and the same text next to it, a linked title included), with every check again;
+  with two such elements, two when it was read, nothing that says where it belongs, a reload, or a
+  changed address or form, it stays stale. Frames from the same site are read and acted in as
+  part of the page; in a box from another site (often a sign-in box) Safari's own reading lists
+  the buttons, links and fields, and each click or text there asks every time. A new tool,
+  `browser_click_point`, clicks a point of the last picture for what the element list lacks: melo
+  checks what is there first (a label moves to its field), asks every time for a point on a
+  password, code or card field, a terms, consent or sign-in control, or inside a box from
+  another site, keeps the link and send checks, shows a ring where it clicks and answers with
+  a new picture with the point marked. A real click or key press that lands on another element
+  than the one melo checked is stopped. Part of #466.
+- Hosted services in Settings (#467). Under **Model server**, **Change…**, the list has a
+  group **Hosted services**: OpenAI, Google Gemini, Anthropic, NVIDIA, DeepSeek and Other
+  (OpenAI format). Choosing one fills its address and suggested models (one table of presets,
+  `support/hosted.py`; DeepSeek is the `openai` backend at `https://api.deepseek.com/v1` with
+  `deepseek-flash` and `deepseek-v4-pro`). **Save key** keeps the API key in the macOS
+  keychain (service `localmelo.<preset>`, account `localmelo`), written through
+  `security -i` with the command on stdin, so the key is on no command line. The config holds
+  only `api_key = "keychain:localmelo.<preset>"`; Settings shows **Saved in the keychain**
+  with **Replace** and **Remove**, and the key never reaches the config, the logs, the
+  events, an API reply or the page. An `api_key_env` variable still works and wins when it
+  has a value. A missing item, a locked keychain or a computer without one gives a plain fix.
+  New routes: `PUT` and `DELETE /api/settings/key` and `GET /api/settings/key-status?preset=`;
+  `GET /api/settings` reports each cloud section's `api_key`, `key` state, `thinking` and
+  `preset`, and `choices.hosted`.
+- **Test connection** for a hosted service asks for `GET <address>/models`, then sends one
+  short chat that offers one tool, and answers in plain words: it works, the key was wrong
+  (401), the service refused the account (402, 403), no such model (404), the service is busy
+  (429), it timed out, or it cannot be reached. The model comes from the list or is typed.
+  `POST /api/settings/test` adds `result`, `message`, `models` and `tools` for a hosted
+  chat service.
+- `melo setup` and the first run offer the same services as a list: the key is typed hidden
+  and saved to the keychain (or an environment variable is named), then the model is picked.
+  With no model server found, the first run's list has **Use a hosted service**.
+- A hosted section can set `thinking = "on"` or `"off"` (a checkbox in Settings, **Let the
+  model think before it answers**) for a service that has a switch for it. Empty follows the
+  preset: `deepseek-flash` starts with thinking off, `deepseek-v4-pro` with its own default;
+  a field of the section's `extra_body` wins. A short measurement against the service (a
+  two-tool task, five runs each) finished 5 of 5 for `deepseek-flash` with thinking on,
+  `deepseek-flash` with thinking off and `deepseek-v4-pro`.
+- `[agent] tool_images = "auto"` follows the hosted service's preset: a model the preset
+  names as reading images (GPT-4o, GPT-4.1 and GPT-5, Gemini, Claude, `deepseek-flash`) gets the
+  pictures that tools return, such as browser screenshots; `deepseek-v4-pro` and NVIDIA's
+  `nemotron` do not, and any other model is unknown and gets none (set `tool_images = "on"` for one that reads
+  images). A hosted service is no longer asked for oMLX's and Ollama's routes.
+- Developer setting `[agent] empty_reply_fallback = "on"|"off"` (default `"on"`;
+  `-X agent.empty_reply_fallback=off` for one run; saved only when `"off"`; listed in the
+  developer settings). `"off"` restores the run from before a thinking model's answer was
+  kept: no retry with thinking off, no answer taken from the thinking, and a turn that ends with
+  only thinking fails with `melo did not finish an answer`. A result says when the fallback
+  stepped in: `empty_reply` in the run record (`--json` and `run.finished`) is
+  `{"thinking_off_retry": true|false, "from_thinking": true|false}`, absent when neither
+  happened, and each step sends a `notice` event, `thinking_off_retry` or
+  `answer_from_thinking`, shown as a dim line in the terminal.
+- A guide for hosted models, [Hosted models](docs/guides/hosted-models.md), in English and
+  Chinese.
+
 - A task the chat starts now begins with what the chat knew when you asked, so a short request
   such as "go look it up" or "read his résumé first" keeps who or what it is about. After its
   request, each part marked as data: what you typed, when the request the task got does not hold
@@ -1170,6 +1254,26 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   ([#188]).
 
 ### Fixed
+
+- A thinking model's answer is no longer lost (#469). A model that ended a turn with an
+  empty reply and its answer only in its thinking, twice in a row, failed the run with
+  `melo did not finish an answer`. When the service reported the model's reasoning, melo now
+  asks once more with thinking off (where the service has a switch for it, such as DeepSeek's
+  `thinking` field), and if the reply is still empty, the last lines of the thinking become
+  the answer, ending with `(from melo's thinking)`, and the run completes. A thinking that
+  was cut off inside the reply, a reply with no thinking and a tool call written as text fail
+  as before.
+- Reviewing a long command is much faster. A word of 200,000 characters took 2.9 seconds, and
+  twice the text took four times as long, because the standard library's shell lexer copies a word
+  at each character it reads. It now takes 0.16 seconds, in proportion to the length. The review,
+  the sentence of an approval card, the memory classifier's labels and the task endings cut a
+  command into words with a copy of that lexer that collects a word's characters once
+  (`melo/contracts/shell_lexer.py`); a test compares it with `shlex` word for word on every
+  command of the review's baselines and on tens of thousands of generated texts, so no command is
+  cut differently. A word said again and again in one command, such as 50,000 times, is looked up
+  once, not 50,000 times (2.3 seconds before, 0.1 now).
+  Python code that splits a long command text it holds (`shlex.split` or `.split()` of a string
+  of 200,000 characters) is reviewed in the same time (2.3 seconds before, 0.08 now).
 
 - With `[memory] note_gate` above `typed` (a developer setting), a page, a file or a finished
   task's result no longer supports a note by text a reader of it would not see, or by an order to

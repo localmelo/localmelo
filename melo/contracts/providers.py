@@ -28,6 +28,14 @@ LLM_REQUEST_KIND: contextvars.ContextVar[str] = contextvars.ContextVar(
     "LLM_REQUEST_KIND", default=""
 )
 
+# Request fields to add to the chat requests sent in this context, empty when
+# none. The agent sets it around the one planning call it retries with
+# thinking turned off (a thinking model that ended a turn with its answer only
+# in its thinking), so a provider can merge it in without a signature change.
+LLM_REQUEST_EXTRA_BODY: contextvars.ContextVar[Mapping[str, Any]] = (
+    contextvars.ContextVar("LLM_REQUEST_EXTRA_BODY", default=MappingProxyType({}))
+)
+
 # The call kinds: runs send "plan" and "reflect", Chat.estimate_steps sends
 # "estimate", melo-retrieve's retrieval requests "retrieve", and the review
 # of a step the rules left open "review" (#339). History's llm_calls rows and
@@ -39,12 +47,16 @@ def thinking_disabled(body: Mapping[str, Any]) -> bool:
     """Whether a request body tells the model not to think (#357).
 
     That is ``chat_template_kwargs.enable_thinking`` set to false (vLLM,
-    oMLX and other servers that render the model's chat template) or
-    ``think`` set to false (Ollama). Anything else, including no setting, is
-    a model that may think.
+    oMLX and other servers that render the model's chat template),
+    ``think`` set to false (Ollama) or ``thinking.type`` set to
+    ``"disabled"`` (hosted services such as DeepSeek). Anything else,
+    including no setting, is a model that may think.
     """
     kwargs = body.get("chat_template_kwargs")
     if isinstance(kwargs, Mapping) and kwargs.get("enable_thinking") is False:
+        return True
+    switch = body.get("thinking")
+    if isinstance(switch, Mapping) and switch.get("type") == "disabled":
         return True
     return body.get("think") is False
 
@@ -145,6 +157,11 @@ class BaseLLMProvider(ABC):
     # request fields; a wrapper copies it. The agent then takes a reply's
     # words, wherever the server put them, as the model's answer (#357).
     thinking_off: bool = False
+    # The request fields that turn the model's thinking off, for the one retry
+    # of a reply that was only thinking (#469); empty when the provider cannot
+    # or already asks for no thinking. A provider sets it on the instance; a
+    # wrapper copies it.
+    thinking_off_body: Mapping[str, Any] = MappingProxyType({})
 
     # The request key this provider can send Message.thinking back under:
     # None (never sends it), "auto" (the key the last reply came from),

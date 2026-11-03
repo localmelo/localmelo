@@ -66,8 +66,12 @@ def test_get_settings_shape_when_file_missing(client: TestClient) -> None:
         assert set(body["sections"][key]) == {
             "api_key_env",
             "api_key_set",
+            "api_key",
+            "key",
             "chat_model",
             "base_url",
+            "thinking",
+            "preset",
         }
     assert body["choices"]["chat_backends"] == [
         {
@@ -1123,6 +1127,39 @@ def test_the_settings_carry_whether_melo_reads_web_pages_and_save_it_only_when_s
     assert "[tools]" not in isolated_config.read_text(), "the default is not written"
     word = client.put(
         "/api/settings", json=_put_body(on.json()["revision"], web_fetch="off")
+    )
+    assert word.status_code == 400
+
+
+def test_the_settings_carry_the_web_search_switch_and_save_it_only_when_sent(
+    client: TestClient, isolated_config: Path
+) -> None:
+    """``[web] search``: off by default and not written; on is written; a developer key too."""
+    _saved_cfg()
+    loaded = client.get("/api/settings").json()
+    assert loaded["web_search"] is False
+    keys = {
+        key["key"]: group["section"]
+        for group in loaded["developer_settings"]
+        for key in group["keys"]
+    }
+    assert keys["web.search"] == keys["web.search_order"] == "web"
+    assert keys["web.search_count"] == "web"
+    on = client.put(
+        "/api/settings", json=_put_body(loaded["revision"], web_search=True)
+    )
+    assert on.status_code == 200 and on.json()["web_search"] is True
+    assert config.load().web.search is True
+    assert "[web]\nsearch = true" in isolated_config.read_text()
+    kept = client.put("/api/settings", json=_put_body(on.json()["revision"]))
+    assert kept.json()["web_search"] is True, "absent leaves it as it is"
+    off = client.put(
+        "/api/settings", json=_put_body(kept.json()["revision"], web_search=False)
+    )
+    assert off.status_code == 200 and off.json()["web_search"] is False
+    assert "[web]" not in isolated_config.read_text(), "the default is not written"
+    word = client.put(
+        "/api/settings", json=_put_body(off.json()["revision"], web_search="yes")
     )
     assert word.status_code == 400
 

@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import getpass
 import os
 import sys
 import textwrap
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
+from functools import partial
 
-from localmelo.support import config
+from localmelo.support import config, hosted, hosted_check, keychain
 from localmelo.support.backends import discovery
 from localmelo.support.onboard_probe import ProbeError, probe_chat, probe_embedding
 from localmelo.support.server_setup import plan as server_setup
+from localmelo.support.words import t_in
 
 
 def _ask(prompt: str, default: str = "") -> str:
@@ -42,6 +45,11 @@ def _ask_choice(prompt: str, options: list[str], default: int = 1) -> int:
     return _ask_int(prompt, default, lo=1, hi=len(options))
 
 
+def _ask_secret(prompt: str) -> str:
+    """A secret typed without echo; nothing of it is shown, stored or logged here."""
+    return getpass.getpass(f"  {prompt}: ").strip()
+
+
 def _confirm(prompt: str = "Save and continue?") -> bool:
     if _arrow_keys():
         rows = ["Save and continue", "Cancel setup"]
@@ -62,10 +70,14 @@ CHAT_BACKENDS: list[tuple[str, str]] = [
     ("ollama", "Ollama (local endpoint)"),
     ("vllm", VLLM_LABEL),
     ("sglang", "SGLang (local endpoint)"),
-    ("openai", "OpenAI"),
-    ("gemini", "Google Gemini"),
-    ("anthropic", "Anthropic"),
-    ("nvidia", "NVIDIA"),
+    *[(p.id, p.label) for p in hosted.PRESETS if p.id == p.backend],
+]
+
+# The setup list: the backends above, then the hosted services that share a
+# backend's section (DeepSeek, "Other"), so every hosted preset is on it.
+SETUP_CHOICES: list[tuple[str, str]] = [
+    *CHAT_BACKENDS,
+    *[(p.id, p.label) for p in hosted.PRESETS if p.id != p.backend],
 ]
 
 EMBEDDING_BACKENDS: list[tuple[str, str]] = [
@@ -87,10 +99,7 @@ _LOCAL_DEFAULTS: dict[str, tuple[str, str]] = {
 }
 
 _CLOUD_DEFAULTS: dict[str, tuple[str, str]] = {
-    "openai": ("OPENAI_API_KEY", "gpt-4o"),
-    "gemini": ("GEMINI_API_KEY", "gemini-2.0-flash"),
-    "anthropic": ("ANTHROPIC_API_KEY", "claude-sonnet-4-20250514"),
-    "nvidia": ("NVIDIA_API_KEY", "nvidia/llama-3.1-nemotron-70b-instruct"),
+    p.id: (p.key_env, p.models[0]) for p in hosted.PRESETS if p.id == p.backend
 }
 
 
@@ -122,22 +131,114 @@ def _onboard_local(cfg: config.Config, key: str) -> bool:
     return _confirm()
 
 
-def _onboard_cloud(cfg: config.Config, key: str) -> bool:
-    """Cloud vendor chat backend setup: API key env var and model name.
+def _pick_hosted_model(preset: hosted.Preset, current: str) -> str:
+    """The model of a hosted service: one of its suggestions, or a name typed."""
+    if not preset.models:
+        while True:
+            name = _ask("Model name", current)
+            if name:
+                return name
+            print("    Enter the model's name.")
+    names = list(dict.fromkeys([current, *preset.models])) if current else []
+    names = names or list(preset.models)
+    rows = [*names, "Type another model name"]
+    choice = _ask_choice("Chat model", rows, default=1)
+    if choice <= len(names):
+        return names[choice - 1]
+    while True:
+        name = _ask("Model name")
+        if name:
+            return name
+        print("    Enter the model's name.")
 
-    The defaults are the section's current values, else the vendor's.
+
+def _paste_hosted_key(preset: hosted.Preset, section: config.CloudVendorConfig) -> bool:
+    """Ask for the key, hidden, and save it in the keychain; False if that failed.
+
+    The section then holds only the keychain reference. A key that does not look
+    like one is asked for again; a keychain that cannot be used says why.
     """
-    default_env, default_model = _CLOUD_DEFAULTS.get(key, ("", ""))
+    while True:
+        key = _ask_secret("API key (typed hidden, saved in the keychain)")
+        if not key:
+            print("    Paste the key, or press Ctrl-C to cancel.")
+            continue
+        try:
+            keychain.write(preset.service, key)
+        except keychain.KeychainError as exc:
+            print(f"    {exc}")
+            if exc.kind == "bad":
+                continue
+            return False
+        section.api_key = keychain.ref_for(preset.service)
+        section.api_key_env = ""
+        print("    Saved in the keychain.")
+        return True
 
-    print(f"\n  -- {key} (cloud API) --\n")
 
-    section = getattr(cfg, key, None)
-    if section is not None:
-        section.api_key_env = _ask(
-            "API key env var", section.api_key_env or default_env
+def _hosted_key(
+    preset: hosted.Preset, section: config.CloudVendorConfig, *, same_service: bool
+) -> None:
+    """Settle where the service's key comes from: kept, pasted, or an environment variable."""
+    have = same_service and hosted.key_state(section) in (hosted.ENV, hosted.KEYCHAIN)
+    named = same_service and bool(section.api_key_env)
+    rows: list[tuple[str, str]] = []
+    if have:
+        rows.append(("keep", "Keep the key melo already has"))
+    if keychain.available():
+        rows.append(("paste", "Paste a key (saved in the keychain)"))
+    rows.append(("env", "Use an environment variable instead"))
+    kinds = [kind for kind, _ in rows]
+    # Enter keeps what works; a variable the config already names stays the
+    # default; otherwise the keychain is the way.
+    default = "keep" if have else "env" if named or len(rows) == 1 else "paste"
+    if len(rows) == 1:
+        choice = "env"
+    else:
+        picked = _ask_choice(
+            "API key", [label for _, label in rows], default=kinds.index(default) + 1
         )
-        section.chat_model = _ask("Chat model", section.chat_model or default_model)
+        choice = kinds[picked - 1]
+    if choice == "keep":
+        return
+    if choice == "paste" and _paste_hosted_key(preset, section):
+        return
+    section.api_key = ""
+    section.api_key_env = _ask(
+        "API key env var",
+        section.api_key_env if same_service and section.api_key_env else preset.key_env,
+    )
 
+
+def _onboard_hosted(cfg: config.Config, preset_id: str) -> bool:
+    """A hosted service: its address (for "Other"), its model and its key.
+
+    The defaults are the section's current values when it is already on this
+    service, else the preset's. The key is typed hidden and saved in the
+    keychain; the config keeps only a reference.
+    """
+    preset = hosted.BY_ID[preset_id]
+    section: config.CloudVendorConfig = getattr(cfg, preset.backend)
+    same_service = hosted.preset_for(preset.backend, section) is preset
+    print(f"\n  -- {preset.label} (hosted service) --\n")
+    if preset.free_address:
+        while True:
+            address = _ask(
+                "Service address, up to /v1 (e.g. https://llm.example.com/v1)",
+                section.base_url if same_service else "",
+            )
+            if address:
+                break
+            print("    Enter the service's address.")
+        section.base_url = address
+    else:
+        section.base_url = preset.stored_url
+    _hosted_key(preset, section, same_service=same_service)
+    section.chat_model = _pick_hosted_model(
+        preset, section.chat_model if same_service else ""
+    )
+    if not same_service:
+        section.thinking = ""
     print()
     return _confirm()
 
@@ -149,11 +250,10 @@ _CHAT_SETUP: dict[str, Callable[[config.Config], bool]] = {
     "ollama": lambda cfg: _onboard_local(cfg, "ollama"),
     "vllm": lambda cfg: _onboard_local(cfg, "vllm"),
     "sglang": lambda cfg: _onboard_local(cfg, "sglang"),
-    "openai": lambda cfg: _onboard_cloud(cfg, "openai"),
-    "gemini": lambda cfg: _onboard_cloud(cfg, "gemini"),
-    "anthropic": lambda cfg: _onboard_cloud(cfg, "anthropic"),
-    "nvidia": lambda cfg: _onboard_cloud(cfg, "nvidia"),
 }
+_CHAT_SETUP.update(
+    {p.id: partial(_onboard_hosted, preset_id=p.id) for p in hosted.PRESETS}
+)
 
 
 # ── Embedding backend handlers ──
@@ -302,17 +402,29 @@ def run_backend_setup(*, guided: bool = False) -> config.Config | None:
     cfg = config.load()
 
     # ── 1. Chat backend ──
-    chat_keys = [key for key, _ in CHAT_BACKENDS]
-    chat_display = [name for _, name in CHAT_BACKENDS]
-    # The default is the saved backend; with none saved, the declined server's
+    chat_keys = [key for key, _ in SETUP_CHOICES]
+    chat_display = [name for _, name in SETUP_CHOICES]
+    # The default is the saved backend (a hosted one by its service: DeepSeek,
+    # not the openai backend it shares); with none saved, the declined server's
     # kind, as the first run would save it (see _with_chat_server).
     default_chat = cfg.chat_backend
+    saved_section = getattr(cfg, default_chat, None)
+    saved_service = (
+        hosted.preset_for(default_chat, saved_section)
+        if isinstance(saved_section, config.CloudVendorConfig)
+        else None
+    )
+    if saved_service is not None:
+        default_chat = saved_service.id
     if default_chat not in chat_keys and declined is not None:
         ollama = asyncio.run(discovery.is_ollama(declined.url))
         default_chat = "ollama" if ollama else "vllm"
     current_chat = chat_keys.index(default_chat) + 1 if default_chat in chat_keys else 1
     choice = _ask_choice("Chat backend", chat_display, default=current_chat)
-    selected_chat_key = CHAT_BACKENDS[choice - 1][0]
+    selected_chat_key = SETUP_CHOICES[choice - 1][0]
+    service = hosted.get(selected_chat_key)
+    # A hosted service is saved in its backend's section (DeepSeek in openai).
+    selected_backend = service.backend if service is not None else selected_chat_key
 
     handler = _CHAT_SETUP.get(selected_chat_key)
     if handler is None:
@@ -331,7 +443,7 @@ def run_backend_setup(*, guided: bool = False) -> config.Config | None:
     # ── 2. Embedding backend ──
     # The chat backend is needed before the embedding question: its own
     # server's listed models become extra options.
-    cfg.chat_backend = selected_chat_key
+    cfg.chat_backend = selected_backend
     emb_keys = [key for key, _ in EMBEDDING_BACKENDS]
     choices: list[EmbeddingChoice] = []
     if cfg.has_embedding:
@@ -343,11 +455,11 @@ def run_backend_setup(*, guided: bool = False) -> config.Config | None:
         default_emb = emb_keys.index(current_emb) + 1
     else:
         models: list[str] = []
-        chat_section = getattr(cfg, selected_chat_key, None)
+        chat_section = getattr(cfg, selected_backend, None)
         chat_url = getattr(chat_section, "chat_url", "")
-        if selected_chat_key in _EMBEDDING_DEFAULTS and chat_url:
+        if selected_backend in _EMBEDDING_DEFAULTS and chat_url:
             try:
-                models = asyncio.run(discovery.list_models(selected_chat_key, chat_url))
+                models = asyncio.run(discovery.list_models(selected_backend, chat_url))
             except discovery.DiscoveryError:
                 models = []  # the end-of-wizard probe still reports the problem
         choices = _embedding_choices(cfg, models)
@@ -435,6 +547,9 @@ def _run_probes(cfg: config.Config, retry: Callable[[], bool] | None = None) -> 
             print(f"\n  Probe failed: {exc}")
             if _wants_a_key(cfg, exc):
                 print(f"  Note: {discovery.NO_API_KEY_HINT}.")
+            hint = _hosted_hint(cfg, exc)
+            if hint:
+                print(f"  {hint}")
             rows = ["Try again", "Save anyway", "Cancel setup"]
             if retry is not None:
                 choice = _choose(
@@ -482,6 +597,30 @@ def _wants_a_key(cfg: config.Config, exc: ProbeError) -> bool:
     return status in (401, 403) and cfg.chat_backend in _LOCAL_DEFAULTS
 
 
+def _hosted_hint(cfg: config.Config, exc: ProbeError) -> str:
+    """Plain words for a hosted service that refused the check; "" for anything else.
+
+    The same words as the Test button in Settings, for a wrong key (401), an
+    account the service refused (402, 403), an unknown model (404) or a busy
+    service (429).
+    """
+    section = getattr(cfg, cfg.chat_backend, None)
+    if not isinstance(section, config.CloudVendorConfig):
+        return ""
+    status = getattr(exc.__cause__, "status_code", None)
+    if status not in (401, 402, 403, 404, 429):
+        return ""
+    result, detail = hosted_check.failure(status, str(exc))
+    return t_in(
+        "en",
+        hosted_check.WORDS[result],
+        model=section.chat_model,
+        status=status,
+        detail=detail,
+        seconds=int(hosted_check.CHAT_TIMEOUT_S),
+    )
+
+
 # ── First run: a URL and a model ──
 
 
@@ -495,6 +634,11 @@ class FirstSetup:
 
 
 _FIRST_RUN_URL = "http://127.0.0.1:8000/v1"
+
+
+@dataclass(frozen=True)
+class _UseHosted:
+    """The person chose a hosted service instead of a model server."""
 
 
 def _question(prompt: str, default: str = "") -> str:
@@ -655,14 +799,15 @@ def _show_summary(setup: server_setup.SetupPlan, *, developer: bool) -> tuple[st
 
 def _wait_for_a_server(
     urls: Sequence[str], *, developer: bool = False
-) -> discovery.FoundServer | str | None:
+) -> discovery.FoundServer | str | _UseHosted | None:
     """Preview setup, then reuse discovery on Enter; return a server/address or quit.
 
     The summary is printed once. On a terminal it is printed again only when
     Check again finds no server and the setup readings (cache, space) have
     changed since. EOFError and KeyboardInterrupt reach the caller. Piped
     input never enters the setup picker or approves anything; Enter/address/q
-    keep their meanings.
+    keep their meanings. On a terminal, "Use a hosted service" is the way
+    in for a person with no server.
     """
     setup = None
     shown: tuple[str, ...] = ()
@@ -678,9 +823,10 @@ def _wait_for_a_server(
     if setup is not None:
         shown = _show_summary(setup, developer=developer)
     if developer:
-        rows = ["Check again", "Review setup plan", "Enter an address", "Quit"]
+        rows = ["Check again", "Review setup plan", "Enter an address"]
     else:
-        rows = ["Check again", "Show how to set one up", "Enter an address", "Quit"]
+        rows = ["Check again", "Show how to set one up", "Enter an address"]
+    rows += ["Use a hosted service", "Quit"]
     if setup is None:
         del rows[1]
     while True:
@@ -696,9 +842,11 @@ def _wait_for_a_server(
                 else:
                     _show_steps(setup)
                 continue
+            if choice == len(rows) - 2:
+                return _UseHosted()
             answer = (
                 _question("Server URL", _FIRST_RUN_URL)
-                if choice == len(rows) - 2
+                if choice == len(rows) - 3
                 else ""
             )
         else:
@@ -1003,6 +1151,8 @@ def run_first_setup(
         waited = _wait_for_a_server(urls, developer=developer)
         if waited is None:
             return None
+        if isinstance(waited, _UseHosted):
+            return _first_hosted_service()
         if isinstance(waited, str):
             typed = waited
         else:
@@ -1088,6 +1238,39 @@ def run_first_setup(
         )
     )
     return FirstSetup(url=url, model=model, saved=saved)
+
+
+def _first_hosted_service() -> FirstSetup | None:
+    """The first run's other way in: a hosted service chosen from the setup list.
+
+    Asks the service, its model and its key (typed hidden, saved in the
+    keychain), checks them with one message, and saves the config. None when the
+    person cancels.
+    """
+    services = hosted.PRESETS
+    picked = _ask_choice("Hosted service", [p.label for p in services], default=1)
+    service = services[picked - 1]
+    cfg = config.load()
+
+    def ask() -> bool:
+        return _onboard_hosted(cfg, service.id)
+
+    if not ask():
+        _say("Setup cancelled.")
+        return None
+    cfg.chat_backend = service.backend
+    cfg.embedding_backend = "none"
+    if not _run_probes(cfg, retry=ask):
+        return None
+    section = getattr(cfg, service.backend)
+    url = section.base_url or service.base_url
+    try:
+        config.save(cfg)
+    except (OSError, config.ConfigError) as exc:
+        _say(f"Could not save {_home_path(config.CONFIG_PATH)}: {exc}")
+        return FirstSetup(url=url, model=section.chat_model, saved=False)
+    _say(f"Saved to {_home_path(config.CONFIG_PATH)} (melo setup changes it).")
+    return FirstSetup(url=url, model=section.chat_model, saved=True)
 
 
 def offer_to_save(url: str, model: str) -> bool:

@@ -151,7 +151,8 @@ def test_ollama_and_the_other_local_servers_are_named_as_they_are_labelled() -> 
 @pytest.mark.parametrize(
     ("backend", "label"),
     [
-        ("openai", "OpenAI"),
+        # An address of its own on [openai] is a service of its own, named by its host.
+        ("openai", "x"),
         ("anthropic", "Anthropic"),
         ("gemini", "Gemini"),
         ("nvidia", "NVIDIA"),
@@ -168,6 +169,24 @@ def test_a_cloud_provider_has_no_place(backend: str, label: str) -> None:
     )
     assert "on this computer" not in line(text, "You are running on")
     assert "http://x" not in text
+
+
+@pytest.mark.parametrize(
+    ("base_url", "label"),
+    [
+        ("", "OpenAI"),
+        ("https://api.openai.com/v1", "OpenAI"),
+        ("https://api.deepseek.com/v1", "DeepSeek"),
+    ],
+)
+def test_a_service_the_presets_know_is_named_by_its_preset(
+    base_url: str, label: str
+) -> None:
+    cfg = Config(chat_backend="openai", embedding_backend="none")
+    cfg.openai = CloudVendorConfig(chat_model="big-model", base_url=base_url)
+    assert line(config_identity(cfg), "You are running on") == (
+        f"You are running on the model big-model, served by {label}."
+    )
 
 
 def test_a_url_session_is_a_local_server_and_omlx_when_a_listing_said_so() -> None:

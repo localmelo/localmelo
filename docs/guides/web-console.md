@@ -628,14 +628,22 @@ save carries the revision it read, so a change made elsewhere meanwhile asks you
   address, **Test connection** (it never shows a key) and **Change…**, the form that picks
   the server, its address and the model (**Discover models** lists them). The form is the
   one change saved with a button, **Save connection**; **Cancel** puts the saved one back.
+  Under **Hosted services** the list offers OpenAI, Google Gemini, Anthropic, NVIDIA,
+  DeepSeek and Other (OpenAI format): the form then has an **API key** field with
+  **Save key** (kept in your Mac's keychain, shown only as **Saved in the keychain**, with
+  **Replace** and **Remove**) and, for a service with a switch for it, **Let the model think
+  before it answers**. **Test connection** then lists the service's models and tries one
+  short chat with a tool. See [Hosted models](hosted-models.md).
 - **Memory**: **Remember across chats**, how Melo finds notes (**By words and meaning** or
   **By words only**; developer mode adds the other two ways, with the key
   `memory.retriever`), and **Open Memory** for the notes themselves.
 - **Chats and folders**: the default folder of a new chat (**Change…** opens the app's
   folder panel, or a path field in a browser), how new chats start (**New chats start in**),
   **Read web pages** (on by default; it lets chats and tasks read public pages with
-  [`web_fetch`](../reference/tools.md#reading-a-public-web-page)), **Other folders melo may
-  read** (the folders you chose **Always allow this folder** for, each with **Remove**; see
+  [`web_fetch`](../reference/tools.md#reading-a-public-web-page)), **Web search** (off by
+  default; it lets chats and tasks look things up with
+  [`web_search`](../reference/tools.md#searching-the-web), and the words searched for leave
+  this computer), **Other folders melo may read** (the folders you chose **Always allow this folder** for, each with **Remove**; see
   [Folders outside the workspace](tools-mcp.md#folders-outside-the-workspace)) and the recent
   folders, each with **Make default**.
 - **Scheduled**: the check-in switch with its next time, and **Open Scheduled** for the chores.
@@ -822,7 +830,13 @@ retrying they show.
 A reply that is only the model's unfinished thinking never shows as the
 answer: it is a folded thinking item in the work box, with the line `The
 model's reply ended inside its thinking; asking it for its answer.`, and the
-model is asked once more. When the second reply has no answer either, the card's
+model is asked once more. When the service reported the model's thinking, melo then
+asks one last time with thinking off (where the service has that switch) and, if the
+reply is still empty, shows the last lines of the thinking as the answer, ending with
+`(from melo's thinking)`. Each of the two steps adds a line to the work box (`The model
+ended its turn with only thinking; asking again with thinking off.` and `The model gave no
+answer after thinking; the answer is the end of its thinking.`). When there is no thinking to use and the second reply has no
+answer either, the card's
 title is `melo did not finish an answer`, the hint `The model's reply held only
 its thinking. Try again, or rephrase the request.`, and the filled button
 **Try again**.

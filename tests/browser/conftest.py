@@ -6,7 +6,7 @@ import socket
 
 import pytest
 
-from localmelo.support.browser import provider
+from localmelo.support.browser import provider, safari
 from localmelo.tests.browser.fakes import FakeDns
 
 
@@ -29,3 +29,11 @@ def dns(monkeypatch: pytest.MonkeyPatch) -> FakeDns:
 def _no_wait_for_the_page_to_settle(monkeypatch: pytest.MonkeyPatch) -> None:
     """A fake page moves only when a test says so, so melo need not wait to see it stay."""
     monkeypatch.setattr(provider, "SETTLE_S", 0.0)
+
+
+@pytest.fixture(autouse=True)
+def _no_wait_after_an_act(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A fake page is quiet at once: melo looks once after an act instead of waiting."""
+    monkeypatch.setattr(safari, "LOOK_STEP_S", 0.0)
+    monkeypatch.setattr(safari, "QUIET_S", 0.0)
+    monkeypatch.setattr(safari, "LOOK_CAP_S", 0.0)

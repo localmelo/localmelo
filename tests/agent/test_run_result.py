@@ -56,8 +56,9 @@ SPEC_FIELDS = [
     "config",
 ]
 
-# Optional memory, context accounting, prefix telemetry and write confinement are
-# omitted while None, and answered_on_stop and format_fixed while false, so
+# Optional memory, context accounting, prefix telemetry, write confinement and the
+# empty-reply fallback are omitted while None, and answered_on_stop and format_fixed
+# while false, so
 # SPEC_FIELDS stays the legacy JSON line's shape.
 DATACLASS_FIELDS = [
     *SPEC_FIELDS,
@@ -67,6 +68,7 @@ DATACLASS_FIELDS = [
     "confinement",
     "answered_on_stop",
     "format_fixed",
+    "empty_reply",
 ]
 
 

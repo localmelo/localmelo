@@ -1639,8 +1639,8 @@ class GatedLLM(BaseLLMProvider):
     """A chat provider that submits each request to *client*'s gate (R18).
 
     It forwards attributes through ``__getattr__``, except those with base
-    class defaults: replay capabilities, request-kind overrides and
-    ``thinking_off`` are copied at construction; ``model``,
+    class defaults: replay capabilities, request-kind overrides,
+    ``thinking_off`` and ``thinking_off_body`` are copied at construction; ``model``,
     ``last_reasoning_key`` and ``last_usage`` are copied again after each
     successful ``chat()``.
     """
@@ -1659,6 +1659,7 @@ class GatedLLM(BaseLLMProvider):
         self.requires_reasoning_replay = inner.requires_reasoning_replay
         self.extra_body_by_kind = inner.extra_body_by_kind
         self.thinking_off = getattr(inner, "thinking_off", False) is True
+        self.thinking_off_body = getattr(inner, "thinking_off_body", {})
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.inner, name)

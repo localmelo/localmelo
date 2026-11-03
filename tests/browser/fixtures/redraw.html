@@ -1,0 +1,38 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Redraw</title>
+<style>body{font:16px sans-serif;margin:40px}button{margin:4px;padding:8px 14px}</style>
+<main>
+  <h1>Pick a mood</h1>
+  <div id="moods"></div>
+  <p id="picked">No mood yet.</p>
+</main>
+<script>
+  // Every click redraws the whole list: the same buttons, new elements, new places;
+  // a moment later it redraws again, as a page does when the site's reply comes in.
+  var picked = "";
+  var round = 0;
+  function draw() {
+    round += 1;
+    var moods = ["Happy", "Calm", "Tired"];
+    if (round % 2 === 0) moods.unshift("New!");
+    var box = document.getElementById("moods");
+    box.innerHTML = "";
+    var wrap = document.createElement("div");
+    wrap.setAttribute("data-round", String(round));
+    moods.forEach(function (name) {
+      var b = document.createElement("button");
+      b.textContent = name;
+      b.setAttribute("aria-pressed", name === picked ? "true" : "false");
+      b.addEventListener("click", function () {
+        picked = name;
+        document.getElementById("picked").textContent = "Mood: " + name;
+        draw();
+        setTimeout(draw, 2500);
+      });
+      wrap.appendChild(b);
+    });
+    box.appendChild(wrap);
+  }
+  draw();
+</script>
