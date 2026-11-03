@@ -240,7 +240,8 @@ class Recall:
     with no content of its own, searched with the user's words of the chat's last
     turns, :func:`follow_up_query`) or ``none`` (nothing: no recall ran).
     With ``[memory] gather`` on (``wide`` or ``guide``), *gather* says the message
-    asks to count, total or compare (:func:`~.recall.asks_to_gather`) and *floor*
+    asks to count, total or compare and speaks of its speaker
+    (:func:`~.recall.asks_to_gather`) and *floor*
     is the vector bar the search used; both are ``None``, and left out of
     :meth:`to_json`, with it off.
     """

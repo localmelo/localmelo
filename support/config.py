@@ -491,8 +491,9 @@ class MemoryConfig:
     with: ``recent`` (the default) the message and the user's words of the chat's
     last two turns that the model still shows, or ``message`` the message's own
     words, as recall did before; with ``recent`` the first message of a new chat
-    that has no content recalls nothing. Two more are for questions that count, total
-    or compare across things (#428), and apply to ``recall_form = "list"``.
+    that has no content recalls nothing. Two more are for questions about the person's
+    own life that count, total or compare across things (#428), and apply to
+    ``recall_form = "list"``.
     ``gather``, ``off`` (the default: recall as before), ``wide`` (for such a
     question the block's vector bar is the lower of ``recall_min_cosine`` and
     ``gather_min_cosine``, and every list-form ``search_memory`` uses that lower bar)

@@ -1,7 +1,8 @@
 """Recall looks wider for a question that counts, totals or compares: ``[memory] gather``.
 
 ``asks_to_gather`` finds such a question (English by words that stand alone, Chinese
-by text). With ``gather = "wide"`` the list form's vector bar drops to
+by text) that also speaks of its speaker ("I", "my", "we", "我" …): a generic prompt
+("how many seconds are in a day") is not one. With ``gather = "wide"`` the list form's vector bar drops to
 ``gather_min_cosine`` for it in the recall block, and for every list-form
 ``search_memory``; ``"guide"`` adds one sentence under the list for a gathering
 turn. ``"off"`` (the default) changes no byte of the block, the search result or
@@ -52,13 +53,14 @@ from localmelo.tests.sessions.helpers import Clock
 # ── The detector ──
 
 POSITIVE = [
-    # English: the words of the brief
+    # English: the words of the brief, in a message about the speaker's own life
     "How many books did I read this year?",
+    "how many books did I read",
     "how much did I spend on groceries?",
     "What is the total of my donations?",
     "How much did I give in total?",
     "Altogether, how long was I in Japan?",
-    "What's the combined cost of the two trips?",
+    "What's the combined cost of our two trips?",
     "In all, which cities did I visit?",
     "What is the number of times I went hiking?",
     "Count the doctors I saw this spring.",
@@ -69,35 +71,59 @@ POSITIVE = [
     "What did I eat each morning?",
     "Did I call every client?",
     "Did I like both movies?",
-    "How does Paris compare to Rome?",
     "I compared two phones last week, which one won?",
     "What was the difference between my two flights?",
     "Did I spend more than two hours reading?",
-    "Was the trip less than a week?",
     "Is my commute longer than hers?",
-    "Which route was faster?",
+    "How many of us went to the lake?",
+    "How many times did the doctor call me?",
+    "How much is mine in total?",
+    "Which cities have we visited in all?",
+    "I'm counting the pets: how many are there?",
+    "Is it fewer than ten, as far as I know?",
     # case, spacing and the forms the words take
     "HOW MANY pets do I have?",
     "how   many pets do I have?",
-    "What are the totals for May?",
+    "What are my totals for May?",
     "Which lists did I make?",
-    "What is the difference and what are the differences?",
-    "Was it fewer than ten?",
+    "What was the difference, and which differences did I miss?",
     # Chinese
     "我一共读了多少本书？",
+    "我一共去过几个国家",
     "我去过几次日本？",
     "我养了几个宠物？",
     "我总共花了什么钱",
-    "合计是多少",
     "我提到过哪些餐厅？",
-    "所有的医生是谁",
-    "每个人的爱好",
     "我的朋友都有谁",
+    "我们一共去了几次？",
     # both languages in one message
     "我想知道 how many books",
-    "how many 个朋友",
+    "how many 个朋友 did I meet",
 ]
 NEGATIVE = [
+    # generic prompts that count, total, list or compare, with nothing of the speaker
+    "How many seconds are in a day?",
+    "How much is the total of 12 and 30?",
+    "List the planets in the solar system.",
+    "Explain the difference between a mutex and a semaphore.",
+    "What's the combined cost of the two trips?",
+    "How does Paris compare to Rome?",
+    "Was the trip less than a week?",
+    "Which route was faster?",
+    "What are the totals for May?",
+    "What is the difference and what are the differences?",
+    "Was it fewer than ten?",
+    "Which cities have the most people in all of Europe?",
+    "一年有多少天？",
+    "列出所有的行星",
+    "合计是多少",
+    "所有的医生是谁",
+    "每个人的爱好",
+    "how many 个朋友",
+    # a speaker word inside another word is not a speaker
+    "How many people fit on the bus?",
+    "How many meters are in a mile?",
+    "Which step does the model determine first, in all?",
     # a word inside another word is not the word
     "What is my account balance?",
     "Where did I put the discount code?",
@@ -145,14 +171,16 @@ def test_the_table_is_big_enough_and_has_both_languages() -> None:
 
 
 @pytest.mark.parametrize("message", POSITIVE)
-def test_a_question_that_counts_totals_lists_or_compares_is_a_gathering_one(
+def test_a_question_that_counts_totals_lists_or_compares_about_the_speaker_gathers(
     message: str,
 ) -> None:
     assert asks_to_gather(message) is True
 
 
 @pytest.mark.parametrize("message", NEGATIVE)
-def test_a_plain_message_and_a_word_inside_a_word_are_not(message: str) -> None:
+def test_a_generic_prompt_a_plain_message_and_a_word_inside_a_word_do_not(
+    message: str,
+) -> None:
     assert asks_to_gather(message) is False
 
 

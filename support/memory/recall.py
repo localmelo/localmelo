@@ -158,6 +158,10 @@ _GATHER: Final = re.compile(
     r"|longer|faster)\b|多少|几个|几次|一共|总共|合计|所有|每个|哪些|都有",
     re.IGNORECASE | re.ASCII,
 )
+# A message that speaks of its own speaker: "I", "my", "we", "our", "我" …
+_SPEAKER: Final = re.compile(
+    r"\b(?:i|i'm|i've|i'd|my|me|mine|myself|we|our|us)\b|我", re.IGNORECASE
+)
 
 
 class Shown(NamedTuple):
@@ -971,9 +975,11 @@ def asks_about_past(message: str) -> bool:
 
 def asks_to_gather(message: str) -> bool:
     """Whether *message* asks to count, total, list or compare across things ("how
-    many", "in total", "each", "compared", "一共", "哪些" …): an answer then needs
-    every item of a kind, not the one that matches best."""
-    return _GATHER.search(message) is not None
+    many", "in total", "each", "compared", "一共", "哪些" …) **and** speaks of its
+    own speaker ("I", "my", "we", "我" …): an answer about the person's own life
+    then needs every item of a kind, not the one that matches best. A generic
+    prompt ("how many seconds are in a day", "list the planets") does not."""
+    return bool(_GATHER.search(message)) and bool(_SPEAKER.search(message))
 
 
 def current_only(items: Sequence[Item], message: str) -> list[Item]:
