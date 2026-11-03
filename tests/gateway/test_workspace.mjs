@@ -1220,6 +1220,7 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
     ['browser-act:https://example.com', {site: 'example.com', access: 'act'}, null, 'Let melo click and choose on example.com?', 'browser · acts on the page'],
     ['browser-type:https://example.com', {site: 'example.com', access: 'type', how: 'type', text: 'hi'}, null, 'Let melo type on example.com?', 'browser · types text'],
     ['browser-submit:https://example.com', {site: 'example.com', access: 'submit', to: 'https://other.org/post', how: 'click'}, null, 'Let melo send a form from example.com?', 'browser · sends a form'],
+    ['desktop-act:Chat', {app: 'Chat', access: 'desktop-act', how: 'press', on: '"Allow"', window: 'Sign in', button: 'Allow'}, null, 'Let melo press a button in Chat?', 'another app · presses a button'],
   ];
   for (const [tool, args, target, title, caption] of asks) {
     h.context.request = {request_id: `ask-${tool}-${title}`, tool_name: tool, arguments: args, workspace_label: '~/w', target};
@@ -1246,6 +1247,18 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
   const sending = findNode(h.run('approvalCard(request)'), (node) => node.className === 'approval-content');
   assert.equal(sending.textContent, 'https://other.org/post');
   assert.equal(sending.attributes['aria-label'], 'Where the form goes');
+});
+
+test("a press in another app's window says what is pressed and is asked every time", async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const focuses = (card) => findNodes(card, (node) => 'approvalFocus' in node.dataset).map((node) => node.dataset.approvalFocus);
+  h.context.request = {request_id: 'press', tool_name: 'desktop-act:Chat',
+    arguments: {app: 'Chat', access: 'desktop-act', how: 'press', on: '"Allow"', window: 'Sign in', button: 'Allow'}, workspace_label: '~/w'};
+  const card = h.run('approvalCard(request)');
+  assert.match(findNode(card, (node) => node.className === 'approval-content').textContent, /press "Allow" in Chat's window “Sign in”/);
+  assert.match(findNode(card, (node) => node.className === 'approval-warning').textContent, /asks every time/);
+  assert.deepEqual(focuses(card).filter((name) => name !== 'reason'), ['once', 'deny'], 'no "allow for this chat" on a press');
 });
 
 test('a form send and typing show what goes, say when the page decides, and offer no answer that is kept', async () => {

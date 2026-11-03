@@ -68,6 +68,9 @@ KEEP_S = 600.0
 MAX_WINDOWS = 3
 MAX_BUTTONS = 12
 TEXT_CHARS = 4000
+# A panel or dialog sits in a layer below this; the menu bar's items and pop-up
+# menus sit at or above it and are never another app's window.
+PANEL_LAYERS = 20
 # How long one call to the helper or to lsappinfo may take.
 CALL_S = 10.0
 FRONT_S = 2.0
@@ -111,6 +114,7 @@ class AppWindow:
     app: str
     title: str
     z: int | None = None
+    layer: int = 0
 
 
 @dataclass(frozen=True)
@@ -127,7 +131,22 @@ class Mark:
     """The screen before an act: the windows listed (None: unknown) and the app in front."""
 
     windows: frozenset[int] | None
-    front: tuple[str, str] | None  # (name, bundle id)
+    front: Front | None
+
+
+@dataclass(frozen=True)
+class Front:
+    """The app in front: its name, bundle id and process id (0 when unknown)."""
+
+    name: str
+    bundle: str = ""
+    pid: int = 0
+
+    def same_app(self, other: Front | None) -> bool:
+        return other is not None and (self.name, self.bundle) == (
+            other.name,
+            other.bundle,
+        )
 
 
 @dataclass(frozen=True)
@@ -181,34 +200,51 @@ def helper_command() -> list[str] | None:
     return None
 
 
-async def front_app() -> tuple[str, str] | None:
-    """The app in front now, as ``(name, bundle id)``; None when the system cannot say.
+async def _lsappinfo(*args: str) -> str:
+    proc = await asyncio.create_subprocess_exec(
+        "/usr/bin/lsappinfo",
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), FRONT_S)
+    except TimeoutError:
+        proc.kill()
+        raise
+    return out.decode("utf-8", "replace")
 
-    From ``lsappinfo``, which needs no grant and shows nothing of any window.
+
+async def front_app() -> Front | None:
+    """The app in front now; None when the system cannot say.
+
+    From ``lsappinfo``, which needs no grant and shows nothing of any window:
+    ``lsappinfo front`` names the app, ``lsappinfo info`` its name, bundle id and pid.
     """
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "/usr/bin/lsappinfo",
-            "info",
-            "-only",
-            "bundleid",
-            "front",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+        asn = (await _lsappinfo("front")).strip()
+        if not asn.startswith("ASN:"):
+            return None
+        text = await _lsappinfo(
+            "info", "-only", "name", "-only", "bundleid", "-only", "pid", asn
         )
-        out, _ = await asyncio.wait_for(proc.communicate(), FRONT_S)
     except (OSError, TimeoutError):
         return None
-    return parse_front(out.decode("utf-8", "replace"))
+    return parse_front(text)
 
 
-def parse_front(text: str) -> tuple[str, str] | None:
-    """``(name, bundle id)`` from ``lsappinfo info -only bundleid front``."""
+def parse_front(text: str) -> Front | None:
+    """The app ``lsappinfo info -only name -only bundleid -only pid ASN`` describes."""
     name = re.match(r'\s*"([^"]*)"', text)
     bundle = re.search(r'bundleID="([^"]*)"', text)
+    pid = re.search(r"\bpid = (\d+)", text)
     if name is None:
         return None
-    return name.group(1), bundle.group(1) if bundle else ""
+    return Front(
+        name.group(1),
+        bundle.group(1) if bundle else "",
+        int(pid.group(1)) if pid else 0,
+    )
 
 
 class DesktopHelper:
@@ -301,7 +337,7 @@ class DesktopHelper:
                 continue
             if row.get("is_on_screen") is False:
                 continue
-            z = row.get("z_index")
+            z, layer = row.get("z_index"), row.get("layer")
             found.append(
                 AppWindow(
                     row["window_id"],
@@ -309,6 +345,7 @@ class DesktopHelper:
                     str(row.get("app_name") or ""),
                     str(row.get("title") or ""),
                     z if isinstance(z, int) else None,
+                    layer if isinstance(layer, int) else 0,
                 )
             )
         return found
@@ -399,7 +436,7 @@ def _first_text(result: dict[str, Any]) -> str:
     return ""
 
 
-FrontApp = Callable[[], Awaitable[tuple[str, str] | None]]
+FrontApp = Callable[[], Awaitable[Front | None]]
 
 
 class DesktopWatch:
@@ -460,7 +497,7 @@ class DesktopWatch:
                 windows = frozenset(w.id for w in await helper.windows())
         return Mark(windows, await self._safe_front())
 
-    async def _safe_front(self) -> tuple[str, str] | None:
+    async def _safe_front(self) -> Front | None:
         try:
             return await self._front()
         except Exception:  # noqa: BLE001 - the front app is a hint, never a failure
@@ -483,25 +520,28 @@ class DesktopWatch:
         front = await self._safe_front()
         moved = (
             front is not None
-            and front != mark.front
-            and self._other(front[0], front[1])
+            and not front.same_app(mark.front)
+            and self._other(front.name, front.bundle)
         )
         if not new and moved and front is not None:
             # The app came to the front with no new window in the main layer: a
             # panel above it, listed only by the app's own process.
             if helper is not None and mark.windows is not None:
                 with contextlib.suppress(DesktopError):
-                    pids = {
-                        w.pid for w in await helper.windows(app=front[1] or front[0])
-                    }
+                    pids = {front.pid} if front.pid else set()
+                    if not pids:
+                        listed = await helper.windows(app=front.bundle or front.name)
+                        pids = {w.pid for w in listed}
                     for pid in sorted(pids)[:2]:
                         new += [
                             w
                             for w in await helper.windows(pid=pid)
-                            if w.id not in mark.windows and w.id not in self._adopted()
+                            if w.id not in mark.windows
+                            and w.id not in self._adopted()
+                            and w.layer < PANEL_LAYERS
                         ]
             if not new:
-                return [Seen("", front[0])]
+                return [Seen("", front.name)]
         new.sort(key=lambda w: -(w.z if w.z is not None else -1))
         seen: list[Seen] = []
         for window in new[:MAX_WINDOWS]:

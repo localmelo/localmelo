@@ -1488,10 +1488,7 @@ class BrowserToolProvider(BaseToolProvider):
         await self._recheck(tab_id)
         if others:
             block = render.block("screen", "", "\n".join(others))
-            return (
-                "Stopped waiting: another app put a window on the screen "
-                f"(the page was not checked again).\n{block}"
-            )
+            return f"Stopped waiting: another app put a window on the screen.\n{block}"
         if reached:
             return f"Reached: {reached_words}."
         return f"Timed out after {limit:g} s: {missed_words}."
@@ -1521,9 +1518,8 @@ class BrowserToolProvider(BaseToolProvider):
             now = loop.time()
             if now >= end:
                 return False, []
-            if (
-                now - start < piece
-            ):  # a driver that answered at once: wait out the piece
+            # A driver that answered at once: wait out the rest of the piece.
+            if now - start < piece:
                 await asyncio.sleep(piece - (now - start))
 
     @_guarded

@@ -24,6 +24,7 @@ from localmelo.support.browser.desktop import (
     SHOT_MAX_BYTES,
     DesktopHelper,
     DesktopWatch,
+    Front,
     parse_front,
 )
 from localmelo.support.browser.driver import Act, ActResult
@@ -71,7 +72,7 @@ class Screen:
         self.log_path = folder / "calls.jsonl"
         self.log_path.write_text("")
         self.state: dict[str, Any] = {"windows": [BROWSER, MINE]}
-        self.front: tuple[str, str] | None = ("Safari", "com.apple.Safari")
+        self.front: Front | None = Front("Safari", "com.apple.Safari", 10)
         self.save()
 
     def save(self) -> None:
@@ -86,7 +87,9 @@ class Screen:
         self.state["windows"] = [*self.state["windows"], window]
         self.save()
         if front:
-            self.front = (window["app_name"], window.get("bundle", ""))
+            self.front = Front(
+                window["app_name"], window.get("bundle", ""), window["pid"]
+            )
 
     def set(self, **values: Any) -> None:
         self.state = self.load()
@@ -99,7 +102,7 @@ class Screen:
             for name, args in map(json.loads, self.log_path.read_text().splitlines())
         ]
 
-    async def in_front(self) -> tuple[str, str] | None:
+    async def in_front(self) -> Front | None:
         return self.front
 
 
@@ -297,6 +300,27 @@ async def test_browser_wait_stops_early_when_another_apps_window_appears(
     assert looks == 2  # it did not wait out the 30 seconds
 
 
+async def test_a_panel_above_the_main_layer_is_found_by_the_app_that_came_to_the_front(
+    screen: Screen,
+) -> None:
+    """A sign-in panel is not in the main layer: melo looks at the windows of the app now in front."""
+    menu_item = {**SIGN_IN, "window_id": 8, "title": "", "layer": 25, "elements": []}
+    panel = {**SIGN_IN, "layer": 3}
+    screen.show(menu_item, front=False)  # the app's menu bar item, there before
+    driver = world(button("Quick sign-in"))
+    on_act(driver, lambda: screen.show(panel))
+    provider, tools = await tools_with(driver, watch(screen))
+    try:
+        with asking(Asks()):
+            await run(tools, "browser_open", url=HOME)
+            out = await run(tools, "browser_click", ref="e1")
+    finally:
+        await provider.close()
+    assert "Chat opened a window 'Sign in to example.com' (w1)" in out.text
+    assert "(w2)" not in out.text  # the menu bar item is never taken for it
+    assert ("list_windows", {"on_screen_only": True, "pid": 70}) in screen.calls()
+
+
 # ── Without the helper ──
 
 
@@ -305,7 +329,9 @@ async def test_without_the_helper_melo_names_the_app_in_front_in_one_line(
     screen: Screen, helper: str
 ) -> None:
     driver = world(button("Quick sign-in"))
-    on_act(driver, lambda: setattr(screen, "front", ("Chat", "com.example.chat")))
+    on_act(
+        driver, lambda: setattr(screen, "front", Front("Chat", "com.example.chat", 70))
+    )
     if helper == "no grant":
         screen.set(grants={"accessibility": False, "screen_recording": True})
     desk = watch(screen, helper=helper != "missing")
@@ -332,8 +358,11 @@ async def test_the_browser_coming_to_the_front_is_not_another_app(
     screen: Screen,
 ) -> None:
     driver = world(button("Quick sign-in"))
-    screen.front = ("Terminal", "com.apple.Terminal")
-    on_act(driver, lambda: setattr(screen, "front", ("Safari", "com.apple.Safari")))
+    screen.front = Front("Terminal", "com.apple.Terminal", 5)
+    on_act(
+        driver,
+        lambda: setattr(screen, "front", Front("Safari", "com.apple.Safari", 10)),
+    )
     provider, tools = await tools_with(driver, watch(screen, helper=False))
     try:
         with asking(Asks()):
@@ -375,8 +404,11 @@ async def test_no_watch_no_window_tools_and_no_note() -> None:
 
 
 def test_the_front_app_is_read_from_lsappinfo_words() -> None:
-    text = '"Chat" ASN:0x0-0x1c01c: (in front)\n    bundleID="com.example.chat"\n'
-    assert parse_front(text) == ("Chat", "com.example.chat")
+    text = (
+        '"Chat" ASN:0x0-0x1c01c: (in front) \n    bundleID="com.example.chat"\n'
+        "    bundle path=[ NULL ] \n    pid = 70 !cgsConnection !signalled\n"
+    )
+    assert parse_front(text) == Front("Chat", "com.example.chat", 70)
     assert parse_front("") is None
 
 
