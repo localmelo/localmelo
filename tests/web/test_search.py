@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+import dataclasses
+import socket
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import pytest
 
-from localmelo.support.browser.driver import BrowserError, Element, RawPage, TabInfo
+from localmelo.melo.contracts.approvals import TOOL_ASK, ApprovalDecision
+from localmelo.support.browser.driver import BrowserError, TabInfo
+from localmelo.support.browser.provider import BrowserToolProvider
 from localmelo.support.web import search as searching
 from localmelo.support.web.fetch import FetchError, Response
+from localmelo.tests.browser.fakes import FakeDns, FakeDriver, link, page
 from localmelo.tests.web import search_fixtures as fx
 
 QUERY = "garden tomato blight"
@@ -44,51 +49,90 @@ class FakeFetcher:
         raise AssertionError(f"unexpected address {url}")
 
 
-class FakeDriver:
-    """Stands for the Safari window: loads nothing, gives the saved result page."""
+ENGINE = "https://html.duckduckgo.com/html/?q=garden%20tomato%20blight"
+HOME = "https://www.example.com/home"
+LOCAL = "http://127.0.0.1:8765/console"
+ELSEWHERE = "https://elsewhere.example/landing"
+SECRET = "the console's private text"
 
-    name = "fake"
+
+@pytest.fixture(autouse=True)
+def dns(monkeypatch: pytest.MonkeyPatch) -> FakeDns:
+    """Name lookups answer from a table, never the network (a public address unless a test says)."""
+    fake = FakeDns()
+    monkeypatch.setattr(socket, "getaddrinfo", fake.getaddrinfo)
+    return fake
+
+
+def _results(text: str = fx.BROWSER_TEXT, **more: Any) -> Any:
+    """The engine's result page, as the browser reads it."""
+    elements = [link(label, href) for label, href in fx.BROWSER_LINKS]
+    return page(
+        ENGINE, text, *elements, title="garden tomato blight at DuckDuckGo", **more
+    )
+
+
+class Window(FakeDriver):
+    """The Safari window: the engine's page for every query, and what a failing, slow or hijacked browser does.
+
+    ``moved`` is the page a script has moved the engine's tab to, whatever the
+    tab's address says.
+    """
 
     def __init__(
         self,
-        page: RawPage | None = None,
-        *,
+        *pages: Any,
         fail: Exception | None = None,
         hang: bool = False,
+        moved: Any = None,
+        **more: Any,
     ) -> None:
-        self.page_ = page
+        super().__init__(*pages, **more)
         self.fail = fail
         self.hang = hang
-        self.opened: list[str] = []
-        self.closed: list[str] = []
+        self.moved = moved
+
+    def _engine(self, url: str) -> bool:
+        return url.startswith(ENGINE.split("?")[0])
 
     async def open(self, url: str, *, new_tab: bool, tab: str | None = None) -> TabInfo:
         if self.hang:
             await asyncio.sleep(3600)
         if self.fail:
             raise self.fail
-        assert new_tab is True
-        self.opened.append(url)
-        return TabInfo(id=f"t{len(self.opened)}", url=url)
+        if self._engine(url) and ENGINE in self.redirects:
+            self.redirects[url] = self.redirects[ENGINE]
+        return await super().open(url, new_tab=new_tab, tab=tab)
 
-    async def page(self, tab: str | None) -> RawPage:
-        assert self.page_ is not None
-        return self.page_
+    async def page(self, tab: str | None) -> Any:
+        self.calls.append(("page", tab or ""))
+        url = self._url(tab)
+        if self._engine(url) and self.moved is not None:
+            return self.moved
+        if self._engine(url) and ENGINE in self.pages:
+            return dataclasses.replace(self.pages[ENGINE], url=url)
+        return self.pages[url]
 
-    async def close_tab(self, tab: str) -> None:
-        self.closed.append(tab)
+    def read(self) -> list[str]:
+        return [tab for call, tab in self.calls if call == "page"]
 
 
-def _duck_page(text: str = fx.BROWSER_TEXT) -> RawPage:
-    return RawPage(
-        url="https://html.duckduckgo.com/html/",
-        title="garden tomato blight at DuckDuckGo",
-        text=text,
-        elements=tuple(
-            Element(kind="link", label=label, href=href)
-            for label, href in fx.BROWSER_LINKS
-        ),
-    )
+class Asks:
+    """The run's approval policy as the person's answers: says yes, keeps the questions."""
+
+    def __init__(self) -> None:
+        self.asked: list[str] = []
+
+    async def __call__(
+        self, name: str, arguments: Mapping[str, Any], preview: str
+    ) -> ApprovalDecision:
+        self.asked.append(name)
+        return ApprovalDecision(True)
+
+
+def _window(*pages: Any, **more: Any) -> tuple[Window, BrowserToolProvider]:
+    driver = Window(*pages, **more)
+    return driver, BrowserToolProvider(driver)
 
 
 class Clock:
@@ -109,7 +153,7 @@ class Clock:
 def _searcher(
     fetcher: FakeFetcher,
     *,
-    browser: FakeDriver | None = None,
+    browser: BrowserToolProvider | None = None,
     order: tuple[str, ...] = searching.DEFAULT_ORDER,
     clock: Clock | None = None,
 ) -> searching.WebSearcher:
@@ -256,10 +300,16 @@ async def test_an_address_the_fetcher_would_refuse_is_dropped_from_the_results()
 # ── the browser way ──
 
 
+def _bing_blocked() -> FakeFetcher:
+    return FakeFetcher(
+        **{"bing.com": _response("", 429), "baidu.com": _response(fx.BAIDU)}
+    )
+
+
 async def test_the_browser_way_reads_the_window_and_closes_its_tab() -> None:
-    driver = FakeDriver(_duck_page())
+    driver, browser = _window(_results())
     fetcher = FakeFetcher(**{"bing.com": _response("", 202)})
-    answer = await _searcher(fetcher, browser=driver).search(QUERY)
+    answer = await _searcher(fetcher, browser=browser).search(QUERY)
     assert (answer.way, answer.engine) == ("browser", "DuckDuckGo in Safari")
     assert answer.skipped == [("Bing", "asked for a check (HTTP 202)")]
     assert [hit.url for hit in answer.hits] == [
@@ -267,17 +317,13 @@ async def test_the_browser_way_reads_the_window_and_closes_its_tab() -> None:
         "https://extension.example.org/blight",
         "https://shop.example.com/sprays?id=7",
     ]  # the address on this computer is dropped
-    assert driver.opened == [
-        "https://html.duckduckgo.com/html/?q=garden%20tomato%20blight"
-    ]
-    assert driver.closed == ["t1"]
+    assert [url for call, url in driver.calls if call == "open"] == [ENGINE]
+    assert driver.tabs_ == {}, "the tab is closed"
+    assert "Water the soil" in answer.hits[0].snippet
 
 
 async def test_the_browser_way_is_left_out_when_the_browser_is_off() -> None:
-    fetcher = FakeFetcher(
-        **{"bing.com": _response("", 429), "baidu.com": _response(fx.BAIDU)}
-    )
-    answer = await _searcher(fetcher).search("番茄 晚疫病 怎么防治")
+    answer = await _searcher(_bing_blocked()).search("番茄 晚疫病 怎么防治")
     assert answer.way == "baidu"
     # Nothing is said about a way that was never on.
     assert answer.skipped == [("Bing", "asked for a check (HTTP 429)")]
@@ -286,35 +332,125 @@ async def test_the_browser_way_is_left_out_when_the_browser_is_off() -> None:
 async def test_a_challenge_page_in_the_window_is_blocked_and_the_tab_still_closes() -> (
     None
 ):
-    driver = FakeDriver(
-        RawPage(url="", title="DuckDuckGo", text=fx.CHALLENGE_TEXT, elements=())
+    driver, browser = _window(
+        page(ENGINE, fx.CHALLENGE_TEXT, title="DuckDuckGo"),
     )
-    fetcher = FakeFetcher(
-        **{"bing.com": _response("", 429), "baidu.com": _response(fx.BAIDU)}
+    answer = await _searcher(_bing_blocked(), browser=browser).search(
+        "番茄 晚疫病 怎么防治"
     )
-    answer = await _searcher(fetcher, browser=driver).search("番茄 晚疫病 怎么防治")
     assert answer.way == "baidu"
     assert ("DuckDuckGo in Safari", searching.BLOCKED) in answer.skipped
-    assert driver.closed == ["t1"]
+    assert driver.tabs_ == {}
 
 
 @pytest.mark.parametrize(
     "make",
     [
-        lambda: FakeDriver(fail=BrowserError("window closed")),
-        lambda: FakeDriver(hang=True),
+        lambda: Window(fail=BrowserError("window closed")),
+        lambda: Window(hang=True),
     ],
 )
 async def test_a_window_that_fails_or_hangs_falls_back(
-    make: Callable[[], FakeDriver], monkeypatch: pytest.MonkeyPatch
+    make: Callable[[], Window], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(searching, "BROWSER_S", 0.05)
-    fetcher = FakeFetcher(
-        **{"bing.com": _response("", 429), "baidu.com": _response(fx.BAIDU)}
+    browser = BrowserToolProvider(make())
+    answer = await _searcher(_bing_blocked(), browser=browser).search(
+        "番茄 晚疫病 怎么防治"
     )
-    answer = await _searcher(fetcher, browser=make()).search("番茄 晚疫病 怎么防治")
     assert answer.way == "baidu"
     assert ("DuckDuckGo in Safari", "could not be reached") in answer.skipped
+
+
+# The browser tools' own checks: the engine's page is read as any page is.
+
+
+@pytest.mark.parametrize(
+    ("what", "redirects", "moved"),
+    [
+        ("redirects to this computer", {ENGINE: LOCAL}, None),
+        ("redirects to another site", {ENGINE: ELSEWHERE}, None),
+        ("moves itself to this computer", {}, page(LOCAL, SECRET)),
+        ("moves itself to another site", {}, page(ELSEWHERE, SECRET)),
+    ],
+)
+async def test_a_page_that_leaves_the_engine_is_blocked_unread_and_nobody_is_asked(
+    what: str, redirects: dict[str, str], moved: Any
+) -> None:
+    driver, browser = _window(
+        _results(), page(ELSEWHERE, SECRET), redirects=redirects, moved=moved
+    )
+    asks = Asks()
+    token = TOOL_ASK.set(asks)
+    try:
+        answer = await _searcher(_bing_blocked(), browser=browser).search(
+            "番茄 晚疫病 怎么防治"
+        )
+    finally:
+        TOOL_ASK.reset(token)
+    assert answer.way == "baidu", what
+    assert ("DuckDuckGo in Safari", searching.PAGE_REFUSED) in answer.skipped
+    assert all(SECRET not in hit.snippet for hit in answer.hits)
+    assert (
+        asks.asked == []
+    ), "the person is not asked about a site a search page went to"
+    assert ("blank", "t1") in driver.calls, "the refused page is left for an empty one"
+    assert driver.tabs_ == {}, "and its tab is closed"
+    if redirects:
+        assert driver.read() == [], "a page that was redirected is not even read"
+
+
+async def test_a_page_with_a_frame_on_this_computer_is_blocked() -> None:
+    driver, browser = _window(_results(frames=(LOCAL,)))
+    answer = await _searcher(_bing_blocked(), browser=browser).search(
+        "番茄 晚疫病 怎么防治"
+    )
+    assert answer.way == "baidu"
+    assert ("DuckDuckGo in Safari", searching.PAGE_REFUSED) in answer.skipped
+    assert ("blank", "t1") in driver.calls and driver.tabs_ == {}
+
+
+async def test_an_engine_name_that_resolves_to_this_computer_is_blocked_unloaded(
+    dns: FakeDns,
+) -> None:
+    dns.answers["html.duckduckgo.com"] = ["127.0.0.1"]
+    driver, browser = _window(_results())
+    answer = await _searcher(_bing_blocked(), browser=browser).search(
+        "番茄 晚疫病 怎么防治"
+    )
+    assert answer.way == "baidu"
+    assert [call for call, _ in driver.calls if call in ("open", "page")] == []
+    assert any(why == "could not be reached" for _, why in answer.skipped)
+
+
+async def test_the_engine_site_is_not_asked_about_since_the_switch_allows_it() -> None:
+    driver, browser = _window(_results())
+    asks = Asks()
+    token = TOOL_ASK.set(asks)
+    try:
+        answer = await _searcher(_bing_blocked(), browser=browser).search(QUERY)
+    finally:
+        TOOL_ASK.reset(token)
+    assert answer.way == "browser" and asks.asked == []
+
+
+async def test_the_chats_own_tabs_are_left_as_they_were() -> None:
+    driver, browser = _window(_results(), page(HOME, "Welcome home."))
+    tools = {t.definition.name: t for t in await browser.start()}
+    await tools["browser_open"].function(url=HOME)  # the chat's tab, t1
+    await _searcher(_bing_blocked(), browser=browser).search(QUERY)
+    assert list(driver.tabs_) == ["t1"], "only the search tab was closed"
+    again = await tools["browser_read"].function()  # still the current tab
+    assert "Welcome home." in str(again)
+
+
+async def test_a_second_search_reads_a_second_page_in_a_tab_of_its_own() -> None:
+    driver, browser = _window(_results())
+    searcher = _searcher(_bing_blocked(), browser=browser)
+    await searcher.search(QUERY)
+    await searcher.search(QUERY)
+    opens = [url for call, url in driver.calls if call == "open"]
+    assert opens == [ENGINE, ENGINE] and driver.tabs_ == {}
 
 
 # ── politeness ──

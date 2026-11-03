@@ -63,14 +63,14 @@ class Asks:
 
 
 def _provider(
-    searcher: FakeSearcher | None = None, *, task: bool = False, **cfg_web: Any
+    searcher: FakeSearcher | None = None, **cfg_web: Any
 ) -> tuple[WebSearchProvider, FakeSearcher]:
     cfg = config.Config(chat_backend="vllm", embedding_backend="none")
     for name, value in cfg_web.items():
         setattr(cfg.web, name, value)
     searcher = searcher or FakeSearcher()
     return (
-        WebSearchProvider(task=task, cfg=cfg, searcher=searcher),  # type: ignore[arg-type]
+        WebSearchProvider(cfg=cfg, searcher=searcher),  # type: ignore[arg-type]
         searcher,
     )
 
@@ -218,7 +218,9 @@ async def test_the_words_shown_are_cut_and_cleaned_but_the_search_gets_them_whol
     None
 ):
     provider, searcher = _provider()
-    text = _text(await _call(provider, query="tomato  blight\n\n" + "w" * 400))
+    text = _text(
+        await _call(provider, ask=Asks(), query="tomato  blight\n\n" + "w" * 400)
+    )
     head = text.splitlines()[0]
     assert head.startswith("Searched the web for “tomato blight www") and "…" in head
     assert len(head) < search_tool.WORDS_CHARS + 60
@@ -367,20 +369,28 @@ async def test_each_doubtful_search_has_a_question_name_of_its_own() -> None:
     assert asks.asked[-1][0] == names[0]
 
 
-async def test_with_nobody_to_ask_a_chat_searches_and_a_task_does_not() -> None:
-    secret = "why does sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789 fail"
-    chat, chat_searcher = _provider()
-    assert isinstance(await _call(chat, ask=None, query=secret), str)
-    assert len(chat_searcher.calls) == 1
-    task, task_searcher = _provider(task=True)
-    result = await _call(task, ask=None, query=secret)
+@pytest.mark.parametrize(
+    ("words", "what"),
+    [
+        ("why does sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789 fail", "a secret"),
+        ("x " * 120, "pasted text"),
+        ("line one of a note\nline two of the same note", "pasted text"),
+    ],
+)
+async def test_with_nobody_to_ask_a_risky_search_is_not_sent_in_a_chat_either(
+    words: str, what: str
+) -> None:
+    """No approval policy at all (a library call, --yolo): a run nobody answers is not allowed."""
+    provider, searcher = _provider()
+    result = await _call(provider, ask=None, query=words)
     assert isinstance(result, ToolOutput) and result.is_error
-    assert "nobody to ask" in result.text and task_searcher.calls == []
+    assert f"the words look like {what}" in result.text
+    assert "nobody to ask" in result.text and searcher.calls == []
 
 
-async def test_an_ordinary_search_in_a_task_needs_nobody() -> None:
-    task, searcher = _provider(task=True)
-    assert isinstance(await _call(task, ask=None, query="tomato blight"), str)
+async def test_with_nobody_to_ask_an_ordinary_search_still_goes() -> None:
+    provider, searcher = _provider()
+    assert isinstance(await _call(provider, ask=None, query="tomato blight"), str)
     assert len(searcher.calls) == 1
 
 

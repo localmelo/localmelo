@@ -93,6 +93,20 @@ def test_links_without_the_title_in_the_text_still_give_a_hit() -> None:
     ]
 
 
+def test_a_title_the_page_wraps_over_lines_still_finds_its_snippet() -> None:
+    hits = pages.read_links(
+        "A long enough title\nthat wraps over two lines\nand the snippet after it",
+        [
+            (
+                "A long enough title that wraps over two lines",
+                "https://www.example.com/x",
+            )
+        ],
+        frozenset(),
+    )
+    assert [h.snippet for h in hits] == ["and the snippet after it"]
+
+
 def test_a_huge_or_deep_page_is_read_within_limits() -> None:
     deep = "<div>" * 5000 + "text" + "</div>" * 5000
     wide = "<p>x</p>" * (pages.MAX_NODES + 10)

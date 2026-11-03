@@ -2398,7 +2398,7 @@ class TaskWorkers:
                         # Searching the web ([web] search), asking the chat that owns
                         # the task about words that look like a secret.
                         *(
-                            [WebSearchProvider(task=True, cfg=self.settings())]
+                            [WebSearchProvider(cfg=self.settings())]
                             if self.settings().web.search is True
                             else []
                         ),

@@ -22,7 +22,6 @@ a way that was turned away is not asked again in the same search.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import re
 import time
 from collections.abc import Awaitable, Callable, Sequence
@@ -31,6 +30,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 from localmelo.support.browser.driver import BrowserError
+from localmelo.support.browser.provider import PageRefusedError
 from localmelo.support.web import search_pages as pages
 from localmelo.support.web.fetch import FetchError, WebFetcher
 from localmelo.support.web.guard import AddressError, check_url
@@ -38,7 +38,7 @@ from localmelo.support.web.search_pages import Hit
 from localmelo.support.web.tool import readable
 
 if TYPE_CHECKING:
-    from localmelo.support.browser.driver import BrowserDriver
+    from localmelo.support.browser.provider import BrowserToolProvider
 
 # Seconds between two requests to one engine.
 GAP_S = 2.0
@@ -77,6 +77,9 @@ BLOCK_MARKERS = (
 BLOCKED = "asked for a check"
 UNREAD = "gave a page melo could not read results from"
 OFF_TOPIC = "gave results that did not match the words"
+# The browser's own checks refused the page: it went to a local address or to
+# another site, or has a frame on one, or the browser gave no address for it.
+PAGE_REFUSED = "gave a page melo's browser does not read"
 
 
 @dataclass(frozen=True)
@@ -208,8 +211,10 @@ Sleep = Callable[[float], Awaitable[None]]
 class WebSearcher:
     """Searches with the ways of *order*, one at a time. See the module docstring.
 
-    *browser* is the driver of the browser window the person switched on
-    (None: the ``browser`` way is skipped). *fetcher*, *sleep* and *clock* are
+    *browser* is the browser tools' provider, when the person switched browsing
+    on (None: the ``browser`` way is skipped); the way reads the engine's page
+    through :meth:`~localmelo.support.browser.provider.BrowserToolProvider.read_for_search`,
+    so it has the browser tools' own checks. *fetcher*, *sleep* and *clock* are
     for tests.
     """
 
@@ -218,7 +223,7 @@ class WebSearcher:
         *,
         order: Sequence[str] = DEFAULT_ORDER,
         fetcher: WebFetcher | None = None,
-        browser: BrowserDriver | None = None,
+        browser: BrowserToolProvider | None = None,
         gap_s: float = GAP_S,
         sleep: Sleep = asyncio.sleep,
         clock: Callable[[], float] = time.monotonic,
@@ -292,26 +297,22 @@ class WebSearcher:
         return [], BLOCKED if looks_blocked(text) else UNREAD
 
     async def _ask_browser(self, query: str) -> tuple[list[Hit], str]:
-        driver = self._browser
-        assert driver is not None
+        reader = self._browser
+        assert reader is not None
         await self._gap(BROWSER_ENGINE)
-        tab: str | None = None
         try:
             async with asyncio.timeout(BROWSER_S):
-                url = BROWSER_URL.format(q=quote(query))
-                tab = (await driver.open(url, new_tab=True)).id
-                page = await driver.page(tab)
+                snap = await reader.read_for_search(BROWSER_URL.format(q=quote(query)))
+        except PageRefusedError:
+            return [], PAGE_REFUSED
         except (BrowserError, TimeoutError):
             return [], "could not be reached"
-        finally:
-            if tab is not None:
-                with contextlib.suppress(Exception):
-                    await driver.close_tab(tab)
-        links = [(e.label, e.href) for e in page.elements if e.kind == "link"]
-        hits = public(pages.read_links(page.text, links, BROWSER_OWN))
+        text = "\n".join(snap.parts)
+        links = [(e.label, e.href) for e in snap.elements.values() if e.kind == "link"]
+        hits = public(pages.read_links(text, links, BROWSER_OWN))
         if hits:
             return hits, ""
-        return [], BLOCKED if looks_blocked(f"{page.title}\n{page.text}") else UNREAD
+        return [], BLOCKED if looks_blocked(f"{snap.title}\n{text}") else UNREAD
 
 
 __all__ = [

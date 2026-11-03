@@ -234,6 +234,7 @@ def read_links(
     The first link to an address wins, so a site's breadcrumb and image links
     do not repeat it.
     """
+    text = _words(text)  # a label that the page wraps over lines still matches
     chosen: list[tuple[str, str]] = []
     seen: set[str] = set()
     for label, href in links:

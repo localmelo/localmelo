@@ -18,9 +18,10 @@ shapes ``support.memory`` detects) or look like pasted text (long, or on more
 than one line, as text copied from a private note or file is) asks first, with a
 question of its own under a name made from the words (``web_search:<digest>``),
 so an answer covers that search only and never a later one. Where nobody can be
-asked, a chat searches (as ``--yolo`` reads sites) and a task does not. An
-address in the results is opened afterwards with ``web_fetch``, which asks
-about the site as it always does.
+asked (no approval policy at all, as in a library call or ``--yolo``), such a
+search is not sent, in a chat as in a task: a run nobody watches is not
+"allowed". An address in the results is opened afterwards with ``web_fetch``,
+which asks about the site as it always does.
 """
 
 from __future__ import annotations
@@ -43,7 +44,7 @@ from localmelo.support.web.search import (
 )
 
 if TYPE_CHECKING:
-    from localmelo.support.browser.driver import BrowserDriver
+    from localmelo.support.browser.provider import BrowserToolProvider
     from localmelo.support.config import Config
 
 NAME = "web_search"
@@ -117,9 +118,8 @@ def _digest(query: str) -> str:
 class WebSearchProvider(BaseToolProvider):
     """The ``web_search`` tool. See the module docstring.
 
-    *task* is set for a task's worker: where nobody can be asked, it does not
-    send a search that needs asking. *browser* is the driver of the browser window
-    the person switched on, when they did (the ``browser`` way). *cfg* is the
+    *browser* is the browser tools' provider, when the person switched browsing
+    on (the ``browser`` way). *cfg* is the
     session's config (the saved one when None), which holds the order of ways
     and the number of results (``[web] search_order``, ``search_count``).
     *searcher* replaces the real one in tests.
@@ -128,8 +128,7 @@ class WebSearchProvider(BaseToolProvider):
     def __init__(
         self,
         *,
-        task: bool = False,
-        browser: BrowserDriver | None = None,
+        browser: BrowserToolProvider | None = None,
         cfg: Config | None = None,
         searcher: WebSearcher | None = None,
     ) -> None:
@@ -137,7 +136,6 @@ class WebSearchProvider(BaseToolProvider):
             from localmelo.support import config
 
             cfg = config.load()
-        self.task = task
         self.browser = browser
         self.count = min(MAX_COUNT, max(1, cfg.web.search_count))
         self.searcher = searcher or WebSearcher(
@@ -202,13 +200,11 @@ class WebSearchProvider(BaseToolProvider):
             return
         ask = TOOL_ASK.get()
         if ask is None:
-            if self.task:
-                raise _RefusedError(
-                    "melo did not search: the words look like "
-                    + ("a secret" if why == "secret" else "pasted text")
-                    + " and this task has nobody to ask."
-                )
-            return
+            raise _RefusedError(
+                "melo did not search: the words look like "
+                + ("a secret" if why == "secret" else "pasted text")
+                + " and there is nobody to ask."
+            )
         shown = render.field_text(query, WORDS_CHARS)
         reason = (
             "the words look like they hold a secret"

@@ -371,7 +371,7 @@ async def build_session_agent(
 
         # The browser window the chat has, if it has one, is a way to search.
         window = next(
-            (p.driver for p in providers if isinstance(p, BrowserToolProvider)), None
+            (p for p in providers if isinstance(p, BrowserToolProvider)), None
         )
         providers.append(WebSearchProvider(browser=window, cfg=cfg))
     llm: BaseLLMProvider | None = None

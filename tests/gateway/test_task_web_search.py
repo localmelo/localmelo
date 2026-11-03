@@ -33,7 +33,7 @@ async def test_a_worker_has_no_web_search_by_default(setup: Setup) -> None:
     assert "web_search" not in await _tools(setup, "off")
 
 
-async def test_the_workers_search_is_the_task_kind_that_asks_its_chat(
+async def test_a_worker_has_one_search_provider_that_cannot_send_unasked_words(
     setup: Setup,
 ) -> None:
     setup[1].web.search = True
@@ -43,4 +43,10 @@ async def test_the_workers_search_is_the_task_kind_that_asks_its_chat(
     await workers.create({"objective": "look it up", "workspace": str(project)})
     await eventually(lambda: len(built) == 1)
     [search] = [p for p in built[0]["tools"] if type(p).__name__ == "WebSearchProvider"]
-    assert search.task is True
+    [tool] = await search.start()
+    # A worker's call runs with no approval policy unless its chat is asked: a
+    # search that needs asking is refused where nobody can be asked.
+    result = await tool.function(
+        query="why does sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789 fail"
+    )
+    assert result.is_error and "nobody to ask" in result.text

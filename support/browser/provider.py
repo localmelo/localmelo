@@ -64,7 +64,11 @@ import logging
 import re
 from typing import Any, NoReturn
 
-from localmelo.melo.contracts.approvals import SELF_ASKING_TOOLS
+from localmelo.melo.contracts.approvals import (
+    SELF_ASKING_TOOLS,
+    TOOL_ASK,
+    ApprovalDecision,
+)
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool, ToolFunction
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.schema import ImagePart, ToolDef
@@ -258,6 +262,26 @@ def _guarded(fn: ToolFunction) -> ToolFunction:
                 self._arm_idle()
 
     return run
+
+
+class PageRefusedError(BrowserError):
+    """:meth:`BrowserToolProvider.read_for_search` did not read the page it loaded.
+
+    The page went to a local or private address, to a site the call may not
+    ask about, or has a frame on a local address, or the browser gave no
+    address for it. Nothing of it was kept.
+    """
+
+
+_SEARCH_ONE_SITE = (
+    "A search page may only be read on the search engine's own site; the "
+    "person did not allow another one."
+)
+
+
+async def _no_other_site(name: str, arguments: Any, preview: str) -> ApprovalDecision:
+    """The answer to every site question while a search page is read: no."""
+    return ApprovalDecision(False, _SEARCH_ONE_SITE, origin="policy")
 
 
 class BrowserToolProvider(BaseToolProvider):
@@ -624,6 +648,44 @@ class BrowserToolProvider(BaseToolProvider):
                 raise BrowserError("No page is open. Use browser_open first.")
             return self._tab
         return self._known(word)
+
+    async def read_for_search(self, url: str) -> render.Snapshot:
+        """Load *url*, a search engine's result page, in a tab of its own, read it and close the tab.
+
+        It is the same checked open and read as ``browser_open``: the address
+        must be public before the page loads, and the page is checked again
+        where it lands and in its frames; a refused page is blanked, a payment
+        page is not read, and sensitive field values are masked. The engine's
+        site is not asked about (turning web search on allows it), and no other
+        site is: a page that goes to another site or to a local address is
+        refused, not asked about. Raises :class:`PageRefusedError` for such a page
+        and :class:`BrowserError` when the browser cannot load it. The chat's
+        own tabs and current tab are left as they were.
+        """
+        origin = sites.require_origin(url)
+        async with self._lock:
+            self._cancel_idle()
+            before, current = set(self._raw), self._tab
+            token = TOOL_ASK.set(_no_other_site)
+            try:
+                await self._driver.start()
+                await addresses.require_public(url)
+                info = await self._driver.open(url, new_tab=True)
+                own = self._own(info)
+                self._made.add(own.id)
+                try:
+                    await self._read_tab(own, {origin})
+                except BrowserError as exc:
+                    raise PageRefusedError(str(exc)) from exc
+                return self._snaps[own.id]
+            finally:
+                TOOL_ASK.reset(token)
+                for short in [t for t in self._raw if t not in before]:
+                    with contextlib.suppress(BrowserError):
+                        await self._driver.close_tab(self._raw[short])
+                    self._forget_tab(short)
+                self._tab = current if current in self._raw else None
+                self._arm_idle()
 
     # ── The tools ──
 
