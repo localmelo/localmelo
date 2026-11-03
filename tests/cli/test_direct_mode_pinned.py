@@ -93,6 +93,11 @@ default, leaves the options and so the requests, stdout and exit codes as they w
 ``tests/agent/test_call_budget.py`` checks. A task's own built-ins (``git_status``,
 ``file_edit``) are left out of ``--builtins all``, so ``_parse_builtins`` has a new hash
 and ``all`` still names the five built-ins it named, with the same requests.
+The developer setting ``[agent] empty_reply_fallback`` (no flag;
+``-X agent.empty_reply_fallback=off``) is applied to the options in
+``_build_direct_mode_agent``, which has a new hash again; the default ``on`` keeps
+today's rescue of an empty reply, and ``off`` restores the earlier ending, as
+``tests/agent/test_thinking_answer.py`` checks.
 ``_check_args`` is not pinned.
 """
 
@@ -115,7 +120,7 @@ PINNED = {
     "_exit_code": "bacf133c2381454b95644b216daebd09f279e75ff0496a319ef3c98c554432a5",
     "_one_line": "4dc03ea8c7f5f5896d9fd58887f5290dfbe1faf4e6286d272ef354567e8f7ef7",
     "_localmelo_version": "7c4a81e650ed6d8cc5ad1f6227b4ce75fe56028ebc7fa27ce5377fda6445db5d",
-    "_build_direct_mode_agent": "e63a11d7f6528c1e3c0f95900a525ab8f85627d27baff707b13579d58b2a2f67",
+    "_build_direct_mode_agent": "ea63499a42892f1faee08464f2f37309fce3730ff68cec571a0541a25588a668",
     "_direct_embedding": "67275e465432460acbb15d5b30649502641de4b37f1758723f066428662c6a7d",
     "_ExitSignals": "7859cea6c228917546ac80014d4745b789ca9c6d732f38aa949de9156f3ff34d",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",
