@@ -27,9 +27,14 @@ from localmelo.support.config import Config, MemoryConfig, save
 from localmelo.support.memory import hippo_encode as hippo
 from localmelo.support.memory.hippo_encode import Cache, Stats, Turn
 from localmelo.tests.memory.hippo_helpers import (
+    CAP,
+    CUT_OFF,
     StubEncoder,
+    by_label,
     item,
+    labels,
     numbers_in,
+    padded,
     says,
     turn,
     window_sizes,
@@ -45,7 +50,7 @@ class Slow(StubEncoder):
     """A stub chat model that takes a moment to answer and records when each request
     started and ended and how many were in flight at once."""
 
-    def __init__(self, reply: Any, *, usage: tuple[int, int] | None = None) -> None:
+    def __init__(self, reply: Any, *, usage: Any = None) -> None:
         super().__init__(reply, usage=usage)
         # Shared with the copy the encoder makes of the provider (a dict, not ints).
         self.spans: list[tuple[float, float]] = []
@@ -363,6 +368,142 @@ async def test_stopping_the_run_cancels_the_pending_asks_and_keeps_the_answered(
     assert len(model.prompts) == 3  # nothing was asked after it
 
 
+# ── encode: windows that run out of room ──
+
+# The prompt over this many characters runs out of room; one with BOOM in it always does.
+ROOM = 4500
+
+
+def runs_out(prompt: str) -> bool:
+    return "BOOM" in prompt or len(prompt) > ROOM
+
+
+def small_room() -> Slow:
+    """A slow chat model that cuts off any reply to a prompt that runs out."""
+    return Slow(
+        lambda p: CUT_OFF if runs_out(p) else by_label(p),
+        usage=lambda p: (len(p) // 4, CAP if runs_out(p) else 120),
+    )
+
+
+def mixed() -> list[Turn]:
+    """One window that runs out and splits, one that always runs out and fails, one
+    exchange read in parts (each part splits), and some ordinary windows."""
+    turns = padded(12)
+    turns.append(turn(12, "BOOM " * 600, "never read"))
+    turns += [turn(n, f"BOOM {n}?", "x" * 500) for n in range(13, 19)]
+    turns.append(turn(19, "Read all of it.", "\n\n".join("w" * 2400 for _ in range(8))))
+    turns += [turn(n, f"Question {n}?", f"Answer {n}.") for n in range(20, 26)]
+    return turns
+
+
+async def test_splitting_windows_give_the_serial_encoding_in_parallel(
+    tmp_path: Path,
+) -> None:
+    turns = mixed()
+    done: dict[str, Any] = {}
+    for name, limit in (("serial", None), ("parallel", asyncio.Semaphore(4))):
+        model, stats = small_room(), Stats()
+        cache = Cache(str(tmp_path / f"{name}.jsonl"))
+        encoding = await hippo.encode(
+            model, "T", turns, window_chars=7000, cache=cache, stats=stats, limit=limit
+        )
+        done[name] = (encoding, stats, model, cache)
+    serial, serial_stats, serial_model, serial_cache = done["serial"]
+    parallel, parallel_stats, parallel_model, parallel_cache = done["parallel"]
+    assert shape(parallel) == shape(serial)
+    assert parallel_stats == serial_stats
+    assert sorted(parallel_model.prompts) == sorted(serial_model.prompts)
+    assert sorted(Path(parallel_cache.path).read_text().splitlines()) == sorted(
+        Path(serial_cache.path).read_text().splitlines()
+    )
+    reports = serial.windows
+    assert any(w.split == 2 and not w.failed for w in reports)
+    assert any((w.split, w.failed_parts, w.failed) == (4, 4, True) for w in reports)
+    assert any(w.part is not None and w.split == 2 for w in reports)
+    assert [w.part for w in reports if w.part] == [(1, 4), (2, 4), (3, 4), (4, 4)]
+    assert [p.sources for p in serial.pieces if not p.forced] == sorted(
+        (p.sources for p in serial.pieces if not p.forced),
+        key=lambda s: (max(s), min(s)),
+    )
+    # Run again on the caches the two modes wrote: no request, and the same result.
+    for limit, cache in ((None, parallel_cache), (asyncio.Semaphore(3), serial_cache)):
+        quiet, stats = small_room(), Stats()
+        again = await hippo.encode(
+            quiet,
+            "T",
+            turns,
+            window_chars=7000,
+            cache=Cache(cache.path),
+            stats=stats,
+            limit=limit,
+        )
+        failed = [w for w in again.windows if w.failed]
+        # Only the window that always runs out is asked again, and only its four
+        # failed parts: that it ran out, and its halves, are kept; the rest is cached.
+        assert len(failed) == 1
+        assert len(quiet.prompts) == stats.calls == 4 * len(failed)
+        assert [w.cached for w in again.windows if not w.failed] == [True] * (
+            len(again.windows) - len(failed)
+        )
+        assert [p.sources for p in again.pieces] == [p.sources for p in serial.pieces]
+
+
+async def test_the_halves_of_a_window_run_together_under_the_limit() -> None:
+    turns = padded(12)
+    for width in (2, 4):
+        model = small_room()
+        encoding = await hippo.encode(
+            model, "T", turns, window_chars=12000, limit=asyncio.Semaphore(width)
+        )
+        assert encoding.windows[0].split == 2 and model.most == 2 == model.overlap()
+        assert len(model.prompts) == 3
+    one = small_room()
+    await hippo.encode(one, "T", turns, window_chars=12000, limit=asyncio.Semaphore(1))
+    assert one.most == 1 and len(one.prompts) == 3
+
+
+async def test_the_same_window_in_two_chats_that_runs_out_is_split_once(
+    tmp_path: Path,
+) -> None:
+    turns = padded(12)
+    serial_stats, parallel_stats = Stats(), Stats()
+    serial_model, parallel_model = small_room(), small_room()
+    cache = Cache(str(tmp_path / "serial.jsonl"))
+    for _ in range(2):
+        await hippo.encode(
+            serial_model,
+            "T",
+            turns,
+            window_chars=12000,
+            cache=cache,
+            stats=serial_stats,
+        )
+    limit = asyncio.Semaphore(4)
+    cache = Cache(str(tmp_path / "parallel.jsonl"))
+    both = await hippo.gather(
+        [
+            hippo.encode(
+                parallel_model,
+                "T",
+                turns,
+                window_chars=12000,
+                cache=cache,
+                stats=parallel_stats,
+                limit=limit,
+            )
+            for _ in range(2)
+        ]
+    )
+    assert parallel_stats == serial_stats
+    assert (parallel_stats.calls, parallel_stats.cache_hits) == (3, 3)
+    assert len(parallel_model.prompts) == len(serial_model.prompts) == 3
+    assert [p.sources for p in both[0].pieces] == [p.sources for p in both[1].pieces]
+    assert [w.cached for w in both[0].windows] == [False]
+    assert [w.cached for w in both[1].windows] == [True]
+    assert cache.inflight == {}
+
+
 # ── ingest ──
 
 LONG = "x" * 2800
@@ -584,3 +725,69 @@ def test_the_service_reads_it_and_falls_back_to_one() -> None:
 
     for value, wanted in ((4, 4), (1, 1), (8, 8), (0, 1), (9, 1), ("4", 1)):
         assert read(value) == wanted
+
+
+# ── ingest: windows that run out of room ──
+
+
+def facts_by_label(prompt: str) -> str:
+    """Items for the exchanges a prompt shows, a part of one exchange named as such."""
+    title = re.search(r"Chat title: (\S+)", prompt)
+    name = title.group(1) if title else "?"
+    more = ", in its second part" if "(continued)" in prompt else ""
+    return says(
+        [
+            item(
+                "Home",
+                f"The user said {name} lives at number {n}{more}.",
+                "profile",
+                [n],
+            )
+            for n in labels(prompt)
+        ]
+    )
+
+
+async def test_ingest_splits_windows_that_run_out_the_same_in_both_modes(
+    tmp_path: Path,
+) -> None:
+    def runs_out_here(prompt: str) -> bool:
+        return len(prompt) > 2700
+
+    made: dict[str, dict[str, Any]] = {}
+    for mode, parallel in (("serial", 1), ("parallel", 4)):
+        model = Slow(
+            lambda p: CUT_OFF if runs_out_here(p) else facts_by_label(p),
+            usage=lambda p: (len(p) // 4, CAP if runs_out_here(p) else 90),
+        )
+        cfg = settings(tmp_path, compress_at_chars=4000, compress_parallel=parallel)
+        cfg.memory.compress_cache = str(tmp_path / f"cache-{mode}.jsonl")
+        report, chats, memory = await compress(
+            tmp_path, data(), model, sub=mode, cfg=cfg
+        )
+        try:
+            _, index = memory.stores()
+            items = await index.fetch_items(
+                list(range(1, await index.count_items() + 1))
+            )
+            made[mode] = {
+                "report": report_shape(report),
+                "stats": (report.stats.calls, report.stats.cache_hits),
+                "items": [(x.title, x.text, x.status) for x in items],
+            }
+        finally:
+            await close(chats, memory)
+    serial, many = made["serial"], made["parallel"]
+    assert many == serial
+    # Nine windows, each asked, then split in two: 27 requests, none cached.
+    assert serial["stats"] == (27, 0) and serial["items"]
+    out = serial["report"]
+    assert out["model_calls"] == 27 and out["split"] == 18 and out["failed_parts"] == 0
+    # Both halves of every window were read: two routed items for each exchange.
+    assert [len(chat["routes"]) for chat in out["compress"].values()] == [6, 6, 6]
+    rows = [w for chat in out["compress"].values() for w in chat["windows"]]
+    assert len(rows) == 9
+    assert all(w["split"] == 2 and not w["failed"] and w["part"] is None for w in rows)
+    assert all(
+        set(w) >= {"split", "failed_parts", "part", "failed", "cut"} for w in rows
+    )

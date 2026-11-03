@@ -26,7 +26,15 @@ from localmelo.support.memory import ChatMemory, hippo_encode, ingest
 from localmelo.support.memory.ingest import IngestError
 from localmelo.support.sessions.store import SessionStore
 from localmelo.tests.memory.chat_memory_helpers import FakeEmbedding
-from localmelo.tests.memory.hippo_helpers import StubEncoder, item, says, turn
+from localmelo.tests.memory.hippo_helpers import (
+    CAP,
+    CUT_OFF,
+    StubEncoder,
+    by_label,
+    item,
+    says,
+    turn,
+)
 
 MAY = {
     "id": "may",
@@ -194,6 +202,8 @@ async def test_the_report_names_windows_gate_items_and_routes_by_file_id(
             False,
         )
         assert (window["cut"], window["dropped"]) == (False, 0)
+        assert (window["split"], window["failed_parts"], window["part"]) == (0, 0, None)
+        assert (data["split"], data["failed_parts"]) == (0, 0)
         assert window["chars"] > 0
         assert [(r["action"], r["item"], r["target"]) for r in may["routes"]] == [
             ("NEW", 1, None),
@@ -366,6 +376,48 @@ async def test_a_failing_model_leaves_the_turns_and_forces_the_plain_statements(
         (stored,) = await memory.stores()[1].fetch_items([1])
         assert (stored.kind, stored.encoder) == ("profile", "rules")
         assert "Pittsburgh" in stored.text
+    finally:
+        await close(chats, memory)
+
+
+async def test_a_very_long_exchange_is_read_in_parts_and_a_stretch_that_runs_out_is_split(
+    tmp_path: Path,
+) -> None:
+    long_chat = {
+        "id": "long",
+        "title": "Long",
+        "date": "2023-07-01T09:00:00",
+        "turns": [
+            {"role": "user", "text": "Short question."},
+            {"role": "assistant", "text": "Short answer."},
+            {"role": "user", "text": "Read the whole thing."},
+            {
+                "role": "assistant",
+                "text": "\n\n".join(chr(97 + n) * 2900 for n in range(10)),
+            },
+        ],
+    }
+    # Every part is a window of its own, at most 12000 characters; the long exchange
+    # is the second of the chat, so its parts name exchange 1. A part that is more
+    # than 8000 characters runs out of room, so it is split in two and read in halves.
+    stub = StubEncoder(
+        lambda p: CUT_OFF if len(p) > 8000 else by_label(p),
+        usage=lambda p: (len(p) // 4, CAP if len(p) > 8000 else 100),
+    )
+    report, chats, memory = await compress(tmp_path, {"sessions": [long_chat]}, stub)
+    try:
+        data = report.to_json()
+        rows = data["compress"]["long"]["windows"]
+        assert [w["part"] for w in rows] == [None, [1, 3], [2, 3], [3, 3]]
+        assert [w["exchanges"] for w in rows] == [1, 1, 1, 1]
+        assert not any(w["cut"] or w["failed"] for w in rows)
+        # The first two parts are over the room (about 11000 characters) and split
+        # in halves; the last is the rest of the exchange and is read whole.
+        assert [w["split"] for w in rows] == [0, 2, 2, 0]
+        assert (data["split"], data["failed_parts"]) == (4, 0)
+        assert data["model_calls"] == 1 + (1 + 2) + (1 + 2) + 1
+        assert data["compress"]["long"]["gate"]["unmentioned"] == []
+        json.dumps(data)
     finally:
         await close(chats, memory)
 

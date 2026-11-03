@@ -1103,6 +1103,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   may pass there too; the page text it quotes was flattened by the page reader, so markup in a
   result is not read. A later part of a page or file read without its predecessor and holding no
   stray closer is read as plain text.
+- Developer only: memory ingest no longer loses a long stretch of chat whose items do not fit one reply: the stretch is split and asked again in parts, and one very long exchange is read in parts instead of being cut. Part of #428.
 - Memory items: the encoder asks a local model with thinking off, as step reviews do (#428).
   A local server whose chat template thinks by default spent the encoder's whole reply
   budget on thinking and answered nothing readable, so most windows of a chat failed. The
