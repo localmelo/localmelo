@@ -132,9 +132,15 @@ async def test_a_click_asks_to_act_on_the_site_apart_from_reading_it() -> None:
         "browser-act:https://example.com",
     ]
     # No origin in the question: a refused click must not refuse reading the site.
+    # It names what it is on, so auto mode's review judges the target (#465).
     name, arguments, preview = asks.asked[1]
-    assert arguments == {"site": "example.com", "access": "act", "how": "click"}
-    assert preview == "click on example.com in Safari"
+    assert arguments == {
+        "site": "example.com",
+        "access": "act",
+        "how": "click",
+        "on": 'a button "Check in"',
+    }
+    assert preview == 'click a button "Check in" on example.com in Safari'
 
 
 async def test_a_refused_click_does_nothing_and_says_whose_answer_it_was() -> None:
@@ -597,9 +603,12 @@ async def test_every_typing_asks_with_all_of_its_text_and_is_never_a_chat_grant(
         "access": "type",
         "how": "type",
         "text": long,
+        "on": 'a textbox "Notes"',
     }
     assert second["text"] == "second"
-    assert typing[0][2] == f"type {len(long)} character(s) on example.com in Safari"
+    assert typing[0][2] == (
+        f'type {len(long)} character(s) into a textbox "Notes" on example.com in Safari'
+    )
     assert not any(
         n.startswith("browser-act:") and a.get("how") == "type"
         for n, a, _ in asks.asked

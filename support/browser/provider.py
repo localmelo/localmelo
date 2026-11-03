@@ -834,21 +834,23 @@ class BrowserToolProvider(BaseToolProvider):
         snap: render.Snapshot,
         what: str,
         typed: str | None = None,
+        on: str = "",
     ) -> set[str] | None:
         """Everything that must hold before melo does something on a page, and the tabs there are now.
 
         The tab's address is read again, the person is asked (about the site
-        for a click or a choice, about the whole text for typing), and the
-        window's tabs are listed so the ones the action opens are known for
-        what they are. A window that cannot be listed is not acted in.
+        for a click or a choice, about the whole text for typing; *on* names
+        the element in words), and the window's tabs are listed so the ones
+        the action opens are known for what they are. A window that cannot be
+        listed is not acted in.
         """
         await self._recheck(
             tab_id
         )  # where the tab is now, before anything is done on it
         if typed is None:
-            await sites.require_act(snap.origin, what)
+            await sites.require_act(snap.origin, what, on)
         else:
-            await sites.require_type(snap.origin, typed)
+            await sites.require_type(snap.origin, typed, on)
         before = await self._tabs_now()
         if before is None:
             raise BrowserError(
@@ -1085,7 +1087,7 @@ class BrowserToolProvider(BaseToolProvider):
             use = "browser_type" if item.kind == "textbox" else "browser_select"
             raise BrowserError(f"{ref} is a {item.kind}: use {use}.")
         await _ask_foreign(snap.origin, item, "click")
-        before = await self._acting(tab_id, snap, "click")
+        before = await self._acting(tab_id, snap, "click", on=_control_words(item))
         assert before is not None
         done: set[str] = set()
         if item.kind == "link" and item.href:
@@ -1128,7 +1130,7 @@ class BrowserToolProvider(BaseToolProvider):
                 "does not type it."
             )
         await _ask_foreign(snap.origin, item, "type into")
-        before = await self._acting(tab_id, snap, "type", typed)
+        before = await self._acting(tab_id, snap, "type", typed, _control_words(item))
         assert before is not None
         done: set[str] = set()
         enter = submit is True or str(submit).lower() == "true"
@@ -1170,7 +1172,9 @@ class BrowserToolProvider(BaseToolProvider):
             self._refuse_secret(item)
         if not str(option).strip():
             raise BrowserError("browser_select needs the option's text.")
-        before = await self._acting(tab_id, snap, "choose an option")
+        before = await self._acting(
+            tab_id, snap, "choose an option", on=_control_words(item)
+        )
         assert before is not None
         result, used = await self._run_act(
             tab_id,
@@ -1214,13 +1218,16 @@ class BrowserToolProvider(BaseToolProvider):
         what = _point_words(hit.surface, item, hit.site)
         if item.sensitive:
             await sites.require_point(origin, fields.REASONS[item.sensitive])
-        elif hit.surface == "frame":
-            await sites.require_point(origin, what)
+        elif hit.surface == "frame" and not _named(item):
+            # A box melo knows nothing of: it cannot tell what the click is on.
+            await sites.require_point(origin, what, known=False)
         elif hit.consent:
             await sites.require_point(
                 origin, f"{what}, which agrees to terms, consent or a sign-in"
             )
-        before = await self._acting(tab_id, snap, "click")
+        # A box melo knows by its title is clicked like any other control: on
+        # the click's own question, which names it (#465).
+        before = await self._acting(tab_id, snap, "click", on=what)
         assert before is not None
         done: set[str] = set()
         if item.kind == "link" and item.href:
@@ -1442,23 +1449,54 @@ def _change_lines(
 
 
 async def _ask_foreign(origin: str, item: Element, how: str) -> None:
-    """A control in a box from another site: melo cannot check it, so the person is asked every time."""
-    if not item.site:
+    """A control with no name in a box from another site: melo cannot tell what it is, so the person is asked every time.
+
+    A control melo lists there by its name is acted on like any other: the
+    click's or the typing's own question names it, box and all (#465).
+    """
+    if not item.site or _named(item):
         return
     host = render.field_text(item.site.split("://", 1)[-1], 60)
-    label = render.field_text(item.label or item.also, 40)
-    what = f'a {item.kind} "{label}"' if label else f"a {item.kind}"
     await sites.require_point(
-        origin, f"{what} inside a box from {host} that melo cannot check", how
+        origin,
+        f"a {item.kind} inside a box from {host} that melo cannot check",
+        how,
+        known=False,
     )
 
 
+def _named(item: Element) -> bool:
+    """Whether melo knows *item* by a name: its label or its other words."""
+    return bool(render.field_text(item.label or item.also, 40))
+
+
+def _control_words(item: Element) -> str:
+    """A control in words for a question: ``a button "Check in"``, with the box it is in.
+
+    The label is page text, cut and on one line; a control in a box from
+    another site says so (``... inside a box from accounts.example.org``).
+    """
+    label = render.field_text(item.label or item.also, 40)
+    words = f'a {item.kind} "{label}"' if label else f"a {item.kind}"
+    if item.site:
+        host = render.field_text(item.site.split("://", 1)[-1], 60)
+        words += f" inside a box from {host}"
+    return words
+
+
 def _point_words(surface: str, item: Element, site: str) -> str:
-    """What a point lands on, in words for the person and the model."""
+    """What a point lands on, in words for the person and the model.
+
+    A box from another site is named by its title when it has one
+    (``inside a box "Sign in" from accounts.example.org``).
+    """
     if surface == "frame":
         host = sites.origin_of(site) or "another site"
-        host = host.split("://", 1)[-1]
-        return f"inside a box from {render.field_text(host, 60)} that melo cannot check"
+        host = render.field_text(host.split("://", 1)[-1], 60)
+        title = render.field_text(item.label or item.also, 40)
+        if title:
+            return f'inside a box "{title}" from {host}'
+        return f"inside a box from {host} that melo cannot check"
     if surface == "canvas":
         return "a drawing or picture"
     label = render.field_text(item.label or item.also, 40)
