@@ -379,7 +379,7 @@ class StepReviewer:
         self._added += 1
         self._words.append(text)
 
-    def earlier_words(self, words: Sequence[str]) -> None:
+    def earlier_words(self, words: Sequence[str], first: str = "") -> None:
         """The user's own words of the chat's messages before this run's, oldest first.
 
         Only for a window that starts over (a reload, a chat opened again,
@@ -387,16 +387,21 @@ class StepReviewer:
         run's own message, so the person's earlier words still count
         (#465). The caller gives only what the person typed: never melo's
         answers, a task's questions or page text; recalled notes are left
-        out here too. Once a message was kept, or the words were put in
+        out here too. *first* is what they typed in the chat's first turn:
+        it goes in before them, as the task the chat began with (#465), unless
+        it is one of them. Once a message was kept, or the words were put in
         since the reset, nothing changes.
         """
         if self._marker or self._seeded:
             return
         self._seeded = True
-        for text in list(words)[-EARLIER_REQUESTS:]:
-            text = own_words(text)
-            if text.strip():
-                self._add(text[:MAX_REQUEST_CHARS])
+        texts = [own_words(text)[:MAX_REQUEST_CHARS] for text in words]
+        texts = [text for text in texts[-EARLIER_REQUESTS:] if text.strip()]
+        first = own_words(first)[:MAX_REQUEST_CHARS]
+        if first.strip() and first not in texts:
+            self._add(first)
+        for text in texts:
+            self._add(text)
 
     @property
     def requests(self) -> tuple[str, ...]:

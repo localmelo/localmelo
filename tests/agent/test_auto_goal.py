@@ -635,3 +635,44 @@ def test_the_recalled_notes_are_the_newest_message_s() -> None:
     # A new run's message says which notes came with it, none included.
     reviewer.user_message("next", recalled="")
     assert reviewer._recalled == ""
+
+
+@pytest.mark.asyncio
+async def test_after_a_reload_the_review_still_reads_the_chat_s_first_task(
+    tmp_path: Path,
+) -> None:
+    tool = Steps()
+    llm = FakeModel(_steps("mood"), [ON_GOAL])
+    agent = _agent(llm, tmp_path / "ws", tool)
+    agent.load_conversation([])  # the chat opened again: the window starts over
+
+    await agent.run_task(
+        "signed in",
+        earlier_turns=[("continue", "1"), ("go on", "2"), ("hm", "3")],
+        chat_first=CHECK_IN,
+        approval=ChatPolicy(Card(), "auto"),
+    )
+
+    assert tool.allowed() == {"mood": True}
+    text = _review_text(llm, 0)
+    assert CHECK_IN in text and text.index(CHECK_IN) < text.index("\ngo on\n")
+    assert agent._reviewer.earlier == (CHECK_IN,)
+    # The recent requests are as before: the newest two earlier words and this one.
+    assert agent._reviewer.requests == ("go on", "hm", "signed in")
+
+
+def test_the_first_task_is_not_put_in_twice() -> None:
+    reviewer = StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+    reviewer.earlier_words([CHECK_IN, "continue"], first=CHECK_IN)
+    reviewer.user_message("signed in")
+    assert reviewer.requests == (CHECK_IN, "continue", "signed in")
+    assert reviewer.earlier == ()
+
+
+@pytest.mark.asyncio
+async def test_a_first_task_that_is_not_text_is_refused(tmp_path: Path) -> None:
+    llm = FakeModel([], [])
+    agent = _agent(llm, tmp_path / "ws", Steps())
+    with pytest.raises(TypeError, match="chat_first must be a str"):
+        await agent.run_task("signed in", chat_first=b"check in")  # type: ignore[arg-type]
+    assert llm.requests == [] and llm.review_requests == []

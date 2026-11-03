@@ -6312,6 +6312,7 @@ class Agent:
         from_person: bool = True,
         hide_tools: Collection[str] = (),
         earlier_turns: Sequence[tuple[str, str]] | None = None,
+        chat_first: str | None = None,
     ) -> RunResult:
         """Run one task and report how it ended.
 
@@ -6518,15 +6519,18 @@ class Agent:
         the step review's window starts over (a reload), the newest of their
         user words go into it before the query's, so the person's earlier
         words still count (#465); their answers never do. ``None`` or none
-        adds nothing.
+        adds nothing. *chat_first* is what the person typed in the chat's
+        first turn (a session's runner reads it from its store): when the
+        window starts over, the step review keeps it first, as the task the
+        chat began with, so a goal review still has it after a reload.
 
         Before the run starts, ``TypeError`` is raised when *on_event* or
         *observe* is not callable or is a coroutine function, when both
         are given, when *approval* has no ``async def decide``, when
-        *earlier_turns* is not a sequence of pairs of ``str``, or when
-        *routine* is not a ``str``, and ``ValueError`` when *routine* is
-        blank: no event is emitted, no task record is written, and working
-        memory is left as it is.
+        *earlier_turns* is not a sequence of pairs of ``str``, when
+        *chat_first* or *routine* is not a ``str``, and ``ValueError`` when
+        *routine* is blank: no event is emitted, no task record is written,
+        and working memory is left as it is.
         """
         check_sink(on_event)
         check_sink(observe, "observe")
@@ -6538,6 +6542,8 @@ class Agent:
                 raise TypeError("routine must be a str")
             if not routine.strip():
                 raise ValueError("routine must not be blank")
+        if chat_first is not None and not isinstance(chat_first, str):
+            raise TypeError("chat_first must be a str")
         turns_before = (
             check_earlier_turns(earlier_turns) if earlier_turns is not None else []
         )
@@ -6571,7 +6577,9 @@ class Agent:
         # The user's own words, which a step review reads (never tool output).
         # A window that starts over takes the person's earlier words first,
         # never the answers (#465).
-        self._reviewer.earlier_words([words for words, _ in turns_before])
+        self._reviewer.earlier_words(
+            [words for words, _ in turns_before], first=chat_first or ""
+        )
         if from_person:
             # The notes recalled for this message go along, apart: they count
             # only where the person's words point to them (#465).
