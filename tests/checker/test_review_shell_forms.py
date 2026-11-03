@@ -466,9 +466,14 @@ def timed(ws: Path, command: str) -> float:
     from localmelo.melo.checker.review.gist import step_gist
 
     arguments = {"command": command, "why": "Delete a.txt"}
-    started = time.perf_counter()
-    step_gist("shell_exec", arguments, review(ws, "shell_exec", arguments))
-    return time.perf_counter() - started
+    # CPU time of the fastest of three runs, so that a busy machine (a parallel
+    # test run) cannot fail a bound meant to catch a rule that backtracks.
+    times = []
+    for _ in range(3):
+        started = time.process_time()
+        step_gist("shell_exec", arguments, review(ws, "shell_exec", arguments))
+        times.append(time.process_time() - started)
+    return min(times)
 
 
 @pytest.mark.parametrize(
@@ -486,10 +491,10 @@ def test_neither_the_review_nor_the_card_reads_a_text_over_the_limit(
     from localmelo.melo.checker.review.gist import step_gist
 
     arguments = {key: text, "why": "Run a long step"}
-    started = time.perf_counter()
+    started = time.process_time()  # CPU time: a busy machine cannot fail it
     found = review(ws, tool, arguments)
     gist = step_gist(tool, arguments, found)
-    assert time.perf_counter() - started < 1.0
+    assert time.process_time() - started < 1.0
     assert found.verdict == "undecided"
     assert gist is not None
 
