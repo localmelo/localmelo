@@ -2830,6 +2830,11 @@ class Agent:
     # ── Workspace, tools and conversation ──
 
     @property
+    def tool_providers(self) -> tuple[BaseToolProvider, ...]:
+        """The tool providers this Agent was made with (read only)."""
+        return self._tool_providers
+
+    @property
     def workspace_root(self) -> str | None:
         """The real path of the agent's workspace root, or ``None``."""
         return self.executor.workspace_root

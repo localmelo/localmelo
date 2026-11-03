@@ -27,10 +27,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   after any click. A question box the page puts up during melo's step ("Delete the draft?") asks you every time
   (`browser-dialog:<site>`, Cancel otherwise); a message is closed with OK, a box that asks for text gets Cancel,
   and *what changed* lists each one. Without Chrome the choice says "Install Google Chrome to browse in the
-  background" and nothing changes. You cannot see or type into melo's Chrome yet, so sign in to sites in Safari's
+  background" and nothing changes. You cannot type into melo's Chrome yet, so sign in to sites in Safari's
   windows for now. Enter in a field with an approved send now lets the form's own send button take the browser's
   click, which melo's guard stopped before. `PUT /api/settings` takes `browser_driver`; the settings carry
   `browser_driver` and `chrome_installed`.
+- Watch melo's Chrome. While melo browses in Chrome in the background, the web console and the app show a Browser
+  panel beside the chat: the page's title and address, a live picture, a ring and "melo is browsing" while a step
+  runs, and calm states for no page open, the first picture on its way, a picture that stopped updating, and why it
+  ended. It opens by itself when melo starts browsing, follows melo to another tab, hides with **Hide browser** (the
+  **Browser** button in the header brings it back), shares the width with the panel beside the chat on a narrower
+  window and opens as a sheet under 900 pixels. In the app, **Pop out** opens it alone in its own window. It is view
+  only: nothing can be clicked or typed in it yet. The pictures stay in memory, are never saved, and are sent only
+  while someone watches; a page that does not change costs almost nothing and a moving one is held to 15 pictures a
+  second (`[browser] live`, on by default, and `live_fps`, 1 to 60). `GET /api/sessions/{id}/browser` and
+  `WS /api/sessions/{id}/browser/live` are the routes (#488); the gateway extra now installs `websockets`.
 - Pictures and files in the web console and the app, and words added while melo works. Drop a picture
   or a text file on the page, paste it with Cmd-V or pick it with the paperclip (`/attach` opens the same
   picker; `/attachments` and `/detach N` list and remove). PNG, JPEG, GIF (first frame), WebP and HEIC

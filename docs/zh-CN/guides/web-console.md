@@ -157,7 +157,7 @@
 | `/title [text]` | 查看或设置对话标题。 |
 | `/memory [window\|import]` | 打开“记忆”标签页；`window` 显示模型的窗口；`import` 还会按下 **Look for notes**，列出其他助手保存的文件（记忆关闭时会有一行说明）。 |
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | 显示对话的模式和授权；`ask` 和 `auto` 切换模式，`forget` 收回授权。`deny` 只在终端里有。 |
-| `/browser [on\|off]` | 查看或切换在 Safari 中读网页，保存到 `[browser] driver`。 |
+| `/browser [on\|off\|chrome\|safari]` | 查看或切换读网页的方式（后台的 Chrome 或 Safari 窗口），保存到 `[browser] driver`。 |
 | `/attach`、`/attachments`、`/detach` | `/attach` 打开选择器，选一张图片或一个文本文件；`/attachments` 列出等待发送的内容，`/detach N`（或 `/detach all`）把它移除。 |
 | `/verbose`、`/thinking`、`/stream [on\|off]` | 页面如何显示对话，保存在这个浏览器里：展开工具调用、展开思考，或只在一轮结束时显示各步。 |
 | `/expand [turn.call]` | 展开一次工具调用及其完整输出。 |
@@ -273,6 +273,18 @@ melo 回答时，消息框仍然可用。它的提示是 `Add to what melo is do
 关闭一个产生过笔记的对话时会问 `Also forget the 2 notes from this chat?`：**Keep the notes**（第一位）、**Forget the 2 notes too** 或 **Don’t delete the chat**。
 
 开发者模式下，**Details** 在面板里打开，代替标签页，直到你关闭它。
+
+<a id="the-browser-panel"></a>
+
+## 浏览器面板
+
+melo 在后台的 Chrome 中浏览时（见[用 melo 浏览网页](browsing.md#watching-melos-browser)），对话旁的**浏览器**面板会实时显示它的页面，仅供查看。
+
+- melo 开始浏览时它自动打开，并跟随 melo 切换到另一个标签页。头部的**收起浏览器**会关闭它；顶部的**浏览器**按钮再把它打开。
+- 它显示页面的标题和地址、实时画面，以及 melo 执行步骤时的边框和“melo 正在浏览”。画面停止时变暗并写着“没有更新”；结束时说明原因。
+- 窗口宽度达到 1480 像素时，它位于对话和[对话旁的面板](#the-panel-beside-a-chat)之间；更窄时，它打开期间取代那个面板，窗口不到 900 像素时，需要时才以底部面板的形式打开。
+- 收起或所在标签页在后台时它不接收任何画面，关闭标签页就会结束画面流。
+- 里面还不能点击或输入；画面不会保存在任何地方。
 
 <a id="melo-in-the-page"></a>
 ## 页面里的 Melo

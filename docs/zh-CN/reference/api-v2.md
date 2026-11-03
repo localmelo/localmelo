@@ -674,6 +674,38 @@ worker 运行或终端对话从 CLI 的文件读取。
 - 名称必须以 `.png`、`.jpg`、`.jpeg`、`.gif`、`.webp` 或 `.svg` 结尾，内容也必须是这类图片（根据开头几个字节判断；`Content-Type` 取自内容而不是名称）；否则返回 415 `not_a_picture`（名为 `chart.png` 的文本文件，或实为 HTML 页面的 SVG）。超过 20 MB 的文件返回 413 `too_large`。
 - 每个响应都带有 `Content-Disposition: inline`、`X-Content-Type-Options: nosniff` 和 `Cache-Control: private`。PNG、JPEG、GIF 或 WebP 带有 `Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'`；SVG 带有 `Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'`，因此它可以绘制，但绝不会运行脚本，也不会作为页面打开。该路由只读取一个文件，不写入也不列出任何内容。
 
+## GET /api/sessions/{id}/browser
+
+对话在 melo 的浏览器里是否有打开的页面，以及是哪一个。melo 开始浏览时，控制台用它来打开**浏览器**面板。它不启动任何东西，也不传送画面。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/browser
+```
+
+```json
+{"open": true, "tab": "t2", "url": "https://example.com/", "title": "Example Domain", "browsing": false, "viewers": 1, "available": true, "driver": "chrome"}
+```
+
+- 对话的当前标签页存在时 `open` 为 true；`tab`、`url` 和 `title` 描述它（`open` 为 false 时，比如对话还没有浏览过或在网关里没有打开，`tab` 为 null，其余为空）。
+- 对话的浏览器步骤正在运行时 `browsing` 为 true。`viewers` 是该对话已打开的实时画面数量。
+- `[browser] driver` 为 `chrome` 且 `[browser] live` 开启时 `available` 为 true；`driver` 重复返回驱动名。未知的会话是 404 `not_found`。响应带有 `Cache-Control: no-store`。
+
+## WS /api/sessions/{id}/browser/live
+
+对话浏览器的实时、仅查看画面：melo 正在操作的页面，以 JPEG 画面的形式送出，相关信息每次变化时再送一条小小的 JSON 消息。控制台和 App 的弹出窗口使用它。
+
+```text
+{"type":"meta","state":"live","tab":"t2","url":"https://example.com/","title":"Example Domain","browsing":true,"owner":"melo","w":1280,"h":713,"offsetTop":0,"scale":1}
+<binary frame: one JPEG>
+```
+
+- 服务器发送文本帧和二进制帧。文本帧是 `meta` 消息：`state` 为 `idle`（没有打开的页面）、`loading`（有页面打开，但第一张画面还没到）、`live`、`stale`（画面流出错，最后一张画面不再更新）或 `closed`；`reason` 说明 `closed` 的原因（`tab`、`browser`、`chat` 或 `unavailable`）。`tab`、`url`、`title` 和 `browsing` 同上，`owner` 为 `melo`，第一张画面到来后还会有 `w` 和 `h`（页面视口，单位为 CSS 像素）、`offsetTop` 和 `scale`。
+- 二进制帧是一张 JPEG。每个观看者只保留最新的一张画面，所以慢的观看者会跳过画面，而不是排队。不变的页面发送一张画面后不再发送；会动的页面被限制在 `[browser] live_fps`（默认 15）以内。
+- 可选的查询参数 `tab=tN` 把画面固定在该对话的一个标签页上。不带时，画面跟随 melo 正在操作的标签页，每次切换都有一条 `meta` 消息。另一个对话的标签页、未知的标签页和格式错误的名称都会被拒绝。
+- 只有在有人观看时才传送：没有观看者的对话，浏览器不会保持画面流；一个对话同时最多有 4 个观看者；传送的内容不会写入磁盘或会话存储。
+- 它与所有 `/api` 路由使用同一道防护：Host 请求头、带有时必须同源的 Origin，以及 Bearer 令牌或控制台的 Cookie。脚本发送 `Authorization: Bearer <token>`，不带 Origin。
+- 画面结束时服务器以 1000 关闭；拒绝时以 1008 关闭（原因为 `not_found`、`not_a_tab`、`not_available`（驱动不是 `chrome` 或 `live = false`）、`refused`（浏览器已停止、另一个对话的标签页，或该对话已有 4 个观看者），或网关令牌轮换时的 `token_rotated`）；客户端单条消息超过 4,096 字节时以 1009 关闭；会话存储不可用时以 1013 关闭。目前客户端发来的消息会被读取并忽略。
+
 ## GET /api/sessions/{id}/submissions/{client_request_id}
 
 客户端用 `client_request_id` 命名的消息最终如何。不带会话的同一查询为 `GET /api/submissions/{client_request_id}`，供从未得知新会话 id 的客户端使用。

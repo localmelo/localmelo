@@ -92,11 +92,22 @@ With `driver = "chrome"`, melo browses in Google Chrome with no window at all.
 - **Only melo drives it.** melo starts the Chrome installed on this Mac and talks to it over a private pipe. Chrome opens no network port for this, so no other program can drive it.
 - **A profile of melo's own.** It lives in `~/.cache/localmelo/browser/chrome`, readable only by you (mode 0700). Your own Chrome profile, its sign-ins and its Keychain item are never used.
 - **What it keeps.** Cookies that a site keeps for days stay in that profile from one chat to the next, so a site you are signed in to there stays signed in. Chrome does not use your Keychain here, so those cookies are protected by the folder's permissions and FileVault only. Cookies that last only for a session are gone when Chrome stops. To clear everything, quit melo and delete that folder.
-- **Signing in is not there yet.** You cannot see or type into melo's Chrome yet (a live view and taking over come next). For a site that needs your sign-in, use Safari windows for now.
+- **Watching works; signing in does not yet.** You can [watch melo's page live](#watching-melos-browser), but you cannot click or type in it yet (taking over comes next). For a site that needs your sign-in, use Safari windows for now.
 - **What a site sees.** An ordinary Chrome: no "HeadlessChrome" in its user agent and no automation flag. Some bot checks may still notice; then use Safari windows.
 - **Chrome's own traffic.** Chrome makes a few connections of its own to Google even with background networking off; nothing comes back to melo through them. Downloads are refused.
 - **Clicks and typing are Chrome's own.** A click is a real one at the middle of the element melo checked, and typing selects what the box holds and puts the text in, so a page that ignores script clicks still works. A choice in a list is made by the page script.
 - **When a page wants an app, or asks a question.** See [When a page wants to open an app](#when-a-page-wants-to-open-an-app).
+
+## Watching melo's browser
+
+In the web console and the app, a **Browser** panel beside the chat shows the page melo has open, live. It needs Chrome in the background; Safari's windows are already on your screen.
+
+- **It opens by itself** when melo starts browsing. **Hide browser** closes it, and the **Browser** button in the header opens it again; on a narrow window it opens as a sheet when you ask.
+- **It shows** the page's title and address, a live picture, and a blue ring around the picture with "melo is browsing" while melo is in the middle of a step. It follows melo to another tab.
+- **It stays calm.** "No page open" before melo browses; "Opening the page…" until the first picture arrives; a dimmed last picture marked "Not updating" while the picture stops; and one sentence of why when it ends (the tab was closed, melo's browser stopped, the chat ended, or the live view is not available).
+- **View only.** You cannot click or type in it yet. The pictures stay in memory, are never saved, and are sent only while the panel is open.
+- **In the app**, **Pop out** opens the panel alone in its own window.
+- **Cost.** A page that does not change costs almost nothing; a moving page is held to 15 pictures a second. The options `live` and `live_fps` are in the [configuration reference](../reference/configuration.md).
 
 ## What melo can do
 
@@ -217,7 +228,7 @@ A page melo acts on can make another app open a window, such as a chat app's sig
 
 Browsing is built in parts; none of these exists yet.
 
-- Watching Chrome in the background: a live view of melo's page in the console and the app, and taking over to sign in, pass a check or type a password yourself, then giving it back.
+- Taking over melo's Chrome to sign in, pass a check or type a password yourself, then giving it back. Watching it is there already.
 - Chrome becoming the default browser, an "open in a window" choice for sites that refuse a browser without a window, and a button that clears melo's Chrome sign-ins.
 - Acting in your own signed-in browser (a Chrome extension): clicks and typing there, with a confirmation that `auto` and `--yolo` cannot skip for sending, posting, buying and signing in. The clicks on this page happen only inside melo's own automation window; moving your mouse on the desktop (computer use, for apps outside the browser) is a separate feature and the next way after a point of a picture.
 - Saved chores that run on a schedule (for example a daily check-in), with steps you approved once.

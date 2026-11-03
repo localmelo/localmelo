@@ -35,14 +35,21 @@ def configured_driver(cfg: Config) -> str:
 
 
 def provider_for(
-    driver: str, *, keep_tabs: bool = False, app_windows: bool = False
+    driver: str,
+    *,
+    keep_tabs: bool = False,
+    app_windows: bool = False,
+    live: bool = True,
+    live_fps: float = 15.0,
 ) -> BrowserToolProvider | None:
     """The browser tools for *driver*; None for ``off``. ``ValueError`` for an unknown name.
 
     With *keep_tabs* (``[browser] keep_tabs``) the tabs melo opened are left
     open when the chat ends or goes idle. With *app_windows* (``[browser]
     app_windows``) melo watches for windows other apps open after its acts
-    (:mod:`localmelo.support.browser.desktop`).
+    (:mod:`localmelo.support.browser.desktop`). With *live* (``[browser] live``) the
+    person can watch the Chrome browser (:mod:`localmelo.support.browser.live`), its
+    pictures held to *live_fps* a second.
     """
     if driver == "off":
         return None
@@ -68,6 +75,8 @@ def provider_for(
             ChromeBackgroundDriver(),
             keep_tabs=keep_tabs,
             desktop=watch_for(app_windows, driver),
+            live=live,
+            live_fps=live_fps,
         )
     raise ValueError(f"unknown browser driver {driver!r}; use one of {DRIVERS}")
 

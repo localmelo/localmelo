@@ -393,6 +393,8 @@ async def build_session_agent(
             browser_driver,
             keep_tabs=cfg is not None and cfg.browser.keep_tabs is True,
             app_windows=cfg is None or cfg.browser.app_windows is True,
+            live=cfg is None or cfg.browser.live is True,
+            live_fps=cfg.browser.live_fps if cfg is not None else 15,
         )
         if browser is not None:
             providers.append(browser)

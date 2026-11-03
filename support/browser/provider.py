@@ -64,7 +64,7 @@ import functools
 import logging
 import re
 from collections.abc import Awaitable, Callable
-from typing import Any, NoReturn
+from typing import Any, NoReturn, cast
 
 from localmelo.melo.contracts.approvals import (
     SELF_ASKING_TOOLS,
@@ -93,6 +93,7 @@ from localmelo.support.browser.driver import (
     TabInfo,
     View,
 )
+from localmelo.support.browser.live import DEFAULT_FPS, LiveView
 
 logger = logging.getLogger(__name__)
 
@@ -322,6 +323,7 @@ def _guarded(fn: ToolFunction) -> ToolFunction:
         async with self._lock:
             self._cancel_idle()
             named = sites.BROWSER.set(self.browser_name)
+            self._set_busy(True)
             try:
                 await self._driver.start()
                 self._looked, self._handoff = False, False
@@ -331,6 +333,7 @@ def _guarded(fn: ToolFunction) -> ToolFunction:
                 return ToolOutput(text=str(exc), is_error=True)
             finally:
                 sites.BROWSER.reset(named)
+                self._set_busy(False)
                 self._arm_idle()
 
     return run
@@ -368,6 +371,8 @@ class BrowserToolProvider(BaseToolProvider):
         settle_s: float | None = None,
         desktop: DesktopWatch | None = None,
         opener: apps.AppOpener | None = None,
+        live: bool = True,
+        live_fps: float = DEFAULT_FPS,
     ) -> None:
         self._driver = driver
         # Names and opens the app an address of another app's kind is for.
@@ -394,7 +399,14 @@ class BrowserToolProvider(BaseToolProvider):
         self._idle_s = idle_close_s
         self._settle_s = SETTLE_S if settle_s is None else settle_s
         self._lock = asyncio.Lock()
-        self._tab: str | None = None  # the current tab (a short id)
+        # The live view of the tab melo works in (a driver that streams, and the
+        # person allowing it): made when first asked for, told when the tabs change.
+        self._live_on = live and hasattr(driver, "start_screencast")
+        self._live_fps = live_fps
+        self._live: LiveView | None = None
+        self._busy = False
+        self._tab_now: str | None = None
+        self._tab = None  # the current tab (a short id)
         # The tabs melo opened in this chat: a short id is what the model sees,
         # the driver's id never leaves this class. Short ids are not reused.
         self._raw: dict[str, str] = {}
@@ -419,6 +431,47 @@ class BrowserToolProvider(BaseToolProvider):
         # The view of each tab's last picture, and the point melo last clicked in it.
         self._views: dict[str, View] = {}
         self._points: dict[str, tuple[View, float, float]] = {}
+
+    @property
+    def _tab(self) -> str | None:
+        """The current tab (a short id); a change is told to the live view."""
+        return self._tab_now
+
+    @_tab.setter
+    def _tab(self, short: str | None) -> None:
+        if short != self._tab_now:
+            self._tab_now = short
+            self._poke_live()
+
+    def _set_busy(self, busy: bool) -> None:
+        if busy != self._busy:
+            self._busy = busy
+            self._poke_live()
+
+    def _poke_live(self) -> None:
+        if self._live is not None:
+            self._live.poke()
+
+    # ── The live view ──
+
+    @property
+    def live(self) -> LiveView | None:
+        """The live view of this chat's browser; None when the driver cannot stream or the person turned it off."""
+        if self._live is None and self._live_on:
+            self._live = LiveView(cast(Any, self._driver), self, fps=self._live_fps)
+        return self._live
+
+    def live_current(self) -> str | None:
+        """The short id of the tab melo works in, or None."""
+        return self._tab_now if self._tab_now in self._raw else None
+
+    def live_raw(self, short: str) -> str | None:
+        """The driver's id of this chat's tab *short*, or None for a tab this chat does not have."""
+        return self._raw.get(short)
+
+    def live_busy(self) -> bool:
+        """Whether melo is in the middle of a browser step."""
+        return self._busy
 
     @property
     def driver(self) -> BrowserDriver:
@@ -480,6 +533,9 @@ class BrowserToolProvider(BaseToolProvider):
     async def close(self) -> None:
         """Close the tabs melo opened (unless ``keep_tabs``), then the driver."""
         self._cancel_idle()
+        if self._live is not None:
+            with contextlib.suppress(Exception):
+                await self._live.aclose()
         if self._raw and not self._keep_tabs:
             # The chat is over: a browser that does not answer is not waited for.
             with contextlib.suppress(Exception):
@@ -533,6 +589,7 @@ class BrowserToolProvider(BaseToolProvider):
             short = f"t{self._tab_n}"
             self._raw[short] = info.id
             self._short[info.id] = short
+            self._poke_live()
         return TabInfo(short, info.url, info.title)
 
     def _known(self, tab: str) -> str:
@@ -560,6 +617,7 @@ class BrowserToolProvider(BaseToolProvider):
         self._made.discard(short)
         if self._tab == short:
             self._tab = None
+        self._poke_live()
 
     def _newest(self) -> str | None:
         """The tab browser_open made last that is still open, or None."""

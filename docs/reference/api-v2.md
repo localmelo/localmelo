@@ -1425,6 +1425,38 @@ lists them).
   'unsafe-inline'; frame-ancestors 'none'`, so it can draw but never run a
   script or open as a page. The route reads one file and writes and lists nothing.
 
+## GET /api/sessions/{id}/browser
+
+Whether the chat has a page open in melo's browser, and which. The console asks it to open its Browser panel when melo starts browsing. It starts nothing and streams nothing.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/browser
+```
+
+```json
+{"open": true, "tab": "t2", "url": "https://example.com/", "title": "Example Domain", "browsing": false, "viewers": 1, "available": true, "driver": "chrome"}
+```
+
+- `open` is true when the chat's current tab exists; `tab`, `url` and `title` describe it (`tab` is null and the others are empty when `open` is false, as for a chat that has not browsed or is not open in the gateway).
+- `browsing` is true while a browser step of the chat runs. `viewers` counts the open live views of the chat.
+- `available` is true when `[browser] driver` is `chrome` and `[browser] live` is on; `driver` repeats the driver. An unknown session is 404 `not_found`. The answer has `Cache-Control: no-store`.
+
+## WS /api/sessions/{id}/browser/live
+
+A live, view-only picture of the chat's browser: the page melo works in, as JPEG pictures, and a small JSON message each time something about it changes. The console and the app's pop-out window use it.
+
+```text
+{"type":"meta","state":"live","tab":"t2","url":"https://example.com/","title":"Example Domain","browsing":true,"owner":"melo","w":1280,"h":713,"offsetTop":0,"scale":1}
+<binary frame: one JPEG>
+```
+
+- The server sends text frames and binary frames. A text frame is a `meta` message: `state` is `idle` (no page open), `loading` (a page is open and the first picture has not come), `live`, `stale` (the picture stream failed, so the last picture no longer updates) or `closed`; `reason` explains `closed` (`tab`, `browser`, `chat` or `unavailable`). `tab`, `url`, `title` and `browsing` are as above, `owner` is `melo`, and once a picture came `w` and `h` are the page view in CSS pixels, with `offsetTop` and `scale`.
+- A binary frame is one JPEG. Only the newest picture is kept for each viewer, so a slow viewer skips pictures and never queues them. A page that does not change sends one picture and then none; moving pages are held to `[browser] live_fps` (15 by default).
+- The optional `tab=tN` query pins the view to one tab of this chat. Without it the view follows the tab melo works in, and a `meta` message tells of each switch. Another chat's tab, an unknown tab and a malformed name are refused.
+- The stream runs only while somebody watches: the browser keeps no picture stream for a chat with no viewer, a chat holds at most 4 viewers at a time, and nothing it carries is written to disk or to the session store.
+- It is behind the same guard as every `/api` route: the Host header, a same-origin Origin when one is sent, and the bearer or the console's cookie. A script sends `Authorization: Bearer <token>` and no Origin.
+- The server closes with 1000 when the view ends, 1008 when it refuses (reason `not_found`, `not_a_tab`, `not_available` for a driver other than `chrome` or `live = false`, `refused` for a stopped browser, another chat's tab or a chat that already has 4 viewers, or `token_rotated` when the gateway token rotates), 1009 when the client sends more than 4,096 bytes in a message, and 1013 when the session store is down. The client's messages are read and ignored for now.
+
 ## GET /api/sessions/{id}/submissions/{client_request_id}
 
 What became of a message the client named with a `client_request_id`. The

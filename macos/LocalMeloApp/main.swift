@@ -55,6 +55,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     // The gateway picks its own port (`--port 0`) and prints it; 0 until then.
     private var port = 0
     private var logHandle: FileHandle?
+    // The Browser panel in a window of its own, made when the console first asks for it.
+    private var browserWindow: BrowserWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // The console's language, before any word is shown: the setting, else the Mac's languages.
@@ -172,6 +174,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         menuBar.refresh()
         pet.languageChanged()
         pill.languageChanged()
+        browserWindow?.languageChanged()
     }
 
     private func handle(_ action: FailureAction) {
@@ -660,7 +663,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     // leave uncommitted after the first page loaded. It loads under the status view
     // and is shown once the page has loaded.
     private func loadConsole(_ url: URL) {
-        if webView != nil { tearDownWebView() }
+        if webView != nil { tearDownWebView(closingBrowser: false) }
         guard let content = window.contentView else { return }
         let configuration = WKWebViewConfiguration()
         // The console page picks its language as the app did, from the Mac's languages.
@@ -683,6 +686,9 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         configuration.userContentController.add(
             LanguageBridge(gatewayPort: { [weak self] in self?.port ?? 0 }, changed: { [weak self] in self?.languageChosen($0) }),
             contentWorld: .page, name: LanguageBridge.name)
+        configuration.userContentController.add(
+            BrowserBridge(gatewayPort: { [weak self] in self?.port ?? 0 }, popOut: { [weak self] in self?.popOutBrowser($0) }),
+            contentWorld: .page, name: BrowserBridge.name)
         let view = ConsoleWebView(frame: content.bounds, configuration: configuration)
         view.autoresizingMask = [.width, .height]
         view.navigationDelegate = self
@@ -716,16 +722,25 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         }
     }
 
-    private func tearDownWebView() {
+    // The pop-out shows the gateway's page, so it goes with the gateway; a console that only loads again leaves it open.
+    private func tearDownWebView(closingBrowser: Bool = true) {
         webView?.stopLoading()
         webView?.navigationDelegate = nil
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: FolderBridge.name, contentWorld: .page)
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: DesktopBridge.name, contentWorld: .page)
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: LanguageBridge.name, contentWorld: .page)
+        webView?.configuration.userContentController.removeScriptMessageHandler(forName: BrowserBridge.name, contentWorld: .page)
         webView?.removeFromSuperview()
         webView = nil
+        if closingBrowser { browserWindow?.close() }
         page = PageState()
         updateSignInItems()
+    }
+
+    // The Browser panel asked to be shown alone in a window of its own.
+    private func popOutBrowser(_ session: String) {
+        if browserWindow == nil { browserWindow = BrowserWindowController() }
+        browserWindow?.show(session: session, port: port)
     }
 
     // The folders the person picked in the panel: the page may ask to see them in Finder, and nothing else but a chat's folder.

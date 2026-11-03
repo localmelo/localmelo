@@ -43,6 +43,14 @@ The pinned Python archive and the wheels are checked against their hashes. The b
 - The log is `~/Library/Logs/LocalMelo/gateway.log`; a problem never shows a dialog or closes the app.
 - The first-run setup is the console's **Settings** (its **Model server** section); the app uses the usual config and chats in `~/.cache/localmelo`.
 
+<a id="the-browser-window"></a>
+
+## The Browser window
+
+- In a chat that browses in Chrome in the background, the console's **Browser** panel has a **Pop out** button. It opens the panel alone in its own window, so you can watch melo's page while you work in another window.
+- The window shows the same live, view-only picture ([Watching melo's browser](browsing.md#watching-melos-browser)). Closing it ends its picture stream; it also closes when the gateway stops or the app quits.
+- It can only show the gateway's own page. A link in it is never opened, and it never goes to another site.
+
 <a id="language"></a>
 
 ## Language

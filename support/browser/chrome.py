@@ -36,6 +36,13 @@ driver sees each such request (``Page.frameRequestedNavigation``) and puts it on
 the act's result (``ActResult.handoff``), and melo asks the person. Chrome is
 never told to allow a scheme.
 
+A tab's page can be streamed as pictures for the live view
+(:meth:`ChromeBackgroundDriver.start_screencast`, Chrome's ``Page.startScreencast``):
+Chrome sends a JPEG only when the page changes, and sends the next one only
+after the last was acknowledged, so the acknowledgements are held to a
+rate (default 15 a second) and a busy page costs a fraction of its full rate.
+A picture goes to the one function that asked for it and is kept nowhere else.
+
 A box the page puts up blocks it until it is answered: an ``alert`` is closed
 with OK; a ``confirm`` during an act is put to the person through
 :attr:`ChromeBackgroundDriver.on_dialog` and is otherwise answered Cancel; a
@@ -80,6 +87,7 @@ from localmelo.support.browser.driver import (
     TabInfo,
     View,
 )
+from localmelo.support.browser.live import DEFAULT_FPS, DEFAULT_QUALITY, Frame
 from localmelo.support.browser.safari import (
     _MOVED,
     _PASSED,
@@ -134,6 +142,9 @@ CLOSE_S = 5.0
 DIALOG_S = 5.0
 # The most addresses of other apps' kinds one tab keeps until an act takes them.
 MAX_HANDOFFS = 5
+# The most one streamed picture may hold, and how long starting or stopping a stream may take.
+MAX_FRAME_BYTES = 4 * 1024 * 1024
+STREAM_S = 10.0
 WORLD = "melo"
 # Chrome's flags, as the background browser needs them. The pipe is the only
 # way in: never ``--remote-debugging-port``.
@@ -241,6 +252,27 @@ class CdpError(BrowserError):
 # ── The Chrome process, shared by every driver of one profile ──
 
 
+class _Cast:
+    """The stream of one tab's pictures: who gets them, and the pace the acknowledgements keep."""
+
+    def __init__(
+        self,
+        on_frame: Callable[[Frame], None],
+        on_end: Callable[[], None],
+        interval: float,
+    ) -> None:
+        self.on_frame = on_frame
+        self.on_end = on_end
+        self.interval = interval
+        self.next_ack = 0.0
+        self.timers: set[asyncio.TimerHandle] = set()
+
+    def cancel(self) -> None:
+        for timer in self.timers:
+            timer.cancel()
+        self.timers.clear()
+
+
 class _Chrome:
     """One headless Chrome and its pipe: requests, answers and the events melo keeps.
 
@@ -265,6 +297,7 @@ class _Chrome:
         self.handoffs: dict[str, list[str]] = {}
         self.navs: dict[str, int] = {}
         self.main: dict[str, str] = {}  # session -> its main frame
+        self.casts: dict[str, _Cast] = {}  # session -> its stream of pictures
         self.spare: set[str] = set()  # the pages Chrome started with: nobody's
         self.claimed: set[str] = set()  # the pages some driver has as its own
 
@@ -374,6 +407,8 @@ class _Chrome:
             self.woken.setdefault(session, asyncio.Event()).set()
         elif method == "Page.javascriptDialogClosed":
             self.dialogs.pop(session, None)
+        elif method == "Page.screencastFrame":
+            self._frame(session, params)
         elif method == "Page.frameRequestedNavigation":
             url = str(params.get("url") or "")
             if apps.custom_scheme(url):
@@ -389,6 +424,60 @@ class _Chrome:
             if params.get("frameId") == self.main.get(session):
                 self.navs[session] = self.navs.get(session, 0) + 1
 
+    def _frame(self, session: str, params: dict[str, Any]) -> None:
+        """A picture of a tab's page: to the stream's function, and its acknowledgement paced.
+
+        Chrome sends the next picture only after this one is acknowledged, and about
+        three are in flight, so acknowledging at most *rate* times a second holds the
+        pictures (and the work of drawing them) to about that rate. A picture nobody
+        asked for is acknowledged at once.
+        """
+        ident = params.get("sessionId")
+        if not isinstance(ident, int):
+            return
+        cast = self.casts.get(session)
+        if cast is None:
+            self._ack(session, ident)
+            return
+        frame = _picture(params)
+        if frame is not None:
+            with contextlib.suppress(
+                Exception
+            ):  # a viewer's failure never stops the browser
+                cast.on_frame(frame)
+        now = self.loop.time()
+        at = max(now, cast.next_ack)
+        cast.next_ack = at + cast.interval
+        if at - now < 0.001:
+            self._ack(session, ident)
+            return
+        handle: asyncio.TimerHandle | None = None
+
+        def later() -> None:
+            if handle is not None:
+                cast.timers.discard(handle)
+            self._ack(session, ident)
+
+        handle = self.loop.call_later(at - now, later)
+        cast.timers.add(handle)
+
+    def _ack(self, session: str, ident: int) -> None:
+        if self.closed or self._writer is None or self._writer.is_closing():
+            return
+        try:
+            future = self.request(
+                "Page.screencastFrameAck", {"sessionId": ident}, session
+            )
+        except BrowserError:
+            return
+        # An answer is not waited for; an error in it (the tab is gone) is not a problem.
+        future.add_done_callback(lambda f: f.cancelled() or f.exception())
+
+    def end_cast(self, session: str) -> None:
+        cast = self.casts.pop(session, None)
+        if cast is not None:
+            cast.cancel()
+
     def _stopped(self) -> None:
         self.closed = True
         for future in self._pending.values():
@@ -397,6 +486,11 @@ class _Chrome:
         self._pending.clear()
         for event in self.woken.values():
             event.set()
+        streams, self.casts = list(self.casts.values()), {}
+        for stream in streams:
+            stream.cancel()
+            with contextlib.suppress(Exception):
+                stream.on_end()
 
     def request(
         self,
@@ -510,6 +604,37 @@ async def _shared(argv: list[str], profile: str, timeout_s: float) -> _Chrome:
         return found
 
 
+def _picture(params: dict[str, Any]) -> Frame | None:
+    """The :class:`Frame` a ``Page.screencastFrame`` carries, or None when it is not a usable JPEG."""
+    data = params.get("data")
+    if not isinstance(data, str) or len(data) > MAX_FRAME_BYTES * 4 // 3 + 8:
+        return None
+    try:
+        raw = base64.b64decode(data, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    if not raw.startswith(b"\xff\xd8") or len(raw) > MAX_FRAME_BYTES:
+        return None
+    meta = params.get("metadata")
+    meta = meta if isinstance(meta, dict) else {}
+
+    def number(key: str, default: float = 0.0) -> float:
+        value = meta.get(key)
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            return default
+        return float(value) if value == value else default
+
+    return Frame(
+        raw,
+        width=number("deviceWidth"),
+        height=number("deviceHeight"),
+        offset_top=number("offsetTop"),
+        scale=number("pageScaleFactor", 1.0) or 1.0,
+        scroll_x=number("scrollOffsetX"),
+        scroll_y=number("scrollOffsetY"),
+    )
+
+
 # ── The driver ──
 
 
@@ -549,6 +674,7 @@ class ChromeBackgroundDriver(PageScriptActs):
         self._mine: set[str] = set()
         self._sessions: dict[str, str] = {}  # target -> session
         self._targets: dict[str, str] = {}  # session -> target
+        self._attaching = asyncio.Lock()
         self._current: str | None = None
         self._acting: set[str] = set()
         self._said: dict[str, list[Dialog]] = {}
@@ -593,6 +719,7 @@ class ChromeBackgroundDriver(PageScriptActs):
             browser.users -= 1
             browser.claimed -= self._mine
             for session in self._sessions.values():
+                browser.end_cast(session)
                 for kept in (browser.dialogs, browser.handoffs, browser.navs):
                     kept.pop(session, None)
         self._mine.clear()
@@ -685,20 +812,24 @@ class ChromeBackgroundDriver(PageScriptActs):
         session = self._sessions.get(target)
         if session:
             return session
-        got = await self._cmd(
-            "Target.attachToTarget", {"targetId": target, "flatten": True}
-        )
-        session = str(got.get("sessionId") or "")
-        if not session:
-            raise BrowserError("Chrome did not let melo drive that tab.")
-        self._sessions[target] = session
-        self._targets[session] = target
-        await self._cmd("Page.enable", {}, session)
-        # A page in a window of its own behaves as if its window had the focus.
-        await self._cmd(
-            "Emulation.setFocusEmulationEnabled", {"enabled": True}, session
-        )
-        return session
+        async with self._attaching:  # the live view and a tool call may ask together
+            session = self._sessions.get(target)
+            if session:
+                return session
+            got = await self._cmd(
+                "Target.attachToTarget", {"targetId": target, "flatten": True}
+            )
+            session = str(got.get("sessionId") or "")
+            if not session:
+                raise BrowserError("Chrome did not let melo drive that tab.")
+            self._sessions[target] = session
+            self._targets[session] = target
+            await self._cmd("Page.enable", {}, session)
+            # A page in a window of its own behaves as if its window had the focus.
+            await self._cmd(
+                "Emulation.setFocusEmulationEnabled", {"enabled": True}, session
+            )
+            return session
 
     def _resolve(self, tab: str | None) -> str:
         target = self._current if not tab or tab == "current" else tab
@@ -853,6 +984,8 @@ class ChromeBackgroundDriver(PageScriptActs):
         if session is not None:
             self._targets.pop(session, None)
         if self._browser is not None:
+            if session is not None:
+                self._browser.end_cast(session)
             self._browser.claimed.discard(target)
         if self._current == target:
             self._current = None
@@ -969,6 +1102,70 @@ class ChromeBackgroundDriver(PageScriptActs):
 
     async def location(self, tab: str | None) -> str:
         return await self._address(tab)
+
+    # ── The live view ──
+
+    async def start_screencast(
+        self,
+        tab: str | None,
+        on_frame: Callable[[Frame], None],
+        on_end: Callable[[], None],
+        *,
+        fps: float = DEFAULT_FPS,
+        quality: int = DEFAULT_QUALITY,
+    ) -> None:
+        """Stream *tab*'s page as pictures to *on_frame*, at most about *fps* a second.
+
+        Chrome sends a picture when the page changes (none for a page that does
+        not), as a JPEG of *quality* the size of the view. *on_end* is called if
+        the stream ends because Chrome stops. A tab that already streams has its
+        functions and pace replaced, and is not started again. This does not make
+        the tab the one melo's tools use, and does not answer a box the page put up.
+        """
+        target = self._resolve(tab)
+        session = await self._attach(target)
+        browser = self._live()
+        cast = _Cast(on_frame, on_end, 1.0 / max(float(fps), 1.0))
+        running = session in browser.casts
+        browser.casts[session] = cast
+        if running:
+            return
+        try:
+            async with asyncio.timeout(STREAM_S):
+                await browser.request(
+                    "Page.startScreencast",
+                    {
+                        "format": "jpeg",
+                        "quality": int(quality),
+                        "maxWidth": VIEW_W,
+                        "maxHeight": VIEW_H,
+                        "everyNthFrame": 1,
+                    },
+                    session,
+                )
+        except TimeoutError:
+            browser.end_cast(session)
+            raise BrowserError("Chrome did not start showing that tab.") from None
+        except BaseException:
+            browser.end_cast(session)
+            raise
+
+    async def stop_screencast(self, tab: str | None) -> None:
+        """Stop streaming *tab*; nothing happens for a tab that does not stream."""
+        browser = self._browser
+        if browser is None or browser.closed:
+            return
+        try:
+            target = self._resolve(tab)
+        except BrowserError:
+            return
+        session = self._sessions.get(target)
+        if not session or session not in browser.casts:
+            return
+        browser.end_cast(session)
+        with contextlib.suppress(BrowserError, TimeoutError):
+            async with asyncio.timeout(STREAM_S):
+                await browser.request("Page.stopScreencast", {}, session)
 
     async def wait(
         self,

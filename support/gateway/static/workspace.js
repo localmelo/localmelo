@@ -21,6 +21,7 @@ import { setupTasks } from "./tasks.mjs";
 import { plainSegments, setupStatusRow } from "./status-row.mjs";
 import { setupRunning } from "./running.mjs";
 import { setupPanel } from "./panel.mjs";
+import { liveRoute, setupBrowser } from "./browser-live.mjs";
 import { levelCode, levelLabel } from "./levels.mjs";
 import { setupModelCard } from "./setup-card.mjs";
 import { setupImportCard } from "./import-card.mjs";
@@ -82,6 +83,7 @@ const KEY = "localmelo-console";
 const STREAM_DELAYS_S = [1, 2, 4, 8, 16, 30];
 const PRESENCE_MS = 2500;
 const LIST_POLL_MS = 4000;
+const BROWSER_HIDDEN_MS = 20000;
 
 const S = {
   health: null,
@@ -244,6 +246,7 @@ function lock(message = "") {
   if (S.authenticated) saveDraft();
   S.authenticated = false;
   closeStream();
+  browser.release();
   $("settings-dialog")?.close?.();
   $("app").inert = true;
   $("app").hidden = true;
@@ -807,6 +810,7 @@ async function openSession(id, { saveCurrent = true, scroll = true, route = true
   if (S.activeId !== id) approvalStates.clear();
   shiftMedia(S.activeId ?? "new", id, { keep: saveCurrent });
   closeStream();
+  browser.release(id);
   S.activeId = id;
   drawer.sessionChanged();
   S.view = newView(id);
@@ -835,6 +839,7 @@ function forgetSession(id) {
   S.sessions = S.sessions.filter((session) => session.id !== id);
   if (S.activeId === id) {
     closeStream();
+    browser.release();
     S.activeId = null;
     drawer.sessionChanged();
     S.view = null;
@@ -858,6 +863,7 @@ function newChat({ saveCurrent = true } = {}) {
   if (S.activeId !== null) approvalStates.clear();
   shiftMedia(S.activeId ?? "new", "new", { keep: saveCurrent });
   closeStream();
+  browser.release();
   S.activeId = null;
   drawer.sessionChanged();
   S.view = null;
@@ -884,6 +890,7 @@ function startStream(id) {
   if (!S.authenticated || S.activeId !== id || workerMode) return;
   closeStream();
   chatStatus.follow(id);
+  browser.follow(id);
   if (typeof EventSource !== "function") return;
   S.stream.sessionId = id;
   const source = new EventSource(eventsUrl(id));
@@ -905,6 +912,7 @@ function startStream(id) {
     if (frame.type === "approval.requested") refreshApproval(id, String(frame.data?.request_id ?? ""));
     if (frame.type === "approval.resolved") approvalStates.delete(String(frame.data?.request_id ?? ""));
     noteFrame(frame);
+    browser.note(frame);
     chatStatus.bump();
     renderMessages(false);
     syncUI();
@@ -3029,6 +3037,7 @@ async function showTask(id) {
     if (S.activeId) await openSession(S.activeId, { route: false });
   }
   drawer.close();
+  giveWayToPanel();
   panel.openTask(id);
   // A waiting task's approval is the panel's now, not the chat card's.
   renderMessages(false, true);
@@ -3249,9 +3258,15 @@ async function showScheduled() {
   const id = S.activeId || S.main?.id || "";
   if (id && S.activeId !== id) await openSession(id);
   else if (id) setRoute(id); // the address names the chat again
+  giveWayToPanel();
   panel.select("scheduled");
   // Below 900 px the panel is a sheet; wider, it already sits beside the chat.
   if (!matchMedia("(min-width: 900px)").matches) panel.openSheet();
+}
+
+/** Where Melo's panel and the Browser panel do not both fit, a task or the schedule shown in Melo's panel takes the place. */
+function giveWayToPanel() {
+  if (!matchMedia("(min-width: 1480px)").matches) browser.hide();
 }
 
 function hashId() {
@@ -3306,6 +3321,37 @@ const panel = setupPanel({
   },
 });
 const pictureBox = setupPictureBox({ dialog: $("picture-box") });
+
+// The Browser panel: a live, view-only window onto the page melo is working in (browser-live.mjs). The macOS app
+// can show it alone in a window of its own; it says so by offering the `localmeloBrowser` message handler.
+const browserBridge = globalThis.webkit?.messageHandlers?.localmeloBrowser;
+const browser = setupBrowser({
+  api,
+  els: {
+    root: $("browser-panel"),
+    chip: $("browser-chip"),
+    chipText: $("browser-chip-text"),
+    title: $("bp-title"),
+    host: $("bp-host"),
+    rest: $("bp-rest"),
+    status: $("bp-status"),
+    viewport: $("bp-viewport"),
+    canvas: $("bp-canvas"),
+    note: $("bp-note"),
+    hide: $("bp-hide"),
+    pop: $("bp-pop"),
+  },
+  openSocket: (url) => new WebSocket(url),
+  decode: (bytes) => createImageBitmap(new Blob([bytes], { type: "image/jpeg" })),
+  observe: (node, fn) => { if (typeof ResizeObserver === "function") new ResizeObserver(fn).observe(node); },
+  wide: () => matchMedia("(min-width: 900px)").matches,
+  popOut: browserBridge ? (session) => browserBridge.postMessage({ action: "popOut", session }) : null,
+  // The gateway ended the stream for the token's sake: any call finds out whether the page is still signed in.
+  denied: () => { api("/health").catch(() => {}); },
+});
+$("browser-chip").addEventListener("click", () => browser.toggle());
+$("bp-hide").addEventListener("click", () => browser.hide());
+$("bp-pop").addEventListener("click", () => browser.popOut());
 
 // ── Pictures and files in the composer ──
 
@@ -3741,6 +3787,14 @@ async function init() {
   delete document.documentElement.dataset.locked;
   $("app").hidden = false;
   $("app").inert = false;
+  // `#/live/<chat>`: the macOS app's pop-out window shows the chat's Browser panel and nothing else.
+  const livePopOut = liveRoute(globalThis.location?.hash);
+  if (livePopOut) {
+    document.documentElement.dataset.view = "live";
+    await browser.follow(livePopOut, { liveOnly: true });
+    document.documentElement.dataset.ready = "1";
+    return;
+  }
   S.drafts = stored(KEY + "-drafts", {}, "sessionStorage");
   const savedOutbox = stored(KEY + "-outbox", {}, "sessionStorage");
   S.outbox = {};
@@ -3913,6 +3967,8 @@ matchMedia("(max-width: 700px)").addEventListener?.("change", () => sidebar(fals
 // Back and Forward move the hash; the chat follows it, as a reload would.
 globalThis.addEventListener?.("hashchange", async (event) => {
   if (!S.authenticated) return;
+  // The pop-out window is the Browser panel alone: it has no chats to follow.
+  if (document.documentElement.dataset.view === "live") return;
   const task = taskRoute();
   if (task !== null) { stampArrival(event); await showTask(task); return; }
   closeTaskPage();
@@ -3982,6 +4038,7 @@ document.addEventListener("keydown", (event) => {
   // A task shown in the panel goes back to the chat first; the sheet closes on the next Escape.
   if (panel.stepBack()) return;
   if (panel.closeSheet()) return;
+  if (browser.closeSheet()) return;
   if ($("app").classList.contains("sidebar-open")) {
     sidebar(false);
     return;
@@ -4001,5 +4058,15 @@ document.addEventListener("keydown", (event) => {
 document.addEventListener("visibilitychange", () => {
   if (S.authenticated && !document.hidden) refreshList();
 });
+// Nobody watches a page that is hidden for a while or kept for Back: its stream stops, and starts when it returns.
+let hiddenTimer = null;
+document.addEventListener("visibilitychange", () => {
+  clearTimeout(hiddenTimer);
+  hiddenTimer = null;
+  if (document.hidden) hiddenTimer = setTimeout(() => browser.suspend(), BROWSER_HIDDEN_MS);
+  else browser.resume();
+});
+globalThis.addEventListener?.("pagehide", () => browser.suspend());
+globalThis.addEventListener?.("pageshow", () => browser.resume());
 
 init();

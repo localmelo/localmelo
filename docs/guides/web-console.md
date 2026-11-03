@@ -257,7 +257,7 @@ The commands of the [terminal](terminal.md#commands) work on this page and in th
 | `/title [text]` | Show or set the chat's title. |
 | `/memory [window\|import]` | Open the Memory tab; `window` shows the model's window; `import` also presses **Look for notes**, so the files other assistants keep are listed (a row says so when memory is off). |
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | Show the chat's mode and grants; `ask` and `auto` switch it and `forget` takes grants back. `deny` is for the terminal. |
-| `/browser [on\|off]` | Show or switch reading web pages in Safari, saved in `[browser] driver`. |
+| `/browser [on\|off\|chrome\|safari]` | Show or switch reading web pages, in Chrome in the background or in Safari's windows, saved in `[browser] driver`. |
 | `/attach`, `/attachments`, `/detach` | `/attach` opens the picker for a picture or a text file; `/attachments` lists what waits and `/detach N` (or `/detach all`) removes it. |
 | `/verbose`, `/thinking`, `/stream [on\|off]` | How the page shows a chat, kept in this browser: tool calls open, thinking open, or steps shown only when a turn ends. |
 | `/expand [turn.call]` | Open a tool call with its whole output. |
@@ -443,6 +443,16 @@ Closing a chat that made notes asks `Also forget the 2 notes from this chat?`: *
 **Forget the 2 notes too**, or **Don’t delete the chat**.
 
 In developer mode, **Details** opens in the panel, in place of the tabs, until you close it.
+
+## The Browser panel
+
+While melo browses in Chrome in the background ([Browsing with melo](browsing.md#watching-melos-browser)), a **Browser** panel beside the chat shows its page, live and view only.
+
+- It opens by itself when melo starts browsing and follows melo to another tab. **Hide browser** in its header closes it; the **Browser** button in the header opens it again.
+- It shows the page's title and address, the picture, and a ring with "melo is browsing" while a step runs. When the picture stops it dims and reads "Not updating"; when it ends it says why.
+- On a window 1480 pixels wide or more it sits between the chat and the [panel beside the chat](#the-panel-beside-a-chat). On a narrower one it takes that panel's place while it is open, and under 900 pixels it opens as a sheet when you ask.
+- It sends nothing while it is hidden or its tab is in the background, and closing the tab ends the picture stream.
+- Nothing in it can be clicked or typed into yet; the picture is not saved anywhere.
 
 ## Melo in the page
 

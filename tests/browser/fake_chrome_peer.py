@@ -17,9 +17,14 @@ then goes to ``goes``), ``popup`` (a tab the click opens), ``notice`` (text the
 page shows after a real click), ``trusted_only`` (a script's click does
 nothing) or ``covered``.
 
+A screencast (``Page.startScreencast``) sends ``FAKE_CHROME_FRAMES`` pictures
+(default 60; ``1`` is a page that does not change), at most three unacknowledged
+at a time, as Chrome does: the next one comes only after an acknowledgement
+(``Page.screencastFrameAck``). Every call is logged with its time (``t``).
+
 Modes (``FAKE_CHROME_MODE``): ``silent`` (never answers), ``exit`` (quits at
 once), ``native_missed`` (a real click reaches nothing), ``no_world`` (no
-isolated world can be made), ``nav_error`` (every navigation fails).
+isolated world can be made), ``nav_error`` (every navigation fails), ``cast_error`` (a screencast cannot start).
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ import base64
 import json
 import os
 import sys
+import time
 from typing import Any
 
 MODE = os.environ.get("FAKE_CHROME_MODE", "")
@@ -132,6 +138,10 @@ typed: dict[str, str] = {}
 waiting: dict[str, list[dict[str, Any]]] = {}  # target -> calls held while a box is up
 dialog_after: dict[str, tuple[int, dict[str, Any]]] = {}  # target -> (call id, element)
 n_targets = 0
+FRAMES = int(os.environ.get("FAKE_CHROME_FRAMES", "60"))
+casts: dict[str, dict[str, int]] = (
+    {}
+)  # session -> how many pictures are left, in flight, sent
 
 
 def log(entry: dict[str, Any]) -> None:
@@ -366,6 +376,35 @@ def at_point(target: str, x: float, y: float) -> dict[str, Any] | None:
     return None
 
 
+def feed(session: str) -> None:
+    """Send pictures of a screencast until three wait for their acknowledgement."""
+    cast = casts.get(session)
+    while cast is not None and cast["left"] > 0 and cast["flight"] < 3:
+        cast["left"] -= 1
+        cast["flight"] += 1
+        cast["sent"] += 1
+        data = base64.b64encode(
+            b"\xff\xd8\xff\xe0frame-%d\xff\xd9" % cast["sent"]
+        ).decode()
+        event(
+            "Page.screencastFrame",
+            {
+                "data": data,
+                "metadata": {
+                    "offsetTop": 0,
+                    "pageScaleFactor": 1,
+                    "deviceWidth": 1280,
+                    "deviceHeight": 713,
+                    "scrollOffsetX": 0,
+                    "scrollOffsetY": 0,
+                    "timestamp": time.time(),
+                },
+                "sessionId": cast["sent"],
+            },
+            session,
+        )
+
+
 def handle(message: dict[str, Any]) -> dict[str, Any] | None:
     """The answer to one call; None when the answer waits (a box is up)."""
     method = message["method"]
@@ -422,6 +461,21 @@ def handle(message: dict[str, Any]) -> dict[str, Any] | None:
         return {}
     if method == "Page.captureScreenshot":
         return {"data": JPEG}
+    if method == "Page.startScreencast":
+        if MODE == "cast_error":
+            return {"__error": "Screencast is not available"}
+        casts[session] = {"left": FRAMES, "flight": 0, "sent": 0}
+        feed(session)
+        return {}
+    if method == "Page.stopScreencast":
+        casts.pop(session, None)
+        return {}
+    if method == "Page.screencastFrameAck":
+        cast = casts.get(session)
+        if cast is not None:
+            cast["flight"] = max(cast["flight"] - 1, 0)
+            feed(session)
+        return {}
     if method == "Page.handleJavaScriptDialog":
         held = dialog_after.pop(target, None)
         event("Page.javascriptDialogClosed", {"result": params["accept"]}, session)
@@ -475,6 +529,7 @@ def answer(message: dict[str, Any]) -> None:
     log(
         {
             "method": message["method"],
+            "t": time.time(),
             "session": message.get("sessionId", ""),
             "params": {
                 k: v

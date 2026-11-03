@@ -567,11 +567,17 @@ class BrowserConfig:
     as a chat app's sign-in window, and answer it with the person's say, when the
     desktop control helper is installed; without the helper melo still says which
     app came to the front (:mod:`localmelo.support.browser.desktop`).
+    ``live`` (on by default) lets the console and the app show the Chrome browser
+    to the person while melo works (a developer option; off refuses the view),
+    and ``live_fps`` (1 to 60, default 15) holds the pictures of that view to that
+    many a second.
     """
 
     driver: str = "off"  # off | safari-automation | chrome
     keep_tabs: bool = False
     app_windows: bool = True
+    live: bool = True
+    live_fps: int = 15
 
 
 # The most folders ``[workspace] extra_folders`` keeps.
@@ -899,16 +905,21 @@ class Config:
         return errors
 
     def _validate_browser(self) -> list[str]:
-        """``[browser] driver`` names a driver; ``keep_tabs`` and ``app_windows`` are true or false."""
+        """``[browser] driver`` names a driver; ``keep_tabs``, ``app_windows`` and ``live`` are true or false."""
         errors = []
         if self.browser.driver not in BROWSER_DRIVERS:
             errors.append(
                 f"[browser] driver={self.browser.driver!r} is not one of {BROWSER_DRIVERS}"
             )
-        for name in ("keep_tabs", "app_windows"):
+        for name in ("keep_tabs", "app_windows", "live"):
             value = getattr(self.browser, name)
             if not isinstance(value, bool):
                 errors.append(f"[browser] {name}={value!r} must be true or false")
+        fps = self.browser.live_fps
+        if isinstance(fps, bool) or not isinstance(fps, int) or not 1 <= fps <= 60:
+            errors.append(
+                f"[browser] live_fps={fps!r} must be a whole number from 1 to 60"
+            )
         return errors
 
     def _validate_tools(self) -> list[str]:
@@ -2138,6 +2149,10 @@ def save(cfg: Config) -> None:
             lines.append(f"keep_tabs = {_toml_value(cfg.browser.keep_tabs)}")
         if cfg.browser.app_windows is not True:
             lines.append(f"app_windows = {_toml_value(cfg.browser.app_windows)}")
+        if cfg.browser.live is not True:
+            lines.append(f"live = {_toml_value(cfg.browser.live)}")
+        if cfg.browser.live_fps != BrowserConfig().live_fps:
+            lines.append(f"live_fps = {_toml_value(cfg.browser.live_fps)}")
         lines.append("")
 
     if cfg.tools != ToolsConfig():

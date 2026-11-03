@@ -293,10 +293,10 @@
     {
       "name": "browser",
       "aliases": [],
-      "args": "[on|off]",
+      "args": "[on|off|chrome|safari]",
       "help": {
-        "en": "Show or switch web browsing in Safari",
-        "zh-Hans": "查看或切换在 Safari 中浏览网页"
+        "en": "Show or switch web browsing (Chrome or Safari)",
+        "zh-Hans": "查看或切换网页浏览（Chrome 或 Safari）"
       },
       "during_turn": "show",
       "keys": "",
