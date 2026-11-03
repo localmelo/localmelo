@@ -166,6 +166,16 @@ FLAGS: tuple[str, ...] = (
 GPU_OFF = "--disable-gpu"
 # The modifier bit of the Command key in a DevTools key event.
 _META = 4
+# The calls the person's input may make (take over), and the most that may wait for Chrome.
+PERSON_METHODS = frozenset(
+    {
+        "Input.dispatchMouseEvent",
+        "Input.dispatchKeyEvent",
+        "Input.insertText",
+        "Input.imeSetComposition",
+    }
+)
+MAX_INFLIGHT = 64
 
 
 def chrome_command() -> list[str] | None:
@@ -260,10 +270,13 @@ class _Cast:
         on_frame: Callable[[Frame], None],
         on_end: Callable[[], None],
         interval: float,
+        on_dialog: Callable[[], None] | None = None,
     ) -> None:
         self.on_frame = on_frame
         self.on_end = on_end
         self.interval = interval
+        # Told when the page puts up a box or one closes (the live view shows it to the person).
+        self.on_dialog = on_dialog
         self.next_ack = 0.0
         self.timers: set[asyncio.TimerHandle] = set()
 
@@ -405,8 +418,10 @@ class _Chrome:
         if method == "Page.javascriptDialogOpening":
             self.dialogs[session] = params
             self.woken.setdefault(session, asyncio.Event()).set()
+            self._dialog_changed(session)
         elif method == "Page.javascriptDialogClosed":
             self.dialogs.pop(session, None)
+            self._dialog_changed(session)
         elif method == "Page.screencastFrame":
             self._frame(session, params)
         elif method == "Page.frameRequestedNavigation":
@@ -423,6 +438,14 @@ class _Chrome:
         elif method == "Page.navigatedWithinDocument":
             if params.get("frameId") == self.main.get(session):
                 self.navs[session] = self.navs.get(session, 0) + 1
+
+    def _dialog_changed(self, session: str) -> None:
+        cast = self.casts.get(session)
+        if cast is not None and cast.on_dialog is not None:
+            with contextlib.suppress(
+                Exception
+            ):  # a viewer's failure never stops the browser
+                cast.on_dialog()
 
     def _frame(self, session: str, params: dict[str, Any]) -> None:
         """A picture of a tab's page: to the stream's function, and its acknowledgement paced.
@@ -679,6 +702,9 @@ class ChromeBackgroundDriver(PageScriptActs):
         self._acting: set[str] = set()
         self._said: dict[str, list[Dialog]] = {}
         self.on_dialog: DialogAsk | None = None
+        # The sessions of tabs the person has (take over): their boxes are the person's.
+        self._held: set[str] = set()
+        self._inflight = 0  # the person's input calls Chrome has not answered yet
         self._ring = f"melo-ring-{uuid.uuid4().hex[:12]}"
 
     # ── Lifecycle ──
@@ -725,6 +751,7 @@ class ChromeBackgroundDriver(PageScriptActs):
         self._mine.clear()
         self._sessions.clear()
         self._targets.clear()
+        self._held.clear()
         self._current = None
         return browser
 
@@ -750,7 +777,7 @@ class ChromeBackgroundDriver(PageScriptActs):
         The time a person takes to answer a box is not counted against the call.
         """
         browser = self._live()
-        if session and session in browser.dialogs:
+        if session and session in browser.dialogs and session not in self._held:
             await self._answer(browser, session)
         future = browser.request(method, params, session)
         loop = asyncio.get_running_loop()
@@ -775,7 +802,7 @@ class ChromeBackgroundDriver(PageScriptActs):
                 return future.result()
             if woken is not None and woken in done and session:
                 browser.woken[session].clear()
-                if session in browser.dialogs:
+                if session in browser.dialogs and session not in self._held:
                     await self._answer(browser, session)
                     end = loop.time() + self._call_s
                 elif browser.closed:
@@ -1113,19 +1140,21 @@ class ChromeBackgroundDriver(PageScriptActs):
         *,
         fps: float = DEFAULT_FPS,
         quality: int = DEFAULT_QUALITY,
+        on_dialog: Callable[[], None] | None = None,
     ) -> None:
         """Stream *tab*'s page as pictures to *on_frame*, at most about *fps* a second.
 
         Chrome sends a picture when the page changes (none for a page that does
         not), as a JPEG of *quality* the size of the view. *on_end* is called if
-        the stream ends because Chrome stops. A tab that already streams has its
+        the stream ends because Chrome stops, *on_dialog* when the page puts up a
+        box or one closes (:meth:`dialog_of`). A tab that already streams has its
         functions and pace replaced, and is not started again. This does not make
         the tab the one melo's tools use, and does not answer a box the page put up.
         """
         target = self._resolve(tab)
         session = await self._attach(target)
         browser = self._live()
-        cast = _Cast(on_frame, on_end, 1.0 / max(float(fps), 1.0))
+        cast = _Cast(on_frame, on_end, 1.0 / max(float(fps), 1.0), on_dialog)
         running = session in browser.casts
         browser.casts[session] = cast
         if running:
@@ -1166,6 +1195,88 @@ class ChromeBackgroundDriver(PageScriptActs):
         with contextlib.suppress(BrowserError, TimeoutError):
             async with asyncio.timeout(STREAM_S):
                 await browser.request("Page.stopScreencast", {}, session)
+
+    # ── The person at the panel (take over) ──
+
+    def hold_dialogs(self, tab: str, held: bool) -> None:
+        """While the person has *tab*, the boxes its page puts up are theirs: melo's own calls leave them open."""
+        try:
+            target = self._resolve(tab)
+        except BrowserError:
+            return
+        session = self._sessions.get(target)
+        if not session:
+            return
+        if held:
+            self._held.add(session)
+        else:
+            self._held.discard(session)
+
+    def dialog_of(self, tab: str) -> dict[str, str] | None:
+        """The box *tab*'s page shows now, for the person: its kind, its words and a prompt's default text; None when none."""
+        browser = self._browser
+        if browser is None or browser.closed:
+            return None
+        try:
+            session = self._sessions.get(self._resolve(tab))
+        except BrowserError:
+            return None
+        params = browser.dialogs.get(session or "")
+        if params is None:
+            return None
+        return {
+            "kind": str(params.get("type") or "alert")[:20],
+            "message": " ".join(str(params.get("message") or "").split())[:300],
+            "default": str(params.get("defaultPrompt") or "")[:300],
+        }
+
+    async def answer_dialog(self, tab: str, accept: bool, text: str = "") -> bool:
+        """The person's answer to the box *tab*'s page shows (*text* for a prompt); whether there was one."""
+        browser = self._live()
+        session = self._sessions.get(self._resolve(tab))
+        if not session or session not in browser.dialogs:
+            return False
+        params: dict[str, Any] = {"accept": bool(accept)}
+        if accept and browser.dialogs[session].get("type") == "prompt":
+            params["promptText"] = text
+        browser.dialogs.pop(session, None)
+        with contextlib.suppress(BrowserError, TimeoutError):
+            async with asyncio.timeout(DIALOG_S):
+                await browser.request("Page.handleJavaScriptDialog", params, session)
+        return True
+
+    def person_input(self, tab: str, method: str, params: dict[str, Any]) -> bool:
+        """Send one input call of the person's to *tab*, in order and without waiting; whether it was sent.
+
+        Only the input methods go this way, only to a tab that streams to a panel,
+        and at most :data:`MAX_INFLIGHT` wait for Chrome at a time (a page held by a
+        box answers none until it closes): more are dropped. Chrome's answer, an
+        error too, is never read, so nothing of what was typed is ever echoed back.
+        """
+        if method not in PERSON_METHODS or self._inflight >= MAX_INFLIGHT:
+            return False
+        browser = self._browser
+        if browser is None or browser.closed:
+            return False
+        try:
+            session = self._sessions.get(self._resolve(tab))
+        except BrowserError:
+            return False
+        if not session or session not in browser.casts:
+            return False
+        try:
+            future = browser.request(method, params, session)
+        except BrowserError:
+            return False
+        self._inflight += 1
+
+        def done(found: asyncio.Future[dict[str, Any]]) -> None:
+            self._inflight = max(0, self._inflight - 1)
+            if not found.cancelled():
+                found.exception()  # read, so it is never logged as never retrieved
+
+        future.add_done_callback(done)
+        return True
 
     async def wait(
         self,

@@ -8,7 +8,7 @@ Let melo read web pages, and click, type and choose on them, on a Mac, from the 
 - Two browsers: **Chrome in the background** (no window, never comes to the front; see [Chrome in the background](#chrome-in-the-background)) or **Safari's automation windows**, which come to the front. Safari is the default for now.
 - melo opens pages, follows links and reads what it finds. It works in one tab, like a person would.
 - It can click a button or link, type into a text box and choose from a list, all **inside melo's own browser window**, with Safari's own clicks and keystrokes, and it says what changed after each one. It never types a password, a card number or a one-time code, never reads your cookies, and asks every time before it types a text and before it sends a form. Once a text is in a page, the page itself may send it: melo cannot stop every such send (see [Clicking, typing and choosing](#clicking-typing-and-choosing)).
-- It does not sign in for you, post or buy; moving the mouse on your desktop is a different feature and is not part of this (see [What is coming](#what-is-coming)).
+- It never types your password for you. In Chrome in the background, when a page needs you (a sign-in, a code, a QR code or a check that you are human), melo asks you to [take the page over](#taking-over-melos-browser) and carries on after you give it back. Moving the mouse on your desktop is a different feature and is not part of this (see [What is coming](#what-is-coming)).
 
 ## Read a page without the browser
 
@@ -92,7 +92,7 @@ With `driver = "chrome"`, melo browses in Google Chrome with no window at all.
 - **Only melo drives it.** melo starts the Chrome installed on this Mac and talks to it over a private pipe. Chrome opens no network port for this, so no other program can drive it.
 - **A profile of melo's own.** It lives in `~/.cache/localmelo/browser/chrome`, readable only by you (mode 0700). Your own Chrome profile, its sign-ins and its Keychain item are never used.
 - **What it keeps.** Cookies that a site keeps for days stay in that profile from one chat to the next, so a site you are signed in to there stays signed in. Chrome does not use your Keychain here, so those cookies are protected by the folder's permissions and FileVault only. Cookies that last only for a session are gone when Chrome stops. To clear everything, quit melo and delete that folder.
-- **Watching works; signing in does not yet.** You can [watch melo's page live](#watching-melos-browser), but you cannot click or type in it yet (taking over comes next). For a site that needs your sign-in, use Safari windows for now.
+- **You can watch it and take it over.** You can [watch melo's page live](#watching-melos-browser) and [take it over](#taking-over-melos-browser) to sign in yourself.
 - **What a site sees.** An ordinary Chrome: no "HeadlessChrome" in its user agent and no automation flag. Some bot checks may still notice; then use Safari windows.
 - **Chrome's own traffic.** Chrome makes a few connections of its own to Google even with background networking off; nothing comes back to melo through them. Downloads are refused.
 - **Clicks and typing are Chrome's own.** A click is a real one at the middle of the element melo checked, and typing selects what the box holds and puts the text in, so a page that ignores script clicks still works. A choice in a list is made by the page script.
@@ -105,9 +105,22 @@ In the web console and the app, a **Browser** panel beside the chat shows the pa
 - **It opens by itself** when melo starts browsing. **Hide browser** closes it, and the **Browser** button in the header opens it again; on a narrow window it opens as a sheet when you ask.
 - **It shows** the page's title and address, a live picture, and a blue ring around the picture with "melo is browsing" while melo is in the middle of a step. It follows melo to another tab.
 - **It stays calm.** "No page open" before melo browses; "Opening the page…" until the first picture arrives; a dimmed last picture marked "Not updating" while the picture stops; and one sentence of why when it ends (the tab was closed, melo's browser stopped, the chat ended, or the live view is not available).
-- **View only.** You cannot click or type in it yet. The pictures stay in memory, are never saved, and are sent only while the panel is open.
+- **Take over** lets you use the page yourself ([Taking over melo's browser](#taking-over-melos-browser)). The pictures stay in memory, are never saved, and are sent only while the panel is open.
 - **In the app**, **Pop out** opens the panel alone in its own window.
-- **Cost.** A page that does not change costs almost nothing; a moving page is held to 15 pictures a second. The options `live` and `live_fps` are in the [configuration reference](../reference/configuration.md).
+- **Cost.** A page that does not change costs almost nothing; a moving page is held to 15 pictures a second (60 while you have it). The options `live` and `live_fps` are in the [configuration reference](../reference/configuration.md).
+
+## Taking over melo's browser
+
+The page in the Browser panel can be yours for a while: to sign in, type a code, scan a QR code or pass a check that you are human. melo never types your password; you do, and only you see it.
+
+- **Take over** in the panel's footer hands you the page. The footer turns into the control bar, "You are in control", and a green ring goes round the picture. Click the page, then type: clicks, drags, the wheel, keys, an input method (Chinese, Japanese and others) and pastes go to the page.
+- **melo needs you.** When melo reaches a sign-in, a password or code field, a QR code or a check that you are human, it asks on a card in the chat: "melo needs you to sign in on example.com". **Take over** opens the panel with the page yours; **Not now** lets melo carry on without it. Only you answer this card, in Ask and in Auto alike.
+- **melo waits.** While you have the page, melo's next browser step on it waits for you (up to 45 seconds at a time) and tells the model that you are using the page. Its other tabs carry on.
+- **Give back to melo** returns the page. melo reads it again before it does anything, since you may have changed it, and the step says how long you had it: "The user had tab t1 for 42 s and gave it back to melo." Nothing of what you typed is in it.
+- **If you leave.** Close the panel, hide the page or let the console sign out, and the page stays yours for 2 minutes, then goes back to melo. Come back sooner and it is still yours.
+- **The page's own boxes** (an alert, a confirm, a question) show in the panel while you have the page, and you answer them there.
+- **Moving out of the page.** While the page has the keys, Control-Esc moves to **Give back to melo**.
+- **Nothing you type is kept.** Your keys and text go from the panel to melo's Chrome and nowhere else: not to a log, the chat's record, melo's memory or the model. A paste is plain text, at most 1,000 characters at a time.
 
 ## What melo can do
 
@@ -230,7 +243,6 @@ A page melo acts on can make another app open a window, such as a chat app's sig
 
 Browsing is built in parts; none of these exists yet.
 
-- Taking over melo's Chrome to sign in, pass a check or type a password yourself, then giving it back. Watching it is there already.
 - Chrome becoming the default browser, an "open in a window" choice for sites that refuse a browser without a window, and a button that clears melo's Chrome sign-ins.
 - Acting in your own signed-in browser (a Chrome extension): clicks and typing there, with a confirmation that `auto` and `--yolo` cannot skip for sending, posting, buying and signing in. The clicks on this page happen only inside melo's own automation window; moving your mouse on the desktop (computer use, for apps outside the browser) is a separate feature and the next way after a point of a picture.
 - Saved chores that run on a schedule (for example a daily check-in), with steps you approved once.

@@ -38,6 +38,18 @@ POINT_PREFIX = "browser-point:"
 # melo acts: ``browser-dialog:<site>``, asked every time.
 HANDOFF_PREFIX = "handoff:"
 DIALOG_PREFIX = "browser-dialog:"
+# melo needs the person on a page (a sign-in, a code, a QR code, a human check):
+# ``takeover:<site>``, a card that offers to take the page over in the Browser
+# panel. Asked when needed, never kept for the chat, only the person answers it.
+TAKEOVER_PREFIX = "takeover:"
+TAKEOVER_NEEDS = {
+    "sign-in": "a sign-in",
+    "password": "a password field",
+    "code": "a one-time code",
+    "card": "a payment card field",
+    "qr": "a QR code to scan",
+    "captcha": "a check that you are human",
+}
 # The browser melo browses in for the running call, as questions name it:
 # Safari's automation windows unless the call's provider says otherwise.
 BROWSER: ContextVar[str] = ContextVar("localmelo_browser_name", default="Safari")
@@ -353,3 +365,24 @@ async def require_dialog(origin: str, message: str) -> None:
     )
     if not decision.allow:
         raise BrowserError(f"melo answered Cancel on {host}. " + denial_text(decision))
+
+
+async def require_takeover(origin: str, need: str, tab: str) -> bool:
+    """Ask the person to take over the page on *origin* in the Browser panel; whether they will.
+
+    *need* says what melo cannot do there itself (a key of :data:`TAKEOVER_NEEDS`)
+    and *tab* is the chat's tab. The question is ``takeover:<origin>``: its yes is
+    "Take over", which hands them the tab; nothing of it is kept for the chat.
+    Without a policy nobody is asked (False).
+    """
+    ask = TOOL_ASK.get()
+    if ask is None:
+        return False
+    host = host_of(origin) if origin else "a page"
+    what = TAKEOVER_NEEDS.get(need, TAKEOVER_NEEDS["sign-in"])
+    decision = await ask(
+        TAKEOVER_PREFIX + (origin or "page"),
+        _browser({"site": host, "access": "takeover", "need": need, "tab": tab}),
+        f"take over {host} in the Browser panel: melo needs you for {what}",
+    )
+    return bool(decision.allow)

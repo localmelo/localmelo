@@ -2656,7 +2656,10 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 @keyframes bp-wait {
   50% { border-color: color-mix(in srgb, var(--kind-web) 35%, var(--line)); }
 }
-.bp-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-top: 1px solid var(--line); color: var(--ink-3); font-size: var(--text-small); }
+.bp-foot { display: flex; flex-direction: column; gap: 6px; padding: var(--space-3) var(--space-4); border-top: 1px solid var(--line); color: var(--ink-3); font-size: var(--text-small); transition: background-color 0.2s; }
+.bp-foot-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 30px; }
+.bp-take, .bp-give { flex: none; padding: 5px 12px; font-size: var(--text-small); }
+.bp-hint { margin: 0; color: var(--ink-2); line-height: 1.45; text-wrap: pretty; }
 .bp-status { display: inline-flex; align-items: center; gap: 7px; min-height: 1.5em; color: var(--ink-2); }
 .bp-status:not(:empty)::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: var(--radius-pill); background: var(--control); }
 .browser-panel[data-state="live"] .bp-status::before { background: var(--ok); }
@@ -2666,6 +2669,22 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 @keyframes bp-dot {
   50% { opacity: 0.35; }
 }
+/* Taken over: the page is the person's. Their colour is the console's own accent, held still (melo's web colour
+   breathes while it works); the ring widens while the keys go to the page, and the footer turns into the control bar. */
+.browser-panel[data-owner="you"] .bp-canvas { box-shadow: 0 0 0 2px var(--accent), var(--tab-shadow); cursor: default; touch-action: none; }
+.browser-panel[data-owner="you"][data-keys="true"] .bp-canvas { box-shadow: 0 0 0 2px var(--accent), 0 0 0 6px color-mix(in srgb, var(--accent) 24%, transparent); }
+.browser-panel[data-owner="you"] .bp-canvas[data-input="false"] { cursor: progress; }
+.browser-panel[data-owner="you"] .bp-foot { background: var(--tint); border-top-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.browser-panel[data-owner="you"] .bp-status { color: var(--ink); font-weight: 600; }
+.browser-panel[data-owner="you"] .bp-status::before { background: var(--accent); animation: none; }
+/* The keys' box: invisible, over the point last clicked, so an input method's window opens where the person types. */
+.bp-keys { position: absolute; left: 0; top: 0; z-index: 1; width: 2px; height: 1.4em; margin: 0; padding: 0; border: 0; outline: none; resize: none; overflow: hidden; opacity: 0; color: transparent; background: transparent; caret-color: transparent; font-size: var(--text-reading); pointer-events: none; }
+/* A box the page put up while the person has it: answered here, over the bottom of the picture. */
+.bp-dialog { position: absolute; left: 50%; bottom: var(--space-3); z-index: 2; width: min(380px, calc(100% - 24px)); transform: translateX(-50%); padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-float); }
+.bp-dialog-title { margin: 0 0 4px; font-weight: 650; }
+.bp-dialog-text { margin: 0; color: var(--ink-2); font-size: var(--text-small); line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
+.bp-dialog-input { width: 100%; margin-top: var(--space-3); }
+.bp-dialog-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-3); }
 /* The header chip brings a hidden panel back, and tells while melo is browsing. */
 .browser-chip { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
 .browser-dot { flex: none; width: 7px; height: 7px; border-radius: var(--radius-pill); background: var(--control); }
@@ -2683,7 +2702,7 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
   :root:not([data-view="live"]) .browser-panel { position: fixed; inset: auto 0 0; z-index: 28; height: min(60dvh, 520px); border: 0; border-top: 1px solid var(--line); border-top-left-radius: var(--radius-panel); border-top-right-radius: var(--radius-panel); box-shadow: var(--shadow-float); }
 }
 @media (pointer: coarse), (max-width: 700px) {
-  .browser-chip, .bp-pop, .bp-hide { min-height: 44px; }
+  .browser-chip, .bp-pop, .bp-hide, .bp-take, .bp-give, .bp-dialog-actions button { min-height: 44px; }
   .bp-hide { min-width: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {

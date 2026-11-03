@@ -2024,6 +2024,18 @@ function approvalCard(request, view = chatApproval, asked = "") {
     caption = t("approval.desktopCaption");
     rule = t("approval.rule.desktopOnce");
     content = t("approval.desktopContent", { app, on: String(args.on || ""), window: String(args.window || "") });
+  } else if (tool.startsWith("takeover:")) {
+    // melo reached something only the person can do on a page (a sign-in, a code, a QR code, a human check): the
+    // card offers them the page in the Browser panel. Their yes is "Take over"; nothing of it is kept for the chat.
+    const site = String(args.site || tool.slice(tool.indexOf(":") + 1));
+    const need = ["sign-in", "password", "code", "card", "qr", "captcha"].includes(args.need) ? args.need : "sign-in";
+    what = t("approval.willDo");
+    title = t(`approval.takeover.${need}`, { site });
+    caption = t("approval.takeoverCaption");
+    rule = t("approval.rule.takeover");
+    why = t("approval.takeoverContent");
+    content = "";
+    noBox = true;
   } else if (tool.startsWith("window-read:")) {
     // A window another app put up right after melo's own step: nothing about it goes to the model unless
     // the person allows it here, in Ask and in Auto alike. The window's title is for the person only.
@@ -2038,7 +2050,9 @@ function approvalCard(request, view = chatApproval, asked = "") {
   // card says why, offers no chat-wide allow, and starts on Deny. A site Auto stopped only because the
   // request did not ask for it (#465) says why too, but may be allowed for the chat: the server says so.
   const review = request.review;
-  const stopped = review?.verdict === "high";
+  // The take-over card is only ever the person's: Auto's "only you" review does not reword it.
+  const takeover = tool.startsWith("takeover:");
+  const stopped = review?.verdict === "high" && !takeover;
   const siteChoice = stopped && request.offers_chat === true;
   const high = stopped && !siteChoice;
   const reviewed = stopped ? reviewWords({ ...review, gist: request.gist }, folder) : { title: "", reasons: [] };
@@ -2116,7 +2130,11 @@ function approvalCard(request, view = chatApproval, asked = "") {
   const actions = el("div", "approval-actions");
   const denyView = el("div", "deny-view");
   // On a high-impact card the safe answer is the filled one.
-  const once = button(high ? "outline-button" : "primary-button", t("common.allowOnce"), () => view.answer(request, state, "once"));
+  const once = button(high ? "outline-button" : "primary-button", takeover ? t("approval.takeoverYes") : t("common.allowOnce"), () => {
+    view.answer(request, state, "once");
+    // The panel opens and the keys go to the page as soon as the gateway hands it over.
+    if (takeover && view === chatApproval) browser.takeOver();
+  });
   once.dataset.approvalOnce = "";
   once.dataset.approvalFocus = "once";
   const seeing = tool.startsWith("window-read:");
@@ -2128,7 +2146,12 @@ function approvalCard(request, view = chatApproval, asked = "") {
   const always = button("outline-button", t("approval.outside.always"), () => view.answer(request, state, "always"));
   always.dataset.approvalFocus = "always";
   always.dataset.approvalAlways = "";
-  const deny = button(high ? "primary-button" : "quiet-button", t("common.deny"), () => {
+  const deny = button(high ? "primary-button" : "quiet-button", takeover ? t("approval.takeoverNo") : t("common.deny"), () => {
+    if (takeover) {
+      // "Not now" needs no reason: melo carries on without the page.
+      view.answer(request, state, "deny");
+      return;
+    }
     state.deny = true;
     actions.hidden = true;
     grant.hidden = true;
@@ -2140,7 +2163,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
   deny.dataset.approvalFocus = "deny";
   // The answers offered: a folder outside the workspace that may be kept has four.
   // Typing and a form's send ask every time, like a high-impact call: their answers are never kept for the chat.
-  const everyTime = high || tool.startsWith("browser-submit:") || tool.startsWith("browser-type:")
+  const everyTime = high || takeover || tool.startsWith("browser-submit:") || tool.startsWith("browser-type:")
     || tool.startsWith("desktop-act:");
   const offered = everyTime ? [once, deny] : outside ? (grantable ? [once, session, always, deny] : [once, deny]) : [once, session, deny];
   actions.append(...offered);
@@ -3334,7 +3357,7 @@ const panel = setupPanel({
 });
 const pictureBox = setupPictureBox({ dialog: $("picture-box") });
 
-// The Browser panel: a live, view-only window onto the page melo is working in (browser-live.mjs). The macOS app
+// The Browser panel: a live window onto the page melo is working in, which the person can take over (browser-live.mjs). The macOS app
 // can show it alone in a window of its own; it says so by offering the `localmeloBrowser` message handler.
 const browserBridge = globalThis.webkit?.messageHandlers?.localmeloBrowser;
 const browser = setupBrowser({
@@ -3352,6 +3375,17 @@ const browser = setupBrowser({
     note: $("bp-note"),
     hide: $("bp-hide"),
     pop: $("bp-pop"),
+    take: $("bp-take"),
+    give: $("bp-give"),
+    viewOnly: $("bp-view-only"),
+    hint: $("bp-hint"),
+    keys: $("bp-keys"),
+    dialog: $("bp-dialog"),
+    dialogTitle: $("bp-dialog-title"),
+    dialogText: $("bp-dialog-text"),
+    dialogInput: $("bp-dialog-input"),
+    dialogOk: $("bp-dialog-ok"),
+    dialogCancel: $("bp-dialog-cancel"),
   },
   openSocket: (url) => new WebSocket(url),
   decode: (bytes) => createImageBitmap(new Blob([bytes], { type: "image/jpeg" })),

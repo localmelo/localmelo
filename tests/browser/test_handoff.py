@@ -303,7 +303,7 @@ async def test_questions_tools_and_the_note_name_the_background_browser() -> Non
     described = found["browser_open"].definition.description
     assert "Chrome, in the background" in described and "Safari" not in described
     assert provider.system_notes()[0] == BACKGROUND_NOTE != PAGE_NOTE
-    assert "/browser safari" in BACKGROUND_NOTE
+    assert "Browser panel" in BACKGROUND_NOTE and "cannot type" not in BACKGROUND_NOTE
     assert sites.BROWSER.get() == "Safari"  # only while a call runs
 
 

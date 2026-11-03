@@ -27,8 +27,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   after any click. A question box the page puts up during melo's step ("Delete the draft?") asks you every time
   (`browser-dialog:<site>`, Cancel otherwise); a message is closed with OK, a box that asks for text gets Cancel,
   and *what changed* lists each one. Without Chrome the choice says "Install Google Chrome to browse in the
-  background" and nothing changes. You cannot type into melo's Chrome yet, so sign in to sites in Safari's
-  windows for now. Enter in a field with an approved send now lets the form's own send button take the browser's
+  background" and nothing changes. To sign in, take it over (below). When melo opens the app a page asked for, that
+  app's window is told on the step, and a window of any other app still asks you first. Enter in a field with an approved send now lets the form's own send button take the browser's
   click, which melo's guard stopped before. `PUT /api/settings` takes `browser_driver`; the settings carry
   `browser_driver` and `chrome_installed`.
 - Watch melo's Chrome. While melo browses in Chrome in the background, the web console and the app show a Browser
@@ -36,11 +36,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   runs, and calm states for no page open, the first picture on its way, a picture that stopped updating, and why it
   ended. It opens by itself when melo starts browsing, follows melo to another tab, hides with **Hide browser** (the
   **Browser** button in the header brings it back), shares the width with the panel beside the chat on a narrower
-  window and opens as a sheet under 900 pixels. In the app, **Pop out** opens it alone in its own window. It is view
-  only: nothing can be clicked or typed in it yet. The pictures stay in memory, are never saved, and are sent only
+  window and opens as a sheet under 900 pixels. In the app, **Pop out** opens it alone in its own window. **Take over** makes
+  the page yours (below). The pictures stay in memory, are never saved, and are sent only
   while someone watches; a page that does not change costs almost nothing and a moving one is held to 15 pictures a
   second (`[browser] live`, on by default, and `live_fps`, 1 to 60). `GET /api/sessions/{id}/browser` and
   `WS /api/sessions/{id}/browser/live` are the routes (#488); the gateway extra now installs `websockets`.
+- Take over melo's Chrome. **Take over** in the Browser panel (the console and the app's pop-out) makes the page
+  yours: "You are in control", a green ring round the picture, and your clicks, drags, wheel, keys, input method
+  (Chinese and others) and pastes (plain text, up to 1,000 characters) go to the page while melo waits. When melo
+  reaches a sign-in, a password, code or card field, a QR code or a check that you are human, a card asks "melo
+  needs you to sign in on example.com" with **Take over** and **Not now**; only you answer it, in Ask and in Auto,
+  and it is never kept for the chat. While you have the page, melo's steps on it wait (up to 45 seconds at a time)
+  and tell the model you are using it, and the page's boxes are yours to answer in the panel. **Give back to melo**
+  returns it; melo reads the page again before it acts, and the step says how long you had it. Leave the panel and
+  the page goes back to melo after 2 minutes. What you type goes from the panel to melo's Chrome only: never to a
+  log, the chat's record, melo's memory or the model. Control-Esc moves out of the page (#488).
 - Pictures and files in the web console and the app, and words added while melo works. Drop a picture
   or a text file on the page, paste it with Cmd-V or pick it with the paperclip (`/attach` opens the same
   picker; `/attachments` and `/detach N` list and remove). PNG, JPEG, GIF (first frame), WebP and HEIC

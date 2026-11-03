@@ -260,11 +260,26 @@
           <div class="bp-viewport" id="bp-viewport">
             <canvas class="bp-canvas" id="bp-canvas" role="img" hidden></canvas>
             <p class="bp-note" id="bp-note"></p>
+            <textarea class="bp-keys" id="bp-keys" aria-label="Type into the page" data-i18n-aria-label="browser.keys" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" rows="1" tabindex="-1" disabled></textarea>
+            <div class="bp-dialog" id="bp-dialog" role="alertdialog" aria-modal="false" aria-labelledby="bp-dialog-title" aria-describedby="bp-dialog-text" hidden>
+              <p class="bp-dialog-title" id="bp-dialog-title"></p>
+              <p class="bp-dialog-text" id="bp-dialog-text"></p>
+              <input class="bp-dialog-input" id="bp-dialog-input" type="text" autocomplete="off" aria-label="Your answer" data-i18n-aria-label="browser.dialog.answer" hidden />
+              <div class="bp-dialog-actions">
+                <button type="button" class="quiet-button" id="bp-dialog-cancel"></button>
+                <button type="button" class="primary-button" id="bp-dialog-ok"></button>
+              </div>
+            </div>
           </div>
         </div>
         <footer class="bp-foot">
-          <span class="bp-status" id="bp-status" role="status" aria-live="polite"></span>
-          <span class="bp-view-only" data-i18n="browser.viewOnly">View only</span>
+          <div class="bp-foot-row">
+            <span class="bp-status" id="bp-status" role="status" aria-live="polite"></span>
+            <span class="bp-view-only" id="bp-view-only" data-i18n="browser.viewOnly">View only</span>
+            <button type="button" class="outline-button bp-take" id="bp-take" hidden data-i18n="browser.takeOver">Take over</button>
+            <button type="button" class="primary-button bp-give" id="bp-give" hidden data-i18n="browser.giveBack">Give back to melo</button>
+          </div>
+          <p class="bp-hint" id="bp-hint" hidden></p>
         </footer>
       </aside>
       <aside class="panel" id="panel" aria-label="Melo">

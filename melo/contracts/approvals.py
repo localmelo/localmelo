@@ -280,6 +280,7 @@ NEVER_GRANTED: Final = (
     "browser-point:",
     "desktop-act:",
     "browser-dialog:",
+    "takeover:",
 )
 
 # The tools melo ships that ask their own questions (per site, and for every text they
@@ -306,6 +307,9 @@ SELF_ASKING_TOOLS: Final = frozenset(
 # "Allow <App> in this chat" grants this name for the chat (the per-chat grant of
 # :class:`~localmelo.support.sessions.approvals.RememberingPolicy`).
 WINDOW_READ: Final = "window-read:"
+# The card that asks the person to take over a page of melo's browser (a sign-in,
+# a code, a QR code, a human check): only the person answers it, never a review.
+TAKEOVER: Final = "takeover:"
 
 
 def window_question(request: ApprovalRequest) -> bool:

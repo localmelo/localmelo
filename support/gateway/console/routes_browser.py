@@ -15,7 +15,17 @@ open its Browser panel when melo starts browsing. It starts nothing.
 * binary frames, one JPEG each: only the newest picture, a viewer that is slow
   loses the pictures in between.
 
-The client sends nothing yet that the server acts on. The optional ``tab=tN``
+The meta also says ``owner``: ``melo``, or ``you`` once the person took the tab
+over (with ``grace``, the seconds the tab stays theirs once no panel shows it, and
+``dialog`` for a box the page shows them); ``takeover`` says a viewer may take it.
+
+The client sends JSON text messages of at most :data:`MAX_CLIENT_MESSAGE` bytes
+(more ends the stream, 1009): ``take`` and ``give`` hand the tab to the person
+and back; while they have it, ``mouse``, ``wheel``, ``key``, ``text``,
+``compose`` and ``paste`` are their input and ``dialog`` their answer to a box
+(see :mod:`localmelo.support.browser.takeover`). Anything else, and input while
+melo has the tab, is dropped without a word. Nothing a message carries is
+logged, stored or shown to a model. The optional ``tab=tN``
 query pins the view to one tab; without it the view follows the tab melo works
 in. Only a tab of this chat can be named: another chat's tab, an unknown
 session and a chat with the live view turned off are refused before the
@@ -40,8 +50,9 @@ from fastapi import FastAPI, WebSocket
 from fastapi.responses import JSONResponse
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
-from localmelo.support.browser.live import LiveRefusedError, LiveView
+from localmelo.support.browser.live import LiveRefusedError, LiveView, Viewer
 from localmelo.support.browser.provider import BrowserToolProvider
+from localmelo.support.browser.takeover import INPUT_TYPES, quiet_frames
 from localmelo.support.sessions.store import SessionStoreError
 
 from .routes_sessions import _require_session
@@ -82,6 +93,9 @@ def available(console: Console) -> bool:
 
 
 def add_routes(app: FastAPI, console: Console) -> None:
+    # The websocket server's debug line for each frame would show what the person types.
+    quiet_frames()
+
     @app.get("/api/sessions/{session_id}/browser")
     async def browser_state(session_id: str) -> JSONResponse:
         console.require_store()
@@ -140,15 +154,15 @@ def add_routes(app: FastAPI, console: Console) -> None:
             return
         try:
             await websocket.accept()
-            await _serve(websocket, viewer)
+            await _serve(websocket, viewer, live)
         finally:
             await live.release(viewer)
 
 
-async def _serve(websocket: WebSocket, viewer: Any) -> None:
-    """Send the viewer's meta and pictures until it ends or the client goes."""
+async def _serve(websocket: WebSocket, viewer: Viewer, live: LiveView) -> None:
+    """Send the viewer's meta and pictures until it ends or the client goes; act on what the client sends."""
     sender = asyncio.ensure_future(_send(websocket, viewer))
-    receiver = asyncio.ensure_future(_receive(websocket))
+    receiver = asyncio.ensure_future(_receive(websocket, viewer, live))
     try:
         await asyncio.wait({sender, receiver}, return_when=asyncio.FIRST_COMPLETED)
     finally:
@@ -178,14 +192,46 @@ async def _send(websocket: WebSocket, viewer: Any) -> None:
             return
 
 
-async def _receive(websocket: WebSocket) -> None:
-    """Read what the client sends until it goes; nothing it sends is acted on yet."""
+async def _receive(websocket: WebSocket, viewer: Viewer, live: LiveView) -> None:
+    """Read what the client sends until it goes, and act on it (see the module docstring).
+
+    Nothing a message carries is logged: a message that is not one the panel
+    sends is dropped without a word, and so is input the live view does not take.
+    """
     while True:
         message = await websocket.receive()
         if message["type"] == "websocket.disconnect":
             return
-        size = len(message.get("text") or "") + len(message.get("bytes") or b"")
+        text = message.get("text")
+        size = len((text or "").encode("utf-8")) + len(message.get("bytes") or b"")
         if size > MAX_CLIENT_MESSAGE:
             with contextlib.suppress(Exception):
                 await websocket.close(code=_TOO_BIG)
             return
+        if not text:
+            continue
+        try:
+            said = json.loads(text)
+        except ValueError:
+            continue
+        if not isinstance(said, dict):
+            continue
+        kind = said.get("type")
+        try:
+            if kind == "take":
+                await live.take(viewer)
+            elif kind == "give":
+                await live.give(viewer)
+            elif kind == "dialog":
+                answer = said.get("text")
+                await live.answer_dialog(
+                    viewer,
+                    said.get("accept") is True,
+                    answer if isinstance(answer, str) else "",
+                )
+            elif kind in INPUT_TYPES:
+                live.send_input(viewer, said)
+        except (
+            Exception
+        ):  # noqa: BLE001 - one message never ends the view, and is never logged
+            logger.warning("A message from the Browser panel could not be handled")

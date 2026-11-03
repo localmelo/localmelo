@@ -692,19 +692,21 @@ worker 运行或终端对话从 CLI 的文件读取。
 
 ## WS /api/sessions/{id}/browser/live
 
-对话浏览器的实时、仅查看画面：melo 正在操作的页面，以 JPEG 画面的形式送出，相关信息每次变化时再送一条小小的 JSON 消息。控制台和 App 的弹出窗口使用它。
+对话浏览器的实时画面：melo 正在操作的页面，以 JPEG 画面的形式送出，相关信息每次变化时再送一条小小的 JSON 消息。用户也可以通过它接管这个网页。控制台和 App 的弹出窗口使用它。
 
 ```text
 {"type":"meta","state":"live","tab":"t2","url":"https://example.com/","title":"Example Domain","browsing":true,"owner":"melo","w":1280,"h":713,"offsetTop":0,"scale":1}
 <binary frame: one JPEG>
 ```
 
-- 服务器发送文本帧和二进制帧。文本帧是 `meta` 消息：`state` 为 `idle`（没有打开的页面）、`loading`（有页面打开，但第一张画面还没到）、`live`、`stale`（画面流出错，最后一张画面不再更新）或 `closed`；`reason` 说明 `closed` 的原因（`tab`、`browser`、`chat` 或 `unavailable`）。`tab`、`url`、`title` 和 `browsing` 同上，`owner` 为 `melo`，第一张画面到来后还会有 `w` 和 `h`（页面视口，单位为 CSS 像素）、`offsetTop` 和 `scale`。
+- 服务器发送文本帧和二进制帧。文本帧是 `meta` 消息：`state` 为 `idle`（没有打开的页面）、`loading`（有页面打开，但第一张画面还没到）、`live`、`stale`（画面流出错，最后一张画面不再更新）或 `closed`；`reason` 说明 `closed` 的原因（`tab`、`browser`、`chat` 或 `unavailable`）。`tab`、`url`、`title` 和 `browsing` 同上，`owner` 为 `melo` 或 `you`（用户接管了这个标签页），第一张画面到来后还会有 `w` 和 `h`（页面视口，单位为 CSS 像素）、`offsetTop` 和 `scale`（页面的缩放）。`takeover: true` 表示可以接管这个网页。`owner` 为 `you` 时，`grace` 是没有观看者之后标签页仍归用户的秒数（120），`dialog`（`kind` 为 `alert`、`confirm`、`prompt` 或 `beforeunload`，以及 `message`、`default`）是网页弹出、等用户回答的对话框。
 - 二进制帧是一张 JPEG。每个观看者只保留最新的一张画面，所以慢的观看者会跳过画面，而不是排队。不变的页面发送一张画面后不再发送；会动的页面被限制在 `[browser] live_fps`（默认 15）以内。
 - 可选的查询参数 `tab=tN` 把画面固定在该对话的一个标签页上。不带时，画面跟随 melo 正在操作的标签页，每次切换都有一条 `meta` 消息。另一个对话的标签页、未知的标签页和格式错误的名称都会被拒绝。
 - 只有在有人观看时才传送：没有观看者的对话，浏览器不会保持画面流；一个对话同时最多有 4 个观看者；传送的内容不会写入磁盘或会话存储。
 - 它与所有 `/api` 路由使用同一道防护：Host 请求头、带有时必须同源的 Origin，以及 Bearer 令牌或控制台的 Cookie。脚本发送 `Authorization: Bearer <token>`，不带 Origin。
-- 画面结束时服务器以 1000 关闭；拒绝时以 1008 关闭（原因为 `not_found`、`not_a_tab`、`not_available`（驱动不是 `chrome` 或 `live = false`）、`refused`（浏览器已停止、另一个对话的标签页，或该对话已有 4 个观看者），或网关令牌轮换时的 `token_rotated`）；客户端单条消息超过 4,096 字节时以 1009 关闭；会话存储不可用时以 1013 关闭。目前客户端发来的消息会被读取并忽略。
+- 客户端发送 JSON 文本消息。`{"type":"take"}` 把它观看的标签页交给用户，`{"type":"give"}` 交还给 melo。标签页在用户手里、且 melo 不在某一步中间时，下面这些是用户的输入：`{"type":"mouse","action":"move|down|up","x","y","button","buttons","clicks","mods"}`（页面 CSS 像素：画面上的点减去 `offsetTop` 后再除以 `scale`）、`{"type":"wheel","x","y","dx","dy","mods"}`、`{"type":"key","action":"down|up","key","code","keyCode","mods","repeat"}`、`{"type":"compose","text","start","end"}`（输入法正在组字的文字）、`{"type":"text","text"}`（输入法提交的文字）和 `{"type":"paste","text"}`（纯文本），每条最多 1,000 个字符；`{"type":"dialog","accept","text"}` 回答网页的对话框。`mods` 是 Alt 1、Control 2、Meta 4 和 Shift 8 之和。每个观看者每秒最多 120 条输入。其他消息，以及 melo 持有标签页时的输入，都会被丢弃且不回复。消息里的任何内容都不会写入日志、保存或交给模型。
+- 用户手里的标签页没人观看时（最后一个观看者关闭，或令牌轮换），它还会归用户 120 秒，然后回到 melo。在此期间，melo 在这个标签页上的浏览步骤会等待，每次最多 45 秒。
+- 画面结束时服务器以 1000 关闭；拒绝时以 1008 关闭（原因为 `not_found`、`not_a_tab`、`not_available`（驱动不是 `chrome` 或 `live = false`）、`refused`（浏览器已停止、另一个对话的标签页，或该对话已有 4 个观看者），或网关令牌轮换时的 `token_rotated`）；客户端单条消息超过 4,096 字节时以 1009 关闭；会话存储不可用时以 1013 关闭。
 
 ## GET /api/sessions/{id}/submissions/{client_request_id}
 

@@ -20,7 +20,8 @@ is the relay between that stream and the people watching one chat's browser:
 
 What a viewer is told besides pictures is a *meta* message: the tab, its address
 and title, the size of the page the picture shows, whether melo is in the middle
-of a browser step, who has the browser (``melo``), and a calm state:
+of a browser step, who has the tab (``melo``, or ``you`` once the person took it
+over: see :mod:`~localmelo.support.browser.takeover`), and a calm state:
 
 ``idle``
     The chat has no page open.
@@ -33,6 +34,14 @@ of a browser step, who has the browser (``melo``), and a calm state:
     updating.
 ``closed``
     The tab, the browser or the chat is gone (``reason`` says which).
+
+**Take over.** A viewer can take the tab it watches (:meth:`LiveView.take`) and
+give it back (:meth:`LiveView.give`). While the person has it, the viewers stay
+on that tab even when melo opens another, the pictures come at up to
+:data:`TAKEN_FPS` a second, the page's boxes are shown to them (``dialog`` in
+the meta) and answered by them (:meth:`LiveView.answer_dialog`), and their
+input goes to the page (:meth:`LiveView.send_input`), held to a rate per viewer
+and only while melo is not in the middle of a step. Nothing of it is kept.
 """
 
 from __future__ import annotations
@@ -45,6 +54,13 @@ from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
 from localmelo.support.browser.driver import BrowserError, TabInfo
+from localmelo.support.browser.takeover import (
+    YOU,
+    Bucket,
+    InputRefusedError,
+    Owners,
+    cdp_events,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +68,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_FPS = 15.0
 MIN_FPS = 1.0
 MAX_FPS = 60.0
+# The rate while the person has the tab: they see what they do at once.
+TAKEN_FPS = 60.0
 # JPEG quality of a picture, and the most viewers of one chat's browser.
 DEFAULT_QUALITY = 70
 MAX_VIEWERS = 4
@@ -129,8 +147,10 @@ class Viewer:
     meta is dropped for a newer one the same way a picture is.
     """
 
-    def __init__(self, pinned: str | None = None) -> None:
+    def __init__(self, pinned: str | None = None, bucket: Bucket | None = None) -> None:
         self.pinned = pinned
+        # The person's input from this viewer, held to a rate (take over).
+        self.bucket = bucket or Bucket()
         # The tab it watches now (short id, driver id), set by the relay.
         self.target: tuple[str | None, str | None] = (None, None)
         self.meta: dict[str, Any] = {}
@@ -186,6 +206,7 @@ class _TabCast:
         self.geometry: tuple[float, float, float, float] | None = None
         self.failed = False
         self.ended = False
+        self.fps = 0.0  # the rate it was asked at
 
 
 class LiveView:
@@ -193,6 +214,8 @@ class LiveView:
 
     *driver* streams (:class:`Screencaster`); *host* answers for the chat's tabs;
     *fps* holds the stream to that many pictures a second (1 to 60) at JPEG *quality*.
+    *owners* say who has each tab (the browser tools' own, shared); without them
+    nobody can take a tab over.
     """
 
     def __init__(
@@ -204,9 +227,13 @@ class LiveView:
         quality: int = DEFAULT_QUALITY,
         poll_s: float = POLL_S,
         max_viewers: int = MAX_VIEWERS,
+        owners: Owners | None = None,
+        bucket: Callable[[], Bucket] = Bucket,
     ) -> None:
         self._driver = driver
         self._host = host
+        self._owners = owners
+        self._bucket = bucket
         self.fps = min(max(float(fps), MIN_FPS), MAX_FPS)
         self.quality = min(max(int(quality), 10), 95)
         self._poll_s = poll_s
@@ -272,7 +299,7 @@ class LiveView:
             raise LiveRefusedError("That is not a tab of this chat.")
         if len(self._viewers) >= self._max:
             raise LiveRefusedError("Too many are watching this chat's browser.")
-        viewer = Viewer(tab)
+        viewer = Viewer(tab, self._bucket())
         self._viewers.append(viewer)
         self._set_target(viewer)
         self._refresh(viewer)
@@ -289,6 +316,7 @@ class LiveView:
         if not self._viewers:
             await self._stop_ticker()
         await self._sync()
+        self._count_watchers()
 
     async def aclose(self) -> None:
         """The chat's browser is over: every viewer is told, and every stream stops."""
@@ -313,6 +341,85 @@ class LiveView:
         with contextlib.suppress(RuntimeError):
             self._syncing = asyncio.ensure_future(self._run_sync())
 
+    def watchers(self, short: str) -> int:
+        """How many viewers watch the chat's tab *short* now."""
+        return sum(1 for v in self._viewers if v.target[0] == short)
+
+    # ── Take over ──
+
+    def can_take(self) -> bool:
+        """Whether a viewer of this view could take a tab over: owners are shared and the driver takes input."""
+        return self._owners is not None and callable(
+            getattr(self._driver, "person_input", None)
+        )
+
+    async def take(self, viewer: Viewer) -> bool:
+        """The person takes the tab *viewer* watches; whether they have it now."""
+        short, raw = viewer.target
+        if not self.can_take() or short is None or raw is None or raw in self._gone:
+            return False
+        assert self._owners is not None
+        self._owners.take(short, watched=True)
+        await self._sync()
+        return True
+
+    async def give(self, viewer: Viewer) -> bool:
+        """The person gives the tab *viewer* watches back to melo; whether they had it."""
+        short = viewer.target[0]
+        if self._owners is None or short is None:
+            return False
+        back = self._owners.give(short) is not None
+        await self._sync()
+        return back
+
+    def send_input(self, viewer: Viewer, message: dict[str, Any]) -> bool:
+        """Pass one input *message* of the person's to the page *viewer* watches; whether it went.
+
+        Only while the person has that tab and melo is not in the middle of a
+        step, within the viewer's rate, once the page's size is known, and only
+        input of a known shape (:func:`~localmelo.support.browser.takeover.cdp_events`).
+        What it carries is never logged or kept.
+        """
+        short, raw = viewer.target
+        if self._owners is None or short is None or raw is None:
+            return False
+        if self._owners.owner(short) != YOU or self._host.live_busy():
+            return False
+        if not viewer.bucket.allow():
+            return False
+        cast = self._casts.get(raw)
+        if cast is None or cast.geometry is None:
+            return False
+        width, height, _offset, scale = cast.geometry
+        try:
+            events = cdp_events(message, (width / scale, height / scale))
+        except InputRefusedError:
+            return False
+        send = getattr(self._driver, "person_input", None)
+        if not callable(send):
+            return False
+        sent = True
+        for method, params in events:
+            sent = bool(send(raw, method, params)) and sent
+        return sent
+
+    async def answer_dialog(self, viewer: Viewer, accept: bool, text: str = "") -> bool:
+        """The person answers the box on the page *viewer* watches; whether there was one to answer."""
+        short, raw = viewer.target
+        if self._owners is None or short is None or raw is None:
+            return False
+        if self._owners.owner(short) != YOU:
+            return False
+        answer = getattr(self._driver, "answer_dialog", None)
+        if not callable(answer):
+            return False
+        try:
+            answered = bool(await answer(raw, bool(accept), text[:1000]))
+        except BrowserError:
+            answered = False
+        self._on_dialog(raw)
+        return answered
+
     # ── The relay ──
 
     async def _run_sync(self) -> None:
@@ -326,6 +433,18 @@ class LiveView:
             logger.warning("The live view could not follow a change", exc_info=True)
 
     def _set_target(self, viewer: Viewer) -> None:
+        held = viewer.target[0]
+        if (
+            viewer.pinned is None
+            and held is not None
+            and self._owners is not None
+            and self._owners.owner(held) == YOU
+        ):
+            # The person has this tab: the view stays on it while melo works in another.
+            raw = self._host.live_raw(held)
+            if raw:
+                viewer.target = (held, raw)
+                return
         short = (
             viewer.pinned if viewer.pinned is not None else self._host.live_current()
         )
@@ -347,8 +466,10 @@ class LiveView:
                 await self._stop(raw)
             for raw in sorted(need):
                 cast = self._casts.get(raw)
-                if cast is None or cast.failed:
-                    await self._start(raw)
+                fps = self._fps_for(raw)
+                if cast is None or cast.failed or cast.fps != fps:
+                    await self._start(raw, fps)
+            self._count_watchers()
             for viewer in self._viewers:
                 self._refresh(viewer)
                 cast = self._casts.get(viewer.target[1] or "")
@@ -359,9 +480,30 @@ class LiveView:
                 ):
                     viewer.offer(cast.frame)
 
-    async def _start(self, raw: str) -> None:
+    def _fps_for(self, raw: str) -> float:
+        """The rate of *raw*'s pictures: the setting's, or :data:`TAKEN_FPS` while the person has the tab."""
+        if self._owners is not None:
+            for viewer in self._viewers:
+                short = viewer.target[0]
+                if (
+                    viewer.target[1] == raw
+                    and short
+                    and self._owners.owner(short) == YOU
+                ):
+                    return max(self.fps, TAKEN_FPS)
+        return self.fps
+
+    def _count_watchers(self) -> None:
+        """Tell the owners how many viewers watch each tab the person has (none starts its grace period)."""
+        if self._owners is None:
+            return
+        for short in self._owners.held:
+            self._owners.watching(short, self.watchers(short))
+
+    async def _start(self, raw: str, fps: float | None = None) -> None:
         cast = self._casts.get(raw) or _TabCast()
         cast.failed = False
+        cast.fps = self.fps if fps is None else fps
         self._casts[raw] = cast
 
         def on_frame(frame: Frame) -> None:
@@ -370,10 +512,14 @@ class LiveView:
         def on_end() -> None:
             self._on_end(raw)
 
+        def on_dialog() -> None:
+            self._on_dialog(raw)
+
+        kwargs: dict[str, Any] = {"fps": cast.fps, "quality": self.quality}
+        if self._owners is not None:
+            kwargs["on_dialog"] = on_dialog
         try:
-            await self._driver.start_screencast(
-                raw, on_frame, on_end, fps=self.fps, quality=self.quality
-            )
+            await self._driver.start_screencast(raw, on_frame, on_end, **kwargs)
         except BrowserError as exc:
             logger.info("The live view could not start a tab's stream: %s", exc)
             cast.failed = True
@@ -398,6 +544,12 @@ class LiveView:
             if first or moved:
                 self._refresh(viewer)
             viewer.offer(frame)
+
+    def _on_dialog(self, raw: str) -> None:
+        """The page of *raw* put up a box or one closed: the viewers of it are told."""
+        for viewer in self._viewers:
+            if viewer.target[1] == raw:
+                self._refresh(viewer)
 
     def _on_end(self, raw: str) -> None:
         cast = self._casts.get(raw)
@@ -467,6 +619,11 @@ class LiveView:
             state, reason = "closed", self._stopped or "tab"
         tab = self._info.get(raw or "")
         cast = self._casts.get(raw or "")
+        owner = (
+            self._owners.owner(short)
+            if self._owners is not None and short and raw
+            else "melo"
+        )
         meta: dict[str, Any] = {
             "type": "meta",
             "state": state,
@@ -474,8 +631,17 @@ class LiveView:
             "url": tab.url if tab else "",
             "title": tab.title if tab else "",
             "browsing": bool(self._host.live_busy()),
-            "owner": "melo",
+            "owner": owner,
         }
+        if self.can_take() and state in ("live", "loading", "stale"):
+            meta["takeover"] = True
+        if owner == YOU and self._owners is not None:
+            # How long the tab stays the person's once no panel shows it.
+            meta["grace"] = int(self._owners.grace_s)
+            dialog_of = getattr(self._driver, "dialog_of", None)
+            box = dialog_of(raw) if callable(dialog_of) and raw else None
+            if box:
+                meta["dialog"] = box
         if reason:
             meta["reason"] = reason
         if cast is not None and cast.geometry is not None:

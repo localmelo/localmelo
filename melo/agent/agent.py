@@ -125,6 +125,7 @@ from localmelo.melo.contracts.approvals import (
     BLOCKED_EARLIER,
     SELF_ASKING_TOOLS,
     STOPPED_NOTE,
+    TAKEOVER,
     TOOL_ASK,
     WINDOW_READ,
     ApprovalDecision,
@@ -2161,6 +2162,8 @@ _SITE_DOUBT = {
 _HANDOFF = "Opens {app}, an app on this Mac, because a page on {site} asked for it."
 # What a card for another app's window says in Auto (only the person sees it).
 _WINDOW_WORDS = "Another app put up a window right after a step; only you decide whether melo sees it."
+# What the card that asks the person to take over a page says in Auto (only they can do it).
+_TAKEOVER_WORDS = "melo needs you on this page (a sign-in or a check only you can do); only you can take it over."
 _TYPING_DOUBT = (
     "Types text on {site}, which needs its own review: the text is the model's own."
 )
@@ -2257,7 +2260,11 @@ class _ToolAsk:
         )
 
     async def _window(
-        self, tool_name: str, arguments: Mapping[str, Any], preview: str
+        self,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+        preview: str,
+        words: str = _WINDOW_WORDS,
     ) -> ApprovalDecision:
         """The question whether melo may see another app's window: only the person answers it.
 
@@ -2269,6 +2276,10 @@ class _ToolAsk:
         person like a card-only kind, or denies when nobody is watching. An
         answer of "Allow <App> in this chat" is the policy's grant of this
         name (``window-read:<bundle id>``).
+
+        The card that asks the person to take over a page of melo's browser
+        (``takeover:<site>``, *words* its own) goes the same way: only the person
+        can sign in or pass a check, so no review decides it.
         """
         request = self._request(tool_name, arguments, preview)
         if review_mode(self._policy, request) == "auto":
@@ -2276,7 +2287,7 @@ class _ToolAsk:
                 return ApprovalDecision(False, STOPPED_NOTE, origin="auto")
             request = dataclasses.replace(
                 request,
-                review=ActionReview("high", ("opaque",), (_WINDOW_WORDS,)),
+                review=ActionReview("high", ("opaque",), (words,)),
             )
         decided: object = await self._policy.decide(request)
         if not isinstance(decided, ApprovalDecision):
@@ -2291,6 +2302,8 @@ class _ToolAsk:
     ) -> ApprovalDecision:
         if tool_name.startswith(WINDOW_READ):
             return await self._window(tool_name, arguments, preview)
+        if tool_name.startswith(TAKEOVER):
+            return await self._window(tool_name, arguments, preview, _TAKEOVER_WORDS)
         request = self._request(tool_name, arguments, preview)
         earlier = self._earlier(request)
         if earlier is not None:
