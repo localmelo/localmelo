@@ -786,6 +786,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Chats with memory answer faster on long turns: each step's request now extends the one before
+  it, so a local model server reuses its cache and prefills only the new step. The long-term recall
+  a chat puts right after the system prompt is read at the turn's first step and kept, instead of
+  being read again on every step, when the turn's own steps (already in view) kept changing it and
+  every later message had to be prefilled again. It is read again after older messages leave the
+  window, and at the next turn. Its place in the request is unchanged.
 - In Auto, the goal decides: the steps a task plainly needs run without asking, and the risky
   ones still ask. On the site or app the chat is about, opening and reading it, signing in the
   way you described, picking options, filling in and sending the task's own form and reading

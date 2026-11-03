@@ -1416,6 +1416,12 @@ class _RunState:
     # run, the recall records not yet sent, and the aliases shown but not yet
     # in the window.
     boundary_block: str = ""
+    # Legacy recall under the fixed prefix: the long-term context the run's
+    # requests carry, and the window's first message when it was read. It is
+    # read again only once that message has left the window (see
+    # Agent._long_context), so the steps in between extend each other.
+    long_context: list[Message] | None = None
+    long_head: Message | None = None
     # A brief run (AgentOptions.brief_probe): the workspace digest at the
     # run's start, None outside a git tree.
     brief: bool = False
@@ -4581,6 +4587,30 @@ class Agent:
                     dropped,
                 )
 
+    async def _long_context(self, query: str, run: _RunState | None) -> list[Message]:
+        """The long-term context a legacy planning request carries.
+
+        Without ``fixed_prefix``, or outside a run, it is read for every
+        request, as before. With it, a run reads it at its first step and
+        again only at a step whose window no longer holds the message that
+        led it when the block was last kept: an eviction has changed the
+        request there already. Between those steps the query is the same and
+        the store gains only the run's own step summaries, whose turns the
+        window still holds. Reading it on every step would repeat them and
+        change the message right after the system prompt, so a server would
+        prefill every later message again; kept, each request extends the
+        previous one.
+        """
+        if run is None or not self.options.fixed_prefix:
+            return await self.hippo.retrieve_context(query)
+        if run.long_context is None or (
+            run.long_head is not None and not self.hippo.working.holds(run.long_head)
+        ):
+            run.long_context = await self.hippo.retrieve_context(query)
+        window = self.hippo.working.get_window()
+        run.long_head = window[0] if window else None
+        return list(run.long_context)
+
     async def _do_retrieval(
         self,
         query: str,
@@ -4606,7 +4636,7 @@ class Agent:
         *fail_reason* is non-None when a check fails and the loop must break.
         """
         if self.options.reasoning == "legacy":
-            long_context = await self.hippo.retrieve_context(query)
+            long_context = await self._long_context(query, run)
         else:
             long_context = []
         if (
@@ -4640,6 +4670,10 @@ class Agent:
             run=run,
         )
         short_window = self.hippo.working.get_window()
+        if run is not None and run.long_context is not None and short_window:
+            # A drop to fit the cap has changed this request already; the
+            # block it carries stays until the window loses messages again.
+            run.long_head = short_window[0]
 
         tool_hints: list[str] = []
         if self.options.tool_exposure == "all":
