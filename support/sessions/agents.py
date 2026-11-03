@@ -22,6 +22,11 @@ from typing import TYPE_CHECKING, Any, Final
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider
+from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
+from localmelo.support.providers.llm.thinking import (
+    LOCAL_BACKENDS,
+    thinking_off_fields,
+)
 from localmelo.support.sessions.identity import (
     config_identity,
     kept_across_chats,
@@ -206,10 +211,6 @@ def load_mcp_providers(path: str) -> list[BaseToolProvider]:
 # thinking, no sampling spread, and a small reply, so a thinking local model
 # answers in time instead of timing out into a block.
 REVIEW_MAX_TOKENS: Final = 200
-# The backends whose OpenAI-compatible servers take chat_template_kwargs
-# (None: a --base-url server, a local one).
-_TEMPLATE_KWARGS_BACKENDS: Final = frozenset({"vllm", "sglang", None})
-_LOCAL_BACKENDS: Final = frozenset({"vllm", "sglang", "mlc", "ollama", None})
 
 
 def review_body(llm: BaseLLMProvider, backend: str | None) -> dict[str, Any]:
@@ -219,31 +220,26 @@ def review_body(llm: BaseLLMProvider, backend: str | None) -> dict[str, Any]:
     :data:`REVIEW_MAX_TOKENS` (``num_predict``), over the provider's own
     options. An OpenAI-compatible server: temperature 0 and ``max_tokens``,
     and, where the server takes it, ``chat_template_kwargs.enable_thinking``
-    off over the provider's own kwargs. A cloud backend gets nothing: its
-    models answer fast, and some refuse these fields.
+    off over the provider's own kwargs
+    (:func:`~localmelo.support.providers.llm.thinking.thinking_off_fields`). A
+    cloud backend gets nothing: its models answer fast, and some refuse these
+    fields.
     """
-    if backend not in _LOCAL_BACKENDS:
+    if backend not in LOCAL_BACKENDS:
         return {}
-    own = getattr(llm, "extra_body", None) or {}
-    from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
-
+    off = thinking_off_fields(llm, backend)
     if isinstance(llm, OllamaNativeChat):
-        found = own.get("options")
+        found = (getattr(llm, "extra_body", None) or {}).get("options")
         options: Mapping[str, Any] = found if isinstance(found, Mapping) else {}
         return {
-            "think": False,
+            **off,
             "options": {
                 **options,
                 "temperature": 0,
                 "num_predict": REVIEW_MAX_TOKENS,
             },
         }
-    body: dict[str, Any] = {"temperature": 0, "max_tokens": REVIEW_MAX_TOKENS}
-    if backend in _TEMPLATE_KWARGS_BACKENDS:
-        kwargs = own.get("chat_template_kwargs")
-        kwargs = dict(kwargs) if isinstance(kwargs, Mapping) else {}
-        body["chat_template_kwargs"] = {**kwargs, "enable_thinking": False}
-    return body
+    return {"temperature": 0, "max_tokens": REVIEW_MAX_TOKENS, **off}
 
 
 def with_review_body(llm: BaseLLMProvider, backend: str | None) -> None:

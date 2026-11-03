@@ -1016,6 +1016,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Memory items: the encoder asks a local model with thinking off, as step reviews do (#428).
+  A local server whose chat template thinks by default spent the encoder's whole reply
+  budget on thinking and answered nothing readable, so most windows of a chat failed. The
+  request now sets `chat_template_kwargs.enable_thinking` to false where the server takes it
+  (`vllm`, `sglang`, a server named by `-u`) over the model's own kwargs, and `think` to
+  false on Ollama's native API; `mlc` and the cloud backends get no new field. The
+  developer setting's replies cached by the older request are not reused (the encoder
+  version is now `3`), so a chat is read again once. Chats and step reviews are unchanged.
 - `browser_tabs` no longer shows tab ids cut off with "…" that no other browser tool could
   use, and closing a tab works: melo's tab ids are short and stable, an id it did not give
   out is refused before the browser is called, and a tab Safari has already lost is dropped

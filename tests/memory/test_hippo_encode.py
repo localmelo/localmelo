@@ -11,15 +11,20 @@ answers with canned JSON: no model server.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import stat
 from pathlib import Path
+from typing import Any
 
+import httpx
 import pytest
 
 from localmelo.support.memory import hippo_encode as hippo
 from localmelo.support.memory.hippo_encode import Cache, Stats, Turn
+from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
+from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 from localmelo.tests.memory.hippo_helpers import (
     StubEncoder,
     at,
@@ -34,6 +39,10 @@ TRAINS = (
     "Tell me about the night trains from Chicago.",
     "The California Zephyr leaves Chicago at 14:00 and reaches Emeryville in 51 hours.",
 )
+
+
+BOUNDED = {"temperature": 0, "max_tokens": hippo.MAX_OUTPUT_TOKENS}
+NO_THINKING = {"chat_template_kwargs": {"enable_thinking": False}}
 
 
 def chat(count: int) -> list[Turn]:
@@ -138,7 +147,9 @@ async def test_the_request_is_english_json_only_at_temperature_zero_and_bounded(
         "Chat title: Night trains\n\n"
         f"[0] 2023-05-20 14:02 User: {TRAINS[0]} / melo: {TRAINS[1]}"
     )
-    assert stub.bodies == [{"temperature": 0, "max_tokens": hippo.MAX_OUTPUT_TOKENS}]
+    # The stub names no backend, so it is a local server named by its URL: asked with
+    # thinking off.
+    assert stub.bodies == [{**BOUNDED, **NO_THINKING}]
     assert hippo.MAX_OUTPUT_TOKENS == 2000
 
 
@@ -147,9 +158,169 @@ async def test_the_chat_models_own_provider_is_not_changed_by_the_request() -> N
     stub.extra_body_by_kind = {"retrieve": {"top_p": 0.9}, "plan": {"x": 1}}
     await hippo.encode(stub, "T", chat(2), window_chars=12000)
     assert stub.extra_body_by_kind == {"retrieve": {"top_p": 0.9}, "plan": {"x": 1}}
-    assert stub.bodies == [
-        {"top_p": 0.9, "temperature": 0, "max_tokens": hippo.MAX_OUTPUT_TOKENS}
-    ]
+    assert stub.bodies == [{"top_p": 0.9, **BOUNDED, **NO_THINKING}]
+
+
+class Wire:
+    """A fake model server that records each request body and answers with JSON."""
+
+    def __init__(self) -> None:
+        self.bodies: list[dict[str, Any]] = []
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.bodies.append(json.loads(request.content))
+        reply = says([item("Tea", "The user likes tea.")])
+        if request.url.path == "/api/chat":
+            return httpx.Response(200, json={"message": {"content": reply}})
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"role": "assistant", "content": reply}}]},
+        )
+
+    def openai(self, **kwargs: Any) -> OpenAICompatLLM:
+        return OpenAICompatLLM(
+            "http://chat.test/v1",
+            "m",
+            transport=httpx.MockTransport(self.handler),
+            **kwargs,
+        )
+
+    def ollama(self, **kwargs: Any) -> OllamaNativeChat:
+        return OllamaNativeChat(
+            "http://chat.test",
+            "m",
+            transport=httpx.MockTransport(self.handler),
+            **kwargs,
+        )
+
+
+@pytest.mark.parametrize("backend", ["vllm", "sglang", None])
+async def test_a_server_that_takes_template_kwargs_is_asked_without_thinking(
+    backend: str | None,
+) -> None:
+    wire = Wire()
+    llm = wire.openai(
+        extra_body={"chat_template_kwargs": {"keep": 1, "enable_thinking": True}}
+    )
+    result = await hippo.encode(llm, "T", chat(1), window_chars=12000, backend=backend)
+    assert len(result.pieces) == 1 and not result.windows[0].failed
+    (body,) = wire.bodies
+    assert body["chat_template_kwargs"] == {"keep": 1, "enable_thinking": False}
+    assert body["temperature"] == 0 and body["max_tokens"] == hippo.MAX_OUTPUT_TOKENS
+    assert "think" not in body
+    await llm.close()
+
+
+async def test_a_caller_that_names_no_backend_gets_the_local_server_rule() -> None:
+    wire = Wire()
+    llm = wire.openai()
+    await hippo.encode(llm, "T", chat(1), window_chars=12000)
+    (body,) = wire.bodies
+    assert set(body) == {
+        "model",
+        "messages",
+        "temperature",
+        "max_tokens",
+        "chat_template_kwargs",
+    }
+    assert body["chat_template_kwargs"] == {"enable_thinking": False}
+    await llm.close()
+
+
+async def test_the_kwargs_of_the_encoder_s_own_kind_are_the_ones_kept() -> None:
+    # A request of this kind carries its kind's kwargs in place of extra_body's.
+    wire = Wire()
+    llm = wire.openai(
+        extra_body={"chat_template_kwargs": {"base": 1}},
+        extra_body_by_kind={
+            "retrieve": {"chat_template_kwargs": {"kind": 2, "enable_thinking": True}}
+        },
+    )
+    await hippo.encode(llm, "T", chat(1), window_chars=12000, backend="vllm")
+    (body,) = wire.bodies
+    assert body["chat_template_kwargs"] == {"kind": 2, "enable_thinking": False}
+    await llm.close()
+
+
+@pytest.mark.parametrize("backend", ["ollama", None])
+async def test_ollama_native_is_asked_with_think_off_and_its_options_kept(
+    backend: str | None,
+) -> None:
+    wire = Wire()
+    llm = wire.ollama(extra_body={"options": {"num_ctx": 8192}})
+    result = await hippo.encode(llm, "T", chat(1), window_chars=12000, backend=backend)
+    assert len(result.pieces) == 1
+    (body,) = wire.bodies
+    assert body["think"] is False
+    assert body["options"] == {
+        "num_ctx": 8192,
+        "temperature": 0,
+        "num_predict": hippo.MAX_OUTPUT_TOKENS,
+    }
+    assert "chat_template_kwargs" not in body and "max_tokens" not in body
+    await llm.close()
+
+
+@pytest.mark.parametrize("backend", ["mlc", "openai", "gemini", "anthropic", "nvidia"])
+async def test_mlc_and_cloud_backends_get_no_thinking_field(backend: str) -> None:
+    wire = Wire()
+    llm = wire.openai(extra_body={"top_p": 0.9})
+    await hippo.encode(llm, "T", chat(1), window_chars=12000, backend=backend)
+    (body,) = wire.bodies
+    assert body == {
+        "model": "m",
+        "messages": body["messages"],
+        "top_p": 0.9,
+        "temperature": 0,
+        "max_tokens": hippo.MAX_OUTPUT_TOKENS,
+    }
+    await llm.close()
+
+
+@pytest.mark.parametrize("backend", ["vllm", None, "ollama", "mlc", "openai"])
+async def test_the_chats_provider_is_the_same_after_an_encode(
+    backend: str | None,
+) -> None:
+    wire = Wire()
+    options = {"num_ctx": 8192}
+    llm = (
+        wire.ollama(extra_body={"options": options})
+        if backend == "ollama"
+        else wire.openai(
+            extra_body={"chat_template_kwargs": {"keep": 1}},
+            extra_body_by_kind={"retrieve": {"top_p": 0.9}, "plan": {"x": 1}},
+        )
+    )
+    kinds = llm.extra_body_by_kind
+    before = (
+        copy.deepcopy(llm.extra_body),
+        copy.deepcopy({k: dict(v) for k, v in kinds.items()}),
+    )
+    thinking = llm.thinking_off
+    await hippo.encode(llm, "T", chat(1), window_chars=12000, backend=backend)
+    assert (llm.extra_body, llm.extra_body_by_kind) == before
+    assert llm.thinking_off is thinking
+    await llm.close()
+
+
+async def test_a_reply_cached_from_an_older_prompt_version_is_not_reused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = Cache(str(tmp_path / "replies.jsonl"))
+    turns = chat(1)
+    window = hippo.pack(turns, 12000)[0]
+    prompt = hippo.prompt_of("T", window)
+    monkeypatch.setattr(hippo, "PROMPT_VERSION", "2")
+    older = hippo.window_key("stub-encoder", prompt)
+    old = StubEncoder(says())
+    await hippo.encode(old, "T", turns, window_chars=12000, cache=cache)
+    assert len(old.prompts) == 1 and cache.get(older) is not None
+    monkeypatch.undo()
+    assert hippo.PROMPT_VERSION == "3"
+    assert hippo.window_key("stub-encoder", prompt) != older
+    new = StubEncoder(says())
+    await hippo.encode(new, "T", turns, window_chars=12000, cache=cache)
+    assert len(new.prompts) == 1  # asked again, not served from the old reply
 
 
 async def test_a_secret_never_reaches_the_model_and_a_missing_title_is_none() -> None:
@@ -361,7 +532,7 @@ async def test_items_come_in_time_order_stamped_with_their_newest_sources_time()
         turns[5].answered_at,
         turns[7].answered_at,
     ]
-    assert {p.encoder for p in result.pieces} == {"2:stub-encoder"}
+    assert {p.encoder for p in result.pieces} == {"3:stub-encoder"}
 
 
 # ── One-shot strong signal ──
@@ -477,7 +648,7 @@ async def test_the_key_is_the_prompt_version_the_model_and_the_text_with_its_dat
     assert hippo.window_key("m", "p") == hippo.window_key("m", "p")
     assert len({hippo.window_key("m", "p"), hippo.window_key("n", "p")}) == 2
     assert hippo.window_key("m", "p") != hippo.window_key("mp", "")
-    assert hippo.PROMPT_VERSION == "2"
+    assert hippo.PROMPT_VERSION == "3"
 
 
 async def test_a_window_that_failed_is_not_cached_and_a_bad_line_is_skipped(

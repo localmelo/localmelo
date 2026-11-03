@@ -928,6 +928,12 @@ class ChatMemory:
                 self.last_error = f"the chat model could not be set up: {exc}"
         return self._llm
 
+    def _llm_backend(self) -> str | None:
+        """The backend key of the chat model :meth:`chat_provider` built; ``None``
+        for a server named by its URL, which is a local one."""
+        key = self._llm_key
+        return None if key is None or key[0] == "url" else key[0]
+
     async def _embed(
         self, texts: Sequence[str], timeout: float, *, query: bool
     ) -> Embedded:
@@ -2035,6 +2041,7 @@ class ChatMemory:
             window_chars=self.compress_window(),
             cache=cache or self.compress_cache(),
             stats=stats,
+            backend=self._llm_backend(),
         )
         texts = [f"{piece.title}\n{piece.text}" for piece in encoding.pieces]
         vectors: list[Sequence[float] | None] = [None] * len(texts)
