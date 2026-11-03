@@ -46,6 +46,7 @@ from localmelo.melo.contracts.review import (
     because,
     block_words,
     loose_keys,
+    offers_grant,
     site_keys,
     step_key,
     url_site,
@@ -256,6 +257,49 @@ SELF_ASKING_TOOLS: Final = frozenset(
 def never_granted(tool_name: str) -> bool:
     """Whether an answer to the question *tool_name* names may never be kept for a chat."""
     return tool_name.startswith(NEVER_GRANTED)
+
+
+# The site questions whose answer on auto mode's card may be kept for the chat
+# (#465): opening or reading a site, and clicking or choosing on it. Typing and
+# sending a form never (:data:`NEVER_GRANTED`).
+SITE_GRANTS: Final = ("browser:", "browser-act:")
+
+
+def site_grant(request: ApprovalRequest) -> bool:
+    """Whether a chat's grant of *request*'s question may cover it in auto mode (#465).
+
+    A question about a site (:data:`SITE_GRANTS`) that auto mode's review
+    stopped only because the request did not ask for it: its categories are
+    ``beyond_request`` and nothing else, with nothing the review could not
+    tell. A grant of the question's name ("this kind of step on this site")
+    then lets it run for the rest of the chat. A step with any high-impact
+    category is never covered (#279), nor typing or a form sent.
+    """
+    review = request.review
+    return (
+        request.outside is None
+        and request.tool_name.startswith(SITE_GRANTS)
+        and not never_granted(request.tool_name)
+        and bool(request.arguments.get("site"))
+        and review is not None
+        and review.verdict == "high"
+        and review.categories == ("beyond_request",)
+        and not review.doubts
+    )
+
+
+def grant_offered(request: ApprovalRequest) -> bool:
+    """Whether an answer to *request* may be kept for the chat ("Allow for this chat").
+
+    A routine or unreviewed call of a tool whose answers may be kept
+    (:func:`~localmelo.melo.contracts.review.offers_grant`), or a site auto
+    mode stopped only as not asked for (:func:`site_grant`). Never a
+    high-impact call, typing, a form sent, or a path outside the workspace
+    (whose folder has a grant of its own, #405).
+    """
+    if request.outside is not None or never_granted(request.tool_name):
+        return False
+    return offers_grant(request.review) or site_grant(request)
 
 
 # Set around each tool call of a run that has a policy: asks that policy about

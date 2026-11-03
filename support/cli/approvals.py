@@ -36,9 +36,10 @@ from localmelo.melo.contracts.approvals import (
     ApprovalRequest,
     AutoPolicy,
     DenyAllPolicy,
+    grant_offered,
     never_granted,
 )
-from localmelo.melo.contracts.review import because, offers_grant, review_title
+from localmelo.melo.contracts.review import because, review_title, url_site
 from localmelo.support.cli import edits
 from localmelo.support.cli.text import escape_arguments, wrap_cells
 from localmelo.support.config import SavedFolders
@@ -510,7 +511,7 @@ class TerminalApprover:
         # A grant never covers a high-impact call, whatever the caller says;
         # a folder outside the workspace is offered only when it may be kept.
         outside = request.outside
-        offered = offers_grant(request.review) if outside is None else outside.grantable
+        offered = grant_offered(request) if outside is None else outside.grantable
         # An answer to typing or to a form's send is never kept for the chat: no session choice.
         grantable = offered and not never_granted(request.tool_name)
         self.pending = PendingApproval(
@@ -673,10 +674,56 @@ def next_mode(mode: Mode) -> Literal["ask", "auto"] | None:
     return "auto" if mode == "ask" else "ask"
 
 
+# A site question's grant in words (#465): its prefix, and what it lets melo do.
+_SITE_GRANT_WORDS: Final = (
+    ("browser-act:", "clicking and choosing on {site}"),
+    ("browser:", "opening {site}"),
+)
+
+
+def grant_site(name: str) -> str:
+    """The host a site question's grant *name* is about, or ``""`` for any other grant."""
+    for prefix, _ in _SITE_GRANT_WORDS:
+        if name.startswith(prefix):
+            rest = name[len(prefix) :]
+            return url_site(rest) or rest
+    return ""
+
+
+def grant_words(name: str) -> str:
+    """A grant in words: ``shell commands``, ``clicking and choosing on example.com``."""
+    if name in _GRANT_WORDS:
+        return _GRANT_WORDS[name]
+    for prefix, words in _SITE_GRANT_WORDS:
+        if name.startswith(prefix):
+            return words.format(site=grant_site(name))
+    return name
+
+
+def grant_listed(name: str) -> str:
+    """A grant as ``/approvals`` lists it: a tool by its name, a site's by its site.
+
+    ``shell_exec``; ``example.com (clicking and choosing)``: the name or the
+    site is what ``/approvals forget`` takes.
+    """
+    site = grant_site(name)
+    if not site:
+        return name
+    what = "clicking and choosing" if name.startswith("browser-act:") else "opening"
+    return f"{site} ({what})"
+
+
 def approval_words(mode: Mode, grants: Iterable[str]) -> str:
-    """What the approval *mode* does, and in ask mode what the session allowed already."""
-    allowed = ", ".join(_GRANT_WORDS.get(tool, tool) for tool in sorted(grants))
-    if mode == "ask" and allowed:
+    """What the approval *mode* does, and what the session allowed already.
+
+    In Ask every grant; in Auto the sites allowed for the chat (#465), the
+    only grants it uses.
+    """
+    names = sorted(grants)
+    if mode == "auto":
+        names = [name for name in names if grant_site(name)]
+    allowed = ", ".join(grant_words(name) for name in names)
+    if mode in ("ask", "auto") and allowed:
         return f"{_MODE_WORDS[mode]} · allowed this session: {allowed}"
     return _MODE_WORDS[mode]
 
@@ -723,8 +770,18 @@ class Approvals:
         self.mode = mode
 
     def forget(self, tool_name: str | None = None) -> None:
-        """Take back one tool's grant, or every grant."""
-        self._policy.forget(tool_name)
+        """Take back one grant, or every grant.
+
+        *tool_name* is a grant's name, or a site: every grant of that site
+        goes (#465).
+        """
+        if tool_name is None or tool_name in self._policy.allowed_tools:
+            self._policy.forget(tool_name)
+            return
+        site = tool_name.lower().removeprefix("www.")
+        for name in self._policy.allowed_tools:
+            if grant_site(name).removeprefix("www.") == site:
+                self._policy.forget(name)
 
     @property
     def allowed_tools(self) -> frozenset[str]:

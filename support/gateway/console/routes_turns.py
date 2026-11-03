@@ -18,8 +18,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse, Response
 
 from localmelo.melo.checker import Checker, GatewayIngressPayload
-from localmelo.melo.contracts.approvals import ApprovalDecision, never_granted
-from localmelo.melo.contracts.review import offers_grant
+from localmelo.melo.contracts.approvals import ApprovalDecision, grant_offered
 from localmelo.support.gateway.auto_blocks import (
     BlockError,
     block_to_allow,
@@ -560,10 +559,9 @@ def add_routes(app: FastAPI, console: Console) -> None:
             raise ApiError(400, "invalid_request", t("errors.alwaysNotFolder"))
         elif body.choice == "session":
             # A high-impact call is never granted for the chat: this answer
-            # allows the one call, and the reply says so.
-            grant = asked is None or (
-                offers_grant(asked.review) and not never_granted(asked.tool_name)
-            )
+            # allows the one call, and the reply says so. A site Auto stopped
+            # only as not asked for may be (#465).
+            grant = asked is None or grant_offered(asked)
             decision = ApprovalDecision(True, remember=grant)
         else:
             decision = ApprovalDecision(False, body.reason)

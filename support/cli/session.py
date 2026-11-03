@@ -47,6 +47,7 @@ from localmelo.support.cli.approvals import (
     Mode,
     TerminalApprover,
     approval_words,
+    grant_listed,
     next_mode,
 )
 from localmelo.support.cli.attachments import (
@@ -1583,7 +1584,11 @@ class CliSession:
                     )
                 )
                 return
-        grants = ", ".join(sorted(approvals.allowed_tools)) or "none"
+        # A site's grant by its site, the name /approvals forget takes (#465).
+        grants = (
+            ", ".join(grant_listed(name) for name in sorted(approvals.allowed_tools))
+            or "none"
+        )
         # Folders outside the workspace allowed for reading in this chat (#405).
         folders = ", ".join(home_label(f) for f in approvals.allowed_folders)
         shown = f" · folders: {folders}" if folders else ""

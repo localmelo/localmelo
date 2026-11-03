@@ -116,8 +116,11 @@ def test_a_write_over_a_file_carries_what_it_replaces(tmp_path: Path) -> None:
         "review",
         "gist",
         "outside",
+        "offers_chat",
     }
     assert pending["outside"] is None
+    # An unreviewed write may be kept for the chat, as Ask's card offers (#465).
+    assert pending["offers_chat"] is True
     assert pending["arguments"] == {"path": str(path), "content": "abd\n"}
 
 

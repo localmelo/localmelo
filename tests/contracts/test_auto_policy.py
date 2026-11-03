@@ -18,8 +18,11 @@ from localmelo.melo.contracts.approvals import (
     block_note,
     denial_text,
     find_auto,
+    grant_offered,
     review_mode,
+    site_grant,
 )
+from localmelo.melo.contracts.folders import OutsideAccess
 from localmelo.melo.contracts.review import ActionReview, ModelAnswer, step_key
 
 INSTALL = ActionReview(
@@ -404,3 +407,67 @@ def test_no_note_or_answer_sends_the_person_to_type_a_permission() -> None:
         lowered = text.lower()
         for typed in ("go ahead", "next message", "say so", "reply"):
             assert typed not in lowered, (typed, text)
+
+
+# ── A choice lasts: what a chat's grant may cover in Auto (#465) ──
+
+
+def _site(
+    name: str = "browser-act:https://news.example",
+    review: ActionReview | None = BEYOND,
+    **arguments: object,
+) -> ApprovalRequest:
+    return ApprovalRequest(
+        request_id="r2",
+        run_id="run-1",
+        call_id="call_2",
+        tool_name=name,
+        arguments={"site": "news.example", "access": "act", **arguments},
+        preview="click on news.example",
+        workspace_root="/ws",
+        review=review,
+    )
+
+
+@pytest.mark.parametrize(
+    ("request_", "site", "offered"),
+    [
+        # A click or an open Auto stopped only as not asked for: the chat may keep it.
+        (_site(), True, True),
+        (_site("browser:https://news.example"), True, True),
+        # Typing and a form sent never; nor a step with a high-impact category.
+        (_site("browser-type:https://news.example"), False, False),
+        (_site("browser-submit:https://news.example"), False, False),
+        (_site(review=ActionReview("high", ("send_out",), ("Sends.",))), False, False),
+        (
+            _site(review=ActionReview("high", ("beyond_request", "send_out"), ("x",))),
+            False,
+            False,
+        ),
+        (_site(review=ActionReview("high", ("opaque",), ("Unclear.",))), False, False),
+        (_site(review=dataclasses.replace(BEYOND, doubts=("?",))), False, False),
+        # Not a site question: a command the review stopped is never kept.
+        (_request("print(1)", BEYOND), False, False),
+        (_request("x", INSTALL), False, False),
+        # Ask's own questions keep their rule: unreviewed and routine may be kept.
+        (_site(review=None), False, True),
+        (_request("print(1)", ActionReview("routine")), False, True),
+    ],
+)
+def test_what_a_chat_may_keep(
+    request_: ApprovalRequest, site: bool, offered: bool
+) -> None:
+    assert site_grant(request_) is site
+    assert grant_offered(request_) is offered
+
+
+def test_a_site_question_without_a_site_or_outside_the_workspace_is_never_kept() -> (
+    None
+):
+    bare = dataclasses.replace(_site(), arguments={"access": "act"})
+    assert not site_grant(bare) and not grant_offered(bare)
+    outside = dataclasses.replace(
+        _request(review=ActionReview("routine")),
+        outside=OutsideAccess("/x/a.txt", "/x", "read", True),
+    )
+    assert not grant_offered(outside)

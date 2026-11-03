@@ -37,15 +37,15 @@ from localmelo.melo.contracts.approvals import (
     Withdrawal,
     find_auto,
     find_folder_asker,
-    never_granted,
+    grant_offered,
     review_mode,
+    site_grant,
 )
 from localmelo.melo.contracts.folders import covers
 from localmelo.melo.contracts.review import (
     RULED_TOOLS,
     ActionReview,
     covered_by_grant,
-    offers_grant,
     step_key,
 )
 
@@ -91,6 +91,10 @@ class RememberingPolicy:
     so it allows that call and grants nothing. Under a grant the agent's
     gate first lets the user's model review an undecided call
     (:meth:`silent_for`); one it finds routine then runs on the grant.
+    In auto mode it is the policy that asks about a step Auto stopped
+    (#465): a site Auto stopped only as not asked for may be granted for
+    the chat, and a grant of that site question covers it after
+    (:func:`~localmelo.melo.contracts.approvals.site_grant`).
     Grants are per tool name and per policy object, and never stored.
 
     With *folders*, it is also asked about a file tool's path outside the
@@ -211,12 +215,12 @@ class RememberingPolicy:
                 "a folder outside the workspace needs its own question",
                 origin="policy",
             )
-        if request.tool_name in self._granted and covered_by_grant(request.review):
+        if request.tool_name in self._granted and (
+            covered_by_grant(request.review) or site_grant(request)
+        ):
             return ApprovalDecision(True, origin="session")
         decision = await self._ask(request)
-        if isinstance(decision, ApprovalDecision) and (
-            not offers_grant(request.review) or never_granted(request.tool_name)
-        ):
+        if isinstance(decision, ApprovalDecision) and not grant_offered(request):
             decision = dataclasses.replace(decision, remember=False)
         if (
             isinstance(decision, ApprovalDecision)

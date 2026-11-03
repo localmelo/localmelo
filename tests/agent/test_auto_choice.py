@@ -10,6 +10,7 @@ is blocked as before. The model and the tools are the fakes of
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -20,12 +21,13 @@ from localmelo.melo.contracts.approvals import (
     AutoPolicy,
     Chosen,
 )
-from localmelo.support.sessions.approvals import RememberingPolicy
+from localmelo.support.sessions.approvals import ChatPolicy, RememberingPolicy
 from localmelo.tests.agent.test_approvals import Recorder, _answer, _calls, _no_wait
 from localmelo.tests.agent.test_auto_mode import (
     BLOCKED,
     POST,
     VENV,
+    ActsOnSite,
     FakeModel,
     OpensSite,
     _agent,
@@ -241,3 +243,122 @@ async def test_a_site_declined_on_the_card_is_not_asked_about_again_in_the_turn(
     assert isinstance(second, Chosen) and second.again
     assert second.reason == "not that site"
     assert len(card.asked) == 1 and len(llm.review_requests) == 1
+
+
+# ── A choice lasts: "Allow on this site for this chat" ──
+
+
+def _acting_agent(llm: FakeModel, root: Path, tool: ActsOnSite) -> Agent:
+    root.mkdir(exist_ok=True)
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset(),
+            tool_exposure="all",
+            workspace_root=str(root),
+        ),
+        tool_providers=[tool],
+    )
+    agent.chat.sleep = _no_wait
+    return agent
+
+
+def _act(site: str, access: str = "act", call: str = "c1") -> Any:
+    return _calls(("act_on_site", {"site": site, "access": access}, call))
+
+
+@pytest.mark.asyncio
+async def test_a_site_allowed_for_the_chat_covers_the_same_kind_there_and_nothing_else(
+    tmp_path: Path,
+) -> None:
+    tool = ActsOnSite()
+    plans = [
+        _act("news.example"),
+        _answer("clicked"),
+        # The next message: the same kind on the same site runs on the grant.
+        _act("news.example"),
+        _answer("clicked again"),
+        # Another site, another kind on the same site, and typing still ask.
+        _act("shop.example"),
+        _answer("one"),
+        _act("news.example", "type"),
+        _answer("two"),
+    ]
+    llm = FakeModel(plans, [NOT_ASKED] * 4)
+    agent = _acting_agent(llm, tmp_path / "ws", tool)
+    card = Card(
+        ApprovalDecision(True, remember=True),
+        ApprovalDecision(False),
+        ApprovalDecision(False),
+    )
+    policy = ChatPolicy(card, "auto")
+
+    await agent.run_task("check the news", approval=policy)
+    assert policy.allowed_tools == {"browser-act:https://news.example"}
+    await agent.run_task("I signed in", approval=policy)
+
+    assert [a.origin for a in tool.answers] == ["user", "session"]
+    assert len(card.asked) == 1
+    [asked] = card.asked
+    assert asked.review is not None and asked.review.categories == ("beyond_request",)
+
+    await agent.run_task("and the shop?", approval=policy)
+    await agent.run_task("write a line", approval=policy)
+
+    assert [a.allow for a in tool.answers] == [True, True, False, False]
+    assert [r.tool_name for r in card.asked[1:]] == [
+        "browser-act:https://shop.example",
+        "browser-type:https://news.example",
+    ]
+    assert policy.allowed_tools == {"browser-act:https://news.example"}
+
+
+@pytest.mark.asyncio
+async def test_remove_ends_a_grant_and_a_new_chat_starts_empty(tmp_path: Path) -> None:
+    tool = ActsOnSite()
+    plans = [_act("news.example"), _answer("a")] * 3
+    llm = FakeModel(plans, [NOT_ASKED] * 3)
+    agent = _acting_agent(llm, tmp_path / "ws", tool)
+    card = Card(ApprovalDecision(True, remember=True), ApprovalDecision(True))
+    policy = ChatPolicy(card, "auto")
+
+    await agent.run_task("check the news", approval=policy)
+    policy.forget("browser-act:https://news.example")  # Remove in the chat's menu
+    await agent.run_task("again", approval=policy)
+
+    assert len(card.asked) == 2
+    other = Card(ApprovalDecision(False))
+    agent.load_conversation([])
+    await agent.run_task("check the news", approval=ChatPolicy(other, "auto"))
+    assert len(other.asked) == 1 and not tool.answers[-1].allow
+
+
+@pytest.mark.asyncio
+async def test_a_high_impact_step_never_rides_a_grant(tmp_path: Path) -> None:
+    llm = FakeModel([*_plans(["print(1)"]), *_plans([VENV], answer="charted")])
+    agent, fake = _agent(llm, tmp_path / "ws")
+    card = Card(ApprovalDecision(True, remember=True), ApprovalDecision(True))
+    policy = ChatPolicy(card, "ask")
+
+    await agent.run_task("print one", approval=policy)
+    assert policy.allowed_tools == {"python_exec"}
+    policy.mode = "auto"
+    await agent.run_task("chart cashflow.csv", approval=policy)
+
+    # The tool grant of Ask covers no high-impact step: the card asks again.
+    assert len(card.asked) == 2 and fake.ran == ["print(1)", VENV]
+    assert card.asked[1].review is not None
+    assert card.asked[1].review.verdict == "high"
+
+
+@pytest.mark.asyncio
+async def test_allow_once_runs_only_that_step(tmp_path: Path) -> None:
+    llm = FakeModel(_plans([POST, POST.replace("hi", "ho")]), [NOT_ASKED] * 2)
+    agent, fake = _agent(llm, tmp_path / "ws")
+    card = Card(ApprovalDecision(True), ApprovalDecision(False))
+    policy = ChatPolicy(card, "auto")
+
+    await agent.run_task("test this API", approval=policy)
+
+    assert fake.ran == [POST] and len(card.asked) == 2
+    assert policy.allowed_tools == frozenset()

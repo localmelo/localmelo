@@ -6,18 +6,47 @@ export const MODES = ['ask', 'auto'];
 /** A mode read from a session or the settings: `auto`, else `ask`. */
 export const modeOf = (value) => (value === 'auto' ? 'auto' : 'ask');
 
+// The grants of a site question (#465): opening or reading a site, and clicking or choosing on it.
+const SITE_GRANTS = [['browser-act:', 'act'], ['browser:', 'open']];
+
+/**
+ * The chat's grants of a site, in the order given: `{name, kind, site}` with `kind` `open` or `act` and
+ * `site` the host. Any other grant (a tool for the session) is left out.
+ */
+export function siteGrants(names = []) {
+  const found = [];
+  for (const name of names) {
+    const text = String(name);
+    const match = SITE_GRANTS.find(([prefix]) => text.startsWith(prefix));
+    if (!match) continue;
+    const rest = text.slice(match[0].length);
+    let site = rest;
+    try {
+      site = new URL(rest).hostname || rest;
+    } catch {
+      // A grant's name holds an origin; keep what it says when it is not one.
+    }
+    found.push({name: text, kind: match[1], site});
+  }
+  return found;
+}
+
 /**
  * Wire the composer's Ask/Auto chip and its menu (`mode-picker`, `mode-btn`, `mode-text` and an empty
  * `mode-menu` in index.html; the menu's content is drawn here). `state()` gives `{mode, fallback,
- * visible, busy}`: the chat's mode (or the one the next new chat gets), the mode new chats start in,
- * whether the chip shows, and whether a switch is being saved. `pick(mode)` saves a choice and
- * resolves when it is kept. `openSettings()` opens Settings at Chats and folders. The menu is a `menu`
- * of two `menuitemradio`s: arrows move, Enter or Space picks, Escape closes.
+ * visible, busy, grants}`: the chat's mode (or the one the next new chat gets), the mode new chats start
+ * in, whether the chip shows, whether a switch is being saved, and the names of the chat's grants. `pick(mode)`
+ * saves a choice and resolves when it is kept. `openSettings()` opens Settings at Chats and folders.
+ * `remove(name)` takes back one grant and resolves when it is gone. The menu is a `menu` of two
+ * `menuitemradio`s, then the sites allowed in this chat (#465), each with a Remove `menuitem`: arrows move,
+ * Enter or Space picks, Escape closes.
  */
-export function setupModeChip({doc, state, pick, openSettings}) {
+export function setupModeChip({doc, state, pick, openSettings, remove = null}) {
   const $ = (id) => doc.getElementById(id);
   let open = false;
   let items = [];
+  // Every control the arrows move through: the two modes, then each grant's Remove.
+  let controls = [];
 
   function node(tag, className, text) {
     const made = doc.createElement(tag);
@@ -55,8 +84,52 @@ export function setupModeChip({doc, state, pick, openSettings}) {
     });
     link.addEventListener('keydown', keys);
     foot.append(link);
+    const grants = remove ? grantsList(state().grants ?? []) : [];
     $('mode-menu').setAttribute('aria-labelledby', 'mode-menu-title');
-    $('mode-menu').replaceChildren(title, ...items, foot);
+    $('mode-menu').replaceChildren(title, ...items, ...grants, foot);
+  }
+
+  // The sites this chat allowed for its rest (#465), each with Remove; nothing when there are none.
+  function grantsList(names) {
+    const found = siteGrants(names);
+    const removes = [];
+    if (!found.length) {
+      controls = [...items];
+      return [];
+    }
+    const box = node('div', 'mode-grants');
+    box.setAttribute('role', 'group');
+    const heading = node('p', 'mode-grants-title', t('auto.menu.grants'));
+    heading.id = 'mode-grants-title';
+    box.setAttribute('aria-labelledby', heading.id);
+    box.append(heading);
+    for (const grant of found) {
+      const what = t(grant.kind === 'act' ? 'auto.menu.grantAct' : 'auto.menu.grantOpen', {site: grant.site});
+      const row = node('div', 'mode-grant');
+      const drop = node('button', 'link-button mode-grant-remove', t('auto.menu.remove'));
+      drop.type = 'button';
+      drop.setAttribute('role', 'menuitem');
+      drop.setAttribute('aria-label', t('auto.menu.removeOne', {what}));
+      drop.addEventListener('click', () => take(grant.name, drop));
+      drop.addEventListener('keydown', keys);
+      removes.push(drop);
+      row.append(node('span', 'mode-grant-what', what), drop);
+      box.append(row);
+    }
+    controls = [...items, ...removes];
+    return [box];
+  }
+
+  async function take(name, button) {
+    button.disabled = true;
+    try {
+      await remove(name);
+    } finally {
+      button.disabled = false;
+    }
+    if (!open) return;
+    menu();
+    (controls[0] ?? null)?.focus();
   }
 
   function draw() {
@@ -88,11 +161,12 @@ export function setupModeChip({doc, state, pick, openSettings}) {
   }
 
   function keys(event) {
-    const at = items.indexOf(doc.activeElement);
-    const to = {ArrowDown: (at + 1) % items.length, ArrowUp: (at + items.length - 1) % items.length, Home: 0, End: items.length - 1}[event.key];
+    const moving = controls.length ? controls : items;
+    const at = moving.indexOf(doc.activeElement);
+    const to = {ArrowDown: (at + 1) % moving.length, ArrowUp: (at + moving.length - 1) % moving.length, Home: 0, End: moving.length - 1}[event.key];
     if (to !== undefined) {
       event.preventDefault?.();
-      items[to].focus();
+      moving[to].focus();
     } else if (event.key === 'Escape') {
       event.preventDefault?.();
       event.stopPropagation?.();

@@ -115,7 +115,9 @@ def add_routes(app: FastAPI, console: Console) -> None:
             }
         )
 
-    @app.delete("/api/sessions/{session_id}/grants/{tool}")
+    # A site's grant is named after its address (``browser-act:https://…``,
+    # #465): the name may hold slashes.
+    @app.delete("/api/sessions/{session_id}/grants/{tool:path}")
     async def forget_grant(session_id: str, tool: str) -> Response:
         console.require_store()
         await _require_session(console, session_id)

@@ -28,6 +28,7 @@ from localmelo.support.cli.approvals import (
     PanelText,
     TerminalApprover,
     approval_words,
+    grant_listed,
     panel_text,
     session_option,
     session_warning,
@@ -1374,3 +1375,69 @@ async def test_the_panel_warns_when_the_description_and_the_code_differ(
         now[0] += 1
         app.type("1")
         await asyncio.wait_for(asking, 3)
+
+
+# ── Auto's card in the terminal: the same list (#465) ──
+
+_NOT_ASKED = ActionReview(
+    "high", ("beyond_request",), ("Does something the request did not ask for.",)
+)
+
+
+def _site_stop(review: ActionReview = _NOT_ASKED) -> ApprovalRequest:
+    return dataclasses.replace(
+        _request(
+            "browser-act:https://news.example",
+            site="news.example",
+            access="act",
+            how="click",
+        ),
+        review=review,
+    )
+
+
+async def test_a_site_auto_stopped_as_not_asked_for_offers_the_chat_on_the_list() -> (
+    None
+):
+    approver = TerminalApprover()
+    asking = asyncio.ensure_future(approver.ask(_site_stop()))
+    await asyncio.sleep(0)
+    pending = approver.pending
+    assert pending is not None and pending.offer_session is True
+    assert session_option(pending.request) == (
+        "Yes, and allow clicking and choosing on news.example for the rest of this chat"
+    )
+    approver.answer("session")
+    assert await asking == ApprovalDecision(True, remember=True)
+    # One the review stopped as risky offers no session choice.
+    risky = _site_stop(ActionReview("high", ("send_out",), ("Sends data.",)))
+    asking = asyncio.ensure_future(approver.ask(risky))
+    await asyncio.sleep(0)
+    assert approver.pending is not None and approver.pending.offer_session is False
+    approver.answer("deny", "not there")
+    assert await asking == ApprovalDecision(False, "not there")
+
+
+async def test_the_terminal_lists_a_site_by_its_site_and_forgets_it_by_name() -> None:
+    async def ask(request: ApprovalRequest) -> ApprovalDecision:
+        return ApprovalDecision(True, remember=True)
+
+    approvals = Approvals(ask, "auto")
+    policy = approvals.policy()
+    assert policy is not None
+    await policy.decide(_site_stop())
+    await approvals._policy.decide(_request("shell_exec"))
+    assert approvals.allowed_tools == {"browser-act:https://news.example", "shell_exec"}
+    assert grant_listed("browser-act:https://news.example") == (
+        "news.example (clicking and choosing)"
+    )
+    assert grant_listed("browser:https://www.docs.example") == (
+        "www.docs.example (opening)"
+    )
+    assert grant_listed("shell_exec") == "shell_exec"
+    # Auto names the sites it may use, the only grants it reads.
+    assert approval_words("auto", approvals.allowed_tools).endswith(
+        "· allowed this session: clicking and choosing on news.example"
+    )
+    approvals.forget("www.news.example")
+    assert approvals.allowed_tools == {"shell_exec"}

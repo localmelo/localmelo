@@ -18,15 +18,16 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from localmelo.melo.agent import Agent
+from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
+from localmelo.melo.contracts.tools import BaseToolProvider
 from localmelo.melo.schema import Message
 from localmelo.support.gateway.auto_blocks import blocked_steps, go_ahead_text
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.sessions.approvals import ChatPolicy, chat_mode
 from localmelo.support.sessions.store import SessionStore
 from localmelo.tests.agent.test_approvals import _answer, _calls
-from localmelo.tests.agent.test_auto_mode import FakeModel
+from localmelo.tests.agent.test_auto_mode import ActsOnSite, FakeModel, verdict
 from localmelo.tests.sessions.helpers import started_agent
 
 from .conftest import PORT, FakeProbe, all_events, make_cfg, quiet_gate
@@ -60,10 +61,12 @@ async def auto_console(
     plans: list[Message],
     reviews: list[Message] | None = None,
     monkeypatch: pytest.MonkeyPatch | None = None,
+    providers: list[BaseToolProvider] = (),  # type: ignore[assignment]
 ) -> AsyncIterator[tuple[Console, httpx.AsyncClient, Ran, FakeModel]]:
     """A console whose chats share one scripted model and one recording python_exec.
 
-    With *monkeypatch*, a saved task's Agent is built the same way.
+    With *monkeypatch*, a saved task's Agent is built the same way. A chat's
+    Agent also has the tools of *providers*.
     """
     ran = Ran()
     llm = FakeModel(plans, reviews or [])
@@ -85,13 +88,27 @@ async def auto_console(
     async def build(
         settings: Any, workspace: str, mcp_config: str | None, session_id: str
     ) -> Any:
-        agent = await started_agent(
-            Path(workspace),
-            llm,
-            mode="gateway",
-            builtins=frozenset({"python_exec"}),
-            tool_exposure="all",
-        )
+        if providers:
+            agent = Agent(
+                llm=llm,
+                options=AgentOptions(
+                    workspace_root=workspace,
+                    record_answers=True,
+                    mode="gateway",
+                    builtins=frozenset({"python_exec"}),
+                    tool_exposure="all",
+                ),
+                tool_providers=list(providers),
+            )
+            await agent.start()
+        else:
+            agent = await started_agent(
+                Path(workspace),
+                llm,
+                mode="gateway",
+                builtins=frozenset({"python_exec"}),
+                tool_exposure="all",
+            )
         agent.executor.register("python_exec", ran.python_exec, requires_approval=True)
         return agent
 
@@ -291,6 +308,48 @@ async def test_in_auto_a_stopped_step_asks_on_the_chat_s_card(
         session = (await client.get(f"/api/sessions/{sid}")).json()["session"]
         assert session["allowances"] == {}  # a card's answer is no allowance
         assert llm.review_requests == []
+
+
+@pytest.mark.asyncio
+async def test_a_site_allowed_for_the_chat_lasts_until_removed(tmp_path: Path) -> None:
+    site = ActsOnSite()
+    act = _calls(("act_on_site", {"site": "news.example", "access": "act"}, "c1"))
+    plans = [act, _answer("a"), act, _answer("b"), act, _answer("c")]
+    not_asked = verdict(verdict="ask", category="beyond_request", fits_request="no")
+    async with auto_console(tmp_path, plans, [not_asked] * 3, providers=[site]) as (
+        console,
+        client,
+        _ran,
+        _llm,
+    ):
+        sid = await create(client, tmp_path, "check the news", approvals="auto")
+        card = await pending(client, sid)
+        name = "browser-act:https://news.example"
+        assert (card["tool_name"], card["offers_chat"]) == (name, True)
+        answered = await client.post(
+            f"/api/approvals/{card['request_id']}", json={"choice": "session"}
+        )
+        assert answered.json()["remember"] is True
+        await wait_turn(client, sid)
+        assert (await client.get(f"/api/sessions/{sid}")).json()["grants"] == [name]
+
+        # The next message: the same click on the same site runs on the grant.
+        await client.post(f"/api/sessions/{sid}/turns", json={"text": "I signed in"})
+        await wait_turn(client, sid)
+        assert [a.origin for a in site.answers] == ["user", "session"]
+
+        # Remove (the chat's menu): the next one asks again.
+        removed = await client.delete(
+            f"/api/sessions/{sid}/grants/{name.replace(':', '%3A').replace('/', '%2F')}"
+        )
+        assert removed.status_code == 204
+        await client.post(f"/api/sessions/{sid}/turns", json={"text": "once more"})
+        card = await pending(client, sid)
+        await client.post(
+            f"/api/approvals/{card['request_id']}", json={"choice": "deny"}
+        )
+        await wait_turn(client, sid)
+        assert [a.allow for a in site.answers] == [True, True, False]
 
 
 # ── Allow once, end to end ──

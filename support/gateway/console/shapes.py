@@ -12,7 +12,7 @@ from typing import Any
 
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.review.gist import step_gist
-from localmelo.melo.contracts.approvals import ApprovalRequest
+from localmelo.melo.contracts.approvals import ApprovalRequest, grant_offered
 from localmelo.melo.contracts.events import json_safe_payload
 from localmelo.melo.contracts.folders import OutsideAccess
 from localmelo.melo.contracts.review import ActionReview, review_title
@@ -178,6 +178,8 @@ def approval_json(request: ApprovalRequest) -> dict[str, Any]:
     ``gist`` is the sentence the card starts with (#454): catalog ids and
     parameters, or ``None`` for a tool whose card has a sentence of its own.
     ``outside`` is set for a path outside the workspace (#405).
+    ``offers_chat`` says whether the card may offer "Allow for this chat"
+    (:func:`~localmelo.melo.contracts.approvals.grant_offered`).
     """
     root = request.workspace_root
     arguments = dict(request.arguments)
@@ -202,6 +204,9 @@ def approval_json(request: ApprovalRequest) -> dict[str, Any]:
         "review": _review_json(request.review, root),
         "gist": None if gist is None else gist.to_json(),
         "outside": outside_json(request.outside),
+        # Whether "Allow for this chat" may be offered: never for a high-impact
+        # call, but for a site Auto stopped only as not asked for (#465).
+        "offers_chat": grant_offered(request),
     }
 
 

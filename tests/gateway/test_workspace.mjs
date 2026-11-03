@@ -1339,6 +1339,42 @@ test('a routine or undecided card stays the plain card, and says what the grant 
   }
 });
 
+// A click Auto stopped only because the request did not ask for it (#465): the server offers the chat.
+const siteStop = (extra = {}) => ({
+  request_id: 'site', tool_name: 'browser-act:https://news.example',
+  arguments: {site: 'news.example', access: 'act', how: 'click'}, arguments_complete: true,
+  workspace_label: '~/melo_test_workspace',
+  review: {verdict: 'high', title: 'Do something you did not ask for?', reasons: ['Does something the request did not ask for.'], categories: ['beyond_request']},
+  offers_chat: true,
+  ...extra,
+});
+
+test('Auto\'s card for a site stopped as not asked for offers the chat, and says why', async () => {
+  const h = harness(baseRoutes({'POST /approvals/site': {outcome: 'allowed', remember: true}}));
+  await h.run('init()');
+  h.context.request = siteStop();
+  h.run('S.view.pending.set("site", request)');
+  const card = h.run('approvalCard(request, chatApproval, "check the news")');
+  const text = (name) => findNode(card, (node) => node.className === name)?.textContent;
+  assert.equal(card.dataset.impact, undefined, 'not the high-impact card');
+  assert.equal(text('approval-title'), 'Let melo click and choose on news.example?');
+  assert.equal(text('approval-why'), 'Why melo asks');
+  assert.equal(text('approval-asked'), 'You asked: “check the news”');
+  const actions = findNode(card, (node) => node.className === 'approval-actions');
+  assert.deepEqual(actions.children.map((node) => node.textContent), ['Allow once', 'Allow for this chat', 'Deny']);
+  assert.match(findNode(card, (node) => node.id === 'approval-scope-site').textContent, /will not ask again before clicking or choosing on news\.example in this chat/);
+  h.run('approvalStates.get("site").mountedAt -= 1000');
+  h.timers.findLast((timer) => timer.ms <= 500).handler();
+  await findNode(card, (node) => node.textContent === 'Allow for this chat').click();
+  assert.deepEqual(h.net.callsTo('/approvals/site')[0].body, {choice: 'session'});
+  // Without the server's word, a high-impact review keeps the card that asks every time.
+  h.context.request = siteStop({request_id: 'site2', offers_chat: false});
+  const strict = h.run('approvalCard(request)');
+  assert.equal(strict.dataset.impact, 'high');
+  const offered = findNode(strict, (node) => node.className === 'approval-actions').children.map((node) => node.textContent);
+  assert.deepEqual(offered, ['Allow once', 'Deny']);
+});
+
 test('a high-impact card: Allow once and Deny answer, there is no session answer, and Review lands on Deny', async () => {
   const h = harness(baseRoutes({'POST /approvals/high': {outcome: 'allowed'}}));
   await h.run('init()');
@@ -5169,6 +5205,47 @@ test('the Ask/Auto chip switches the open chat from its menu', async () => {
   assert.deepEqual(patch.body, {approvals: 'auto'});
   assert.equal(h.element('mode-btn').dataset.mode, 'auto');
   assert.match(h.text('notice'), /This chat is in Auto now, from melo’s next step\./);
+});
+
+test('the Ask/Auto menu lists the sites this chat allowed, each with Remove (#465)', async () => {
+  const name = 'browser-act:https://news.example';
+  const h = harness(baseRoutes({
+    'GET /settings': {mode: 'default', approvals: 'ask'},
+    'GET /sessions/a': {
+      session: session('a', {approvals: 'auto'}), pending_approvals: [], grants: ['python_exec', name, 'browser:https://docs.example'],
+      granted_at: {}, mcp_error: '', agent: 'not_loaded', tokens: 0,
+    },
+    [`DELETE /sessions/a/grants/${encodeURIComponent(name)}`]: {status: 204},
+  }));
+  await h.run('init()');
+  h.element('mode-btn').click();
+  const menu = h.element('mode-menu');
+  assert.match(flatten(menu), /Allowed in this chat/);
+  const rows = [];
+  const walk = (node) => { if (node.className === 'mode-grant-what') rows.push(node.textContent); (node.children ?? []).forEach(walk); };
+  walk(menu);
+  assert.deepEqual(rows, ['Click and choose on news.example', 'Open and read docs.example'], 'a tool grant is not a site');
+  const remove = findNode(menu, (node) => node.getAttribute?.('aria-label') === 'Remove: Click and choose on news.example');
+  assert.ok(remove, 'each site has its Remove');
+  await remove.click();
+  await settle();
+  assert.equal(h.net.callsTo(`/sessions/a/grants/${encodeURIComponent(name)}`)[0].method, 'DELETE');
+  assert.deepEqual(h.state().view.grants, ['python_exec', 'browser:https://docs.example']);
+  assert.doesNotMatch(flatten(h.element('mode-menu')), /news\.example/);
+});
+
+test('a chat that allowed no site shows no list in its menu', async () => {
+  const h = harness(baseRoutes({'GET /settings': {mode: 'default', approvals: 'ask'}}));
+  await h.run('init()');
+  h.element('mode-btn').click();
+  assert.doesNotMatch(flatten(h.element('mode-menu')), /Allowed in this chat/);
+});
+
+test('siteGrants reads a grant\'s kind and site and leaves other grants out', () => {
+  assert.deepEqual(modeChip.siteGrants(['shell_exec', 'browser:https://a.example', 'browser-act:https://b.example:8443', 'browser-type:https://c.example']), [
+    {name: 'browser:https://a.example', kind: 'open', site: 'a.example'},
+    {name: 'browser-act:https://b.example:8443', kind: 'act', site: 'b.example'},
+  ]);
 });
 
 test('a new chat takes the chip\'s choice with its first turn', async () => {

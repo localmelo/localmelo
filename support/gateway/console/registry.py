@@ -28,9 +28,8 @@ from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     ApprovalRequest,
     Withdrawal,
-    never_granted,
+    grant_offered,
 )
-from localmelo.melo.contracts.review import offers_grant
 from localmelo.melo.contracts.tools import BaseToolProvider
 from localmelo.melo.schema import Message
 from localmelo.support.browser import configured_driver
@@ -567,12 +566,7 @@ class ConsoleSessions:
                 # The person's Allow: this chat's tasks may run the same step (#369).
                 self.ledger.record(current, request)
                 # A folder's "this chat" is a grant of the folder, not of the tool.
-                if (
-                    decision.remember
-                    and request.outside is None
-                    and offers_grant(request.review)
-                    and not never_granted(request.tool_name)
-                ):
+                if decision.remember and grant_offered(request):
                     granted_at[request.tool_name] = self._clock()
             return decision
 
