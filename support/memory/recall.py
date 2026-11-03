@@ -113,6 +113,13 @@ ITEM_LIST_GUIDE: Final = (
     "Memory items that may hold the answer, closest first. Open the ones you "
     "need with open_memory before you answer from them; a title is not the content."
 )
+# With ``[memory] premise_check = "on"`` and the list form, the sentence that follows
+# either guide (after one space): check what the question names against the lines.
+PREMISE_GUIDE: Final = (
+    "If the question names a person, thing, place or role that none of these "
+    "mention, say first that you have no record of it, and do not answer it from "
+    "something similar."
+)
 CUT_MARK: Final = "… (cut)"
 # With ``[memory] excerpt_open = "on"``: the line under the excerpts when one of them
 # starts with its turn's id, because it shows less than the whole turn.
@@ -1112,6 +1119,14 @@ def kept_lines(quotes: Sequence[str], *, refused: bool = False) -> list[str]:
             shown.append(f"and {len(quotes) - KEPT_NOTES} more")
         lines.append(KEPT_LINE.format(notes=" ".join(shown)))
     return lines + ([NOT_KEPT_LINE] if refused else [])
+
+
+def list_guide(items: bool, premise: bool = False) -> str:
+    """The line above the list form's lines: :data:`ITEM_LIST_GUIDE` for memory items
+    (*items*) or :data:`LIST_GUIDE` for chat turns, and with *premise*
+    (``[memory] premise_check = "on"``) :data:`PREMISE_GUIDE` after one space."""
+    guide = ITEM_LIST_GUIDE if items else LIST_GUIDE
+    return f"{guide} {PREMISE_GUIDE}" if premise else guide
 
 
 def block(

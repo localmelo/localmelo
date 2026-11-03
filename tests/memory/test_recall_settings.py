@@ -142,6 +142,7 @@ def test_the_defaults_are_the_shipped_numbers() -> None:
         False,
         True,  # followup: a message with no content recalls from the recent turns
         True,  # excerpt_open: a cut excerpt can be opened, by default
+        False,  # premise: the list form's guide line is as it was
     )
     assert cfg.followup_query == "recent"
     assert (cfg.recall_min_cosine, cfg.recall_min_coverage) == (0.55, 0.6)
@@ -157,9 +158,10 @@ def test_the_defaults_are_the_shipped_numbers() -> None:
     assert (
         cfg.recall_source,
         cfg.open_sources,
+        cfg.premise_check,
         cfg.compress_at_chars,
         cfg.compress_cache,
-    ) == ("turns", "off", 12000, "")
+    ) == ("turns", "off", "off", 12000, "")
     assert cfg.excerpt_open == "on"
     # The head of a turn is a floor, not a default: it stays what it was.
     assert TURN_CHARS == 234

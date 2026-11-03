@@ -119,8 +119,6 @@ from localmelo.support.memory.recall import (
     BLOCK_CHARS,
     CUT_GUIDE,
     ITEM_CHARS,
-    ITEM_LIST_GUIDE,
-    LIST_GUIDE,
     LIST_MAX,
     MIN_COSINE,
     MIN_COVERAGE,
@@ -139,6 +137,7 @@ from localmelo.support.memory.recall import (
     in_view,
     is_contentless,
     kept_lines,
+    list_guide,
     meaning_of,
     newer_first,
     pick,
@@ -283,6 +282,8 @@ class RecallSettings(NamedTuple):
     may open it (:attr:`opens_excerpts`). The defaults are the shipped ones: a block
     of :data:`BLOCK_CHARS` and a turn of :data:`ITEM_CHARS` (#349), *followup* and
     *excerpt_open* on, and what recall did before these were settings for the rest.
+    *premise* (``[memory] premise_check = "on"``) adds one sentence to the list
+    form's guide line (:attr:`guide`); it changes nothing without *listing*.
     """
 
     records: int = AUTO_RECORDS
@@ -301,6 +302,14 @@ class RecallSettings(NamedTuple):
     open_sources: bool = False
     followup: bool = True
     excerpt_open: bool = True
+    premise: bool = False
+
+    @property
+    def guide(self) -> str:
+        """The line above the list form's lines (:func:`.recall.list_guide`): the
+        items' or the turns', and with ``premise_check = "on"`` and the list form
+        one sentence more. The excerpt form never carries it."""
+        return list_guide(self.items, self.premise and self.listing)
 
     @property
     def opens_excerpts(self) -> bool:
@@ -892,6 +901,7 @@ class ChatMemory:
             getattr(memory, "open_sources", "off") == "on",
             getattr(memory, "followup_query", "recent") != "message",
             getattr(memory, "excerpt_open", "on") != "off",
+            getattr(memory, "premise_check", "off") == "on",
         )
 
     def note_settings(self) -> NoteSettings:
@@ -1465,7 +1475,7 @@ class ChatMemory:
             budget.chars,
             budget.shown(query),
             listing=budget.listing,
-            guide=ITEM_LIST_GUIDE if budget.items else LIST_GUIDE,
+            guide=budget.guide,
         )
         hinted = budget.hint and not used
         if hinted:
@@ -3175,7 +3185,7 @@ class MemoryTools(BaseToolProvider):
         chat: ChatTurn | None,
     ) -> str:
         """The search result of the list form: the notes found as before, numbered,
-        then, under :data:`LIST_GUIDE`, a line for each chat turn (up to ``k``,
+        then, under the list guide (:attr:`RecallSettings.guide`), a line for each chat turn (up to ``k``,
         which may reach ``recall_list_max``, and ``recall_list_max`` without it)."""
         notes_k = max(1, min(int(5 if k is None else k), 8))
         turns_k = (
@@ -3203,7 +3213,7 @@ class MemoryTools(BaseToolProvider):
             chat.add_searched([*notes, *turns])
         lines = [f"{n}. {item.shown}" for n, item in enumerate(notes, 1)]
         if turns:
-            lines.append(ITEM_LIST_GUIDE if settings.items else LIST_GUIDE)
+            lines.append(settings.guide)
             lines.extend(item.shown for item in turns)
         return "\n".join(lines)
 

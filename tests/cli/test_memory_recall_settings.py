@@ -4,7 +4,7 @@
 ``search_when_empty``, ``recall_min_cosine``, ``recall_min_coverage``,
 ``recall_item_chars``, ``recall_excerpt``, ``recall_form``, ``recall_list_max``,
 ``recall_open_chars``, ``excerpt_open``, ``recall_source``, ``open_sources``,
-``compress_at_chars``, ``compress_parallel``, ``compress_cache``, ``note_gate``, ``note_min_cosine`` and
+``premise_check``, ``compress_at_chars``, ``compress_parallel``, ``compress_cache``, ``note_gate``, ``note_min_cosine`` and
 ``followup_query`` are saved only when they differ from the default, checked
 against their bounds and values, set for one run with ``-X``, and listed by the
 developer help only, each with the issue that decides it.
@@ -37,6 +37,7 @@ CHANGED = {
     "excerpt_open": "off",  # "on" is the default
     "recall_source": "items",
     "open_sources": "on",
+    "premise_check": "on",
     "compress_at_chars": 20000,
     "compress_parallel": 4,
     "compress_cache": "cache/compress.jsonl",
@@ -52,6 +53,7 @@ ISSUE = {name: "#349" for name in CHANGED} | {
     "excerpt_open": "#428",
     "recall_source": "#428",
     "open_sources": "#428",
+    "premise_check": "#428",
     "compress_at_chars": "#428",
     "compress_parallel": "#428",
     "compress_cache": "#428",
@@ -100,6 +102,7 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
             'recall_item_chars = 800\nrecall_excerpt = "match"\n'
             'recall_form = "list"\nrecall_list_max = 35\nrecall_open_chars = 9000\n'
             'excerpt_open = "off"\nrecall_source = "items"\nopen_sources = "on"\n'
+            'premise_check = "on"\n'
             'compress_at_chars = 20000\ncompress_parallel = 4\ncompress_cache = "cache/compress.jsonl"\n'
             'note_gate = "model"\nnote_min_cosine = 0.65\n'
             'followup_query = "message"\n'
@@ -111,6 +114,30 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
             keys = [line.split(" ")[0] for line in path.read_text().splitlines()]
             assert [key for key in keys if key in CHANGED] == [name]
             assert config.load().memory == cfg.memory
+
+
+def test_premise_check_is_off_by_default_and_saved_only_when_on(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    cfg = Config(chat_backend="vllm", embedding_backend="none")
+    assert MemoryConfig().premise_check == "off" and cfg.memory.premise_check == "off"
+    with (
+        mock.patch.object(config, "CONFIG_PATH", str(path)),
+        mock.patch.object(config, "CONFIG_DIR", str(tmp_path)),
+    ):
+        save(cfg)
+        assert "premise_check" not in path.read_text()
+        assert config.load().memory.premise_check == "off"
+        cfg.memory = MemoryConfig(premise_check="off")
+        save(cfg)
+        assert "premise_check" not in path.read_text()
+        cfg.memory = MemoryConfig(premise_check="on")
+        save(cfg)
+        assert '[memory]\npremise_check = "on"\n' in path.read_text()
+        assert config.load().memory.premise_check == "on"
+        cfg.memory = MemoryConfig()
+        save(cfg)
+        assert "premise_check" not in path.read_text()
+    assert errors(premise_check="on") == [] == errors(premise_check="off")
 
 
 def test_excerpt_open_is_on_by_default_and_saved_only_when_off(tmp_path: Path) -> None:
@@ -228,6 +255,8 @@ def test_a_file_without_followup_query_gets_the_new_default(tmp_path: Path) -> N
         ("recall_source", "items"),
         ("open_sources", "off"),
         ("open_sources", "on"),
+        ("premise_check", "off"),
+        ("premise_check", "on"),
         ("compress_at_chars", 4000),
         ("compress_at_chars", 60000),
         ("compress_at_chars", 12000),
@@ -421,6 +450,18 @@ def test_the_bounds_and_values_are_accepted(name: str, value: object) -> None:
             "Must be one of ('off', 'on').",
         ),
         (
+            "premise_check",
+            True,
+            "[memory] premise_check True is not recognised. "
+            "Must be one of ('off', 'on').",
+        ),
+        (
+            "premise_check",
+            "always",
+            "[memory] premise_check 'always' is not recognised. "
+            "Must be one of ('off', 'on').",
+        ),
+        (
             "compress_at_chars",
             3999,
             "[memory] compress_at_chars must be from 4000 to 60000, got 3999",
@@ -579,6 +620,8 @@ def test_x_sets_each_for_one_run_and_only_the_developer_help_lists_them(
         "memory.excerpt_open=maybe",
         "memory.recall_source=both",
         "memory.open_sources=maybe",
+        "memory.premise_check=maybe",
+        "memory.premise_check=true",
         "memory.compress_at_chars=3999",
         "memory.compress_at_chars=60001",
         "memory.compress_at_chars=big",

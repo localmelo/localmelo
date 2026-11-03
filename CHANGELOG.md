@@ -9,6 +9,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Developer only: a memory setting that has the model say it has no record of something a question names before answering from a near match. Part of #428.
 - Windows from other apps (#280). A page melo acts on can make another app open a window, such as a chat
   app's sign-in window that asks you to authorize; the browser never shows it. With the desktop control
   helper (a separate app that holds the Mac's Accessibility and Screen Recording permissions, so melo needs

@@ -98,6 +98,10 @@ MEMORY_EXCERPT_OPEN = ("off", "on")
 # is cut into for that encoding: see MemoryConfig.recall_source.
 MEMORY_RECALL_SOURCE = ("turns", "items")
 MEMORY_OPEN_SOURCES = ("off", "on")
+# Whether the list form's guide line also tells the model to say it has no record of
+# what a question names that none of the listed lines mention: see
+# MemoryConfig.premise_check.
+MEMORY_PREMISE_CHECK = ("off", "on")
 MEMORY_COMPRESS_AT_CHARS = (4000, 60000)
 # How many windows of one ingest the encoder is asked for at once: see
 # MemoryConfig.compress_parallel.
@@ -139,6 +143,7 @@ RECALL_KEYS = (
     "excerpt_open",
     "recall_source",
     "open_sources",
+    "premise_check",
     "compress_at_chars",
     "compress_parallel",
     "compress_cache",
@@ -466,6 +471,11 @@ class MemoryConfig:
     ``melo memory ingest FILE -X ingest=compress`` writes them); ``open_sources``,
     ``off`` (the default: an opened item shows its title and text only) or ``on``
     (it also shows its source turns whole, within ``recall_open_chars``);
+    ``premise_check``, ``off`` (the default) or ``on``, adds one sentence to the
+    line above the list form's lines that tells the model to say first that it has
+    no record of a person, thing, place or role the question names when none of the
+    lines mention it, and not to answer from something similar (it has no effect
+    on the excerpt form);
     ``compress_at_chars`` (4000-60000), the size of the window a chat is cut into
     for the chat model to encode, one model call each; ``compress_parallel`` (1-8,
     default 1), how many of those windows ``melo memory ingest`` has the chat
@@ -511,6 +521,7 @@ class MemoryConfig:
     excerpt_open: str = "on"  # on | off: a cut excerpt carries its id to open.
     recall_source: str = "turns"  # turns | items: recall draws on turns, or on items.
     open_sources: str = "off"  # off | on: an opened item also shows its source turns.
+    premise_check: str = "off"  # off | on: the list guide asks for "no record" first.
     compress_at_chars: int = 12000  # The size of a window a chat is encoded in.
     compress_parallel: int = 1  # Windows an ingest asks the encoder for at once.
     compress_cache: str = (
@@ -886,6 +897,7 @@ class Config:
             ("followup_query", MEMORY_FOLLOWUP_QUERY),
             ("recall_source", MEMORY_RECALL_SOURCE),
             ("open_sources", MEMORY_OPEN_SOURCES),
+            ("premise_check", MEMORY_PREMISE_CHECK),
             ("project_instructions", MEMORY_PROJECT_INSTRUCTIONS),
         ):
             value = getattr(self.memory, name)
