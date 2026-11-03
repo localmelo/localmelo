@@ -611,6 +611,7 @@
   "errors.pictureConvert": "这台电脑无法转换 {kind} 图片。请另存为 PNG 或 JPEG 后再添加。",
   "errors.pictureEmpty": "图片是空的。",
   "errors.pictureGone": "这张图片已经不在待发送中了，请重新添加。",
+  "errors.pictureScale": "这台电脑无法缩小这么大的图片。请另存一张更小的 PNG 或 JPEG（长边不超过 {px} 像素）再添加。",
   "errors.pictureTooLarge": "这张图片太大了，单张最大 {mb} MB。",
   "errors.pictureTooManyPixels": "这张图片的像素太多（最多 {px} 百万像素）。请缩小后再添加。",
   "errors.pictureTwice": "同一张图片被添加了两次。",

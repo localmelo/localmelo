@@ -628,6 +628,7 @@
   "errors.pictureConvert": "This computer cannot convert {kind} pictures. Save it as PNG or JPEG and add it again.",
   "errors.pictureEmpty": "The picture is empty.",
   "errors.pictureGone": "That picture is no longer waiting. Add it again.",
+  "errors.pictureScale": "This computer cannot scale a picture that large. Save a smaller PNG or JPEG (at most {px} pixels on the long side) and add it again.",
   "errors.pictureTooLarge": "That picture is too large. A picture may be at most {mb} MB.",
   "errors.pictureTooManyPixels": "That picture has too many pixels (at most {px} million). Make it smaller and add it again.",
   "errors.pictureTwice": "The same picture is attached twice.",

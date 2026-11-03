@@ -6,17 +6,27 @@ the name or the type the browser reported, and returns the picture the model
 gets: a PNG or JPEG whose long side is at most :data:`LONG_SIDE` pixels, the
 same limit the screenshots tools return use (``ToolImageStore``).
 
-PNG and JPEG that already fit are kept byte for byte. A larger PNG or JPEG is
-scaled and keeps its format. GIF (its first frame), WebP and HEIC are converted
-with macOS ``sips``: HEIC to JPEG, GIF and WebP to PNG, which keeps transparency.
+A PNG or JPEG that already fits keeps its pixels. A larger PNG or JPEG is scaled
+and keeps its format. GIF (its first frame), WebP and HEIC are converted with
+macOS ``sips``: HEIC to JPEG, GIF and WebP to PNG, which keeps transparency.
 Without ``sips`` only the PNG and JPEG that fit can be taken; anything that needs
-a conversion is refused with a plain reason instead of being sent as it is.
+a conversion or a smaller size is refused with a plain reason instead of being
+sent as it is.
+
+The pixel limit is checked first, from the sizes the file's own headers claim
+(:mod:`~localmelo.support.sessions.picture_extent`: every frame of a GIF, every
+property of a HEIC), before ``sips`` or any decoder opens the file. What comes out
+of a conversion is measured again and must fit in :data:`LONG_SIDE`.
+
+Whatever the route, the picture that comes out has no metadata: no EXIF (the
+camera, the time, the GPS position), XMP, comments or text chunks, and nothing
+after the end of the image (see :mod:`~localmelo.support.sessions.picture_clean`).
+Only the orientation and the colour that decoding needs are kept.
 """
 
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import subprocess
 import tempfile
@@ -27,6 +37,8 @@ from typing import Final
 from localmelo.melo.agent._request_accounting import _image_dimensions
 from localmelo.melo.checker.validators import MAX_IMAGE_BYTES
 from localmelo.melo.schema import ImagePart
+from localmelo.support.sessions.picture_clean import strip
+from localmelo.support.sessions.picture_extent import claimed_sizes
 
 # Pictures one message may carry. A picture costs a vision model roughly a
 # thousand tokens at this size, and a local model's window is often 8k to 32k
@@ -45,7 +57,6 @@ SIPS_TIMEOUT_S: Final = 20.0
 _HEIC_BRANDS: Final = frozenset(
     {b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"mif1", b"msf1", b"heif"}
 )
-_SIZE: Final = re.compile(r"pixel(Width|Height):\s*(\d+)")
 
 
 class PictureRefused(ValueError):  # noqa: N818
@@ -87,24 +98,6 @@ def sniff(raw: bytes) -> str | None:
     return None
 
 
-def _size_by_sips(sips: str, path: str) -> tuple[int, int] | None:
-    """The pixel size *sips* reads from the file's header, or None."""
-    try:
-        done = subprocess.run(
-            [sips, "-g", "pixelWidth", "-g", "pixelHeight", path],
-            capture_output=True,
-            text=True,
-            timeout=SIPS_TIMEOUT_S,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    found = dict(_SIZE.findall(done.stdout))
-    if done.returncode != 0 or "Width" not in found or "Height" not in found:
-        return None
-    return int(found["Width"]), int(found["Height"])
-
-
 def _convert(
     sips: str, raw: bytes, kind: str, target: str, scale: bool
 ) -> bytes | None:
@@ -143,44 +136,49 @@ def normalize(raw: bytes) -> Picture:
     kind = sniff(raw)
     if kind is None:
         raise PictureRefused(415, "picture_unsupported")
-    size = _image_dimensions(raw) if kind in ("png", "jpeg", "gif") else None
-    sips = shutil.which("sips")
-    if size is None and kind in ("png", "jpeg", "gif"):
+    sizes = claimed_sizes(raw, kind)
+    if sizes is None:
         raise PictureRefused(415, "picture_unreadable")
-    if size is None:
-        # WebP and HEIC: the header says nothing here; ask the system once.
-        if sips is None:
-            raise PictureRefused(415, "picture_convert", kind=kind.upper())
-        with tempfile.TemporaryDirectory(prefix="melo-picture-") as folder:
-            probe = os.path.join(folder, f"in.{kind}")
-            Path(probe).write_bytes(raw)
-            size = _size_by_sips(sips, probe)
-        if size is None:
-            raise PictureRefused(415, "picture_unreadable")
-    width, height = size
-    if width <= 0 or height <= 0 or width * height > MAX_PIXELS:
+    # Every picture the file mentions (each frame of a GIF, each property of a HEIC)
+    # is held to the limit, not only the first.
+    if any(w <= 0 or h <= 0 or w * h > MAX_PIXELS for w, h in sizes):
         raise PictureRefused(
             413,
             "picture_too_many_pixels",
             px=MAX_PIXELS // 1_000_000,
         )
-    fits = max(width, height) <= LONG_SIDE
+    # The tool only enlarges a picture it is told to fit, so it is asked to scale only
+    # when some size in the headers is over the limit; a grid of tiles can name a tile
+    # larger than the picture, which is then scaled up to the limit at worst.
+    fits = all(max(size) <= LONG_SIDE for size in sizes)
     if kind in ("png", "jpeg") and fits:
-        return Picture(ImagePart.from_bytes(raw, f"image/{kind}"), width, height, False)
+        return _clean(raw, kind, raw)
+    sips = shutil.which("sips")
     if sips is None:
         if kind in ("png", "jpeg"):
-            # Larger than the limit and no tool to scale it: sent as it is (as screenshots are).
-            return Picture(
-                ImagePart.from_bytes(raw, f"image/{kind}"), width, height, False
-            )
+            # Too large and no tool to scale it: not sent as it is.
+            raise PictureRefused(413, "picture_scale", px=LONG_SIDE)
         raise PictureRefused(415, "picture_convert", kind=kind.upper())
     target = {"heic": "jpeg", "jpeg": "jpeg"}.get(kind, "png")
     converted = _convert(sips, raw, kind, target, scale=not fits)
     if not converted:
         raise PictureRefused(415, "picture_unreadable")
-    if len(converted) > MAX_IMAGE_BYTES:
-        raise PictureRefused(413, "picture_too_large", mb=MAX_IMAGE_BYTES >> 20)
-    done_size = _image_dimensions(converted)
-    if done_size is None:
+    return _clean(converted, target, raw)
+
+
+def _clean(made: bytes, kind: str, original: bytes) -> Picture:
+    """The picture for *made* (PNG or JPEG) with its metadata stripped, as ``Picture.converted`` against *original*."""
+    cleaned = strip(made, kind)
+    if cleaned is None:
         raise PictureRefused(415, "picture_unreadable")
-    return Picture(ImagePart.from_bytes(converted, f"image/{target}"), *done_size, True)
+    if len(cleaned) > MAX_IMAGE_BYTES:
+        raise PictureRefused(413, "picture_too_large", mb=MAX_IMAGE_BYTES >> 20)
+    size = _image_dimensions(cleaned)
+    if size is None:
+        raise PictureRefused(415, "picture_unreadable")
+    if max(size) > LONG_SIDE:
+        # A converter that did not scale: the picture is not sent as it is.
+        raise PictureRefused(413, "picture_scale", px=LONG_SIDE)
+    return Picture(
+        ImagePart.from_bytes(cleaned, f"image/{kind}"), *size, cleaned != original
+    )

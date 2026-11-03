@@ -10,7 +10,7 @@ disk, and a picture nobody sends is gone after :data:`TTL_S` seconds.
 * ``POST /api/uploads?name=…`` answers 201 with ``{id, name, mime_type,
   size_bytes, width, height, model_reads}`` (``model_reads`` is whether the chat
   model reads pictures: true, false, or null when unknown); 413 ``picture_too_large``, 415
-  ``picture_unsupported`` / ``picture_unreadable`` / ``picture_convert``.
+  ``picture_unsupported`` / ``picture_unreadable`` / ``picture_convert`` / ``picture_scale``.
 * ``GET /api/uploads/{id}`` is the picture as it will be sent, for the thumbnail.
 * ``DELETE /api/uploads/{id}`` drops it (the thumbnail's remove button).
 """
@@ -86,6 +86,8 @@ def refusal_text(refused: PictureRefused) -> str:
             return t("errors.pictureUnsupported")
         case "picture_convert":
             return t("errors.pictureConvert", **params)
+        case "picture_scale":
+            return t("errors.pictureScale", **params)
     return t("errors.pictureUnreadable")
 
 
