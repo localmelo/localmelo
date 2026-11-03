@@ -290,15 +290,38 @@
                   <p class="field-hint" id="s-chat-url-hint" data-i18n="html.sChatUrlHint">The address your model server prints when it starts, such as http://127.0.0.1:8000/v1.</p>
                 </div>
                 <div id="s-cloud-fields" hidden>
-                  <div class="field">
-                    <label for="s-key-env" data-i18n="html.apiKeyEnvironmentVariable">API key environment variable</label>
-                    <input id="s-key-env" spellcheck="false" autocomplete="off" aria-describedby="s-key-status" />
+                  <div class="field" id="s-base-url-field" hidden>
+                    <label for="s-base-url" data-i18n="settings.hosted.address">Service address</label>
+                    <input id="s-base-url" placeholder="https://llm.example.com/v1" spellcheck="false" autocomplete="url" aria-describedby="s-base-url-hint" />
+                    <p class="field-hint" id="s-base-url-hint" data-i18n="settings.hosted.addressHint">A service that speaks the OpenAI format. Use its address up to /v1.</p>
+                  </div>
+                  <p class="st-hint" id="s-address-text"></p>
+                  <div class="field" id="s-key-field">
+                    <label for="s-key-input" data-i18n="settings.hosted.key">API key</label>
+                    <div class="st-secret" id="s-key-saved" hidden>
+                      <p class="st-state" id="s-key-state"></p>
+                      <div class="st-actions">
+                        <button type="button" class="quiet-button" id="s-key-replace" data-i18n="settings.hosted.replace">Replace</button>
+                        <button type="button" class="quiet-button" id="s-key-remove" data-i18n="settings.hosted.remove">Remove</button>
+                      </div>
+                    </div>
+                    <div class="st-inline" id="s-key-entry">
+                      <input id="s-key-input" type="password" spellcheck="false" autocomplete="off" autocapitalize="off" aria-describedby="s-key-help s-key-status" />
+                      <button type="button" class="outline-button" id="s-key-save" data-i18n="settings.hosted.saveKey">Save key</button>
+                    </div>
+                    <p class="field-hint" id="s-key-help" data-i18n="settings.hosted.keyHelp">Kept in your Mac's keychain, not in melo's settings. melo does not show it again.</p>
                     <p id="s-key-status" class="field-hint" role="status" aria-live="polite"></p>
                   </div>
-                  <div class="field">
-                    <label for="s-base-url" data-i18n="html.baseUrlOptional">Base URL (optional)</label>
-                    <input id="s-base-url" spellcheck="false" autocomplete="url" />
-                  </div>
+                  <details class="advanced" id="s-key-env-details">
+                    <summary><span data-i18n="settings.hosted.envTitle">Use an environment variable instead</span> <span class="advanced-optional" data-i18n="html.optional">Optional</span></summary>
+                    <div class="advanced-body">
+                      <div class="field">
+                        <label for="s-key-env" data-i18n="html.apiKeyEnvironmentVariable">API key environment variable</label>
+                        <input id="s-key-env" spellcheck="false" autocomplete="off" aria-describedby="s-key-env-status" />
+                        <p id="s-key-env-status" class="field-hint" role="status" aria-live="polite"></p>
+                      </div>
+                    </div>
+                  </details>
                 </div>
                 <datalist id="s-model-options"></datalist>
                 <div class="field">
@@ -308,6 +331,10 @@
                     <button type="button" class="outline-button" id="discover-btn" data-i18n="html.discoverBtn">Discover models</button>
                   </div>
                   <p id="discover-status" class="field-hint" role="status" aria-live="polite"></p>
+                </div>
+                <div class="field" id="s-thinking-field" hidden>
+                  <label class="st-check"><input type="checkbox" id="s-thinking" aria-describedby="s-thinking-hint" /> <span data-i18n="settings.hosted.thinking">Let the model think before it answers</span></label>
+                  <p class="field-hint" id="s-thinking-hint" data-i18n="settings.hosted.thinkingHint">Thinking can help on hard tasks. It is slower, and a model that thinks sometimes ends a turn without an answer.</p>
                 </div>
                 <div class="field" id="s-embed-offer" hidden>
                   <label class="st-check"><input type="checkbox" id="s-embed-use" /> <span id="s-embed-offer-label" data-i18n="html.sEmbedOfferLabel">Remember across chats with an embedding model?</span></label>

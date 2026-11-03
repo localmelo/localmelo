@@ -2402,6 +2402,9 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .st-editor .st-group-title { margin-top: 0; }
 .st-editor .field:last-of-type { margin-bottom: 0; }
 .st-inline { display: flex; gap: var(--space-2); }
+.st-secret { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-1) var(--space-3); min-height: 38px; }
+.st-secret .st-state { margin: 0; }
+#s-address-text { margin: 0 0 var(--space-4); overflow-wrap: anywhere; }
 .st-inline { align-items: center; }
 .st-inline input { flex: 1; min-width: 0; }
 .st-inline button { flex: none; min-height: 38px; }
