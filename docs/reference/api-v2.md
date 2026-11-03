@@ -631,6 +631,14 @@ Tools run with the user's permissions, not in a sandbox.
 - `GET /api/tasks` returns `{"tasks": [...]}`; optional `state` and integer
   `level` query parameters filter the rows. `GET /api/tasks/{task_id}`
   returns `{"task": ...}` or 404 `not_found`.
+- A task's `spec` also holds what melo gave it when it was made, each field
+  only when set and never accepted in a request: `context_pack` (the notes),
+  `own_words` (what the person typed, when the objective does not hold it),
+  `chat_turns` (the starting chat's newest earlier turns, `- the user: …` with
+  an indented `melo: …` line each) and `chat_picked` (one `- ` line for each
+  thing that chat's turn opened, searched or recalled). The task reads them as
+  data after its request; the task page folds them under "What melo told the
+  task".
 - A task whose run ended `budget_exhausted` is stored `failed` with
   `wait_reason` `Out of steps`, and every task body says `out_of_steps`
   (`true` for it). `GET /api/tasks/{task_id}` also gives such a task `left`,
@@ -965,10 +973,14 @@ token total.
   `gist.say.model` (`melo says: …`), so the words always read as the model's. A
   client says everything in its own language with the catalog entries
   `gist.say.<id>`, and joins `apps` with `gist.list.*`; `warn` is set when the
-  model's words disagree with what the code does (`delete` or `send_out`) and
-  quotes them. The sentence is for reading: `review` decides whether the call
+  model's words disagree with what the code does and quotes them (`params.said`):
+  `delete` or `send_out` for another effect, `delete_target` or `send_out_target`
+  (with `params.target`) for the same effect on a file, folder or host the words did
+  not name. The sentence is for reading: `review` decides whether the call
   asks, and `categories` has `app_control` for a script that operates one app by
-  its plain name (click-only, like `system`).
+  its plain name (click-only, like `system`). Erasing a disk, stopping other programs
+  and opening a link of a custom scheme are `system`; discarding uncommitted work is
+  `delete`.
 - A `pending_approvals` entry's `target` is set for a `file_write`: the
   path `path_label` (relative to the workspace, else with the home folder
   as `~`), whether the file `exists`, and its `size_bytes`, read when the

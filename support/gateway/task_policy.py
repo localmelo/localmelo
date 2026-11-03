@@ -104,6 +104,11 @@ class TaskSpec:
     and a step review reads it as the person's words.
     ``context_pack`` is what the owner chat's notes said about the person and
     the folder when the task was made; only trusted code sets it.
+    ``own_words`` is ``user_words`` as the task's first request shows them
+    (cut), set only when they say more than the objective; ``chat_turns`` the
+    lines of the starting chat's newest earlier turns and ``chat_picked`` the
+    lines of what its turn recalled, searched or opened, both for a task a
+    chat started. Only trusted code sets them; the task reads all three as data.
     ``project_instructions`` is the text of the project's own instruction
     files found in the folder then (``AGENTS.md``, ``CLAUDE.md``,
     ``GEMINI.md``); ``project_files`` lists what was read as (path, characters,
@@ -119,6 +124,9 @@ class TaskSpec:
     reason: str = ""
     user_words: str = ""
     context_pack: str = ""
+    own_words: str = ""
+    chat_turns: str = ""
+    chat_picked: str = ""
     project_instructions: str = ""
     project_files: tuple[tuple[str, int, bool], ...] = ()
     project_skipped: tuple[str, ...] = ()
@@ -182,7 +190,8 @@ class TaskSpec:
     def to_dict(self) -> dict[str, Any]:
         """The JSON object ``tasks.spec`` holds.
 
-        ``user_words``, ``context_pack`` and the ``project_*`` fields are in it only when set.
+        ``user_words``, ``context_pack``, ``own_words``, ``chat_turns``,
+        ``chat_picked`` and the ``project_*`` fields are in it only when set.
         """
         out: dict[str, Any] = {
             "title": self.title,
@@ -196,6 +205,9 @@ class TaskSpec:
             out["user_words"] = self.user_words
         if self.context_pack:
             out["context_pack"] = self.context_pack
+        for name in ("own_words", "chat_turns", "chat_picked"):
+            if value := getattr(self, name):
+                out[name] = value
         if self.project_instructions:
             out["project_instructions"] = self.project_instructions
         if self.project_files:

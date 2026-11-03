@@ -19,9 +19,11 @@ from localmelo.melo.checker.review.paths import Context, Findings, resolve, touc
 from localmelo.melo.checker.review.python import review_python
 from localmelo.melo.checker.review.shell import review_shell
 from localmelo.melo.contracts.folders import canonical_path
-from localmelo.melo.contracts.review import RULED_TOOLS, ActionReview
+from localmelo.melo.contracts.review import MAX_TEXT, RULED_TOOLS, ActionReview
 
-__all__ = ["RULED_TOOLS", "review_action"]
+__all__ = ["MAX_TEXT", "RULED_TOOLS", "review_action"]
+
+TOO_LONG = "Is too long for melo to check."
 
 
 def review_action(payload: ActionReviewPayload) -> ActionReview:
@@ -41,9 +43,17 @@ def review_action(payload: ActionReviewPayload) -> ActionReview:
         if payload.tool_name == "shell_exec":
             command = args.get("command")
             text = " ".join(map(str, command)) if isinstance(command, list) else command
-            review_shell(ctx, f, str(text or ""))
+            text = str(text or "")
+            if len(text) > MAX_TEXT:
+                f.doubt(TOO_LONG)
+            else:
+                review_shell(ctx, f, text)
         elif payload.tool_name == "python_exec":
-            review_python(ctx, f, str(args.get("code") or ""))
+            code = str(args.get("code") or "")
+            if len(code) > MAX_TEXT:
+                f.doubt(TOO_LONG)
+            else:
+                review_python(ctx, f, code)
         elif payload.tool_name in ("file_write", "file_edit"):
             # The workspace fence places it; what the path is counts, and the
             # code it writes.

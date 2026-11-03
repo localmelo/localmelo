@@ -167,7 +167,9 @@ class TestEarlierTurns:
             async def broken(*_: Any, **__: Any) -> Any:
                 raise OSError("disk gone")
 
-            monkeypatch.setattr(chat.runner, "_eligible_turns", broken)
+            monkeypatch.setattr(
+                "localmelo.support.sessions.runner.earlier_turns", broken
+            )
             assert await chat.say("go on", "Going on.") == "Going on."
             assert "earlier_turns" not in chat.kwargs[-1]
         finally:

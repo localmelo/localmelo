@@ -89,7 +89,8 @@ MEMORY_RECALL_FORM = ("excerpt", "list")
 MEMORY_RECALL_LIST_MAX = (1, 50)
 MEMORY_RECALL_OPEN_CHARS = (500, 16000)
 # Whether a turn's excerpt that shows less than the whole turn carries its id, so the
-# model can open the whole turn: see MemoryConfig.excerpt_open.
+# model can open the whole turn (on, the default; off is the developer comparison):
+# see MemoryConfig.excerpt_open.
 MEMORY_EXCERPT_OPEN = ("off", "on")
 # Whether recall draws on the chat turns or on memory items encoded from them, and
 # whether an opened item also shows its source turns; the size of the window a chat
@@ -97,6 +98,9 @@ MEMORY_EXCERPT_OPEN = ("off", "on")
 MEMORY_RECALL_SOURCE = ("turns", "items")
 MEMORY_OPEN_SOURCES = ("off", "on")
 MEMORY_COMPRESS_AT_CHARS = (4000, 60000)
+# How many windows of one ingest the encoder is asked for at once: see
+# MemoryConfig.compress_parallel.
+MEMORY_COMPRESS_PARALLEL = (1, 8)
 # The bars an item must pass to be recalled, and their bounds (inclusive): see
 # MemoryConfig.recall_min_cosine and recall_min_coverage.
 MEMORY_RECALL_MIN_COSINE = (0.20, 0.95)
@@ -135,6 +139,7 @@ RECALL_KEYS = (
     "recall_source",
     "open_sources",
     "compress_at_chars",
+    "compress_parallel",
     "compress_cache",
     "note_gate",
     "note_min_cosine",
@@ -418,12 +423,13 @@ class MemoryConfig:
     the block and in the search tool alike, and ``recall_open_chars`` (500-16000)
     is the room one opened turn takes; ``recall_docs`` and ``recall_chars`` do not
     bound the list, and ``recall_item_chars`` and ``recall_excerpt`` apply to the
-    excerpt form only. ``excerpt_open``, ``off`` (the default) or ``on``, is for the
+    excerpt form only. ``excerpt_open``, ``on`` (the default) or ``off``, is for the
     excerpt form of chat turns: with ``on`` a line that shows less than the whole
     turn (an excerpt that was cut, or a piece of a long turn) starts with the
     turn's id, such as ``[t123]``, a line under the items says so, and the model
     has ``open_memory`` to open the turn whole within ``recall_open_chars``; a line
-    that shows the whole turn reads as before. It has no effect with
+    that shows the whole turn reads as before; ``off`` is the developer comparison
+    (the block, the search result and the tools as before). It has no effect with
     ``recall_form = "list"`` (which always offers ``open_memory``) or
     ``recall_source = "items"``. Four more are about memory items (#428). ``recall_source``,
     ``turns`` (recall draws on the chat turns, the default) or ``items`` (it draws
@@ -432,7 +438,9 @@ class MemoryConfig:
     ``off`` (the default: an opened item shows its title and text only) or ``on``
     (it also shows its source turns whole, within ``recall_open_chars``);
     ``compress_at_chars`` (4000-60000), the size of the window a chat is cut into
-    for the chat model to encode, one model call each; and ``compress_cache``, the
+    for the chat model to encode, one model call each; ``compress_parallel`` (1-8,
+    default 1), how many of those windows ``melo memory ingest`` has the chat
+    model read at once (the items are the same, only the time changes); and ``compress_cache``, the
     path of the file that keeps each window's reply (empty: ``compress_cache.jsonl``
     in the memory folder). Two more are about where a note the chat's model keeps
     with ``remember`` may come from (#442). ``note_gate``, ``typed`` (the words the
@@ -471,10 +479,11 @@ class MemoryConfig:
     recall_form: str = "excerpt"  # excerpt | list: turns as excerpts, or as a list.
     recall_list_max: int = 20  # The most turns the list form lists.
     recall_open_chars: int = 4000  # The room one turn the model opens takes.
-    excerpt_open: str = "off"  # off | on: a cut excerpt carries its id to open.
+    excerpt_open: str = "on"  # on | off: a cut excerpt carries its id to open.
     recall_source: str = "turns"  # turns | items: recall draws on turns, or on items.
     open_sources: str = "off"  # off | on: an opened item also shows its source turns.
     compress_at_chars: int = 12000  # The size of a window a chat is encoded in.
+    compress_parallel: int = 1  # Windows an ingest asks the encoder for at once.
     compress_cache: str = (
         ""  # Where encoder replies are kept; empty: in the memory dir.
     )
@@ -785,6 +794,7 @@ class Config:
             ("recall_list_max", MEMORY_RECALL_LIST_MAX),
             ("recall_open_chars", MEMORY_RECALL_OPEN_CHARS),
             ("compress_at_chars", MEMORY_COMPRESS_AT_CHARS),
+            ("compress_parallel", MEMORY_COMPRESS_PARALLEL),
         ):
             value = getattr(self.memory, name)
             if not isinstance(value, int) or isinstance(value, bool):

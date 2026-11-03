@@ -55,11 +55,34 @@ function defaultEvery(fn, ms) {
   return () => clearInterval(timer);
 }
 
-// What the task's chat knew about the person and the folder when the task began (its spec's
-// context_pack, one "- " line each): a folded list, and nothing when the task had no pack.
+// One "- " line each, as a pack's lines are kept.
+function packLines(text) {
+  return String(text ?? '').split('\n').map((line) => line.replace(/^- /, '')).filter(Boolean);
+}
+
+// The chat's earlier turns as kept ("- the user: …" with an indented "melo: …"): one entry a turn.
+function turnEntries(text) {
+  const entries = [];
+  for (const line of String(text ?? '').split('\n')) {
+    if (line.startsWith('- ')) entries.push(line.slice(2));
+    else if (line.trim() && entries.length) entries[entries.length - 1] += `\n${line.trim()}`;
+  }
+  return entries;
+}
+
+// What melo gave the task when it began, as its spec keeps it: the person's own words when the
+// request did not hold them (own_words), its chat's earlier turns (chat_turns), what the chat's
+// turn recalled (chat_picked) and the notes (context_pack). A folded list for each part it got,
+// under its label, and nothing when it got none.
 export function packFold(doc, task) {
-  const lines = String(task?.spec?.context_pack ?? '').split('\n').map((line) => line.replace(/^- /, '')).filter(Boolean);
-  if (!lines.length) return null;
+  const spec = task?.spec ?? {};
+  const parts = [
+    ['tasks.pack.words', spec.own_words ? [String(spec.own_words)] : []],
+    ['tasks.pack.turns', turnEntries(spec.chat_turns)],
+    ['tasks.pack.picked', packLines(spec.chat_picked)],
+    ['tasks.pack.notes', packLines(spec.context_pack)],
+  ].filter(([, entries]) => entries.length);
+  if (!parts.length) return null;
   const fold = doc.createElement('details');
   fold.className = 'task-pack';
   const summary = doc.createElement('summary');
@@ -67,13 +90,19 @@ export function packFold(doc, task) {
   const note = doc.createElement('p');
   note.className = 'muted';
   note.textContent = t('tasks.pack.note');
-  const list = doc.createElement('ul');
-  for (const line of lines) {
-    const item = doc.createElement('li');
-    item.textContent = line;
-    list.append(item);
+  fold.append(summary, note);
+  for (const [key, entries] of parts) {
+    const label = doc.createElement('p');
+    label.className = 'task-pack-part';
+    label.textContent = t(key);
+    const list = doc.createElement('ul');
+    for (const entry of entries) {
+      const item = doc.createElement('li');
+      item.textContent = entry;
+      list.append(item);
+    }
+    fold.append(label, list);
   }
-  fold.append(summary, note, list);
   return fold;
 }
 
