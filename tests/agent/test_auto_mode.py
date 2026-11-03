@@ -755,6 +755,85 @@ async def test_typing_is_reviewed_by_itself_while_a_click_or_choice_stays_routin
         assert "types text on news.example" in words and "hello there" in words
 
 
+class PressesInAnotherApp(OpensSite):
+    """A provided tool that asks to press a button in another app's window, as ``window_press`` does."""
+
+    async def start(self) -> list[ProvidedTool]:
+        [tool] = await super().start()
+        return [
+            ProvidedTool(
+                definition=ToolDef(
+                    name="press_in_app",
+                    description="Press a button in another app's window.",
+                    parameters={
+                        "type": "object",
+                        "properties": {"button": {"type": "string"}},
+                        "required": ["button"],
+                    },
+                    annotations={"readOnlyHint": True},
+                ),
+                function=self._press,
+            )
+        ]
+
+    async def _press(self, button: str) -> str:
+        ask = TOOL_ASK.get()
+        assert ask is not None
+        decision = await ask(
+            "desktop-act:Chat",
+            {
+                "app": "Chat",
+                "access": "desktop-act",
+                "how": "press",
+                "on": f'"{button}"',
+                "window": "Sign in to news.example",
+                "button": button,
+            },
+            f'press "{button}" in Chat\'s window "Sign in to news.example"',
+        )
+        self.answers.append(decision)
+        return "pressed" if decision.allow else decision.reason
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reviews", "allowed"),
+    [
+        # Authorizing the sign-in the person asked for: on the goal, it runs.
+        ([verdict()], True),
+        # Off the goal: stopped, with nobody to ask.
+        ([verdict(fits_request="no", category="beyond_request")], False),
+    ],
+)
+async def test_a_press_in_another_apps_window_is_reviewed_on_the_goal(
+    tmp_path: Path, reviews: list[Message], allowed: bool
+) -> None:
+    tool = PressesInAnotherApp()
+    call = ("press_in_app", {"button": "Allow"}, "c1")
+    llm = FakeModel([_calls(call), _answer("done")], reviews)
+    (tmp_path / "ws").mkdir()
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset(),
+            tool_exposure="all",
+            workspace_root=str(tmp_path / "ws"),
+        ),
+        tool_providers=[tool],
+    )
+    agent.chat.sleep = _no_wait
+
+    await agent.run_task(
+        "sign in to news.example with the Chat app and check in", approval=AutoPolicy()
+    )
+
+    [answer] = tool.answers
+    assert answer.allow is allowed
+    assert len(llm.review_requests) == 1  # a press is never routine by a word match
+    words = json.dumps([m.content for m in llm.review_requests[0]])
+    assert "another app's window" in words and "Allow" in words
+
+
 @pytest.mark.asyncio
 async def test_typing_the_same_text_twice_is_two_reviews(tmp_path: Path) -> None:
     tool = ActsOnSite()
