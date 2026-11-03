@@ -72,6 +72,7 @@ from localmelo.melo.schema import (
 from localmelo.support.config import (
     CHAT_RECENT_DIGEST_MINUTES,
     MEMORY_COMPRESS_AT_CHARS,
+    MEMORY_COMPRESS_PARALLEL,
     MEMORY_NOTE_GATE,
     MEMORY_NOTE_MIN_COSINE,
     MEMORY_RECALL_CHARS,
@@ -1999,6 +2000,14 @@ class ChatMemory:
         fits = isinstance(value, int) and not isinstance(value, bool)
         return value if fits and low <= value <= high else COMPRESS_AT_CHARS
 
+    def compress_parallel(self) -> int:
+        """``[memory] compress_parallel`` now (out of its bounds: 1)."""
+        cfg = self._settings()
+        value = getattr(cfg.memory, "compress_parallel", 1) if cfg else 0
+        low, high = MEMORY_COMPRESS_PARALLEL
+        fits = isinstance(value, int) and not isinstance(value, bool)
+        return value if fits and low <= value <= high else 1
+
     def compress_cache(self) -> hippo_encode.Cache:
         """The cache of encoder replies: ``[memory] compress_cache``, else
         ``compress_cache.jsonl`` in the memory folder."""
@@ -2010,6 +2019,37 @@ class ChatMemory:
             else os.path.join(self.directory, COMPRESS_CACHE_FILE)
         )
 
+    async def encode_chat(
+        self,
+        title: str,
+        turns: Sequence[hippo_encode.Turn],
+        *,
+        stats: hippo_encode.Stats | None = None,
+        cache: hippo_encode.Cache | None = None,
+        limit: asyncio.Semaphore | None = None,
+    ) -> hippo_encode.Encoding:
+        """The encode step of :meth:`compress_chat` alone: the chat's model reads
+        the exchanges *turns* window by window and the items come back, not yet
+        embedded or routed (developer setting, #428).
+
+        Raises ``RuntimeError`` when no chat model is set up. With *limit*, the
+        windows that are not cached are asked for together, each request under the
+        semaphore (see :func:`~.hippo_encode.encode`); the encoding is the same.
+        """
+        provider = self.chat_provider()
+        if provider is None:
+            raise RuntimeError(self.last_error or "no chat model is set up")
+        return await hippo_encode.encode(
+            provider,
+            title,
+            turns,
+            window_chars=self.compress_window(),
+            cache=cache or self.compress_cache(),
+            stats=stats,
+            backend=self._llm_backend(),
+            limit=limit,
+        )
+
     async def compress_chat(
         self,
         session_id: str,
@@ -2019,6 +2059,7 @@ class ChatMemory:
         stats: hippo_encode.Stats | None = None,
         router: Router | None = None,
         cache: hippo_encode.Cache | None = None,
+        encoding: hippo_encode.Encoding | None = None,
     ) -> Compressed:
         """Encode the exchanges *turns* of chat *session_id* into memory items and
         route each against the items kept (developer setting, #428).
@@ -2029,20 +2070,12 @@ class ChatMemory:
         (:class:`~.hippo_route.Router`: rules, no model call). Raises
         ``RuntimeError`` when no chat model is set up. Nothing about the chat's
         turns changes. *router* and *cache* are shared across the chats of one run
-        (the settings' otherwise).
+        (the settings' otherwise). With *encoding* (what :meth:`encode_chat` gave
+        for these *turns*), the chat is not encoded again: it goes straight to
+        embedding and routing.
         """
-        provider = self.chat_provider()
-        if provider is None:
-            raise RuntimeError(self.last_error or "no chat model is set up")
-        encoding = await hippo_encode.encode(
-            provider,
-            title,
-            turns,
-            window_chars=self.compress_window(),
-            cache=cache or self.compress_cache(),
-            stats=stats,
-            backend=self._llm_backend(),
-        )
+        if encoding is None:
+            encoding = await self.encode_chat(title, turns, stats=stats, cache=cache)
         texts = [f"{piece.title}\n{piece.text}" for piece in encoding.pieces]
         vectors: list[Sequence[float] | None] = [None] * len(texts)
         model = ""
