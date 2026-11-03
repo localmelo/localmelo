@@ -1280,6 +1280,7 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
   const handing = h.run('approvalCard(request)');
   assert.equal(findNode(handing, (node) => node.className === 'approval-content').textContent, 'chat://login?x=1');
   assert.match(findNode(handing, (node) => node.className === 'approval-note').textContent, /Chat comes to the front/);
+  assert.equal(findNode(handing, (node) => node.id === 'approval-scope-hand-off').textContent, 'In this chat, pages may open Chat again without asking.');
   // Chrome in the background is worded for itself.
   h.context.request = {request_id: 'open-chrome', tool_name: 'browser:https://example.com',
     arguments: {site: 'example.com', access: 'read', browser: 'chrome'}, workspace_label: '~/w'};
@@ -6170,6 +6171,9 @@ test('the main chat\'s own approval card says each kept answer counts in every c
     'melo will not ask again before reading or opening a.example in any chat.');
   assert.equal(rules({tool_name: 'browser-act:https://a.example', arguments: {site: 'a.example'}})[1],
     'melo will not ask again before clicking or choosing on a.example in any chat. Typing still asks every time.');
+  // A page that asks for another app: the kept answer covers that kind of address in any chat.
+  assert.deepEqual(rules({tool_name: 'handoff:chat', arguments: {site: 'example.com', access: 'handoff', app: 'Chat', scheme: 'chat', url: 'chat://login?x=1'}}),
+    ['Allow in every chat', 'In any chat, pages may open Chat again without asking.', EVERYWHERE]);
   // A window another app opened names the app.
   const see = rules({tool_name: 'window-read:com.example.chat', arguments: {app: 'Chat', window: 'Sign in'}, offers_chat: true});
   assert.deepEqual([see[0], see[2]], ['Allow Chat everywhere', EVERYWHERE]);

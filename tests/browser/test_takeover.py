@@ -370,6 +370,30 @@ def test_the_websocket_frame_lines_never_reach_a_log() -> None:
     )
 
 
+@pytest.mark.parametrize("level", [logging.DEBUG, logging.INFO, logging.WARNING])
+def test_a_handshake_header_that_carries_a_credential_is_logged_redacted(
+    level: int,
+) -> None:
+    token = "synthetic-bearer-7f3a"  # noqa: S105 - not a credential
+    for line, name, value in [
+        ("< %s: %s", "Authorization", f"Bearer {token}"),
+        ("< %s: %s", "cookie", f"melo_session_1={token}"),
+        ("> %s: %s", "Set-Cookie", f"melo_session_1={token}; HttpOnly"),
+        ("< %s: %s", "X-Api-Token", token),
+    ]:
+        record = logging.LogRecord(
+            "uvicorn.error", level, "", 0, line, (name, value), None
+        )
+        assert QuietFrames().filter(record) is True, "the line stays, redacted"
+        said = record.getMessage()
+        assert token not in said and said.endswith(f"{name}: {takeover.REDACTED}")
+    host = logging.LogRecord(
+        "uvicorn.error", level, "", 0, "< %s: %s", ("Host", "127.0.0.1:9"), None
+    )
+    assert QuietFrames().filter(host) is True
+    assert host.getMessage() == "< Host: 127.0.0.1:9"
+
+
 # ── When melo needs the person ──
 
 
@@ -766,6 +790,72 @@ async def test_melo_never_tidies_away_the_persons_tab() -> None:
     provider._arm_idle()
     await asyncio.sleep(0.3)
     assert ("close", "t1") not in driver.calls and provider.live_raw("t1") is not None
+    await provider.close()
+
+
+async def test_a_step_naming_another_tab_never_acts_on_the_persons_tab(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The person took the current tab over from the panel; its reading is kept,
+    # so a ref of it is still real. A step naming another tab, a tab of no chat
+    # or the person's tab spelt differently is refused or waits: the tab whose
+    # owner was checked is the tab the step works on.
+    monkeypatch.setattr(provider_mod, "STEP_WAIT_S", 0.05)
+    driver = browser()
+    provider, tools, live = await started(driver)
+    await run(tools, "browser_open", url=HOME)  # t1: e1 is the "Sign in" link
+    await run(tools, "browser_open", url=LOGIN, tab="new")  # t2: e3 on
+    await run(tools, "browser_tabs", action="switch", tab="t1")
+    viewer = await live.watch()
+    framed(driver)
+    assert await live.take(viewer) is True and provider.owners.owner("t1") == "you"
+    calls = len(driver.calls)
+
+    other = await run(tools, "browser_follow", ref="e1", tab="t2")
+    assert other.is_error and "e1" in other.text, "t2's reading has no e1"
+    unknown = await run(tools, "browser_follow", ref="e1", tab="t9")
+    assert unknown.is_error and '"t9" is not a tab of this chat' in unknown.text
+    spelt = await run(tools, "browser_follow", ref="e1", tab=" T1 ")
+    assert not spelt.is_error
+    assert spelt.text.startswith("The user is using the page in tab t1")
+
+    assert driver.calls[calls:] == [], "no page was opened, read or touched"
+    assert driver.open_in == [], "nothing was loaded into a tab of before"
+    assert provider.owners.owner("t1") == "you"
+    await provider.close()
+
+
+@pytest.mark.parametrize(
+    ("tool", "args"),
+    [
+        ("browser_open", {"url": LOGIN}),
+        ("browser_read", {}),
+        ("browser_find", {"query": "Sign"}),
+        ("browser_follow", {"ref": "e1"}),
+        ("browser_click", {"ref": "e2"}),
+        ("browser_type", {"ref": "e1", "text": "x"}),
+        ("browser_select", {"ref": "e1", "option": "x"}),
+        ("browser_back", {}),
+        ("browser_tabs", {"action": "switch"}),
+        ("browser_tabs", {"action": "close"}),
+        ("browser_wait", {"until": "load"}),
+        ("browser_screenshot", {}),
+        ("browser_click_point", {"x": 10, "y": 10}),
+    ],
+)
+async def test_every_step_naming_a_tab_of_no_chat_is_refused_before_it_waits_or_acts(
+    tool: str, args: dict[str, Any]
+) -> None:
+    driver = browser()
+    provider, tools, live = await started(driver)
+    await run(tools, "browser_open", url=HOME)
+    viewer = await live.watch()
+    framed(driver)
+    await live.take(viewer)  # a wait would show: the current tab is the person's
+    calls = len(driver.calls)
+    out = await run(tools, tool, **args, tab="t9")
+    assert out.is_error and '"t9" is not a tab of this chat' in out.text
+    assert driver.calls[calls:] == [] and driver.acts == []
     await provider.close()
 
 

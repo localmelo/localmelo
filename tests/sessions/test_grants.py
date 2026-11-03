@@ -343,6 +343,40 @@ def test_money_account_and_allow_once_are_never_kept() -> None:
         check_grant("folder", "/", "person")
 
 
+async def test_an_app_a_page_opens_is_the_persons_grant_in_ask_and_never_in_auto(
+    store: SessionStore,
+) -> None:
+    """The person's "allow for this chat" on a page's request to open an app is
+    kept for that kind of address, where their grants hold; Auto's high review of
+    the same step is never kept and never covered."""
+    book = GrantBook(store)
+    await book.open()
+    main, side, _ = await _chats(store)
+    arguments: dict[str, object] = {
+        "site": "example.com",
+        "access": "handoff",
+        "app": "Chat",
+        "scheme": "chat",
+    }
+    ask = _request("handoff:chat", arguments=arguments)
+    granted = await book.view(main, "main").grant("handoff:chat", request=ask)
+    assert granted is not None and granted.scope == "global"
+    assert granted.label == "Let pages open Chat (chat: addresses)"
+
+    asker = Asker(ApprovalDecision(True))
+    policy = ChatPolicy(asker, grants=book.view(side, "side"))
+    assert (await policy.decide(ask)).origin == "session" and asker.requests == []
+    auto = _request(
+        "handoff:chat",
+        arguments=arguments,
+        review=ActionReview("high", ("open_app",)),
+    )
+    assert (await policy.decide(auto)).allow and asker.requests == [auto]
+    with pytest.raises(GrantRefusedError):
+        check_grant("tool", "handoff:chat", "person", request=auto)
+    await book.flush()
+
+
 async def test_a_refused_grant_writes_no_row(store: SessionStore) -> None:
     book = GrantBook(store)
     await book.open()

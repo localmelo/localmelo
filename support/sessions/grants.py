@@ -17,8 +17,11 @@ The scope rule:
 
 Nothing that must ask every time is ever written: the questions of
 :data:`~localmelo.melo.contracts.approvals.NEVER_GRANTED` (typing, sending
-a form, a click at a point, a press in another app), a step of a card-only
-kind (paying, an account's settings) and an Allow once. The write path
+a form, a click at a point, a press in another app), a step reviewed as a
+card-only kind (paying, an account's settings, opening an app in auto mode)
+and an Allow once. In ask mode a page's request to open an app
+(``handoff:<scheme>``) is the person's own card: their "allow for this chat"
+is kept for that kind of address, as the card says. The write path
 refuses them with :class:`GrantRefusedError`; the read path ignores any row that
 breaks a rule (a forged one too: a ``global`` row from a side chat, Auto's
 row that claims more than a site read, a folder that is never offered), so
@@ -111,6 +114,8 @@ _COLUMNS: Final = (
     "granted_at, request_id, revoked_at"
 )
 
+# A page's request to open an app: the grant covers that kind of address.
+HANDOFF_KEY: Final = "handoff:"
 # A tool grant in words, for the page and the terminal.
 TOOL_WORDS: Final = {
     "shell_exec": "Run shell commands",
@@ -224,6 +229,11 @@ def describe(
             app = _plain(request.arguments.get("app"), 80)
         app = app or key[len(WINDOW_PREFIX) :]
         return f"See {app} windows", app
+    if key.startswith(HANDOFF_KEY):
+        # It covers that kind of address from any page, not only the page that asked.
+        scheme = key[len(HANDOFF_KEY) :]
+        app = _plain(request.arguments.get("app"), 80) if request is not None else ""
+        return f"Let pages open {app or 'its app'} ({scheme}: addresses)", app or scheme
     words = TOOL_WORDS.get(key)
     if words is None and request is not None and ":" in key:
         words = _plain(request.preview, LABEL_CHARS)

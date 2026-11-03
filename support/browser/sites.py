@@ -317,8 +317,10 @@ async def require_handoff(origin: str, url: str, app: str) -> bool:
     """Ask whether melo may open *url*, an address of another app's kind a page on *origin* asked for; :class:`BrowserError` if refused.
 
     *app* is the app this Mac opens it with. The question is
-    ``handoff:<scheme>``: "allow for this chat" covers that kind of address
-    for the rest of the chat, nothing longer. It has no ``origin`` argument,
+    ``handoff:<scheme>``: the person's "allow for this chat" is a grant of that
+    kind of address, held where the person's grants hold (in the main chat,
+    every chat) until it is revoked; in auto mode the step is reviewed high
+    and asked on the card every time. It has no ``origin`` argument,
     so a refusal does not refuse the site for reading. Returns whether
     anybody was asked (False without a policy).
     """

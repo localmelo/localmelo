@@ -232,6 +232,7 @@ TOOLS: tuple[ToolDef, ...] = (
         "Open the address of a link from the last reading (no click).",
         ("ref",),
         ref=_p("string", "A link ref such as e12 from the last reading."),
+        tab=_TAB,
     ),
     _def(
         "browser_click",
@@ -337,11 +338,16 @@ _FRESH_STEPS = frozenset(
     {"_open", "_find", "_tabs", "_back", "_wait", "_screenshot", "_window_read"}
 )
 
+# The tools that work on no tab of the chat: another app's window.
+_NO_TAB_STEPS = frozenset({"_window_read", "_window_press"})
+
 
 def _guarded(fn: ToolFunction) -> ToolFunction:
     """Run a tool under the provider's lock; a browser problem becomes the result.
 
-    A step on a tab the person has (take over) waits for them first, at most
+    The step's tab is found first (:meth:`BrowserToolProvider._step_target`); a
+    tab that is not one of this chat's is refused before anything is done. A
+    step on a tab the person has (take over) waits for them first, at most
     :data:`~localmelo.support.browser.takeover.STEP_WAIT_S` seconds, and says so
     when they still have it. A tab they gave back is told on the next step, and
     a step that would act on it on an old reading reads its page again instead.
@@ -356,14 +362,16 @@ def _guarded(fn: ToolFunction) -> ToolFunction:
             try:
                 self._ask = TOOL_ASK.get()
                 self._step_start = asyncio.get_running_loop().time()
-                busy = await self._wait_for_person(fn.__name__, arguments)
+                # The tab is found once: the wait for the person checks it and
+                # the step runs on it, so the two can never differ.
+                tab, arguments = self._step_target(fn.__name__, arguments)
+                busy = await self._wait_for_person(tab)
                 if busy is not None:
                     return busy
                 self._set_busy(True)
                 await self._driver.start()
                 self._looked, self._handoff = False, False
                 back, returned = self._back_lines()
-                tab = self._step_tab(fn.__name__, arguments)
                 stale = (
                     tab is not None
                     and tab in returned
@@ -1080,14 +1088,15 @@ class BrowserToolProvider(BaseToolProvider):
         )
 
     @_guarded
-    async def _follow(self, ref: str = "", **_: Any) -> str:
-        snap = self._snapshot_of(None)
+    async def _follow(self, ref: str = "", tab: str | None = None, **_: Any) -> str:
+        tab_id = self._current(tab)
+        snap = self._snapshot_of(tab_id)
         item = snap.elements.get(str(ref).strip())
         if item is None:
             raise BrowserError(_stale_ref(ref))
         if item.kind != "link" or not item.href:
             raise BrowserError(f"{ref} is a {item.kind}, not a link.")
-        return await self._go(item.href, snap.tab, same_site=snap.origin)
+        return await self._go(item.href, tab_id, same_site=snap.origin)
 
     @_guarded
     async def _back(self, tab: str | None = None, **_: Any) -> str:
@@ -1097,30 +1106,34 @@ class BrowserToolProvider(BaseToolProvider):
 
     # ── The person takes over ──
 
-    def _step_tab(self, name: str, arguments: dict[str, Any]) -> str | None:
-        """The chat's tab a step of tool *name* works on, or None (a new tab, the tab list, another app's window)."""
-        if name in ("_window_read", "_window_press"):
-            return None
-        word = str(arguments.get("tab") or "current").strip().lower()
-        if name == "_tabs" and str(arguments.get("action") or "list") == "list":
-            return None
-        if name == "_open":
-            if word == "new":
-                return None
-            if word == "current":
-                return self._open_target("current") if self._raw else None
-        if word == "current":
-            return self._tab if self._tab in self._raw else None
-        return word if word in self._raw else None
-
-    async def _wait_for_person(
+    def _step_target(
         self, name: str, arguments: dict[str, Any]
-    ) -> ToolOutput | None:
-        """Wait while the person has the tab this step works on; what to say when they still have it, else None."""
-        try:
-            tab = self._step_tab(name, arguments)
-        except BrowserError:
-            return None
+    ) -> tuple[str | None, dict[str, Any]]:
+        """The chat's tab a step of tool *name* works on, and the arguments the step runs with.
+
+        The one place a step's tab is found. The tab is None for a new tab, the
+        tab list and another app's window; else the arguments name it by its id,
+        so the step works on exactly the tab whose owner was checked. A tab that
+        is not one of this chat's raises :class:`BrowserError`: the step is
+        refused, never moved to another tab.
+        """
+        if name in _NO_TAB_STEPS:
+            return None, arguments
+        given = arguments.get("tab")
+        if name == "_tabs":
+            action = arguments.get("action") or "list"
+            if action not in ("switch", "close") or not given:
+                return None, arguments  # the list, or a step the tool refuses itself
+            tab = self._known(str(given))
+        elif name == "_open":
+            found = self._open_target(str(given or "current"))
+            return found, {**arguments, "tab": found or "new"}
+        else:
+            tab = self._current(None if given is None else str(given))
+        return tab, {**arguments, "tab": tab}
+
+    async def _wait_for_person(self, tab: str | None) -> ToolOutput | None:
+        """Wait while the person has *tab*, the step's tab; what to say when they still have it, else None."""
         if tab is None or self._owners.owner(tab) != YOU:
             return None
         if await self._owners.wait_for_melo(tab, STEP_WAIT_S):

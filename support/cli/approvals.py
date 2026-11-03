@@ -406,8 +406,8 @@ def _tool_panel(
             app = shown(str(arguments.get("app") or "an app"))
             said = f"A page on {site} wants to open {app}. melo would open this address with it:"
             note = (
-                f"{app} comes to the front. "
-                "Allow for this chat covers this kind of address until the chat ends."
+                # The kept answer below says where it holds (this chat, every chat).
+                f"{app} comes to the front. A kept answer lets pages open such addresses again."
             )
             body = [("", row) for row in _wrapped([said], width)]
             body += [

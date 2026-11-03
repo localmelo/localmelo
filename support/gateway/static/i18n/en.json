@@ -188,6 +188,7 @@
   "approval.rule.desktopOnce": "melo asks every time it presses a button in another app.",
   "approval.rule.dialogOnce": "melo asks every time a page asks this.",
   "approval.rule.handoff": "In this {scope}, pages may open {app} again without asking.",
+  "approval.rule.handoffMain": "In any chat, pages may open {app} again without asking.",
   "approval.rule.high": "A {scope}-wide allow never covers installs, downloads or changes outside {workspace}.",
   "approval.rule.highMain": "An allow in every chat never covers installs, downloads or changes outside {workspace}.",
   "approval.rule.open": "melo will not ask again before opening {site} in this {scope}.",

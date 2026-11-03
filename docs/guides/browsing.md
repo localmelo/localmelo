@@ -208,7 +208,7 @@ what changed:
 
 A page can ask the browser to open an address meant for an app, such as a chat app's `chat://` sign-in link. Chrome in the background never opens it by itself.
 
-- **melo asks you.** It names the app this Mac would use and asks "Open Chat?" with the address. *Allow for this chat* lets pages open that kind of address again until the chat ends. In Auto mode it always asks you on the card, and does nothing when nobody is watching.
+- **melo asks you.** It names the app this Mac would use and asks "Open Chat?" with the address. *Allow for this chat* lets pages open that kind of address again without asking. It is a grant like any other: in the main chat the button reads *Allow in every chat* and counts everywhere, and **Settings › Permissions** or `/grants` takes it back. In Auto mode it always asks you on the card, never rides such a grant, and does nothing when nobody is watching.
 - **On yes, melo opens it.** The app comes to the front, as it would from your own browser, and melo watches for the window it opens (a sign-in window, say), like after any click: see [Windows from other apps](#windows-from-other-apps).
 - **What the model reads.** The step says what happened: "The page asked to open Chat (chat:…). You allowed it; melo opened it, so Chat comes to the front." Only the kind of address is shown; the rest of it can hold a sign-in token.
 - **Questions from the page.** In the background a page's question box would stop the page, so melo answers it. A message is closed with OK. A question during melo's own step ("Delete the draft?") is put to you every time, and No answers Cancel. A box that asks for text gets Cancel. The step lists each one under *what changed*.

@@ -22,8 +22,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   trusted input at the middle of the element melo checked, a choice in a list is the page script's, and each
   chat sees only its own tabs and the tabs they opened. A page that asks to open another app (a chat app's
   `chat://` sign-in link) is never followed by Chrome: melo names the app this Mac would use and asks "Open
-  Chat?" with the address (`handoff:<scheme>`, allowed for the chat at most; in Auto always on the card, under a
-  new card-only kind, "Open another app?"), then opens it itself on a yes and watches for the app's window like
+  Chat?" with the address (`handoff:<scheme>`; *Allow for this chat* is a grant of that kind of address, in the
+  main chat *Allow in every chat*, listed and revoked with the others; in Auto always on the card, under a new
+  card-only kind, "Open another app?", and never by a grant), then opens it itself on a yes and watches for the app's window like
   after any click. A question box the page puts up during melo's step ("Delete the draft?") asks you every time
   (`browser-dialog:<site>`, Cancel otherwise); a message is closed with OK, a box that asks for text gets Cancel,
   and *what changed* lists each one. Without Chrome the choice says "Install Google Chrome to browse in the

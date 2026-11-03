@@ -537,15 +537,48 @@ def _key(message: Mapping[str, Any]) -> dict[str, Any]:
 # ── Logging ──
 
 
+# The websocket library's debug line for each frame sent or received, and for
+# each header of the opening handshake (request and response).
+_FRAME_LINES: Final = ("< %s", "> %s")
+_HEADER_LINES: Final = ("< %s: %s", "> %s: %s")
+# The headers that carry a credential (the gateway's bearer and its cookie).
+CREDENTIAL_HEADERS: Final = frozenset(
+    {"authorization", "proxy-authorization", "cookie", "set-cookie"}
+)
+REDACTED: Final = "[redacted]"
+
+
+def _credential(name: object) -> bool:
+    lowered = str(name).strip().lower()
+    return lowered in CREDENTIAL_HEADERS or any(
+        word in lowered for word in ("token", "secret", "api-key", "apikey")
+    )
+
+
 class QuietFrames(logging.Filter):
-    """Drops the websocket library's debug line for each frame sent or received, which would show what the person typed."""
+    """Keeps what the person typed and the gateway's credential out of the websocket library's logs.
+
+    Its debug line for each frame sent or received, which would show what the
+    person typed, is dropped. A handshake header that carries a credential
+    (:data:`CREDENTIAL_HEADERS`: the bearer, the cookie) keeps its line with the
+    value replaced by :data:`REDACTED`, whatever the record's level: a logger
+    turned to debug after the gateway started logs no credential either.
+    """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        return not (
-            record.levelno <= logging.DEBUG
-            and isinstance(record.msg, str)
-            and record.msg in ("< %s", "> %s")
-        )
+        if not isinstance(record.msg, str):
+            return True
+        if record.msg in _FRAME_LINES:
+            return record.levelno > logging.DEBUG
+        args = record.args
+        if (
+            record.msg in _HEADER_LINES
+            and isinstance(args, tuple)
+            and len(args) == 2
+            and _credential(args[0])
+        ):
+            record.args = (args[0], REDACTED)
+        return True
 
 
 # The loggers the websocket server writes its frames to: uvicorn's own and the library's.

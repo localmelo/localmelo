@@ -290,9 +290,13 @@ def test_a_page_that_asks_for_an_app_shows_the_app_and_the_address() -> None:
     words = " ".join(" ".join(line for _, line in handing.body).split())
     assert "A page on example.com wants to open Chat." in words
     assert "chat://login?x=1" in words and "Chat comes to the front" in words
+    assert "A kept answer lets pages open such addresses again." in words
     request = _request("handoff:chat", app="Chat", access="handoff")
     assert session_option(request) == (
         "Yes, and let pages open Chat for the rest of this chat"
+    )
+    assert session_option(request, everywhere=True) == (
+        "Yes, and let pages open Chat in every chat"
     )
     assert grant_words("handoff:chat") == "opening chat: addresses in their app"
 

@@ -120,8 +120,12 @@ CLICK_ONLY: Final = frozenset(
 # sign-in or security settings; and opening another app that a page asked for
 # (an address of the app's kind, which the browser in the background does not
 # open itself). However well the step serves the goal, only a person's answer
-# lets it run: never words, the model or a grant of the chat. In auto mode a
-# person who watches is asked on the card (#465).
+# lets it run: never words or the model. A step reviewed as one of these is
+# asked on the card every time (in auto mode a person who watches; #465), and
+# no grant of the chat covers it. In ask mode a page's request to open an app
+# is a card of its own (``handoff:<scheme>``), where the person may choose to
+# let pages open that kind of address again: that grant is their own answer,
+# shown on the card, and auto mode never rides it.
 CARD_ONLY: Final = frozenset({"money", "account", "open_app"})
 # The reason a call of the ``self`` category is denied without asking.
 SELF_DENIAL: Final = "melo never lets a call change its own runtime, settings or keys"

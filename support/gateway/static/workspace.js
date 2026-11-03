@@ -2006,13 +2006,14 @@ function approvalCard(request, view = chatApproval, asked = "") {
     }
   } else if (tool.startsWith("handoff:")) {
     // A page asked to open an address of another app's kind, which the browser in the background does not
-    // open itself: melo opens it on a yes, and "Allow for this chat" covers that kind of address.
+    // open itself: melo opens it on a yes, and a kept answer covers that kind of address where it is kept
+    // (in the main chat, every chat). In Auto the step is high impact: no kept answer is offered.
     const app = String(args.app || tool.slice(tool.indexOf(":") + 1));
     const site = String(args.site || "");
     what = t("approval.handoffAddress");
     title = t("approval.handoffTitle", { app });
     caption = t("approval.handoffCaption");
-    rule = t("approval.rule.handoff", { app, scope });
+    rule = everywhere ? t("approval.rule.handoffMain", { app }) : t("approval.rule.handoff", { app, scope });
     why = t("approval.handoffContent", { app, site });
     content = String(args.url || "");
   } else if (tool.startsWith("browser-dialog:")) {

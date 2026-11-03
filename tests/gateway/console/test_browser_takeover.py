@@ -312,3 +312,40 @@ async def test_nothing_typed_is_in_the_store_the_logs_or_on_disk(
         for path in tmp_path.rglob("*"):
             if path.is_file():
                 assert text.encode() not in path.read_bytes(), path
+
+
+@pytest.mark.parametrize("credential", ["bearer", "cookie"])
+async def test_a_logger_turned_to_debug_after_startup_logs_no_credential(
+    console: Console,
+    builder: Builder,
+    workspace: Path,
+    served: Served,
+    caplog: pytest.LogCaptureFixture,
+    credential: str,
+) -> None:
+    # The server started at warning; its loggers are turned to debug after, as
+    # a person debugging the gateway might. The credential is the test's own
+    # (a token made for this test's gateway), never a real one.
+    caplog.set_level(logging.DEBUG)
+    for name in ("uvicorn.error", "websockets", "websockets.server"):
+        caplog.set_level(logging.DEBUG, logger=name)  # put back after the test
+    if credential == "bearer":
+        headers, secret = served.bearer, served.token
+    else:
+        headers = served.cookie()
+        secret = headers["Cookie"].split("=", 1)[1]
+    session_id, _agent = await opened(console, builder, workspace)
+    async with connect(served.url(session_id), additional_headers=headers) as ws:
+        await messages(ws, 1)
+    logged = [
+        record.getMessage()
+        for record in caplog.records
+        if not record.name.startswith("websockets.client")
+    ]
+    header = "authorization" if credential == "bearer" else "cookie"
+    assert any(
+        line.lower() == f"< {header}: [redacted]" for line in logged
+    ), "the handshake's header lines were on, with the credential redacted"
+    assert len(secret) >= 16
+    for line in logged:
+        assert secret not in line and secret[:12] not in line
