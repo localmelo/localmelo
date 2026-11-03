@@ -34,7 +34,7 @@ remembers across chats and talks to your own model server or a cloud API.
 - Say a chore once, like `every weekday at 8:30, brief me on my calendar`: it runs on time, and a check-in tells you what finished.
 - Ask for a reminder, like `remind me to send the report on Friday at 9`: melo shows the date it understood, then tells you at that time.
 - Approve what matters: melo asks before commands and file writes, and shows the change.
-- Choose Auto for a chat and melo works without asking: routine steps run, risky ones are blocked with the reason, and **Allow once** lets one through.
+- Choose Auto for a chat and melo works on its own: routine steps run, a step you did not ask for asks you on a card (**Allow once**, **Allow for this chat** for a site, or **Deny**), and the riskiest are blocked with the reason.
 - When a task runs out of steps it reads Stopped, and **Continue** picks it up where it left off.
 - Use the console and the app in English or 简体中文.
 - Use oMLX, Ollama, vLLM, SGLang or MLC LLM on your computer, or a cloud API; run one task from a script and get one JSON line.
