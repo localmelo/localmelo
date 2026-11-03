@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from localmelo.support.sessions.store import SessionStore
+from localmelo.support.sessions.store import SessionStore, SessionStoreError
 from localmelo.tests.sessions.helpers import answer, tool_call
 
 from ..test_guard import FOREIGN_ORIGIN, ORIGIN_ERROR, _build_gateway
@@ -175,6 +175,57 @@ async def test_store_path_is_the_console_s(tmp_path: Path) -> None:
     async with console_with(tmp_path) as (console, _client, _):
         assert isinstance(console.grants.store, SessionStore)
         assert console.grants.store.path == str(tmp_path / "sessions.db")
+
+
+async def test_a_side_chat_shows_and_takes_back_the_main_chat_s_grants_everywhere(
+    tmp_path: Path,
+) -> None:
+    async with console_with(tmp_path, answer("hi")) as (console, client, _):
+        body = await _create(client, tmp_path, "Hello")
+        side = body["session"]["id"]
+        await _wait_turn(client, side)
+        main = console.main_id
+        assert main is not None
+        book = console.sessions.book
+        await book.view(main, "main").grant("python_exec")
+        await book.view(main, "main").grant("shell_exec")
+        await book.view(side, "side").grant("file_write")
+
+        detail = (await client.get(f"/api/sessions/{side}")).json()
+        assert detail["grants_everywhere"] == ["python_exec", "shell_exec"]
+        main_detail = (await client.get(f"/api/sessions/{main}")).json()
+        assert main_detail["grants_everywhere"] == []
+
+        # Clear: only the side chat's own go; the main chat's still hold here.
+        cleared = await client.delete(f"/api/sessions/{side}/grants")
+        assert cleared.json() == {"revoked": 1, "still_everywhere": 2}
+        # By name: a main-chat grant goes everywhere, and the answer says so.
+        gone = await client.delete(f"/api/sessions/{side}/grants/python_exec")
+        assert gone.status_code == 200
+        assert gone.json() == {
+            "revoked": [{"key": "python_exec", "scope": "global"}],
+            "everywhere": True,
+        }
+        assert console.sessions.grants(main) == {"shell_exec"}
+
+
+async def test_a_revoke_the_store_cannot_save_is_503_and_holds_here(
+    tmp_path: Path,
+) -> None:
+    async with console_with(tmp_path, answer("hi")) as (console, client, _):
+        body = await _create(client, tmp_path, "Hello")
+        side = body["session"]["id"]
+        await _wait_turn(client, side)
+        await console.sessions.book.view(side, "side").grant("file_write")
+
+        async def fail(*args: object, **kwargs: object) -> None:
+            raise SessionStoreError("disk full")
+
+        console.sessions.book._mark_revoked = fail  # type: ignore[method-assign]
+        refused = await client.delete(f"/api/sessions/{side}/grants/file_write")
+        assert refused.status_code == 503
+        # The check stopped using it all the same.
+        assert "file_write" not in console.sessions.grants(side)
 
 
 # ── The guard ──

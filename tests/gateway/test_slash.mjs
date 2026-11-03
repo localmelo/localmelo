@@ -378,8 +378,9 @@ const ROUTES = {
   'GET /sessions/chat-1/memory': {working: [{}, {}], working_max: 20, long_term: {enabled: true, backend: 'ollama'}},
   'POST /sessions/chat-1/retry': {},
   'POST /sessions/chat-1/undo': {},
-  'DELETE /sessions/chat-1/grants': {},
-  'DELETE /sessions/chat-1/grants/file_write': {},
+  // What a revoke answers: the grants taken back, and whether the main chat's reach everywhere (see `GRANTS_*` below).
+  'DELETE /sessions/chat-1/grants': {revoked: 1, still_everywhere: 0},
+  'DELETE /sessions/chat-1/grants/file_write': {revoked: [{key: 'file_write', scope: 'session'}], everywhere: false},
 };
 const TURN = {id: 't1', turn: 1, userText: 'Plan a trip to Rome', answer: 'Here is a plan.', finishedAt: 100, startedAt: 90, status: 'completed', undone: false, outputTokens: 1500, items: [{kind: 'tool', name: 'file_read', status: 'success'}], result: {}};
 
@@ -618,6 +619,45 @@ test('/approvals switches the chat\'s mode, forgets a grant, and shows the mode 
   const missing = page({routes: {...ROUTES, 'DELETE /sessions/chat-1/grants/nope': Object.assign(new Error('x'), {status: 404})}});
   await missing.slash.handle('/approvals forget nope');
   assert.match(lastRow(missing), /No grant for nope in this chat\./);
+});
+
+test('/approvals forget says when a grant of the main chat went everywhere, and how many still hold here', async () => {
+  const taken = {revoked: [{key: 'shell_exec', scope: 'global'}], everywhere: true};
+  const p = page({routes: {...ROUTES, 'DELETE /sessions/chat-1/grants/shell_exec': taken}});
+  await p.slash.handle('/approvals forget shell_exec');
+  // A row is the command echoed, then the lines it answered with.
+  assert.equal(lastRow(p), '/approvals forget shell_exec Took back shell_exec everywhere: it was allowed in the main chat.');
+  // Without a name only this chat's own grants go; the main chat's still hold, as many as the gateway counts.
+  for (const [still, words] of [
+    [0, 'Forgot every grant in this chat.'],
+    [1, 'Forgot every grant in this chat. 1 grant from the main chat still holds here; Settings → Permissions takes it back.'],
+    [3, 'Forgot every grant in this chat. 3 grants from the main chat still hold here; Settings → Permissions takes them back.'],
+  ]) {
+    const all = page({routes: {...ROUTES, 'DELETE /sessions/chat-1/grants': {revoked: 2, still_everywhere: still}}});
+    await all.slash.handle('/approvals forget');
+    assert.equal(lastRow(all), `/approvals forget ${words}`);
+  }
+  // A gateway that answers with nothing (an older one) keeps today's lines.
+  const old = page({routes: {...ROUTES, 'DELETE /sessions/chat-1/grants': {}, 'DELETE /sessions/chat-1/grants/file_write': {}}});
+  await old.slash.handle('/approvals forget');
+  assert.equal(lastRow(old), '/approvals forget Forgot every grant in this chat.');
+  await old.slash.handle('/approvals forget file_write');
+  assert.equal(lastRow(old), '/approvals forget file_write Forgot the grant for file_write.');
+});
+
+test('/approvals forget reads in Chinese when a grant came from the main chat', async () => {
+  await useLanguage('zh-Hans');
+  try {
+    const p = page({routes: {...ROUTES,
+      'DELETE /sessions/chat-1/grants/shell_exec': {revoked: [{key: 'shell_exec', scope: 'global'}], everywhere: true},
+      'DELETE /sessions/chat-1/grants': {revoked: 1, still_everywhere: 2}}});
+    await p.slash.handle('/approvals forget shell_exec');
+    assert.equal(lastRow(p), '/approvals forget shell_exec 已在所有对话中收回 shell_exec：它是在主对话里允许的。');
+    await p.slash.handle('/approvals forget');
+    assert.equal(lastRow(p), '/approvals forget 已忘掉这个对话的全部授权。来自主对话的 2 项授权在这里仍然有效；到“设置 → 授权”里可以收回。');
+  } finally {
+    await useLanguage('en');
+  }
 });
 
 const GRANTS = {grants: [

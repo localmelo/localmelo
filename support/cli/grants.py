@@ -17,6 +17,7 @@ import time
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Final
 
+from localmelo.support.cli.approvals import grant_listed, grant_site
 from localmelo.support.cli.main_chat import GatewayError
 from localmelo.support.sessions.grants import listed
 from localmelo.support.sessions.store import SessionStoreError
@@ -35,6 +36,51 @@ FROM_MAIN: Final = (
     "✗ That one was allowed in the main chat. Take it back there with /grants, "
     "or in the console's Settings → Permissions."
 )
+
+
+FROM_MAIN_FORGET: Final = (
+    "✗ {name} was allowed in the main chat, so it counts everywhere and still holds "
+    "here. Take it back with /grants in the main chat, or in the console's "
+    "Settings → Permissions."
+)
+STILL_FROM_MAIN: Final = (
+    "Allowed in the main chat, these still hold here: {names}. Take them back with "
+    "/grants in the main chat, or in the console's Settings → Permissions."
+)
+
+
+def _names(name: str, held: frozenset[str]) -> set[str]:
+    """The grants in *held* that ``/approvals forget NAME`` means: the name, or a site's."""
+    site = name.lower().removeprefix("www.")
+    return {
+        grant
+        for grant in held
+        if grant == name or grant_site(grant).removeprefix("www.") == site
+    }
+
+
+async def forget(session: CliSession, name: str | None) -> None:
+    """``/approvals forget [NAME]`` in the terminal's own chat.
+
+    Takes back this chat's own grants (of NAME, or all) and says plainly when
+    one of the main chat's still holds: those are taken back in the main chat
+    or in the console. A revoke the file could not save is said too.
+    """
+    out, approvals = session.out, session.approvals
+    approvals.forget(name)
+    try:
+        await session.grant_book.settle()
+    except SessionStoreError as exc:
+        out.print(session._text(f"⚠ Taken back here, but not saved: {exc}", "warn"))
+    from_main = {g.key for g in session.grant_book.outside()}
+    still = approvals.allowed_tools & from_main
+    if name is not None:
+        if _names(name, frozenset(still)):
+            out.print(session._text(FROM_MAIN_FORGET.format(name=name), "error"))
+        return
+    if still:
+        names = ", ".join(grant_listed(grant) for grant in sorted(still))
+        out.print(session._text(STILL_FROM_MAIN.format(names=names), "muted"))
 
 
 def _when(at: object) -> str:

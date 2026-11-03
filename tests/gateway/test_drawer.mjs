@@ -48,8 +48,8 @@ test('tools render safely and revoke one or all through encoded paths', async ()
   let count = 0;
   const h = harness({
     'GET /sessions/s%2F1/tools': () => ++count === 1 ? tools : emptyTools,
-    'DELETE /sessions/s%2F1/grants/%3Cshell%2Fa%3E': {},
-    'DELETE /sessions/s%2F1/grants': {},
+    'DELETE /sessions/s%2F1/grants/%3Cshell%2Fa%3E': {revoked: [{key: '<shell/a>', scope: 'session'}], everywhere: false},
+    'DELETE /sessions/s%2F1/grants': {revoked: 1, still_everywhere: 0},
   });
   await h.drawer.open();
   assert.match(h.text(), /<script>bad<\/script>/);
@@ -65,6 +65,31 @@ test('tools render safely and revoke one or all through encoded paths', async ()
   assert.equal(h.drawer.close(), true);
   assert.equal(h.root.hidden, true);
   assert.equal(h.doc.activeElement, h.trigger);
+});
+
+test('a revoke says when a grant of the main chat went everywhere, or how many of them still hold here', async () => {
+  const shell = '/sessions/s%2F1/grants/%3Cshell%2Fa%3E';
+  const everywhere = harness({
+    'GET /sessions/s%2F1/tools': tools,
+    [`DELETE ${shell}`]: {revoked: [{key: '<shell/a>', scope: 'global'}], everywhere: true},
+  });
+  await everywhere.drawer.open();
+  await everywhere.find('Revoke').click();
+  assert.match(everywhere.text(), /Taken back everywhere\./);
+  const plain = harness({'GET /sessions/s%2F1/tools': tools, [`DELETE ${shell}`]: {revoked: [{key: '<shell/a>', scope: 'session'}], everywhere: false}});
+  await plain.drawer.open();
+  await plain.find('Revoke').click();
+  assert.doesNotMatch(plain.text(), /everywhere|main chat/);
+  for (const [still, words] of [[1, /1 grant from the main chat still holds here/], [2, /2 grants from the main chat still hold here/]]) {
+    const all = harness({'GET /sessions/s%2F1/tools': tools, 'DELETE /sessions/s%2F1/grants': {revoked: 1, still_everywhere: still}});
+    await all.drawer.open();
+    await all.find('Revoke all grants').click();
+    assert.match(all.text(), words);
+  }
+  const none = harness({'GET /sessions/s%2F1/tools': tools, 'DELETE /sessions/s%2F1/grants': {revoked: 1, still_everywhere: 0}});
+  await none.drawer.open();
+  await none.find('Revoke all grants').click();
+  assert.doesNotMatch(none.text(), /main chat/);
 });
 
 test('memory and paginated runs use actual response shapes', async () => {

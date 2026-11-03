@@ -145,8 +145,12 @@ async def test_forgetting_a_grant_takes_it_back(tmp_path: Path) -> None:
 
         forgotten = await client.delete(f"/api/sessions/{session_id}/grants/file_write")
 
-        assert forgotten.status_code == 204
-        assert forgotten.content == b""
+        assert forgotten.status_code == 200
+        # A side chat's own grant: taken back here only.
+        assert forgotten.json() == {
+            "revoked": [{"key": "file_write", "scope": "session"}],
+            "everywhere": False,
+        }
         detail = (await client.get(f"/api/sessions/{session_id}")).json()
         assert detail["grants"] == [] and detail["granted_at"] == {}
         listed = (await client.get(f"/api/sessions/{session_id}/tools")).json()
@@ -186,14 +190,15 @@ async def test_forgetting_every_grant_takes_them_back(tmp_path: Path) -> None:
 
         forgotten = await client.delete(f"/api/sessions/{session_id}/grants")
 
-        assert forgotten.status_code == 204
+        assert forgotten.status_code == 200
+        assert forgotten.json() == {"revoked": 1, "still_everywhere": 0}
         detail = (await client.get(f"/api/sessions/{session_id}")).json()
         assert detail["grants"] == [] and detail["granted_at"] == {}
         listed = (await client.get(f"/api/sessions/{session_id}/tools")).json()
         assert all(tool["granted"] is False for tool in listed["tools"])
 
 
-async def test_forgetting_every_grant_is_204_even_without_any(
+async def test_forgetting_every_grant_answers_even_without_any(
     tmp_path: Path,
 ) -> None:
     async with console_with(tmp_path, answer("hello")) as (_console, client, _):
@@ -202,8 +207,8 @@ async def test_forgetting_every_grant_is_204_even_without_any(
 
         response = await client.delete(f"/api/sessions/{session_id}/grants")
 
-        assert response.status_code == 204
-        assert response.content == b""
+        assert response.status_code == 200
+        assert response.json() == {"revoked": 0, "still_everywhere": 0}
 
 
 # ── Memory ──

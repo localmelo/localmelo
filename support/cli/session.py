@@ -38,7 +38,8 @@ from localmelo.melo.schema import RunResult
 from localmelo.support import config
 from localmelo.support.backends import discovery
 from localmelo.support.backends.openai_compat import normalize_url
-from localmelo.support.cli import browsing, commands, grants, hanging, usershell
+from localmelo.support.cli import browsing, commands, hanging, usershell
+from localmelo.support.cli import grants as grant_commands
 from localmelo.support.cli.agents import AgentFactory
 from localmelo.support.cli.app import InteractiveApp, StatusBar
 from localmelo.support.cli.approvals import (
@@ -85,7 +86,7 @@ from localmelo.support.sessions.display import (
     format_tokens,
     home_label,
 )
-from localmelo.support.sessions.grants import GrantBook, read_global_grants
+from localmelo.support.sessions.grants import GrantBook, MainChatGrants
 from localmelo.support.sessions.runner import ResumeLoader, ResumeMode, SessionRunner
 from localmelo.support.sessions.store import (
     GATEWAY_SESSIONS_DB,
@@ -275,10 +276,9 @@ class CliSession:
             tool.name: tool.tier for tool in self.agent.list_tools()
         }
         # The grants of the terminal's own chat, kept in its sessions file;
-        # what the person allowed in the main chat holds here too.
-        self.grant_book = GrantBook(
-            store, outside=lambda: read_global_grants(GATEWAY_SESSIONS_DB)
-        )
+        # what the person allowed in the main chat holds here too, read from
+        # the gateway's file at every check, so a revoke there holds at once.
+        self.grant_book = GrantBook(store, outside=MainChatGrants(GATEWAY_SESSIONS_DB))
         # [approvals] auto_asks: Auto asks on the panel while someone is at
         # the terminal (#465).
         self.approvals = Approvals(
@@ -320,7 +320,7 @@ class CliSession:
         return self.runner.session_id if self.runner is not None else None
 
     async def grants_ready(self) -> None:
-        """Read the grants of the terminal's file once, and the main chat's again.
+        """Read the grants of the terminal's file once (the main chat's are read at every check).
 
         A file that cannot be read leaves the grants in this process only.
         """
@@ -329,7 +329,6 @@ class CliSession:
                 await self.grant_book.open()
             except Exception as exc:
                 logger.warning("The grants of this chat are not kept: %s", exc)
-        await self.grant_book.refresh()
 
     # ── What the app reads ──
 
@@ -1050,7 +1049,7 @@ class CliSession:
         elif name == "approvals":
             await self.approvals_command(arguments)
         elif name == "grants":
-            await grants.command(self, arguments)
+            await grant_commands.command(self, arguments)
         elif name == "status":
             await self.status(arguments)
         elif name == "retry":
@@ -1619,7 +1618,7 @@ class CliSession:
             if what in ("ask", "auto", "deny"):
                 await self.switch_mode(cast(Literal["ask", "auto", "deny"], what))
             elif what == "forget":
-                approvals.forget(parts[1] if len(parts) > 1 else None)
+                await grant_commands.forget(self, parts[1] if len(parts) > 1 else None)
             else:
                 self.out.print(
                     self._text(

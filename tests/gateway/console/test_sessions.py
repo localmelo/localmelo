@@ -154,6 +154,7 @@ async def test_a_session_with_its_tokens_and_agent_state(
         "pending_approvals",
         "grants",
         "granted_at",
+        "grants_everywhere",
         "mcp_error",
         "agent",
         "tokens",

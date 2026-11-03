@@ -89,6 +89,30 @@ async def test_the_main_chat_s_grants_hold_in_the_terminal_s_own_chat(
     assert "python_exec" in session.approvals.allowed_tools
 
 
+async def test_approvals_forget_says_a_main_chat_grant_is_taken_back_there(
+    setup: Setup,
+) -> None:
+    session, out = setup.session, setup.out
+    gateway = SessionStore(Path(GATEWAY_SESSIONS_DB).expanduser(), writer="gateway")
+    await gateway.open()
+    try:
+        book = GrantBook(gateway)
+        await book.open()
+        main = (await gateway.main_chat()).id
+        await book.view(main, "main").grant("python_exec")
+    finally:
+        await gateway.aclose()
+    await _first_turn(setup)
+    session.approvals._policy.grants.grant_now("file_write")
+
+    session.enter("/approvals forget python_exec")
+    await _until(lambda: "was allowed in the main chat" in out.text())
+    assert "python_exec" in session.approvals.allowed_tools
+    session.enter("/approvals forget")
+    await _until(lambda: "these still hold here" in out.text())
+    assert session.approvals.allowed_tools == {"python_exec"}
+
+
 class FakeGateway:
     """The gateway's grants routes, as the main chat's client calls them."""
 

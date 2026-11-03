@@ -35,17 +35,16 @@ CASCADE``); revoked rows go at the store's retention.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import sqlite3
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Final, Literal, get_args
-
-import aiosqlite
 
 from localmelo.melo.contracts.approvals import (
     ALLOWED_ONCE,
@@ -347,33 +346,97 @@ def _row(row: Iterable[Any]) -> Grant | None:
         return None
 
 
-async def read_global_grants(path: str | os.PathLike[str]) -> list[Grant]:
-    """The live ``global`` grants of the sessions file at *path*, read without writing.
+class MainChatGrants:
+    """The live ``global`` grants of the gateway's file, current at every check.
 
     For the terminal's own chat, which works without the gateway: what the
-    person allowed in the main chat counts there too. A missing file, one
-    without the table, or one that cannot be read gives none.
+    person allowed in the main chat holds there too, and a revoke the gateway
+    committed holds from the very next check, in the middle of a turn too.
+    Each call asks ``PRAGMA data_version`` on a read-only connection it keeps
+    open (one cheap statement, no write) and reads the rows again only when
+    another connection committed since, or the file was replaced.
+
+    It fails closed: a missing file or table gives no grant, and so does a
+    file that cannot be read or a ``grants`` component newer than this
+    localmelo reads (with one warning each).
     """
-    path = os.path.expanduser(os.fspath(path))
-    if not os.path.exists(path):
-        return []
-    uri = f"{Path(path).as_uri()}?mode=ro"
-    try:
-        async with aiosqlite.connect(uri, uri=True) as conn:
-            await conn.execute("PRAGMA busy_timeout = 2000")
-            found = await conn.execute_fetchall(
-                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'grants'"
+
+    def __init__(self, path: str | os.PathLike[str], *, busy_s: float = 0.5) -> None:
+        self.path = os.path.expanduser(os.fspath(path))
+        self._busy_s = busy_s
+        self._conn: sqlite3.Connection | None = None
+        self._identity: tuple[int, int] | None = None
+        self._version: int | None = None
+        self._grants: tuple[Grant, ...] = ()
+        self._warned = ""
+
+    def _warn(self, message: str) -> None:
+        if message != self._warned:
+            self._warned = message
+            logger.warning("The main chat's grants do not hold here: %s", message)
+
+    def close(self) -> None:
+        conn, self._conn = self._conn, None
+        self._identity = self._version = None
+        self._grants = ()
+        if conn is not None:
+            with contextlib.suppress(sqlite3.Error):
+                conn.close()
+
+    def __call__(self) -> tuple[Grant, ...]:
+        try:
+            stat = os.stat(self.path)
+        except OSError:
+            self.close()
+            return ()
+        identity = (stat.st_dev, stat.st_ino)
+        try:
+            if self._conn is None or identity != self._identity:
+                self.close()
+                self._conn = sqlite3.connect(
+                    f"{Path(self.path).as_uri()}?mode=ro",
+                    uri=True,
+                    timeout=self._busy_s,
+                    isolation_level=None,
+                    check_same_thread=False,
+                )
+                self._identity = identity
+            version = int(self._conn.execute("PRAGMA data_version").fetchone()[0])
+            if version != self._version:
+                self._grants = self._read(self._conn)
+                self._version = version
+        except (sqlite3.Error, OSError, ValueError, TypeError) as exc:
+            self.close()
+            self._warn(f"{self.path} could not be read ({exc})")
+            return ()
+        return self._grants
+
+    def _read(self, conn: sqlite3.Connection) -> tuple[Grant, ...]:
+        tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' "
+                "AND name IN ('schema_components', 'grants')"
             )
-            if not list(found):
-                return []
-            rows = await conn.execute_fetchall(
-                f"SELECT {_COLUMNS} FROM grants "
-                "WHERE scope = 'global' AND revoked_at IS NULL ORDER BY granted_at"
+        }
+        if tables != {"schema_components", "grants"}:
+            return ()
+        found = conn.execute(
+            "SELECT version FROM schema_components WHERE name = ?", (COMPONENT,)
+        ).fetchone()
+        if found is None:
+            return ()
+        if int(found[0]) > GRANTS_VERSION:
+            self._warn(
+                f"{self.path} has grants schema version {found[0]}; "
+                f"this localmelo reads version {GRANTS_VERSION}"
             )
-    except (sqlite3.Error, OSError, ValueError):
-        logger.warning("Could not read the main chat's grants", exc_info=True)
-        return []
-    return [g for g in map(_row, rows) if g is not None and trusted(g)]
+            return ()
+        rows = conn.execute(
+            f"SELECT {_COLUMNS} FROM grants "
+            "WHERE scope = 'global' AND revoked_at IS NULL ORDER BY granted_at"
+        ).fetchall()
+        return tuple(g for g in map(_row, rows) if g is not None and trusted(g))
 
 
 def listed(grants: Iterable[Grant]) -> list[Grant]:
@@ -406,10 +469,10 @@ class GrantBook:
     *store* is the file (``None``: the rows live as long as the book).
     :meth:`open` creates the component and reads the live rows; until it
     did, the book is empty and keeps what is granted in memory, written
-    once it opens. *outside* reads ``global`` grants this book does not
-    own (the terminal's own chat reads the main chat's, see
-    :func:`read_global_grants`); :meth:`refresh` reads them again. Every
-    change calls the functions in :attr:`listeners`.
+    once it opens. *outside* gives the ``global`` grants this book does not
+    own, and is asked at every check (the terminal's own chat reads the main
+    chat's through :class:`MainChatGrants`, so a revoke there holds at once).
+    Every change calls the functions in :attr:`listeners`.
     """
 
     def __init__(
@@ -417,13 +480,12 @@ class GrantBook:
         store: SessionStore | None = None,
         *,
         clock: Callable[[], float] = time.time,
-        outside: Callable[[], Awaitable[list[Grant]]] | None = None,
+        outside: Callable[[], Sequence[Grant]] | None = None,
     ) -> None:
         self._store = store
         self._clock = clock
-        self._outside_reader = outside
+        self._outside = outside
         self._rows: dict[str, Grant] = {}
-        self._outside: tuple[Grant, ...] = ()
         self._opened = False
         self._open_lock = asyncio.Lock()
         self._write_lock = asyncio.Lock()
@@ -495,17 +557,16 @@ class GrantBook:
                     self._queue(self._insert(grant), "grant_add")
         self._changed()
 
-    async def refresh(self) -> None:
-        """Read the ``global`` grants of :attr:`outside` again (no reader: nothing)."""
-        if self._outside_reader is None:
-            return
+    def outside(self) -> tuple[Grant, ...]:
+        """The ``global`` grants of :attr:`outside` as they are now (none: no source, or it failed)."""
+        if self._outside is None:
+            return ()
         try:
-            found = await self._outside_reader()
+            found = self._outside()
         except Exception:
             logger.warning("Could not read the main chat's grants", exc_info=True)
-            found = []
-        self._outside = tuple(g for g in found if trusted(g))
-        self._changed()
+            return ()
+        return tuple(g for g in found if trusted(g) and g.scope == "global")
 
     async def apply_retention(self) -> int:
         """Delete revoked rows older than the store's retention; how many went."""
@@ -532,7 +593,7 @@ class GrantBook:
         """The grants that hold in *session_id*: its own, and with *inherit* the global ones."""
         found = [
             g
-            for g in (*self._outside, *self._rows.values())
+            for g in (*self.outside(), *self._rows.values())
             if (inherit and g.scope == "global")
             or (session_id is not None and g.session_id == session_id)
         ]
@@ -696,19 +757,42 @@ class GrantBook:
         main chat that is every global one); a global grant from the main
         chat stays in a side chat.
         """
-        sid = session_id or ""
-        if key is None:
-            found = [g for g in self._rows.values() if g.session_id == sid]
-        else:
-            found = [
-                g
-                for g in self._rows.values()
-                if g.key == key
-                and (g.kind == "folder") == folders
-                and (g.session_id == sid or g.scope == "global")
-            ]
+        found = self._held(session_id, key, folders)
         self._drop(found)
         return found
+
+    async def forget(
+        self,
+        session_id: str | None,
+        key: str | None = None,
+        *,
+        folders: bool = False,
+    ) -> list[Grant]:
+        """:meth:`forget_now`, waiting for the rows to be marked.
+
+        The checks stop using the grants at once; a write that fails raises
+        :class:`SessionStoreError`, so a caller can say the revoke was not
+        saved (it would come back after a restart).
+        """
+        found = self._held(session_id, key, folders)
+        write = self._drop(found)
+        if write is not None:
+            await write
+        return found
+
+    def _held(
+        self, session_id: str | None, key: str | None, folders: bool
+    ) -> list[Grant]:
+        sid = session_id or ""
+        if key is None:
+            return [g for g in self._rows.values() if g.session_id == sid]
+        return [
+            g
+            for g in self._rows.values()
+            if g.key == key
+            and (g.kind == "folder") == folders
+            and (g.session_id == sid or g.scope == "global")
+        ]
 
     def forget_session(self, session_id: str) -> None:
         """Forget a deleted session's rows here; its file rows went with it."""
@@ -741,7 +825,24 @@ class GrantBook:
 
     async def _ordered(self, write: Awaitable[None], label: str) -> None:
         async with self._write_lock:
-            await write
+            try:
+                await write
+            except (sqlite3.Error, OSError) as exc:
+                raise SessionStoreError(
+                    f"Could not save a grant change: {exc}"
+                ) from exc
+
+    async def settle(self) -> None:
+        """Wait for every queued write; the first that failed raises :class:`SessionStoreError`."""
+        failed: BaseException | None = None
+        while self._pending:
+            for result in await asyncio.gather(
+                *list(self._pending), return_exceptions=True
+            ):
+                if isinstance(result, BaseException) and failed is None:
+                    failed = result
+        if failed is not None:
+            raise SessionStoreError(str(failed)) from failed
 
     async def flush(self) -> None:
         """Wait for every queued write (a failed one is logged)."""
@@ -826,6 +927,12 @@ class SessionGrants:
         """The folders outside the workspace allowed for reading here, oldest first."""
         return tuple(
             dict.fromkeys(g.key for g in self._visible() if g.kind == "folder")
+        )
+
+    def everywhere(self) -> frozenset[str]:
+        """The names that hold here because the person allowed them in the main chat."""
+        return frozenset(
+            g.key for g in self._visible() if g.scope == "global" and g.kind != "folder"
         )
 
     def granted_at(self, name: str) -> float:
@@ -914,7 +1021,7 @@ __all__ = [
     "describe",
     "grant_kind",
     "listed",
-    "read_global_grants",
+    "MainChatGrants",
     "scope_for",
     "trusted",
 ]

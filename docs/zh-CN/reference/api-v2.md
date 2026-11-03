@@ -473,7 +473,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 }
 ```
 
-- `grants` 是对话里允许的名称（工具、网站、窗口），无论对话是否打开：它自己的，以及（旁支对话）主对话的，后者在所有对话里都算；`granted_at` 把每一项映射到授权开始的时间。[`GET /api/grants`](#get-apigrants) 列出同样的授权及其详情。
+- `grants` 是对话里允许的名称（工具、网站、窗口），无论对话是否打开：它自己的，以及（旁支对话）主对话的，后者在所有对话里都算；`granted_at` 把每一项映射到授权开始的时间。`grants_everywhere` 列出旁支对话的 `grants` 里因为主对话允许而算数的那些（主对话和任务里为 `[]`）：在这里收回其中一项，会在所有对话里一并收回。[`GET /api/grants`](#get-apigrants) 列出同样的授权及其详情。
 - `mcp_error` 说明本会话为何在没有 MCP 工具的情况下运行，否则为 `""`。目前它始终为 `""`：控制台尚未实现 MCP。
 - `agent` 为 `open`、`paused`（已关闭，但保留其对话）或 `not_loaded`（本网关尚未打开的会话，例如重启之后）。创建操作即使没有轮次也会打开会话；读取路由从不打开会话，而轮次或重试会打开。因此，`not_loaded` 会持续到网关启动后的第一次打开，而已关闭的智能体读作 `paused`。
 - `tokens` 汇总该会话已结束轮次的 `completion_tokens`，与回答所报告的字段相同。
@@ -1074,10 +1074,11 @@ worker 运行或终端对话从 CLI 的文件读取。
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X DELETE http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/grants/python_exec
 ```
 
-- 204 且无响应体；`GET /api/sessions/{id}` 的 `grants` 和 `granted_at` 都会去掉它。它会收回这个对话自己的同名授权，以及主对话的同名授权（后者在所有对话里一并收回）。
+- 200，响应体为 `{"revoked": [{"key": "python_exec", "scope": "session"}], "everywhere": false}`；`GET /api/sessions/{id}` 的 `grants` 和 `granted_at` 都会去掉它。它会收回这个对话自己的同名授权，以及主对话的同名授权（后者在所有对话里一并收回：这时 `everywhere` 为 `true`，那一行的 `scope` 为 `global`）。
 - 没有同名授权在该对话里算数时返回 404 `not_found`。对话不必处于打开状态。
-- `DELETE /api/sessions/{id}/grants` 不带名称时，会收回这个对话自己的授权并返回 204；在主对话里则收回每一项 `global` 授权。
-- `DELETE /api/sessions/{id}/folders?path=PATH` 收回对话里允许读取的一个文件夹（204；没有这样的授权时返回 404 `not_found`）。对话不处于打开状态时也可用。
+- `DELETE /api/sessions/{id}/grants` 不带名称时，会收回这个对话自己的授权并返回 200，响应体为 `{"revoked": N, "still_everywhere": M}`：旁支对话里还有 `M` 项主对话的授权仍然算数；在主对话里则收回每一项 `global` 授权。
+- 存储无法保存收回时返回 503 `store_unavailable`；检查已经不再使用这项授权，但重启后它会回来。
+- `DELETE /api/sessions/{id}/folders?path=PATH` 收回对话里允许读取的一个文件夹（204；没有这样的授权时返回 404 `not_found`；存储无法保存时返回 503）。对话不处于打开状态时也可用。
 - 网站的授权以问题命名，例如 `browser-act:https://news.example`；名称里可以有斜杠，可以百分号编码后发送，也可以原样发送。
 
 ## DELETE /api/sessions/{id}/approvals/{entry_id}

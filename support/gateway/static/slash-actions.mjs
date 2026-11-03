@@ -273,12 +273,17 @@ export function createActions(host) {
       if (word === 'deny') throw new Error(t('slash.noDeny'));
       if (word === 'forget') {
         const path = chat();
+        let taken;
         try {
-          await api(tool ? `${path}/grants/${enc(tool)}` : `${path}/grants`, {method: 'DELETE'});
+          taken = await api(tool ? `${path}/grants/${enc(tool)}` : `${path}/grants`, {method: 'DELETE'});
         } catch (error) {
           throw error.status === 404 ? new Error(t('slash.noGrant', {tool})) : error;
         }
-        return [say(tool ? t('slash.forgot', {tool}) : t('slash.forgotAll'), 'ok')];
+        // A grant of the main chat is taken back in every chat; "forget" without a name leaves them and says how many.
+        if (tool) return [say(t(taken?.everywhere === true ? 'slash.forgotEverywhere' : 'slash.forgot', {tool}), 'ok')];
+        const still = Number(taken?.still_everywhere) || 0;
+        const words = still > 0 ? [t('slash.forgotAll'), t('slash.stillEverywhere', {n: still})] : [t('slash.forgotAll')];
+        return [say(words.join(t('common.sentenceGap')), 'ok')];
       }
       if (word) throw new Error(t('slash.useApprovals'));
       return [say(await approvalsText())];

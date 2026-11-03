@@ -118,30 +118,47 @@ def add_routes(app: FastAPI, console: Console) -> None:
     # A site's grant is named after its address (``browser-act:https://…``,
     # #465): the name may hold slashes.
     @app.delete("/api/sessions/{session_id}/grants/{tool:path}")
-    async def forget_grant(session_id: str, tool: str) -> Response:
+    async def forget_grant(session_id: str, tool: str) -> JSONResponse:
         """Take back the grant of *tool* that holds in the chat, open or not.
 
         A grant from the main chat holds everywhere, so taking it back here
-        takes it back everywhere.
+        takes it back everywhere: ``everywhere`` says so. A write that fails
+        is 503 (the checks stopped using it already).
         """
         console.require_store()
         await _require_session(console, session_id)
         if tool not in console.sessions.grants(session_id):
             raise ApiError(404, "not_found", t("errors.noGrant"))
-        await _sessions_call(
+        gone = await _sessions_call(
             console, console.sessions.forget_grant(session_id, tool), session_id
         )
-        return Response(status_code=204)
+        return JSONResponse(
+            content={
+                "revoked": [{"key": g.key, "scope": g.scope} for g in gone],
+                "everywhere": any(g.scope == "global" for g in gone),
+            }
+        )
 
     @app.delete("/api/sessions/{session_id}/grants")
-    async def forget_grants(session_id: str) -> Response:
-        """Take back every grant the chat gave (the main chat's: every global one)."""
+    async def forget_grants(session_id: str) -> JSONResponse:
+        """Take back every grant the chat gave (the main chat's: every global one).
+
+        A side chat's clear leaves the main chat's grants, which still hold
+        here: ``still_everywhere`` counts them.
+        """
         console.require_store()
         await _require_session(console, session_id)
-        await _sessions_call(
+        gone = await _sessions_call(
             console, console.sessions.forget_grant(session_id), session_id
         )
-        return Response(status_code=204)
+        still = {
+            g.key
+            for g in console.sessions.book.visible(session_id)
+            if g.scope == "global"
+        }
+        return JSONResponse(
+            content={"revoked": len(gone), "still_everywhere": len(still)}
+        )
 
     @app.delete("/api/sessions/{session_id}/folders")
     async def forget_folder(session_id: str, path: str = "") -> Response:

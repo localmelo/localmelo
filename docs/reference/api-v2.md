@@ -939,6 +939,9 @@ token total.
 - `grants` are the names allowed in the chat (tools, sites, windows), whether
   the chat is open or not: its own and, for a side chat, the main chat's, which
   hold everywhere; `granted_at` maps each one to when the grant began.
+  `grants_everywhere` names those of a side chat's `grants` that hold because
+  the main chat allowed them (`[]` in the main chat and a task): taking one back
+  here takes it back everywhere.
   [`GET /api/grants`](#get-apigrants) lists the same grants with their details.
 - `mcp_error` is why this session runs without MCP tools, or `""`. It is
   always `""` today: MCP in the console is not built yet.
@@ -2064,16 +2067,22 @@ Take back one grant that holds in the chat, so the tool asks again next time.
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X DELETE http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/grants/python_exec
 ```
 
-- 204 with no body; both `grants` and `granted_at` of
-  `GET /api/sessions/{id}` drop it. It takes back the chat's own grant of that
-  name and a main-chat grant of that name, which is taken back everywhere.
+- 200 with `{"revoked": [{"key": "python_exec", "scope": "session"}], "everywhere": false}`;
+  both `grants` and `granted_at` of `GET /api/sessions/{id}` drop it. It takes
+  back the chat's own grant of that name and a main-chat grant of that name,
+  which is taken back everywhere: `everywhere` is then `true` and that row's
+  `scope` is `global`.
 - 404 `not_found` when no grant of that name holds in the chat. The chat need
   not be open.
 - `DELETE /api/sessions/{id}/grants` without a name takes back the chat's own
-  grants and answers 204; in the main chat it takes back every `global` grant.
+  grants and answers 200 with `{"revoked": N, "still_everywhere": M}`: `M`
+  main-chat grants still hold in a side chat; in the main chat it takes back
+  every `global` grant.
+- A revoke the store cannot save is 503 `store_unavailable`; the checks have
+  stopped using the grant all the same, but it would come back after a restart.
 - `DELETE /api/sessions/{id}/folders?path=PATH` takes back a folder allowed
-  for reading in the chat (204; 404 `not_found` when none holds there). It
-  works for a chat that is not open too.
+  for reading in the chat (204; 404 `not_found` when none holds there; 503
+  when the store cannot save it). It works for a chat that is not open too.
 - A site's grant is named after the question, such as
   `browser-act:https://news.example`; the name may hold slashes, and is sent
   percent-encoded or as it is.

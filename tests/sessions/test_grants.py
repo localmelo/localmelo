@@ -9,8 +9,10 @@ ask every time is written, and a row that breaks a rule is never used.
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -33,13 +35,19 @@ from localmelo.support.sessions.grants import (
     Grant,
     GrantBook,
     GrantRefusedError,
+    MainChatGrants,
     check_grant,
     grant_kind,
     listed,
-    read_global_grants,
     trusted,
 )
 from localmelo.support.sessions.store import SessionStore, SessionStoreError
+from localmelo.tests.agent.test_approvals import (
+    ScriptedLLM,
+    _agent,
+    _answer,
+    _calls,
+)
 
 SITE = "browser:https://example.com"
 
@@ -404,7 +412,11 @@ async def test_a_forged_row_is_never_used(store: SessionStore, tmp_path: Path) -
     assert book.live() == []
     assert book.allowed_for(side) == frozenset()
     assert book.folders_for(side) == ()
-    assert await read_global_grants(store.path) == []
+    reader = MainChatGrants(store.path)
+    try:
+        assert reader() == ()
+    finally:
+        reader.close()
 
 
 def test_trusted_keeps_the_rule_of_the_write() -> None:
@@ -496,15 +508,14 @@ async def test_the_terminal_reads_the_main_chat_s_grants_without_writing(
     terminal_store = SessionStore(tmp_path / "cli.db", writer="cli")
     await terminal_store.open()
     try:
-        terminal = GrantBook(
-            terminal_store, outside=lambda: read_global_grants(store.path)
-        )
+        reader = MainChatGrants(store.path)
+        terminal = GrantBook(terminal_store, outside=reader)
         await terminal.open()
-        await terminal.refresh()
         view = terminal.view("t-chat", "terminal")
         assert view.names() == {"shell_exec"}
         assert terminal.live() == []  # the main chat's rows are not this book's
-        assert await read_global_grants(tmp_path / "missing.db") == []
+        assert MainChatGrants(tmp_path / "missing.db")() == ()
+        reader.close()
     finally:
         await terminal_store.aclose()
 
@@ -518,3 +529,143 @@ def test_holds_grant_never_answers_for_a_question_that_asks_every_time() -> None
     )
     assert not holds_grant(policy, "desktop-act:Notes")
     assert not holds_grant(policy, "window-read:com.example.mail")
+
+
+# ── The terminal's own chat: a revoke in the gateway holds at the next check ──
+
+
+class _RevokeBefore(ScriptedLLM):
+    """A scripted model that runs *before* ahead of its *at*-th request."""
+
+    def __init__(self, replies: list[Any], at: int, before: Any) -> None:
+        super().__init__(replies)
+        self._at, self._before = at, before
+
+    async def chat(self, messages: Any, tools: Any = None) -> Any:
+        if len(self.requests) == self._at:
+            await self._before()
+        return await super().chat(messages, tools)
+
+
+async def test_a_gateway_revoke_holds_for_the_next_call_of_the_same_turn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two books, two files: the gateway's and the terminal's own chat's.
+
+    The main chat allowed a folder and file writes; the terminal's turn reads
+    and writes once on them, the gateway commits a revoke of both while the
+    model plans the next step, and the next read and write of the same turn
+    ask the person (who says no) instead of running on the stale grant.
+    """
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    root = home / "workspace"
+    letters = home / "Documents" / "letters"
+    root.mkdir(parents=True)
+    letters.mkdir(parents=True)
+    (letters / "a.md").write_text("first")
+    (letters / "b.md").write_text("second")
+    real_letters = os.path.realpath(letters)
+
+    gateway = SessionStore(tmp_path / "gateway.db", writer="gateway")
+    await gateway.open()
+    terminal_store = SessionStore(tmp_path / "cli.db", writer="cli")
+    await terminal_store.open()
+    reader = MainChatGrants(gateway.path)
+    try:
+        book = GrantBook(gateway)
+        await book.open()
+        main = (await gateway.main_chat()).id
+        allowed = [
+            await book.view(main, "main").grant(real_letters, kind="folder"),
+            await book.view(main, "main").grant("file_write"),
+            await book.view(main, "main").grant("window-read:com.example.chat"),
+        ]
+        terminal = GrantBook(terminal_store, outside=reader)
+        await terminal.open()
+        asker = Asker(ApprovalDecision(False, "no"), ApprovalDecision(False, "no"))
+        policy = ChatPolicy(asker, grants=terminal.view("t-chat", "terminal"))
+        assert holds_grant(policy, "window-read:com.example.chat")
+
+        async def revoke() -> None:
+            for grant in allowed:
+                assert grant is not None and await book.revoke(grant.id)
+
+        llm = _RevokeBefore(
+            [
+                _calls(
+                    ("file_read", {"path": str(letters / "a.md")}, "c1"),
+                    ("file_write", {"path": str(root / "x.md"), "content": "x"}, "c2"),
+                ),
+                _calls(
+                    ("file_read", {"path": str(letters / "b.md")}, "c3"),
+                    ("file_write", {"path": str(root / "y.md"), "content": "y"}, "c4"),
+                ),
+                _answer("done"),
+            ],
+            at=1,
+            before=revoke,
+        )
+        agent, _ = _agent(
+            llm,
+            builtins=frozenset({"file_read", "file_write", "list_files"}),
+            workspace_root=str(root),
+        )
+        await agent.run_task("read my letters", approval=policy)
+
+        # The first read and write ran on the main chat's grants, unasked; after
+        # the revoke the same turn's next read and write asked and were refused.
+        assert [r.tool_name for r in asker.requests] == ["file_read", "file_write"]
+        assert asker.requests[0].outside is not None
+        assert (root / "x.md").exists() and not (root / "y.md").exists()
+        assert not any("second" in text for text in llm.tool_messages(2))
+        # A self-asking question (another app's window) sees the revoke too.
+        assert not holds_grant(policy, "window-read:com.example.chat")
+    finally:
+        reader.close()
+        await terminal_store.aclose()
+        await gateway.aclose()
+
+
+async def test_the_reader_fails_closed(store: SessionStore, tmp_path: Path) -> None:
+    book = GrantBook(store)
+    await book.open()
+    main, _, _ = await _chats(store)
+    await book.view(main, "main").grant("shell_exec")
+    reader = MainChatGrants(store.path)
+    try:
+        assert [g.key for g in reader()] == ["shell_exec"]
+        # A newer grants component than this localmelo reads: none hold.
+        async with store.component_transaction("test") as conn:
+            await conn.execute(
+                "UPDATE schema_components SET version = ? WHERE name = ?",
+                (GRANTS_VERSION + 1, COMPONENT),
+            )
+        assert reader() == ()
+        # A file that is not a database: none hold, and nothing raises.
+        broken = tmp_path / "broken.db"
+        broken.write_bytes(b"not a database at all, just text" * 64)
+        assert MainChatGrants(broken)() == ()
+        # A source that raises: the book holds none of its grants.
+        failing = GrantBook(outside=_raise)
+        assert failing.view("t", "terminal").names() == frozenset()
+    finally:
+        reader.close()
+
+
+def _raise() -> tuple[Grant, ...]:
+    raise RuntimeError("cannot read")
+
+
+async def test_a_revoke_that_cannot_be_saved_raises_and_still_holds_here(
+    store: SessionStore,
+) -> None:
+    book = GrantBook(store)
+    await book.open()
+    main, side, _ = await _chats(store)
+    await book.view(side, "side").grant("file_write")
+    await store.aclose()  # every later write fails
+    with pytest.raises(SessionStoreError):
+        await book.forget(side, "file_write")
+    # The check stopped using it all the same.
+    assert "file_write" not in book.allowed_for(side)

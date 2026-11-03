@@ -333,6 +333,25 @@ def test_the_chat_wide_answer_names_what_it_allows() -> None:
     )
 
 
+def test_in_the_main_chat_the_answer_says_it_counts_in_every_chat() -> None:
+    def option(name: str, **arguments: Any) -> str:
+        return session_option(_request(name, **arguments), everywhere=True)
+
+    assert option("browser:https://example.com", site="example.com") == (
+        "Yes, and allow example.com in every chat"
+    )
+    assert option("browser-act:https://example.com", site="example.com") == (
+        "Yes, and allow clicking and choosing on example.com in every chat"
+    )
+    assert option("window-read:com.example.chat", app="Chat") == (
+        "Yes, and allow Chat everywhere"
+    )
+    assert option("shell_exec") == "Yes, and allow every shell_exec call in every chat"
+    assert "for the rest of this chat" in session_option(
+        _request("browser:https://example.com", site="example.com")
+    )
+
+
 def test_the_header_names_the_tier() -> None:
     shell = panel_text(_request(tier="exec"), width=60)
     assert shell.header == f"shell_exec · exec · in {WORKSPACE}"

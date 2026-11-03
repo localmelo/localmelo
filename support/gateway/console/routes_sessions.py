@@ -264,6 +264,13 @@ def add_routes(app: FastAPI, console: Console) -> None:
         granted_at = (
             {tool: view.granted_at(tool) for tool in grants} if view is not None else {}
         )
+        # In a side chat, the grants that hold because the main chat allowed
+        # them: taking one back here takes it back everywhere.
+        everywhere = (
+            sorted(view.everywhere())
+            if view is not None and info.kind not in ("front", "task", "front_bg")
+            else []
+        )
         turns = await _store_call(
             console, store.list_turns(session_id), None if worker else session_id
         )
@@ -298,6 +305,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 ),
                 "grants": grants,
                 "granted_at": granted_at,
+                "grants_everywhere": everywhere,
                 "mcp_error": "" if entry is None else entry.mcp_error,
                 "agent": "not_loaded" if worker else agent_state(console, session_id),
                 "tokens": tokens,

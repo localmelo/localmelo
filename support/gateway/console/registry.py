@@ -546,17 +546,27 @@ class ConsoleSessions:
         Open or not: the grants live in the table. A grant of the main chat
         that holds here is taken back everywhere by its name; with ``None``
         only the chat's own go (in the main chat, every global one). The
-        checks stop using it at once; this waits for the rows.
+        checks stop using them at once; this waits for the rows, and a write
+        that fails raises :class:`SessionStoreError`.
         """
-        gone = self.book.forget_now(session_id, tool_name)
-        await self.book.flush()
-        return gone
+        return await self.book.forget(session_id, tool_name)
 
     async def forget_folder(self, session_id: str, folder: str) -> bool:
-        """Take back a folder's grant that holds in *session_id*; whether one did."""
-        gone = self.book.forget_now(session_id, folder, folders=True)
-        await self.book.flush()
-        return bool(gone)
+        """Take back a folder's grant that holds in *session_id*; whether one did.
+
+        A write that fails raises :class:`SessionStoreError`.
+        """
+        return bool(await self.book.forget(session_id, folder, folders=True))
+
+    async def _forget_moved(self, session_id: str) -> None:
+        """A chat in another folder starts without its own grants (the main chat's still hold)."""
+        try:
+            await self.forget_grant(session_id)
+        except SessionStoreError:
+            # The checks stopped using them; only the file still lists them.
+            logger.warning(
+                "Could not save that %s's grants were taken back", session_id
+            )
 
     async def keep(self, session_id: str) -> None:
         """Close *session_id*'s Agent, keeping its conversation.
@@ -1240,7 +1250,7 @@ class ConsoleSessions:
                 info = await self._store.update_session(session_id, workspace=path)
                 # A chat in another folder starts without its grants (the main
                 # chat's still hold), open or not.
-                await self.forget_grant(session_id)
+                await self._forget_moved(session_id)
                 return info
             if entry.runner.busy:
                 raise ApiError(
@@ -1284,7 +1294,7 @@ class ConsoleSessions:
             old, entry.agent = entry.agent, agent
             with contextlib.suppress(Exception):
                 await old.close()
-            await self.forget_grant(session_id)
+            await self._forget_moved(session_id)
             entry.last_used = self._clock()
             return info
 

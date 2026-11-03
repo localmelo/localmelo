@@ -372,6 +372,8 @@ async def test_an_approval_is_the_terminals_list_answered_through_the_gateway(
     pending = session.approver.pending
     assert pending is not None and pending.request.tool_name == "shell_exec"
     assert pending.request.arguments == {"command": "ls"} and pending.offer_session
+    # The main chat's own "allow" counts in every chat: the list says so.
+    assert pending.everywhere
     session.approver.answer("session")
     await setup.idle()
     answered = [r for r in gateway.requests if r[1] == "/api/approvals/r1"]

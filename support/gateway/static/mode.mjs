@@ -34,8 +34,9 @@ export function siteGrants(names = []) {
 /**
  * Wire the composer's Ask/Auto chip and its menu (`mode-picker`, `mode-btn`, `mode-text` and an empty
  * `mode-menu` in index.html; the menu's content is drawn here). `state()` gives `{mode, fallback,
- * visible, busy, grants}`: the chat's mode (or the one the next new chat gets), the mode new chats start
- * in, whether the chip shows, whether a switch is being saved, and the names of the chat's grants. `pick(mode)`
+ * visible, busy, grants, everywhere}`: the chat's mode (or the one the next new chat gets), the mode new chats start
+ * in, whether the chip shows, whether a switch is being saved, the names of the chat's grants, and which of
+ * them hold because the main chat allowed them (taking one back takes it away in every chat). `pick(mode)`
  * saves a choice and resolves when it is kept. `openSettings()` opens Settings at Chats and folders.
  * `remove(name)` takes back one grant and resolves when it is gone. The menu is a `menu` of two
  * `menuitemradio`s, then the sites allowed in this chat (#465), each with a Remove `menuitem`: arrows move,
@@ -84,14 +85,15 @@ export function setupModeChip({doc, state, pick, openSettings, remove = null}) {
     });
     link.addEventListener('keydown', keys);
     foot.append(link);
-    const grants = remove ? grantsList(state().grants ?? []) : [];
+    const grants = remove ? grantsList(state().grants ?? [], state().everywhere ?? []) : [];
     $('mode-menu').setAttribute('aria-labelledby', 'mode-menu-title');
     $('mode-menu').replaceChildren(title, ...items, ...grants, foot);
   }
 
   // The sites this chat allowed for its rest (#465), each with Remove; nothing when there are none.
-  function grantsList(names) {
+  function grantsList(names, everywhere = []) {
     const found = siteGrants(names);
+    const fromMain = new Set(everywhere);
     const removes = [];
     if (!found.length) {
       controls = [...items];
@@ -103,7 +105,7 @@ export function setupModeChip({doc, state, pick, openSettings, remove = null}) {
     heading.id = 'mode-grants-title';
     box.setAttribute('aria-labelledby', heading.id);
     box.append(heading);
-    for (const grant of found) {
+    for (const [index, grant] of found.entries()) {
       const what = t(grant.kind === 'act' ? 'auto.menu.grantAct' : 'auto.menu.grantOpen', {site: grant.site});
       const row = node('div', 'mode-grant');
       const drop = node('button', 'link-button mode-grant-remove', t('auto.menu.remove'));
@@ -113,7 +115,16 @@ export function setupModeChip({doc, state, pick, openSettings, remove = null}) {
       drop.addEventListener('click', () => take(grant.name, drop));
       drop.addEventListener('keydown', keys);
       removes.push(drop);
-      row.append(node('span', 'mode-grant-what', what), drop);
+      const words = node('span', 'mode-grant-what', what);
+      if (fromMain.has(grant.name)) {
+        // The main chat allowed it: say so, and that Remove reaches every chat.
+        const from = node('span', 'mode-item-words mode-grant-from', t('auto.menu.fromMain'));
+        from.id = `mode-grant-from-${index}`;
+        drop.setAttribute('aria-describedby', from.id);
+        const text = node('span', 'mode-item-text');
+        text.append(words, from);
+        row.append(text, drop);
+      } else row.append(words, drop);
       box.append(row);
     }
     controls = [...items, ...removes];

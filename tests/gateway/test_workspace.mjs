@@ -5489,7 +5489,7 @@ test('the Ask/Auto menu lists the sites this chat allowed, each with Remove (#46
       session: session('a', {approvals: 'auto'}), pending_approvals: [], grants: ['python_exec', name, 'browser:https://docs.example'],
       granted_at: {}, mcp_error: '', agent: 'not_loaded', tokens: 0,
     },
-    [`DELETE /sessions/a/grants/${encodeURIComponent(name)}`]: {status: 204},
+    [`DELETE /sessions/a/grants/${encodeURIComponent(name)}`]: {revoked: [{key: name, scope: 'session'}], everywhere: false},
   }));
   await h.run('init()');
   h.element('mode-btn').click();
@@ -5506,6 +5506,68 @@ test('the Ask/Auto menu lists the sites this chat allowed, each with Remove (#46
   assert.equal(h.net.callsTo(`/sessions/a/grants/${encodeURIComponent(name)}`)[0].method, 'DELETE');
   assert.deepEqual(h.state().view.grants, ['python_exec', 'browser:https://docs.example']);
   assert.doesNotMatch(flatten(h.element('mode-menu')), /news\.example/);
+  assert.match(h.text('notice'), /Removed\. melo asks again next time\./);
+  assert.doesNotMatch(h.text('notice'), /everywhere/);
+});
+
+test('a side chat\'s menu marks the sites the main chat allowed, and removing one says it went everywhere', async () => {
+  const own = 'browser:https://docs.example';
+  const fromMain = 'browser-act:https://news.example';
+  const h = harness(sideRoutes({
+    'GET /settings': {mode: 'default', approvals: 'ask'},
+    'GET /sessions/a': {
+      session: session('a', {title: 'Plan the trip'}), pending_approvals: [], grants: ['python_exec', fromMain, own], grants_everywhere: [fromMain],
+      granted_at: {}, mcp_error: '', agent: 'not_loaded', tokens: 0,
+    },
+    [`DELETE /sessions/a/grants/${encodeURIComponent(fromMain)}`]: {revoked: [{key: fromMain, scope: 'global'}], everywhere: true},
+  }));
+  await h.run('init()');
+  await openSide(h);
+  assert.deepEqual(h.state().view.grantsEverywhere, [fromMain]);
+  h.element('mode-btn').click();
+  const rows = () => findNodes(h.element('mode-menu'), (node) => node.className === 'mode-grant');
+  const marks = () => rows().map((row) => [findNode(row, (node) => node.className === 'mode-grant-what').textContent,
+    findNode(row, (node) => String(node.className).includes('mode-grant-from'))?.textContent ?? null]);
+  assert.deepEqual(marks(), [
+    ['Click and choose on news.example', 'From the main chat · removing it takes it away everywhere'],
+    ['Open and read docs.example', null],
+  ]);
+  const remove = findNode(rows()[0], (node) => node.tag === 'button');
+  const from = findNode(rows()[0], (node) => String(node.className).includes('mode-grant-from'));
+  assert.equal(remove.attributes['aria-describedby'], from.id, 'Remove is described by where the grant came from');
+  assert.equal(findNode(rows()[1], (node) => node.tag === 'button').attributes['aria-describedby'], undefined);
+  await remove.click();
+  await settle();
+  assert.equal(h.net.callsTo(`/sessions/a/grants/${encodeURIComponent(fromMain)}`)[0].method, 'DELETE');
+  assert.match(h.text('notice'), /Taken back everywhere\./);
+  assert.deepEqual(h.state().view.grants, ['python_exec', own]);
+  assert.deepEqual(h.state().view.grantsEverywhere, []);
+  assert.deepEqual(marks(), [['Open and read docs.example', null]]);
+});
+
+test('the menu reads in Chinese for a grant from the main chat', async () => {
+  const fromMain = 'browser:https://docs.example';
+  const h = harness(sideRoutes({
+    'GET /settings': {mode: 'default', approvals: 'ask'},
+    'GET /sessions/a': {
+      session: session('a', {title: 'Plan the trip'}), pending_approvals: [], grants: [fromMain], grants_everywhere: [fromMain],
+      granted_at: {}, mcp_error: '', agent: 'not_loaded', tokens: 0,
+    },
+    [`DELETE /sessions/a/grants/${encodeURIComponent(fromMain)}`]: {revoked: [{key: fromMain, scope: 'global'}], everywhere: true},
+  }));
+  await h.run('init()');
+  await openSide(h);
+  const {useLanguage} = await import('../../support/gateway/static/i18n.mjs');
+  await useLanguage('zh-Hans');
+  try {
+    h.element('mode-btn').click();
+    assert.match(flatten(h.element('mode-menu')), /来自主对话 · 收回后在所有对话中都不再允许/);
+    await findNode(h.element('mode-menu'), (node) => node.tag === 'button' && node.textContent === '移除').click();
+    await settle();
+    assert.match(h.text('notice'), /已在所有对话中收回。/);
+  } finally {
+    await useLanguage('en');
+  }
 });
 
 test('a chat that allowed no site shows no list in its menu', async () => {
@@ -6037,6 +6099,154 @@ test('the folder card in a task says this task, and reads in Simplified Chinese'
     assert.equal(findNode(card, (node) => node.className === 'approval-title').textContent, '让 melo 读取 ~/Documents/letters 里的内容？');
     const actions = findNode(card, (node) => node.className === 'approval-actions');
     assert.deepEqual(actions.children.map((node) => node.textContent), ['允许一次', '在这个对话里允许这个文件夹', '总是允许这个文件夹', '拒绝']);
+  } finally {
+    await useLanguage('en');
+  }
+});
+
+// ── What the main chat allows counts everywhere ──
+
+const EVERYWHERE = 'In the main chat this counts in every chat, the tasks you start and the terminal, until you revoke it in Settings → Permissions.';
+const answersOf = (card) => findNode(card, (node) => node.className === 'approval-actions').children.map((node) => node.textContent);
+const ruleOf = (card, id) => findNode(card, (node) => node.id === `approval-scope-${id}`).textContent;
+const everywhereLine = (card) => findNode(card, (node) => String(node.className).includes('approval-everywhere'));
+const askOf = (extra) => ({request_id: 'q', tool_name: 'file_read', arguments: {path: 'a.txt'}, arguments_complete: true, workspace_label: '~/w', ...extra});
+
+test('the main chat\'s own approval card says each kept answer counts in every chat', async () => {
+  const h = harness(mainRoutes());
+  await h.run('init()');
+  assert.equal(h.state().activeId, 'm');
+  // A tool: the answer, the rule and the line below it.
+  h.context.request = askOf();
+  const card = h.run('approvalCard(request)');
+  assert.deepEqual(answersOf(card), ['Allow once', 'Allow in every chat', 'Deny']);
+  assert.equal(ruleOf(card, 'q'), 'melo will not ask again before using file_read in any chat.');
+  assert.equal(everywhereLine(card).textContent, EVERYWHERE);
+  assert.doesNotMatch(flatten(card), /this chat/);
+  const order = card.children.map((node) => node.className);
+  assert.ok(order.indexOf('approval-warning') < order.indexOf('approval-warning approval-everywhere'), 'the line follows the rule');
+  const keep = findNode(card, (node) => node.textContent === 'Allow in every chat');
+  assert.match(keep.attributes['aria-describedby'], /approval-scope-q approval-wide-q/);
+  // Commands and code, writes, a site and acting on it.
+  const rules = (extra) => { h.context.request = askOf({request_id: 'r', ...extra }); const made = h.run('approvalCard(request)'); return [answersOf(made)[1], ruleOf(made, 'r'), everywhereLine(made)?.textContent]; };
+  assert.deepEqual(rules({tool_name: 'shell_exec', arguments: {command: 'ls'}}), ['Allow in every chat',
+    '“Allow in every chat” lets routine shell commands run without asking in any chat. Installs, downloads and changes outside ~/w still ask.', EVERYWHERE]);
+  assert.equal(rules({tool_name: 'python_exec', arguments: {code: 'print(1)'}})[1],
+    '“Allow in every chat” lets routine Python code run without asking in any chat. Installs, downloads and changes outside ~/w still ask.');
+  assert.equal(rules({tool_name: 'file_write', arguments: {path: 'a', content: 'x'}, target: {path_label: 'a', exists: false, size_bytes: 0}})[1],
+    'melo will not ask again before writing files in any chat.');
+  assert.equal(rules({tool_name: 'browser:https://a.example', arguments: {site: 'a.example'}})[1], 'melo will not ask again before opening a.example in any chat.');
+  assert.equal(rules({tool_name: 'browser:https://a.example', arguments: {site: 'a.example', via: 'web_fetch', url: 'https://a.example/x'}})[1],
+    'melo will not ask again before reading or opening a.example in any chat.');
+  assert.equal(rules({tool_name: 'browser-act:https://a.example', arguments: {site: 'a.example'}})[1],
+    'melo will not ask again before clicking or choosing on a.example in any chat. Typing still asks every time.');
+  // A window another app opened names the app.
+  const see = rules({tool_name: 'window-read:com.example.chat', arguments: {app: 'Chat', window: 'Sign in'}, offers_chat: true});
+  assert.deepEqual([see[0], see[2]], ['Allow Chat everywhere', EVERYWHERE]);
+  assert.match(see[1], /“Allow Chat everywhere” lets melo see Chat's later windows in any chat/);
+  // A folder outside the workspace.
+  h.context.request = outsideRead();
+  const folder = h.run('approvalCard(request)');
+  assert.deepEqual(answersOf(folder), ['Allow once', 'Allow this folder in every chat', 'Always allow this folder', 'Deny']);
+  assert.equal(ruleOf(folder, 'out'), '“Allow this folder in every chat” covers every chat, the tasks you start and the terminal. “Always” keeps ~/Documents/letters in Settings, under Chats and folders, where you can remove it. Writing there still asks every time.');
+  assert.equal(everywhereLine(folder).textContent, EVERYWHERE);
+  // Typing, a form and a high-impact call keep nothing: they say nothing about everywhere.
+  for (const extra of [{tool_name: 'browser-type:https://a.example', arguments: {site: 'a.example', text: 'hi'}},
+    {tool_name: 'browser-submit:https://a.example', arguments: {site: 'a.example', fields: []}},
+    {review: {verdict: 'high', categories: ['delete'], reasons: ['Deletes x.']}}]) {
+    h.context.request = askOf({request_id: 'once', ...extra});
+    const once = h.run('approvalCard(request)');
+    assert.deepEqual(answersOf(once), ['Allow once', 'Deny']);
+    assert.equal(everywhereLine(once), null);
+    assert.doesNotMatch(flatten(once), /Allow in every chat|Allow for this chat|counts in every chat/);
+  }
+  h.context.request = askOf({request_id: 'high', tool_name: 'shell_exec', arguments: {command: 'pip install x'}, review: {verdict: 'high', categories: ['install'], reasons: ['Installs x.']}});
+  assert.equal(ruleOf(h.run('approvalCard(request)'), 'high'), 'An allow in every chat never covers installs, downloads or changes outside ~/w.');
+});
+
+test('in the main chat the remembered note and the Deny view follow the wider answer', async () => {
+  const h = harness(mainRoutes());
+  await h.run('init()');
+  h.context.request = askOf({remembered: true});
+  const card = h.run('approvalCard(request)');
+  const kept = findNode(card, (node) => node.className === 'approval-remembered');
+  assert.equal(kept.textContent, 'Your Allow also lets every chat, the tasks you start and the terminal run this exact step later without asking, until you revoke it.');
+  const line = everywhereLine(card);
+  h.run('approvalStates.get("q").mountedAt -= 1000');
+  h.timers.findLast((timer) => timer.ms <= 500).handler();
+  quietDeny(card).click();
+  assert.deepEqual([line.hidden, kept.hidden], [true, true], 'Deny shows only its reason box');
+  findNode(card, (node) => node.textContent === 'Back').click();
+  assert.deepEqual([line.hidden, kept.hidden], [false, false]);
+});
+
+test('in the main chat the wider answer posts the same choice a chat answer does', async () => {
+  for (const [label, choice] of [['Allow once', 'once'], ['Allow in every chat', 'session']]) {
+    const h = harness(mainRoutes({'POST /approvals/post': {outcome: 'allowed'}}));
+    await h.run('init()');
+    h.context.request = askOf({request_id: 'post', tool_name: 'shell_exec', arguments: {command: 'pwd'}});
+    h.run('S.view.pending.set("post", request)');
+    const card = h.run('approvalCard(request)');
+    const target = findNode(card, (node) => node.textContent === label);
+    h.run('approvalStates.get("post").mountedAt -= 1000');
+    h.timers.findLast((timer) => timer.ms <= 500).handler();
+    await target.click();
+    assert.deepEqual(h.net.callsTo('/approvals/post')[0].body, {choice});
+  }
+});
+
+test('a side chat\'s card says this chat, and a task\'s card says this task, even in the main chat', async () => {
+  const side = harness(sideRoutes());
+  await side.run('init()');
+  await openSide(side);
+  assert.equal(side.state().activeId, 'a');
+  side.context.request = askOf({remembered: true});
+  const card = side.run('approvalCard(request)');
+  assert.deepEqual(answersOf(card), ['Allow once', 'Allow for this chat', 'Deny']);
+  assert.equal(ruleOf(card, 'q'), 'melo will not ask again before using file_read in this chat.');
+  assert.equal(everywhereLine(card), null);
+  assert.match(findNode(card, (node) => node.className === 'approval-remembered').textContent, /^Your Allow also lets this chat's tasks/);
+  side.context.request = outsideRead();
+  assert.deepEqual(answersOf(side.run('approvalCard(request)')), ['Allow once', 'Allow this folder for this chat', 'Always allow this folder', 'Deny']);
+  side.context.request = askOf({tool_name: 'window-read:com.example.chat', arguments: {app: 'Chat', window: 'x'}, offers_chat: true});
+  assert.equal(answersOf(side.run('approvalCard(request)'))[1], 'Allow Chat in this chat');
+  // A task's card, drawn while the main chat is open, keeps its own words.
+  const main = harness(mainRoutes());
+  await main.run('init()');
+  assert.equal(main.state().activeId, 'm');
+  main.context.request = askOf({remembered: true});
+  const task = main.run('approvalCard(request, {...chatApproval, scope: "task"})');
+  assert.deepEqual(answersOf(task), ['Allow once', 'Allow for this task', 'Deny']);
+  assert.equal(ruleOf(task, 'q'), 'melo will not ask again before using file_read in this task.');
+  assert.equal(everywhereLine(task), null);
+  assert.match(findNode(task, (node) => node.className === 'approval-remembered').textContent, /^Your Allow also lets later tasks from the same chat/);
+  main.context.request = outsideRead();
+  assert.equal(answersOf(main.run('approvalCard(request, {...chatApproval, scope: "task"})'))[1], 'Allow this folder for this task');
+  // The chat before any is open (no main chat in the list) is not the main chat.
+  const none = harness(baseRoutes());
+  await none.run('init()');
+  none.context.request = askOf();
+  assert.equal(answersOf(none.run('approvalCard(request)'))[1], 'Allow for this chat');
+});
+
+test('the main chat\'s card reads in Simplified Chinese', async () => {
+  const h = harness(mainRoutes());
+  await h.run('init()');
+  const {useLanguage} = await import('../../support/gateway/static/i18n.mjs');
+  await useLanguage('zh-Hans');
+  try {
+    h.context.request = askOf({remembered: true});
+    const card = h.run('approvalCard(request)');
+    assert.deepEqual(answersOf(card), ['允许一次', '在所有对话中允许', '拒绝']);
+    assert.equal(ruleOf(card, 'q'), '在所有对话里，melo 使用 file_read 前不会再问你。');
+    assert.equal(everywhereLine(card).textContent, '在主对话里允许的在所有对话、你开始的任务和终端里都算，直到你在“设置 → 授权”里收回。');
+    assert.match(findNode(card, (node) => node.className === 'approval-remembered').textContent, /^你的允许也会让所有对话、你开始的任务和终端/);
+    h.context.request = outsideRead({request_id: 'zh'});
+    assert.equal(answersOf(h.run('approvalCard(request)'))[1], '在所有对话中允许这个文件夹');
+    h.context.request = askOf({request_id: 'see', tool_name: 'window-read:com.example.chat', arguments: {app: 'Chat', window: 'x'}, offers_chat: true});
+    assert.equal(answersOf(h.run('approvalCard(request)'))[1], '在所有对话中允许 Chat');
+    h.context.request = askOf({request_id: 'sh', tool_name: 'shell_exec', arguments: {command: 'ls'}});
+    assert.equal(ruleOf(h.run('approvalCard(request)'), 'sh'), '“在所有对话中允许”让常规的 shell 命令在所有对话里不再询问就运行。安装、下载和 ~/w 之外的改动仍会询问。');
   } finally {
     await useLanguage('en');
   }
