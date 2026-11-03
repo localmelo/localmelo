@@ -1086,6 +1086,7 @@ test('the key is sent once, leaves the field at once and only its keychain refer
   assert.equal(h.element('s-key-entry').hidden, true);
   assert.equal(h.element('s-key-state').dataset.text, 'Saved in the keychain');
   assert.equal(h.element('s-key-status').textContent, 'Saved in the keychain.');
+  assert.match(h.element('s-key-status').className, /sr-only/, 'announced, not drawn twice beside the saved row');
   await h.element('settings-test').emit('click');
   await h.element('create-btn').emit('click');
   await flush();
@@ -1236,4 +1237,25 @@ test('the hosted setup reads in Simplified Chinese', async () => {
   } finally {
     await useLanguage('en');
   }
+});
+
+test('a service tried in the form does not change the saved connection\'s state rows', async () => {
+  const h = harness({
+    'GET /settings': full(),
+    'GET /settings/key-status?preset=deepseek': {keychain: 'missing'},
+    'POST /settings/test': {ok: false, result: 'wrong_key', error: 'The service did not accept the key (401). Paste the key again.'},
+  });
+  await h.open();
+  const before = h.element('s-chat-state').dataset.text;
+  await h.element('s-change').emit('click');
+  await change(h, 's-adapter', 'deepseek', 'change');
+  await flush();
+  await h.element('settings-test').emit('click');
+  assert.equal(h.element('settings-test-status').textContent, 'The service did not accept the key (401). Paste the key again.');
+  assert.equal(h.element('s-chat-state').dataset.text, before, 'the saved server is not marked unreachable by another service\'s test');
+  const same = harness({'GET /settings': full(), 'POST /settings/test': {ok: true}});
+  await same.open();
+  await same.element('s-change').emit('click');
+  await same.element('settings-test').emit('click');
+  assert.match(same.element('s-chat-state').dataset.text, /^Connected · old/, 'the saved connection tested as it is shows its result');
 });

@@ -1347,7 +1347,7 @@
   "settings.hosted.replace": "Replace",
   "settings.hosted.saveKey": "Save key",
   "settings.hosted.thinking": "Let the model think before it answers",
-  "settings.hosted.thinkingHint": "Thinking can help on hard tasks. It is slower, and a model that thinks sometimes ends a turn without an answer.",
+  "settings.hosted.thinkingHint": "Thinking can help on hard tasks. If a thinking model ends a turn without an answer, melo asks once more with thinking off.",
   "settings.key.checking": "Checking key status…",
   "settings.key.failed": "Could not check key status.",
   "settings.key.invalid": "Enter a valid environment variable name.",

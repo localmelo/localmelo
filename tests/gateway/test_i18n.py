@@ -38,6 +38,7 @@ CONSOLE = ROOT / "support/gateway/console"
 # Words written by modules the terminal runs too, which need no gateway.
 USAGE = ROOT / "support/usage_snapshot.py"
 DISPLAY = ROOT / "support/sessions/display.py"
+HOSTED_CHECK = ROOT / "support/hosted_check.py"
 # The terminal's main chat, which writes the catalog's English (``t_in("en", …)``).
 TERMINAL = ROOT / "support/cli/main_chat.py"
 APP = ROOT / "macos/LocalMeloApp"
@@ -276,6 +277,7 @@ def named_keys() -> tuple[set[str], set[str], set[str]]:
         *CONSOLE.glob("*.py"),
         USAGE,
         DISPLAY,
+        HOSTED_CHECK,
     ]:
         quoted |= set(_QUOTED_KEY.findall(path.read_text("utf-8")))
     built = {key for key in found if "{" in key or "$" in key}

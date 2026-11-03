@@ -85,6 +85,8 @@ export function setupSettings({
   const status = $("settings-status");
   const modelStatus = $("discover-status");
   const keyStatus = $("s-key-status");
+  // The line under the key: `quiet` text is announced to a screen reader and not drawn.
+  const keySays = (text, quiet = false) => { keyStatus.className = quiet ? "field-hint sr-only" : "field-hint"; keyStatus.textContent = text; };
   const envStatus = $("s-key-env-status");
   const testButton = $("settings-test");
   const testStatus = $("settings-test-status");
@@ -325,7 +327,7 @@ export function setupSettings({
     replacing = false;
     removeArmed = null;
     if (cloud) renderHosted(item);
-    else { keyVersion += 1; envStatus.textContent = ""; keyStatus.textContent = ""; }
+    else { keyVersion += 1; envStatus.textContent = ""; keySays(""); }
   }
 
   // The part of the form that is the hosted service's: its address, its key, and its thinking switch.
@@ -337,7 +339,7 @@ export function setupSettings({
     $("s-key-env-details").open = !!data.api_key_env;
     $("s-thinking-field").hidden = !item.thinking_switch;
     $("s-thinking").checked = thinks(item, data);
-    keyStatus.textContent = "";
+    keySays("");
     renderKey();
     if (!keychain.has(item.id)) askKeychain(item);
     checkKey();
@@ -444,6 +446,14 @@ export function setupSettings({
       };
     }
     return {chat_backend: item ? item.backend : chat.value, embedding_backend: embedding.value, workspace: settings.workspace, sections: selectedSections};
+  }
+
+  // Whether the form holds the connection that is saved now, field for field.
+  function draftIsSaved() {
+    if (!settings || !chat.value) return false;
+    const {chat_backend: backend, embedding_backend: embed, sections: fields} = candidate();
+    const now = savedConnection(settings);
+    return JSON.stringify([backend, embed, fields]) === JSON.stringify([now.chat_backend, now.embedding_backend, now.sections]);
   }
 
   // The connection as `loaded` saved it, for Undo: its writable fields only.
@@ -997,7 +1007,7 @@ export function setupSettings({
     saved("", null);
     status.textContent = t("settings.loading");
     modelStatus.textContent = "";
-    keyStatus.textContent = "";
+    keySays("");
     envStatus.textContent = "";
     dialog.dataset.ready = "false";
     layout(developer());
@@ -1087,12 +1097,12 @@ export function setupSettings({
     const key = $("s-key-input").value.trim();
     if (!item || busy || !settings) return;
     if (!key) {
-      keyStatus.textContent = t("settings.hosted.keyEmpty");
+      keySays(t("settings.hosted.keyEmpty"));
       return;
     }
     const currentGeneration = generation;
     $("s-key-save").disabled = true;
-    keyStatus.textContent = t("settings.hosted.keySaving");
+    keySays(t("settings.hosted.keySaving"));
     try {
       const result = await api("/settings/key", {method: "PUT", body: {preset: item.id, key}});
       if (currentGeneration !== generation || !dialog.open) return;
@@ -1106,10 +1116,11 @@ export function setupSettings({
       replacing = false;
       invalidateTest();
       renderKey();
-      keyStatus.textContent = t(cleared ? "settings.hosted.keySavedCleared" : "settings.hosted.keySaved");
+      // The saved row already shows "Saved in the keychain", so a plain save is only announced, not shown twice.
+      keySays(t(cleared ? "settings.hosted.keySavedCleared" : "settings.hosted.keySaved"), !cleared);
     } catch (err) {
       if (currentGeneration !== generation || !dialog.open) return;
-      keyStatus.textContent = err.message || t("settings.hosted.keyFailed");
+      keySays(err.message || t("settings.hosted.keyFailed"));
     } finally {
       if (currentGeneration === generation && dialog.open) $("s-key-save").disabled = busy || !settings;
     }
@@ -1122,7 +1133,7 @@ export function setupSettings({
   });
   $("s-key-replace").addEventListener("click", () => {
     replacing = true;
-    keyStatus.textContent = "";
+    keySays("");
     renderKey();
     $("s-key-input").focus?.();
   });
@@ -1144,10 +1155,10 @@ export function setupSettings({
       section(item.id).api_key = "";
       keychain.set(item.id, "missing");
       invalidateTest();
-      keyStatus.textContent = t("settings.hosted.keyRemoved");
+      keySays(t("settings.hosted.keyRemoved"));
     } catch (err) {
       if (currentGeneration !== generation || !dialog.open) return;
-      keyStatus.textContent = err.message || t("settings.hosted.keyFailed");
+      keySays(err.message || t("settings.hosted.keyFailed"));
     }
     renderKey();
   });
@@ -1211,12 +1222,15 @@ export function setupSettings({
         fillModels(preset()?.models || [], result.models);
         modelStatus.textContent = t("settings.hosted.modelsListed", {n: result.models.length});
       }
+      // The saved connection's rows show a test only when the form is that connection: a service tried
+      // in the form says so beside the button and leaves the saved one's state alone.
+      const mine = draftIsSaved();
       if (result.ok === true) {
-        tested = {at: clock(), ok: true};
+        tested = mine ? {at: clock(), ok: true} : null;
         testStatus.textContent = hosted ? result.message : t(both ? "settings.test.both" : "settings.test.chat");
         testStatus.dataset.state = "success";
       } else {
-        tested = {at: clock(), ok: false, failed: result.failed === "embedding" ? "embedding" : "chat"};
+        tested = mine ? {at: clock(), ok: false, failed: result.failed === "embedding" ? "embedding" : "chat"} : null;
         testStatus.textContent = hosted ? firstLine(result.error) : t("settings.test.failed", {problem: firstLine(result.error)});
         testStatus.dataset.state = "error";
       }

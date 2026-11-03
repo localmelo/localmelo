@@ -1267,7 +1267,7 @@
   "settings.hosted.replace": "替换",
   "settings.hosted.saveKey": "保存密钥",
   "settings.hosted.thinking": "让模型先思考再回答",
-  "settings.hosted.thinkingHint": "思考有助于较难的任务，但更慢，而且会思考的模型有时会没给出答案就结束一轮。",
+  "settings.hosted.thinkingHint": "思考有助于较难的任务。如果会思考的模型没给出答案就结束一轮，melo 会关闭思考再问一次。",
   "settings.key.checking": "正在检查密钥状态…",
   "settings.key.failed": "无法检查密钥状态。",
   "settings.key.invalid": "请输入有效的环境变量名。",
