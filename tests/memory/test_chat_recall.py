@@ -350,8 +350,11 @@ async def test_search_memory_answers_with_sources_and_scopes(
 
     memory, _ = await build(tmp_path, store, None)
     try:
-        tool, _ = await memory.tools().start()  # remember: test_chat_remember.py
-        assert tool.definition is SEARCH_MEMORY and not tool.requires_approval
+        tool, *_ = await memory.tools().start()  # remember: test_chat_remember.py
+        # By default its description also carries the cut-excerpt sentence.
+        assert tool.definition.name == SEARCH_MEMORY.name
+        assert tool.definition.description.startswith(SEARCH_MEMORY.description)
+        assert not tool.requires_approval
         assert tool.definition.annotations == {"readOnlyHint": True}
         found = str(await tool.function(query="robotics lab keys"))
         assert found.startswith(

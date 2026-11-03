@@ -4,7 +4,7 @@
 ``search_when_empty``, ``recall_min_cosine``, ``recall_min_coverage``,
 ``recall_item_chars``, ``recall_excerpt``, ``recall_form``, ``recall_list_max``,
 ``recall_open_chars``, ``excerpt_open``, ``recall_source``, ``open_sources``,
-``compress_at_chars``, ``compress_cache``, ``note_gate``, ``note_min_cosine`` and
+``compress_at_chars``, ``compress_parallel``, ``compress_cache``, ``note_gate``, ``note_min_cosine`` and
 ``followup_query`` are saved only when they differ from the default, checked
 against their bounds and values, set for one run with ``-X``, and listed by the
 developer help only, each with the issue that decides it.
@@ -34,10 +34,11 @@ CHANGED = {
     "recall_form": "list",
     "recall_list_max": 35,
     "recall_open_chars": 9000,
-    "excerpt_open": "on",
+    "excerpt_open": "off",  # "on" is the default
     "recall_source": "items",
     "open_sources": "on",
     "compress_at_chars": 20000,
+    "compress_parallel": 4,
     "compress_cache": "cache/compress.jsonl",
     "note_gate": "model",
     "note_min_cosine": 0.65,
@@ -52,6 +53,7 @@ ISSUE = {name: "#349" for name in CHANGED} | {
     "recall_source": "#428",
     "open_sources": "#428",
     "compress_at_chars": "#428",
+    "compress_parallel": "#428",
     "compress_cache": "#428",
     "note_gate": "#442",
     "note_min_cosine": "#442",
@@ -83,9 +85,11 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
             recall_notes="on",
             recall_min_cosine=0.55,
             followup_query="recent",
+            excerpt_open="on",
         )
         save(cfg)
         assert "[memory]" not in path.read_text()
+        assert "excerpt_open" not in path.read_text()
         cfg.memory = MemoryConfig(**CHANGED)  # type: ignore[arg-type]
         save(cfg)
         text = path.read_text()
@@ -95,8 +99,8 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
             "recall_min_cosine = 0.45\nrecall_min_coverage = 0.4\n"
             'recall_item_chars = 800\nrecall_excerpt = "match"\n'
             'recall_form = "list"\nrecall_list_max = 35\nrecall_open_chars = 9000\n'
-            'excerpt_open = "on"\nrecall_source = "items"\nopen_sources = "on"\n'
-            'compress_at_chars = 20000\ncompress_cache = "cache/compress.jsonl"\n'
+            'excerpt_open = "off"\nrecall_source = "items"\nopen_sources = "on"\n'
+            'compress_at_chars = 20000\ncompress_parallel = 4\ncompress_cache = "cache/compress.jsonl"\n'
             'note_gate = "model"\nnote_min_cosine = 0.65\n'
             'followup_query = "message"\n'
         ) in text
@@ -107,6 +111,40 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
             keys = [line.split(" ")[0] for line in path.read_text().splitlines()]
             assert [key for key in keys if key in CHANGED] == [name]
             assert config.load().memory == cfg.memory
+
+
+def test_excerpt_open_is_on_by_default_and_saved_only_when_off(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    cfg = Config(chat_backend="vllm", embedding_backend="none")
+    assert MemoryConfig().excerpt_open == "on" and cfg.memory.excerpt_open == "on"
+    with (
+        mock.patch.object(config, "CONFIG_PATH", str(path)),
+        mock.patch.object(config, "CONFIG_DIR", str(tmp_path)),
+    ):
+        # The default is not written, and a config without the key reads as on.
+        save(cfg)
+        assert "excerpt_open" not in path.read_text()
+        assert config.load().memory.excerpt_open == "on"
+        cfg.memory = MemoryConfig(excerpt_open="on")
+        save(cfg)
+        assert "excerpt_open" not in path.read_text() and "[memory]" not in (
+            path.read_text()
+        )
+        # Off is written, read back, and written again the same.
+        cfg.memory = MemoryConfig(excerpt_open="off")
+        save(cfg)
+        text = path.read_text()
+        assert '[memory]\nexcerpt_open = "off"\n' in text
+        loaded = config.load()
+        assert loaded.memory.excerpt_open == "off"
+        save(loaded)
+        assert path.read_text() == text
+        # A file that still says "on" is the default, and saves without the key.
+        path.write_text('chat_backend = "vllm"\n[memory]\nexcerpt_open = "on"\n')
+        loaded = config.load()
+        assert loaded.memory.excerpt_open == "on"
+        save(loaded)
+        assert "excerpt_open" not in path.read_text()
 
 
 def test_a_saved_value_is_kept_and_a_missing_one_is_the_larger_default(
@@ -193,6 +231,9 @@ def test_a_file_without_followup_query_gets_the_new_default(tmp_path: Path) -> N
         ("compress_at_chars", 4000),
         ("compress_at_chars", 60000),
         ("compress_at_chars", 12000),
+        ("compress_parallel", 1),
+        ("compress_parallel", 8),
+        ("compress_parallel", 4),
         ("compress_cache", ""),
         ("compress_cache", "~/runs/compress_cache.jsonl"),
         ("note_gate", "typed"),
@@ -395,6 +436,21 @@ def test_the_bounds_and_values_are_accepted(name: str, value: object) -> None:
             "[memory] compress_at_chars must be a whole number, got '12000'",
         ),
         (
+            "compress_parallel",
+            0,
+            "[memory] compress_parallel must be from 1 to 8, got 0",
+        ),
+        (
+            "compress_parallel",
+            9,
+            "[memory] compress_parallel must be from 1 to 8, got 9",
+        ),
+        (
+            "compress_parallel",
+            "4",
+            "[memory] compress_parallel must be a whole number, got '4'",
+        ),
+        (
             "compress_cache",
             "a\x00b",
             "[memory] compress_cache must be a path string without NUL",
@@ -526,6 +582,9 @@ def test_x_sets_each_for_one_run_and_only_the_developer_help_lists_them(
         "memory.compress_at_chars=3999",
         "memory.compress_at_chars=60001",
         "memory.compress_at_chars=big",
+        "memory.compress_parallel=0",
+        "memory.compress_parallel=9",
+        "memory.compress_parallel=many",
         "memory.note_gate=typing",
         "memory.note_min_cosine=0.1",
         "memory.note_min_cosine=high",

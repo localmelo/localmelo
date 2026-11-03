@@ -26,9 +26,9 @@ among them within :data:`SELECT_TIMEOUT_S`, no embedding calls). With the
 developer setting ``[memory] recall_form = "list"`` the recall block and the
 search tool show each chat turn as one line, not an excerpt, and the chat's model
 opens the turns it needs with ``open_memory`` (:meth:`ChatMemory.open_turn`). With
-``[memory] excerpt_open = "on"`` the excerpt form stays, but a turn whose excerpt
-shows less than the whole turn starts with its id and the model has ``open_memory``
-too.
+``[memory] excerpt_open = "on"`` (the default) the excerpt form stays, but a turn
+whose excerpt shows less than the whole turn starts with its id and the model has
+``open_memory`` too; ``off`` is the developer comparison without them.
 With ``[memory] recall_source = "items"`` recall draws on memory items in place of the
 turns: items a chat model encoded from the chats (:meth:`ChatMemory.compress_chat`,
 :mod:`.hippo_encode`) and routed against the items kept (:mod:`.hippo_route`), shown
@@ -72,6 +72,7 @@ from localmelo.melo.schema import (
 from localmelo.support.config import (
     CHAT_RECENT_DIGEST_MINUTES,
     MEMORY_COMPRESS_AT_CHARS,
+    MEMORY_COMPRESS_PARALLEL,
     MEMORY_NOTE_GATE,
     MEMORY_NOTE_MIN_COSINE,
     MEMORY_RECALL_CHARS,
@@ -277,11 +278,11 @@ class RecallSettings(NamedTuple):
     memory items in place of the chat turns, and *open_sources* that an opened item
     also shows the turns it came from. *followup* says a message with no content of
     its own is searched with the user's words of the chat's last turns (``[memory]
-    followup_query = "recent"``, the default) instead of its own. *excerpt_open* says
+    followup_query = "recent"``, the default) instead of its own. *excerpt_open* (on by default) says
     an excerpt that shows less than the whole turn carries the turn's id and the model
     may open it (:attr:`opens_excerpts`). The defaults are the shipped ones: a block
-    of :data:`BLOCK_CHARS` and a turn of :data:`ITEM_CHARS` (#349), *followup* on,
-    and what recall did before these were settings for the rest.
+    of :data:`BLOCK_CHARS` and a turn of :data:`ITEM_CHARS` (#349), *followup* and
+    *excerpt_open* on, and what recall did before these were settings for the rest.
     """
 
     records: int = AUTO_RECORDS
@@ -299,7 +300,7 @@ class RecallSettings(NamedTuple):
     items: bool = False
     open_sources: bool = False
     followup: bool = True
-    excerpt_open: bool = False
+    excerpt_open: bool = True
 
     @property
     def opens_excerpts(self) -> bool:
@@ -511,6 +512,10 @@ CHAT_TURN: contextvars.ContextVar[ChatTurn | None] = contextvars.ContextVar(
 )
 # The session kinds whose indexed results count as a finished task's result.
 _TASK_KINDS: Final = ("task", "front_bg")
+
+
+def _chunk_of(doc: Any) -> int:
+    return int(doc.chunk)
 
 
 def is_owner_question(info: object) -> bool:
@@ -886,7 +891,7 @@ class ChatMemory:
             getattr(memory, "recall_source", "turns") == "items",
             getattr(memory, "open_sources", "off") == "on",
             getattr(memory, "followup_query", "recent") != "message",
-            getattr(memory, "excerpt_open", "off") == "on",
+            getattr(memory, "excerpt_open", "on") != "off",
         )
 
     def note_settings(self) -> NoteSettings:
@@ -927,6 +932,12 @@ class ChatMemory:
             except Exception as exc:
                 self.last_error = f"the chat model could not be set up: {exc}"
         return self._llm
+
+    def _llm_backend(self) -> str | None:
+        """The backend key of the chat model :meth:`chat_provider` built; ``None``
+        for a server named by its URL, which is a local one."""
+        key = self._llm_key
+        return None if key is None or key[0] == "url" else key[0]
 
     async def _embed(
         self, texts: Sequence[str], timeout: float, *, query: bool
@@ -1599,13 +1610,21 @@ class ChatMemory:
         other words or another language (:meth:`_by_meaning`); with ``model``, the
         model's own conclusion from what the user typed is kept as ``inferred``. A
         page or file the user did not point to supports nothing, and one the user
-        called someone else's supports no note about the user.
+        called someone else's supports no note about the user. A page read in the
+        browser supports nothing either; the refusal says so
+        (:data:`note_gate.NOT_BROWSER`). What a page or a file supports is what it
+        states (:func:`note_gate.material_text`): its hidden text and its paragraphs
+        that order the assistant are left out; of a result only the paragraphs aimed
+        at an assistant (:func:`note_gate.result_text`).
         """
         if note_gate.is_instruction(note):
             return note_gate.NOT_A_FACT
         if not records.unsupported(note, said):
             return Admission(note_gate.TYPED)
-        material = await self._pointed(turn)
+        everything = await self._pointed(turn)
+        # A page read in the browser supports no note; it only explains a refusal.
+        browsed = [m for m in everything if m.browser]
+        material = [m for m in everything if not m.browser]
         about = note_gate.about_user(note)
         usable = [m for m in material if not (about and m.other)]
         pages = [m.text for m in usable]
@@ -1617,9 +1636,13 @@ class ChatMemory:
         if not records.unsupported(note, evidence):
             return Admission(note_gate.RESULT)
         if about and len(usable) < len(material):
-            everything = said + [m.text for m in material] + results
-            if not records.unsupported(note, everything):
+            held = said + [m.text for m in material] + results
+            if not records.unsupported(note, held):
                 return note_gate.NOT_THEIRS
+        if browsed and not records.unsupported(
+            note, evidence + [m.text for m in browsed]
+        ):
+            return note_gate.NOT_BROWSER
         if note_gate.level_at_least(gate.level, "meaning"):
             judged = await self._by_meaning(note, said, usable, results, gate)
             if judged is not None:
@@ -1850,7 +1873,11 @@ class ChatMemory:
         ]
 
     async def _results(self, turn: ChatTurn) -> list[str]:
-        """The finished tasks' results this chat has shown: those it recalled."""
+        """The finished tasks' results this chat has shown: those it recalled, as they
+        may support a note. A recalled result counts whole, all its chunks joined
+        (:func:`note_gate.joined_result`), then read for orders only
+        (:func:`note_gate.result_text`: the paragraphs aimed at an assistant left out,
+        no markup read, what the user asked left as it was)."""
         from localmelo.support.sessions.store import MEMORY_EVENT_TYPE
 
         ids = {int(item.key[2:]) for item in turn.memory.used if item.is_turn}
@@ -1869,8 +1896,21 @@ class ChatMemory:
                 break
             after = int(events[-1].id or 0)
         async with self._lock:
-            docs = await self.stores()[1].fetch(ids)
-        return [doc.text for doc in docs if doc.kind in _TASK_KINDS]
+            index = self.stores()[1]
+            recalled = [d for d in await index.fetch(ids) if d.kind in _TASK_KINDS]
+            # A result comes back whole: a comment or an element that one chunk
+            # opens and a later one closes is one thing for the cleaner.
+            chunks: dict[tuple[str, int], list[Any]] = {}
+            for doc in await index.turn_documents(
+                (d.session_id, d.turn) for d in recalled
+            ):
+                chunks.setdefault((doc.session_id, doc.turn), []).append(doc)
+        return [
+            note_gate.result_text(
+                note_gate.joined_result([d.text for d in sorted(whole, key=_chunk_of)])
+            )
+            for whole in chunks.values()
+        ]
 
     def after_turn(
         self, store: SessionStore, info: TurnInfo, typed: str, answer: str
@@ -1993,6 +2033,14 @@ class ChatMemory:
         fits = isinstance(value, int) and not isinstance(value, bool)
         return value if fits and low <= value <= high else COMPRESS_AT_CHARS
 
+    def compress_parallel(self) -> int:
+        """``[memory] compress_parallel`` now (out of its bounds: 1)."""
+        cfg = self._settings()
+        value = getattr(cfg.memory, "compress_parallel", 1) if cfg else 0
+        low, high = MEMORY_COMPRESS_PARALLEL
+        fits = isinstance(value, int) and not isinstance(value, bool)
+        return value if fits and low <= value <= high else 1
+
     def compress_cache(self) -> hippo_encode.Cache:
         """The cache of encoder replies: ``[memory] compress_cache``, else
         ``compress_cache.jsonl`` in the memory folder."""
@@ -2004,6 +2052,37 @@ class ChatMemory:
             else os.path.join(self.directory, COMPRESS_CACHE_FILE)
         )
 
+    async def encode_chat(
+        self,
+        title: str,
+        turns: Sequence[hippo_encode.Turn],
+        *,
+        stats: hippo_encode.Stats | None = None,
+        cache: hippo_encode.Cache | None = None,
+        limit: asyncio.Semaphore | None = None,
+    ) -> hippo_encode.Encoding:
+        """The encode step of :meth:`compress_chat` alone: the chat's model reads
+        the exchanges *turns* window by window and the items come back, not yet
+        embedded or routed (developer setting, #428).
+
+        Raises ``RuntimeError`` when no chat model is set up. With *limit*, the
+        windows that are not cached are asked for together, each request under the
+        semaphore (see :func:`~.hippo_encode.encode`); the encoding is the same.
+        """
+        provider = self.chat_provider()
+        if provider is None:
+            raise RuntimeError(self.last_error or "no chat model is set up")
+        return await hippo_encode.encode(
+            provider,
+            title,
+            turns,
+            window_chars=self.compress_window(),
+            cache=cache or self.compress_cache(),
+            stats=stats,
+            backend=self._llm_backend(),
+            limit=limit,
+        )
+
     async def compress_chat(
         self,
         session_id: str,
@@ -2013,6 +2092,7 @@ class ChatMemory:
         stats: hippo_encode.Stats | None = None,
         router: Router | None = None,
         cache: hippo_encode.Cache | None = None,
+        encoding: hippo_encode.Encoding | None = None,
     ) -> Compressed:
         """Encode the exchanges *turns* of chat *session_id* into memory items and
         route each against the items kept (developer setting, #428).
@@ -2023,19 +2103,12 @@ class ChatMemory:
         (:class:`~.hippo_route.Router`: rules, no model call). Raises
         ``RuntimeError`` when no chat model is set up. Nothing about the chat's
         turns changes. *router* and *cache* are shared across the chats of one run
-        (the settings' otherwise).
+        (the settings' otherwise). With *encoding* (what :meth:`encode_chat` gave
+        for these *turns*), the chat is not encoded again: it goes straight to
+        embedding and routing.
         """
-        provider = self.chat_provider()
-        if provider is None:
-            raise RuntimeError(self.last_error or "no chat model is set up")
-        encoding = await hippo_encode.encode(
-            provider,
-            title,
-            turns,
-            window_chars=self.compress_window(),
-            cache=cache or self.compress_cache(),
-            stats=stats,
-        )
+        if encoding is None:
+            encoding = await self.encode_chat(title, turns, stats=stats, cache=cache)
         texts = [f"{piece.title}\n{piece.text}" for piece in encoding.pieces]
         vectors: list[Sequence[float] | None] = [None] * len(texts)
         model = ""
