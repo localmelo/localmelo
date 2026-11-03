@@ -7,9 +7,11 @@ touches the real screen.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import sys
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -90,6 +92,42 @@ class Clock:
             then()
 
 
+class Pacer:
+    """The pause between two background samples: none passes until a test ticks.
+
+    The sampler parks here; ``tick`` lets it take one sample and returns when it
+    is parked again (or has ended), so a test decides what the screen shows at
+    each sample.
+    """
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.waiting = asyncio.Event()
+        self._go: asyncio.Queue[None] = asyncio.Queue()
+
+    async def __call__(self, seconds: float) -> None:
+        self.calls += 1
+        self.waiting.set()
+        await self._go.get()
+        self.waiting.clear()
+
+    async def tick(self, provider: BrowserToolProvider) -> None:
+        end = time.monotonic() + 5.0
+
+        def over() -> bool:
+            task = provider._sampler
+            return task is None or task.done() or time.monotonic() > end
+
+        while not self.waiting.is_set():
+            if over():
+                return
+            await asyncio.sleep(0.01)
+        calls = self.calls
+        self._go.put_nowait(None)
+        while self.calls == calls and not over():
+            await asyncio.sleep(0.01)
+
+
 class Screen:
     """The fake helper's screen file, and the app the test puts in front."""
 
@@ -100,6 +138,7 @@ class Screen:
         self.state: dict[str, Any] = {"windows": [BROWSER, MINE]}
         self.front: Front | None = Front("Safari", "com.apple.Safari", 10)
         self.clock = Clock()
+        self.pacer = Pacer()
         self.save()
 
     def save(self) -> None:
@@ -138,13 +177,22 @@ def screen(tmp_path: Path) -> Screen:
     return Screen(tmp_path)
 
 
-def watch(screen: Screen, *, helper: bool = True) -> DesktopWatch:
+def watch(
+    screen: Screen, *, helper: bool = True, asked: tuple[str, ...] = ()
+) -> DesktopWatch:
+    """A watch over *screen*; *asked* are the names of the app an address of another kind opens (none: not known)."""
     command = [sys.executable, "-I", FAKE, str(screen.path), str(screen.log_path)]
+
+    async def handler(url: str) -> frozenset[str]:
+        return frozenset(asked)
+
     return DesktopWatch(
         DesktopHelper(command) if helper else None,
         front=screen.in_front,
+        handler=handler,
         clock=screen.clock,
         sleep=screen.clock.sleep,
+        pace=screen.pacer,
     )
 
 
@@ -304,7 +352,7 @@ async def test_browser_wait_stops_early_when_another_apps_window_appears(
     screen: Screen, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(provider_mod, "WATCH_S", 0.01)
-    driver = world()
+    driver = world(button("Quick sign-in"))
     real = driver.wait
     looks = 0
 
@@ -320,6 +368,8 @@ async def test_browser_wait_stops_early_when_another_apps_window_appears(
     try:
         with asking(Asks()):
             await run(tools, "browser_open", url=HOME)
+            # A wait tells a window only inside the deadline of an act that can hand off.
+            await run(tools, "browser_click", ref="e1")
             out = await run(
                 tools, "browser_wait", until="text", text="never", seconds=30
             )
