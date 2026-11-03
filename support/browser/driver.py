@@ -204,13 +204,15 @@ class ActResult:
     meanwhile (a send nobody asked about), or ``""``; ``via`` the way it acted
     and ``why`` the reason a better way was not used (``""`` when none was
     passed over); ``changes`` what it saw change, or None when the page became
-    another document.
+    another document. ``native_failed`` says the browser's own input did not
+    work there, so the site starts with the page script next time.
     """
 
     note: str = ""
     via: Way = "page-script"
     why: str = ""
     changes: Changes | None = None
+    native_failed: bool = False
 
 
 ActionKind = Literal["click", "type", "select"]
@@ -231,7 +233,9 @@ class Act:
     (a click on its submit button, or Enter): a driver tries to stop any other
     attempt by the page to send a form while the action runs. That is best
     effort and holds only that long; once a text is in a page, the page may send
-    it itself. ``point`` is a click at that place of ``view`` (page
+    it itself. ``native`` lets the driver use the browser's own input first;
+    False starts with the page script (a site where the browser's own input
+    did not work earlier). ``point`` is a click at that place of ``view`` (page
     pixels), with the browser's own click, on the control ``element`` that was
     found there; the driver does nothing unless the point still resolves to it
     and the view has not scrolled.
@@ -244,6 +248,7 @@ class Act:
     enter: bool = False
     doc: str = ""
     send: bool = False
+    native: bool = True
     point: tuple[float, float] | None = None
     view: View | None = None
 

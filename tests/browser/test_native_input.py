@@ -100,7 +100,7 @@ async def test_a_click_is_the_browsers_own_on_the_node_melo_checked(
     try:
         button = el(raw, "Check in")
         done = await driver.act(None, Act("click", raw.url, button, doc=raw.doc))
-        assert done.via == "browser" and done.why == ""
+        assert done.via == "browser" and done.why == "" and not done.native_failed
         assert native(log) == [
             {
                 "node": str(100 + button.at),
@@ -117,11 +117,11 @@ async def test_a_click_is_the_browsers_own_on_the_node_melo_checked(
 
 
 async def test_the_page_script_click_is_the_backup_and_says_why(tmp_path: Path) -> None:
-    for mode, why in (
-        ("no_native", "cannot act on page elements itself"),
-        ("no_uids", "could not name that element"),
-        ("native_missed", "did not reach it"),
-        ("native_error", "did not reach it"),
+    for mode, why, site in (
+        ("no_native", "cannot act on page elements itself", False),
+        ("no_uids", "could not name that element", False),
+        ("native_missed", "did not reach it", True),
+        ("native_error", "did not reach it", True),
     ):
         driver, raw, _ = await opened(mode, tmp_path / mode)
         try:
@@ -129,6 +129,7 @@ async def test_the_page_script_click_is_the_backup_and_says_why(tmp_path: Path) 
                 None, Act("click", raw.url, el(raw, "Check in"), doc=raw.doc)
             )
             assert done.via == "page-script" and why in done.why, mode
+            assert done.native_failed is site, mode
             # This page ignores a script's click: nothing changed, and the act says so.
             assert done.changes is not None and done.changes.texts == (), mode
         finally:
@@ -142,7 +143,7 @@ async def test_a_covered_element_is_clicked_by_the_page_script(tmp_path: Path) -
             None, Act("click", raw.url, el(raw, "Hidden away"), doc=raw.doc)
         )
         assert done.via == "page-script" and "covers it" in done.why
-        assert native(log) == []
+        assert not done.native_failed and native(log) == []
     finally:
         await driver.close()
 
@@ -156,7 +157,7 @@ async def test_an_element_the_browsers_reading_names_twice_is_left_to_the_page_s
             None, Act("click", raw.url, el(raw, "Happy"), doc=raw.doc)
         )
         assert done.via == "page-script" and "could not name" in done.why
-        assert native(log) == []
+        assert not done.native_failed and native(log) == []
     finally:
         await driver.close()
 
@@ -257,6 +258,18 @@ async def test_a_stale_element_is_refused_before_the_browser_acts(
                 None, Act("click", raw.url, el(raw, "Check in"), doc=raw.doc)
             )
         assert stale.value.why == "gone" and native(log) == []
+    finally:
+        await driver.close()
+
+
+async def test_a_site_starts_with_the_page_script_when_asked(tmp_path: Path) -> None:
+    driver, raw, log = await opened("", tmp_path)
+    try:
+        done = await driver.act(
+            None,
+            Act("click", raw.url, el(raw, "Happy"), doc=raw.doc, native=False),
+        )
+        assert done.via == "page-script" and done.why == "" and native(log) == []
     finally:
         await driver.close()
 

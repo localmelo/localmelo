@@ -94,9 +94,10 @@ class FakeDriver:
     ``docs`` maps a tab to the document id its page shows. ``popups``
     maps a label to an address that opens in a new tab. ``lose`` forgets a tab
     as the real helper does when it loses one. ``via`` is the way an act says
-    it used, ``changes`` maps a label to what an act on it changed, and
-    ``redraw`` maps a label to the address whose page an act on it finds
-    redrawn (stale, once). ``hits`` maps a rounded point to what is there.
+    it used (``refuse_native`` makes it the page script, with the browser's own
+    input failed for the site), ``changes`` maps a label to what an act on it
+    changed, and ``redraw`` maps a label to the address whose page an act on it
+    finds redrawn (stale, once). ``hits`` maps a rounded point to what is there.
     """
 
     name = "fake"
@@ -129,6 +130,7 @@ class FakeDriver:
         self.tabs_fail = False
         self.location_empty: set[str] = set()
         self.via = "browser"
+        self.refuse_native = False
         self.changes: dict[str, Changes] = {}
         self.redraw: dict[str, RawPage] = {}
         self.hits: dict[tuple[int, int], PointHit] = {}
@@ -283,11 +285,17 @@ class FakeDriver:
         self.acts.append(act)
         key = ("enter:" if act.enter else "") + label
         via = "point" if act.point is not None else self.via
+        failed = False
+        if self.refuse_native and act.native and act.point is None:
+            via, failed = "page-script", True
+        elif not act.native and act.point is None:
+            via = "page-script"
         result = ActResult(
             self.stopped,
             via,  # type: ignore[arg-type]
-            "",
+            "the browser's own input did not reach it" if failed else "",
             self.changes.get(label, Changes()),
+            native_failed=failed,
         )
         if label in self.fails:
             self.tabs_[here].append(self.fails[label])

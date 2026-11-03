@@ -1465,10 +1465,13 @@ class SafariAutomationDriver:
         if act.element.frame.startswith("x"):
             return await self._foreign_act(act)
         spec = _spec(act)
-        done = await self._native(spec, act)
-        if isinstance(done, ActResult):
-            return done
-        return await self._scripted(spec, act, done)
+        passed, failed = "", False
+        if act.native or act.point is not None:
+            done = await self._native(spec, act)
+            if isinstance(done, ActResult):
+                return done
+            passed, failed = done
+        return await self._scripted(spec, act, passed, failed)
 
     async def _script(self, source: str) -> dict[str, Any]:
         """Run an act script: its answer, or the error it means (stale, no such option)."""
@@ -1487,22 +1490,24 @@ class SafariAutomationDriver:
             raise BrowserError("The page did not take that action.")
         return result
 
-    async def _native(self, spec: dict[str, Any], act: Act) -> ActResult | str:
-        """The act by the browser's own input; else why not."""
+    async def _native(
+        self, spec: dict[str, Any], act: Act
+    ) -> ActResult | tuple[str, bool]:
+        """The act by the browser's own input; else why not, and whether that holds for the site."""
         if not self._has("interact"):
-            return _PASSED["tool"]
+            return _PASSED["tool"], False
         uid = ""
         if act.point is None:
             if act.element.frame:
-                return _PASSED["frame"]
+                return _PASSED["frame"], False
             if not self._has("content"):
-                return _PASSED["tool"]
+                return _PASSED["tool"], False
             ready = await self._script(act_script({**spec, "mode": "scroll"}))
             if ready.get("covered") is True:
-                return _PASSED["covered"]
+                return _PASSED["covered"], False
             uid = bind(ready, await self._nodes())
             if not uid:
-                return _PASSED["name"]
+                return _PASSED["name"], False
         key = _key()
         armed = await self._script(
             act_script({**spec, "mode": "arm", "key": key, "uid": uid})
@@ -1526,7 +1531,7 @@ class SafariAutomationDriver:
         if not _reached(act, data, frame=armed.get("frame") is True):
             if act.point is not None and armed.get("frame") is True:
                 raise BrowserError(_STALE["reach"])
-            return _PASSED["missed"]
+            return _PASSED["missed"], True
         self._check_typed(act, data)
         return ActResult(
             _stopped(blocked),
@@ -1535,7 +1540,9 @@ class SafariAutomationDriver:
             _changes(data, quiet),
         )
 
-    async def _scripted(self, spec: dict[str, Any], act: Act, passed: str) -> ActResult:
+    async def _scripted(
+        self, spec: dict[str, Any], act: Act, passed: str, failed: bool
+    ) -> ActResult:
         """The act by the page script, with the look after it."""
         key = _key()
         try:
@@ -1557,6 +1564,7 @@ class SafariAutomationDriver:
             "point" if act.point is not None else "page-script",
             passed,
             _changes(data, quiet),
+            native_failed=failed,
         )
 
     async def _foreign_act(self, act: Act) -> ActResult:

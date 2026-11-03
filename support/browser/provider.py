@@ -310,6 +310,9 @@ class BrowserToolProvider(BaseToolProvider):
         self._idle: asyncio.TimerHandle | None = None
         self._tidying: asyncio.Task[None] | None = None
         self._last_call = 0.0
+        # Sites where the browser's own input did not work in this chat: they start
+        # with the page script.
+        self._scripted: set[str] = set()
         # The view of each tab's last picture, and the point melo last clicked in it.
         self._views: dict[str, View] = {}
         self._points: dict[str, tuple[View, float, float]] = {}
@@ -372,6 +375,7 @@ class BrowserToolProvider(BaseToolProvider):
         self._origins.clear()
         self._views.clear()
         self._points.clear()
+        self._scripted.clear()
 
     async def end_chat(self) -> None:
         """A new chat starts: nothing is approved, and the tabs of the old one are tidied."""
@@ -801,11 +805,14 @@ class BrowserToolProvider(BaseToolProvider):
     ) -> tuple[ActResult, str]:
         """Do *act*, and the ref it was done on.
 
-        When the page redrew itself since it was read, the element is looked
-        for in a new reading (see :meth:`_refind`) and the act is done on the
-        one element like it, with every check again. When the act fails after
-        it may have run, the tab is checked before anything else.
+        A site where the browser's own input did not work earlier in the chat
+        starts with the page script. When the page redrew itself since it was
+        read, the element is looked for in a new reading (see :meth:`_refind`)
+        and the act is done on the one element like it, with every check again.
+        When the act fails after it may have run, the tab is checked before
+        anything else.
         """
+        act = dataclasses.replace(act, native=snap.origin not in self._scripted)
         raw = self._raw[tab_id]
         try:
             try:
@@ -831,6 +838,10 @@ class BrowserToolProvider(BaseToolProvider):
                 raise refused from exc
             self._drop_reading(tab_id)  # what it did to the page is not known
             raise
+        if result.native_failed:
+            self._scripted.add(snap.origin)
+        elif not act.native and result.via == "page-script" and not result.why:
+            result = dataclasses.replace(result, why=_EARLIER)
         return result, ref
 
     async def _refind(
@@ -1284,6 +1295,9 @@ class BrowserToolProvider(BaseToolProvider):
         )
 
 
+_EARLIER = (
+    "the browser's own input did not reach this site's elements earlier in this chat"
+)
 _NO_ADDRESS = (
     "melo could not tell which page that tab shows, so it did not look at it. "
     "Use browser_read to read the tab again."
