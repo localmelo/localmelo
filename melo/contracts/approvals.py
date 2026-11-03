@@ -298,6 +298,31 @@ SELF_ASKING_TOOLS: Final = frozenset(
 )
 
 
+# The question the browser provider asks when another app puts up a window right after
+# melo's own act and the page did not ask for that app (``window-read:<bundle id>``). Only
+# the person answers it, in Ask and in Auto: no model sees the window, so none reviews it.
+# "Allow <App> in this chat" grants this name for the chat (the per-chat grant of
+# :class:`~localmelo.support.sessions.approvals.RememberingPolicy`).
+WINDOW_READ: Final = "window-read:"
+
+
+def window_question(request: ApprovalRequest) -> bool:
+    """Whether *request* is the question whether melo may see another app's window."""
+    return request.tool_name.startswith(WINDOW_READ) and request.outside is None
+
+
+def window_grant(request: ApprovalRequest) -> bool:
+    """Whether a chat's grant of the app's window question lets its later windows through unasked.
+
+    Only for that question, as asked in Ask (no review) or as Auto shows it to the person
+    (a ``high`` review of the one category ``opaque``): nothing else is covered.
+    """
+    review = request.review
+    return window_question(request) and (
+        review is None or review.categories == ("opaque",)
+    )
+
+
 def never_granted(tool_name: str) -> bool:
     """Whether an answer to the question *tool_name* names may never be kept for a chat."""
     return tool_name.startswith(NEVER_GRANTED)
@@ -384,7 +409,7 @@ def grant_offered(request: ApprovalRequest) -> bool:
     """
     if request.outside is not None or never_granted(request.tool_name):
         return False
-    return offers_grant(request.review) or site_grant(request)
+    return offers_grant(request.review) or site_grant(request) or window_grant(request)
 
 
 # Set around each tool call of a run that has a policy: asks that policy about

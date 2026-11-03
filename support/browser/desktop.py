@@ -75,7 +75,12 @@ from dataclasses import dataclass, field
 from typing import Any, TypeVar
 from urllib.parse import urlsplit
 
-from localmelo.melo.contracts.approvals import TOOL_ASK, denial_text
+from localmelo.melo.contracts.approvals import (
+    TOOL_ASK,
+    WINDOW_READ,
+    ToolAsk,
+    denial_text,
+)
 from localmelo.melo.schema import ImagePart
 from localmelo.support.browser import render
 from localmelo.support.browser.driver import BrowserError
@@ -108,6 +113,8 @@ KEEP_S = 600.0
 ADMIT_S = 15.0
 # The most windows one act adopts, buttons one window names, and characters of its text.
 MAX_WINDOWS = 3
+# The most windows waiting for the person's say at one look.
+MAX_PENDING = 3
 MAX_BUTTONS = 12
 TEXT_CHARS = 4000
 # A panel or dialog sits in a layer below this; the menu bar's items and pop-up
@@ -382,6 +389,23 @@ def app_names(path: str) -> frozenset[str]:
         if isinstance(value, str) and value:
             names.add(value)
     return frozenset(name.lower() for name in names if name)
+
+
+async def bundle_of(pid: int) -> str:
+    """The bundle id of the app with process *pid* (``""`` when it cannot be told); from ``lsappinfo``, no grant."""
+    if pid <= 0:
+        return ""
+    try:
+        found = re.search(
+            r"ASN:0x[0-9a-f]+-0x[0-9a-f]+", await _lsappinfo("find", f"pid={pid}")
+        )
+        if found is None:
+            return ""
+        text = await _lsappinfo("info", "-only", "bundleid", found.group(0))
+    except (OSError, TimeoutError):
+        return ""
+    bundle = re.search(r'bundleID="([^"]*)"', text)
+    return bundle.group(1) if bundle else ""
 
 
 # The helper's own identity, as its grants are held: the daemon it starts through
@@ -689,6 +713,7 @@ def _first_text(result: dict[str, Any]) -> str:
 
 FrontApp = Callable[[], Awaitable[Front | None]]
 SchemeApps = Callable[[str], Awaitable[frozenset[str]]]
+BundleOf = Callable[[int], Awaitable[str]]
 
 
 class DesktopWatch:
@@ -713,6 +738,7 @@ class DesktopWatch:
         ),
         front: FrontApp | None = None,
         handler: SchemeApps | None = None,
+        bundle: BundleOf | None = None,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         pace: Callable[[float], Awaitable[None]] = asyncio.sleep,
@@ -722,12 +748,17 @@ class DesktopWatch:
         # The module's front_app and scheme_apps, looked up at each call, unless given.
         self._front = front or (lambda: front_app())
         self._handler = handler or (lambda url: scheme_apps(url))
+        self._bundle = bundle or (lambda pid: bundle_of(pid))
         self._clock = clock
         self._sleep = sleep
         # The pause between two background samples (a test paces them by hand).
         self._pace = pace
         self._kept: dict[str, _Kept] = {}
         self._n = 0
+        # Windows of other apps that appeared inside the deadline but are not the app the
+        # page asked for: only the person decides whether melo may see one, so nothing
+        # about them is told to a model until then. The provider takes them (``take_pending``).
+        self._pending: list[AppWindow] = []
         # The apps that came to the front after an act, newest first: their
         # windows on every layer are listed before each later act.
         self._pids: list[int] = []
@@ -894,8 +925,12 @@ class DesktopWatch:
         return await self._compare(mark)
 
     def _asked(self, mark: Mark, *names: str) -> bool:
-        """Whether one of *names* is the app the page asked for (a hint: see :meth:`admit`)."""
+        """Whether one of *names* is the app the page asked for (see :meth:`admit`)."""
         return any(name.lower() in mark.target for name in names if name)
+
+    def _alone(self, mark: Mark, window: AppWindow) -> bool:
+        """Whether *window* is read on its own (the app the page asked for); any other waits for the person."""
+        return self._asked(mark, window.app)
 
     async def _compare(self, mark: Mark) -> tuple[list[Seen], Mark]:
         """The windows of other apps that appeared since *mark*, each adopted (at most :data:`MAX_WINDOWS`), and the mark of the listing that showed them.
@@ -913,16 +948,15 @@ class DesktopWatch:
             frozenset(w.id for w in listed) if listed is not None else mark.windows
         )
         front = await self._safe_front()
-        # Admission is by time only, not by app. A window that appears within
-        # ADMIT_S of melo's own act that can hand off is taken for that act
-        # whichever app shows it: a third-party quick sign-in often asks "authorize?"
-        # from another app or helper process than the one the page asked to open
-        # (an SSO agent, a password manager, the chat app's helper), and an app
-        # filter would hide the window that has to be answered. What bounds the
-        # exposure is the deadline: it is set only by melo's own acts, never by a
-        # look, so reads, waits and screenshots cannot keep admission open for a
-        # window the person opens on their own. After it, a look renews the
-        # baseline and nothing else: no report, no state read, no id, no name.
+        # A window is a candidate only inside the deadline, which only melo's own act
+        # that can hand off sets: reads, waits and screenshots never open or extend it.
+        # After it, a look renews the baseline and nothing else: no report, no state
+        # read, no id, no name. Inside it the deadline is no proof that the act caused
+        # the window, so only the app the page asked for (the scheme's handler, known
+        # when the address named one) is read on its own. A third-party sign-in often
+        # asks from another app or helper process (an SSO agent, a password manager),
+        # so any other window is not dropped: it waits for the person, who decides
+        # whether melo sees it (``take_pending``).
         if not self.admitting(mark):
             return [], await self._marked(helper, listing, front, mark)
         new: list[AppWindow] = []
@@ -939,11 +973,10 @@ class DesktopWatch:
             and not front.same_app(mark.front)
             and self._other(front.name, front.bundle)
         )
-        title = ""
         # The app came to the front with no new window in the main layer: a panel
         # above it, listed only by the app's own process. It is new only against a
-        # listing of that process from before the act; without one, melo names it
-        # and never reads or presses it.
+        # listing of that process from before the act; without one, only the app is
+        # named (no title), and melo never reads or presses it.
         if (
             not new
             and moved
@@ -952,16 +985,21 @@ class DesktopWatch:
             and mark.windows is not None
         ):
             with contextlib.suppress(DesktopError):
-                new, title = await self._panels(helper, front, mark)
-        # The app the page asked for first (a hint), then the topmost.
+                new = await self._panels(helper, front, mark)
+        # The app the page asked for first, then the topmost window.
         new.sort(
             key=lambda w: (
                 not self._asked(mark, w.app),
                 -(w.z if w.z is not None else -1),
             )
         )
+        # Admission is by time, but only the app the page asked for is read on its own:
+        # a window of any other app waits for the person (``take_pending``), and
+        # nothing about it, not even its app, reaches a model before they allow it.
+        asked = [w for w in new if self._alone(mark, w)]
+        waiting = [w for w in new if not self._alone(mark, w)]
         read: list[tuple[AppWindow, tuple[str, ...]]] = []
-        for window in new[:MAX_WINDOWS]:
+        for window in asked[:MAX_WINDOWS]:
             names: tuple[str, ...] = ()
             if helper is not None:
                 with contextlib.suppress(DesktopError):
@@ -979,20 +1017,72 @@ class DesktopWatch:
             )
             for window, names in read
         ]
-        if not seen and moved and front is not None:
-            seen = [Seen("", front.name, title)]
+        self._pending.extend(waiting[:MAX_PENDING])
+        # An app that came to the front with a window waiting for the person is not named
+        # either; one with no window melo can place is named, by name only.
+        if not seen and not waiting and moved and front is not None:
+            seen = [Seen("", front.name)]
         return seen, fresh
+
+    def take_pending(self) -> list[AppWindow]:
+        """The windows waiting for the person to allow melo to see them, once."""
+        pending, self._pending = self._pending, []
+        return pending
+
+    async def adopt_seen(self, window: AppWindow) -> Seen | None:
+        """*window*, which the person let melo see: adopted and read for its buttons; None when it is gone."""
+        helper = await self._helper_ready()
+        if helper is None or window.id in self._adopted():
+            return None
+        try:
+            listed = await helper.windows(pid=window.pid)
+            if window.id not in {w.id for w in listed}:
+                return None
+            state = await helper.state(window, picture=False)
+        except DesktopError:
+            return None
+        names = tuple(c.name for c in state.controls[:MAX_BUTTONS])
+        return Seen(self._adopt(window), window.app, window.title, names)
+
+    async def window_allowed(self, ask: ToolAsk | None, window: AppWindow) -> bool:
+        """Whether the person lets melo see *window* of another app: the one check for "is this app's window allowed for this chat".
+
+        It asks the question ``window-read:<bundle id>`` (the app's name when
+        its bundle id cannot be told) through the run's approval policy, which
+        raises the card (the person only; the card shows the window's title) or,
+        when the person answered "Allow <App> in this chat" before, allows it
+        without one. Without a way to ask, never.
+        """
+        if ask is None:
+            return False
+        app = render.field_text(window.app, 60)
+        title = render.field_text(window.title, 80)
+        bundle = await self._bundle(window.pid)
+        key = WINDOW_READ + (bundle or window.app)
+        arguments = {
+            "app": app,
+            "window": title,
+            "bundle": bundle,
+            "access": "window-read",
+        }
+        shown = f' "{title}"' if title else ""
+        decision = await ask(
+            key,
+            arguments,
+            f"{app} opened a window{shown} right after melo's click: let melo see it?",
+        )
+        return decision.allow
 
     async def _panels(
         self, helper: DesktopHelper, front: Front, mark: Mark
-    ) -> tuple[list[AppWindow], str]:
-        """The panels of the app in *front* known to be new, or none and the title of its top one."""
+    ) -> list[AppWindow]:
+        """The panels of the app in *front* known to be new (none when it is not known which are)."""
         pid = front.pid
         if not pid:
             listed = await helper.windows(app=front.bundle or front.name)
             pid = min((w.pid for w in listed), default=0)
         if not pid:
-            return [], ""
+            return []
         before = mark.panels.get(pid)
         if pid in self._pids:
             self._pids.remove(pid)
@@ -1005,12 +1095,10 @@ class DesktopWatch:
             and w.id not in self._adopted()
         ]
         if before is None:
-            # No listing of this app from before the act: nothing is known to be new.
-            top = max(
-                listed, key=lambda w: w.z if w.z is not None else -1, default=None
-            )
-            return [], top.title if top is not None else ""
-        return [w for w in listed if w.id not in before], ""
+            return (
+                []
+            )  # No listing of this app from before the act: nothing is known to be new.
+        return [w for w in listed if w.id not in before]
 
     def _adopted(self) -> set[int]:
         return {kept.window.id for kept in self._kept.values()}
@@ -1240,13 +1328,6 @@ def seen_lines(seen: Sequence[Seen]) -> list[str]:
     """What an act left from other apps, as "what changed" lines (cleaned where they are shown)."""
     lines = []
     for item in seen:
-        if not item.short and item.title:
-            lines.append(
-                f'{item.app} came to the front with a window "{item.title}" that '
-                "melo cannot confirm appeared after its step, so it does not read or "
-                f"press it. Tell the person to answer it in {item.app}."
-            )
-            continue
         if not item.short:
             lines.append(
                 f"{item.app} came to the front: it may show a window melo cannot "

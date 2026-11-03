@@ -17,6 +17,7 @@ from localmelo.melo.contracts.approvals import (
     AutoPolicy,
     Chosen,
     DenyAllPolicy,
+    grant_offered,
 )
 from localmelo.melo.contracts.review import ActionReview
 from localmelo.melo.schema import ToolTier
@@ -268,6 +269,36 @@ def test_a_press_in_another_apps_window_names_the_app_and_asks_every_time() -> N
     words = " ".join(" ".join(line for _, line in pressing.body).split())
     assert 'press "Allow" in Chat\'s window “Sign in”.' in words
     assert "never types into other apps" in words and "asks every time" in words
+
+
+def test_a_window_another_app_opened_is_asked_with_its_title_and_an_allow_for_the_chat() -> (
+    None
+):
+    asked = _request(
+        "window-read:com.example.chat",
+        app="Chat",
+        window="Sign in to example.com",
+        bundle="com.example.chat",
+        access="window-read",
+    )
+    panel = panel_text(asked, width=80)
+    assert panel.title == "Let melo see another app's window?"
+    assert panel.header == "Chat · another app's window"
+    words = " ".join(" ".join(line for _, line in panel.body).split())
+    assert "Chat opened a window right after melo's click: let melo see it?" in words
+    assert "The window: “Sign in to example.com”." in words
+    assert session_option(asked) == "Yes, and allow Chat in this chat"
+    assert grant_offered(asked), "the chat-wide answer is offered"
+    # Auto stopped it without deciding it: the panel keeps its own question and the chat-wide answer.
+    in_auto = dataclasses.replace(
+        asked,
+        review=ActionReview(
+            "high", ("opaque",), ("Another app put up a window right after a step.",)
+        ),
+    )
+    again = panel_text(in_auto, width=80)
+    assert again.title == "Let melo see another app's window?"
+    assert grant_offered(in_auto)
 
 
 def test_a_typing_panel_shows_all_the_text_and_says_the_page_may_send_it() -> None:
