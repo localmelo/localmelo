@@ -53,7 +53,6 @@ import functools
 import json
 import os
 import re
-import shlex
 import subprocess
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
@@ -61,6 +60,7 @@ from typing import Any, Final
 
 from localmelo.melo.agent._brief_aids import FileStamp, edited_files
 from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.contracts import shell_lexer
 from localmelo.support.gateway.front_rules import asks_tests
 from localmelo.support.sessions.store import SessionStore
 from localmelo.support.words import LANGUAGES, t_in
@@ -463,7 +463,7 @@ def _words(node: ast.AST) -> list[str] | None:
     """A literal command's words (``sys.executable`` reads as python), or None."""
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         try:
-            return shlex.split(node.value)
+            return shell_lexer.split(node.value)
         except ValueError:
             return node.value.split()
     if not isinstance(node, ast.List | ast.Tuple):
@@ -553,7 +553,7 @@ def _shell_test(command: str) -> tuple[str, bool]:
     """``(command, passed on)`` of a shell command: one plain runner command passes on."""
     first = _OPERATORS.split(command, maxsplit=1)[0]
     try:
-        words = shlex.split(first)
+        words = shell_lexer.split(first)
     except ValueError:
         words = first.split()
     runs, here = _runner(words)
@@ -589,7 +589,7 @@ def _shell_writes(command: str) -> bool:
     if _OPERATORS.search(command):
         return True
     try:
-        words = shlex.split(command)
+        words = shell_lexer.split(command)
     except ValueError:
         return True
     if not words or os.path.basename(words[0]) in _SHELL_READS:
@@ -629,7 +629,7 @@ def _argv(call: ast.Call) -> list[str | None] | None:
         if _OPERATORS.search(first.value):
             return None
         try:
-            return list(shlex.split(first.value))
+            return list(shell_lexer.split(first.value))
         except ValueError:
             return None
     if not isinstance(first, ast.List | ast.Tuple):
@@ -767,7 +767,7 @@ class _Call:
             except (SyntaxError, ValueError):
                 return None
         try:
-            return shlex.split(given)
+            return shell_lexer.split(given)
         except ValueError:
             return None
 

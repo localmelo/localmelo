@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.contracts import shell_lexer
 from localmelo.melo.memory.procedures.mask import mask_credentials
 
 READ: Final = "R"
@@ -282,7 +283,7 @@ def _basename(arguments: Any) -> str:
 def _lex(text: str) -> list[str] | None:
     """*text*'s shell words, or ``None`` when shlex refuses it (an open quote)."""
     try:
-        lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
+        lexer = shell_lexer.Lexer(text, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
         return list(lexer)
     except ValueError:
