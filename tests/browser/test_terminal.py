@@ -124,10 +124,18 @@ async def test_browser_says_it_is_off_and_a_list_turns_it_on(chat: Any) -> None:
         and session.state == "idle"
     )
     text = out.text()
-    assert "Browsing is off. /browser on lets melo read web pages in Safari." in text
+    flat = " ".join(text.split())
+    assert (
+        "Browsing is off. /browser on lets melo read web pages in Safari; "
+        "/browser chrome, in Chrome in the background."
+    ) in flat
     assert app.asked[0][:2] == (
-        "Browsing in Safari",
-        ["Turn browsing on", "Leave it off"],
+        "Browsing",
+        [
+            "Turn browsing on: Safari windows (they come to the front)",
+            "Turn browsing on: Chrome in the background",
+            "Leave it off",
+        ],
     )
     assert "Browsing is on." in text and "Safari's automation helper answers." in text
     assert (
@@ -180,13 +188,57 @@ async def test_browser_lists_the_sites_this_chat_allowed(chat: Any) -> None:
     app.answers = ["n"]
     session.enter("/browser")
     await _until(lambda: "Sites allowed in this chat: a.net:8080, b.org" in out.text())
-    assert app.asked[-1][1] == ["Turn browsing off", "Leave it on"]
+    assert app.asked[-1][1] == [
+        "Turn browsing off",
+        "Switch to Chrome in the background",
+        "Leave it on",
+    ]
 
 
 async def test_a_mistyped_browser_command_says_how(chat: Any) -> None:
     session, out, _, _ = chat
     session.enter("/browser maybe")
-    await _until(lambda: "✗ Use /browser, /browser on or /browser off." in out.text())
+    await _until(
+        lambda: "✗ Use /browser, /browser on, /browser off, /browser chrome or "
+        "/browser safari." in " ".join(out.text().split())
+    )
+
+
+async def test_browser_chrome_switches_to_chrome_and_on_keeps_it(
+    chat: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from localmelo.support.browser import chrome
+
+    session, out, _, factory = chat
+    monkeypatch.setattr(chrome, "chrome_installed", lambda: True)
+    config.save(config.Config(chat_backend="vllm", embedding_backend="none"))
+    session.enter("/browser chrome")
+    await _until(lambda: _tools(session) != [] and session.state == "idle")
+    assert factory.browser_driver == "chrome"
+    assert config.load().browser.driver == "chrome"
+    assert "Browsing is on: melo reads pages in Chrome, in the background" in (
+        " ".join(out.text().split())
+    )
+    session.enter("/browser on")
+    await _until(lambda: "Browsing is already on." in out.text())
+    assert factory.browser_driver == "chrome"
+    session.enter("/browser safari")
+    await _until(lambda: factory.browser_driver == "safari-automation")
+    await _until(lambda: session.state == "idle")
+
+
+async def test_browser_chrome_without_chrome_says_to_install_it_and_changes_nothing(
+    chat: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from localmelo.support.browser import chrome
+
+    session, out, _, factory = chat
+    monkeypatch.setattr(chrome, "chrome_installed", lambda: False)
+    session.enter("/browser chrome")
+    await _until(
+        lambda: "⚠ Google Chrome is not installed" in " ".join(out.text().split())
+    )
+    assert factory.browser_driver == "off"
 
 
 async def test_a_failed_switch_leaves_browsing_as_it_was(chat: Any) -> None:

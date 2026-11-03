@@ -9,6 +9,28 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Chrome in the background. `[browser] driver = "chrome"` (Settings → Chats and folders → **Browser**: Chrome,
+  Safari or Off; `/browser chrome` and `/browser safari` in the terminal and the console; `/browser on` keeps the
+  browser chosen before, Safari's windows when none was, and Safari stays the default) browses in the Google
+  Chrome installed on this Mac with no window: it never comes to the front and never switches the desktop. melo
+  drives it over a private pipe, never a network port, on a profile of its own in
+  `~/.cache/localmelo/browser/chrome` (readable only by you; Chrome keeps off the Keychain there, so its cookies
+  are protected by the folder's permissions and FileVault), never your own Chrome profile. Cookies a site keeps
+  for days stay from one chat to the next; session cookies go when Chrome stops. A site sees an ordinary Chrome
+  (no headless user agent, no automation flag), downloads are refused, and Chrome still makes a few connections of
+  its own to Google. The same twelve tools, refs, questions and checks apply; clicks and typing are Chrome's own
+  trusted input at the middle of the element melo checked, a choice in a list is the page script's, and each
+  chat sees only its own tabs and the tabs they opened. A page that asks to open another app (a chat app's
+  `chat://` sign-in link) is never followed by Chrome: melo names the app this Mac would use and asks "Open
+  Chat?" with the address (`handoff:<scheme>`, allowed for the chat at most; in Auto always on the card, under a
+  new card-only kind, "Open another app?"), then opens it itself on a yes and watches for the app's window like
+  after any click. A question box the page puts up during melo's step ("Delete the draft?") asks you every time
+  (`browser-dialog:<site>`, Cancel otherwise); a message is closed with OK, a box that asks for text gets Cancel,
+  and *what changed* lists each one. Without Chrome the choice says "Install Google Chrome to browse in the
+  background" and nothing changes. You cannot see or type into melo's Chrome yet, so sign in to sites in Safari's
+  windows for now. Enter in a field with an approved send now lets the form's own send button take the browser's
+  click, which melo's guard stopped before. `PUT /api/settings` takes `browser_driver`; the settings carry
+  `browser_driver` and `chrome_installed`.
 - Pictures and files in the web console and the app, and words added while melo works. Drop a picture
   or a text file on the page, paste it with Cmd-V or pick it with the paperclip (`/attach` opens the same
   picker; `/attachments` and `/detach N` list and remove). PNG, JPEG, GIF (first frame), WebP and HEIC

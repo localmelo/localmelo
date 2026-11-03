@@ -2,12 +2,13 @@
 
 # 用 melo 浏览网页
 
-在 Mac 上，通过终端或网页控制台，让 melo 在 Safari 中读取网页，并在网页上点击、输入和选择。开启前请先阅读安全部分；相关设置见[配置参考](../reference/configuration.md)。
+在 Mac 上，通过终端或网页控制台，让 melo 读取网页，并在网页上点击、输入和选择：在后台的 Chrome 中，或在 Safari 的自动化窗口中。开启前请先阅读安全部分；相关设置见[配置参考](../reference/configuration.md)。
 
 ![终端对话里，melo 打开一个网页并说明它的内容。](../../assets/img/browser.webp)
 
 - 浏览**默认关闭**。
-- melo 在 Safari 的*自动化窗口*中打开网页、跟随链接并读取内容，像人一样在一个标签页里工作。
+- 两种浏览器：**后台的 Chrome**（没有窗口，从不来到最前面；见[后台的 Chrome](#chrome-in-the-background)），或会来到最前面的 **Safari 自动化窗口**。目前默认是 Safari。
+- melo 打开网页、跟随链接并读取内容，像人一样在一个标签页里工作。
 - 它可以点击按钮或链接、在文本框里输入、从列表里选择，这一切都发生在 **melo 自己的浏览器窗口里**，用的是 Safari 自己的点击和按键，每次操作后都会说明页面变了什么。它从不输入密码、银行卡号或一次性验证码，从不读取你的 Cookie，每次输入文字前和发送表单前都会先问你。文字一旦进了网页，网页自己也可能把它发出去，melo 无法拦住每一次这样的发送（见[点击、输入和选择](#clicking-typing-and-choosing)）。
 - 它不会替你登录、发帖或购买；在桌面上移动鼠标是另一项功能，不属于这里（见[后续计划](#what-is-coming)）。
 
@@ -30,8 +31,8 @@
 
 ## 需要什么
 
-- 一台装有 Safari 27 或更高版本的 Mac。melo 使用 Safari 自带的自动化服务器 `/usr/bin/safaridriver --mcp`，不需要安装任何东西。
-- Safari 中的两个开关，只需打开一次（见[设置 Safari](#set-up-safari)）。
+- 使用 Safari 窗口：一台装有 Safari 27 或更高版本的 Mac。melo 使用 Safari 自带的自动化服务器 `/usr/bin/safaridriver --mcp`，不需要安装任何东西。Safari 中有两个开关需要打开一次（见[设置 Safari](#set-up-safari)）。
+- 使用后台的 Chrome：装在 `/Applications`（或 `~/Applications`）里的 [Google Chrome](https://www.google.com/chrome/)，别的都不需要。
 - 可选，用于[其他应用的窗口](#windows-from-other-apps)：桌面控制助手 [Cua Driver](https://cua.ai/docs/cua-driver)，安装为 `/Applications/CuaDriver.app`（melo 也会在 `PATH` 中查找 `cua-driver`）。在“系统设置 → 隐私与安全性”中给它“辅助功能”权限；再给“录屏”权限，melo 才能看到窗口的图片。melo 自己不需要这两项权限。
 - 终端对话（`melo`）或网页控制台。直接运行（`melo "任务"`）、worker 运行和已保存的任务都不会获得浏览工具。
 
@@ -45,8 +46,9 @@
 /browser
 ```
 
-- 它显示浏览是否开启；开启时会检查 Safari 是否有响应，然后一个列表提供 **Turn browsing on**（开启浏览）或 **Leave it off**（保持关闭）。
-- `/browser on` 和 `/browser off` 不经列表直接执行。
+- 它显示浏览是否开启；开启时会检查浏览器是否有响应，然后一个列表提供开启（Safari 窗口，或后台的 Chrome）、切换浏览器或关闭。
+- `/browser chrome` 和 `/browser safari` 选择浏览器并开启浏览；`/browser on` 用之前选的浏览器开启（没选过时用 Safari），`/browser off` 关闭。
+- 在网页控制台和 App 中：设置 → 对话和文件夹 → **浏览器**（Chrome、Safari 或关闭），或同样的 `/browser` 命令。没有安装 Chrome 时，这个选项会显示“安装 Google Chrome 后才能在后台浏览”，并且不做任何更改。
 - 已有保存的配置时，选择会写入 `~/.cache/localmelo/config.toml` 的 `[browser] driver`；对话会换到一个新的 Agent 上继续，已说的内容不会丢失。
 
 只为一次运行开启、不保存：
@@ -59,12 +61,12 @@ melo -X browser.driver=safari-automation
 
 ```toml
 [browser]
-driver = "safari-automation"
+driver = "safari-automation"   # 或 "chrome"：后台的 Chrome
 keep_tabs = false   # 设为 true 会让 melo 打开的标签页留在窗口里
 app_windows = true  # 设为 false 后 melo 不再留意其他应用的窗口
 ```
 
-默认是 `"off"`。网页控制台和 App 在打开每个对话（包括主对话）时读取同一个设置：在那里用 `/browser on`，或用 `melo config set browser.driver safari-automation` 修改，然后打开新对话。
+默认是 `"off"`。网页控制台和 App 在打开每个对话（包括主对话）时读取同一个设置：在那里的设置中或用 `/browser` 修改，或用 `melo config set browser.driver chrome`，然后打开新对话。
 
 <a id="set-up-safari"></a>
 
@@ -93,6 +95,22 @@ Safari is not set up for melo yet. In Safari, open Settings > Developer and turn
 - 它们从空白状态开始，像无痕窗口：**你的登录状态、Cookie 和自动填充都不可用**，之后什么也不保留。
 - 同一时间只运行一个自动化会话；窗口上方的一层面板会拦截你的鼠标和键盘，打断它会提示停止会话。
 - 所以 melo 能读不需要登录的网页；登录后才显示的网页，以及会质疑自动化浏览器的网站，暂时可能无法使用。
+
+<a id="chrome-in-the-background"></a>
+
+## 后台的 Chrome
+
+设为 `driver = "chrome"` 时，melo 在完全没有窗口的 Google Chrome 中浏览。
+
+- **从不打扰你。** Chrome 以无界面方式运行：没有窗口，没有程序坞图标，从不来到最前面，也从不切换你的桌面（空间）。melo 读取、点击和输入时，最前面的应用一直是你的。
+- **只有 melo 能操控它。** melo 启动这台 Mac 上安装的 Chrome，并通过一条私有管道和它通信。Chrome 不会为此打开任何网络端口，所以其他程序都无法操控它。
+- **melo 自己的配置。** 位于 `~/.cache/localmelo/browser/chrome`，只有你能读取（权限 0700）。从不使用你自己的 Chrome 配置、其中的登录信息，或它在钥匙串中的条目。
+- **它保留什么。** 网站保存多天的 Cookie 会留在这个配置里，从一个对话保留到下一个，所以你在那里登录过的网站会保持登录。Chrome 在这里不使用你的钥匙串，因此这些 Cookie 只受文件夹权限和 FileVault 保护。只在会话期间有效的 Cookie 在 Chrome 停止后就没有了。要全部清除，退出 melo 后删除这个文件夹。
+- **还不能登录。** 你现在还看不到 melo 的 Chrome，也不能在里面输入（实时画面和接管功能在后面）。需要你登录的网站，目前请用 Safari 窗口。
+- **网站看到什么。** 一个普通的 Chrome：用户代理中没有“HeadlessChrome”，也没有自动化标记。有些机器人检查可能仍会发现；这时请用 Safari 窗口。
+- **Chrome 自己的流量。** 即使关闭了后台联网，Chrome 仍会自己连接几次 Google；这些连接不会把任何东西带给 melo。下载会被拒绝。
+- **点击和输入由 Chrome 自己完成。** 点击是在 melo 检查过的元素中间的一次真实点击；输入会先选中框里原有的内容，再放入文字，所以忽略脚本点击的网页也能用。从列表里选择由页面脚本完成。
+- **网页要打开应用或提问时。** 见[网页要打开应用时](#when-a-page-wants-to-open-an-app)。
 
 <a id="what-melo-can-do"></a>
 
@@ -182,6 +200,17 @@ what changed:
 
 <a id="who-decides-which-sites-melo-opens"></a>
 
+<a id="when-a-page-wants-to-open-an-app"></a>
+
+### 网页要打开应用时
+
+网页可能请浏览器打开一个给应用用的地址，比如聊天应用的 `chat://` 登录链接。后台的 Chrome 从不自己打开它。
+
+- **melo 会问你。** 它说出这台 Mac 会用哪个应用打开，并问“打开 Chat？”，同时显示这个地址。*在这个对话里允许*让网页在对话结束前可以再次打开这类地址。在“自动”模式下，它总是在卡片上问你；没有人在看时什么都不做。
+- **你同意后，melo 打开它。** 这个应用会来到最前面，就像从你自己的浏览器打开一样；melo 会像任何一次点击之后那样，留意它打开的窗口（比如登录窗口）：见[其他应用的窗口](#windows-from-other-apps)。
+- **模型读到什么。** 这一步会说明发生了什么：“The page asked to open Chat (chat:…). You allowed it; melo opened it, so Chat comes to the front.”只显示地址的种类；地址的其余部分可能含有登录令牌。
+- **网页的提问。** 在后台，网页的提问框会让页面停住，所以由 melo 回答。消息框用“确定”关闭。melo 自己操作时出现的提问（“删除这份草稿？”）每次都会问你，你拒绝时回答“取消”。要求输入文字的框一律回答“取消”。这一步会在 *what changed* 下面列出每一个。
+
 <a id="windows-from-other-apps"></a>
 
 ## 其他应用的窗口
@@ -210,8 +239,10 @@ melo 操作的网页可能让另一个应用打开窗口，比如聊天应用请
 
 ## 后续计划
 
-浏览功能分几部分构建；接下来这两部分目前都还不存在。
+浏览功能分几部分构建；下面这些目前都还不存在。
 
+- 查看后台的 Chrome：在控制台和 App 里实时看到 melo 的页面，并可以接管它，自己登录、通过验证或输入密码，然后再交还给 melo。
+- 让 Chrome 成为默认浏览器；为拒绝无窗口浏览器的网站提供“在窗口中打开”；以及一个清除 melo 的 Chrome 登录信息的按钮。
 - 在你自己已登录的浏览器里操作（Chrome 扩展）：在那里点击和输入，发送、发帖、购买和登录需要确认，`auto` 和 `--yolo` 无法跳过。本页的点击只发生在 melo 自己的自动化窗口里；在桌面上移动鼠标（computer use，用于浏览器之外的应用）是另一项功能，也是图上点击之后的下一种方式。
 - 按计划运行的已保存例行任务（例如每日签到），其步骤由你事先批准一次。
 
@@ -222,6 +253,10 @@ melo 操作的网页可能让另一个应用打开窗口，比如聊天应用请
 | 你看到 | 怎么办 |
 |---|---|
 | `Safari is not set up for melo yet` | 打开[设置 Safari](#set-up-safari)中的两个开关。 |
+| `Google Chrome is not installed, so melo cannot browse in the background` | 安装 Google Chrome，或改用 Safari 窗口（`/browser safari`）。 |
+| `Chrome stopped` | 再问一次：melo 会在下一步重新启动 Chrome。只在会话期间有效的登录会丢失。 |
+| `Chrome could not load that page (net::...)` | 这个地址没有响应，或页面是一个下载（melo 的 Chrome 拒绝下载）。 |
+| `The page tried to open ... ; melo did not open it` | 你回答了“否”，或在“自动”模式下没有人在看。再问一次就会再次询问你。 |
 | `Safari's automation helper did not start` | 确认已安装 Safari 27 或更高版本且开关已打开；`/browser` 会重新检查。 |
 | `This Safari's automation server lacks the tools melo needs` | 更新 macOS 和 Safari。 |
 | 页面读出来是空的 | 可能需要登录，或页面在加载后由脚本生成；试试 `browser_wait`，或自己打开它。 |

@@ -29,6 +29,7 @@ from localmelo.support.cli.approvals import (
     TerminalApprover,
     approval_words,
     grant_listed,
+    grant_words,
     panel_text,
     session_option,
     session_warning,
@@ -268,6 +269,73 @@ def test_a_press_in_another_apps_window_names_the_app_and_asks_every_time() -> N
     words = " ".join(" ".join(line for _, line in pressing.body).split())
     assert 'press "Allow" in Chat\'s window “Sign in”.' in words
     assert "never types into other apps" in words and "asks every time" in words
+
+
+def test_a_page_that_asks_for_an_app_shows_the_app_and_the_address() -> None:
+    handing = panel_text(
+        _request(
+            "handoff:chat",
+            site="example.com",
+            access="handoff",
+            app="Chat",
+            scheme="chat",
+            url="chat://login?x=1",
+            browser="chrome",
+        ),
+        width=80,
+    )
+    assert handing.title == "Open Chat?"
+    assert handing.header == "example.com · a page asks for an app"
+    words = " ".join(" ".join(line for _, line in handing.body).split())
+    assert "A page on example.com wants to open Chat." in words
+    assert "chat://login?x=1" in words and "Chat comes to the front" in words
+    request = _request("handoff:chat", app="Chat", access="handoff")
+    assert session_option(request) == (
+        "Yes, and let pages open Chat for the rest of this chat"
+    )
+    assert grant_words("handoff:chat") == "opening chat: addresses in their app"
+
+
+def test_a_question_the_page_asks_shows_its_words_and_asks_every_time() -> None:
+    asking = panel_text(
+        _request(
+            "browser-dialog:https://example.com",
+            site="example.com",
+            access="dialog",
+            how="confirm",
+            text="Delete the draft?",
+        ),
+        width=80,
+    )
+    assert asking.title == "Answer OK on a website?"
+    words = " ".join(" ".join(line for _, line in asking.body).split())
+    assert "Delete the draft?" in words and "Asked every time" in words
+
+
+def test_chrome_in_the_background_is_named_on_the_cards() -> None:
+    opening = panel_text(
+        _request(
+            "browser:https://example.com",
+            site="example.com",
+            access="read",
+            browser="chrome",
+        ),
+        width=80,
+    )
+    words = " ".join(" ".join(line for _, line in opening.body).split())
+    assert "open example.com in Chrome and read it" in words
+    assert "nowindowcomestothefront" in "".join(words.split())
+    clicking = panel_text(
+        _request(
+            "browser-act:https://example.com",
+            site="example.com",
+            access="act",
+            browser="chrome",
+        ),
+        width=80,
+    )
+    words = " ".join(" ".join(line for _, line in clicking.body).split())
+    assert "inmelo'sbrowser,whichrunsinthebackground" in "".join(words.split())
 
 
 def test_a_typing_panel_shows_all_the_text_and_says_the_page_may_send_it() -> None:

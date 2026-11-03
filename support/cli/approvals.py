@@ -307,6 +307,12 @@ def _tool_panel(
             body,
             escaped_any,
         )
+    background = arguments.get("browser") == "chrome"
+    window = (
+        "in melo's browser, which runs in the background"
+        if background
+        else "in Safari's automation window"
+    )
     if tool.startswith(
         ("browser-act:", "browser-type:", "browser-submit:", "browser-point:")
     ):
@@ -325,22 +331,17 @@ def _tool_panel(
         elif pointing:
             on = shown(str(arguments.get("on") or "a point of the page"))
             how = shown(str(arguments.get("how") or "click"))
-            said = f"melo wants to {how} {on} on {site} in Safari's automation window."
+            said = f"melo wants to {how} {on} on {site} {window}."
             note = "melo cannot check this one itself, so it asks every time."
         elif typing:
-            said = (
-                f"melo wants to type this text on {site} in Safari's automation window:"
-            )
+            said = f"melo wants to type this text on {site} {window}:"
             note = (
                 "It never types passwords, card numbers or one-time codes. Once the "
                 "text is in the page, the page may send it on its own; melo asks "
                 "before it presses send, but cannot stop every send the page makes."
             )
         else:
-            said = (
-                f"melo wants to click and choose on {site} in Safari's "
-                "automation window, as you would."
-            )
+            said = f"melo wants to click and choose on {site} {window}, as you would."
             note = "Each text it types is asked about apart, every time."
         body = [("", row) for row in _wrapped([said], width)]
         if sending and goes:
@@ -392,12 +393,54 @@ def _tool_panel(
             body,
             escaped_any,
         )
+    if tool.startswith(("handoff:", "browser-dialog:")):
+        site = shown(str(arguments.get("site") or "a page"))
+        if tool.startswith("handoff:"):
+            # A page asked to open an address of another app's kind, which the
+            # browser in the background does not open by itself.
+            app = shown(str(arguments.get("app") or "an app"))
+            said = f"A page on {site} wants to open {app}. melo would open this address with it:"
+            note = (
+                f"{app} comes to the front. "
+                "Allow for this chat covers this kind of address until the chat ends."
+            )
+            body = [("", row) for row in _wrapped([said], width)]
+            body += [
+                ("", row)
+                for row in _wrapped([shown(str(arguments.get("url") or ""))], width)
+            ]
+            body += [("muted", row) for row in _wrapped([note], width)]
+            return PanelText(
+                f"Open {app}?",
+                f"{site}{mark} · a page asks for an app",
+                body,
+                escaped_any,
+            )
+        said = f"The page on {site} asks this question. Answer OK?"
+        note = "Cancel is melo's answer when you say no. Asked every time."
+        body = [("", row) for row in _wrapped([said], width)]
+        body += [
+            ("", row)
+            for row in _wrapped([shown(str(arguments.get("text") or ""))], width)
+        ]
+        body += [("muted", row) for row in _wrapped([note], width)]
+        return PanelText(
+            "Answer OK on a website?",
+            f"{site}{mark} · the page asks",
+            body,
+            escaped_any,
+        )
     if tool.startswith("browser:"):
         site = shown(str(arguments.get("site") or tool[len("browser:") :]))
-        said = f"melo wants to open {site} in Safari and read it."
-        note = (
-            "Safari opens it in its own automation window; your sign-ins are not used."
-        )
+        if background:
+            said = f"melo wants to open {site} in Chrome and read it."
+            note = (
+                "Chrome runs in the background with melo's own profile: no window "
+                "comes to the front, and your own sign-ins are not used."
+            )
+        else:
+            said = f"melo wants to open {site} in Safari and read it."
+            note = "Safari opens it in its own automation window; your sign-ins are not used."
         body = [("", row) for row in _wrapped([said], width)]
         body += [("muted", row) for row in _wrapped([note], width)]
         return PanelText(
@@ -485,6 +528,9 @@ def session_option(request: ApprovalRequest) -> str:
         return (
             f"Yes, and allow clicking and choosing on {site} for the rest of this chat"
         )
+    if request.tool_name.startswith("handoff:"):
+        app = str(request.arguments.get("app") or "that app")
+        return f"Yes, and let pages open {app} for the rest of this chat"
     return f"Yes, and allow every {request.tool_name} call in this session"
 
 
@@ -741,6 +787,8 @@ def grant_words(name: str) -> str:
     """A grant in words: ``shell commands``, ``clicking and choosing on example.com``."""
     if name in _GRANT_WORDS:
         return _GRANT_WORDS[name]
+    if name.startswith("handoff:"):
+        return f"opening {name[len('handoff:') :]}: addresses in their app"
     for prefix, words in _SITE_GRANT_WORDS:
         if name.startswith(prefix):
             return words.format(site=grant_site(name))

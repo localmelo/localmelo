@@ -550,15 +550,17 @@ class SchedulerConfig:
     lock_gate: str = "record"  # record | wait
 
 
-BROWSER_DRIVERS = ("off", "safari-automation")
+BROWSER_DRIVERS = ("off", "safari-automation", "chrome")
 
 
 @dataclass
 class BrowserConfig:
     """The ``[browser]`` table: whether melo may read web pages in a browser.
 
-    ``driver`` is ``off`` (the default, no browser tools) or ``safari-automation``
-    (Safari's automation windows). Only the terminal chat and the console offer it.
+    ``driver`` is ``off`` (the default, no browser tools), ``safari-automation``
+    (Safari's automation windows, which come to the front) or ``chrome`` (Google
+    Chrome in the background, with no window and a profile of melo's own). Only
+    the terminal chat and the console offer it.
     ``keep_tabs`` leaves the tabs melo opened in the window when a chat ends or
     sits idle; by default melo closes them. ``app_windows`` (on by default) lets
     melo see a window another app opens after its own act in the browser, such
@@ -567,7 +569,7 @@ class BrowserConfig:
     app came to the front (:mod:`localmelo.support.browser.desktop`).
     """
 
-    driver: str = "off"  # off | safari-automation
+    driver: str = "off"  # off | safari-automation | chrome
     keep_tabs: bool = False
     app_windows: bool = True
 

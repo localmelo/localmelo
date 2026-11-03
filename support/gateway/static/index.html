@@ -428,6 +428,14 @@
                   <div class="st-text"><label class="st-label" for="s-web-search" data-i18n="settings.webSearch.title">Web search</label><span class="st-key" data-developer hidden>web.search</span><p class="st-hint" data-i18n="settings.webSearch.hint">Melo can search the web when it needs to check something, in every chat and task. The words it searches for leave this computer.</p></div>
                   <span class="st-switch"><input type="checkbox" role="switch" id="s-web-search" disabled /><span class="st-track" aria-hidden="true"></span></span>
                 </li>
+                <li class="st-row" id="s-browser-row" hidden>
+                  <div class="st-text"><span class="st-label" id="s-browser-legend" data-i18n="settings.browser.title">Browser</span><span class="st-key" data-developer hidden>browser.driver</span><p class="st-hint" data-i18n="settings.browser.hint">Where melo reads and uses web pages, asking you about each site. Chrome works in the background with no window; Safari's windows come to the front.</p><p class="st-hint" id="s-browser-chrome-missing" data-i18n="settings.browser.chromeMissing" hidden>Install Google Chrome to browse in the background.</p></div>
+                  <div class="st-segments" role="radiogroup" aria-labelledby="s-browser-legend">
+                    <label><input type="radio" name="s-browser" id="s-browser-chrome" value="chrome" disabled /><span data-i18n="settings.browser.chrome">Chrome</span></label>
+                    <label><input type="radio" name="s-browser" id="s-browser-safari-automation" value="safari-automation" disabled /><span data-i18n="settings.browser.safari">Safari</span></label>
+                    <label><input type="radio" name="s-browser" id="s-browser-off" value="off" disabled /><span data-i18n="settings.browser.off">Off</span></label>
+                  </div>
+                </li>
                 <li class="st-row" id="s-app-windows-row" hidden>
                   <div class="st-text"><label class="st-label" for="s-app-windows" data-i18n="settings.appWindows.title">Other apps' windows</label><span class="st-key" data-developer hidden>browser.app_windows</span><p class="st-hint" data-i18n="settings.appWindows.hint">When a page melo uses in the browser opens a window in another app, such as a chat app's sign-in window, melo sees it and can press its buttons with your say. It never types into other apps.</p><p class="st-hint" id="s-app-windows-helper" data-i18n="settings.appWindows.helper" hidden>Needs the desktop control helper. Without it melo only says which app to answer.</p><p class="st-hint" id="s-app-windows-status" role="status" hidden></p></div>
                   <span class="st-switch"><input type="checkbox" role="switch" id="s-app-windows" disabled /><span class="st-track" aria-hidden="true"></span></span>

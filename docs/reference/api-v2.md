@@ -415,9 +415,16 @@ sessions.
 - `approvals` is optional: `ask` or `auto` sets `[approvals] mode`, the mode
   new chats start in (other values are 400 `invalid_request`); omitted, the
   saved value is kept. Chats made before keep their own mode.
-- `browser` is optional: `true` sets `[browser] driver` to `safari-automation`,
-  `false` to `off` (anything else is 400 `invalid_request`); omitted, the saved
-  value is kept. It is what `/browser on` and `/browser off` save.
+- `browser` is optional: `true` turns browsing on (`[browser] driver` keeps a
+  browser chosen before, else becomes `safari-automation`), `false` sets it to
+  `off` (anything else is 400 `invalid_request`); omitted, the saved value is
+  kept. It is what `/browser on` and `/browser off` save.
+- `browser_driver` is optional: `off`, `safari-automation` or `chrome` sets
+  `[browser] driver` by name and wins over `browser` (other values are 400
+  `invalid_request`); omitted, the saved value is kept. It is what Settings'
+  **Browser** choice, `/browser chrome` and `/browser safari` save. The
+  response carries `browser_driver` and `chrome_installed` (whether Google
+  Chrome is installed, so the choice can say to install it first).
 - The console saves one change at a time: the loaded `revision` with only the
   changed field, and its Undo is the same request with the earlier value.
 - A `revision` that does not match the file on disk returns 409

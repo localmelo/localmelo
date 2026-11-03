@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from contextvars import ContextVar
 from urllib.parse import urlsplit
 
 from localmelo.melo.contracts.approvals import (
@@ -20,6 +21,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     denial_text,
 )
+from localmelo.support.browser.apps import scheme_of
 from localmelo.support.browser.driver import BrowserError
 
 PREFIX = "browser:"
@@ -31,6 +33,14 @@ ACT_PREFIX = "browser-act:"
 TYPE_PREFIX = "browser-type:"
 SUBMIT_PREFIX = "browser-submit:"
 POINT_PREFIX = "browser-point:"
+# A page asks to open an address of another app's kind (``chat://...``):
+# ``handoff:<scheme>``, asked per chat. A ``confirm`` box a page puts up while
+# melo acts: ``browser-dialog:<site>``, asked every time.
+HANDOFF_PREFIX = "handoff:"
+DIALOG_PREFIX = "browser-dialog:"
+# The browser melo browses in for the running call, as questions name it:
+# Safari's automation windows unless the call's provider says otherwise.
+BROWSER: ContextVar[str] = ContextVar("localmelo_browser_name", default="Safari")
 # The longest address a site question shows (web_fetch's): longer ones are cut.
 URL_SHOWN = 300
 # The most form fields a send question lists.
@@ -83,6 +93,19 @@ def host_of(origin: str) -> str:
     return origin.split("://", 1)[-1]
 
 
+def _in() -> str:
+    """Where melo acts, for a question's preview: ``in Safari``, ``in Chrome``."""
+    return f"in {BROWSER.get()}"
+
+
+def _browser(arguments: dict[str, object]) -> dict[str, object]:
+    """*arguments* with the browser named, when it is not Safari (the surfaces word the card for it)."""
+    name = BROWSER.get()
+    if name != "Safari":
+        arguments["browser"] = name.lower()
+    return arguments
+
+
 def shown_url(url: str) -> str:
     """*url* as a question shows it: at most :data:`URL_SHOWN` characters."""
     url = url.strip()
@@ -94,14 +117,18 @@ def _question(
 ) -> tuple[str, dict[str, str], str]:
     """The site question about *origin*: its name, arguments and preview."""
     host = host_of(origin)
-    arguments = {"site": host, "origin": origin, "access": "read"}
-    preview = f"open {host} in Safari and read it"
+    arguments: dict[str, str] = {"site": host, "origin": origin, "access": "read"}
+    preview = f"open {host} {_in()} and read it"
     if via == "web_fetch":
         arguments["via"] = "web_fetch"
         preview = f"read {host}"
         if url:
             arguments["url"] = shown_url(url)
             preview = f"read {arguments['url']}"
+    else:
+        name = BROWSER.get()
+        if name != "Safari":
+            arguments["browser"] = name.lower()
     return PREFIX + origin, arguments, preview
 
 
@@ -165,8 +192,8 @@ async def require_act(origin: str, what: str, on: str = "") -> None:
         arguments["on"] = on
     decision = await ask(
         ACT_PREFIX + origin,
-        arguments,
-        f"{what} {on} on {host} in Safari" if on else f"{what} on {host} in Safari",
+        _browser(dict(arguments)),
+        f"{what} {on} on {host} {_in()}" if on else f"{what} on {host} {_in()}",
     )
     if not decision.allow:
         raise BrowserError(
@@ -195,8 +222,8 @@ async def require_type(origin: str, text: str, on: str = "") -> None:
     into = f" into {on}" if on else ""
     decision = await ask(
         TYPE_PREFIX + origin,
-        arguments,
-        f"type {len(text)} character(s){into} on {host} in Safari",
+        _browser(dict(arguments)),
+        f"type {len(text)} character(s){into} on {host} {_in()}",
     )
     if not decision.allow:
         raise BrowserError(f"melo did not type on {host}. " + denial_text(decision))
@@ -265,10 +292,64 @@ async def require_point(
         arguments["target"] = "unknown"
     decision = await ask(
         POINT_PREFIX + origin,
-        arguments,
-        f"{how} {what} on {host} in Safari",
+        _browser(dict(arguments)),
+        f"{how} {what} on {host} {_in()}",
     )
     if not decision.allow:
         raise BrowserError(
             f"melo did not {how} there on {host}. " + denial_text(decision)
         )
+
+
+async def require_handoff(origin: str, url: str, app: str) -> bool:
+    """Ask whether melo may open *url*, an address of another app's kind a page on *origin* asked for; :class:`BrowserError` if refused.
+
+    *app* is the app this Mac opens it with. The question is
+    ``handoff:<scheme>``: "allow for this chat" covers that kind of address
+    for the rest of the chat, nothing longer. It has no ``origin`` argument,
+    so a refusal does not refuse the site for reading. Returns whether
+    anybody was asked (False without a policy).
+    """
+    ask = TOOL_ASK.get()
+    if ask is None:
+        return False
+    scheme = scheme_of(url)[:30]
+    host = host_of(origin) if origin else "a page"
+    decision = await ask(
+        HANDOFF_PREFIX + scheme,
+        _browser(
+            {
+                "site": host,
+                "access": "handoff",
+                "app": app,
+                "scheme": scheme,
+                "url": shown_url(url),
+            }
+        ),
+        f"open {app} for a page on {host} ({scheme}: address)",
+    )
+    if not decision.allow:
+        raise BrowserError(f"melo did not open {app}. " + denial_text(decision))
+    return True
+
+
+async def require_dialog(origin: str, message: str) -> None:
+    """Ask whether melo may answer OK to a ``confirm`` box a page on *origin* put up while it acted; :class:`BrowserError` if refused.
+
+    *message* is the page's own words in the box (cut short): the person
+    sees what they agree to. Asked every time and never kept for the chat;
+    without a policy nobody is asked and the answer is OK, as the act was.
+    """
+    ask = TOOL_ASK.get()
+    if ask is None:
+        return
+    host = host_of(origin) if origin else "a page"
+    decision = await ask(
+        DIALOG_PREFIX + (origin or "page"),
+        _browser(
+            {"site": host, "access": "dialog", "how": "confirm", "text": message[:300]}
+        ),
+        f"answer OK to a question the page on {host} asks {_in()}",
+    )
+    if not decision.allow:
+        raise BrowserError(f"melo answered Cancel on {host}. " + denial_text(decision))

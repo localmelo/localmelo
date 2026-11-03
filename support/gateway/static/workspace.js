@@ -1952,7 +1952,8 @@ function approvalCard(request, view = chatApproval, asked = "") {
     title = t(reading ? "approval.readSite" : "approval.openSite", { site });
     caption = t(reading ? "approval.readCaption" : "approval.browserCaption");
     rule = t(reading ? "approval.rule.read" : "approval.rule.open", { site, scope });
-    content = t(reading ? "approval.readContent" : "approval.siteContent", { site });
+    // Chrome in the background (`args.browser`) is worded for itself: no window comes to the front.
+    content = t(reading ? "approval.readContent" : args.browser === "chrome" ? "approval.siteContentChrome" : "approval.siteContent", { site });
     if (reading && args.url) {
       // The whole address reaches the site, path and query too: the card shows it.
       why = content;
@@ -1970,7 +1971,10 @@ function approvalCard(request, view = chatApproval, asked = "") {
     title = t(sending ? "approval.submitSite" : typing ? "approval.typeSite" : "approval.actSite", { site });
     caption = t(sending ? "approval.submitCaption" : typing ? "approval.typeCaption" : "approval.actCaption");
     rule = t(sending ? "approval.rule.submitOnce" : typing ? "approval.rule.typeOnce" : "approval.rule.act", { site, scope });
-    content = t(sending ? "approval.submitContent" : typing ? "approval.typeContent" : "approval.actContent", { site });
+    const chrome = args.browser === "chrome";
+    content = t(sending ? "approval.submitContent"
+      : typing ? (chrome ? "approval.typeContentChrome" : "approval.typeContent")
+      : chrome ? "approval.actContentChrome" : "approval.actContent", { site });
     if (sending) {
       // Where the form goes (or that the page decides) and what it holds, nothing secret in it.
       why = content;
@@ -1983,6 +1987,26 @@ function approvalCard(request, view = chatApproval, asked = "") {
       content = String(args.text ?? "");
       what = t("approval.actTyped");
     }
+  } else if (tool.startsWith("handoff:")) {
+    // A page asked to open an address of another app's kind, which the browser in the background does not
+    // open itself: melo opens it on a yes, and "Allow for this chat" covers that kind of address.
+    const app = String(args.app || tool.slice(tool.indexOf(":") + 1));
+    const site = String(args.site || "");
+    what = t("approval.handoffAddress");
+    title = t("approval.handoffTitle", { app });
+    caption = t("approval.handoffCaption");
+    rule = t("approval.rule.handoff", { app, scope });
+    why = t("approval.handoffContent", { app, site });
+    content = String(args.url || "");
+  } else if (tool.startsWith("browser-dialog:")) {
+    // A confirm box the page put up while melo acted: OK is asked every time; Cancel otherwise.
+    const site = String(args.site || tool.slice(tool.indexOf(":") + 1));
+    what = t("approval.dialogText");
+    title = t("approval.dialogTitle", { site });
+    caption = t("approval.dialogCaption");
+    rule = t("approval.rule.dialogOnce");
+    why = t("approval.dialogContent", { site });
+    content = String(args.text ?? "");
   } else if (tool.startsWith("desktop-act:")) {
     // A button in another app's window that appeared after melo's own step in the browser: asked every
     // time, and the card names the app, the window and what is pressed.

@@ -65,7 +65,6 @@ import logging
 import re
 from collections.abc import Awaitable, Callable
 from typing import Any, NoReturn
-from urllib.parse import urlsplit
 
 from localmelo.melo.contracts.approvals import (
     SELF_ASKING_TOOLS,
@@ -75,7 +74,7 @@ from localmelo.melo.contracts.approvals import (
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool, ToolFunction
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.schema import ImagePart, ToolDef
-from localmelo.support.browser import addresses, fields, render, sites
+from localmelo.support.browser import addresses, apps, fields, render, sites
 from localmelo.support.browser.desktop import (
     LATE_S,
     DesktopWatch,
@@ -88,6 +87,7 @@ from localmelo.support.browser.driver import (
     ActResult,
     BrowserDriver,
     BrowserError,
+    Dialog,
     Element,
     StaleElementError,
     TabInfo,
@@ -128,6 +128,14 @@ PAGE_NOTE = (
     "the window. Each act returns what changed and the page again. Only for what "
     "the element list lacks (a drawing, a box from another site): "
     "browser_screenshot, then browser_click_point."
+)
+# The same note for a browser that runs in the background, where the person cannot
+# type yet: a sign-in is theirs to do, in a browser they can see.
+BACKGROUND_NOTE = PAGE_NOTE.replace(
+    "ask the user to do that in the window.",
+    "melo's browser runs in the background, where the user cannot type yet: ask "
+    "them to sign in or fill such a field themselves (/browser safari lets them "
+    "do it in a Safari window).",
 )
 DESKTOP_NOTE = (
     "Other apps' windows: a step's result names a window another app opened "
@@ -313,6 +321,7 @@ def _guarded(fn: ToolFunction) -> ToolFunction:
     async def run(self: BrowserToolProvider, **arguments: Any) -> str | ToolOutput:
         async with self._lock:
             self._cancel_idle()
+            named = sites.BROWSER.set(self.browser_name)
             try:
                 await self._driver.start()
                 self._looked, self._handoff = False, False
@@ -321,6 +330,7 @@ def _guarded(fn: ToolFunction) -> ToolFunction:
             except BrowserError as exc:
                 return ToolOutput(text=str(exc), is_error=True)
             finally:
+                sites.BROWSER.reset(named)
                 self._arm_idle()
 
     return run
@@ -357,8 +367,14 @@ class BrowserToolProvider(BaseToolProvider):
         idle_close_s: float = IDLE_CLOSE_S,
         settle_s: float | None = None,
         desktop: DesktopWatch | None = None,
+        opener: apps.AppOpener | None = None,
     ) -> None:
         self._driver = driver
+        # Names and opens the app an address of another app's kind is for.
+        self._opener = opener or apps.AppOpener()
+        # A driver whose page boxes block the page asks melo about a confirm.
+        if hasattr(driver, "on_dialog"):
+            setattr(driver, "on_dialog", self._confirm)  # noqa: B010
         # Other apps' windows around melo's own acts; None: not looked for.
         self._desktop = desktop
         # The screen as melo last looked at it: kept until a step of any kind
@@ -408,10 +424,21 @@ class BrowserToolProvider(BaseToolProvider):
     def driver(self) -> BrowserDriver:
         return self._driver
 
+    @property
+    def browser_name(self) -> str:
+        """The browser in words: ``Safari`` (its automation windows) or ``Chrome`` (in the background)."""
+        return str(getattr(self._driver, "label", "Safari"))
+
+    @property
+    def background(self) -> bool:
+        """Whether the browser runs in the background, where the person cannot see it."""
+        return self.browser_name == "Chrome"
+
     def system_notes(self) -> tuple[str, ...]:
+        note = BACKGROUND_NOTE if self.background else PAGE_NOTE
         if self._desktop is not None:
-            return (PAGE_NOTE, DESKTOP_NOTE)
-        return (PAGE_NOTE,)
+            return (note, DESKTOP_NOTE)
+        return (note,)
 
     async def start(self) -> list[ProvidedTool]:
         impls: dict[str, ToolFunction] = {
@@ -431,8 +458,10 @@ class BrowserToolProvider(BaseToolProvider):
             "window_press": self._window_press,
         }
         offered = TOOLS
+        if self.background:
+            offered = tuple(_in_background(tool) for tool in TOOLS)
         if self._desktop is not None and self._desktop.can_read:
-            offered = (*TOOLS, *WINDOW_TOOLS)
+            offered = (*offered, *WINDOW_TOOLS)
         return [
             # No timeout of its own: a call may wait for the person's answer about
             # a site, so the run's tool timeout applies, and the driver bounds
@@ -787,6 +816,7 @@ class BrowserToolProvider(BaseToolProvider):
             self._cancel_idle()
             before, current = set(self._raw), self._tab
             token = TOOL_ASK.set(_no_other_site)
+            named = sites.BROWSER.set(self.browser_name)
             try:
                 await self._driver.start()
                 await addresses.require_public(url)
@@ -799,6 +829,7 @@ class BrowserToolProvider(BaseToolProvider):
                     raise PageRefusedError(str(exc)) from exc
                 return self._snaps[own.id]
             finally:
+                sites.BROWSER.reset(named)
                 TOOL_ASK.reset(token)
                 for short in [t for t in self._raw if t not in before]:
                     with contextlib.suppress(BrowserError):
@@ -1226,8 +1257,17 @@ class BrowserToolProvider(BaseToolProvider):
             or lines
             or (result is not None and (changes is None or changes.changed))
         )
+        handed = False
+        if result is not None and result.handoff:
+            line, handed = await self._hand_off(
+                result.handoff, self._origins.get(tab_id, "")
+            )
+            said += f" {line}"
         stop = self._page_moved(landed, urls[landed], before)
-        others = await self._other_windows(wait=hands_off and not changed, stop=stop)
+        # melo's own opening of the app is an act: its window is waited for too.
+        others = await self._other_windows(
+            wait=(hands_off and not changed) or handed, stop=stop
+        )
         notes = self._take_notes()
         if others:
             said += " Another app put a window on the screen: see what changed."
@@ -1237,6 +1277,7 @@ class BrowserToolProvider(BaseToolProvider):
             expect
             and changes is not None
             and not (opened or moved or lines or changes.changed)
+            and not (result is not None and result.handoff)
         ):
             said += " Nothing on the page changed."
         elif changes is not None and not changes.quiet:
@@ -1253,6 +1294,54 @@ class BrowserToolProvider(BaseToolProvider):
                 ) from None
             raise
         return f"{said}\n{page}"
+
+    async def _hand_off(self, url: str, origin: str) -> tuple[str, bool]:
+        """Offer the person the app a page asked for (*url*); the line for the step, and whether melo opened it.
+
+        The app's name comes from this Mac, never the page; only the kind of
+        address is shown, never the rest of it (it can hold a sign-in token),
+        which the question shows the person. On a yes the screen is looked at
+        right before melo opens it, so the app's window is told on this step.
+        """
+        shown = apps.shown_scheme(url)
+        try:
+            app = await self._opener.name_for(url)
+        except Exception:  # noqa: BLE001 - which app it is, is a hint
+            app = ""
+        app = " ".join(app.split())[:80]
+        if not app:
+            return (
+                f"The page tried to open an app ({shown}); no app on this Mac "
+                "opens it, so nothing opened.",
+                False,
+            )
+        try:
+            asked = await sites.require_handoff(origin, url, app)
+        except BrowserError:
+            return (
+                f"The page tried to open {app} ({shown}); melo did not open it.",
+                False,
+            )
+        self._held += await self._look()  # the screen right before melo's own act
+        try:
+            await self._opener.open(url)
+        except BrowserError as exc:
+            return f"The page asked to open {app} ({shown}), but {exc}", False
+        who = "You allowed it" if asked else "It was allowed"
+        return (
+            f"The page asked to open {app} ({shown}). {who}; melo opened it, so "
+            f"{app} comes to the front.",
+            True,
+        )
+
+    async def _confirm(self, kind: str, message: str, url: str) -> bool:
+        """Whether to answer OK to a ``confirm`` box a page put up while melo acted: the person says."""
+        origin = sites.origin_of(url) or ""
+        try:
+            await sites.require_dialog(origin, message)
+        except BrowserError:
+            return False
+        return True
 
     async def _look(
         self,
@@ -1769,12 +1858,35 @@ def _screen_block(lines: list[str]) -> str:
 
 def _custom_scheme(url: str) -> bool:
     """Whether *url* is an address another app opens (``chat://...``), not a page or the browser's own."""
-    try:
-        scheme = urlsplit(url.strip()).scheme.lower()
-    except ValueError:
-        return False
-    own = ("http", "https", "file", "about", "data", "javascript", "blob")
-    return bool(scheme) and scheme not in own and "-" not in scheme
+    return apps.custom_scheme(url)
+
+
+def _in_background(tool: ToolDef) -> ToolDef:
+    """*tool* as the model reads it when the browser runs in the background."""
+    words = tool.description.replace(
+        "in Safari", "in melo's browser (Chrome, in the background)"
+    ).replace("inside melo's browser window", "in melo's browser")
+    return dataclasses.replace(tool, description=words)
+
+
+_DIALOG_WORDS = {
+    "alert": "a message",
+    "confirm": "a question",
+    "prompt": "a box that asks for text",
+    "beforeunload": "a question before leaving",
+}
+
+
+def _dialog_line(dialog: Dialog) -> str:
+    """A box the page put up, as "what changed" says it: page words, cleaned there."""
+    what = _DIALOG_WORDS.get(dialog.kind, "a box")
+    if dialog.kind == "alert":
+        answer = "melo closed it"
+    elif dialog.kind == "beforeunload":
+        answer = "melo left the page" if dialog.accepted else "melo stayed"
+    else:
+        answer = "melo answered OK" if dialog.accepted else "melo answered Cancel"
+    return f'the page showed {what}: "{dialog.message}" ({answer})'
 
 
 _EARLIER = (
@@ -1832,6 +1944,8 @@ def _change_lines(
             f"address: {render.address(url, origin)} -> {render.address(now, origin)}"
         )
     changes = result.changes if result is not None else None
+    if result is not None:
+        lines.extend(_dialog_line(dialog) for dialog in result.dialogs)
     if changes is not None:
         lines.extend(f'new text: "{text}"' for text in changes.texts)
         if changes.target:

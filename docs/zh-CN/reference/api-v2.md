@@ -220,7 +220,8 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `memory_retriever` 可选：`auto`、`bm25`、`embedding` 或 `llm`，设置 `[memory] retriever`（其他值返回 400 `invalid_request`；没有嵌入模型时设为 `embedding` 返回 400 `invalid_settings`）；省略时保留已保存的值。
 - `language` 可选：`auto`、`en` 或 `zh-Hans`，设置 `[console] language`（其他值返回 400 `invalid_request`）；省略时保留已保存的值。页面会重新载入，显示新的语言。
 - `approvals` 可选：`ask` 或 `auto`，设置 `[approvals] mode`，即新对话开始时的模式（其他值返回 400 `invalid_request`）；省略时保留已保存的值。之前创建的对话保留各自的模式。
-- `browser` 可选：`true` 把 `[browser] driver` 设为 `safari-automation`，`false` 设为 `off`（其他值返回 400 `invalid_request`）；省略时保留已保存的值。`/browser on` 和 `/browser off` 保存的就是它。
+- `browser` 可选：`true` 开启浏览（`[browser] driver` 保留之前选过的浏览器，否则设为 `safari-automation`），`false` 设为 `off`（其他值返回 400 `invalid_request`）；省略时保留已保存的值。`/browser on` 和 `/browser off` 保存的就是它。
+- `browser_driver` 可选：`off`、`safari-automation` 或 `chrome`，按名字设置 `[browser] driver`，并优先于 `browser`（其他值返回 400 `invalid_request`）；省略时保留已保存的值。设置中的**浏览器**选项、`/browser chrome` 和 `/browser safari` 保存的就是它。响应中带有 `browser_driver` 和 `chrome_installed`（是否已安装 Google Chrome，以便选项提示先安装）。
 - 控制台一次保存一项更改：带上读取时的 `revision`，只发送改动的字段；它的 Undo 是同一个请求，换成之前的值。
 - 与磁盘上的文件不匹配的 `revision` 会返回 409 `settings_changed`。两个并发的 `PUT` 请求若读取了同一个 `revision`，两者都可能通过检查；最后写入者胜出，`os.replace` 保证文件不会被撕裂。
 - 服务器会重新加载 `config.toml`，因此命令行的 `--host` 和 `--port` 覆盖值从不写入磁盘；它会保留其他节、`extra_body`、`mcp_config`、`request_timeout_s`、`[agent]` 和 `[scheduler]`，校验候选设置（失败时返回 `400 invalid_settings` 并附 `details.errors`），以原子方式写入 `config.toml`，关闭空闲的会话智能体，使下一轮以新设置打开，并返回更新后的 `GET /api/settings` 响应体。

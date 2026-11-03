@@ -47,6 +47,7 @@ TITLES: Final[dict[str, str]] = {
     "account": "Change an account's settings?",
     "system": "Change system settings?",
     "app_control": "Control an app?",
+    "open_app": "Open another app?",
     "persistence": "Set up something that runs later?",
     "remote_code": "Run code downloaded from the internet?",
     "install": "Install software?",
@@ -70,6 +71,7 @@ CATEGORY_WORDS: Final[dict[str, str]] = {
     "account": "changes an account's sign-in or security settings",
     "system": "changes system settings",
     "app_control": "controls an app",
+    "open_app": "opens another app for a page",
     "persistence": "sets up something that runs later",
     "remote_code": "runs code from the internet",
     "install": "installs software",
@@ -115,10 +117,12 @@ CLICK_ONLY: Final = frozenset(
 )
 # Kinds only the user's model names, for a step on a page or in an app: paying
 # (a purchase, a payment, a subscription, a transfer) and changing an account's
-# sign-in or security settings. However well the step serves the goal, only a
-# person's answer lets it run: never words, the model or a grant of the chat. In
-# auto mode a person who watches is asked on the card (#465).
-CARD_ONLY: Final = frozenset({"money", "account"})
+# sign-in or security settings; and opening another app that a page asked for
+# (an address of the app's kind, which the browser in the background does not
+# open itself). However well the step serves the goal, only a person's answer
+# lets it run: never words, the model or a grant of the chat. In auto mode a
+# person who watches is asked on the card (#465).
+CARD_ONLY: Final = frozenset({"money", "account", "open_app"})
 # The reason a call of the ``self`` category is denied without asking.
 SELF_DENIAL: Final = "melo never lets a call change its own runtime, settings or keys"
 # The tools whose arguments the rules read (melo.checker.review); another

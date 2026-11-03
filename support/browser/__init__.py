@@ -1,7 +1,9 @@
 """Browsing for melo: read, follow and act on web pages in a browser, with the person's say.
 
 ``provider_for`` builds the tool provider that a session registers when
-``[browser] driver`` names a driver (``off``, the default, registers nothing).
+``[browser] driver`` names a driver (``off``, the default, registers nothing):
+``safari-automation`` (Safari's automation windows, which come to the front) or
+``chrome`` (Google Chrome in the background, with no window).
 ``configured_driver`` is the driver a chat passes: the setting, or ``off`` when
 it names no driver.
 """
@@ -56,6 +58,16 @@ def provider_for(
             SafariAutomationDriver(command=command, args=(*args, "--mcp")),
             keep_tabs=keep_tabs,
             desktop=watch_for(app_windows),
+        )
+    if driver == "chrome":
+        from localmelo.support.browser.chrome import ChromeBackgroundDriver
+
+        # LOCALMELO_CHROME replaces Chrome's command line (read when the driver
+        # starts), so tests run a fake and never the real Chrome.
+        return BrowserToolProvider(
+            ChromeBackgroundDriver(),
+            keep_tabs=keep_tabs,
+            desktop=watch_for(app_windows, driver),
         )
     raise ValueError(f"unknown browser driver {driver!r}; use one of {DRIVERS}")
 

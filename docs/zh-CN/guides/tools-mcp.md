@@ -148,12 +148,12 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 
 ## 浏览
 
-在 Mac 上，melo 可以在 Safari 里阅读网页，并在自己的浏览器窗口里点击、输入和选择。它默认关闭；[浏览指南](browsing.md)有设置步骤、melo 能做和不能做的事，以及故障排查。
+在 Mac 上，melo 可以阅读网页，并在网页上点击、输入和选择：在后台的 Chrome 中（没有窗口），或在 Safari 的自动化窗口中。它默认关闭；[浏览指南](browsing.md)有设置步骤、melo 能做和不能做的事，以及故障排查。
 
-- 在终端聊天里用 `/browser on` 打开它，或用 `melo -X browser.driver=safari-automation` 只对一次运行生效。
-- 在 Safari 里打开“设置 > 开发者”，把 “Allow remote automation” 打开一次。
+- 在终端聊天里用 `/browser on`（Safari 窗口）或 `/browser chrome`（后台的 Chrome）打开它，或用 `melo -X browser.driver=chrome` 只对一次运行生效。
+- 用 Safari 时，在 Safari 里打开“设置 > 开发者”，把 “Allow remote automation” 打开一次。用 Chrome 时只需要安装 Google Chrome。
 - 之后终端聊天以及网页控制台和 App 的每个聊天会得到十二个工具：`browser_open`、`browser_read`、`browser_find`、`browser_follow`、`browser_click`、`browser_type`、`browser_select`、`browser_back`、`browser_tabs`、`browser_wait`、`browser_screenshot` 和 `browser_click_point`。
-- 它们在 Safari 自己的自动化窗口里工作，这些窗口启动时不带你的任何登录状态。
+- 它们在 Safari 自己的自动化窗口里工作，这些窗口启动时不带你的任何登录状态；或在使用 melo 自己配置的 Chrome 里工作，从不使用你的配置。
 - melo 加载网页之前会问 “Open a website?”，每个网站在一个聊天里问一次（`auto` 模式同样会问），在网站上点击、输入或选择前会再问一次，发送表单前每次都会单独问（会显示表单发往哪里、里面有什么；发送表单没有“在这个聊天里允许”）；它在一个标签页里工作，从不输入密码、银行卡号或一次性验证码，也不会替你登录或发布。直接运行、worker 和保存的任务从不会得到这些工具。
 
 不用 Safari 时，每个聊天和任务都可以用 `web_fetch` 读取公开网页，它默认开启（见[不用浏览器读取网页](browsing.md#read-a-page-without-the-browser)）。

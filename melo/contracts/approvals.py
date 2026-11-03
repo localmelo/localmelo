@@ -272,12 +272,14 @@ class ApprovalPolicy(Protocol):
 # or text, whatever it holds and wherever it goes. A click at a point on a secret
 # field, a consent or terms control, or inside a box from another site
 # (``browser-point:<site>``) is one too, and so is a press in another app's window
-# that appeared after melo's own act (``desktop-act:<app>``).
+# that appeared after melo's own act (``desktop-act:<app>``), and OK to a
+# ``confirm`` box a page put up while melo acted (``browser-dialog:<site>``).
 NEVER_GRANTED: Final = (
     "browser-submit:",
     "browser-type:",
     "browser-point:",
     "desktop-act:",
+    "browser-dialog:",
 )
 
 # The tools melo ships that ask their own questions (per site, and for every text they

@@ -612,7 +612,7 @@ def act_script(spec: dict[str, Any]) -> str:
     n.scrollIntoView({block: "center", inline: "center"});
     var r = P.rect.call(n), top = D && P.efp ? P.efp.call(D, r.left + r.width / 2, r.top + r.height / 2) : n;
     var tag = n.tagName.toLowerCase();
-    return say({ok: true, covered: !within(n, top), tag: tag, role: attr(n, "role").toLowerCase(),
+    return say({ok: true, covered: !within(n, top), cx: r.left + r.width / 2, cy: r.top + r.height / 2, tag: tag, role: attr(n, "role").toLowerCase(),
       text: cap(tag === "input" ? "" : n.innerText || n.textContent, 200), value: tag === "input" && /^(submit|button|reset)$/.test(attr(n, "type").toLowerCase()) ? cap(n.value, 120) : "",
       label: cap(labelsOf(n), 120), aria: cap(attr(n, "aria-label"), 120), name: cap(attr(n, "name"), 80), id: cap(n.id, 80),
       title: cap(attr(n, "title") || attr(n, "alt"), 120), placeholder: cap(attr(n, "placeholder"), 120)});
@@ -665,6 +665,8 @@ def act_script(spec: dict[str, Any]) -> str:
   var zone = [n];  // where a real input may land: the element, and what is at a point
   if (hit && hit.raw) zone.push(hit.raw);
   if (hit && hit.label) zone.push(hit.label);
+  // Enter in a field clicks its form's default button: the browser's own send, asked about already.
+  if (spec.act === "type" && spec.enter && spec.send && n.form) { var first = defaultButton(n.form); if (first) zone.push(first); }
   var inZone = function (t) { return zone.some(function (z) { return within(z, t); }); };
   var contain = function () {
     var on = function (e) {
@@ -1042,7 +1044,126 @@ def _parse_tabs(text: str) -> list[tuple[TabInfo, bool]]:
     return tabs
 
 
-class SafariAutomationDriver:
+class PageScriptActs:
+    """What a driver that runs melo's page scripts in the page does around an act.
+
+    A driver gives :meth:`_eval` (a script run in the page of the tab it
+    means now, its value decoded); this base runs an act script and reads its
+    answer (:meth:`_script`), acts by the page script (:meth:`_scripted`) and
+    looks at the page after an act until it is quiet (:meth:`_look`). Both
+    the Safari and the Chrome drivers use it, so an act is checked, guarded and
+    looked at by the same rules whichever browser does it. ``label`` is the
+    browser's name in what melo says.
+    """
+
+    label = "Safari"
+
+    async def _eval(self, source: str) -> Any:
+        raise NotImplementedError
+
+    async def _ready(self) -> None:
+        loop = asyncio.get_running_loop()
+        end = loop.time() + SETTLE_S
+        while loop.time() < end:
+            if await self._eval("document.readyState") == "complete":
+                return
+            await asyncio.sleep(POLL_S)
+
+    async def _script(self, source: str) -> dict[str, Any]:
+        """Run an act script: its answer, or the error it means (stale, no such option)."""
+        result = await self._eval(source)
+        if not isinstance(result, dict):
+            raise BrowserError(f"{self.label} returned an answer melo could not read.")
+        if result.get("ok") is not True:
+            if result.get("stale"):
+                why = str(result["stale"])
+                raise StaleElementError(_STALE.get(why, _STALE["gone"]), why)
+            if "option" in result:
+                raise BrowserError(
+                    "That list has no single option with those words (none, or "
+                    "more than one). Use browser_read for its options."
+                )
+            raise BrowserError("The page did not take that action.")
+        return result
+
+    async def _scripted(
+        self, spec: dict[str, Any], act: Act, passed: str, failed: bool
+    ) -> ActResult:
+        """The act by the page script, with the look after it."""
+        key = _key()
+        try:
+            result = await self._script(
+                act_script({**spec, "mode": "script", "key": key})
+            )
+        except BrowserError:
+            with contextlib.suppress(BrowserError):
+                await self._finish(key, spec["doc"])
+            raise
+        data, quiet = await self._look(key, spec["doc"], act)
+        self._check_typed(act, data)
+        blocked = [
+            str(k)
+            for k in [*(result.get("blocked") or []), *(data.get("blocked") or [])]
+        ]
+        return ActResult(
+            _stopped(blocked),
+            "point" if act.point is not None else "page-script",
+            passed,
+            _changes(data, quiet),
+            native_failed=failed,
+        )
+
+    @staticmethod
+    def _check_typed(act: Act, data: dict[str, Any]) -> None:
+        if act.kind == "type" and data.get("stale") in ("field", "grew"):
+            raise StaleElementError(_STALE["grew"], "grew")
+
+    async def _look(self, key: str, doc: str, act: Act) -> tuple[dict[str, Any], bool]:
+        """Wait until the page is quiet after *act*, then take what the observer saw.
+
+        The page is quiet once nothing changed for :data:`QUIET_S` (and that
+        long after the act); a click, or Enter, first waits for the page's
+        first change, since a reply from the site may take a moment. It never
+        waits longer than :data:`LOOK_CAP_S`. A page that left for another
+        document is waited for until it has loaded. Returns the observer's
+        report (``{"lost": True}`` once the page is another document) and
+        whether the page was quiet.
+        """
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        first = act.kind == "click" or act.enter
+        probe = SETTLE_JS % _data({"key": key, "doc": doc})
+        quiet = True
+        while True:
+            if LOOK_STEP_S:
+                await asyncio.sleep(LOOK_STEP_S)
+            try:
+                now = await self._eval(probe)
+            except BrowserSetupError:
+                raise
+            except BrowserError:
+                now = {"doc": False}  # a page between two documents does not answer
+            spent = loop.time() - start
+            if not isinstance(now, dict) or now.get("doc") is False or now.get("lost"):
+                with contextlib.suppress(BrowserError):
+                    await self._ready()
+                return {"lost": True}, True
+            changed = bool(now.get("count")) or now.get("target") is True
+            still = _number(now.get("quiet")) >= QUIET_S * 1000
+            if spent >= QUIET_S and still and (changed or not first):
+                break
+            if spent >= LOOK_CAP_S:
+                quiet = still or not changed
+                break
+        return await self._finish(key, doc), quiet
+
+    async def _finish(self, key: str, doc: str) -> dict[str, Any]:
+        """The observer's report under *key*, its guards taken down."""
+        data = await self._eval(DISARM_JS % _data({"key": key, "doc": doc}))
+        return data if isinstance(data, dict) else {"lost": True}
+
+
+class SafariAutomationDriver(PageScriptActs):
     """:class:`BrowserDriver` over ``safaridriver --mcp``. See the module docstring."""
 
     name = "safari-automation"
@@ -1249,14 +1370,6 @@ class SafariAutomationDriver:
             said = await self._eval("document.title")
             title = said if isinstance(said, str) else ""
         return TabInfo(tab, url, title)
-
-    async def _ready(self) -> None:
-        loop = asyncio.get_running_loop()
-        end = loop.time() + SETTLE_S
-        while loop.time() < end:
-            if await self._eval("document.readyState") == "complete":
-                return
-            await asyncio.sleep(POLL_S)
 
     # ── The driver ──
 
@@ -1503,23 +1616,6 @@ class SafariAutomationDriver:
             passed, failed = done
         return await self._scripted(spec, act, passed, failed)
 
-    async def _script(self, source: str) -> dict[str, Any]:
-        """Run an act script: its answer, or the error it means (stale, no such option)."""
-        result = await self._eval(source)
-        if not isinstance(result, dict):
-            raise BrowserError("Safari returned an answer melo could not read.")
-        if result.get("ok") is not True:
-            if result.get("stale"):
-                why = str(result["stale"])
-                raise StaleElementError(_STALE.get(why, _STALE["gone"]), why)
-            if "option" in result:
-                raise BrowserError(
-                    "That list has no single option with those words (none, or "
-                    "more than one). Use browser_read for its options."
-                )
-            raise BrowserError("The page did not take that action.")
-        return result
-
     async def _native(
         self, spec: dict[str, Any], act: Act
     ) -> ActResult | tuple[str, bool]:
@@ -1570,33 +1666,6 @@ class SafariAutomationDriver:
             _changes(data, quiet),
         )
 
-    async def _scripted(
-        self, spec: dict[str, Any], act: Act, passed: str, failed: bool
-    ) -> ActResult:
-        """The act by the page script, with the look after it."""
-        key = _key()
-        try:
-            result = await self._script(
-                act_script({**spec, "mode": "script", "key": key})
-            )
-        except BrowserError:
-            with contextlib.suppress(BrowserError):
-                await self._finish(key, spec["doc"])
-            raise
-        data, quiet = await self._look(key, spec["doc"], act)
-        self._check_typed(act, data)
-        blocked = [
-            str(k)
-            for k in [*(result.get("blocked") or []), *(data.get("blocked") or [])]
-        ]
-        return ActResult(
-            _stopped(blocked),
-            "point" if act.point is not None else "page-script",
-            passed,
-            _changes(data, quiet),
-            native_failed=failed,
-        )
-
     async def _foreign_act(self, act: Act) -> ActResult:
         """An act on a control in a frame from another site, by the browser's own input.
 
@@ -1628,11 +1697,6 @@ class SafariAutomationDriver:
         with contextlib.suppress(BrowserError):
             await self._ready()
         return ActResult(via="browser")
-
-    @staticmethod
-    def _check_typed(act: Act, data: dict[str, Any]) -> None:
-        if act.kind == "type" and data.get("stale") in ("field", "grew"):
-            raise StaleElementError(_STALE["grew"], "grew")
 
     async def _nodes(
         self, region: str = "viewport", frames: bool = False
@@ -1669,50 +1733,6 @@ class SafariAutomationDriver:
             with contextlib.suppress(OSError):
                 os.unlink(path)
         return parse_nodes(text)
-
-    async def _look(self, key: str, doc: str, act: Act) -> tuple[dict[str, Any], bool]:
-        """Wait until the page is quiet after *act*, then take what the observer saw.
-
-        The page is quiet once nothing changed for :data:`QUIET_S` (and that
-        long after the act); a click, or Enter, first waits for the page's
-        first change, since a reply from the site may take a moment. It never
-        waits longer than :data:`LOOK_CAP_S`. A page that left for another
-        document is waited for until it has loaded. Returns the observer's
-        report (``{"lost": True}`` once the page is another document) and
-        whether the page was quiet.
-        """
-        loop = asyncio.get_running_loop()
-        start = loop.time()
-        first = act.kind == "click" or act.enter
-        probe = SETTLE_JS % _data({"key": key, "doc": doc})
-        quiet = True
-        while True:
-            if LOOK_STEP_S:
-                await asyncio.sleep(LOOK_STEP_S)
-            try:
-                now = await self._eval(probe)
-            except BrowserSetupError:
-                raise
-            except BrowserError:
-                now = {"doc": False}  # a page between two documents does not answer
-            spent = loop.time() - start
-            if not isinstance(now, dict) or now.get("doc") is False or now.get("lost"):
-                with contextlib.suppress(BrowserError):
-                    await self._ready()
-                return {"lost": True}, True
-            changed = bool(now.get("count")) or now.get("target") is True
-            still = _number(now.get("quiet")) >= QUIET_S * 1000
-            if spent >= QUIET_S and still and (changed or not first):
-                break
-            if spent >= LOOK_CAP_S:
-                quiet = still or not changed
-                break
-        return await self._finish(key, doc), quiet
-
-    async def _finish(self, key: str, doc: str) -> dict[str, Any]:
-        """The observer's report under *key*, its guards taken down."""
-        data = await self._eval(DISARM_JS % _data({"key": key, "doc": doc}))
-        return data if isinstance(data, dict) else {"lost": True}
 
     def _has(self, key: str) -> bool:
         return TOOL_NAMES[key] in self._tools

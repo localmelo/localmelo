@@ -2153,7 +2153,11 @@ _SITE_DOUBT = {
     "point": "Clicks at a point on {site}.",
     "submit": "Sends a form from {site}, which needs its own review.",
     "desktop-act": "Presses a button in another app's window that a browser act opened.",
+    "dialog": "Answers OK to a question the page on {site} asks.",
 }
+# A page asked to open another app (an address of the app's kind): only a
+# person's answer lets melo open it, in auto mode too.
+_HANDOFF = "Opens {app}, an app on this Mac, because a page on {site} asked for it."
 _TYPING_DOUBT = (
     "Types text on {site}, which needs its own review: the text is the model's own."
 )
@@ -2165,7 +2169,7 @@ _UNKNOWN_TARGET = "Clicks on {site} where melo cannot tell what it clicks."
 # on a page, a click at a point, a press in an app's window. Only these can
 # turn a model's ``credentials`` into no category; a read (its address can hold
 # a key), a search, typing, a form sent, or any access not listed never does.
-_VALUE_FREE_ACCESS: Final = frozenset({"act", "point", "desktop-act"})
+_VALUE_FREE_ACCESS: Final = frozenset({"act", "point", "desktop-act", "dialog"})
 
 
 def _site_doubt(access: str, site: str, preview: str) -> str:
@@ -2292,6 +2296,12 @@ class _ToolAsk:
                 # on the goal, so the person is asked (#465).
                 review = ActionReview(
                     "high", ("opaque",), (_UNKNOWN_TARGET.format(site=site),)
+                )
+            elif access == "handoff":
+                # Another app comes to the front: the person's choice, always.
+                app = " ".join(str(arguments.get("app") or "an app").split())[:80]
+                review = ActionReview(
+                    "high", ("open_app",), (_HANDOFF.format(app=app, site=site),)
                 )
             elif reading and reviewer.names_host(site):
                 review = ActionReview(

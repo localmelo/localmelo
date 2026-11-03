@@ -1228,6 +1228,8 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
     ['browser-type:https://example.com', {site: 'example.com', access: 'type', how: 'type', text: 'hi'}, null, 'Let melo type on example.com?', 'browser · types text'],
     ['browser-submit:https://example.com', {site: 'example.com', access: 'submit', to: 'https://other.org/post', how: 'click'}, null, 'Let melo send a form from example.com?', 'browser · sends a form'],
     ['desktop-act:Chat', {app: 'Chat', access: 'desktop-act', how: 'press', on: '"Allow"', window: 'Sign in', button: 'Allow'}, null, 'Let melo press a button in Chat?', 'another app · presses a button'],
+    ['handoff:chat', {site: 'example.com', access: 'handoff', app: 'Chat', scheme: 'chat', url: 'chat://login?x=1', browser: 'chrome'}, null, 'Open Chat?', 'a page asks for an app'],
+    ['browser-dialog:https://example.com', {site: 'example.com', access: 'dialog', how: 'confirm', text: 'Delete the draft?', browser: 'chrome'}, null, 'Answer OK on example.com?', 'browser · the page asks'],
   ];
   for (const [tool, args, target, title, caption] of asks) {
     h.context.request = {request_id: `ask-${tool}-${title}`, tool_name: tool, arguments: args, workspace_label: '~/w', target};
@@ -1254,6 +1256,17 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
   const sending = findNode(h.run('approvalCard(request)'), (node) => node.className === 'approval-content');
   assert.equal(sending.textContent, 'https://other.org/post');
   assert.equal(sending.attributes['aria-label'], 'Where the form goes');
+  // A page that asks for another app shows the address melo would open, and what comes to the front.
+  h.context.request = {request_id: 'hand-off', tool_name: 'handoff:chat',
+    arguments: {site: 'example.com', access: 'handoff', app: 'Chat', scheme: 'chat', url: 'chat://login?x=1'}, workspace_label: '~/w'};
+  const handing = h.run('approvalCard(request)');
+  assert.equal(findNode(handing, (node) => node.className === 'approval-content').textContent, 'chat://login?x=1');
+  assert.match(findNode(handing, (node) => node.className === 'approval-note').textContent, /Chat comes to the front/);
+  // Chrome in the background is worded for itself.
+  h.context.request = {request_id: 'open-chrome', tool_name: 'browser:https://example.com',
+    arguments: {site: 'example.com', access: 'read', browser: 'chrome'}, workspace_label: '~/w'};
+  const opening = h.run('approvalCard(request)');
+  assert.match(findNode(opening, (node) => node.className === 'approval-content').textContent, /in Chrome and read it\. Chrome runs in the background/);
 });
 
 test("a press in another app's window says what is pressed and is asked every time", async () => {
