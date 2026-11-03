@@ -228,7 +228,7 @@ class RunReviews:
         for key in keys:
             found = self.declined.get(key)
             if found is not None:
-                return Chosen(False, found.reason, origin=found.origin, again=True)
+                return dataclasses.replace(found, remember=False, again=True)
         return None
 
     def count(self, review: ActionReview | None) -> None:

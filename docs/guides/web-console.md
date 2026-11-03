@@ -872,7 +872,7 @@ commands and file changes.
   on, counts as **Deny**: the step reads "No answer in time", with one line
   under it ("Not run: no answer within 1 minute").
 - **Not allowed is not failed.** A step you denied, or that nobody answered,
-  shows in amber with one plain line ("Not run: you chose Don't allow" and
+  shows in amber with one plain line ("Not run: you declined it" and
   your note), never as a failure and never with the note melo reads. Ask's
   **Deny** shows the same way.
 - **Allowed in this chat.** **Allow for this chat** on a site's card lets the

@@ -248,7 +248,7 @@ test('a denied approval blocks the call and says why', () => {
   push('tool.finished', {step: 1, call_id: 'call-1', name: 'file_write', status: 'blocked', error_category: 'approval_denied', output: '', output_chars: 0, error: '', duration_s: 0, images: [], approval: {request_id: 'req-1', allowed: false, reason: 'wrong file pick another', remember: false, origin: 'user'}, exit_code: null});
   // A Deny is no failure: the step was not allowed, in the approval card's amber (#465).
   assert.deepEqual(toolState(card), {state: 'declined', mark: '⊘', text: 'Not allowed'});
-  assert.equal(turns.declinedLine(turns.declinedStep(card)), 'Not run: you chose Don\'t allow. Your note: wrong file pick another');
+  assert.equal(turns.declinedLine(turns.declinedStep(card)), 'Not run: you declined it. Your note: wrong file pick another');
   assert.equal(deniedCount(turn), 1);
   assert.equal(failedCount(turn), 0);
 });
@@ -266,6 +266,7 @@ function declinedTurn(how, where) {
     remember: false,
     origin: how === 'denied' ? 'user' : 'timeout',
     reason: {denied: 'not this site', unanswered: 'no answer within 1 minute', closed: 'the chat was closed before an answer'}[how],
+    ...{denied: {}, unanswered: {unanswered: 'time', wait_s: 60}, closed: {unanswered: 'left'}}[how],
   };
   if (where === 'site') {
     push('tool.started', {step: 1, call_id: 'call-1', name: 'browser_open', arguments: {url: 'https://example.net/teapot'}, preview: ''});
@@ -280,12 +281,12 @@ function declinedTurn(how, where) {
 
 const DECLINED = {
   en: {
-    denied: ['Not allowed', 'Not run: you chose Don\'t allow. Your note: not this site'],
+    denied: ['Not allowed', 'Not run: you declined it. Your note: not this site'],
     unanswered: ['No answer in time', 'Not run: no answer within 1 minute'],
     closed: ['No answer in time', 'Not run: the chat was closed before an answer'],
   },
   'zh-Hans': {
-    denied: ['未允许', '未运行：你选择了不允许。你的说明：not this site'],
+    denied: ['未允许', '未运行：你拒绝了。你的说明：not this site'],
     unanswered: ['没有及时回答', '未运行：1 分钟内没有回答'],
     closed: ['没有及时回答', '未运行：回答之前对话已关闭'],
   },
@@ -328,6 +329,25 @@ test('a declined step\'s details show the plain line, never the note the model r
   assert.deepEqual(plain, ['Not run: no answer within 1 minute']);
   assert.equal(findNode(shown, (node) => node.className === 'tool-error'), null, 'No red text');
   assert.ok(!JSON.stringify(shown.textContent ?? '').includes('Do not try it again'));
+});
+
+test('a declined step reads the record\'s code, and its wait in words', async () => {
+  const {card} = declinedTurn('closed', 'gate');
+  card.approval.reason = 'any text at all';
+  assert.equal(turns.declinedStep(card).how, 'closed', 'The code decides, not the text');
+  card.approval.unanswered = 'time';
+  card.approval.wait_s = 120;
+  assert.equal(turns.declinedLine(turns.declinedStep(card)), 'Not run: no answer within 2 minutes');
+  delete card.approval.wait_s;
+  assert.equal(turns.declinedLine(turns.declinedStep(card)), 'Not run: no answer in time');
+  assert.deepEqual([60, 120, 45, 1].map(turns.waitWords), ['1 minute', '2 minutes', '45 seconds', '1 second']);
+  const {useLanguage} = await import('../../support/gateway/static/i18n.mjs');
+  await useLanguage('zh-Hans');
+  try {
+    assert.deepEqual([60, 120, 45].map(turns.waitWords), ['1 分钟', '2 分钟', '45 秒']);
+  } finally {
+    await useLanguage('en');
+  }
 });
 
 test('a site the tool opened after another was refused is no declined step', () => {

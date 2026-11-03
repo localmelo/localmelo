@@ -37,6 +37,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalRequest,
     AskWatch,
     AutoPolicy,
+    Chosen,
     ReviewMode,
     Withdrawal,
     find_auto,
@@ -253,12 +254,13 @@ class CardWatch:
     asks only while one is open (:meth:`watched`); with none it blocks the
     step as before. A card waits at most :data:`AUTO_ASK_WAIT_S`; when nobody
     answers in that time, or every viewer is gone for :data:`CARD_LEFT_S`,
-    *end* answers it as a deny with origin ``timeout``
-    (:data:`NO_ANSWER`, :data:`LEFT_UNANSWERED`), which auto mode reads as
-    Don't allow. *end* takes the request id and the decision and says
-    whether the card was up (answered now or before); it is the answer of
-    the broker or of the terminal's panel, so the card ends as an answered
-    one. *clock* and *sleep* are a test's fake time.
+    *end* answers it as auto mode's Don't allow, a :class:`Chosen` with origin
+    ``timeout`` and its code (``unanswered`` ``time`` with ``wait_s``, or
+    ``left``; :data:`NO_ANSWER`, :data:`LEFT_UNANSWERED` as its text). *end*
+    takes the request id and the decision and says whether the card was up
+    (answered now or before); it is the answer of the broker or of the
+    terminal's panel, so the card ends as an answered one. *clock* and
+    *sleep* are a test's fake time.
     """
 
     def __init__(
@@ -297,7 +299,9 @@ class CardWatch:
         """Answer the card of *request* once nobody answered or nobody sees it."""
         start = self._clock()
         gone: float | None = None  # when a check first found nobody
-        reason = NO_ANSWER
+        decision = Chosen(
+            False, NO_ANSWER, origin="timeout", unanswered="time", wait_s=self.wait_s
+        )
         while True:
             await self._sleep(CARD_POLL_S)
             now = self._clock()
@@ -306,11 +310,12 @@ class CardWatch:
             else:
                 gone = now if gone is None else gone
                 if now - gone >= CARD_LEFT_S:
-                    reason = LEFT_UNANSWERED
+                    decision = Chosen(
+                        False, LEFT_UNANSWERED, origin="timeout", unanswered="left"
+                    )
                     break
             if now - start >= self.wait_s:
                 break
-        decision = ApprovalDecision(False, reason, origin="timeout")
         # A card not up yet (its event is still being written) is tried again.
         while not self._end(request.request_id, decision):
             await self._sleep(CARD_POLL_S)

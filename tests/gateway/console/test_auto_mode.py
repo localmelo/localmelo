@@ -456,6 +456,10 @@ async def test_a_card_its_viewer_leaves_or_nobody_answers_is_declined(
         )
         reason = "the chat was closed" if how == "closed" else "no answer within 1"
         assert reason in first["reason"]
+        # The surfaces read the code, never the text (#465).
+        code = {"closed": {"unanswered": "left"}, "unanswered": {"unanswered": "time"}}
+        assert {k: first[k] for k in code[how]} == code[how]
+        assert again["unanswered"] == first["unanswered"]
         # The same step later in the turn is not asked about again.
         assert again["declined"] is True and await requested(console, sid) == 1
         first_note, again_note = llm.tool_messages()

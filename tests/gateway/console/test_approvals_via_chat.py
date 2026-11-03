@@ -842,6 +842,7 @@ async def test_a_tasks_card_follows_it_when_its_chat_is_deleted(
         else:
             assert (approval["origin"], approval["allowed"]) == ("timeout", False)
             assert approval["reason"] == "the chat was closed before an answer"
+            assert approval["unanswered"] == "left"
             assert s.ran.codes == []
 
 

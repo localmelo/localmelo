@@ -695,8 +695,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   answers within 1 minute, or one whose last viewer closes the chat, counts as **Deny**:
   melo reads that you did not answer, does not ask about the step again in that turn, and the
   step shows "No answer in time". A step you denied (in Auto or in Ask), or that nobody
-  answered, now shows in amber with one plain line, such as "Not run: you chose Don't
-  allow" and your note, instead of a red failure with the note melo reads; it no longer
+  answered, now shows in amber with one plain line, such as "Not run: you declined
+  it" and your note, instead of a red failure with the note melo reads; it no longer
   counts as failed. Benchmarks can turn the card off with the developer
   setting `[approvals] auto_asks = false`. Part of #465.
 

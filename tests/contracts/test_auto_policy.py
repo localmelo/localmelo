@@ -359,12 +359,14 @@ async def test_a_card_nobody_answered_counts_as_dont_allow() -> None:
 
     decided = await policy.decide(_request(review=BEYOND))
 
-    assert decided == Chosen(False, NO_ANSWER, origin="timeout")
+    assert decided == Chosen(False, NO_ANSWER, origin="timeout", unanswered="time")
     assert denial_text(decided).split("\n")[0] == (
         "The user did not answer the card for this step (no answer within 1 "
         "minute), so it counts as Don't allow and the step did not run."
     )
-    again = denial_text(Chosen(False, LEFT_UNANSWERED, origin="timeout", again=True))
+    again = denial_text(
+        Chosen(False, LEFT_UNANSWERED, origin="timeout", again=True, unanswered="left")
+    )
     assert again.startswith(
         "The user did not answer the card for this step earlier in this turn (the "
         "chat was closed before an answer), so it did not run and they were not "
@@ -440,10 +442,24 @@ def test_a_chosen_answer_is_the_persons() -> None:
         Chosen(True, origin="session")
     with pytest.raises(ValueError):
         Chosen(False, origin="auto")
-    # Nobody answered: a deny, never an allow.
-    assert not Chosen(False, NO_ANSWER, origin="timeout").allow
-    with pytest.raises(ValueError):
-        Chosen(True, origin="timeout")
+    # Nobody answered: a deny, never an allow, with why as a code.
+    unanswered = Chosen(
+        False, NO_ANSWER, origin="timeout", unanswered="time", wait_s=60.0
+    )
+    assert not unanswered.allow
+    assert unanswered.record() == {"unanswered": "time", "wait_s": 60.0}
+    left = Chosen(False, LEFT_UNANSWERED, origin="timeout", unanswered="left")
+    assert left.record() == {"unanswered": "left"}
+    assert Chosen(False, "no").record() == {}
+    for wrong in (
+        {"origin": "timeout", "allow": True, "unanswered": "time"},
+        {"origin": "timeout", "allow": False},  # a code is required
+        {"origin": "timeout", "allow": False, "unanswered": "gone"},
+        {"origin": "user", "allow": False, "unanswered": "left"},
+        {"origin": "timeout", "allow": False, "unanswered": "left", "wait_s": 1.0},
+    ):
+        with pytest.raises(ValueError):
+            Chosen(**wrong)  # type: ignore[arg-type]
     with pytest.raises(ValueError):
         Chosen(True, again=True)
     with pytest.raises(TypeError):

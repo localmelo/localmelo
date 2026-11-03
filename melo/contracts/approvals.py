@@ -89,6 +89,9 @@ WITHOUT_IT: Final = (
 DENIAL_REASON_CHARS: Final = 500
 
 _ORIGINS: Final = frozenset(get_args(ApprovalOrigin))
+# Why a card auto mode showed went unanswered (#465): none, no answer in time,
+# or every viewer left first.
+UNANSWERED_CODES: Final = frozenset({"", "time", "left"})
 
 
 @dataclass(frozen=True)
@@ -201,14 +204,18 @@ class Chosen(ApprovalDecision):
 
     Allow once, allow on this site for this chat (``remember``), or Don't
     allow with the person's optional note as ``reason``: origin ``user``. A
-    card nobody answered in :data:`AUTO_ASK_WAIT_S`, or whose every viewer
-    left, counts as Don't allow: origin ``timeout``, with what happened as
-    ``reason``. On a denial, :func:`denial_text` says what happened and not to
-    try the step again in this turn. ``again`` is set on the refusal of a step
-    declined earlier in the turn: nobody was asked this time.
+    card nobody answered counts as Don't allow: origin ``timeout``, with the
+    human text of what happened as ``reason`` and its code as ``unanswered``:
+    ``time`` (no answer in ``wait_s`` seconds, :data:`AUTO_ASK_WAIT_S`) or
+    ``left`` (every viewer left first). On a denial, :func:`denial_text` says
+    what happened and not to try the step again in this turn. ``again`` is set
+    on the refusal of a step declined earlier in the turn: nobody was asked
+    this time.
     """
 
     again: bool = False
+    unanswered: str = ""
+    wait_s: float | None = None
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -220,17 +227,35 @@ class Chosen(ApprovalDecision):
             raise ValueError("a card nobody answered never allows")
         if self.again and self.allow:
             raise ValueError("Chosen.again needs allow=False")
+        if self.unanswered not in UNANSWERED_CODES or (
+            bool(self.unanswered) != (self.origin == "timeout")
+        ):
+            raise ValueError(
+                "Chosen.unanswered is 'time' or 'left' for origin 'timeout' only, "
+                f"got {self.unanswered!r}"
+            )
+        if self.wait_s is not None and self.unanswered != "time":
+            raise ValueError("Chosen.wait_s goes with unanswered='time'")
 
     @classmethod
     def of(cls, decision: ApprovalDecision) -> Chosen:
-        """*decision*, a person's answer, as the answer to auto mode's card."""
+        """*decision*, a person's answer or a timeout, as the answer to auto mode's card."""
         return cls(
             decision.allow,
             decision.reason,
             decision.remember,
             decision.origin,
             decision.always,
+            unanswered="time" if decision.origin == "timeout" else "",
         )
+
+    def record(self) -> dict[str, Any]:
+        """What a call's approval record keeps of a card nobody answered: its code and wait."""
+        if not self.unanswered:
+            return {}
+        if self.wait_s is None:
+            return {"unanswered": self.unanswered}
+        return {"unanswered": self.unanswered, "wait_s": self.wait_s}
 
 
 @runtime_checkable
@@ -410,8 +435,9 @@ def wait_words(seconds: float) -> str:
     return f"{seconds:g} second" + ("" if seconds == 1 else "s")
 
 
-# The reason of a card nobody answered in time, and of one whose every viewer
-# left before an answer: each counts as Don't allow.
+# The human text of a card nobody answered in time, and of one whose every
+# viewer left before an answer (each counts as Don't allow); code reads
+# ``Chosen.unanswered`` ("time", "left"), never these.
 NO_ANSWER: Final = f"no answer within {wait_words(AUTO_ASK_WAIT_S)}"
 LEFT_UNANSWERED: Final = "the chat was closed before an answer"
 

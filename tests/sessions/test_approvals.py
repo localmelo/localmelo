@@ -16,6 +16,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     ApprovalPolicy,
     ApprovalRequest,
+    Chosen,
     Withdrawal,
 )
 from localmelo.melo.contracts.review import ActionReview
@@ -335,7 +336,9 @@ async def test_a_card_nobody_answers_in_a_minute_ends_as_a_timeout() -> None:
         5,
     )
 
-    assert decided == ApprovalDecision(False, NO_ANSWER, origin="timeout")
+    assert decided == Chosen(
+        False, NO_ANSWER, origin="timeout", unanswered="time", wait_s=AUTO_ASK_WAIT_S
+    )
     assert time_.now == AUTO_ASK_WAIT_S == 60.0  # not a second earlier
     assert broker.pending("s") == []
     assert broker.answer(asked.request_id, ApprovalDecision(True)) == "already_resolved"
@@ -370,7 +373,9 @@ async def test_the_last_viewer_leaving_ends_the_card() -> None:
         5,
     )
 
-    assert decided == ApprovalDecision(False, LEFT_UNANSWERED, origin="timeout")
+    assert decided == Chosen(
+        False, LEFT_UNANSWERED, origin="timeout", unanswered="left"
+    )
     # A full grace from the first check that found nobody.
     assert time_.now == 10.0 + CARD_LEFT_S < AUTO_ASK_WAIT_S
 

@@ -407,22 +407,22 @@ def test_a_denial_shows_its_reason() -> None:
     )
     # A Deny is no failure: amber, one plain line, never the model's note (#465).
     assert "⊘ ± file_write  todo.md (68 chars) · Not allowed\n" in text
-    assert "Not run: you chose Don't allow. Your note: keep the item first" in text
+    assert "Not run: you declined it. Your note: keep the item first" in text
 
 
 @pytest.mark.parametrize(
-    ("origin", "reason", "word", "line"),
+    ("origin", "code", "word", "line"),
     [
-        ("user", "", "Not allowed", "Not run: you chose Don't allow"),
+        ("user", {}, "Not allowed", "Not run: you declined it"),
         (
             "timeout",
-            "no answer within 1 minute",
+            {"unanswered": "time", "wait_s": 60.0},
             "No answer in time",
             "Not run: no answer within 1 minute",
         ),
         (
             "timeout",
-            "the chat was closed before an answer",
+            {"unanswered": "left"},
             "No answer in time",
             "Not run: the chat was closed before an answer",
         ),
@@ -430,10 +430,11 @@ def test_a_denial_shows_its_reason() -> None:
 )
 @pytest.mark.parametrize("where", ["gate", "site"])
 def test_a_declined_step_is_amber_with_one_plain_line(
-    origin: str, reason: str, word: str, line: str, where: str
+    origin: str, code: dict[str, Any], word: str, line: str, where: str
 ) -> None:
     note = "Do not try it again in this turn or reach the same result another way."
-    asked = {"allowed": False, "origin": origin, "reason": reason, "mode": "auto"}
+    # The record's code decides, never its text.
+    asked = {"allowed": False, "origin": origin, "reason": "x", "mode": "auto", **code}
     if where == "gate":
         turn = Turn().tool(
             "python_exec",
@@ -2852,3 +2853,19 @@ def test_a_file_name_cannot_act_on_the_terminal() -> None:
     text = Writes().write(name, "x\n").done()
     assert "\x1b" not in text and "\x07" not in text
     assert _after_footer(text) == ["  Changed + ab.txt (+1)"]
+
+
+def test_a_declined_line_takes_its_wait_from_the_record() -> None:
+    from localmelo.melo.contracts.approvals import AUTO_ASK_WAIT_S
+    from localmelo.support.cli.render import Declined, declined_line
+
+    assert declined_line(Declined("unanswered", wait_s=AUTO_ASK_WAIT_S)) == (
+        "Not run: no answer within 1 minute"
+    )
+    assert declined_line(Declined("unanswered", wait_s=120)) == (
+        "Not run: no answer within 2 minutes"
+    )
+    assert declined_line(Declined("unanswered")) == "Not run: no answer in time"
+    assert declined_line(Declined("denied", "not now")) == (
+        "Not run: you declined it. Your note: not now"
+    )

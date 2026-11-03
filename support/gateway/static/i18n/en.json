@@ -1744,9 +1744,10 @@
   "turns.approval.withdrawn.short": "not run",
   "turns.bytes": "{n} bytes",
   "turns.declined.closed": "Not run: the chat was closed before an answer",
-  "turns.declined.denied": "Not run: you chose Don't allow",
-  "turns.declined.deniedNote": "Not run: you chose Don't allow. Your note: {note}",
-  "turns.declined.unanswered": "Not run: no answer within 1 minute",
+  "turns.declined.denied": "Not run: you declined it",
+  "turns.declined.deniedNote": "Not run: you declined it. Your note: {note}",
+  "turns.declined.unanswered": "Not run: no answer within {wait}",
+  "turns.declined.unansweredInTime": "Not run: no answer in time",
   "turns.fact.accepted": "Message accepted: {text}",
   "turns.fact.memory": "Memory {action}",
   "turns.fact.memoryKind": "Memory {action}: {kind}",
@@ -1847,6 +1848,14 @@
   "turns.tool.stoppedAfter": "stopped after {duration}",
   "turns.tool.timeout": "Timed out",
   "turns.tool.unanswered": "No answer in time",
+  "turns.wait.minutes": {
+    "one": "{n} minute",
+    "other": "{n} minutes"
+  },
+  "turns.wait.seconds": {
+    "one": "{n} second",
+    "other": "{n} seconds"
+  },
   "turns.yolo": "No approvals for this turn (--yolo).",
   "workers.listFailed": "Could not load workers. Try again.",
   "workers.noHistory": "This server does not support worker history yet.",

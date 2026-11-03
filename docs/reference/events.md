@@ -347,7 +347,9 @@ The number of `tool.started` events is `RunResult.n_tool`.
   has origin `user` (or `session` when a site allowed for the chat covers it),
   and `reason` is their note on a denial; a step they declined earlier in the
   same run, tried again, is refused unasked with origin `user` and
-  `declined: true`. Origin `auto` with
+  `declined: true`. A card nobody answered is declined with origin `timeout`
+  and `unanswered`: `time` (with `wait_s`, the seconds it waited) or `left`
+  (every viewer left first); `reason` is only its human text. Origin `auto` with
   `allowed: false` is a step auto mode blocked; `reason` then names it in a few
   words (`installs software`); the console's
   [Allow once](api-v2.md#ask-and-auto) finds it by `request_id`. See

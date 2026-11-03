@@ -16,6 +16,8 @@ import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.approvals import (
+    LEFT_UNANSWERED,
+    NO_ANSWER,
     ApprovalDecision,
     ApprovalRequest,
     AutoPolicy,
@@ -243,6 +245,55 @@ async def test_a_site_declined_on_the_card_is_not_asked_about_again_in_the_turn(
     assert isinstance(second, Chosen) and second.again
     assert second.reason == "not that site"
     assert len(card.asked) == 1 and len(llm.review_requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("why", ["time", "left"])
+async def test_a_site_card_nobody_answered_says_why_in_the_calls_record(
+    tmp_path: Path, why: str
+) -> None:
+    opener = OpensSite()
+    plans = [
+        _calls(("open_site", {"site": "news.example"}, "call_1")),
+        _calls(("open_site", {"site": "news.example"}, "call_2")),
+        _answer("ok"),
+    ]
+    llm = FakeModel(plans, [NOT_ASKED])
+    (tmp_path / "ws").mkdir()
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset(),
+            tool_exposure="all",
+            workspace_root=str(tmp_path / "ws"),
+        ),
+        tool_providers=[opener],
+    )
+    agent.chat.sleep = _no_wait
+    unanswered = (
+        Chosen(False, NO_ANSWER, origin="timeout", unanswered="time", wait_s=60.0)
+        if why == "time"
+        else Chosen(False, LEFT_UNANSWERED, origin="timeout", unanswered="left")
+    )
+    card = Card(unanswered)
+    recorder = Recorder()
+
+    await agent.run_task(
+        "what is the weather?", on_event=recorder, approval=_auto(card)
+    )
+
+    # The surfaces read the code (and the wait), never the reason's text; it is
+    # nobody's denial of the step, so it keeps no call key (#465).
+    first, second = (e.data["tool_asks"][0] for e in recorder.of("tool.finished"))
+    code = unanswered.record()
+    assert {k: first[k] for k in ("allowed", "origin", *code)} == {
+        "allowed": False,
+        "origin": "timeout",
+        **code,
+    }
+    assert "call_key" not in first
+    assert second["declined"] is True and second["unanswered"] == why
+    assert len(card.asked) == 1
 
 
 # ── A choice lasts: "Allow on this site for this chat" ──

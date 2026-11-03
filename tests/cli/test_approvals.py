@@ -964,9 +964,13 @@ async def test_a_panel_nobody_answers_ends_through_the_approver() -> None:
     assert not approver.ends(shown.request_id, unanswered)  # gone, left as it is
     # The row says it was not run for want of an answer, not that it failed.
     record = {"allowed": False, "origin": "timeout", "reason": unanswered.reason}
-    finished = {"status": "blocked", "approval": record}
-    assert declined_step(finished) == ("unanswered", "")
-    assert declined_line("unanswered") == "Not run: no answer within 1 minute"
+    finished = {"status": "blocked", "approval": {**record, "unanswered": "time"}}
+    declined = declined_step(
+        {**finished, "approval": {**record, "unanswered": "time", "wait_s": 60}}
+    )
+    assert declined is not None and declined.how == "unanswered"
+    assert declined_line(declined) == "Not run: no answer within 1 minute"
+    assert declined_line(declined_step(finished)) == "Not run: no answer in time"  # type: ignore[arg-type]
 
 
 async def test_grants_survive_auto_and_ask_until_forgotten() -> None:

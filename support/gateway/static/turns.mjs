@@ -1011,16 +1011,14 @@ export function toolCount(turn) {
     .length;
 }
 
-// The reason the server gives a card whose last viewer left before an answer
-// (LEFT_UNANSWERED in melo/contracts/approvals.py); data, never shown.
-const LEFT_UNANSWERED = /^the chat was closed before an answer$/;
-
 /**
  * A step that did not run because the person declined it, or because nobody
- * answered its card (#465), else null: `{how, note}`, `how` being `denied`,
- * `unanswered` or `closed` and `note` the person's note for `denied`. The
- * step's own card (a Deny in Ask or in Auto) or a question its tool asked
- * itself (a site) says so; nothing went wrong, so it is no failure.
+ * answered its card (#465), else null: `{how, note, waitS}`, `how` being
+ * `denied`, `unanswered` or `closed` (the record's `unanswered` code: `time`
+ * or `left`), `note` the person's note for `denied` and `waitS` how long the
+ * card waited. The step's own card (a Deny in Ask or in Auto) or a question
+ * its tool asked itself (a site) says so; nothing went wrong, so it is no
+ * failure.
  */
 export function declinedStep(item) {
   if (item.kind !== "tool" || ["success", "running", "waiting_approval"].includes(item.status)) {
@@ -1031,9 +1029,18 @@ export function declinedStep(item) {
     (one) => one.allowed === false && (one.origin === "user" || one.origin === "timeout"),
   );
   if (!found) return null;
-  const note = String(found.reason ?? "").split(/\s+/).filter(Boolean).join(" ");
-  if (found.origin === "user") return {how: "denied", note};
-  return {how: LEFT_UNANSWERED.test(note) ? "closed" : "unanswered", note: ""};
+  if (found.origin === "user") {
+    const note = String(found.reason ?? "").split(/\s+/).filter(Boolean).join(" ");
+    return {how: "denied", note, waitS: null};
+  }
+  if (found.unanswered === "left") return {how: "closed", note: "", waitS: null};
+  return {how: "unanswered", note: "", waitS: num(found.wait_s)};
+}
+
+/** How long a card waited, in words: `1 minute`, `2 minutes`, `45 seconds` (`1 分钟`). */
+export function waitWords(seconds) {
+  if (seconds >= 60 && seconds % 60 === 0) return t("turns.wait.minutes", {n: seconds / 60});
+  return t("turns.wait.seconds", {n: seconds});
 }
 
 /** The one plain line a declined step shows the person, in place of the note the model reads. */
@@ -1043,7 +1050,12 @@ export function declinedLine(declined) {
       ? t("turns.declined.deniedNote", {note: declined.note})
       : t("turns.declined.denied");
   }
-  return t(`turns.declined.${declined.how}`);
+  if (declined.how === "unanswered") {
+    return declined.waitS
+      ? t("turns.declined.unanswered", {wait: waitWords(declined.waitS)})
+      : t("turns.declined.unansweredInTime");
+  }
+  return t("turns.declined.closed");
 }
 
 /** The calls that failed: `error`, `timeout` or `crashed`; a declined step is not one. */

@@ -1757,6 +1757,7 @@ class _ApprovalGate:
                 self._record(asking, origin=again.origin, reason=again.reason)
                 assert self.asked is not None
                 self.asked["declined"] = True
+                self.asked.update(again.record())
                 return again
         run.waiting_call_id = call.id
         try:
@@ -1850,7 +1851,9 @@ class _ApprovalGate:
         )
         if isinstance(decided, Chosen) and not decided.allow:
             # Don't allow on the card, or no answer, holds for the rest of the
-            # turn (#465).
+            # turn (#465); a card nobody answered keeps why, for the surfaces.
+            assert self.asked is not None
+            self.asked.update(decided.record())
             run.reviews.decline(
                 [
                     call_key(
@@ -2219,7 +2222,8 @@ class _ToolAsk:
             self.refused.append(
                 {"request_id": request.request_id, "tool": tool_name,
                  "allowed": False, "origin": again.origin,
-                 "reason": again.reason, "declined": True, "preview": preview}
+                 "reason": again.reason, "declined": True, "preview": preview,
+                 **again.record()}
             )  # fmt: skip
             return again
         if auto and reviewer is not None:
@@ -2286,6 +2290,15 @@ class _ToolAsk:
             # Don't allow on the card, or no answer, holds for the rest of the
             # turn (#465).
             self._run.reviews.decline(declined, decided)
+            if decided.origin == "timeout":
+                # Nobody's denial of the step (no call key), but the call's
+                # tool_asks say why it did not run, for the surfaces.
+                self.refused.append(
+                    {"request_id": request.request_id, "tool": tool_name,
+                     "allowed": False, "origin": "timeout",
+                     "reason": decided.reason, "preview": preview,
+                     **decided.record()}
+                )  # fmt: skip
         if (
             auto
             and reviewer is not None

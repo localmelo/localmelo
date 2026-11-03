@@ -1,8 +1,7 @@
 › Clean the build directory.
 
 ⊘ $ shell_exec  rm -rf build · Not allowed
-  └ Not run: you chose Don't allow. Your note: It would delete the build
-    directory.
+  └ Not run: you declined it. Your note: It would delete the build directory.
 ● I did not delete the build directory.
 ✻ Worked for 0.1s · 1 tool call · ↓ 24 tokens
 
