@@ -2145,6 +2145,7 @@ _SITE_DOUBT = {
     "act": "Clicks or chooses on {site}.",
     "point": "Clicks at a point on {site}.",
     "submit": "Sends a form from {site}, which needs its own review.",
+    "desktop-act": "Presses a button in another app's window that a browser act opened.",
 }
 _TYPING_DOUBT = (
     "Types text on {site}, which needs its own review: the text is the model's own."

@@ -804,12 +804,13 @@ async def test_find_matches_buttons_by_visible_text_and_by_aria_label() -> None:
     driver = world(*items)
     tools = await tools_of(driver)
     await run(tools, "browser_open", url=HOME)
+    # Each find reads the page again, so its refs are those of a new reading.
     by_text = (await run(tools, "browser_find", query="签到")).text
     by_aria = (await run(tools, "browser_find", query="check-in", role="button")).text
-    assert '1 of 4 elements match "签到"' in by_text and '[e1 button "签到"]' in by_text
-    assert '[e1 button "签到"]' in by_aria
+    assert '1 of 4 elements match "签到"' in by_text and '[e5 button "签到"]' in by_text
+    assert '[e9 button "签到"]' in by_aria
     menu = (await run(tools, "browser_find", query="account")).text
-    assert '[e2 button "Account menu"]' in menu
+    assert '[e14 button "Account menu"]' in menu
     only_links = (await run(tools, "browser_find", query="a", role="link")).text
     assert "button" not in only_links
 

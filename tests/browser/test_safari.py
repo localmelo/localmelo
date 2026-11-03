@@ -101,6 +101,22 @@ async def test_wait_polls_until_the_page_has_the_text(
     assert await driver.wait(None, "load", "", 2)
 
 
+@pytest.mark.parametrize("until", ["text", "gone"])
+async def test_a_page_with_no_body_yet_is_not_loaded_and_the_wait_goes_on(
+    until: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bot check between two documents has no body: the wait keeps looking, it does not fail."""
+    monkeypatch.setattr("localmelo.support.browser.safari.POLL_S", 0.01)
+    safari = driver_for("no_body")
+    await safari.start()
+    try:
+        await safari.open("https://example.com/", new_tab=True)
+        word = "Welcome" if until == "text" else "Nowhere"
+        assert await safari.wait(None, until, word, 5)
+    finally:
+        await safari.close()
+
+
 async def test_where_a_tab_is_is_read_in_the_tab_and_a_wait_holds_to_its_site(
     driver: SafariAutomationDriver,
 ) -> None:
@@ -468,12 +484,13 @@ async def test_a_button_is_found_clicked_and_the_new_page_read_over_the_fake_ser
     try:
         await tools["browser_open"].function(url="https://example.com/form")
         found = await tools["browser_find"].function(query="daily check-in")
-        assert isinstance(found, str) and '[e1 button "Check in"]' in found
+        # The find read the page again: its refs follow the first reading's.
+        assert isinstance(found, str) and '[e4 button "Check in"]' in found
         assert "2 more things on the page were skipped" in found
-        clicked = await tools["browser_click"].function(ref="e1")
+        clicked = await tools["browser_click"].function(ref="e4")
         assert isinstance(clicked, str)
         assert (
-            clicked.startswith("Clicked e1 (via browser).\n<<page id=s2")
+            clicked.startswith("Clicked e4 (via browser).\n<<page id=s3")
             and "Checked in." in clicked
         )
     finally:

@@ -9,6 +9,27 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Windows from other apps (#280). A page melo acts on can make another app open a window, such as a chat
+  app's sign-in window that asks you to authorize; the browser never shows it. With the desktop control
+  helper (a separate app that holds the Mac's Accessibility and Screen Recording permissions, so melo needs
+  neither), melo lists the windows on the screen before and after each click, typing, choice and point, and
+  while `browser_wait` waits. A window of another app that appeared is named in that step's answer, under
+  *what changed*, with its title and its buttons, and `browser_wait` ends early. Two tools come with the
+  helper: `window_read` (the window's text and buttons, and a picture of only that window, as a JPEG within
+  1280 pixels and 256 KB) and `window_press` (a button by its name through accessibility, or, when that
+  does not go through, a point of the window's picture, marked on the picture that comes back). A press is a
+  question of its own every time (`desktop-act:<app>`): a card in Ask mode, and in Auto mode reviewed against
+  the chat's goal like a browser act, so the press that authorizes the sign-in you asked for runs with no
+  card, while an off-goal or high-impact press asks. With Accessibility alone the helper reads text and
+  buttons and presses by name, with no picture. Without the helper or its Accessibility permission melo
+  still notices that another app came to the front and says which one, so you can answer it there. The
+  browsing guide's setup list says where to get the helper. Only windows that appeared after
+  melo's own step are named, read or pressed (a panel of an app that only came to the front is read only
+  against a listing of that app's windows from before the step; otherwise it is named, never read), and melo
+  never types into other apps. Settings → Chats and
+  folders → **Other apps' windows** (shown while browsing is on; `[browser] app_windows`, on by default)
+  turns it off, and says when the helper is missing.
+
 - Web search, one switch for every chat and task (#468). `[web] search` (off by default; Settings →
   Chats and folders → **Web search**, `melo config set web.search true`, `-X web.search=true`) gives the
   terminal chat, every console and app chat and every console task a read-only `web_search` tool and a
@@ -1275,6 +1296,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   ([#188]).
 
 ### Fixed
+
+- `browser_find` reads the page again before it searches, so its refs are always of the page as it is now;
+  before, a page reloaded since the last reading gave refs that only failed with "The page was reloaded or
+  replaced since it was read". A ref from before a reload at the same address is used when the new page has
+  exactly one element of the same kind and name that still belongs where it did (its row or heading and the
+  text next to it), and *what changed* says so; an action that sends (a form's button, Enter in a box) is
+  never carried over.
+- `browser_wait` on a page with no body yet (a bot check, an interstitial) keeps waiting instead of failing
+  with a script error.
+- `browser_wait` says "Timed out after 20 s: the text did not appear." (and "the page did not finish
+  loading", "the text did not go away") instead of "the text appeared did not happen".
 
 - A thinking model's answer is no longer lost (#469). A model that ended a turn with an
   empty reply and its answer only in its thinking, twice in a row, failed the run with

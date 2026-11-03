@@ -13,6 +13,7 @@ import os
 import shlex
 from typing import TYPE_CHECKING
 
+from localmelo.support.browser.desktop import watch_for
 from localmelo.support.browser.provider import BrowserToolProvider
 from localmelo.support.config import BROWSER_DRIVERS as DRIVERS
 
@@ -31,11 +32,15 @@ def configured_driver(cfg: Config) -> str:
     return "off"
 
 
-def provider_for(driver: str, *, keep_tabs: bool = False) -> BrowserToolProvider | None:
+def provider_for(
+    driver: str, *, keep_tabs: bool = False, app_windows: bool = False
+) -> BrowserToolProvider | None:
     """The browser tools for *driver*; None for ``off``. ``ValueError`` for an unknown name.
 
     With *keep_tabs* (``[browser] keep_tabs``) the tabs melo opened are left
-    open when the chat ends or goes idle.
+    open when the chat ends or goes idle. With *app_windows* (``[browser]
+    app_windows``) melo watches for windows other apps open after its acts
+    (:mod:`localmelo.support.browser.desktop`).
     """
     if driver == "off":
         return None
@@ -50,6 +55,7 @@ def provider_for(driver: str, *, keep_tabs: bool = False) -> BrowserToolProvider
         return BrowserToolProvider(
             SafariAutomationDriver(command=command, args=(*args, "--mcp")),
             keep_tabs=keep_tabs,
+            desktop=watch_for(app_windows),
         )
     raise ValueError(f"unknown browser driver {driver!r}; use one of {DRIVERS}")
 

@@ -1910,6 +1910,15 @@ function approvalCard(request, view = chatApproval, asked = "") {
       content = String(args.text ?? "");
       what = t("approval.actTyped");
     }
+  } else if (tool.startsWith("desktop-act:")) {
+    // A button in another app's window that appeared after melo's own step in the browser: asked every
+    // time, and the card names the app, the window and what is pressed.
+    const app = String(args.app || tool.slice(tool.indexOf(":") + 1));
+    what = t("approval.willDo");
+    title = t("approval.desktopTitle", { app });
+    caption = t("approval.desktopCaption");
+    rule = t("approval.rule.desktopOnce");
+    content = t("approval.desktopContent", { app, on: String(args.on || ""), window: String(args.window || "") });
   }
   // A high-impact call (installs, downloads, changes outside the folder) asks every time: the
   // card says why, offers no chat-wide allow, and starts on Deny. A site Auto stopped only because the
@@ -2014,7 +2023,8 @@ function approvalCard(request, view = chatApproval, asked = "") {
   deny.dataset.approvalFocus = "deny";
   // The answers offered: a folder outside the workspace that may be kept has four.
   // Typing and a form's send ask every time, like a high-impact call: their answers are never kept for the chat.
-  const everyTime = high || tool.startsWith("browser-submit:") || tool.startsWith("browser-type:");
+  const everyTime = high || tool.startsWith("browser-submit:") || tool.startsWith("browser-type:")
+    || tool.startsWith("desktop-act:");
   const offered = everyTime ? [once, deny] : outside ? (grantable ? [once, session, always, deny] : [once, deny]) : [once, session, deny];
   actions.append(...offered);
   card.append(actions);

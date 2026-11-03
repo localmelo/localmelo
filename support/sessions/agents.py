@@ -359,6 +359,7 @@ async def build_session_agent(
         browser = provider_for(
             browser_driver,
             keep_tabs=cfg is not None and cfg.browser.keep_tabs is True,
+            app_windows=cfg is None or cfg.browser.app_windows is True,
         )
         if browser is not None:
             providers.append(browser)

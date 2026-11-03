@@ -26,6 +26,7 @@ The rest of this page is about browsing in Safari, which also follows links, cli
 
 - A Mac with Safari 27 or later. melo uses the automation server that Safari ships, `/usr/bin/safaridriver --mcp`; nothing is installed.
 - Two switches in Safari, turned on once (see [Set up Safari](#set-up-safari)).
+- Optional, for [windows from other apps](#windows-from-other-apps): the desktop control helper, [Cua Driver](https://cua.ai/docs/cua-driver), installed as `/Applications/CuaDriver.app` (melo also finds `cua-driver` on your `PATH`). Give it Accessibility in System Settings → Privacy & Security; Screen Recording adds a picture of the window. melo itself needs neither.
 - The terminal chat (`melo`) or the web console. Direct runs (`melo "task"`), worker runs and saved tasks never get the browser tools.
 
 ## Turn it on
@@ -52,6 +53,7 @@ In the config file:
 [browser]
 driver = "safari-automation"
 keep_tabs = false   # true leaves the tabs melo opened in the window
+app_windows = true  # false: melo no longer looks for other apps' windows
 ```
 
 `"off"` is the default. The web console and the app read the same setting when they open a chat, the main chat included: change it with `/browser on` there, or `melo config set browser.driver safari-automation`, and open a new chat.
@@ -86,16 +88,18 @@ Safari is not set up for melo yet. In Safari, open Settings > Developer and turn
 |---|---|
 | `browser_open` | Open an `http` or `https` address and read it. It reuses the tab melo opened in this chat; `tab="new"` opens another, and a tab id such as `t2` names one. |
 | `browser_read` | Read the current page again, or the next part of a long page (`part`). |
-| `browser_find` | Search the elements of the last reading (links, buttons, menu items, fields) by words in their visible text, `aria-label` or address. It says how many things on the page it left out. |
+| `browser_find` | Read the page again and search its elements (links, buttons, menu items, fields) by words in their visible text, `aria-label` or address, so its refs are always those of the page as it is now. It says how many things on the page it left out. |
 | `browser_follow` | Open the address of a link from the last reading. It opens the address; it does not click. |
 | `browser_click` | Click a button, link, menu item or checkbox from the last reading. The answer says how it clicked and what changed, then reads the page again. |
 | `browser_type` | Type into a text box from the last reading, at most 1,000 characters (`submit=true` presses Enter afterwards, which sends the form). melo asks about every text and shows all of it. Never a password, card or one-time-code field. |
 | `browser_select` | Choose an option in a select list from the last reading, by its text. |
 | `browser_back` | Go back one page in the tab. |
 | `browser_tabs` | List melo's tabs, switch to one, or close one. A tab whose page melo has not checked shows as *(not checked)*. |
-| `browser_wait` | Wait (30 seconds at most) for the page melo opened to load, or for some text to appear or go. |
+| `browser_wait` | Wait (30 seconds at most) for the page melo opened to load, or for some text to appear or go. A page with no body yet, such as a bot check, counts as still loading. The wait ends early when another app puts a window on the screen. |
 | `browser_screenshot` | Take a picture of the page. The picture is kept with the chat, and the web console shows it; the terminal does not draw images. A model that reads images also receives it, in the next step (see `tool_images` in the [configuration reference](../reference/configuration.md)). |
 | `browser_click_point` | Click a point of the last picture (`x` and `y` from 0 to 1000 across and down it), for what the element list lacks: a drawn button, a box from another site. The answer has a new picture with the point marked. |
+| `window_read` | Read a window another app opened after melo's own step (see [Windows from other apps](#windows-from-other-apps)): its text, its buttons and a picture of only that window. |
+| `window_press` | Press a button in that window by its name, or, when that does not go through, a point of its picture. melo asks you first, every time. |
 
 A page reaches the model as one bounded block:
 
@@ -144,7 +148,8 @@ what changed:
 
 - **Safari's own input first.** melo finds the element in Safari's own reading of the page and Safari clicks, types or chooses on it: real events, the same as yours, so a page that ignores script clicks still works. When Safari cannot reach the element, a page script does it instead. The first line names the way: `via browser`, `via page-script` with the reason, or `via point`. A site where Safari's own input did not work starts with the page script for the rest of the chat.
 - **What changed.** melo watches the page from just before the action. It waits until the page is quiet (no change for about 0.3 seconds, and after a click up to 2 seconds for the site's answer), then reports new text such as a notice or an error (even one that is gone again), a new address, and the clicked element's new state. When nothing changed, the first line says so. The page is read again, so the next step needs no `browser_read`.
-- **A page that redrew itself.** If the page rebuilt its elements since melo read it, without loading again, melo reads it again and uses the one element with the same kind, name, address and form that still belongs where it did (the same row or heading and the same text next to it, a linked title included), with every check again. It does nothing when two match, when the page had two such elements when melo read it (a "Delete" in each row, say), when nothing on the page says where the element belongs, or when the page loaded again (a reload is always a new reading); where a real control and a look-alike match, it uses the control.
+- **A page that redrew itself.** If the page rebuilt its elements since melo read it, without loading again, melo reads it again and uses the one element with the same kind, name, address and form that still belongs where it did (the same row or heading and the same text next to it, a linked title included), with every check again. It does nothing when two match, when the page had two such elements when melo read it (a "Delete" in each row, say), or when nothing on the page says where the element belongs; where a real control and a look-alike match, it uses the control.
+- **A page that loaded again.** If the page reloaded at the same address since melo read it, melo reads it again and uses the one element with the same kind and name that still belongs where it did (the same row or heading and the same text next to it), and says so under *what changed*. It does nothing when two match, when nothing says where the element belongs, when the page moved to another address, or when the action sends something (a form's button, Enter in a box): what the new page would send was not asked about. So the "Delete" of a record the reload replaced with another is never pressed.
 - **Frames.** A frame from the same site is read and acted in as part of the page. In a box from another site (often a sign-in box) Safari's own reading lists the buttons, links and fields, as `[e9 button "Continue" in a box from accounts.example]`; melo knows each of these by its name, so a click or a text there asks like any other on the page, and the question names the box; a field whose type Safari does not name counts as a secret one. A box with nothing melo can reach shows as `[a box from accounts.example that melo can't reach ...]`.
 - **A point of a picture, as the last way.** For a drawn button or a box from another site, the model takes a `browser_screenshot` and names a point with `browser_click_point`. melo checks what is there first: a label moves to its field, and a point on nothing clickable is refused. A point on a password, code or card field, on a control that agrees to terms, consent or a sign-in with another account, or inside a box from another site that has no title (melo cannot tell what the click is on) asks you every time; in Auto that last one always asks you on the card. A point inside a box melo knows by its title is a click like any other. Link and send checks are the same as for a click. A red ring shows where melo clicks, and the next picture marks the point. melo cannot see inside a box from another site, so the new picture is how you and the model see what a click there did.
 
@@ -158,6 +163,18 @@ what changed:
 - **A form that is sent asks by itself, every time.** A click on a button that submits a form, and `browser_type` with `submit=true` (Enter), ask "Let melo send a form from example.com?" with the address the form goes to and what the form holds, as melo last read it (the page can change a value before it sends); values that look secret or like a token show as `(hidden)`. When Enter is pressed outside any form, melo cannot say where it goes and the question says the page decides, and the page may then send any form on it. The answers are *Yes* (this one send) and *No*: a send has no "allow for this chat", in the terminal, the console or the API. The address is checked first, like any other: a form that posts to this Mac or your network is refused outright, and one that posts to another site asks about that site before anything is sent.
 - **A link's address is checked before the click**, the same way, and again at the mouse press. A click that lands on a local address anyway (a script sent it there) is blanked and refused.
 - **Your session stays yours.** melo never reads cookies or page storage, and the automation windows have none of your sign-ins.
+
+<a id="windows-from-other-apps"></a>
+
+## Windows from other apps
+
+A page melo acts on can make another app open a window, such as a chat app's sign-in window that asks you to authorize. melo looks for one after each of its own steps in the browser.
+
+- **With the desktop control helper.** The helper is a separate app that holds the Mac's Accessibility and Screen Recording permissions, so melo never needs them. melo names the new window and its buttons in that step's answer, can read it with a picture of only that window, and can press one of its buttons. With Accessibility alone it reads the window's text and buttons and presses by name, without a picture.
+- **Pressing asks.** In Ask mode you see a card for each press. In Auto mode a press the task needs, such as authorizing the sign-in you asked for, goes ahead; anything else stops.
+- **Without the helper.** melo cannot read the window. It still notices that another app came to the front and tells you which one, so you can answer it there.
+- **Only what melo's step opened.** melo never looks at your other windows and never types into other apps. A panel of an app that only came to the front is read only when melo listed that app's windows before its step; otherwise melo names it and asks you to answer it.
+- **The setting.** Settings → Chats and folders → **Other apps' windows**, shown while browsing is on. It is on by default; `[browser] app_windows = false` turns it off.
 
 ## Who decides which sites melo opens
 
@@ -190,6 +207,9 @@ Browsing is built in parts; none of the next two exists yet.
 | `The page tried to send a form that melo had not asked about` | melo stopped it. To send a form, click its button: melo asks first. |
 | `(via page-script: ...)` after an action | Safari could not reach that element itself, so a page script acted. A page that ignores script clicks may then do nothing: take a `browser_screenshot` and use `browser_click_point`. |
 | `A real click or key press landed on another element` | Something covered the element between melo's check and the click, so melo stopped it. `browser_read` and try again. |
+| `... came to the front: it may show a window melo cannot see` | Another app opened a window and the desktop control helper is not installed or lacks its permissions. Answer the window in that app yourself. |
+| `melo cannot read other apps' windows: ...` | Install the desktop control helper (see [What you need](#what-you-need)), or give it Accessibility in System Settings → Privacy & Security. |
+| `no Screen Recording permission` | The helper reads text and buttons and presses by name, but has no picture. Give it Screen Recording for pictures and point clicks. |
 | `a box from ... that melo can't reach` | A frame from another site, often a sign-in box, with nothing Safari lists in it. Fill it in yourself, or let melo click a point of a picture of it. |
 | `Take a browser_screenshot of this tab first` or `The page scrolled since the picture` | A point belongs to the last picture of the same page and view; take a new picture. |
 | `The page moved while melo was reading it` | The tab changed address between the check and the reading, so nothing was read. `browser_read` tries again. |
