@@ -1228,6 +1228,7 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
     ['browser-type:https://example.com', {site: 'example.com', access: 'type', how: 'type', text: 'hi'}, null, 'Let melo type on example.com?', 'browser · types text'],
     ['browser-submit:https://example.com', {site: 'example.com', access: 'submit', to: 'https://other.org/post', how: 'click'}, null, 'Let melo send a form from example.com?', 'browser · sends a form'],
     ['desktop-act:Chat', {app: 'Chat', access: 'desktop-act', how: 'press', on: '"Allow"', window: 'Sign in', button: 'Allow'}, null, 'Let melo press a button in Chat?', 'another app · presses a button'],
+    ['window-read:com.example.chat', {app: 'Chat', window: 'Sign in', bundle: 'com.example.chat', access: 'window-read'}, null, "Chat opened a window right after melo's click: let melo see it?", 'another app · its window'],
   ];
   for (const [tool, args, target, title, caption] of asks) {
     h.context.request = {request_id: `ask-${tool}-${title}`, tool_name: tool, arguments: args, workspace_label: '~/w', target};
@@ -1266,6 +1267,31 @@ test("a press in another app's window says what is pressed and is asked every ti
   assert.match(findNode(card, (node) => node.className === 'approval-content').textContent, /press "Allow" in Chat's window “Sign in”/);
   assert.match(findNode(card, (node) => node.className === 'approval-warning').textContent, /asks every time/);
   assert.deepEqual(focuses(card).filter((name) => name !== 'reason'), ['once', 'deny'], 'no "allow for this chat" on a press');
+});
+
+test("a window another app opened is a question for the person, with the title for the person only and an allow for the chat", async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const focuses = (card) => findNodes(card, (node) => 'approvalFocus' in node.dataset).map((node) => node.dataset.approvalFocus);
+  const labels = (card) => findNodes(card, (node) => 'approvalFocus' in node.dataset && node.dataset.approvalFocus !== 'reason')
+    .map((node) => node.textContent);
+  const args = {app: 'Chat', window: 'Sign in to example.com', bundle: 'com.example.chat', access: 'window-read'};
+  // Ask: the window's title is shown (to the person), the chat-wide answer names the app.
+  h.context.request = {request_id: 'see', tool_name: 'window-read:com.example.chat', arguments: args, workspace_label: '~/w',
+    offers_chat: true};
+  const card = h.run('approvalCard(request)');
+  assert.equal(findNode(card, (node) => node.className === 'approval-content').textContent, 'Sign in to example.com');
+  assert.deepEqual(focuses(card).filter((name) => name !== 'reason'), ['once', 'session', 'deny']);
+  assert.ok(labels(card).includes('Allow Chat in this chat'), labels(card).join(' | '));
+  assert.match(findNode(card, (node) => node.className === 'approval-warning').textContent, /nothing about this window reaches melo's model/);
+  // Auto stopped it (it never decides this one): the card keeps its own question and the chat-wide answer.
+  h.context.request = {request_id: 'see-auto', tool_name: 'window-read:com.example.chat', arguments: args, workspace_label: '~/w',
+    offers_chat: true, review: {verdict: 'high', categories: ['opaque'], reasons: ['Another app put up a window right after a step; only you decide whether melo sees it.']}};
+  const auto = h.run('approvalCard(request)');
+  assert.equal(findNode(auto, (node) => node.className === 'approval-title').textContent,
+    "Chat opened a window right after melo's click: let melo see it?");
+  assert.deepEqual(focuses(auto).filter((name) => name !== 'reason'), ['once', 'session', 'deny']);
+  assert.ok(labels(auto).includes('Allow Chat in this chat'));
 });
 
 test('a form send and typing show what goes, say when the page decides, and offer no answer that is kept', async () => {

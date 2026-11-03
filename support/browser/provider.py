@@ -71,14 +71,18 @@ from localmelo.melo.contracts.approvals import (
     SELF_ASKING_TOOLS,
     TOOL_ASK,
     ApprovalDecision,
+    ToolAsk,
 )
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool, ToolFunction
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.schema import ImagePart, ToolDef
 from localmelo.support.browser import addresses, fields, render, sites
 from localmelo.support.browser.desktop import (
+    KEEP_S,
     LATE_S,
+    MAX_PENDING,
     SAMPLE_S,
+    AppWindow,
     DesktopWatch,
     Mark,
     seen_lines,
@@ -110,6 +114,9 @@ SETTLE_TRIES = 5
 SETTLE_S = 0.3
 # While browser_wait waits, the screen is looked at this often for another app's window.
 WATCH_S = 1.0
+# How long the card "let melo see this window?" waits for the person (the time a window
+# stays readable); with no answer by then nothing is ever told about the window.
+CARD_S = KEEP_S
 
 PAGE_NOTE = (
     "Web pages: the browser_* tools return pages between a start marker "
@@ -316,6 +323,7 @@ def _guarded(fn: ToolFunction) -> ToolFunction:
             self._cancel_idle()
             try:
                 await self._driver.start()
+                self._ask = TOOL_ASK.get()
                 self._looked, self._handoff = False, False
                 result = await fn(self, **arguments)
                 return await self._with_screen(result)
@@ -373,6 +381,10 @@ class BrowserToolProvider(BaseToolProvider):
         # open: what it finds waits in ``_held`` for the next step.
         self._looking = asyncio.Lock()
         self._sampler: asyncio.Task[None] | None = None
+        # How the run asks the person (from the latest tool call), and the cards
+        # about other apps' windows that wait for an answer, each a task of its own.
+        self._ask: ToolAsk | None = None
+        self._cards: set[asyncio.Task[None]] = set()
         # Window lines found before an act that its result tells, notes about the
         # helper still to be said, whether this step has looked at the screen, and
         # whether the tab showed a custom address (another app was handed the act).
@@ -460,6 +472,7 @@ class BrowserToolProvider(BaseToolProvider):
         """Close the tabs melo opened (unless ``keep_tabs``), then the driver."""
         self._cancel_idle()
         await self._end_sampler()
+        await self._end_cards()
         if self._raw and not self._keep_tabs:
             # The chat is over: a browser that does not answer is not waited for.
             with contextlib.suppress(Exception):
@@ -473,6 +486,7 @@ class BrowserToolProvider(BaseToolProvider):
     def kill(self) -> None:
         self._cancel_idle()
         self._stop_sampler()
+        self._stop_cards()
         if self._desktop is not None:
             self._desktop.kill()
         self._driver.kill()
@@ -486,6 +500,8 @@ class BrowserToolProvider(BaseToolProvider):
         self._points.clear()
         self._scripted.clear()
         self._stop_sampler()
+        self._stop_cards()
+        self._ask = None
         self._desk_mark = None
         self._held.clear()
         self._notes.clear()
@@ -1028,6 +1044,12 @@ class BrowserToolProvider(BaseToolProvider):
         failed after it began). An act the browser refused as stale did nothing,
         and a text typed or an option chosen hands nothing off.
         """
+        if (act.kind == "click" or act.enter) and self._desktop is not None:
+            # The baseline is taken right now, after every approval card this act
+            # waited on: a window that opened while a card was up was there before the
+            # act and is never taken for its doing. The deadline opens from here.
+            found = await self._look()
+            self._held.extend(found)
         try:
             result = await self._driver.act(raw, act)
         except StaleElementError:
@@ -1071,6 +1093,57 @@ class BrowserToolProvider(BaseToolProvider):
         if task is not None:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
+
+    def _offer(self, windows: list[AppWindow]) -> None:
+        """Ask the person about each window of another app that waits for their say.
+
+        The provider raises the card itself, in the run's approval policy and
+        never through the model: neither the model nor a ``window_read`` call
+        can ask for it or sees it. The card runs on its own, so it also reaches
+        the person while the model is still planning its next step. With nobody
+        to ask nothing is ever told about the window.
+        """
+        ask = self._ask
+        for window in windows:
+            if ask is None or len(self._cards) >= MAX_PENDING:
+                continue
+            card = asyncio.ensure_future(self._card(window, ask))
+            self._cards.add(card)
+            card.add_done_callback(self._cards.discard)
+
+    async def _card(self, window: AppWindow, ask: ToolAsk) -> None:
+        """The person's say on *window*; an allow adopts it, and the next step tells it.
+
+        A refusal, no answer within :data:`CARD_S` or a window gone by then tell
+        nothing, not even the app.
+        """
+        watch = self._desktop
+        if watch is None:
+            return
+        try:
+            async with asyncio.timeout(CARD_S):
+                allowed = await watch.window_allowed(ask, window)
+            seen = await watch.adopt_seen(window) if allowed else None
+        except TimeoutError:
+            return
+        except Exception:  # noqa: BLE001 - the screen is a hint, never a failure
+            logger.debug("Asking about another app's window failed", exc_info=True)
+            return
+        if seen is not None:
+            found = seen_lines([seen])
+            self._held.extend(found)
+
+    def _stop_cards(self) -> None:
+        cards, self._cards = self._cards, set()
+        for card in cards:
+            card.cancel()
+
+    async def _end_cards(self) -> None:
+        cards = list(self._cards)
+        self._stop_cards()
+        for card in cards:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await card
 
     async def _run_sampler(self, watch: DesktopWatch) -> None:
         """Look at the screen every :data:`SAMPLE_S` seconds while the admission deadline is open."""
@@ -1373,9 +1446,11 @@ class BrowserToolProvider(BaseToolProvider):
                     limit_s=LATE_S if sampling else None,
                 )
                 note = watch.notice()
+                pending = watch.take_pending()
         except Exception:  # noqa: BLE001 - the screen is a hint, never a failure
             logger.debug("Looking at other apps' windows failed", exc_info=True)
             return []
+        self._offer(pending)
         if not sampling:  # a sample is no step's own look
             self._looked = True
         if note:

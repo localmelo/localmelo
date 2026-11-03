@@ -1992,6 +1992,15 @@ function approvalCard(request, view = chatApproval, asked = "") {
     caption = t("approval.desktopCaption");
     rule = t("approval.rule.desktopOnce");
     content = t("approval.desktopContent", { app, on: String(args.on || ""), window: String(args.window || "") });
+  } else if (tool.startsWith("window-read:")) {
+    // A window another app put up right after melo's own step: nothing about it goes to the model unless
+    // the person allows it here, in Ask and in Auto alike. The window's title is for the person only.
+    const app = String(args.app || tool.slice(tool.indexOf(":") + 1));
+    what = t("approval.seeWindow");
+    title = t("approval.seeTitle", { app });
+    caption = t("approval.seeCaption");
+    rule = t("approval.rule.see", { app });
+    content = String(args.window || "");
   }
   // A high-impact call (installs, downloads, changes outside the folder) asks every time: the
   // card says why, offers no chat-wide allow, and starts on Deny. A site Auto stopped only because the
@@ -2078,7 +2087,10 @@ function approvalCard(request, view = chatApproval, asked = "") {
   const once = button(high ? "outline-button" : "primary-button", t("common.allowOnce"), () => view.answer(request, state, "once"));
   once.dataset.approvalOnce = "";
   once.dataset.approvalFocus = "once";
-  const session = button("outline-button", outside ? t("approval.outside.chat", { scope }) : t("approval.allowFor", { scope }),
+  const seeing = tool.startsWith("window-read:");
+  const session = button("outline-button",
+    outside ? t("approval.outside.chat", { scope })
+      : seeing ? t("approval.seeChat", { app: String(args.app || "") }) : t("approval.allowFor", { scope }),
     () => view.answer(request, state, "session"));
   session.dataset.approvalFocus = "session";
   const always = button("outline-button", t("approval.outside.always"), () => view.answer(request, state, "always"));

@@ -24,9 +24,11 @@ from localmelo.support.browser import desktop as desktop_mod
 from localmelo.support.browser import provider as provider_mod
 from localmelo.support.browser.desktop import (
     SHOT_MAX_BYTES,
+    AppWindow,
     DesktopHelper,
     DesktopWatch,
     Front,
+    Mark,
     parse_front,
 )
 from localmelo.support.browser.driver import Act, ActResult
@@ -177,19 +179,54 @@ def screen(tmp_path: Path) -> Screen:
     return Screen(tmp_path)
 
 
+class Trusting(DesktopWatch):
+    """A watch that reads every window that appears inside the deadline on its own.
+
+    The tests of the timing (deadline, late wait, sampler) are about when a window is
+    noticed, not about who may see it, so they use this; the real rule (only the app
+    the page asked for is read on its own, any other waits for the person) is tested
+    with ``watch(..., strict=True)``.
+    """
+
+    def _alone(self, mark: Mark, window: AppWindow) -> bool:
+        return True
+
+
+# The apps of the fake screen's windows, by process id (what lsappinfo would say).
+BUNDLES = {
+    10: "com.apple.Safari",
+    20: "com.apple.Notes",
+    70: "com.example.chat",
+    80: "com.example.sso",
+}
+
+
 def watch(
-    screen: Screen, *, helper: bool = True, asked: tuple[str, ...] = ()
+    screen: Screen,
+    *,
+    helper: bool = True,
+    asked: tuple[str, ...] = (),
+    strict: bool = False,
 ) -> DesktopWatch:
-    """A watch over *screen*; *asked* are the names of the app an address of another kind opens (none: not known)."""
+    """A watch over *screen*.
+
+    *asked* are the names of the app an address of another kind opens (none: not
+    known). Unless *strict*, every window inside the deadline is read on its own.
+    """
     command = [sys.executable, "-I", FAKE, str(screen.path), str(screen.log_path)]
 
     async def handler(url: str) -> frozenset[str]:
         return frozenset(asked)
 
-    return DesktopWatch(
+    async def bundle(pid: int) -> str:
+        return BUNDLES.get(pid, "")
+
+    kind = DesktopWatch if strict else Trusting
+    return kind(
         DesktopHelper(command) if helper else None,
         front=screen.in_front,
         handler=handler,
+        bundle=bundle,
         clock=screen.clock,
         sleep=screen.clock.sleep,
         pace=screen.pacer,
@@ -409,10 +446,12 @@ async def test_a_panel_of_an_app_that_came_to_the_front_is_new_only_against_its_
         await provider.close()
     assert "(w1)" not in once.text
     assert (
-        "- Chat came to the front with a window 'Sign in to example.com' that melo "
-        "cannot confirm appeared after its step, so it does not read or press it. "
-        "Tell the person to answer it in Chat."
+        "- Chat came to the front: it may show a window melo cannot see. Tell the "
+        "person to answer it in Chat."
     ) in once.text
+    assert (
+        "Sign in to example.com" not in once.text
+    )  # a window it cannot place: no title
     assert unread.is_error and "No window of another app appeared" in unread.text
     assert "Chat opened a window 'Confirm sign-in' (w1)" in again.text
     assert "Sign in to example.com" not in again.text  # there before: not new
@@ -440,7 +479,8 @@ async def test_a_panel_open_before_the_act_is_never_read_when_its_app_comes_forw
     finally:
         await provider.close()
     assert "(w1)" not in out.text and "its buttons" not in out.text
-    assert "cannot confirm appeared after its step" in out.text
+    assert "- Chat came to the front: it may show a window melo cannot see." in out.text
+    assert "Private notes" not in out.text  # no title of a window melo cannot place
     assert read.is_error
     assert not [name for name, _ in screen.calls() if name == "get_window_state"]
 
