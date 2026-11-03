@@ -122,7 +122,8 @@ PRESETS: Final[tuple[Preset, ...]] = (
         "DEEPSEEK_API_KEY",
         thinking_off=_DEEPSEEK_THINKING_OFF,
         off_models=("deepseek-flash",),
-        text_models=("deepseek-flash",),
+        image_models=("deepseek-flash",),
+        text_models=("deepseek-v4-pro",),
     ),
     Preset(OTHER_ID, "Other (OpenAI format)", "openai", "", (), ""),
 )
