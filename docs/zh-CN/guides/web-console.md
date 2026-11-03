@@ -158,7 +158,7 @@
 | `/memory [window\|import]` | 打开“记忆”标签页；`window` 显示模型的窗口；`import` 还会按下 **Look for notes**，列出其他助手保存的文件（记忆关闭时会有一行说明）。 |
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | 显示对话的模式和授权；`ask` 和 `auto` 切换模式，`forget` 收回授权。`deny` 只在终端里有。 |
 | `/browser [on\|off]` | 查看或切换在 Safari 中读网页，保存到 `[browser] driver`。 |
-| `/attach`、`/attachments`、`/detach` | 控制台暂时不能附加文件，并会这样说明。 |
+| `/attach`、`/attachments`、`/detach` | `/attach` 打开选择器，选一张图片或一个文本文件；`/attachments` 列出等待发送的内容，`/detach N`（或 `/detach all`）把它移除。 |
 | `/verbose`、`/thinking`、`/stream [on\|off]` | 页面如何显示对话，保存在这个浏览器里：展开工具调用、展开思考，或只在一轮结束时显示各步。 |
 | `/expand [turn.call]` | 展开一次工具调用及其完整输出。 |
 | `/exit`、`/quit` | 在应用里：先询问，再退出。在浏览器标签页里：说明关闭标签页即可，因为 melo 会继续运行。 |
@@ -176,6 +176,38 @@
 - **Scheduled 标签页。** 最上面是 check-in，然后是每个定时事项：标题、运行时间、下次运行、上次运行的结果和一个开关。点开一行会看到它的优先级（`Priority: P2 · normal`），并可以 **Run now**、**Edit time** 或 **Delete**（会先询问）。主对话列出全部事项，旁支对话只列自己的；`#/scheduled` 会打开这个标签页。
 - **提醒。** 提醒是只运行一次的定时事项。`remind me to send the report on Friday at 9`、`in 2 hours` 或 `提醒我明天九点给导师发邮件` 会出现一张卡片 `Remind you on Fri Oct 30 at 9:00?`，带 **Remind me** 和 **Cancel**；卡片总是写出它理解的日期和时间。相对的说法（`tomorrow`、`Friday`、`in 2 hours`、`下周一`、`两小时后`）按你电脑的时钟换成具体的日期和时间。只说了日子没说时间是 9:00，单独的 1 到 6 点算下午，今天已经过去的时间算明天，除非你说了 `today`（今天）。星期五说 `Friday` 指下周五。没有可用的时间时，主对话会问 `When should I remind you?`，绝不猜：只回复一个时间就行（`Friday at 9`）。到了时间，melo 用一张卡片说出提醒，`Reminder: send the report`，运行没有完成时也一样。电脑睡眠或网关没运行期间错过的提醒，会在 melo 重新启动时运行，并说明晚了多久（`ran 2 h late`）。在 Scheduled 标签页里，它显示日期和时间，运行之后显示 `Reminded today at 9:01 AM`；**Edit time** 接受日期和时间，也能让已完成的提醒重新生效。提醒最多提前一年；`every …` 仍然生成重复的定时事项。
 - **Check-in。** 每 30 分钟它会看有没有要告诉你的事：某个事项刚结束的运行，或一个等了你整整一个周期的任务。没有就什么也不做，也不用模型；有的话，调用一次模型写一条简短的说明，作为一张卡片发到主对话。它的开关可以把它关掉。
+
+<a id="add-words-while-melo-works"></a>
+## 边做边补充
+
+melo 回答时，消息框仍然可用。它的提示是 `Add to what melo is doing…`，按回车会把你的话加到正在运行的这一轮，而不是等它结束。Shift + 回车仍然换行，Esc 仍然停止这一轮。
+
+- **melo 在下一步读到。** 模型会把这些话当作你的消息收到，并标明是它工作时补充的，所以一句更正（例如 `use the 2024 file instead`）会改变这一轮余下的部分，而不只是下一轮。一轮最多收 20 条补充，每条最多 8,000 个字符。
+- **先“已发送”，再“已看到”。** 这些话在这一轮的工作里先显示 `Sent. melo reads it at its next step.`，运行读到后变成 `Seen by melo at step 3`。它们随这一轮一起保存，所以重新打开的对话也会显示。
+- **这一轮先结束了**，它们就成为你的下一条消息：`melo finished first. This goes next as your message.` 它们和对话里其他排队的消息一起按顺序等待，网关重启后也会保留。
+- **停止会把它们还给你。** 停止仍然取消这一轮；melo 还没读到的话会回到消息框里，不会再开始新的一轮；已经读到的话留在这一轮的工作里。
+- **不变的部分。** 只有你自己开始的一轮才能补充；melo 为回答任务的问题而开始的一轮不行，任务的问题仍按[上文](#when-a-task-is-stuck-it-asks-its-chat)所述回答。图片和文件不能加入正在运行的一轮（`Pictures and files cannot join a turn that is running. Send them when melo is done, or press Stop.`）。
+- 客户端用 [`POST /api/turns/{turn_id}/notes`](../../reference/api-v2.md#post-apiturnsturn_idnotes)（英文）发送同样的话。
+
+<a id="pictures-and-files-in-a-message"></a>
+## 在消息里加图片和文件
+
+在浏览器和 [macOS 应用](macos-app.md)里，加图片或文本文件的方式相同：
+
+- **拖放**：把它拖到页面任意位置。文件在窗口上方时会显示提示 `Drop pictures or text files to add them to your message`。
+- **粘贴**：光标在消息框里时按 Cmd-V；剪贴板里的截图也可以。粘贴的文字仍然是文字。
+- **选择**：点消息框旁的回形针，或输入 `/attach`，它会打开同一个选择器。`/attachments` 列出等待发送的内容，`/detach N`（或 `/detach all`）把它移除。
+
+你加的内容会在消息框上方排成一行：图片是缩略图，文件是带名字的小标签，每个都有移除按钮。点缩略图会放大打开图片。一条消息可以只有图片或文件。
+
+- **哪些图片。** PNG、JPEG、GIF、WebP 和 HEIC。melo 按内容而不是文件名判断它是什么。HEIC 会转成 JPEG，GIF 的第一帧和 WebP 会转成 PNG，长边超过 1,280 像素的图片会缩小到这个尺寸（与 melo 自己截的屏一样），所以一张很大的照片并不比小图占用更多模型上下文。不是图片的文件、损坏的图片和超过 1.2 亿像素的图片会被拒绝，并附一句说明该怎么办的话。
+- **多少张。** 一条消息最多 4 张图片，每张缩放前最多 20 MB。一张图片会占用模型的上下文（这个尺寸大约一千个 token），而在本机运行的模型窗口是 8,000 到 32,000 个 token，超过四张会挤掉对话本身。
+- **文本文件。** 最多 8 个文件，每个 256 KB，合计 512 KB，随消息一起发送，方式与终端的 `/attach` 相同。其他类型的文件会回答 `report.pdf: this kind of file is not supported yet. Pictures and text files work.`，页面停在原处：拖到消息框以外的文件，在浏览器或应用里都不会在窗口中被打开。
+- **在对话里。** 消息气泡显示图片和文件名。图片随这一轮一起保存，所以重新加载或重新打开的对话仍会显示它们，**Try again** 会再次发送它们。
+- **不能读图片的模型。** 当所选模型已知读不了图片时，缩略图下面会有一行说明，并链接到 设置 → 模型。melo 不会悄悄丢掉图片：仍然发送会被拒绝，并说明 `This model cannot read pictures. Choose a model that can in Settings → Model, or send the message without the picture.`。如果 melo 无法判断，就会发送图片。
+- **等待中的图片留在内存里。** 加了但没发送的图片最多在本机内存里保留 30 分钟（24 张、64 MB），移除或关闭对话后就没有了。消息发送之前不会写入磁盘。
+- **不是任务。** 带图片的消息交给模型，没有任何规则读它，所以不会开始任务；有图片时 **Run as a task** 和 `/task` 会被拒绝（`Pictures cannot start a task. Send them as a message.`）。
+- 客户端用 [`POST /api/uploads`](../../reference/api-v2.md#post-apiuploads)（英文）发送图片，并把它写进这一轮的 `images`。
 
 <a id="pictures-in-the-answer"></a>
 ## 回答里的图片

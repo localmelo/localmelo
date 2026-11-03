@@ -6,7 +6,7 @@ API v2 是网页控制台的 HTTP API。它在网关上以 `/api/` 为前缀提�
 
 除认证要求外，API 字段保持增量兼容：会新增端点、可选的请求字段和响应键。客户端可以忽略它不认识的键。
 
-本页记录每一个 API v2 路由：健康检查、设置、密钥状态、连接测试、模型列表、会话、轮次、SSE 事件、blob、图片、提交记录、审批、工具、授权、记忆、运行，以及调度器任务。
+本页记录每一个 API v2 路由：健康检查、设置、密钥状态、连接测试、模型列表、会话、轮次、补充的话、上传、SSE 事件、blob、图片、提交记录、审批、工具、授权、记忆、运行，以及调度器任务。
 
 `POST /api/auth/login` 用一个有效的一次性代码换取浏览器 cookie；`POST /api/auth/logout` 撤销该 cookie。`POST /api/auth/rotate` 需要 bearer 令牌，并会轮换它。
 
@@ -18,7 +18,7 @@ API v2 是网页控制台的 HTTP API。它在网关上以 `/api/` 为前缀提�
 
 JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`，图片 blob 和图片文件使用其图片媒体类型，成功的 204 响应没有响应体。
 
-非空请求体需要 `Content-Type: application/json`，且请求体最多 1 MiB（1,048,576 字节）。请求中的每个字符串都必须是有效的 UTF-8，且不含孤立代理项。
+非空请求体需要 `Content-Type: application/json`，且请求体最多 1 MiB（1,048,576 字节）；唯一的例外是 [`POST /api/uploads`](#post-apiuploads)，它接收图片的字节（图片类型的 `Content-Type`，最多 20 MiB）。请求中的每个字符串都必须是有效的 UTF-8，且不含孤立代理项。
 
 响应带有 `Cache-Control: no-store`、`Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; font-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`（blob 除外，其策略为 `default-src 'none'; sandbox; frame-ancestors 'none'`；图片见[它的路由](#get-apisessionsidpictures)）、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、`Cross-Origin-Opener-Policy: same-origin`、`Cross-Origin-Resource-Policy: same-origin`、`X-Frame-Options: DENY` 和 `Permissions-Policy: camera=(), microphone=(), geolocation=()`。被拒绝的请求只有一种错误结构：
 
@@ -37,8 +37,8 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 | 404 | `not_found` | 未知的会话、blob、图片或路由 |
 | 405 | `method_not_allowed` | 已知路径，但不支持该方法；`Allow` 请求头列出它支持的方法 |
 | 409 | `settings_changed` | 自 `GET /api/settings` 读取其 `revision` 以来，`config.toml` 在磁盘上已被改动 |
-| 413 | `too_large` | 请求体超过 1 MiB，或所请求的图片超过 20 MB |
-| 415 | `unsupported_media_type` | 非空请求体没有 `Content-Type: application/json` |
+| 413 | `too_large` | 请求体超过 1 MiB（`POST /api/uploads` 为 20 MiB），或所请求的图片超过 20 MB |
+| 415 | `unsupported_media_type` | 非空请求体没有 `Content-Type: application/json`（`POST /api/uploads` 要求图片类型） |
 | 415 | `not_a_picture` | 图片请求的文件，其名称或内容不是 PNG、JPEG、GIF、WebP 或 SVG |
 | 421 | `misdirected_request` | `Host` 请求头不是 `127.0.0.1:<port>`、`localhost:<port>` 或 `[::1]:<port>`，或由应用启动的网关的 `/api/auth/login` 没有匹配的 `X-LocalMelo-Instance` |
 | 500 | `internal_error` | 意外失败；消息为 `Internal error; see the gateway log.`，从不包含堆栈跟踪或请求中的值 |
@@ -700,12 +700,16 @@ worker 运行或终端对话从 CLI 的文件读取。
 |---|---|---|
 | 400 | `invalid_workspace` | 文件夹不是绝对路径或 `~/` 开头，已不再是目录，或者无法创建默认工作区 |
 | 400 | `text_rejected` | 检查器拒绝了消息文本，与 `/v1/agent/run` 请求的处理方式相同 |
+| 400 | `picture_gone` | 轮次所指的图片已不再等待：已被移除、已过期或已发送 |
+| 409 | `model_text_only` | 轮次带有图片，而对话模型已知读不了图片 |
+| 409 | `chat_answering` | 对话正在回答任务的提问时，收到了带图片的消息 |
 | 409 | `session_busy` | 该会话中已有轮次正在运行 |
 | 409 | `not_latest_turn` | 重试或撤销所指的轮次不是最新已结束的那一个 |
 | 409 | `not_retryable` | 重试所指的轮次回答的是任务的提问 |
 | 409 | `submission_conflict` | 该 `client_request_id` 已用于另一条消息 |
 | 409 | `submission_withdrawn` | 该 `client_request_id` 在开始之前已被取消 |
-| 409 | `turn_not_running` | 取消所指的轮次并未在运行 |
+| 409 | `turn_not_running` | 取消或补充的话所指的轮次并未在运行（或正在被停止） |
+| 409 | `not_your_turn` | 补充的话所指的轮次不是用户开始的（对话对任务提问的回答） |
 | 409 | `already_answered` | 该审批已经答复 |
 | 409 | `sleep_running` | 整理正在处理笔记时撤销 `sleep` 回执 |
 | 502 | `agent_start_failed` | 会话的智能体无法启动；消息为构建器的错误 |
@@ -743,7 +747,9 @@ worker 运行或终端对话从 CLI 的文件读取。
 - `turn` 是可选的。不带它时，回答是仅含 `session` 的 201，会话等待 `POST /api/sessions/{id}/turns`。
 - `session.model` 是本请求中设置的对话模型。第一条消息的文本会成为标题：空白被折叠，最多 60 个字符，超出时以 `…` 结尾。
 - `client_request_id` 使创建可以安全地重复。相同的键加相同的文本，返回 200，附带它所创建的会话和轮次以及 `"repeated": true`，且不再构建任何东西；文本不同则为 409 `submission_conflict`；在开始之前已撤回的键则为 409 `submission_withdrawn`。两个针对同一个键的竞争创建只会生成一个会话。
-- `attachments` 目前必须为空：任何条目都是 400 `invalid_request`，即 `attachments: files are not supported yet; send the text alone`。文本由网关入口检查器检查；被拒绝则为 400 `text_rejected`。
+- `attachments` 是用户加入的文本文件：`[{"name": "notes.md", "text": "…", "chars": 1234}]`，最多 8 个，每个 256 KiB，合计 512 KiB。二进制或过大的文件返回 400 `invalid_request`，并指出该文件。网关会清理每个文件、遮蔽其中的密钥，并把它作为 `<attachment>` 块加到消息里，所以轮次的 `user_text` 同时包含这些话和这些文件。
+- `images` 是用户加入的图片：来自 [`POST /api/uploads`](#post-apiuploads) 的 id，最多 4 个，不可重复。已不存在的 id 返回 400 `picture_gone`；超过 4 个返回 400 `invalid_request`；对话模型已知读不了图片则返回 409 `model_text_only`。带图片的消息交给模型：没有任何任务规则会读它，带图片的 `as_task` 返回 400 `invalid_request`，对话正在回答任务的提问时返回 409 `chat_answering`。图片随轮次一起保存（`turn.started` 把它们列为 `images`，由 [blob 路由](#get-apisessionsidblobssha256)提供），所以重试会再次发送它们。
+- 有图片或文件时，消息可以没有文字：`text` 此时可以为空，轮次的文字读作 `[2 pictures]` 或 `[attached: notes.md]`。文本由网关入口检查器检查；被拒绝则为 400 `text_rejected`。
 
 ## POST /api/sessions/{id}/turns
 
@@ -760,6 +766,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 - 轮次运行期间返回 409 `session_busy`。每个会话同时只运行一个轮次；第二个请求会在任何东西进入队列之前被拒绝。
 - 重复的 `client_request_id` 会以 200 返回该键已保存的轮次和 `"repeated": true`，无论该轮次是否仍在运行。
 - 会话的文件夹必须仍然存在：文件夹被删除则返回 400 `invalid_workspace`，且轮次不会开始。
+- `attachments` 和 `images` 与创建时相同。要向正在运行的轮次补充话语，请使用 [`POST /api/turns/{turn_id}/notes`](#post-apiturnsturn_idnotes)，而不是等待。
 
 ## POST /api/sessions/{id}/retry
 
@@ -802,6 +809,46 @@ worker 运行或终端对话从 CLI 的文件读取。
 - 本网关运行该轮次时返回 202；对于已结束的轮次，或本网关不运行的轮次，返回 409 `turn_not_running`。
 - 轮次在其下一个边界处停止，并以 `cancelled` 结束，原因为 `user_stop`；`turn.finished` 会说明这一点。若它没有说任何话，其保存的 `answer` 为 `[interrupt: no assistant output for this turn]`。
 - 在审批等待期间取消，会撤回该卡片：请求会被答复为 `withdrawn`，并离开 `pending_approvals`。
+- [补充到该轮次](#post-apiturnsturn_idnotes)、但其运行尚未读到的话不会开始另一个轮次：它们会从队列中移除，并以 `"unread_notes": [{"note": 3, "text": "use the 2024 file"}]` 返回，由客户端放回消息框。没有时不会有这个键。
+
+## POST /api/turns/{turn_id}/notes
+
+向正在运行的轮次补充话语。它的运行会在下一步读到这些话。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/turns/9c1f0e2d4b6a48c1a3e5f7091b2d4c6e/notes \
+  -H 'Content-Type: application/json' \
+  -d '{"text": "use the 2024 file instead", "client_request_id": "curl-note-1"}'
+```
+
+```json
+{"note": {"note": 3, "turn_id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e", "text": "use the 2024 file instead", "client_request_id": "curl-note-1", "state": "sent"}}
+```
+
+- 返回 202。`state` 为 `sent` 表示正在运行的轮次接收了这些话，为 `next` 表示这些话保存期间轮次已经结束：它们会作为对话的下一个轮次运行。`client_request_id` 是可选的，使调用可以安全地重复（同样的内容会原样返回，轮次结束之后也一样）。
+- 运行会把每条补充放进下一次模型请求，作为用户的消息，并标明是它工作时补充的，同时用 `inbox.accepted` 说明已读到（它的 `offset` 就是这条补充的编号）。运行在轮次结束前没有读到的补充，会作为对话的下一个轮次发送，与排队的消息按顺序排列；它们在同一个存储里，所以重启后仍会保留。停止会把没读到的还给客户端（见[取消](#post-apiturnsturn_idcancel)）。
+- `text` 会去掉首尾空白，不能为空，最多 8,000 个字符，并经过与普通消息相同的检查器（400 `invalid_request`，400 `text_rejected`）。一个轮次最多接收 20 条补充。
+- 对没有在运行、正在被停止或其运行已结束的轮次返回 409 `turn_not_running`：客户端应把这些话作为一条消息发送。对不是用户开始的轮次，以及任务会话，返回 409 `not_your_turn`。
+- 图片和文件不能加入正在运行的轮次。
+
+## POST /api/uploads
+
+为一条消息暂存一张图片。请求体是图片的字节，不是 JSON：这是唯一接收字节的路由。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST 'http://127.0.0.1:8401/api/uploads?name=shot.png' \
+  -H 'Content-Type: image/png' --data-binary @shot.png
+```
+
+```json
+{"id": "46fb64ffc2a04ad98a9a0bb3a1a0f0c1", "name": "shot.png", "mime_type": "image/png", "size_bytes": 20481, "width": 1280, "height": 720, "model_reads": true}
+```
+
+- 返回 201。请求体最多 20 MiB，`Content-Type` 是图片类型（`image/png`、`image/jpeg`、`image/gif`、`image/webp`、`image/heic`、`image/heif`）或 `application/octet-stream`；类型只是提示，网关根据字节判断它是什么。其他路由仍保持 1 MiB 的 JSON 限制。
+- PNG 和 JPEG 的长边不超过 1,280 像素时原样保留，否则缩放到该尺寸；GIF 的第一帧和 WebP 图片变成 PNG，HEIC 图片变成 JPEG，使用这台 Mac 自带的图像工具（`sips`）。`mime_type`、`size_bytes`、`width` 和 `height` 描述的是实际发送的图片。`name` 是可选的查询参数，会去掉路径和控制字符（最多 120 个字符）。
+- `model_reads` 说明对话模型是否读得了图片：`true`、`false`（页面会立刻提醒），或网关无法判断时的 `null`（此时会发送图片）。
+- 图片留在内存里，不写磁盘：同时最多 24 张、64 MiB，先放入的先丢，保留 30 分钟。在 `images` 中写上它的 `id` 的轮次会取走它。超过 20 MiB 返回 413 `too_large`；超过 1.2 亿像素返回 413 `picture_too_many_pixels`；字节不是 PNG、JPEG、GIF、WebP 或 HEIC 图片返回 415 `picture_unsupported`；图片损坏返回 415 `picture_unreadable`；这台 Mac 无法转换返回 415 `picture_convert`；请求体为空返回 400 `invalid_request`。
+- `GET /api/uploads/{id}` 返回实际发送的图片（已不存在则返回 404 `not_found`），安全策略与 blob 相同。`DELETE /api/uploads/{id}` 丢弃它，无论它是否存在都返回 204。
 
 ## POST /api/sessions/{id}/submissions/{client_request_id}/cancel
 
@@ -816,7 +863,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 {"submission": {"client_request_id": "8d2f6c1e-5b7a-4e0c-9a41-2f3b6d8e1c07", "state": "withdrawn", "session_id": "3f9c2a7b1d4e", "turn_id": null, "status": null, "cause": null, "turn": null, "error": "Request cancelled before acceptance.", "created_at": 1793163793.49}, "cancelling": false}
 ```
 
-- 请求体的 `text` 是消息的文本。对已保存的键使用另一段文本会返回 409 `submission_conflict`。
+- 请求体的 `text` 是消息的文本；带有 `attachments` 或 `images` 发送的消息要再次写出它们（图片只读取数量）。对已保存的键使用另一段文本会返回 409 `submission_conflict`。
 - 不带会话保存的撤回——即不带 id 的路由——其 `"session_id": null`。
 - 当该键的轮次已被接受且仍在运行时，返回 202 并附带 `"cancelling": true`：该轮次会按上述方式停止。`submission` 是本次调用读取到的键，因此其中的轮次仍为 `running`：它会在回答之后结束。请跟踪其 `turn.finished`（原因为 `user_stop`），或再次查询以获知结束。
 - 其他情况返回 200。已被接受且已经结束的轮次按原样返回。没有提交的键会被记录为已撤回，因此之后用它的创建或轮次会返回 409 `submission_withdrawn`；重复调用会返回相同的撤回结果。

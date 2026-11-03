@@ -12,7 +12,7 @@ endpoints, optional request fields and response keys are added. A client may ign
 know.
 
 This page documents every API v2 route: health, settings, key status,
-connection test, model listing, sessions, turns, SSE events, blobs, pictures,
+connection test, model listing, sessions, turns, added words, uploads, SSE events, blobs, pictures,
 submissions, approvals, tools, grants, memory, runs and scheduler tasks.
 
 `POST /api/auth/login` exchanges a valid single-use code for a browser cookie;
@@ -37,7 +37,8 @@ JSON request bodies and JSON responses use UTF-8. Event streams use
 
 A request with a non-empty body
 needs `Content-Type: application/json`, and a body may have at most 1 MiB
-(1,048,576 bytes). Every string in a request must be valid UTF-8 without
+(1,048,576 bytes); the one exception is [`POST /api/uploads`](#post-apiuploads), which takes
+a picture's bytes (an image `Content-Type`, at most 20 MiB). Every string in a request must be valid UTF-8 without
 lone surrogates.
 
 Responses carry `Cache-Control: no-store`,
@@ -66,8 +67,8 @@ every route below:
 | 404 | `not_found` | an unknown session, blob, picture or route |
 | 405 | `method_not_allowed` | a known path with a method it does not serve; the `Allow` header names the methods it does |
 | 409 | `settings_changed` | `config.toml` changed on disk since `GET /api/settings` read its `revision` |
-| 413 | `too_large` | the request body is over 1 MiB, or a requested picture is over 20 MB |
-| 415 | `unsupported_media_type` | a non-empty request body without `Content-Type: application/json` |
+| 413 | `too_large` | the request body is over 1 MiB (20 MiB for `POST /api/uploads`), or a requested picture is over 20 MB |
+| 415 | `unsupported_media_type` | a non-empty request body without `Content-Type: application/json` (an image type for `POST /api/uploads`) |
 | 415 | `not_a_picture` | a picture request for a file whose name or content is not a PNG, JPEG, GIF, WebP or SVG |
 | 421 | `misdirected_request` | the `Host` header is not `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>`, or an app-started gateway's `/api/auth/login` has no matching `X-LocalMelo-Instance` |
 | 500 | `internal_error` | an unexpected failure; the message is `Internal error; see the gateway log.` and never a traceback or a value from the request |
@@ -1459,12 +1460,16 @@ These codes answer on the write routes besides the shared ones above:
 |---|---|---|
 | 400 | `invalid_workspace` | the folder is not absolute or `~/`, is no longer a directory, or the default workspace cannot be created |
 | 400 | `text_rejected` | the checker refused the message text, as it does for a `/v1/agent/run` request |
+| 400 | `picture_gone` | a turn named a picture that no longer waits: removed, expired or already sent |
+| 409 | `model_text_only` | a turn has pictures and the chat's model is known not to read them |
+| 409 | `chat_answering` | a message with pictures arrived while the chat answers a task's question |
 | 409 | `session_busy` | a turn is already running in the session |
 | 409 | `not_latest_turn` | retry or undo named a turn that is not the newest finished one |
 | 409 | `not_retryable` | retry named a turn that answered a task's question |
 | 409 | `submission_conflict` | the `client_request_id` was used for a different message |
 | 409 | `submission_withdrawn` | the `client_request_id` was cancelled before it started |
-| 409 | `turn_not_running` | cancel named a turn that is not running |
+| 409 | `turn_not_running` | cancel, or an added word, named a turn that is not running (or is being stopped) |
+| 409 | `not_your_turn` | an added word named a turn the person did not start (the chat's answer to a task's question) |
 | 409 | `already_answered` | the approval was answered already |
 | 409 | `sleep_running` | Undo on a `sleep` echo while a sleep is tidying the notes |
 | 502 | `agent_start_failed` | the session's Agent could not start; the message is the builder's error |
@@ -1524,9 +1529,21 @@ Create a session, usually with its first turn.
   `"repeated": true`, building nothing; another text is 409
   `submission_conflict`; a key withdrawn before it started is 409
   `submission_withdrawn`. Two creates racing on one key make one session.
-- `attachments` must be empty for now: an entry is 400 `invalid_request`,
-  `attachments: files are not supported yet; send the text alone`. The
-  text is checked by the gateway ingress checker; a refusal is 400
+- `attachments` are the text files the person added: `[{"name": "notes.md", "text": "…", "chars": 1234}]`,
+  at most 8, 256 KiB each and 512 KiB together. A file that is binary or too large is 400
+  `invalid_request` with the file named. The gateway cleans each file, redacts secrets in it and
+  adds it to the message as an `<attachment>` block, so the turn's `user_text` holds the words and
+  the files.
+- `images` are the pictures the person added: ids from [`POST /api/uploads`](#post-apiuploads),
+  at most 4, none twice. An id that is gone is 400 `picture_gone`; more than 4 is 400 `invalid_request`;
+  a chat model known not to read pictures is 409 `model_text_only`. A message with pictures goes to
+  the model: no task rule reads it, `as_task` with pictures is 400 `invalid_request`, and while the
+  chat answers a task's question it is 409 `chat_answering`. The pictures are stored with the turn
+  (`turn.started` lists them as `images`, and the [blobs route](#get-apisessionsidblobssha256) serves
+  them), so a retry sends them again.
+- A message may have no words when it has pictures or files: `text` may then be empty, and the turn's
+  words read `[2 pictures]` or `[attached: notes.md]`.
+  The text is checked by the gateway ingress checker; a refusal is 400
   `text_rejected`.
 
 ## POST /api/sessions/{id}/turns
@@ -1553,6 +1570,8 @@ is no `workspace` here — the session's own folder is the Agent's.
   and `"repeated": true`, whether the turn still runs or not.
 - The session's folder must still exist: a deleted folder is 400
   `invalid_workspace`, and the turn does not start.
+- `attachments` and `images` are as in a create. To add words to a turn that is running, use
+  [`POST /api/turns/{turn_id}/notes`](#post-apiturnsturn_idnotes) instead of waiting.
 
 ## POST /api/sessions/{id}/retry
 
@@ -1609,6 +1628,67 @@ Stop a running turn, from the id the events gave.
   `[interrupt: no assistant output for this turn]` when it said nothing.
 - Cancelling while an approval waits withdraws the card: the request is
   answered `withdrawn` and leaves `pending_approvals`.
+- Words [added to the turn](#post-apiturnsturn_idnotes) that its run had not read do not start
+  another turn: they are dropped from the queue and come back as `"unread_notes": [{"note": 3,
+  "text": "use the 2024 file"}]`, for the client to put back into its message box. The key is absent
+  when there are none.
+
+## POST /api/turns/{turn_id}/notes
+
+Add words to a turn that is running. Its run reads them at its next step.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/turns/9c1f0e2d4b6a48c1a3e5f7091b2d4c6e/notes \
+  -H 'Content-Type: application/json' \
+  -d '{"text": "use the 2024 file instead", "client_request_id": "curl-note-1"}'
+```
+
+```json
+{"note": {"note": 3, "turn_id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e", "text": "use the 2024 file instead", "client_request_id": "curl-note-1", "state": "sent"}}
+```
+
+- 202. `state` is `sent` when the running turn takes the words, and `next` when the turn ended while they
+  were stored: they run as the chat's next turn. `client_request_id` is optional and makes the call safe
+  to repeat (the same body comes back, also after the turn ended).
+- The run puts each note into its next model request as the person's message, marked as added while it
+  worked, and says so with `inbox.accepted` (its `offset` is the note's number). A note the run did not
+  read before the turn ended is sent as the chat's next turn, in order with the queued messages; they live in
+  the same store, so a restart keeps them. A Stop gives the unread ones back ([cancel](#post-apiturnsturn_idcancel)).
+- `text` is trimmed, must not be empty, has at most 8,000 characters and goes through the same checker as a
+  message (400 `invalid_request`, 400 `text_rejected`). A turn takes at most 20 notes.
+- 409 `turn_not_running` for a turn that is not running, is being stopped or has finished its run: the
+  client sends the words as a message instead. 409 `not_your_turn` for a turn the person did not
+  start, and for a session that is a task.
+- Pictures and files cannot be added to a running turn.
+
+## POST /api/uploads
+
+Stage a picture for a message. The body is the picture's bytes, not JSON: the one route that takes them.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST 'http://127.0.0.1:8401/api/uploads?name=shot.png' \
+  -H 'Content-Type: image/png' --data-binary @shot.png
+```
+
+```json
+{"id": "46fb64ffc2a04ad98a9a0bb3a1a0f0c1", "name": "shot.png", "mime_type": "image/png", "size_bytes": 20481, "width": 1280, "height": 720, "model_reads": true}
+```
+
+- 201. The body is at most 20 MiB and its `Content-Type` an image type (`image/png`, `image/jpeg`,
+  `image/gif`, `image/webp`, `image/heic`, `image/heif`) or `application/octet-stream`; the type is only a
+  hint, since the gateway decides what the bytes are from the bytes. Every other route keeps its 1 MiB JSON limit.
+- PNG and JPEG are kept as they are when their long side is at most 1,280 pixels, and otherwise scaled to it;
+  the first frame of a GIF and a WebP picture become PNG and a HEIC picture becomes JPEG, with the Mac's own
+  image tool (`sips`). `mime_type`, `size_bytes`, `width` and `height` describe the picture as it will be sent.
+  `name` is the optional query parameter, cleaned of a path and control characters (at most 120 characters).
+- `model_reads` says whether the chat's model reads pictures: `true`, `false` (the page warns at once) or `null`
+  when the gateway cannot tell (a picture is then sent).
+- The picture waits in memory, not on disk: at most 24 pictures and 64 MiB at once, the oldest first, and 30
+  minutes. A turn that names its `id` in `images` takes it. 413 `too_large` over 20 MiB; 413 `picture_too_many_pixels`
+  over 120 million pixels; 415 `picture_unsupported` for bytes that are not a PNG, JPEG, GIF, WebP or HEIC picture;
+  415 `picture_unreadable` for a damaged one; 415 `picture_convert` when this Mac cannot convert it; 400 `invalid_request` for an empty body.
+- `GET /api/uploads/{id}` returns the picture as it will be sent (404 `not_found` when it is gone), with the
+  policy of a blob. `DELETE /api/uploads/{id}` drops it and answers 204 whether or not it was there.
 
 ## POST /api/sessions/{id}/submissions/{client_request_id}/cancel
 
@@ -1625,7 +1705,8 @@ session, for a create whose answer was lost.
 {"submission": {"client_request_id": "8d2f6c1e-5b7a-4e0c-9a41-2f3b6d8e1c07", "state": "withdrawn", "session_id": "3f9c2a7b1d4e", "turn_id": null, "status": null, "cause": null, "turn": null, "error": "Request cancelled before acceptance.", "created_at": 1793163793.49}, "cancelling": false}
 ```
 
-- The body's `text` is the message's text. Another text on a stored key is
+- The body's `text` is the message's text; a message sent with `attachments` or `images` names them again
+  (for pictures only how many is read). Another text on a stored key is
   409 `submission_conflict`.
 - A withdrawal stored without a session — the route without an id — has
   `"session_id": null`.

@@ -9,6 +9,22 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Pictures and files in the web console and the app, and words added while melo works. Drop a picture
+  or a text file on the page, paste it with Cmd-V or pick it with the paperclip (`/attach` opens the same
+  picker; `/attachments` and `/detach N` list and remove). PNG, JPEG, GIF (first frame), WebP and HEIC
+  pictures are accepted, converted where needed and scaled to a long side of 1,280 pixels like a screenshot;
+  a message takes up to 4 pictures and 8 text files, and a picture that is too large or not a picture is
+  refused with a sentence that says why. Thumbnails with a remove button sit above the message box, the
+  picture shows in your message and again after a reload, and the model gets it as an image. A model
+  known not to read pictures gets a one-line warning that links to Settings → Model; the picture is never
+  dropped silently. Other files answer `not supported yet`, and a file dropped beside the box never opens in
+  the window, in the browser or in the app. While a turn runs, Enter now adds your words to it: the run reads
+  them at its next step, the bubble shows `Sent` then `Seen by melo`, words the turn ended before reading
+  become your next message in order (a restart keeps them), and Stop gives unread words back to the box.
+  New routes `POST /api/uploads` (with `GET`/`DELETE /api/uploads/{id}`) and `POST /api/turns/{turn_id}/notes`;
+  a turn takes `images` and `attachments`; new event `turn.note` and `images` in `turn.started`; new errors
+  `picture_gone`, `model_text_only`, `chat_answering`, `not_your_turn`. The terminal keeps its own queue and
+  text-only `/attach`.
 - Web search, one switch for every chat and task (#468). `[web] search` (off by default; Settings →
   Chats and folders → **Web search**, `melo config set web.search true`, `-X web.search=true`) gives the
   terminal chat, every console and app chat and every console task a read-only `web_search` tool and a
