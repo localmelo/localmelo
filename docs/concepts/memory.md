@@ -173,7 +173,7 @@ A line that starts with an id such as [t123] is cut; open it with open_memory wh
 - The model also has `open_memory`, as in the list form: it returns the whole turn up to `recall_open_chars`. `search_memory` marks its lines the same way.
 - It has no effect with `recall_form = "list"`, which always offers `open_memory`, or with `recall_source = "items"`.
 
-**Memory items (developer setting).** An earlier chat turn is raw text. With `melo memory ingest FILE -X ingest=compress` the chat model reads each ingested chat, `compress_at_chars` characters at a time, and writes short memory items from it: each has a title, a text of one or two sentences, a kind (`profile`, `semantic` or `episodic`) and the exchanges it came from. A lasting statement the model left out is made into an item by the rules. Each item is then compared with the items already kept of its kind by rules, with no model request, and one of five things happens:
+**Memory items (developer setting).** An earlier chat turn is raw text. With `melo memory ingest FILE -X ingest=compress` the chat model reads each ingested chat, `compress_at_chars` characters at a time, and writes short memory items from it: each has a title, a text of one or two sentences, a kind (`profile`, `semantic` or `episodic`) and the exchanges it came from. A lasting statement the model left out is made into an item by the rules. The encoder asks a local model with thinking off, as step reviews do, so a model that thinks by default does not spend its answer on thinking. Each item is then compared with the items already kept of its kind by rules, with no model request, and one of five things happens:
 
 | Outcome | What it does |
 |---|---|

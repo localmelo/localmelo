@@ -11,15 +11,17 @@ compress_at_chars`` characters (:func:`pack`; one exchange longer than that gets
 window of its own and is cut at its size). Each window is one request to the chat
 model, temperature 0, at most :data:`MAX_OUTPUT_TOKENS` tokens out, asking for
 JSON only (:data:`SYSTEM_PROMPT`); an unreadable reply is asked for once more and
-then the window has failed. What comes back is checked (:func:`check`): a source
-outside the window is dropped, an item left with none is dropped and counted, an
-exchange named by no item and not ignored is *unmentioned*. An exchange whose user
-words state a lasting fact by the rules the note path uses
-(:func:`localmelo.support.memory.records.statements`) must be the source of an
-item: if no item has it, one is made from the rules' note (*forced*). A window's
-reply is kept in a JSON-lines cache, keyed by the prompt version, the model and the
-window's text with its dates, so a second run with the same chats makes no call.
-Text that goes to the model has its secrets left out, as an index document has.
+then the window has failed. The encoder asks a local model with thinking off, as
+step reviews do (:mod:`localmelo.support.providers.llm.thinking`). What comes back
+is checked (:func:`check`): a source outside the window is dropped, an item left
+with none is dropped and counted, an exchange named by no item and not ignored is
+*unmentioned*. An exchange whose user words state a lasting fact by the rules the
+note path uses (:func:`localmelo.support.memory.records.statements`) must be the
+source of an item: if no item has it, one is made from the rules' note (*forced*).
+A window's reply is kept in a JSON-lines cache, keyed by the prompt version, the
+model and the window's text with its dates, so a second run with the same chats
+makes no call. Text that goes to the model has its secrets left out, as an index
+document has.
 """
 
 from __future__ import annotations
@@ -42,12 +44,14 @@ from localmelo.melo.memory.retrieval.llm import send_from_provider
 from localmelo.melo.schema import Message, split_thinking
 from localmelo.support.memory import records
 from localmelo.support.memory.index import ITEM_KINDS, cleaned, plain_text
+from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
+from localmelo.support.providers.llm.thinking import thinking_off_fields
 
 logger = logging.getLogger(__name__)
 
 # Bump it when the prompt or what is asked of the model changes: it is part of the
 # cache key and of every item's ``encoder``.
-PROMPT_VERSION: Final = "2"
+PROMPT_VERSION: Final = "3"
 MAX_OUTPUT_TOKENS: Final = 2000
 ENCODE_TIMEOUT_S: Final = 900.0
 TITLE_CHARS: Final = 80
@@ -402,17 +406,26 @@ class Cache:
 # ── The model ──
 
 
-def _quiet(provider: BaseLLMProvider) -> BaseLLMProvider:
-    """A private view of *provider* that answers at temperature 0 and stops at
-    :data:`MAX_OUTPUT_TOKENS`, never altering the provider chats use."""
+def _quiet(provider: BaseLLMProvider, backend: str | None = None) -> BaseLLMProvider:
+    """A private view of *provider* that answers at temperature 0, stops at
+    :data:`MAX_OUTPUT_TOKENS` and, on a local *backend*, does not think, never
+    altering the provider chats use.
+
+    The thinking-off fields come from
+    :func:`~localmelo.support.providers.llm.thinking.thinking_off_fields`, over the
+    ``chat_template_kwargs`` the provider's requests of this kind carry now.
+    *backend* is the chat backend's key; ``None``, a server named by its URL,
+    counts as a local one.
+    """
     view = copy.copy(provider)
+    kept = provider.extra_body_by_kind.get("retrieve", {})
+    own = {**(getattr(provider, "extra_body", None) or {}), **kept}
     body = {
-        **provider.extra_body_by_kind.get("retrieve", {}),
+        **kept,
         "temperature": 0,
         "max_tokens": MAX_OUTPUT_TOKENS,
+        **thinking_off_fields(provider, backend, own),
     }
-    from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
-
     if isinstance(view, OllamaNativeChat):
         body["options"] = {
             **view.extra_body.get("options", {}),
@@ -457,16 +470,20 @@ async def encode(
     window_chars: int,
     cache: Cache | None = None,
     stats: Stats | None = None,
+    backend: str | None = None,
 ) -> Encoding:
     """Encode the exchanges *turns* of one chat into items.
 
     One model request for each window of at most *window_chars* characters, none
     when *cache* has the window's reply (:func:`window_key`). *stats* is added to.
+    *backend* is the key of the chat backend *provider* runs on, which decides how
+    the request turns thinking off (:func:`_quiet`); ``None``, as when a caller
+    names none, is a local server named by its URL.
     """
     stats = stats if stats is not None else Stats()
     model = str(getattr(provider, "model", "") or "")
     encoder = f"{PROMPT_VERSION}:{model}"
-    send = send_from_provider(_quiet(provider))
+    send = send_from_provider(_quiet(provider, backend))
     result = Encoding()
     mentioned: set[int] = set()
     ignored: set[int] = set()
