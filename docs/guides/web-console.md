@@ -906,8 +906,8 @@ commands and file changes.
 - **Allowed in this chat.** **Allow for this chat** on a site's card lets the
   same kind of step on that site (opening and reading it, or clicking and
   choosing on it) run for the rest of the chat. A site Auto let the chat open
-  or click on stays allowed for the rest of the chat too, also after you
-  switch to Ask. The chip's menu lists the sites the chat allowed, each with
+  stays allowed for reading its pages for the rest of the chat too, also
+  after you switch to Ask; a click on it still asks in Ask. The chip's menu lists the sites the chat allowed, each with
   **Remove**. Typing on a page and sending a form ask every time, a
   high-impact step never rides an allowance, and a new chat starts with none.
 - **What is blocked.** Typing or reading a secret (a password, a one-time

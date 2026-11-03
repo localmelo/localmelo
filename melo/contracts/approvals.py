@@ -332,19 +332,44 @@ def site_grant(request: ApprovalRequest) -> bool:
     )
 
 
+# The site questions auto mode's run keeps allowed for the chat (#465): opening
+# or reading a site, never clicking or choosing on it. Nobody reviews a step in
+# Ask, so a click kept from Auto would let any button of the site run there with
+# no card ("Pay" too): Ask asks about every click of a site the person did not
+# allow themselves.
+STAYS_FOR_CHAT: Final = ("browser:",)
+
+
+def plain_address(url: object) -> bool:
+    """Whether a site question's *url* is a plain address: no query, fragment or
+    user name, and shown whole. Any other can carry a secret or more data out."""
+    return (
+        isinstance(url, str)
+        and bool(url.strip())
+        and not url.endswith("…")
+        and not any(mark in url for mark in "?#@")
+    )
+
+
 def stays_for_chat(request: ApprovalRequest) -> bool:
     """Whether auto mode's run of *request* keeps its question allowed for the chat (#465).
 
-    A question about opening or acting on a site (:data:`SITE_GRANTS`) with a
-    ``site`` argument: a site Auto let the chat read or act on stays allowed
-    for the rest of the chat, in Ask too. Never typing, a form sent, a click
-    at a point (:data:`NEVER_GRANTED`) or a path outside the workspace.
+    A question about opening or reading a site (:data:`STAYS_FOR_CHAT`) with a
+    ``site`` argument and, when it carries the address it reads (web_fetch's
+    ``url``), a plain one (:func:`plain_address`): a site Auto let the chat
+    read stays allowed for the rest of the chat, in Ask too. Never a click or
+    a choice, typing, a form sent, a click at a point, a path outside the
+    workspace, or a step of a card-only kind (:data:`CARD_ONLY`): nothing
+    implicit covers what the person must allow themselves.
     """
+    review = request.review
     return (
         request.outside is None
-        and request.tool_name.startswith(SITE_GRANTS)
+        and request.tool_name.startswith(STAYS_FOR_CHAT)
         and not never_granted(request.tool_name)
         and bool(request.arguments.get("site"))
+        and ("url" not in request.arguments or plain_address(request.arguments["url"]))
+        and (review is None or not set(review.categories) & CARD_ONLY)
     )
 
 
@@ -508,9 +533,9 @@ class AutoPolicy:
     *asking* (nobody can be asked: a schedule, a benchmark), with nobody
     watching, and for any other stopped call, it is denied with origin
     ``auto`` and the category in a few words as its reason. A call nothing
-    reviewed is blocked too. A site question it runs (:func:`stays_for_chat`)
-    is told to *asking* through its optional ``passed_in_auto(name)``, so the
-    site stays allowed for the chat in Ask too.
+    reviewed is blocked too. A site read it runs (:func:`stays_for_chat`) is
+    told to *asking* through its optional ``passed_in_auto(name)``, so the
+    site's plain reads stay allowed for the chat in Ask too; a click never.
 
     :meth:`allow_once` keeps an allowance for one exact step
     (:func:`~localmelo.melo.contracts.review.step_key`, the files it read
@@ -605,8 +630,8 @@ class AutoPolicy:
             return ApprovalDecision(False, CATEGORY_WORDS["unreviewed"], origin="auto")
         if review.verdict == "routine":
             if stays_for_chat(request):
-                # A site Auto let this chat read or act on stays allowed for
-                # the chat (#465): the asking policy keeps it, for Ask.
+                # A site Auto let this chat read stays allowed for the chat
+                # (#465): the asking policy keeps it, for Ask. Never a click.
                 keep = getattr(self.asking, "passed_in_auto", None)
                 if callable(keep):
                     keep(request.tool_name)
