@@ -15,15 +15,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   pictures are accepted, converted where needed and scaled to a long side of 1,280 pixels like a screenshot;
   a message takes up to 4 pictures and 8 text files, and a picture that is too large or not a picture is
   refused with a sentence that says why. Thumbnails with a remove button sit above the message box, the
-  picture shows in your message and again after a reload, and the model gets it as an image. A model
+  picture shows in your message and again after a reload, and the model gets it as an image. Every
+  picture is rewritten before the model gets it: EXIF (the camera, the time, GPS), XMP, comments, text
+  chunks and anything after the end of the picture are removed, also from a picture that needed no
+  conversion, and a picture melo cannot scale or rewrite is refused instead of being sent as it is. The
+  size limit is read from the file's header before anything opens it, every frame of a GIF included. A model
   known not to read pictures gets a one-line warning that links to Settings → Model; the picture is never
-  dropped silently. Other files answer `not supported yet`, and a file dropped beside the box never opens in
+  dropped silently. A model that refuses a turn because of its pictures is remembered as text-only: the turn
+  ends with one plain line, the composer warns, and Try again does not send the same pictures again. Other files answer `not supported yet`, and a file dropped beside the box never opens in
   the window, in the browser or in the app. While a turn runs, Enter now adds your words to it: the run reads
   them at its next step, the bubble shows `Sent` then `Seen by melo`, words the turn ended before reading
-  become your next message in order (a restart keeps them), and Stop gives unread words back to the box.
+  become your next message in order (a restart keeps them, and words that were read leave the kept queue, with a few more tries if the write fails), and Stop gives unread words back to the box.
   New routes `POST /api/uploads` (with `GET`/`DELETE /api/uploads/{id}`) and `POST /api/turns/{turn_id}/notes`;
   a turn takes `images` and `attachments`; new event `turn.note` and `images` in `turn.started`; new errors
-  `picture_gone`, `model_text_only`, `chat_answering`, `not_your_turn`. The terminal keeps its own queue and
+  `picture_gone`, `model_text_only`, `chat_answering`, `not_your_turn`, `picture_scale`. The terminal keeps its own queue and
   text-only `/attach`.
 - Web search, one switch for every chat and task (#468). `[web] search` (off by default; Settings →
   Chats and folders → **Web search**, `melo config set web.search true`, `-X web.search=true`) gives the

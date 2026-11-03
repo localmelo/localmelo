@@ -200,11 +200,12 @@ melo 回答时，消息框仍然可用。它的提示是 `Add to what melo is do
 
 你加的内容会在消息框上方排成一行：图片是缩略图，文件是带名字的小标签，每个都有移除按钮。点缩略图会放大打开图片。一条消息可以只有图片或文件。
 
-- **哪些图片。** PNG、JPEG、GIF、WebP 和 HEIC。melo 按内容而不是文件名判断它是什么。HEIC 会转成 JPEG，GIF 的第一帧和 WebP 会转成 PNG，长边超过 1,280 像素的图片会缩小到这个尺寸（与 melo 自己截的屏一样），所以一张很大的照片并不比小图占用更多模型上下文。不是图片的文件、损坏的图片和超过 1.2 亿像素的图片会被拒绝，并附一句说明该怎么办的话。
+- **哪些图片。** PNG、JPEG、GIF、WebP 和 HEIC。melo 按内容而不是文件名判断它是什么。HEIC 会转成 JPEG，GIF（动图也一样）的第一帧和 WebP 会转成 PNG，长边超过 1,280 像素的图片会缩小到这个尺寸（与 melo 自己截的屏一样），所以一张很大的照片并不比小图占用更多模型上下文。在任何程序打开文件之前，melo 先从文件头读出图片的尺寸（GIF 的每一帧、HEIC 的每张图都算），超过 1.2 亿像素的会被拒绝。不是图片的文件和损坏的图片同样会被拒绝，并附一句说明该怎么办的话。如果这台 Mac 无法缩放或转换某张图片，melo 会明说（`Save a smaller PNG or JPEG`），而不是原样发送。
+- **不会夹带隐藏信息。** 每张图片在交给模型之前都会被重写，没有经过转换的也一样：EXIF 数据块（相机、时间，常常还有 GPS 位置）、XMP、注释、文本块和图片结尾之后的任何内容都会被去掉。只保留方向和解码所需的少量颜色数值，不保留内嵌的颜色配置文件。melo 无法重写的图片会被拒绝，而不是发送。
 - **多少张。** 一条消息最多 4 张图片，每张缩放前最多 20 MB。一张图片会占用模型的上下文（这个尺寸大约一千个 token），而在本机运行的模型窗口是 8,000 到 32,000 个 token，超过四张会挤掉对话本身。
 - **文本文件。** 最多 8 个文件，每个 256 KB，合计 512 KB，随消息一起发送，方式与终端的 `/attach` 相同。其他类型的文件会回答 `report.pdf: this kind of file is not supported yet. Pictures and text files work.`，页面停在原处：拖到消息框以外的文件，在浏览器或应用里都不会在窗口中被打开。
 - **在对话里。** 消息气泡显示图片和文件名。图片随这一轮一起保存，所以重新加载或重新打开的对话仍会显示它们，**Try again** 会再次发送它们。
-- **不能读图片的模型。** 当所选模型已知读不了图片时，缩略图下面会有一行说明，并链接到 设置 → 模型。melo 不会悄悄丢掉图片：仍然发送会被拒绝，并说明 `This model cannot read pictures. Choose a model that can in Settings → Model, or send the message without the picture.`。如果 melo 无法判断，就会发送图片。
+- **不能读图片的模型。** 当所选模型已知读不了图片时，缩略图下面会有一行说明，并链接到 设置 → 模型。melo 不会悄悄丢掉图片：仍然发送会被拒绝，并说明 `This model cannot read pictures. Choose a model that can in Settings → Model, or send the message without the picture.`。如果 melo 无法判断，就会发送图片。如果模型或其服务器随后因为图片而拒绝这一轮，这一轮会以一行话结束，`This model can't see pictures; choose one that can in Settings → Model`，从此 melo 把该模型当作只能读文字，直到你换了模型，或服务器表示它读得了图片：输入框会提醒，而这一轮的 **Try again** 会被拒绝（`model_text_only`），不会再次发送同一张图片。
 - **等待中的图片留在内存里。** 加了但没发送的图片最多在本机内存里保留 30 分钟（24 张、64 MB），移除或关闭对话后就没有了。消息发送之前不会写入磁盘。
 - **不是任务。** 带图片的消息交给模型，没有任何规则读它，所以不会开始任务；有图片时 **Run as a task** 和 `/task` 会被拒绝（`Pictures cannot start a task. Send them as a message.`）。
 - 客户端用 [`POST /api/uploads`](../../reference/api-v2.md#post-apiuploads)（英文）发送图片，并把它写进这一轮的 `images`。

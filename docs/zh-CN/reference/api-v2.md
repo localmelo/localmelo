@@ -701,7 +701,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 | 400 | `invalid_workspace` | 文件夹不是绝对路径或 `~/` 开头，已不再是目录，或者无法创建默认工作区 |
 | 400 | `text_rejected` | 检查器拒绝了消息文本，与 `/v1/agent/run` 请求的处理方式相同 |
 | 400 | `picture_gone` | 轮次所指的图片已不再等待：已被移除、已过期或已发送 |
-| 409 | `model_text_only` | 轮次带有图片，而对话模型已知读不了图片 |
+| 409 | `model_text_only` | 轮次（或对它的重试）带有图片，而对话模型已知读不了图片 |
 | 409 | `chat_answering` | 对话正在回答任务的提问时，收到了带图片的消息 |
 | 409 | `session_busy` | 该会话中已有轮次正在运行 |
 | 409 | `not_latest_turn` | 重试或撤销所指的轮次不是最新已结束的那一个 |
@@ -781,6 +781,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 - 任务会话返回 409 `task_session_read_only`；它不能作为对话重试。
 - 除非该 id 是最新的、已结束且未撤销的轮次，否则返回 409 `not_latest_turn`：丢失了某个轮次结束信息的客户端，应重试它所持有的那个 id。轮次运行期间返回 409 `session_busy`。
 - 回答任务提问的轮次（`origin` 为 `ask_owner`）返回 409 `not_retryable`：其中的话不是用户说的。
+- 带图片的轮次，当对话模型已知读不了图片时返回 409 `model_text_only`：重试会再次发送同样的图片。
 
 ## POST /api/sessions/{id}/undo
 
@@ -845,9 +846,10 @@ worker 运行或终端对话从 CLI 的文件读取。
 ```
 
 - 返回 201。请求体最多 20 MiB，`Content-Type` 是图片类型（`image/png`、`image/jpeg`、`image/gif`、`image/webp`、`image/heic`、`image/heif`）或 `application/octet-stream`；类型只是提示，网关根据字节判断它是什么。其他路由仍保持 1 MiB 的 JSON 限制。
-- PNG 和 JPEG 的长边不超过 1,280 像素时原样保留，否则缩放到该尺寸；GIF 的第一帧和 WebP 图片变成 PNG，HEIC 图片变成 JPEG，使用这台 Mac 自带的图像工具（`sips`）。`mime_type`、`size_bytes`、`width` 和 `height` 描述的是实际发送的图片。`name` 是可选的查询参数，会去掉路径和控制字符（最多 120 个字符）。
-- `model_reads` 说明对话模型是否读得了图片：`true`、`false`（页面会立刻提醒），或网关无法判断时的 `null`（此时会发送图片）。
-- 图片留在内存里，不写磁盘：同时最多 24 张、64 MiB，先放入的先丢，保留 30 分钟。在 `images` 中写上它的 `id` 的轮次会取走它。超过 20 MiB 返回 413 `too_large`；超过 1.2 亿像素返回 413 `picture_too_many_pixels`；字节不是 PNG、JPEG、GIF、WebP 或 HEIC 图片返回 415 `picture_unsupported`；图片损坏返回 415 `picture_unreadable`；这台 Mac 无法转换返回 415 `picture_convert`；请求体为空返回 400 `invalid_request`。
+- PNG 和 JPEG 的长边不超过 1,280 像素时保留原有像素，否则缩放到该尺寸；GIF（动图也一样）的第一帧和 WebP 图片变成 PNG，HEIC 图片变成 JPEG，使用这台 Mac 自带的图像工具（`sips`）。输出的图片会被再量一次，必须不超过 1,280 像素。`mime_type`、`size_bytes`、`width` 和 `height` 描述的是实际发送的图片。`name` 是可选的查询参数，会去掉路径和控制字符（最多 120 个字符）。
+- 每张图片都会被重写、去掉元数据，不需要改动的也一样：JPEG 只保留图像段（所有 `APPn` 段和注释都会被丢弃，图像结束之后的内容也一样），以及重新写出的两个固定段，即方向和 Adobe 颜色变换；PNG 只保留 `IHDR`、`PLTE`、`IDAT`、`IEND`、`tRNS`、`gAMA`、`cHRM`、`sRGB` 和 `cICP`。EXIF（相机、时间、GPS）、XMP、注释、文本块和内嵌的颜色配置文件都不会到达模型。结构不完整的图片会以 `picture_unreadable` 被拒绝，而不是原样传下去。
+- `model_reads` 说明对话模型是否读得了图片：`true`、`false`（页面会立刻提醒），或网关无法判断时的 `null`（此时会发送图片）。当某一轮因为图片而被拒绝之后它也是 `false`，直到换了模型，或服务器表示它读得了图片。
+- 图片留在内存里，不写磁盘：同时最多 24 张、64 MiB，先放入的先丢，保留 30 分钟。在 `images` 中写上它的 `id` 的轮次会取走它。超过 20 MiB 返回 413 `too_large`；超过 1.2 亿像素返回 413 `picture_too_many_pixels`，依据是文件头里的尺寸（GIF 的每一帧、HEIC 的每张图），在任何程序打开文件之前判断；长边超过 1,280 像素的图片无法缩放（没有 `sips`，或它没能缩小）返回 413 `picture_scale`，因为不会有任何图片未经缩放就被传下去；字节不是 PNG、JPEG、GIF、WebP 或 HEIC 图片返回 415 `picture_unsupported`；图片损坏返回 415 `picture_unreadable`；这台 Mac 无法转换返回 415 `picture_convert`；请求体为空返回 400 `invalid_request`。
 - `GET /api/uploads/{id}` 返回实际发送的图片（已不存在则返回 404 `not_found`），安全策略与 blob 相同。`DELETE /api/uploads/{id}` 丢弃它，无论它是否存在都返回 204。
 
 ## POST /api/sessions/{id}/submissions/{client_request_id}/cancel

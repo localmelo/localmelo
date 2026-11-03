@@ -277,6 +277,10 @@ second try may succeed:
 - A chat request is retried at most twice: after 1 second, then after 4 more
   seconds. If the last attempt fails too, the run ends as `provider_error`.
 - Embedding requests are not retried.
+- A turn that sent pictures to a model that cannot read them is the one error with fixed words: when the server's
+  error names images, or answers 400, 415 or 422 and the model is not reported to read pictures, the run ends as
+  `provider_error` with the error `This model can't see pictures; choose one that can in Settings → Model`, and
+  the console treats that model as text-only (see [Pictures and files in a message](../guides/web-console.md#pictures-and-files-in-a-message)).
 - The error names the request and, when the server answered, gives the HTTP
   status and the first 500 characters of the response body, for example
   `POST /chat/completions failed with HTTP 500: <html> …`.

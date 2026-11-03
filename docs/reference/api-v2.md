@@ -1461,7 +1461,7 @@ These codes answer on the write routes besides the shared ones above:
 | 400 | `invalid_workspace` | the folder is not absolute or `~/`, is no longer a directory, or the default workspace cannot be created |
 | 400 | `text_rejected` | the checker refused the message text, as it does for a `/v1/agent/run` request |
 | 400 | `picture_gone` | a turn named a picture that no longer waits: removed, expired or already sent |
-| 409 | `model_text_only` | a turn has pictures and the chat's model is known not to read them |
+| 409 | `model_text_only` | a turn, or the retry of one, has pictures and the chat's model is known not to read them |
 | 409 | `chat_answering` | a message with pictures arrived while the chat answers a task's question |
 | 409 | `session_busy` | a turn is already running in the session |
 | 409 | `not_latest_turn` | retry or undo named a turn that is not the newest finished one |
@@ -1591,6 +1591,8 @@ Run the newest finished turn's text again.
   `session_busy` while a turn runs.
 - 409 `not_retryable` for a turn that answered a task's question
   (`origin` `ask_owner`): its words are not the person's.
+- 409 `model_text_only` for a turn with pictures when the chat's model is known not to read them: the retry
+  would send the same pictures again.
 
 ## POST /api/sessions/{id}/undo
 
@@ -1677,16 +1679,27 @@ Stage a picture for a message. The body is the picture's bytes, not JSON: the on
 - 201. The body is at most 20 MiB and its `Content-Type` an image type (`image/png`, `image/jpeg`,
   `image/gif`, `image/webp`, `image/heic`, `image/heif`) or `application/octet-stream`; the type is only a
   hint, since the gateway decides what the bytes are from the bytes. Every other route keeps its 1 MiB JSON limit.
-- PNG and JPEG are kept as they are when their long side is at most 1,280 pixels, and otherwise scaled to it;
-  the first frame of a GIF and a WebP picture become PNG and a HEIC picture becomes JPEG, with the Mac's own
-  image tool (`sips`). `mime_type`, `size_bytes`, `width` and `height` describe the picture as it will be sent.
+- PNG and JPEG keep their pixels when their long side is at most 1,280 pixels, and otherwise are scaled to it;
+  the first frame of a GIF (an animated one too) and a WebP picture become PNG and a HEIC picture becomes JPEG,
+  with the Mac's own image tool (`sips`). What leaves is measured again and must fit in 1,280 pixels.
+  `mime_type`, `size_bytes`, `width` and `height` describe the picture as it will be sent.
   `name` is the optional query parameter, cleaned of a path and control characters (at most 120 characters).
+- Every picture is rewritten without metadata, also one that needed no change: a JPEG keeps only its image
+  segments (every `APPn` segment and comment is dropped, and so is anything after the end of the image) and, as
+  two fixed segments written afresh, its orientation and Adobe color transform; a PNG keeps only `IHDR`, `PLTE`,
+  `IDAT`, `IEND`, `tRNS`, `gAMA`, `cHRM`, `sRGB` and `cICP`. EXIF (the camera, the time, GPS), XMP, comments,
+  text chunks and an embedded color profile do not reach the model. A picture whose structure does not hold
+  together is refused as `picture_unreadable`, not passed on.
 - `model_reads` says whether the chat's model reads pictures: `true`, `false` (the page warns at once) or `null`
-  when the gateway cannot tell (a picture is then sent).
+  when the gateway cannot tell (a picture is then sent). It is `false` also after a turn was refused for its
+  pictures, until the model changes or its server says it reads them.
 - The picture waits in memory, not on disk: at most 24 pictures and 64 MiB at once, the oldest first, and 30
   minutes. A turn that names its `id` in `images` takes it. 413 `too_large` over 20 MiB; 413 `picture_too_many_pixels`
-  over 120 million pixels; 415 `picture_unsupported` for bytes that are not a PNG, JPEG, GIF, WebP or HEIC picture;
-  415 `picture_unreadable` for a damaged one; 415 `picture_convert` when this Mac cannot convert it; 400 `invalid_request` for an empty body.
+  over 120 million pixels, judged from the sizes in the file's headers (every frame of a GIF, every image of a HEIC)
+  before anything opens the file; 413 `picture_scale` when a picture over 1,280 pixels cannot be scaled (no `sips`,
+  or it did not shrink it), since nothing is passed on unscaled; 415 `picture_unsupported` for bytes that are not a
+  PNG, JPEG, GIF, WebP or HEIC picture; 415 `picture_unreadable` for a damaged one; 415 `picture_convert` when this
+  Mac cannot convert it; 400 `invalid_request` for an empty body.
 - `GET /api/uploads/{id}` returns the picture as it will be sent (404 `not_found` when it is gone), with the
   policy of a blob. `DELETE /api/uploads/{id}` drops it and answers 204 whether or not it was there.
 
