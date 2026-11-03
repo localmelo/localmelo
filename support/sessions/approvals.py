@@ -47,6 +47,7 @@ from localmelo.melo.contracts.approvals import (
     review_mode,
     site_grant,
     stays_for_chat,
+    window_grant,
 )
 from localmelo.melo.contracts.folders import covers
 from localmelo.melo.contracts.review import (
@@ -247,7 +248,9 @@ class RememberingPolicy:
                 origin="policy",
             )
         if request.tool_name in self._granted and (
-            covered_by_grant(request.review) or site_grant(request)
+            covered_by_grant(request.review)
+            or site_grant(request)
+            or window_grant(request)
         ):
             return ApprovalDecision(True, origin="session")
         if (

@@ -7,9 +7,11 @@ touches the real screen.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import sys
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -22,9 +24,11 @@ from localmelo.support.browser import desktop as desktop_mod
 from localmelo.support.browser import provider as provider_mod
 from localmelo.support.browser.desktop import (
     SHOT_MAX_BYTES,
+    AppWindow,
     DesktopHelper,
     DesktopWatch,
     Front,
+    Mark,
     parse_front,
 )
 from localmelo.support.browser.driver import Act, ActResult
@@ -90,6 +94,42 @@ class Clock:
             then()
 
 
+class Pacer:
+    """The pause between two background samples: none passes until a test ticks.
+
+    The sampler parks here; ``tick`` lets it take one sample and returns when it
+    is parked again (or has ended), so a test decides what the screen shows at
+    each sample.
+    """
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.waiting = asyncio.Event()
+        self._go: asyncio.Queue[None] = asyncio.Queue()
+
+    async def __call__(self, seconds: float) -> None:
+        self.calls += 1
+        self.waiting.set()
+        await self._go.get()
+        self.waiting.clear()
+
+    async def tick(self, provider: BrowserToolProvider) -> None:
+        end = time.monotonic() + 5.0
+
+        def over() -> bool:
+            task = provider._sampler
+            return task is None or task.done() or time.monotonic() > end
+
+        while not self.waiting.is_set():
+            if over():
+                return
+            await asyncio.sleep(0.01)
+        calls = self.calls
+        self._go.put_nowait(None)
+        while self.calls == calls and not over():
+            await asyncio.sleep(0.01)
+
+
 class Screen:
     """The fake helper's screen file, and the app the test puts in front."""
 
@@ -100,6 +140,7 @@ class Screen:
         self.state: dict[str, Any] = {"windows": [BROWSER, MINE]}
         self.front: Front | None = Front("Safari", "com.apple.Safari", 10)
         self.clock = Clock()
+        self.pacer = Pacer()
         self.save()
 
     def save(self) -> None:
@@ -138,13 +179,57 @@ def screen(tmp_path: Path) -> Screen:
     return Screen(tmp_path)
 
 
-def watch(screen: Screen, *, helper: bool = True) -> DesktopWatch:
+class Trusting(DesktopWatch):
+    """A watch that reads every window that appears inside the deadline on its own.
+
+    The tests of the timing (deadline, late wait, sampler) are about when a window is
+    noticed, not about who may see it, so they use this; the real rule (only the app
+    the page asked for is read on its own, any other waits for the person) is tested
+    with ``watch(..., strict=True)``.
+    """
+
+    def _alone(self, mark: Mark, window: AppWindow) -> bool:
+        return True
+
+
+# The apps of the fake screen's windows, by process id (what lsappinfo would say).
+BUNDLES = {
+    10: "com.apple.Safari",
+    20: "com.apple.Notes",
+    70: "com.example.chat",
+    80: "com.example.sso",
+}
+
+
+def watch(
+    screen: Screen,
+    *,
+    helper: bool = True,
+    asked: tuple[str, ...] = (),
+    strict: bool = False,
+) -> DesktopWatch:
+    """A watch over *screen*.
+
+    *asked* are the names of the app an address of another kind opens (none: not
+    known). Unless *strict*, every window inside the deadline is read on its own.
+    """
     command = [sys.executable, "-I", FAKE, str(screen.path), str(screen.log_path)]
-    return DesktopWatch(
+
+    async def handler(url: str) -> frozenset[str]:
+        return frozenset(asked)
+
+    async def bundle(pid: int) -> str:
+        return BUNDLES.get(pid, "")
+
+    kind = DesktopWatch if strict else Trusting
+    return kind(
         DesktopHelper(command) if helper else None,
         front=screen.in_front,
+        handler=handler,
+        bundle=bundle,
         clock=screen.clock,
         sleep=screen.clock.sleep,
+        pace=screen.pacer,
     )
 
 
@@ -304,7 +389,7 @@ async def test_browser_wait_stops_early_when_another_apps_window_appears(
     screen: Screen, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(provider_mod, "WATCH_S", 0.01)
-    driver = world()
+    driver = world(button("Quick sign-in"))
     real = driver.wait
     looks = 0
 
@@ -320,6 +405,8 @@ async def test_browser_wait_stops_early_when_another_apps_window_appears(
     try:
         with asking(Asks()):
             await run(tools, "browser_open", url=HOME)
+            # A wait tells a window only inside the deadline of an act that can hand off.
+            await run(tools, "browser_click", ref="e1")
             out = await run(
                 tools, "browser_wait", until="text", text="never", seconds=30
             )
@@ -359,10 +446,12 @@ async def test_a_panel_of_an_app_that_came_to_the_front_is_new_only_against_its_
         await provider.close()
     assert "(w1)" not in once.text
     assert (
-        "- Chat came to the front with a window 'Sign in to example.com' that melo "
-        "cannot confirm appeared after its step, so it does not read or press it. "
-        "Tell the person to answer it in Chat."
+        "- Chat came to the front: it may show a window melo cannot see. Tell the "
+        "person to answer it in Chat."
     ) in once.text
+    assert (
+        "Sign in to example.com" not in once.text
+    )  # a window it cannot place: no title
     assert unread.is_error and "No window of another app appeared" in unread.text
     assert "Chat opened a window 'Confirm sign-in' (w1)" in again.text
     assert "Sign in to example.com" not in again.text  # there before: not new
@@ -390,7 +479,8 @@ async def test_a_panel_open_before_the_act_is_never_read_when_its_app_comes_forw
     finally:
         await provider.close()
     assert "(w1)" not in out.text and "its buttons" not in out.text
-    assert "cannot confirm appeared after its step" in out.text
+    assert "- Chat came to the front: it may show a window melo cannot see." in out.text
+    assert "Private notes" not in out.text  # no title of a window melo cannot place
     assert read.is_error
     assert not [name for name, _ in screen.calls() if name == "get_window_state"]
 

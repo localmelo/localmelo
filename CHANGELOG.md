@@ -85,10 +85,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   never types into other apps. Settings → Chats and
   folders → **Other apps' windows** (shown while browsing is on; `[browser] app_windows`, on by default)
   turns it off, and says under the switch whether the helper is installed and has Accessibility.
-  A window that comes a moment after the step is still seen: melo keeps its view of the screen until a
-  later step of any kind (reading, waiting, a picture, the next click) has looked, and tells what is new
-  since, once; after a click, a click on a point or a send that changed nothing on the page it also watches
-  for up to 3 seconds and stops as soon as a window appears or the page changes by itself. A chat is told
+  A window that comes a moment after the step is still seen: after a click, a click on a point or a send,
+  melo tells a window that appeared (once; the app the page asked for is read right away, and a window of
+  any other app asks you first, "Chat opened a window right after melo's click: let melo see it?", with
+  Allow once, Allow Chat in this chat and Don't allow; Auto never answers it, and nothing about a window you
+  do not allow, not even the app's name, goes to the model) in that step and, whenever it comes, in the next
+  one: for those 15 seconds melo also looks at the
+  screen about once a second in the background, so a window that comes while the model is still working out
+  its next step is noticed when it appears, not when the step runs. After a click, a click on a point or a send
+  that changed nothing on the page it also watches for up to 3 seconds in all, slow calls included, and
+  stops as soon as a window appears or the tab goes to another address or opens another tab. Only such a
+  step opens those 15 seconds, counted from the moment the act is sent (after any approval it waited on);
+  reading, waiting, pictures and searching never do or extend them, so a window you open later, or one
+  that was already there when the act was sent, is never named, read or pressed. A chat is told
   once when the helper is installed but cannot run: it needs Accessibility (System Settings → Privacy &
   Security → Accessibility), which is Cua Driver's own permission, not melo's. `GET /api/health` carries
   `desktop_helper` (`missing`, `installed`, `granted`, `no_grant` or `failed`; `?helper=check` looks once).
@@ -825,6 +834,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- melo acts for you, in your name. Applying with your resume, signing in, filling in and submitting a form, sending a message as you and booking are done when you ask or authorize them: the model no longer refuses a step because it speaks in your name or cannot be undone, and it does not hand back a list of links or leave the last click to you. The approval cards (Ask) and Auto's review decide which steps you confirm, never the model, and only what would harm other people is declined. Every chat's and every task's instructions say so, the main chat and the side chats add a one-line reminder after your message, and a recalled reply in which melo refused or said a step was blocked is no precedent. The main chat is told that a request to do something online is work (the browser, or a task for the many-step part), not advice, and a go-ahead such as `I authorize you to apply` or `我授权你去投简历` starts that work like any other request.
 - In Auto, the goal decides: the steps a task plainly needs run without asking, and the risky
   ones still ask. On the site or app the chat is about, opening and reading it, signing in the
   way you described, picking options, filling in and sending the task's own form and reading

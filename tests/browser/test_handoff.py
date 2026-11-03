@@ -29,8 +29,14 @@ from localmelo.tests.browser.fakes import FakeDriver, button
 from localmelo.tests.browser.test_acting import HOME, Asks, asking, world
 from localmelo.tests.browser.test_chrome import FAKE as FAKE_CHROME
 from localmelo.tests.browser.test_chrome import Peer
+from localmelo.tests.browser.test_other_windows import (
+    BUNDLES,
+    SIGN_IN,
+    Screen,
+    run,
+)
 from localmelo.tests.browser.test_other_windows import FAKE as FAKE_DESKTOP
-from localmelo.tests.browser.test_other_windows import SIGN_IN, Screen, run
+from localmelo.tests.browser.test_window_cards import settled
 
 CHAT = "chat://login?token=secret-token"
 
@@ -84,10 +90,19 @@ def chrome_watch(screen: Screen) -> DesktopWatch:
         str(screen.path),
         str(screen.log_path),
     ]
+
+    async def no_handler(url: str) -> frozenset[str]:
+        return frozenset()  # LaunchServices is never asked here
+
+    async def bundle(pid: int) -> str:
+        return BUNDLES.get(pid, "")
+
     return DesktopWatch(
         DesktopHelper(command),
         skip=MELO_APPS,
         front=screen.in_front,
+        handler=no_handler,
+        bundle=bundle,
         clock=screen.clock,
         sleep=screen.clock.sleep,
     )
@@ -169,8 +184,40 @@ async def test_the_apps_window_after_melo_opens_it_is_told_on_that_step(
     opener = Opener(then=lambda: screen.clock.at(1.0, lambda: screen.show(SIGN_IN)))
     out = await clicked(opener, Asks(), chrome_watch(screen))
     assert opener.opened == [CHAT]
-    assert "Chat opened a window 'Sign in to example.com' (w1)" in out.text
+    # The app melo opened is the one the page asked for: its window is told on its own.
+    assert (
+        "Chat (the app the page asked for) opened a window 'Sign in to example.com' (w1)"
+    ) in out.text
     assert "its buttons: 'Allow', 'Cancel'" in out.text
+
+
+async def test_after_melo_opens_the_app_another_apps_window_still_waits_for_the_card(
+    tmp_path: Path,
+) -> None:
+    """The app melo opened is the one the page asked for; any other app's window is the person's call."""
+    screen = Screen(tmp_path)
+    other = {
+        **SIGN_IN,
+        "window_id": 8,
+        "pid": 80,
+        "app_name": "Single Sign-On",
+        "bundle": "com.example.sso",
+        "title": "Approve the sign-in",
+    }
+    opener = Opener(then=lambda: screen.clock.at(1.0, lambda: screen.show(other)))
+    asks = Asks(deny=("window-read:",))
+    driver = handing_off(world(button("Open in Chat")), {"Open in Chat": CHAT})
+    provider, found = await tools(driver, opener, chrome_watch(screen))
+    try:
+        with asking(asks):
+            await run(found, "browser_open", url=HOME)
+            out = await run(found, "browser_click", ref="e1")
+            await settled(provider)
+    finally:
+        await provider.close()
+    assert opener.opened == [CHAT]
+    assert "Single Sign-On" not in out.text and "Approve the sign-in" not in out.text
+    assert "window-read:com.example.sso" in asks.names
 
 
 def test_an_address_of_another_apps_kind_is_told_from_a_page_and_the_browsers_own() -> (

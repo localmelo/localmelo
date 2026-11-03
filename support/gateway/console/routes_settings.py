@@ -257,7 +257,11 @@ async def desktop_helper_json(
     watches other apps' windows, is the helper started (and stopped) to look.
     """
     watching = cfg.browser.driver != "off" and cfg.browser.app_windows is True
-    status = await desktop.helper_status(check=check and watching)
+    try:
+        status = await desktop.helper_status(check=check and watching)
+    except Exception:  # health never fails for one part (see running_status)
+        logger.warning("Could not read the desktop helper's status", exc_info=True)
+        return {"state": "failed", "app": "", "pictures": None, "problem": "unknown"}
     return status.to_json()
 
 

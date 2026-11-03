@@ -144,6 +144,7 @@ from localmelo.support.sessions.approvals import (
     chat_mode,
 )
 from localmelo.support.sessions.hub import SessionHub
+from localmelo.support.sessions.identity import ACTING_RULE
 from localmelo.support.sessions.runner import SessionRunner
 from localmelo.support.sessions.store import SessionStore, SessionStoreError
 from localmelo.support.web import WebFetchProvider
@@ -177,7 +178,7 @@ WORKER_GUIDE = (
     "just to ask the person in your report. End your report with one line, "
     "Ending: ready (done as asked), Ending: blocked: <what only the person can "
     "give> (say blocked only then), Ending: failed or Ending: dropped (made "
-    "moot); code checks it against your own test runs and commits."
+    "moot); code checks it against your own test runs and commits. " + ACTING_RULE
 )
 # The heading of a task's context pack on its first request: the notes are data.
 TASK_PACK_HEADER: Final = (

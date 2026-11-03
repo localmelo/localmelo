@@ -37,6 +37,7 @@ from localmelo.support.gateway.console.front import (
     front_options,
 )
 from localmelo.support.sessions.agents import session_options
+from localmelo.support.sessions.identity import ACTING_NOTE
 from localmelo.support.sessions.store import StoredEvent
 from localmelo.tests.sessions.helpers import ScriptedLLM, answer, tool_call
 
@@ -170,8 +171,8 @@ def _hear(console: Console, session: str, kind: str, data: dict[str, Any]) -> No
 
 
 def _asked(llm: ScriptedLLM, request: int = -1) -> str:
-    """The user message the model was last sent."""
-    return str(llm.requests[request][-1].content)
+    """The user message the model was last sent, without the chat's reminder."""
+    return str(llm.requests[request][-1].content).removesuffix("\n\n" + ACTING_NOTE)
 
 
 # ── 1. The task tools and code's rules ──

@@ -96,7 +96,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 
 ### melo 如何介绍自己
 
-- 每个对话都会先告诉模型它是谁，这样问“你是谁？”时，回答的是 melo：localmelo 的 melo，一个开源智能体，在你的文件夹里用工具工作，改动任何东西之前先询问你。
+- 每个对话都会先告诉模型它是谁，这样问“你是谁？”时，回答的是 melo：localmelo 的 melo，一个开源智能体，在你的文件夹里用工具工作，并替你行事；步骤改动任何东西之前由它的批准卡片询问你，而不是由模型自己来问。
 - 被问到时，它说出自己运行在哪个模型上；不把自己说成该模型原本的助手；并用你书写的语言和文字回答。
 - 它像横幅那样写出服务器的名称（`oMLX`、`Ollama`、`OpenAI-compatible server`，或云服务商的名称），并说明服务器是否在本机；`/model` 和 `/backend` 会让下一轮用新的选择开始。
 - 它还会写明对话记得什么：默认只记得本次对话最近的消息，不记得其他对话；如果记忆会在多次运行之间保留（见[记忆](memory.md#keep-memory-between-runs)），还会有 localmelo 在本机保存、并与你的问题相符的简短笔记。你文件夹里的文件不是记忆。

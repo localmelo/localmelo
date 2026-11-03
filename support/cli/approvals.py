@@ -40,6 +40,7 @@ from localmelo.melo.contracts.approvals import (
     DenyAllPolicy,
     grant_offered,
     never_granted,
+    window_question,
 )
 from localmelo.melo.contracts.review import because, review_title, url_site
 from localmelo.support.cli import edits
@@ -196,7 +197,8 @@ def panel_text(
     text = _says(request, _tool_panel(request, target, width, minus, show_tier))
     review = request.review
     title = review_title(review, folder_name(request.workspace_root))
-    if review is None or not title:
+    if review is None or not title or window_question(request):
+        # Another app's window is asked about the same way in Ask and in Auto: its own words.
         return text
     note, changed = escape_arguments(f"melo asks because this call {because(review)}.")
     return dataclasses.replace(
@@ -430,6 +432,27 @@ def _tool_panel(
             body,
             escaped_any,
         )
+    if tool.startswith("window-read:"):
+        # A window another app put up right after melo's own step in the browser: nothing
+        # about it goes to the model unless the person allows it here. The title is for the
+        # person only.
+        app = shown(str(arguments.get("app") or tool[len("window-read:") :]))
+        window = shown(str(arguments.get("window") or ""))
+        said = f"{app} opened a window right after melo's click: let melo see it?"
+        body = [("", row) for row in _wrapped([said], width)]
+        if window:
+            body += [("", row) for row in _wrapped([f"The window: “{window}”."], width)]
+        note = (
+            "Only you see its name. If you allow it, melo reads the window's text and "
+            "buttons and can press one only with your say. melo never types into other apps."
+        )
+        body += [("muted", row) for row in _wrapped([note], width)]
+        return PanelText(
+            "Let melo see another app's window?",
+            f"{app}{mark} · another app's window",
+            body,
+            escaped_any,
+        )
     if tool.startswith("browser:"):
         site = shown(str(arguments.get("site") or tool[len("browser:") :]))
         if background:
@@ -531,6 +554,9 @@ def session_option(request: ApprovalRequest) -> str:
     if request.tool_name.startswith("handoff:"):
         app = str(request.arguments.get("app") or "that app")
         return f"Yes, and let pages open {app} for the rest of this chat"
+    if request.tool_name.startswith("window-read:"):
+        app, _ = escape_arguments(str(request.arguments.get("app") or "this app"))
+        return f"Yes, and allow {app} in this chat"
     return f"Yes, and allow every {request.tool_name} call in this session"
 
 
