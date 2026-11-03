@@ -759,6 +759,9 @@ class DesktopWatch:
         # page asked for: only the person decides whether melo may see one, so nothing
         # about them is told to a model until then. The provider takes them (``take_pending``).
         self._pending: list[AppWindow] = []
+        # The apps of those windows until the person lets melo see one of them: such an
+        # app is never named, not even by the front-app line, while it is held.
+        self._held: set[str] = set()
         # The apps that came to the front after an act, newest first: their
         # windows on every layer are listed before each later act.
         self._pids: list[int] = []
@@ -1018,9 +1021,17 @@ class DesktopWatch:
             for window, names in read
         ]
         self._pending.extend(waiting[:MAX_PENDING])
+        self._held.update(w.app.lower() for w in waiting)
         # An app that came to the front with a window waiting for the person is not named
-        # either; one with no window melo can place is named, by name only.
-        if not seen and not waiting and moved and front is not None:
+        # either, nor one whose window is held for the person or was not allowed; one with
+        # no window melo can place is named, by name only.
+        if (
+            not seen
+            and not waiting
+            and moved
+            and front is not None
+            and front.name.lower() not in self._held
+        ):
             seen = [Seen("", front.name)]
         return seen, fresh
 
@@ -1042,6 +1053,7 @@ class DesktopWatch:
         except DesktopError:
             return None
         names = tuple(c.name for c in state.controls[:MAX_BUTTONS])
+        self._held.discard(window.app.lower())
         return Seen(self._adopt(window), window.app, window.title, names)
 
     async def window_allowed(self, ask: ToolAsk | None, window: AppWindow) -> bool:
@@ -1113,6 +1125,7 @@ class DesktopWatch:
         """Nothing that appeared before is melo's any more, and a helper that could not run is tried again."""
         self._kept.clear()
         self._pids.clear()
+        self._held.clear()
         self._noticed = False
         if self._helper is not None:
             self._helper.recheck()
