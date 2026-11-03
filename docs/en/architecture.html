@@ -46,7 +46,7 @@
     <article class="content">
       <header class="doc-hero" id="overview">
         <h1>Architecture</h1>
-        <p class="lead">How localmelo's parts fit together, as the code is today; what is not built yet is tagged planned.</p>
+        <p class="lead">How localmelo's parts fit together, as the code is today; the status table at the end lists what is not built yet.</p>
       </header>
 
       <section class="section" id="diagram">
@@ -85,7 +85,7 @@
               <span class="node-sub"><span aria-hidden="true">↑</span> results and news</span>
               <span class="node-sub"><span aria-hidden="true">↑</span> asks for help</span>
               <span class="node-sub"><span aria-hidden="true">↓</span> context pack: notes about you, your preferences and this project, matched to the task</span>
-              <span class="node-sub"><span aria-hidden="true">↓</span> your own words and what its chat picks <span class="tag-planned">planned</span></span>
+              <span class="node-sub"><span aria-hidden="true">↓</span> your own words and what its chat picks</span>
             </div>
             <a class="node hub" id="f-sched" href="#c-scheduler" style="left:290px;top:262px;width:220px;min-height:72px">
               <span class="node-title">Task scheduler</span>
@@ -114,14 +114,13 @@
 
         <div class="legend">
           <div class="legend-item"><div class="legend-line"></div>calls and data inside localmelo</div>
-          <div class="legend-item"><span class="tag-planned">planned</span> not built yet</div>
         </div>
         <ul>
           <li>You talk to the main chat. Side chats have the same abilities and share its memory.</li>
           <li>Bigger work goes to the task scheduler, from the main chat, a side chat or a scheduled chore. It orders tasks by level, P0 to P5, and by model slot, then starts workers; a worker's name says which chat it works for.</li>
           <li>A task belongs to the chat that started it: its news and result come back there, and a finished side chat leaves a summary for the main chat.</li>
           <li>A chat can check on a worker and message it. A worker asks its chat for help; only the chat asks you, and only you, or Auto's review, approve a step.</li>
-          <li>A worker starts with a context pack of notes about you, your preferences and this project. Your own words, and what its chat picks, join it later <span class="tag-planned">planned</span>.</li>
+          <li>A task a chat starts comes with your own words, what the chat picks, and a context pack of notes about you, your preferences and this project.</li>
         </ul>
 
         <h3 id="core">The agent's core</h3>
@@ -238,7 +237,7 @@
                 <span class="node-part-title">Brief</span>
                 <span class="node-sub">The task's objective</span>
                 <span class="node-sub">Context pack: notes about you, your preferences and this project, matched to the task</span>
-                <span class="node-sub">Your own words and what its chat picks <span class="tag-planned">planned</span></span>
+                <span class="node-sub">Your own words and what its chat picks</span>
               </div>
               <div class="node-part">
                 <span class="node-part-title">Channel</span>
@@ -254,14 +253,13 @@
 
         <div class="legend">
           <div class="legend-item"><div class="legend-line"></div>calls and data inside localmelo</div>
-          <div class="legend-item"><span class="tag-planned">planned</span> not built yet</div>
           <div class="legend-item"><div class="legend-box"></div>guarded by the checker</div>
         </div>
         <p class="diagram-caption">A worker finishes one job fast. It has no long-term memory of its own, it asks its chat first, and only the chat asks you.</p>
         <ul>
           <li>It runs the same loop as a chat's agent: plan a step, run its tools through the executor, and pass every call through the checks.</li>
-          <li>It starts with a brief from its chat: the task's objective, and a context pack of notes about you, your preferences and this project, matched to the task.</li>
-          <li>When something blocks it, it asks its chat for help; the chat answers, or asks you. Your own words, and what its chat picks, join the brief later <span class="tag-planned">planned</span>.</li>
+          <li>It starts with a brief from its chat: the task's objective, your own words, what its chat picks, and a context pack of notes about you, your preferences and this project, matched to the task.</li>
+          <li>When something blocks it, it asks its chat for help; the chat answers, or asks you.</li>
           <li>A step budget stops it, and its last two steps are kept for the commit and the report.</li>
           <li>You approve its steps, or Auto's review does; in Auto it writes only in its folder.</li>
         </ul>
@@ -532,7 +530,7 @@
               <tr><td>Side chats as equals</td><td>Side chats start tasks and get their results, and a finished side chat leaves a summary for the main chat</td><td><span class="chip done">done</span></td></tr>
               <tr><td>Workers asking their chat</td><td>A worker sends its chat a short request for help, each task comes with a context pack of notes about you, your preferences and this project, and only the chat asks you</td><td><span class="chip done">done</span></td></tr>
               <tr><td>Reasoning notes</td><td>Compress modes that keep notes and recall them in the loop</td><td><span class="chip testing">testing</span></td></tr>
-              <tr><td>Your words in a task</td><td>A task sees your own words, and the memory items its chat picks for it</td><td>planned</td></tr>
+              <tr><td>Your words in a task</td><td>A task sees your own words, and the memory items its chat picks for it</td><td><span class="chip done">done</span></td></tr>
               <tr><td>Computer use</td><td>Acting on pages in the browser, asking before anything that matters</td><td>planned</td></tr>
               <tr><td>Learning while idle</td><td>Offline review of past work</td><td>planned</td></tr>
             </tbody>

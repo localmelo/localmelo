@@ -9,6 +9,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A task the chat starts now begins with what the chat knew when you asked, so a short request
+  such as "go look it up" or "read his résumé first" keeps who or what it is about. After its
+  request, each part marked as data: what you typed, when the request the task got does not hold
+  it already (cut at a sentence end at 1,200 characters); the chat's newest three turns (1,200
+  characters at most); and what the chat's turn opened, found with its memory search or recalled,
+  in that order, each once, with no ids and no People or Decisions notes. That part has at most
+  900 of the context pack's 1,500 characters, ahead of your notes: an opened turn is cut at a
+  sentence end first, then the lowest lines go. With memory off a task still gets your words and
+  the chat's turns, but nothing recalled and no notes; a turn melo began itself hands no items. All of it is made once, kept in the task's `spec`
+  (`own_words`, `chat_turns`, `chat_picked`) and folded on the task page under "What melo told
+  the task", each part under its own label. Each part is fenced as data, so nothing inside it can
+  pose as a heading or a speaker; a task started from a "Start this as a task?" card gets the
+  turns before that card and what the chat recalled for the request that offered it, checked again
+  at Start; near the request limit the lowest parts are left out first. #463.
+- Developer only, not visible by default: a cut excerpt can be opened whole. With
+  `[memory] excerpt_open = "on"` (`-X memory.excerpt_open=on` for one run; the default, `"off"`,
+  changes nothing) recall keeps its excerpts of earlier chat turns, but a line that shows less
 - Developer only: memory ingest can ask the encoder for several windows at once (`[memory] compress_parallel`, 1-8, default 1); the items are the same, only faster on a server that batches requests. Part of #428.
 - A cut excerpt can be opened whole (`[memory] excerpt_open`, on by default: see Changed).
   Recall keeps its excerpts of earlier chat turns, but a line that shows less
@@ -1646,6 +1663,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Docs
 
+- The architecture page drops its last planned mark, in English and Chinese. A task seeing your own words and the memory items its chat picks is built (#463), so the channel line and the brief line in the two diagrams, the notes under them and the status table row read as built text, and the diagrams' legends lose the planned entry; the page's lead points to the status table for what is not built yet.
 - The architecture page shows what is built, in English and Chinese. A side chat starting tasks, a finished side chat's summary for the main chat, a worker asking its chat for help and a task's context pack of notes about you, your preferences and this project lose their planned mark, and the status table marks them done; the one part still planned is a task seeing your own words and the memory items its chat picks (#463). In "Inside a worker" the brief and the channel are one part, "From its chat", next to the chat box, because both come from the owning chat. The Workers, Chats and Around-the-agent notes say the same.
 - The architecture page has two new diagrams, in English and Chinese. "How work flows" shows the main chat and a group of side chats, scheduled chores, the task scheduler, one group of workers (told apart by the chat each works for), the channel between a chat and its workers, and approvals; "Inside a worker" is the agent's core without long-term memory, with its brief, step budget and finishing note, scheduler level and slot, channel to its chat, and approvals with the Auto sandbox. Parts not built yet (side chats starting tasks, a worker asking its chat for help, the context pack, a side chat's summary for the main chat) are tagged planned and drawn dotted; the status table lists them, the Workers card says a worker keeps no long-term memory of its own, and the "Around the agent" note no longer says workers recall memory. The two existing diagrams are unchanged ([#371]).
 - The website and both READMEs catch up with October 30 and 31: the home page has short sections for Auto mode, reminders and stopped tasks that continue, each with a picture and a terminal block, and a card for the Chinese console; priorities read P0 to P5; the Chinese pages show Chinese screenshots; the roadmap board moves Auto mode, Chinese, reminders, stop-and-continue and the self-runs to Done and plans bringing in what other assistants remember and tidying notes while the computer is idle; the Updates page has an October 31 entry; the Architecture page shows Auto's review and write sandbox in the checker; both READMEs list the new features. `scripts/usage_blocks.toml` blocks can have `mode = "chat"` for what you type into melo's own chat (messages marked `›`) ([#368]).
