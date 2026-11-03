@@ -1189,6 +1189,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   command of the review's baselines and on tens of thousands of generated texts, so no command is
   cut differently. A word said again and again in one command, such as 50,000 times, is looked up
   once, not 50,000 times (2.3 seconds before, 0.1 now).
+  Python code that splits a long command text it holds (`shlex.split` or `.split()` of a string
+  of 200,000 characters) is reviewed in the same time (2.3 seconds before, 0.08 now).
 
 - With `[memory] note_gate` above `typed` (a developer setting), a page, a file or a finished
   task's result no longer supports a note by text a reader of it would not see, or by an order to
