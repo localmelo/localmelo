@@ -72,6 +72,7 @@ from localmelo.support.browser import addresses, fields, render, sites
 from localmelo.support.browser.driver import (
     MAX_TYPED_CHARS,
     Act,
+    ActResult,
     BrowserDriver,
     BrowserError,
     Element,
@@ -108,7 +109,7 @@ PAGE_NOTE = (
     'tab="new". Use the tab ids browser_tabs shows. browser_click, '
     "browser_type and browser_select act on the page you read, by ref; never "
     "type a password, card number or one-time code: ask the user to do that in "
-    "the window."
+    "the window. Each act returns what changed and the page again."
 )
 
 _ROLES = ["link", "button", "textbox", "checkbox", "select", "any"]
@@ -516,7 +517,13 @@ class BrowserToolProvider(BaseToolProvider):
             raise BrowserError("No page is open in that tab. Use browser_open first.")
         return tab_id
 
-    async def _read_tab(self, info: TabInfo, done: set[str], view: str = "all") -> str:
+    async def _read_tab(
+        self,
+        info: TabInfo,
+        done: set[str],
+        view: str = "all",
+        changes: list[str] | None = None,
+    ) -> str:
         """Read the page the tab landed on, after checking where it landed."""
         if info.url:
             await self._admit(info.url, info.id, done)
@@ -537,7 +544,7 @@ class BrowserToolProvider(BaseToolProvider):
         self._ref_n += len(snap.elements)
         self._snaps[info.id] = snap
         self._tab = info.id
-        return render.render_page(snap, view=view)
+        return render.render_page(snap, view=view, changes=changes)
 
     async def _admit_frames(self, frames: tuple[str, ...], tab: str) -> None:
         """Refuse a page whose frames, as far as they can be read, are on a local address."""
@@ -755,12 +762,7 @@ class BrowserToolProvider(BaseToolProvider):
             )
         return before
 
-    async def _run_act(
-        self,
-        tab_id: str,
-        act: Act,
-        before: set[str],
-    ) -> str:
+    async def _run_act(self, tab_id: str, act: Act, before: set[str]) -> ActResult:
         """Do *act*; when it fails after it may have run, the tab is checked before anything else."""
         try:
             return await self._driver.act(self._raw[tab_id], act)
@@ -850,17 +852,48 @@ class BrowserToolProvider(BaseToolProvider):
         return opened, urls
 
     async def _after(
-        self, tab_id: str, said: str, before: set[str], done: set[str]
+        self,
+        tab_id: str,
+        said: str,
+        before: set[str],
+        done: set[str],
+        result: ActResult | None = None,
+        url: str = "",
+        expect: bool = True,
     ) -> str:
-        """Read the page an action left, once every tab it touched has been checked."""
+        """Read the page an action left, once every tab it touched has been checked.
+
+        The reading opens with what changed (see :func:`_change_lines`), and the
+        line before it says when nothing did after a click or Enter (*expect*).
+        """
         opened, urls = await self._verify(tab_id, before)
         landed = opened[0] if opened else tab_id
         if opened:
             said += f" It opened {landed}."
         if landed not in urls:
             raise BrowserError(_NO_ADDRESS)
-        page = await self._read_tab(TabInfo(landed, urls[landed]), done)
+        moved = bool(url) and not opened and urls[landed] != url
+        lines = _change_lines(
+            result, url if moved else "", urls[landed], self._origins.get(tab_id, "")
+        )
+        changes = result.changes if result is not None else None
+        if (
+            expect
+            and changes is not None
+            and not (opened or moved or lines or changes.changed)
+        ):
+            said += " Nothing on the page changed."
+        elif changes is not None and not changes.quiet:
+            said += " The page was still changing: browser_read shows it later."
+        page = await self._read_tab(TabInfo(landed, urls[landed]), done, changes=lines)
         return f"{said}\n{page}"
+
+    def _done_line(self, verb: str, ref: str, result: ActResult) -> str:
+        """``Clicked e12 (via browser).``, with why a better way was passed over."""
+        how = f"via {result.via}"
+        if result.why:
+            how += f": {result.why}"
+        return _said(f"{verb} {ref} ({how}).", result.note)
 
     @_guarded
     async def _click(self, ref: str = "", tab: str | None = None, **_: Any) -> str:
@@ -877,12 +910,13 @@ class BrowserToolProvider(BaseToolProvider):
             await self._check_destination(item.href, snap.origin, done)
         elif item.submit:
             await self._submit_checks(snap, item, "click", done)
-        note = await self._run_act(
+        result = await self._run_act(
             tab_id,
             Act("click", snap.url, item, doc=snap.doc, send=bool(item.submit)),
             before,
         )
-        return await self._after(tab_id, _said(f"Clicked {ref}.", note), before, done)
+        said = self._done_line("Clicked", ref, result)
+        return await self._after(tab_id, said, before, done, result, snap.url)
 
     @_guarded
     async def _type(
@@ -915,7 +949,7 @@ class BrowserToolProvider(BaseToolProvider):
         enter = submit is True or str(submit).lower() == "true"
         if enter:
             await self._submit_checks(snap, item, "enter", done, typed)
-        note = await self._run_act(
+        result = await self._run_act(
             tab_id,
             Act(
                 "type",
@@ -928,10 +962,13 @@ class BrowserToolProvider(BaseToolProvider):
             ),
             before,
         )
-        said = f"Typed {len(typed)} character(s) into {ref}" + (
-            " and pressed Enter." if enter else "."
+        verb = f"Typed {len(typed)} character(s) into"
+        said = self._done_line(verb, ref, result)
+        if enter:
+            said = said.replace(f"{verb} {ref} ", f"{verb} {ref} and pressed Enter ", 1)
+        return await self._after(
+            tab_id, said, before, done, result, snap.url, expect=enter
         )
-        return await self._after(tab_id, _said(said, note), before, done)
 
     @_guarded
     async def _select(
@@ -946,13 +983,14 @@ class BrowserToolProvider(BaseToolProvider):
             raise BrowserError("browser_select needs the option's text.")
         before = await self._acting(tab_id, snap, "choose an option")
         assert before is not None
-        note = await self._run_act(
+        result = await self._run_act(
             tab_id,
             Act("select", snap.url, item, text=str(option), doc=snap.doc),
             before,
         )
+        said = self._done_line("Chose an option in", ref, result)
         return await self._after(
-            tab_id, _said(f"Chose an option in {ref}.", note), before, set()
+            tab_id, said, before, set(), result, snap.url, expect=False
         )
 
     # ── Tabs, waiting, pictures ──
@@ -1068,6 +1106,23 @@ _NO_ADDRESS = (
 
 def _said(line: str, note: str) -> str:
     return f"{line} {note}" if note else line
+
+
+def _change_lines(
+    result: ActResult | None, url: str, now: str, origin: str = ""
+) -> list[str]:
+    """What an action changed, for the top of the page block: page words, cleaned there."""
+    lines: list[str] = []
+    if url:
+        lines.append(
+            f"address: {render.address(url, origin)} -> {render.address(now, origin)}"
+        )
+    changes = result.changes if result is not None else None
+    if changes is not None:
+        lines.extend(f'new text: "{text}"' for text in changes.texts)
+        if changes.target:
+            lines.append(f"the element acted on: {changes.target}")
+    return lines
 
 
 def _stale_ref(ref: object) -> str:

@@ -12,6 +12,9 @@ from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
 ElementKind = Literal["link", "button", "textbox", "checkbox", "select"]
+# How an action was done, best first: the browser's own input on the element melo
+# read (trusted events), or a page script on that element.
+Way = Literal["browser", "page-script"]
 # The most characters one text is typed with. The question that asks to type shows
 # all of it, so it is short enough to read before it is allowed.
 MAX_TYPED_CHARS = 1000
@@ -122,6 +125,41 @@ class Shot:
     data: str
 
 
+@dataclass(frozen=True)
+class Changes:
+    """What an action changed on the page, as an observer set before it saw.
+
+    ``texts`` is new visible text (a notice, a toast, an error), even text that
+    was gone again by the end; ``target`` the acted-on element's new state in
+    words (``"now checked, disabled"``, ``"gone from the page"``), ``""`` when
+    it did not change. ``changed`` is whether the page changed at all (its
+    document tree, or the element's state). ``quiet`` is False when the page
+    was still changing when melo stopped waiting. These are words from the page.
+    """
+
+    texts: tuple[str, ...] = ()
+    target: str = ""
+    quiet: bool = True
+    changed: bool = False
+
+
+@dataclass(frozen=True)
+class ActResult:
+    """What :meth:`BrowserDriver.act` did.
+
+    ``note`` is a sentence about what the driver stopped the page from doing
+    meanwhile (a send nobody asked about), or ``""``; ``via`` the way it acted
+    and ``why`` the reason a better way was not used (``""`` when none was
+    passed over); ``changes`` what it saw change, or None when the page became
+    another document.
+    """
+
+    note: str = ""
+    via: Way = "page-script"
+    why: str = ""
+    changes: Changes | None = None
+
+
 ActionKind = Literal["click", "type", "select"]
 
 
@@ -153,7 +191,16 @@ class Act:
 
 
 class StaleElementError(BrowserError):
-    """The page is not the one that was read, or the element is no longer there."""
+    """The page is not the one that was read, or the element is no longer there.
+
+    ``why`` is the page script's word for it: ``page`` (another address),
+    ``doc`` (reloaded), ``gone`` (no longer there as it was read), ``dest`` (it
+    leads or sends elsewhere now), ``field``, ``grew`` or ``frame``.
+    """
+
+    def __init__(self, message: str, why: str = "") -> None:
+        super().__init__(message)
+        self.why = why
 
 
 class BrowserDriver(Protocol):
@@ -209,11 +256,10 @@ class BrowserDriver(Protocol):
     async def blank(self, tab: str | None) -> None:
         """Leave the page: load an empty one (a redirect the person refused)."""
 
-    async def act(self, tab: str | None, act: Act) -> str:
+    async def act(self, tab: str | None, act: Act) -> ActResult:
         """Do *act* on the page of *tab*, then let the page settle.
 
-        Returns a sentence about what the driver stopped the page from doing
-        meanwhile (sending a form nobody asked about), or ``""``. Raises
+        Returns what it did (see :class:`ActResult`). Raises
         :class:`StaleElementError` when the page is not the one that was read,
         and :class:`BrowserError`, in words for the model, when the element
         cannot be used (hidden, disabled, a field melo never types in, an

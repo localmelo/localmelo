@@ -11,6 +11,14 @@ and elements as JSON (:data:`PAGE_JS`), so what the model reads does not depend
 on the format of the server's own content tool. Tool and argument names are
 looked up in the server's ``tools/list`` (:data:`TOOL_NAMES`, :data:`ARG_NAMES`).
 
+An act is done by the browser itself where it can be: the page script checks the
+element and finds which of the browser's node ids it is (from
+``get_page_content``), and ``page_interactions`` clicks, types or chooses on that
+node, with real events a page cannot tell from a person's. The page script's own
+events are the backup, and the result names the way used. Around either way an
+observer set before the act sees what the page shows new, and melo waits until
+the page is quiet (see :meth:`SafariAutomationDriver.act`).
+
 A tab is the handle the server gave it. A tab's address is what the server's own
 tab list reports for that handle (a bare ``location.href`` is read only when the
 list carries none), never a value a page serialises for itself. Every call
@@ -30,6 +38,7 @@ import stat
 import tempfile
 import uuid
 from base64 import b64encode
+from dataclasses import dataclass
 from typing import Any, cast
 from urllib.parse import urlsplit
 
@@ -38,8 +47,10 @@ from localmelo.support.browser import fields
 from localmelo.support.browser.driver import (
     MAX_TYPED_CHARS,
     Act,
+    ActResult,
     BrowserError,
     BrowserSetupError,
+    Changes,
     Element,
     FieldAttrs,
     RawPage,
@@ -73,6 +84,8 @@ TOOL_NAMES = {
     "switch": "switch_tab",
     "new_tab": "create_tab",
     "close": "close_tab",
+    "content": "get_page_content",
+    "interact": "page_interactions",
 }
 REQUIRED = ("open", "script")
 # The argument names a tool may use for what melo sends, first match wins; a
@@ -98,6 +111,24 @@ _STALE = {
     "grew": "That field turned into a protected one while melo typed, so melo cleared it. Ask the person to fill it in themselves.",
     "frame": "melo could not set up its safe page checks on this page, so it did nothing. Use browser_read to try again.",
 }
+# Why the browser's own input was passed over for the page script (the result says it).
+_PASSED = {
+    "tool": "this Safari cannot act on page elements itself",
+    "covered": "another element covers it, so only the page script reaches it",
+    "name": "the browser could not name that element",
+    "missed": "the browser's own input did not reach it",
+}
+_MOVED = (
+    "A real click or key press landed on another element than the one melo checked, "
+    "so melo stopped it. Use browser_read and try again."
+)
+# Looking at the page after an act: a poll this often, done once nothing changed for
+# QUIET_S (a click waits up to LOOK_CAP_S for the page's first change), never longer.
+LOOK_STEP_S = 0.1
+QUIET_S = 0.3
+LOOK_CAP_S = 2.0
+MAX_NODES = 800
+MAX_CONTENT_BYTES = 4 * 1024 * 1024
 NO_CHECKS_NOTE = (
     "(melo could not set up its safe page checks on this page, so no links, buttons "
     "or fields are listed.)"
@@ -136,7 +167,7 @@ var P = (function () {
       req: w.HTMLFormElement.prototype.requestSubmit, sub: w.HTMLFormElement.prototype.submit,
       click: w.HTMLElement.prototype.click, dispatch: w.EventTarget.prototype.dispatchEvent,
       rm: w.EventTarget.prototype.removeEventListener, closest: w.Element.prototype.closest,
-      cdp: w.Node.prototype.compareDocumentPosition
+      cdp: w.Node.prototype.compareDocumentPosition, rect: w.Element.prototype.getBoundingClientRect
     };
     // The fresh functions are tried on their own terms, never against the page's.
     var probe = w.document.createElement("div");
@@ -144,6 +175,9 @@ var P = (function () {
     if (fresh.ga.call(probe, "lang") !== "x" || fresh.json({a: 1}) !== '{"a":1}' ||
         typeof fresh.qsa.call(document, "html").length !== "number" || typeof fresh.gcs(document.documentElement).display !== "string") throw new Error("frame");
     for (var k in fresh) if (typeof fresh[k] !== "function") throw new Error(k);
+    // Only the check that nothing covers an element needs this one.
+    var efp = w.Document.prototype.elementFromPoint;
+    fresh.efp = typeof efp === "function" ? efp : null;
     return fresh;
   } catch (e) {
     return null;  // never the page's own: nothing is listed or done without the fresh ones
@@ -317,6 +351,29 @@ var lookAt = function (n, counts) {
   if (counts) el.fp = fingerprint(n, (counts[el.kind + "|" + el.label] || 0) + 1);
   return {el: el};
 };
+var within = function (n, t) { return !!t && (t === n || !!(P.cdp.call(n, t) & 16)); };
+// The state of an element that an action may change, never the value of a secret field.
+var stateOf = function (n) {
+  if (!n || !n.isConnected) return {gone: true};
+  var tag = n.tagName.toLowerCase(), type = attr(n, "type").toLowerCase();
+  var r = P.rect.call(n), st = P.gcs(n);
+  var s = {shown: !(st.visibility === "hidden" || st.display === "none" || (r.width === 0 && r.height === 0)),
+           disabled: !!n.disabled || attr(n, "aria-disabled") === "true"};
+  var field = /^(input|textarea|select)$/.test(tag);
+  var secret = field && (/^(password|hidden)$/.test(type) || !!secretKind(attrsOf(n, st, labelsOf(n), cap(attr(n, "aria-label"), 120), cap(attr(n, "placeholder"), 120))));
+  if (tag === "input" && /^(checkbox|radio)$/.test(type)) s.checked = !!n.checked;
+  else if (tag === "select") s.value = secret ? "" : cap(n.options && n.selectedIndex >= 0 ? n.options[n.selectedIndex].text : "", 120);
+  else if (field && !/^(button|submit|reset|image)$/.test(type)) s.value = secret ? "" : cap(n.value, 120);
+  else s.label = tag === "input" ? cap(n.value, 120) : cap(n.innerText || n.textContent, 120);
+  ["aria-pressed", "aria-selected", "aria-expanded", "aria-checked", "aria-current"].forEach(function (a) { var v = attr(n, a); if (v) s[a.slice(5)] = v; });
+  return s;
+};
+var linesOf = function (node, into, limit) {
+  var text = String(node && (node.innerText || node.textContent) || "");
+  var parts = text.split("\n");
+  for (var i = 0; i < parts.length && i < limit; i++) { var t = cap(parts[i], 200); if (t.length > 1) into.push(t); }
+  return into;
+};
 """
 )
 
@@ -360,27 +417,53 @@ PAGE_JS = (
 )
 
 
+def _data(value: Any) -> str:
+    """*value* as a JavaScript literal that holds no ``$`` (the server's ``$uid()`` macro) and no line separators."""
+    return (
+        json.dumps(value)
+        .replace("$", "\\u0024")
+        .replace(" ", "\\u2028")
+        .replace(" ", "\\u2029")
+    )
+
+
 def act_script(spec: dict[str, Any]) -> str:
-    """The script that does one :class:`Act`, given its *spec* as plain data.
+    """The script that does, or prepares, one :class:`Act`, given its *spec* as plain data.
 
     It does nothing, and says why, unless the page is the one that was read:
     the same address in the same document, and at ``at`` the same element (its
     fingerprint, kind, label, address and the address its form is sent to, and
-    for a text box the same field attributes). It looks again after the field
-    has focus, after the text is in and after the page's own handlers ran, and
-    clears the field if it turned into a secret one. While it works it tries
-    to stop a form the page sends that melo did not ask about, and a link whose
-    address is no longer the one that was read when it is pressed or clicked.
-    That guard is best effort and lasts only while the script runs: a page can
-    send later (a timer, a request from a script, a function it saved earlier),
-    and once a text is in a page the page may send it itself. When the fresh
-    built-ins (``P``) cannot be had it does nothing.
+    for a text box the same field attributes).
+
+    ``mode`` says what it does once that holds:
+
+    - ``script`` (the default) acts with page-script events. It looks again
+      after the field has focus, after the text is in and after the page's own
+      handlers ran, and clears the field if it turned into a secret one. While
+      it works it tries to stop a form the page sends that melo did not ask
+      about, and a link whose address is no longer the one that was read when
+      it is pressed or clicked.
+    - ``scroll`` brings the element into view, says whether another element
+      covers its middle and describes it (tag, role, text, label, name, id), so
+      melo can find it in the browser's own reading of the page.
+    - ``arm`` keeps the same guards up while the browser itself acts on the
+      node melo found (``uid``): also, until the first look after the act, a
+      real press, click or keystroke that lands on another element is stopped
+      (``moved``).
+
+    With ``key``, an observer set before the act keeps what the page shows new
+    and the element's state for :data:`SETTLE_JS` and :data:`DISARM_JS`, which
+    also take the guards down (by themselves after 20 s at the latest).
+
+    The guards are best effort and last only that long: a page can send later
+    (a timer, a request from a script, a function it saved earlier), and once
+    a text is in a page the page may send it itself. When the fresh built-ins
+    (``P``) cannot be had it does nothing.
     """
-    data = json.dumps(spec).replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
     return r"""(function (spec) {""" + COMMON_JS + r"""
   if (!P) return JSON.stringify({ok: false, stale: "frame"});  // nothing is done without the fresh built-ins
   var say = function (o) { return P.json(o); };
-  var blocked = [];
+  var blocked = [], seen = {__proto__: null}, undo = [];
   if (location.href !== spec.url) return say({ok: false, stale: "page"});
   if (docId() !== spec.doc) return say({ok: false, stale: "doc"});
   var nodes = P.qsa.call(document, SEL), n = nodes[spec.at], counts = {};
@@ -401,79 +484,204 @@ def act_script(spec: dict[str, Any]) -> str:
   };
   var why = same();
   if (why) return say({ok: false, stale: why});
+  var mode = spec.mode || "script";
+  var setValue = function (v) {
+    Object.getOwnPropertyDescriptor(n.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, "value").set.call(n, v);
+  };
+  var pick = function () {  // the one option the words name, or the count of those they fit
+    var want = String(spec.text).trim().toLowerCase(), opts = Array.prototype.slice.call(n.options || []);
+    var hits = opts.filter(function (o) { return !o.disabled && (cap(o.text, 60).toLowerCase() === want || String(o.value).toLowerCase() === want); });
+    if (!hits.length) hits = opts.filter(function (o) { return !o.disabled && want && cap(o.text, 60).toLowerCase().indexOf(want) >= 0; });
+    return hits.length === 1 ? hits[0] : hits.length;
+  };
+  if (mode === "scroll") {
+    n.scrollIntoView({block: "center", inline: "center"});
+    var r = P.rect.call(n), top = P.efp ? P.efp.call(document, r.left + r.width / 2, r.top + r.height / 2) : n;
+    var tag = n.tagName.toLowerCase();
+    return say({ok: true, covered: !within(n, top), tag: tag, role: attr(n, "role").toLowerCase(),
+      text: cap(tag === "input" ? "" : n.innerText || n.textContent, 200), value: tag === "input" && /^(submit|button|reset)$/.test(attr(n, "type").toLowerCase()) ? cap(n.value, 120) : "",
+      label: cap(labelsOf(n), 120), aria: cap(attr(n, "aria-label"), 120), name: cap(attr(n, "name"), 80), id: cap(n.id, 80),
+      title: cap(attr(n, "title") || attr(n, "alt"), 120), placeholder: cap(attr(n, "placeholder"), 120)});
+  }
+  var option = null;
+  if (spec.act === "select") {
+    option = pick();
+    if (typeof option === "number") return say({ok: false, option: option});
+  }
+  var wins = [window];
+  var listen = function (target, type, fn, capture, list) {
+    P.add.call(target, type, fn, capture);
+    (list || undo).push(function () { P.rm.call(target, type, fn, capture); });
+  };
   var allowed = function (form, button) {
     return spec.send && (spec.submit === "" || formAddress(form, button) === spec.submit);
   };
   var onSubmit = function (e) {
+    seen.submit = (seen.submit || 0) + 1;
     if (!allowed(e.target, e.submitter)) { e.preventDefault(); e.stopImmediatePropagation(); blocked.push("send"); }
   };
   var onClick = function (e) {
     var t = e.target, a = t && t.nodeType === 1 ? P.closest.call(t, "a[href]") : null;
     if (spec.kind === "link" && a && hrefOf(a) !== spec.href) { e.preventDefault(); e.stopImmediatePropagation(); blocked.push("link"); }
   };
-  var proto = HTMLFormElement.prototype;
-  var saved = {submit: Object.getOwnPropertyDescriptor(proto, "submit"), requestSubmit: Object.getOwnPropertyDescriptor(proto, "requestSubmit")};
-  var put = function (name, fn) { Object.defineProperty(proto, name, {value: fn, configurable: true, writable: true}); };
-  var done = function (o) { blocked.length && (o.blocked = blocked.slice()); return say(o); };
-  try {
-    put("submit", function () { if (allowed(this, null)) return P.sub.call(this); blocked.push("send"); });
-    put("requestSubmit", function (b) { if (allowed(this, b)) return P.req.call(this, b); blocked.push("send"); });
-    P.add.call(window, "submit", onSubmit, true);
-    P.add.call(window, "submit", onSubmit, false);
-    P.add.call(window, "click", onClick, true);
-    P.add.call(n, "click", onClick, false);  // after the page's own handlers on the element
-    if (n.form) P.add.call(n.form, "submit", onSubmit, false);
-    n.scrollIntoView({block: "center", inline: "center"});
-    var fire = function (type) { P.dispatch.call(n, new Event(type, {bubbles: true})); };
-    var cleared = function (stale) {
-      if (spec.act === "type") { Object.getOwnPropertyDescriptor(n.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, "value").set.call(n, ""); }
-      return done({ok: false, stale: stale});
+  var guard = function () {
+    wins.forEach(function (w) {
+      var proto = w.HTMLFormElement.prototype;
+      var saved = {submit: Object.getOwnPropertyDescriptor(proto, "submit"), requestSubmit: Object.getOwnPropertyDescriptor(proto, "requestSubmit")};
+      var put = function (name, fn) { Object.defineProperty(proto, name, {value: fn, configurable: true, writable: true}); };
+      undo.push(function () {
+        ["submit", "requestSubmit"].forEach(function (name) {
+          if (saved[name]) Object.defineProperty(proto, name, saved[name]); else delete proto[name];
+        });
+      });
+      put("submit", function () { if (allowed(this, null)) return P.sub.call(this); blocked.push("send"); });
+      put("requestSubmit", function (b) { if (allowed(this, b)) return P.req.call(this, b); blocked.push("send"); });
+      listen(w, "submit", onSubmit, true);
+      listen(w, "submit", onSubmit, false);
+      listen(w, "click", onClick, true);
+    });
+    listen(n, "click", onClick, false);  // after the page's own handlers on the element
+    if (n.form) listen(n.form, "submit", onSubmit, false);
+  };
+  var unguard = function (list) { while (list.length) { try { list.pop()(); } catch (e) { /* the page took it already */ } } };
+  // Until the first look after the browser's own act: a real press, click or keystroke
+  // must land on the element that was checked, or it is stopped.
+  var held = [];
+  var inZone = function (t) { return within(n, t); };
+  var contain = function () {
+    var on = function (e) {
+      if (inZone(e.target)) { seen[e.type] = (seen[e.type] || 0) + 1; return; }
+      if (e.isTrusted === false) return;  // the page's own events are its business
+      e.preventDefault(); e.stopImmediatePropagation(); blocked.push("moved");
     };
+    ["pointerdown", "mousedown", "pointerup", "mouseup", "click", "keydown", "beforeinput"].forEach(function (t) {
+      wins.forEach(function (w) { listen(w, t, on, true, held); });
+    });
+    var count = function (e) { if (inZone(e.target)) seen[e.type] = (seen[e.type] || 0) + 1; };
+    wins.forEach(function (w) { listen(w, "input", count, true); listen(w, "change", count, true); });
+  };
+  // What the page shows new from now on, and the element's state before.
+  var watch = function () {
+    var s0 = P.json(stateOf(n)), before = {__proto__: null}, texts = [], count = 0, last = Date.now(), done = false;
+    linesOf(document.body, [], 5000).forEach(function (t) { before[t] = 1; });
+    var take = function (el) {
+      if (!el || el.nodeType !== 1 || texts.length >= 8) return;
+      if (String(el.textContent || "").length > 20000 || !el.getClientRects().length) return;
+      linesOf(el, [], 50).forEach(function (t) { if (!before[t] && texts.indexOf(t) < 0 && texts.length < 8) texts.push(t); });
+    };
+    var MO = window.MutationObserver;
+    if (MO) {
+      var mo = new MO(function (records) {
+        for (var i = 0; i < records.length && i < 300; i++) {
+          var r = records[i];
+          if (r.type === "childList") {
+            for (var a = 0; a < r.addedNodes.length && a < 50; a++) { var x = r.addedNodes[a]; take(x.nodeType === 1 ? x : x.parentElement); }
+          } else take(r.type === "characterData" ? r.target.parentElement : r.target);
+        }
+        count++; last = Date.now();
+      });
+      var opts = {subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["class", "style", "hidden", "open", "aria-hidden"]};
+      mo.observe(document, opts);
+      undo.push(function () { mo.disconnect(); });
+    }
+    var finish = function () {
+      if (done) return P.json({lost: true});
+      done = true;
+      var later = same();
+      if (later && spec.act === "type" && n.isConnected) {
+        // The field changed after the text went in (it may be a secret one now): it is emptied.
+        try { setValue(""); } catch (e) { /* gone */ }
+        later = "field";
+      }
+      var s1 = P.json(stateOf(n));
+      unguard(held); unguard(undo);
+      try { delete window[spec.key]; } catch (e) { /* kept */ }
+      return P.json({blocked: blocked, texts: texts, before: s0, after: s1, seen: seen, stale: later === "gone" ? "" : later, count: count});
+    };
+    var poll = function () {
+      unguard(held);  // the act is over: the person's own clicks are theirs again
+      return P.json({doc: true, count: count, quiet: Date.now() - last, target: P.json(stateOf(n)) !== s0});
+    };
+    var timer = window.setTimeout(finish, 20000);
+    undo.push(function () { window.clearTimeout(timer); });
+    Object.defineProperty(window, spec.key, {value: Object.freeze({poll: poll, finish: finish}), configurable: true});
+  };
+  if (mode === "arm") {
+    try {
+      guard();
+      contain();
+      watch();
+    } catch (e) {
+      unguard(held); unguard(undo);
+      return say({ok: false, stale: "frame"});
+    }
+    return say({ok: true, option: option ? cap(option.text, 60) : ""});
+  }
+  // The page-script act: its guards hold while it runs; the observer stays for the look after.
+  var done = function (o) { blocked.length && (o.blocked = blocked.slice()); return say(o); };
+  var cleared = function (stale) {
+    if (spec.act === "type") setValue("");
+    return done({ok: false, stale: stale});
+  };
+  var fire = function (type) { P.dispatch.call(n, new Event(type, {bubbles: true})); };
+  var mouse = function (type) { P.dispatch.call(n, new MouseEvent(type, {bubbles: true, cancelable: true, view: window})); };
+  var temp = [];
+  try {
+    if (spec.key) watch();
+    temp = undo; undo = [];
+    guard();
+    n.scrollIntoView({block: "center", inline: "center"});
     if (spec.act === "click") {
       if (n.tagName === "A" || n.tagName === "AREA") P.ra.call(n, "ping");
-      ["mousedown", "mouseup"].forEach(function (t) { P.dispatch.call(n, new MouseEvent(t, {bubbles: true, cancelable: true, view: window})); });
+      mouse("mousedown"); mouse("mouseup");
       var moved = same();  // a handler of the press may have changed where this goes
       if (moved) return done({ok: false, stale: moved === "gone" ? "dest" : moved});
       if (n instanceof HTMLElement) P.click.call(n);
-      else P.dispatch.call(n, new MouseEvent("click", {bubbles: true, cancelable: true, view: window}));
+      else mouse("click");
     } else if (spec.act === "type") {
       n.focus();
       var after = same();  // the page's focus handlers have run
       if (after) return done({ok: false, stale: after});
-      var setter = Object.getOwnPropertyDescriptor(n.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, "value").set;
-      setter.call(n, spec.text);
-      var typed = same();
-      if (typed) return cleared("grew");
+      setValue(spec.text);
+      if (same()) return cleared("grew");
       fire("input"); fire("change");
-      var handled = same();  // and the handlers of the typing
-      if (handled) return cleared("grew");
+      if (same()) return cleared("grew");  // and the handlers of the typing
       if (spec.enter) {
-        var key = function (t) { return new KeyboardEvent(t, {key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true}); };
-        var go = P.dispatch.call(n, key("keydown"));
-        P.dispatch.call(n, key("keypress"));
-        P.dispatch.call(n, key("keyup"));
+        var keyOf = function (t) { return new KeyboardEvent(t, {key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true}); };
+        var go = P.dispatch.call(n, keyOf("keydown"));
+        P.dispatch.call(n, keyOf("keypress"));
+        P.dispatch.call(n, keyOf("keyup"));
         if (go && n.form) P.req.call(n.form, defaultButton(n.form) || undefined);
       }
     } else if (spec.act === "select") {
-      var want = String(spec.text).trim().toLowerCase(), opts = Array.prototype.slice.call(n.options);
-      var hits = opts.filter(function (o) { return !o.disabled && (cap(o.text, 60).toLowerCase() === want || String(o.value).toLowerCase() === want); });
-      if (!hits.length) hits = opts.filter(function (o) { return !o.disabled && want && cap(o.text, 60).toLowerCase().indexOf(want) >= 0; });
-      if (hits.length !== 1) return done({ok: false, option: hits.length});
-      hits[0].selected = true;
+      option.selected = true;
       fire("input"); fire("change");
     }
     return done({ok: true});
   } finally {
-    ["submit", "requestSubmit"].forEach(function (name) {
-      if (saved[name]) Object.defineProperty(proto, name, saved[name]); else delete proto[name];
-    });
-    P.rm.call(window, "submit", onSubmit, true);
-    P.rm.call(window, "submit", onSubmit, false);
-    P.rm.call(window, "click", onClick, true);
-    if (n) P.rm.call(n, "click", onClick, false);
-    if (n && n.form) P.rm.call(n.form, "submit", onSubmit, false);
+    unguard(undo);
+    undo = temp;
   }
-})(""" + data + ")"
+})(""" + _data(spec) + ")"
+
+
+# A look at the page after an act, through what ``act_script`` left under ``key``:
+# whether it is still the same document, how many changes the page made and how
+# long ago the last one was, and whether the element's state changed. No page
+# built-in is set up for it, so the look itself changes nothing.
+SETTLE_JS = r"""(function (settle) {
+  if (String(performance.timeOrigin) !== settle.doc) return '{"doc":false}';
+  var S = window[settle.key];
+  return S ? S.poll() : '{"lost":true}';
+})(%s)"""
+
+# What the act changed (new text, the element's state before and after), the
+# guards' reports, and the guards taken down.
+DISARM_JS = r"""(function (disarm) {
+  if (String(performance.timeOrigin) !== disarm.doc) return '{"lost":true}';
+  var S = window[disarm.key];
+  return S ? S.finish() : '{"lost":true}';
+})(%s)"""
 
 
 FOCUS_JS = r"""(function () {
@@ -629,7 +837,7 @@ class SafariAutomationDriver:
         self._current: str | None = None
         self._returns: bool | None = None  # whether scripts need a leading "return"
         self._shots: str | None = (
-            None  # melo's private folder for pictures Safari saves
+            None  # melo's private folder for the files Safari saves for it
         )
 
     @property
@@ -696,11 +904,26 @@ class SafariAutomationDriver:
             raise BrowserError(
                 f"Safari's automation server has no {TOOL_NAMES[key]} tool."
             )
+        return await self._send(tool, self._args(tool, **values))
+
+    async def _call_with(self, key: str, arguments: dict[str, Any]) -> ToolOutput:
+        """Call a tool with the *arguments* its schema lists (any other is left out)."""
+        tool = self._tools.get(TOOL_NAMES[key])
+        if self._client is None or tool is None:
+            raise BrowserError(
+                f"Safari's automation server has no {TOOL_NAMES[key]} tool."
+            )
+        props = tool.input_schema.get("properties")
+        props = props if isinstance(props, dict) else {}
+        return await self._send(
+            tool, {k: v for k, v in arguments.items() if k in props}
+        )
+
+    async def _send(self, tool: McpTool, arguments: dict[str, Any]) -> ToolOutput:
+        assert self._client is not None
         try:
             async with asyncio.timeout(self._call_timeout_s):
-                result = await self._client.call_tool(
-                    tool.name, self._args(tool, **values)
-                )
+                result = await self._client.call_tool(tool.name, arguments)
         except TimeoutError:
             raise BrowserError(
                 f"Safari did not answer {tool.name} in {self._call_timeout_s:g} s."
@@ -918,9 +1141,7 @@ class SafariAutomationDriver:
         # Safari saves the picture to a file and answers with text only. melo
         # names the file, in a folder only it can enter, reads that path and
         # never one it finds in the reply, and deletes the file whatever happens.
-        if self._shots is None:
-            self._shots = tempfile.mkdtemp(prefix="melo-safari-")  # mode 0700
-        path = os.path.join(self._shots, f"{uuid.uuid4().hex}.png")
+        path = os.path.join(self._folder(), f"{uuid.uuid4().hex}.png")
         try:
             out = await self._call("shot", save_path=path)
             if out.images:
@@ -929,6 +1150,12 @@ class SafariAutomationDriver:
         finally:
             with contextlib.suppress(OSError):
                 os.unlink(path)  # a link is removed, never followed
+
+    def _folder(self) -> str:
+        """melo's private folder for the files Safari saves for it (mode 0700)."""
+        if self._shots is None:
+            self._shots = tempfile.mkdtemp(prefix="melo-safari-")
+        return self._shots
 
     async def blank(self, tab: str | None) -> None:
         """Leave the page in *tab* for an empty one, in its place in the history.
@@ -959,62 +1186,445 @@ class SafariAutomationDriver:
                     return True
         return False
 
-    async def act(self, tab: str | None, act: Act) -> str:
+    async def act(self, tab: str | None, act: Act) -> ActResult:
+        """Do *act*: by the browser's own input first, else by the page script.
+
+        The browser's own input (``page_interactions``) needs the element to be
+        one the browser names: the page script checks the element as it was
+        read, brings it into view and finds its node id among those the
+        browser's own reading of the view gives (``get_page_content``), keeps
+        its guards up, and then the browser acts on that node.
+        When the browser cannot act (no such tool, no node id, another element
+        covering it) or its input did not reach the element, the page script
+        acts instead and the result says why. After either way melo looks at
+        the page until it is quiet (see :meth:`_look`).
+        """
         if len(act.text) > MAX_TYPED_CHARS:
             raise BrowserError(
                 f"melo types at most {MAX_TYPED_CHARS} characters at a time."
             )
         await self._focus(tab)
-        item = act.element
-        spec: dict[str, Any] = {
-            "act": act.kind,
-            "url": act.url,
-            "doc": act.doc,
-            "at": item.at,
-            "fp": item.fp,
-            "kind": item.kind,
-            "label": item.label,
-            "href": item.href,
-            "submit": item.submit,
-            "text": act.text,
-            "enter": act.enter,
-            "send": act.send,
-        }
-        if item.attrs is not None:
-            spec["attrs"] = {
-                "type": item.attrs.type,
-                "autocomplete": item.attrs.autocomplete,
-                "words": item.attrs.words,
-                "inputmode": item.attrs.inputmode,
-                "maxlength": item.attrs.maxlength,
-                "masked": item.attrs.masked,
-            }
-        result = await self._eval(act_script(spec))
+        spec = _spec(act)
+        done = await self._native(spec, act)
+        if isinstance(done, ActResult):
+            return done
+        return await self._scripted(spec, act, done)
+
+    async def _script(self, source: str) -> dict[str, Any]:
+        """Run an act script: its answer, or the error it means (stale, no such option)."""
+        result = await self._eval(source)
         if not isinstance(result, dict):
             raise BrowserError("Safari returned an answer melo could not read.")
-        stopped = [
-            _BLOCKED[str(k)] for k in result.get("blocked") or [] if str(k) in _BLOCKED
-        ]
         if result.get("ok") is not True:
             if result.get("stale"):
-                raise StaleElementError(
-                    _STALE.get(str(result["stale"]), _STALE["gone"])
-                )
+                why = str(result["stale"])
+                raise StaleElementError(_STALE.get(why, _STALE["gone"]), why)
             if "option" in result:
                 raise BrowserError(
                     "That list has no single option with those words (none, or "
                     "more than one). Use browser_read for its options."
                 )
             raise BrowserError("The page did not take that action.")
-        await asyncio.sleep(
-            POLL_S
-        )  # a click may start a load that is not yet under way
-        with contextlib.suppress(BrowserError):  # the page may have closed itself
-            await self._ready()
-        return " ".join(dict.fromkeys(stopped))
+        return result
+
+    async def _native(self, spec: dict[str, Any], act: Act) -> ActResult | str:
+        """The act by the browser's own input; else why not."""
+        if not self._has("interact"):
+            return _PASSED["tool"]
+        if not self._has("content"):
+            return _PASSED["tool"]
+        ready = await self._script(act_script({**spec, "mode": "scroll"}))
+        if ready.get("covered") is True:
+            return _PASSED["covered"]
+        uid = bind(ready, await self._nodes())
+        if not uid:
+            return _PASSED["name"]
+        key = _key()
+        armed = await self._script(
+            act_script({**spec, "mode": "arm", "key": key, "uid": uid})
+        )
+        try:
+            await self._call_with(
+                "interact", {"interactions": [_interaction(act, uid, armed)]}
+            )
+        except BrowserSetupError:
+            with contextlib.suppress(BrowserError):
+                await self._finish(key, spec["doc"])
+            raise
+        except BrowserError:
+            # Whether it acted before it failed is read from the page: an act
+            # that shows there is kept, one that does not falls to the page script.
+            pass
+        data, quiet = await self._look(key, spec["doc"], act)
+        blocked = [str(k) for k in data.get("blocked") or []]
+        if "moved" in blocked:
+            raise BrowserError(_MOVED)
+        if not _reached(act, data):
+            return _PASSED["missed"]
+        self._check_typed(act, data)
+        return ActResult(_stopped(blocked), "browser", "", _changes(data, quiet))
+
+    async def _scripted(self, spec: dict[str, Any], act: Act, passed: str) -> ActResult:
+        """The act by the page script, with the look after it."""
+        key = _key()
+        try:
+            result = await self._script(
+                act_script({**spec, "mode": "script", "key": key})
+            )
+        except BrowserError:
+            with contextlib.suppress(BrowserError):
+                await self._finish(key, spec["doc"])
+            raise
+        data, quiet = await self._look(key, spec["doc"], act)
+        self._check_typed(act, data)
+        blocked = [
+            str(k)
+            for k in [*(result.get("blocked") or []), *(data.get("blocked") or [])]
+        ]
+        return ActResult(
+            _stopped(blocked),
+            "page-script",
+            passed,
+            _changes(data, quiet),
+        )
+
+    @staticmethod
+    def _check_typed(act: Act, data: dict[str, Any]) -> None:
+        if act.kind == "type" and data.get("stale") in ("field", "grew"):
+            raise StaleElementError(_STALE["grew"], "grew")
+
+    async def _nodes(self) -> list[Node]:
+        """The nodes the browser itself names in the view (its own reading of the page), in order.
+
+        The reading goes to a file melo names in its private folder (a long one
+        would otherwise land in a file the server picks); only the node lines are
+        taken from it.
+        """
+        path = os.path.join(self._folder(), f"{uuid.uuid4().hex}.txt")
+        try:
+            out = await self._call_with(
+                "content",
+                {
+                    "format": "textTree",
+                    "nodeIds": "interactive",
+                    "region": "viewport",
+                    "includeURLs": False,
+                    "maxWordsPerParagraph": 40,
+                    "savePath": path,
+                },
+            )
+            text = _read_text(path)
+            if text is None:
+                text = out.text  # a server that answered inline after all
+        except BrowserSetupError:
+            raise
+        except BrowserError:
+            return []
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(path)
+        return parse_nodes(text)
+
+    async def _look(self, key: str, doc: str, act: Act) -> tuple[dict[str, Any], bool]:
+        """Wait until the page is quiet after *act*, then take what the observer saw.
+
+        The page is quiet once nothing changed for :data:`QUIET_S` (and that
+        long after the act); a click, or Enter, first waits for the page's
+        first change, since a reply from the site may take a moment. It never
+        waits longer than :data:`LOOK_CAP_S`. A page that left for another
+        document is waited for until it has loaded. Returns the observer's
+        report (``{"lost": True}`` once the page is another document) and
+        whether the page was quiet.
+        """
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        first = act.kind == "click" or act.enter
+        probe = SETTLE_JS % _data({"key": key, "doc": doc})
+        quiet = True
+        while True:
+            if LOOK_STEP_S:
+                await asyncio.sleep(LOOK_STEP_S)
+            try:
+                now = await self._eval(probe)
+            except BrowserSetupError:
+                raise
+            except BrowserError:
+                now = {"doc": False}  # a page between two documents does not answer
+            spent = loop.time() - start
+            if not isinstance(now, dict) or now.get("doc") is False or now.get("lost"):
+                with contextlib.suppress(BrowserError):
+                    await self._ready()
+                return {"lost": True}, True
+            changed = bool(now.get("count")) or now.get("target") is True
+            still = _number(now.get("quiet")) >= QUIET_S * 1000
+            if spent >= QUIET_S and still and (changed or not first):
+                break
+            if spent >= LOOK_CAP_S:
+                quiet = still or not changed
+                break
+        return await self._finish(key, doc), quiet
+
+    async def _finish(self, key: str, doc: str) -> dict[str, Any]:
+        """The observer's report under *key*, its guards taken down."""
+        data = await self._eval(DISARM_JS % _data({"key": key, "doc": doc}))
+        return data if isinstance(data, dict) else {"lost": True}
 
     def _has(self, key: str) -> bool:
         return TOOL_NAMES[key] in self._tools
+
+
+@dataclass(frozen=True)
+class Node:
+    """One node of the browser's own reading of a page (``get_page_content``, ``textTree``).
+
+    ``uid`` is the browser's id for it (``2_1_90`` for one inside a frame from
+    another site), ``tag`` its tag or role, ``attrs`` the ``name=value`` pairs
+    the line shows, ``text`` its quoted text (cut with ``…`` when long) and
+    ``depth`` how far it is indented.
+    """
+
+    uid: str
+    tag: str
+    attrs: dict[str, str]
+    text: str
+    depth: int
+
+
+_NODE_LINE = re.compile(r"^(\t*)([A-Za-z][\w:-]*)\b(.*)$")
+_NODE_ATTR = re.compile(r"([A-Za-z][\w-]*)=('(?:[^'\\]|\\.)*'|\S+)")
+_NODE_TEXT = re.compile(r"'((?:[^'\\]|\\.)*)'\s*$")
+
+
+def parse_nodes(reply: str) -> list[Node]:
+    """The nodes with an id in a ``textTree`` reading (the reply, or its ``content``)."""
+    data = _decode(reply)
+    text = data.get("content") if isinstance(data, dict) else reply
+    nodes: list[Node] = []
+    for line in str(text or "").split("\n"):
+        match = _NODE_LINE.match(line)
+        if match is None or "uid=" not in match.group(3):
+            continue
+        rest = match.group(3)
+        attrs = {
+            k: v[1:-1] if v.startswith("'") and v.endswith("'") else v
+            for k, v in _NODE_ATTR.findall(rest)
+        }
+        uid = attrs.pop("uid", "")
+        said = _NODE_TEXT.search(_NODE_ATTR.sub("", rest))
+        if uid:
+            nodes.append(
+                Node(
+                    uid,
+                    match.group(2).lower(),
+                    attrs,
+                    said.group(1) if said else "",
+                    len(match.group(1)),
+                )
+            )
+        if len(nodes) >= MAX_NODES:
+            break
+    return nodes
+
+
+def _plain(words: Any) -> str:
+    return " ".join(str(words or "").split()).lower()
+
+
+def bind(described: dict[str, Any], nodes: list[Node]) -> str:
+    """The browser's id of the element the page script *described*, or ``""``.
+
+    It is the one node of the page itself (not of a frame) in view with the same
+    tag or role and the same words (its text, value, label, ``aria-label``,
+    title or placeholder; a cut text matches the start) or the same ``name`` or
+    ``id``. None, or more than one, is no id: melo then acts by the page
+    script. Where the browser's input lands is checked again at the act, on
+    the element itself, so a wrong id is stopped, never used.
+    """
+    tag, role = str(described.get("tag") or ""), str(described.get("role") or "")
+    words = {
+        _plain(described.get(k))
+        for k in ("text", "value", "label", "aria", "title", "placeholder")
+    } - {""}
+    names = {str(described.get(k) or "") for k in ("name", "id")} - {""}
+    found: list[str] = []
+    for node in nodes:
+        if "_" in node.uid:
+            continue  # a node inside a frame
+        kinds = {node.tag, node.attrs.get("role", "")}
+        if not (
+            tag in kinds or (role and role in kinds) or (tag == "a" and "link" in kinds)
+        ):
+            continue
+        said = [
+            node.text,
+            *(
+                node.attrs.get(k, "")
+                for k in ("label", "aria-label", "title", "placeholder")
+            ),
+        ]
+        same = any(
+            _plain(w).rstrip("…")
+            and (
+                _plain(w) in words
+                or (
+                    _plain(w).endswith("…")
+                    and any(x.startswith(_plain(w)[:-1]) for x in words)
+                )
+            )
+            for w in said
+        )
+        if same or {node.attrs.get("name", ""), node.attrs.get("id", "")} & names:
+            found.append(node.uid)
+    return found[0] if len(found) == 1 else ""
+
+
+def _key() -> str:
+    """A fresh name for what an act script leaves on the page for the look after it."""
+    return f"__melo_{uuid.uuid4().hex}"
+
+
+def _spec(act: Act) -> dict[str, Any]:
+    """*act* as the plain data the act script checks against."""
+    item = act.element
+    spec: dict[str, Any] = {
+        "act": act.kind,
+        "url": act.url,
+        "doc": act.doc,
+        "at": item.at,
+        "fp": item.fp,
+        "kind": item.kind,
+        "label": item.label,
+        "href": item.href,
+        "submit": item.submit,
+        "text": act.text,
+        "enter": act.enter,
+        "send": act.send,
+    }
+    if item.attrs is not None:
+        spec["attrs"] = {
+            "type": item.attrs.type,
+            "autocomplete": item.attrs.autocomplete,
+            "words": item.attrs.words,
+            "inputmode": item.attrs.inputmode,
+            "maxlength": item.attrs.maxlength,
+            "masked": item.attrs.masked,
+        }
+    return spec
+
+
+def _interaction(act: Act, uid: str, armed: dict[str, Any]) -> dict[str, Any]:
+    """The one ``page_interactions`` step that does *act* on node *uid*."""
+    if act.kind == "type":
+        return {
+            "type": "type",
+            "node": uid,
+            "value": act.text,
+            "replaceAll": True,
+            "pressReturn": act.enter,
+            "purpose": "Type the approved text",
+        }
+    if act.kind == "select":
+        return {
+            "type": "selectMenuItem",
+            "node": uid,
+            "text": str(armed.get("option") or act.text),
+            "purpose": "Choose the approved option",
+        }
+    return {"type": "click", "node": uid, "purpose": "Click the checked element"}
+
+
+def _number(value: Any) -> float:
+    return float(value) if isinstance(value, int | float) else 0.0
+
+
+def _reached(act: Act, data: dict[str, Any]) -> bool:
+    """Whether the browser's own input shows on the page: events on the element, a change, a new document."""
+    if data.get("lost"):
+        return True
+    seen = data.get("seen")
+    seen = seen if isinstance(seen, dict) else {}
+    kinds = {
+        "click": ("pointerdown", "mousedown", "click"),
+        "type": ("keydown", "beforeinput", "input"),
+        "select": ("input", "change"),
+    }[act.kind]
+    if any(_number(seen.get(k)) > 0 for k in kinds):
+        return True
+    before, after = _decode(str(data.get("before") or "")), _decode(
+        str(data.get("after") or "")
+    )
+    return before != after or _number(data.get("count")) > 0
+
+
+def _stopped(blocked: list[str]) -> str:
+    return " ".join(dict.fromkeys(_BLOCKED[k] for k in blocked if k in _BLOCKED))
+
+
+_STATE_WORDS = {
+    "pressed": ("pressed", "not pressed"),
+    "selected": ("selected", "not selected"),
+    "expanded": ("expanded", "collapsed"),
+    "current": ("current", "not current"),
+}
+
+
+def _target_words(before: Any, after: Any) -> str:
+    """How the acted-on element changed, in words (``""`` when it did not, or cannot be told)."""
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return ""
+    if before.get("gone"):
+        return ""
+    if after.get("gone"):
+        return "gone from the page"
+    words: list[str] = []
+    if before.get("shown") and after.get("shown") is False:
+        words.append("hidden")
+    if bool(before.get("disabled")) != bool(after.get("disabled")):
+        words.append("disabled" if after.get("disabled") else "enabled")
+    if before.get("checked") != after.get("checked") and "checked" in after:
+        state = after["checked"]
+        words.append(
+            "partly checked"
+            if state == "mixed"
+            else "checked" if state in (True, "true") else "unchecked"
+        )
+    for key, (yes, no) in _STATE_WORDS.items():
+        if before.get(key) != after.get(key):
+            words.append(yes if after.get(key) == "true" else no)
+    if "value" in after and before.get("value") != after.get("value"):
+        words.append(f'value "{str(after["value"])[:60]}"')
+    if "label" in after and before.get("label") != after.get("label"):
+        words.append(f'reads "{str(after["label"])[:60]}"')
+    return "now " + ", ".join(words) if words else ""
+
+
+def _changes(data: dict[str, Any], quiet: bool) -> Changes | None:
+    """What the observer saw, or None when the page became another document."""
+    if data.get("lost"):
+        return None
+    texts = data.get("texts")
+    shown = (
+        tuple(str(t)[:200] for t in texts if isinstance(t, str))[:8]
+        if isinstance(texts, list)
+        else ()
+    )
+    before = _decode(str(data.get("before") or ""))
+    after = _decode(str(data.get("after") or ""))
+    changed = _number(data.get("count")) > 0 or before != after
+    return Changes(shown, _target_words(before, after), quiet, changed)
+
+
+def _read_text(path: str) -> str | None:
+    """The text file at *path* that melo asked Safari to write, or None when there is none."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        return None
+    with os.fdopen(fd, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            return None
+        data = handle.read(MAX_CONTENT_BYTES)
+    return data.decode("utf-8", errors="replace")
 
 
 def _read_picture(path: str) -> Shot:

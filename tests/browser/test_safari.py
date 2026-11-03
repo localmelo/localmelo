@@ -401,10 +401,19 @@ async def test_an_option_that_is_not_there_is_not_chosen(
 async def test_the_act_script_text_is_valid_and_carries_its_spec_as_data() -> None:
     from localmelo.support.browser.safari import act_script
 
-    spec = {"act": "type", "url": "https://a/", "at": 3, "text": "</script> x"}
+    spec = {
+        "act": "type",
+        "url": "https://a/",
+        "at": 3,
+        "text": "</script>\u2028x $uid(4)",
+    }
     script = act_script(spec)
-    assert " " not in script
-    assert json.loads(script[script.rindex("})(") + 3 : -1]) == spec
+    assert "\u2028" not in script
+    start = script.rindex('})({"') + 3
+    carried, end = json.JSONDecoder().raw_decode(script, start)
+    assert carried == spec and script[end:] == ")"
+    # A server macro such as $uid() never sees a page's words: every $ is escaped.
+    assert "$uid(4)" not in script and "\\u0024uid(4)" in script
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
@@ -464,7 +473,8 @@ async def test_a_button_is_found_clicked_and_the_new_page_read_over_the_fake_ser
         clicked = await tools["browser_click"].function(ref="e1")
         assert isinstance(clicked, str)
         assert (
-            clicked.startswith("Clicked e1.\n<<page id=s2") and "Checked in." in clicked
+            clicked.startswith("Clicked e1 (via browser).\n<<page id=s2")
+            and "Checked in." in clicked
         )
     finally:
         await provider.close()

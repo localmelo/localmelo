@@ -8,8 +8,10 @@ from typing import Any
 
 from localmelo.support.browser.driver import (
     Act,
+    ActResult,
     BrowserError,
     BrowserSetupError,
+    Changes,
     Element,
     RawPage,
     Shot,
@@ -89,7 +91,9 @@ class FakeDriver:
     raises; ``stopped`` is what ``act`` answers (the page's blocked sends);
     ``docs`` maps a tab to the document id its page shows. ``popups``
     maps a label to an address that opens in a new tab. ``lose`` forgets a tab
-    as the real helper does when it loses one.
+    as the real helper does when it loses one. ``via`` is the way an act says
+    it used, and ``changes`` maps a label to what an act on
+    it changed.
     """
 
     name = "fake"
@@ -121,6 +125,8 @@ class FakeDriver:
         self.blank_fails = False
         self.tabs_fail = False
         self.location_empty: set[str] = set()
+        self.via = "browser"
+        self.changes: dict[str, Changes] = {}
 
     def _new_tab(self) -> str:
         self.made += 1
@@ -240,18 +246,25 @@ class FakeDriver:
             # entry is swapped, so Back never returns to the page that was refused.
             self.tabs_[here][-1:] = ["about:blank"]
 
-    async def act(self, tab: str | None, act: Act) -> str:
+    async def act(self, tab: str | None, act: Act) -> ActResult:
         self.calls.append(("act", f"{act.kind}:{act.element.label}"))
         here = tab or self.current or ""
         if self._url(tab) != act.url:
-            raise StaleElementError("The page is not the one that was read.")
+            raise StaleElementError("The page is not the one that was read.", "page")
         if act.doc and act.doc != self.docs.get(here, "d1"):
             raise StaleElementError(
-                "The page was reloaded or replaced since it was read."
+                "The page was reloaded or replaced since it was read.", "doc"
             )
-        self.acts.append(act)
         label = act.element.label
+        self.acts.append(act)
         key = ("enter:" if act.enter else "") + label
+        via = self.via
+        result = ActResult(
+            self.stopped,
+            via,  # type: ignore[arg-type]
+            "",
+            self.changes.get(label, Changes()),
+        )
         if label in self.fails:
             self.tabs_[here].append(self.fails[label])
             raise BrowserError("The page did not take that action.")
@@ -260,7 +273,7 @@ class FakeDriver:
             for address in [wanted] if isinstance(wanted, str) else wanted:
                 self.current = self._new_tab()
                 self.tabs_[self.current].append(address)
-            return self.stopped
+            return result
         landed = self.lands.get(key)
         if landed is None and act.kind == "click" and act.element.kind == "link":
             landed = act.element.href
@@ -269,4 +282,4 @@ class FakeDriver:
         if key in self.then:
             self.queue[here] = [self._url(here), self.then[key]]
             self.tabs_[here].append(self.then[key])
-        return self.stopped
+        return result
