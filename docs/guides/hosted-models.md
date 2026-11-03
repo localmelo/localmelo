@@ -4,7 +4,7 @@ Use a model from a hosted service (OpenAI, Google Gemini, Anthropic, NVIDIA, Dee
 
 - Choose a service, paste your key once, press **Test connection**, save.
 - The key is kept in your Mac's keychain, never in melo's settings.
-- A model that thinks never loses its answer.
+- If a thinking model leaves its answer only in its thinking, melo recovers it.
 
 ## Set up a service
 

@@ -34,6 +34,10 @@ Details:
   [How it works](../concepts/how-it-works.md)) is stored as thinking and
   counts as an empty reply; a row that held one ends with the error
   `melo did not finish an answer`, and the thinking is never the `result`.
+  The exception is a model whose server reported its reasoning: it is asked
+  once more with thinking off where that is possible, and when it is still
+  empty the `result` is the last lines of the thinking, ending with
+  `(from melo's thinking)`, and the status is `completed`.
   A reply with no tool call that writes one out as text (a server's parser can
   leave `text`, or markup such as `<function_calls>`, in the content) is no
   answer either: localmelo asks the model again, it counts as an empty reply,

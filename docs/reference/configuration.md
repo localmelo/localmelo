@@ -91,7 +91,9 @@ tables of the chosen backends.
 | `followup_query` | `[memory]` | `"recent"` | A developer setting. What a message with no content of its own ("go look it up", "continue", "do that", "去查一下", "那个呢") is searched with. `"recent"`: the message and what you typed in the last two turns of the chat that the model still shows, newest first, within 2,000 characters (melo's replies, an undone turn, a task's question and a turn with no content of its own, such as an earlier "continue", are left out; the two turns are the last two that say something); the first message of a new chat, with no such turn, recalls nothing, and the model can still call `search_memory`. `"message"`: its own words, which match whatever holds them, as recall did before. A message has content when a word is left after small words, asking words and follow-up words ("go", "look", "up", "continue", "that", "继续", "去查一下"), or when it holds a number, a URL or quoted text, or speaks of you ("I", "me", "my", "我", "我的"; a request such as "tell me more", "do it for me" or "帮我查一下" does not); "what is my name?", "what do you know about me?", "我是谁" and "我朋友叫什么名字" have content and are searched as typed either way. The two recall bars, the ranking, the limits and the block do not change. The `turn.memory` event's `recall.query_from` says which one a turn used: `"message"`, `"recent"` or `"none"`. Saved only when `"message"`; `-X memory.followup_query=message` for one run. See [A short follow-up](../concepts/memory.md#memory-across-chats). |
 | `project_instructions` | `[memory]` | `"on"` | `"on"`: a task you start, or a saved chore, reads the project's own instruction file when it starts: the first of `AGENTS.md`, `CLAUDE.md` and `GEMINI.md` in its folder and in each folder above it up to your home folder, nearest first, at most three files and 6,000 characters, read-only, with secrets removed. They go after the context pack under their own heading, and never outrank your words, melo's rules or an approval. `"off"` reads nothing. Saved only when `"off"`; `-X memory.project_instructions=off` for one run. See [A task reads its project's own instruction file](../concepts/memory.md#a-task-reads-its-projects-own-instruction-file). |
 | `admit_on_outcome` | `[memory]` | `false` | R6-lite: admit only the final attempt digest at the run's end, with the terminal status in its provenance. The `--admit-on-outcome` flag wins for one run; direct mode applies the table, the interactive UI and the gateway do not read it, and it is accepted and inert in `legacy`. |
-| `api_key_env` | cloud backend | not set | The name of the environment variable that holds the API key. |
+| `api_key_env` | cloud backend | not set | The name of the environment variable that holds the API key. When the variable has a value, it is used before `api_key`. |
+| `api_key` | cloud backend | not set | A reference to the key in the macOS keychain, `keychain:localmelo.<name>` (for example `keychain:localmelo.deepseek`). Settings and `melo setup` write it; it holds the reference, never the key. Anything else is a configuration error. |
+| `thinking` | cloud backend | not set | `"on"` or `"off"` for a hosted service that has a switch for the model's thinking (DeepSeek). Empty follows the service's default: `deepseek-flash` starts with thinking off, `deepseek-v4-pro` with its own default. A field of the section's `extra_body` wins. See [Hosted models](../guides/hosted-models.md#thinking-models). |
 | `base_url` | cloud backend | the vendor's URL | The API's URL. |
 | `host` | `[gateway]` | `"127.0.0.1"` | Loopback listen address; non-loopback binds are refused. |
 | `port` | `[gateway]` | `8401` | The port the gateway listens on. |
@@ -473,14 +475,21 @@ See [Memory](memory.md).
 
 ## Cloud API keys
 
-- The config file stores the *name* of the environment variable
-  (`api_key_env`), never the key.
+- The config file never holds a key. It holds a keychain reference
+  (`api_key = "keychain:localmelo.<name>"`, written by Settings or
+  `melo setup`) or the *name* of an environment variable (`api_key_env`).
+- When both are set and the variable has a value, the variable wins.
+- A keychain item that is missing or locked, or a keychain that this computer
+  does not have, stops `melo` before the run with exit code 1 and a plain fix.
+- A reference must name one of melo's own items (`keychain:localmelo.` and a
+  name of lowercase letters, digits, `-` and `_`); any other value is refused.
 - Export the variable in the shell that runs `melo`.
-- If it is not set, `melo` stops before the run with exit code 1:
+- If it is not set and there is no saved key, `melo` stops before the run with
+  exit code 1:
 
   ```text
     Configuration errors:
-    - [openai] environment variable $OPENAI_API_KEY is not set. Export it before starting the gateway.
+    - [openai] environment variable $OPENAI_API_KEY is not set. Export it before starting the gateway, or paste the key in Settings.
   ```
 
 - `--base-url` sends no API key, so use a config file for cloud APIs.
@@ -595,7 +604,7 @@ chat_model = "Qwen/Qwen3-8B"
 | `LOCALMELO_MEMORY_DIR` | The directory for those files (default `~/.cache/localmelo/memory`). It is used exactly as given: `~` is not expanded. |
 | `LOCALMELO_DETECT_URLS` | The URLs that the [first run](../guides/configure.md#first-run) asks for a model list, comma-separated, in place of ports 8000, 8400, 11434 and 30000 of `127.0.0.1`. An empty value turns the search off. |
 | `LOCALMELO_THINKING_RETENTION_DAYS` | The days that `history.db` and the session store's `sessions.db` keep the model's reasoning (default 30): any number above 0, such as `7` or `0.5`. Any other value stops `melo` with exit code 2. See [Model calls](memory.md#model-calls). |
-| The variable that `api_key_env` names | The API key of a cloud backend, such as `OPENAI_API_KEY`. |
+| The variable that `api_key_env` names | The API key of a cloud backend, such as `OPENAI_API_KEY`. It is used before a key saved in the keychain. |
 
 See [Keep memory between runs](../guides/memory.md#keep-memory-between-runs).
 

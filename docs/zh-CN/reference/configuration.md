@@ -90,7 +90,9 @@ chat_model = "qwen3:8b"
 | `followup_query` | `[memory]` | `"recent"` | 开发者设置。没有自己内容的消息（"go look it up"、"continue"、"do that"、"去查一下"、"那个呢"）用什么来搜索。`"recent"`：这条消息，加上你在这个对话中最近两个仍显示给模型的轮次里输入的内容，最新的在前，总共不超过 2,000 个字符（melo 的回复、已撤销的轮次、任务的提问，以及没有自己内容的轮次（例如更早的 "continue"）都不算；取的是最近两个有实际内容的轮次）；新对话的第一条消息没有这样的轮次，什么也不召回，模型仍可调用 `search_memory`。`"message"`：只按它自己的词搜索，这些词会匹配到任何含有它们的内容，召回以前就是这样。去掉小词、提问词和接话词（"go"、"look"、"up"、"continue"、"that"、"继续"、"去查一下"）之后还剩下词，或者消息里有数字、网址或引用的文字，或者说到了你（"I"、"me"、"my"、"我"、"我的"；"tell me more"、"do it for me"、"帮我查一下" 这样的请求不算），这条消息就有内容；"what is my name?"、"what do you know about me?"、"我是谁" 和 "我朋友叫什么名字" 有内容，两种设置下都照原样搜索。两个召回门槛、排序、数量上限和召回块都不变。`turn.memory` 事件的 `recall.query_from` 说明这一轮用的是哪一种：`"message"`、`"recent"` 或 `"none"`。只有 `"message"` 时才会保存；`-X memory.followup_query=message` 只对一次运行生效。见[简短的接话](../concepts/memory.md#memory-across-chats)。 |
 | `project_instructions` | `[memory]` | `"on"` | `"on"`：你发起的任务或已保存的例行任务，在开始时读取项目自己的说明文件：它所在文件夹以及上面每一级文件夹（直到你的主目录）里，`AGENTS.md`、`CLAUDE.md`、`GEMINI.md` 中第一个存在的，最近的在前，最多三个文件、6,000 个字符，只读，并去掉机密内容。它们放在上下文包之后，用单独的标题，永远排在你的话、melo 的规则和审批之后。`"off"`：什么都不读。只有 `"off"` 时才会保存；`-X memory.project_instructions=off` 只对一次运行生效。见[任务读取项目自己的说明文件](../concepts/memory.md#a-task-reads-its-projects-own-instruction-file)。 |
 | `admit_on_outcome` | `[memory]` | `false` | R6-lite：只在运行结束时准入最后一次尝试的摘要，并在其来源中带上最终状态。`--admit-on-outcome` 旗标对一次运行优先；直接模式会读这张表，交互式界面和网关不读，且在 `legacy` 中被接受但不生效。 |
-| `api_key_env` | 云端后端 | 未设置 | 保存 API 密钥的环境变量名称。 |
+| `api_key_env` | 云端后端 | 未设置 | 保存 API 密钥的环境变量名称。变量有值时，先于 `api_key` 使用。 |
+| `api_key` | 云端后端 | 未设置 | 指向 macOS 钥匙串中密钥的引用，形如 `keychain:localmelo.<name>`（例如 `keychain:localmelo.deepseek`）。由设置和 `melo setup` 写入；它保存的是引用，不是密钥。其他任何值都是配置错误。 |
+| `thinking` | 云端后端 | 未设置 | 对有思考开关的云端服务（DeepSeek），取 `"on"` 或 `"off"`。留空则跟随服务的默认：`deepseek-flash` 默认关闭思考，`deepseek-v4-pro` 用它自己的默认。该表 `extra_body` 里的同名字段优先。见[云端模型](../guides/hosted-models.md#thinking-models)。 |
 | `base_url` | 云端后端 | 厂商的 URL | API 的 URL。 |
 | `host` | `[gateway]` | `"127.0.0.1"` | 回环监听地址；拒绝非回环绑定。 |
 | `port` | `[gateway]` | `8401` | 网关监听的端口。 |
@@ -316,13 +318,16 @@ JSON 结果的 `prefix_cache.schema_changes` 统计运行期间所提供的规�
 
 ## 云端 API 密钥
 
-- 配置文件只保存环境变量的名称（`api_key_env`），从不保存密钥本身。
+- 配置文件从不保存密钥本身。它保存的是钥匙串引用（`api_key = "keychain:localmelo.<name>"`，由设置或 `melo setup` 写入），或环境变量的*名称*（`api_key_env`）。
+- 两者都设置且变量有值时，变量优先。
+- 钥匙串里的条目缺失或已锁定，或者这台电脑没有钥匙串时，`melo` 会在运行之前停止，退出码为 1，并说明怎么办。
+- 引用必须指向 melo 自己的条目（`keychain:localmelo.` 加上由小写字母、数字、`-` 和 `_` 组成的名称）；其他任何值都会被拒绝。
 - 在运行 `melo` 的 shell 中导出该变量。
-- 如果它没有设置，`melo` 会在运行之前停止，退出码为 1：
+- 如果变量没有设置，也没有已保存的密钥，`melo` 会在运行之前停止，退出码为 1：
 
   ```text
     Configuration errors:
-    - [openai] environment variable $OPENAI_API_KEY is not set. Export it before starting the gateway.
+    - [openai] environment variable $OPENAI_API_KEY is not set. Export it before starting the gateway, or paste the key in Settings.
   ```
 
 - `--base-url` 不发送 API 密钥，因此云端 API 请使用配置文件。
@@ -418,7 +423,7 @@ chat_model = "Qwen/Qwen3-8B"
 | `LOCALMELO_MEMORY_DIR` | 这些文件的目录（默认 `~/.cache/localmelo/memory`）。它按原样使用：不会展开 `~`。 |
 | `LOCALMELO_DETECT_URLS` | [首次运行](../guides/configure.md#first-run)请求模型列表的 URL，逗号分隔，用来代替 `127.0.0.1` 的 8000、8400、11434 和 30000 端口。空值会关闭搜索。 |
 | `LOCALMELO_THINKING_RETENTION_DAYS` | `history.db` 和会话存储的 `sessions.db` 保留模型推理的天数（默认 30）：任何大于 0 的数，例如 `7` 或 `0.5`。其他任何值都会让 `melo` 以退出码 2 停止。见[模型调用](../../reference/memory.md#model-calls)（英文）。 |
-| `api_key_env` 指定的变量 | 云端后端的 API 密钥，例如 `OPENAI_API_KEY`。 |
+| `api_key_env` 指定的变量 | 云端后端的 API 密钥，例如 `OPENAI_API_KEY`。先于钥匙串里保存的密钥使用。 |
 
 见[在运行之间保留记忆](../guides/memory.md#keep-memory-between-runs)。
 

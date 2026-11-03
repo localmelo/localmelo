@@ -9,6 +9,38 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Hosted services in Settings (#467). Under **Model server**, **Change…**, the list has a
+  group **Hosted services**: OpenAI, Google Gemini, Anthropic, NVIDIA, DeepSeek and Other
+  (OpenAI format). Choosing one fills its address and suggested models (one table of presets,
+  `support/hosted.py`; DeepSeek is the `openai` backend at `https://api.deepseek.com/v1` with
+  `deepseek-flash` and `deepseek-v4-pro`). **Save key** keeps the API key in the macOS
+  keychain (service `localmelo.<preset>`, account `localmelo`), written through
+  `security -i` with the command on stdin, so the key is on no command line. The config holds
+  only `api_key = "keychain:localmelo.<preset>"`; Settings shows **Saved in the keychain**
+  with **Replace** and **Remove**, and the key never reaches the config, the logs, the
+  events, an API reply or the page. An `api_key_env` variable still works and wins when it
+  has a value. A missing item, a locked keychain or a computer without one gives a plain fix.
+  New routes: `PUT` and `DELETE /api/settings/key` and `GET /api/settings/key-status?preset=`;
+  `GET /api/settings` reports each cloud section's `api_key`, `key` state, `thinking` and
+  `preset`, and `choices.hosted`.
+- **Test connection** for a hosted service asks for `GET <address>/models`, then sends one
+  short chat that offers one tool, and answers in plain words: it works, the key was wrong
+  (401), the service refused the account (402, 403), no such model (404), the service is busy
+  (429), it timed out, or it cannot be reached. The model comes from the list or is typed.
+  `POST /api/settings/test` adds `result`, `message`, `models` and `tools` for a hosted
+  chat service.
+- `melo setup` and the first run offer the same services as a list: the key is typed hidden
+  and saved to the keychain (or an environment variable is named), then the model is picked.
+  With no model server found, the first run's list has **Use a hosted service**.
+- A hosted section can set `thinking = "on"` or `"off"` (a checkbox in Settings, **Let the
+  model think before it answers**) for a service that has a switch for it. Empty follows the
+  preset: `deepseek-flash` starts with thinking off, `deepseek-v4-pro` with its own default;
+  a field of the section's `extra_body` wins. A short measurement against the service (a
+  two-tool task, five runs each) finished 5 of 5 for `deepseek-flash` with thinking on,
+  `deepseek-flash` with thinking off and `deepseek-v4-pro`.
+- A guide for hosted models, [Hosted models](docs/guides/hosted-models.md), in English and
+  Chinese.
+
 - Developer only, not visible by default: a cut excerpt can be opened whole. With
   `[memory] excerpt_open = "on"` (`-X memory.excerpt_open=on` for one run; the default, `"off"`,
   changes nothing) recall keeps its excerpts of earlier chat turns, but a line that shows less
@@ -1015,6 +1047,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   ([#188]).
 
 ### Fixed
+
+- A thinking model's answer is no longer lost (#469). A model that ended a turn with an
+  empty reply and its answer only in its thinking, twice in a row, failed the run with
+  `melo did not finish an answer`. When the service reported the model's reasoning, melo now
+  asks once more with thinking off (where the service has a switch for it, such as DeepSeek's
+  `thinking` field), and if the reply is still empty, the last lines of the thinking become
+  the answer, ending with `(from melo's thinking)`, and the run completes. A thinking that
+  was cut off inside the reply, a reply with no thinking and a tool call written as text fail
+  as before.
 
 - `browser_tabs` no longer shows tab ids cut off with "…" that no other browser tool could
   use, and closing a tab works: melo's tab ids are short and stable, an id it did not give

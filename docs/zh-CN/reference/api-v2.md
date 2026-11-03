@@ -158,7 +158,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
   "workspace": "~/localmelo-workspace",
   "sections": {
     "mlc": {"chat_url": "http://127.0.0.1:8400/v1", "chat_model": "qwen3-1.7b", "embedding_url": "", "embedding_model": ""},
-    "openai": {"api_key_env": "OPENAI_API_KEY", "api_key_set": false, "chat_model": "gpt-4o", "base_url": ""}
+    "openai": {"api_key_env": "OPENAI_API_KEY", "api_key_set": false, "api_key": "", "key": "none", "chat_model": "gpt-4o", "base_url": "", "thinking": "", "preset": "openai"}
   },
   "defaults": {
     "mlc": {"chat_url": "http://localhost:8400/v1", "chat_model": "qwen3-1.7b", "embedding_url": "http://localhost:8400/v1", "embedding_model": "nomic-embed"},
@@ -167,7 +167,8 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
   "errors": [],
   "choices": {
     "chat_backends": [{"key": "mlc", "label": "MLC (local endpoint)", "kind": "local"}, {"key": "openai", "label": "OpenAI", "kind": "cloud"}],
-    "embedding_backends": [{"key": "mlc", "label": "MLC (local endpoint)"}, {"key": "none", "label": "None (no long-term memory)"}]
+    "embedding_backends": [{"key": "mlc", "label": "MLC (local endpoint)"}, {"key": "none", "label": "None (no long-term memory)"}],
+    "hosted": [{"id": "deepseek", "label": "DeepSeek", "backend": "openai", "base_url": "https://api.deepseek.com/v1", "stored_url": "https://api.deepseek.com/v1", "models": ["deepseek-flash", "deepseek-v4-pro"], "key_env": "DEEPSEEK_API_KEY", "key_ref": "keychain:localmelo.deepseek", "free_address": false, "thinking_switch": true, "thinking_off_models": ["deepseek-flash"]}]
   },
   "mode": "default",
   "across_chats": true,
@@ -188,7 +189,8 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 }
 ```
 
-- `sections` 包含全部四个本地节（`mlc`、`ollama`、`vllm`、`sglang`）和全部四个云端节（`openai`、`gemini`、`anthropic`、`nvidia`）。云端节报告 `api_key_env`（变量名）和 `api_key_set`（该变量在网关的环境中是否非空），从不包含密钥或其遮罩。
+- `sections` 包含全部四个本地节（`mlc`、`ollama`、`vllm`、`sglang`）和全部四个云端节（`openai`、`gemini`、`anthropic`、`nvidia`）。云端节报告 `api_key_env`（变量名）和 `api_key_set`（该变量在网关的环境中是否非空），从不包含密钥或其遮罩。它们还报告 `api_key`（钥匙串引用，例如 `keychain:localmelo.deepseek`，或 `""`）、`key`（密钥现在来自哪里：`env`、`keychain`、`missing`、`locked`、`unavailable` 或 `none`）、`thinking`（`""`、`"on"` 或 `"off"`）和 `preset`（这个节所属云端服务的 id）。
+- `choices.hosted` 列出云端服务（示例只显示六个中的一个）：它们的地址、建议的模型、钥匙串出现之前保存密钥的变量、保存密钥后得到的引用，以及该服务是否有思考开关、哪些模型默认关闭思考。
 - `workspace` 是 `[gateway] workspace`；未设置时为 `~/localmelo-workspace`。
 - `revision` 是文件 SHA-256 的前 16 个十六进制字符；文件尚不存在时为 `""`。
 - `across_chats` 是 `[memory] across_chats`，即[跨对话记忆](#memory-across-chats)的开关。
@@ -210,6 +212,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 ```
 
 - 每个字符串都必须是不含控制字符的单行，`workspace` 为必填项，必须是绝对路径或以 `~/` 开头，并且不能解析为 `/` 或主目录（包括经由符号链接）；否则返回 400 `invalid_request`。`sections` 中不接受 `api_key_set`。
+- 云端节可以带 `api_key`，它必须为空或是一个 `keychain:localmelo.<name>` 引用（否则 400 `invalid_request`），还可以带 `thinking`，它必须是 `""`、`"on"` 或 `"off"`。密钥本身从不在这个请求体里：由 [`PUT /api/settings/key`](#put-apisettingskey) 保存。
 - `mode` 可选：`default` 或 `developer` 会设置 `[ui] mode`（其他值返回 400 `invalid_request`）；省略时保留已保存的模式。模式只改变控制台和 `melo --help` 显示的内容。
 - `across_chats` 可选：布尔值，设置 `[memory] across_chats`；省略时保留已保存的值。
 - `memory_retriever` 可选：`auto`、`bm25`、`embedding` 或 `llm`，设置 `[memory] retriever`（其他值返回 400 `invalid_request`；没有嵌入模型时设为 `embedding` 返回 400 `invalid_settings`）；省略时保留已保存的值。
@@ -237,6 +240,13 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 ```
 
 - 字段或校验错误会先返回 400。探测失败会返回 HTTP 200，并附 `{"ok": false, "error": "...", "failed": "chat"}`（嵌入探测失败时 `failed` 为 `embedding`）；超时没有 `failed`。
+- 对云端对话服务，测试先请求 `GET <address>/models`，再发一条只提供一个工具的简短对话。响应体多出 `result`、`message`（平实的说明，使用控制台的语言）、`models`（服务列出的对话模型，最多 200 个）和 `tools`（模型是否调用了测试工具）：
+
+  ```json
+  {"ok": false, "result": "wrong_key", "error": "The service did not accept the key (401). Paste the key again.", "message": "The service did not accept the key (401). Paste the key again.", "models": [], "tools": null, "failed": "chat"}
+  ```
+
+  `result` 是 `works`、`no_key`、`wrong_key`（401）、`refused`（402、403）、`no_model`（404，或列表里没有的模型）、`busy`（429）、`timeout`、`unreachable`、`error`，或在无法读取已保存密钥时的 `keychain_missing`、`keychain_locked`、`keychain_unavailable`、`keychain_bad` 和 `keychain_failed`。密钥只放在请求头里发给服务；每个 `message` 和 `error` 都经过脱敏。
 
 ## GET /api/settings/key-status
 
@@ -251,6 +261,40 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 ```
 
 - `name` 必须匹配 `^[A-Za-z_][A-Za-z0-9_]{0,127}$`；其他任何值都是 400 `invalid_request`。
+- 用 `preset=<id>` 代替 `name` 可以查询某个云端服务：`{"keychain": "saved", "env_set": false}`，其中 `keychain` 是 `saved`、`missing`、`locked` 或 `unavailable`。它不读取密钥。未知的 id 是 400 `invalid_request`。
+
+## PUT /api/settings/key
+
+把某个云端服务的 API 密钥保存到 macOS 钥匙串，服务名为 `localmelo.<preset>`，账户为 `localmelo`。这是唯一携带密钥的请求。
+
+请求体是 JSON，由设置页发送；不要把密钥放进命令行，`ps` 可能会看到它。
+
+```json
+{"preset": "deepseek", "key": "<your key>"}
+```
+
+响应：
+
+```json
+{"preset": "deepseek", "api_key": "keychain:localmelo.deepseek", "keychain": "saved"}
+```
+
+- 响应里是指向该条目的引用，从不是密钥。密钥通过标准输入交给 `security`，不在命令行上，也从不记入日志。
+- 不是“8 到 512 个可打印字符”的一串（开头的 `Bearer` 会被去掉）是 400 `invalid_key`；未知的 `preset` 是 400 `invalid_request`。
+- 钥匙串已锁定是 409 `keychain_locked`，电脑上没有钥匙串是 409 `keychain_unavailable`，其他拒绝是 502 `keychain_failed`。
+- 它不会修改 `config.toml`：页面随后用 [`PUT /api/settings`](#put-apisettings) 保存 `api_key`。
+
+## DELETE /api/settings/key
+
+把某个云端服务的密钥从钥匙串中删除。如果它不在那里，什么也不会发生。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X DELETE 'http://127.0.0.1:8401/api/settings/key?preset=deepseek'
+```
+
+```json
+{"preset": "deepseek", "keychain": "missing"}
+```
 
 ## GET /api/models
 
