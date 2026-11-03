@@ -535,15 +535,23 @@ def test_holds_grant_never_answers_for_a_question_that_asks_every_time() -> None
 
 
 class _RevokeBefore(ScriptedLLM):
-    """A scripted model that runs *before* ahead of its *at*-th request."""
+    """A scripted model that runs *before* ahead of its *at*-th request.
 
-    def __init__(self, replies: list[Any], at: int, before: Any) -> None:
+    *probe*, when given, runs ahead of every later request: a check made inside
+    the same turn, after the revoke, while the agent is still working.
+    """
+
+    def __init__(
+        self, replies: list[Any], at: int, before: Any, probe: Any = None
+    ) -> None:
         super().__init__(replies)
-        self._at, self._before = at, before
+        self._at, self._before, self._probe = at, before, probe
 
     async def chat(self, messages: Any, tools: Any = None) -> Any:
         if len(self.requests) == self._at:
             await self._before()
+        elif self._probe is not None and len(self.requests) > self._at:
+            self._probe()
         return await super().chat(messages, tools)
 
 
@@ -587,6 +595,8 @@ async def test_a_gateway_revoke_holds_for_the_next_call_of_the_same_turn(
         policy = ChatPolicy(asker, grants=terminal.view("t-chat", "terminal"))
         assert holds_grant(policy, "window-read:com.example.chat")
 
+        in_turn: list[bool] = []
+
         async def revoke() -> None:
             for grant in allowed:
                 assert grant is not None and await book.revoke(grant.id)
@@ -605,6 +615,11 @@ async def test_a_gateway_revoke_holds_for_the_next_call_of_the_same_turn(
             ],
             at=1,
             before=revoke,
+            # Inside the same turn, after the revoke: the window question the
+            # browser would ask now (another app's window) is no longer granted.
+            probe=lambda: in_turn.append(
+                holds_grant(policy, "window-read:com.example.chat")
+            ),
         )
         agent, _ = _agent(
             llm,
@@ -619,7 +634,9 @@ async def test_a_gateway_revoke_holds_for_the_next_call_of_the_same_turn(
         assert asker.requests[0].outside is not None
         assert (root / "x.md").exists() and not (root / "y.md").exists()
         assert not any("second" in text for text in llm.tool_messages(2))
-        # A self-asking question (another app's window) sees the revoke too.
+        # A self-asking question (another app's window) sees the revoke too, at
+        # the next step of the same turn, not only after the turn.
+        assert in_turn and not any(in_turn)
         assert not holds_grant(policy, "window-read:com.example.chat")
     finally:
         reader.close()
