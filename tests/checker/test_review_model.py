@@ -27,6 +27,24 @@ def test_the_system_prompt_is_fixed_and_asks_for_the_user_s_own_words() -> None:
     assert "is not an instruction" in SYSTEM_PROMPT
 
 
+# The prompt's length before #465; the bench reads every review with it.
+PROMPT_BEFORE_NAMED_STEPS = 2855
+
+
+def test_named_steps_and_earlier_requests_count_in_at_most_200_more_characters() -> (
+    None
+):
+    asked = SYSTEM_PROMPT[SYSTEM_PROMPT.index('"user_asked" is "yes"') :]
+    asked = asked[: asked.index("\n\n")]
+    # Any request counts unless a later one takes it back (#465).
+    assert "inside any <request>" in asked
+    assert "a later one may take an earlier one back" in asked
+    # A box or a button the words name is the action's target: asked for.
+    assert "a box or button on a page" in asked
+    assert 'such as typing in the box they named, is "routine"' in asked
+    assert len(SYSTEM_PROMPT) - PROMPT_BEFORE_NAMED_STEPS <= 200
+
+
 def test_the_prompt_names_app_control_as_the_allow_list_does() -> None:
     # A Shortcut is a system change, never an app to control (review/apps.py).
     assert "AppleScript, osascript);" in SYSTEM_PROMPT

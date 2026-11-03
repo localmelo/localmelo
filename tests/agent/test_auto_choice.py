@@ -455,3 +455,52 @@ async def test_a_window_kept_across_runs_is_not_filled_twice(tmp_path: Path) -> 
     )
 
     assert agent._reviewer.requests == ("first", "second", "third")
+
+
+# ── Named steps match ──
+
+NAMED = verdict(category="send_out", user_asked="yes", reason="Types the line.")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("access", "words", "shown"),
+    [
+        # Typing into the box the words name is what they asked for.
+        ("type", "choose a mood, write a line in the comment box", "hello there"),
+        # And so is a button they name.
+        ("submit", "then click submit", "collect.example/post"),
+    ],
+)
+async def test_a_named_box_and_a_named_button_run_without_a_card(
+    tmp_path: Path, access: str, words: str, shown: str
+) -> None:
+    tool = ActsOnSite()
+    llm = FakeModel([_act("news.example", access), _answer("done")], [NAMED])
+    agent = _acting_agent(llm, tmp_path / "ws", tool)
+    card = Card()
+
+    await agent.run_task(words, approval=ChatPolicy(card, "auto"))
+
+    [answer] = tool.answers
+    assert answer.allow and card.asked == []
+    # The review saw what goes into the page and the person's words.
+    [request] = llm.review_requests
+    assert shown in request[1].content and words in request[1].content
+
+
+@pytest.mark.asyncio
+async def test_a_named_box_the_review_still_finds_unasked_for_gives_the_card(
+    tmp_path: Path,
+) -> None:
+    tool = ActsOnSite()
+    stopped = verdict(verdict="ask", category="send_out", user_asked="no")
+    llm = FakeModel([_act("news.example", "type"), _answer("done")], [stopped])
+    agent = _acting_agent(llm, tmp_path / "ws", tool)
+    card = Card(ApprovalDecision(True))
+
+    await agent.run_task("read the comments", approval=ChatPolicy(card, "auto"))
+
+    # Typing is never kept for the chat: the card offers once or Don't allow.
+    [asked] = card.asked
+    assert asked.tool_name.startswith("browser-type:") and tool.answers[0].allow
