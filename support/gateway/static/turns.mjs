@@ -608,6 +608,14 @@ export function newView(id) {
   };
 }
 
+/** The picture references of a turn's event or row, keeping the ones that name a blob. */
+function pictureRefs(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((image) => isObject(image) && /^[0-9a-f]{64}$/.test(String(image.sha256 ?? "")))
+    .map((image) => ({sha256: String(image.sha256), mime_type: String(image.mime_type ?? ""), size_bytes: num(image.size_bytes) ?? 0}));
+}
+
 /** One turn from a `turn_json` row (`GET /api/sessions/{id}/turns`). */
 export function newTurn(row) {
   const source = objectOf(row);
@@ -618,6 +626,8 @@ export function newTurn(row) {
     turn: int(source.turn) ?? 0,
     runId: String(source.run_id ?? ""),
     userText: String(source.user_text ?? ""),
+    // The pictures the person added (`turn.started`'s `images`): `{sha256, mime_type, size_bytes}`, served by the chat's blobs.
+    images: pictureRefs(source.images),
     // "ask_owner": the chat's internal turn on a task's question (#369); "" the person's.
     origin: String(source.origin ?? ""),
     status: String(source.status ?? ""),
@@ -671,6 +681,7 @@ function ensureTurn(view, number, fields = {}) {
       id: fields.id ?? "",
       turn: number,
       user_text: fields.userText ?? "",
+      images: fields.images,
       client_request_id: fields.clientRequestId ?? "",
       origin: fields.origin ?? "",
       status: "running",
@@ -681,6 +692,7 @@ function ensureTurn(view, number, fields = {}) {
   if (fields.id && !turn.id) turn.id = fields.id;
   if (fields.origin && !turn.origin) turn.origin = fields.origin;
   if (fields.userText && !turn.userText) turn.userText = fields.userText;
+  if (turn.images.length === 0) turn.images = pictureRefs(fields.images);
   if (fields.clientRequestId && !turn.clientRequestId) {
     turn.clientRequestId = fields.clientRequestId;
   }
@@ -793,6 +805,7 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
     type === "turn.started" ? ensureTurn(view, number, {
       id: data.turn_id,
       userText: data.user_text,
+      images: data.images,
       clientRequestId: data.client_request_id,
       origin: data.origin,
     }) : findTurn(view, number);

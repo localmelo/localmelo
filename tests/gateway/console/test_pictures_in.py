@@ -9,6 +9,7 @@ chat on a scripted model; nothing reaches a model server.
 from __future__ import annotations
 
 import asyncio
+import json
 import shutil
 import struct
 import zlib
@@ -24,6 +25,7 @@ from localmelo.melo.agent._request_accounting import _image_dimensions
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.vision import Vision
 from localmelo.support.gateway.guard import UPLOAD_BYTES_LIMIT, LoopbackGuard
+from localmelo.support.sessions.attachments import compose_user_text, snapshot
 from localmelo.support.sessions.picture_input import (
     LONG_SIDE,
     MAX_PICTURES,
@@ -530,3 +532,89 @@ async def test_a_binary_or_oversize_or_too_many_files_are_refused_with_a_reason(
         )
         assert many.status_code == 400
         assert await console.store.list_turns(main_id) == []
+
+
+async def test_cancelling_a_message_with_media_judges_the_text_the_send_kept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cancel and keep draft names the same words, files and picture count the send had."""
+    async with ask_console(
+        tmp_path,
+        monkeypatch,
+        main=[answer("Seen.")],
+        vision=FakeVision(True),
+        run=False,
+    ) as (console, client, _):
+        main_id = str(console.main_id)
+        picture = await _stage(client)
+        files = [{"name": "n.txt", "text": "hi", "chars": 2}]
+        # A message that never arrived: withdrawn with its media, it can no longer be sent.
+        gone = await client.post(
+            f"/api/sessions/{main_id}/submissions/k-never/cancel",
+            json={"text": "", "images": [picture], "attachments": files},
+        )
+        assert gone.status_code == 200, gone.text
+        assert gone.json()["submission"]["state"] == "withdrawn"
+        late = await _post_turn(
+            client,
+            main_id,
+            "",
+            images=[picture],
+            attachments=files,
+            client_request_id="k-never",
+        )
+        assert late.status_code == 409
+        # A message that was accepted: the same media is the same text, another file is not.
+        sent = await _post_turn(
+            client,
+            main_id,
+            "",
+            images=[picture],
+            attachments=files,
+            client_request_id="k-sent",
+        )
+        assert sent.status_code == 202, sent.text
+        same = await client.post(
+            f"/api/sessions/{main_id}/submissions/k-sent/cancel",
+            json={"text": "", "images": [picture], "attachments": files},
+        )
+        assert same.status_code in (200, 202), same.text
+        assert same.json()["submission"]["state"] == "accepted"
+        other = await client.post(
+            f"/api/sessions/{main_id}/submissions/k-sent/cancel",
+            json={
+                "text": "",
+                "images": [picture],
+                "attachments": [{"name": "n.txt", "text": "different", "chars": 9}],
+            },
+        )
+        assert other.status_code == 409
+        assert other.json()["error"]["code"] == "submission_conflict"
+        blank = await client.post(
+            f"/api/sessions/{main_id}/submissions/k-blank/cancel",
+            json={"text": " "},
+        )
+        assert blank.status_code == 400
+
+
+def test_the_composed_text_is_what_the_pages_parser_reads() -> None:
+    """The page reads a stored message back with the same shape ``compose_user_text`` writes.
+
+    ``tests/fixtures/composed_attachments.json`` is the shared case: this test
+    keeps it equal to the gateway's own output and ``test_composer_media.mjs``
+    reads the page's answer from it.
+    """
+    fixture = json.loads(
+        (
+            Path(__file__).resolve().parents[2] / "fixtures/composed_attachments.json"
+        ).read_text("utf-8")
+    )
+    files = [snapshot(item["name"], item["text"]) for item in fixture["files"]]
+    assert (
+        compose_user_text(fixture["with_words"]["words"], files)
+        == fixture["with_words"]["composed"]
+    )
+    assert (
+        compose_user_text(fixture["stand_in"]["words"], files)
+        == fixture["stand_in"]["composed"]
+    )

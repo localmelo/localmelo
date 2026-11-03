@@ -134,6 +134,7 @@
           <button type="button" class="link-button" id="reconnect-btn" data-i18n="html.reconnectBtn">Reconnect now</button>
         </div>
         <div class="notice" id="notice" role="status" hidden></div>
+        <div class="drop-hint" id="drop-hint" aria-hidden="true" hidden><span data-i18n="composer.dropHint">Drop pictures or text files to add them to your message</span></div>
         <section id="worker-panel" class="worker-panel" aria-label="Worker history" data-i18n-aria-label="html.workerHistory" hidden></section>
         <section class="scroll" id="scroll" aria-label="Conversation" data-i18n-aria-label="html.conversation">
           <div class="welcome" id="welcome">
@@ -172,6 +173,10 @@
           <form class="composer" id="composer">
             <label class="sr-only" for="input" data-i18n="html.message">Message</label>
             <div class="slash-menu" id="slash-menu" role="listbox" aria-label="Commands" data-i18n-aria-label="slash.menuLabel" hidden></div>
+            <div class="media-tray" id="media-tray" role="group" aria-label="Added to this message" data-i18n-aria-label="composer.trayLabel" hidden></div>
+            <p class="media-warning" id="media-warning" role="status" hidden></p>
+            <input type="file" id="media-input" class="sr-only" multiple tabindex="-1" aria-hidden="true"
+              accept="image/png,image/jpeg,image/gif,image/webp,image/heic,image/heif,text/*,.md,.json,.yaml,.yml,.toml,.csv,.log,.py,.js,.mjs,.ts,.tsx,.jsx,.swift,.rs,.go,.java,.c,.h,.cpp,.sh,.sql" />
             <textarea
               id="input"
               placeholder="Ask anything, or describe a task…" data-i18n-placeholder="html.askAnythingOrDescribeA"
@@ -180,6 +185,9 @@
               aria-autocomplete="list"
             ></textarea>
             <div class="composer-toolbar">
+              <button type="button" class="attach-button" id="attach-btn" aria-label="Add a picture or file" data-i18n-aria-label="composer.attach">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.9-8.9a3.7 3.7 0 0 1 5.2 5.2l-8.9 8.9a1.8 1.8 0 0 1-2.6-2.6l8.2-8.2" /></svg>
+              </button>
               <div class="folder-picker" id="folder-picker" hidden>
                 <button type="button" class="folder-chip" id="folder-btn" aria-expanded="false" aria-controls="folder-menu" aria-describedby="folder-full">
                   <span id="folder-text" data-i18n="html.folderText">In folder</span><span aria-hidden="true">⌄</span>

@@ -68,8 +68,16 @@ function page({routes = {}, state = {}, host: extra = {}} = {}) {
     return result;
   };
   const record = (name) => (...args) => { events.push([name, ...args]); };
+  // The composer's pictures and files: two waiting, as the strip would list them.
+  const strip = [{id: 'm1', name: 'plan.png', bytes: 84 * 1024}, {id: 'm2', name: 'notes.md', bytes: 2048}];
   const host = {
     doc, input, menu, rows, api,
+    media: {
+      pick: record('pick'),
+      list: () => strip.map((item) => ({...item})),
+      remove: (id) => { events.push(['remove', id]); strip.splice(strip.findIndex((item) => item.id === id), 1); },
+      clear: () => { events.push(['clear']); strip.length = 0; },
+    },
     enabled: () => true,
     slot: () => current.id ?? 'new',
     state: () => current,
@@ -683,13 +691,27 @@ test('/exit quits the app after a confirm, and in a browser tab says to close th
   assert.match(lastRow(old), /Quit melo from its menu bar item, or press ⌘Q\./);
 });
 
-test('the console takes no files yet, and says so for each of the three commands', async () => {
+test('/attach opens the picker, /attachments lists what waits, /detach removes one or all', async () => {
   const p = page();
-  for (const line of ['/attach notes.txt', '/attachments', '/detach all']) {
-    await p.slash.handle(line);
-    assert.match(lastRow(p), /This page cannot take files yet\. Attach one in a terminal chat with \/attach PATH\./);
-  }
-  assert.deepEqual(p.sent, []);
+  await p.slash.handle('/attach');
+  assert.deepEqual(p.events.filter(([name]) => name === 'pick'), [['pick']], 'the page cannot read a path, so it opens its picker');
+  assert.equal(p.rows.children.length, 0, 'nothing is written: the picker is the answer');
+  await p.slash.handle('/attachments');
+  assert.match(text(p.rows.children[0]), /1\. plan\.png · 86 KB/);
+  assert.match(text(p.rows.children[0]), /2\. notes\.md · 2\.0 KB/);
+  await p.slash.handle('/detach 1');
+  assert.deepEqual(p.events.filter(([name]) => name === 'remove'), [['remove', 'm1']]);
+  assert.match(lastRow(p), /Removed plan\.png\./);
+  await p.slash.handle('/detach 5');
+  assert.match(lastRow(p), /There is no attachment 5\./);
+  await p.slash.handle('/detach');
+  assert.match(lastRow(p), /Use \/detach N to remove one attachment, or \/detach all\./);
+  await p.slash.handle('/detach all');
+  assert.deepEqual(p.events.filter(([name]) => name === 'clear'), [['clear']]);
+  assert.match(lastRow(p), /Removed all attachments\./);
+  await p.slash.handle('/attachments');
+  assert.match(lastRow(p), /Nothing is attached\./);
+  assert.deepEqual(p.sent, [], 'none of it reaches the model');
 });
 
 test('a row is a command echo, then lines whose colors say what they mean', () => {

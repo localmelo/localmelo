@@ -28,6 +28,7 @@ import { folderName, setupFolderPicker } from "./folder.mjs";
 import { modeOf, setupModeChip } from "./mode.mjs";
 import { allowState, blockCard, blockFacts, gistWords, reviewWords } from "./blocked.mjs";
 import { picturesNode, setupPictureBox } from "./pictures.mjs";
+import { isStandIn, requestOf, setupMedia, splitAttachments, turnPictures, uploadType } from "./composer-media.mjs";
 import { memoryNodes } from "./memory.mjs";
 import { parseCommand, setupSlash } from "./slash.mjs";
 import { askAboutNotes } from "./memory-tab.mjs";
@@ -99,6 +100,7 @@ const S = {
   cardAllows: {},
   drafts: {},
   outbox: {},
+  media: {}, // The pictures and files waiting in the composer of each chat that is not open, by slot.
   cancelling: new Set(),
   stream: { source: null, sessionId: null, status: "idle", attempt: 0, retryAt: 0, timer: null },
   view: null,
@@ -537,13 +539,18 @@ function syncUI() {
   $("stop-btn").disabled = !busy || S.cancelling.has(busy.id);
   $("stop-btn").textContent = `■ ${t(busy && S.cancelling.has(busy.id) ? "header.stopping" : "common.stop")}`;
   const sending = pendingOutbox();
+  // Words, or pictures and files that have arrived at the gateway, can be sent.
+  const hasMedia = media.has();
+  $("attach-btn").hidden = workerMode;
+  $("attach-btn").disabled = setup || !S.online;
   $("send-btn").disabled =
     setup ||
     !S.online ||
     (sending !== null && sending.state !== "failed") ||
-    !input.value.trim();
+    media.busy() ||
+    !(input.value.trim() || hasMedia);
   // Run as a task: a chat starts the message as a task, without asking the model.
-  $("task-btn").hidden = !S.activeId || !!busy;
+  $("task-btn").hidden = !S.activeId || !!busy || media.hasPictures();
   $("task-btn").disabled = $("send-btn").disabled;
   $("run-status").textContent = turn ? (held ? holdText(held) : t(developerMode ? "header.runningOnBackend" : "header.workingDots")) : "";
   $("level-btn").textContent = levelName(session?.level);
@@ -797,6 +804,7 @@ async function openSession(id, { saveCurrent = true, scroll = true, route = true
   }
   if (saveCurrent) saveDraft();
   if (S.activeId !== id) approvalStates.clear();
+  shiftMedia(S.activeId ?? "new", id, { keep: saveCurrent });
   closeStream();
   S.activeId = id;
   drawer.sessionChanged();
@@ -847,6 +855,7 @@ function newChat({ saveCurrent = true } = {}) {
   if (saveCurrent) saveDraft();
   S.pendingTitle = "";
   if (S.activeId !== null) approvalStates.clear();
+  shiftMedia(S.activeId ?? "new", "new", { keep: saveCurrent });
   closeStream();
   S.activeId = null;
   drawer.sessionChanged();
@@ -1412,9 +1421,53 @@ function turnNode(turn, newest = false, asked = askTurn(turn)) {
   return section;
 }
 
+/**
+ * What a message carries, as the bubble draws it: its pictures (a row of thumbnails that open at full
+ * size) and its text files (chips). *pictures* are `{name, url, bytes}`, *files* `{name}`.
+ */
+function mediaRow(pictures, files) {
+  if (pictures.length === 0 && files.length === 0) return null;
+  const row = el("div", "bubble-media");
+  for (const picture of pictures) {
+    const tile = el("button", "bubble-picture");
+    tile.type = "button";
+    tile.setAttribute("aria-label", t("composer.openPicture", { name: picture.name }));
+    const image = document.createElement("img");
+    image.alt = "";
+    image.loading = "lazy";
+    image.src = picture.url;
+    tile.append(image);
+    tile.addEventListener("click", () => pictureBox({ path: picture.name, size: picture.bytes, mtime: 0, state: "" }, picture.url));
+    row.append(tile);
+  }
+  for (const file of files) row.append(el("span", "bubble-file", file.name));
+  return row;
+}
+
+/** The bubble's content: media above the words. A message sent with no words shows its pictures alone. */
+function fillBubble(bubble, words, { pictures, files }) {
+  const row = mediaRow(pictures, files);
+  if (row !== null) bubble.append(row);
+  if (words) bubble.append(el("div", "bubble-words", words));
+  if (row !== null) bubble.classList.add("has-media");
+}
+
+/** An outbox entry's media (the items taken from the strip) as the bubble draws them. */
+function entryMedia(items) {
+  return {
+    pictures: items.filter((item) => item.kind === "picture").map((item) => ({ name: item.name, url: item.url, bytes: item.bytes })),
+    files: items.filter((item) => item.kind === "file").map((item) => ({ name: item.name })),
+  };
+}
+
 function userNode(turn, newest = false) {
   const article = el("article", "msg user");
-  article.append(el("div", "user-bubble", turn.userText), ...memoryOf(turn));
+  // The gateway writes the text files after the words, and stands in `[2 pictures]` for no words.
+  const { words, files } = splitAttachments(turn.userText);
+  const pictures = turnPictures(S.view?.id ?? S.activeId, turn.images);
+  const bubble = el("div", "user-bubble");
+  fillBubble(bubble, (pictures.length > 0 || files.length > 0) && isStandIn(words) ? "" : words, { pictures, files });
+  article.append(bubble, ...memoryOf(turn));
   if (turn.undone) {
     // Nothing follows an undo (/undo); a retry is followed by the turn that ran again.
     article.append(el("p", "turn-caption", t(newest ? "chat.undoneNote" : "chat.retriedBelow")));
@@ -2347,7 +2400,8 @@ function pastNode(turn) {
 
 function outboxNode(entry, slot) {
   const article = el("article", "msg user");
-  const bubble = el("div", "user-bubble", entry.text);
+  const bubble = el("div", "user-bubble");
+  fillBubble(bubble, entry.text, entryMedia(entry.media ?? []));
   article.append(bubble);
   const status = el("p", "outbox-state");
   if (entry.state === "sending") status.textContent = t("outbox.sending");
@@ -2401,16 +2455,38 @@ async function queueMessage(text, {clearInput = false, asTask = false} = {}) {
   if (workerMode) return;
   const slot = S.activeId ?? "new";
   const previous = S.outbox[slot];
-  // While melo works, the words join the work: its run reads them at its next step.
-  if (text && composerTurn() !== null) return addNote(text, { clearInput });
-  if (!text) return;
+  if (composerTurn() !== null) {
+    // Pictures and files cannot join a running turn; they stay where they are.
+    if (clearInput && media.has()) {
+      notify(t("composer.mediaWhileWorking"));
+      return;
+    }
+    // While melo works, the words join the work: its run reads them at its next step.
+    if (text) return addNote(text, { clearInput });
+  }
+  if (!text && !(clearInput && media.has())) return;
+  if (clearInput && media.busy()) return;
+  if (asTask && media.hasPictures()) {
+    notify(t("composer.picturesNoTask"));
+    return;
+  }
   if (previous && (previous.state !== "failed" || !clearInput)) return;
-  // The same text, failed after a check of unknown outcome, keeps its key:
+  // The same text, failed after a check of unknown outcome, keeps its key and its media:
   // the store answers `repeated` instead of running it twice.
   const again = previous && previous.state === "failed" && previous.text === text;
   const key = again ? previous.clientRequestId : newClientRequestId();
   slash.clearRows(slot);
-  S.outbox[slot] = { clientRequestId: key, text, state: "sending", error: "", ...(asTask ? { asTask } : {}) };
+  // A failed message that is replaced gives its pictures and files back to the strip first, so they go with the new one.
+  if (previous && !again && previous.media?.length) media.restore(previous.media);
+  const carried = again ? previous.media ?? [] : clearInput ? media.take() : [];
+  S.outbox[slot] = {
+    clientRequestId: key,
+    text,
+    state: "sending",
+    error: "",
+    ...(carried.length ? { media: carried } : {}),
+    ...(asTask ? { asTask } : {}),
+  };
   if (clearInput) {
     input.value = "";
     saveDraft();
@@ -2467,6 +2543,13 @@ async function addNote(text, { clearInput = false } = {}) {
   syncUI();
 }
 
+/** Put the pictures and files of a message that was not sent back in the composer of its chat. */
+function returnMedia(slot, items) {
+  if (items.length === 0) return;
+  if ((S.activeId ?? "new") === slot) media.restore(items);
+  else S.media[slot] = [...items, ...(S.media[slot] ?? [])];
+}
+
 /** Put words back in the box, before what is typed there now. */
 function giveBack(text) {
   input.value = [text, input.value.trim()].filter(Boolean).join("\n\n");
@@ -2482,7 +2565,7 @@ async function submit(slot, key, text) {
     if (!sessionId) {
       const body = await api("/sessions", {
         body: {
-          turn: { text, client_request_id: key },
+          turn: { text, client_request_id: key, ...requestOf(S.outbox[slot]?.media ?? []) },
           ...(S.newWorkspace ? { workspace: S.newWorkspace } : {}),
           ...(S.newMode ? { approvals: S.newMode } : {}),
         },
@@ -2514,7 +2597,7 @@ async function submit(slot, key, text) {
     }
     const asTask = S.outbox[slot]?.asTask === true;
     const body = await api(`/sessions/${encodeURIComponent(sessionId)}/turns`, {
-      body: { text, client_request_id: key, ...(asTask ? { as_task: true } : {}) },
+      body: { text, client_request_id: key, ...requestOf(S.outbox[slot]?.media ?? []), ...(asTask ? { as_task: true } : {}) },
     });
     // A repeat is accepted too, so either way the text is not a draft now.
     if (S.outbox[slot]?.clientRequestId !== key) return;
@@ -2617,10 +2700,11 @@ async function cancelSend(slot, entry) {
     ? `/sessions/${encodeURIComponent(sessionId)}/submissions/${encodeURIComponent(entry.clientRequestId)}/cancel`
     : `/submissions/${encodeURIComponent(entry.clientRequestId)}/cancel`;
   try {
-    await api(path, { body: { text: entry.text } });
+    await api(path, { body: { text: entry.text, ...requestOf(entry.media ?? []) } });
     if (S.outbox[slot] !== entry) return;
     delete S.outbox[slot];
     keepDraft(slot, entry.text);
+    returnMedia(slot, entry.media ?? []);
     renderMessages(false);
     syncUI();
   } catch (error) {
@@ -2629,6 +2713,7 @@ async function cancelSend(slot, entry) {
       // The store never took it, so the text comes back to the composer.
       delete S.outbox[slot];
       keepDraft(slot, entry.text);
+      returnMedia(slot, entry.media ?? []);
       renderMessages(false);
       syncUI();
       return;
@@ -3182,6 +3267,123 @@ const panel = setupPanel({
   },
 });
 const pictureBox = setupPictureBox({ dialog: $("picture-box") });
+
+// ── Pictures and files in the composer ──
+
+/** Send a picture's bytes to the gateway, which reads, converts and scales it (`POST /api/uploads`). */
+async function uploadPicture(file) {
+  if (!S.authenticated) {
+    const error = new Error(t("chat.locked"));
+    error.status = 401;
+    throw error;
+  }
+  const response = await fetch(`/api/uploads?name=${encodeURIComponent(file.name || "")}`, {
+    method: "POST",
+    headers: { "Content-Type": uploadType(file) },
+    body: file,
+  });
+  if (response.status === 401) {
+    lock();
+    const error = new Error(t("chat.locked"));
+    error.status = 401;
+    throw error;
+  }
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload?.error?.message || t("chat.requestFailed", { status: response.status }));
+    error.status = response.status;
+    throw error;
+  }
+  return payload;
+}
+
+const media = setupMedia({
+  doc: document,
+  tray: $("media-tray"),
+  warning: $("media-warning"),
+  fileInput: $("media-input"),
+  upload: uploadPicture,
+  // A picture taken out of the strip, or sent, is forgotten by the gateway (it forgets by itself in time too).
+  discard: (id) => { api(`/uploads/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {}); },
+  notify: (message) => notify(message),
+  changed: () => syncUI(),
+  openSettings: () => openSettings("model"),
+  open: (name, url, bytes) => pictureBox({ path: name, size: bytes, mtime: 0, state: "" }, url),
+});
+
+/** Whether the composer takes pictures and files now. */
+function takesMedia() {
+  return S.authenticated && !workerMode && !input.disabled;
+}
+
+/** Add files from a drop, a paste or the picker, unless melo is working on a turn (these cannot join it). */
+function addMedia(files) {
+  if (!takesMedia() || files.length === 0) return;
+  if (composerTurn() !== null) {
+    notify(t("composer.mediaWhileWorking"));
+    return;
+  }
+  return media.add(files);
+}
+
+/** Keep each chat's pictures and files with it, as its draft is kept: the strip shows the chat that is open. */
+function shiftMedia(from, to, { keep = true } = {}) {
+  // The same chat keeps its strip; a closed one gives up what it held.
+  if (from === to && keep) return;
+  const incoming = S.media[to] ?? [];
+  delete S.media[to];
+  const outgoing = media.swap(incoming, { discard: !keep });
+  if (outgoing.length > 0) S.media[from] = outgoing;
+}
+
+// A drop anywhere on the page is for the composer. A file the page did not take must never be opened
+// by the browser (which would leave the page), so every drag that carries files is answered here.
+const carriesFiles = (event) => Array.from(event.dataTransfer?.types ?? []).includes("Files");
+let dragDepth = 0;
+function showDrop(on) {
+  $("drop-hint").hidden = !on || !takesMedia();
+}
+document.addEventListener("dragenter", (event) => {
+  if (!carriesFiles(event)) return;
+  event.preventDefault();
+  dragDepth += 1;
+  showDrop(true);
+});
+document.addEventListener("dragover", (event) => {
+  if (!carriesFiles(event)) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = takesMedia() ? "copy" : "none";
+});
+document.addEventListener("dragleave", (event) => {
+  if (!carriesFiles(event)) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) showDrop(false);
+});
+document.addEventListener("drop", (event) => {
+  if (!carriesFiles(event)) {
+    // A link or text dropped outside the box must not take the page away either.
+    if (!["TEXTAREA", "INPUT"].includes(event.target?.tagName)) event.preventDefault();
+    return;
+  }
+  event.preventDefault();
+  dragDepth = 0;
+  showDrop(false);
+  addMedia(Array.from(event.dataTransfer.files ?? []));
+});
+// A picture on the clipboard (a screenshot, a copied image) is added; text pastes as text.
+input.addEventListener("paste", (event) => {
+  const files = Array.from(event.clipboardData?.files ?? []);
+  if (files.length === 0 || event.clipboardData?.getData?.("text/plain")) return;
+  event.preventDefault();
+  addMedia(files);
+});
+/** Open the file picker (the paperclip, `/attach`), unless melo is working on a turn. */
+function addMediaFromPicker() {
+  if (!takesMedia()) return;
+  if (composerTurn() !== null) notify(t("composer.mediaWhileWorking"));
+  else media.pick();
+}
+$("attach-btn").addEventListener("click", addMediaFromPicker);
 const drawer = setupDrawer({ api, currentId: () => S.activeId, root: $("details-drawer"), trigger: $("details-trigger"), developer: () => developerMode });
 /** The page after Settings (or a slash command) saved: the mode, the status row and the model chip follow. */
 async function settingsSaved(saved) {
@@ -3337,6 +3539,13 @@ const slash = setupSlash({
     };
   },
   submit: send,
+  // The composer's pictures and files (`/attach`, `/attachments`, `/detach`).
+  media: {
+    pick: () => addMediaFromPicker(),
+    list: () => media.items(),
+    remove: (id) => media.remove(id),
+    clear: () => media.swap([], { discard: true }),
+  },
   sync: () => {
     saveDraft();
     resizeInput();
@@ -3500,6 +3709,7 @@ async function init() {
     if (!entry || typeof entry !== "object" || typeof entry.clientRequestId !== "string" || typeof entry.text !== "string") continue;
     if (!["sending", "checking", "failed"].includes(entry.state)) continue;
     S.outbox[slot] = {...entry, state: entry.state === "failed" ? "failed" : "checking"};
+    if (!Array.isArray(entry.media)) delete S.outbox[slot].media;
   }
   input.value = S.drafts.new || "";
   resizeInput();

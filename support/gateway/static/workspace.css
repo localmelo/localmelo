@@ -2591,3 +2591,38 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
   .slash-foot { display: none; }
   .local-choice { min-height: 44px; }
 }
+
+/* Pictures and text files in a message: the strip above the box while it is written, the row in the bubble after.
+   A picture is a small square you can open; a file is a chip with its name. Both can be removed before sending. */
+.media-tray { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin: 0 0 var(--space-3); padding: var(--space-1) var(--space-1) 0 0; }
+.media-item { position: relative; display: flex; max-width: 100%; }
+.media-frame { display: grid; place-items: center; width: 64px; height: 64px; padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-card); background: repeating-conic-gradient(var(--raised) 0% 25%, var(--surface) 0% 50%) 50% / 16px 16px; cursor: zoom-in; }
+.media-frame:hover:not(:disabled) { border-color: var(--control); filter: none; }
+.media-frame:disabled { cursor: progress; background: var(--raised); }
+.media-thumb { display: block; width: 100%; height: 100%; object-fit: cover; }
+.media-wait { padding: 0 var(--space-1); color: var(--muted); font-size: var(--text-caption); }
+.media-chip { display: inline-flex; align-items: baseline; gap: var(--space-2); max-width: 100%; padding: 5px 14px 5px 12px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--raised); color: var(--ink); font-size: var(--text-small); }
+.media-chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-chip-size { flex: none; color: var(--muted); font-size: var(--text-caption); }
+.media-remove { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 2px solid var(--surface); border-radius: var(--radius-pill); background: var(--primary); color: var(--on-primary); font-size: 13px; line-height: 1; cursor: pointer; }
+/* The target is larger than the mark: a thumb or a finger finds it. */
+.media-remove::after { content: ""; position: absolute; inset: -8px; }
+.media-warning { margin: 0 0 var(--space-3); color: var(--warn); font-size: var(--text-small); }
+.media-warning .link-button { margin-left: var(--space-1); padding: 0; font-size: inherit; }
+.attach-button { flex: none; display: grid; place-items: center; width: 32px; height: 32px; margin: -4px -4px -4px -8px; padding: 0; border: 0; border-radius: var(--radius-pill); background: none; color: var(--ink-2); }
+.attach-button:hover:not(:disabled) { background: var(--soft); color: var(--ink); filter: none; }
+.drop-hint { position: absolute; inset: var(--space-3); z-index: 30; display: grid; place-items: center; padding: var(--space-4); border: 2px dashed var(--accent); border-radius: var(--radius-panel); background: var(--tint); background: color-mix(in srgb, var(--tint) 90%, transparent); color: var(--accent); font-size: var(--text-title); font-weight: 600; text-align: center; pointer-events: none; }
+.user-bubble.has-media { display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-2); }
+.bubble-media { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
+.bubble-picture { padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); line-height: 0; cursor: zoom-in; }
+.bubble-picture:hover { border-color: var(--control); filter: none; }
+.bubble-picture img { display: block; width: auto; height: auto; max-width: 200px; max-height: 120px; }
+.bubble-picture:only-child img { max-width: min(300px, 100%); max-height: 220px; }
+.bubble-file { max-width: 100%; padding: 3px 12px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--surface); color: var(--ink-2); font-size: var(--text-small); text-overflow: ellipsis; white-space: nowrap; }
+.bubble-words { min-width: 0; align-self: stretch; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (pointer: coarse), (max-width: 700px) {
+  .attach-button { width: 44px; height: 44px; margin: -6px -6px -6px -12px; }
+  .media-remove { width: 24px; height: 24px; }
+  .media-remove::after { inset: -10px; }
+  .media-chip { min-height: 36px; align-items: center; }
+}

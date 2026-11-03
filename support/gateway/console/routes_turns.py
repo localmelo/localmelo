@@ -32,6 +32,7 @@ from localmelo.support.gateway.task_store import TaskStoreError
 from localmelo.support.sessions.attachments import (
     MAX_ATTACHMENTS,
     MAX_TOTAL_BYTES,
+    TextAttachment,
     compose_user_text,
     snapshot,
 )
@@ -120,8 +121,12 @@ class PatchRequest(Body):
 
 
 class CancelRequest(Body):
+    """A message to withdraw: what its send carried, so the same text is judged."""
+
     text: str
     attachments: list[_Attachment] = []
+    # The staged pictures the send named; only how many is read (the stand-in words of a message with no words).
+    images: list[str] = []
 
 
 class ApprovalAnswer(Body):
@@ -144,22 +149,51 @@ def _key(value: str | None) -> str | None:
         raise ApiError(400, "invalid_request", str(exc)) from exc
 
 
-def _compose(request: CancelRequest) -> str:
-    """The user text of a turn: the typed text, trimmed as the checker trims it.
-
-    The trim happens here, so the text the store judges by length, keeps in
-    a submission and gives the Agent is the one the checker approved.
-    """
-    text = request.text.strip()
-    if not text:
-        raise ApiError(400, "invalid_request", t("errors.blankMessage"))
-    if request.attachments:
+def _files(items: list[_Attachment]) -> list[TextAttachment]:
+    """The text files of a send, cleaned and checked; 400 for one the checker would refuse."""
+    attached: list[TextAttachment] = []
+    total = 0
+    if len(items) > MAX_ATTACHMENTS:
+        raise ApiError(
+            400, "invalid_request", t("errors.tooManyFiles", n=MAX_ATTACHMENTS)
+        )
+    for item in items:
+        try:
+            file = snapshot(item.name, item.text)
+        except ValueError as exc:
+            raise ApiError(
+                400,
+                "invalid_request",
+                t("errors.fileRefused", name=item.name[:80], why=str(exc)),
+            ) from exc
+        total += len(file.text.encode("utf-8"))
+        attached.append(file)
+    if total > MAX_TOTAL_BYTES:
         raise ApiError(
             400,
             "invalid_request",
-            t("errors.noAttachments"),
+            t("errors.filesTooLarge", kb=MAX_TOTAL_BYTES // 1024),
         )
-    return text
+    return attached
+
+
+def _compose(request: CancelRequest) -> str:
+    """The user text a withdrawn send had: its words (or the stand-in for none) and its files.
+
+    The store compares this with what the send kept, so it is built as the
+    send builds it.
+    """
+    attached = _files(request.attachments)
+    if len(request.images) > MAX_PICTURES:
+        raise ApiError(
+            400, "invalid_request", t("errors.tooManyPictures", n=MAX_PICTURES)
+        )
+    words = request.text.strip()
+    if not words:
+        if not request.images and not attached:
+            raise ApiError(400, "invalid_request", t("errors.blankMessage"))
+        words = _marker(len(request.images), [file.name for file in attached])
+    return compose_user_text(words, attached)
 
 
 def _check_text(console: Console, text: str, session_id: str | None) -> str:
@@ -205,29 +239,7 @@ async def _sent(
     gone from the stage or too many, and a text over the checker's limit; 409
     ``model_text_only`` when the chat model is known not to read pictures.
     """
-    attached = []
-    total = 0
-    if len(request.attachments) > MAX_ATTACHMENTS:
-        raise ApiError(
-            400, "invalid_request", t("errors.tooManyFiles", n=MAX_ATTACHMENTS)
-        )
-    for item in request.attachments:
-        try:
-            file = snapshot(item.name, item.text)
-        except ValueError as exc:
-            raise ApiError(
-                400,
-                "invalid_request",
-                t("errors.fileRefused", name=item.name[:80], why=str(exc)),
-            ) from exc
-        total += len(file.text.encode("utf-8"))
-        attached.append(file)
-    if total > MAX_TOTAL_BYTES:
-        raise ApiError(
-            400,
-            "invalid_request",
-            t("errors.filesTooLarge", kb=MAX_TOTAL_BYTES // 1024),
-        )
+    attached = _files(request.attachments)
     if len(request.images) > MAX_PICTURES:
         raise ApiError(
             400, "invalid_request", t("errors.tooManyPictures", n=MAX_PICTURES)
