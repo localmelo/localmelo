@@ -398,7 +398,9 @@ test('a run that ended on a model-server error leaves its retry notices out of t
 test('the live row words the run as the terminal does', () => {
   const {turn, push} = fullTurn();
   push('run.progress', {level: 1, state: 'running', step: 4, attempt: 2, phase: 'Verify', cycle: 1, tests: {passed: 3, failed: 1, total: 4}, items: null, past: null, basis: {match: 'new'}});
-  assert.deepEqual(liveFacts(turn), ['step 4', 'attempt 2', 'Verify (cycle 1)', 'tests 3/4']);
+  assert.deepEqual(liveFacts(turn), ['step 4 of 30', 'attempt 2', 'Verify (cycle 1)', 'tests 3/4'], 'the turn\'s own cap');
+  push('run.progress', {level: 1, state: 'running', step: 4, attempt: 2, limits: {max_steps: 100, steps_per_attempt: 50, max_attempts: 5, timeout_s: null}, phase: 'Verify', cycle: 1, tests: {passed: 3, failed: 1, total: 4}, items: null, past: null, basis: {match: 'new'}});
+  assert.deepEqual(liveFacts(turn), ['step 4 of 100', 'attempt 2', 'Verify (cycle 1)', 'tests 3/4'], 'the run\'s cap, as run.progress says it');
   assert.equal(activity(turn, {now: 200}), 'Thinking');
   push('reflection.started', {attempt: 1, failure_type: 'stuck'});
   assert.equal(activity(turn, {now: 200}), 'Reflecting');
@@ -425,7 +427,7 @@ test('a reflection line reads as render.py writes it', () => {
 test('before the first run.progress the step is the turn\'s own', () => {
   const {turn, push} = fullTurn();
   push('step.started', {step: 2, attempt: 3});
-  assert.deepEqual(liveFacts(turn), ['step 2/30', 'attempt 3']);
+  assert.deepEqual(liveFacts(turn), ['step 2 of 30', 'attempt 3']);
 });
 
 test('the run end fills the answer and flushes the calls that never started', () => {

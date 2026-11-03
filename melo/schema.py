@@ -31,9 +31,15 @@ WINDOW_MESSAGES_MAX = 256
 LONG_TERM_TOP_K = 5
 TOOL_SEARCH_TOP_K = 3
 
-MAX_AGENT_STEPS = 30
+# A run has at most MAX_AGENT_STEPS planning calls. An attempt runs up to
+# STEPS_PER_ATTEMPT of them and, with reflection on, is followed by a reflection
+# that decides whether the next attempt starts. The long attempt means a task
+# that needs 20 or 40 steps is not interrupted: a reflection comes only after
+# 50 steps without an answer. The earlier defaults were 30, 10 and 5; the
+# options ``max_steps=30, steps_per_attempt=10`` still give that run.
+MAX_AGENT_STEPS = 100
 MIN_AGENT_STEPS = 3
-STEPS_PER_ATTEMPT = 10
+STEPS_PER_ATTEMPT = 50
 MAX_ATTEMPTS = 5
 
 # Reflection budget. Only one reflection is carried into the next attempt's

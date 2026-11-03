@@ -643,7 +643,10 @@ save carries the revision it read, so a change made elsewhere meanwhile asks you
   [`web_fetch`](../reference/tools.md#reading-a-public-web-page)), **Web search** (off by
   default; it lets chats and tasks look things up with
   [`web_search`](../reference/tools.md#searching-the-web), and the words searched for leave
-  this computer), **Other folders melo may read** (the folders you chose **Always allow this folder** for, each with **Remove**; see
+  this computer), **Reflect when stuck after many steps** (on by default; a task still not
+  done after 50 steps pauses once to reflect before it goes on, which costs one more model
+  request; off, it keeps going to 100 steps; the key is `agent.reflection`),
+  **Other folders melo may read** (the folders you chose **Always allow this folder** for, each with **Remove**; see
   [Folders outside the workspace](tools-mcp.md#folders-outside-the-workspace)) and the recent
   folders, each with **Make default**.
 - **Scheduled**: the check-in switch with its next time, and **Open Scheduled** for the chores.

@@ -783,6 +783,26 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   shows it; a blocked note says when the step needs you because nobody could be asked. A turn
   may send up to 12 reviews (was 6). The review prompt grows from 3,011 to 3,789 characters and
   the chat's identity paragraph by 296 characters. Part of #465.
+- Long attempts by default, and reflection is a switch (part of #185). An attempt now runs up to
+  50 steps and a run up to 100 (it was 10 and 30), and a reflection comes only when a task is still
+  not done after those 50 steps: a task that needs 20 or 40 steps is no longer cut halfway (a
+  sign-in in a browser ended at step 10 with "The attempt used its step budget" in a test). The
+  evidence is a tie: on 12 coding exercises run 5 times each, reflecting and not reflecting both
+  passed 59/60 runs, and reflection replies cost about 170 output tokens a task
+  ([Evaluations](docs/project/evaluations.md#long-attempts-and-reflection-as-an-option)).
+  **Reflect when stuck after many steps** in Settings → Chats and folders (the app and the web
+  console; on by default) is `[agent] reflection`: off, melo never reflects and runs straight to
+  100 steps (`attempt_policy = "none"`). `-X agent.reflection=off` does it for one run, and a
+  config without the key reads on. Chats, side chats, tasks, workers, direct runs and the
+  gateway read it; `--attempt-policy` keeps its say over the file. The developer key
+  `[agent] steps_per_attempt` (`-X agent.steps_per_attempt=N`) sets the attempt's length and
+  `-s N` the run's. The main chat's own turns are unchanged (4 steps, no reflection; longer
+  work becomes a task). A running turn shows `step 4 of 100` in the terminal's line and
+  status bar and in the web console. `-s 30 -X agent.steps_per_attempt=10` gives the earlier
+  requests; `--attempt-policy none --max-steps 30` sends the same requests as before, and
+  `--max-steps 30` alone is now one attempt of 30 steps and a final reflection. A routine's
+  learned steps are kept per set of length options, so the new defaults start their own count and
+  the earlier ones stay as they were.
 - A cut excerpt of an earlier chat turn can be opened whole, by default. When recall shows
   less than the whole turn, the line starts with the turn's id, such as `[t123]`, a line under
   the excerpts says it can be opened, and the chat's model has `open_memory` to read the turn

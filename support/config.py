@@ -328,6 +328,13 @@ class AgentConfig:
     # then answered with the end of its thinking, marked as such
     # (AgentOptions.empty_reply_fallback). "off" ends such a run as failed.
     empty_reply_fallback: str = "on"  # on | off
+    # Reflect when stuck after many steps (AgentOptions.attempt_policy): true runs
+    # attempts of steps_per_attempt steps with a reflection between them; false
+    # never reflects and runs straight to the run's total.
+    reflection: bool = True
+    # Developer setting: steps in one attempt before a reflection
+    # (AgentOptions.steps_per_attempt). None: the built-in (STEPS_PER_ATTEMPT, 50).
+    steps_per_attempt: int | None = None
 
     def window_for(self, backend: str) -> int:
         """The working window's cap: ``window_messages``, else *backend*'s default."""
@@ -1122,6 +1129,15 @@ class Config:
             errors.append("[agent] confine_direct_runs must be a boolean")
         if not isinstance(self.agent.answer_on_stop, bool):
             errors.append("[agent] answer_on_stop must be a boolean")
+        if not isinstance(self.agent.reflection, bool):
+            errors.append("[agent] reflection must be a boolean")
+        attempt: object = self.agent.steps_per_attempt
+        if attempt is not None and (
+            isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1
+        ):
+            errors.append(
+                f"[agent] steps_per_attempt must be an int >= 1, got {attempt!r}"
+            )
         calls: object = self.agent.max_calls
         if calls is not None and (
             isinstance(calls, bool) or not isinstance(calls, int) or calls < 2
@@ -2028,6 +2044,8 @@ def save(cfg: Config) -> None:
         or cfg.agent.answer_on_stop != defaults.answer_on_stop
         or cfg.agent.max_calls is not None
         or cfg.agent.empty_reply_fallback != defaults.empty_reply_fallback
+        or cfg.agent.reflection != defaults.reflection
+        or cfg.agent.steps_per_attempt is not None
         or any(
             getattr(cfg.agent, name) != getattr(defaults, name) for name in IMAGE_KEYS
         )
@@ -2074,6 +2092,12 @@ def save(cfg: Config) -> None:
             lines.append(
                 "empty_reply_fallback = "
                 f"{_toml_string(cfg.agent.empty_reply_fallback)}"
+            )
+        if cfg.agent.reflection != defaults.reflection:
+            lines.append(f"reflection = {_toml_value(cfg.agent.reflection)}")
+        if cfg.agent.steps_per_attempt is not None:
+            lines.append(
+                f"steps_per_attempt = {_toml_value(cfg.agent.steps_per_attempt)}"
             )
         if cfg.agent.tool_env:
             lines.append(f"tool_env = {_toml_value(cfg.agent.tool_env)}")

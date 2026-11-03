@@ -98,6 +98,12 @@ The developer setting ``[agent] empty_reply_fallback`` (no flag;
 ``_build_direct_mode_agent``, which has a new hash again; the default ``on`` keeps
 today's rescue of an empty reply, and ``off`` restores the earlier ending, as
 ``tests/agent/test_thinking_answer.py`` checks.
+The setting ``[agent] reflection`` (``-X agent.reflection=off``) and the developer setting
+``[agent] steps_per_attempt`` are applied to the options in ``_build_direct_mode_agent``
+(``--attempt-policy`` keeps its say), which has a new hash again; with the earlier lengths
+(``--max-steps 30``, ``steps_per_attempt=10``) and ``--attempt-policy none`` the requests
+are the same, as ``tests/agent/test_legacy_golden.py`` and ``tests/cli/test_reflection_config.py``
+check.
 ``_check_args`` is not pinned.
 """
 
@@ -120,7 +126,7 @@ PINNED = {
     "_exit_code": "bacf133c2381454b95644b216daebd09f279e75ff0496a319ef3c98c554432a5",
     "_one_line": "4dc03ea8c7f5f5896d9fd58887f5290dfbe1faf4e6286d272ef354567e8f7ef7",
     "_localmelo_version": "7c4a81e650ed6d8cc5ad1f6227b4ce75fe56028ebc7fa27ce5377fda6445db5d",
-    "_build_direct_mode_agent": "ea63499a42892f1faee08464f2f37309fce3730ff68cec571a0541a25588a668",
+    "_build_direct_mode_agent": "bfa01067a66362585dd4b253c0f96dfec294c66c7bfa9011d88c1a7b74292511",
     "_direct_embedding": "67275e465432460acbb15d5b30649502641de4b37f1758723f066428662c6a7d",
     "_ExitSignals": "7859cea6c228917546ac80014d4745b789ca9c6d732f38aa949de9156f3ff34d",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",

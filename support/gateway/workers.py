@@ -130,6 +130,7 @@ from localmelo.support.scheduler.model import (
 from localmelo.support.sessions import display
 from localmelo.support.sessions.agents import (
     build_session_agent,
+    configured_attempt_options,
     configured_cache_options,
 )
 from localmelo.support.sessions.approvals import (
@@ -2357,17 +2358,20 @@ class TaskWorkers:
                     base_url=None,
                     model=None,
                     workspace=workspace,
-                    options=configured_cache_options(
+                    options=configured_attempt_options(
                         self.settings(),
-                        AgentOptions(
-                            mode="gateway",
-                            memory=False,
-                            timeout_s=None,
-                            builtins=worker_tool_allowlist("user").builtins,
-                            confine_writes=self.settings().agent.confine_writes,
-                            tool_env=tool_env,
-                            identity=WORKER_GUIDE,
-                            task_aids=True,
+                        configured_cache_options(
+                            self.settings(),
+                            AgentOptions(
+                                mode="gateway",
+                                memory=False,
+                                timeout_s=None,
+                                builtins=worker_tool_allowlist("user").builtins,
+                                confine_writes=self.settings().agent.confine_writes,
+                                tool_env=tool_env,
+                                identity=WORKER_GUIDE,
+                                task_aids=True,
+                            ),
                         ),
                     ),
                     wrap_llm=lambda inner: _WorkerLLM(

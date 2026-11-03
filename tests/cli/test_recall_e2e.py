@@ -2,7 +2,8 @@
 
 The benchmark's ``retry`` stub exercises R5 through the real CLI: ten steps
 fill the window, the first reflection continues, and the early note that
-described the failure leaves the window in the second attempt. Without the
+described the failure leaves the window in the second attempt (the runs set
+``agent.steps_per_attempt=10``; an attempt is 50 steps by default). Without the
 step trigger ranking a superseded note of an evicted turn, and without the
 note's ``found:`` items in the state query, every later step is empty. These
 runs go through ``melo``'s own JSON line and the stub server's recorded
@@ -146,6 +147,8 @@ def _run(tmp_path: Path, stub: StubServer, scenario: str, *args: str) -> dict[st
         "-I",
         "-m",
         "localmelo",
+        "-X",
+        "agent.steps_per_attempt=10",  # the scenario reflects after ten steps
         "--base-url",
         base_url,
         "--reasoning",

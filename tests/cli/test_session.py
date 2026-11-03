@@ -1524,9 +1524,27 @@ async def test_status_shows_the_facts(
     assert "approvals  ask · allowed in this session: none" in text
     assert "tools      5 built-in (3 ask first)" in text
     assert "memory     2 of 64 (local server) messages · " in text
-    assert "limits     30 steps a turn, 10 an attempt, 5 attempts" in text
+    assert "limits     100 steps a turn, 50 an attempt, 5 attempts" in text
     assert "files      " in text and "sessions.db" in text
     assert "version    melo " in text
+
+
+async def test_status_says_when_the_chat_never_reflects(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def list_models(key: str, url: str, **kwargs: object) -> list[str]:
+        return ["m1"]
+
+    monkeypatch.setattr("localmelo.support.backends.discovery.list_models", list_models)
+    session, out = setup.session, setup.out
+    session.enter("hello")
+    await setup.idle()
+    agent = session.agent
+    agent.options = replace(agent.options, attempt_policy="none")
+    session.enter("/status all")
+    await _until(lambda: "limits     " in out.text())
+    assert "limits     100 steps a turn, no reflection · commands stop" in out.text()
+    assert "an attempt" not in out.text()
 
 
 @pytest.mark.parametrize(
@@ -2314,7 +2332,7 @@ async def test_the_step_is_in_the_run_zone_not_the_usage(setup: Setup) -> None:
     session._state = "running"
     session.renderer.live = LiveState(activity="Thinking", started=0.0, step=4)
     assert _usage(session.status_bar()) == "↑ 1.0k ↓ 5 · ctx 1.0k · cache 83%"
-    assert session.status_bar().run == "step 4 · ctrl+o steps"
+    assert session.status_bar().run == "step 4 of 100 · ctrl+o steps"
     session._state = "idle"
     session.renderer.live = None
 
@@ -2400,10 +2418,10 @@ async def test_the_run_zone_gives_the_steps_in_brief_while_a_turn_runs(
     renderer = session.renderer
     renderer.live = LiveState(activity="Thinking", started=0.0, step=2)
     renderer.progress = None
-    assert session.status_bar().run == "step 2 · ctrl+o steps"
+    assert session.status_bar().run == "step 2 of 100 · ctrl+o steps"
     renderer.progress = {"step": 2, "past": {"runs": 1, "last_steps": 8}}
     assert session.status_bar().run == "2/~8 · ctrl+o steps"
     renderer.progress = {"step": 3, "basis": {"match": "new"}, "past": None}
-    assert session.status_bar().run == "step 3 · ctrl+o steps"
+    assert session.status_bar().run == "step 3 of 100 · ctrl+o steps"
     session._state = "idle"
     renderer.live = None

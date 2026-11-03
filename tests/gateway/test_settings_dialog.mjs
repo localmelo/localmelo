@@ -641,6 +641,44 @@ test('Follow up on tasks: a developer switch that saves follow_up, hidden in def
   assert.equal(older.element('s-follow-up-row').hidden, true, 'a gateway that does not report it');
 });
 
+test('Reflect when stuck after many steps: a plain switch that saves reflection, on until turned off', async () => {
+  const older = harness({'GET /settings': full()});
+  await older.open('chats');
+  assert.equal(older.element('s-reflection-row').hidden, true, 'a gateway that does not report it');
+  let revision = 1;
+  const h = harness({
+    'GET /settings': full({reflection: true}),
+    'PUT /settings': (body) => full({revision: `rev${++revision}`, reflection: body.reflection ?? true}),
+  });
+  await h.open('chats');
+  assert.equal(h.element('s-reflection-row').hidden, false, 'a plain switch in default mode');
+  assert.equal(h.element('s-reflection').checked, true, 'on until the person turns it off');
+  h.element('s-reflection').checked = false;
+  await h.element('s-reflection').emit('change');
+  await flush();
+  assert.deepEqual(h.puts().at(-1).options.body, {chat_backend: 'mlc', embedding_backend: 'none', workspace: '~/ws',
+    sections: {}, revision: 'rev1', reflection: false});
+  assert.equal(h.element('settings-saved-text').textContent, 'Saved: Reflecting after many steps is off.');
+  assert.equal(h.element('s-reflection').checked, false);
+  await h.element('settings-undo').emit('click');
+  await flush();
+  assert.equal(h.puts().at(-1).options.body.reflection, true);
+  assert.equal(h.element('settings-saved-text').textContent, 'Undone: Reflecting after many steps is on.');
+  assert.equal(h.element('s-reflection').checked, true);
+});
+
+test('Reflect when stuck after many steps says what it costs, in English and Simplified Chinese', async () => {
+  const {useLanguage, t} = await import('../../support/gateway/static/i18n.mjs');
+  assert.equal(t('settings.reflection.title'), 'Reflect when stuck after many steps');
+  assert.match(t('settings.reflection.hint'), /50 steps.*one more model request.*100 steps/);
+  try {
+    await useLanguage('zh-Hans');
+    assert.match(t('settings.reflection.hint'), /50 步.*多花一次模型请求.*100 步/);
+  } finally {
+    await useLanguage('en');
+  }
+});
+
 test('a change made elsewhere meanwhile is a conflict: the switch goes back and Reload is offered', async () => {
   const conflict = Object.assign(new Error('stale'), {status: 409, code: 'settings_changed'});
   const h = harness({'GET /settings': full(), 'PUT /settings': () => { throw conflict; }});

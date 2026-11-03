@@ -70,16 +70,19 @@ class AgentOptions:
     existed, except that every step now offers all registered built-ins
     and runs only the tools it offered (see ``tool_exposure``), that
     a reflection decides on its own checks whether the next attempt
-    starts, patiently (see ``reflection_gate``), and that a run without
-    a usable answer is asked for one (see ``answer_on_stop``). An
-    invalid value raises ``ValueError`` naming the field.
+    starts, patiently (see ``reflection_gate``), that a run without
+    a usable answer is asked for one (see ``answer_on_stop``), and that an
+    attempt is long: 50 steps, in a run of 100 (see ``steps_per_attempt``).
+    An invalid value raises ``ValueError`` naming the field.
 
-    - ``max_steps``: cap on planning calls for the whole run.
+    - ``max_steps``: cap on planning calls for the whole run (100).
     - ``attempt_policy``: ``"reflect"`` runs attempts of at most
-      ``steps_per_attempt`` steps, up to ``max_attempts`` of them, with a
+      ``steps_per_attempt`` steps (50), up to ``max_attempts`` of them, with a
       reflection after each attempt that runs out of steps or gets stuck;
-      ``"none"`` runs one attempt with budget ``max_steps`` and makes no
-      reflection calls.
+      so a run reflects after 50 steps without an answer, then goes on to
+      ``max_steps``. ``"none"`` runs one attempt with budget ``max_steps`` and
+      makes no reflection calls (``[agent] reflection = false`` sets it for the
+      chats, tasks and runs that read the config).
     - ``reflection_gate``: how a reflection decides whether the next
       attempt starts; it matters only with ``attempt_policy="reflect"``.
       ``"flags"`` starts it when the reflection chooses ``continue`` and

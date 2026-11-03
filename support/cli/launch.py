@@ -33,6 +33,7 @@ from localmelo.support.backends import discovery
 from localmelo.support.browser import configured_driver
 from localmelo.support.cli.views import BackendInfo
 from localmelo.support.sessions.agents import (
+    configured_attempt_options,
     configured_cache_options,
     configured_context_options,
     configured_fallback_options,
@@ -356,6 +357,7 @@ def run_interactive(
             "recall_kinds",
             "recall_placement",
             "recall_min_score",
+            "attempt_policy",
         )
         if getattr(args, name, None) is not None
     }
@@ -369,6 +371,7 @@ def run_interactive(
                 options = replace(options, captured_history=True)
             options = configured_image_options(loaded, options)
             options = configured_fallback_options(loaded, options)
+            options = configured_attempt_options(loaded, options, explicit)
             options = configured_context_options(
                 loaded,
                 options,

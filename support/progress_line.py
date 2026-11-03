@@ -12,16 +12,17 @@ interactive UI's own row (U2).
 What the line shows follows the honesty rules of the progress spec
 (sections 6 and 7):
 
-- level 0, facts only: ``step 4 · attempt 2 · Verify (cycle 1) · pytest
-  0:41 · tests 3/8 · 1m03s``;
+- level 0, facts only: ``step 4 of 100 · attempt 2 · Verify (cycle 1) ·
+  pytest 0:41 · tests 3/8 · 1m03s``;
 - level 1, also past facts and the steps of past runs, without a percent:
   ``last time 6 steps, 2m10s: Read test_parser.py ✓ · Edit parser.py ◐ ·
   pytest``;
 - level 2, a bar: ``▓▓▓▓▓▓░░░░ 57% · step 4 of ~7 · ...``; off its
   template the bar freezes and the line says why.
 
-Never a percent at level 0 or 1, never ``step n/max``, and 100% only on
-the end of a completed run.
+Never a percent at level 0 or 1, and 100% only on the end of a completed
+run. The step is shown with the run's step cap (``step 4 of 100``), the most
+it may take, never as an estimate of its length; ``of ~7`` is an estimate.
 """
 
 from __future__ import annotations
@@ -339,12 +340,27 @@ def _bar(fraction: float, complete: bool) -> str:
     return "▓" * cells + "░" * (BAR_CELLS - cells)
 
 
+def step_limit(payload: Mapping[str, Any]) -> int | None:
+    """The run's step cap (``limits.max_steps``) in a ``run.progress`` payload, or None."""
+    limits = payload.get("limits")
+    value = _int(limits.get("max_steps")) if isinstance(limits, Mapping) else None
+    return value if value is not None and value > 0 else None
+
+
 def _head(payload: Mapping[str, Any], level: int, step: int) -> list[str]:
-    """The bar (level 2) and the step, with the reason when off the template."""
-    step_text = f"step {step}" if step > 0 else "starting"
+    """The bar (level 2) and the step, with the reason when off the template.
+
+    Without a bar the step is ``step 4 of 100`` with the run's cap, so a long run
+    says how far it may go. A bar already tells the position, so its step stays
+    plain, or ``step 4 of ~7`` with the expected count.
+    """
     fraction = _number(payload.get("fraction"))
     if level < 2 or fraction is None:
-        return [step_text]
+        if step <= 0:
+            return ["starting"]
+        limit = step_limit(payload)
+        return [f"step {step} of {limit}" if limit else f"step {step}"]
+    step_text = "starting" if step <= 0 else f"step {step}"
     ended = payload.get("state") == "ended"
     # 100% only on the end of a completed run: the tracker gives 1.0 then
     # and only then (section 6.3).
@@ -365,7 +381,7 @@ def _head(payload: Mapping[str, Any], level: int, step: int) -> list[str]:
         return [f"{bar} stopped at {percent}", step_text]
     expected = _int(payload.get("expected_steps"))
     if not ended and expected is not None and step > 0:
-        step_text += f" of ~{expected}"
+        step_text = f"step {step} of ~{expected}"
     return [f"{bar} {percent}", step_text]
 
 

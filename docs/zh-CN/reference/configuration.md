@@ -47,6 +47,8 @@ chat_model = "qwen3:8b"
 | `reflect_tool_guard` | `[agent]` | `true` | `false` 发送不带工具和结尾句子的反思请求。见[上下文统计](#context-accounting)。 |
 | `confine_writes` | `[agent]` | `true` | 在 macOS 上，`--brief` worker 运行和保存的任务会在沙箱中启动 `shell_exec` 和 `python_exec`，拒绝工作区之外的文件写入；`false` 关闭它（`-X agent.confine_writes=false` 为一次运行关闭）。其他运行只限制 Auto 决定的调用（`[approvals] mode`）。见[写入留在工作区内](cli.md#confined-writes)。 |
 | `confine_direct_runs` | `[agent]` | `false` | 开发者设置。`true` 让普通直接运行也受限制，就像 `confine_writes` 限制 `--brief` 运行那样：在 macOS 上，命令行给出的任务和 `melo ""` 循环会在沙箱中启动 `shell_exec` 和 `python_exec`，拒绝工作区（`--workspace`，否则为当前文件夹）之外的文件写入，结果中带有 `confinement`。没有对应的标志，`-X agent.confine_direct_runs=true` 为一次运行设置它。`--brief` 运行遵循 `confine_writes`；交互式界面、控制台、应用和网关会忽略它。见[写入留在工作区内](cli.md#confined-writes)。 |
+| `reflection` | `[agent]` | `true` | 设置（应用和网页控制台）中的**多步仍没做完时先反思**。`true`：任务做了 `steps_per_attempt`（50）步仍没完成时，会反思一次，由反思决定是否继续，最多到运行的 100 步；反思多花一个模型请求。`false`：从不反思，运行是一次直接做到总步数的尝试（等同于 `attempt_policy = "none"`）。只保存 `false`。`-X agent.reflection=off` 只对一次运行生效，没有这个键的配置读作 `true`，`--attempt-policy` 优先于它。对话、侧边对话、任务、worker、直接运行和网关都会读取它；主对话自己的回合从不反思。见[评测](../project/evaluations.md#long-attempts-and-reflection-as-an-option)。 |
+| `steps_per_attempt` | `[agent]` | 未设置 | 开发者设置。不小于 1 的整数：一次尝试在反思之前的步数（`reflection` 开启时）。未设置时为 50。运行的总步数是 `-s N`（`--steps`，100）。`-X agent.steps_per_attempt=10 -s 30` 复现长尝试之前的长度。 |
 | `answer_on_stop` | `[agent]` | `true` | 开发者设置。`true` 让以 `gate_stopped` 或 `budget_exhausted` 结束且没有答案的运行再向模型发出一次不带工具的请求，根据已收集的证据（工作窗口和最新反思）索要最终答案，使用任务要求的格式，允许回答 `unknown`。运行保留原来的状态；`result` 就是这个答案，JSON 记录中有 `"answered_on_stop": true`。任务要求有收尾行（例如 `FINAL ANSWER:`）而答案里没有时，它也会再发出一次请求把这一行加上，记录中则有 `"format_fixed": true`。`false` 两种请求都不发；没有对应的标志，`-X agent.answer_on_stop=off` 仅对一次运行设置它。直接运行读取该键；交互式界面、控制台、应用和网关会忽略它，并且总是发出这些请求，只有控制台的主对话例外：步数用完的请求会交给任务，其他这样的一轮由它自己再发一次请求要回答。见[运行结果](run-results.md#statuses)。`--reflection-gate`（默认 `patient`）是同类的另一个设置：见[反思](../concepts/how-it-works.md#reflection)。 |
 | `max_calls` | `[agent]` | 未设置 | 开发者设置。不小于 2 的整数：直接运行最多发出的模型请求数（规划、反思及其他请求；重试的请求每次尝试各算一次）。在会超出它的那个请求之前，运行以 `budget_exhausted` 结束，错误是 `Call budget reached: ...`。开启 `answer_on_stop` 时，最后一次调用留给答案：运行在发出 `N - 1` 个请求后停止，答案请求是第 `N` 次调用。未设置时没有上限。没有对应的标志，`-X agent.max_calls=N` 仅对一次运行设置它。交互式界面、控制台、应用和网关会忽略它。见[运行结果](run-results.md#statuses)。 |
 | `empty_reply_fallback` | `[agent]` | `"on"` | 开发者设置。`"on"` 让一个回合在会思考的模型没有给出答案、也没有工具调用就结束时，在服务提供关闭思考的开关时（托管服务都有；见[会思考的模型](../guides/hosted-models.md#thinking-models)）关闭思考再问一次，回复仍为空时就以思考的最后几行作为答案，末尾带有 `(from melo's thinking)`，运行因此完成。`"off"` 两者都不做：这样的运行像以前一样以 `failed` 结束，错误为 `melo did not finish an answer`。只有 `"off"` 会被保存；没有对应的标志，`-X agent.empty_reply_fallback=off` 仅对一次运行设置它。直接运行、交互式界面、控制台、应用和网关都读取它。每一步都是一条 `thinking_off_retry` 或 `answer_from_thinking` [通知](events.md#notice)，并在结果的 `empty_reply` 中设置一个标志（见[运行结果](run-results.md#fields)）。 |
@@ -458,5 +460,7 @@ chat_model = "Qwen/Qwen3-8B"
 - `[cloud_api]` 和 `[online]` 表，现在每个厂商一张表；
 - `[mlc]` 中的 `chat_port`，现在是 `chat_url`；
 - 扁平的 `chat_template_kwargs`，现在位于 `extra_body` 之内。
+
+没有 `[agent] reflection` 或 `steps_per_attempt` 的文件读取默认值：反思开启、尝试 50 步、运行 100 步。需要以前长度的运行设置 `-X agent.steps_per_attempt=10 -s 30`。
 
 再次运行向导会以当前格式写入该文件。
