@@ -60,6 +60,7 @@ melo -X browser.driver=safari-automation
 [browser]
 driver = "safari-automation"
 keep_tabs = false   # 设为 true 会让 melo 打开的标签页留在窗口里
+app_windows = true  # 设为 false 后 melo 不再留意其他应用的窗口
 ```
 
 默认是 `"off"`。网页控制台和 App 在打开每个对话（包括主对话）时读取同一个设置：在那里用 `/browser on`，或用 `melo config set browser.driver safari-automation` 修改，然后打开新对话。

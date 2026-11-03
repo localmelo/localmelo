@@ -484,12 +484,13 @@ async def test_a_button_is_found_clicked_and_the_new_page_read_over_the_fake_ser
     try:
         await tools["browser_open"].function(url="https://example.com/form")
         found = await tools["browser_find"].function(query="daily check-in")
-        assert isinstance(found, str) and '[e1 button "Check in"]' in found
+        # The find read the page again: its refs follow the first reading's.
+        assert isinstance(found, str) and '[e4 button "Check in"]' in found
         assert "2 more things on the page were skipped" in found
-        clicked = await tools["browser_click"].function(ref="e1")
+        clicked = await tools["browser_click"].function(ref="e4")
         assert isinstance(clicked, str)
         assert (
-            clicked.startswith("Clicked e1 (via browser).\n<<page id=s2")
+            clicked.startswith("Clicked e4 (via browser).\n<<page id=s3")
             and "Checked in." in clicked
         )
     finally:

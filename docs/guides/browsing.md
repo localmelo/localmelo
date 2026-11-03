@@ -52,6 +52,7 @@ In the config file:
 [browser]
 driver = "safari-automation"
 keep_tabs = false   # true leaves the tabs melo opened in the window
+app_windows = true  # false: melo no longer looks for other apps' windows
 ```
 
 `"off"` is the default. The web console and the app read the same setting when they open a chat, the main chat included: change it with `/browser on` there, or `melo config set browser.driver safari-automation`, and open a new chat.
