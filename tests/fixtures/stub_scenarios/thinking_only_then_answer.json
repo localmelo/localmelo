@@ -1,0 +1,30 @@
+{
+  "sequential": true,
+  "replies": [
+    {
+      "reasoning": "The user wants the folder's contents.\nThe folder is empty.\nSo I will tell them the folder is empty.",
+      "content": "",
+      "usage": {
+        "prompt_tokens": 120,
+        "completion_tokens": 12,
+        "completion_tokens_details": {
+          "reasoning_tokens": 12
+        }
+      }
+    },
+    {
+      "reasoning": "The user wants the folder's contents.\nThe folder is empty.\nSo I will tell them the folder is empty.",
+      "content": "",
+      "usage": {
+        "prompt_tokens": 120,
+        "completion_tokens": 12,
+        "completion_tokens_details": {
+          "reasoning_tokens": 12
+        }
+      }
+    },
+    {
+      "content": "The folder is empty."
+    }
+  ]
+}

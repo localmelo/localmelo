@@ -138,6 +138,7 @@ from localmelo.melo.contracts.events import EventSink
 from localmelo.melo.contracts.folders import OutsideAccess, home_label
 from localmelo.melo.contracts.inbox import InboxError, InboxSource
 from localmelo.melo.contracts.providers import (
+    LLM_REQUEST_EXTRA_BODY,
     BaseEmbeddingProvider,
     BaseLLMProvider,
     ProviderError,
@@ -304,6 +305,7 @@ from localmelo.melo.schema import (
     new_record_id,
     new_tool_call_id,
     split_thinking,
+    thinking_answer,
     unfinished_as_thinking,
 )
 
@@ -1281,6 +1283,13 @@ class _RunState:
     empty_replies: int = 0
     unfinished_row: bool = False
     broken_row: bool = False
+    # The latest thinking of the row's replies that had any, which is the answer
+    # when the row ends with the model's words only there (#469); whether the
+    # row has used its one retry with thinking turned off, and whether the next
+    # planning call is that retry.
+    row_thinking: str = ""
+    thinking_retry_used: bool = False
+    thinking_retry_armed: bool = False
     # The run's task id ("" for a call without a task record).
     task_id: str = ""
     # The query Message this run appended to the window, for replay scope.
@@ -4597,6 +4606,12 @@ class Agent:
 
         return long_context, short_window, tools, None
 
+    def _thinking_retry_body(self) -> Mapping[str, Any]:
+        """The request fields that turn thinking off for one retry (#469), if any."""
+        find = getattr(self.chat, "thinking_retry_body", None)
+        body = find() if callable(find) else None
+        return body if isinstance(body, Mapping) else {}
+
     async def _do_plan(
         self,
         long_context: list[Message],
@@ -5791,6 +5806,15 @@ class Agent:
         asked once more, and a row that held such a reply ends the run with
         :data:`~localmelo.melo.schema.UNFINISHED_ANSWER_ERROR` instead.
 
+        A row that ends with such a reply, or an empty one, from a model that
+        did think (#469) does not fail when the answer may be in the thinking.
+        Where the provider has a switch for thinking (``thinking_off_body``),
+        the reply that would end the row is followed by one more request sent
+        with thinking off. If the row ends empty again, the last lines of the
+        row's latest thinking (:func:`~localmelo.melo.schema.thinking_answer`)
+        are the answer, ending with the note "(from melo's thinking)", and
+        the run completes. A row with no thinking at all still fails.
+
         A reply with no tool call that writes one out as text
         (:func:`~localmelo.melo.schema.broken_tool_call`; a local model's
         server can leave ``text`` or ``<function_calls>`` in the content) is
@@ -5877,21 +5901,34 @@ class Agent:
             if (stream_display := STREAM_DISPLAY.get()) is not None:
                 stream_display.step(run.steps)
             run.note(lambda trace: trace.step(run.steps, run.attempts))
-            response, fail = await self._do_plan(
-                long_context,
-                short_window,
-                tools,
-                query,
-                reflections=reflections,
-                task_query=run.task_query_msg,
-                run=run,
-                **({"on_ready": on_ready} if on_ready is not None else {}),
-            )
+            # The retry of a reply that was only thinking (#469) goes out with
+            # the provider's thinking switched off, for this call only.
+            retry_body = self._thinking_retry_body() if run.thinking_retry_armed else {}
+            run.thinking_retry_armed = False
+            retry_token = LLM_REQUEST_EXTRA_BODY.set(retry_body) if retry_body else None
+            try:
+                response, fail = await self._do_plan(
+                    long_context,
+                    short_window,
+                    tools,
+                    query,
+                    reflections=reflections,
+                    task_query=run.task_query_msg,
+                    run=run,
+                    **({"on_ready": on_ready} if on_ready is not None else {}),
+                )
+            finally:
+                if retry_token is not None:
+                    LLM_REQUEST_EXTRA_BODY.reset(retry_token)
             # A reply that is only unfinished thinking (#278) is thinking with
             # no answer: it is stored and shown so, and goes on as empty.
             unfinished = fail is None and bool(
                 getattr(self.chat, "last_unfinished", False)
             )
+            # What the provider reported as the model's reasoning, before an
+            # unfinished reply's text is merged into it: only that is a model
+            # reasoning its way to an answer (see the rescue below).
+            reasoned = response.thinking
             if unfinished:
                 before = len(response.thinking)
                 response = dataclasses.replace(
@@ -5907,6 +5944,32 @@ class Agent:
             if fail is not None:
                 run.end("failed", error=fail)
                 return step + 1, ""
+            # A reply with thinking but no tool call and no words may have its
+            # answer in the thinking (#469). The row's last empty reply first
+            # asks once more with thinking off, where the provider has that
+            # switch; if the row still ends empty, the end of the thinking is
+            # the answer, marked as such.
+            if not response.tool_calls and not has_content(response.content):
+                if reasoned.strip():
+                    run.row_thinking = reasoned
+                if (
+                    run.empty_replies + 1 >= MAX_EMPTY_REPLIES
+                    and run.row_thinking.strip()
+                    and not run.broken_row
+                ):
+                    if (
+                        not run.thinking_retry_used
+                        and step + 1 < budget
+                        and self._thinking_retry_body()
+                    ):
+                        run.thinking_retry_used = True
+                        run.thinking_retry_armed = True
+                    else:
+                        response = dataclasses.replace(
+                            response,
+                            content=thinking_answer(run.row_thinking),
+                            thinking=run.row_thinking,
+                        )
             rest = response.content
             has_model_note = False
             if self._notes_mode:
@@ -5988,7 +6051,10 @@ class Agent:
                         run.empty_replies,
                         final=run.empty_replies >= MAX_EMPTY_REPLIES,
                     )
-                if run.empty_replies >= MAX_EMPTY_REPLIES:
+                if (
+                    run.empty_replies >= MAX_EMPTY_REPLIES
+                    and not run.thinking_retry_armed
+                ):
                     run.end(
                         "failed",
                         error=(
@@ -6039,6 +6105,9 @@ class Agent:
             run.empty_replies = 0
             run.unfinished_row = False
             run.broken_row = False
+            run.row_thinking = ""
+            run.thinking_retry_used = False
+            run.thinking_retry_armed = False
 
             # Execute every call in order, each through the executor boundary,
             # which runs only the tools this planning call offered. Until the

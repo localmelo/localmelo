@@ -50,7 +50,7 @@ chat_model = "qwen3:8b"
 | `answer_on_stop` | `[agent]` | `true` | 开发者设置。`true` 让以 `gate_stopped` 或 `budget_exhausted` 结束且没有答案的运行再向模型发出一次不带工具的请求，根据已收集的证据（工作窗口和最新反思）索要最终答案，使用任务要求的格式，允许回答 `unknown`。运行保留原来的状态；`result` 就是这个答案，JSON 记录中有 `"answered_on_stop": true`。任务要求有收尾行（例如 `FINAL ANSWER:`）而答案里没有时，它也会再发出一次请求把这一行加上，记录中则有 `"format_fixed": true`。`false` 两种请求都不发；没有对应的标志，`-X agent.answer_on_stop=off` 仅对一次运行设置它。直接运行读取该键；交互式界面、控制台、应用和网关会忽略它，并且总是发出这些请求，只有控制台的主对话例外：步数用完的请求会交给任务，其他这样的一轮由它自己再发一次请求要回答。见[运行结果](run-results.md#statuses)。`--reflection-gate`（默认 `patient`）是同类的另一个设置：见[反思](../concepts/how-it-works.md#reflection)。 |
 | `max_calls` | `[agent]` | 未设置 | 开发者设置。不小于 2 的整数：直接运行最多发出的模型请求数（规划、反思及其他请求；重试的请求每次尝试各算一次）。在会超出它的那个请求之前，运行以 `budget_exhausted` 结束，错误是 `Call budget reached: ...`。开启 `answer_on_stop` 时，最后一次调用留给答案：运行在发出 `N - 1` 个请求后停止，答案请求是第 `N` 次调用。未设置时没有上限。没有对应的标志，`-X agent.max_calls=N` 仅对一次运行设置它。交互式界面、控制台、应用和网关会忽略它。见[运行结果](run-results.md#statuses)。 |
 | `lean_output` | `[agent]` | `false` | 实验性。`true` 让命令行给出的任务少输出 token；没有对应的标志，`-X agent.lean_output=true` 为一次运行设置它。交互式界面和网关会忽略它。见[上下文统计](#context-accounting)。 |
-| `tool_images` | `[agent]` | `"auto"` | 工具返回的图片是否发给模型：`on` 在每个规划请求中把最新的几张作为 `image_url` 部分发送，`off` 只注明它们，`auto` 在服务器表明模型能读图时（oMLX 的 `model_type` 为 `vlm`，Ollama 的 `vision` 能力）等同于 `on`。没有对应的标志，`-X agent.tool_images=on` 为一次运行设置它。见[工具返回的图片](../guides/tools-mcp.md#pictures-that-tools-return)。 |
+| `tool_images` | `[agent]` | `"auto"` | 工具返回的图片是否发给模型：`on` 在每个规划请求中把最新的几张作为 `image_url` 部分发送，`off` 只注明它们，`auto` 在服务器表明模型能读图时（oMLX 的 `model_type` 为 `vlm`，Ollama 的 `vision` 能力），或对云端服务，在其预设把该模型列为能读图时（见[云端模型](../guides/hosted-models.md#pictures)）等同于 `on`。没有对应的标志，`-X agent.tool_images=on` 为一次运行设置它。见[工具返回的图片](../guides/tools-mcp.md#pictures-that-tools-return)。 |
 | `tool_images_keep`、`tool_images_retire` | `[agent]` | `3`、`2` | `tool_images` 开启时：最新的 `tool_images_keep` 张图片保留像素，有更多图片到来时最旧的 `tool_images_retire` 张一起失去像素，因此默认每个请求带 3 到 4 张图片。 |
 | `cache_layout` | `[agent]` | `"v3"` | `"v2"` 会发送此前的请求，在每个规划请求中把反思重建为最后一条消息；`"v3"` 与 `fixed_prefix` 一起使用时，只追加一次反思。见[上下文统计](#context-accounting)。 |
 | `window_messages` | `[agent]` | 本地服务器或 URL 上为 `64`，云厂商上为 `20` | 工作窗口的消息数上限，8 到 256；`20` 会发送此前的上限。见[上下文统计](#context-accounting)。 |
@@ -91,7 +91,9 @@ chat_model = "qwen3:8b"
 | `followup_query` | `[memory]` | `"recent"` | 开发者设置。没有自己内容的消息（"go look it up"、"continue"、"do that"、"去查一下"、"那个呢"）用什么来搜索。`"recent"`：这条消息，加上你在这个对话中最近两个仍显示给模型的轮次里输入的内容，最新的在前，总共不超过 2,000 个字符（melo 的回复、已撤销的轮次、任务的提问，以及没有自己内容的轮次（例如更早的 "continue"）都不算；取的是最近两个有实际内容的轮次）；新对话的第一条消息没有这样的轮次，什么也不召回，模型仍可调用 `search_memory`。`"message"`：只按它自己的词搜索，这些词会匹配到任何含有它们的内容，召回以前就是这样。去掉小词、提问词和接话词（"go"、"look"、"up"、"continue"、"that"、"继续"、"去查一下"）之后还剩下词，或者消息里有数字、网址或引用的文字，或者说到了你（"I"、"me"、"my"、"我"、"我的"；"tell me more"、"do it for me"、"帮我查一下" 这样的请求不算），这条消息就有内容；"what is my name?"、"what do you know about me?"、"我是谁" 和 "我朋友叫什么名字" 有内容，两种设置下都照原样搜索。两个召回门槛、排序、数量上限和召回块都不变。`turn.memory` 事件的 `recall.query_from` 说明这一轮用的是哪一种：`"message"`、`"recent"` 或 `"none"`。只有 `"message"` 时才会保存；`-X memory.followup_query=message` 只对一次运行生效。见[简短的接话](../concepts/memory.md#memory-across-chats)。 |
 | `project_instructions` | `[memory]` | `"on"` | `"on"`：你发起的任务或已保存的例行任务，在开始时读取项目自己的说明文件：它所在文件夹以及上面每一级文件夹（直到你的主目录）里，`AGENTS.md`、`CLAUDE.md`、`GEMINI.md` 中第一个存在的，最近的在前，最多三个文件、6,000 个字符，只读，并去掉机密内容。它们放在上下文包之后，用单独的标题，永远排在你的话、melo 的规则和审批之后。`"off"`：什么都不读。只有 `"off"` 时才会保存；`-X memory.project_instructions=off` 只对一次运行生效。见[任务读取项目自己的说明文件](../concepts/memory.md#a-task-reads-its-projects-own-instruction-file)。 |
 | `admit_on_outcome` | `[memory]` | `false` | R6-lite：只在运行结束时准入最后一次尝试的摘要，并在其来源中带上最终状态。`--admit-on-outcome` 旗标对一次运行优先；直接模式会读这张表，交互式界面和网关不读，且在 `legacy` 中被接受但不生效。 |
-| `api_key_env` | 云端后端 | 未设置 | 保存 API 密钥的环境变量名称。 |
+| `api_key_env` | 云端后端 | 未设置 | 保存 API 密钥的环境变量名称。变量有值时，先于 `api_key` 使用。 |
+| `api_key` | 云端后端 | 未设置 | 指向 macOS 钥匙串中密钥的引用，形如 `keychain:localmelo.<name>`（例如 `keychain:localmelo.deepseek`）。由设置和 `melo setup` 写入；它保存的是引用，不是密钥。其他任何值都是配置错误。 |
+| `thinking` | 云端后端 | 未设置 | 对有思考开关的云端服务（DeepSeek），取 `"on"` 或 `"off"`。留空则跟随服务的默认：`deepseek-flash` 默认关闭思考，`deepseek-v4-pro` 用它自己的默认。该表 `extra_body` 里的同名字段优先。见[云端模型](../guides/hosted-models.md#thinking-models)。 |
 | `base_url` | 云端后端 | 厂商的 URL | API 的 URL。 |
 | `host` | `[gateway]` | `"127.0.0.1"` | 回环监听地址；拒绝非回环绑定。 |
 | `port` | `[gateway]` | `8401` | 网关监听的端口。 |
@@ -109,7 +111,7 @@ chat_model = "qwen3:8b"
 | `resume_mode` | `[sessions]` | `"pairs"` | 终端对话恢复：`pairs` 加载最近的用户/答案对；`window` 加载保存的工作窗口加上之后的问答对，没有可用的检查点时回退。无效值只在界面中警告或回退；直接运行不读取此设置。 |
 | `record_direct` | `[sessions]` | `true` | 把每次直接运行（`melo "<task>"`、`melo --brief FILE`）记录为 `~/.cache/localmelo/cli/sessions.db` 中的 worker 会话，网页控制台的 Workers 视图和 macOS 应用会读取它。只有 `false` 会关闭；`--no-save-session` 对单次运行起同样作用，`--save-session` 或 `--parent-run` 仍会记录。只在为 `false` 时写入。见 [Worker 历史记录](cli.md#worker-历史记录)。 |
 | `policy` | `[scheduler]` | `"off"` | 网页工作区的调用如何到达模型服务器：`off` 只记录，`fcfs` 先到先得，`class` 让 P1 先于 P2 得到准入（依此类推）；见[调度器](../guides/scheduler.md#the-gate-on-chats-s2)。 |
-| `driver` | `[browser]` | `"off"` | melo 是否可以在浏览器中读取网页：`off` 不提供浏览工具；`safari-automation` 为终端对话以及网页控制台和 App 的每个对话提供十一个工具，在 Safari 的自动化窗口中打开、读取、点击、输入和选择网页内容，全部发生在 melo 自己的浏览器窗口里（每个网站每次对话询问一次，点击、输入和选择会再询问，发送表单每次都会单独询问；见[用 melo 浏览网页](../guides/browsing.md)）。终端中用 `/browser` 切换；`-X browser.driver=safari-automation` 仅用于一次运行。直接运行、worker 运行和已保存的任务从不获得这些工具。其他任何值都是配置错误。 |
+| `driver` | `[browser]` | `"off"` | melo 是否可以在浏览器中读取网页：`off` 不提供浏览工具；`safari-automation` 为终端对话以及网页控制台和 App 的每个对话提供十二个工具，在 Safari 的自动化窗口中打开、读取、点击、输入和选择网页内容，全部发生在 melo 自己的浏览器窗口里（每个网站每次对话询问一次，点击、输入和选择会再询问，发送表单每次都会单独询问；见[用 melo 浏览网页](../guides/browsing.md)）。终端中用 `/browser` 切换；`-X browser.driver=safari-automation` 仅用于一次运行。直接运行、worker 运行和已保存的任务从不获得这些工具。其他任何值都是配置错误。 |
 | `keep_tabs` | `[browser]` | `false` | melo 打开的标签页是否保持打开。默认情况下 melo 每个对话复用一个标签页，并在对话结束时、以及十分钟没有浏览调用后关闭它打开的标签页（最后一个保留为空白页）。`true` 让它们全部保持打开。不是 melo 打开的标签页从不触碰。见[用 melo 浏览网页](../guides/browsing.md#tabs)。 |
 | `web_fetch` | `[tools]` | `true` | 对话和任务是否可以用 `web_fetch` 工具读取公开网页（只读；从不访问这台电脑或它所在的局域网；你自己最近的消息没有提到的网站每个对话问一次，与浏览器共用；见[工具](tools.md#reading-a-public-web-page)）。`false` 移除这个工具；设置 → 对话和文件夹 → **读取网页** 是同一个开关；`-X tools.web_fetch=off` 仅用于一次运行。直接运行从不获得它。不是布尔值的任何值都是配置错误。 |
 | `web_fetch_allow_local` | `[tools]` | `[]` | 开发者设置，默认为空（关闭），用于需要 `web_fetch` 读取这台电脑上一个测试页面的测试。一个由精确条目组成的列表：`"127.0.0.1:PORT"` 或 `"[::1]:PORT"`（端口 1 到 65535）；`web_fetch` 随后会读取这些地址，不会读取其他任何本机地址。其他任何条目都是配置错误，且永远不会被使用：名字（`localhost`）、其他地址（私有或局域网地址段、`127.0.0.2`、`0.0.0.0`）、端口范围、通配符、没有端口。melo 自己的网关和控制台的端口（它真正监听的端口，包括 `melo serve --port` 设置的，以及正在运行的网关的端口），以及配置里写明的或这次运行的 `-u` URL 指向的任何模型服务器的端口，即使列出也会被拒绝；两者都没有写明的模型服务器不受保护。对话或任务在开始时读取这份列表，已列出的服务器会先问人（自动模式下单独审查；没有人可问时，例如 `--yolo`，会直接读取）。只有 `web_fetch` 读取它，浏览工具从不读取。在文件中设置，或用 `-X tools.web_fetch_allow_local=127.0.0.1:PORT[,…]` 仅用于一次运行：模型、控制台的设置和 API 都不能设置它，运行 `melo config set` 或对它使用 `-X` 的 shell 或 Python 调用算作改动 localmelo 本身（每次都要问，自动模式会拦下）。它放行的读取会在该调用的 `tool.finished` 事件和调用显示的内容中标出。`melo config keys` 会带着警告列出它；规则见[工具](tools.md#test-servers-on-this-computer)。 |
@@ -320,13 +322,16 @@ JSON 结果的 `prefix_cache.schema_changes` 统计运行期间所提供的规�
 
 ## 云端 API 密钥
 
-- 配置文件只保存环境变量的名称（`api_key_env`），从不保存密钥本身。
+- 配置文件从不保存密钥本身。它保存的是钥匙串引用（`api_key = "keychain:localmelo.<name>"`，由设置或 `melo setup` 写入），或环境变量的*名称*（`api_key_env`）。
+- 两者都设置且变量有值时，变量优先。
+- 钥匙串里的条目缺失或已锁定，或者这台电脑没有钥匙串时，`melo` 会在运行之前停止，退出码为 1，并说明怎么办。
+- 引用必须指向 melo 自己的条目（`keychain:localmelo.` 加上由小写字母、数字、`-` 和 `_` 组成的名称）；其他任何值都会被拒绝。
 - 在运行 `melo` 的 shell 中导出该变量。
-- 如果它没有设置，`melo` 会在运行之前停止，退出码为 1：
+- 如果变量没有设置，也没有已保存的密钥，`melo` 会在运行之前停止，退出码为 1：
 
   ```text
     Configuration errors:
-    - [openai] environment variable $OPENAI_API_KEY is not set. Export it before starting the gateway.
+    - [openai] environment variable $OPENAI_API_KEY is not set. Export it before starting the gateway, or paste the key in Settings.
   ```
 
 - `--base-url` 不发送 API 密钥，因此云端 API 请使用配置文件。
@@ -422,7 +427,7 @@ chat_model = "Qwen/Qwen3-8B"
 | `LOCALMELO_MEMORY_DIR` | 这些文件的目录（默认 `~/.cache/localmelo/memory`）。它按原样使用：不会展开 `~`。 |
 | `LOCALMELO_DETECT_URLS` | [首次运行](../guides/configure.md#first-run)请求模型列表的 URL，逗号分隔，用来代替 `127.0.0.1` 的 8000、8400、11434 和 30000 端口。空值会关闭搜索。 |
 | `LOCALMELO_THINKING_RETENTION_DAYS` | `history.db` 和会话存储的 `sessions.db` 保留模型推理的天数（默认 30）：任何大于 0 的数，例如 `7` 或 `0.5`。其他任何值都会让 `melo` 以退出码 2 停止。见[模型调用](../../reference/memory.md#model-calls)（英文）。 |
-| `api_key_env` 指定的变量 | 云端后端的 API 密钥，例如 `OPENAI_API_KEY`。 |
+| `api_key_env` 指定的变量 | 云端后端的 API 密钥，例如 `OPENAI_API_KEY`。先于钥匙串里保存的密钥使用。 |
 
 见[在运行之间保留记忆](../guides/memory.md#keep-memory-between-runs)。
 

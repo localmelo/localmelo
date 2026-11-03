@@ -6,14 +6,14 @@
 
 - 在搭载 Apple silicon 的 Mac 上，推荐使用本地服务器 oMLX。
 - 在其他系统上，可以用 Ollama 作为替代。
-- 云端 API 只需要把密钥放进一个环境变量。
+- 云端服务只需要一个密钥：在设置里粘贴一次，它会保存在你 Mac 的钥匙串里。见[云端模型](hosted-models.md)。
 
 <a id="setup-preview"></a>
 
 ## 设置预览
 
 - 尚未保存后端且未找到服务器时，终端首次运行和 `melo setup` 会显示简短的只读预览。受支持的 Apple silicon Mac 推荐 oMLX 与 Qwen3 4B Instruct（4-bit），显示下载量上限、已缓存量和可用空间，仅在需要时添加一条警告。其他系统显示手动指南，不为不受支持的安装程序估算缓存。若已经保存后端但没有找到服务器，`melo setup` 会改为打开完整后端菜单。
-- 摘要只显示一次。随后的列表提供 `Check again`、`Show how to set one up`、`Enter an address` 和 `Quit`。`Show how to set one up` 会显示最多六步的简明编号步骤：下载 oMLX、可选地核对校验和、打开并移到“应用程序”、下载模型、启动服务器，最后在 melo 中选择 `Enter an address`。自动设置即将推出。`Check again` 没找到服务器时，只有已缓存量或可用空间发生变化才会再次显示摘要。
+- 摘要只显示一次。随后的列表提供 `Check again`、`Show how to set one up`、`Enter an address`、`Use a hosted service` 和 `Quit`。`Show how to set one up` 会显示最多六步的简明编号步骤：下载 oMLX、可选地核对校验和、打开并移到“应用程序”、下载模型、启动服务器，最后在 melo 中选择 `Enter an address`。自动设置即将推出。`Check again` 没找到服务器时，只有已缓存量或可用空间发生变化才会再次显示摘要。
 - 开发者模式会一次性显示完整详情，并保留 `Review setup plan` 菜单，其中有生命周期选项、手动步骤和 `Details`。版本、校验和、缓存路径、各卷磁盘读数、计划摘要和建议端口放在 `Details` 或开发者模式中，不占默认摘要。
 - 内存按 GiB 计算（显示为 GB），`Details` 同时给出准确字节数；低于 16 GB 只提示可能较慢，不限制为仅手动设置。固定模型约 2.28 GB；oMLX 0.7.3 的 DMG 在 macOS 15 上约 0.84 GB，在 macOS 26/27 上约 0.88 GB，剩余下载量包含两者。展开和暂存开销尚未测量，磁盘负载只是下限。不会安装、下载、启动或写设置。
 - 这些步骤由同一个固定版本配方生成：模型保留在标准 Hugging Face 缓存中，服务器使用独立的设置目录，并关闭 oMLX 的额外缓存扫描，让这个实例只提供所选快照。自行安装官方应用，准备好后再复制显示的命令。建议的高位端口只是示例，并未预留；启动前请选一个空闲端口，然后在 melo 中输入该地址。手动命令独立运行，服务器须自行按 Ctrl+C 停止；计划生命周期不会管理它。缓存位置依次遵循 `HF_HUB_CACHE`、旧变量 `HUGGINGFACE_HUB_CACHE`、`HF_HOME/hub`、XDG/标准默认值；计划中的服务器状态位于 `~/.cache/localmelo/server-setup/` 下。管道和 `TERM=dumb` 显示手动指南链接而不是列表项；设置检查缓慢或不可用时，不会阻断手动路径。
@@ -190,6 +190,8 @@ chat_model = "Qwen/Qwen3-8B"
 
 ### 云端 API
 
+在设置里，从 **Hosted services** 下选择一个服务并粘贴一次密钥，见[云端模型](hosted-models.md)。如果想把密钥放在环境变量里：
+
 ```toml
 chat_backend = "openai"
 embedding_backend = "none"
@@ -206,7 +208,7 @@ export OPENAI_API_KEY="<your key>"
 melo "What is 6*7?"
 ```
 
-对于其他提供方，使用 `[anthropic]`、`[gemini]` 或 `[nvidia]` 表。向导建议使用变量 `ANTHROPIC_API_KEY`、`GEMINI_API_KEY` 和 `NVIDIA_API_KEY`。
+对于其他提供方，使用 `[anthropic]`、`[gemini]` 或 `[nvidia]` 表。设置会建议使用变量 `ANTHROPIC_API_KEY`、`GEMINI_API_KEY` 和 `NVIDIA_API_KEY`。变量优先于保存在钥匙串里的密钥。
 
 <a id="mix-backends"></a>
 

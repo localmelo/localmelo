@@ -1000,7 +1000,7 @@ class TestOnboardingDispatch:
         assert result.chat_backend == "openai"
 
     def test_chat_setup_has_all_backend_keys(self) -> None:
-        """_CHAT_SETUP must cover all 8 backend keys."""
+        """_CHAT_SETUP must cover every backend and every hosted service."""
         from localmelo.support.onboard import _CHAT_SETUP
 
         expected = {
@@ -1012,15 +1012,18 @@ class TestOnboardingDispatch:
             "gemini",
             "anthropic",
             "nvidia",
+            "deepseek",
+            "other",
         }
         assert set(_CHAT_SETUP.keys()) == expected
         assert all(callable(fn) for fn in _CHAT_SETUP.values())
 
     def test_chat_backends_list_has_8_entries(self) -> None:
-        """CHAT_BACKENDS list must have 8 entries."""
-        from localmelo.support.onboard import CHAT_BACKENDS
+        """CHAT_BACKENDS lists the 8 backends; the setup list adds DeepSeek and Other."""
+        from localmelo.support.onboard import CHAT_BACKENDS, SETUP_CHOICES
 
         assert len(CHAT_BACKENDS) == 8
+        assert [key for key, _ in SETUP_CHOICES[8:]] == ["deepseek", "other"]
 
     def test_embedding_backends_list_includes_local_and_none(self) -> None:
         """EMBEDDING_BACKENDS must include local backends + none only."""
@@ -1082,22 +1085,20 @@ class TestOnboardingDispatch:
         mock_emb.assert_called_once()
 
     def test_nvidia_cloud_backend_onboarding(self) -> None:
-        """Cloud API onboarding for NVIDIA sets correct config fields."""
+        """Onboarding a hosted NVIDIA service sets the key variable and model."""
         with (
+            # key: the environment variable row; model: the first suggestion
+            mock.patch("localmelo.support.onboard._ask_choice", side_effect=[2, 1]),
             mock.patch(
-                "localmelo.support.onboard._ask",
-                side_effect=[
-                    "NVIDIA_API_KEY",
-                    "nvidia/llama-3.1-nemotron-70b-instruct",
-                ],
+                "localmelo.support.onboard._ask", side_effect=["NVIDIA_API_KEY"]
             ),
             mock.patch("localmelo.support.onboard._confirm", return_value=True),
             mock.patch("builtins.print"),
         ):
-            from localmelo.support.onboard import _onboard_cloud
+            from localmelo.support.onboard import _onboard_hosted
 
             cfg = Config()
-            result = _onboard_cloud(cfg, "nvidia")
+            result = _onboard_hosted(cfg, "nvidia")
 
         assert result is True
         assert cfg.nvidia.api_key_env == "NVIDIA_API_KEY"

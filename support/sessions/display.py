@@ -563,7 +563,7 @@ def activity_text(
         return _doing("search", _words_shown(args.get("query")), "web")
     if name == "browser_follow":
         return _doing("follow", said("steps.aLink"), "web")
-    if name == "browser_click":
+    if name in ("browser_click", "browser_click_point"):
         return _doing("click", said("steps.thePage"), "web")
     if name == "browser_type":
         return _doing("type", said("steps.aField"), "web")

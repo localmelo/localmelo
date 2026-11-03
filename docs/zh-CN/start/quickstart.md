@@ -161,7 +161,7 @@ Try: What is this project? · / commands · ctrl+d quit
 
 ### 使用配置向导
 
-配置向导还可以配置嵌入服务器或云端 API。对于云端 API，先在当前终端运行 `export OPENAI_API_KEY="<your key>"`（或提供方对应的变量）：向导的测试请求会使用该密钥。先运行向导，再启动网关：
+配置向导还可以配置嵌入服务器或云端服务。对于云端服务，在列表里选择它，并在提示时输入密钥（输入时隐藏，保存在你 Mac 的钥匙串里；见[云端模型](../guides/hosted-models.md)），或者先在当前终端运行 `export OPENAI_API_KEY="<your key>"`（或提供方对应的变量）：向导的测试请求会使用该密钥。先运行向导，再启动网关：
 
 ```shell
 melo setup

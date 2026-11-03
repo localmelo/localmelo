@@ -12,7 +12,17 @@ import {test} from 'node:test';
 import {fileURLToPath} from 'node:url';
 import {dirname, join} from 'node:path';
 
+import {createRequire} from 'node:module';
+
 import {JSDOM, VirtualConsole} from 'jsdom';
+
+// A real (trusted) event, as the browser's own input makes one: jsdom's own helper.
+const require = createRequire(import.meta.url);
+const jsdomEvents = require('jsdom/lib/jsdom/living/helpers/events.js');
+const jsdomIdl = require('jsdom/lib/jsdom/living/generated/utils.js');
+const jsdomMouse = require('jsdom/lib/jsdom/living/generated/MouseEvent.js');
+const realClick = (el) => jsdomEvents.fireAnEvent('click', jsdomIdl.implForWrapper(el), jsdomMouse, {bubbles: true, cancelable: true});
+const realPress = (el) => jsdomEvents.fireAnEvent('mousedown', jsdomIdl.implForWrapper(el), jsdomMouse, {bubbles: true, cancelable: true});
 
 const here = dirname(fileURLToPath(import.meta.url));
 const scripts = JSON.parse(readFileSync(process.env.MELO_SCRIPTS, 'utf8'));
@@ -22,6 +32,7 @@ const PRELUDE = `
 Object.defineProperty(HTMLElement.prototype, 'innerText', {get() { return this.textContent; }, configurable: true});
 Element.prototype.getBoundingClientRect = function () { return {width: 10, height: 10, top: 0, left: 0, right: 10, bottom: 10}; };
 Element.prototype.scrollIntoView = function () {};
+Element.prototype.getClientRects = function () { return [this.getBoundingClientRect()]; };
 `;
 
 function load(html, {url = 'https://example.com/', before = ''} = {}) {
@@ -37,6 +48,8 @@ function load(html, {url = 'https://example.com/', before = ''} = {}) {
 
 const readPage = (dom) => JSON.parse(dom.window.eval(scripts.page));
 const run = (dom, spec) => JSON.parse(dom.window.eval(scripts.actPrefix + JSON.stringify(spec) + ')'));
+const settle = (dom, key, doc) => JSON.parse(dom.window.eval(scripts.settle.replace('%s', JSON.stringify({key, doc}))));
+const disarm = (dom, key, doc) => JSON.parse(dom.window.eval(scripts.disarm.replace('%s', JSON.stringify({key, doc}))));
 const sends = (dom) => dom.sent.filter((line) => /HTMLFormElement/.test(line));
 const navigations = (dom) => dom.sent.filter((line) => /navigation/i.test(line));
 
@@ -388,4 +401,180 @@ test('a click on an element that is not an HTML element is dispatched as a click
   const link = page.elements[0];
   assert.deepEqual(run(dom, specFor(page, link)), {ok: true});
   assert.equal(dom.window.eval('window.clicks'), 1);
+});
+
+// ── The browser's own input: binding, guards, and the look after ──
+
+test('scroll describes the element for finding it in the browser\'s own reading', () => {
+  const dom = load(FORM);
+  const page = readPage(dom);
+  const go = run(dom, specFor(page, byLabel(page, 'Go'), {mode: 'scroll'}));
+  assert.equal(go.ok, true);
+  assert.equal(go.covered, false);
+  assert.deepEqual([go.tag, go.text, go.id], ['button', 'Go', 'go']);
+  const box = run(dom, specFor(page, byLabel(page, 'Search'), {mode: 'scroll'}));
+  assert.deepEqual([box.tag, box.label, box.name, box.text], ['input', 'Search', 'q', ''], 'a field\'s value is not its words');
+  // An arm with nothing to bind leaves nothing behind once it is taken down.
+  const armed = run(dom, specFor(page, byLabel(page, 'Go'), {mode: 'arm', key: 'k1', uid: '8'}));
+  assert.equal(armed.ok, true);
+  assert.equal(disarm(dom, 'k1', page.doc).blocked.length, 0);
+  assert.equal(dom.window.eval('Object.getOwnPropertyNames(window).indexOf("k1")'), -1);
+});
+
+test('a real click that lands on another element while melo acts is stopped and reported', () => {
+  const dom = load(FORM);
+  dom.window.eval(`window.hits = []; document.getElementById('n').addEventListener('click', function (e) { window.hits.push('news'); e.preventDefault(); });`);
+  const page = readPage(dom);
+  const spec = specFor(page, byLabel(page, 'Go'), {mode: 'arm', key: 'k3', uid: '8', send: true});
+  assert.equal(run(dom, spec).ok, true);
+  // The page slid another element under the click between the check and the act.
+  realPress(dom.window.document.getElementById('n'));
+  realClick(dom.window.document.getElementById('n'));
+  assert.deepEqual(Array.from(dom.window.eval('window.hits')), [], 'the other element got nothing');
+  assert.equal(navigations(dom).length, 0);
+  const report = disarm(dom, 'k3', page.doc);
+  assert.deepEqual([...new Set(report.blocked)], ['moved']);
+  assert.equal(report.seen.click, undefined);
+});
+
+test('a real click on the checked element goes through, and after the first look the person’s clicks are theirs', () => {
+  const dom = load(FORM);
+  dom.window.eval(`window.hits = []; document.getElementById('n').addEventListener('click', function (e) { window.hits.push('news'); e.preventDefault(); });`);
+  const page = readPage(dom);
+  const news = byLabel(page, 'News');
+  run(dom, specFor(page, news, {mode: 'arm', key: 'k4', uid: '9'}));
+  realClick(dom.window.document.getElementById('n'));
+  assert.deepEqual(Array.from(dom.window.eval('window.hits')), ['news']);
+  const look = settle(dom, 'k4', page.doc);
+  assert.equal(look.doc, true);
+  // The person clicks elsewhere now: not stopped.
+  realClick(dom.window.document.getElementById('go'));
+  const report = disarm(dom, 'k4', page.doc);
+  assert.equal(report.seen.click, 1);
+  assert.ok(!report.blocked.includes('moved'));
+});
+
+test('a link whose address changes at a real click is stopped, and so is a form nobody asked about', () => {
+  const dom = load(FORM);
+  dom.window.eval(`document.getElementById('n').addEventListener('click', function () { this.href = 'http://127.0.0.1:9/x'; });`);
+  const page = readPage(dom);
+  run(dom, specFor(page, byLabel(page, 'News'), {mode: 'arm', key: 'k5', uid: '9'}));
+  realClick(dom.window.document.getElementById('n'));
+  assert.equal(navigations(dom).length, 0);
+  assert.deepEqual(disarm(dom, 'k5', page.doc).blocked, ['link']);
+  // The Go button is clicked for real, but its send was not approved.
+  const other = load(FORM);
+  const read = readPage(other);
+  run(other, specFor(read, byLabel(read, 'Go'), {mode: 'arm', key: 'k6', uid: '8', send: false}));
+  other.window.eval(`document.getElementById('f').requestSubmit()`);
+  assert.equal(sends(other).length, 0);
+  assert.deepEqual(disarm(other, 'k6', read.doc).blocked, ['send']);
+  assert.equal(other.window.eval('typeof HTMLFormElement.prototype.requestSubmit'), 'function', 'put back');
+});
+
+test('a field never typed into stays so, and one that turned protected after typing is cleared', () => {
+  const dom = load(FORM);
+  const page = readPage(dom);
+  const secret = page.elements.find((el) => el.sensitive === 'password');
+  assert.deepEqual(run(dom, specFor(page, {...secret, label: ''}, {act: 'type', mode: 'arm', key: 'k7', uid: '1'})), {ok: false, stale: 'field'});
+  const box = byLabel(page, 'Search');
+  run(dom, specFor(page, box, {act: 'type', text: 'dogs', mode: 'arm', key: 'k8', uid: '2'}));
+  // The browser types; then the page turns the box into a password field.
+  dom.window.eval(`var q = document.getElementById('q'); q.value = 'dogs'; q.type = 'password';`);
+  const report = disarm(dom, 'k8', page.doc);
+  assert.equal(report.stale, 'field');
+  assert.equal(dom.window.document.getElementById('q').value, '', 'what was typed is cleared');
+  assert.ok(!JSON.stringify(report).includes('dogs'), 'nothing of a protected field is read');
+});
+
+test('the look after an act sees new text (even gone again), not text that was there, and the element’s new state', () => {
+  // Lines as a browser's innerText gives them (jsdom's text is the source's).
+  const dom = load('<main>\n<p>Welcome back.</p>\n<button id="b" aria-pressed="false">Happy</button>\n<div id="t"></div>\n</main>');
+  dom.window.eval(`document.getElementById('b').addEventListener('click', function () {
+    this.setAttribute('aria-pressed', 'true');
+    var t = document.getElementById('t');
+    t.innerHTML = '<p>Welcome back.</p>\\n<p>Checked in: day 12</p>';
+    var toast = document.createElement('div'); toast.textContent = 'Saved!'; document.body.appendChild(toast);
+    setTimeout(function () { toast.parentNode.removeChild(toast); }, 1);
+  });`);
+  const page = readPage(dom);
+  const happy = byLabel(page, 'Happy');
+  assert.deepEqual(run(dom, specFor(page, happy, {key: 'k9'})), {ok: true});
+  return new Promise((resolve) => setTimeout(resolve, 20)).then(() => {
+    assert.equal(dom.window.document.body.textContent.includes('Saved!'), false, 'the toast is gone again');
+    const look = settle(dom, 'k9', page.doc);
+    assert.equal(look.doc, true);
+    assert.ok(look.count > 0 && look.target === true, JSON.stringify(look));
+    const report = disarm(dom, 'k9', page.doc);
+    assert.deepEqual(report.texts, ['Checked in: day 12', 'Saved!']);
+    assert.equal(JSON.parse(report.before).pressed, 'false');
+    assert.equal(JSON.parse(report.after).pressed, 'true');
+    assert.deepEqual(disarm(dom, 'k9', page.doc), {lost: true}, 'taken down once');
+  });
+});
+
+test('another document answers the look as gone', () => {
+  const dom = load(FORM);
+  const page = readPage(dom);
+  run(dom, specFor(page, byLabel(page, 'News'), {key: 'k10'}));
+  assert.deepEqual(settle(dom, 'k10', 'another'), {doc: false});
+  assert.deepEqual(disarm(dom, 'k10', 'another'), {lost: true});
+  assert.equal(disarm(dom, 'k10', page.doc).count, 0);
+});
+
+test('an element that only looks clickable is marked plain; a control is not', () => {
+  const dom = load('<div class="btn" style="cursor:pointer">Submit</div><button>Submit</button>');
+  const [div, button] = readPage(dom).elements;
+  assert.equal(div.plain, true);
+  assert.equal(button.plain, undefined);
+});
+
+test('a frame from the same site is read and acted in as part of the page', () => {
+  const dom = load('<main><p>Outer.</p><iframe id="f"></iframe></main>');
+  const frame = dom.window.document.getElementById('f');
+  const fw = frame.contentWindow;
+  Object.defineProperty(fw.HTMLElement.prototype, 'innerText', {get() { return this.textContent; }, configurable: true});
+  fw.Element.prototype.getBoundingClientRect = function () { return {width: 10, height: 10, top: 0, left: 0, right: 10, bottom: 10}; };
+  fw.Element.prototype.scrollIntoView = function () {};
+  frame.contentDocument.body.innerHTML = '<p>Sign in here.</p><button id="in">Continue</button>';
+  dom.window.eval(`window.clicked = 0; document.getElementById('f').contentDocument.getElementById('in').addEventListener('click', function () { window.clicked++; });`);
+  const page = readPage(dom);
+  const cont = byLabel(page, 'Continue');
+  assert.equal(cont.frame, '0');
+  assert.ok(cont.fp.includes('|f:'), cont.fp);
+  assert.match(page.text, /Sign in here\./);
+  assert.deepEqual(run(dom, specFor(page, cont, {frame: '0'})), {ok: true});
+  assert.equal(dom.window.eval('window.clicked'), 1);
+  // A frame that went elsewhere since it was read is another page.
+  assert.deepEqual(run(dom, specFor(page, cont, {frame: '1'})), {ok: false, stale: 'gone'});
+});
+
+test('where an element belongs: its row, its heading and the text next to it, for finding a redrawn ref', () => {
+  const rows = load('<ul><li id="a">Record A <button>Delete</button></li><li>Record B <button>Delete</button></li></ul>');
+  const [a, b] = readPage(rows).elements;
+  assert.notEqual(a.context, b.context);
+  assert.match(b.context, /Record B/);
+  rows.window.document.getElementById('a').remove();  // record A went: B's own place is unchanged
+  assert.equal(readPage(rows).elements[0].context, b.context);
+
+  const cards = load('<h2>Records</h2><div><span>Record A</span><button>Open</button></div><div><span>Record B</span><button>Open</button></div>');
+  const [first, second] = readPage(cards).elements;
+  assert.match(first.context, /Record A/);
+  assert.notEqual(first.context, second.context);
+  // A card's title that is a link counts as the text next to its button.
+  const linked = load('<h2>Records</h2><div><a href="/r/a">Trip notes</a><form action="/s"><button>Share</button></form></div>');
+  assert.match(byLabel(readPage(linked), 'Share').context, /Trip notes/);
+
+  // A list that redraws itself (new elements, one more button) under the same heading.
+  const moods = load('<main><h1>Pick a mood</h1><div id="m"><div><button>Happy</button><button>Calm</button></div></div></main>');
+  const before = byLabel(readPage(moods), 'Calm').context;
+  moods.window.document.getElementById('m').innerHTML = '<div><button>New!</button><button>Happy</button><button>Calm</button></div>';
+  assert.ok(before);
+  assert.equal(byLabel(readPage(moods), 'Calm').context, before);
+
+  // Nothing says where a lone button belongs, and a secret field has no context at all.
+  const lone = load('<button>Go</button><input type="password" name="pw">');
+  const [go, pw] = readPage(lone).elements;
+  assert.equal(go.context, '');
+  assert.equal(pw.context, undefined);
 });

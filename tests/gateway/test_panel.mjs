@@ -141,6 +141,7 @@ test('a step reads as the server words it, in the present while it runs and the 
     ['web_search', {}, 'Searching the web for …'],
     ['browser_follow', {ref: 'e1'}, 'Following a link'],
     ['browser_click', {ref: 'e1'}, 'Clicking on the page'],
+    ['browser_click_point', {x: 500, y: 300}, 'Clicking on the page'],
     ['browser_type', {ref: 'e2', text: 'my secret'}, 'Typing into a field'],
     ['browser_select', {ref: 'e3', option: 'Spain'}, 'Choosing from a list'],
     ['recall', {}, 'Remembering'],

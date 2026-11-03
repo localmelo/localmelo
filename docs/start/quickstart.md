@@ -238,9 +238,11 @@ the key for those. See
 
 ### With the setup wizard
 
-The setup wizard also sets up an embedding server or a cloud API. For a
-cloud API, first run `export OPENAI_API_KEY="<your key>"` (or your vendor's
-variable) in this terminal: the wizard's test request uses that key. Run the
+The setup wizard also sets up an embedding server or a hosted service. For a
+hosted service, choose it in the list and type the key when asked (it is
+hidden and kept in your Mac's keychain; see [Hosted models](../guides/hosted-models.md)),
+or `export OPENAI_API_KEY="<your key>"` (or your vendor's variable) in this
+terminal first: the wizard's test request uses that key. Run the
 wizard, then start the gateway:
 
 ```shell

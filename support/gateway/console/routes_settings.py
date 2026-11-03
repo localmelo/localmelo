@@ -32,7 +32,14 @@ from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
 from localmelo.melo.contracts.events import EVENT_SCHEMA_VERSION
 from localmelo.melo.schema import SESSION_TEXT_CHARS
-from localmelo.support import config, onboard, onboard_probe
+from localmelo.support import (
+    config,
+    hosted,
+    hosted_check,
+    keychain,
+    onboard,
+    onboard_probe,
+)
 from localmelo.support import settings as setting_keys
 from localmelo.support.backends import discovery
 from localmelo.support.backends.discovery import DISCOVERY_TIMEOUT_S, DiscoveryError
@@ -63,13 +70,20 @@ logger = logging.getLogger(__name__)
 
 # Seconds ``POST /api/settings/test`` waits for ``probe_all`` at most.
 SETTINGS_TEST_TIMEOUT_S: Final = 30.0
+# The same for a hosted service: its model list, then one short chat that a
+# model which thinks first can take a while to answer.
+HOSTED_TEST_TIMEOUT_S: Final = (
+    hosted_check.LIST_TIMEOUT_S + hosted_check.CHAT_TIMEOUT_S + 5
+)
 
 # Re-exported so tests may patch either ``onboard_probe.probe_all`` /
 # ``discovery.list_models`` or the names on this module.
 _ORIG_PROBE_ALL = onboard_probe.probe_all
 _ORIG_LIST_MODELS = discovery.list_models
+_ORIG_CHECK_HOSTED = hosted_check.check_hosted
 probe_all = _ORIG_PROBE_ALL
 list_models = _ORIG_LIST_MODELS
+check_hosted = _ORIG_CHECK_HOSTED
 
 _ENV_NAME_RE: Final = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 _LOCAL_FIELDS: Final = (
@@ -80,8 +94,10 @@ _LOCAL_FIELDS: Final = (
 )
 _CLOUD_FIELDS: Final = (
     "api_key_env",
+    "api_key",
     "chat_model",
     "base_url",
+    "thinking",
 )
 
 
@@ -126,6 +142,16 @@ class SettingsPutBody(_SettingsBaseBody):
     # ``[tasks] follow_up``: whether a chat follows up on a task it started that
     # stopped (#411, a developer setting); absent leaves it.
     follow_up: StrictBool | None = None
+
+
+class KeyBody(BaseModel):
+    """Request body of ``PUT /api/settings/key``: the one time a key is sent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    preset: StrictStr
+    # Not shown in a repr, an error or a log line.
+    key: StrictStr = Field(repr=False, max_length=1024)
 
 
 def _check_single_line(field: str, value: str) -> None:
@@ -288,6 +314,17 @@ async def setup_detect_json(console: Console) -> dict[str, Any]:
     }
 
 
+def _hosted_choices() -> list[dict[str, Any]]:
+    """The hosted-service presets, with the free-form one named in the request's language."""
+    choices = hosted.presets_json()
+    for choice in choices:
+        key = choice["id"]
+        words = t(f"settings.preset.{key}")
+        if words != f"settings.preset.{key}":
+            choice["label"] = words
+    return choices
+
+
 def _ui_mode(cfg: config.Config) -> str:
     """The saved ``[ui] mode``; a value the CLI warns about reads as default."""
     return cfg.ui.mode if cfg.ui.mode in config.UI_MODES else "default"
@@ -362,11 +399,19 @@ def settings_json() -> dict[str, Any]:
     for name in config._CLOUD_SECTIONS:
         sec = getattr(cfg, name)
         env_name = str(sec.api_key_env)
+        preset = hosted.preset_for(name, sec)
         sections[name] = {
             "api_key_env": env_name,
             "api_key_set": bool(env_name and os.environ.get(env_name)),
+            # The reference to the key in the keychain, never the key; ``key`` says
+            # where the key comes from now: env, keychain, missing, locked,
+            # unavailable or none.
+            "api_key": str(sec.api_key),
+            "key": hosted.key_state(sec),
             "chat_model": str(sec.chat_model),
             "base_url": str(sec.base_url),
+            "thinking": str(sec.thinking),
+            "preset": preset.id if preset is not None else name,
         }
     ws = (
         cfg.gateway.workspace
@@ -394,6 +439,7 @@ def settings_json() -> dict[str, Any]:
                 {"key": key, "label": _choice_label(key, label)}
                 for key, label in onboard.EMBEDDING_BACKENDS
             ],
+            "hosted": _hosted_choices(),
         },
         "mode": _ui_mode(cfg),
         "across_chats": cfg.memory.across_chats,
@@ -477,6 +523,26 @@ def _validate_sections(sections: dict[str, Any]) -> None:
                     400,
                     "invalid_request",
                     f"sections.{sec_name}.api_key_env: Invalid environment variable name.",
+                )
+            if sec_name in config._CLOUD_SECTIONS and field_name == "api_key":
+                try:
+                    keychain.parse_ref(field_val)
+                except ValueError:
+                    raise ApiError(
+                        400,
+                        "invalid_request",
+                        f"sections.{sec_name}.api_key: Must be empty or a "
+                        "keychain:localmelo.<name> reference.",
+                    ) from None
+            if (
+                sec_name in config._CLOUD_SECTIONS
+                and field_name == "thinking"
+                and field_val not in hosted.THINKING
+            ):
+                raise ApiError(
+                    400,
+                    "invalid_request",
+                    f"sections.{sec_name}.thinking: Must be one of {hosted.THINKING}.",
                 )
 
 
@@ -665,6 +731,90 @@ async def _call_list_models(backend: str, url: str) -> list[str]:
     return await fn(backend, url, timeout_s=DISCOVERY_TIMEOUT_S)
 
 
+# The status of each keychain refusal, and the catalog's words for it.
+_KEY_STATUS: Final = {
+    "bad": (400, "invalid_key"),
+    "locked": (409, "keychain_locked"),
+    "unavailable": (409, "keychain_unavailable"),
+    "missing": (404, "key_missing"),
+    "failed": (502, "keychain_failed"),
+}
+
+
+def _key_error(exc: keychain.KeychainError) -> ApiError:
+    """The refusal for a keychain failure; it never carries the key."""
+    status, code = _KEY_STATUS.get(exc.kind, (502, "keychain_failed"))
+    kind = exc.kind
+    return ApiError(status, code, t(f"hosted.key.{kind}"))
+
+
+def _preset(preset_id: str) -> hosted.Preset:
+    _check_single_line("preset", preset_id)
+    preset = hosted.get(preset_id)
+    if preset is None:
+        raise ApiError(400, "invalid_request", "preset: Unknown hosted service.")
+    return preset
+
+
+def _hosted_message(found: hosted_check.HostedCheck, model: str) -> str:
+    """What the Test button says of *found*, in the request's language."""
+    if found.result.startswith("keychain_"):
+        kind = found.result.removeprefix("keychain_")
+        return t(f"hosted.key.{kind}")
+    if found.ok:
+        return t(
+            "hosted.test.works" if found.tools else "hosted.test.noTool", model=model
+        )
+    return t(
+        hosted_check.WORDS.get(found.result, "hosted.test.error"),
+        model=model,
+        status=found.status or "",
+        seconds=int(hosted_check.CHAT_TIMEOUT_S),
+        detail=found.detail,
+    )
+
+
+async def _call_check_hosted(cfg: config.Config) -> hosted_check.HostedCheck:
+    fn = (
+        check_hosted
+        if check_hosted is not _ORIG_CHECK_HOSTED
+        else hosted_check.check_hosted
+    )
+    return await fn(cfg)
+
+
+async def _test_hosted(candidate: config.Config) -> JSONResponse:
+    """The Test button for a hosted chat service: its models, then one short chat."""
+    model = getattr(candidate, candidate.chat_backend).chat_model
+    try:
+        async with asyncio.timeout(HOSTED_TEST_TIMEOUT_S):
+            found = await _call_check_hosted(candidate)
+    except TimeoutError:
+        found = hosted_check.HostedCheck(False, hosted_check.TIMEOUT)
+    if found.ok and candidate.embedding_backend not in ("", "none"):
+        # A hosted chat model can sit beside a local embedding model.
+        try:
+            async with asyncio.timeout(SETTINGS_TEST_TIMEOUT_S):
+                await onboard_probe.probe_embedding(candidate)
+        except Exception as exc:
+            err = _redact(redact_userinfo(str(exc) or type(exc).__name__))
+            return JSONResponse(
+                content={"ok": False, "error": err, "failed": "embedding"}
+            )
+    message = _redact(_hosted_message(found, model))
+    return JSONResponse(
+        content={
+            "ok": found.ok,
+            "result": found.result,
+            "error": "" if found.ok else message,
+            "message": message,
+            "models": list(found.models),
+            "tools": found.tools,
+            "failed": "" if found.ok else "chat",
+        }
+    )
+
+
 def add_routes(app: FastAPI, console: Console) -> None:
     """Register the health, settings and models routes on *app*."""
 
@@ -674,14 +824,22 @@ def add_routes(app: FastAPI, console: Console) -> None:
 
     @app.get("/api/settings")
     async def api_get_settings() -> JSONResponse:
-        return JSONResponse(content=settings_json())
+        return JSONResponse(content=await asyncio.to_thread(settings_json))
 
     @app.get("/api/setup/detect")
     async def api_setup_detect() -> JSONResponse:
         return JSONResponse(content=await setup_detect_json(console))
 
     @app.get("/api/settings/key-status")
-    async def api_key_status(name: str | None = None) -> JSONResponse:
+    async def api_key_status(
+        name: str | None = None, preset: str | None = None
+    ) -> JSONResponse:
+        if preset is not None:
+            # Whether a key is saved for the preset in the keychain (no secret is read).
+            found = _preset(preset)
+            state = await asyncio.to_thread(keychain.status, found.service)
+            env = bool(found.key_env and os.environ.get(found.key_env))
+            return JSONResponse(content={"keychain": state, "env_set": env})
         if not name or not _ENV_NAME_RE.fullmatch(name):
             raise ApiError(
                 400,
@@ -689,6 +847,32 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 "name: Invalid environment variable name.",
             )
         return JSONResponse(content={"set": bool(os.environ.get(name))})
+
+    @app.put("/api/settings/key")
+    async def api_put_key(body: KeyBody) -> JSONResponse:
+        found = _preset(body.preset)
+        try:
+            await asyncio.to_thread(keychain.write, found.service, body.key)
+        except keychain.KeychainError as exc:
+            raise _key_error(exc) from None
+        logger.info("settings: a key was saved in the keychain for %s", found.id)
+        return JSONResponse(
+            content={
+                "preset": found.id,
+                "api_key": keychain.ref_for(found.service),
+                "keychain": keychain.SAVED,
+            }
+        )
+
+    @app.delete("/api/settings/key")
+    async def api_delete_key(preset: str | None = None) -> JSONResponse:
+        found = _preset(preset or "")
+        try:
+            await asyncio.to_thread(keychain.remove, found.service)
+        except keychain.KeychainError as exc:
+            raise _key_error(exc) from None
+        logger.info("settings: the key of %s was removed from the keychain", found.id)
+        return JSONResponse(content={"preset": found.id, "keychain": keychain.MISSING})
 
     @app.put("/api/settings")
     async def api_put_settings(body: SettingsPutBody) -> JSONResponse:
@@ -712,12 +896,14 @@ def add_routes(app: FastAPI, console: Console) -> None:
         if reset is not None:
             reset(active)
         await console.sessions.settings_changed()
-        return JSONResponse(content=settings_json())
+        return JSONResponse(content=await asyncio.to_thread(settings_json))
 
     @app.post("/api/settings/test")
     async def api_test_settings(body: SettingsTestBody) -> JSONResponse:
         _, candidate = _build_candidate(body)
         _check_candidate_probe_urls(candidate)
+        if candidate.chat_backend in config._CLOUD_SECTIONS:
+            return await _test_hosted(candidate)
         try:
             async with asyncio.timeout(SETTINGS_TEST_TIMEOUT_S):
                 await _call_probe_all(candidate)

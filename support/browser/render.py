@@ -39,6 +39,7 @@ OPTION_CHARS = 40
 OPTIONS_SHOWN = 10
 HREF_CHARS = 120
 TITLE_CHARS = 120
+MAX_UNREACHED = 4  # boxes from other sites named in a reading
 
 _UNSAFE = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f‎‏‪-‮⁦-⁩]")
 _ANGLES_OPEN = re.compile("<{2,}")
@@ -147,6 +148,9 @@ class Snapshot:
     skipped: int = (
         0  # elements the page script left out (hidden, disabled, over its cap)
     )
+    unreached: tuple[
+        str, ...
+    ] = ()  # origins of frames from another site melo cannot read
 
 
 def make_snapshot(
@@ -156,6 +160,9 @@ def make_snapshot(
     snap = Snapshot(
         sid, tab, raw.url, origin, raw.title, [""], doc=raw.doc, skipped=raw.skipped
     )
+    snap.unreached = tuple(
+        dict.fromkeys(o for o in map(_origin, raw.unreached) if o and o != origin)
+    )[:MAX_UNREACHED]
     kept: list[Element] = []
     for item in raw.elements:
         secret = item.sensitive or (
@@ -164,7 +171,15 @@ def make_snapshot(
             else ""
         )
         if secret:
-            item = Element(item.kind, "", sensitive=secret, at=item.at, fp=item.fp)
+            item = Element(
+                item.kind,
+                "",
+                sensitive=secret,
+                at=item.at,
+                fp=item.fp,
+                frame=item.frame,
+                site=item.site,
+            )
         elif not (item.label.strip() or item.also.strip() or item.href):
             continue
         if kept and kept[-1] == item and item.kind == "link":
@@ -178,6 +193,27 @@ def make_snapshot(
     return snap
 
 
+def _origin(url: str) -> str:
+    """``scheme://host[:port]`` of *url*, or ``""``."""
+    match = re.match(r"(https?://[^/?#\s]+)", url.strip(), re.IGNORECASE)
+    return match.group(1).lower() if match else ""
+
+
+def unreached_line(origin: str) -> str:
+    host = field_text(origin.split("://", 1)[-1], 80)
+    return (
+        f"[a box from {host} that melo can't reach: browser_screenshot, "
+        "then browser_click_point, can click in it]"
+    )
+
+
+def changes_lines(changes: list[str]) -> list[str]:
+    """The lines that say what an action changed: page words, cleaned, one per line."""
+    if not changes:
+        return []
+    return ["what changed:", *(f"- {field_text(line, 220)}" for line in changes)]
+
+
 def block(ident: str, attrs: str, body: str) -> str:
     """*body* between markers with a fresh nonce."""
     nonce = secrets.token_hex(4)
@@ -188,7 +224,7 @@ def block(ident: str, attrs: str, body: str) -> str:
     )
 
 
-def _address(href: str, origin: str) -> str:
+def address(href: str, origin: str) -> str:
     """*href* as the page block shows it: without the page's own origin."""
     if origin and href.startswith(origin + "/"):
         href = href[len(origin) :]
@@ -196,11 +232,19 @@ def _address(href: str, origin: str) -> str:
 
 
 def element_line(ref: str, item: Element, origin: str = "") -> str:
+    line = _line(ref, item, origin)
+    if item.site:
+        host = field_text(item.site.split("://", 1)[-1], 80)
+        line = f"{line[:-1]} in a box from {host}]"
+    return line
+
+
+def _line(ref: str, item: Element, origin: str) -> str:
     if item.sensitive:
         return f"[{ref} {_SENSITIVE_WORDS[item.sensitive]}: melo never types here]"
     label = field_text(item.label or item.also, LABEL_CHARS)
     if item.kind == "link":
-        return f'[{ref} link "{label}" -> {_address(item.href, origin)}]'
+        return f'[{ref} link "{label}" -> {address(item.href, origin)}]'
     if item.kind == "checkbox":
         state = "checked" if item.checked else "unchecked"
         return f'[{ref} checkbox "{label}" {state}]'
@@ -215,12 +259,21 @@ def element_line(ref: str, item: Element, origin: str = "") -> str:
         return (
             f'[{ref} textbox "{label}" value="{field_text(item.value, VALUE_CHARS)}"]'
         )
-    sends = f" sends a form -> {_address(item.submit, origin)}" if item.submit else ""
+    sends = f" sends a form -> {address(item.submit, origin)}" if item.submit else ""
     return f'[{ref} {item.kind} "{label}"{sends}]'
 
 
-def render_page(snap: Snapshot, *, part: int = 1, view: str = "all") -> str:
-    """The page block for *part* of *snap*; *view* is ``text``, ``elements`` or ``all``."""
+def render_page(
+    snap: Snapshot,
+    *,
+    part: int = 1,
+    view: str = "all",
+    changes: list[str] | None = None,
+) -> str:
+    """The page block for *part* of *snap*; *view* is ``text``, ``elements`` or ``all``.
+
+    *changes* (what an action changed, see :func:`changes_lines`) open the body.
+    """
     total = len(snap.parts)
     attrs = f'tab={field_text(snap.tab, 40)} origin={snap.origin} title="{field_text(snap.title, TITLE_CHARS)}"'
     if total > 1 and view != "elements":
@@ -228,7 +281,7 @@ def render_page(snap: Snapshot, *, part: int = 1, view: str = "all") -> str:
     if snap.payment:
         body = "[melo does not read pages with payment fields.]"
         return block(snap.id, attrs, body)
-    lines: list[str] = []
+    lines: list[str] = changes_lines(changes or []) if part == 1 else []
     if view != "elements":
         lines.append(snap.parts[part - 1] or "(no readable text)")
     if view != "text" and (part == 1 or view == "elements") and snap.elements:
@@ -238,6 +291,8 @@ def render_page(snap: Snapshot, *, part: int = 1, view: str = "all") -> str:
         if len(snap.elements) > len(shown):
             more = len(snap.elements) - len(shown)
             lines.append(f"[{more} more elements: browser_find searches them]")
+    if view != "text" and (part == 1 or view == "elements"):
+        lines.extend(unreached_line(origin) for origin in snap.unreached)
     if view != "elements" and part < total:
         lines.append(
             f"[part {part} of {total}: browser_read part={part + 1} continues]"

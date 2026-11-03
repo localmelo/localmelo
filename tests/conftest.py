@@ -26,6 +26,24 @@ def _no_setting_overrides() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def fake_keychain(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
+    """No test reaches the real keychain: ``security`` is an in-memory stand-in.
+
+    A test that reads or changes a saved key takes this fixture and works with
+    ``fake_keychain.items``.
+    """
+    from localmelo.support import keychain
+    from localmelo.tests.fake_keychain import FakeSecurity
+
+    fake = FakeSecurity()
+    monkeypatch.setattr(keychain, "_security", fake)
+    monkeypatch.setattr(keychain, "available", lambda: True)
+    keychain._cache.clear()
+    yield fake
+    keychain._cache.clear()
+
+
+@pytest.fixture(autouse=True)
 def _no_env_persistence(monkeypatch: pytest.MonkeyPatch) -> None:
     """Never let the environment point a test at a real memory dir.
 

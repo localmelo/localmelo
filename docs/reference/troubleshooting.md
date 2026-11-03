@@ -131,7 +131,8 @@ No model server is running yet.
   up to six numbered steps. Automatic setup is coming soon. Other systems keep
   manual-server guidance; pipes and `TERM=dumb` print a guide link rather than
   advertising a picker choice. Start the server yourself, then `Check again`
-  or `Enter an address` for a nondefault port. `Quit` (or Esc) saves nothing.
+  or `Enter an address` for a nondefault port. `Use a hosted service` sets up one
+  instead (see [Hosted models](../guides/hosted-models.md)). `Quit` (or Esc) saves nothing.
   If setup checks fail or take too long, manual guidance remains available.
   Already saved a backend? With none found, `melo setup` opens the full backend
   menu instead. The web/app setup card keeps its manual commands and checks
@@ -162,14 +163,18 @@ saving · q quits:`.
 
 ```text
   Configuration errors:
-  - [openai] environment variable $OPENAI_API_KEY is not set. Export it before starting the gateway.
+  - [openai] environment variable $OPENAI_API_KEY is not set. Export it before starting the gateway, or paste the key in Settings.
 ```
 
 `melo` stops before the run with exit code 1. Each line names one problem:
 
 | Message contains | Fix |
 |---|---|
-| `environment variable $… is not set` | Export the API key in this shell. |
+| `environment variable $… is not set` | Export the API key in this shell, or paste it in Settings (see [Hosted models](../guides/hosted-models.md)). |
+| `the key … is not in the keychain` | Open Settings, choose the model server and paste the key again, or run `melo setup`. |
+| `the keychain is locked` | Unlock it (open Keychain Access, or sign in to this Mac again), then try again. |
+| `the keychain is not available on this computer` | Set `api_key_env` to the name of a variable that holds the key. |
+| `api_key: … is not a keychain reference` | Write `api_key = "keychain:localmelo.<name>"`, or leave it empty. |
 | `embedding_url is empty`, `embedding_model is empty` | Add both to the backend's table, or set `embedding_backend = "none"`. |
 | `request_timeout_s must be a finite number of seconds > 0` | Write a number without quotes, such as `request_timeout_s = 600`. |
 | `extra_body must not set 'model'` | Remove that key from `extra_body`. |
@@ -333,7 +338,10 @@ melo: run ended with status failed: melo did not finish an answer
 - **Cause:** the model stopped inside its thinking, before its answer, and
   did the same when localmelo asked it once more. Its thinking is kept as
   thinking (`/thinking on` in the terminal, the folded thinking in the
-  console), never as the answer.
+  console), never as the answer. This ends a run only when the thinking was
+  cut off inside the reply; a model whose server reports its reasoning is
+  asked once more with thinking off and, if that is empty too, its last
+  lines of thinking become the answer, marked `(from melo's thinking)`.
 - **Fix:** try again (`/retry`, or Try again in the console). If it keeps
   happening, raise the model's output limit on the server, or try another
   model.
