@@ -950,7 +950,9 @@ class BrowserToolProvider(BaseToolProvider):
                 # A point is found again by a new picture, never by its words.
                 found = None
                 if act.point is None:
-                    found = await self._refind(tab_id, snap, act.element, stale)
+                    found = await self._refind(
+                        tab_id, snap, act.element, stale, send=act.send
+                    )
                 if found is None:
                     raise
                 fresh, again, item = found
@@ -987,6 +989,8 @@ class BrowserToolProvider(BaseToolProvider):
         snap: render.Snapshot,
         item: Element,
         stale: StaleElementError,
+        *,
+        send: bool = False,
     ) -> tuple[render.Snapshot, str, Element] | None:
         """The one element like *item* in a new reading of a page that redrew itself, or None.
 
@@ -1005,7 +1009,9 @@ class BrowserToolProvider(BaseToolProvider):
         the one that went. Anything else stays stale.
         """
         if stale.why == "doc":
-            return await self._reloaded(tab_id, snap, item)
+            # An act that sends (a form's button, Enter in a field) is never
+            # carried over to a reloaded page: what it would send was not asked.
+            return None if send else await self._reloaded(tab_id, snap, item)
         if stale.why != "gone" or not item.context:
             return None
         twins = [
@@ -1036,27 +1042,31 @@ class BrowserToolProvider(BaseToolProvider):
         """The one element like *item* on the page reloaded at the same address, or None.
 
         The page loaded again since it was read (another document, the same
-        address, on the site the act was approved for). Like means the same
-        kind and name, destination, frame and, for a text box, the same field,
-        never a secret one. It must have been the only one of its kind and
-        name in the reading the act was approved on, and be the only one in
-        the new reading (a control wins over a look-alike). A control that
-        sends a form is never carried over: what the reloaded page would send
-        was not asked about. Anything else stays stale.
+        address, on the site the act was approved for). Like is as for a page
+        that redrew itself (:func:`_like`): the same kind, name, destination,
+        frame and field, never a secret one, and where it belongs (its row or
+        the heading above it and the text next to it, ``Element.context``,
+        which must say something), so the "Delete" of a record the reload
+        replaced with another is never taken for it. It must have been the
+        only one of its kind and name in the reading the act was approved on,
+        and be the only one like it in the new reading (a control wins over a
+        look-alike). A control that sends a form is never carried over: what
+        the reloaded page would send was not asked about. Anything else
+        stays stale.
         """
-        if item.submit:
+        if item.submit or not item.context:
             return None
-        twins = [e for e in snap.elements.values() if _same_control(e, item)]
+        twins = [
+            e
+            for e in snap.elements.values()
+            if _same_control(e, item) and e.plain == item.plain
+        ]
         if len(twins) != 1:
             return None
         fresh = await self._reading(TabInfo(tab_id), set())
         if fresh.origin != snap.origin or not _same_page(fresh.url, snap.url):
             return None
-        like = [
-            (r, e)
-            for r, e in fresh.elements.items()
-            if not e.sensitive and _same_control(e, item) and e.attrs == item.attrs
-        ]
+        like = [(r, e) for r, e in fresh.elements.items() if _like(e, item)]
         if len(like) > 1:
             like = [(r, e) for r, e in like if not e.plain]
         if len(like) != 1:

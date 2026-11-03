@@ -61,9 +61,9 @@ def reload(driver: FakeDriver, shown: Any = None) -> None:
 
 
 async def test_a_ref_from_before_a_reload_is_used_when_one_element_is_like_it() -> None:
-    """The page loaded again at the same address: the one button like the ref is used, and the result says so."""
+    """The page loaded again at the same address: the one button like the ref, where it was, is used, and the result says so."""
     asks = Asks()
-    driver = world(button("Happy"), button("Check in"))
+    driver = world(at("Happy"), at("Check in"))
     tools = await tools_of(driver)
     with asking(asks):
         await run(tools, "browser_open", url=HOME)
@@ -82,18 +82,49 @@ async def test_a_ref_from_before_a_reload_is_used_when_one_element_is_like_it() 
     assert driver.acts[0].doc == "d2"
 
 
-@pytest.mark.parametrize("after", ["two like it", "a form send"])
+async def test_a_reload_that_shows_another_record_never_gets_the_records_action() -> (
+    None
+):
+    """Record A's "Delete" (a script button, no form): the reload shows record B, with the same button."""
+    driver = world(at("Delete", where=row("Record A")))
+    tools = await tools_of(driver)
+    with asking(Asks()):
+        await run(tools, "browser_open", url=HOME)
+        reload(driver, page(HOME, "Records.", at("Delete", where=row("Record B"))))
+        out = await run(tools, "browser_click", ref="e1")
+    assert out.is_error and "reloaded or replaced" in out.text and not driver.acts
+
+
+@pytest.mark.parametrize("after", ["two like it", "a form send", "nothing says where"])
 async def test_a_ref_from_before_a_reload_otherwise_stays_stale(after: str) -> None:
-    sends = button("Happy", submit=HOME + "mood")
-    driver = world(sends if after == "a form send" else button("Happy"))
+    item = {
+        "two like it": at("Happy"),
+        "a form send": at("Happy", submit=HOME + "mood"),
+        "nothing says where": button("Happy"),
+    }[after]
+    driver = world(item)
     tools = await tools_of(driver)
     with asking(Asks()):
         await run(tools, "browser_open", url=HOME)
         if after == "two like it":
-            reload(driver, page(HOME, "Moods.", button("Happy"), button("Happy")))
+            reload(driver, page(HOME, "Moods.", at("Happy"), at("Happy")))
         else:
-            reload(driver)  # what the new page would send was not asked about
+            reload(driver)  # a send was not asked about; a context-less one is unknown
         out = await run(tools, "browser_click", ref="e1")
+    assert out.is_error and "reloaded or replaced" in out.text and not driver.acts
+
+
+async def test_enter_in_a_box_is_never_carried_over_to_a_reloaded_page() -> None:
+    """Enter outside a form sends what the page decides: after a reload it stays stale."""
+    box = Element(
+        "textbox", "Line", attrs=FieldAttrs(type="text", words="line"), context=MOODS
+    )
+    driver = world(box)
+    tools = await tools_of(driver)
+    with asking(Asks()):
+        await run(tools, "browser_open", url=HOME)
+        reload(driver)
+        out = await run(tools, "browser_type", ref="e1", text="hello", submit=True)
     assert out.is_error and "reloaded or replaced" in out.text and not driver.acts
 
 

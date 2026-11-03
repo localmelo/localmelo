@@ -72,6 +72,8 @@ TEXT_CHARS = 4000
 # A panel or dialog sits in a layer below this; the menu bar's items and pop-up
 # menus sit at or above it and are never another app's window.
 PANEL_LAYERS = 20
+# The most apps whose windows on every layer are listed before each act.
+MAX_WATCHED = 3
 # How long one call to the helper or to lsappinfo may take.
 CALL_S = 10.0
 FRONT_S = 2.0
@@ -129,10 +131,17 @@ class Control:
 
 @dataclass(frozen=True)
 class Mark:
-    """The screen before an act: the windows listed (None: unknown) and the app in front."""
+    """The screen before an act.
+
+    ``windows`` are the main-layer windows listed (None: unknown), ``front``
+    the app in front, and ``panels`` the windows on every layer of each app
+    that came to the front after an earlier act, by pid: only against such a
+    listing is a panel of that app known to be new.
+    """
 
     windows: frozenset[int] | None
     front: Front | None
+    panels: dict[int, frozenset[int]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -475,6 +484,9 @@ class DesktopWatch:
         self._clock = clock
         self._kept: dict[str, _Kept] = {}
         self._n = 0
+        # The apps that came to the front after an act, newest first: their
+        # windows on every layer are listed before each later act.
+        self._pids: list[int] = []
 
     @property
     def can_read(self) -> bool:
@@ -497,11 +509,15 @@ class DesktopWatch:
     async def mark(self) -> Mark:
         """The screen before an act."""
         windows: frozenset[int] | None = None
+        panels: dict[int, frozenset[int]] = {}
         helper = await self._helper_ready()
         if helper is not None:
             with contextlib.suppress(DesktopError):
                 windows = frozenset(w.id for w in await helper.windows())
-        return Mark(windows, await self._safe_front())
+            for pid in self._pids:
+                with contextlib.suppress(DesktopError):
+                    panels[pid] = frozenset(w.id for w in await helper.windows(pid=pid))
+        return Mark(windows, await self._safe_front(), panels)
 
     async def _safe_front(self) -> Front | None:
         try:
@@ -531,23 +547,15 @@ class DesktopWatch:
         )
         if not new and moved and front is not None:
             # The app came to the front with no new window in the main layer: a
-            # panel above it, listed only by the app's own process.
+            # panel above it, listed only by the app's own process. It is new
+            # only against a listing of that process from before the act;
+            # without one, melo names it and never reads or presses it.
+            title = ""
             if helper is not None and mark.windows is not None:
                 with contextlib.suppress(DesktopError):
-                    pids = {front.pid} if front.pid else set()
-                    if not pids:
-                        listed = await helper.windows(app=front.bundle or front.name)
-                        pids = {w.pid for w in listed}
-                    for pid in sorted(pids)[:2]:
-                        new += [
-                            w
-                            for w in await helper.windows(pid=pid)
-                            if w.id not in mark.windows
-                            and w.id not in self._adopted()
-                            and w.layer < PANEL_LAYERS
-                        ]
+                    new, title = await self._panels(helper, front, mark)
             if not new:
-                return [Seen("", front.name)]
+                return [Seen("", front.name, title)]
         new.sort(key=lambda w: -(w.z if w.z is not None else -1))
         seen: list[Seen] = []
         for window in new[:MAX_WINDOWS]:
@@ -559,6 +567,35 @@ class DesktopWatch:
                     names = tuple(c.name for c in state.controls[:MAX_BUTTONS])
             seen.append(Seen(short, window.app, window.title, names))
         return seen
+
+    async def _panels(
+        self, helper: DesktopHelper, front: Front, mark: Mark
+    ) -> tuple[list[AppWindow], str]:
+        """The panels of the app in *front* known to be new, or none and the title of its top one."""
+        pid = front.pid
+        if not pid:
+            listed = await helper.windows(app=front.bundle or front.name)
+            pid = min((w.pid for w in listed), default=0)
+        if not pid:
+            return [], ""
+        before = mark.panels.get(pid)
+        if pid in self._pids:
+            self._pids.remove(pid)
+        self._pids = [pid, *self._pids][:MAX_WATCHED]
+        listed = [
+            w
+            for w in await helper.windows(pid=pid)
+            if w.layer < PANEL_LAYERS
+            and w.id not in (mark.windows or frozenset())
+            and w.id not in self._adopted()
+        ]
+        if before is None:
+            # No listing of this app from before the act: nothing is known to be new.
+            top = max(
+                listed, key=lambda w: w.z if w.z is not None else -1, default=None
+            )
+            return [], top.title if top is not None else ""
+        return [w for w in listed if w.id not in before], ""
 
     def _adopted(self) -> set[int]:
         return {kept.window.id for kept in self._kept.values()}
@@ -572,6 +609,7 @@ class DesktopWatch:
     def forget(self) -> None:
         """Nothing that appeared before is melo's any more."""
         self._kept.clear()
+        self._pids.clear()
 
     def _window(self, short: str | None) -> tuple[str, _Kept]:
         """The kept window *short* names (default the newest); :class:`DesktopError` otherwise."""
@@ -784,6 +822,13 @@ def seen_lines(seen: Sequence[Seen]) -> list[str]:
     """What an act left from other apps, as "what changed" lines (cleaned where they are shown)."""
     lines = []
     for item in seen:
+        if not item.short and item.title:
+            lines.append(
+                f'{item.app} came to the front with a window "{item.title}" that '
+                "melo cannot confirm appeared after its step, so it does not read or "
+                f"press it. Tell the person to answer it in {item.app}."
+            )
+            continue
         if not item.short:
             lines.append(
                 f"{item.app} came to the front: it may show a window melo cannot "

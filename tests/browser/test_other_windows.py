@@ -300,25 +300,69 @@ async def test_browser_wait_stops_early_when_another_apps_window_appears(
     assert looks == 2  # it did not wait out the 30 seconds
 
 
-async def test_a_panel_above_the_main_layer_is_found_by_the_app_that_came_to_the_front(
+async def test_a_panel_of_an_app_that_came_to_the_front_is_new_only_against_its_own_listing(
     screen: Screen,
 ) -> None:
-    """A sign-in panel is not in the main layer: melo looks at the windows of the app now in front."""
+    """A panel is not in the main layer, so melo lists the app's own windows on every layer.
+
+    The first time the app comes to the front there is no such listing from
+    before the act: its panel is named, never read. After that, the app's windows
+    are listed before each act, and a panel that appears is melo's to read.
+    """
     menu_item = {**SIGN_IN, "window_id": 8, "title": "", "layer": 25, "elements": []}
-    panel = {**SIGN_IN, "layer": 3}
+    first = {**SIGN_IN, "layer": 3}
+    second = {**SIGN_IN, "window_id": 9, "title": "Confirm sign-in", "layer": 3}
     screen.show(menu_item, front=False)  # the app's menu bar item, there before
+    driver = world(button("Quick sign-in"), button("Again"))
+    shown = [first, second]
+    on_act(driver, lambda: screen.show(shown.pop(0)))
+    provider, tools = await tools_with(driver, watch(screen))
+    try:
+        with asking(Asks()):
+            await run(tools, "browser_open", url=HOME)
+            once = await run(tools, "browser_click", ref="e1")
+            unread = await run(tools, "window_read")
+            screen.front = Front("Safari", "com.apple.Safari", 10)
+            await run(tools, "browser_open", url=HOME)
+            again = await run(tools, "browser_click", ref="e5")
+    finally:
+        await provider.close()
+    assert "(w1)" not in once.text
+    assert (
+        "- Chat came to the front with a window 'Sign in to example.com' that melo "
+        "cannot confirm appeared after its step, so it does not read or press it. "
+        "Tell the person to answer it in Chat."
+    ) in once.text
+    assert unread.is_error and "No window of another app appeared" in unread.text
+    assert "Chat opened a window 'Confirm sign-in' (w1)" in again.text
+    assert "Sign in to example.com" not in again.text  # there before: not new
+    assert "(w2)" not in again.text  # the menu bar item is never taken for it
+    assert ("list_windows", {"on_screen_only": True, "pid": 70}) in screen.calls()
+
+
+async def test_a_panel_open_before_the_act_is_never_read_when_its_app_comes_forward(
+    screen: Screen,
+) -> None:
+    """Only the app in front changes: the panel was there all along, so it is named, not read."""
+    private = {**SIGN_IN, "window_id": 5, "title": "Private notes", "layer": 3}
+    screen.show({**SIGN_IN, "window_id": 4, "title": "Chat"}, front=False)
+    screen.show(private, front=False)
     driver = world(button("Quick sign-in"))
-    on_act(driver, lambda: screen.show(panel))
+    on_act(
+        driver, lambda: setattr(screen, "front", Front("Chat", "com.example.chat", 70))
+    )
     provider, tools = await tools_with(driver, watch(screen))
     try:
         with asking(Asks()):
             await run(tools, "browser_open", url=HOME)
             out = await run(tools, "browser_click", ref="e1")
+            read = await run(tools, "window_read")
     finally:
         await provider.close()
-    assert "Chat opened a window 'Sign in to example.com' (w1)" in out.text
-    assert "(w2)" not in out.text  # the menu bar item is never taken for it
-    assert ("list_windows", {"on_screen_only": True, "pid": 70}) in screen.calls()
+    assert "(w1)" not in out.text and "its buttons" not in out.text
+    assert "cannot confirm appeared after its step" in out.text
+    assert read.is_error
+    assert not [name for name, _ in screen.calls() if name == "get_window_state"]
 
 
 async def test_with_accessibility_alone_melo_reads_and_presses_by_name_without_a_picture(
