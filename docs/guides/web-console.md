@@ -258,7 +258,7 @@ The commands of the [terminal](terminal.md#commands) work on this page and in th
 | `/memory [window\|import]` | Open the Memory tab; `window` shows the model's window; `import` also presses **Look for notes**, so the files other assistants keep are listed (a row says so when memory is off). |
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | Show the chat's mode and grants; `ask` and `auto` switch it and `forget` takes grants back. `deny` is for the terminal. |
 | `/browser [on\|off]` | Show or switch reading web pages in Safari, saved in `[browser] driver`. |
-| `/attach`, `/attachments`, `/detach` | The console takes no files yet, and says so. |
+| `/attach`, `/attachments`, `/detach` | `/attach` opens the picker for a picture or a text file; `/attachments` lists what waits and `/detach N` (or `/detach all`) removes it. |
 | `/verbose`, `/thinking`, `/stream [on\|off]` | How the page shows a chat, kept in this browser: tool calls open, thinking open, or steps shown only when a turn ends. |
 | `/expand [turn.call]` | Open a tool call with its whole output. |
 | `/exit`, `/quit` | In the app: ask, then quit. In a browser tab: say to close the tab, since melo keeps running. |
@@ -275,6 +275,37 @@ The commands of the [terminal](terminal.md#commands) work on this page and in th
 - **The Scheduled tab.** The check-in on top, then each chore: its title, when it runs, the next run, how the last run went, and a switch. A row opens to its priority (`Priority: P2 · normal`), **Run now**, **Edit time** and **Delete**, which asks first. The main chat lists every chore, a side chat its own; `#/scheduled` opens the tab.
 - **Reminders.** A reminder is a chore that runs once. `remind me to send the report on Friday at 9`, `in 2 hours` or `提醒我明天九点给导师发邮件` makes a card, `Remind you on Fri Oct 30 at 9:00?`, with **Remind me** and **Cancel**; it always shows the date and time it understood. Relative words (`tomorrow`, `Friday`, `in 2 hours`, `下周一`, `两小时后`) become that date and time on your computer's clock. A day with no time is 9:00, a bare hour from 1 to 6 is the afternoon, and a time already past today is tomorrow unless you said `today`. `Friday` on a Friday is next week. With no usable time, the main chat asks `When should I remind you?` and never guesses: reply with just a time (`Friday at 9`). At its time, melo says the reminder in a card, `Reminder: send the report`, also when the run did not finish. A reminder missed while the computer slept or the gateway was down runs when melo starts again and says how late it ran (`ran 2 h late`). On the Scheduled tab it shows its date and time, then `Reminded today at 9:01 AM`; **Edit time** takes a date and time and sets a done reminder again. A reminder is at most a year ahead; `every …` still makes a repeating chore.
 - **The check-in.** Every 30 minutes it looks for something to tell you: a chore's finished run, or a task that has waited for you a whole beat. With nothing, it does nothing and uses no model; otherwise one model call writes a short note, posted as one card in the main chat. Its switch turns it off.
+
+## Add words while melo works
+
+While melo answers, the message box stays open. Its placeholder reads `Add to what melo is doing…`, and Enter adds your words to the turn that runs instead of waiting for it to end. Shift + Enter still starts a new line, and Esc still stops the turn.
+
+- **melo reads them at its next step.** The model gets the words as your message, marked as added while it worked, so a correction (`use the 2024 file instead`) changes the rest of the turn, not only the next one. A turn takes at most 20 added messages of 8,000 characters each.
+- **Sent, then seen.** The words show in the turn's work as `Sent. melo reads it at its next step.` and change to `Seen by melo at step 3` when the run has read them. They are stored with the turn, so a reopened chat shows them too.
+- **If the turn ends first**, they become your next message: `melo finished first. This goes next as your message.` They wait with the chat's other queued messages, in order, and a restart of the gateway keeps them.
+- **Stop gives them back.** Stop cancels the turn as before. Words melo had not read go back into the message box instead of starting another turn; words it had read stay in the turn's work.
+- **What does not change.** Only a turn you started takes added words; the turn melo starts to answer a task's question does not, and a task's question is still answered as [described above](#when-a-task-is-stuck-it-asks-its-chat). Pictures and files cannot join a turn that runs (`Pictures and files cannot join a turn that is running. Send them when melo is done, or press Stop.`).
+- The same words reach a client through [`POST /api/turns/{turn_id}/notes`](../reference/api-v2.md#post-apiturnsturn_idnotes).
+
+## Pictures and files in a message
+
+Add a picture or a text file to a message the same way in the browser and in the [macOS app](macos-app.md):
+
+- **Drop** it anywhere on the page. A hint, `Drop pictures or text files to add them to your message`, shows while a file is over the window.
+- **Paste** it with Cmd-V while the cursor is in the message box; a screenshot on the clipboard works. Pasted text is still text.
+- **Pick** it with the paperclip beside the box, or type `/attach`, which opens the same picker. `/attachments` lists what waits and `/detach N` (or `/detach all`) removes it.
+
+What you add shows as a row above the box: a thumbnail for a picture, a chip with the name for a file, each with a remove button. A click on a thumbnail opens the picture larger. A message may be only pictures or files.
+
+- **Which pictures.** PNG, JPEG, GIF, WebP and HEIC. melo tells what a file is from its content, not its name. A HEIC picture is converted to JPEG, the first frame of a GIF (an animated one too) and a WebP picture to PNG, and a picture whose long side is over 1,280 pixels is scaled down to that, as the screenshots melo takes are, so a huge photo costs the model no more than a small one. melo reads a picture's size from its header before anything opens the file (every frame of a GIF, every image of a HEIC) and refuses one over 120 million pixels. A file that is not a picture and a damaged picture are refused too, each with a sentence that says what to do. When this Mac cannot scale or convert a picture, melo says so (`Save a smaller PNG or JPEG`) instead of sending it as it is.
+- **Nothing hidden goes along.** Every picture is rewritten before the model gets it, also one that needed no conversion: the EXIF block (the camera, the time, often the GPS position), XMP, comments, text chunks and anything after the end of the picture are removed. Only the orientation and the few numbers a decoder needs for color are kept, not an embedded color profile. A picture melo cannot rewrite is refused, not sent.
+- **How many.** Up to 4 pictures in one message, each at most 20 MB before scaling. A picture takes the model's context (roughly a thousand tokens at that size) and the models that run here have windows of 8,000 to 32,000 tokens, so more than four would crowd out the conversation.
+- **Text files.** Up to 8 files, 256 KB each and 512 KB together, sent with the message as the terminal's `/attach` sends them. Any other kind of file answers `report.pdf: this kind of file is not supported yet. Pictures and text files work.`, and the page stays where it is: a file dropped beside the message box never opens in the window, in the browser or in the app.
+- **In the chat.** The message bubble shows the pictures and the file names. The pictures are stored with the turn, so a reloaded or reopened chat shows them again, and **Try again** sends them again.
+- **A model that cannot read pictures.** When the chosen model is known not to read them, a line under the thumbnails says so and links to Settings → Model. melo never drops a picture silently: sending anyway is refused with `This model cannot read pictures. Choose a model that can in Settings → Model, or send the message without the picture.` When melo cannot tell, it sends the picture. If the model or its server then refuses the turn because it does not take the picture (an error that says so; a bare error, a message about length or a picture it could not decode keeps its own text), the turn ends with one line, `This model can't see pictures; choose one that can in Settings → Model`, and melo treats the model as text-only for the next minute or until you choose another model; after that it asks the model's server again and goes by its answer. While it lasts, the composer warns, and **Try again** on that turn is refused (`model_text_only`) instead of sending the same picture again.
+- **Waiting pictures stay in memory.** A picture you added and did not send is kept in memory on this Mac for 30 minutes at most (24 pictures, 64 MB), and is gone when you remove it or close the chat. Nothing is written to disk until the message is sent.
+- **Not a task.** A message with a picture goes to the model; no rule reads it, so it cannot start a task, and **Run as a task** and `/task` are refused with pictures (`Pictures cannot start a task. Send them as a message.`).
+- A client sends a picture with [`POST /api/uploads`](../reference/api-v2.md#post-apiuploads) and names it in the turn's `images`.
 
 ## Pictures in the answer
 

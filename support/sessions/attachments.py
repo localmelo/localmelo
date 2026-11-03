@@ -5,8 +5,11 @@ from __future__ import annotations
 import html
 import json
 import re
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
+
+from localmelo.melo.checker.redaction import redact_secrets
 
 _BLOCK = re.compile(
     r'\n\n<attachment name="([^"\n]{1,200})" chars="([0-9]+)"'
@@ -21,6 +24,40 @@ class TextAttachment:
 
     name: str
     text: str
+
+
+# What one message may carry as text files, as the terminal's attachments do.
+MAX_ATTACHMENTS = 8
+MAX_FILE_BYTES = 256 * 1024
+MAX_TOTAL_BYTES = 512 * 1024
+
+
+def clean_text(text: str) -> str:
+    """*text* without control and format characters, except newlines and tabs."""
+    return "".join(
+        c for c in text if c in "\n\t" or unicodedata.category(c) not in {"Cc", "Cf"}
+    )
+
+
+def snapshot(name: str, text: str) -> TextAttachment:
+    """A file's text as an attachment: cleaned, with secrets redacted, under a safe name.
+
+    ``ValueError`` (a sentence without the file's content) for a binary text,
+    a name that is empty or over 200 characters, or a text over
+    :data:`MAX_FILE_BYTES`.
+    """
+    if "\x00" in text:
+        raise ValueError("binary files are not supported")
+    if len(text.encode("utf-8", errors="replace")) > MAX_FILE_BYTES:
+        raise ValueError(f"a file may be at most {MAX_FILE_BYTES // 1024} KiB")
+    safe_name, _ = redact_secrets(
+        clean_text(name).replace("\n", " ").replace("\t", " ")
+    )
+    safe_name = safe_name.strip()
+    if not safe_name or len(safe_name) > 200:
+        raise ValueError("a file name must be 1 to 200 characters")
+    body, _ = redact_secrets(clean_text(text))
+    return TextAttachment(safe_name, body)
 
 
 def encode_attachments(attachments: Sequence[TextAttachment]) -> str:

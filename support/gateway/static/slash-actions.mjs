@@ -7,12 +7,13 @@
  * `host` is the page (`workspace.js`): `api`, `state()`, and the moves it makes: `send`,
  * `newChat`, `pickChat`, `openChat`, `openMain`, `openSettings`, `openMemory`, `settingsSaved`,
  * `setMode`, `setTitle`, `setNewTitle`, `view`, `reveal`, `writeText`, `isApp`, `canQuit`, `quit`
- * `memoryImport` (`/memory import`: the Memory tab looks for notes) and `undoSleep` (`/memory undo`: the
- * newest "melo tidied your notes" line of the main chat is undone).
+ * `memoryImport` (`/memory import`: the Memory tab looks for notes), `undoSleep` (`/memory undo`: the
+ * newest "melo tidied your notes" line of the main chat is undone) and `media` (the composer's pictures
+ * and files: `pick()` opens the file picker, `list()` the names and sizes, `remove(id)` and `clear()`).
  */
 
 import {saidText, t} from './i18n.mjs';
-import {formatDuration, formatTokens, shownItems, turnDuration} from './turns.mjs';
+import {formatBytes, formatDuration, formatTokens, shownItems, turnDuration} from './turns.mjs';
 
 const enc = encodeURIComponent;
 const say = (text, tone) => ({text, tone});
@@ -293,10 +294,32 @@ export function createActions(host) {
       return [say(t(settings.browser ? 'slash.browserOn' : 'slash.browserOff'), settings.browser ? 'ok' : 'muted')];
     },
 
-    // ── Files: the console does not take them yet ──
+    // ── Pictures and files: the picker, the strip above the box ──
 
+    /** The terminal's `/attach PATH` reads a path; the page cannot, so it opens its picker (a drop and a paste also work). */
     attach() {
-      return [say(t('slash.noFiles'), 'muted')];
+      host.media.pick();
+      return [];
+    },
+
+    attachments() {
+      const items = host.media.list();
+      if (items.length === 0) return [say(t('slash.attachNone'), 'muted')];
+      return items.map((item, index) => say(`${index + 1}. ${item.name} · ${formatBytes(item.bytes)}`));
+    },
+
+    detach({args}) {
+      const items = host.media.list();
+      if (args === 'all') {
+        if (items.length === 0) return [say(t('slash.attachNone'), 'muted')];
+        host.media.clear();
+        return [say(t('slash.detachedAll'), 'ok')];
+      }
+      if (!/^\d+$/.test(args)) throw new Error(t('slash.detachUse'));
+      const item = items[Number(args) - 1];
+      if (!item) throw new Error(t('slash.detachNo', {n: args}));
+      host.media.remove(item.id);
+      return [say(t('slash.detachedOne', {name: item.name}), 'ok')];
     },
 
     // ── How the page shows things ──
@@ -308,8 +331,6 @@ export function createActions(host) {
       return [say(t(`slash.view.${name}.${on ? 'on' : 'off'}`), 'muted')];
     },
   };
-  actions.attachments = actions.attach;
-  actions.detach = actions.attach;
 
   async function approvalsText(short = false) {
     const {id, session} = state();

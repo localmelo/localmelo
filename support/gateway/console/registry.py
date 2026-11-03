@@ -30,8 +30,9 @@ from localmelo.melo.contracts.approvals import (
     Withdrawal,
     grant_offered,
 )
+from localmelo.melo.contracts.inbox import InboxSource
 from localmelo.melo.contracts.tools import BaseToolProvider
-from localmelo.melo.schema import Message
+from localmelo.melo.schema import ImagePart, Message
 from localmelo.support.browser import configured_driver
 from localmelo.support.config import SavedFolders, gateway_workspace_problem
 from localmelo.support.gateway.auto_blocks import BlockError
@@ -52,6 +53,7 @@ from localmelo.support.sessions.approvals import (
     ChatPolicy,
     chat_mode,
 )
+from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
 from localmelo.support.sessions.runner import (
     DEFAULT_RESUME_MODE,
     ResumeInfo,
@@ -63,6 +65,7 @@ from localmelo.support.sessions.store import (
     SessionStore,
     SessionStoreError,
     TurnInfo,
+    check_attachment_submission,
     process_holder,
 )
 from localmelo.support.sessions.submissions import check_submission
@@ -167,6 +170,14 @@ async def default_builder(
     )
 
 
+@dataclass(frozen=True)
+class TurnExtras:
+    """What a message carries besides its words: files read as text, and pictures."""
+
+    attachments: tuple[TextAttachment, ...] = ()
+    images: tuple[ImagePart, ...] = ()
+
+
 @dataclass(eq=False)
 class OpenSession:
     """One session the console keeps open.
@@ -217,6 +228,7 @@ class ConsoleSessions:
         clock: Callable[[], float] = time.time,
         ledger: ApprovalLedger | None = None,
         viewers: Callable[[str], int] | None = None,
+        inbox_for: Callable[[str], InboxSource] | None = None,
     ) -> None:
         if store.writer != "gateway":
             raise ValueError("the console opens the gateway's store")
@@ -225,6 +237,8 @@ class ConsoleSessions:
         # How many surfaces show a chat to a person now (the hub's viewers,
         # #465); None: nobody ever does, so Auto blocks as before.
         self._viewers = viewers
+        # The run inbox of a chat: the words the person adds while it works.
+        self.inbox_for = inbox_for
         # The person's Allows in each chat, which its tasks may use (#369).
         self.ledger = ledger or ApprovalLedger()
         self.ledger.grants_of = self.grants
@@ -269,6 +283,9 @@ class ConsoleSessions:
     @property
     def store(self) -> SessionStore:
         return self._store
+
+    def _inbox(self, session_id: str) -> InboxSource | None:
+        return None if self.inbox_for is None else self.inbox_for(session_id)
 
     def get(self, session_id: str) -> OpenSession | None:
         return self._sessions.get(session_id)
@@ -425,6 +442,7 @@ class ConsoleSessions:
                 progress=True,
                 pictures=True,
                 memory=self._memory,
+                inbox=self._inbox(session_id),
             )
             granted_at: dict[str, float] = {}
             policy = ChatPolicy(
@@ -855,11 +873,13 @@ class ConsoleSessions:
         client_request_id: str | None = None,
         mode: ChatMode | None = None,
         admit: Callable[[], Awaitable[None]] | None = None,
+        extras: TurnExtras | None = None,
     ) -> tuple[OpenSession, TurnInfo | None]:
         """Create a session, usually with its first turn (``POST /api/sessions``).
 
         *first* is ``(typed, composed)``: the typed text titles the session,
-        the composed text is the turn's. *workspace* is the folder, or the
+        the composed text is the turn's; *extras* are its files and pictures.
+        *workspace* is the folder, or the
         default when ``None``. *mode* is the chat's Ask or Auto, else the
         settings' mode for new chats. With *client_request_id*, a repeat of
         an accepted key raises :class:`SubmissionRepeated` with its turn and
@@ -875,6 +895,7 @@ class ConsoleSessions:
                     client_request_id,
                     mode or self.new_chat_mode(),
                     admit,
+                    extras,
                 )
         finally:
             # Outside the block: the lock this task took is free again, so
@@ -888,15 +909,22 @@ class ConsoleSessions:
         client_request_id: str | None,
         mode: ChatMode = "ask",
         admit: Callable[[], Awaitable[None]] | None = None,
+        extras: TurnExtras | None = None,
     ) -> tuple[OpenSession, TurnInfo | None]:
         if self._closed:
             raise RuntimeError("The console's sessions are closed")
+        extras = extras or TurnExtras()
         typed, composed = (None, None) if first is None else first
         if client_request_id is not None:
             # The key decides before the directory or the Agent, so a repeat
             # costs neither, and a rejected key writes no row.
             found = await self._store.get_submission(None, client_request_id)
-            check_submission(found, composed or "")
+            check_attachment_submission(
+                found, extras.attachments, composed if extras.attachments else None
+            )
+            check_submission(
+                found, compose_user_text(composed or "", extras.attachments)
+            )
             if admit is not None:
                 await admit()
         path = self._resolve_workspace(workspace)
@@ -920,6 +948,7 @@ class ConsoleSessions:
                 composed,
                 client_request_id,
                 has_turn=first is not None,
+                extras=extras,
             )
 
     async def _fill_new(
@@ -932,8 +961,10 @@ class ConsoleSessions:
         client_request_id: str | None,
         *,
         has_turn: bool,
+        extras: TurnExtras | None = None,
     ) -> tuple[OpenSession, TurnInfo | None]:
         """Build the Agent of a new row, start its first turn and register it."""
+        extras = extras or TurnExtras()
         try:
             # MCP is deferred (U3 decision 5 B): the builder gets no config.
             agent = await self._build_agent(settings, path, None, info.id)
@@ -950,6 +981,7 @@ class ConsoleSessions:
             progress=True,
             pictures=True,
             memory=self._memory,
+            inbox=self._inbox(info.id),
             # A create's key stays where a create looks it up, even though
             # the row was made before the Agent.
             create_scope_key=client_request_id is not None,
@@ -972,6 +1004,8 @@ class ConsoleSessions:
                     approval=policy,
                     title=typed,
                     client_request_id=client_request_id,
+                    attachments=extras.attachments,
+                    images=extras.images,
                 )
             except BaseException:
                 # The row exists already, and a first turn that failed or
@@ -1036,17 +1070,24 @@ class ConsoleSessions:
         composed: str,
         *,
         client_request_id: str | None = None,
+        extras: TurnExtras | None = None,
     ) -> tuple[TurnInfo, ResumeInfo | None]:
         """Start a turn in *session_id*; return it and the open's resume.
+
+        *extras* are the files and pictures the message carries.
 
         The resume is the ``ResumeInfo`` of an open this call made, for the
         route's 202, else ``None``. The key is checked before the session is
         opened, so a repeat never builds an Agent.
         """
+        extras = extras or TurnExtras()
         async with self.lock(session_id):
             if client_request_id is not None:
                 found = await self._store.get_submission(session_id, client_request_id)
-                check_submission(found, composed)
+                check_attachment_submission(
+                    found, extras.attachments, composed if extras.attachments else None
+                )
+                check_submission(found, compose_user_text(composed, extras.attachments))
             entry = await self.open(session_id)
             resumed = entry.resumed
             entry.resumed = None
@@ -1057,6 +1098,8 @@ class ConsoleSessions:
                 approval=entry.policy,
                 title=typed,
                 client_request_id=client_request_id,
+                attachments=extras.attachments,
+                images=extras.images,
             )
             entry.last_used = self._clock()
             return turn, resumed
@@ -1124,9 +1167,14 @@ class ConsoleSessions:
             resumed = entry.runner.last_resume
             await self._reconcile(entry)
             self._note_turn_start(session_id)
-            # The person's words, not the attachments the text carries.
+            # The person's words, not the attachments the text carries; the
+            # pictures they added go with the words again.
+            pictures = await self._store.turn_images(session_id, undone.turn)
             turn = await entry.runner.start_turn(
-                undone.user_text, approval=entry.policy, words=undone.typed_text or None
+                undone.user_text,
+                approval=entry.policy,
+                words=undone.typed_text or None,
+                images=pictures,
             )
             entry.last_used = self._clock()
             return turn, resumed

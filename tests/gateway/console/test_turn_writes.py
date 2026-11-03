@@ -475,7 +475,7 @@ async def test_a_bad_key_is_judged_after_the_text(tmp_path: Path) -> None:
         assert response.json()["error"]["code"] == "text_rejected"
 
 
-async def test_attachments_are_refused_for_now(tmp_path: Path) -> None:
+async def test_a_first_message_can_carry_a_text_file(tmp_path: Path) -> None:
     async with console_with(tmp_path) as (_console, client, _):
         response = await client.post(
             "/api/sessions",
@@ -488,8 +488,10 @@ async def test_attachments_are_refused_for_now(tmp_path: Path) -> None:
             },
         )
 
-        assert response.status_code == 400
-        assert response.json()["error"]["code"] == "invalid_request"
+        assert response.status_code == 201, response.text
+        shown = response.json()["turn"]["user_text"]
+        assert shown.startswith("Read this")
+        assert '<attachment name="notes.txt" chars="1">' in shown
 
 
 # ── Approvals ──

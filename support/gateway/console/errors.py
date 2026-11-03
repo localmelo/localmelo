@@ -33,10 +33,15 @@ from localmelo.support.gateway.guard import (
     _SECURITY_HEADERS,
     _TOO_LARGE_ERROR,
     _UNSUPPORTED_MEDIA_TYPE_ERROR,
+    _UPLOAD_MEDIA_TYPE_ERROR,
+    _UPLOAD_TOO_LARGE_ERROR,
     API_CSP,
     BODY_BYTES_LIMIT,
+    UPLOAD_BYTES_LIMIT,
     _content_length_too_large,
     is_json_content_type,
+    is_upload_content_type,
+    is_upload_request,
 )
 
 logger = logging.getLogger(__name__)
@@ -194,16 +199,29 @@ class ApiMiddleware:
         for name, value in scope.get("headers", ()):
             req_headers.setdefault(name.lower(), []).append(value.decode("latin-1"))
 
+        # A picture's bytes go to one route, with their own limit and types.
+        upload = is_upload_request(scope)
+        limit = UPLOAD_BYTES_LIMIT if upload else BODY_BYTES_LIMIT
+        too_large = _UPLOAD_TOO_LARGE_ERROR if upload else _TOO_LARGE_ERROR
+        content_type_ok = (is_upload_content_type if upload else is_json_content_type)(
+            req_headers.get(b"content-type", [])
+        )
         content_lengths = req_headers.get(b"content-length", [])
-        if _content_length_too_large(content_lengths):
-            response = error_response(413, "too_large", _TOO_LARGE_ERROR)
+        if _content_length_too_large(content_lengths, limit):
+            response = error_response(413, "too_large", too_large)
             await response(scope, receive, send_with_headers)
             return
-        if any(
-            raw.strip().isdigit() and int(raw.strip()) > 0 for raw in content_lengths
-        ) and not is_json_content_type(req_headers.get(b"content-type", [])):
+        if (
+            any(
+                raw.strip().isdigit() and int(raw.strip()) > 0
+                for raw in content_lengths
+            )
+            and not content_type_ok
+        ):
             response = error_response(
-                415, "unsupported_media_type", _UNSUPPORTED_MEDIA_TYPE_ERROR
+                415,
+                "unsupported_media_type",
+                _UPLOAD_MEDIA_TYPE_ERROR if upload else _UNSUPPORTED_MEDIA_TYPE_ERROR,
             )
             await response(scope, receive, send_with_headers)
             return
@@ -219,8 +237,8 @@ class ApiMiddleware:
             chunk = message.get("body", b"")
             if chunk:
                 total += len(chunk)
-                if total > BODY_BYTES_LIMIT:
-                    response = error_response(413, "too_large", _TOO_LARGE_ERROR)
+                if total > limit:
+                    response = error_response(413, "too_large", too_large)
                     await response(scope, receive, send_with_headers)
                     return
                 chunks.append(chunk)
@@ -228,13 +246,15 @@ class ApiMiddleware:
                 break
 
         full_body = b"".join(chunks)
-        if total > 0:
-            if not is_json_content_type(req_headers.get(b"content-type", [])):
-                response = error_response(
-                    415, "unsupported_media_type", _UNSUPPORTED_MEDIA_TYPE_ERROR
-                )
-                await response(scope, receive, send_with_headers)
-                return
+        if total > 0 and not content_type_ok:
+            response = error_response(
+                415,
+                "unsupported_media_type",
+                _UPLOAD_MEDIA_TYPE_ERROR if upload else _UNSUPPORTED_MEDIA_TYPE_ERROR,
+            )
+            await response(scope, receive, send_with_headers)
+            return
+        if total > 0 and not upload:
             try:
                 text = full_body.decode("utf-8")
             except UnicodeDecodeError:

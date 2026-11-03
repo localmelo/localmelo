@@ -14,7 +14,11 @@ Nothing here grants an approval.
 
 A message the person sends while an internal turn runs is queued, shown as
 queued, kept in the chat's ``meta.queued`` until it starts (a restart runs it
-then), and runs as the chat's next turn, before any other internal turn. A
+then), and runs as the chat's next turn, before any other internal turn. Words
+the person adds to a turn that runs (:meth:`add_note`) wait in the same queue,
+flagged with that turn: the turn's run reads them at its next step
+(:class:`~.notes.ChatNotes`), and any it never read run as the next turn, in
+order, once the turn ends. A
 chat that neither answers nor asks the person within :data:`OWNER_TIMEOUT_S`
 of its internal turn's start, or whose internal turn ends without doing
 either, gives the worker "No answer from <chat>"; a stopped task ends its
@@ -31,6 +35,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import contextvars
+import itertools
 import logging
 import time
 import uuid
@@ -66,7 +71,14 @@ ASK_STEPS: Final = 8
 OWNER_TIMEOUT_S: Final = 600.0
 # How often a chat with a turn running is looked at again.
 IDLE_POLL_S: Final = 0.2
+# Tries to store the queue without an entry that was handled.
+FORGET_TRIES: Final = 3
 MAX_ANSWER_CHARS: Final = 2000
+# Words the person can add to one running turn, and the longest of them.
+MAX_NOTES: Final = 20
+MAX_NOTE_CHARS: Final = 8_000
+# The notes of a chat that are remembered by key, so a repeated send gets its note back.
+NOTE_KEYS_KEPT: Final = 64
 # How long the person can take back a message sent as a task's answer.
 ANSWER_UNDO_S: Final = 10.0
 MAX_PART_CHARS: Final = 800
@@ -114,6 +126,13 @@ class _Queued:
     # own, so a turn started before a restart is found, not run again.
     key: str
     echo: dict[str, Any] = field(default_factory=dict)
+    # Words added to a running turn: that turn's id, and the number its run's
+    # inbox reads them by. A queued message has "" and 0, and so does a note
+    # a restart brought back, which is a message now.
+    note_of: str = ""
+    note: int = 0
+    # False while a note is being stored: its run does not read it yet.
+    note_ready: bool = True
 
 
 class OwnerAsks:
@@ -137,6 +156,10 @@ class OwnerAsks:
         self.undo_s = ANSWER_UNDO_S
         # Per chat and key: the outcome of a queued message being kept.
         self._admitting: dict[tuple[str, str], asyncio.Future[dict[str, Any]]] = {}
+        # The numbers of notes, and the newest notes of each chat by key, so a
+        # repeated send answers with the note it made, also once it was read.
+        self._note_numbers = itertools.count(1)
+        self._note_keys: dict[str, dict[str, dict[str, Any]]] = {}
 
     # ── What the rest reads ──
 
@@ -481,6 +504,145 @@ class OwnerAsks:
             chat_id, meta_update={"queued": kept or None}
         )
 
+    # ── Words the person adds to a running turn ──
+
+    def noted(self, turn_id: str, key: str | None) -> dict[str, Any] | None:
+        """The note a send of *key* to turn *turn_id* made, also once its turn ended: a repeat gets it back."""
+        if key is None:
+            return None
+        for kept in self._note_keys.values():
+            body = kept.get(key)
+            if body is not None and body["turn_id"] == turn_id:
+                return body
+        return None
+
+    async def add_note(
+        self, chat_id: str, turn_id: str, text: str, composed: str, key: str | None
+    ) -> dict[str, Any]:
+        """Add the person's words to turn *turn_id* of *chat_id*, which runs.
+
+        The turn's run reads them at its next step (:meth:`unread_notes`); a
+        note it has not read when the turn ends runs as the chat's next turn,
+        in order, with the queued messages (the same store, so a restart keeps
+        it). 409 ``turn_not_running`` when the turn is not that turn, is being
+        stopped, or has ended its run. The answer says whether the note was
+        sent to the running turn (``sent``) or the turn ended while it was
+        stored (``next``). A repeat of a *key* answers with the note it made.
+        """
+        if key is not None:
+            first = self._admitting.get((chat_id, key))
+            if first is not None:
+                return await asyncio.shield(first)
+            kept = self._note_keys.get(chat_id, {}).get(key)
+            if kept is not None:
+                return kept
+        outcome: asyncio.Future[dict[str, Any]] | None = None
+        if key is not None:
+            outcome = asyncio.get_running_loop().create_future()
+            outcome.add_done_callback(lambda f: f.cancelled() or f.exception())
+            self._admitting[(chat_id, key)] = outcome
+        try:
+            body = await self._add_note(chat_id, turn_id, text, composed, key)
+        except BaseException as exc:
+            if outcome is not None:
+                failed = (
+                    exc if isinstance(exc, Exception) else SessionStoreError(str(exc))
+                )
+                outcome.set_exception(failed)
+            raise
+        finally:
+            if key is not None:
+                self._admitting.pop((chat_id, key), None)
+        if outcome is not None:
+            outcome.set_result(body)
+        return body
+
+    async def _add_note(
+        self, chat_id: str, turn_id: str, text: str, composed: str, key: str | None
+    ) -> dict[str, Any]:
+        entry = self.console.sessions.get(chat_id)
+        if entry is None or not entry.runner.takes_notes(turn_id):
+            raise ApiError(409, "turn_not_running", t("errors.turnNotRunning"))
+        people = self._people.setdefault(chat_id, [])
+        if sum(1 for item in people if item.note_of == turn_id) >= MAX_NOTES:
+            raise ApiError(
+                400, "invalid_request", t("errors.tooManyNotes", n=MAX_NOTES)
+            )
+        number = next(self._note_numbers)
+        item = _Queued(
+            text,
+            composed,
+            key or f"note-{uuid.uuid4().hex}",
+            note_of=turn_id,
+            note=number,
+            note_ready=False,
+        )
+        people.append(item)
+        try:
+            await self._keep_queue(chat_id)
+        except Exception as exc:
+            with contextlib.suppress(ValueError):
+                people.remove(item)
+            if isinstance(exc, SessionStoreError):
+                raise
+            raise SessionStoreError("Could not keep the note") from exc
+        # Stored: now its run may read it, after the event that shows it.
+        sent = entry.runner.publish_note(turn_id, number, text)
+        if sent:
+            item.note_ready = True
+        else:
+            # The turn ended while it was stored: it is the next message.
+            item.note_of = ""
+            item.note_ready = True
+        self._kick(chat_id)
+        body = {
+            "note": number,
+            "turn_id": turn_id,
+            "text": text,
+            "client_request_id": item.key,
+            "state": "sent" if sent else "next",
+        }
+        kept = self._note_keys.setdefault(chat_id, {})
+        kept[item.key] = body
+        while len(kept) > NOTE_KEYS_KEPT:
+            del kept[next(iter(kept))]
+        return body
+
+    def unread_notes(self, chat_id: str) -> list[tuple[int, str]]:
+        """The words added to *chat_id*'s running turn that its run has not read, oldest first."""
+        entry = self.console.sessions.get(chat_id)
+        turn = None if entry is None else entry.runner.current_turn
+        if turn is None:
+            return []
+        return [
+            (item.note, item.composed)
+            for item in self._people.get(chat_id, ())
+            if item.note_of == turn.id and item.note_ready
+        ]
+
+    def note_read(self, chat_id: str, number: int) -> None:
+        """The run read note *number*: it is no longer a message to send next."""
+        people = self._people.get(chat_id, [])
+        kept = [item for item in people if item.note != number or not item.note_of]
+        if len(kept) == len(people):
+            return
+        people[:] = kept
+        self._spawn(self._forget_started(chat_id))
+
+    async def drop_notes(self, chat_id: str, turn_id: str) -> list[dict[str, Any]]:
+        """Take back the notes of *turn_id* that were never read (its Stop), for the composer.
+
+        A stopped turn does not start its notes as a next turn; the person
+        gets their words back and sends them again, or not.
+        """
+        people = self._people.get(chat_id, [])
+        gone = [item for item in people if item.note_of == turn_id]
+        if not gone:
+            return []
+        people[:] = [item for item in people if item not in gone]
+        await self._forget_started(chat_id)
+        return [{"note": item.note, "text": item.typed} for item in gone]
+
     async def _not_sent(self, chat_id: str, item: _Queued) -> None:
         await self.console.front_for(chat_id).echo(
             {"echo": "failed", "of": item.echo.get("id"), "typed": item.typed,
@@ -582,17 +744,28 @@ class OwnerAsks:
             self._people[chat_id].pop(0)
             await self._forget_started(chat_id)
             return
-        await front.echo({"echo": "dequeued", "of": item.echo.get("id")})
+        if item.echo:
+            await front.echo({"echo": "dequeued", "of": item.echo.get("id")})
         self._people[chat_id].pop(0)
         await self._forget_started(chat_id)
 
     async def _forget_started(self, chat_id: str) -> None:
-        """Store the queue without the message just handled."""
-        try:
-            await self._keep_queue(chat_id)
-        except Exception:
-            # Kept as started: its key finds the turn after a restart.
-            logger.warning("Could not store the chat's queue", exc_info=True)
+        """Store the queue without the message (or read note) just handled.
+
+        A failed write is tried again a few times, a little later each time: the
+        stored queue is what a restart would run, so an entry left in it after it
+        was handled would run twice. If every try fails the entry stays stored; a
+        message's key then finds its turn after a restart, a read note has none.
+        """
+        for attempt in range(FORGET_TRIES):
+            try:
+                await self._keep_queue(chat_id)
+                return
+            except Exception:
+                logger.warning("Could not store the chat's queue", exc_info=True)
+                if self._stopping():
+                    return
+                await asyncio.sleep(self.idle_s * (attempt + 1))
 
     async def _internal_turn(self, chat_id: str, ask: Ask) -> None:
         if await self.console.store.get_session(chat_id) is None:

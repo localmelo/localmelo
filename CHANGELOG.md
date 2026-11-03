@@ -9,6 +9,30 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Pictures and files in the web console and the app, and words added while melo works. Drop a picture
+  or a text file on the page, paste it with Cmd-V or pick it with the paperclip (`/attach` opens the same
+  picker; `/attachments` and `/detach N` list and remove). PNG, JPEG, GIF (first frame), WebP and HEIC
+  pictures are accepted, converted where needed and scaled to a long side of 1,280 pixels like a screenshot;
+  a message takes up to 4 pictures and 8 text files, and a picture that is too large or not a picture is
+  refused with a sentence that says why. Thumbnails with a remove button sit above the message box, the
+  picture shows in your message and again after a reload, and the model gets it as an image. Every
+  picture is rewritten before the model gets it: EXIF (the camera, the time, GPS), XMP, comments, text
+  chunks and anything after the end of the picture are removed, also from a picture that needed no
+  conversion, and a picture melo cannot scale or rewrite is refused instead of being sent as it is. The
+  size limit is read from the file's header before anything opens it, every frame of a GIF included. A model
+  known not to read pictures gets a one-line warning that links to Settings → Model; the picture is never
+  dropped silently. A model whose error says it does not take pictures is treated as text-only for a minute: the turn
+  ends with one plain line, the composer warns, and Try again does not send the same pictures again; a bare 400, a
+  message about length or a picture it could not decode is not taken for that. A GIF without its end, a WebP or
+  HEIC whose boxes do not add up, and a PNG whose chunks have the wrong length or stand out of order are
+  refused as unreadable. Other files answer `not supported yet`, and a file dropped beside the box never opens in
+  the window, in the browser or in the app. While a turn runs, Enter now adds your words to it: the run reads
+  them at its next step, the bubble shows `Sent` then `Seen by melo`, words the turn ended before reading
+  become your next message in order (a restart keeps them, and words that were read leave the kept queue, with a few more tries if the write fails), and Stop gives unread words back to the box.
+  New routes `POST /api/uploads` (with `GET`/`DELETE /api/uploads/{id}`) and `POST /api/turns/{turn_id}/notes`;
+  a turn takes `images` and `attachments`; new event `turn.note` and `images` in `turn.started`; new errors
+  `picture_gone`, `model_text_only`, `chat_answering`, `not_your_turn`, `picture_scale`. The terminal keeps its own queue and
+  text-only `/attach`.
 - Windows from other apps (#280). A page melo acts on can make another app open a window, such as a chat
   app's sign-in window that asks you to authorize; the browser never shows it. With the desktop control
   helper (a separate app that holds the Mac's Accessibility and Screen Recording permissions, so melo needs

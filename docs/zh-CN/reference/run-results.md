@@ -163,6 +163,7 @@
 
 - 对话请求最多重试两次：1 秒后一次，再过 4 秒又一次。如果最后一次尝试也失败，运行以 `provider_error` 结束。
 - 嵌入请求不重试。
+- 把图片发给读不了图片的模型，是唯一一种措辞固定的错误：当服务器返回 400、415 或 422（或没有状态码），且错误提到图片并说明不接受时，运行以 `provider_error` 结束，错误为 `This model can't see pictures; choose one that can in Settings → Model`，控制台此后一分钟内把该模型当作只能读文字（见[在消息里加图片和文件](../guides/web-console.md#pictures-and-files-in-a-message)）。
 - 错误会指出请求，并在服务器有回答时给出 HTTP 状态和回复体的前 500 个字符，例如 `POST /chat/completions failed with HTTP 500: <html> …`。
 - 每次尝试都等待完整的[对话请求超时](configuration.md#chat-request-timeout)。因此，一个什么都不发送的服务器会在约 3 × 超时 + 5 秒后结束运行：使用默认的 120 秒时约为 365 秒。
 - 每个对话请求都在 `X-Localmelo-Attempt` HTTP 头中携带它的尝试序号（1、2 或 3），因此可以把代理的请求日志与 `n_llm` 和 `llm_errors` 对应起来。`X-Localmelo-Call-Kind` 对规划请求是 `plan`，对反思请求是 `reflect`。

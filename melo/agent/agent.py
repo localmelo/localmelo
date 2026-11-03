@@ -84,6 +84,7 @@ from localmelo.melo.agent._earlier import (
 )
 from localmelo.melo.agent._events import GateVerdict, _Emitter, check_sink
 from localmelo.melo.agent._json_repair import error_line, rejected_objects, repairs
+from localmelo.melo.agent._picture_refusal import names_pictures
 from localmelo.melo.agent._step_review import (
     RunReviews,
     StepReviewer,
@@ -112,7 +113,12 @@ from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.review.gist import step_gist
 from localmelo.melo.checker.review.model import recalled_part
 from localmelo.melo.checker.tiers import tier_of, tier_requires_approval
-from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN, _sanitize_images
+from localmelo.melo.checker.validators import (
+    MAX_IMAGES_PER_RESULT,
+    MAX_MEMORY_TEXT_LEN,
+    _sanitize_images,
+    image_problem,
+)
 from localmelo.melo.contracts.approvals import (
     ALLOWED_ONCE,
     BLOCKED_ALIKE,
@@ -278,6 +284,7 @@ from localmelo.melo.schema import (
     MAX_AGENT_STEPS,
     MAX_REFLECTION_CHARS,
     MIN_AGENT_STEPS,
+    PICTURES_REFUSED_ERROR,
     SHORT_TERM_MAX,
     TOOL_CALL_TEXT_ERROR,
     TOOL_CALL_TEXT_LABEL,
@@ -6319,6 +6326,7 @@ class Agent:
         from_person: bool = True,
         hide_tools: Collection[str] = (),
         earlier_turns: Sequence[tuple[str, str]] | None = None,
+        images: Sequence[ImagePart] = (),
         chat_first: str | None = None,
     ) -> RunResult:
         """Run one task and report how it ended.
@@ -6531,6 +6539,16 @@ class Agent:
         window starts over, the step review keeps it first, as the task the
         chat began with, so a goal review still has it after a reload.
 
+        *images* are pictures the person added to the query, with their data.
+        The query message keeps reference copies, as a tool result does, and the
+        store keeps the payloads of the newest few (see
+        :meth:`~localmelo.melo.agent._tool_images.ToolImageStore.keep_user`), so
+        each planning request carries them; once a payload is gone, the model
+        reads a line that names the picture instead. ``ValueError`` before the
+        run for a picture the checker would refuse (see
+        :func:`~localmelo.melo.checker.validators.image_problem`), or more than
+        :data:`~localmelo.melo.checker.validators.MAX_IMAGES_PER_RESULT`.
+
         Before the run starts, ``TypeError`` is raised when *on_event* or
         *observe* is not callable or is a coroutine function, when both
         are given, when *approval* has no ``async def decide``, when
@@ -6554,6 +6572,12 @@ class Agent:
         turns_before = (
             check_earlier_turns(earlier_turns) if earlier_turns is not None else []
         )
+        pictures = list(images)
+        if len(pictures) > MAX_IMAGES_PER_RESULT:
+            raise ValueError(f"at most {MAX_IMAGES_PER_RESULT} pictures per message")
+        for picture in pictures:
+            if problem := image_problem(picture):
+                raise ValueError(f"picture refused: {problem}")
         earlier = earlier_block(turns_before)
         place = self._run_place()
         started = time.perf_counter()
@@ -6660,7 +6684,11 @@ class Agent:
                         await self._ensure_tools()
                     except Exception as exc:
                         raise _ToolSetupError(str(exc) or _exception_text(exc)) from exc
-                    query_msg = Message(role="user", content=query)
+                    query_msg = Message(
+                        role="user",
+                        content=query,
+                        images=self._tool_images.keep_user(pictures),
+                    )
                     run.window_had_turns = any(
                         msg.role != "system" for msg in self.hippo.working.get_window()
                     )
@@ -6729,7 +6757,10 @@ class Agent:
             except ProviderError as exc:
                 # Reported in the result, not a crash: no traceback.
                 logger.info("Task %s ended with provider_error: %s", task.task_id, exc)
-                run.end("provider_error", error=str(exc) or _exception_text(exc))
+                error = str(exc) or _exception_text(exc)
+                if self._refused_pictures(exc):
+                    error = PICTURES_REFUSED_ERROR
+                run.end("provider_error", error=error)
             except Exception as exc:
                 if (
                     isinstance(exc, TimeoutError)
@@ -7078,6 +7109,16 @@ class Agent:
             raise cancelled
 
     # ── Cancelled interactive runs ──
+
+    def _refused_pictures(self, exc: ProviderError) -> bool:
+        """Whether *exc* is the server refusing the pictures its request carried.
+
+        True only for a request that carried pixels, when the error says the model
+        cannot take pictures (see ``_picture_refusal.names_pictures``). A bare HTTP 400,
+        an error about the length of the request or about another parameter, and an
+        outage are not it, so they keep their own text.
+        """
+        return self._tool_images.sent_pixels and names_pictures(exc)
 
     async def _on_cancelled(
         self, query: str, run: _RunState, exc: asyncio.CancelledError

@@ -19,6 +19,7 @@ import {setupRunning} from '../../support/gateway/static/running.mjs';
 import {setupModelCard} from '../../support/gateway/static/setup-card.mjs';
 import {folderChoices, folderName, setupFolderPicker} from '../../support/gateway/static/folder.mjs';
 import {picturesNode, setupPictureBox} from '../../support/gateway/static/pictures.mjs';
+import * as composerMedia from '../../support/gateway/static/composer-media.mjs';
 import {memoryNodes} from '../../support/gateway/static/memory.mjs';
 import * as mainChat from '../../support/gateway/static/main-chat.mjs';
 import * as levels from '../../support/gateway/static/levels.mjs';
@@ -686,6 +687,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{ setupImportCard \} from "\.\/import-card\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/folder\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/pictures\.mjs";\n/m, '')
+  .replace(/^import \{[^}]*\} from "\.\/composer-media\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/memory\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/memory-tab\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/main-chat\.mjs";\n/m, '')
@@ -824,10 +826,12 @@ function gateway(routes) {
   const fetch = async (url, options = {}) => {
     const method = options.method ?? 'GET';
     const path = String(url).replace(/^\/api/, '');
-    calls.push({method, path, headers: options.headers ?? {}, body: options.body ? JSON.parse(options.body) : undefined});
+    // A JSON body is parsed; the bytes of an upload (a file) are kept as they were sent.
+    const sent = typeof options.body === 'string' ? JSON.parse(options.body) : options.body;
+    calls.push({method, path, headers: options.headers ?? {}, body: sent});
     const handler = routes[`${method} ${path}`] ?? routes[path];
     if (handler === undefined) throw new Error(`Unexpected request: ${method} ${path}`);
-    let result = typeof handler === 'function' ? handler(options.body ? JSON.parse(options.body) : undefined) : handler;
+    let result = typeof handler === 'function' ? handler(sent) : handler;
     if (result instanceof Error) throw result;
     if (result?.then) result = await result;
     if (result instanceof Error) throw result;
@@ -904,6 +908,7 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     setupFolderPicker,
     picturesNode,
     setupPictureBox,
+    ...composerMedia,
     memoryNodes,
     ...mainChat,
     ...levels,
@@ -914,7 +919,7 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     setupSlash,
     // The question a deleted chat with notes asks; a test sets `answer`.
     askAboutNotes: async (ask) => { asked.push(ask); return answer.notes; },
-    setupSettings: () => async () => { context.settingsOpened = (context.settingsOpened || 0) + 1; },
+    setupSettings: () => async (section) => { context.settingsOpened = (context.settingsOpened || 0) + 1; context.settingsSection = section; },
     setupDrawer: () => drawer,
     // The panel beside the chat has its own tests (test_panel.mjs); here it only hears health.
     // `/memory import` opens its tab and presses "Look for notes": a test sets `notesOn` and reads `notesLooked`.
@@ -2964,12 +2969,133 @@ test('stop posts the running turn\'s id', async () => {
     data: {turn: 2, turn_id: 'turn-2', user_text: 'A long task', client_request_id: 'k2'},
   });
   assert.equal(h.element('stop-btn').hidden, false);
-  assert.equal(h.element('send-btn').hidden, true);
+  // Send stays: during a turn it adds words to the work. Stop is its own button.
+  assert.equal(h.element('send-btn').hidden, false);
   await h.run('stop()');
   assert.deepEqual(h.net.callsTo('/turns/turn-2/cancel').map((call) => call.method), ['POST']);
   assert.equal(h.state().cancelling.size, 0);
 });
 
+// ── Words added while melo works ──
+
+/** A chat with a turn that runs, ready for words to be typed. */
+async function runningChat(routes = {}) {
+  const h = harness(baseRoutes(routes));
+  await h.run('init()');
+  h.stream().emit({
+    id: 20, turn: 2, ts: 50, type: 'turn.started',
+    data: {turn: 2, turn_id: 'turn-2', user_text: 'A long task', client_request_id: 'k2'},
+  });
+  return h;
+}
+
+const noteReply = (number, text, extra = {}) => ({status: 202, body: {note: {note: number, turn_id: 'turn-2', text, state: 'sent', ...extra}}});
+
+test('Enter during a running turn posts the words to that turn, shows them as sent, and empties the box', async () => {
+  const h = await runningChat({'POST /turns/turn-2/notes': noteReply(1, 'use the blue one')});
+  assert.equal(h.element('input').placeholder, 'Add to what melo is doing…');
+  assert.equal(h.element('send-btn').title, 'Add this to the work');
+  h.element('input').value = 'use the blue one';
+  h.element('input').listeners.input?.forEach((handler) => handler());
+  assert.equal(h.element('send-btn').disabled, false, 'words can be sent while a turn runs');
+  await h.run('send()');
+  const calls = h.net.callsTo('/turns/turn-2/notes');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].body.text, 'use the blue one');
+  assert.ok(calls[0].body.client_request_id, 'the send carries a key, so a repeat is one note');
+  assert.deepEqual(h.net.callsTo('/sessions/a/turns'), [], 'no second turn is started');
+  assert.equal(h.element('input').value, '');
+  assert.match(h.text('messages'), /use the blue one/);
+  assert.match(h.text('messages'), /Sent\. melo reads it at its next step\./);
+});
+
+test('a note turns to seen at the step that read it, and that step is named', async () => {
+  const h = await runningChat({'POST /turns/turn-2/notes': noteReply(7, 'check the log first')});
+  h.element('input').value = 'check the log first';
+  await h.run('send()');
+  h.stream().emit({id: 21, turn: 2, ts: 51, type: 'turn.note', data: {turn: 2, turn_id: 'turn-2', note: 7, text: 'check the log first'}});
+  assert.equal(h.text('messages').match(/check the log first/g).length, 1, 'the event and the answer are one note');
+  h.stream().emit({id: 22, turn: 2, ts: 52, type: 'inbox.accepted', data: {offset: 7, text: 'check the log first', step: 3, attempt: 1}});
+  assert.match(h.text('messages'), /Seen by melo at step 3/);
+  assert.doesNotMatch(h.text('messages'), /Sent\. melo reads it/);
+});
+
+test('a note that the turn did not read before it ended says it is the next message', async () => {
+  const h = await runningChat({'POST /turns/turn-2/notes': noteReply(1, 'one more thing')});
+  h.element('input').value = 'one more thing';
+  await h.run('send()');
+  h.stream().emit({id: 23, turn: 2, ts: 53, type: 'turn.finished', data: {turn: 2, turn_id: 'turn-2', status: 'completed', error: null, cause: 'run'}});
+  assert.match(h.text('messages'), /melo finished first\. This goes next as your message\./);
+});
+
+test('a note refused because the turn just ended is sent as a message', async () => {
+  const h = await runningChat({
+    'POST /turns/turn-2/notes': {status: 409, body: {error: {code: 'turn_not_running', message: 'that turn is not running'}}},
+    'POST /sessions/a/turns': {status: 202, body: {turn_id: 'turn-3', turn: turnRow({turn_id: 'turn-3', turn: 3, user_text: 'late words'})}},
+  });
+  h.stream().emit({id: 23, turn: 2, ts: 53, type: 'turn.finished', data: {turn: 2, turn_id: 'turn-2', status: 'completed', error: null, cause: 'run'}});
+  // The page still thought it ran when the words were typed.
+  h.element('input').value = 'late words';
+  await h.run('send()');
+  assert.deepEqual(h.net.callsTo('/sessions/a/turns').map((call) => call.body.text), ['late words']);
+  assert.equal(h.net.callsTo('/turns/turn-2/notes').length, 0, 'a finished turn takes no notes');
+});
+
+test('a refused note gives the words back to the box and says why', async () => {
+  const h = await runningChat({'POST /turns/turn-2/notes': {status: 400, body: {error: {code: 'invalid_request', message: 'a turn takes at most 20 added messages'}}}});
+  h.element('input').value = 'too many';
+  await h.run('send()');
+  assert.equal(h.element('input').value, 'too many');
+  assert.doesNotMatch(h.text('messages'), /Sent\. melo reads it/);
+  assert.match(h.text('notice'), /Could not add that: .*at most 20/);
+});
+
+test('Stop gives the unread words back to the box and the turn starts nothing else', async () => {
+  const h = await runningChat({
+    'POST /turns/turn-2/notes': noteReply(4, 'not that way'),
+    'POST /turns/turn-2/cancel': {status: 202, body: {turn_id: 'turn-2', cancelling: true, unread_notes: [{note: 4, text: 'not that way'}]}},
+  });
+  h.element('input').value = 'not that way';
+  await h.run('send()');
+  assert.equal(h.element('input').value, '');
+  await h.run('stop()');
+  assert.equal(h.element('input').value, 'not that way');
+  assert.match(h.text('messages'), /Not read: the turn was stopped\. It is back in the message box\./);
+});
+
+// ── The note reducer on its own ──
+
+test('a note is one item however its answer and its event arrive', () => {
+  const {view, turn} = started();
+  const item = turns.startNote(turn, 'hello', 'k1');
+  assert.equal(turns.noteState(turn, item), 'sending');
+  // The event comes before the answer.
+  applyEvent(view, {id: 2, turn: 1, ts: 101, type: 'turn.note', data: {turn: 1, turn_id: 'turn-1', note: 5, text: 'hello'}});
+  assert.equal(turn.items.filter((entry) => entry.kind === 'note').length, 1);
+  turns.acknowledgeNote(turn, item, 5);
+  assert.equal(turn.items.filter((entry) => entry.kind === 'note').length, 1);
+  assert.equal(turns.noteState(turn, turn.items.find((entry) => entry.kind === 'note')), 'sent');
+});
+
+test('a note read by the run is seen; one read by nobody before the turn ends is next', () => {
+  const {view, turn} = started();
+  applyEvent(view, {id: 2, turn: 1, ts: 101, type: 'turn.note', data: {turn: 1, turn_id: 'turn-1', note: 1, text: 'first'}});
+  applyEvent(view, {id: 3, turn: 1, ts: 102, type: 'turn.note', data: {turn: 1, turn_id: 'turn-1', note: 2, text: 'second'}});
+  applyEvent(view, {id: 4, turn: 1, ts: 103, type: 'inbox.accepted', data: {offset: 1, text: 'first', step: 2, attempt: 1}});
+  const [first, second] = turn.items.filter((entry) => entry.kind === 'note');
+  assert.equal(turns.noteState(turn, first), 'seen');
+  assert.equal(turns.noteLine(turn, first), 'Seen by melo at step 2');
+  assert.equal(turns.noteState(turn, second), 'sent');
+  assert.equal(turn.items.filter((entry) => entry.kind === 'fact').length, 0, 'a read note adds no second line');
+  turn.finishedAt = 110;
+  assert.equal(turns.noteState(turn, second), 'next');
+});
+
+test('an inbox line that is no note of the person stays a fact line', () => {
+  const {view, turn} = started();
+  applyEvent(view, {id: 2, turn: 1, ts: 101, type: 'inbox.accepted', data: {offset: 9, text: 'from a task', step: 1, attempt: 1}});
+  assert.equal(turn.items.filter((entry) => entry.kind === 'fact').length, 1);
+});
 test('a running turn draws the live row with the terminal\'s facts', async () => {
   const running = turnRow({status: 'running', answer: null, finished_at: 0, running_here: true});
   const h = harness(baseRoutes({
@@ -5993,4 +6119,441 @@ test('the approval card reads in Simplified Chinese: sentence, kind, reason with
   } finally {
     await useLanguage('en');
   }
+});
+
+// ── Pictures and files in the composer ──
+
+const SHA = 'ab'.repeat(32);
+const fileOf = (name, type, size = 4096) => ({name, type, size, arrayBuffer: async () => new ArrayBuffer(size)});
+const textFile = (name, body, type = 'text/plain') => {
+  const bytes = new TextEncoder().encode(body);
+  return {name, type, size: bytes.length, arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length)};
+};
+/** The gateway's answer to an accepted upload. */
+const stagedPicture = (id, name, extra = {}) => ({
+  status: 201,
+  body: {id, name, mime_type: 'image/png', size_bytes: 3000, width: 640, height: 480, model_reads: true, ...extra},
+});
+const accepted = (id = 'turn-2', number = 2) => ({status: 202, body: {turn_id: id, turn: turnRow({id, turn: number, user_text: 'x'})}});
+/** A drag or drop event as the browser gives it; `prevented` counts the calls that keep the page from opening the file. */
+function dragOf(files, {types = ['Files'], target = {tagName: 'DIV'}} = {}) {
+  return {dataTransfer: {types, files, dropEffect: ''}, target, prevented: 0, preventDefault() { this.prevented += 1; }};
+}
+const tiles = (h, className) => findNodes(h.element('media-tray'), (node) => node.className === className);
+const dropFiles = async (h, files) => {
+  const event = dragOf(files);
+  h.documentListeners.drop[0](event);
+  await settle();
+  return event;
+};
+
+test('a picture dropped anywhere on the page is uploaded as its own bytes and shown as a thumbnail with a remove button', async () => {
+  const png = fileOf('shot.png', 'image/png');
+  const h = harness(baseRoutes({'POST /uploads?name=shot.png': stagedPicture('up1', 'shot.png')}));
+  await h.run('init()');
+  const over = dragOf([], {types: ['Files']});
+  h.documentListeners.dragenter[0](over);
+  assert.equal(over.prevented, 1, 'a drag with files is answered by the page');
+  assert.equal(h.element('drop-hint').hidden, false, 'the page says where a drop goes');
+  const hover = dragOf([]);
+  h.documentListeners.dragover[0](hover);
+  assert.equal(hover.dataTransfer.dropEffect, 'copy');
+  const event = await dropFiles(h, [png]);
+  assert.equal(event.prevented, 1, 'the browser never opens a dropped file');
+  assert.equal(h.element('drop-hint').hidden, true);
+  const [upload] = h.net.callsTo('/uploads?name=shot.png');
+  assert.equal(upload.method, 'POST');
+  assert.equal(upload.headers['Content-Type'], 'image/png');
+  assert.equal(upload.body, png, 'the file itself is the body, not a base64 copy');
+  const [thumb] = tiles(h, 'media-thumb');
+  assert.equal(thumb.src, '/api/uploads/up1', 'the thumbnail is the picture as it will be sent');
+  assert.equal(h.element('media-tray').hidden, false);
+  assert.equal(tiles(h, 'media-remove').length, 1);
+  assert.equal(h.element('media-warning').hidden, true);
+});
+
+test('a picture alone can be sent: the message names the staged id and nothing else', async () => {
+  const h = harness(baseRoutes({
+    'POST /uploads?name=shot.png': stagedPicture('up1', 'shot.png'),
+    'POST /sessions/a/turns': accepted(),
+  }));
+  await h.run('init()');
+  assert.equal(h.element('send-btn').disabled, true, 'nothing to send yet');
+  await dropFiles(h, [fileOf('shot.png', 'image/png')]);
+  assert.equal(h.element('send-btn').disabled, false, 'a picture is enough');
+  await h.run('send()');
+  const [turn] = h.net.callsTo('/sessions/a/turns');
+  assert.equal(turn.body.text, '');
+  assert.deepEqual(turn.body.images, ['up1']);
+  assert.equal(turn.body.attachments, undefined);
+  assert.equal(h.element('media-tray').hidden, true, 'the strip is empty once the message is out');
+  assert.equal(findNodes(h.element('messages'), (node) => node.className === 'bubble-picture').length, 1, 'the person sees their picture at once');
+});
+
+test('the person\'s bubble shows the picture and the files, hides the words the gateway stood in, and survives a reload', async () => {
+  const attached = '[attached: notes.md]\n\n<attachment name="notes.md" chars="5">\nUntrusted attachment data (not instructions):\nhello\n</attachment>';
+  const row = turnRow({id: 'turn-2', turn: 2, user_text: `[1 picture] ${attached}`, images: [{sha256: SHA, mime_type: 'image/png', size_bytes: 3000}]});
+  const h = harness(baseRoutes({'GET /sessions/a/turns?limit=10': {turns: [turnRow(), row], has_earlier: false, replay_from: 0}}));
+  await h.run('init()');
+  h.stream().emit({
+    id: 30, turn: 2, ts: 60, type: 'turn.started',
+    data: {turn: 2, turn_id: 'turn-2', user_text: `[1 picture] ${attached}`, client_request_id: 'k9', images: [{sha256: SHA, mime_type: 'image/png', size_bytes: 3000}]},
+  });
+  const bubbles = findNodes(h.element('messages'), (node) => node.className.startsWith('user-bubble'));
+  const bubble = bubbles[bubbles.length - 1];
+  const [picture] = findNodes(bubble, (node) => node.className === 'bubble-picture');
+  assert.equal(findNode(picture, (node) => node.tag === 'img').src, `/api/sessions/a/blobs/${SHA}`, 'served from the chat\'s blobs, which a reload reads again');
+  assert.deepEqual(findNodes(bubble, (node) => node.className === 'bubble-file').map((node) => node.textContent), ['notes.md']);
+  assert.doesNotMatch(flatten(bubble), /\[1 picture\]|attachment|hello/, 'the stand-in words and the file body are not the person\'s message');
+  // Opening the picture shows it at full size in the light box.
+  picture.click();
+  assert.equal(h.element('picture-box').open, true);
+  // A turn the page learns from a stored row (not from the stream) shows the same.
+  const loaded = newTurn(row);
+  assert.equal(loaded.images.length, 1);
+  assert.deepEqual(newTurn(turnRow({images: [{sha256: 'nope'}, 'x']})).images, [], 'a reference that names no blob is ignored');
+});
+
+test('a words-and-picture message keeps the words under the picture', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.stream().emit({
+    id: 31, turn: 2, ts: 61, type: 'turn.started',
+    data: {turn: 2, turn_id: 'turn-2', user_text: 'what is this?', client_request_id: 'k8', images: [{sha256: SHA, mime_type: 'image/png', size_bytes: 3000}]},
+  });
+  const bubbles = findNodes(h.element('messages'), (node) => node.className.startsWith('user-bubble'));
+  const bubble = bubbles[bubbles.length - 1];
+  assert.match(flatten(bubble), /what is this\?/);
+  assert.equal(findNodes(bubble, (node) => node.className === 'bubble-picture').length, 1);
+  assert.equal(bubble.children[0].className, 'bubble-media', 'pictures first');
+});
+
+test('a picture pasted with Cmd-V is added, while pasted text stays text', async () => {
+  const h = harness(baseRoutes({'POST /uploads?name=image.png': stagedPicture('up2', 'image.png')}));
+  await h.run('init()');
+  const [paste] = h.element('input').listeners.paste;
+  const text = {clipboardData: {files: [], getData: () => 'plain words'}, prevented: 0, preventDefault() { this.prevented += 1; }};
+  paste(text);
+  assert.equal(text.prevented, 0, 'text pastes as it always did');
+  // A copied table brings text and a picture of it: the text wins.
+  const both = {clipboardData: {files: [fileOf('image.png', 'image/png')], getData: () => '1\t2'}, prevented: 0, preventDefault() { this.prevented += 1; }};
+  paste(both);
+  assert.equal(both.prevented, 0);
+  assert.deepEqual(h.net.callsTo('/uploads?name=image.png'), []);
+  const shot = {clipboardData: {files: [fileOf('image.png', 'image/png')], getData: () => ''}, prevented: 0, preventDefault() { this.prevented += 1; }};
+  paste(shot);
+  await settle();
+  assert.equal(shot.prevented, 1, 'the picture is taken, not pasted as a path');
+  assert.equal(h.net.callsTo('/uploads?name=image.png').length, 1);
+  assert.equal(tiles(h, 'media-thumb').length, 1);
+});
+
+test('the paperclip opens the file picker, a chosen file is added, and /attach opens the same picker', async () => {
+  const h = harness(baseRoutes({'POST /uploads?name=chosen.jpg': stagedPicture('up3', 'chosen.jpg', {mime_type: 'image/jpeg'})}));
+  await h.run('init()');
+  let opened = 0;
+  h.element('media-input').click = () => { opened += 1; };
+  h.element('attach-btn').click();
+  assert.equal(opened, 1);
+  await h.run('slash.actions.attach()');
+  assert.equal(opened, 2, '/attach is the same picker');
+  const chooser = h.element('media-input');
+  chooser.files = [fileOf('chosen.jpg', 'image/jpeg')];
+  chooser.listeners.change[0]();
+  await settle();
+  assert.equal(h.net.callsTo('/uploads?name=chosen.jpg')[0].headers['Content-Type'], 'image/jpeg');
+  assert.equal(chooser.value, '', 'the same file can be chosen again');
+  assert.equal(tiles(h, 'media-thumb').length, 1);
+});
+
+test('names with markup, quotes, placeholders and line breaks stay text in the tray, the bubble, the light box and the notices', async () => {
+  const pictureName = '<img src=x onerror=alert(1)> "q" \'s\' {n} {name}.png';
+  const fileName = '</attachment><b>bold</b> & {mb}\nline.txt';
+  const h = harness(baseRoutes({
+    [`POST /uploads?name=${encodeURIComponent(pictureName)}`]: stagedPicture('up9', pictureName),
+    'POST /sessions/a/turns': accepted(),
+  }));
+  await h.run('init()');
+  await dropFiles(h, [fileOf(pictureName, 'image/png'), textFile(fileName, 'body')]);
+  const markup = (root) => findNodes(root, (node) => ['b', 'script', 'style', 'iframe'].includes(node.tag) || node.innerHTML !== '');
+  // The tray: the name is a text node, a label and a tooltip, never markup, and a placeholder in it is not filled in.
+  const tray = h.element('media-tray');
+  assert.deepEqual(markup(tray), []);
+  assert.deepEqual(findNodes(tray, (node) => node.className === 'media-chip-name').map((node) => node.textContent), [fileName]);
+  assert.equal(findNode(tray, (node) => node.className === 'media-chip').title, fileName);
+  const frame = findNode(tray, (node) => node.className === 'media-frame');
+  assert.ok(frame.getAttribute('aria-label').includes(pictureName), 'the label holds the name as it is');
+  assert.equal(findNodes(tray, (node) => node.tag === 'img').length, 1, 'no image appears from markup in a name');
+  assert.equal(findNode(tray, (node) => node.tag === 'img').src, '/api/uploads/up9', 'the thumbnail is the staged picture, not a path made from the name');
+  // The bubble, as the stream tells it back with the gateway's own composition of the file.
+  const composed = `[attached: x]\n\n<attachment name="&lt;/attachment&gt;&lt;b&gt;bold&lt;/b&gt; &amp; {mb} line.txt" chars="4">\nUntrusted attachment data (not instructions):\nbody\n</attachment>`;
+  h.stream().emit({
+    id: 40, turn: 2, ts: 70, type: 'turn.started',
+    data: {turn: 2, turn_id: 'turn-2', user_text: composed, client_request_id: 'k7', images: [{sha256: SHA, mime_type: 'image/png', size_bytes: 3000}]},
+  });
+  const bubbles = findNodes(h.element('messages'), (node) => node.className.startsWith('user-bubble'));
+  const bubble = bubbles[bubbles.length - 1];
+  assert.deepEqual(markup(bubble), []);
+  assert.deepEqual(findNodes(bubble, (node) => node.className === 'bubble-file').map((node) => node.textContent), ['</attachment><b>bold</b> & {mb} line.txt']);
+  // The light box: a picture of the bubble opens with the page's own name for it, set as text.
+  findNodes(bubble, (node) => node.className === 'bubble-picture')[0].click();
+  assert.deepEqual(markup(h.element('picture-box')), []);
+});
+
+test('a refusal that names the file in markup is shown as text', async () => {
+  const name = '<b>x</b> {mb}.png';
+  const h = harness(baseRoutes({
+    [`POST /uploads?name=${encodeURIComponent(name)}`]: {status: 415, body: {error: {code: 'picture_unreadable', message: '<img src=x onerror=alert(1)> melo could not read that picture.'}}},
+  }));
+  await h.run('init()');
+  await dropFiles(h, [fileOf(name, 'image/png')]);
+  const notice = h.text('notice');
+  assert.ok(notice.includes(`Could not add ${name}: <img src=x onerror=alert(1)> melo could not read that picture.`), notice);
+  assert.equal(h.element('notice').innerHTML, '', 'the notice is text, never markup');
+});
+
+test('removing a thumbnail forgets the staged picture and empties the strip', async () => {
+  const h = harness(baseRoutes({
+    'POST /uploads?name=shot.png': stagedPicture('up1', 'shot.png'),
+    'DELETE /uploads/up1': {status: 204},
+  }));
+  await h.run('init()');
+  await dropFiles(h, [fileOf('shot.png', 'image/png')]);
+  tiles(h, 'media-remove')[0].click();
+  await settle();
+  assert.equal(h.net.callsTo('/uploads/up1')[0].method, 'DELETE');
+  assert.equal(h.element('media-tray').hidden, true);
+  assert.equal(h.element('send-btn').disabled, true);
+});
+
+test('four pictures fit a message; the fifth is told why and never uploaded', async () => {
+  const routes = {};
+  for (const n of [1, 2, 3, 4]) routes[`POST /uploads?name=p${n}.png`] = stagedPicture(`up${n}`, `p${n}.png`);
+  const h = harness(baseRoutes(routes));
+  await h.run('init()');
+  await dropFiles(h, [1, 2, 3, 4, 5].map((n) => fileOf(`p${n}.png`, 'image/png')));
+  assert.equal(h.net.callsTo('/uploads?name=p5.png').length, 0);
+  assert.equal(tiles(h, 'media-thumb').length, 4);
+  assert.match(h.text('notice'), /A message can carry 4 pictures\./);
+});
+
+test('a picture over the size limit is refused with the limit, before any upload', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  await dropFiles(h, [fileOf('huge.png', 'image/png', 21 * 1024 * 1024)]);
+  assert.deepEqual(h.net.calls.filter((call) => call.path.startsWith('/uploads')), []);
+  assert.match(h.text('notice'), /huge\.png is over 20 MB/);
+  assert.equal(h.element('media-tray').hidden, true);
+});
+
+test('the gateway\'s refusal of a picture is shown with its words, and the tile goes away', async () => {
+  const h = harness(baseRoutes({
+    'POST /uploads?name=odd.png': {status: 415, body: {error: {code: 'picture_unreadable', message: 'melo could not read that picture. Try saving it again as PNG or JPEG.'}}},
+  }));
+  await h.run('init()');
+  await dropFiles(h, [fileOf('odd.png', 'image/png')]);
+  assert.match(h.text('notice'), /Could not add odd\.png: melo could not read that picture/);
+  assert.equal(h.element('media-tray').hidden, true);
+});
+
+test('a text-only model warns in one line with a link to Settings, never silently', async () => {
+  const h = harness(baseRoutes({'POST /uploads?name=shot.png': stagedPicture('up1', 'shot.png', {model_reads: false})}));
+  await h.run('init()');
+  await dropFiles(h, [fileOf('shot.png', 'image/png')]);
+  const warning = h.element('media-warning');
+  assert.equal(warning.hidden, false);
+  assert.match(flatten(warning), /The chosen model cannot read pictures, so melo will not see them\./);
+  const link = findNode(warning, (node) => node.tag === 'button');
+  assert.equal(link.textContent, 'Choose another model in Settings → Model');
+  link.click();
+  assert.equal(h.context.settingsSection, 'model');
+  // Removing the picture takes the warning with it.
+  tiles(h, 'media-remove')[0].click();
+  assert.equal(warning.hidden, true);
+});
+
+test('a turn the model refused for its pictures ends with one plain line, and the composer warns from then on', async () => {
+  const refusal = turns.PICTURES_REFUSED;
+  assert.equal(refusal, "This model can't see pictures; choose one that can in Settings → Model");
+  assert.deepEqual(statusText('provider_error', 'run', refusal), {word: 'Model server error', severity: 'error', title: refusal});
+  assert.equal(statusText('provider_error', 'run', 'POST /chat/completions failed with HTTP 400').title, 'Could not get an answer from the model server', 'other errors keep their words');
+  const h = harness(baseRoutes({'POST /uploads?name=shot.png': stagedPicture('up1', 'shot.png', {model_reads: null})}));
+  await h.run('init()');
+  await dropFiles(h, [fileOf('shot.png', 'image/png')]);
+  assert.equal(h.element('media-warning').hidden, true, 'the gateway did not know yet');
+  h.stream().emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'two', user_text: 'what is this?', client_request_id: 'k'}});
+  h.stream().emit({id: 21, turn: 2, ts: 51, type: 'turn.finished', data: {turn: 2, turn_id: 'two', status: 'provider_error', cause: 'run', error: 'POST /chat/completions failed with HTTP 400'}});
+  assert.equal(h.element('media-warning').hidden, true, 'another error says nothing about pictures');
+  h.stream().emit({id: 22, turn: 3, ts: 60, type: 'turn.started', data: {turn: 3, turn_id: 'three', user_text: 'again', client_request_id: 'k2'}});
+  h.stream().emit({id: 23, turn: 3, ts: 61, type: 'turn.finished', data: {turn: 3, turn_id: 'three', status: 'provider_error', cause: 'run', error: refusal}});
+  const warning = h.element('media-warning');
+  assert.equal(warning.hidden, false);
+  assert.match(flatten(warning), /The chosen model cannot read pictures, so melo will not see them\./);
+  // The failed turn says it once, as its title: no second line and no server hint (the error stays under Details).
+  const messages = h.element('messages');
+  const card = findNode(messages, (node) => node.className === 'failure-card' && flatten(node).includes(refusal));
+  assert.equal(flatten(findNode(card, (node) => node.className === 'failure-title')).replace(/^\S+ /, ''), refusal, 'the title is the sentence');
+  assert.equal(findNode(card, (node) => node.className === 'failure-error'), null);
+  assert.equal(findNode(card, (node) => node.className === 'failure-hint'), null);
+});
+
+test('a model that reads pictures shows no warning, and one that is not known shows none either', async () => {
+  const h = harness(baseRoutes({
+    'POST /uploads?name=a.png': stagedPicture('up1', 'a.png', {model_reads: true}),
+    'POST /uploads?name=b.png': stagedPicture('up2', 'b.png', {model_reads: null}),
+  }));
+  await h.run('init()');
+  await dropFiles(h, [fileOf('a.png', 'image/png'), fileOf('b.png', 'image/png')]);
+  assert.equal(h.element('media-warning').hidden, true);
+});
+
+test('a dropped text file travels in the message as an attachment and shows as a chip', async () => {
+  const h = harness(baseRoutes({'POST /sessions/a/turns': accepted()}));
+  await h.run('init()');
+  await dropFiles(h, [textFile('notes.md', '# Plan\nbuy milk', 'text/markdown'), textFile('run.py', 'print(1)', '')]);
+  assert.deepEqual(tiles(h, 'media-chip-name').map((node) => node.textContent), ['notes.md', 'run.py']);
+  assert.deepEqual(h.net.calls.filter((call) => call.path.startsWith('/uploads')), [], 'text is read here, not uploaded');
+  h.element('input').value = 'summarize these';
+  await h.run('send()');
+  const [turn] = h.net.callsTo('/sessions/a/turns');
+  assert.equal(turn.body.text, 'summarize these');
+  assert.deepEqual(turn.body.attachments, [
+    {name: 'notes.md', text: '# Plan\nbuy milk', chars: 15},
+    {name: 'run.py', text: 'print(1)', chars: 8},
+  ]);
+  assert.equal(turn.body.images, undefined);
+});
+
+test('a file that is not a picture or text is told "not supported yet", and a binary file posing as text is refused', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  await dropFiles(h, [fileOf('report.pdf', 'application/pdf'), fileOf('song.mp3', 'audio/mpeg')]);
+  assert.match(h.text('notice'), /song\.mp3: this kind of file is not supported yet\./);
+  assert.equal(h.element('media-tray').hidden, true);
+  const bad = textFile('data.txt', '');
+  bad.arrayBuffer = async () => new Uint8Array([0xff, 0xfe, 0x00, 0x41]).buffer;
+  await dropFiles(h, [bad]);
+  assert.match(h.text('notice'), /data\.txt is not a text file in UTF-8\./);
+  assert.equal(h.element('media-tray').hidden, true);
+  assert.deepEqual(h.net.calls.filter((call) => call.path.startsWith('/uploads')), []);
+});
+
+test('text files are held to the limits the gateway keeps: 256 KB each', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  await dropFiles(h, [textFile('big.txt', 'x'.repeat(256 * 1024 + 1))]);
+  assert.match(h.text('notice'), /big\.txt is over 256 KB/);
+  assert.equal(h.element('media-tray').hidden, true);
+});
+
+test('a drop the page cannot use never leaves the page: files, links, and files dropped on the message box', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const onBox = dragOf([fileOf('x.pdf', 'application/pdf')], {target: {tagName: 'TEXTAREA'}});
+  h.documentListeners.drop[0](onBox);
+  assert.equal(onBox.prevented, 1, 'a file dropped on the box is not opened');
+  const link = dragOf([], {types: ['text/uri-list']});
+  h.documentListeners.drop[0](link);
+  assert.equal(link.prevented, 1, 'a dragged link is not followed');
+  const words = dragOf([], {types: ['text/plain'], target: {tagName: 'TEXTAREA'}});
+  h.documentListeners.drop[0](words);
+  assert.equal(words.prevented, 0, 'text dragged into the box still lands in the box');
+  // Leaving the window takes the hint away.
+  h.documentListeners.dragenter[0](dragOf([]));
+  h.documentListeners.dragleave[0](dragOf([]));
+  assert.equal(h.element('drop-hint').hidden, true);
+});
+
+test('while melo works, a picture cannot join the turn: a drop is told so, and Send keeps the picture and posts nothing', async () => {
+  const h = await runningChat({'POST /uploads?name=shot.png': stagedPicture('up1', 'shot.png')});
+  await dropFiles(h, [fileOf('shot.png', 'image/png')]);
+  assert.deepEqual(h.net.callsTo('/uploads?name=shot.png'), []);
+  assert.match(h.text('notice'), /Pictures and files cannot join a turn that is running\./);
+  h.element('attach-btn').click();
+  assert.match(h.text('notice'), /Pictures and files cannot join a turn that is running\./);
+});
+
+test('a picture that waits in the strip when a turn starts is not lost to a note', async () => {
+  const h = harness(baseRoutes({'POST /uploads?name=shot.png': stagedPicture('up1', 'shot.png'), 'POST /turns/turn-2/notes': noteReply(1, 'hello')}));
+  await h.run('init()');
+  await dropFiles(h, [fileOf('shot.png', 'image/png')]);
+  h.stream().emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'turn-2', user_text: 'A long task', client_request_id: 'k2'}});
+  h.element('input').value = 'hello';
+  await h.run('send()');
+  assert.deepEqual(h.net.callsTo('/turns/turn-2/notes'), [], 'the words do not go alone while a picture waits');
+  assert.equal(tiles(h, 'media-thumb').length, 1, 'the picture stays');
+  assert.equal(h.element('input').value, 'hello');
+  assert.match(h.text('notice'), /cannot join a turn that is running/);
+});
+
+test('a picture and words that the gateway refuses stay visible in the failed message, and Cancel gives them back', async () => {
+  const refused = {status: 409, body: {error: {code: 'model_text_only', message: 'The chosen model cannot read pictures.'}}};
+  const h = harness(baseRoutes({
+    'POST /uploads?name=shot.png': stagedPicture('up1', 'shot.png'),
+    'POST /sessions/a/turns': refused,
+    'POST /sessions/a/submissions/key-media/cancel': {status: 200, body: {submission: {state: 'withdrawn'}}},
+  }));
+  h.context.crypto = {randomUUID: () => 'key-media'};
+  await h.run('init()');
+  await dropFiles(h, [fileOf('shot.png', 'image/png'), textFile('n.txt', 'hi')]);
+  h.element('input').value = 'look';
+  await h.run('send()');
+  const entry = h.state().outbox.a;
+  assert.equal(entry.state, 'failed');
+  assert.match(h.text('messages'), /Not sent: The chosen model cannot read pictures\./);
+  assert.equal(findNodes(h.element('messages'), (node) => node.className === 'bubble-picture').length, 1, 'the failed message still shows its picture');
+  assert.equal(h.element('media-tray').hidden, true, 'the strip belongs to the next message');
+  // Cancel withdraws the same message: its words, its file and its picture count.
+  h.net.calls.length = 0;
+  await h.run('cancelSend("a", S.outbox.a)');
+  const [cancel] = h.net.callsTo('/sessions/a/submissions/key-media/cancel');
+  assert.deepEqual(cancel.body, {text: 'look', images: ['up1'], attachments: [{name: 'n.txt', text: 'hi', chars: 2}]});
+  assert.equal(h.state().outbox.a, undefined);
+  assert.equal(h.element('input').value, 'look');
+  assert.equal(tiles(h, 'media-thumb').length, 1, 'the picture is back in the strip');
+  assert.deepEqual(tiles(h, 'media-chip-name').map((node) => node.textContent), ['n.txt']);
+});
+
+test('Run as a task is not offered with a picture, and a command typed with media attached is still a command', async () => {
+  const h = harness(baseRoutes({'POST /uploads?name=shot.png': stagedPicture('up1', 'shot.png')}));
+  await h.run('init()');
+  assert.equal(h.element('task-btn').hidden, false);
+  await dropFiles(h, [fileOf('shot.png', 'image/png')]);
+  assert.equal(h.element('task-btn').hidden, true);
+  await h.run('queueMessage("hello", {clearInput: true, asTask: true})');
+  assert.deepEqual(h.net.callsTo('/sessions/a/turns'), []);
+  assert.match(h.text('notice'), /Pictures cannot start a task\./);
+});
+
+test('each chat keeps its own pictures and files, as it keeps its draft', async () => {
+  const detail = (id) => ({session: session(id), pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'not_loaded', tokens: 0});
+  const h = harness(baseRoutes({
+    'GET /sessions': {sessions: [session('a'), session('b')], machine: null, has_more: false},
+    'GET /sessions/b': detail('b'),
+    'GET /sessions/b/turns?limit=10': {turns: [], has_earlier: false, replay_from: 0},
+    'POST /uploads?name=shot.png': stagedPicture('up1', 'shot.png'),
+  }));
+  await h.run('init()');
+  await dropFiles(h, [fileOf('shot.png', 'image/png')]);
+  await h.run('openSession("b")');
+  assert.equal(h.element('media-tray').hidden, true, 'chat b has nothing attached');
+  assert.equal(h.element('send-btn').disabled, true);
+  await h.run('openSession("a")');
+  assert.equal(tiles(h, 'media-thumb').length, 1, 'chat a still has its picture');
+  assert.deepEqual(h.net.calls.filter((call) => call.method === 'DELETE'), [], 'moving between chats forgets nothing');
+});
+
+test('closing the chat that held pictures forgets them at the gateway', async () => {
+  const h = harness(baseRoutes({
+    'POST /uploads?name=shot.png': stagedPicture('up1', 'shot.png'),
+    'DELETE /uploads/up1': {status: 204},
+    'GET /memory/records?session_id=a': {records: []},
+    'DELETE /sessions/a': {status: 204},
+  }));
+  await h.run('init()');
+  await dropFiles(h, [fileOf('shot.png', 'image/png')]);
+  await h.run('deleteSession("a")');
+  await settle();
+  assert.equal(h.net.callsTo('/uploads/up1').length, 1);
+  assert.equal(h.element('media-tray').hidden, true, 'the new chat that follows starts clean');
 });

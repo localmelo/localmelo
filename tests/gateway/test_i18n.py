@@ -48,6 +48,7 @@ _PARAM = re.compile(r"\{(\w+)\}")
 # The files whose words come from the catalog: a new English literal in one fails the scan.
 CONVERTED_JS = (
     "blocked.mjs",
+    "composer-media.mjs",
     "drawer.mjs",
     "endings.mjs",
     "folder.mjs",
@@ -98,7 +99,10 @@ JS_ENGLISH = {
     "melo did not finish an answer",
     "tool call written as text",
     "cannot reach the model server at",
+    "This model can't see pictures; choose one that can in Settings → Model",
     "noopener noreferrer",
+    # The type a drag carries when it holds files (the browser's own word).
+    "Files",
     # A note for the browser console, never shown on the page.
     "Melo: the moves cannot be read; the portrait shows still pictures",
     # Class lists of one word each.
