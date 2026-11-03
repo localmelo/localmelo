@@ -1204,9 +1204,31 @@ class TestEveryStatus:
     @pytest.mark.asyncio
     async def test_failed_after_two_empty_replies(self) -> None:
         recorder = Recorder()
-        agent = _agent(ScriptedLLM([_answer(""), _answer("", thinking="hmm")]))
+        agent = _agent(ScriptedLLM([_answer(""), _answer("")]))
         result = await agent.run_task("say it", on_event=recorder)
         assert (result.status, result.error) == ("failed", "empty replies")
+        assert recorder.types == [
+            "run.started",
+            "step.started",
+            "assistant.message",
+            "notice",
+            "step.started",
+            "assistant.message",
+            "run.finished",
+        ]
+        assert recorder.notices() == ["empty_reply"]
+        await check_guarantees(recorder, result, agent)
+
+    @pytest.mark.asyncio
+    async def test_completed_by_the_thinking_of_two_empty_replies(self) -> None:
+        # #469: the second empty reply has thinking, so its end is the answer.
+        recorder = Recorder()
+        agent = _agent(
+            ScriptedLLM([_answer(""), _answer("", thinking="hmm\nIt is 4.")])
+        )
+        result = await agent.run_task("say it", on_event=recorder)
+        assert (result.status, result.error) == ("completed", "")
+        assert result.result == "hmm\nIt is 4.\n\n(from melo's thinking)"
         assert recorder.types == [
             "run.started",
             "step.started",

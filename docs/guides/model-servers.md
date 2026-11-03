@@ -4,7 +4,7 @@ Run a model server yourself and point localmelo at it: oMLX, Ollama, MLC LLM, vL
 
 - On a Mac with Apple silicon, oMLX is the recommended local server.
 - Ollama is the alternative on other systems.
-- A cloud API needs only a key in an environment variable.
+- A hosted service needs only a key: paste it once in Settings and it is kept in your Mac's keychain. See [Hosted models](hosted-models.md).
 
 ## Setup preview
 
@@ -16,7 +16,7 @@ Run a model server yourself and point localmelo at it: oMLX, Ollama, MLC LLM, vL
   With a backend already saved and no server found, `melo setup` opens the full
   backend menu instead.
 - The summary is printed once. The list then offers `Check again`,
-  `Show how to set one up`, `Enter an address` and `Quit`. `Show how to set one
+  `Show how to set one up`, `Enter an address`, `Use a hosted service` and `Quit`. `Show how to set one
   up` prints at most six plain numbered steps: download oMLX, optionally check
   its checksum, open it and move it to Applications, download the model, start
   the server, then choose `Enter an address` in melo. Automatic setup is coming
@@ -209,6 +209,8 @@ chat_model = "Qwen/Qwen3-8B"
 
 ### A cloud API
 
+In Settings, choose a service under **Hosted services** and paste the key once; see [Hosted models](hosted-models.md). To keep the key in an environment variable instead:
+
 ```toml
 chat_backend = "openai"
 embedding_backend = "none"
@@ -225,7 +227,7 @@ export OPENAI_API_KEY="<your key>"
 melo "What is 6*7?"
 ```
 
-For another vendor, use the table `[anthropic]`, `[gemini]` or `[nvidia]`; the wizard suggests the variables `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` and `NVIDIA_API_KEY`.
+For another vendor, use the table `[anthropic]`, `[gemini]` or `[nvidia]`; setup suggests the variables `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` and `NVIDIA_API_KEY`. The variable wins over a key saved in the keychain.
 
 ### Mix backends
 

@@ -18,6 +18,7 @@ The Chinese index is [zh-CN/README.md](zh-CN/README.md).
 - [Interactive terminal](guides/terminal.md): chats, commands, approvals and sessions.
 - [Configure localmelo](guides/configure.md) and
   [model servers](guides/model-servers.md): setup, backends and maintenance.
+- [Hosted models](guides/hosted-models.md): use OpenAI, Gemini, Anthropic, NVIDIA, DeepSeek or another hosted service.
 - [Set up an embedding model](guides/embedding.md): servers and connection checks.
 - [Tools and MCP](guides/tools-mcp.md): selection, configuration and approvals.
 - [Browsing](guides/browsing.md): let melo read web pages in Safari on a Mac.

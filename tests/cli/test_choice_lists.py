@@ -285,7 +285,8 @@ def test_a_failed_address_offers_try_again_start_without_saving_and_quit(
             [f"Server URL [{onboard._FIRST_RUN_URL}]: "],
         ),
         ("3", "http://x/v1", [f"Server URL [{onboard._FIRST_RUN_URL}]: "]),
-        ("4", None, []),
+        ("4", onboard._UseHosted(), []),  # no question is asked here
+        ("5", None, []),
         (ESC, None, []),
     ],
 )
@@ -304,7 +305,7 @@ def test_with_no_server_the_list_checks_again_takes_an_address_or_quits(
     text = seen(drawn)
     assert "No model server found. What now?" in text and "❯ 1. Check again" in text
     assert "2. Show how to set one up" in text and "3. Enter an address" in text
-    assert "4. Quit" in text
+    assert "4. Use a hosted service" in text and "5. Quit" in text
     assert "esc quit" in text
 
 

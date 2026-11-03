@@ -628,6 +628,12 @@ save carries the revision it read, so a change made elsewhere meanwhile asks you
   address, **Test connection** (it never shows a key) and **Change…**, the form that picks
   the server, its address and the model (**Discover models** lists them). The form is the
   one change saved with a button, **Save connection**; **Cancel** puts the saved one back.
+  Under **Hosted services** the list offers OpenAI, Google Gemini, Anthropic, NVIDIA,
+  DeepSeek and Other (OpenAI format): the form then has an **API key** field with
+  **Save key** (kept in your Mac's keychain, shown only as **Saved in the keychain**, with
+  **Replace** and **Remove**) and, for a service with a switch for it, **Let the model think
+  before it answers**. **Test connection** then lists the service's models and tries one
+  short chat with a tool. See [Hosted models](hosted-models.md).
 - **Memory**: **Remember across chats**, how Melo finds notes (**By words and meaning** or
   **By words only**; developer mode adds the other two ways, with the key
   `memory.retriever`), and **Open Memory** for the notes themselves.
@@ -822,7 +828,11 @@ retrying they show.
 A reply that is only the model's unfinished thinking never shows as the
 answer: it is a folded thinking item in the work box, with the line `The
 model's reply ended inside its thinking; asking it for its answer.`, and the
-model is asked once more. When the second reply has no answer either, the card's
+model is asked once more. When the service reported the model's thinking, melo then
+asks one last time with thinking off (where the service has that switch) and, if the
+reply is still empty, shows the last lines of the thinking as the answer, ending with
+`(from melo's thinking)`. When there is no thinking to use and the second reply has no
+answer either, the card's
 title is `melo did not finish an answer`, the hint `The model's reply held only
 its thinking. Try again, or rephrase the request.`, and the filled button
 **Try again**.

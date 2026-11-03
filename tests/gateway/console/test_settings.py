@@ -66,8 +66,12 @@ def test_get_settings_shape_when_file_missing(client: TestClient) -> None:
         assert set(body["sections"][key]) == {
             "api_key_env",
             "api_key_set",
+            "api_key",
+            "key",
             "chat_model",
             "base_url",
+            "thinking",
+            "preset",
         }
     assert body["choices"]["chat_backends"] == [
         {

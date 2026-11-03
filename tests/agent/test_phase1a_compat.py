@@ -560,7 +560,7 @@ def _failed_after_two_empty_replies() -> Scenario:
         query="Name a prime number.",
         replies=[
             _reply("", usage=_usage(80, 0)),
-            _reply("", thinking="Maybe 7, but I will not say it.", usage=_usage(95, 9)),
+            _reply("", usage=_usage(95, 9)),
         ],
     )
 

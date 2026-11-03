@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
 
+from localmelo.support import hosted
 from localmelo.support.backends.base import BaseBackend
 from localmelo.support.backends.openai_compat import build_openai_chat
 
@@ -29,19 +29,12 @@ class OpenAIBackend(BaseBackend):
     def display_name(self) -> str:
         return "OpenAI"
 
+    def label(self, cfg: Config, *, embedding: bool = False) -> str:
+        """The service this section's address names: DeepSeek, OpenAI or its host."""
+        return hosted.label_for("openai", cfg.openai)
+
     def validate(self, cfg: Config) -> list[str]:
-        errors: list[str] = []
-        if not cfg.openai.api_key_env:
-            errors.append(
-                "[openai] api_key_env is empty. "
-                "Set the environment variable name that holds your API key "
-                "(e.g. OPENAI_API_KEY)."
-            )
-        elif not os.environ.get(cfg.openai.api_key_env):
-            errors.append(
-                f"[openai] environment variable ${cfg.openai.api_key_env} "
-                "is not set. Export it before starting the gateway."
-            )
+        errors = hosted.key_errors("openai", cfg.openai, "OPENAI_API_KEY")
         if not cfg.openai.chat_model:
             errors.append(
                 "[openai] chat_model is empty. " "Specify the model name (e.g. gpt-4o)."
@@ -56,12 +49,14 @@ class OpenAIBackend(BaseBackend):
 
     def build_chat_provider(self, cfg: Config) -> BaseLLMProvider:
         base_url = cfg.openai.base_url or _DEFAULT_BASE_URL
-        api_key = os.environ.get(cfg.openai.api_key_env, "")
+        api_key = hosted.api_key(cfg.openai)
         return build_openai_chat(
             base_url=base_url,
             model=cfg.openai.chat_model,
             api_key=api_key,
-            extra_body=cfg.openai.extra_body,
+            extra_body=hosted.request_body("openai", cfg.openai),
+            thinking_off_body=hosted.retry_body("openai", cfg.openai),
+            **hosted.image_args("openai", cfg.openai),
             timeout=cfg.request_timeout_s,
             reasoning_field=getattr(cfg.openai, "reasoning_field", "") or None,
             requires_reasoning_replay=getattr(
