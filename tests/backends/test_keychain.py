@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from typing import Any
 from unittest import mock
 
 import pytest
@@ -141,7 +142,7 @@ def test_any_other_reference_is_refused(text: str) -> None:
 # -- Which key a section uses ------------------------------------------------
 
 
-def section(**fields: str) -> CloudVendorConfig:
+def section(**fields: Any) -> CloudVendorConfig:
     return CloudVendorConfig(chat_model="m", **fields)
 
 

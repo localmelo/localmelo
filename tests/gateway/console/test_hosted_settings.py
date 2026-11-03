@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 import pytest
@@ -31,7 +32,7 @@ def isolated_config(tmp_path: Path) -> Iterator[Path]:
         yield cfg_path
 
 
-def deepseek_cfg(**fields: str) -> Config:
+def deepseek_cfg(**fields: Any) -> Config:
     return Config(
         chat_backend="openai",
         embedding_backend="none",
