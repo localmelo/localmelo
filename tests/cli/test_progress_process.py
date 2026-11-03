@@ -222,12 +222,16 @@ def test_the_line_on_a_terminal_and_the_same_stdout_without_it(
     # Drawn, dim by default, with the step and the tests seen.
     assert drawn.stderr.startswith(ERASE + "\x1b[2mstarting · ")
     plain = [re.sub(r"\x1b\[[0-9]*m", "", draw) for draw in drawn.draws()]
-    assert any(re.fullmatch(r"step 2 · Verify · tests 2/3 · \d+s", d) for d in plain)
     assert any(
-        re.fullmatch(r"step 2 · Verify · Python 0:0\d · tests 2/3 · \d+s", d)
+        re.fullmatch(r"step 2 of 100 · Verify · tests 2/3 · \d+s", d) for d in plain
+    )
+    assert any(
+        re.fullmatch(r"step 2 of 100 · Verify · Python 0:0\d · tests 2/3 · \d+s", d)
         for d in plain
     )
-    assert any(re.fullmatch(r"step 4 · Finishing · tests 3/3 · \d+s", d) for d in plain)
+    assert any(
+        re.fullmatch(r"step 4 of 100 · Finishing · tests 3/3 · \d+s", d) for d in plain
+    )
     # Erased at the end, and never a newline.
     assert drawn.stderr.endswith(ERASE)
     assert "\n" not in drawn.stderr

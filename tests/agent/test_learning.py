@@ -150,8 +150,8 @@ async def test_a_completed_run_records_its_episode_and_version_1() -> None:
     assert options == {
         "attempt_policy": "reflect",
         "reflection_gate": "patient",
-        "max_steps": 30,
-        "steps_per_attempt": 10,
+        "max_steps": 100,
+        "steps_per_attempt": 50,
         "max_attempts": 5,
     }
 

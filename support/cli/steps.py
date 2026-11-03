@@ -2,9 +2,9 @@
 
 While a turn runs the bar shows where it is in a few cells: ``2/8`` with a
 plan's total, ``2/~8`` with the number of steps the task took before (an
-estimate, so marked), or ``step 2``. The steps themselves, one row per tool
-call with its status and time, open on request in :class:`StepsPicker`,
-the terminal's own list.
+estimate, so marked), or ``step 2 of 100`` with the run's step cap. The
+steps themselves, one row per tool call with its status and time, open on
+request in :class:`StepsPicker`, the terminal's own list.
 """
 
 from __future__ import annotations
@@ -41,12 +41,17 @@ class StepRow:
 
 
 def step_figure(
-    step: int, *, planned: int | None = None, learned: int | None = None
+    step: int,
+    *,
+    planned: int | None = None,
+    learned: int | None = None,
+    limit: int | None = None,
 ) -> str:
     """``2/8`` with a plan's total, ``2/~8`` with a learned one, else ``step 2``.
 
     A total the run has passed says nothing any more: past it, the figure is
-    the step alone. No step yet gives nothing.
+    the step alone. With the run's step cap (*limit*) the step alone reads
+    ``step 2 of 100``. No step yet gives nothing.
     """
     if step <= 0:
         return ""
@@ -54,7 +59,7 @@ def step_figure(
         return f"{step}/{planned}"
     if learned and step <= learned:
         return f"{step}/~{learned}"
-    return f"step {step}"
+    return f"step {step} of {limit}" if limit else f"step {step}"
 
 
 def learned_total(progress: Mapping[str, Any] | None) -> int | None:

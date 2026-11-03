@@ -70,6 +70,23 @@ def _no_env_retention(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_desktop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test reaches the desktop control helper or asks which app is in front.
+
+    The helper would read the person's real screen. A test of other apps'
+    windows builds a ``DesktopWatch`` over the fake helper and a scripted front
+    app itself.
+    """
+    from localmelo.support.browser import desktop
+
+    async def nobody_in_front() -> None:
+        return None
+
+    monkeypatch.setenv(desktop.HELPER_ENV, "")
+    monkeypatch.setattr(desktop, "front_app", nobody_in_front)
+
+
+@pytest.fixture(autouse=True)
 def _no_browser(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """No test opens a real browser, or takes the run for a person at a terminal.
 

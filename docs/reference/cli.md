@@ -444,8 +444,8 @@ accepts the options named in [Interactive UI](#interactive-ui).
 | `--captured-history on\|off` | `off` | Store a bounded, pattern-redacted captured result separately from the model preview; see [configuration](configuration.md#context-accounting). |
 | `--brief-items on\|off` | `off` | Experimental. With `--brief`, name the brief's numbered items that no edit has touched yet in each reflection request and two steps before the last attempt ends; see [Run a worker task](#brief-items). Overrides `[agent] brief_items`; inert without `--brief`. |
 | `--context-window N`, `--output-reserve N`, `--safety-margin N` | not set | Opt in to per-request context accounting; all three must resolve to positive integers and the window must exceed the other two combined. |
-| `--max-steps N` | `30` | The most planning steps the whole run may take. |
-| `--attempt-policy reflect\|none` | `reflect` | `reflect`: attempts with a reflection after each. `none`: one attempt, no reflection. |
+| `--max-steps N` | `100` | The most planning steps the whole run may take (also `-s N`). |
+| `--attempt-policy reflect\|none` | `reflect` | `reflect`: attempts of `agent.steps_per_attempt` steps (50) with a reflection after each. `none`: one attempt of `--max-steps` steps, no reflection. `[agent] reflection = false` (**Reflect when stuck after many steps** in Settings, or `-X agent.reflection=off` for one run) gives `none` to every run that reads the config; this option keeps its say over it. |
 | `--reflection-gate flags\|utility\|patient` | `patient` | After a reflection, start the next attempt when it chooses `continue` and its three checks hold (`flags`), or also require its utility score to reach 0.1 (`utility`, the behavior before this option), or as `flags`, but once per run also when the next step is not novel (`patient`, the default). |
 | `--tool-exposure retrieve\|all` | `retrieve` | Which tools each step offers the model. |
 | `--builtins all\|none\|NAME,...` | the mode's set | The built-in tools to register. Without the flag, a direct run gets `file_read`, `file_write` and `python_exec`; `all` adds `shell_exec` and `list_files` (the interactive UI keeps all five by default). |
@@ -484,8 +484,9 @@ accepts the options named in [Interactive UI](#interactive-ui).
 - The three context flags override the matching `[agent]` keys independently, in direct mode and the
   interactive UI. Over-budget requests are fitted on a copy, or the run ends `context_budget_exceeded`;
   the output reserve is not a generation cap. See [context accounting](configuration.md#context-accounting).
-- `--max-steps`: at least 1. With `reflect`, a run has attempts of up to 10
-  steps, at most 5 attempts, and at most `--max-steps` steps in total. See
+- `--max-steps` (`-s`, default 100): at least 1. With `reflect`, a run has attempts of up to 50
+  steps (`-X agent.steps_per_attempt=N`), at most 5 attempts, and at most `--max-steps` steps in
+  total; `-X agent.reflection=off` (or `--attempt-policy none`) runs straight to the total. See
   [How localmelo works](../concepts/how-it-works.md#the-run-loop). To limit every
   model request instead (planning, reflection and the rest), set `-X agent.max_calls=N`
   (a developer setting, a whole number of 2 or more, no option of its own): the run
@@ -1091,7 +1092,7 @@ every second, and erased before the result and the status line are
 printed, so it never remains in the scrollback:
 
 ```text
-step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
+step 4 of 100 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
 ```
 
 - **When.** With `--progress auto`, the default, only when stderr is a
@@ -1102,7 +1103,7 @@ step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
   option. Stdout is the same either way. While `melo` runs in the
   background (`melo "<task>" &`, or Ctrl+Z then `bg`), the line is not
   drawn, so it never covers the shell's prompt; it comes back with `fg`.
-- **First runs: facts.** `step 4` counts planning steps; `attempt 2` appears
+- **First runs: facts.** `step 4 of 100` counts planning steps against the most the run may take; `attempt 2` appears
   from the second attempt on. The phase is read from the tool calls so far:
   `Explore` (before the first edit), `Write` (editing), `Verify` (running
   tests) or `Finishing` (after a test run passed), with `(cycle n)` from
@@ -1116,15 +1117,15 @@ step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
   has), the line adds what those runs did, never a percent:
 
   ```text
-  step 4 · Write (cycle 1) · 1m03s · last time 6 steps, 2m10s: Read test_parser.py ✓ · Edit parser.py + pytest (×2) ◐ · git commit
-  step 4 · Write (cycle 1) · 1m03s · past 5-8 steps, 2-3 min · last time: Read test_parser.py ✓ · Edit parser.py ◐ · git commit
+  step 4 of 100 · Write (cycle 1) · 1m03s · last time 6 steps, 2m10s: Read test_parser.py ✓ · Edit parser.py + pytest (×2) ◐ · git commit
+  step 4 of 100 · Write (cycle 1) · 1m03s · past 5-8 steps, 2-3 min · last time: Read test_parser.py ✓ · Edit parser.py ◐ · git commit
   ```
 
   The steps are those of past runs: `✓` done, `◐` the current one, `–`
   skipped, no mark for one not reached yet (this run need not do them all);
   `(×2)` marks a pattern that repeated. A percent bar is not shown in this
-  release. The step count is never shown against `--max-steps`, which is a
-  limit, not a plan.
+  release. The step is shown against `--max-steps` (`step 4 of 100`), which is a
+  limit, not a plan: most runs end well before it.
 
   A similar task's runs are a hint, so the line never says `last time` for
   them; they follow `like <routine title>:`, naming the task they are from
@@ -1132,7 +1133,7 @@ step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
   `its steps:`:
 
   ```text
-  step 4 · Write (cycle 1) · 1m03s · like Fix the parser tests: 6 steps, 2m10s: Read test_parser.py ✓ · Edit parser.py ◐ · git commit
+  step 4 of 100 · Write (cycle 1) · 1m03s · like Fix the parser tests: 6 steps, 2m10s: Read test_parser.py ✓ · Edit parser.py ◐ · git commit
   ```
 - **Past runs need persistence.** Each `melo` is a new process, and
   procedural memory stays in RAM unless memory is kept between runs. Run

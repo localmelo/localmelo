@@ -421,7 +421,7 @@ async def test_allow_once_runs_only_that_step(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_earlier_typed_words_count_after_a_reload(tmp_path: Path) -> None:
     tool = ActsOnSite()
-    llm = FakeModel([_act("news.example"), _answer("clicked")])
+    llm = FakeModel([_act("news.example"), _answer("clicked")], [verdict()])
     agent = _acting_agent(llm, tmp_path / "ws", tool)
     agent.load_conversation([])  # the chat opened again: the window starts over
     card = Card()
@@ -432,8 +432,12 @@ async def test_earlier_typed_words_count_after_a_reload(tmp_path: Path) -> None:
         approval=ChatPolicy(card, "auto"),
     )
 
-    # The earlier message names the site: the click runs, unreviewed and unasked.
-    assert tool.answers[0].allow and (card.asked, llm.review_requests) == ([], [])
+    # The earlier message names the site: the review is told so, and the click
+    # runs unasked (a click is judged by what it is on, #465).
+    assert tool.answers[0].allow and card.asked == []
+    [request] = llm.review_requests
+    assert "check me in on news.example" in request[1].content
+    assert "The user's words name this site" in request[1].content
     assert agent._reviewer.requests == ("check me in on news.example", "I signed in")
 
 

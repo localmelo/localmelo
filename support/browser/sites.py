@@ -146,23 +146,27 @@ async def require_site(
         raise BrowserError(_refusal(origin, via, decision))
 
 
-async def require_act(origin: str, what: str) -> None:
+async def require_act(origin: str, what: str, on: str = "") -> None:
     """Ask about clicking or choosing on *origin*'s page; :class:`BrowserError` if refused.
 
     The question has no ``origin`` argument on purpose: a refusal of a click
     must not refuse the site for reading too (the earlier-blocks rule keys on
-    it). *what* is ``click`` or ``choose an option``. One answer for the site
-    covers the chat's later clicks and choices; typing asks apart
-    (:func:`require_type`).
+    it). *what* is ``click`` or ``choose an option``; *on* is what it is done
+    on, in words (``a button "Check in"``), so auto mode's review judges the
+    step by its target (#465). One answer for the site covers the chat's later
+    clicks and choices; typing asks apart (:func:`require_type`).
     """
     ask = TOOL_ASK.get()
     if ask is None:
         return
     host = host_of(origin)
+    arguments = {"site": host, "access": "act", "how": what}
+    if on:
+        arguments["on"] = on
     decision = await ask(
         ACT_PREFIX + origin,
-        {"site": host, "access": "act", "how": what},
-        f"{what} on {host} in Safari",
+        arguments,
+        f"{what} {on} on {host} in Safari" if on else f"{what} on {host} in Safari",
     )
     if not decision.allow:
         raise BrowserError(
@@ -170,23 +174,29 @@ async def require_act(origin: str, what: str) -> None:
         )
 
 
-async def require_type(origin: str, text: str) -> None:
+async def require_type(origin: str, text: str, on: str = "") -> None:
     """Ask about typing *text* on *origin*'s page; :class:`BrowserError` if refused.
 
     Asked for every text, whatever was allowed before, and never kept for the
     chat. The question carries all of the text, uncut (the caller keeps it to
     :data:`~localmelo.support.browser.driver.MAX_TYPED_CHARS` characters it can
     show): it is the model's own words, a person or a reviewer must see what
-    goes into the page. Like a click's question it has no ``origin`` argument.
+    goes into the page. *on* is the box in words (``a textbox "Comment"``),
+    so the review sees where it goes (#465). Like a click's question it has
+    no ``origin`` argument.
     """
     ask = TOOL_ASK.get()
     if ask is None:
         return
     host = host_of(origin)
+    arguments = {"site": host, "access": "type", "how": "type", "text": text}
+    if on:
+        arguments["on"] = on
+    into = f" into {on}" if on else ""
     decision = await ask(
         TYPE_PREFIX + origin,
-        {"site": host, "access": "type", "how": "type", "text": text},
-        f"type {len(text)} character(s) on {host} in Safari",
+        arguments,
+        f"type {len(text)} character(s){into} on {host} in Safari",
     )
     if not decision.allow:
         raise BrowserError(f"melo did not type on {host}. " + denial_text(decision))
@@ -233,22 +243,29 @@ async def require_submit(
         )
 
 
-async def require_point(origin: str, what: str, how: str = "click") -> None:
+async def require_point(
+    origin: str, what: str, how: str = "click", *, known: bool = True
+) -> None:
     """Ask about a click (or typing, *how*) on *origin*'s page that lands on *what*; :class:`BrowserError` if refused.
 
     For a point that lands on a password, code or card field, on a control that
     agrees to terms, consent or a sign-in with another account, or inside a box
-    from another site that melo cannot check, and for a control listed inside
-    such a box. Asked every time and never kept for the chat: the person sees
-    what it is on.
+    from another site whose target melo cannot tell (*known* false: the
+    question says ``target: unknown``, and auto mode asks the person, #465).
+    Asked every time and never kept for the chat: the person sees what it is
+    on. A box melo knows by a name (its title, a control listed in it) is
+    clicked on the click's own question instead (:func:`require_act`).
     """
     ask = TOOL_ASK.get()
     if ask is None:
         return
     host = host_of(origin)
+    arguments = {"site": host, "access": "point", "how": how, "on": what}
+    if not known:
+        arguments["target"] = "unknown"
     decision = await ask(
         POINT_PREFIX + origin,
-        {"site": host, "access": "point", "how": how, "on": what},
+        arguments,
         f"{how} {what} on {host} in Safari",
     )
     if not decision.allow:

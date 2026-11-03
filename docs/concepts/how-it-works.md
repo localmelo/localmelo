@@ -9,7 +9,7 @@ task
  └─ step: build a request ─► model reply ─┬─ text, no tool call ─► the answer (completed)
         ▲                                 └─ tool calls ─► checks ─► run ─► results
         └───────────────── next step ◄─────────────────────────────────────┘
-an attempt that runs out of steps, or repeats itself ─► reflection ─► done, continue or stop
+an attempt that runs out of steps (50), or repeats itself ─► reflection ─► done, continue or stop
 ```
 
 A run works on one task in steps. Each step:
@@ -22,9 +22,9 @@ A reply with tool calls runs them, in order, through the checks, and their resul
 
 The run has a budget:
 
-- At most 30 steps in total (`--steps`).
-- With the default `reflect` policy, steps come in attempts of up to 10 steps, and a run has at most 5 attempts.
-- With `--attempt-policy none`, the run is one attempt of up to `--steps` steps; the same tool calls, or the same errors, three steps in a row end it as `stuck`.
+- At most 100 steps in total (`--steps`).
+- With reflection on, the default, steps come in attempts of up to 50 steps (`-X agent.steps_per_attempt=N`), and a run has at most 5 attempts. A task that needs 20 or 40 steps is never interrupted: the first reflection comes only after 50 steps without an answer.
+- With reflection off (`[agent] reflection = false`, `-X agent.reflection=off` or `--attempt-policy none`), the run is one attempt of up to `--steps` steps and never reflects; the same tool calls, or the same errors, three steps in a row end it as `stuck`.
 
 Three kinds of reply are not answers:
 
@@ -45,7 +45,7 @@ With `--reasoning compress`, each reply is compressed into a short note before t
 
 ## Reflection
 
-With the default `reflect` policy, an attempt that runs out of steps, or repeats itself three steps in a row, is followed by a reflection: one request without tools that asks the model to review the attempt and reply with a JSON object (a summary, what failed, what helped, and one action).
+Reflection is an option, on by default (**Reflect when stuck after many steps** in Settings, `[agent] reflection`; see [Evaluations](../project/evaluations.md#long-attempts-and-reflection-as-an-option) for why). With it on, an attempt that runs out of its 50 steps, or repeats itself three steps in a row, is followed by a reflection: one request without tools that asks the model to review the attempt and reply with a JSON object (a summary, what failed, what helped, and one action). A run that is not done after 50 steps reflects once and goes on, up to 100 steps. A reflection costs one more model request and about 170 output tokens. With it off, nothing reflects and the run goes straight to its 100 steps.
 
 | Action | What happens |
 |---|---|

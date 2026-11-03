@@ -838,7 +838,7 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
   switch (type) {
     case "run.started": {
       turn.runId = String(frame.run_id ?? "");
-      turn.maxSteps = int(data.max_steps) ?? 30;
+      turn.maxSteps = int(data.max_steps) ?? 100;
       turn.approvalsOn = data.approval !== false;
       if (data.approval === false) {
         turn.items.unshift({kind: "notice", noticeKind: "yolo", step: 0, message: t("turns.yolo")});
@@ -1276,21 +1276,24 @@ export function activity(turn, {held = "", pending = 0, cancelling = false, now 
 /**
  * The live row's facts after the elapsed time: the `run.progress` wording.
  *
- * `step 4 · attempt 2 · Verify (cycle 1) · tests 3/4`, never `step n/max`
- * once `run.progress` has arrived; before the first one, the step of the
- * turn's own events (`step 2/30`).
+ * `step 4 of 100 · attempt 2 · Verify (cycle 1) · tests 3/4` once
+ * `run.progress` has arrived (the cap is the most the run may take, never an
+ * estimate of its length); before the first one, the step of the turn's own
+ * events (`step 2 of 100`).
  */
 export function liveFacts(turn) {
   const parts = [];
   const progress = isObject(turn.progress) ? turn.progress : null;
   if (progress === null) {
-    if (turn.step > 0) parts.push(t("turns.facts.stepOf", {step: turn.step, max: turn.maxSteps || 30}));
+    if (turn.step > 0) parts.push(t("turns.facts.stepOf", {step: turn.step, max: turn.maxSteps || 100}));
     if (turn.attempt >= 2) parts.push(t("turns.facts.attempt", {n: turn.attempt}));
     return parts;
   }
   const step = int(progress.step) ?? 0;
   const attempt = int(progress.attempt) ?? 0;
-  if (step > 0) parts.push(t("turns.facts.step", {step}));
+  // The run's step cap (`limits.max_steps`, else the turn's own): `step 4 of 100`, the most it may take.
+  const max = int(objectOf(progress.limits).max_steps) ?? (turn.maxSteps > 0 ? turn.maxSteps : null);
+  if (step > 0) parts.push(max > 0 ? t("turns.facts.stepOf", {step, max}) : t("turns.facts.step", {step}));
   if (attempt >= 2) parts.push(t("turns.facts.attempt", {n: attempt}));
   if (progress.phase) {
     const cycle = int(progress.cycle) ?? 0;

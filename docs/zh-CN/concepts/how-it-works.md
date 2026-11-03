@@ -13,7 +13,7 @@ task
  └─ step: build a request ─► model reply ─┬─ text, no tool call ─► the answer (completed)
         ▲                                 └─ tool calls ─► checks ─► run ─► results
         └───────────────── next step ◄─────────────────────────────────────┘
-an attempt that runs out of steps, or repeats itself ─► reflection ─► done, continue or stop
+an attempt that runs out of steps (50), or repeats itself ─► reflection ─► done, continue or stop
 ```
 
 一次运行分步处理一项任务。每一步：
@@ -26,9 +26,9 @@ an attempt that runs out of steps, or repeats itself ─► reflection ─► do
 
 运行有预算：
 
-- 总共最多 30 步（`--steps`）。
-- 默认 `reflect` 策略下，步骤分为多次尝试，每次最多 10 步，一次运行最多 5 次尝试。
-- 使用 `--attempt-policy none` 时，一次运行只有一次尝试，最多 `--steps` 步；相同的工具调用或相同的错误连续三步重复，运行以 `stuck` 结束。
+- 总共最多 100 步（`--steps`）。
+- 反思开启时（默认），步骤分为多次尝试，每次最多 50 步（`-X agent.steps_per_attempt=N`），一次运行最多 5 次尝试。需要 20 或 40 步的任务不会被打断：第一次反思要等到 50 步仍没有答案时才出现。
+- 反思关闭时（`[agent] reflection = false`、`-X agent.reflection=off` 或 `--attempt-policy none`），一次运行只有一次尝试，最多 `--steps` 步，从不反思；相同的工具调用或相同的错误连续三步重复，运行以 `stuck` 结束。
 
 有三种回复不算回答：
 
@@ -51,7 +51,7 @@ an attempt that runs out of steps, or repeats itself ─► reflection ─► do
 
 ## 反思
 
-默认 `reflect` 策略下，一次尝试用完步骤，或连续三步重复自身后，会进行反思：这是一次不带工具的请求，要求模型回顾本次尝试并回复一个 JSON 对象（摘要、失败之处、有帮助的内容和一个行动）。
+反思是一个选项，默认开启（设置中的**多步仍没做完时先反思**，即 `[agent] reflection`；原因见[评测](../project/evaluations.md#long-attempts-and-reflection-as-an-option)）。开启时，一次尝试用完它的 50 步，或连续三步重复自身后，会进行反思：这是一次不带工具的请求，要求模型回顾本次尝试并回复一个 JSON 对象（摘要、失败之处、有帮助的内容和一个行动）。做了 50 步仍没完成的运行会反思一次，然后继续，最多到 100 步。一次反思多花一个模型请求，约 170 个输出 token。关闭时不会反思，运行直接做到 100 步。
 
 | 行动 | 结果 |
 |---|---|

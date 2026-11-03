@@ -577,6 +577,26 @@ test('Web search: hidden for a gateway that does not report it, else a switch th
   assert.equal(h.element('s-web-search').checked, false);
 });
 
+test("Other apps' windows: shown while browsing is on, saves app_windows, and says when the helper is missing", async () => {
+  const off = harness({'GET /settings': full({app_windows: true, desktop_helper: true, browser: false})});
+  await off.open('chats');
+  assert.equal(off.element('s-app-windows-row').hidden, true, 'hidden while browsing is off');
+  let revision = 1;
+  const h = harness({
+    'GET /settings': full({app_windows: true, desktop_helper: false, browser: true}),
+    'PUT /settings': (body) => full({revision: `rev${++revision}`, app_windows: body.app_windows ?? true, desktop_helper: false, browser: true}),
+  });
+  await h.open('chats');
+  assert.equal(h.element('s-app-windows-row').hidden, false);
+  assert.equal(h.element('s-app-windows').checked, true, 'on by default');
+  assert.equal(h.element('s-app-windows-helper').hidden, false, 'the helper is missing, so the line says so');
+  h.element('s-app-windows').checked = false;
+  await h.element('s-app-windows').emit('change');
+  await flush();
+  assert.equal(h.puts().at(-1).options.body.app_windows, false);
+  assert.equal(h.element('settings-saved-text').textContent, "Saved: melo no longer looks at other apps' windows.");
+});
+
 test('Web search says that the words leave the computer, in English and Simplified Chinese', async () => {
   const {useLanguage, t} = await import('../../support/gateway/static/i18n.mjs');
   assert.match(t('settings.webSearch.hint'), /leave this computer/);
@@ -619,6 +639,44 @@ test('Follow up on tasks: a developer switch that saves follow_up, hidden in def
   const older = harness({'GET /settings': full({mode: 'developer'})}, new Map(), () => true);
   await older.open('chats');
   assert.equal(older.element('s-follow-up-row').hidden, true, 'a gateway that does not report it');
+});
+
+test('Reflect when stuck after many steps: a plain switch that saves reflection, on until turned off', async () => {
+  const older = harness({'GET /settings': full()});
+  await older.open('chats');
+  assert.equal(older.element('s-reflection-row').hidden, true, 'a gateway that does not report it');
+  let revision = 1;
+  const h = harness({
+    'GET /settings': full({reflection: true}),
+    'PUT /settings': (body) => full({revision: `rev${++revision}`, reflection: body.reflection ?? true}),
+  });
+  await h.open('chats');
+  assert.equal(h.element('s-reflection-row').hidden, false, 'a plain switch in default mode');
+  assert.equal(h.element('s-reflection').checked, true, 'on until the person turns it off');
+  h.element('s-reflection').checked = false;
+  await h.element('s-reflection').emit('change');
+  await flush();
+  assert.deepEqual(h.puts().at(-1).options.body, {chat_backend: 'mlc', embedding_backend: 'none', workspace: '~/ws',
+    sections: {}, revision: 'rev1', reflection: false});
+  assert.equal(h.element('settings-saved-text').textContent, 'Saved: Reflecting after many steps is off.');
+  assert.equal(h.element('s-reflection').checked, false);
+  await h.element('settings-undo').emit('click');
+  await flush();
+  assert.equal(h.puts().at(-1).options.body.reflection, true);
+  assert.equal(h.element('settings-saved-text').textContent, 'Undone: Reflecting after many steps is on.');
+  assert.equal(h.element('s-reflection').checked, true);
+});
+
+test('Reflect when stuck after many steps says what it costs, in English and Simplified Chinese', async () => {
+  const {useLanguage, t} = await import('../../support/gateway/static/i18n.mjs');
+  assert.equal(t('settings.reflection.title'), 'Reflect when stuck after many steps');
+  assert.match(t('settings.reflection.hint'), /50 steps.*one more model request.*100 steps/);
+  try {
+    await useLanguage('zh-Hans');
+    assert.match(t('settings.reflection.hint'), /50 步.*多花一次模型请求.*100 步/);
+  } finally {
+    await useLanguage('en');
+  }
 });
 
 test('a change made elsewhere meanwhile is a conflict: the switch goes back and Reload is offered', async () => {

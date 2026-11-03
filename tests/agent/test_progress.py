@@ -212,7 +212,7 @@ async def test_a_first_run_shows_facts_only() -> None:
         "step": 0,
         "attempt": 0,
         "limits": {
-            "max_steps": 30,
+            "max_steps": 100,
             "steps_per_attempt": 10,
             "max_attempts": 2,
             "timeout_s": 120.0,
@@ -245,7 +245,7 @@ async def test_one_attempt_has_no_attempt_limits() -> None:
     agent = make_agent(ScriptedLLM([answer("done")]), attempt_policy="none")
     await agent.run_task(QUERY, on_event=recorder, progress=True)
     assert progress(recorder)[0]["limits"] == {
-        "max_steps": 30,
+        "max_steps": 100,
         "steps_per_attempt": None,
         "max_attempts": None,
         "timeout_s": None,

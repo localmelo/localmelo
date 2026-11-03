@@ -138,7 +138,7 @@ def test_default_help_says_what_the_everyday_commands_do(
     )
     # The seven words are not all listed: the rest are in `melo -h all`.
     assert "worker" not in text and "import" not in text
-    assert re.search(r"-s, --steps N +most model calls per task \(default 30\)", text)
+    assert re.search(r"-s, --steps N +most model calls per task \(default 100\)", text)
 
 
 def test_every_everyday_command_is_a_command_the_full_help_explains() -> None:

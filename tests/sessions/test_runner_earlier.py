@@ -157,6 +157,33 @@ class TestEarlierTurns:
         finally:
             await chat.close()
 
+    async def test_a_reloaded_chat_still_gives_its_review_the_first_task(
+        self, store: SessionStore, tmp_path: Path
+    ) -> None:
+        """The chat's first turn of the person's goes along, so a goal review keeps it (#465)."""
+        chat = Chat(store, None, tmp_path / "w")
+        try:
+            # Neither a task's question nor an undone turn is the chat's first task.
+            chat.model.plans.append(_reply("The task may go on."))
+            await chat.runner.start_turn("[task t1] may I go on?", origin="ask_owner")
+            await chat.runner.wait()
+            await chat.say("never mind", "OK.")
+            await chat.runner.undo()
+            await chat.say("check in on the forum for me", "Sign in first.")
+            assert "chat_first" not in chat.kwargs[-1]  # nothing came before it
+            for n in range(4):
+                await chat.say(f"step {n}", f"done {n}")
+            chat.agent.load_conversation(
+                []
+            )  # a reload: the review's window starts over
+            await chat.say("and now?", "Checked in.")
+            assert chat.kwargs[-1]["chat_first"] == "check in on the forum for me"
+            reviewer = chat.agent._reviewer
+            assert reviewer.earlier[0] == "check in on the forum for me"
+            assert reviewer.requests == ("step 2", "step 3", "and now?")
+        finally:
+            await chat.close()
+
     async def test_a_store_that_fails_leaves_the_run_without_them(
         self, store: SessionStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -42,7 +42,45 @@ def test_named_steps_and_earlier_requests_count_in_at_most_200_more_characters()
     # A box or a button the words name is the action's target: asked for.
     assert "a box or button on a page" in asked
     assert 'such as typing in the box they named, is "routine"' in asked
-    assert len(SYSTEM_PROMPT) - PROMPT_BEFORE_NAMED_STEPS <= 200
+    assert PROMPT_BEFORE_GOAL - PROMPT_BEFORE_NAMED_STEPS <= 200
+
+
+# The prompt's length before the goal decides (#465 follow-up), and how much
+# that change may add: the bench reads every review with it.
+PROMPT_BEFORE_GOAL = 3011
+GOAL_ADDS_AT_MOST = 800
+
+
+def test_the_goal_of_the_chat_decides_and_the_high_impact_kinds_are_named() -> None:
+    asked = SYSTEM_PROMPT[SYSTEM_PROMPT.index('The verdict is "ask"') :]
+    asked = asked[: asked.index("\n\nThe category")]
+    # Off the goal, not "not named", is what stops a plain step.
+    assert "is off the goal: neither asked for nor plainly needed" in asked
+    assert "did not ask for" not in asked
+    # What a task on a site plainly needs is routine, named or not.
+    assert 'a step the task plainly needs is "routine"' in asked
+    for step in (
+        "opening it",
+        "signing in as the user described",
+        "clicking a sign-in or quick-login button uses no secret",
+        "picking options",
+        "filling in and sending the task's own form",
+    ):
+        assert step in asked, step
+    # A secret is a value; paying and an account's settings are kinds of their own.
+    assert "reads, types or sends a secret (a password or one-time code" in asked
+    assert 'spends money (a purchase, payment, subscription or transfer): "money"' in (
+        asked
+    )
+    assert "sign-in or security settings" in asked and '"account"' in asked
+    assert "message to other people beyond the form the task is about" in asked
+    assert '"credentials" | "money" | "account" | "system"' in SYSTEM_PROMPT
+    # The goal is all the requests; recalled notes only where words point to them.
+    assert "The goal is what all their requests want done" in SYSTEM_PROMPT
+    assert 'counts only where their words point to it ("do it the way I told you")' in (
+        SYSTEM_PROMPT
+    )
+    assert len(SYSTEM_PROMPT) - PROMPT_BEFORE_GOAL <= GOAL_ADDS_AT_MOST
 
 
 def test_the_prompt_names_app_control_as_the_allow_list_does() -> None:

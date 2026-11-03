@@ -15,6 +15,9 @@ melo sends to answer from a tiny set of pages. ``screenshot`` answers as the rea
 - ``return_style``: a script runs only with a leading ``return``
 - ``alt_names``: other argument names (``address``, ``javascript``, ``handle``)
 - ``slow_load``: ``document.readyState`` says ``loading`` twice first
+- ``no_body``: the page has no ``document.body`` for its first two looks (a bot
+  check between two documents): a script that reads ``document.body.innerText``
+  then fails as Safari's does, unless it checks for the body first
 - ``focus_secret``: a password field has focus
 - ``inline_image``: ``screenshot`` answers with an image part instead of a file
 - ``decoy``: ``screenshot`` ignores ``savePath`` and names the file in
@@ -205,6 +208,7 @@ typed: dict[str, str] = {}
 current = 0
 polls = 0
 moved = False
+body_looks = 0
 STYLE_RETURN = MODE == "return_style"
 redraws: dict[str, int] = {}
 looks: dict[str, dict[str, Any]] = {}
@@ -487,7 +491,7 @@ def content(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def run_script(source: str) -> Any:
-    global polls, moved
+    global polls, moved, body_looks
     if STYLE_RETURN and not source.startswith("return "):
         raise SyntaxError("Unexpected token")
     source = source.removeprefix("return ")
@@ -576,6 +580,15 @@ def run_script(source: str) -> Any:
         return True
     if "activeElement" in source:
         return MODE == "focus_secret"
+    if MODE == "no_body" and "document.body.innerText" in source:
+        body_looks += 1
+        if body_looks <= 2:
+            if "!!document.body &&" not in source:
+                raise TypeError(
+                    "A JavaScript exception occured: null is not an object "
+                    "(evaluating 'document.body.innerText')"
+                )
+            return False
     if "indexOf" in source:
         needle = json.loads(source.split("indexOf(", 1)[1].split(")", 1)[0])
         found = needle in page_now().get("text", "")
@@ -645,6 +658,8 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
             result = run_script(str(script))
         except SyntaxError as exc:
             return text(f"SyntaxError: {exc}", error=True)
+        except TypeError as exc:
+            return text(f"evaluateJavaScriptFunction: {exc}.", error=True)
         return text(result if isinstance(result, str) else json.dumps(result))
     if name == "page_interactions":
         return interact(args)

@@ -399,7 +399,9 @@ test('a run that ended on a model-server error leaves its retry notices out of t
 test('the live row words the run as the terminal does', () => {
   const {turn, push} = fullTurn();
   push('run.progress', {level: 1, state: 'running', step: 4, attempt: 2, phase: 'Verify', cycle: 1, tests: {passed: 3, failed: 1, total: 4}, items: null, past: null, basis: {match: 'new'}});
-  assert.deepEqual(liveFacts(turn), ['step 4', 'attempt 2', 'Verify (cycle 1)', 'tests 3/4']);
+  assert.deepEqual(liveFacts(turn), ['step 4 of 30', 'attempt 2', 'Verify (cycle 1)', 'tests 3/4'], 'the turn\'s own cap');
+  push('run.progress', {level: 1, state: 'running', step: 4, attempt: 2, limits: {max_steps: 100, steps_per_attempt: 50, max_attempts: 5, timeout_s: null}, phase: 'Verify', cycle: 1, tests: {passed: 3, failed: 1, total: 4}, items: null, past: null, basis: {match: 'new'}});
+  assert.deepEqual(liveFacts(turn), ['step 4 of 100', 'attempt 2', 'Verify (cycle 1)', 'tests 3/4'], 'the run\'s cap, as run.progress says it');
   assert.equal(activity(turn, {now: 200}), 'Thinking');
   push('reflection.started', {attempt: 1, failure_type: 'stuck'});
   assert.equal(activity(turn, {now: 200}), 'Reflecting');
@@ -426,7 +428,7 @@ test('a reflection line reads as render.py writes it', () => {
 test('before the first run.progress the step is the turn\'s own', () => {
   const {turn, push} = fullTurn();
   push('step.started', {step: 2, attempt: 3});
-  assert.deepEqual(liveFacts(turn), ['step 2/30', 'attempt 3']);
+  assert.deepEqual(liveFacts(turn), ['step 2 of 30', 'attempt 3']);
 });
 
 test('the run end fills the answer and flushes the calls that never started', () => {
@@ -1225,6 +1227,7 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
     ['browser-act:https://example.com', {site: 'example.com', access: 'act'}, null, 'Let melo click and choose on example.com?', 'browser · acts on the page'],
     ['browser-type:https://example.com', {site: 'example.com', access: 'type', how: 'type', text: 'hi'}, null, 'Let melo type on example.com?', 'browser · types text'],
     ['browser-submit:https://example.com', {site: 'example.com', access: 'submit', to: 'https://other.org/post', how: 'click'}, null, 'Let melo send a form from example.com?', 'browser · sends a form'],
+    ['desktop-act:Chat', {app: 'Chat', access: 'desktop-act', how: 'press', on: '"Allow"', window: 'Sign in', button: 'Allow'}, null, 'Let melo press a button in Chat?', 'another app · presses a button'],
   ];
   for (const [tool, args, target, title, caption] of asks) {
     h.context.request = {request_id: `ask-${tool}-${title}`, tool_name: tool, arguments: args, workspace_label: '~/w', target};
@@ -1251,6 +1254,18 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
   const sending = findNode(h.run('approvalCard(request)'), (node) => node.className === 'approval-content');
   assert.equal(sending.textContent, 'https://other.org/post');
   assert.equal(sending.attributes['aria-label'], 'Where the form goes');
+});
+
+test("a press in another app's window says what is pressed and is asked every time", async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const focuses = (card) => findNodes(card, (node) => 'approvalFocus' in node.dataset).map((node) => node.dataset.approvalFocus);
+  h.context.request = {request_id: 'press', tool_name: 'desktop-act:Chat',
+    arguments: {app: 'Chat', access: 'desktop-act', how: 'press', on: '"Allow"', window: 'Sign in', button: 'Allow'}, workspace_label: '~/w'};
+  const card = h.run('approvalCard(request)');
+  assert.match(findNode(card, (node) => node.className === 'approval-content').textContent, /press "Allow" in Chat's window “Sign in”/);
+  assert.match(findNode(card, (node) => node.className === 'approval-warning').textContent, /asks every time/);
+  assert.deepEqual(focuses(card).filter((name) => name !== 'reason'), ['once', 'deny'], 'no "allow for this chat" on a press');
 });
 
 test('a form send and typing show what goes, say when the page decides, and offer no answer that is kept', async () => {

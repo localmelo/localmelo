@@ -33,6 +33,27 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   a turn takes `images` and `attachments`; new event `turn.note` and `images` in `turn.started`; new errors
   `picture_gone`, `model_text_only`, `chat_answering`, `not_your_turn`, `picture_scale`. The terminal keeps its own queue and
   text-only `/attach`.
+- Windows from other apps (#280). A page melo acts on can make another app open a window, such as a chat
+  app's sign-in window that asks you to authorize; the browser never shows it. With the desktop control
+  helper (a separate app that holds the Mac's Accessibility and Screen Recording permissions, so melo needs
+  neither), melo lists the windows on the screen before and after each click, typing, choice and point, and
+  while `browser_wait` waits. A window of another app that appeared is named in that step's answer, under
+  *what changed*, with its title and its buttons, and `browser_wait` ends early. Two tools come with the
+  helper: `window_read` (the window's text and buttons, and a picture of only that window, as a JPEG within
+  1280 pixels and 256 KB) and `window_press` (a button by its name through accessibility, or, when that
+  does not go through, a point of the window's picture, marked on the picture that comes back). A press is a
+  question of its own every time (`desktop-act:<app>`): a card in Ask mode, and in Auto mode reviewed against
+  the chat's goal like a browser act, so the press that authorizes the sign-in you asked for runs with no
+  card, while an off-goal or high-impact press asks. With Accessibility alone the helper reads text and
+  buttons and presses by name, with no picture. Without the helper or its Accessibility permission melo
+  still notices that another app came to the front and says which one, so you can answer it there. The
+  browsing guide's setup list says where to get the helper. Only windows that appeared after
+  melo's own step are named, read or pressed (a panel of an app that only came to the front is read only
+  against a listing of that app's windows from before the step; otherwise it is named, never read), and melo
+  never types into other apps. Settings → Chats and
+  folders → **Other apps' windows** (shown while browsing is on; `[browser] app_windows`, on by default)
+  turns it off, and says when the helper is missing.
+
 - Web search, one switch for every chat and task (#468). `[web] search` (off by default; Settings →
   Chats and folders → **Web search**, `melo config set web.search true`, `-X web.search=true`) gives the
   terminal chat, every console and app chat and every console task a read-only `web_search` tool and a
@@ -765,6 +786,49 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- In Auto, the goal decides: the steps a task plainly needs run without asking, and the risky
+  ones still ask. On the site or app the chat is about, opening and reading it, signing in the
+  way you described, picking options, filling in and sending the task's own form and reading
+  the result run with no card, whether or not your latest message names them. melo judges each
+  step against all your messages in the chat (the first one kept, so "signed in" still means
+  the check-in) and, when you point to them ("do it the way I told you"), against the notes it
+  recalled; your words only ever add, and never stop a step the task needs. A click or a choice
+  names what it is on (`a button "Check in"`) and is judged by that target, also on a site your
+  words name. Passwords and keys mean a secret value typed, read or sent, so a click on a
+  sign-in or quick-login button is no longer blocked as one. Paying and changing an account's
+  email, password or sign-in are kinds of their own: they always ask on the card, even when you
+  asked for them, and never ride an allowance. A click inside a box from another site is a
+  click like any other when melo knows the box (a control it lists there by name, or the box's
+  title), and asks you only when melo cannot tell what it is on. A site Auto let the chat open
+  stays allowed for reading its pages for the rest of the chat, in Ask too (a click on it still
+  asks in Ask), and is listed with **Remove**. An address that holds a key is never read without
+  your answer, even when the task needs it.
+  **Don't allow** on one button no longer refuses the other buttons of the site for the turn.
+  melo tells the model that it asks the person itself on a card, so the model never asks you
+  to type a permission and says a step was blocked, failed or succeeded only when a step result
+  shows it; a blocked note says when the step needs you because nobody could be asked. A turn
+  may send up to 12 reviews (was 6). The review prompt grows from 3,011 to 3,789 characters and
+  the chat's identity paragraph by 296 characters. Part of #465.
+- Long attempts by default, and reflection is a switch (part of #185). An attempt now runs up to
+  50 steps and a run up to 100 (it was 10 and 30), and a reflection comes only when a task is still
+  not done after those 50 steps: a task that needs 20 or 40 steps is no longer cut halfway (a
+  sign-in in a browser ended at step 10 with "The attempt used its step budget" in a test). The
+  evidence is a tie: on 12 coding exercises run 5 times each, reflecting and not reflecting both
+  passed 59/60 runs, and reflection replies cost about 170 output tokens a task
+  ([Evaluations](docs/project/evaluations.md#long-attempts-and-reflection-as-an-option)).
+  **Reflect when stuck after many steps** in Settings → Chats and folders (the app and the web
+  console; on by default) is `[agent] reflection`: off, melo never reflects and runs straight to
+  100 steps (`attempt_policy = "none"`). `-X agent.reflection=off` does it for one run, and a
+  config without the key reads on. Chats, side chats, tasks, workers, direct runs and the
+  gateway read it; `--attempt-policy` keeps its say over the file. The developer key
+  `[agent] steps_per_attempt` (`-X agent.steps_per_attempt=N`) sets the attempt's length and
+  `-s N` the run's. The main chat's own turns are unchanged (4 steps, no reflection; longer
+  work becomes a task). A running turn shows `step 4 of 100` in the terminal's line and
+  status bar and in the web console. `-s 30 -X agent.steps_per_attempt=10` gives the earlier
+  requests; `--attempt-policy none --max-steps 30` sends the same requests as before, and
+  `--max-steps 30` alone is now one attempt of 30 steps and a final reflection. A routine's
+  learned steps are kept per set of length options, so the new defaults start their own count and
+  the earlier ones stay as they were.
 - A cut excerpt of an earlier chat turn can be opened whole, by default. When recall shows
   less than the whole turn, the line starts with the turn's id, such as `[t123]`, a line under
   the excerpts says it can be opened, and the chat's model has `open_memory` to read the turn
@@ -1278,6 +1342,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   ([#188]).
 
 ### Fixed
+
+- `browser_find` reads the page again before it searches, so its refs are always of the page as it is now;
+  before, a page reloaded since the last reading gave refs that only failed with "The page was reloaded or
+  replaced since it was read". A ref from before a reload at the same address is used when the new page has
+  exactly one element of the same kind and name that still belongs where it did (its row or heading and the
+  text next to it), and *what changed* says so; an action that sends (a form's button, Enter in a box) is
+  never carried over.
+- `browser_wait` on a page with no body yet (a bot check, an interstitial) keeps waiting instead of failing
+  with a script error.
+- `browser_wait` says "Timed out after 20 s: the text did not appear." (and "the page did not finish
+  loading", "the text did not go away") instead of "the text appeared did not happen".
 
 - A thinking model's answer is no longer lost (#469). A model that ended a turn with an
   empty reply and its answer only in its thinking, twice in a row, failed the run with

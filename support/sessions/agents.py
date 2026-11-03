@@ -113,6 +113,38 @@ def configured_fallback_options(cfg: Config, options: AgentOptions) -> AgentOpti
     return _configured_keys(cfg, options, FALLBACK_SETTINGS)
 
 
+def configured_attempt_options(
+    cfg: Config | None, options: AgentOptions, keep: Collection[str] = ()
+) -> AgentOptions:
+    """*options* with the config's reflection switch and attempt length.
+
+    ``[agent] reflection = false`` makes ``attempt_policy`` ``"none"``: the run
+    never reflects and goes straight to its total. ``true`` leaves the policy
+    as the caller set it, so an explicit ``none`` stays. ``[agent]
+    steps_per_attempt``, when set, is the attempt length. The names in *keep*
+    (``attempt_policy``, ``steps_per_attempt``) retain the caller's values; a
+    value the config holds that the options refuse raises ``ValueError``.
+    """
+    if cfg is None:
+        return options
+    changes: dict[str, Any] = {}
+    if "attempt_policy" not in keep and cfg.agent.reflection is False:
+        changes["attempt_policy"] = "none"
+    if "steps_per_attempt" not in keep and cfg.agent.steps_per_attempt is not None:
+        changes["steps_per_attempt"] = cfg.agent.steps_per_attempt
+    changes = {
+        name: value
+        for name, value in changes.items()
+        if getattr(options, name) != value
+    }
+    if not changes:
+        return options
+    try:
+        return dataclasses.replace(options, **changes)
+    except ValueError as exc:
+        raise ValueError(f"[agent] {exc}") from None
+
+
 def configured_context_options(
     cfg: Config | None, options: AgentOptions, overrides: Mapping[str, int | None]
 ) -> AgentOptions:
@@ -153,6 +185,7 @@ def configured_session_options(
     options = configured_context_options(cfg, options, overrides)
     if cfg is None:
         return options
+    options = configured_attempt_options(cfg, options, explicit)
     if overrides:
         cfg = copy.deepcopy(cfg)
         for name in ("context_window", "output_reserve", "safety_margin"):
@@ -359,6 +392,7 @@ async def build_session_agent(
         browser = provider_for(
             browser_driver,
             keep_tabs=cfg is not None and cfg.browser.keep_tabs is True,
+            app_windows=cfg is None or cfg.browser.app_windows is True,
         )
         if browser is not None:
             providers.append(browser)

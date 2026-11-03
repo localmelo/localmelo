@@ -41,7 +41,10 @@ async def test_at_most_four_boxes_from_other_sites_are_named() -> None:
     assert out.text.count("that melo can't reach") == 4
 
 
-async def test_a_control_in_a_box_from_another_site_asks_every_time() -> None:
+async def test_a_named_control_in_a_box_from_another_site_is_clicked_like_any_other() -> (
+    None
+):
+    """melo knows it by its name: the click's own question names it, box and all (#465)."""
     go = Element(
         "button", "Continue", frame="x2_1_92", site="https://accounts.example.org"
     )
@@ -66,17 +69,20 @@ async def test_a_control_in_a_box_from_another_site_asks_every_time() -> None:
         )
         out = await run(tools, "browser_click", ref="e2")
     assert not out.is_error
-    asked = [p for n, _, p in asks.asked if n.startswith("browser-point:")]
-    assert asked == [
-        'click a button "Continue" inside a box from accounts.example.org that melo '
-        "cannot check on example.com in Safari"
+    assert not [n for n, _, _ in asks.asked if n.startswith("browser-point:")]
+    [(name, arguments, preview)] = [
+        q for q in asks.asked if q[0].startswith("browser-act:")
     ]
+    on = 'a button "Continue" inside a box from accounts.example.org'
+    assert (name, arguments["on"]) == ("browser-act:https://example.com", on)
+    assert preview == f"click {on} on example.com in Safari"
     refusing = world(button("Post"), go)
     tools = await tools_of(refusing)
-    with asking(Asks(deny=("browser-point:",))):
+    with asking(Asks(deny=("browser-act:",))):
         await run(tools, "browser_open", url=HOME)
         out = await run(tools, "browser_click", ref="e2")
-    assert out.is_error and "did not click there" in out.text and not refusing.acts
+    assert out.is_error and "did not click or choose" in out.text
+    assert not refusing.acts
 
 
 async def test_the_controls_of_a_box_from_another_site_are_listed_and_clicked_by_the_browser(
