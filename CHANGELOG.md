@@ -19,8 +19,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   answer) and the answer opens with what changed: a new address, new text such as a notice or
   an error (even one that is gone again) and the element's new state, or that nothing changed.
   When the page rebuilt its elements since it was read, melo acts on the one element with the
-  same kind, name, address and form, with every check again; with two such elements, or a
-  changed address or form, it stays stale. Frames from the same site are read and acted in as
+  same kind, name, address and form that still belongs where it did (the same row or heading and
+  the same text next to it), with every check again; with two such elements, two when it was
+  read, nothing that says where it belongs, or a changed address or form, it stays stale. Frames from the same site are read and acted in as
   part of the page; in a box from another site (often a sign-in box) Safari's own reading lists
   the buttons, links and fields, and each click or text there asks every time. A new tool,
   `browser_click_point`, clicks a point of the last picture for what the element list lacks: melo

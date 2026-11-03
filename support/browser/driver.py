@@ -72,7 +72,12 @@ class Element:
     ``form`` is the name and value of every field in that form, with nothing
     secret in it, as the question about sending it shows; ``options`` are the
     choices of a select; ``attrs`` describes a text box or a select (see
-    :class:`FieldAttrs`).
+    :class:`FieldAttrs`). ``frame`` is where it is when not in the page itself
+    (a frame of the same site, or ``x<id>`` in a box from another site, whose
+    ``site`` is that box's origin); ``plain`` marks an element that only looks
+    clickable. ``context`` says where it belongs (what it is, its row or the
+    heading above it, the text next to it), ``""`` when nothing does: a ref the
+    page redrew is found again only with the same.
     """
 
     kind: ElementKind
@@ -91,6 +96,7 @@ class Element:
     frame: str = field(default="", compare=False)
     site: str = field(default="", compare=False)
     plain: bool = field(default=False, compare=False)
+    context: str = field(default="", compare=False)
 
 
 @dataclass(frozen=True)

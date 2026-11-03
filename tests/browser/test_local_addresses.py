@@ -20,7 +20,14 @@ from localmelo.melo.contracts.tools import ProvidedTool
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.support import config, gateway_endpoint
 from localmelo.support.browser import sites
-from localmelo.support.browser.driver import BrowserError, RawPage, Shot, TabInfo
+from localmelo.support.browser.driver import (
+    BrowserError,
+    Element,
+    PointHit,
+    RawPage,
+    Shot,
+    TabInfo,
+)
 from localmelo.support.browser.provider import BrowserToolProvider
 from localmelo.support.browser.sites import origin_of
 from localmelo.tests.browser.fakes import FakeDns, FakeDriver, link, page
@@ -361,6 +368,54 @@ async def test_a_picture_taken_while_the_page_moved_is_dropped() -> None:
     out = await run(tools, "browser_screenshot")
     assert_refused(out)
     assert not out.images
+
+
+class MovesAtTheLookAfterAPoint(Anywhere):
+    """The first picture and the click stay put; the page moves while melo takes the picture after it."""
+
+    moves_to = CONSOLE
+
+    async def screenshot(self, tab: str | None, mark: Any = None) -> Shot:
+        if mark is not None:  # the picture after a point, with the point drawn on it
+            self.tabs_["t1"].append(self.moves_to)
+        return await super().screenshot(tab, mark)
+
+
+class Refuses(Asks):
+    """Says yes to every site but one."""
+
+    def __init__(self, refused: str) -> None:
+        super().__init__()
+        self.refused = refused
+
+    async def __call__(
+        self, name: str, arguments: Mapping[str, Any], preview: str
+    ) -> ApprovalDecision:
+        self.asked.append(name)
+        allow = not name.endswith(self.refused)
+        return ApprovalDecision(allow, remember=allow)
+
+
+@pytest.mark.parametrize("moves_to", [CONSOLE, "https://other.org/"])
+async def test_the_picture_after_a_point_is_dropped_when_the_page_moved_meanwhile(
+    moves_to: str,
+) -> None:
+    driver = MovesAtTheLookAfterAPoint(page(HOME, "Welcome."))
+    driver.moves_to = moves_to
+    driver.hits[(500, 250)] = PointHit("canvas", Element("button", "", fp="canvas|1"))
+    provider = BrowserToolProvider(driver)
+    tools = {t.definition.name: t for t in await provider.start()}
+    with asking(Refuses("other.org")):
+        assert not (await run(tools, "browser_open", url=HOME)).is_error
+        assert (await run(tools, "browser_screenshot")).images
+        out = await run(tools, "browser_click_point", x=500, y=500)
+    assert driver.acts and driver.acts[0].point is not None  # the click itself was fine
+    assert not out.images and "No new picture" in out.text, out.text
+    assert SECRET not in out.text
+    assert "t1" not in provider._views and "t1" not in provider._points
+    assert any(
+        call == "blank" for call, _ in driver.calls
+    )  # the page it went to is left
 
 
 async def test_the_tab_list_shows_only_pages_melo_checked() -> None:

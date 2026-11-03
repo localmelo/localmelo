@@ -548,3 +548,30 @@ test('a frame from the same site is read and acted in as part of the page', () =
   // A frame that went elsewhere since it was read is another page.
   assert.deepEqual(run(dom, specFor(page, cont, {frame: '1'})), {ok: false, stale: 'gone'});
 });
+
+test('where an element belongs: its row, its heading and the text next to it, for finding a redrawn ref', () => {
+  const rows = load('<ul><li id="a">Record A <button>Delete</button></li><li>Record B <button>Delete</button></li></ul>');
+  const [a, b] = readPage(rows).elements;
+  assert.notEqual(a.context, b.context);
+  assert.match(b.context, /Record B/);
+  rows.window.document.getElementById('a').remove();  // record A went: B's own place is unchanged
+  assert.equal(readPage(rows).elements[0].context, b.context);
+
+  const cards = load('<h2>Records</h2><div><span>Record A</span><button>Open</button></div><div><span>Record B</span><button>Open</button></div>');
+  const [first, second] = readPage(cards).elements;
+  assert.match(first.context, /Record A/);
+  assert.notEqual(first.context, second.context);
+
+  // A list that redraws itself (new elements, one more button) under the same heading.
+  const moods = load('<main><h1>Pick a mood</h1><div id="m"><div><button>Happy</button><button>Calm</button></div></div></main>');
+  const before = byLabel(readPage(moods), 'Calm').context;
+  moods.window.document.getElementById('m').innerHTML = '<div><button>New!</button><button>Happy</button><button>Calm</button></div>';
+  assert.ok(before);
+  assert.equal(byLabel(readPage(moods), 'Calm').context, before);
+
+  // Nothing says where a lone button belongs, and a secret field has no context at all.
+  const lone = load('<button>Go</button><input type="password" name="pw">');
+  const [go, pw] = readPage(lone).elements;
+  assert.equal(go.context, '');
+  assert.equal(pw.context, undefined);
+});

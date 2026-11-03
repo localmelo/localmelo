@@ -250,6 +250,29 @@ var contextOf = function (n) {
   var head = headingBefore(n);
   return head ? "h:" + cap(head.innerText || head.textContent, 80) : "";
 };
+// The text next to an element that is no control's own: that of the nearer of its two
+// closest containers holding some (a card's name, say), cut short.
+var nearText = function (n) {
+  for (var c = n.parentElement, i = 0; c && i < 2 && c !== document.body && c !== document.documentElement; c = c.parentElement, i++) {
+    var out = [], stack = [c], seen = 0, size = 0;
+    while (stack.length && seen < 120 && size < 120) {
+      var x = stack.pop(); seen++;
+      if (x.nodeType === 3) { var t = cap(x.nodeValue, 80); if (t) { out.push(t); size += t.length + 1; } continue; }
+      if (x.nodeType !== 1 || /^(SCRIPT|STYLE|TEMPLATE)$/.test(x.tagName) || (x !== c && P.matches.call(x, SEL))) continue;
+      for (var k = x.childNodes.length - 1; k >= 0; k--) stack.push(x.childNodes[k]);
+    }
+    if (out.length) return cap(out.join(" "), 120);
+  }
+  return "";
+};
+// Where an element belongs, for finding a ref the page redrew again: what it is (tag,
+// type, role, id, name), its row or the heading above it, and the text next to it.
+// Without a row, a heading or such text nothing says where it belongs: "".
+var belongsTo = function (n) {
+  var around = contextOf(n), near = nearText(n);
+  if (!around && !near) return "";
+  return P.json([n.tagName.toLowerCase(), attr(n, "type").toLowerCase(), attr(n, "role").toLowerCase(), cap(n.id, 40), cap(attr(n, "name"), 40), around, near]) + frameMark(n);
+};
 var fingerprint = function (n, nth) {
   var parts = [], cur = n, depth = 0;
   while (cur && cur.nodeType === 1 && depth < 12) {
@@ -359,6 +382,7 @@ var lookAt = function (n, counts) {
   // Which of the same-labelled elements before it in the document this one is (counts
   // is how many came before; none given means the fingerprint is not wanted).
   if (counts) el.fp = fingerprint(n, (counts[el.kind + "|" + el.label] || 0) + 1) + frameMark(n);
+  if (counts && !el.sensitive) el.context = belongsTo(n);
   return {el: el};
 };
 // A frame of the page from the same site is read and acted in as part of the page.
@@ -988,6 +1012,7 @@ def _element(item: Any) -> Element | None:
         form=fields.form_pairs(rows) if isinstance(rows, list) else (),
         frame=str(item.get("frame") or ""),
         plain=item.get("plain") is True,
+        context=str(item.get("context") or "")[:1000],
     )
 
 

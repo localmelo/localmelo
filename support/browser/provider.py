@@ -858,9 +858,20 @@ class BrowserToolProvider(BaseToolProvider):
         the act was approved for. Like means the same kind, label, destination,
         form address and form fields and, for a text box, the same field; where
         several are, a control by its tag or role wins over an element that only
-        looks clickable. Anything else stays stale.
+        looks clickable. It must also belong where it did: the same row or
+        heading and the same text next to it (``Element.context``), and it must
+        have been the only one of its kind and label in the reading the act
+        was approved on, so a "Delete" of another record is never taken for
+        the one that went. Anything else stays stale.
         """
-        if stale.why not in ("gone", "doc"):
+        if stale.why not in ("gone", "doc") or not item.context:
+            return None
+        twins = [
+            e
+            for e in snap.elements.values()
+            if _same_control(e, item) and e.plain == item.plain
+        ]
+        if len(twins) != 1:
             return None
         fresh = await self._reading(TabInfo(tab_id), set())
         if fresh.origin != snap.origin or not _same_page(fresh.url, snap.url):
@@ -1169,14 +1180,20 @@ class BrowserToolProvider(BaseToolProvider):
         page = await self._after(
             tab_id, said, before, done, result, view.url, expect=not boxed
         )
-        # melo looks again: the page as it is now, with the point drawn on it.
+        # melo looks again: the page as it is now, with the point drawn on it. As
+        # for browser_screenshot, the tab is checked before and after the picture:
+        # a page that moved meanwhile (drawing the point is a change it can see) is
+        # not shown, and its view is not kept.
         landed = self._tab or tab_id
         try:
             await self._recheck(landed)
             shot = await self._driver.screenshot(
                 self._raw[landed], self._points.get(landed)
             )
+            await self._recheck(landed)
         except BrowserError as exc:
+            self._views.pop(landed, None)
+            self._points.pop(landed, None)
             return ToolOutput(text=f"{page}\n[No new picture: {exc}]")
         if shot.view is not None:
             self._views[landed] = shot.view
@@ -1313,12 +1330,28 @@ def _same_page(left: str, right: str) -> bool:
     return left.split("#", 1)[0] == right.split("#", 1)[0]
 
 
+def _same_control(found: Element, item: Element) -> bool:
+    """Whether two elements are the same kind of control with the same words, destination and frame."""
+    return (found.kind, found.label, found.href, found.submit, found.frame) == (
+        item.kind,
+        item.label,
+        item.href,
+        item.submit,
+        item.frame,
+    )
+
+
 def _like(found: Element, item: Element) -> bool:
-    """Whether *found*, in a new reading, is the element *item* was: what it is, says, leads to and sends."""
+    """Whether *found*, in a new reading, is the element *item* was.
+
+    What it is, says, leads to and sends, and where it belongs: the same row
+    or heading and the same text next to it.
+    """
     return (
         not found.sensitive
-        and (found.kind, found.label, found.href, found.submit, found.frame)
-        == (item.kind, item.label, item.href, item.submit, item.frame)
+        and _same_control(found, item)
+        and bool(item.context)
+        and found.context == item.context
         and found.attrs == item.attrs
         and (not item.submit or found.form == item.form)
     )
