@@ -45,6 +45,18 @@ TIMEOUT: Final = "timeout"
 UNREACHABLE: Final = "unreachable"
 ERROR: Final = "error"
 
+# The catalog key of the words for each failure, by result code.
+WORDS: Final = {
+    NO_KEY: "hosted.test.noKey",
+    WRONG_KEY: "hosted.test.wrongKey",
+    REFUSED: "hosted.test.refused",
+    NO_MODEL: "hosted.test.noModel",
+    BUSY: "hosted.test.busy",
+    TIMEOUT: "hosted.test.timeout",
+    UNREACHABLE: "hosted.test.unreachable",
+    ERROR: "hosted.test.error",
+}
+
 _TOOL = ToolDef(
     "echo",
     "Say a word back.",
@@ -83,7 +95,7 @@ def _address(backend: str, section: config.CloudVendorConfig) -> str:
     return preset.base_url.rstrip("/") if preset is not None else ""
 
 
-def _failure(status: int | None, text: str) -> tuple[str, str]:
+def failure(status: int | None, text: str) -> tuple[str, str]:
     """The result code and detail for an HTTP *status* (or none) with body *text*."""
     detail = redact_secrets(" ".join(text.split())[:200])[0]
     if status == 401:
@@ -133,7 +145,7 @@ async def list_models(
     if response.status_code in (404, 405, 501):
         return [], None
     if response.status_code >= 300:  # a redirect is never followed
-        result, detail = _failure(response.status_code, response.text)
+        result, detail = failure(response.status_code, response.text)
         return [], HostedCheck(
             False, result, status=response.status_code, detail=detail
         )
@@ -185,7 +197,7 @@ async def check_hosted(
     except TimeoutError:
         return HostedCheck(False, TIMEOUT, models=tuple(models))
     except ProviderError as exc:
-        result, detail = _failure(exc.status_code, str(exc))
+        result, detail = failure(exc.status_code, str(exc))
         return HostedCheck(
             False, result, models=tuple(models), status=exc.status_code, detail=detail
         )

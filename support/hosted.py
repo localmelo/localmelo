@@ -82,20 +82,20 @@ PRESETS: Final[tuple[Preset, ...]] = (
         "OPENAI_API_KEY",
     ),
     Preset(
-        "anthropic",
-        "Anthropic",
-        "anthropic",
-        "https://api.anthropic.com/v1",
-        ("claude-sonnet-4-20250514",),
-        "ANTHROPIC_API_KEY",
-    ),
-    Preset(
         "gemini",
         "Google Gemini",
         "gemini",
         "https://generativelanguage.googleapis.com/v1beta/openai",
         ("gemini-2.0-flash",),
         "GEMINI_API_KEY",
+    ),
+    Preset(
+        "anthropic",
+        "Anthropic",
+        "anthropic",
+        "https://api.anthropic.com/v1",
+        ("claude-sonnet-4-20250514",),
+        "ANTHROPIC_API_KEY",
     ),
     Preset(
         "nvidia",

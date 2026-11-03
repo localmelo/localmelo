@@ -59,8 +59,8 @@ def test_the_settings_offer_the_presets_in_order(client: TestClient) -> None:
 
     assert [row["id"] for row in hosted_list] == [
         "openai",
-        "anthropic",
         "gemini",
+        "anthropic",
         "nvidia",
         "deepseek",
         "other",

@@ -748,19 +748,6 @@ def _preset(preset_id: str) -> hosted.Preset:
     return preset
 
 
-# The words of each result of the Test button for a hosted service.
-_HOSTED_WORDS: Final = {
-    hosted_check.NO_KEY: "hosted.test.noKey",
-    hosted_check.WRONG_KEY: "hosted.test.wrongKey",
-    hosted_check.REFUSED: "hosted.test.refused",
-    hosted_check.NO_MODEL: "hosted.test.noModel",
-    hosted_check.BUSY: "hosted.test.busy",
-    hosted_check.TIMEOUT: "hosted.test.timeout",
-    hosted_check.UNREACHABLE: "hosted.test.unreachable",
-    hosted_check.ERROR: "hosted.test.error",
-}
-
-
 def _hosted_message(found: hosted_check.HostedCheck, model: str) -> str:
     """What the Test button says of *found*, in the request's language."""
     if found.result.startswith("keychain_"):
@@ -771,7 +758,7 @@ def _hosted_message(found: hosted_check.HostedCheck, model: str) -> str:
             "hosted.test.works" if found.tools else "hosted.test.noTool", model=model
         )
     return t(
-        _HOSTED_WORDS.get(found.result, "hosted.test.error"),
+        hosted_check.WORDS.get(found.result, "hosted.test.error"),
         model=model,
         status=found.status or "",
         seconds=int(hosted_check.CHAT_TIMEOUT_S),
