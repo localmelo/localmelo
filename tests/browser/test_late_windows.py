@@ -515,6 +515,267 @@ async def test_a_wait_stops_polling_the_screen_once_the_deadline_has_closed(
     assert len(listed) <= 2  # the first look and the one after the first slice
 
 
+# ── A window that comes while the model plans its next step ──
+
+
+def sampling(provider: BrowserToolProvider) -> bool:
+    task = provider._sampler
+    return task is not None and not task.done()
+
+
+async def test_a_window_that_comes_during_the_deadline_is_told_by_a_step_after_it(
+    screen: Screen,
+) -> None:
+    """A slow model: the window comes 5 s after the click, the next step runs at 20 s."""
+    desk = watch(screen)
+    provider, tools = await opened(world(button("Quick sign-in")), desk)
+    try:
+        with asking(Asks()):
+            await run(tools, "browser_click", ref="e1")
+            assert sampling(provider)
+            screen.clock.now += 5
+            screen.show(SIGN_IN, front=False)
+            await screen.pacer.tick(provider)  # a sample sees it at 5 s
+            screen.clock.now += 15  # the next step runs 20 s after the click
+            assert not desk.admitting(provider._desk_mark)
+            read = await run(tools, "browser_read")
+            again = await run(tools, "browser_read")
+            window = await run(tools, "window_read")
+    finally:
+        await provider.close()
+    assert "Another app put a window on the screen since your last step" in read.text
+    assert "Chat opened a window 'Sign in to example.com' (w1)" in read.text
+    assert read.text.count("opened a window") == 1
+    assert "opened a window" not in again.text  # told once
+    # It was admitted when it was first seen: it is still there to read.
+    assert not window.is_error and '[button "Allow"]' in window.text
+    assert len(window_calls(screen)) == 2  # the buttons when seen, then the read
+
+
+async def test_a_window_that_comes_after_the_deadline_is_not_sampled(
+    screen: Screen,
+) -> None:
+    provider, tools = await opened(world(button("Quick sign-in")), watch(screen))
+    try:
+        with asking(Asks()):
+            await run(tools, "browser_click", ref="e1")
+            screen.clock.now += ADMIT_S + 1  # 16 s after the click
+            screen.show(SIGN_IN, front=False)
+            await screen.pacer.tick(provider)
+            read = await run(tools, "browser_read")
+            window = await run(tools, "window_read")
+            ended = not sampling(provider)
+    finally:
+        await provider.close()
+    assert ended
+    assert "opened a window" not in read.text
+    assert window.is_error and window_calls(screen) == []
+
+
+async def test_a_wait_after_the_deadline_tells_what_a_sample_admitted_inside_it(
+    screen: Screen,
+) -> None:
+    provider, tools = await opened(world(button("Quick sign-in")), watch(screen))
+    try:
+        with asking(Asks()):
+            await run(tools, "browser_click", ref="e1")
+            screen.clock.now += 3
+            screen.show(SIGN_IN, front=False)
+            await screen.pacer.tick(provider)
+            screen.clock.now += ADMIT_S  # the wait starts after the deadline
+            out = await run(
+                tools, "browser_wait", until="text", text="never", seconds=30
+            )
+    finally:
+        await provider.close()
+    assert out.text.startswith("Stopped waiting: another app put a window")
+    assert "Chat opened a window" in out.text
+
+
+async def test_a_step_inside_the_deadline_tells_a_sampled_window_once(
+    screen: Screen,
+) -> None:
+    provider, tools = await opened(world(button("Quick sign-in")), watch(screen))
+    try:
+        with asking(Asks()):
+            await run(tools, "browser_click", ref="e1")
+            screen.clock.now += 2
+            screen.show(SIGN_IN, front=False)
+            await screen.pacer.tick(provider)
+            first = await run(tools, "browser_read")
+            second = await run(tools, "browser_read")
+    finally:
+        await provider.close()
+    assert first.text.count("(w1)") == 1 and "opened a window" not in second.text
+
+
+async def test_the_sampler_stops_when_the_deadline_closes(screen: Screen) -> None:
+    provider, tools = await opened(world(button("Quick sign-in")), watch(screen))
+    try:
+        with asking(Asks()):
+            await run(tools, "browser_click", ref="e1")
+            screen.clock.now += 6
+            await screen.pacer.tick(provider)
+            still = sampling(provider)  # a sample at 6 s: it goes on
+            screen.clock.now += ADMIT_S
+            await screen.pacer.tick(provider)  # the next one finds the deadline closed
+            ended = not sampling(provider)
+    finally:
+        await provider.close()
+    assert still and ended
+
+
+async def test_the_sampler_stops_when_the_browser_closes(screen: Screen) -> None:
+    provider, tools = await opened(world(button("Quick sign-in")), watch(screen))
+    with asking(Asks()):
+        await run(tools, "browser_click", ref="e1")
+    task = provider._sampler
+    assert task is not None and not task.done()
+    await provider.close()
+    assert task.done() and provider._sampler is None
+
+
+async def test_the_sampler_stops_when_a_new_chat_starts(screen: Screen) -> None:
+    provider, tools = await opened(world(button("Quick sign-in")), watch(screen))
+    try:
+        with asking(Asks()):
+            await run(tools, "browser_click", ref="e1")
+            screen.clock.now += 2
+            screen.show(SIGN_IN, front=False)
+            await screen.pacer.tick(provider)  # queued, not yet told
+            task = provider._sampler
+            provider.forget()
+            await asyncio.sleep(0)
+            read = await run(tools, "browser_read")
+    finally:
+        await provider.close()
+    assert task is not None and task.done()
+    assert "opened a window" not in read.text  # the old chat's window is not told
+
+
+async def test_a_new_act_replaces_the_sampler_with_its_own(screen: Screen) -> None:
+    provider, tools = await opened(world(button("Quick sign-in")), watch(screen))
+    try:
+        with asking(Asks()):
+            await run(tools, "browser_click", ref="e1")
+            first = provider._sampler
+            reading = await run(tools, "browser_read")
+            await run(tools, "browser_click", ref=ref_of(reading))
+            second = provider._sampler
+            await asyncio.sleep(0.05)
+            live = [t for t in (first, second) if t is not None and not t.done()]
+    finally:
+        await provider.close()
+    assert first is not None and second is not None and first is not second
+    assert live == [second]  # one sampler at a time
+
+
+async def test_there_is_no_sampler_without_an_act_that_can_hand_off(
+    screen: Screen,
+) -> None:
+    driver = world(Element("textbox", "Name"), Element("select", "Size"))
+    provider, tools = await opened(driver, watch(screen))
+    try:
+        with asking(Asks()):
+            await run(tools, "browser_read")
+            await run(tools, "browser_find", query="Name")
+            await run(tools, "browser_screenshot")
+            await run(tools, "browser_wait", until="load", seconds=1)
+            await run(tools, "browser_type", ref="e1", text="Alex")
+            await run(tools, "browser_select", ref="e5", option="Large")
+            seen = provider._sampler
+    finally:
+        await provider.close()
+    assert seen is None and screen.pacer.calls == 0
+
+
+async def test_a_sample_is_cut_at_the_late_waits_limit(
+    screen: Screen, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(provider_mod, "LATE_S", 0.3)
+    slow = False
+
+    async def front() -> Front | None:
+        if slow:
+            await asyncio.sleep(30)
+        return screen.front
+
+    desk = watch(screen)
+    desk._front = front
+    provider, tools = await opened(world(button("Quick sign-in")), desk)
+    try:
+        with asking(Asks()):
+            await run(tools, "browser_click", ref="e1")
+            slow = True
+            began = time.monotonic()
+            await screen.pacer.tick(provider)  # the sample hangs until it is cut
+            took = time.monotonic() - began
+            held = list(provider._held)
+    finally:
+        await provider.close()
+    assert took < 3.0 and held == []
+
+
+async def test_a_sample_is_not_a_steps_own_look(screen: Screen) -> None:
+    provider, tools = await opened(world(button("Quick sign-in")), watch(screen))
+    try:
+        with asking(Asks()):
+            await run(tools, "browser_click", ref="e1")
+            provider._looked = False
+            await provider._look(sampling=True)
+            sampled = provider._looked
+            await provider._look()
+            looked = provider._looked
+    finally:
+        await provider.close()
+    assert sampled is False and looked is True
+
+
+async def test_the_sampler_runs_on_its_own_beside_the_steps_in_real_time(
+    screen: Screen, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No hand-paced clock: a short deadline, a window that comes in it, a step after it."""
+    monkeypatch.setattr(desktop_mod, "ADMIT_S", 1.0)
+    monkeypatch.setattr(provider_mod, "SAMPLE_S", 0.05)
+    monkeypatch.setattr(provider_mod, "LATE_S", 0.2)
+    command = [sys.executable, "-I", FAKE, str(screen.path), str(screen.log_path)]
+    desk = DesktopWatch(DesktopHelper(command), front=screen.in_front)
+    provider, tools = await opened(world(button("Quick sign-in")), desk)
+    try:
+        with asking(Asks()):
+            await run(tools, "browser_click", ref="e1")
+            await asyncio.sleep(0.3)
+            screen.show(SIGN_IN, front=False)
+            await asyncio.sleep(1.5)  # the model plans; the deadline closes meanwhile
+            ended = not sampling(provider)
+            read = await run(tools, "browser_read")
+            again = await run(tools, "browser_read")
+    finally:
+        await provider.close()
+    assert ended
+    assert read.text.count("Chat opened a window 'Sign in to example.com' (w1)") == 1
+    assert "opened a window" not in again.text
+
+
+async def test_without_the_helper_the_sampler_watches_the_front_app(
+    screen: Screen,
+) -> None:
+    provider, tools = await opened(
+        world(button("Quick sign-in")), watch(screen, helper=False)
+    )
+    try:
+        with asking(Asks()):
+            await run(tools, "browser_click", ref="e1")
+            screen.clock.now += 5
+            screen.front = CHAT
+            await screen.pacer.tick(provider)
+            screen.clock.now += 15
+            read = await run(tools, "browser_read")
+    finally:
+        await provider.close()
+    assert "- Chat came to the front" in read.text
+
+
 # ── The app the page asked for is a hint, not a filter ──
 
 
@@ -905,7 +1166,11 @@ async def test_a_helper_that_does_not_start_is_said_with_its_reason(
 ) -> None:
     bad = DesktopHelper(["/nonexistent/helper-program", "mcp"])
     desk = DesktopWatch(
-        bad, front=screen.in_front, clock=screen.clock, sleep=screen.clock.sleep
+        bad,
+        front=screen.in_front,
+        clock=screen.clock,
+        sleep=screen.clock.sleep,
+        pace=screen.pacer,
     )
     provider, tools = await opened(world(button("Quick sign-in")), desk)
     try:

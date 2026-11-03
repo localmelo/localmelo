@@ -55,7 +55,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   turns it off, and says under the switch whether the helper is installed and has Accessibility.
   A window that comes a moment after the step is still seen: after a click, a click on a point or a send,
   melo tells a window that appeared (once, from any app; the app the page asked for first when it is
-  known) in that step and in the next ones for 15 seconds, and after a click, a click on a point or a send
+  known) in that step and, whenever it comes, in the next one: for those 15 seconds melo also looks at the
+  screen about once a second in the background, so a window that comes while the model is still working out
+  its next step is noticed when it appears, not when the step runs. After a click, a click on a point or a send
   that changed nothing on the page it also watches for up to 3 seconds in all, slow calls included, and
   stops as soon as a window appears or the tab goes to another address or opens another tab. Only such a
   step opens those 15 seconds; reading, waiting, pictures and searching never do or extend them, so a

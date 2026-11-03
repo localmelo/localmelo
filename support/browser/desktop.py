@@ -44,6 +44,13 @@ Admission is by time only, not by app: a third-party sign-in often shows its
 window from another app or helper process than the one the page asked for. The
 app the page asked for, when known, is a hint: its windows come first and say so.
 A click that may hand off also waits up to :data:`LATE_S` seconds for a window.
+
+A model can take longer than the deadline to plan its next step, so while the
+deadline is open the provider also samples the screen about every
+:data:`SAMPLE_S` seconds in the background. A window first seen then is admitted
+at that moment, with the same rules as any look, and told by the next browser
+step even when that step comes after the deadline; the time it was first seen,
+never the time it is told, is what counts.
 """
 
 from __future__ import annotations
@@ -113,6 +120,11 @@ MAX_WATCHED = 3
 # ends when a window appears or the tab moves to another address or another tab opens.
 LATE_S = 3.0
 LATE_POLL_S = 0.5
+# While the admission deadline is open the screen is also sampled in the background this
+# often (see the provider), so a window that comes while the model is still planning its
+# next step is admitted when it is first seen, not when the next step looks. Each sample is
+# cut at LATE_S like the late wait.
+SAMPLE_S = 1.0
 # How long one call to the helper or to lsappinfo may take.
 CALL_S = 10.0
 FRONT_S = 2.0
@@ -703,6 +715,7 @@ class DesktopWatch:
         handler: SchemeApps | None = None,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        pace: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self._helper = helper
         self._skip = frozenset(name.lower() for name in skip)
@@ -711,6 +724,8 @@ class DesktopWatch:
         self._handler = handler or (lambda url: scheme_apps(url))
         self._clock = clock
         self._sleep = sleep
+        # The pause between two background samples (a test paces them by hand).
+        self._pace = pace
         self._kept: dict[str, _Kept] = {}
         self._n = 0
         # The apps that came to the front after an act, newest first: their
@@ -796,6 +811,10 @@ class DesktopWatch:
         """Whether the admission deadline of *mark* is still open."""
         return mark is not None and self._clock() <= mark.until
 
+    async def pace(self, seconds: float) -> None:
+        """Pause *seconds* between two background samples."""
+        await self._pace(seconds)
+
     async def scheme_app(self, url: str) -> frozenset[str]:
         """The names of the app that opens addresses like *url*, or none (see :func:`scheme_apps`)."""
         try:
@@ -815,6 +834,7 @@ class DesktopWatch:
         *,
         wait_s: float = 0.0,
         stop: Callable[[], Awaitable[bool]] | None = None,
+        limit_s: float | None = None,
     ) -> tuple[list[Seen], Mark | None]:
         """What other apps put on the screen since *mark*, and the mark to keep from now on.
 
@@ -829,11 +849,14 @@ class DesktopWatch:
         did not hand off). The seconds are counted from the start, and every
         call inside, the helper's and lsappinfo's too, is cut at their end: a
         look that did not finish tells nothing and leaves the mark as it was.
+        A single look with no waiting is cut after *limit_s* seconds when that
+        is given (a background sample).
         """
-        end = self._clock() + wait_s if wait_s > 0 else None
+        cap = wait_s if wait_s > 0 else limit_s
+        end = self._clock() + cap if cap and cap > 0 else None
         nothing: tuple[list[Seen], Mark | None] = ([], mark)
         seen, fresh = await self._timed(end, lambda: self._look_once(mark), nothing)
-        if end is None or seen:
+        if wait_s <= 0 or end is None or seen:
             return seen, fresh
         while self._clock() < end:
             if stop is not None and await self._timed(end, stop, False):
