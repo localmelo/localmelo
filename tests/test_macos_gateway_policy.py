@@ -54,6 +54,14 @@ precondition(isGatewayURL(URL(string: "http://127.0.0.1:9999/")!, port: 9999))
 precondition(!isGatewayURL(URL(string: "http://localhost:9999/")!, port: 9999))
 precondition(isGatewayPage(URL(string: "http://127.0.0.1:9999/#/workers")!, port: 9999))
 precondition(!isGatewayPage(URL(string: "http://127.0.0.1:9999/api/health")!, port: 9999))
+// A file dropped on the window that the page did not take is an attempt to open it: the file, a blob or a
+// data address, a link to another port, an address with a user name, and an upload are never the gateway page.
+for dropped in ["file:///Users/someone/Pictures/shot.png", "file:///tmp/notes.txt", "blob:http://127.0.0.1:9999/6b1c",
+                "data:text/html,hello", "about:blank", "http://127.0.0.1:9998/", "http://user@127.0.0.1:9999/"] {
+    precondition(!isGatewayURL(URL(string: dropped)!, port: 9999), dropped)
+    precondition(!isGatewayPage(URL(string: dropped)!, port: 9999), dropped)
+}
+precondition(!isGatewayPage(URL(string: "http://127.0.0.1:9999/api/uploads")!, port: 9999))
 let owned = GatewayHealth(store: "unavailable", error: "owned", reason: "owned", running: 0)
 let failed = GatewayHealth(store: "unavailable", error: "corrupt", reason: "open-error", running: 0)
 precondition(storeFailureMessage(owned).contains("Stop the other gateway"))
