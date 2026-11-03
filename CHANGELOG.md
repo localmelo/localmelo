@@ -10,9 +10,6 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 ### Added
 
 - Developer only: memory ingest can ask the encoder for several windows at once (`[memory] compress_parallel`, 1-8, default 1); the items are the same, only faster on a server that batches requests. Part of #428.
-- Developer only, not visible by default: a cut excerpt can be opened whole. With
-  `[memory] excerpt_open = "on"` (`-X memory.excerpt_open=on` for one run; the default, `"off"`,
-  changes nothing) recall keeps its excerpts of earlier chat turns, but a line that shows less
 - A cut excerpt can be opened whole (`[memory] excerpt_open`, on by default: see Changed).
   Recall keeps its excerpts of earlier chat turns, but a line that shows less
   than the whole turn starts with the turn's id, `[t123] the user said “…”; melo replied “…”`,
