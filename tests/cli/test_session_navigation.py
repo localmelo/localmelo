@@ -60,7 +60,7 @@ async def test_resume_keeps_workspace_and_uses_stored_typed_text(setup: Setup) -
         await conn.execute(
             "UPDATE turns SET attachments = NULL WHERE session_id = ?", (sid,)
         )
-    setup.session.approvals._policy._granted.add("file_write")
+    setup.session.approvals._policy.grants.grant_now("file_write")
     setup.session.enter(f"/resume {sid}")
     await setup.idle()
     session = setup.session

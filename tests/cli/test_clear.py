@@ -39,7 +39,7 @@ def _welcome(setup: Setup) -> list[int]:
 async def _chat_once(setup: Setup) -> None:
     setup.session.enter("one")
     await setup.idle()
-    setup.session.approvals._policy._granted.add("shell_exec")
+    setup.session.approvals._policy.grants.grant_now("shell_exec")
 
 
 async def test_clear_starts_a_new_chat_on_an_empty_screen_with_the_welcome(

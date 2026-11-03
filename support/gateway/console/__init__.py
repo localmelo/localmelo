@@ -45,6 +45,7 @@ from localmelo.support.sessions.approvals import (
     ApprovalLedger,
     ApprovalUse,
 )
+from localmelo.support.sessions.grants import GrantBook
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.store import (
     FAILED_ERROR,
@@ -63,6 +64,7 @@ from . import (
     routes_chores,
     routes_commands,
     routes_details,
+    routes_grants,
     routes_memory,
     routes_page,
     routes_pictures,
@@ -193,6 +195,9 @@ class Console:
         own_front = self.options.front_builder or not self.options.builder
         # The person's Allows per chat, which the chat's tasks use (#369).
         self.approvals = ApprovalLedger()
+        # Every "allow for this chat", in the store's table: the main chat's
+        # count in every chat and task, and they outlive a restart.
+        self.grants = GrantBook(self.store)
         self.sessions = ConsoleSessions(
             self.store,
             self.broker,
@@ -203,6 +208,7 @@ class Console:
             memory=self.memory,
             ledger=self.approvals,
             viewers=self.hub.viewers,
+            grants=self.grants,
         )
         self.workers = TaskWorkers(
             self.store,
@@ -213,6 +219,7 @@ class Console:
             memory=self.memory,
             ledger=self.approvals,
         )
+        self.workers.grants = self.grants
         # A task asks the chat that started it when it is stuck (#369).
         self.asks = OwnerAsks(self)
         self.workers.owner = self.asks
@@ -469,6 +476,7 @@ class Console:
         routes_status.add_routes(app, self)
         routes_turns.add_routes(app, self)
         routes_details.add_routes(app, self)
+        routes_grants.add_routes(app, self)
         routes_page.add_routes(app, self)
         routes_pictures.add_routes(app, self)
         uploads.add_routes(app, self)
@@ -501,6 +509,7 @@ class Console:
     async def _try_open(self) -> bool:
         try:
             await self.store.open()
+            await self.grants.open()
             await self.workers.open()
             main = await self.store.main_chat()
             self.main_id = main.id

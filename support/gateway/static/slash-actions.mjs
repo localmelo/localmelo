@@ -13,6 +13,7 @@
  */
 
 import {saidText, t} from './i18n.mjs';
+import {grantPlace, grantWho, grantWords} from './permissions-tab.mjs';
 import {formatBytes, formatDuration, formatTokens, shownItems, turnDuration} from './turns.mjs';
 
 const enc = encodeURIComponent;
@@ -281,6 +282,25 @@ export function createActions(host) {
       }
       if (word) throw new Error(t('slash.useApprovals'));
       return [say(await approvalsText())];
+    },
+
+    // What the person allowed, numbered in the order Settings lists it (everywhere first, then chat by chat); `revoke N` takes one back.
+    async grants({args}) {
+      const revoking = /^revoke\s+(\d+)$/.exec(args);
+      if (args && !revoking) throw new Error(t('slash.useGrants'));
+      const {grants = []} = await api('/grants');
+      if (!revoking) {
+        if (grants.length === 0) return [say(t('slash.grantsNone'), 'muted')];
+        return grants.map((grant, index) => say(`${index + 1}. ${[grantWords(grant), grantPlace(grant), grantWho(grant)].join(' · ')}`));
+      }
+      const grant = grants[Number(revoking[1]) - 1];
+      if (!grant) throw new Error(t('slash.grantsNo', {n: revoking[1]}));
+      try {
+        await api(`/grants/${enc(grant.id)}`, {method: 'DELETE'});
+      } catch (error) {
+        if (error.status !== 404) throw error; // gone already: the grant is revoked either way
+      }
+      return [say(t('slash.grantsRevoked', {what: grantWords(grant)}), 'ok')];
     },
 
     async browser({args}) {

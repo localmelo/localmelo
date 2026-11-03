@@ -258,11 +258,11 @@ def add_routes(app: FastAPI, console: Console) -> None:
         info, store = await _read_session(console, session_id)
         worker = store is console.worker_history
         entry = None if worker else console.sessions.get(session_id)
-        grants = sorted(entry.policy.allowed_tools) if entry is not None else []
+        # The grants that hold in the chat, open or not: its own and the main chat's.
+        view = None if worker else console.sessions.grants_view(info)
+        grants = sorted(view.names() | view.passed()) if view is not None else []
         granted_at = (
-            {tool: entry.granted_at.get(tool, 0.0) for tool in grants}
-            if entry is not None
-            else {}
+            {tool: view.granted_at(tool) for tool in grants} if view is not None else {}
         )
         turns = await _store_call(
             console, store.list_turns(session_id), None if worker else session_id

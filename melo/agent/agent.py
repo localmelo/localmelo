@@ -138,6 +138,7 @@ from localmelo.melo.contracts.approvals import (
     find_auto,
     find_earlier,
     find_folder_asker,
+    holds_grant,
     question_key,
     review_mode,
     site_key,
@@ -2224,6 +2225,10 @@ class _ToolAsk:
     def names_host(self, host: str) -> bool:
         """Whether the user's recent messages name *host* itself (``www.`` aside)."""
         return self._reviewer is not None and self._reviewer.names_host(host)
+
+    def granted(self, name: str) -> bool:
+        """Whether the run's chat holds a grant of the question *name* (``window-read:<app>``)."""
+        return holds_grant(self._policy, name)
 
     def refused_earlier(
         self, tool_name: str, arguments: Mapping[str, Any], preview: str

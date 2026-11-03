@@ -51,6 +51,7 @@ from localmelo.support.sessions.approvals import (
     RememberingPolicy,
 )
 from localmelo.support.sessions.display import display_path, folder_name, home_label
+from localmelo.support.sessions.grants import SessionGrants
 from localmelo.support.words import gist_note, gist_text
 
 # Keys other than Esc and Ctrl+C do nothing this long after the panel opens,
@@ -804,7 +805,13 @@ def terminal_watch(
 
 
 class Approvals:
-    """The session's approval mode and policy, which keeps the grants."""
+    """The session's approval mode and policy, which keeps the grants.
+
+    With *grants* (the terminal's own chat), the grants live in the table
+    of the terminal's sessions file and hold in the session that gave them,
+    beside what the person allowed in the main chat; without, in this
+    object only.
+    """
 
     def __init__(
         self,
@@ -813,9 +820,11 @@ class Approvals:
         *,
         snapshots: EditSnapshots | None = None,
         watch: AskWatch | None = None,
+        grants: SessionGrants | None = None,
     ) -> None:
         self.mode: Mode = mode
         self._ask = ask
+        self.grants = grants
         self.snapshots = snapshots if snapshots is not None else EditSnapshots()
         self._policy = self._asking()
         # Auto mode's policy, kept across turns for its allowances; a step it
@@ -826,7 +835,9 @@ class Approvals:
 
     def _asking(self) -> RememberingPolicy:
         # It also asks about a folder outside the workspace (#405).
-        return RememberingPolicy(self._ask, folders=True, saved=SavedFolders())
+        return RememberingPolicy(
+            self._ask, folders=True, saved=SavedFolders(), grants=self.grants
+        )
 
     def policy(self) -> ApprovalPolicy | None:
         """The policy for a turn: None with ``--yolo``, so nothing asks.
@@ -870,7 +881,11 @@ class Approvals:
         return self._policy.allowed_folders
 
     def reset(self) -> None:
-        """Forget every grant: a new session starts with none."""
+        """Start the next session without this one's grants.
+
+        Kept grants stay with the session that gave them (a resumed session
+        has its own again); grants kept in this object only are forgotten.
+        """
         self._policy = self._asking()
         self._auto = AutoPolicy(asking=self._policy, watch=self._watch)
         self.snapshots.clear()
