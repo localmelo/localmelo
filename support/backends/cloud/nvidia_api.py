@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
 
+from localmelo.support import hosted
 from localmelo.support.backends.base import BaseBackend
 from localmelo.support.backends.openai_compat import build_openai_chat
 
@@ -30,18 +30,7 @@ class NvidiaBackend(BaseBackend):
         return "NVIDIA"
 
     def validate(self, cfg: Config) -> list[str]:
-        errors: list[str] = []
-        if not cfg.nvidia.api_key_env:
-            errors.append(
-                "[nvidia] api_key_env is empty. "
-                "Set the environment variable name that holds your API key "
-                "(e.g. NVIDIA_API_KEY)."
-            )
-        elif not os.environ.get(cfg.nvidia.api_key_env):
-            errors.append(
-                f"[nvidia] environment variable ${cfg.nvidia.api_key_env} "
-                "is not set. Export it before starting the gateway."
-            )
+        errors = hosted.key_errors("nvidia", cfg.nvidia, "NVIDIA_API_KEY")
         if not cfg.nvidia.chat_model:
             errors.append(
                 "[nvidia] chat_model is empty. "
@@ -57,12 +46,12 @@ class NvidiaBackend(BaseBackend):
 
     def build_chat_provider(self, cfg: Config) -> BaseLLMProvider:
         base_url = cfg.nvidia.base_url or _DEFAULT_BASE_URL
-        api_key = os.environ.get(cfg.nvidia.api_key_env, "")
+        api_key = hosted.api_key(cfg.nvidia)
         return build_openai_chat(
             base_url=base_url,
             model=cfg.nvidia.chat_model,
             api_key=api_key,
-            extra_body=cfg.nvidia.extra_body,
+            extra_body=hosted.request_body("nvidia", cfg.nvidia),
             timeout=cfg.request_timeout_s,
             reasoning_field=getattr(cfg.nvidia, "reasoning_field", "") or None,
             requires_reasoning_replay=getattr(
