@@ -1218,6 +1218,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   the answer, ending with `(from melo's thinking)`, and the run completes. A thinking that
   was cut off inside the reply, a reply with no thinking and a tool call written as text fail
   as before.
+- Reviewing a long command is much faster. A word of 200,000 characters took 2.9 seconds, and
+  twice the text took four times as long, because the standard library's shell lexer copies a word
+  at each character it reads. It now takes 0.16 seconds, in proportion to the length. The review,
+  the sentence of an approval card, the memory classifier's labels and the task endings cut a
+  command into words with a copy of that lexer that collects a word's characters once
+  (`melo/contracts/shell_lexer.py`); a test compares it with `shlex` word for word on every
+  command of the review's baselines and on tens of thousands of generated texts, so no command is
+  cut differently. A word said again and again in one command, such as 50,000 times, is looked up
+  once, not 50,000 times (2.3 seconds before, 0.1 now).
+  Python code that splits a long command text it holds (`shlex.split` or `.split()` of a string
+  of 200,000 characters) is reviewed in the same time (2.3 seconds before, 0.08 now).
 
 - With `[memory] note_gate` above `typed` (a developer setting), a page, a file or a finished
   task's result no longer supports a note by text a reader of it would not see, or by an order to

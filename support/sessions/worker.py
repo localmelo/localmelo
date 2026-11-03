@@ -5,7 +5,6 @@ from __future__ import annotations
 import ast
 import asyncio
 import os
-import shlex
 import sqlite3
 import subprocess
 import sys
@@ -13,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.contracts import shell_lexer
 
 if TYPE_CHECKING:
     from localmelo.melo.agent import Agent
@@ -107,7 +107,7 @@ def sensitive_read(
 def _shell_read_paths(command: str) -> list[str]:
     """Extract operands from a small subset of shell reads, without executing it."""
     try:
-        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer = shell_lexer.Lexer(command, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
         tokens = list(lexer)
     except ValueError:
