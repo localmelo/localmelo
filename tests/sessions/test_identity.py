@@ -138,11 +138,18 @@ def test_melo_acts_for_the_user_and_its_cards_decide_what_they_confirm() -> None
     )
     for task in (
         "apply for jobs with their resume",
-        "sign in (they type a password or code in the window)",
-        "fill in and submit a form",
+        "sign in, fill in and submit a form",
         "send a message as them, book",
+        # A sign-in is never the place to stop; melo never types the password.
+        "A sign-in is a step, not a stop",
+        "(you never type it)",
+        # Forms come from the user's own answers: true when they are, never invented.
+        "never invent a fact about them",
+        "choose not to answer",
     ):
         assert task in ACTING_RULE
+    assert "A sign-in is a step, not a stop" in ACTING_NOTE
+    assert "ask only about a fact you do not have" in ACTING_NOTE
     assert (
         "never refuse, hedge or lecture because a step is irreversible" in ACTING_RULE
     )
@@ -150,7 +157,7 @@ def test_melo_acts_for_the_user_and_its_cards_decide_what_they_confirm() -> None
     assert "melo's approval cards" in ACTING_RULE
     assert "Ask only for facts you need and cannot find." in ACTING_RULE
     assert ACTING_RULE.endswith("Decline only what would harm other people.")
-    assert "that was a mistake, not a precedent" in ACTING_RULE
+    assert "was a mistake, not a precedent" in ACTING_RULE
     assert len(ACTING_RULE) < 1200
 
 
