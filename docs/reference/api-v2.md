@@ -120,6 +120,7 @@ output or log the header; same-user processes can still read the token file.
     "recent": {"kind": "chat", "id": "e5f60718293a", "title": "Plan the trip", "outcome": "done", "ended_s_ago": 3.2},
     "focus": {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test", "activity": "Running the tests", "icon": "run", "answering": false}
   },
+  "desktop_helper": {"state": "granted", "app": "Cua Driver", "pictures": true, "problem": ""},
   "uptime_s": 132.4
 }
 ```
@@ -208,6 +209,7 @@ output or log the header; same-user processes can still read the token file.
   and an undone turn does not count. It is for a client that shows how the last
   run went: the macOS app's pet and activity pill read it. One call reads the newest finished turn of
   the most recently updated sessions of each file by their indexes.
+- `desktop_helper` is the desktop control helper's state as the last chat or check found it: `state` is `missing` (not installed), `installed` (not checked yet), `granted` (it runs and has Accessibility; `pictures` says whether it also has Screen Recording), `no_grant` (Accessibility is off) or `failed` (it did not start); `app` is the app to give the permissions to and `problem` says what is wrong. `GET /api/health?helper=check` starts the helper once to read its permissions (without a prompt, at most every 30 seconds, and only while browsing is on and `[browser] app_windows` is true); otherwise nothing is started.
 
 ## GET /api/activity
 

@@ -52,7 +52,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   against a listing of that app's windows from before the step; otherwise it is named, never read), and melo
   never types into other apps. Settings → Chats and
   folders → **Other apps' windows** (shown while browsing is on; `[browser] app_windows`, on by default)
-  turns it off, and says when the helper is missing.
+  turns it off, and says under the switch whether the helper is installed and has Accessibility.
+  A window that comes a moment after the step is still seen: melo keeps its view of the screen until a
+  later step of any kind (reading, waiting, a picture, the next click) has looked, and tells what is new
+  since, once; after a click, a click on a point or a send that changed nothing on the page it also watches
+  for up to 3 seconds and stops as soon as a window appears or the page changes by itself. A chat is told
+  once when the helper is installed but cannot run: it needs Accessibility (System Settings → Privacy &
+  Security → Accessibility), which is Cua Driver's own permission, not melo's. `GET /api/health` carries
+  `desktop_helper` (`missing`, `installed`, `granted`, `no_grant` or `failed`; `?helper=check` looks once).
 
 - Web search, one switch for every chat and task (#468). `[web] search` (off by default; Settings →
   Chats and folders → **Web search**, `melo config set web.search true`, `-X web.search=true`) gives the

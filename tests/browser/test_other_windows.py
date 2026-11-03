@@ -64,6 +64,32 @@ SIGN_IN = {
 }  # fmt: skip
 
 
+class Clock:
+    """The watch's clock and sleep: time moves only when the watch sleeps, so a late wait costs no real time.
+
+    ``at(seconds, then)`` runs *then* when the clock first passes that many
+    seconds from now: what another app does a moment after an act.
+    """
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+        self.slept: list[float] = []
+        self._due: list[tuple[float, Callable[[], None]]] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    def at(self, seconds: float, then: Callable[[], None]) -> None:
+        self._due.append((self.now + seconds, then))
+
+    async def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+        self.now += seconds
+        for due, then in [d for d in self._due if d[0] <= self.now]:
+            self._due.remove((due, then))
+            then()
+
+
 class Screen:
     """The fake helper's screen file, and the app the test puts in front."""
 
@@ -73,6 +99,7 @@ class Screen:
         self.log_path.write_text("")
         self.state: dict[str, Any] = {"windows": [BROWSER, MINE]}
         self.front: Front | None = Front("Safari", "com.apple.Safari", 10)
+        self.clock = Clock()
         self.save()
 
     def save(self) -> None:
@@ -114,7 +141,10 @@ def screen(tmp_path: Path) -> Screen:
 def watch(screen: Screen, *, helper: bool = True) -> DesktopWatch:
     command = [sys.executable, "-I", FAKE, str(screen.path), str(screen.log_path)]
     return DesktopWatch(
-        DesktopHelper(command) if helper else None, front=screen.in_front
+        DesktopHelper(command) if helper else None,
+        front=screen.in_front,
+        clock=screen.clock,
+        sleep=screen.clock.sleep,
     )
 
 

@@ -95,7 +95,7 @@ Safari is not set up for melo yet. In Safari, open Settings > Developer and turn
 | `browser_select` | Choose an option in a select list from the last reading, by its text. |
 | `browser_back` | Go back one page in the tab. |
 | `browser_tabs` | List melo's tabs, switch to one, or close one. A tab whose page melo has not checked shows as *(not checked)*. |
-| `browser_wait` | Wait (30 seconds at most) for the page melo opened to load, or for some text to appear or go. A page with no body yet, such as a bot check, counts as still loading. The wait ends early when another app puts a window on the screen. |
+| `browser_wait` | Wait (30 seconds at most) for the page melo opened to load, or for some text to appear or go. A page with no body yet, such as a bot check, counts as still loading. The wait ends early when another app puts a window on the screen, also one that came before the wait began. |
 | `browser_screenshot` | Take a picture of the page. The picture is kept with the chat, and the web console shows it; the terminal does not draw images. A model that reads images also receives it, in the next step (see `tool_images` in the [configuration reference](../reference/configuration.md)). |
 | `browser_click_point` | Click a point of the last picture (`x` and `y` from 0 to 1000 across and down it), for what the element list lacks: a drawn button, a box from another site. The answer has a new picture with the point marked. |
 | `window_read` | Read a window another app opened after melo's own step (see [Windows from other apps](#windows-from-other-apps)): its text, its buttons and a picture of only that window. |
@@ -170,11 +170,14 @@ what changed:
 
 A page melo acts on can make another app open a window, such as a chat app's sign-in window that asks you to authorize. melo looks for one after each of its own steps in the browser.
 
+- **A window that comes a moment late is still seen.** An app often opens its window a second or two after the click. After a click, a click on a point of a picture or a send that changes nothing on the page, melo watches the screen for up to 3 seconds and stops as soon as a window appears or the page changes by itself. Any later step, whatever it is (reading, waiting, a picture, the next click), also tells a window that appeared since melo last looked, once. A window that opens more than ten minutes after melo's last step is taken to be one you opened yourself, and melo leaves it alone.
+
 - **With the desktop control helper.** The helper is a separate app that holds the Mac's Accessibility and Screen Recording permissions, so melo never needs them. melo names the new window and its buttons in that step's answer, can read it with a picture of only that window, and can press one of its buttons. With Accessibility alone it reads the window's text and buttons and presses by name, without a picture.
 - **Pressing asks.** In Ask mode you see a card for each press. In Auto mode a press the task needs, such as authorizing the sign-in you asked for, goes ahead; anything else stops.
-- **Without the helper.** melo cannot read the window. It still notices that another app came to the front and tells you which one, so you can answer it there.
+- **Without the helper.** melo cannot read the window. It still notices that another app came to the front, also when that happens a moment late, and tells you which one, so you can answer it there.
+- **When the helper cannot run.** If it is installed but has no Accessibility permission, or did not start, melo says so once in each chat: "melo can't read other apps' windows: the desktop control helper needs Accessibility (System Settings → Privacy & Security → Accessibility)". The permission belongs to **Cua Driver** itself, not to melo or to the app that started melo: Cua Driver runs its own background app, which is the one to turn on in that list. A new chat looks at the permission again, so turn it on and start a new chat.
 - **Only what melo's step opened.** melo never looks at your other windows and never types into other apps. A panel of an app that only came to the front is read only when melo listed that app's windows before its step; otherwise melo names it and asks you to answer it.
-- **The setting.** Settings → Chats and folders → **Other apps' windows**, shown while browsing is on. It is on by default; `[browser] app_windows = false` turns it off.
+- **The setting.** Settings → Chats and folders → **Other apps' windows**, shown while browsing is on. It is on by default; `[browser] app_windows = false` turns it off. Under the switch a line says whether the helper is installed and has Accessibility, or which permission it lacks.
 
 ## Who decides which sites melo opens
 
@@ -208,7 +211,7 @@ Browsing is built in parts; none of the next two exists yet.
 | `(via page-script: ...)` after an action | Safari could not reach that element itself, so a page script acted. A page that ignores script clicks may then do nothing: take a `browser_screenshot` and use `browser_click_point`. |
 | `A real click or key press landed on another element` | Something covered the element between melo's check and the click, so melo stopped it. `browser_read` and try again. |
 | `... came to the front: it may show a window melo cannot see` | Another app opened a window and the desktop control helper is not installed or lacks its permissions. Answer the window in that app yourself. |
-| `melo cannot read other apps' windows: ...` | Install the desktop control helper (see [What you need](#what-you-need)), or give it Accessibility in System Settings → Privacy & Security. |
+| `melo cannot read other apps' windows: ...` or `melo can't read other apps' windows: ...` | Install the desktop control helper (see [What you need](#what-you-need)), or turn on Cua Driver in System Settings → Privacy & Security → Accessibility, then start a new chat. |
 | `no Screen Recording permission` | The helper reads text and buttons and presses by name, but has no picture. Give it Screen Recording for pictures and point clicks. |
 | `a box from ... that melo can't reach` | A frame from another site, often a sign-in box, with nothing Safari lists in it. Fill it in yourself, or let melo click a point of a picture of it. |
 | `Take a browser_screenshot of this tab first` or `The page scrolled since the picture` | A point belongs to the last picture of the same page and view; take a new picture. |

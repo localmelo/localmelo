@@ -19,6 +19,8 @@ const RECALL = ["auto", "bm25", "embedding", "llm"];
 const recallWords = (name) => t(`settings.recall.${RECALL.includes(name) ? name : "auto"}`);
 // What the app shows on the desktop (the words are the app's menu's: `app.desktop.<place>`).
 const DESKTOP = ["pill", "pet", "nothing"];
+// The words under "Other apps' windows" for each state of the desktop control helper (`settings.appWindows.status.<key>`).
+const HELPER_LINES = {installed: "installed", granted: "granted", no_grant: "noGrant", failed: "failed"};
 // The console's language: automatic, or one the console has. Each language is named in itself.
 const LANGUAGE_SETTINGS = ["auto", "en", "zh-Hans"];
 // How a new chat starts (#339): `[approvals] mode`.
@@ -136,6 +138,8 @@ export function setupSettings({
   // The last test of this dialog: {at, ok, failed} (`failed` is "chat" or "embedding"), or null.
   let tested = null;
   let checkin = null;
+  let helper = null; // the desktop control helper's status from the health route; null until it is read
+  let helperAsked = false;
   let place = null; // what is on the desktop, as the app says; null without the app
   let undo = null;
 
@@ -571,11 +575,38 @@ export function setupSettings({
     $("s-app-windows-row").hidden = settings.app_windows === undefined || settings.browser !== true;
     $("s-app-windows").checked = settings.app_windows === true;
     $("s-app-windows-helper").hidden = settings.desktop_helper !== false;
+    renderHelper();
     followUp();
     // Reflecting after many steps (`[agent] reflection`, on by default); a gateway that does not report it has no switch.
     $("s-reflection-row").hidden = settings.reflection === undefined;
     $("s-reflection").checked = settings.reflection !== false;
     notes();
+  }
+
+  // What the desktop control helper last reported (`GET /api/health?helper=check`, asked once while the row shows a
+  // helper that is installed and melo watches other apps' windows): installed, granted, or the grant it lacks.
+  function renderHelper() {
+    const line = $("s-app-windows-status");
+    const watching = settings?.browser === true && settings.app_windows === true && settings.desktop_helper === true;
+    if (!watching) { helper = null; helperAsked = false; } else if (!helperAsked) loadHelper();
+    const key = watching && helper ? HELPER_LINES[helper.state] : undefined;
+    line.hidden = key === undefined;
+    if (key === undefined) return;
+    const quiet = key === "granted" && helper.pictures === false ? "grantedNoPictures" : key;
+    line.textContent = t(`settings.appWindows.status.${quiet}`, {app: helper.app});
+  }
+  async function loadHelper() {
+    helperAsked = true;
+    const currentGeneration = generation;
+    try {
+      const body = await api("/health?helper=check");
+      if (currentGeneration !== generation) return;
+      helper = body?.desktop_helper ?? null;
+    } catch {
+      if (currentGeneration !== generation) return;
+      helper = null; // the line stays out
+    }
+    renderHelper();
   }
 
   // The folders "Always allow this folder" kept (#405): each can be removed, with Undo. One melo never
@@ -1030,6 +1061,8 @@ export function setupSettings({
     saving = false;
     tested = null;
     checkin = null;
+    helper = null;
+    helperAsked = false;
     invalidateTest();
     enable(false);
     showError("");

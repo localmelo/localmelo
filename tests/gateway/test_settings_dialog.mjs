@@ -597,6 +597,66 @@ test("Other apps' windows: shown while browsing is on, saves app_windows, and sa
   assert.equal(h.element('settings-saved-text').textContent, "Saved: melo no longer looks at other apps' windows.");
 });
 
+test("Other apps' windows: the helper's status from the health route reads under the switch", async () => {
+  const status = (state, extra = {}) => ({desktop_helper: {state, app: 'Cua Driver', pictures: true, problem: '', ...extra}});
+  const open = async (health, settings = {}) => {
+    const h = harness({
+      'GET /settings': full({app_windows: true, desktop_helper: true, browser: true, ...settings}),
+      'GET /health?helper=check': health,
+    });
+    await h.open('chats');
+    await flush();
+    return h;
+  };
+  const line = (h) => h.element('s-app-windows-status');
+  const granted = await open(status('granted'));
+  assert.equal(line(granted).hidden, false);
+  assert.equal(line(granted).textContent, "Cua Driver is installed and may read other apps' windows (Accessibility is on).");
+  assert.equal(granted.calls.filter((call) => call.path === '/health?helper=check').length, 1, 'asked once');
+
+  const noPictures = await open(status('granted', {pictures: false}));
+  assert.match(line(noPictures).textContent, /Screen Recording is off/);
+
+  const missing = await open(status('no_grant', {problem: 'the desktop control helper has no Accessibility grant'}));
+  assert.equal(line(missing).textContent,
+    'Cua Driver is installed, but Accessibility is off. Turn it on in System Settings → Privacy & Security → Accessibility.');
+
+  const failed = await open(status('failed'));
+  assert.equal(line(failed).textContent, 'Cua Driver is installed, but melo could not start it.');
+
+  const unchecked = await open(status('installed'));
+  assert.match(line(unchecked).textContent, /checks its permissions the first time/);
+
+  // Not installed, switched off, or browsing off: the health route is not asked and no status shows.
+  for (const settings of [{desktop_helper: false}, {app_windows: false}, {browser: false}]) {
+    const quiet = await open(status('granted'), settings);
+    assert.equal(line(quiet).hidden, true);
+    assert.equal(quiet.calls.some((call) => call.path.startsWith('/health')), false);
+  }
+  // A health route that cannot be read leaves the line out.
+  const broken = harness({'GET /settings': full({app_windows: true, desktop_helper: true, browser: true})});
+  await broken.open('chats');
+  await flush();
+  assert.equal(line(broken).hidden, true);
+});
+
+test("Other apps' windows: the helper's status reads in Simplified Chinese", async () => {
+  const {useLanguage} = await import('../../support/gateway/static/i18n.mjs');
+  await useLanguage('zh-Hans');
+  try {
+    const h = harness({
+      'GET /settings': full({app_windows: true, desktop_helper: true, browser: true}),
+      'GET /health?helper=check': {desktop_helper: {state: 'no_grant', app: 'Cua Driver', pictures: null, problem: ''}},
+    });
+    await h.open('chats');
+    await flush();
+    assert.equal(h.element('s-app-windows-status').textContent,
+      '已安装 Cua Driver，但“辅助功能”权限没有打开。请在“系统设置 → 隐私与安全性 → 辅助功能”里打开它。');
+  } finally {
+    await useLanguage('en');
+  }
+});
+
 test('Web search says that the words leave the computer, in English and Simplified Chinese', async () => {
   const {useLanguage, t} = await import('../../support/gateway/static/i18n.mjs');
   assert.match(t('settings.webSearch.hint'), /leave this computer/);

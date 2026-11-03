@@ -24,6 +24,14 @@ press, for :data:`KEEP_S` seconds and while they stay open; melo never lists
 the person's other windows to the model, never roams the desktop, and never
 types into another app. Pressing a button asks its own question
 (``desktop-act:<app>``), reviewed as a browser act is, every time.
+
+A window may come a moment after the act (a chat app starts, then asks), so the
+look at the screen does not end with the act. The mark of the screen lives until
+a later browser step of any kind has looked against it (:meth:`DesktopWatch.look`
+reports what is new since the mark and takes the next one), a click that may hand
+off to another app waits up to :data:`LATE_S` seconds for a window, and a mark
+older than :data:`MARK_TTL_S` is only renewed, so a window the person opens
+themselves long after the act is never taken for it.
 """
 
 from __future__ import annotations
@@ -48,6 +56,7 @@ from localmelo.melo.contracts.approvals import TOOL_ASK, denial_text
 from localmelo.melo.schema import ImagePart
 from localmelo.support.browser import render
 from localmelo.support.browser.driver import BrowserError
+from localmelo.support.words import t_in
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +83,14 @@ TEXT_CHARS = 4000
 PANEL_LAYERS = 20
 # The most apps whose windows on every layer are listed before each act.
 MAX_WATCHED = 3
+# A mark of the screen older than this is renewed without a report. A window of an act
+# is melo's to read for KEEP_S seconds, so a window that opened longer ago than that is
+# more likely the person's own than the act's (a chat left alone for an hour).
+MARK_TTL_S = KEEP_S
+# After an act that may hand off to another app, the screen is looked at this often for
+# up to this long, and the wait ends when a window appears or the page changes by itself.
+LATE_S = 3.0
+LATE_POLL_S = 0.5
 # How long one call to the helper or to lsappinfo may take.
 CALL_S = 10.0
 FRONT_S = 2.0
@@ -136,12 +153,14 @@ class Mark:
     ``windows`` are the main-layer windows listed (None: unknown), ``front``
     the app in front, and ``panels`` the windows on every layer of each app
     that came to the front after an earlier act, by pid: only against such a
-    listing is a panel of that app known to be new.
+    listing is a panel of that app known to be new. ``taken`` is the watch's
+    clock when the mark was taken.
     """
 
     windows: frozenset[int] | None
     front: Front | None
     panels: dict[int, frozenset[int]] = field(default_factory=dict)
+    taken: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -257,6 +276,61 @@ def parse_front(text: str) -> Front | None:
     )
 
 
+# The helper's own identity, as its grants are held: the daemon it starts through
+# LaunchServices (``cua-driver mcp`` is a proxy to it), not the app that starts the proxy.
+HELPER_APP = "Cua Driver"
+HELPER_BUNDLE = "com.trycua.driver"
+
+
+def _grant_holder(source: Any) -> str:
+    """The app whose Accessibility and Screen Recording grants the helper's answer reflects.
+
+    ``check_permissions`` names it in ``source``: the helper's own daemon
+    (``driver-daemon``, how ``cua-driver mcp`` runs) or, when the helper was
+    started to run in its caller's process, that host.
+    """
+    if isinstance(source, dict):
+        bundle = str(source.get("bundle_id") or "")
+        if source.get("attribution") != "driver-daemon" and bundle != HELPER_BUNDLE:
+            name = os.path.basename(str(source.get("executable") or "")) or bundle
+            if name:
+                return render.field_text(name, 60)
+    return HELPER_APP
+
+
+@dataclass(frozen=True)
+class HelperStatus:
+    """What is known of the desktop control helper: ``missing`` (not installed), ``installed``
+    (its grants not checked yet), ``granted``, ``no_grant`` (Accessibility is off) or ``failed``
+    (it did not start). ``app`` is the app to give the grants to; ``pictures`` whether it also
+    holds Screen Recording (None: not known)."""
+
+    state: str
+    app: str = HELPER_APP
+    pictures: bool | None = None
+    problem: str = ""
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "state": self.state,
+            "app": self.app,
+            "pictures": self.pictures,
+            "problem": self.problem,
+        }
+
+
+# The newest status any check of the helper found, with the command it ran and when.
+_last: tuple[HelperStatus, tuple[str, ...], float] | None = None
+# A check of the helper for the settings page is not repeated within this many seconds.
+STATUS_TTL_S = 30.0
+
+
+def forget_status() -> None:
+    """Forget the newest status of the helper (the next one reads as ``installed``)."""
+    global _last
+    _last = None
+
+
 class DesktopHelper:
     """The desktop control helper over MCP: lists windows, reads one, presses in it.
 
@@ -264,19 +338,25 @@ class DesktopHelper:
     (``check_permissions`` without a prompt): with Accessibility off it is not
     used, and :attr:`problem` says why; with Screen Recording off it reads text
     and buttons and presses by name, with no picture and no point
-    (:attr:`pictures`).
+    (:attr:`pictures`). :attr:`phase` is None until the check ran, then
+    ``ready``, ``no_accessibility`` or ``failed``; :attr:`app` is the app that
+    holds (or needs) the grants.
     """
 
     def __init__(self, command: Sequence[str]) -> None:
         from localmelo.support.mcp.config import McpServerConfig
 
         program, *args = command
+        self._command = tuple(command)
         self._config = McpServerConfig(
             name="desktop", command=program, args=list(args), startup_timeout_s=CALL_S
         )
         self._client: Any = None
         self._ready: bool | None = None
         self.problem = ""
+        self.why = ""
+        self.phase: str | None = None
+        self.app = HELPER_APP
         # Whether it holds Screen Recording: without it melo reads a window's
         # text and buttons and presses by name, but has no picture to show or
         # to point at.
@@ -293,18 +373,66 @@ class DesktopHelper:
             await client.start()
             self._client = client
             grants = await self._call("check_permissions", {"prompt": False})
-        except (McpError, DesktopError, OSError) as exc:
-            self.problem = f"the desktop control helper did not start ({exc})"
-            self._ready = False
+        except asyncio.CancelledError:
             await self._drop(client)
+            raise
+        except (McpError, DesktopError, OSError) as exc:
+            await self._drop(client)
+            self.fail(str(exc))
             return False
+        self.app = _grant_holder(grants.get("source"))
         if grants.get("accessibility") is not True:
             self.problem = "the desktop control helper has no Accessibility grant"
+            self.phase = "no_accessibility"
+        else:
+            self.phase = "ready"
         self.pictures = grants.get("screen_recording") is True
         self._ready = not self.problem
         if not self._ready:
             await self._drop(client)
+        self._remember()
         return self._ready
+
+    def fail(self, why: str) -> None:
+        """The helper did not start (or did not answer): *why*, and it is not used."""
+        self.why = render.field_text(why, 100)
+        self.problem = f"the desktop control helper did not start ({self.why})"
+        self.phase = "failed"
+        self._ready = False
+        self._remember()
+
+    def status(self) -> HelperStatus:
+        """What the check found (``installed`` before it ran)."""
+        if self.phase == "ready":
+            return HelperStatus("granted", self.app, self.pictures)
+        if self.phase == "no_accessibility":
+            return HelperStatus("no_grant", self.app, None, self.problem)
+        if self.phase == "failed":
+            return HelperStatus("failed", self.app, None, self.problem)
+        return HelperStatus("installed", self.app)
+
+    def _remember(self) -> None:
+        global _last
+        _last = (self.status(), self._command, time.monotonic())
+
+    def notice(self) -> str:
+        """The one line that says why melo cannot read other apps' windows ("" when it can)."""
+        if self.phase == "no_accessibility":
+            return t_in("en", "desktop.noAccessibility", app=self.app)
+        if self.phase == "failed":
+            return t_in("en", "desktop.failed", why=self.why)
+        return ""
+
+    def recheck(self) -> None:
+        """Look at the helper's grants again at the next use, when the last look found it unusable.
+
+        A chat that starts after the person turned the grant on then finds it.
+        """
+        if self._ready is False:
+            self._ready = None
+            self.phase = None
+            self.problem = ""
+            self.why = ""
 
     async def _drop(self, client: Any) -> None:
         self._client = None
@@ -476,17 +604,21 @@ class DesktopWatch:
         ),
         front: FrontApp | None = None,
         clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self._helper = helper
         self._skip = frozenset(name.lower() for name in skip)
         # The module's front_app, looked up at each call, unless one is given.
         self._front = front or (lambda: front_app())
         self._clock = clock
+        self._sleep = sleep
         self._kept: dict[str, _Kept] = {}
         self._n = 0
         # The apps that came to the front after an act, newest first: their
         # windows on every layer are listed before each later act.
         self._pids: list[int] = []
+        # Whether the one line about a helper that cannot run was given in this chat.
+        self._noticed = False
 
     @property
     def can_read(self) -> bool:
@@ -506,18 +638,37 @@ class DesktopWatch:
             return None
         return helper
 
+    def notice(self) -> str:
+        """The one line per chat that says the helper cannot run, or "" (it can, it is not installed, or it was said)."""
+        helper = self._helper
+        if helper is None or self._noticed:
+            return ""
+        line = helper.notice()
+        self._noticed = bool(line)
+        return line
+
     async def mark(self) -> Mark:
-        """The screen before an act."""
-        windows: frozenset[int] | None = None
-        panels: dict[int, frozenset[int]] = {}
+        """The screen now."""
         helper = await self._helper_ready()
+        windows: frozenset[int] | None = None
         if helper is not None:
             with contextlib.suppress(DesktopError):
                 windows = frozenset(w.id for w in await helper.windows())
+        return await self._marked(helper, windows, await self._safe_front())
+
+    async def _marked(
+        self,
+        helper: DesktopHelper | None,
+        windows: frozenset[int] | None,
+        front: Front | None,
+    ) -> Mark:
+        """A mark of *windows* and *front*, with the listing of each app watched on every layer."""
+        panels: dict[int, frozenset[int]] = {}
+        if helper is not None:
             for pid in self._pids:
                 with contextlib.suppress(DesktopError):
                     panels[pid] = frozenset(w.id for w in await helper.windows(pid=pid))
-        return Mark(windows, await self._safe_front(), panels)
+        return Mark(windows, front, panels, self._clock())
 
     async def _safe_front(self) -> Front | None:
         try:
@@ -525,26 +676,64 @@ class DesktopWatch:
         except Exception:  # noqa: BLE001 - the front app is a hint, never a failure
             return None
 
-    async def appeared(self, mark: Mark) -> list[Seen]:
-        """The windows of other apps that appeared since *mark*, each adopted (at most :data:`MAX_WINDOWS`)."""
+    async def look(
+        self,
+        mark: Mark | None,
+        *,
+        wait_s: float = 0.0,
+        stop: Callable[[], Awaitable[bool]] | None = None,
+    ) -> tuple[list[Seen], Mark]:
+        """What other apps put on the screen since *mark*, and the mark to keep from now on.
+
+        Both come from one listing, so a window is told once and none is lost
+        between two looks. Without a mark, or with one older than
+        :data:`MARK_TTL_S`, nothing is told: the screen is only marked. With
+        *wait_s* the screen is looked at every :data:`LATE_POLL_S` seconds until
+        something appeared, the time is up or *stop* answers true (the page
+        changed by itself, so the act did not hand off).
+        """
+        seen, fresh = await self._look_once(mark)
+        if wait_s <= 0 or seen:
+            return seen, fresh
+        end = self._clock() + wait_s
+        while self._clock() < end:
+            if stop is not None and await stop():
+                break
+            await self._sleep(min(LATE_POLL_S, max(end - self._clock(), 0.0)))
+            seen, fresh = await self._look_once(fresh)
+            if seen:
+                break
+        return seen, fresh
+
+    async def _look_once(self, mark: Mark | None) -> tuple[list[Seen], Mark]:
+        if mark is None or self._clock() - mark.taken > MARK_TTL_S:
+            return [], await self.mark()
+        return await self._compare(mark)
+
+    async def _compare(self, mark: Mark) -> tuple[list[Seen], Mark]:
+        """The windows of other apps that appeared since *mark*, each adopted (at most :data:`MAX_WINDOWS`), and the mark of the listing that showed them."""
         helper = await self._helper_ready()
         new: list[AppWindow] = []
-        if helper is not None and mark.windows is not None:
+        listing = mark.windows
+        if helper is not None:
             with contextlib.suppress(DesktopError):
                 listed = await helper.windows()
-                new = [
-                    w
-                    for w in listed
-                    if w.id not in mark.windows
-                    and self._other(w.app)
-                    and w.id not in self._adopted()
-                ]
+                listing = frozenset(w.id for w in listed)
+                if mark.windows is not None:
+                    new = [
+                        w
+                        for w in listed
+                        if w.id not in mark.windows
+                        and self._other(w.app)
+                        and w.id not in self._adopted()
+                    ]
         front = await self._safe_front()
         moved = (
             front is not None
             and not front.same_app(mark.front)
             and self._other(front.name, front.bundle)
         )
+        seen: list[Seen] = []
         if not new and moved and front is not None:
             # The app came to the front with no new window in the main layer: a
             # panel above it, listed only by the app's own process. It is new
@@ -555,9 +744,8 @@ class DesktopWatch:
                 with contextlib.suppress(DesktopError):
                     new, title = await self._panels(helper, front, mark)
             if not new:
-                return [Seen("", front.name, title)]
+                seen = [Seen("", front.name, title)]
         new.sort(key=lambda w: -(w.z if w.z is not None else -1))
-        seen: list[Seen] = []
         for window in new[:MAX_WINDOWS]:
             short = self._adopt(window)
             names: tuple[str, ...] = ()
@@ -566,7 +754,7 @@ class DesktopWatch:
                     state = await helper.state(window, picture=False)
                     names = tuple(c.name for c in state.controls[:MAX_BUTTONS])
             seen.append(Seen(short, window.app, window.title, names))
-        return seen
+        return seen, await self._marked(helper, listing, front)
 
     async def _panels(
         self, helper: DesktopHelper, front: Front, mark: Mark
@@ -607,9 +795,12 @@ class DesktopWatch:
         return short
 
     def forget(self) -> None:
-        """Nothing that appeared before is melo's any more."""
+        """Nothing that appeared before is melo's any more, and a helper that could not run is tried again."""
         self._kept.clear()
         self._pids.clear()
+        self._noticed = False
+        if self._helper is not None:
+            self._helper.recheck()
 
     def _window(self, short: str | None) -> tuple[str, _Kept]:
         """The kept window *short* names (default the newest); :class:`DesktopError` otherwise."""
@@ -953,6 +1144,36 @@ async def fit_picture(mime: str, data: str) -> ImagePart | None:
         return None
     finally:
         shutil.rmtree(folder, ignore_errors=True)
+
+
+async def helper_status(*, check: bool = False) -> HelperStatus:
+    """What is known of the helper on this Mac, for the settings page and the health route.
+
+    ``missing`` when it is not installed. Otherwise the newest status a check
+    found (a chat's first use of the helper is one), else ``installed``. With
+    *check*, and when the newest status is older than :data:`STATUS_TTL_S`, the
+    helper is started once to read its grants (without a prompt) and stopped
+    again.
+    """
+    command = helper_command()
+    if command is None:
+        return HelperStatus("missing")
+
+    def newest() -> tuple[HelperStatus, float] | None:
+        found = _last
+        return (found[0], found[2]) if found and found[1] == tuple(command) else None
+
+    known = newest()
+    if check and (known is None or time.monotonic() - known[1] > STATUS_TTL_S):
+        helper = DesktopHelper(command)
+        try:
+            await asyncio.wait_for(helper.ready(), CALL_S * 2)
+        except TimeoutError:
+            helper.fail("it did not answer")
+        finally:
+            await helper.close()
+        known = newest()
+    return known[0] if known else HelperStatus("installed")
 
 
 def watch_for(enabled: bool) -> DesktopWatch | None:

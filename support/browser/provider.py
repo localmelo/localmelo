@@ -63,7 +63,9 @@ import dataclasses
 import functools
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from typing import Any, NoReturn
+from urllib.parse import urlsplit
 
 from localmelo.melo.contracts.approvals import (
     SELF_ASKING_TOOLS,
@@ -74,7 +76,12 @@ from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool, ToolF
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.schema import ImagePart, ToolDef
 from localmelo.support.browser import addresses, fields, render, sites
-from localmelo.support.browser.desktop import DesktopWatch, Mark, seen_lines
+from localmelo.support.browser.desktop import (
+    LATE_S,
+    DesktopWatch,
+    Mark,
+    seen_lines,
+)
 from localmelo.support.browser.driver import (
     MAX_TYPED_CHARS,
     Act,
@@ -308,7 +315,9 @@ def _guarded(fn: ToolFunction) -> ToolFunction:
             self._cancel_idle()
             try:
                 await self._driver.start()
-                return await fn(self, **arguments)
+                self._looked, self._handoff = False, False
+                result = await fn(self, **arguments)
+                return await self._with_screen(result)
             except BrowserError as exc:
                 return ToolOutput(text=str(exc), is_error=True)
             finally:
@@ -352,7 +361,17 @@ class BrowserToolProvider(BaseToolProvider):
         self._driver = driver
         # Other apps' windows around melo's own acts; None: not looked for.
         self._desktop = desktop
+        # The screen as melo last looked at it: kept until a step of any kind
+        # has looked against it, so a window that comes a moment after an act is
+        # told by the next step (see ``DesktopWatch.look``).
         self._desk_mark: Mark | None = None
+        # Window lines found before an act that its result tells, notes about the
+        # helper still to be said, whether this step has looked at the screen, and
+        # whether the tab showed a custom address (another app was handed the act).
+        self._held: list[str] = []
+        self._notes: list[str] = []
+        self._looked = False
+        self._handoff = False
         # Lines an act adds to "what changed" (a ref found again after a reload).
         self._act_notes: list[str] = []
         self._keep_tabs = keep_tabs
@@ -456,6 +475,9 @@ class BrowserToolProvider(BaseToolProvider):
         self._views.clear()
         self._points.clear()
         self._scripted.clear()
+        self._desk_mark = None
+        self._held.clear()
+        self._notes.clear()
         if self._desktop is not None:
             self._desktop.forget()
 
@@ -920,10 +942,9 @@ class BrowserToolProvider(BaseToolProvider):
             )
         self._act_notes = []
         # The screen before the act: a window another app opens because of it
-        # is told apart from the windows that were there.
-        self._desk_mark = None
-        if self._desktop is not None:
-            self._desk_mark = await self._desktop.mark()
+        # is told apart from the windows that were there. What came since the
+        # last look is told with this step's result, and the mark is renewed.
+        self._held += await self._look()
         return before
 
     async def _run_act(
@@ -1137,6 +1158,7 @@ class BrowserToolProvider(BaseToolProvider):
         for short in [tab_id, *opened]:
             if short not in self._raw:
                 continue  # closed meanwhile
+            url = ""
             try:
                 url = await self._settled(short)
                 if not url:
@@ -1146,6 +1168,9 @@ class BrowserToolProvider(BaseToolProvider):
                 urls[short] = url
             except BrowserError as exc:
                 problem = problem or exc
+                # An address of another kind (``chat://...``) is not a page, but
+                # a hand-off to the app that opens such addresses.
+                self._handoff = self._handoff or _custom_scheme(url)
                 await self._refuse_tab(short)
         if problem is not None:
             raise problem
@@ -1160,13 +1185,27 @@ class BrowserToolProvider(BaseToolProvider):
         result: ActResult | None = None,
         url: str = "",
         expect: bool = True,
+        hands_off: bool = False,
     ) -> str:
         """Read the page an action left, once every tab it touched has been checked.
 
         The reading opens with what changed (see :func:`_change_lines`), and the
         line before it says when nothing did after a click or Enter (*expect*).
+        An action that may hand off to another app (*hands_off*: a click, a
+        point, a send) and left the page as it was waits a few seconds for the
+        window (see :meth:`_other_windows`).
         """
-        opened, urls = await self._verify(tab_id, before)
+        try:
+            opened, urls = await self._verify(tab_id, before)
+        except BrowserError as exc:
+            if not self._handoff:
+                raise
+            # The tab showed an address of another kind: the act was handed to
+            # the app that opens it, which may put a window up a moment later.
+            screen = await self._other_windows(wait=True)
+            if not screen:
+                raise
+            raise BrowserError(f"{exc}\n{_screen_block(screen)}") from None
         landed = opened[0] if opened else tab_id
         if opened:
             said += f" It opened {landed}."
@@ -1178,11 +1217,22 @@ class BrowserToolProvider(BaseToolProvider):
         )
         lines = [*self._act_notes, *lines]
         self._act_notes = []
-        others = await self._other_windows()
+        changes = result.changes if result is not None else None
+        # An act that changed the page itself did not need another app to show
+        # anything; one that changed nothing may have handed off.
+        changed = bool(
+            opened
+            or moved
+            or lines
+            or (result is not None and (changes is None or changes.changed))
+        )
+        stop = self._page_moved(landed, urls[landed], before)
+        others = await self._other_windows(wait=hands_off and not changed, stop=stop)
+        notes = self._take_notes()
         if others:
             said += " Another app put a window on the screen: see what changed."
             lines.extend(others)
-        changes = result.changes if result is not None else None
+        lines.extend(notes)
         if (
             expect
             and changes is not None
@@ -1191,15 +1241,112 @@ class BrowserToolProvider(BaseToolProvider):
             said += " Nothing on the page changed."
         elif changes is not None and not changes.quiet:
             said += " The page was still changing: browser_read shows it later."
-        page = await self._read_tab(TabInfo(landed, urls[landed]), done, changes=lines)
+        try:
+            page = await self._read_tab(
+                TabInfo(landed, urls[landed]), done, changes=lines
+            )
+        except BrowserError as exc:
+            # What the screen showed is not lost with a page that cannot be read.
+            if others or notes:
+                raise BrowserError(
+                    f"{exc}\n{_screen_block([*others, *notes])}"
+                ) from None
+            raise
         return f"{said}\n{page}"
 
-    async def _other_windows(self) -> list[str]:
-        """The "what changed" lines for windows other apps put up since the act began."""
-        mark, self._desk_mark = self._desk_mark, None
-        if self._desktop is None or mark is None:
+    async def _look(
+        self,
+        *,
+        wait_s: float = 0.0,
+        stop: Callable[[], Awaitable[bool]] | None = None,
+    ) -> list[str]:
+        """The "what changed" lines for windows other apps put up since the last look.
+
+        The mark is renewed from the same listing, so a window is told once and
+        none is lost between two looks. With *wait_s* the screen is watched that
+        long for a window, until *stop* says the page changed by itself. The
+        watch never fails a step: what it cannot see it does not tell.
+        """
+        watch = self._desktop
+        if watch is None:
             return []
-        return seen_lines(await self._desktop.appeared(mark))
+        try:
+            seen, self._desk_mark = await watch.look(
+                self._desk_mark, wait_s=wait_s, stop=stop
+            )
+            note = watch.notice()
+        except Exception:  # noqa: BLE001 - the screen is a hint, never a failure
+            logger.debug("Looking at other apps' windows failed", exc_info=True)
+            return []
+        self._looked = True
+        if note:
+            self._notes.append(note)
+        return seen_lines(seen)
+
+    async def _other_windows(
+        self,
+        *,
+        wait: bool = False,
+        stop: Callable[[], Awaitable[bool]] | None = None,
+    ) -> list[str]:
+        """The lines for windows other apps put up since the last look, those found before the act first.
+
+        With *wait* the act may have handed off to another app, which can take
+        a few seconds to show its window (:data:`LATE_S`).
+        """
+        held, self._held = self._held, []
+        late = LATE_S if wait and self._desktop is not None else 0.0
+        return [*held, *await self._look(wait_s=late, stop=stop)]
+
+    def _take_notes(self) -> list[str]:
+        """The notes about the helper that wait to be told, once."""
+        notes, self._notes = self._notes, []
+        return notes
+
+    def _page_moved(
+        self, tab_id: str, url: str, before: set[str]
+    ) -> Callable[[], Awaitable[bool]]:
+        """Whether the page changed by itself while melo waits for another app's window.
+
+        It did when the tab shows another address or another tab opened: the
+        act was then not handed off, and what it did shows in the reading.
+        """
+
+        async def moved() -> bool:
+            try:
+                if await self._driver.location(self._raw[tab_id]) != url:
+                    return True
+                return any(
+                    tab.id not in before and tab.id not in self._short
+                    for tab in await self._driver.tabs()
+                )
+            except (BrowserError, KeyError):
+                return True
+
+        return moved
+
+    async def _with_screen(self, result: str | ToolOutput) -> str | ToolOutput:
+        """*result* with what other apps put on the screen since the last look, if the step did not tell it itself."""
+        if self._desktop is None:
+            return result
+        lines, self._held = self._held, []
+        # Nothing is watched before melo's first act: no window can be its doing,
+        # and a chat that only reads pages never starts the helper.
+        if not self._looked and self._desk_mark is not None:
+            lines += await self._look()
+        notes = self._take_notes()
+        if not lines and not notes:
+            return result
+        head = (
+            "Another app put a window on the screen since your last step: see "
+            "what changed.\n"
+            if lines
+            else ""
+        )
+        text = f"{head}{_screen_block([*lines, *notes])}"
+        if isinstance(result, ToolOutput):
+            return dataclasses.replace(result, text=f"{result.text}\n{text}")
+        return f"{result}\n{text}"
 
     def _done_line(self, verb: str, ref: str, asked: str, result: ActResult) -> str:
         """``Clicked e12 (via browser).``, with why a way was passed over and a ref found again."""
@@ -1243,7 +1390,9 @@ class BrowserToolProvider(BaseToolProvider):
             before,
         )
         said = self._done_line("Clicked", used, ref, result)
-        return await self._after(tab_id, said, before, done, result, snap.url)
+        return await self._after(
+            tab_id, said, before, done, result, snap.url, hands_off=True
+        )
 
     @_guarded
     async def _type(
@@ -1299,7 +1448,7 @@ class BrowserToolProvider(BaseToolProvider):
                 f"{verb} {used} ", f"{verb} {used} and pressed Enter ", 1
             )
         return await self._after(
-            tab_id, said, before, done, result, snap.url, expect=enter
+            tab_id, said, before, done, result, snap.url, expect=enter, hands_off=enter
         )
 
     @_guarded
@@ -1393,7 +1542,14 @@ class BrowserToolProvider(BaseToolProvider):
         if boxed:
             said += " What it did inside the box shows only in the new picture."
         page = await self._after(
-            tab_id, said, before, done, result, view.url, expect=not boxed
+            tab_id,
+            said,
+            before,
+            done,
+            result,
+            view.url,
+            expect=not boxed,
+            hands_off=True,
         )
         # melo looks again: the page as it is now, with the point drawn on it. As
         # for browser_screenshot, the tab is checked before and after the picture:
@@ -1502,12 +1658,23 @@ class BrowserToolProvider(BaseToolProvider):
         # and the tab is checked again after: a wait says nothing about a page
         # that went elsewhere while it was watched.
         reached, others = await self._watched_wait(tab_id, until, str(text), limit)
-        await self._recheck(tab_id)
-        if others:
-            block = render.block("screen", "", "\n".join(others))
-            return f"Stopped waiting: another app put a window on the screen.\n{block}"
+        try:
+            await self._recheck(tab_id)
+        except BrowserError as exc:
+            if others:
+                raise BrowserError(f"{exc}\n{_screen_block(others)}") from None
+            raise
+        if others and not reached:
+            return (
+                "Stopped waiting: another app put a window on the screen.\n"
+                + _screen_block(others)
+            )
         if reached:
-            return f"Reached: {reached_words}."
+            line = f"Reached: {reached_words}."
+            if others:
+                line += " Another app put a window on the screen.\n"
+                line += _screen_block(others)
+            return line
         return f"Timed out after {limit:g} s: {missed_words}."
 
     async def _watched_wait(
@@ -1521,15 +1688,20 @@ class BrowserToolProvider(BaseToolProvider):
         raw, origin = self._raw[tab_id], self._origins[tab_id]
         if self._desktop is None:
             return await self._driver.wait(raw, until, text, limit, origin=origin), []
-        mark = await self._desktop.mark()
+        # A window that came since the last step is what the person has to
+        # answer: it is told at once, and the wait does not start.
+        held, self._held = self._held, []
+        first = [*held, *await self._look()]
+        if first:
+            return False, first
         loop = asyncio.get_running_loop()
         end = loop.time() + limit
         while True:
             start = loop.time()
             piece = max(min(WATCH_S, end - start), 0.0)
             if await self._driver.wait(raw, until, text, piece, origin=origin):
-                return True, []
-            others = seen_lines(await self._desktop.appeared(mark))
+                return True, await self._look()
+            others = await self._look()
             if others:
                 return False, others
             now = loop.time()
@@ -1588,6 +1760,21 @@ class BrowserToolProvider(BaseToolProvider):
         px, py = parse_point(x, y, rest)
         text, images = await watch.press_point(window, px, py)
         return ToolOutput(text=text, images=images)
+
+
+def _screen_block(lines: list[str]) -> str:
+    """What other apps put on the screen, between page markers: their words are data, never orders."""
+    return render.block("screen", "", "\n".join(render.changes_lines(lines)))
+
+
+def _custom_scheme(url: str) -> bool:
+    """Whether *url* is an address another app opens (``chat://...``), not a page or the browser's own."""
+    try:
+        scheme = urlsplit(url.strip()).scheme.lower()
+    except ValueError:
+        return False
+    own = ("http", "https", "file", "about", "data", "javascript", "blob")
+    return bool(scheme) and scheme not in own and "-" not in scheme
 
 
 _EARLIER = (
