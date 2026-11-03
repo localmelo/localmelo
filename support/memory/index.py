@@ -326,15 +326,22 @@ def _user_head(typed: str, limit: int) -> str:
     return flat[: cut if cut > 0 else limit] + "…"
 
 
-def _split(typed: str, answer: str, title: str) -> tuple[list[str], bool]:
+def _split(typed: str, answer: str | None, title: str) -> tuple[list[str], bool]:
     """A turn's chunks (:func:`document_chunks`) and whether text was left out."""
-    lead, typed, answer = _parts(typed, answer, title)
-    text = f"{lead}User: {typed}\nmelo: {answer}"
+    reply = answer is not None
+    lead, typed, said = _parts(typed, answer or "", title)
+    if reply:
+        text = f"{lead}User: {typed}\nmelo: {said}"
+        label = len("\nmelo: ")
+    else:  # the user's words alone: no label with nothing after it
+        typed = typed.rstrip()
+        text = f"{lead}User: {typed}"
+        label = 0
     if len(text) <= DOC_CHARS:
         return [text], False
     typed_at = len(lead) + len("User: ")
     typed_end = typed_at + len(typed)
-    answer_at = typed_end + len("\nmelo: ")
+    answer_at = typed_end + label
     head = f"User: {_user_head(typed, min(USER_HEAD_CHARS, DOC_CHARS // 8))}\nmelo: "
     spans = _fences(text)
     chunks: list[str] = []
@@ -359,7 +366,7 @@ def _split(typed: str, answer: str, title: str) -> tuple[list[str], bool]:
         start = back + gap.end() if gap else back
 
 
-def document_chunks(typed: str, answer: str, *, title: str = "") -> list[str]:
+def document_chunks(typed: str, answer: str | None, *, title: str = "") -> list[str]:
     """What a turn's documents hold, chunk 0 first: a task's title, who said
     what, redacted, each at most :data:`DOC_CHARS` long.
 
@@ -369,16 +376,20 @@ def document_chunks(typed: str, answer: str, *, title: str = "") -> list[str]:
     ``User: <the first words the user typed>…`` and ``melo: `` and goes on with
     the text where the one before ended, overlapping it by about
     :data:`CHUNK_OVERLAP` characters. At most :data:`MAX_CHUNKS` come out.
+
+    With ``answer=None`` the turn holds the user's words only: ``User: <words>``,
+    with no ``melo:`` line behind it, however long (an empty answer is a reply of
+    nothing, ``melo: `` as it always was).
     """
     return _split(typed, answer, title)[0]
 
 
-def document_text(typed: str, answer: str, *, title: str = "") -> str:
+def document_text(typed: str, answer: str | None, *, title: str = "") -> str:
     """The head of a turn's text (chunk 0 of :func:`document_chunks`)."""
     return document_chunks(typed, answer, title=title)[0]
 
 
-def is_cut(typed: str, answer: str, *, title: str = "") -> bool:
+def is_cut(typed: str, answer: str | None, *, title: str = "") -> bool:
     """Whether :func:`document_chunks` leaves part of the turn out, for its length."""
     return _split(typed, answer, title)[1]
 

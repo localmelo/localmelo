@@ -244,6 +244,8 @@ MEMORY_EVENT_TYPE: Final = "turn.memory"
 NOTE_EVENT_TYPE: Final = "turn.note"
 # A core event: a run read words the person added (offset, text, step, attempt); the text is redacted.
 INBOX_ACCEPTED_EVENT_TYPE: Final = "inbox.accepted"
+# A core event: a tool call ended (status, error_category, output, error, ...).
+TOOL_FINISHED_EVENT_TYPE: Final = "tool.finished"
 # The grammar of an event type with a reserved prefix.
 RESERVED_EVENT_TYPE_RE: Final = re.compile(r"[a-z]+(\.[a-z_]+)+")
 
@@ -2197,6 +2199,46 @@ class SessionStore:
             )
         texts = (json.loads(row[0]).get("data", {}).get("text") for row in rows)
         return [text for text in texts if isinstance(text, str) and text.strip()]
+
+    async def turn_tool_results(
+        self,
+        session_id: str,
+        turn: int,
+        *,
+        head: int = 400,
+        last: int | None = None,
+    ) -> list[tuple[str, str, str]]:
+        """How the tool calls of turn *turn* ended, in the order they finished (or only
+        the last *last* of them): ``(status, error_category, text head)`` for each
+        ``tool.finished`` event.
+
+        The head is the first *head* characters of the call's error, or of its
+        output when it has none; the rest of a long output is not read out of the
+        store. A call that was never reported finished has no entry; nothing from
+        another turn of the session.
+        """
+        text = "json_extract(event, '$.data.%s')"
+        async with self._lock:
+            conn = await self._ready()
+            rows = await _rows(
+                conn,
+                f"SELECT {text % 'status'}, {text % 'error_category'}, "
+                f"substr(coalesce(nullif({text % 'error'}, ''), "
+                f"{text % 'output'}, ''), 1, ?) "
+                "FROM events WHERE session_id = ? AND turn = ? AND type = ? "
+                "ORDER BY id DESC LIMIT ?",
+                (
+                    head,
+                    session_id,
+                    turn,
+                    TOOL_FINISHED_EVENT_TYPE,
+                    -1 if last is None else last,
+                ),
+            )
+        return [
+            (str(status or ""), str(category or ""), str(words or ""))
+            for status, category, words in reversed(rows)
+        ]
 
     async def events_of_type_anywhere(
         self, type_: str, *, before_id: int | None = None, limit: int = 200

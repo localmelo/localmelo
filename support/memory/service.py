@@ -84,7 +84,7 @@ from localmelo.support.config import (
     MEMORY_RECALL_OPEN_CHARS,
     MEMORY_RECALL_RECORDS,
 )
-from localmelo.support.memory import hippo_encode, note_gate, records
+from localmelo.support.memory import blocked, hippo_encode, note_gate, records
 from localmelo.support.memory import sleep as sleeping
 from localmelo.support.memory.digest import (
     DIGEST_KINDS,
@@ -712,6 +712,34 @@ async def turn_words(store: SessionStore, info: TurnInfo, typed: str) -> str:
     if is_owner_question(info):
         return typed
     return with_read_notes(typed, await store.read_notes(info.session_id, info.turn))
+
+
+async def ended_on_block(store: SessionStore, info: TurnInfo) -> bool:
+    """Whether turn *info* ended on a blocked step (:func:`blocked.ended_on_block`),
+    from the last result of its tool calls in the store: one read."""
+    results = await store.turn_tool_results(
+        info.session_id, info.turn, head=blocked.HEAD_CHARS, last=1
+    )
+    return blocked.ended_on_block(results)
+
+
+async def turn_document(
+    store: SessionStore, info: TurnInfo, typed: str, answer: str
+) -> tuple[str, str | None] | None:
+    """What a finished turn's document holds: ``(the person's words, melo's answer)``,
+    or ``None`` when the turn holds nothing to remember.
+
+    The words are :func:`turn_words`. A turn that ended on a blocked step
+    (:func:`ended_on_block`) holds the words only, its answer ``None`` (no
+    ``melo:`` line): melo's reply about a step it was not allowed to take reports the
+    rules of that time, which no longer say anything about the person. A blocked turn
+    with no words has nothing left. Any other turn is as it was: the words and the
+    answer. The live index and a rebuild both call this, so they agree.
+    """
+    words = await turn_words(store, info, typed)
+    if not await ended_on_block(store, info):
+        return words, answer
+    return (words, None) if words.strip() else None
 
 
 async def recent_said(
@@ -1963,22 +1991,25 @@ class ChatMemory:
     ) -> None:
         try:
             source = await self._source(store, info)
-            words = await turn_words(store, info, typed)
+            held = await turn_document(store, info, typed, answer)
+            if held is None:
+                return
             await self._add_documents(
-                [(source, info.turn, words, answer, time.time())], INDEX_EMBED_TIMEOUT_S
+                [(source, info.turn, *held, time.time())], INDEX_EMBED_TIMEOUT_S
             )
         except Exception:
             logger.warning("Could not add a turn to the memory index", exc_info=True)
 
     async def _add_documents(
         self,
-        turns: Sequence[tuple[dict[str, Any], int, str, str, float]],
+        turns: Sequence[tuple[dict[str, Any], int, str, str | None, float]],
         timeout: float,
     ) -> tuple[int, int]:
         """Index turns of ``(source, turn, typed, answer, at)``: a document for each
-        chunk of each turn (:func:`document_chunks`), embedded _BATCH at a time, and
-        a turn's stored in place of the ones it had. Returns the documents stored
-        and the characters embedded (0 without a vector)."""
+        chunk of each turn (:func:`document_chunks`; an answer of ``None`` is no
+        reply line), embedded _BATCH at a time, and a turn's stored in place of the
+        ones it had. Returns the documents stored and the characters embedded (0
+        without a vector)."""
         chunked = [
             document_chunks(
                 typed, answer, title=src["title"] if src["kind"] == "task" else ""
@@ -2235,7 +2266,7 @@ class ChatMemory:
                 async with self._lock:
                     await records_store.set_vector(entry.id, vectors[0], model)
                 notes += 1
-        found: list[tuple[dict[str, Any], int, str, str, float]] = []
+        found: list[tuple[dict[str, Any], int, str, str | None, float]] = []
         if chats is not None:
             since = await index.forgotten_at()
             for session in await chats.list_sessions(limit=100_000, kinds=None):
@@ -2256,12 +2287,16 @@ class ChatMemory:
                         and (turn.finished_at or 0) > since
                     ):
                         # What was typed: the composed text holds attachments too.
-                        # Then the words the person added while melo worked, as
-                        # the live index has them (:func:`turn_words`).
-                        words = await turn_words(chats, turn, _typed_words(turn))
-                        found.append(
-                            (source, turn.turn, words, answer, turn.finished_at or 0)
+                        # Then the words the person added while melo worked, and no
+                        # answer for a turn that ended on a blocked step, as the
+                        # live index has them (:func:`turn_document`).
+                        held = await turn_document(
+                            chats, turn, _typed_words(turn), answer
                         )
+                        if held is not None:
+                            found.append(
+                                (source, turn.turn, *held, turn.finished_at or 0)
+                            )
             async with self._lock:
                 # Summaries and exchanges are no turns of a session file: keep them.
                 extra = [
