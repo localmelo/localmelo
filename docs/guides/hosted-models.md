@@ -84,6 +84,7 @@ melo setup
 - A thinking model can end a turn with its answer only in its thinking. melo then asks once more with thinking off.
 - If the reply is still empty, melo shows the last lines of the thinking as the answer, marked `(from melo's thinking)`, and the run finishes.
 - A reply with no thinking at all still fails, as before.
+- A run's result says when either happened (`empty_reply` in the JSON record, and a notice in the chat). To count them, or to run without them, set `[agent] empty_reply_fallback = "off"` (`-X agent.empty_reply_fallback=off` for one run); a turn that ends with only thinking then fails as it did before.
 - DeepSeek: `deepseek-flash` starts with thinking off; `deepseek-v4-pro` keeps its own default. Change either with the checkbox or with `thinking` in the config.
 
 ## Pictures

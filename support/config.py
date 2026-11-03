@@ -69,6 +69,7 @@ NOTE_WRITERS = ("auto", "heuristic")
 WINDOW_EVICTIONS = ("slide", "chunk", "boundary")
 CACHE_LAYOUTS = ("v2", "v3")
 TOOL_IMAGES = ("auto", "on", "off")
+EMPTY_REPLY_FALLBACKS = ("on", "off")
 REASONING_FIELDS = ("auto", "reasoning_content", "reasoning")
 RETRIEVAL_MODES = ("auto", "off", "bm25", "llm", "embedding")
 # How memory across chats finds notes: see MemoryConfig.retriever.
@@ -316,6 +317,12 @@ class AgentConfig:
     tool_images: str = "auto"
     tool_images_keep: int = 3
     tool_images_retire: int = 2
+    # Developer setting: a turn that ends with no answer from a model that did
+    # think (an empty reply, or a reply that ends inside its thinking) is asked
+    # once more with thinking off where the service has a switch for it, and
+    # then answered with the end of its thinking, marked as such
+    # (AgentOptions.empty_reply_fallback). "off" ends such a run as failed.
+    empty_reply_fallback: str = "on"  # on | off
 
     def window_for(self, backend: str) -> int:
         """The working window's cap: ``window_messages``, else *backend*'s default."""
@@ -340,6 +347,16 @@ def tool_images_errors(agent: AgentConfig) -> list[str]:
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             errors.append(f"[agent] {name} must be an int >= 1, got {value!r}")
     return errors
+
+
+def empty_reply_fallback_errors(agent: AgentConfig) -> list[str]:
+    """What is wrong with ``[agent] empty_reply_fallback``."""
+    if agent.empty_reply_fallback in EMPTY_REPLY_FALLBACKS:
+        return []
+    return [
+        f"[agent] empty_reply_fallback {agent.empty_reply_fallback!r} is not "
+        f"recognised. Must be one of {EMPTY_REPLY_FALLBACKS}."
+    ]
 
 
 def default_window_messages(backend: str) -> int:
@@ -1038,6 +1055,7 @@ class Config:
         ):
             errors.append(f"[agent] max_calls must be an int >= 2, got {calls!r}")
         errors.extend(tool_images_errors(self.agent))
+        errors.extend(empty_reply_fallback_errors(self.agent))
         if self.agent.reasoning not in REASONING_MODES:
             errors.append(
                 f"[agent] reasoning {self.agent.reasoning!r} is not recognised. "
@@ -1926,6 +1944,7 @@ def save(cfg: Config) -> None:
         or cfg.agent.confine_direct_runs
         or cfg.agent.answer_on_stop != defaults.answer_on_stop
         or cfg.agent.max_calls is not None
+        or cfg.agent.empty_reply_fallback != defaults.empty_reply_fallback
         or any(
             getattr(cfg.agent, name) != getattr(defaults, name) for name in IMAGE_KEYS
         )
@@ -1968,6 +1987,11 @@ def save(cfg: Config) -> None:
         for name in IMAGE_KEYS:
             if getattr(cfg.agent, name) != getattr(defaults, name):
                 lines.append(f"{name} = {_toml_value(getattr(cfg.agent, name))}")
+        if cfg.agent.empty_reply_fallback != defaults.empty_reply_fallback:
+            lines.append(
+                "empty_reply_fallback = "
+                f"{_toml_string(cfg.agent.empty_reply_fallback)}"
+            )
         if cfg.agent.tool_env:
             lines.append(f"tool_env = {_toml_value(cfg.agent.tool_env)}")
         for name in ("context_window", "output_reserve", "safety_margin"):

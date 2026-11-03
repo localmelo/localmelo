@@ -378,7 +378,7 @@ melo 想要对话文件夹之外的文件时，卡片会询问那个文件夹（
 
 模型服务器完全连不上时，卡片写 `Could not reach the model server`，并问 `Is your model server still running at 127.0.0.1:8000? Start it, then try again.`，其中的地址就是失败的那个地址。卡片不重复错误本身：提供方的原始文字留在 **Details** 中。实心按钮是 **Try again**（该轮次已运行过工具时是 **Continue**，接着做而不是从头开始），**Change the server address** 是打开设置的链接。使用云端模型时，提示是 `Check your network connection, then try again.`，链接仍是 **Open model settings**，因为没有地址可改。以这种方式结束的运行，其工作框也不再列出重试行（卡片已经说过了）；运行仍在重试时它们照常显示。
 
-只含模型未完成思考的回复绝不会显示为回答：它是工作框中折叠的思考项，附有一行 `The model's reply ended inside its thinking; asking it for its answer.`，模型会被再问一次。如果服务报告了模型的思考，melo 会在服务提供相应开关时，关闭思考再问最后一次；回复仍为空时，把思考的最后几行作为回答显示，末尾带有 `(from melo's thinking)`。没有思考可用、且第二个回复仍没有回答时，卡片标题是 `melo did not finish an answer`，提示是 `The model's reply held only its thinking. Try again, or rephrase the request.`，实心按钮是 **Try again**。
+只含模型未完成思考的回复绝不会显示为回答：它是工作框中折叠的思考项，附有一行 `The model's reply ended inside its thinking; asking it for its answer.`，模型会被再问一次。如果服务报告了模型的思考，melo 会在服务提供相应开关时，关闭思考再问最后一次；回复仍为空时，把思考的最后几行作为回答显示，末尾带有 `(from melo's thinking)`。这两步各会在工作框里加一行（`The model ended its turn with only thinking; asking again with thinking off.` 和 `The model gave no answer after thinking; the answer is the end of its thinking.`）。没有思考可用、且第二个回复仍没有回答时，卡片标题是 `melo did not finish an answer`，提示是 `The model's reply held only its thinking. Try again, or rephrase the request.`，实心按钮是 **Try again**。
 
 <a id="auto-mode"></a>
 

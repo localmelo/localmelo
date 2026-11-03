@@ -37,6 +37,7 @@ NoteWriter = Literal["auto", "heuristic"]
 WindowEviction = Literal["slide", "chunk", "boundary"]
 CacheLayout = Literal["v2", "v3"]
 ToolImages = Literal["auto", "on", "off"]
+EmptyReplyFallback = Literal["on", "off"]
 
 # The reasoning a replay request carries for one turn is capped at this many
 # characters. At the plan's 3.45 characters per token that is about 11,600
@@ -343,6 +344,16 @@ class AgentOptions:
       was refused, or the approval policy's denial. Such a step still sends
       its request and counts in ``RunResult.steps``; once the allowance is
       spent, refused steps count as any other. Default 0: nothing changes.
+    - ``empty_reply_fallback``: what a run does when a model that did think
+      (the provider reported reasoning) ends its turn with no answer and no tool
+      call, after the one nudge every empty reply gets. ``"on"``, the default:
+      where the service has a switch for thinking (``thinking_off_body``), the
+      turn is asked once more with thinking off, and if it ends empty again the
+      last lines of the thinking are the answer, ending with the note "(from
+      melo's thinking)"; the run completes. ``RunResult.empty_reply`` says which
+      of the two happened, and each comes with a ``notice`` event
+      (``thinking_off_retry``, ``answer_from_thinking``). ``"off"``: neither;
+      the run ends ``failed`` as it did before the fallback existed.
     """
 
     context_window: int | None = None
@@ -404,6 +415,7 @@ class AgentOptions:
     max_calls: int | None = None
     task_aids: bool = False
     refused_steps: int = 0
+    empty_reply_fallback: EmptyReplyFallback = "on"
 
     def __post_init__(self) -> None:
         if not isinstance(self.fixed_prefix, bool):
@@ -474,6 +486,7 @@ class AgentOptions:
             ("window_eviction", get_args(WindowEviction)),
             ("cache_layout", get_args(CacheLayout)),
             ("tool_images", get_args(ToolImages)),
+            ("empty_reply_fallback", get_args(EmptyReplyFallback)),
             ("retriever", RETRIEVER_MODES),
             ("recall_placement", RECALL_PLACEMENTS),
         ):

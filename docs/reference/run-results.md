@@ -37,7 +37,9 @@ Details:
   The exception is a model whose server reported its reasoning: it is asked
   once more with thinking off where that is possible, and when it is still
   empty the `result` is the last lines of the thinking, ending with
-  `(from melo's thinking)`, and the status is `completed`.
+  `(from melo's thinking)`, and the status is `completed`. The record says
+  which of the two happened in `empty_reply`. `-X agent.empty_reply_fallback=off`
+  gives both up: the run ends `failed` as described above.
   A reply with no tool call that writes one out as text (a server's parser can
   leave `text`, or markup such as `<function_calls>`, in the content) is no
   answer either: localmelo asks the model again, it counts as an empty reply,
@@ -193,6 +195,7 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `confinement` | Only in a run that confines its writes (a `--brief` worker or a saved task, see [Writes stay in the workspace](cli.md#confined-writes)): `{"writes": "confined", "refused_writes": N}`, N being the writes outside the workspace this run's `shell_exec` and `python_exec` reported refused, or `{"writes": "not_confined", "reason": "..."}` off macOS. Absent otherwise. |
 | `answered_on_stop` | Only `true`, and only in a run whose `result` came from the extra request that `answer_on_stop` makes (see [Statuses](#statuses)). Absent otherwise. |
 | `format_fixed` | Only `true`, and only in a run whose `result` got the closing line the task asks for, from the extra request that `answer_on_stop` makes (see [Statuses](#statuses)). Absent otherwise. |
+| `empty_reply` | Only in a run where a model that did think ended a turn with no answer and `empty_reply_fallback` stepped in: `{"thinking_off_retry": true or false, "from_thinking": true or false}`. `thinking_off_retry` is `true` when the turn was asked again with thinking off, `from_thinking` when the `result` is the last lines of the thinking, ending with `(from melo's thinking)`. Absent otherwise, and always with `-X agent.empty_reply_fallback=off`. |
 
 `config` holds:
 
@@ -203,6 +206,7 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `memory_dir` | The directory of the SQLite files, or `null` when memory stays in RAM. |
 | `tools` | Every registered tool, built-in and MCP, sorted by name. |
 | `answer_on_stop` | `true` when the run had it on (the default); absent with `-X agent.answer_on_stop=off`. |
+| `empty_reply_fallback` | `"off"` when the run had it off; absent with the default `"on"`. |
 | `max_calls` | The run's call budget when it set one; absent otherwise. |
 | `window_eviction` | `chunk` (the default) or `boundary` when the run used one; absent for `slide`. |
 | `reflect_tool_guard` | `true` when the run used the guard (the default); absent with `--reflect-tool-guard off`. |

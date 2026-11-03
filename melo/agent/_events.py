@@ -51,6 +51,12 @@ NOTICE_MESSAGES: Mapping[str, str] = {
     "tool_call_as_text": (
         "The model wrote a tool call as text, so it did not run; asking it again."
     ),
+    "thinking_off_retry": (
+        "The model ended its turn with only thinking; asking again with thinking off."
+    ),
+    "answer_from_thinking": (
+        "The model gave no answer after thinking; the answer is the end of its thinking."
+    ),
     "no_change": "Nothing has changed in the workspace yet.",
     "brief_items": "Some numbered items of the brief have no edit yet.",
     "brief_check_failed": (
@@ -500,6 +506,22 @@ class _Emitter:
             else NOTICE_MESSAGES["tool_call_as_text"]
         )
         self._notice("tool_call_as_text", message, {"count": count})
+
+    def thinking_off_retry(self) -> None:
+        """A model that thought ended its turn empty, and the next planning
+        request goes out with thinking off (``empty_reply_fallback``)."""
+        if self._sink is None:
+            return
+        self._notice("thinking_off_retry", NOTICE_MESSAGES["thinking_off_retry"], {})
+
+    def answer_from_thinking(self) -> None:
+        """A model that thought ended its turn empty again, and the end of its
+        thinking, marked, is the answer (``empty_reply_fallback``)."""
+        if self._sink is None:
+            return
+        self._notice(
+            "answer_from_thinking", NOTICE_MESSAGES["answer_from_thinking"], {}
+        )
 
     def no_change(self, scope: str | None = None) -> None:
         """A brief run found the workspace unchanged: at a boundary, or with

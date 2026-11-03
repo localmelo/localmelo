@@ -253,7 +253,7 @@ melo: run ended with status failed: empty replies
 melo: run ended with status failed: melo did not finish an answer
 ```
 
-- **原因：** 模型在思考中、给出回答之前停下了，localmelo 再问一次时又是如此。它的思考作为思考保留（终端中用 `/thinking on`，控制台中是折叠的思考），绝不作为回答。只有思考在回复里被截断时才会因此结束运行；如果服务器报告了模型的推理，会关闭思考再问一次，仍为空时，思考的最后几行成为回答，并标注 `(from melo's thinking)`。
+- **原因：** 模型在思考中、给出回答之前停下了，localmelo 再问一次时又是如此。它的思考作为思考保留（终端中用 `/thinking on`，控制台中是折叠的思考），绝不作为回答。只有思考在回复里被截断时才会因此结束运行；如果服务器报告了模型的推理，会关闭思考再问一次，仍为空时，思考的最后几行成为回答，并标注 `(from melo's thinking)`。`-X agent.empty_reply_fallback=off` 会关掉这一做法，运行就会以这个错误结束。
 - **修复：** 再试一次（终端中用 `/retry`，控制台中点 Try again）。如果反复出现，在服务器上提高模型的输出上限，或换一个模型。
 
 ### budget_exhausted: Max steps reached

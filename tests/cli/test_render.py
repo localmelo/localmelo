@@ -1728,6 +1728,34 @@ def test_a_budget_and_a_stuck_notice_are_warnings() -> None:
     assert "⚠ The same tool calls or errors repeated; the attempt ends." in text
 
 
+def test_the_notices_of_the_empty_reply_fallback_are_dim() -> None:
+    """The retry with thinking off and the answer taken from the thinking say what
+    melo did; they are not warnings."""
+    text = (
+        Turn()
+        .event(
+            "notice",
+            kind="thinking_off_retry",
+            message="The model ended its turn with only thinking; asking again with thinking off.",
+            detail={},
+            step=2,
+            attempt=1,
+        )
+        .event(
+            "notice",
+            kind="answer_from_thinking",
+            message="The model gave no answer after thinking; the answer is the end of its thinking.",
+            detail={},
+            step=3,
+            attempt=1,
+        )
+        .text()
+    )
+    assert "· The model ended its turn with only thinking; asking again" in text
+    assert "· The model gave no answer after thinking; the answer is" in text
+    assert "⚠" not in text
+
+
 # ── Thinking, intermediate and held text ──
 
 

@@ -98,6 +98,7 @@ melo setup
 - 会思考的模型有时会结束一轮，而答案只在它的思考里。melo 会关闭思考再问一次。
 - 如果回复仍然是空的，melo 会把思考的最后几行作为答案，并标注 `(from melo's thinking)`，然后结束运行。
 - 完全没有思考内容的空回复仍然会失败，和以前一样。
+- 运行结果会说明这两步是否发生过（JSON 记录里的 `empty_reply`，以及聊天里的一条通知）。想统计它们，或不要这两步，可以设置 `[agent] empty_reply_fallback = "off"`（`-X agent.empty_reply_fallback=off` 仅对一次运行生效）；此后只含思考的回合会像以前一样失败。
 - DeepSeek：`deepseek-flash` 默认关闭思考；`deepseek-v4-pro` 保持它自己的默认。可以用复选框或配置里的 `thinking` 来改。
 
 <a id="pictures"></a>

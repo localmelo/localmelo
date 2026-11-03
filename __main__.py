@@ -2457,6 +2457,7 @@ def _build_direct_mode_agent(
         CACHE_SETTINGS,
         configured_cache_options,
         configured_context_options,
+        configured_fallback_options,
         configured_image_options,
     )
 
@@ -2562,6 +2563,7 @@ def _build_direct_mode_agent(
         options = dataclasses.replace(options, confine_writes=True)
     try:
         options = configured_image_options(budget_cfg, options)
+        options = configured_fallback_options(budget_cfg, options)
     except ValueError as exc:
         config_value_error(str(exc))
 

@@ -84,6 +84,7 @@ async def _run(
     *,
     switch: dict[str, Any] | None = None,
     extra_body: dict[str, Any] | None = None,
+    fallback: str = "on",
 ) -> tuple[RunResult, list[AgentEvent]]:
     stub.default = scenario
     events: list[AgentEvent] = []
@@ -101,6 +102,7 @@ async def _run(
             retriever="off",
             max_steps=6,
             workspace_root=str(tmp_path),
+            empty_reply_fallback=fallback,  # type: ignore[arg-type]
         ),
     )
     try:
@@ -172,3 +174,106 @@ async def test_a_reply_with_no_thinking_at_all_still_fails(
     )
     assert result.n_llm == 2  # asked once more, no retry and no answer from nothing
     assert _sent_thinking(stub) == [None, None]
+
+
+# ── empty_reply_fallback: off is the run from before, on says what it did ──
+
+
+def _notices(events: list[AgentEvent]) -> list[str]:
+    return [event.data["kind"] for event in events if event.type == "notice"]
+
+
+@pytest.mark.parametrize(
+    "scenario", ["thinking_only_always", "thinking_only_then_answer"]
+)
+@pytest.mark.parametrize("switch", [OFF, None])
+async def test_off_ends_the_run_as_it_did_before_the_fallback_existed(
+    stub: StubServer, tmp_path: Path, scenario: str, switch: dict[str, Any] | None
+) -> None:
+    """Pinned to the run of the version before the fallback, switch or not: the
+    same two requests, the same notice, the same failed result."""
+    result, events = await _run(stub, scenario, tmp_path, switch=switch, fallback="off")
+    assert (result.status, result.error, result.result) == (
+        "failed",
+        UNFINISHED_ANSWER_ERROR,
+        "",
+    )
+    assert (result.steps, result.n_llm) == (2, 2)
+    assert _sent_thinking(stub) == [None, None]  # no retry with thinking off
+    assert _notices(events) == ["unfinished_answer"]
+    assert result.empty_reply is None and "empty_reply" not in result.to_dict()
+    assert "empty_reply" not in events[-1].data["result"]
+    assert result.config["empty_reply_fallback"] == "off"
+
+
+async def test_on_leaves_no_trace_in_a_run_that_needed_no_fallback(
+    stub: StubServer, tmp_path: Path
+) -> None:
+    result, events = await _run(stub, "answer", tmp_path, switch=OFF)
+    assert result.status == "completed"
+    assert result.empty_reply is None and "empty_reply" not in result.to_dict()
+    assert "empty_reply_fallback" not in result.config  # the default is not listed
+    assert not {"thinking_off_retry", "answer_from_thinking"} & set(_notices(events))
+
+
+async def test_on_marks_the_retry_that_gave_the_answer(
+    stub: StubServer, tmp_path: Path
+) -> None:
+    result, events = await _run(stub, "thinking_only_then_answer", tmp_path, switch=OFF)
+    assert result.result == "The folder is empty."
+    flags = {"thinking_off_retry": True, "from_thinking": False}
+    assert result.empty_reply == flags
+    assert result.to_dict()["empty_reply"] == flags
+    assert events[-1].data["result"]["empty_reply"] == flags  # run.finished
+    # The retry's notice follows the usual one of the reply that led to it.
+    assert _notices(events) == [
+        "unfinished_answer",
+        "unfinished_answer",
+        "thinking_off_retry",
+    ]
+    notice = next(e for e in events if e.data.get("kind") == "thinking_off_retry")
+    assert notice.data["message"] == (
+        "The model ended its turn with only thinking; asking again with thinking off."
+    )
+    assert notice.data["detail"] == {}
+
+
+async def test_on_marks_the_retry_and_the_answer_taken_from_the_thinking(
+    stub: StubServer, tmp_path: Path
+) -> None:
+    result, events = await _run(stub, "thinking_only_always", tmp_path, switch=OFF)
+    flags = {"thinking_off_retry": True, "from_thinking": True}
+    assert result.empty_reply == flags
+    assert events[-1].data["result"]["empty_reply"] == flags
+    assert _notices(events) == [
+        "unfinished_answer",
+        "unfinished_answer",
+        "thinking_off_retry",
+        "answer_from_thinking",
+    ]
+    assert events[-1].type == "run.finished"  # the notice comes before it
+
+
+async def test_on_marks_only_the_answer_where_the_service_has_no_switch(
+    stub: StubServer, tmp_path: Path
+) -> None:
+    result, events = await _run(stub, "thinking_only_always", tmp_path)
+    assert result.empty_reply == {"thinking_off_retry": False, "from_thinking": True}
+    assert _notices(events) == ["unfinished_answer", "answer_from_thinking"]
+
+
+async def test_a_failed_run_with_no_thinking_has_nothing_to_mark(
+    stub: StubServer, tmp_path: Path
+) -> None:
+    result, events = await _run(stub, "no_thinking_text", tmp_path, switch=OFF)
+    assert result.status == "failed"
+    assert result.empty_reply is None
+    assert not {"thinking_off_retry", "answer_from_thinking"} & set(_notices(events))
+
+
+def test_a_result_with_the_flags_rebuilds_from_its_dict() -> None:
+    """``run.finished`` carries ``result.to_dict()``, and the other end rebuilds it."""
+    flags = {"thinking_off_retry": True, "from_thinking": False}
+    result = RunResult(task_id="t", status="completed", empty_reply=flags)
+    assert RunResult(**result.to_dict()) == result
+    assert "empty_reply" not in RunResult(task_id="t", status="completed").to_dict()

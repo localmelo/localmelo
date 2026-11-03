@@ -1290,6 +1290,11 @@ class _RunState:
     row_thinking: str = ""
     thinking_retry_used: bool = False
     thinking_retry_armed: bool = False
+    # empty_reply_fallback, over the whole run (the row's state above resets
+    # with each tool call): whether a turn was asked again with thinking off,
+    # and whether the result is the marked end of a model's thinking.
+    fallback_retried: bool = False
+    fallback_answered: bool = False
     # The run's task id ("" for a call without a task record).
     task_id: str = ""
     # The query Message this run appended to the window, for replay scope.
@@ -5807,13 +5812,17 @@ class Agent:
         :data:`~localmelo.melo.schema.UNFINISHED_ANSWER_ERROR` instead.
 
         A row that ends with such a reply, or an empty one, from a model that
-        did think (#469) does not fail when the answer may be in the thinking.
-        Where the provider has a switch for thinking (``thinking_off_body``),
+        did think (#469) does not fail when the answer may be in the thinking
+        (``AgentOptions.empty_reply_fallback``, on by default; off, the row
+        ends as a failed run, as it did before). Where the provider has a
+        switch for thinking (``thinking_off_body``),
         the reply that would end the row is followed by one more request sent
         with thinking off. If the row ends empty again, the last lines of the
         row's latest thinking (:func:`~localmelo.melo.schema.thinking_answer`)
         are the answer, ending with the note "(from melo's thinking)", and
-        the run completes. A row with no thinking at all still fails.
+        the run completes. A row with no thinking at all still fails. Each of
+        the two steps is a notice (``thinking_off_retry``,
+        ``answer_from_thinking``) and sets its flag in ``RunResult.empty_reply``.
 
         A reply with no tool call that writes one out as text
         (:func:`~localmelo.melo.schema.broken_tool_call`; a local model's
@@ -5949,7 +5958,11 @@ class Agent:
             # asks once more with thinking off, where the provider has that
             # switch; if the row still ends empty, the end of the thinking is
             # the answer, marked as such.
-            if not response.tool_calls and not has_content(response.content):
+            if (
+                self.options.empty_reply_fallback == "on"
+                and not response.tool_calls
+                and not has_content(response.content)
+            ):
                 if reasoned.strip():
                     run.row_thinking = reasoned
                 if (
@@ -5964,12 +5977,15 @@ class Agent:
                     ):
                         run.thinking_retry_used = True
                         run.thinking_retry_armed = True
+                        run.fallback_retried = True
                     else:
+                        marked = thinking_answer(run.row_thinking)
                         response = dataclasses.replace(
-                            response,
-                            content=thinking_answer(run.row_thinking),
-                            thinking=run.row_thinking,
+                            response, content=marked, thinking=run.row_thinking
                         )
+                        if marked:  # thinking with no words gives no answer
+                            run.fallback_answered = True
+                            run.events.answer_from_thinking()
             rest = response.content
             has_model_note = False
             if self._notes_mode:
@@ -6101,6 +6117,9 @@ class Agent:
                     run.events.unfinished_answer()
                 elif not broken:
                     run.events.empty_reply(run.empty_replies)
+                if run.thinking_retry_armed:
+                    # Armed by this reply: the next request is the retry.
+                    run.events.thinking_off_retry()
                 continue
             run.empty_replies = 0
             run.unfinished_row = False
@@ -7318,6 +7337,14 @@ class Agent:
             confinement=self._confinement_record(run),
             answered_on_stop=run.answered_on_stop,
             format_fixed=run.format_fixed,
+            empty_reply=(
+                {
+                    "thinking_off_retry": run.fallback_retried,
+                    "from_thinking": run.fallback_answered,
+                }
+                if run.fallback_retried or run.fallback_answered
+                else None
+            ),
         )
 
     def _confinement_record(self, run: _RunState) -> dict[str, Any] | None:
@@ -7349,6 +7376,8 @@ class Agent:
         }
         if opts.answer_on_stop:
             config["answer_on_stop"] = True
+        if opts.empty_reply_fallback != "on":
+            config["empty_reply_fallback"] = opts.empty_reply_fallback
         if opts.refused_steps:
             config["refused_steps"] = opts.refused_steps
         if opts.max_calls is not None:

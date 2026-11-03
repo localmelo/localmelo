@@ -85,17 +85,32 @@ def configured_cache_options(
 
 # The settings of the pictures that tools return (AgentOptions.tool_images).
 IMAGE_SETTINGS: Final = ("tool_images", "tool_images_keep", "tool_images_retire")
+# The setting of a turn that ends with only thinking
+# (AgentOptions.empty_reply_fallback).
+FALLBACK_SETTINGS: Final = ("empty_reply_fallback",)
 
 
-def configured_image_options(cfg: Config, options: AgentOptions) -> AgentOptions:
-    """*options* with the config's ``tool_images`` keys; ValueError for a bad value."""
-    values = {name: getattr(cfg.agent, name) for name in IMAGE_SETTINGS}
+def _configured_keys(
+    cfg: Config, options: AgentOptions, names: tuple[str, ...]
+) -> AgentOptions:
+    """*options* with the config's ``[agent]`` *names*; ValueError for a bad value."""
+    values = {name: getattr(cfg.agent, name) for name in names}
     if all(getattr(options, name) == value for name, value in values.items()):
         return options
     try:
         return dataclasses.replace(options, **values)
     except ValueError as exc:
         raise ValueError(f"[agent] {exc}") from None
+
+
+def configured_image_options(cfg: Config, options: AgentOptions) -> AgentOptions:
+    """*options* with the config's ``tool_images`` keys; ValueError for a bad value."""
+    return _configured_keys(cfg, options, IMAGE_SETTINGS)
+
+
+def configured_fallback_options(cfg: Config, options: AgentOptions) -> AgentOptions:
+    """*options* with ``[agent] empty_reply_fallback``; ValueError for a bad value."""
+    return _configured_keys(cfg, options, FALLBACK_SETTINGS)
 
 
 def configured_context_options(
@@ -151,6 +166,7 @@ def configured_session_options(
             *CACHE_SETTINGS,
             "captured_history",
             *IMAGE_SETTINGS,
+            *FALLBACK_SETTINGS,
         )
         if name not in explicit
     }
