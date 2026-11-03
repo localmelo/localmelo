@@ -749,3 +749,28 @@ def test_the_notes_text_says_the_model_sees_only_the_recent_messages_of_the_conv
     assert "search_memory looks up more" in NOTES_TEXT
     # The chat without notes says the same of the window: recent messages.
     assert ALONE.startswith("You remember the recent messages of this chat")
+
+
+@pytest.mark.parametrize("surface", ["main", "side"])
+async def test_a_direct_call_keeps_the_persons_words_free_of_the_reminder(
+    tmp_path: Path, surface: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The reviews read user_words; a caller that gives none must not hand them
+    # the query with melo's own reminder appended.
+    from localmelo.melo.agent.agent import Agent
+
+    seen: list[object] = []
+    original = Agent.run_task
+
+    async def spy(self: Agent, query: str, **kwargs: object) -> object:
+        seen.append(kwargs.get("user_words"))
+        return await original(self, query, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Agent, "run_task", spy)
+    stub = StubServer().start()
+    try:
+        url = stub.base_url.rsplit("/v1", 1)[0] + "/s/answer/v1"
+        await say_hello(surface, url, str(tmp_path))
+    finally:
+        stub.close()
+    assert seen and seen[0] == "hello"

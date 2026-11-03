@@ -478,6 +478,9 @@ class FrontAgent(Agent):
             return await self.answer_ask(query, on_event=on_event, **kwargs)
         if front is not None and turn is not None and turn.origin == FOLLOWUP_ORIGIN:
             return await self.follow_up(query, on_event=on_event, **kwargs)
+        # The reviews read the person's words: never the notes appended below.
+        if kwargs.get("user_words") is None:
+            kwargs["user_words"] = query
         if front is None or turn is None or on_event is None:
             query = f"{query}\n\n{ACTING_NOTE}"
             return await super().run_task(query, on_event=on_event, **kwargs)
@@ -667,6 +670,9 @@ class SideAgent(FrontAgent):
             return await self.answer_ask(query, on_event=on_event, **kwargs)
         if turn is not None and turn.origin == FOLLOWUP_ORIGIN:
             return await self.follow_up(query, on_event=on_event, **kwargs)
+        # The reviews read the person's words: never the notes appended below.
+        if kwargs.get("user_words") is None:
+            kwargs["user_words"] = query
         news = ""
         if self.front is not None:
             try:

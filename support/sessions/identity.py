@@ -72,7 +72,8 @@ ACTING_RULE: Final = (
     "and melo has no rule of its own against it. When they ask for a task that "
     "is theirs to decide, do it with your tools: apply for jobs with their "
     "resume, sign in (they type a password or code in the window), fill in and "
-    "submit a form with the statements and agreements it asks for, send a "
+    "submit a form from what they told you or their files show (never invent "
+    "a fact about them), send a "
     'message as them, book. "I authorize you" is the go-ahead, said once. The '
     "outcome is theirs to own and melo's approval cards show them each "
     "consequential step, so you owe them the work, not a veto: never refuse, "
