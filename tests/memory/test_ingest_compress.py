@@ -16,12 +16,17 @@ from typing import Any
 
 import pytest
 
-from localmelo.support.config import Config, MemoryConfig
-from localmelo.support.memory import ChatMemory, ingest
+from localmelo.support.config import (
+    CloudVendorConfig,
+    Config,
+    LocalBackendConfig,
+    MemoryConfig,
+)
+from localmelo.support.memory import ChatMemory, hippo_encode, ingest
 from localmelo.support.memory.ingest import IngestError
 from localmelo.support.sessions.store import SessionStore
 from localmelo.tests.memory.chat_memory_helpers import FakeEmbedding
-from localmelo.tests.memory.hippo_helpers import StubEncoder, item, says
+from localmelo.tests.memory.hippo_helpers import StubEncoder, item, says, turn
 
 MAY = {
     "id": "may",
@@ -137,7 +142,7 @@ async def test_the_turns_are_written_as_ever_and_the_items_follow(
         assert (first.status, first.replaced_by) == ("replaced", 3)
         assert (book.status, utrecht.status) == ("active", "active")
         assert first.session_id == may and utrecht.session_id == june
-        assert first.encoder == "2:stub-encoder" and first.embed_model == ""
+        assert first.encoder == "3:stub-encoder" and first.embed_model == ""
         # The item's time is that of the last turn it came from.
         stored = await chats.get_session(may)
         assert stored is not None and stored.title == "Moving"
@@ -377,3 +382,51 @@ async def test_the_compress_run_ignores_a_held_gpu_lock(tmp_path: Path) -> None:
         assert lock.read_text().startswith("holder: someone else")
     finally:
         await close(chats, memory)
+
+
+# ── The chat backend reaches the encoder ──
+
+
+@pytest.mark.parametrize(
+    ("chat_backend", "url", "expected"),
+    [
+        ("vllm", None, "vllm"),
+        ("ollama", None, "ollama"),
+        ("mlc", None, "mlc"),
+        ("openai", None, "openai"),
+        ("vllm", "http://127.0.0.1:9/v1", None),  # a server named by its URL
+    ],
+)
+async def test_the_backend_of_the_chat_model_is_what_the_encoder_is_told(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    chat_backend: str,
+    url: str | None,
+    expected: str | None,
+) -> None:
+    monkeypatch.setenv("MELO_TEST_CHAT_KEY", "k")
+    local = LocalBackendConfig(chat_url="http://127.0.0.1:9/v1", chat_model="m")
+    cfg = Config(chat_backend=chat_backend, embedding_backend="none")
+    setattr(cfg, chat_backend, local)
+    if chat_backend == "openai":
+        cfg.openai = CloudVendorConfig(api_key_env="MELO_TEST_CHAT_KEY", chat_model="m")
+    cfg.memory = MemoryConfig(compress_cache=str(tmp_path / "cache.jsonl"))
+    seen: list[dict[str, Any]] = []
+    real = hippo_encode.encode
+
+    async def spy(provider: Any, title: str, turns: Any, **kwargs: Any) -> Any:
+        seen.append(kwargs)
+        return await real(StubEncoder(says()), title, turns, **kwargs)
+
+    monkeypatch.setattr(hippo_encode, "encode", spy)
+    memory = ChatMemory(
+        lambda: cfg,
+        directory=str(tmp_path / "memory"),
+        chat_url=url,
+        chat_model="m" if url else None,
+    )
+    try:
+        await memory.compress_chat("s1", "T", [turn(0, "Hello.", "Hi.")])
+        assert [kwargs["backend"] for kwargs in seen] == [expected]
+    finally:
+        await memory.aclose()
