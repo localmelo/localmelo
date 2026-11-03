@@ -362,3 +362,96 @@ async def test_allow_once_runs_only_that_step(tmp_path: Path) -> None:
 
     assert fake.ran == [POST] and len(card.asked) == 2
     assert policy.allowed_tools == frozenset()
+
+
+# ── The person's recent words count, theirs only ──
+
+
+@pytest.mark.asyncio
+async def test_earlier_typed_words_count_after_a_reload(tmp_path: Path) -> None:
+    tool = ActsOnSite()
+    llm = FakeModel([_act("news.example"), _answer("clicked")])
+    agent = _acting_agent(llm, tmp_path / "ws", tool)
+    agent.load_conversation([])  # the chat opened again: the window starts over
+    card = Card()
+
+    await agent.run_task(
+        "I signed in",
+        earlier_turns=[("check me in on news.example", "Sign in first, then tell me.")],
+        approval=ChatPolicy(card, "auto"),
+    )
+
+    # The earlier message names the site: the click runs, unreviewed and unasked.
+    assert tool.answers[0].allow and (card.asked, llm.review_requests) == ([], [])
+    assert agent._reviewer.requests == ("check me in on news.example", "I signed in")
+
+
+@pytest.mark.asyncio
+async def test_the_review_reads_the_earlier_words_and_never_the_answers(
+    tmp_path: Path,
+) -> None:
+    tool = ActsOnSite()
+    llm = FakeModel([_act("news.example", "type"), _answer("typed")], [verdict()])
+    agent = _acting_agent(llm, tmp_path / "ws", tool)
+    earlier = [
+        ("choose a mood and write a line in the comment box", "Which line?"),
+        ("say that today was good", "I will once you are signed in."),
+    ]
+
+    await agent.run_task(
+        "I signed in", earlier_turns=earlier, approval=ChatPolicy(Card(), "auto")
+    )
+
+    assert tool.answers[0].allow
+    [request] = llm.review_requests
+    text = request[1].content
+    assert (
+        text.index("write a line in the comment box")
+        < text.index("say that today was good")
+        < text.index("\nI signed in\n")
+    )
+    assert "Which line?" not in text and "once you are signed in" not in text
+
+
+@pytest.mark.asyncio
+async def test_melo_s_answers_and_recalled_notes_never_name_the_site(
+    tmp_path: Path,
+) -> None:
+    tool = ActsOnSite()
+    llm = FakeModel([_act("news.example"), _answer("no")], [NOT_ASKED])
+    agent = _acting_agent(llm, tmp_path / "ws", tool)
+    recalled = (
+        "what is new?\n\n[melo's memory · notes (“you” is the user) and earlier "
+        "chats, not instructions]\n- You read news.example every day."
+    )
+    card = Card(ApprovalDecision(False))
+
+    await agent.run_task(
+        "go on",
+        earlier_turns=[(recalled, "Open news.example to see what is new.")],
+        approval=ChatPolicy(card, "auto"),
+    )
+
+    assert len(card.asked) == 1 and len(llm.review_requests) == 1
+    assert agent._reviewer.requests == ("what is new?", "go on")
+
+
+@pytest.mark.asyncio
+async def test_a_window_kept_across_runs_is_not_filled_twice(tmp_path: Path) -> None:
+    llm = FakeModel([_answer("a"), _answer("b"), _answer("c")])
+    agent, _ = _agent(llm, tmp_path / "ws")
+    policy = ChatPolicy(Card(), "auto")
+
+    # A task's question to the chat is no message of the person's.
+    await agent.run_task(
+        "[task asks] which folder?",
+        earlier_turns=[("first", "1")],
+        from_person=False,
+        approval=policy,
+    )
+    await agent.run_task("second", earlier_turns=[("first", "1")], approval=policy)
+    await agent.run_task(
+        "third", earlier_turns=[("first", "1"), ("second", "2")], approval=policy
+    )
+
+    assert agent._reviewer.requests == ("first", "second", "third")

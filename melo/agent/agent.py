@@ -6364,8 +6364,11 @@ class Agent:
         query (a window that began the run empty is not) carry them as one
         data block (see
         :func:`~localmelo.melo.agent._earlier.earlier_block`). A short request
-        such as "go look it up" then stays on what the chat is about. ``None``
-        or none adds nothing.
+        such as "go look it up" then stays on what the chat is about. When
+        the step review's window starts over (a reload), the newest of their
+        user words go into it before the query's, so the person's earlier
+        words still count (#465); their answers never do. ``None`` or none
+        adds nothing.
 
         Before the run starts, ``TypeError`` is raised when *on_event* or
         *observe* is not callable or is a coroutine function, when both
@@ -6385,9 +6388,10 @@ class Agent:
                 raise TypeError("routine must be a str")
             if not routine.strip():
                 raise ValueError("routine must not be blank")
-        earlier = earlier_block(
+        turns_before = (
             check_earlier_turns(earlier_turns) if earlier_turns is not None else []
         )
+        earlier = earlier_block(turns_before)
         place = self._run_place()
         started = time.perf_counter()
         task = TaskRecord(query=query)
@@ -6415,6 +6419,9 @@ class Agent:
         )
         self._earlier_block = earlier
         # The user's own words, which a step review reads (never tool output).
+        # A window that starts over takes the person's earlier words first,
+        # never the answers (#465).
+        self._reviewer.earlier_words([words for words, _ in turns_before])
         if from_person:
             self._reviewer.user_message(query if user_words is None else user_words)
         if chat_started is not None:

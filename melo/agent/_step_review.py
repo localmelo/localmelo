@@ -317,6 +317,8 @@ class StepReviewer:
         """
         self._requests: deque[str] = deque(maxlen=EARLIER_REQUESTS + 1)
         self._marker = 0
+        # Whether the person's earlier words were put in since the reset.
+        self._seeded = False
         self._cache: OrderedDict[str, tuple[ActionReview, int, Purpose]] = OrderedDict()
         # Addresses each site verdict let through since the user's last message.
         self._shared_used: dict[str, int] = {}
@@ -331,14 +333,36 @@ class StepReviewer:
 
         Recalled notes and earlier chats appended to it are left out: they
         are not the user's words, and an earlier answer could argue a call.
+        The newest :data:`EARLIER_REQUESTS` messages before it stay as
+        evidence of what the user asked (#465): "I signed in" after "check
+        me in" still asks for the check-in.
         """
         text = own_words(text)
-        # A message counts even with no words (an attachment): a consent or a
-        # block of the last message does not carry over to it.
+        # A message counts even with no words (an attachment): a review
+        # settled for the last message is asked again, with the new words.
         self._marker += 1
         self._shared_used.clear()
         if text.strip():
             self._requests.append(text[:MAX_REQUEST_CHARS])
+
+    def earlier_words(self, words: Sequence[str]) -> None:
+        """The user's own words of the chat's messages before this run's, oldest first.
+
+        Only for a window that starts over (a reload, a chat opened again,
+        a new Agent): the newest :data:`EARLIER_REQUESTS` go in before the
+        run's own message, so the person's earlier words still count
+        (#465). The caller gives only what the person typed: never melo's
+        answers, a task's questions or page text; recalled notes are left
+        out here too. Once a message was kept, or the words were put in
+        since the reset, nothing changes.
+        """
+        if self._marker or self._seeded:
+            return
+        self._seeded = True
+        for text in list(words)[-EARLIER_REQUESTS:]:
+            text = own_words(text)
+            if text.strip():
+                self._requests.append(text[:MAX_REQUEST_CHARS])
 
     @property
     def requests(self) -> tuple[str, ...]:
