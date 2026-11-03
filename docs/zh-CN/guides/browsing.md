@@ -32,6 +32,7 @@
 
 - 一台装有 Safari 27 或更高版本的 Mac。melo 使用 Safari 自带的自动化服务器 `/usr/bin/safaridriver --mcp`，不需要安装任何东西。
 - Safari 中的两个开关，只需打开一次（见[设置 Safari](#set-up-safari)）。
+- 可选，用于[其他应用的窗口](#windows-from-other-apps)：桌面控制助手 [Cua Driver](https://cua.ai/docs/cua-driver)，安装为 `/Applications/CuaDriver.app`（melo 也会在 `PATH` 中查找 `cua-driver`）。在“系统设置 → 隐私与安全性”中给它“辅助功能”权限；再给“录屏”权限，melo 才能看到窗口的图片。melo 自己不需要这两项权限。
 - 终端对话（`melo`）或网页控制台。直接运行（`melo "任务"`）、worker 运行和已保存的任务都不会获得浏览工具。
 
 <a id="turn-it-on"></a>
@@ -187,7 +188,7 @@ what changed:
 
 melo 操作的网页可能让另一个应用打开窗口，比如聊天应用请你授权登录的窗口。melo 每次在浏览器里操作之后都会留意有没有这样的窗口。
 
-- **有桌面控制助手时。** 这个助手是一个单独的应用，由它持有 Mac 的“辅助功能”和“录屏”权限，melo 自己不需要这些权限。melo 会在这一步的回答里写出新窗口和它的按钮，可以读取它（附一张只拍这个窗口的图），也可以按下其中的按钮。
+- **有桌面控制助手时。** 这个助手是一个单独的应用，由它持有 Mac 的“辅助功能”和“录屏”权限，melo 自己不需要这些权限。melo 会在这一步的回答里写出新窗口和它的按钮，可以读取它（附一张只拍这个窗口的图），也可以按下其中的按钮。只有“辅助功能”权限时，melo 能读取窗口的文字和按钮、按名字按下按钮，但没有图片。
 - **按按钮会询问。** 在“询问”模式下，每次按按钮都会出现一张卡片。在“自动”模式下，任务需要的按钮（比如为你要求的登录授权）会直接按下；其他的会被拦下。
 - **没有助手时。** melo 读不到这个窗口，但仍会发现有另一个应用到了最前面，并告诉你是哪个应用，请你在那里处理。
 - **只看 melo 这一步打开的窗口。** melo 从不查看你的其他窗口，也从不在其他应用里输入文字。
@@ -229,7 +230,8 @@ melo 操作的网页可能让另一个应用打开窗口，比如聊天应用请
 | 操作后显示 `(via page-script: ...)` | Safari 自己够不到那个元素，所以由页面脚本操作。忽略脚本点击的网页这时可能没有反应：先 `browser_screenshot`，再用 `browser_click_point`。 |
 | `A real click or key press landed on another element` | 在 melo 检查和点击之间有东西盖住了那个元素，所以 melo 把它拦下了。`browser_read` 后再试。 |
 | `... came to the front: it may show a window melo cannot see` | 另一个应用打开了窗口，但没有安装桌面控制助手，或助手缺少权限。请自己在那个应用里处理这个窗口。 |
-| `melo cannot read other apps' windows: ...` | 安装桌面控制助手，或在“系统设置 → 隐私与安全性”里给它“辅助功能”和“录屏”权限。 |
+| `melo cannot read other apps' windows: ...` | 安装桌面控制助手（见[需要什么](#what-you-need)），或在“系统设置 → 隐私与安全性”里给它“辅助功能”权限。 |
+| `no Screen Recording permission` | 助手能读取文字和按钮、按名字按下按钮，但没有图片。给它“录屏”权限后才有图片和按点点击。 |
 | `a box from ... that melo can't reach` | 来自其他网站的框架，常见的是登录框，Safari 没有在其中列出任何东西。请自己填写，或让 melo 点击它截图上的一点。 |
 | `Take a browser_screenshot of this tab first` 或 `The page scrolled since the picture` | 一个点属于同一页面、同一视图的上一张图；请重新拍一张。 |
 | `The page moved while melo was reading it` | 标签页的地址在检查和读取之间变了，所以什么都没读。用 `browser_read` 再试一次。 |

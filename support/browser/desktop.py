@@ -6,16 +6,17 @@ window, so melo looks at the screen around its own acts:
 
 1. With the desktop control helper (an MCP server that holds the Mac's
    Accessibility and Screen Recording grants for its own app, so melo needs
-   neither), melo lists the windows before and after each act and while it
-   waits (``list_windows``, the helper's cheapest call). A window of another
+   neither; Accessibility alone gives text, buttons and presses by name,
+   without a picture or a point), melo lists the windows before and after each
+   act and while it waits (``list_windows``, the helper's cheapest call). A window of another
    app that appeared meanwhile gets a short id (``w1``) and is named in the
    step's result with its buttons. melo may read it (its accessibility text,
    its buttons by name and a picture of only that window) and press one of its
    buttons: through accessibility first, and, when that does not go through,
    at a point of the window's picture that the model names, with the point
    marked on the picture melo shows next.
-2. Without the helper, or without its grants, the window cannot be read. melo
-   still notices that another app came to the front (``lsappinfo``, which needs
+2. Without the helper, or without its Accessibility grant, the window cannot
+   be read. melo still notices that another app came to the front (``lsappinfo``, which needs
    no grant) and says which app it is, so the person can answer it there.
 
 Only windows that appeared after one of melo's own acts are melo's to read or
@@ -251,8 +252,10 @@ class DesktopHelper:
     """The desktop control helper over MCP: lists windows, reads one, presses in it.
 
     It starts on first use and checks the helper's own grants once
-    (``check_permissions`` without a prompt): with Accessibility or Screen
-    Recording off, it is not used, and :attr:`problem` says why.
+    (``check_permissions`` without a prompt): with Accessibility off it is not
+    used, and :attr:`problem` says why; with Screen Recording off it reads text
+    and buttons and presses by name, with no picture and no point
+    (:attr:`pictures`).
     """
 
     def __init__(self, command: Sequence[str]) -> None:
@@ -265,9 +268,13 @@ class DesktopHelper:
         self._client: Any = None
         self._ready: bool | None = None
         self.problem = ""
+        # Whether it holds Screen Recording: without it melo reads a window's
+        # text and buttons and presses by name, but has no picture to show or
+        # to point at.
+        self.pictures = False
 
     async def ready(self) -> bool:
-        """Whether the helper runs and holds its grants (checked once)."""
+        """Whether the helper runs and holds Accessibility (checked once, with Screen Recording)."""
         if self._ready is not None:
             return self._ready
         from localmelo.support.mcp.client import McpError, StdioMcpClient
@@ -284,8 +291,7 @@ class DesktopHelper:
             return False
         if grants.get("accessibility") is not True:
             self.problem = "the desktop control helper has no Accessibility grant"
-        elif grants.get("screen_recording") is not True:
-            self.problem = "the desktop control helper has no Screen Recording grant"
+        self.pictures = grants.get("screen_recording") is True
         self._ready = not self.problem
         if not self._ready:
             await self._drop(client)
@@ -358,7 +364,7 @@ class DesktopHelper:
                 "pid": window.pid,
                 "window_id": window.id,
                 "tree_format": "elements",
-                "include_screenshot": picture,
+                "include_screenshot": picture and self.pictures,
                 "max_image_dimension": SHOT_LONG_SIDE,
             },
         )
@@ -619,6 +625,12 @@ class DesktopWatch:
                 note = "[No picture: it did not fit melo's picture limits.]"
             else:
                 images.append(fitted)
+        elif not helper.pictures:
+            note = (
+                "[No picture: the desktop control helper has no Screen Recording "
+                "permission, so melo reads only the window's text and buttons, and "
+                "presses by name only.]"
+            )
         else:
             note = "[No picture: the helper sent none.]"
         return _block(name, kept.window, state.text, state.controls, note), images
@@ -633,9 +645,8 @@ class DesktopWatch:
             done = await helper.press(control.token)
         except DesktopError as exc:
             raise DesktopError(
-                f"{exc} The accessibility press did not go through. window_read "
-                f"{name} shows a picture; window_press with x and y (0-1000 on that "
-                "picture) clicks the button's place instead."
+                f"{exc} The accessibility press did not go through. "
+                + _point_way(helper, name, kept.window.app)
             ) from None
         effect = str(done.get("effect") or "")
         if effect in ("refused", "suspected_noop", "unverifiable"):
@@ -646,8 +657,7 @@ class DesktopWatch:
             }[effect]
             line = (
                 f'Pressed "{control.name}" in {kept.window.app} (via accessibility), '
-                f"but {words}. window_read {name} shows the window now; window_press "
-                "with x and y (0-1000 on its picture) clicks the button's place."
+                f"but {words}. " + _point_way(helper, name, kept.window.app)
             )
         else:
             line = f'Pressed "{control.name}" in {kept.window.app} (via accessibility).'
@@ -658,6 +668,12 @@ class DesktopWatch:
     ) -> tuple[str, list[ImagePart]]:
         """Click (*x*, *y*), 0-1000 across and down the window's last picture; the point is marked."""
         helper, name, kept = await self._ready_for(short)
+        if not helper.pictures:
+            raise DesktopError(
+                "melo cannot click a point of this window: the desktop control helper "
+                "has no Screen Recording permission, so there is no picture to point "
+                f"at. Ask the person to press it in {kept.window.app}."
+            )
         if kept.view is None:
             raise DesktopError(
                 f"Use window_read {name} first: a point is read on the window's last picture."
@@ -702,6 +718,19 @@ class DesktopWatch:
     def kill(self) -> None:
         if self._helper is not None:
             self._helper.kill()
+
+
+def _point_way(helper: DesktopHelper, name: str, app: str) -> str:
+    """What the model can do when a press by name did not go through."""
+    if helper.pictures:
+        return (
+            f"window_read {name} shows the window now; window_press with x and y "
+            "(0-1000 on its picture) clicks the button's place."
+        )
+    return (
+        "With no Screen Recording permission melo has no picture to click a point "
+        f"of: ask the person to press it in {app}."
+    )
 
 
 def _named(controls: list[Control], button: str) -> Control:

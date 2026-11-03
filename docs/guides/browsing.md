@@ -26,6 +26,7 @@ The rest of this page is about browsing in Safari, which also follows links, cli
 
 - A Mac with Safari 27 or later. melo uses the automation server that Safari ships, `/usr/bin/safaridriver --mcp`; nothing is installed.
 - Two switches in Safari, turned on once (see [Set up Safari](#set-up-safari)).
+- Optional, for [windows from other apps](#windows-from-other-apps): the desktop control helper, [Cua Driver](https://cua.ai/docs/cua-driver), installed as `/Applications/CuaDriver.app` (melo also finds `cua-driver` on your `PATH`). Give it Accessibility in System Settings → Privacy & Security; Screen Recording adds a picture of the window. melo itself needs neither.
 - The terminal chat (`melo`) or the web console. Direct runs (`melo "task"`), worker runs and saved tasks never get the browser tools.
 
 ## Turn it on
@@ -169,7 +170,7 @@ what changed:
 
 A page melo acts on can make another app open a window, such as a chat app's sign-in window that asks you to authorize. melo looks for one after each of its own steps in the browser.
 
-- **With the desktop control helper.** The helper is a separate app that holds the Mac's Accessibility and Screen Recording permissions, so melo never needs them. melo names the new window and its buttons in that step's answer, can read it with a picture of only that window, and can press one of its buttons.
+- **With the desktop control helper.** The helper is a separate app that holds the Mac's Accessibility and Screen Recording permissions, so melo never needs them. melo names the new window and its buttons in that step's answer, can read it with a picture of only that window, and can press one of its buttons. With Accessibility alone it reads the window's text and buttons and presses by name, without a picture.
 - **Pressing asks.** In Ask mode you see a card for each press. In Auto mode a press the task needs, such as authorizing the sign-in you asked for, goes ahead; anything else stops.
 - **Without the helper.** melo cannot read the window. It still notices that another app came to the front and tells you which one, so you can answer it there.
 - **Only what melo's step opened.** melo never looks at your other windows and never types into other apps.
@@ -207,7 +208,8 @@ Browsing is built in parts; none of the next two exists yet.
 | `(via page-script: ...)` after an action | Safari could not reach that element itself, so a page script acted. A page that ignores script clicks may then do nothing: take a `browser_screenshot` and use `browser_click_point`. |
 | `A real click or key press landed on another element` | Something covered the element between melo's check and the click, so melo stopped it. `browser_read` and try again. |
 | `... came to the front: it may show a window melo cannot see` | Another app opened a window and the desktop control helper is not installed or lacks its permissions. Answer the window in that app yourself. |
-| `melo cannot read other apps' windows: ...` | Install the desktop control helper, or give it Accessibility and Screen Recording in System Settings → Privacy & Security. |
+| `melo cannot read other apps' windows: ...` | Install the desktop control helper (see [What you need](#what-you-need)), or give it Accessibility in System Settings → Privacy & Security. |
+| `no Screen Recording permission` | The helper reads text and buttons and presses by name, but has no picture. Give it Screen Recording for pictures and point clicks. |
 | `a box from ... that melo can't reach` | A frame from another site, often a sign-in box, with nothing Safari lists in it. Fill it in yourself, or let melo click a point of a picture of it. |
 | `Take a browser_screenshot of this tab first` or `The page scrolled since the picture` | A point belongs to the last picture of the same page and view; take a new picture. |
 | `The page moved while melo was reading it` | The tab changed address between the check and the reading, so nothing was read. `browser_read` tries again. |

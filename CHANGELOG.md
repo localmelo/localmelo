@@ -19,8 +19,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   1280 pixels and 256 KB) and `window_press` (a button by its name through accessibility, or, when that
   does not go through, a point of the window's picture, marked on the picture that comes back). A press is a
   question of its own every time (`desktop-act:<app>`): a card in Ask mode, and in Auto mode reviewed against
-  the chat's goal like a browser act. Without the helper or its permissions melo still notices that another
-  app came to the front and says which one, so you can answer it there. Only windows that appeared after
+  the chat's goal like a browser act, so the press that authorizes the sign-in you asked for runs with no
+  card, while an off-goal or high-impact press asks. With Accessibility alone the helper reads text and
+  buttons and presses by name, with no picture. Without the helper or its Accessibility permission melo
+  still notices that another app came to the front and says which one, so you can answer it there. The
+  browsing guide's setup list says where to get the helper. Only windows that appeared after
   melo's own step are named, read or pressed, and melo never types into other apps. Settings → Chats and
   folders → **Other apps' windows** (shown while browsing is on; `[browser] app_windows`, on by default)
   turns it off, and says when the helper is missing.

@@ -321,6 +321,60 @@ async def test_a_panel_above_the_main_layer_is_found_by_the_app_that_came_to_the
     assert ("list_windows", {"on_screen_only": True, "pid": 70}) in screen.calls()
 
 
+async def test_with_accessibility_alone_melo_reads_and_presses_by_name_without_a_picture(
+    screen: Screen,
+) -> None:
+    driver = world(button("Quick sign-in"))
+    on_act(driver, lambda: screen.show(SIGN_IN))
+    screen.set(grants={"accessibility": True, "screen_recording": False})
+    provider, tools = await tools_with(driver, watch(screen))
+    try:
+        with asking(Asks()):
+            await run(tools, "browser_open", url=HOME)
+            out = await run(tools, "browser_click", ref="e1")
+            read = await run(tools, "window_read")
+            point = await run(tools, "window_press", x=500, y=800)
+            pressed = await run(tools, "window_press", button="Allow")
+    finally:
+        await provider.close()
+    assert "Chat opened a window 'Sign in to example.com' (w1)" in out.text
+    assert not read.is_error and not read.images
+    assert '[button "Allow"]' in read.text
+    assert "no Screen Recording permission" in read.text
+    assert point.is_error and "no picture to point at" in point.text
+    assert (
+        pressed.text == "Pressed 'Allow' in Chat (via accessibility). Window w1 closed."
+    )
+    assert all(
+        args.get("include_screenshot") is False
+        for name, args in screen.calls()
+        if name == "get_window_state"
+    )
+    assert not [
+        args for name, args in screen.calls() if name == "click" and "x" in args
+    ]
+
+
+async def test_a_failed_press_without_screen_recording_asks_the_person(
+    screen: Screen,
+) -> None:
+    driver = world(button("Quick sign-in"))
+    on_act(driver, lambda: screen.show(SIGN_IN))
+    screen.set(grants={"accessibility": True}, press_fails=True)
+    provider, tools = await tools_with(driver, watch(screen))
+    try:
+        with asking(Asks()):
+            await run(tools, "browser_open", url=HOME)
+            await run(tools, "browser_click", ref="e1")
+            failed = await run(tools, "window_press", button="Allow")
+    finally:
+        await provider.close()
+    assert failed.is_error
+    assert "no picture to click a point of: ask the person to press it in Chat" in (
+        failed.text
+    )
+
+
 # ── Without the helper ──
 
 

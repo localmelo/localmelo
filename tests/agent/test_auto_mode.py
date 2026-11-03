@@ -24,6 +24,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     ApprovalRequest,
     AutoPolicy,
+    grant_offered,
 )
 from localmelo.melo.contracts.providers import LLM_REQUEST_KIND, BaseLLMProvider
 from localmelo.melo.contracts.review import step_key
@@ -795,21 +796,36 @@ class PressesInAnotherApp(OpensSite):
         return "pressed" if decision.allow else decision.reason
 
 
+class CardAsker:
+    """The policy that asks a person on the card: records each card, answers Don't allow."""
+
+    def __init__(self) -> None:
+        self.asked: list[ApprovalRequest] = []
+
+    async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
+        self.asked.append(request)
+        return ApprovalDecision(False, "not this one", origin="user")
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("reviews", "allowed"),
+    ("button", "reviews", "card"),
     [
-        # Authorizing the sign-in the person asked for: on the goal, it runs.
-        ([verdict()], True),
-        # Off the goal: stopped, with nobody to ask.
-        ([verdict(fits_request="no", category="beyond_request")], False),
+        # Authorizing the sign-in the person asked for: on the goal, it runs with
+        # no card, although a press is never kept as a grant for the chat.
+        ("Allow", [verdict()], False),
+        # Off the goal, or high-impact (sending, deleting): the card asks.
+        ("Allow", [verdict(fits_request="no", category="beyond_request")], True),
+        ("Send to all contacts", [verdict(verdict="ask", category="send_out")], True),
+        ("Delete chat history", [verdict(verdict="ask", category="delete")], True),
     ],
 )
 async def test_a_press_in_another_apps_window_is_reviewed_on_the_goal(
-    tmp_path: Path, reviews: list[Message], allowed: bool
+    tmp_path: Path, button: str, reviews: list[Message], card: bool
 ) -> None:
     tool = PressesInAnotherApp()
-    call = ("press_in_app", {"button": "Allow"}, "c1")
+    asker = CardAsker()
+    call = ("press_in_app", {"button": button}, "c1")
     llm = FakeModel([_calls(call), _answer("done")], reviews)
     (tmp_path / "ws").mkdir()
     agent = Agent(
@@ -824,14 +840,20 @@ async def test_a_press_in_another_apps_window_is_reviewed_on_the_goal(
     agent.chat.sleep = _no_wait
 
     await agent.run_task(
-        "sign in to news.example with the Chat app and check in", approval=AutoPolicy()
+        "sign in to news.example with the Chat app and check in",
+        approval=AutoPolicy(asking=asker),
     )
 
     [answer] = tool.answers
-    assert answer.allow is allowed
-    assert len(llm.review_requests) == 1  # a press is never routine by a word match
+    assert answer.allow is not card, answer
+    assert (
+        len(llm.review_requests) == 1
+    ), answer  # a press is never routine by a word match
     words = json.dumps([m.content for m in llm.review_requests[0]])
-    assert "another app's window" in words and "Allow" in words
+    assert "another app's window" in words and button in words
+    assert len(asker.asked) == (1 if card else 0), answer
+    if card:  # the card offers Allow once and Deny, never a grant for the chat
+        assert not grant_offered(asker.asked[0])
 
 
 @pytest.mark.asyncio
