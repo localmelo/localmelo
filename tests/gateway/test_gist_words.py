@@ -97,10 +97,12 @@ def test_the_code_gives_the_parameters_the_words_take(name: str) -> None:
 
 @pytest.mark.parametrize("name", WARN_IDS)
 def test_a_warning_takes_what_the_model_said(name: str) -> None:
+    """The words, and for a target warning also where the code acts."""
+    wanted = {"said", "target"} if name.endswith("_target") else {"said"}
     for language in ("en", "zh-Hans"):
         entry = catalog(language)[f"gist.warn.{name}"]
         assert isinstance(entry, str)
-        assert set(PARAM.findall(entry)) == {"said"}
+        assert set(PARAM.findall(entry)) == wanted
 
 
 def test_the_terminal_reads_the_sentence_in_english() -> None:

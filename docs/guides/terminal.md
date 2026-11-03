@@ -339,7 +339,7 @@ A call that installs software, downloads files, changes files outside the folder
   ↑↓ select · enter confirm · 1-2 · v view all · esc stop the turn
 ```
 
-A script that operates one app by its plain name (`osascript` telling Safari to close tabs, `open -a Notes`) is its own kind, **Control an app?**, and the reason names the app. Like system settings it needs a click. It is an allow-list: a script that runs a shell, presses keys, drives System Events, names a terminal or an editor, a path or a second app, and `shortcuts run`, stays **Change system settings?**. A blocked step's row in a turn carries the same sentence under it.
+A script that operates one app by its plain name (`osascript` telling Safari to close tabs, `open -a Notes`) is its own kind, **Control an app?**, and the reason names the app. Like system settings it needs a click. It is an allow-list: a script that runs a shell, presses keys, drives System Events, names a terminal or an editor, a path or a second app, and `shortcuts run`, stays **Change system settings?**. So does a script that reaches macOS without naming an app, an `open` of a link that is not `http`, `https` or `file` (`open shortcuts://…`), erasing a disk and stopping other programs (`pkill`, `kill` of a process the call did not start); discarding uncommitted work (`git checkout -- .`, `git restore`, `git clean`, `git stash drop`) asks **Delete files that cannot be restored?**. A blocked step's row in a turn carries the same sentence under it.
 
 ```text
 ╭─ Control an app? ──────────────────────────────────────────────────────────╮

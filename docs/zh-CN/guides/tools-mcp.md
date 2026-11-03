@@ -310,21 +310,21 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 
 ### 高影响调用
 
-在策略决策之前，检查器会用固定规则审查每次 `shell_exec`、`python_exec` 和 `file_write` 调用：命令按 Shell 的方式拆分，Python 代码只解析不运行，调用运行的本地脚本会读取一次。调用分为**常规**、**高影响**和**无法判定**三类。
+在策略决策之前，检查器会用固定规则审查每次 `shell_exec`、`python_exec` 和 `file_write` 调用：命令按 Shell 的方式拆分（`$(…)`、反引号以及会展开内容的 here-document 里的命令也会被审查；here-document 或命令替换无法被精确读取时，调用为“无法判定”），Python 代码只解析不运行，调用运行的本地脚本会读取一次。调用分为**常规**、**高影响**和**无法判定**三类。
 
 以下调用属于高影响：
 
 - 安装软件或软件包，恢复项目的软件包（`uv sync`、`npm ci`、`pip install -r`），或创建编程环境（`python -m venv`、`uv venv`、`conda create`）；
 - 下载安装程序、大文件（压缩包、wheel、模型权重）或把任何文件下载到工作区以外，或运行从互联网下载的代码（`curl … | sh`、`get-pip.py`）；
-- 在工作区以外写入或删除文件，删除工作区本身或其 `.git`，或丢弃工作（`git reset --hard`、`git clean -x`、强制推送）；
-- 设置以后会自行运行的内容（launchd、`crontab`、Shell 启动文件、git 钩子、`.envrc`、`nohup`），使用密码、密钥、Cookie 或钥匙串（读取也算），更改系统设置或使用 `sudo`，用脚本操作另一个应用（`osascript` 让 Safari 退出、`open -a Notes`），打开其他计算机可以访问的网络服务，或发送工作区以外的文件或电子邮件；
+- 在工作区以外写入或删除文件，删除工作区本身或其 `.git`，或丢弃工作（`git reset --hard`、`git checkout -- .`、`git restore`、`git clean`、`git stash drop`、强制推送），擦除或重新分区磁盘（`diskutil eraseDisk`），或停止其他程序（`pkill`、`killall`，以及对调用没有启动的进程使用 `kill`）；
+- 设置以后会自行运行的内容（launchd、`crontab`、Shell 启动文件、git 钩子、`.envrc`、`nohup`），使用密码、密钥、Cookie 或钥匙串（读取也算），更改系统设置或使用 `sudo`，用脚本操作另一个应用（`osascript` 让 Safari 退出、`open -a Notes`）或不指名应用就通过脚本接触 macOS，打开自定义协议的链接（`open shortcuts://…`；`http`、`https` 和 `file` 链接不算），打开其他计算机可以访问的网络服务，或发送工作区以外的文件或电子邮件；
 - 更改 localmelo 本身，或运行在运行时拼出的代码（对计算出的文本使用 `exec`、`eval "$x"`）。
 
-规则无法读出调用的作用时，调用属于无法判定：在运行时拼出的命令、程序或路径，发送数据的 POST，`git push`。没有 `pipefail` 而依据管道退出状态的调用也属于无法判定，并附上原因：`pytest | tail` 的状态是 `tail` 的，所以读取它的 Python（`.returncode`、`check=True`）或 `pytest | tail && git commit` 会在测试失败后继续。`set -o pipefail` 会让它变成测试的状态。
+规则无法读出调用的作用时，调用属于无法判定：在运行时拼出的命令、程序或路径，发送数据的 POST，`git push`。没有 `pipefail` 而依据管道退出状态的调用也属于无法判定，并附上原因：`pytest | tail` 的状态是 `tail` 的，所以读取它的 Python（`.returncode`、`check=True`）或 `pytest | tail && git commit` 会在测试失败后继续。`set -o pipefail` 会让它变成测试的状态。当 melo 无法像 Shell 那样读出调用的文本时，调用同样属于无法判定：`$'…'` 引号、始终没有闭合的反引号，以及超过 256 KB 的命令或代码（这样的文本根本不会被读取）。
 
 高影响调用在网页控制台有专门的卡片，在终端有专门的面板（参见[网页控制台](web-console.md#approvals-and-failures)和[终端](terminal.md#approvals)）。每张卡片：
 
-- 以一句平实的话开头，说明这一步要做什么。这句话由 melo 根据调用生成，并按顺序写出它发现的每个效果（“Run the command ls -1”、“Operate Safari, then delete files”）。模型自己的话（`why` 参数，或代码开头的注释）始终带着标签“melo says: …”：只有规则什么都没发现时，它们才是这句话；否则它们放在这句话下面，所以永远不会让一步看起来更安全。如果这些话与代码不符，而代码会删除文件或把数据发出去，警告会引用模型的话；
+- 以一句平实的话开头，说明这一步要做什么。这句话由 melo 根据调用生成，并按顺序写出它发现的每个效果（“Run the command ls -1”、“Operate Safari, then delete files”）。模型自己的话（`why` 参数，或代码开头的注释）始终带着标签“melo says: …”：只有规则什么都没发现时，它们才是这句话；否则它们放在这句话下面，所以永远不会让一步看起来更安全。如果这些话与代码不符，而代码会删除文件或把数据发出去，警告会引用模型的话。如果这些话指名了某个文件、文件夹或网站，而代码删除或发送到的还有话里没有点名的地方，也会警告（`melo described this as “Delete notes.tmp”, but the code deletes build/.`）；没有指名这些的话从不警告；
 - 用一个问题说出调用要做什么（“Install software?”、“Change files outside demo-project?”、“Control an app?”）；
 - 列出最多三条原因，不提供会话授权的选项；
 - 在终端中默认选中 No，并用一行说明会话授权从不覆盖安装、下载或文件夹以外的更改；

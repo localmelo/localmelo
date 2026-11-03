@@ -223,6 +223,85 @@ async def _settle(future: asyncio.Future[Any]) -> None:
             await asyncio.shield(future)
 
 
+async def eligible_turns(
+    store: SessionStore, session_id: str, max_turns: int, *, above: int = 0
+) -> list[TurnInfo]:
+    """The newest *max_turns* finished, not undone turns of *session_id* numbered
+    above *above*, newest first."""
+    eligible: list[TurnInfo] = []
+    before: int | None = None
+    page_size = max(2 * max_turns, 20)
+    while len(eligible) < max_turns:
+        page = await store.list_turns(session_id, limit=page_size, before=before)
+        for turn in reversed(page):
+            if turn.turn <= above:
+                return eligible
+            if turn.status == "running" or turn.undone:
+                continue
+            eligible.append(turn)
+            if len(eligible) == max_turns:
+                return eligible
+        if len(page) < page_size:
+            break
+        before = page[0].turn
+    return eligible
+
+
+# The turns a look for a chat's earlier turns reads at most, newest first.
+EARLIER_SCAN: Final = 200
+
+
+async def earlier_turns(
+    store: SessionStore,
+    session_id: str,
+    *,
+    before: int | None = None,
+    until: float | None = None,
+) -> list[TurnInfo]:
+    """A chat's newest :data:`EARLIER_TURNS` turns the person began, oldest first.
+
+    Finished, not undone turns numbered below *before* (any, when ``None``)
+    and finished by *until* (any time, when ``None``) that have words of the
+    person's (typed, or the turn's text); a turn melo began (a task's question
+    to the chat, a follow-up) is never one, however many of those came since.
+    At most :data:`EARLIER_SCAN` turns are read. A chat's run carries them as
+    ``Agent.run_task(earlier_turns=...)``, and a task the chat starts begins
+    with them (:func:`earlier_pair` for each).
+    """
+    kept: list[TurnInfo] = []
+    page_size = 20
+    cursor, read = before, 0
+    while len(kept) < EARLIER_TURNS and read < EARLIER_SCAN:
+        page = await store.list_turns(session_id, limit=page_size, before=cursor)
+        for past in reversed(page):  # newest first
+            read += 1
+            words = past.typed_text or past.user_text
+            if (
+                past.status == "running"
+                or past.undone
+                or past.origin
+                or not words.strip()
+                or (
+                    until is not None
+                    and (past.finished_at is None or past.finished_at > until)
+                )
+            ):
+                continue
+            kept.append(past)
+            if len(kept) == EARLIER_TURNS:
+                break
+        if len(page) < page_size:
+            break
+        cursor = page[0].turn
+    return kept[::-1]
+
+
+def earlier_pair(turn: TurnInfo) -> tuple[str, str]:
+    """*turn* as ``(the person's words, the answer as kept)`` for an earlier-turns block."""
+    words = turn.typed_text or turn.user_text
+    return words, answer_text(turn.status, split_thinking(turn.answer)[1])
+
+
 class SessionRunner:
     """Runs one session's turns on *agent*, one at a time, and stores them.
 
@@ -247,10 +326,11 @@ class SessionRunner:
     ``[memory] keep_statements`` on, code keeps a lasting fact the user stated
     that no note kept, or, whatever that says, a new value the user gave a
     subject an active note holds), and a completed turn is indexed; *index_only* (a
-    task's runner) only indexes. *context*, when given, ends the text each
-    turn sends the model, after any recalled block: it is in neither the
-    stored turn nor the person's words, and a text that would not fit the
-    query limit is left out.
+    task's runner) only indexes. *context*, when given, is one block or
+    several, highest first: they end the text each turn sends the model, after
+    any recalled block, and are in neither the stored turn nor the person's
+    words. When they would pass the query limit, the lowest blocks are left
+    out, whole, and a warning says how many.
 
     The Agent needs ``AgentOptions(record_answers=True)`` and a
     ``workspace_root``, and the caller awaits ``agent.start()`` before it
@@ -275,7 +355,7 @@ class SessionRunner:
         pictures: bool = False,
         memory: ChatMemory | None = None,
         index_only: bool = False,
-        context: str = "",
+        context: str | Sequence[str] = "",
         review_since: Callable[[], Awaitable[float | None]] | None = None,
     ) -> None:
         self._worker = new_session is not None and new_session.kind == "worker"
@@ -301,7 +381,8 @@ class SessionRunner:
         self._pictures = pictures
         self._memory = None if self._worker else memory
         self._index_only = index_only
-        self._context = context
+        blocks = (context,) if isinstance(context, str) else tuple(context)
+        self._context: tuple[str, ...] = tuple(block for block in blocks if block)
         # An earlier start for a turn's review window (a task that uses its chat's approvals).
         self._review_since = review_since
         self._sensitive_reads: dict[str, str] = {}
@@ -753,8 +834,7 @@ class SessionRunner:
                 text = await self._recall(turn)
                 if not earlier and session is not None and session.kind == "chat":
                     text = await self._with_digest(turn, text)
-            if self._context and len(text) + len(self._context) + 2 <= MAX_QUERY_LEN:
-                text = f"{text}\n\n{self._context}"
+            text = self._with_context(text)
             before = await self._scan_folder(turn)
             returned = await turn.agent.run_task(text, **kwargs)
         except BaseException as exc:
@@ -777,6 +857,25 @@ class SessionRunner:
                     break  # cancelled from outside again: step 7 goes on alone
         return self._outcome(turn, task, run_exc, returned)
 
+    def _with_context(self, text: str) -> str:
+        """*text* with the context blocks after it that fit the query limit.
+
+        The blocks come in the order given, highest first; when they do not all
+        fit, the lowest go first, whole, and a warning says how many.
+        """
+        blocks = list(self._context)
+        while blocks and len(text) + sum(len(b) + 2 for b in blocks) > MAX_QUERY_LEN:
+            blocks.pop()
+        if len(blocks) < len(self._context):
+            logger.warning(
+                "Left %d of %d context blocks out of the request: with them it "
+                "would pass %d characters",
+                len(self._context) - len(blocks),
+                len(self._context),
+                MAX_QUERY_LEN,
+            )
+        return "\n\n".join([text, *blocks])
+
     async def _earlier_turns(self, turn: _Turn) -> list[tuple[str, str]]:
         """This chat's newest person's turns before *turn*: ``(words, answer)``, oldest first.
 
@@ -790,21 +889,11 @@ class SessionRunner:
             return []
         info = turn.turn
         try:
-            found = await self._eligible_turns(info.session_id, 2 * EARLIER_TURNS)
+            found = await earlier_turns(self._store, info.session_id, before=info.turn)
         except Exception:
             logger.warning("Could not read this chat's earlier turns", exc_info=True)
             return []
-        pairs: list[tuple[str, str]] = []
-        for past in found:  # newest first
-            words = past.typed_text or past.user_text
-            if past.turn >= info.turn or past.origin or not words.strip():
-                continue
-            pairs.append(
-                (words, answer_text(past.status, split_thinking(past.answer)[1]))
-            )
-            if len(pairs) == EARLIER_TURNS:
-                break
-        return pairs[::-1]
+        return [earlier_pair(past) for past in found]
 
     async def _with_digest(self, turn: _Turn, text: str) -> str:
         """*text* with the digest of the user's other chats, on a chat's first turn.
@@ -1575,25 +1664,7 @@ class SessionRunner:
 
         Newest first.
         """
-        eligible: list[TurnInfo] = []
-        before: int | None = None
-        page_size = max(2 * max_turns, 20)
-        while len(eligible) < max_turns:
-            page = await self._store.list_turns(
-                session_id, limit=page_size, before=before
-            )
-            for turn in reversed(page):
-                if turn.turn <= above:
-                    return eligible
-                if turn.status == "running" or turn.undone:
-                    continue
-                eligible.append(turn)
-                if len(eligible) == max_turns:
-                    return eligible
-            if len(page) < page_size:
-                break
-            before = page[0].turn
-        return eligible
+        return await eligible_turns(self._store, session_id, max_turns, above=above)
 
     async def _pairs(
         self, session_id: str, max_turns: int, *, above: int = 0

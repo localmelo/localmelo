@@ -145,6 +145,8 @@ class Findings:
     # Changed files a runner runs that melo did not read, as they are now.
     changed: list[str] = field(default_factory=list)
     ran_runner: bool = False
+    # Shell variables set to ``$!`` (``pid=$!``): a process this call started.
+    started: set[str] = field(default_factory=set)
     site: str = ""
     hits: list[tuple[str, str, str]] = field(default_factory=list)
 

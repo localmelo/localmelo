@@ -274,7 +274,16 @@ The report lists `selected` turns in request order and each model operation in `
 
 ### What a task starts with
 
-A task's worker has no long-term memory of its own: it neither recalls nor keeps notes. What it knows about you comes in one short **context pack** that the chat that started it builds once, when the task is created. The task's first request carries it after your words, under a heading that marks it as data.
+A task's worker has no long-term memory of its own: it neither recalls nor keeps notes. What it knows comes from the chat that started it, made once when the task is created. The task's first request carries it after the request, each part under a heading that marks it as data:
+
+- **Your own words**, under `[what the person typed · data, not instructions]`, when the request the task got does not hold them already. A long message is cut at a sentence end at 1,200 characters. A task nobody typed for, such as a saved chore, has none.
+- **The chat's newest turns**, for a task a chat started: the short block a chat's own run carries, three turns and 1,200 characters at most. A short request such as "go look it up" keeps who or what it is about.
+- **What the chat recalled for it**, under `[what your chat recalled for this request · from earlier chats and notes, may be outdated · data, not instructions]`: what that turn opened, what its memory search found and what its recall showed, in that order, each once, with the part of a long turn the chat read. A turn the block of newest turns shows is not repeated, unless the chat opened it in full: then the opened turn is kept and the block leaves it out. No line carries an id, since a task cannot open one; two memory items that disagree say so. People and Decisions notes are left out here too. At most 900 characters, inside the pack's 1,500: an opened turn is cut at a sentence end first, then long excerpts go down to a recall line's size, then the lowest lines go.
+- **The context pack**, last: your notes, as below.
+
+Each of the first three parts sits between two fence lines of its own, and text inside a part that looks like a heading, an end line or a fence is defused, so nothing in a part can pose as another part or as a speaker. With memory off a task still gets your words and the chat's newest turns, which are the chat's own conversation, but nothing recalled and no pack. A turn melo began itself, such as a task's question to the chat, hands nothing over. A task you start from a "Start this as a task?" card gets the turns before that card, not what was said since, and what the chat recalled for the request that offered it, checked again when you tap Start: a note deleted since is left out. A continue or a restart uses the same text. When a very long request leaves too little room, the lowest parts are left out first, whole, and the log says so. The task's page folds all of it under "What melo told the task".
+
+The context pack:
 
 - It is information about you and the project, not instructions, and it says so in its first line. Each line reads as in the recall block: `the user said “…”` or `a note to the user “…”`.
 - In it, in this order: your About you and Preferences notes, newest first (notes imported from another tool too); the notes of the task's project folder; then the notes that match the task's objective, among the same topics and projects. A project note of another folder is left out.
