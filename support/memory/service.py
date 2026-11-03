@@ -184,6 +184,12 @@ PACK_HEADER: Final = (
 _PACK_RECALL: Final = 12
 # The turn origin of a task's question to its owner chat (``TurnInfo.origin``).
 ASK_OWNER: Final = "ask_owner"
+# The line before each note the person added while melo worked, in the words a
+# turn's document holds (:func:`with_read_notes`).
+ADDED_MARK: Final = "(added while melo worked)"
+# The line a console chat puts before a note in the request the run reads (so also
+# in the ``inbox.accepted`` text); memory leaves it out, :data:`ADDED_MARK` says it.
+_NOTE_LEAD: Final = "[The user added this while you were working]"
 NOT_THE_USER: Final = (
     "Not remembered: this turn is a task's question, not the user's words."
 )
@@ -673,6 +679,39 @@ def _typed_words(turn: TurnInfo) -> str:
     """What the user typed in *turn*: with attachments the typed text, which holds
     none of the attached text, else the turn's text."""
     return turn.typed_text if turn.attachments else turn.user_text
+
+
+def with_read_notes(typed: str, notes: Sequence[str]) -> str:
+    """*typed* and then each of *notes*, the words the person added while melo
+    worked, on a paragraph of its own: :data:`ADDED_MARK`, a line break, the note.
+
+    The mark is a line of its own so a statement in the note reads as one (a
+    sentence that starts with a mark is no statement). A note that holds nothing
+    after the console's own lead (:data:`_NOTE_LEAD`) is left out. Without notes,
+    *typed* exactly.
+    """
+    marked = []
+    for note in notes:
+        words = note.strip().removeprefix(_NOTE_LEAD).strip()
+        if words:
+            marked.append(f"{ADDED_MARK}\n{words}")
+    if not marked:
+        return typed
+    return "\n\n".join([typed.rstrip(), *marked] if typed.strip() else marked)
+
+
+async def turn_words(store: SessionStore, info: TurnInfo, typed: str) -> str:
+    """The person's words of a finished turn, as its document holds them: *typed*,
+    then each note the run read (:meth:`SessionStore.read_notes`).
+
+    The same rule as the typed words: a turn the person did not begin
+    (:func:`is_owner_question`) holds no words of theirs, so none of its notes
+    count; *typed* comes back as it is. A note the run never read is not here:
+    it is the typed text of the chat's next turn.
+    """
+    if is_owner_question(info):
+        return typed
+    return with_read_notes(typed, await store.read_notes(info.session_id, info.turn))
 
 
 async def recent_said(
@@ -1924,8 +1963,9 @@ class ChatMemory:
     ) -> None:
         try:
             source = await self._source(store, info)
+            words = await turn_words(store, info, typed)
             await self._add_documents(
-                [(source, info.turn, typed, answer, time.time())], INDEX_EMBED_TIMEOUT_S
+                [(source, info.turn, words, answer, time.time())], INDEX_EMBED_TIMEOUT_S
             )
         except Exception:
             logger.warning("Could not add a turn to the memory index", exc_info=True)
@@ -2216,9 +2256,11 @@ class ChatMemory:
                         and (turn.finished_at or 0) > since
                     ):
                         # What was typed: the composed text holds attachments too.
-                        typed = turn.typed_text if turn.attachments else turn.user_text
+                        # Then the words the person added while melo worked, as
+                        # the live index has them (:func:`turn_words`).
+                        words = await turn_words(chats, turn, _typed_words(turn))
                         found.append(
-                            (source, turn.turn, typed, answer, turn.finished_at or 0)
+                            (source, turn.turn, words, answer, turn.finished_at or 0)
                         )
             async with self._lock:
                 # Summaries and exchanges are no turns of a session file: keep them.

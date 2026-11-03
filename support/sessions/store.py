@@ -242,6 +242,8 @@ PICTURES_EVENT_TYPE: Final = "turn.pictures"
 MEMORY_EVENT_TYPE: Final = "turn.memory"
 # Words the person added to a running turn; the run's ``inbox.accepted`` says when it read them.
 NOTE_EVENT_TYPE: Final = "turn.note"
+# A core event: a run read words the person added (offset, text, step, attempt); the text is redacted.
+INBOX_ACCEPTED_EVENT_TYPE: Final = "inbox.accepted"
 # The grammar of an event type with a reserved prefix.
 RESERVED_EVENT_TYPE_RE: Final = re.compile(r"[a-z]+(\.[a-z_]+)+")
 
@@ -2177,6 +2179,24 @@ class SessionStore:
             StoredEvent(row[0], session_id, row[1], json.loads(row[2]))
             for row in reversed(rows)
         ]
+
+    async def read_notes(self, session_id: str, turn: int) -> list[str]:
+        """The words the person added to turn *turn* that its run read, in read order.
+
+        The redacted ``text`` of the turn's ``inbox.accepted`` events (a note the
+        run never read has none: it became the next turn); an empty text is left
+        out. Nothing from another turn of the session.
+        """
+        async with self._lock:
+            conn = await self._ready()
+            rows = await _rows(
+                conn,
+                "SELECT event FROM events WHERE session_id = ? AND turn = ? "
+                "AND type = ? ORDER BY id",
+                (session_id, turn, INBOX_ACCEPTED_EVENT_TYPE),
+            )
+        texts = (json.loads(row[0]).get("data", {}).get("text") for row in rows)
+        return [text for text in texts if isinstance(text, str) and text.strip()]
 
     async def events_of_type_anywhere(
         self, type_: str, *, before_id: int | None = None, limit: int = 200
