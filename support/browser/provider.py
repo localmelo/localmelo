@@ -361,9 +361,11 @@ class BrowserToolProvider(BaseToolProvider):
         self._driver = driver
         # Other apps' windows around melo's own acts; None: not looked for.
         self._desktop = desktop
-        # The screen as melo last looked at it: kept until a step of any kind
-        # has looked against it, so a window that comes a moment after an act is
-        # told by the next step (see ``DesktopWatch.look``).
+        # What melo knows of the screen (see ``DesktopWatch.look``): the baseline,
+        # which every look of any step renews, and the admission deadline, which
+        # only an act that can hand off to another app sets (``_open_deadline``). A window
+        # that comes a moment after such an act is told by the next step while the
+        # deadline is open; no read, wait or screenshot ever opens or extends it.
         self._desk_mark: Mark | None = None
         # Window lines found before an act that its result tells, notes about the
         # helper still to be said, whether this step has looked at the screen, and
@@ -968,7 +970,7 @@ class BrowserToolProvider(BaseToolProvider):
         raw = self._raw[tab_id]
         try:
             try:
-                result = await self._driver.act(raw, act)
+                result = await self._dispatch(raw, act)
             except StaleElementError as stale:
                 # A point is found again by a new picture, never by its words.
                 found = None
@@ -990,7 +992,7 @@ class BrowserToolProvider(BaseToolProvider):
                 act = dataclasses.replace(
                     act, url=fresh.url, element=item, doc=fresh.doc
                 )
-                result = await self._driver.act(raw, act)
+                result = await self._dispatch(raw, act)
         except StaleElementError:
             raise  # nothing was done
         except BrowserError as exc:
@@ -1005,6 +1007,31 @@ class BrowserToolProvider(BaseToolProvider):
         elif not act.native and result.via == "page-script" and not result.why:
             result = dataclasses.replace(result, why=_EARLIER)
         return result, ref
+
+    async def _dispatch(self, raw: str, act: Act) -> ActResult:
+        """Do *act* in the browser; one that can hand off to another app opens the admission deadline.
+
+        A click, a point click and a send can make another app put up a window,
+        so the deadline opens when they have run, or may have (the browser
+        failed after it began). An act the browser refused as stale did nothing,
+        and a text typed or an option chosen hands nothing off.
+        """
+        try:
+            result = await self._driver.act(raw, act)
+        except StaleElementError:
+            raise
+        except BrowserError:
+            self._open_deadline(act.kind == "click" or act.enter)
+            raise
+        self._open_deadline(act.kind == "click" or act.enter)
+        return result
+
+    def _open_deadline(
+        self, hands_off: bool, target: frozenset[str] = frozenset()
+    ) -> None:
+        """Open the admission deadline of the screen mark (see ``DesktopWatch.admit``) after an act that can hand off."""
+        if hands_off and self._desktop is not None:
+            self._desk_mark = self._desktop.admit(self._desk_mark, target)
 
     async def _refind(
         self,
@@ -1169,12 +1196,22 @@ class BrowserToolProvider(BaseToolProvider):
             except BrowserError as exc:
                 problem = problem or exc
                 # An address of another kind (``chat://...``) is not a page, but
-                # a hand-off to the app that opens such addresses.
-                self._handoff = self._handoff or _custom_scheme(url)
+                # a hand-off to the app that opens such addresses: the act's own
+                # deadline is set again, with that app as the one the page asked for.
+                if _custom_scheme(url):
+                    self._handoff = True
+                    await self._asked_for(url)
                 await self._refuse_tab(short)
         if problem is not None:
             raise problem
         return opened, urls
+
+    async def _asked_for(self, url: str) -> None:
+        """The act left the tab on an address another app opens: its window is expected, and that app is the one the page asked for."""
+        watch = self._desktop
+        if watch is None:
+            return
+        self._open_deadline(True, await watch.scheme_app(url))
 
     async def _after(
         self,
@@ -1262,10 +1299,12 @@ class BrowserToolProvider(BaseToolProvider):
     ) -> list[str]:
         """The "what changed" lines for windows other apps put up since the last look.
 
-        The mark is renewed from the same listing, so a window is told once and
-        none is lost between two looks. With *wait_s* the screen is watched that
-        long for a window, until *stop* says the page changed by itself. The
-        watch never fails a step: what it cannot see it does not tell.
+        The baseline is renewed from the same listing, so a window is told once and
+        none is lost between two looks; windows are told only while the admission
+        deadline of the last hand-off act is open. With *wait_s* the screen is
+        watched that long in all (its own calls included) for a window, until
+        *stop* says the tab moved. The watch never fails a step: what it cannot
+        see it does not tell.
         """
         watch = self._desktop
         if watch is None:
@@ -1282,6 +1321,13 @@ class BrowserToolProvider(BaseToolProvider):
         if note:
             self._notes.append(note)
         return seen_lines(seen)
+
+    async def _look_while_open(self) -> list[str]:
+        """:meth:`_look` while the admission deadline is open; nothing once it has closed (a look then only renews the baseline)."""
+        watch = self._desktop
+        if watch is None or not watch.admitting(self._desk_mark):
+            return []
+        return await self._look()
 
     async def _other_windows(
         self,
@@ -1306,10 +1352,12 @@ class BrowserToolProvider(BaseToolProvider):
     def _page_moved(
         self, tab_id: str, url: str, before: set[str]
     ) -> Callable[[], Awaitable[bool]]:
-        """Whether the page changed by itself while melo waits for another app's window.
+        """Whether the tab moved by itself while melo waits for another app's window.
 
         It did when the tab shows another address or another tab opened: the
-        act was then not handed off, and what it did shows in the reading.
+        act was then not handed off, and what it did shows in the reading. A
+        change on the same page does not end the wait; an act that changed the
+        page that way does not wait at all (see :meth:`_after`).
         """
 
         async def moved() -> bool:
@@ -1683,7 +1731,10 @@ class BrowserToolProvider(BaseToolProvider):
         """Wait for the page; with the desktop watched, stop early when another app's window appears.
 
         Whether the condition held, and the "what changed" lines of the
-        windows that appeared (none: the wait ran to its end).
+        windows that appeared (none: the wait ran to its end). A wait never
+        opens or extends the admission deadline: it tells a window only while
+        the deadline of an earlier act is open, and polls the screen no longer
+        once it has closed.
         """
         raw, origin = self._raw[tab_id], self._origins[tab_id]
         if self._desktop is None:
@@ -1701,7 +1752,7 @@ class BrowserToolProvider(BaseToolProvider):
             piece = max(min(WATCH_S, end - start), 0.0)
             if await self._driver.wait(raw, until, text, piece, origin=origin):
                 return True, await self._look()
-            others = await self._look()
+            others = await self._look_while_open()
             if others:
                 return False, others
             now = loop.time()

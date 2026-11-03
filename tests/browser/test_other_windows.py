@@ -138,11 +138,19 @@ def screen(tmp_path: Path) -> Screen:
     return Screen(tmp_path)
 
 
-def watch(screen: Screen, *, helper: bool = True) -> DesktopWatch:
+def watch(
+    screen: Screen, *, helper: bool = True, asked: tuple[str, ...] = ()
+) -> DesktopWatch:
+    """A watch over *screen*; *asked* are the names of the app an address of another kind opens (none: not known)."""
     command = [sys.executable, "-I", FAKE, str(screen.path), str(screen.log_path)]
+
+    async def handler(url: str) -> frozenset[str]:
+        return frozenset(asked)
+
     return DesktopWatch(
         DesktopHelper(command) if helper else None,
         front=screen.in_front,
+        handler=handler,
         clock=screen.clock,
         sleep=screen.clock.sleep,
     )
@@ -304,7 +312,7 @@ async def test_browser_wait_stops_early_when_another_apps_window_appears(
     screen: Screen, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(provider_mod, "WATCH_S", 0.01)
-    driver = world()
+    driver = world(button("Quick sign-in"))
     real = driver.wait
     looks = 0
 
@@ -320,6 +328,8 @@ async def test_browser_wait_stops_early_when_another_apps_window_appears(
     try:
         with asking(Asks()):
             await run(tools, "browser_open", url=HOME)
+            # A wait tells a window only inside the deadline of an act that can hand off.
+            await run(tools, "browser_click", ref="e1")
             out = await run(
                 tools, "browser_wait", until="text", text="never", seconds=30
             )
