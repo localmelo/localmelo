@@ -42,6 +42,23 @@ Usage::
 
 ``--stub`` answers with a stand-in model that names the right subject only when
 the request holds it: it proves the plumbing, not the model.
+
+How it runs
+-----------
+Every case's two first requests are built first, one after another (no model
+call; a few seconds). Then every model call, one per case, arm and rep, runs
+at once through ``--jobs`` slots (default 8, what a local server takes in
+parallel); the calls do not depend on each other, and the results keep the
+case, arm and rep order whatever order they finish in.
+
+Resuming
+--------
+With ``--out FILE``, each model call's verdict and reply is appended to
+``FILE.calls.jsonl`` as it finishes, after a first line naming the model,
+the server and whether it is the stub. A run with the same ``--out`` and the
+same model and server reuses the calls listed there and asks only the rest;
+the requests are built again (cheap). Another model or server starts the
+file anew. The file is removed once ``FILE`` is written.
 """
 
 from __future__ import annotations
@@ -419,52 +436,135 @@ def judge_model(args: argparse.Namespace, case: Case) -> BaseLLMProvider:
     )
 
 
+ARMS = ("before", "after")
+Call = tuple[str, str, int]  # case, arm, rep
+
+
+def calls_file(args: argparse.Namespace) -> Path | None:
+    """Where each finished model call is kept while ``--out`` is not written."""
+    return Path(f"{args.out}.calls.jsonl") if args.out else None
+
+
+def calls_key(args: argparse.Namespace) -> dict[str, Any]:
+    """The first line of a calls file: the calls in it are reused only for these."""
+    return {
+        "stub": bool(args.stub),
+        "model": "" if args.stub else args.model,
+        "server": "" if args.stub else args.base_url,
+    }
+
+
+def done_calls(path: Path | None, key: dict[str, Any]) -> dict[Call, dict[str, str]]:
+    """The calls a run with the same model and server finished; ``{}`` for none.
+
+    A last line cut short by an interruption is skipped. Another key starts
+    the file anew.
+    """
+    if path is None:
+        return {}
+    lines = path.read_text("utf-8").splitlines() if path.exists() else []
+    head = None
+    if lines:
+        try:
+            head = json.loads(lines[0])
+        except ValueError:
+            head = None
+    if head != key:
+        path.write_text(json.dumps(key) + "\n", encoding="utf-8")
+        return {}
+    done: dict[Call, dict[str, str]] = {}
+    for line in lines[1:]:
+        try:
+            entry = json.loads(line)
+            done[(entry["case"], entry["arm"], int(entry["rep"]))] = {
+                "verdict": str(entry["verdict"]),
+                "reply": str(entry["reply"]),
+            }
+        except (ValueError, KeyError, TypeError):
+            continue
+    return done
+
+
 async def run(args: argparse.Namespace) -> dict[str, Any]:
     cases = [case for case in CASES if not args.cases or case.name in args.cases]
-    rows: list[dict[str, Any]] = []
+    built: dict[tuple[str, str], dict[str, Any]] = {}
     with tempfile.TemporaryDirectory(prefix="task-pack-ab-") as work:
         # Nothing reads or writes the real home: memory, sessions and tasks live here.
         os.environ["HOME"] = work
+        # 1. Every first request, one after another: no model call.
         for case in cases:
-            row: dict[str, Any] = {"case": case.name, "arms": {}}
-            for arm in ("before", "after"):
-                built = await first_request(
+            for arm in ARMS:
+                one = await first_request(
                     case, Path(work) / case.name / arm, after=arm == "after"
                 )
+                built[case.name, arm] = one
                 if args.dump:
                     out = Path(args.dump) / f"{case.name}-{arm}.txt"
                     out.parent.mkdir(parents=True, exist_ok=True)
                     out.write_text(
                         "\n\n".join(
-                            f"## {m.role}\n{m.content}" for m in built["messages"]
+                            f"## {m.role}\n{m.content}" for m in one["messages"]
                         ),
                         encoding="utf-8",
                     )
-                verdicts, replies = [], []
-                for _ in range(args.reps):
-                    model = judge_model(args, case)
-                    try:
-                        reply = await model.chat(built["messages"], built["tools"])
-                    finally:
-                        await model.close()
-                    verdicts.append(verdict(case, reply))
-                    replies.append(str(reply.content or "")[:300])
-                row["arms"][arm] = {
-                    "request_chars": built["request_chars"],
-                    "message_chars": built["message_chars"],
-                    "context_chars": built["context_chars"],
-                    "holds_right": built["holds_right"],
-                    "spec": built["spec"],
-                    "verdicts": verdicts,
-                    "replies": replies,
-                }
-            rows.append(row)
-            print(
-                f"{case.name:14} before {row['arms']['before']['verdicts']} "
-                f"after {row['arms']['after']['verdicts']} "
-                f"+{row['arms']['after']['message_chars'] - row['arms']['before']['message_chars']} chars",
-                flush=True,
-            )
+    # 2. Every model call at once, through --jobs slots; the order stays fixed.
+    path = calls_file(args)
+    done = done_calls(path, calls_key(args))
+    slots = asyncio.Semaphore(max(1, args.jobs))
+    by_name = {case.name: case for case in cases}
+    order: list[Call] = [
+        (case.name, arm, rep)
+        for case in cases
+        for arm in ARMS
+        for rep in range(args.reps)
+    ]
+
+    async def ask(call: Call) -> dict[str, str]:
+        if call in done:
+            return done[call]
+        name, arm, rep = call
+        case, one = by_name[name], built[name, arm]
+        async with slots:
+            model = judge_model(args, case)
+            try:
+                reply = await model.chat(one["messages"], one["tools"])
+            finally:
+                await model.close()
+        result = {
+            "verdict": verdict(case, reply),
+            "reply": str(reply.content or "")[:300],
+        }
+        if path is not None:
+            entry = {"case": name, "arm": arm, "rep": rep, **result}
+            with path.open("a", encoding="utf-8") as file:
+                file.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        return result
+
+    answers = dict(
+        zip(order, await asyncio.gather(*(ask(c) for c in order)), strict=True)
+    )
+    rows: list[dict[str, Any]] = []
+    for case in cases:
+        row: dict[str, Any] = {"case": case.name, "arms": {}}
+        for arm in ARMS:
+            one = built[case.name, arm]
+            got = [answers[case.name, arm, rep] for rep in range(args.reps)]
+            row["arms"][arm] = {
+                "request_chars": one["request_chars"],
+                "message_chars": one["message_chars"],
+                "context_chars": one["context_chars"],
+                "holds_right": one["holds_right"],
+                "spec": one["spec"],
+                "verdicts": [answer["verdict"] for answer in got],
+                "replies": [answer["reply"] for answer in got],
+            }
+        rows.append(row)
+        before, after = row["arms"]["before"], row["arms"]["after"]
+        print(
+            f"{case.name:14} before {before['verdicts']} after {after['verdicts']} "
+            f"+{after['message_chars'] - before['message_chars']} chars",
+            flush=True,
+        )
     return {"env": environment(args), "cases": rows, "summary": summary(rows, args)}
 
 
@@ -511,6 +611,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--base-url", default="", help="OpenAI-compatible /v1 URL")
     parser.add_argument("--model", default="", help="the model's name on the server")
     parser.add_argument("--reps", type=int, default=1, help="replies per case and arm")
+    parser.add_argument(
+        "--jobs", type=int, default=8, help="model calls at once (default 8)"
+    )
     parser.add_argument("--request-timeout", type=float, default=300.0)
     parser.add_argument("--cases", nargs="*", default=[], help="case names to run")
     parser.add_argument("--out", default="", help="write the results here (JSON)")
@@ -525,6 +628,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         Path(args.out).write_text(
             json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8"
         )
+        kept = calls_file(args)
+        if kept is not None:
+            kept.unlink(missing_ok=True)  # FILE holds every call now
 
 
 if __name__ == "__main__":
