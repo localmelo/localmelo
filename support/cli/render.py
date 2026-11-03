@@ -356,6 +356,9 @@ def approval_tag(status: str, approval: Mapping[str, Any] | None) -> str:
     reason = " ".join(str(approval.get("reason") or "").split())
     if origin == "error":
         return "approval failed"
+    if origin == "timeout" and approval.get("mode") == "auto":
+        # Auto's card nobody answered counts as Don't allow (#465).
+        return "declined: no answer"
     if origin == "timeout":
         return "not answered in time"
     if approval.get("allowed"):

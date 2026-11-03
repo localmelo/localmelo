@@ -195,6 +195,7 @@ class Console:
             gate=self.gate,
             memory=self.memory,
             ledger=self.approvals,
+            viewers=self.hub.viewers,
         )
         self.workers = TaskWorkers(
             self.store,

@@ -200,10 +200,12 @@ class Chosen(ApprovalDecision):
     """The person's answer to the card auto mode shows in place of a block (#465).
 
     Allow once, allow on this site for this chat (``remember``), or Don't
-    allow with the person's optional note as ``reason``. On a denial,
-    :func:`denial_text` says what they chose and not to try the step again in
-    this turn. ``again`` is set on the refusal of a step the person declined
-    earlier in the turn: nobody was asked this time. Origin ``user``.
+    allow with the person's optional note as ``reason``: origin ``user``. A
+    card nobody answered in :data:`AUTO_ASK_WAIT_S`, or whose every viewer
+    left, counts as Don't allow: origin ``timeout``, with what happened as
+    ``reason``. On a denial, :func:`denial_text` says what happened and not to
+    try the step again in this turn. ``again`` is set on the refusal of a step
+    declined earlier in the turn: nobody was asked this time.
     """
 
     again: bool = False
@@ -212,8 +214,10 @@ class Chosen(ApprovalDecision):
         super().__post_init__()
         if not isinstance(self.again, bool):
             raise TypeError(f"Chosen.again must be bool, got {self.again!r}")
-        if self.origin != "user":
+        if self.origin not in ("user", "timeout"):
             raise ValueError("a Chosen answer is the person's: origin 'user'")
+        if self.origin == "timeout" and self.allow:
+            raise ValueError("a card nobody answered never allows")
         if self.again and self.allow:
             raise ValueError("Chosen.again needs allow=False")
 
@@ -393,6 +397,45 @@ def asks_in_auto(review: ActionReview | None) -> bool:
     )
 
 
+# How long the card auto mode shows waits for the person (#465): a card nobody
+# answers in this time counts as Don't allow. The one place this time is set.
+AUTO_ASK_WAIT_S: Final = 60.0
+
+
+def wait_words(seconds: float) -> str:
+    """*seconds* in words: ``1 minute``, ``2 minutes``, ``45 seconds``."""
+    if seconds >= 60 and seconds % 60 == 0:
+        minutes = int(seconds // 60)
+        return f"{minutes} minute" + ("" if minutes == 1 else "s")
+    return f"{seconds:g} second" + ("" if seconds == 1 else "s")
+
+
+# The reason of a card nobody answered in time, and of one whose every viewer
+# left before an answer: each counts as Don't allow.
+NO_ANSWER: Final = f"no answer within {wait_words(AUTO_ASK_WAIT_S)}"
+LEFT_UNANSWERED: Final = "the chat was closed before an answer"
+
+
+class AskWatch(Protocol):
+    """Who sees the card auto mode shows, and how long it waits (#465).
+
+    Auto mode asks only while :meth:`watched` (a console, the app or the
+    terminal shows the chat); with nobody watching, the step is blocked as
+    before. :meth:`ask` asks through *asking* and ends a card nobody answers
+    as a deny with origin ``timeout``.
+    """
+
+    def watched(self) -> bool:
+        """Whether a person can see a card now."""
+        ...
+
+    async def ask(
+        self, request: ApprovalRequest, asking: ApprovalPolicy
+    ) -> ApprovalDecision:
+        """``asking.decide(request)``, ended as a ``timeout`` deny when nobody answers."""
+        ...
+
+
 class AutoPolicy:
     """Auto mode (#339): a routine call runs; a call that is not routine is stopped.
 
@@ -401,11 +444,13 @@ class AutoPolicy:
     may cover), so this policy reads only the verdict: ``routine`` runs
     (origin ``auto``). A stopped call that a person may allow
     (:func:`asks_in_auto`) goes to *asking*, the policy that asks a person
-    (the chat's card, #465), and the answer comes back as :class:`Chosen`;
-    without *asking* (nobody can be asked: a schedule, a benchmark), and for
-    any other stopped call, it is denied with origin ``auto`` and the
-    category in a few words as its reason. A call nothing reviewed is
-    blocked too.
+    (the chat's card, #465), and the answer comes back as :class:`Chosen`.
+    With a *watch*, it asks only while a person sees the chat, and a card
+    nobody answers counts as Don't allow (:data:`AUTO_ASK_WAIT_S`). Without
+    *asking* (nobody can be asked: a schedule, a benchmark), with nobody
+    watching, and for any other stopped call, it is denied with origin
+    ``auto`` and the category in a few words as its reason. A call nothing
+    reviewed is blocked too.
 
     :meth:`allow_once` keeps an allowance for one exact step
     (:func:`~localmelo.melo.contracts.review.step_key`, the files it read
@@ -422,6 +467,7 @@ class AutoPolicy:
         task: bool = False,
         clock: Callable[[], float] = time.time,
         asking: ApprovalPolicy | None = None,
+        watch: AskWatch | None = None,
     ) -> None:
         # A saved task's policy: a blocked step is offered on the task's page.
         self.task = task
@@ -429,6 +475,8 @@ class AutoPolicy:
         # The policy that asks a person about a stopped step (#465); None
         # when nobody can be asked, so the step is blocked.
         self.asking = asking
+        # Who sees the card and how long it waits; None: always, unbounded.
+        self.watch = watch
         # key -> (until, categories, tool) of each allowance not used yet.
         self._allowed: dict[str, tuple[float, frozenset[str], str]] = {}
         self.given: dict[str, float] = {}
@@ -497,13 +545,23 @@ class AutoPolicy:
             return ApprovalDecision(False, CATEGORY_WORDS["unreviewed"], origin="auto")
         if review.verdict == "routine":
             return ApprovalDecision(True, origin="auto")
-        asking = self.asking
-        if asking is not None and asks_in_auto(review):
+        asking, watch = self.asking, self.watch
+        if (
+            asking is not None
+            and asks_in_auto(review)
+            and (watch is None or watch.watched())
+        ):
             # The person chooses on the card instead of a block (#465). A
             # grant of the chat that covers the step answers with origin
-            # "session"; a timeout or a withdrawn card stays what it is.
-            decided = await asking.decide(request)
-            if type(decided) is ApprovalDecision and decided.origin == "user":
+            # "session"; a withdrawn card stays what it is. A card nobody
+            # answered counts as Don't allow.
+            decided = await (
+                asking.decide(request) if watch is None else watch.ask(request, asking)
+            )
+            if type(decided) is ApprovalDecision and (
+                decided.origin == "user"
+                or (decided.origin == "timeout" and not decided.allow)
+            ):
                 return Chosen.of(decided)
             return decided
         return ApprovalDecision(
@@ -786,15 +844,37 @@ DECLINED_AGAIN: Final = (
 )
 
 
-def chosen_note(decision: Chosen) -> str:
-    """What the model reads for the person's Don't allow on auto mode's card (#465).
+# A card nobody answered (#465), and the same step tried again in the turn;
+# {reason} is what happened (:data:`NO_ANSWER`, :data:`LEFT_UNANSWERED`).
+UNANSWERED_NOTE: Final = (
+    "The user did not answer the card for this step ({reason}), so it counts as "
+    "Don't allow and the step did not run.\n"
+    "Do not try it again in this turn or reach the same result another way: "
+    "melo will not ask them again. Go on with any work that does not need it, "
+    "and say in your answer what you could not do."
+)
+UNANSWERED_AGAIN: Final = (
+    "The user did not answer the card for this step earlier in this turn "
+    "({reason}), so it did not run and they were not asked again.\n"
+    "Do not try it again in this turn or reach the same result another way. Go on "
+    "with any work that does not need it, and say in your answer what you could "
+    "not do."
+)
 
-    That they chose it, their note (whitespace folded, at most
+
+def chosen_note(decision: Chosen) -> str:
+    """What the model reads for a Don't allow on auto mode's card (#465).
+
+    That the person chose it, their note (whitespace folded, at most
     :data:`DENIAL_REASON_CHARS` characters) when they wrote one, and not to
     try the step again in this turn; for a step declined earlier in the turn
-    (``again``), that they were not asked again.
+    (``again``), that they were not asked again. A card nobody answered
+    (origin ``timeout``) says so, with what happened.
     """
     reason = " ".join(decision.reason.split())[:DENIAL_REASON_CHARS]
+    if decision.origin == "timeout":
+        template = UNANSWERED_AGAIN if decision.again else UNANSWERED_NOTE
+        return template.format(reason=reason or NO_ANSWER)
     note = ""
     if reason:
         note = f" Their note: {reason}"

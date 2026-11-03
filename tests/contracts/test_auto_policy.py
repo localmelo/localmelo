@@ -9,8 +9,12 @@ import pytest
 from localmelo.melo.contracts.approvals import (
     ALLOW_ONCE_S,
     ALLOWED_ONCE,
+    AUTO_ASK_WAIT_S,
+    LEFT_UNANSWERED,
+    NO_ANSWER,
     AllowAllPolicy,
     ApprovalDecision,
+    ApprovalPolicy,
     ApprovalRequest,
     AutoPolicy,
     Chosen,
@@ -21,6 +25,7 @@ from localmelo.melo.contracts.approvals import (
     grant_offered,
     review_mode,
     site_grant,
+    wait_words,
 )
 from localmelo.melo.contracts.folders import OutsideAccess
 from localmelo.melo.contracts.review import ActionReview, ModelAnswer, step_key
@@ -334,11 +339,10 @@ async def test_a_routine_step_and_an_unreviewed_one_never_ask() -> None:
     "answer",
     [
         ApprovalDecision(True, origin="session"),
-        ApprovalDecision(False, "No answer within 5 s", origin="timeout"),
         Withdrawal(False, "the gateway stops", origin="policy"),
     ],
 )
-async def test_a_grant_a_timeout_or_a_withdrawn_card_stays_what_it_is(
+async def test_a_grant_or_a_withdrawn_card_stays_what_it_is(
     answer: ApprovalDecision,
 ) -> None:
     policy = AutoPolicy(asking=_Asking(answer))
@@ -346,6 +350,77 @@ async def test_a_grant_a_timeout_or_a_withdrawn_card_stays_what_it_is(
     decided = await policy.decide(_request(review=BEYOND))
 
     assert decided is answer
+
+
+async def test_a_card_nobody_answered_counts_as_dont_allow() -> None:
+    policy = AutoPolicy(
+        asking=_Asking(ApprovalDecision(False, NO_ANSWER, origin="timeout"))
+    )
+
+    decided = await policy.decide(_request(review=BEYOND))
+
+    assert decided == Chosen(False, NO_ANSWER, origin="timeout")
+    assert denial_text(decided).split("\n")[0] == (
+        "The user did not answer the card for this step (no answer within 1 "
+        "minute), so it counts as Don't allow and the step did not run."
+    )
+    again = denial_text(Chosen(False, LEFT_UNANSWERED, origin="timeout", again=True))
+    assert again.startswith(
+        "The user did not answer the card for this step earlier in this turn (the "
+        "chat was closed before an answer), so it did not run and they were not "
+        "asked again.\n"
+    )
+
+
+class _Watch:
+    """Who sees the card: *seen* says whether anyone does; records each card asked."""
+
+    def __init__(self, seen: bool) -> None:
+        self.seen = seen
+        self.asked: list[str] = []
+
+    def watched(self) -> bool:
+        return self.seen
+
+    async def ask(
+        self, request: ApprovalRequest, asking: ApprovalPolicy
+    ) -> ApprovalDecision:
+        self.asked.append(request.request_id)
+        return await asking.decide(request)
+
+
+async def test_with_nobody_watching_auto_blocks_at_once_and_asks_nobody() -> None:
+    asking = _Asking(ApprovalDecision(True))
+    watch = _Watch(seen=False)
+    policy = AutoPolicy(asking=asking, watch=watch)
+
+    decided = await policy.decide(_request(review=INSTALL))
+
+    # The block of a policy nobody can ask, exactly (#465).
+    assert decided == await AutoPolicy().decide(_request(review=INSTALL))
+    assert asking.asked == [] and watch.asked == []
+
+
+async def test_with_someone_watching_auto_asks_through_the_watch() -> None:
+    asking = _Asking(ApprovalDecision(True))
+    watch = _Watch(seen=True)
+    policy = AutoPolicy(asking=asking, watch=watch)
+
+    decided = await policy.decide(_request(review=INSTALL))
+
+    assert decided == Chosen(True)
+    assert watch.asked == ["r1"] and len(asking.asked) == 1
+
+
+def test_the_wait_is_one_minute_set_in_one_place() -> None:
+    assert AUTO_ASK_WAIT_S == 60.0
+    assert NO_ANSWER == "no answer within 1 minute"
+    assert [wait_words(s) for s in (60, 120, 45, 1)] == [
+        "1 minute",
+        "2 minutes",
+        "45 seconds",
+        "1 second",
+    ]
 
 
 async def test_an_allowance_still_runs_before_the_card() -> None:
@@ -363,6 +438,12 @@ def test_a_chosen_answer_is_the_persons() -> None:
     assert Chosen.of(ApprovalDecision(False, "not now")) == Chosen(False, "not now")
     with pytest.raises(ValueError):
         Chosen(True, origin="session")
+    with pytest.raises(ValueError):
+        Chosen(False, origin="auto")
+    # Nobody answered: a deny, never an allow.
+    assert not Chosen(False, NO_ANSWER, origin="timeout").allow
+    with pytest.raises(ValueError):
+        Chosen(True, origin="timeout")
     with pytest.raises(ValueError):
         Chosen(True, again=True)
     with pytest.raises(TypeError):

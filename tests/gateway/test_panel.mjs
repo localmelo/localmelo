@@ -464,7 +464,7 @@ test('a running worker run opens to its live steps, which follow its stream unti
   const steps = () => h.root.findAll((node) => node.className === 'activity-step').map((step) => [step.dataset.state, step.text()]);
   assert.deepEqual(steps(), [['running', '● Reading notes.md now']]);
   assert.equal(h.sources.length, 1);
-  assert.equal(h.sources[0].url, '/api/sessions/r1/events?after=2');
+  assert.equal(h.sources[0].url, '/api/sessions/r1/events?after=2&watch=true');
   assert.deepEqual(h.calls.filter(([, path]) => path.includes('/turns')).map(([, path]) => path),
     ['/sessions/r1/turns?limit=1&events=true'], 'only the newest turn is read');
   h.sources[0].emit(tool(3, 'c1', 'tool.finished', {name: 'file_read', status: 'success', output: 'Meeting notes\n- one\n- two\n- three', duration_s: 0.2}));

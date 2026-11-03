@@ -1740,6 +1740,8 @@
   "turns.approval.session.short": "allowed for the session",
   "turns.approval.timeout.long": "Not approved in time",
   "turns.approval.timeout.short": "not answered in time",
+  "turns.approval.unanswered.long": "Declined: nobody answered the card in time",
+  "turns.approval.unanswered.short": "declined: no answer",
   "turns.approval.withdrawn.long": "Not run: the turn was stopped",
   "turns.approval.withdrawn.short": "not run",
   "turns.bytes": "{n} bytes",

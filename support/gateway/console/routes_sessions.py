@@ -372,6 +372,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         session_id: str,
         after: str | None = Query(None),
         follow: bool = Query(True),
+        watch: bool = Query(False),
         last_event_id: str | None = Header(None, alias="Last-Event-ID"),
     ) -> Response:
         console.require_store()
@@ -408,6 +409,11 @@ def add_routes(app: FastAPI, console: Console) -> None:
             # The hub hears only this process's commits; a worker run is
             # written by another process, so its stream polls the file.
             live=run_is_live if worker else None,
+            # A surface that shows the chat to a person (the console, the
+            # app, the terminal) says so: while one follows, a step Auto
+            # stops asks on the chat's card (#465). A script that reads the
+            # stream does not, so Auto blocks for it as before.
+            viewer=watch,
         )
         return EventStreamResponse(
             stream,

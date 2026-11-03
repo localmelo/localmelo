@@ -23,8 +23,10 @@ _PAGE: Final = 1000
 
 
 class _Subscriber:
-    def __init__(self, queue_size: int) -> None:
+    def __init__(self, queue_size: int, viewer: bool = False) -> None:
         self.queue: asyncio.Queue[StoredEvent | str] = asyncio.Queue(maxsize=queue_size)
+        # A surface that shows the session to a person (#465).
+        self.viewer = viewer
 
     def offer(self, item: StoredEvent | str) -> None:
         """Queue *item*; a full queue is emptied and marked instead."""
@@ -69,18 +71,28 @@ class SessionHub:
         for subscriber in list(self._subscribers.get(event.session_id, ())):
             subscriber.offer(event)
 
+    def viewers(self, session_id: str) -> int:
+        """How many subscribers of *session_id* show it to a person now (#465)."""
+        return sum(
+            1
+            for subscriber in self._subscribers.get(session_id, ())
+            if subscriber.viewer
+        )
+
     async def subscribe(
-        self, session_id: str, *, after_id: int = 0
+        self, session_id: str, *, after_id: int = 0, viewer: bool = False
     ) -> AsyncGenerator[StoredEvent, None]:
         """The session's events with ids above *after_id*: stored ones, then live.
 
         The subscriber is registered before the replay, so an event stored
         during it is either replayed or queued, and is yielded once.
         Closing the iterator unregisters it; :meth:`aclose` ends it.
+        *viewer*: the subscriber shows the session to a person (the console,
+        the app, the terminal), which :meth:`viewers` counts.
         """
         if self._closed:
             return
-        subscriber = _Subscriber(self._queue_size)
+        subscriber = _Subscriber(self._queue_size, viewer)
         self._subscribers.setdefault(session_id, set()).add(subscriber)
         last = after_id
         try:

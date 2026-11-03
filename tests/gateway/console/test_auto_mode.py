@@ -13,6 +13,7 @@ import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -25,12 +26,13 @@ from localmelo.melo.schema import Message
 from localmelo.support.gateway.auto_blocks import blocked_steps, go_ahead_text
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.sessions.approvals import ChatPolicy, chat_mode
+from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.store import SessionStore
 from localmelo.tests.agent.test_approvals import _answer, _calls
 from localmelo.tests.agent.test_auto_mode import ActsOnSite, FakeModel, verdict
 from localmelo.tests.sessions.helpers import started_agent
 
-from .conftest import PORT, FakeProbe, all_events, make_cfg, quiet_gate
+from .conftest import PORT, FakeProbe, all_events, make_cfg, quiet_gate, viewer
 
 DELETE = "import shutil\nshutil.rmtree('.git', ignore_errors=True)"
 # A step only a click allows: Auto blocks it, with Allow once, even in a chat
@@ -62,12 +64,22 @@ async def auto_console(
     reviews: list[Message] | None = None,
     monkeypatch: pytest.MonkeyPatch | None = None,
     providers: list[BaseToolProvider] = (),  # type: ignore[assignment]
+    watched: bool = True,
 ) -> AsyncIterator[tuple[Console, httpx.AsyncClient, Ran, FakeModel]]:
     """A console whose chats share one scripted model and one recording python_exec.
 
     With *monkeypatch*, a saved task's Agent is built the same way. A chat's
-    Agent also has the tools of *providers*.
+    Agent also has the tools of *providers*. *watched*: a page shows every
+    chat and task, so a step Auto stops asks on the card (#465); without it
+    the hub counts the viewers a test opens.
     """
+    if watched:
+        with patch.object(SessionHub, "viewers", lambda self, session_id: 1):
+            async with auto_console(
+                tmp_path, plans, reviews, monkeypatch, providers, watched=False
+            ) as made:
+                yield made
+        return
     ran = Ran()
     llm = FakeModel(plans, reviews or [])
 
@@ -350,6 +362,105 @@ async def test_a_site_allowed_for_the_chat_lasts_until_removed(tmp_path: Path) -
         )
         await wait_turn(client, sid)
         assert [a.allow for a in site.answers] == [True, True, False]
+
+
+# ── Nobody watching keeps the block; a card nobody answers is declined (#465) ──
+
+
+async def empty_chat(client: httpx.AsyncClient, tmp_path: Path) -> str:
+    """A chat in Auto with no turn yet, so a page can open it before the first."""
+    folder = tmp_path / "ws"
+    folder.mkdir(exist_ok=True)
+    made = await client.post(
+        "/api/sessions", json={"workspace": str(folder), "approvals": "auto"}
+    )
+    assert made.status_code == 201, made.text
+    return str(made.json()["session"]["id"])
+
+
+async def requested(console: Console, session_id: str) -> int:
+    return sum(
+        e.event["type"] == "approval.requested"
+        for e in await all_events(console.store, session_id)
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("how", ["nobody watches", "auto_asks off"])
+async def test_without_a_card_auto_blocks_at_once_as_before(
+    tmp_path: Path, how: str
+) -> None:
+    # A script sends the turn over HTTP and follows no stream as a viewer; or
+    # [approvals] auto_asks is off, and even an open page gets no card.
+    async with auto_console(
+        tmp_path, [step(DELETE), _answer("Done.")], watched=False
+    ) as (
+        console,
+        client,
+        ran,
+        llm,
+    ):
+        started = time.monotonic()
+        if how == "nobody watches":
+            sid = await create(client, tmp_path, "Tidy the notes", approvals="auto")
+            await wait_turn(client, sid)
+        else:
+            console.cfg.approvals.auto_asks = False
+            sid = await empty_chat(client, tmp_path)
+            async with viewer(console, sid):
+                await client.post(f"/api/sessions/{sid}/turns", json={"text": "Tidy"})
+                await wait_turn(client, sid)
+        assert time.monotonic() - started < TIMEOUT_S / 2  # nothing waited
+        assert ran.codes == [] and await requested(console, sid) == 0
+        [approval] = await approvals(console, sid)
+        assert (approval["origin"], approval["allowed"]) == ("auto", False)
+        [note] = llm.tool_messages()
+        assert "Auto mode blocked this step, so it did not run." in note
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("how", ["closed", "unanswered"])
+async def test_a_card_its_viewer_leaves_or_nobody_answers_is_declined(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, how: str
+) -> None:
+    import localmelo.support.sessions.approvals as approvals_mod
+
+    monkeypatch.setattr(approvals_mod, "CARD_POLL_S", 0.02)
+    monkeypatch.setattr(approvals_mod, "CARD_LEFT_S", 0.1)
+    if how == "unanswered":
+        monkeypatch.setattr(approvals_mod, "AUTO_ASK_WAIT_S", 0.2)
+    plans = [step(DELETE), step(DELETE, "call_2"), _answer("Done.")]
+    async with auto_console(tmp_path, plans, watched=False) as (
+        console,
+        client,
+        ran,
+        llm,
+    ):
+        sid = await empty_chat(client, tmp_path)
+        async with viewer(console, sid):
+            sent = await client.post(
+                f"/api/sessions/{sid}/turns", json={"text": "Tidy"}
+            )
+            assert sent.status_code == 202, sent.text
+            card = await pending(client, sid)
+            assert card["review"]["categories"] == ["delete"]
+            if how == "unanswered":
+                await wait_turn(client, sid)
+        await wait_turn(client, sid)
+        assert ran.codes == []
+        first, again = await approvals(console, sid)
+        assert (first["origin"], first["allowed"], first["mode"]) == (
+            "timeout",
+            False,
+            "auto",
+        )
+        reason = "the chat was closed" if how == "closed" else "no answer within 1"
+        assert reason in first["reason"]
+        # The same step later in the turn is not asked about again.
+        assert again["declined"] is True and await requested(console, sid) == 1
+        first_note, again_note = llm.tool_messages()
+        assert "did not answer the card" in first_note and "Don't allow" in first_note
+        assert "not asked again" in again_note
 
 
 # ── Allow once, end to end ──

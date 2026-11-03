@@ -1707,3 +1707,17 @@ class TestApprovalsConfig:
         cfg = Config()
         cfg.approvals.mode = "yolo"
         assert any("[approvals] mode" in e for e in cfg.setting_errors())
+
+    def test_auto_asks_is_on_by_default_and_off_is_saved_and_loaded_back(
+        self, config_path: Path
+    ) -> None:
+        # A developer setting (#465): off, Auto never asks and blocks as before.
+        assert Config().approvals.auto_asks is True
+        cfg = Config(chat_backend="vllm", embedding_backend="none")
+        cfg.approvals.auto_asks = False
+        save(cfg)
+        text = config_path.read_text(encoding="utf-8")
+        assert '[approvals]\nmode = "ask"\nauto_asks = false\n' in text
+        assert load().approvals.auto_asks is False
+        cfg.approvals.auto_asks = "no"  # type: ignore[assignment]
+        assert any("[approvals] auto_asks" in e for e in cfg.setting_errors())

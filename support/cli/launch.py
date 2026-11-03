@@ -667,6 +667,7 @@ async def main_async(
             pricing=pricing,
             work=WorkBeside(GatewayTasks()),
             welcome=draw_banner,
+            auto_asks=session_config.approvals.auto_asks is not False,
         )
 
         def show_banner(selected: SessionInfo | None = None) -> None:

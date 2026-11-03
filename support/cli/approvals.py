@@ -24,6 +24,7 @@ import asyncio
 import dataclasses
 import json
 import os
+import sys
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
@@ -34,6 +35,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     ApprovalPolicy,
     ApprovalRequest,
+    AskWatch,
     AutoPolicy,
     DenyAllPolicy,
     grant_offered,
@@ -43,7 +45,11 @@ from localmelo.melo.contracts.review import because, review_title, url_site
 from localmelo.support.cli import edits
 from localmelo.support.cli.text import escape_arguments, wrap_cells
 from localmelo.support.config import SavedFolders
-from localmelo.support.sessions.approvals import AskFunction, RememberingPolicy
+from localmelo.support.sessions.approvals import (
+    AskFunction,
+    CardWatch,
+    RememberingPolicy,
+)
 from localmelo.support.sessions.display import display_path, folder_name, home_label
 from localmelo.support.words import gist_note, gist_text
 
@@ -532,6 +538,18 @@ class TerminalApprover:
             self.pending = None
             self.on_change()
 
+    def ends(self, request_id: str, decision: ApprovalDecision) -> bool:
+        """End the panel of *request_id* with *decision*, for a card nobody answered (#465).
+
+        Whether that panel was up; one already answered is gone and left as it is.
+        """
+        pending = self.pending
+        if pending is None or pending.request.request_id != request_id:
+            return False
+        if not pending.future.done():
+            pending.future.set_result(decision)
+        return True
+
     def guarded(self) -> bool:
         """Whether the panel opened too recently for a key to answer it."""
         pending = self.pending
@@ -728,6 +746,30 @@ def approval_words(mode: Mode, grants: Iterable[str]) -> str:
     return _MODE_WORDS[mode]
 
 
+def at_terminal() -> bool:
+    """Whether a person can answer the panel: stdin and stdout are a terminal (#465)."""
+    try:
+        return sys.stdin.isatty() and sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def terminal_watch(
+    approver: TerminalApprover,
+    *,
+    auto_asks: bool = True,
+    present: Callable[[], bool] = at_terminal,
+) -> CardWatch:
+    """Who sees the panel Auto shows in the terminal, and how long it waits (#465).
+
+    The person at the terminal, while stdin and stdout are one (*present*):
+    with stdin piped or no terminal, or with ``[approvals] auto_asks`` off,
+    Auto blocks as before and never waits. A panel nobody answers ends
+    through *approver*.
+    """
+    return CardWatch(lambda: int(auto_asks and present()), approver.ends)
+
+
 class Approvals:
     """The session's approval mode and policy, which keeps the grants."""
 
@@ -737,14 +779,17 @@ class Approvals:
         mode: Mode,
         *,
         snapshots: EditSnapshots | None = None,
+        watch: AskWatch | None = None,
     ) -> None:
         self.mode: Mode = mode
         self._ask = ask
         self.snapshots = snapshots if snapshots is not None else EditSnapshots()
         self._policy = self._asking()
         # Auto mode's policy, kept across turns for its allowances; a step it
-        # stops that the person may allow asks on the panel (#465).
-        self._auto = AutoPolicy(asking=self._policy)
+        # stops that the person may allow asks on the panel while *watch*
+        # says someone is at the terminal (#465).
+        self._watch = watch
+        self._auto = AutoPolicy(asking=self._policy, watch=watch)
 
     def _asking(self) -> RememberingPolicy:
         # It also asks about a folder outside the workspace (#405).
@@ -794,5 +839,5 @@ class Approvals:
     def reset(self) -> None:
         """Forget every grant: a new session starts with none."""
         self._policy = self._asking()
-        self._auto = AutoPolicy(asking=self._policy)
+        self._auto = AutoPolicy(asking=self._policy, watch=self._watch)
         self.snapshots.clear()

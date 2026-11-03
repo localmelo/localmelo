@@ -445,6 +445,10 @@ export function approvalTag(status, errorCategory, approval) {
   if (origin === "error") {
     return {short: t("turns.approval.error.short"), long: t("turns.approval.error.long")};
   }
+  // Auto's card nobody answered in time counts as Don't allow (#465).
+  if (origin === "timeout" && approval.mode === "auto") {
+    return {short: t("turns.approval.unanswered.short"), long: t("turns.approval.unanswered.long")};
+  }
   if (origin === "timeout") {
     return {short: t("turns.approval.timeout.short"), long: t("turns.approval.timeout.long")};
   }

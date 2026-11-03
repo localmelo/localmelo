@@ -852,8 +852,10 @@ function newChat({ saveCurrent = true } = {}) {
 
 // ── The event stream ──
 
+// `watch=true`: this page shows the chat to the person, so a step Auto stops
+// asks on the card while it is open (#465).
 function eventsUrl(id) {
-  return `/api/sessions/${encodeURIComponent(id)}/events?after=${S.view?.lastEventId ?? 0}`;
+  return `/api/sessions/${encodeURIComponent(id)}/events?after=${S.view?.lastEventId ?? 0}&watch=true`;
 }
 
 function startStream(id) {

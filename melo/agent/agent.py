@@ -1742,7 +1742,7 @@ class _ApprovalGate:
             self._record(asking, origin="auto", reason="the turn stopped")
             return ApprovalDecision(False, STOPPED_NOTE, origin="auto")
         if self._mode == "auto":
-            note = run.reviews.declined_note(
+            again = run.reviews.declined_again(
                 [
                     call_key(
                         request.tool_name, request.arguments, self._workspace_root
@@ -1750,13 +1750,14 @@ class _ApprovalGate:
                     *loose_keys(request.tool_name, request.arguments),
                 ]
             )
-            if note is not None:
-                # The person chose Don't allow for this step, or one alike, on
-                # the card earlier in this turn: nobody is asked again (#465).
-                self._record(asking, origin="user", reason=note)
+            if again is not None:
+                # This step, or one alike, was declined on the card earlier in
+                # this turn (the person's Don't allow, or no answer): nobody is
+                # asked again (#465).
+                self._record(asking, origin=again.origin, reason=again.reason)
                 assert self.asked is not None
                 self.asked["declined"] = True
-                return Chosen(False, note, again=True)
+                return again
         run.waiting_call_id = call.id
         try:
             if (
@@ -1819,9 +1820,11 @@ class _ApprovalGate:
             self._record(asking, origin="error", reason=_exception_text(no_decision))
             raise no_decision
         # Who decided, not the mode the call began in: a chat may switch
-        # while the call is reviewed.
+        # while the call is reviewed. Auto's card nobody answered is auto
+        # mode's decision (#465).
         allowance = decided.origin == "user" and decided.reason == ALLOWED_ONCE
-        if decided.origin == "auto" or allowance:
+        unanswered = isinstance(decided, Chosen) and decided.origin == "timeout"
+        if decided.origin == "auto" or allowance or unanswered:
             self._mode = "auto"
             auto = find_auto(self._policy) or auto
         elif self._mode == "auto":
@@ -1846,7 +1849,8 @@ class _ApprovalGate:
             and not isinstance(decided, Withdrawal),
         )
         if isinstance(decided, Chosen) and not decided.allow:
-            # Don't allow on the card holds for the rest of the turn (#465).
+            # Don't allow on the card, or no answer, holds for the rest of the
+            # turn (#465).
             run.reviews.decline(
                 [
                     call_key(
@@ -1858,7 +1862,7 @@ class _ApprovalGate:
                         () if self.review is None else self.review.categories,
                     ),
                 ],
-                decided.reason,
+                decided,
             )
         if not decided.allow and decided.origin == "auto":
             return dataclasses.replace(
@@ -2207,17 +2211,17 @@ class _ToolAsk:
             # The turn already stopped: no site opens either.
             return ApprovalDecision(False, STOPPED_NOTE, origin="auto")
         declined = _question_keys(tool_name, request.arguments)
-        note = self._run.reviews.declined_note(declined) if auto else None
-        if note is not None:
-            # The person chose Don't allow for the same question on the card
-            # earlier in this turn: nobody is asked again (#465). A repeat is
-            # no new refusal: it keeps no call key.
+        again = self._run.reviews.declined_again(declined) if auto else None
+        if again is not None:
+            # The same question was declined on the card earlier in this turn
+            # (the person's Don't allow, or no answer): nobody is asked again
+            # (#465). A repeat is no new refusal: it keeps no call key.
             self.refused.append(
                 {"request_id": request.request_id, "tool": tool_name,
-                 "allowed": False, "origin": "user", "reason": note,
-                 "declined": True, "preview": preview}
+                 "allowed": False, "origin": again.origin,
+                 "reason": again.reason, "declined": True, "preview": preview}
             )  # fmt: skip
-            return Chosen(False, note, again=True)
+            return again
         if auto and reviewer is not None:
             site = str(arguments.get("site") or "")
             access = str(arguments.get("access") or "")
@@ -2279,8 +2283,9 @@ class _ToolAsk:
             # a task its chat continues on its own never asks it again.
             self._keep(request, decided)
         if isinstance(decided, Chosen) and not decided.allow:
-            # Don't allow on the card holds for the rest of the turn (#465).
-            self._run.reviews.decline(declined, decided.reason)
+            # Don't allow on the card, or no answer, holds for the rest of the
+            # turn (#465).
+            self._run.reviews.decline(declined, decided)
         if (
             auto
             and reviewer is not None

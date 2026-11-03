@@ -32,8 +32,9 @@ from localmelo.support.cli.approvals import (
     panel_text,
     session_option,
     session_warning,
+    terminal_watch,
 )
-from localmelo.support.cli.render import LiveState
+from localmelo.support.cli.render import LiveState, approval_tag
 from localmelo.support.cli.text import cells
 from localmelo.support.sessions.approvals import RememberingPolicy
 from localmelo.tests.cli.ui_helpers import (
@@ -918,6 +919,52 @@ async def test_auto_mode_asks_on_the_panel_and_blocks_what_only_a_click_allows()
     old = approvals._auto
     approvals.reset()
     assert approvals._auto is not old
+
+
+@pytest.mark.parametrize("how", ["piped stdin", "auto_asks off"])
+async def test_auto_with_nobody_at_the_terminal_blocks_and_never_waits(
+    monkeypatch: pytest.MonkeyPatch, how: str
+) -> None:
+    import io
+
+    asked: list[ApprovalRequest] = []
+
+    async def ask(request: ApprovalRequest) -> ApprovalDecision:
+        asked.append(request)
+        await asyncio.Event().wait()  # a panel nobody answers
+        raise AssertionError("unreachable")
+
+    if how == "piped stdin":
+        monkeypatch.setattr("sys.stdin", io.StringIO("go ahead\n"))
+        watch = terminal_watch(TerminalApprover())
+    else:
+        watch = terminal_watch(
+            TerminalApprover(), auto_asks=False, present=lambda: True
+        )
+    policy = Approvals(ask, "auto", watch=watch).policy()
+    assert policy is not None
+    pip = dataclasses.replace(
+        _request("shell_exec", command="pip install x"),
+        review=ActionReview("high", ("install",), ("Installs x with pip.",)),
+    )
+    decided = await asyncio.wait_for(policy.decide(pip), 5)
+    assert decided == ApprovalDecision(False, "installs software", origin="auto")
+    assert asked == []
+
+
+async def test_a_panel_nobody_answers_ends_through_the_approver() -> None:
+    approver = TerminalApprover()
+    shown = _request("shell_exec", command="pip install x")
+    waiting = asyncio.ensure_future(approver.ask(shown))
+    await asyncio.sleep(0)
+    unanswered = ApprovalDecision(False, "no answer within 1 minute", origin="timeout")
+    assert not approver.ends("another", unanswered)
+    assert approver.ends(shown.request_id, unanswered)
+    assert await waiting == unanswered and approver.pending is None
+    assert not approver.ends(shown.request_id, unanswered)  # gone, left as it is
+    tag = approval_tag("blocked", {"origin": "timeout", "mode": "auto"})
+    assert tag == "declined: no answer"
+    assert approval_tag("blocked", {"origin": "timeout"}) == "not answered in time"
 
 
 async def test_grants_survive_auto_and_ask_until_forgotten() -> None:

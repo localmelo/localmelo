@@ -357,3 +357,60 @@ async def test_a_deleted_session_ends_the_stream(
 
 async def _collect(lines: AsyncIterator[str]) -> list[str]:
     return [line async for line in lines]
+
+
+async def test_a_page_s_stream_counts_as_a_viewer_while_it_is_open(
+    console: Console, workspace: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The console, the app and the terminal follow with watch=true (#465).
+    import localmelo.support.gateway.console.sse as sse_mod
+
+    monkeypatch.setattr(sse_mod, "SSE_KEEPALIVE_S", 0.01)
+    turn = await seed_turn(console.store, workspace)
+    stored = await all_events(console.store, turn.session_id)
+    after = stored[-1].id
+    assert after is not None
+    page = EventStream(
+        console.store,
+        console.hub,
+        console.shutdown,
+        turn.session_id,
+        after_id=after,
+        viewer=True,
+    )
+    script = EventStream(
+        console.store, console.hub, console.shutdown, turn.session_id, after_id=after
+    )
+    try:
+        for stream in (page, script):
+            assert await anext(stream) == "retry: 2000\n\n"
+            assert await anext(stream) == ": keepalive\n\n"
+        assert console.hub.viewers(turn.session_id) == 1  # the script is none
+        await page.aclose()
+        assert console.hub.viewers(turn.session_id) == 0
+    finally:
+        await page.aclose()
+        await script.aclose()
+
+
+async def test_watch_true_is_what_makes_a_stream_a_viewer(
+    client: TestClient,
+    console: Console,
+    workspace: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import localmelo.support.gateway.console.routes_sessions as routes
+
+    made: list[object] = []
+
+    class Recorded(EventStream):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            made.append(kwargs.get("viewer"))
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(routes, "EventStream", Recorded)
+    turn = await seed_turn(console.store, workspace)
+    url = f"/api/sessions/{turn.session_id}/events?follow=false"
+    for query in ("", "&watch=true", "&watch=false"):
+        assert client.get(url + query).status_code == 200
+    assert made == [False, True, False]

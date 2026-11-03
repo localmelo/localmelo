@@ -38,6 +38,7 @@ from localmelo.support.gateway.finishing import OUT_OF_STEPS
 from localmelo.support.gateway.front_rules import hands_off, start_rule
 from localmelo.support.gateway.workers import NOTE_START, _turn_text
 from localmelo.support.sessions.agents import session_options
+from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.store import SessionBusyError
 from localmelo.tests.sessions.helpers import answer, tool_call
 
@@ -739,6 +740,8 @@ async def test_the_chats_note_is_never_the_persons_words(
             answer("Could not install numpy either.\nEnding: failed"),
         ],
     ]
+    # The person has the chat open (#465): every page counts as one viewer.
+    monkeypatch.setattr(SessionHub, "viewers", lambda self, session_id: 1)
     async with owner_console(
         tmp_path, monkeypatch, main=main, workers=workers, approvals="auto"
     ) as (console, client, models, ran):

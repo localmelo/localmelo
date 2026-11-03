@@ -51,7 +51,7 @@ from localmelo.melo.checker.review.model import (
     step_names,
     user_message,
 )
-from localmelo.melo.contracts.approvals import ReviewMode, block_note
+from localmelo.melo.contracts.approvals import Chosen, ReviewMode, block_note
 from localmelo.melo.contracts.review import (
     CATEGORY_WORDS,
     MODEL_CAN_ALLOW,
@@ -207,22 +207,28 @@ class RunReviews:
     # The hosts of the sites refused in this run, oldest first (#433): the
     # review of a later step is told of them.
     refused_sites: list[str] = field(default_factory=list)
-    # The steps the person chose Don't allow for on auto mode's card in this
-    # run (#465), by each of their keys: the person's note. The same step, or
-    # one alike, is refused again without asking until the run ends.
-    declined: dict[str, str] = field(default_factory=dict)
+    # The steps declined on auto mode's card in this run (#465), by each of
+    # their keys: the person's Don't allow, or a card nobody answered. The
+    # same step, or one alike, is refused again without asking until the run
+    # ends.
+    declined: dict[str, Chosen] = field(default_factory=dict)
 
-    def decline(self, keys: Iterable[str], note: str) -> None:
-        """Keep a step the person declined on the card, under each of *keys*."""
+    def decline(self, keys: Iterable[str], decision: Chosen) -> None:
+        """Keep a step declined on the card (*decision*), under each of *keys*."""
         for key in keys:
             if key:
-                self.declined.setdefault(key, note)
+                self.declined.setdefault(key, decision)
 
-    def declined_note(self, keys: Iterable[str]) -> str | None:
-        """The person's note when a step with any of *keys* was declined in this run."""
+    def declined_again(self, keys: Iterable[str]) -> Chosen | None:
+        """The refusal of a step with any of *keys* declined in this run, else None.
+
+        It keeps who declined it and why (the person's note, or that nobody
+        answered), and says that nobody was asked this time (``again``).
+        """
         for key in keys:
-            if key in self.declined:
-                return self.declined[key]
+            found = self.declined.get(key)
+            if found is not None:
+                return Chosen(False, found.reason, origin=found.origin, again=True)
         return None
 
     def count(self, review: ActionReview | None) -> None:

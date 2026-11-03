@@ -450,6 +450,8 @@ test('an approval tag follows the call\'s end', () => {
   assert.equal(approvalTag('blocked', 'approval_denied', {allowed: false, origin: 'policy', reason: 'rule'}).short, 'denied by policy: rule');
   assert.deepEqual(approvalTag('cancelled', 'cancelled', {allowed: false, origin: 'withdrawn'}), {short: 'not run', long: 'Not run: the turn was stopped'});
   assert.equal(approvalTag('cancelled', 'none', {origin: 'timeout'}).short, 'not answered in time');
+  // Auto's card nobody answered counts as Don't allow (#465).
+  assert.equal(approvalTag('blocked', 'approval_denied', {origin: 'timeout', mode: 'auto', allowed: false}).short, 'declined: no answer');
   assert.equal(approvalTag('success', 'none', null), null, 'A call nobody asked about has no tag');
 });
 
@@ -2321,7 +2323,7 @@ test('the page boots from /api and renders a session\'s turns', async () => {
   assert.equal(h.element('machine-state').hidden, true);
   assert.equal(h.element('connection-label').textContent, 'Ready');
   assert.equal(h.element('header-title').textContent, 'New chat');
-  assert.equal(h.stream().url, '/api/sessions/a/events?after=7');
+  assert.equal(h.stream().url, '/api/sessions/a/events?after=7&watch=true');
   assert.equal(h.root.dataset.ready, '1', 'The first load marks the page ready');
 });
 
@@ -2506,7 +2508,7 @@ test('a send in a new chat creates the chat with its first turn', async () => {
   assert.equal(h.state().activeId, 'b');
   assert.equal(h.context.location.hash, '#/s/b');
   assert.equal(h.element('input').value, '');
-  assert.equal(h.stream().url, '/api/sessions/b/events?after=0');
+  assert.equal(h.stream().url, '/api/sessions/b/events?after=0&watch=true');
   assert.match(h.text('messages'), /The answer\./);
 });
 
@@ -2671,7 +2673,7 @@ test('a chat left before its load finishes keeps no stream', async () => {
   await first;
   assert.equal(h.state().activeId, 'b');
   assert.equal(FakeEventSource.instances.length, 1, 'The abandoned load opens no second stream');
-  assert.equal(h.stream().url, '/api/sessions/b/events?after=0');
+  assert.equal(h.stream().url, '/api/sessions/b/events?after=0&watch=true');
 });
 
 test('a repeated send reloads the chat and reopens its stream', async () => {
@@ -2683,7 +2685,7 @@ test('a repeated send reloads the chat and reopens its stream', async () => {
   h.element('input').value = 'Only once';
   await h.run('send()');
   assert.equal(FakeEventSource.instances.length, 2, 'The rebuilt view reopens the stream from its cursor');
-  assert.equal(h.stream().url, '/api/sessions/a/events?after=0');
+  assert.equal(h.stream().url, '/api/sessions/a/events?after=0&watch=true');
 });
 
 test('a level change lands on the chat it was made for', async () => {
@@ -2854,7 +2856,7 @@ test('a running turn draws the live row with the terminal\'s facts', async () =>
     'GET /sessions/a/turns?limit=10': {turns: [running], has_earlier: false, replay_from: 0},
   }));
   await h.run('init()');
-  assert.equal(h.stream().url, '/api/sessions/a/events?after=0');
+  assert.equal(h.stream().url, '/api/sessions/a/events?after=0&watch=true');
   h.stream().emit({id: 21, turn: 1, ts: 51, type: 'step.started', data: {step: 1, attempt: 1}});
   h.stream().emit({id: 22, turn: 1, ts: 52, type: 'run.progress', data: {level: 1, state: 'running', step: 2, attempt: 1, phase: 'Verify', cycle: 0, tests: {passed: 3, failed: 0, total: 3}, items: null, past: {runs: 1, last_steps: 4, last_wall_s: 60}, basis: {match: 'exact'}}});
   const live = flatten(h.element('messages'));
@@ -3137,7 +3139,7 @@ test('Escape and a click outside close the running list before Escape stops the 
 test('a closed stream reopens from the last event id', async () => {
   const h = harness(baseRoutes());
   await h.run('init()');
-  assert.equal(h.stream().url, '/api/sessions/a/events?after=7');
+  assert.equal(h.stream().url, '/api/sessions/a/events?after=7&watch=true');
   h.stream().emit({id: 12, turn: 1, ts: 30, type: 'turn.undone', data: {turn: 1, turn_id: 'turn-1'}});
   h.stream().fail();
   assert.equal(h.state().stream.status, 'paused');
@@ -3146,7 +3148,7 @@ test('a closed stream reopens from the last event id', async () => {
   await timer.handler();
   assert.equal(h.net.callsTo('/sessions/a').length, 2, 'The chat is checked before the stream reopens');
   assert.equal(FakeEventSource.instances.length, 2);
-  assert.equal(h.stream().url, '/api/sessions/a/events?after=12');
+  assert.equal(h.stream().url, '/api/sessions/a/events?after=12&watch=true');
 });
 
 test('the open chat\'s row follows the frames the page sees', async () => {
@@ -4103,7 +4105,7 @@ test('a running task card gains a step and a tool call as they are recorded, wit
     'GET /sessions/t1/status': {session_id: 't1', segments: ['cache 50%']},
   });
   const panel = h.element('task-panel');
-  assert.equal(taskStream(h).url, '/api/sessions/t1/events?after=1', 'the stream starts after the last event read');
+  assert.equal(taskStream(h).url, '/api/sessions/t1/events?after=1&watch=true', 'the stream starts after the last event read');
   assert.equal(liveBox(h).hidden, true, 'a task with no step yet shows no Live heading');
   const heading = panel.children[0];
   const stream = taskStream(h);
@@ -4131,7 +4133,7 @@ test('the approval card and the live tail sit side by side, and a frame redraws 
   assert.ok(card);
   assert.match(flatten(liveBox(h)), /file_read/, 'a held task keeps showing its work');
   assert.equal(panel.children.indexOf(liveBox(h)), panel.children.indexOf(card) + 1);
-  assert.equal(taskStream(h).url, '/api/sessions/t1/events?after=2', 'a held task is followed');
+  assert.equal(taskStream(h).url, '/api/sessions/t1/events?after=2&watch=true', 'a held task is followed');
   taskStream(h).emit(liveTool(3, {data: {step: 2, call_id: 'c3', name: 'shell_exec', arguments: {command: 'make test'}, preview: 'make test'}}));
   h.timers.findLast((timer) => !timer.interval && timer.ms === 150 && !timer.cleared).handler();
   assert.match(flatten(liveBox(h)), /shell_exec/);
@@ -4245,7 +4247,7 @@ test('the live stream closes in a hidden tab, resumes after the last id, and end
   assert.equal(first.closed, true);
   h.context.document.visibilityState = 'visible';
   visibility();
-  assert.equal(taskStream(h).url, '/api/sessions/t1/events?after=2');
+  assert.equal(taskStream(h).url, '/api/sessions/t1/events?after=2&watch=true');
   assert.notEqual(taskStream(h), first);
   const second = taskStream(h);
   state = 'done';
@@ -4276,7 +4278,7 @@ test('leaving the task card, or opening another task, closes the live stream and
   assert.equal(first.closed, true, 'the stream of the task that was left is closed');
   assert.doesNotMatch(flatten(liveBox(h)), /file_read/, 'the other task shows none of its tail');
   const second = FakeEventSource.instances.at(-1);
-  assert.equal(second.url, '/api/sessions/t2/events?after=5');
+  assert.equal(second.url, '/api/sessions/t2/events?after=5&watch=true');
   h.context.location.hash = '#/tasks';
   await h.windowListeners.hashchange[0](); await settle();
   assert.equal(second.closed, true, 'the task list follows nothing');

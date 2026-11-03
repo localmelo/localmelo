@@ -47,6 +47,7 @@ from localmelo.support.sessions.approvals import (
     ApprovalBroker,
     ApprovalLedger,
     AskFunction,
+    CardWatch,
     ChatMode,
     ChatPolicy,
     chat_mode,
@@ -214,11 +215,15 @@ class ConsoleSessions:
         max_open: int = MAX_OPEN,
         clock: Callable[[], float] = time.time,
         ledger: ApprovalLedger | None = None,
+        viewers: Callable[[str], int] | None = None,
     ) -> None:
         if store.writer != "gateway":
             raise ValueError("the console opens the gateway's store")
         self._store = store
         self._broker = broker
+        # How many surfaces show a chat to a person now (the hub's viewers,
+        # #465); None: nobody ever does, so Auto blocks as before.
+        self._viewers = viewers
         # The person's Allows in each chat, which its tasks may use (#369).
         self.ledger = ledger or ApprovalLedger()
         self.ledger.grants_of = self.grants
@@ -425,6 +430,7 @@ class ConsoleSessions:
                 runner.observe(self._timed_ask(session_id, granted_at)),
                 self.mode_of(info),
                 saved=self.saved_folders,
+                watch=self.card_watch(session_id),
             )
             entry = OpenSession(
                 session_id=session_id,
@@ -539,6 +545,21 @@ class ConsoleSessions:
             # next open: the kept conversation is what it loads.
             entry.agent = None
         entry.last_used = self._clock()
+
+    def card_watch(self, session_id: str) -> CardWatch:
+        """Who sees the card Auto shows in *session_id*, and how long it waits (#465).
+
+        The chat's viewers (a console, the app or the terminal following its
+        stream as one); none with ``[approvals] auto_asks`` off, so Auto
+        blocks as before. A card nobody answers is ended through the broker.
+        """
+
+        def viewers() -> int:
+            if self._viewers is None or not self._settings().approvals.auto_asks:
+                return 0
+            return self._viewers(session_id)
+
+        return CardWatch(viewers, self._broker.ends)
 
     def _timed_ask(
         self,
@@ -936,6 +957,7 @@ class ConsoleSessions:
             runner.observe(self._timed_ask(info.id, granted_at)),
             chat_mode(info.meta),
             saved=self.saved_folders,
+            watch=self.card_watch(info.id),
         )
         turn: TurnInfo | None = None
         if has_turn:

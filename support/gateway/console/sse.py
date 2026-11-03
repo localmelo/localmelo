@@ -73,8 +73,9 @@ class EventStream:
     ``True`` subscribes to the hub and waits, sending keepalives and ending
     when *shutdown* is set. With *live*, a following stream reads the store
     every *poll_s* seconds instead and ends once ``await live()`` is false
-    and no event is left. :meth:`aclose` is safe to call twice and is what
-    :class:`EventStreamResponse` calls on the way out.
+    and no event is left. *viewer*: the stream shows the session to a person,
+    and the hub counts it as one (#465). :meth:`aclose` is safe to call twice
+    and is what :class:`EventStreamResponse` calls on the way out.
     """
 
     def __init__(
@@ -90,6 +91,7 @@ class EventStream:
         on_close: Callable[[], None] | None = None,
         live: Callable[[], Awaitable[bool]] | None = None,
         poll_s: float | None = None,
+        viewer: bool = False,
     ) -> None:
         self._store = store
         self._hub = hub
@@ -103,7 +105,7 @@ class EventStream:
         self._poll_s = SSE_POLL_S if poll_s is None else poll_s
         self._quiet_since = time.monotonic()
         self._iterator: AsyncIterator[StoredEvent] | None = (
-            hub.subscribe(session_id, after_id=after_id)
+            hub.subscribe(session_id, after_id=after_id, viewer=viewer)
             if follow and live is None
             else None
         )
