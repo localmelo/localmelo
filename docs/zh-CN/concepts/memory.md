@@ -179,7 +179,7 @@ A line that starts with an id such as [t123] is cut; open it with open_memory wh
 - 模型同样有 `open_memory`，与列表形式相同：最多返回 `recall_open_chars` 个字符的整轮对话。`search_memory` 用同样的方式标记它的行。
 - 与 `recall_form = "list"`（它总是提供 `open_memory`）或 `recall_source = "items"` 一起用没有效果。
 
-**记忆条目（开发者设置）。** 以前的对话轮次是原始文本。使用 `melo memory ingest FILE -X ingest=compress` 时，聊天模型会每次读取 `compress_at_chars` 个字符的已导入对话，并从中写出简短的记忆条目：每条有标题、一两句话的正文、类型（`profile`、`semantic` 或 `episodic`）以及它所来自的轮次。模型漏掉的长期陈述，由规则补成条目。编码器像步骤审查一样，请本地模型在关闭思考的情况下回答，所以默认会思考的模型不会把回答用在思考上。每个条目随后按规则（不发起模型请求）与已有的同类型条目比对，出现以下五种结果之一：
+**记忆条目（开发者设置）。** 以前的对话轮次是原始文本。使用 `melo memory ingest FILE -X ingest=compress` 时，聊天模型会每次读取 `compress_at_chars` 个字符的已导入对话（条目放不进一次回答的那一段会被拆成两半分别读取，特别长的一轮最多分成四个部分来读），并从中写出简短的记忆条目：每条有标题、一两句话的正文、类型（`profile`、`semantic` 或 `episodic`）以及它所来自的轮次。模型漏掉的长期陈述，由规则补成条目。编码器像步骤审查一样，请本地模型在关闭思考的情况下回答，所以默认会思考的模型不会把回答用在思考上。每个条目随后按规则（不发起模型请求）与已有的同类型条目比对，出现以下五种结果之一：
 
 | 结果 | 做法 |
 |---|---|

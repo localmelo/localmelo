@@ -1017,6 +1017,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Developer only: memory ingest no longer loses a long stretch of chat whose items do not fit one reply: the stretch is split and asked again in parts, and one very long exchange is read in parts instead of being cut. Part of #428.
 - Memory items: the encoder asks a local model with thinking off, as step reviews do (#428).
   A local server whose chat template thinks by default spent the encoder's whole reply
   budget on thinking and answered nothing readable, so most windows of a chat failed. The

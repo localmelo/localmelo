@@ -7,11 +7,19 @@ item against the ones kept are :mod:`.hippo_route`, and the pure policy they
 call is :mod:`localmelo.melo.memory.hippo.policy`.
 
 A chat's exchanges are packed in order into windows of at most ``[memory]
-compress_at_chars`` characters (:func:`pack`; one exchange longer than that gets a
-window of its own and is cut at its size). Each window is one request to the chat
-model, temperature 0, at most :data:`MAX_OUTPUT_TOKENS` tokens out, asking for
-JSON only (:data:`SYSTEM_PROMPT`); an unreadable reply is asked for once more and
-then the window has failed. The encoder asks a local model with thinking off, as
+compress_at_chars`` characters (:func:`pack`; one exchange longer than that is read
+in up to :data:`MAX_PARTS` consecutive parts of that size, each part after the first
+starting ``[n] (continued) ``). Each window is one request to the chat model,
+temperature 0, at most :data:`MAX_OUTPUT_TOKENS` tokens out, asking for JSON only
+(:data:`SYSTEM_PROMPT`). An unreadable reply is asked for once more and then the
+window has failed, unless the reply *ran out of room* (:func:`_ran_out`: its JSON
+was cut off at the output cap): asking the same prompt again at temperature 0 would
+cut it at the same place, so the window is split instead, as the hippocampus
+encodes an episode too big for one go at its next event boundary down: between
+exchanges, then, inside one exchange, between paragraphs or sentences
+(:func:`halves`). Each half is asked and cached like any window; one that also runs
+out splits once more, so a window makes at most four sub-windows, and a sub-window
+that fails fails alone. The encoder asks a local model with thinking off, as
 step reviews do (:mod:`localmelo.support.providers.llm.thinking`). What comes back
 is checked (:func:`check`): a source outside the window is dropped, an item left
 with none is dropped and counted, an exchange named by no item and not ignored is
@@ -20,8 +28,9 @@ note path uses (:func:`localmelo.support.memory.records.statements`) must be the
 source of an item: if no item has it, one is made from the rules' note (*forced*).
 A window's reply is kept in a JSON-lines cache, keyed by the prompt version, the
 model and the window's text with its dates, so a second run with the same chats
-makes no call. Text that goes to the model has its secrets left out, as an index
-document has.
+makes no call; a window that was split is kept under a second key (:func:`split_key`),
+so the run does not ask it again either. Text that goes to the model has its
+secrets left out, as an index document has.
 """
 
 from __future__ import annotations
@@ -55,11 +64,22 @@ _T = TypeVar("_T")
 # cache key and of every item's ``encoder``.
 PROMPT_VERSION: Final = "3"
 MAX_OUTPUT_TOKENS: Final = 2000
+# A reply that reports at least this many completion tokens ran out of room (a
+# server may count a token or two differently from the cap it was given).
+_RUN_OUT_MARGIN: Final = 16
+# A window shorter than this is not split; the one that has run out fails.
+MIN_SPLIT_CHARS: Final = 1500
+# Levels of splitting: a window makes two halves, each of which may make two more.
+MAX_SPLIT_DEPTH: Final = 2
+# Most parts one very long exchange is read in; the text after them is cut.
+MAX_PARTS: Final = 4
 ENCODE_TIMEOUT_S: Final = 900.0
 TITLE_CHARS: Final = 80
 TEXT_CHARS: Final = 800
 _CHAT_TITLE_CHARS: Final = 120
 _SEPARATOR: Final = "\n\n"
+# What follows the ``[n]`` label of every part of an exchange after the first.
+_CONTINUED: Final = " (continued) "
 # What an item made by the rules, not the model, has as its ``encoder``.
 RULES_ENCODER: Final = "rules"
 
@@ -119,11 +139,19 @@ class Turn:
 
 @dataclass(frozen=True)
 class Window:
-    """Some exchanges of a chat, in order, as one request shows them."""
+    """Some exchanges of a chat, in order, as one request shows them.
+
+    *cut* says text was left out (more than :data:`MAX_PARTS` parts of one
+    exchange), *part* is ``(k, m)`` for part *k* of *m* of one long exchange,
+    *starts* the offset in *text* of each exchange's block (what :func:`halves`
+    splits a window of several exchanges by; not part of what a window is).
+    """
 
     positions: tuple[int, ...]
     text: str
     cut: bool = False
+    part: tuple[int, int] | None = None
+    starts: tuple[int, ...] = field(default=(), compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -144,8 +172,16 @@ class Piece:
 @dataclass
 class WindowReport:
     """How one window went: its exchanges and characters, whether its reply came
-    from the cache, failed, or was cut (one exchange longer than the window), and
-    how many of its items were dropped."""
+    from the cache (no request at all, not for a part of it either), failed, or was
+    cut (text of one very long exchange left out), and how many of its items were
+    dropped.
+
+    *split* is the number of sub-windows asked for when the window ran out of room
+    (0 when it did not; at most four, a half that split again counted by its own
+    halves), *failed_parts* how many of them failed, and *part* is ``(k, m)`` for
+    part *k* of *m* of one long exchange. *failed* is true only when the window
+    gave nothing: it could not split, or every sub-window failed.
+    """
 
     exchanges: int
     chars: int
@@ -153,6 +189,9 @@ class WindowReport:
     failed: bool = False
     cut: bool = False
     dropped: int = 0
+    split: int = 0
+    failed_parts: int = 0
+    part: tuple[int, int] | None = None
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -162,6 +201,9 @@ class WindowReport:
             "failed": self.failed,
             "cut": self.cut,
             "dropped": self.dropped,
+            "split": self.split,
+            "failed_parts": self.failed_parts,
+            "part": list(self.part) if self.part is not None else None,
         }
 
 
@@ -221,35 +263,145 @@ def render(position: int, turn: Turn) -> str:
     return f"{line} / melo: {answer}" if answer else line
 
 
+_PARAGRAPH = re.compile(r"\n[ \t]*\n\s*")
+# A sentence end: a full stop, ``!``, ``?`` or ``…`` (and any closing quote or
+# bracket) before whitespace, or a CJK full stop, ``！`` or ``？``.
+_SENTENCE = re.compile(
+    "[.!?\u2026][\"')\\]\u201d\u2019]*\\s+|[\u3002\uff01\uff1f]+\\s*"
+)
+_BLANK = re.compile(r"\s+")
+
+
+def _cut_index(text: str, low: int, high: int, target: int) -> int:
+    """Where to cut *text*, between *low* and *high* (the first part is
+    ``text[:index]``): after the paragraph break nearest *target*, else after the
+    sentence end nearest it, else after the whitespace nearest it, else at *target*
+    (kept between *low* and *high*). A cut after a break starts the next part at a
+    word."""
+    low, high = max(low, 1), min(high, len(text) - 1)
+    if low > high:
+        return max(min(target, len(text) - 1), 1)
+    for pattern in (_PARAGRAPH, _SENTENCE, _BLANK):
+        ends = [match.end() for match in pattern.finditer(text, low, high)]
+        if ends:
+            return min(ends, key=lambda end: (abs(end - target), end))
+    return min(max(target, low), high)
+
+
+def _continued(position: int) -> str:
+    """What a part of exchange *position* after the first starts with, so the
+    model can name its source: ``[3] (continued) ``."""
+    return f"[{position}]{_CONTINUED}"
+
+
+def _parts(position: int, block: str, limit: int) -> list[Window]:
+    """One exchange longer than *limit* as consecutive windows of at most *limit*
+    characters (each part after the first starts :func:`_continued`), cut at a
+    paragraph break, else a sentence end, else whitespace, else exactly at the size.
+    At most :data:`MAX_PARTS` of them: what is left after that is cut, and the last
+    part says so."""
+    pieces: list[tuple[str, bool]] = []
+    start = 0
+    for k in range(MAX_PARTS):
+        lead = _continued(position) if k else ""
+        room = max(limit - len(lead), 1)
+        if len(block) - start <= room:
+            pieces.append((lead + block[start:], False))
+            break
+        if k == MAX_PARTS - 1:
+            pieces.append((lead + block[start : start + room], True))
+            break
+        end = _cut_index(block, start + room // 2, start + room, start + room)
+        pieces.append((lead + block[start:end], False))
+        start = end
+    return [
+        Window((position,), text, cut=cut, part=(k, len(pieces)))
+        for k, (text, cut) in enumerate(pieces, 1)
+    ]
+
+
 def pack(turns: Sequence[Turn], limit: int) -> list[Window]:
     """The exchanges of a chat in order, packed into windows of at most *limit*
     characters of prompt text (the exchanges as :func:`render` writes them, a blank
-    line between). One exchange that is longer than *limit* has a window of its
-    own, cut at *limit* characters."""
+    line between). One exchange that is longer than *limit* is not cut at *limit*:
+    it is read in consecutive part windows of at most *limit* characters each (see
+    :func:`_parts`), at most :data:`MAX_PARTS` of them, between its neighbours'
+    windows."""
     windows: list[Window] = []
     positions: list[int] = []
     blocks: list[str] = []
+    starts: list[int] = []
     size = 0
 
     def close() -> None:
-        nonlocal positions, blocks, size
+        nonlocal positions, blocks, starts, size
         if blocks:
-            windows.append(Window(tuple(positions), _SEPARATOR.join(blocks)))
-        positions, blocks, size = [], [], 0
+            windows.append(
+                Window(
+                    tuple(positions),
+                    _SEPARATOR.join(blocks),
+                    starts=tuple(starts),
+                )
+            )
+        positions, blocks, starts, size = [], [], [], 0
 
     for position, turn in enumerate(turns):
         block = render(position, turn)
         if len(block) > limit:
             close()
-            windows.append(Window((position,), block[:limit], cut=True))
+            windows.extend(_parts(position, block, limit))
             continue
         if blocks and size + len(_SEPARATOR) + len(block) > limit:
             close()
+        starts.append(size + (len(_SEPARATOR) if blocks else 0))
         size += len(block) + (len(_SEPARATOR) if blocks else 0)
         positions.append(position)
         blocks.append(block)
     close()
     return windows
+
+
+def halves(window: Window) -> tuple[Window, Window] | None:
+    """The two windows *window* splits into when its reply runs out of room, or
+    ``None`` when it cannot (under :data:`MIN_SPLIT_CHARS`).
+
+    A window of several exchanges splits at the boundary between exchanges nearest
+    its middle by characters. A window of one exchange splits its text in two: at the
+    paragraph break nearest the middle, else a sentence end, else whitespace, else
+    exactly in the middle (only within the middle half, so neither part is small);
+    the second starts :func:`_continued`. The halves' texts, without that prefix,
+    are the window's, in order.
+    """
+    text = window.text
+    count = len(window.positions)
+    if len(text) < MIN_SPLIT_CHARS:
+        return None
+    if count >= 2:
+        if len(window.starts) != count:
+            return None
+        gap = len(_SEPARATOR)
+        k = min(
+            range(1, count),
+            key=lambda i: abs(
+                (window.starts[i] - gap) - (len(text) - window.starts[i])
+            ),
+        )
+        at = window.starts[k]
+        return (
+            Window(window.positions[:k], text[: at - gap], starts=window.starts[:k]),
+            Window(
+                window.positions[k:],
+                text[at:],
+                starts=tuple(start - at for start in window.starts[k:]),
+            ),
+        )
+    size = len(text)
+    end = _cut_index(text, size // 4, 3 * size // 4, size // 2)
+    (position,) = window.positions
+    return (
+        Window(window.positions, text[:end]),
+        Window(window.positions, _continued(position) + text[end:], cut=window.cut),
+    )
 
 
 def prompt_of(title: str, window: Window) -> str:
@@ -359,6 +511,22 @@ def window_key(model: str, prompt: str) -> str:
     return digest.hexdigest()
 
 
+def split_key(key: str) -> str:
+    """The cache key under which a window that ran out of room is kept, so a later
+    run splits it without asking it again. Its own key, not the window's, so a
+    reader that knows nothing of splits never finds it and reads no empty reply."""
+    return hashlib.sha256(f"{key}\0split".encode()).hexdigest()
+
+
+# What :func:`_window_reply` returns, in place of a reply's JSON, for a window that
+# ran out of room and has to be split.
+_SPLIT: Final[dict[str, Any]] = {"split": True}
+
+
+def _is_split(raw: dict[str, Any] | None) -> bool:
+    return raw is _SPLIT
+
+
 class Cache:
     """A JSON-lines file of window replies, one ``{"key": …, "reply": {…}}`` a line.
 
@@ -445,11 +613,59 @@ def _quiet(provider: BaseLLMProvider, backend: str | None = None) -> BaseLLMProv
     return view
 
 
+def _unfinished(content: str) -> bool:
+    """Whether *content*, after its thinking and any code fence, starts a JSON
+    object that is never closed (braces outside strings do not balance)."""
+    text = split_thinking(content or "")[1].strip()
+    text = re.sub(r"^```[A-Za-z]*\s*", "", text)
+    if not text.startswith("{"):
+        return False
+    depth, quoted, escaped = 0, False, False
+    for char in text:
+        if quoted:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quoted = False
+        elif char == '"':
+            quoted = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return False
+    return True
+
+
+def _ran_out(reply: Message) -> bool:
+    """Whether *reply* stopped because it ran out of output room, its JSON cut off
+    at :data:`MAX_OUTPUT_TOKENS`.
+
+    The chat provider's ``chat()`` hands back the message only, not the finish
+    reason, so this reads what the message carries: the completion tokens the server
+    reported (at least ``MAX_OUTPUT_TOKENS - 16``), and, when it reported none, whether
+    the text is a JSON object that is never closed (:func:`_unfinished`).
+    """
+    done = (reply.usage or {}).get("completion_tokens")
+    if isinstance(done, int) and not isinstance(done, bool) and done > 0:
+        return done >= MAX_OUTPUT_TOKENS - _RUN_OUT_MARGIN
+    return _unfinished(reply.content)
+
+
 async def _ask(
-    send: Send, prompt: str, stats: Stats
+    send: Send, prompt: str, stats: Stats, *, splittable: bool = False
 ) -> tuple[dict[str, Any] | None, str]:
     """Ask for a window's items, twice at most: the reply's JSON, or ``None`` and
-    why not. Every request is counted."""
+    why not. Every request is counted.
+
+    An unreadable reply that ran out of room (:func:`_ran_out`) is not asked for
+    again: the same prompt at temperature 0 is cut at the same place. It gives the
+    split mark (``_SPLIT``) when the window can be split (*splittable*), else
+    ``None``.
+    """
     why = ""
     for _ in range(2):
         stats.calls += 1
@@ -466,6 +682,10 @@ async def _ask(
         value = read_reply(reply.content)
         if value is not None:
             return value, ""
+        if _ran_out(reply):
+            if splittable:
+                return _SPLIT, ""
+            return None, "the reply ran out of room and the window cannot be split"
         why = "the reply was not readable JSON"
     return None, why
 
@@ -477,18 +697,31 @@ async def _window_reply(
     cache: Cache | None,
     stats: Stats,
     limit: asyncio.Semaphore | None,
+    *,
+    splittable: bool = False,
 ) -> tuple[dict[str, Any] | None, bool, str]:
-    """A window's reply JSON (``None`` when the window failed), whether it came from
-    the cache, and why not when it failed.
+    """A window's reply JSON (``None`` when the window failed; the split mark
+    ``_SPLIT`` when it ran out of room and *splittable* says it can be split),
+    whether it came from the cache, and why not when it failed.
 
-    A cached reply makes no request. Otherwise the request (:func:`_ask`) runs under
-    *limit* when it is given, and the reply is put in the cache as soon as it comes,
-    so a run that is stopped keeps every window already answered. When the same
-    window is already being asked for (the same text in two chats of one run), this
-    waits for that reply and counts a cache hit, as a later serial ask would.
+    A cached reply makes no request, and neither does a window the cache knows
+    ran out of room (:func:`split_key`). Otherwise the request (:func:`_ask`) runs
+    under *limit* when it is given, and the reply is put in the cache as soon as it
+    comes, so a run that is stopped keeps every window already answered. When the
+    same window is already being asked for (the same text in two chats of one run),
+    this waits for that reply and counts a cache hit, as a later serial ask would.
     """
-    while cache is not None:
+
+    def known() -> dict[str, Any] | None:
+        if cache is None:
+            return None
         raw = cache.get(key)
+        if raw is None and splittable and cache.get(split_key(key)) is not None:
+            return _SPLIT
+        return raw
+
+    while cache is not None:
+        raw = known()
         if raw is not None:
             stats.cache_hits += 1
             return raw, True, ""
@@ -501,14 +734,87 @@ async def _window_reply(
         mine = cache.inflight[key] = asyncio.get_running_loop().create_future()
     try:
         async with limit if limit is not None else contextlib.nullcontext():
-            raw, why = await _ask(send, prompt, stats)
+            raw, why = await _ask(send, prompt, stats, splittable=splittable)
         if raw is not None and cache is not None:
-            cache.put(key, raw)
+            cache.put(split_key(key) if _is_split(raw) else key, raw)
         return raw, False, why
     finally:
         if cache is not None and mine is not None:
             del cache.inflight[key]
             mine.set_result(None)
+
+
+@dataclass
+class _Read:
+    """What asking for one window gave: its reply's JSON (``raw``, ``None`` when it
+    failed), whether that came from the cache, why it failed, and, when it ran out of
+    room, what its halves gave (in order, each read the same way)."""
+
+    window: Window
+    raw: dict[str, Any] | None = None
+    cached: bool = False
+    why: str = ""
+    parts: list[_Read] = field(default_factory=list)
+
+    def leaves(self) -> list[_Read]:
+        """The sub-windows that were read (the window itself when it did not
+        split), in order; a half that split again gives its own halves."""
+        if not self.parts:
+            return [self]
+        return [leaf for part in self.parts for leaf in part.leaves()]
+
+    def untouched(self) -> bool:
+        """Whether no request was made for the window or any part of it."""
+        return self.cached and all(part.untouched() for part in self.parts)
+
+
+async def _read_window(
+    send: Send,
+    title: str,
+    model: str,
+    window: Window,
+    *,
+    cache: Cache | None,
+    stats: Stats,
+    limit: asyncio.Semaphore | None,
+    depth: int = 0,
+) -> _Read:
+    """Ask for one window; when its reply runs out of room, split it (*depth* 0 is
+    the window of the chat, at most :data:`MAX_SPLIT_DEPTH` levels) and ask for each
+    half the same way, one by one without *limit* and together with it. A half that
+    fails fails alone."""
+    parts = halves(window) if depth < MAX_SPLIT_DEPTH else None
+    prompt = prompt_of(title, window)
+    raw, cached, why = await _window_reply(
+        send,
+        prompt,
+        window_key(model, prompt),
+        cache,
+        stats,
+        limit,
+        splittable=parts is not None,
+    )
+    if not _is_split(raw):
+        return _Read(window, raw, cached, why)
+    assert parts is not None
+
+    def read(half: Window) -> Coroutine[Any, Any, _Read]:
+        return _read_window(
+            send,
+            title,
+            model,
+            half,
+            cache=cache,
+            stats=stats,
+            limit=limit,
+            depth=depth + 1,
+        )
+
+    if limit is None:
+        reads = [await read(half) for half in parts]
+    else:
+        reads = await gather([read(half) for half in parts])
+    return _Read(window, None, cached, parts=reads)
 
 
 async def gather(
@@ -540,7 +846,9 @@ async def encode(
     """Encode the exchanges *turns* of one chat into items.
 
     One model request for each window of at most *window_chars* characters, none
-    when *cache* has the window's reply (:func:`window_key`). *stats* is added to.
+    when *cache* has the window's reply (:func:`window_key`). A window whose reply
+    runs out of room is split in two and each half is asked in its place (see
+    :func:`halves` and :func:`_read_window`). *stats* is added to.
     *backend* is the key of the chat backend *provider* runs on, which decides how
     the request turns thinking off (:func:`_quiet`); ``None``, as when a caller
     names none, is a local server named by its URL.
@@ -548,8 +856,9 @@ async def encode(
     Without *limit* the windows are asked for one by one, in order. With one, the
     windows that are not cached are asked for together, each request waiting for
     the semaphore, which a caller may share across the chats of a run to bound the
-    requests in flight; the result is built in window order all the same, so it is
-    the one the serial path gives. A window that fails fails alone.
+    requests in flight, the halves of a split window too; the result is built in
+    window order all the same, so it is the one the serial path gives. A window that
+    fails fails alone, and so does a half of one.
     """
     stats = stats if stats is not None else Stats()
     model = str(getattr(provider, "model", "") or "")
@@ -559,31 +868,41 @@ async def encode(
     mentioned: set[int] = set()
     ignored: set[int] = set()
     windows = pack(turns, window_chars)
-    prompts = [prompt_of(title, window) for window in windows]
-    keys = [window_key(model, prompt) for prompt in prompts]
 
-    def ask(n: int) -> Coroutine[Any, Any, tuple[dict[str, Any] | None, bool, str]]:
-        return _window_reply(send, prompts[n], keys[n], cache, stats, limit)
+    def ask(window: Window) -> Coroutine[Any, Any, _Read]:
+        return _read_window(
+            send, title, model, window, cache=cache, stats=stats, limit=limit
+        )
 
     if limit is None:
-        replies = [await ask(n) for n in range(len(windows))]
+        reads = [await ask(window) for window in windows]
     else:
-        replies = await gather([ask(n) for n in range(len(windows))])
-    for window, (raw, cached, why) in zip(windows, replies, strict=True):
+        reads = await gather([ask(window) for window in windows])
+    for window, read in zip(windows, reads, strict=True):
         report = WindowReport(
-            len(window.positions), len(window.text), cached=cached, cut=window.cut
+            len(window.positions),
+            len(window.text),
+            cached=read.untouched(),
+            cut=window.cut,
+            part=window.part,
         )
         result.windows.append(report)
-        if raw is None:
-            report.failed = True
-            logger.warning("Hippo encoder: a window failed, %s", why)
-            continue
-        checked = check(raw, window, turns)
-        report.dropped = checked.dropped
-        for piece in checked.pieces:
-            result.pieces.append(replace(piece, encoder=encoder))
-            mentioned.update(piece.sources)
-        ignored |= checked.ignore
+        leaves = read.leaves()
+        if read.parts:
+            report.split = len(leaves)
+        for leaf in leaves:
+            if leaf.raw is None:
+                if read.parts:
+                    report.failed_parts += 1
+                logger.warning("Hippo encoder: a window failed, %s", leaf.why)
+                continue
+            checked = check(leaf.raw, leaf.window, turns)
+            report.dropped += checked.dropped
+            for piece in checked.pieces:
+                result.pieces.append(replace(piece, encoder=encoder))
+                mentioned.update(piece.sources)
+            ignored |= checked.ignore
+        report.failed = all(leaf.raw is None for leaf in leaves)
     forced = _force(turns, mentioned)
     result.pieces.extend(forced)
     for piece in forced:
