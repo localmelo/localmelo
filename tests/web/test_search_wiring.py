@@ -198,6 +198,46 @@ async def test_the_terminal_passes_the_setting(
     assert "web_search=loaded.web.search is True" in inspect.getsource(launch)
 
 
+async def test_with_the_switch_off_nothing_is_built_and_no_request_goes_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from localmelo.support.web import search_tool
+    from localmelo.support.web.fetch import WebFetcher
+
+    def refuse(*_: Any, **__: Any) -> None:
+        raise AssertionError("a search was set up or sent with the switch off")
+
+    monkeypatch.setattr(search_tool.WebSearchProvider, "__init__", refuse)
+    monkeypatch.setattr(WebFetcher, "fetch", refuse)
+    cfg = _cfg()
+    agent = await _session_agent()
+    side = await registry.default_builder(cfg, str(Path.cwd()), None, "s1")
+    main = await front.build_front_agent(cfg, str(Path.cwd()), "s2", tools=_NoTools())
+    try:
+        for built in (agent, side, main):
+            assert "web_search" not in _tools(built)
+    finally:
+        await agent.close()
+        await side.close()
+        await main.close()
+
+
+async def test_with_the_switch_on_building_a_chat_sends_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from localmelo.support.web.fetch import WebFetcher
+
+    def refuse(*_: Any, **__: Any) -> None:
+        raise AssertionError("a request went out while a chat was built")
+
+    monkeypatch.setattr(WebFetcher, "fetch", refuse)
+    agent = await _session_agent(web_search=True)
+    try:
+        assert "web_search" in _tools(agent)
+    finally:
+        await agent.close()
+
+
 def test_direct_runs_never_get_it() -> None:
     import argparse
     import inspect
