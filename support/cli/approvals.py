@@ -300,9 +300,12 @@ def _tool_panel(
             body,
             escaped_any,
         )
-    if tool.startswith(("browser-act:", "browser-type:", "browser-submit:")):
+    if tool.startswith(
+        ("browser-act:", "browser-type:", "browser-submit:", "browser-point:")
+    ):
         sending = tool.startswith("browser-submit:")
         typing = tool.startswith("browser-type:")
+        pointing = tool.startswith("browser-point:")
         site = shown(str(arguments.get("site") or tool.split(":", 1)[1]))
         goes = str(arguments.get("to") or "")
         if sending:
@@ -312,6 +315,11 @@ def _tool_panel(
                 if goes
                 else "The page decides where this goes: melo cannot say."
             )
+        elif pointing:
+            on = shown(str(arguments.get("on") or "a point of the page"))
+            how = shown(str(arguments.get("how") or "click"))
+            said = f"melo wants to {how} {on} on {site} in Safari's automation window."
+            note = "melo cannot check this one itself, so it asks every time."
         elif typing:
             said = (
                 f"melo wants to type this text on {site} in Safari's automation window:"

@@ -1,0 +1,24 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Check in</title>
+<style>body{font:16px sans-serif;margin:40px}#toast{position:fixed;top:12px;right:12px;padding:10px;background:#222;color:#fff}</style>
+<main>
+  <h1>Daily check-in</h1>
+  <p>Days checked in: <span id="days">11</span></p>
+  <button id="check">Check in</button>
+</main>
+<script>
+  // Like a site that ignores clicks a script made: only a real click checks in.
+  document.getElementById("check").addEventListener("click", function (e) {
+    if (!e.isTrusted) return;
+    fetch("/checked-in", {method: "POST"}).then(function () {
+      var days = document.getElementById("days");
+      days.textContent = String(Number(days.textContent) + 1);
+      var toast = document.createElement("div");
+      toast.id = "toast";
+      toast.textContent = "Checked in: day " + days.textContent;
+      document.body.appendChild(toast);
+      setTimeout(function () { toast.remove(); }, 1500);
+    });
+  });
+</script>

@@ -15,7 +15,13 @@ from pathlib import Path
 
 import pytest
 
-from localmelo.support.browser.safari import COMMON_JS, PAGE_JS, act_script
+from localmelo.support.browser.safari import (
+    COMMON_JS,
+    DISARM_JS,
+    PAGE_JS,
+    SETTLE_JS,
+    act_script,
+)
 
 JS = Path(__file__).with_name("js")
 
@@ -30,8 +36,11 @@ def test_the_page_scripts_do_what_they_claim_in_a_js_engine(tmp_path: Path) -> N
     scripts = {
         "page": PAGE_JS,
         "common": COMMON_JS,
-        # The act script up to where its spec goes: the test fills the spec in.
-        "actPrefix": whole[: whole.rindex("})(") + 3],
+        # The act script up to where its spec goes: the test fills the spec in,
+        # and the node lookups after it (null, or an object the test makes).
+        "actPrefix": whole[: whole.rindex("})({") + 3],
+        "settle": SETTLE_JS,
+        "disarm": DISARM_JS,
     }
     exported = tmp_path / "scripts.json"
     exported.write_text(json.dumps(scripts), encoding="utf-8")

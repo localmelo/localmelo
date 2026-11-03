@@ -9,6 +9,28 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Browsing finishes page tasks more often. A click, a text or a choice is done by Safari
+  itself on the element melo checked (real events, as yours are), so a page that ignores
+  clicks made by a script, such as a check-in button, now works; when Safari cannot reach the
+  element, melo's page script does it, and each answer names the way (`via browser`, `via
+  page-script` and why, `via point`). A site where Safari's own input did not work starts with
+  the page script for the rest of the chat. After each action melo waits until the page is
+  quiet (about 0.3 seconds without a change; after a click up to 2 seconds for the site to
+  answer) and the answer opens with what changed: a new address, new text such as a notice or
+  an error (even one that is gone again) and the element's new state, or that nothing changed.
+  When the page rebuilt its elements since it was read, without loading again, melo acts on the
+  one element with the same kind, name, address and form that still belongs where it did (the same
+  row or heading and the same text next to it, a linked title included), with every check again;
+  with two such elements, two when it was read, nothing that says where it belongs, a reload, or a
+  changed address or form, it stays stale. Frames from the same site are read and acted in as
+  part of the page; in a box from another site (often a sign-in box) Safari's own reading lists
+  the buttons, links and fields, and each click or text there asks every time. A new tool,
+  `browser_click_point`, clicks a point of the last picture for what the element list lacks: melo
+  checks what is there first (a label moves to its field), asks every time for a point on a
+  password, code or card field, a terms, consent or sign-in control, or inside a box from
+  another site, keeps the link and send checks, shows a ring where it clicks and answers with
+  a new picture with the point marked. A real click or key press that lands on another element
+  than the one melo checked is stopped. Part of #466.
 - Hosted services in Settings (#467). Under **Model server**, **Change…**, the list has a
   group **Hosted services**: OpenAI, Google Gemini, Anthropic, NVIDIA, DeepSeek and Other
   (OpenAI format). Choosing one fills its address and suggested models (one table of presets,

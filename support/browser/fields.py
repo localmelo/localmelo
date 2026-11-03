@@ -215,6 +215,23 @@ def form_pairs(rows: list[object]) -> tuple[tuple[str, str], ...]:
     return tuple(out)
 
 
+# Words of a control that agrees to something for the person: terms, consent, a
+# newsletter, or a sign-in with another account. A click on one by a point is asked
+# about, whatever was allowed before.
+CONSENT_WORDS = (
+    r"\bagree|\baccept|\bconsent|\bterms\b|terms of|\bconditions\b|privacy|\bpolicy\b"
+    r"|i have read|i\'ve read|subscribe|newsletter|marketing|opt ?in"
+    r"|(sign|log) ?in with|continue with|authori[sz]e"
+    r"|同意|接受|条款|协议|隐私|订阅|授权|规约|約款|동의|약관"
+)
+_CONSENT = re.compile(CONSENT_WORDS, re.IGNORECASE)
+
+
+def consent(words: str) -> bool:
+    """Whether a control's *words* agree to terms, consent, marketing or a sign-in with another account."""
+    return bool(_CONSENT.search(words))
+
+
 def _js(pattern: str) -> str:
     return f"new RegExp({json.dumps(pattern)})"
 
@@ -264,7 +281,9 @@ var secretKind = function (a) {
 
 
 __all__ = [
+    "CONSENT_WORDS",
     "HIDDEN",
+    "consent",
     "JS_RULES",
     "form_pairs",
     "REASONS",

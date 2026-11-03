@@ -59,6 +59,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import functools
 import logging
 import re
@@ -72,11 +73,13 @@ from localmelo.support.browser import addresses, fields, render, sites
 from localmelo.support.browser.driver import (
     MAX_TYPED_CHARS,
     Act,
+    ActResult,
     BrowserDriver,
     BrowserError,
     Element,
     StaleElementError,
     TabInfo,
+    View,
 )
 
 logger = logging.getLogger(__name__)
@@ -108,7 +111,9 @@ PAGE_NOTE = (
     'tab="new". Use the tab ids browser_tabs shows. browser_click, '
     "browser_type and browser_select act on the page you read, by ref; never "
     "type a password, card number or one-time code: ask the user to do that in "
-    "the window."
+    "the window. Each act returns what changed and the page again. Only for what "
+    "the element list lacks (a drawing, a box from another site): "
+    "browser_screenshot, then browser_click_point."
 )
 
 _ROLES = ["link", "button", "textbox", "checkbox", "select", "any"]
@@ -239,6 +244,16 @@ TOOLS: tuple[ToolDef, ...] = (
         "Take a picture of the current page. It is kept with the chat; a model that reads images receives it.",
         tab=_TAB,
     ),
+    _def(
+        "browser_click_point",
+        "Click a point of the last browser_screenshot, for what the element list "
+        "lacks. x and y run 0-1000 across and down the picture.",
+        ("x", "y"),
+        acts=True,
+        x=_p("number"),
+        y=_p("number"),
+        tab=_TAB,
+    ),
 )
 
 
@@ -295,6 +310,12 @@ class BrowserToolProvider(BaseToolProvider):
         self._idle: asyncio.TimerHandle | None = None
         self._tidying: asyncio.Task[None] | None = None
         self._last_call = 0.0
+        # Sites where the browser's own input did not work in this chat: they start
+        # with the page script.
+        self._scripted: set[str] = set()
+        # The view of each tab's last picture, and the point melo last clicked in it.
+        self._views: dict[str, View] = {}
+        self._points: dict[str, tuple[View, float, float]] = {}
 
     @property
     def driver(self) -> BrowserDriver:
@@ -316,6 +337,7 @@ class BrowserToolProvider(BaseToolProvider):
             "browser_tabs": self._tabs,
             "browser_wait": self._wait,
             "browser_screenshot": self._screenshot,
+            "browser_click_point": self._click_point,
         }
         return [
             # No timeout of its own: a call may wait for the person's answer about
@@ -351,6 +373,9 @@ class BrowserToolProvider(BaseToolProvider):
         self._tab = None
         self._snaps.clear()
         self._origins.clear()
+        self._views.clear()
+        self._points.clear()
+        self._scripted.clear()
 
     async def end_chat(self) -> None:
         """A new chat starts: nothing is approved, and the tabs of the old one are tidied."""
@@ -397,6 +422,8 @@ class BrowserToolProvider(BaseToolProvider):
             self._short.pop(raw, None)
         self._snaps.pop(short, None)
         self._origins.pop(short, None)
+        self._views.pop(short, None)
+        self._points.pop(short, None)
         self._made.discard(short)
         if self._tab == short:
             self._tab = None
@@ -516,8 +543,19 @@ class BrowserToolProvider(BaseToolProvider):
             raise BrowserError("No page is open in that tab. Use browser_open first.")
         return tab_id
 
-    async def _read_tab(self, info: TabInfo, done: set[str], view: str = "all") -> str:
+    async def _read_tab(
+        self,
+        info: TabInfo,
+        done: set[str],
+        view: str = "all",
+        changes: list[str] | None = None,
+    ) -> str:
         """Read the page the tab landed on, after checking where it landed."""
+        snap = await self._reading(info, done)
+        return render.render_page(snap, view=view, changes=changes)
+
+    async def _reading(self, info: TabInfo, done: set[str]) -> render.Snapshot:
+        """A new reading of the tab's page, made the newest: its address checked first."""
         if info.url:
             await self._admit(info.url, info.id, done)
         raw = await self._driver.page(self._raw[info.id])
@@ -537,7 +575,7 @@ class BrowserToolProvider(BaseToolProvider):
         self._ref_n += len(snap.elements)
         self._snaps[info.id] = snap
         self._tab = info.id
-        return render.render_page(snap, view=view)
+        return snap
 
     async def _admit_frames(self, frames: tuple[str, ...], tab: str) -> None:
         """Refuse a page whose frames, as far as they can be read, are on a local address."""
@@ -555,6 +593,8 @@ class BrowserToolProvider(BaseToolProvider):
         """Forget what was read in *tab* and approved for it: its page is no longer known."""
         self._snaps.pop(tab, None)
         self._origins.pop(tab, None)
+        self._views.pop(tab, None)
+        self._points.pop(tab, None)
 
     async def _refuse_tab(self, tab: str) -> None:
         """Leave a page that was refused: blank its tab (in place, so Back does not return to it).
@@ -758,12 +798,37 @@ class BrowserToolProvider(BaseToolProvider):
     async def _run_act(
         self,
         tab_id: str,
+        snap: render.Snapshot,
+        ref: str,
         act: Act,
         before: set[str],
-    ) -> str:
-        """Do *act*; when it fails after it may have run, the tab is checked before anything else."""
+    ) -> tuple[ActResult, str]:
+        """Do *act*, and the ref it was done on.
+
+        A site where the browser's own input did not work earlier in the chat
+        starts with the page script. When the page redrew itself since it was
+        read, the element is looked for in a new reading (see :meth:`_refind`)
+        and the act is done on the one element like it, with every check again.
+        When the act fails after it may have run, the tab is checked before
+        anything else.
+        """
+        act = dataclasses.replace(act, native=snap.origin not in self._scripted)
+        raw = self._raw[tab_id]
         try:
-            return await self._driver.act(self._raw[tab_id], act)
+            try:
+                result = await self._driver.act(raw, act)
+            except StaleElementError as stale:
+                # A point is found again by a new picture, never by its words.
+                found = None
+                if act.point is None:
+                    found = await self._refind(tab_id, snap, act.element, stale)
+                if found is None:
+                    raise
+                fresh, ref, item = found
+                act = dataclasses.replace(
+                    act, url=fresh.url, element=item, doc=fresh.doc
+                )
+                result = await self._driver.act(raw, act)
         except StaleElementError:
             raise  # nothing was done
         except BrowserError as exc:
@@ -773,6 +838,56 @@ class BrowserToolProvider(BaseToolProvider):
                 raise refused from exc
             self._drop_reading(tab_id)  # what it did to the page is not known
             raise
+        if result.native_failed:
+            self._scripted.add(snap.origin)
+        elif not act.native and result.via == "page-script" and not result.why:
+            result = dataclasses.replace(result, why=_EARLIER)
+        return result, ref
+
+    async def _refind(
+        self,
+        tab_id: str,
+        snap: render.Snapshot,
+        item: Element,
+        stale: StaleElementError,
+    ) -> tuple[render.Snapshot, str, Element] | None:
+        """The one element like *item* in a new reading of a page that redrew itself, or None.
+
+        Only a page that redrew itself in the same document (the element is
+        gone as it was read) is read again, and only on the site the act was
+        approved for; after a reload or another document a ref stays stale,
+        and so does one whose new reading is another document already. Like means the same kind, label, destination,
+        form address and form fields and, for a text box, the same field; where
+        several are, a control by its tag or role wins over an element that only
+        looks clickable. It must also belong where it did: the same row or
+        heading and the same text next to it (``Element.context``), and it must
+        have been the only one of its kind and label in the reading the act
+        was approved on, so a "Delete" of another record is never taken for
+        the one that went. Anything else stays stale.
+        """
+        if stale.why != "gone" or not item.context:
+            return None
+        twins = [
+            e
+            for e in snap.elements.values()
+            if _same_control(e, item) and e.plain == item.plain
+        ]
+        if len(twins) != 1:
+            return None
+        fresh = await self._reading(TabInfo(tab_id), set())
+        if (
+            fresh.origin != snap.origin
+            or fresh.doc != snap.doc
+            or not _same_page(fresh.url, snap.url)
+        ):
+            return None  # another document: a ref of the old one is never carried over
+        like = [(r, e) for r, e in fresh.elements.items() if _like(e, item)]
+        if len(like) > 1:
+            like = [(r, e) for r, e in like if not e.plain]
+        if len(like) != 1:
+            return None
+        ref, found = like[0]
+        return fresh, ref, found
 
     async def _tabs_now(self) -> set[str] | None:
         """The driver's ids of every tab in the window now, or None when it cannot say."""
@@ -850,17 +965,54 @@ class BrowserToolProvider(BaseToolProvider):
         return opened, urls
 
     async def _after(
-        self, tab_id: str, said: str, before: set[str], done: set[str]
+        self,
+        tab_id: str,
+        said: str,
+        before: set[str],
+        done: set[str],
+        result: ActResult | None = None,
+        url: str = "",
+        expect: bool = True,
     ) -> str:
-        """Read the page an action left, once every tab it touched has been checked."""
+        """Read the page an action left, once every tab it touched has been checked.
+
+        The reading opens with what changed (see :func:`_change_lines`), and the
+        line before it says when nothing did after a click or Enter (*expect*).
+        """
         opened, urls = await self._verify(tab_id, before)
         landed = opened[0] if opened else tab_id
         if opened:
             said += f" It opened {landed}."
         if landed not in urls:
             raise BrowserError(_NO_ADDRESS)
-        page = await self._read_tab(TabInfo(landed, urls[landed]), done)
+        moved = bool(url) and not opened and urls[landed] != url
+        lines = _change_lines(
+            result, url if moved else "", urls[landed], self._origins.get(tab_id, "")
+        )
+        changes = result.changes if result is not None else None
+        if (
+            expect
+            and changes is not None
+            and not (opened or moved or lines or changes.changed)
+        ):
+            said += " Nothing on the page changed."
+        elif changes is not None and not changes.quiet:
+            said += " The page was still changing: browser_read shows it later."
+        page = await self._read_tab(TabInfo(landed, urls[landed]), done, changes=lines)
         return f"{said}\n{page}"
+
+    def _done_line(self, verb: str, ref: str, asked: str, result: ActResult) -> str:
+        """``Clicked e12 (via browser).``, with why a way was passed over and a ref found again."""
+        how = f"via {result.via}"
+        if result.why:
+            how += f": {result.why}"
+        line = f"{verb} {ref} ({how})."
+        if ref != asked:
+            line += (
+                f" The page redrew {render.field_text(asked, 30)}; {ref} is the one "
+                "element like it now."
+            )
+        return _said(line, result.note)
 
     @_guarded
     async def _click(self, ref: str = "", tab: str | None = None, **_: Any) -> str:
@@ -870,6 +1022,7 @@ class BrowserToolProvider(BaseToolProvider):
         if item.kind in ("textbox", "select"):
             use = "browser_type" if item.kind == "textbox" else "browser_select"
             raise BrowserError(f"{ref} is a {item.kind}: use {use}.")
+        await _ask_foreign(snap.origin, item, "click")
         before = await self._acting(tab_id, snap, "click")
         assert before is not None
         done: set[str] = set()
@@ -877,12 +1030,15 @@ class BrowserToolProvider(BaseToolProvider):
             await self._check_destination(item.href, snap.origin, done)
         elif item.submit:
             await self._submit_checks(snap, item, "click", done)
-        note = await self._run_act(
+        result, used = await self._run_act(
             tab_id,
+            snap,
+            ref,
             Act("click", snap.url, item, doc=snap.doc, send=bool(item.submit)),
             before,
         )
-        return await self._after(tab_id, _said(f"Clicked {ref}.", note), before, done)
+        said = self._done_line("Clicked", used, ref, result)
+        return await self._after(tab_id, said, before, done, result, snap.url)
 
     @_guarded
     async def _type(
@@ -909,14 +1065,17 @@ class BrowserToolProvider(BaseToolProvider):
                 f"That text has {hidden}, which a question cannot show, so melo "
                 "does not type it."
             )
+        await _ask_foreign(snap.origin, item, "type into")
         before = await self._acting(tab_id, snap, "type", typed)
         assert before is not None
         done: set[str] = set()
         enter = submit is True or str(submit).lower() == "true"
         if enter:
             await self._submit_checks(snap, item, "enter", done, typed)
-        note = await self._run_act(
+        result, used = await self._run_act(
             tab_id,
+            snap,
+            ref,
             Act(
                 "type",
                 snap.url,
@@ -928,10 +1087,15 @@ class BrowserToolProvider(BaseToolProvider):
             ),
             before,
         )
-        said = f"Typed {len(typed)} character(s) into {ref}" + (
-            " and pressed Enter." if enter else "."
+        verb = f"Typed {len(typed)} character(s) into"
+        said = self._done_line(verb, used, ref, result)
+        if enter:
+            said = said.replace(
+                f"{verb} {used} ", f"{verb} {used} and pressed Enter ", 1
+            )
+        return await self._after(
+            tab_id, said, before, done, result, snap.url, expect=enter
         )
-        return await self._after(tab_id, _said(said, note), before, done)
 
     @_guarded
     async def _select(
@@ -946,13 +1110,100 @@ class BrowserToolProvider(BaseToolProvider):
             raise BrowserError("browser_select needs the option's text.")
         before = await self._acting(tab_id, snap, "choose an option")
         assert before is not None
-        note = await self._run_act(
+        result, used = await self._run_act(
             tab_id,
+            snap,
+            ref,
             Act("select", snap.url, item, text=str(option), doc=snap.doc),
             before,
         )
+        said = self._done_line("Chose an option in", used, ref, result)
         return await self._after(
-            tab_id, _said(f"Chose an option in {ref}.", note), before, set()
+            tab_id, said, before, set(), result, snap.url, expect=False
+        )
+
+    @_guarded
+    async def _click_point(
+        self,
+        x: Any = None,
+        y: Any = None,
+        tab: str | None = None,
+        **rest: Any,
+    ) -> ToolOutput:
+        tab_id = self._approved(tab)
+        px, py = parse_point(x, y, rest)
+        view = self._views.get(tab_id)
+        if view is None:
+            raise BrowserError(
+                "Take a browser_screenshot of this tab first: a point is read on "
+                "the last picture."
+            )
+        snap = self._snapshot_of(tab_id)
+        await self._recheck(tab_id)
+        origin = self._origins[tab_id]
+        cx, cy = px / 1000 * view.width, py / 1000 * view.height
+        hit = await self._driver.hit(self._raw[tab_id], view, cx, cy)
+        item = hit.element
+        if hit.surface == "none" or item is None:
+            raise BrowserError(
+                "There is nothing to click at that point (text or background). "
+                "Pick a point on a button, link, field or drawing in the picture."
+            )
+        what = _point_words(hit.surface, item, hit.site)
+        if item.sensitive:
+            await sites.require_point(origin, fields.REASONS[item.sensitive])
+        elif hit.surface == "frame":
+            await sites.require_point(origin, what)
+        elif hit.consent:
+            await sites.require_point(
+                origin, f"{what}, which agrees to terms, consent or a sign-in"
+            )
+        before = await self._acting(tab_id, snap, "click")
+        assert before is not None
+        done: set[str] = set()
+        if item.kind == "link" and item.href:
+            await self._check_destination(item.href, origin, done)
+        elif item.submit:
+            await self._submit_checks(snap, item, "click", done)
+        if hit.at is not None:
+            cx, cy = hit.at  # a label hit moves to its field
+        act = Act(
+            "click",
+            view.url,
+            item,
+            doc=view.doc,
+            send=bool(item.submit),
+            point=(cx, cy),
+            view=view,
+        )
+        result, _used = await self._run_act(tab_id, snap, "", act, before)
+        self._points[tab_id] = (view, cx, cy)
+        said = _said(f"Clicked {what} at ({px:g}, {py:g}) (via point).", result.note)
+        boxed = hit.surface == "frame"  # melo sees nothing inside that box
+        if boxed:
+            said += " What it did inside the box shows only in the new picture."
+        page = await self._after(
+            tab_id, said, before, done, result, view.url, expect=not boxed
+        )
+        # melo looks again: the page as it is now, with the point drawn on it. As
+        # for browser_screenshot, the tab is checked before and after the picture:
+        # a page that moved meanwhile (drawing the point is a change it can see) is
+        # not shown, and its view is not kept.
+        landed = self._tab or tab_id
+        try:
+            await self._recheck(landed)
+            shot = await self._driver.screenshot(
+                self._raw[landed], self._points.get(landed)
+            )
+            await self._recheck(landed)
+        except BrowserError as exc:
+            self._views.pop(landed, None)
+            self._points.pop(landed, None)
+            return ToolOutput(text=f"{page}\n[No new picture: {exc}]")
+        if shot.view is not None:
+            self._views[landed] = shot.view
+        return ToolOutput(
+            text=page, images=[ImagePart(mime_type=shot.mime_type, data=shot.data)]
         )
 
     # ── Tabs, waiting, pictures ──
@@ -1052,14 +1303,23 @@ class BrowserToolProvider(BaseToolProvider):
     async def _screenshot(self, tab: str | None = None, **_: Any) -> ToolOutput:
         tab_id = self._approved(tab)
         await self._recheck(tab_id)
-        shot = await self._driver.screenshot(self._raw[tab_id])
+        shot = await self._driver.screenshot(
+            self._raw[tab_id], self._points.get(tab_id)
+        )
         await self._recheck(tab_id)  # a page that moved while it was pictured
+        if shot.view is not None:
+            self._views[tab_id] = shot.view
+        else:
+            self._views.pop(tab_id, None)
         return ToolOutput(
             text=f"A picture of {self._origins[tab_id]} was taken and kept with this chat.",
             images=[ImagePart(mime_type=shot.mime_type, data=shot.data)],
         )
 
 
+_EARLIER = (
+    "the browser's own input did not reach this site's elements earlier in this chat"
+)
 _NO_ADDRESS = (
     "melo could not tell which page that tab shows, so it did not look at it. "
     "Use browser_read to read the tab again."
@@ -1068,6 +1328,128 @@ _NO_ADDRESS = (
 
 def _said(line: str, note: str) -> str:
     return f"{line} {note}" if note else line
+
+
+def _same_page(left: str, right: str) -> bool:
+    """Whether two addresses are one page, the fragment aside."""
+    return left.split("#", 1)[0] == right.split("#", 1)[0]
+
+
+def _same_control(found: Element, item: Element) -> bool:
+    """Whether two elements are the same kind of control with the same words, destination and frame."""
+    return (found.kind, found.label, found.href, found.submit, found.frame) == (
+        item.kind,
+        item.label,
+        item.href,
+        item.submit,
+        item.frame,
+    )
+
+
+def _like(found: Element, item: Element) -> bool:
+    """Whether *found*, in a new reading, is the element *item* was.
+
+    What it is, says, leads to and sends, and where it belongs: the same row
+    or heading and the same text next to it.
+    """
+    return (
+        not found.sensitive
+        and _same_control(found, item)
+        and bool(item.context)
+        and found.context == item.context
+        and found.attrs == item.attrs
+        and (not item.submit or found.form == item.form)
+    )
+
+
+def _change_lines(
+    result: ActResult | None, url: str, now: str, origin: str = ""
+) -> list[str]:
+    """What an action changed, for the top of the page block: page words, cleaned there."""
+    lines: list[str] = []
+    if url:
+        lines.append(
+            f"address: {render.address(url, origin)} -> {render.address(now, origin)}"
+        )
+    changes = result.changes if result is not None else None
+    if changes is not None:
+        lines.extend(f'new text: "{text}"' for text in changes.texts)
+        if changes.target:
+            lines.append(f"the element acted on: {changes.target}")
+    return lines
+
+
+async def _ask_foreign(origin: str, item: Element, how: str) -> None:
+    """A control in a box from another site: melo cannot check it, so the person is asked every time."""
+    if not item.site:
+        return
+    host = render.field_text(item.site.split("://", 1)[-1], 60)
+    label = render.field_text(item.label or item.also, 40)
+    what = f'a {item.kind} "{label}"' if label else f"a {item.kind}"
+    await sites.require_point(
+        origin, f"{what} inside a box from {host} that melo cannot check", how
+    )
+
+
+def _point_words(surface: str, item: Element, site: str) -> str:
+    """What a point lands on, in words for the person and the model."""
+    if surface == "frame":
+        host = sites.origin_of(site) or "another site"
+        host = host.split("://", 1)[-1]
+        return f"inside a box from {render.field_text(host, 60)} that melo cannot check"
+    if surface == "canvas":
+        return "a drawing or picture"
+    label = render.field_text(item.label or item.also, 40)
+    return f'a {item.kind} "{label}"' if label else f"a {item.kind}"
+
+
+_NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
+
+
+def parse_point(x: Any, y: Any, rest: dict[str, Any]) -> tuple[float, float]:
+    """A point in the 0-1000 frame of a picture, from however a model wrote it.
+
+    Accepted: ``x`` and ``y`` as numbers or number strings; a pair in one value
+    (``x="[512, 300]"``, ``point=[512, 300]``, ``point_2d``, ``point={"x":..,
+    "y":..}``, ``coordinate``); a reply cut off after both numbers. Two numbers
+    of 1 or less are fractions of the picture. Anything else, or a number
+    outside 0-1000, is an error that says how to write it.
+    """
+    numbers: list[float] = []
+
+    def take(value: Any) -> None:
+        if isinstance(value, bool) or value is None:
+            return
+        if isinstance(value, int | float):
+            numbers.append(float(value))
+        elif isinstance(value, dict):
+            for key in ("x", "y"):
+                take(value.get(key))
+        elif isinstance(value, list | tuple):
+            for part in value[:2]:
+                take(part)
+        else:
+            numbers.extend(float(n) for n in _NUMBER.findall(str(value))[:2])
+
+    take(x)
+    take(y)
+    if len(numbers) < 2:
+        for key in ("point", "point_2d", "coordinate", "coordinates", "xy", "position"):
+            if key in rest:
+                take(rest[key])
+    if len(numbers) < 2:
+        raise BrowserError(
+            "browser_click_point needs x and y, numbers from 0 to 1000 across and "
+            'down the last picture, such as {"x": 500, "y": 300}.'
+        )
+    px, py = numbers[0], numbers[1]
+    if 0 <= px <= 1 and 0 <= py <= 1 and (px % 1 or py % 1):
+        px, py = px * 1000, py * 1000
+    if not (0 <= px <= 1000 and 0 <= py <= 1000):
+        raise BrowserError(
+            "x and y run from 0 to 1000 across and down the picture, whatever its size."
+        )
+    return px, py
 
 
 def _stale_ref(ref: object) -> str:

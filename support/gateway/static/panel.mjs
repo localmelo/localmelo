@@ -83,7 +83,7 @@ export function stepWords(name, args, done = false) {
     return host ? say('read', host) : say('open', t('steps.aPage'));
   }
   if (tool === 'browser_follow') return say('follow', t('steps.aLink'));
-  if (tool === 'browser_click') return say('click', t('steps.thePage'));
+  if (tool === 'browser_click' || tool === 'browser_click_point') return say('click', t('steps.thePage'));
   if (tool === 'browser_type') return say('type', t('steps.aField'));
   if (tool === 'browser_select') return say('choose', t('steps.aList'));
   if (tool === 'browser_screenshot') return say('lookAt', t('steps.thePage'));
