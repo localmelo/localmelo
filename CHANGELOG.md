@@ -81,6 +81,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   pictures that tools return, such as browser screenshots; `deepseek-v4-pro` and NVIDIA's
   `nemotron` do not, and any other model is unknown and gets none (set `tool_images = "on"` for one that reads
   images). A hosted service is no longer asked for oMLX's and Ollama's routes.
+- Developer setting `[agent] empty_reply_fallback = "on"|"off"` (default `"on"`;
+  `-X agent.empty_reply_fallback=off` for one run; saved only when `"off"`; listed in the
+  developer settings). `"off"` restores the run from before a thinking model's answer was
+  kept: no retry with thinking off, no answer taken from the thinking, and a turn that ends with
+  only thinking fails with `melo did not finish an answer`. A result says when the fallback
+  stepped in: `empty_reply` in the run record (`--json` and `run.finished`) is
+  `{"thinking_off_retry": true|false, "from_thinking": true|false}`, absent when neither
+  happened, and each step sends a `notice` event, `thinking_off_retry` or
+  `answer_from_thinking`, shown as a dim line in the terminal.
 - A guide for hosted models, [Hosted models](docs/guides/hosted-models.md), in English and
   Chinese.
 

@@ -833,7 +833,9 @@ model's reply ended inside its thinking; asking it for its answer.`, and the
 model is asked once more. When the service reported the model's thinking, melo then
 asks one last time with thinking off (where the service has that switch) and, if the
 reply is still empty, shows the last lines of the thinking as the answer, ending with
-`(from melo's thinking)`. When there is no thinking to use and the second reply has no
+`(from melo's thinking)`. Each of the two steps adds a line to the work box (`The model
+ended its turn with only thinking; asking again with thinking off.` and `The model gave no
+answer after thinking; the answer is the end of its thinking.`). When there is no thinking to use and the second reply has no
 answer either, the card's
 title is `melo did not finish an answer`, the hint `The model's reply held only
 its thinking. Try again, or rephrase the request.`, and the filled button

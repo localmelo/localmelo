@@ -342,6 +342,8 @@ melo: run ended with status failed: melo did not finish an answer
   cut off inside the reply; a model whose server reports its reasoning is
   asked once more with thinking off and, if that is empty too, its last
   lines of thinking become the answer, marked `(from melo's thinking)`.
+  `-X agent.empty_reply_fallback=off` turns that off, and the run then ends
+  with this error.
 - **Fix:** try again (`/retry`, or Try again in the console). If it keeps
   happening, raise the model's output limit on the server, or try another
   model.

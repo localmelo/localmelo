@@ -1236,9 +1236,14 @@ class TestEveryStatus:
             "notice",
             "step.started",
             "assistant.message",
+            "notice",
             "run.finished",
         ]
-        assert recorder.notices() == ["empty_reply"]
+        assert recorder.notices() == ["empty_reply", "answer_from_thinking"]
+        assert result.empty_reply == {
+            "thinking_off_retry": False,
+            "from_thinking": True,
+        }
         await check_guarantees(recorder, result, agent)
 
     @pytest.mark.asyncio

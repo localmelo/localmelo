@@ -721,6 +721,7 @@ class TestJsonOutput:
                 "confinement",
                 "answered_on_stop",
                 "format_fixed",
+                "empty_reply",
             )
         ] + ["localmelo_version"]
         assert record.pop("localmelo_version") == "v-test"

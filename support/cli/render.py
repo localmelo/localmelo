@@ -1094,7 +1094,13 @@ class TurnRenderer:
             # still has it), and the notice below says what happened.
             self._held = ""
             self._claim_stream(data.get("step"))
-        if kind in ("empty_reply", "unfinished_answer", "tool_call_as_text"):
+        if kind in (
+            "empty_reply",
+            "unfinished_answer",
+            "tool_call_as_text",
+            "thinking_off_retry",
+            "answer_from_thinking",
+        ):
             line = Text(f"{self.symbols.dot} {message}", style="muted")
         else:
             line = Text(f"{self.symbols.warn} {message}", style="warn")

@@ -990,6 +990,13 @@ class RunResult:
     ``format_fixed`` is true only for a run whose ``result`` got the closing line
     that the task's text asks for, from one more request of the same option.
     :meth:`to_dict` leaves each out when it is false.
+
+    ``empty_reply`` is set only for a run in which a model that did think ended
+    a turn with no answer and ``AgentOptions.empty_reply_fallback`` stepped in:
+    ``{"thinking_off_retry": bool, "from_thinking": bool}``. The first is true
+    when the turn was asked again with thinking off, the second when the
+    result is the marked end of the model's thinking. :meth:`to_dict` leaves
+    it out when it is ``None``.
     """
 
     task_id: str
@@ -1012,6 +1019,7 @@ class RunResult:
     confinement: dict[str, Any] | None = None
     answered_on_stop: bool = False
     format_fixed: bool = False
+    empty_reply: dict[str, bool] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """A deep copy as a plain dict, with keys in field order.
@@ -1032,6 +1040,8 @@ class RunResult:
             del data["answered_on_stop"]
         if not data["format_fixed"]:
             del data["format_fixed"]
+        if data.get("empty_reply") is None:
+            del data["empty_reply"]
         return data
 
 

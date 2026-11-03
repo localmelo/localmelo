@@ -243,6 +243,7 @@ def test_run_result_and_message_keep_their_fields() -> None:
             "confinement",
             "answered_on_stop",
             "format_fixed",
+            "empty_reply",
         )
     ] == [
         "task_id",
