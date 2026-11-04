@@ -17,11 +17,9 @@ import asyncio
 import base64
 import os
 import subprocess
-import threading
 from collections.abc import AsyncIterator, Iterator
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
-from typing import Any
 from urllib.parse import parse_qs
 
 import pytest
@@ -29,6 +27,7 @@ import pytest
 from localmelo.support.browser import chrome
 from localmelo.support.browser.chrome import ChromeBackgroundDriver
 from localmelo.support.browser.driver import Act, Dialog, Element, RawPage
+from localmelo.tests.fixtures.http_stub import HttpStub
 
 BINARY = os.path.join(chrome.CHROME_APPS[0], chrome.APP_BINARY)
 pytestmark = pytest.mark.skipif(
@@ -103,9 +102,6 @@ NEWS = "<!doctype html><title>News</title><body><p>Today's news.</p></body>"
 class Site(BaseHTTPRequestHandler):
     posts: list[dict[str, list[str]]] = []
 
-    def log_message(self, *args: Any) -> None:
-        pass
-
     def _send(self, body: str) -> None:
         data = body.encode("utf-8")
         self.send_response(200)
@@ -151,14 +147,8 @@ def never_the_front() -> Iterator[None]:
 @pytest.fixture
 def base() -> Iterator[str]:
     Site.posts = []
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Site)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://127.0.0.1:{server.server_address[1]}/"
-    finally:
-        server.shutdown()
-        server.server_close()
+    with HttpStub(Site, path="/") as stub:
+        yield stub.base_url
 
 
 @pytest.fixture

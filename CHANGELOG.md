@@ -884,6 +884,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Developer only: in the list form of recall, when you ask melo to count, total or compare things you told it across chats, it now looks wider in its memory and checks each kind it may have missed, by default; a search on any other turn keeps the usual bar. Part of #428.
 - "Allow for this chat" is no longer memory-only. `GET /api/sessions/{id}` `grants` and `granted_at` list what
   holds in the chat whether it is open or not, the main chat's grants included for a side chat.
   `DELETE /api/sessions/{id}/grants/{name}` takes back the chat's own grant and a main-chat grant of that name
@@ -1501,6 +1502,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   page or of another app's window were only inside each folded step; they now show in a row under the turn's
   steps and open at full size. A browser chosen while a chat's turn ran now reaches that chat at its next message
   (it waited until the chat was closed), and switching between Chrome and Safari says each keeps its own sign-ins.
+- melo no longer refuses to remember something you said in Chinese just because it put it in slightly different words. Part of #442.
+- melo keeps more of what you said in Chinese as notes when it words them differently. Part of #442.
+- A long unbroken paste (tens of thousands of characters with no spaces, or a long dotted or underscored text) no longer freezes the gateway for seconds while the main chat decides whether it is a request. The routing rules read the first 4,000 characters, and a file name or path is matched up to 200 characters per part; the task that starts still gets all of the text. Part of #493.
 - Words added to a chat while melo works are now remembered with that turn; before, only the first message of the turn was. Part of #428.
 - A button that a sticky header or an anchored ad stands over can be clicked. Before a real click, melo
   scrolls the element to the middle of the view at once (also on a page that scrolls smoothly, where the middle

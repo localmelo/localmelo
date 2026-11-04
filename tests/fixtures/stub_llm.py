@@ -105,7 +105,13 @@ class StubServer:
         self._lock = threading.Lock()
         self._httpd = ThreadingHTTPServer(("127.0.0.1", port), self._handler())
         self._httpd.daemon_threads = True
-        self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
+        # The poll is short so close() returns at once (the default is 0.5 s).
+        # This file also runs as a script, so it does not use http_stub.
+        self._thread = threading.Thread(
+            target=self._httpd.serve_forever,
+            kwargs={"poll_interval": 0.01},
+            daemon=True,
+        )
 
     @property
     def base_url(self) -> str:

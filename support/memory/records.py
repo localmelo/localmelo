@@ -218,16 +218,44 @@ _FRAMING: Final = frozenset(
 )
 # Terms that are values: a change in one is a different fact. A word is a value
 # when it has a digit, is a number word or a weekday, is capitalised inside a
-# sentence or sits in a quoted span; every CJK character or pair is one too.
+# sentence or sits in a quoted span. A Chinese or Japanese character or pair is
+# one when it sits in a quoted span, holds a number character, or holds a
+# character that no evidence text has and that is no common wording
+# (:data:`_CJK_WORDING`); the rest of the CJK terms are wording, like the other
+# content words (:func:`value_terms`).
 _VALUE_WORD = re.compile(
     r"one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|thirty"
     r"|forty|fifty|hundred|thousand|(?:mon|tues|wednes|thurs|fri|satur|sun)day"
 )
-_QUOTED = re.compile(r"\"([^\"]+)\"|“([^”]+)”|「([^」]+)」")
+_QUOTED = re.compile(r"\"([^\"]+)\"|“([^”]+)”|「([^」]+)」|『([^』]+)』")
 _SENTENCE = re.compile(r"(?<=[.!?。！？])\s+|\n")
-# What share of a note's other content words the evidence must hold.
+# What share of a note's other content words the evidence must hold (a word of
+# another script, or a single Chinese or Japanese character: a pair of characters
+# only counts when it is a value).
 WORDS_FOUND: Final = 0.8
 _CJK_FILLER: Final = frozenset("的了是在我你他她它们和与就也都吗呢吧啊么")
+# Characters of common wording: a note that restates what the user typed may add
+# or swap them without changing the fact (particles, pronouns, prepositions and
+# conjunctions, adverbs, auxiliaries and light verbs, words of time and manner,
+# the verbs of liking and planning, and the Japanese particles). Characters that
+# make names and places (surnames, 州 山 江 京 市), the number characters and the
+# negations are left out on purpose: those are details. This is in addition to
+# :data:`_CJK_FILLER`, whose characters are dropped from a note's terms.
+_CJK_WORDING: Final = frozenset(
+    "着过地得呀啦嘛哦哈呗"  # particles
+    "这那些个其该此自己咱您谁哪什怎样如某各本"  # pronouns
+    "把被让给对向从到按照以为于由跟同往经通比离替靠"  # prepositions
+    "并且或而但却则若果虽然因所及即既之"  # conjunctions
+    "又再还才先刚已正将很太最更挺常总每只仅另全"  # adverbs
+    "会能可要想应须需肯敢愿用做去来有说看使叫当作成出进回起上下开打拿放弄搞求请完"  # verbs
+    "时候天次后前间内外里事情方式法种类点好物"  # time, manner, things
+    "喜欢爱希望算计划准备决定觉认知道记住"  # liking, planning, knowing
+    "习惯偏默般较尽"  # habit
+    "のはがをにでともへやかねよなだてたるます"  # Japanese particles
+)
+# Number characters (the CJK values that hold a digit); 一 is left out because it
+# is as often wording (一下, 一些, 一起) as a number.
+_CJK_NUMBERS: Final = frozenset("〇零二三四五六七八九十百千万亿两")
 _CJK_FRAMING = re.compile("希望被叫作|希望被称为|用户")
 _POSSESSIVE = re.compile(r"(?<=\w)['’]s\b")
 _WORD = re.compile(r"[a-z0-9_]+")
@@ -877,17 +905,57 @@ def _flagged(note: str) -> set[str]:
     return {_stem(word) for word in words if word.isascii()}
 
 
-def value_terms(note: str) -> set[str]:
-    """The stemmed values whose exact presence grounding requires (not paraphrases)."""
-    flagged = _flagged(note)
+def _quoted_cjk(note: str) -> set[str]:
+    """The CJK terms of the quoted spans of *note*."""
     return {
         term
-        for term in note_terms(note)
+        for group in _QUOTED.findall(note)
+        for span in group
+        for term in tokenize(normalise(span))
         if not term.isascii()
-        or term in flagged
-        or _VALUE_WORD.fullmatch(term) is not None
-        or any(char.isdigit() for char in term)
     }
+
+
+def value_terms(note: str, evidence: Sequence[str] | None = None) -> set[str]:
+    """The stemmed values whose exact presence grounding requires (not paraphrases).
+
+    A term of Latin script is a value when it is flagged (:func:`_flagged`), a
+    number word or a weekday, or holds a digit. A CJK term is one when it sits in
+    a quoted span, holds a number character, or, given the *evidence* texts, holds
+    a character that none of them has and that is no common wording
+    (:data:`_CJK_WORDING`): a name or a place is a detail the user must have
+    typed, while a particle or a light verb is how the sentence is put. Without
+    *evidence* every CJK term is a value (the sleep pass compares notes with
+    no texts to look the characters up in).
+    """
+    flagged = _flagged(note)
+    quoted = _quoted_cjk(note)
+    seen = (
+        None
+        if evidence is None
+        else {char for text in evidence for char in normalise(text)}
+    )
+
+    def cjk_value(term: str) -> bool:
+        if seen is None or term in quoted:
+            return True
+        if any(char not in seen and char not in _CJK_WORDING for char in term):
+            return True
+        # A number with no wording beside it (周五, 五月, 十三) is typed as it is.
+        return any(char in _CJK_NUMBERS for char in term) and not any(
+            char in _CJK_WORDING for char in term
+        )
+
+    def is_value(term: str) -> bool:
+        if not term.isascii():
+            return cjk_value(term)
+        return (
+            term in flagged
+            or _VALUE_WORD.fullmatch(term) is not None
+            or any(char.isdigit() for char in term)
+        )
+
+    return {term for term in note_terms(note) if is_value(term)}
 
 
 def unsupported(note: str, evidence: Sequence[str]) -> list[str]:
@@ -896,21 +964,32 @@ def unsupported(note: str, evidence: Sequence[str]) -> list[str]:
 
     The wording may vary, the values may not. Every value (a number or a word
     with a digit, a weekday, a capitalised word inside a sentence, a quoted
-    span, a Chinese or Japanese character or pair) must be found, and so must
-    at least :data:`WORDS_FOUND` of the other content words (:func:`_missing`
-    says when one is found). The words listed are all the missing ones, values
-    first.
+    span, and in Chinese or Japanese a character that was never typed and is no
+    common wording, :func:`value_terms`) must be found, and so must at least
+    :data:`WORDS_FOUND` of the other content words (:func:`_missing` says when
+    one is found; in Chinese or Japanese the share counts single characters, since
+    one added or swapped character spoils two pairs of characters as well, and a
+    pair only has to be found when it is a value). The words listed are all the
+    missing ones, values first.
     """
     gone = _missing(note, evidence)
     if not gone:
         return []
-    valued = value_terms(note)
+    valued = value_terms(note, evidence)
     values = [term for term in gone if term in valued]
     others = [term for term in note_terms(note) if term not in valued]
     lost = [term for term in gone if term not in values]
-    if not values and len(others) - len(lost) >= WORDS_FOUND * len(others):
+    if not values and _counted(others) - _counted(lost) >= WORDS_FOUND * _counted(
+        others
+    ):
         return []
     return values + lost
+
+
+def _counted(terms: Iterable[str]) -> int:
+    """How many of *terms* count toward the share of words found: each word, and
+    each CJK character; a CJK pair is only ever a value, never part of the share."""
+    return sum(1 for term in terms if term.isascii() or len(term) == 1)
 
 
 def other_script(words: Sequence[str], evidence: Sequence[str]) -> bool:

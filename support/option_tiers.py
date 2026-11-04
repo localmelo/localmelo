@@ -154,6 +154,8 @@ EXPERIMENTAL_KEYS: dict[str, str] = {
     "memory.note_gate": "#442",
     "memory.note_min_cosine": "#442",
     "memory.followup_query": "#452",
+    "memory.gather": "#428",
+    "memory.gather_min_cosine": "#428",
     "approvals.auto_asks": "#465",
 }
 

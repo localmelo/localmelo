@@ -21,7 +21,6 @@ import signal
 import struct
 import subprocess
 import sys
-import threading
 import time
 import zlib
 from collections.abc import Iterator
@@ -29,6 +28,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
+
+from localmelo.tests.fixtures.http_stub import HttpStub
 
 ROOT = Path(__file__).resolve().parents[1]
 pytestmark = [
@@ -237,19 +238,11 @@ class _Model(http.server.BaseHTTPRequestHandler):
             },
         )
 
-    def log_message(self, *args: object) -> None:
-        pass
-
 
 @contextlib.contextmanager
 def model_server() -> Iterator[int]:
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Model)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    try:
-        yield int(server.server_address[1])
-    finally:
-        server.shutdown()
-        server.server_close()
+    with HttpStub(_Model) as stub:
+        yield stub.port
 
 
 def build_app(root: Path) -> Path:

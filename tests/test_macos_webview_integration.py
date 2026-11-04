@@ -19,6 +19,8 @@ from urllib.parse import unquote
 
 import pytest
 
+from localmelo.tests.fixtures.http_stub import HttpStub
+
 ROOT = Path(__file__).resolve().parents[1]
 pytestmark = [
     pytest.mark.skipif(sys.platform != "darwin", reason="requires macOS WebKit"),
@@ -1291,26 +1293,16 @@ def test_a_port_the_child_does_not_own_receives_no_request(
             self.end_headers()
             self.wfile.write(b"foreign")
 
-        def log_message(self, *args: object) -> None:
-            pass
-
-    server = HTTPServer(("127.0.0.1", 0), ForeignHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    process = launch(
-        app, tmp_path, "foreign", TEST_FOREIGN_PORT=str(server.server_address[1])
-    )
-    try:
-        time.sleep(3)  # many polls: the app checks the owner before any request
-        assert process.poll() is None
-        assert not requests
-        events = tmp_path / "events"  # not written until something happens
-        assert not events.exists() or "loaded" not in events.read_text()
-    finally:
-        stop(process, tmp_path)
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+    with HttpStub(ForeignHandler) as server:
+        process = launch(app, tmp_path, "foreign", TEST_FOREIGN_PORT=str(server.port))
+        try:
+            time.sleep(3)  # many polls: the app checks the owner before any request
+            assert process.poll() is None
+            assert not requests
+            events = tmp_path / "events"  # not written until something happens
+            assert not events.exists() or "loaded" not in events.read_text()
+        finally:
+            stop(process, tmp_path)
 
 
 def test_a_gateway_that_never_reports_a_port_is_stopped_at_the_deadline(

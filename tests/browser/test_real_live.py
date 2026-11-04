@@ -32,7 +32,7 @@ import subprocess
 import threading
 import time
 from collections.abc import AsyncIterator, Iterator
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any, cast
 
@@ -53,6 +53,7 @@ from localmelo.support.gateway.auth import GatewayAuth
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.guard import LoopbackGuard
 from localmelo.tests.browser.test_provider import run
+from localmelo.tests.fixtures.http_stub import HttpStub
 from localmelo.tests.gateway.console.conftest import (
     FakeAgent,
     FakeProbe,
@@ -82,8 +83,6 @@ STILL = """<!doctype html><meta charset="utf-8"><title>Still page</title>
 
 
 class Pages(BaseHTTPRequestHandler):
-    def log_message(self, *args: Any) -> None:
-        pass
 
     def do_GET(self) -> None:
         data = (ANIMATED if self.path.startswith("/moving") else STILL).encode()
@@ -168,13 +167,8 @@ def never_the_front(tmp_path: Path) -> Iterator[None]:
 
 @pytest.fixture
 def base() -> Iterator[str]:
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Pages)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    try:
-        yield f"http://127.0.0.1:{server.server_address[1]}"
-    finally:
-        server.shutdown()
-        server.server_close()
+    with HttpStub(Pages) as stub:
+        yield stub.base_url
 
 
 @pytest.fixture(autouse=True)

@@ -159,6 +159,8 @@ _MAKING_ROOM: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "making_room", default=False
 )
 _CAPTURE_RETRY_SECONDS = 10.0
+# How long shutdown waits for a worker that is still closing before it gives up.
+_CLOSE_AT_SHUTDOWN_SECONDS = 10.0
 # What a task's worker is told on every planning request (as its identity).
 WORKER_GUIDE = (
     "You are melo's worker for one task, in its folder. Use git_status to "
@@ -1975,7 +1977,9 @@ class TaskWorkers:
                         {closing, shutdown}, return_when=asyncio.FIRST_COMPLETED
                     )
                     if closing not in done:
-                        done, _ = await asyncio.wait({closing}, timeout=10)
+                        done, _ = await asyncio.wait(
+                            {closing}, timeout=_CLOSE_AT_SHUTDOWN_SECONDS
+                        )
                         if not done:
                             closing.cancel()
                             log.error(
@@ -2611,7 +2615,9 @@ class TaskWorkers:
                     await self._shutdown.wait()
                     try:
                         closing = asyncio.create_task(self._close_worker(runner, agent))
-                        done, _ = await asyncio.wait({closing}, timeout=10)
+                        done, _ = await asyncio.wait(
+                            {closing}, timeout=_CLOSE_AT_SHUTDOWN_SECONDS
+                        )
                         if not done:
                             closing.cancel()
                             log.error(
