@@ -21,6 +21,7 @@ import { setupTasks } from "./tasks.mjs";
 import { plainSegments, setupStatusRow } from "./status-row.mjs";
 import { setupRunning } from "./running.mjs";
 import { setupPanel } from "./panel.mjs";
+import { liveRoute, setupBrowser } from "./browser-live.mjs";
 import { levelCode, levelLabel } from "./levels.mjs";
 import { setupModelCard } from "./setup-card.mjs";
 import { setupImportCard } from "./import-card.mjs";
@@ -82,6 +83,7 @@ const KEY = "localmelo-console";
 const STREAM_DELAYS_S = [1, 2, 4, 8, 16, 30];
 const PRESENCE_MS = 2500;
 const LIST_POLL_MS = 4000;
+const BROWSER_HIDDEN_MS = 20000;
 
 const S = {
   health: null,
@@ -244,6 +246,7 @@ function lock(message = "") {
   if (S.authenticated) saveDraft();
   S.authenticated = false;
   closeStream();
+  browser.release();
   $("settings-dialog")?.close?.();
   $("app").inert = true;
   $("app").hidden = true;
@@ -770,6 +773,8 @@ async function loadSession(id) {
   view.session = detail.session ?? view.session;
   view.tokens = detail.tokens ?? 0;
   view.grants = detail.grants ?? [];
+  // The grants that hold here because the main chat allowed them: taking one back takes it away everywhere.
+  view.grantsEverywhere = detail.grants_everywhere ?? [];
   view.grantedAt = detail.granted_at ?? {};
   view.pending = new Map();
   for (const approval of detail.pending_approvals ?? []) {
@@ -807,6 +812,7 @@ async function openSession(id, { saveCurrent = true, scroll = true, route = true
   if (S.activeId !== id) approvalStates.clear();
   shiftMedia(S.activeId ?? "new", id, { keep: saveCurrent });
   closeStream();
+  browser.release(id);
   S.activeId = id;
   drawer.sessionChanged();
   S.view = newView(id);
@@ -835,6 +841,7 @@ function forgetSession(id) {
   S.sessions = S.sessions.filter((session) => session.id !== id);
   if (S.activeId === id) {
     closeStream();
+    browser.release();
     S.activeId = null;
     drawer.sessionChanged();
     S.view = null;
@@ -858,6 +865,7 @@ function newChat({ saveCurrent = true } = {}) {
   if (S.activeId !== null) approvalStates.clear();
   shiftMedia(S.activeId ?? "new", "new", { keep: saveCurrent });
   closeStream();
+  browser.release();
   S.activeId = null;
   drawer.sessionChanged();
   S.view = null;
@@ -884,6 +892,7 @@ function startStream(id) {
   if (!S.authenticated || S.activeId !== id || workerMode) return;
   closeStream();
   chatStatus.follow(id);
+  browser.follow(id);
   if (typeof EventSource !== "function") return;
   S.stream.sessionId = id;
   const source = new EventSource(eventsUrl(id));
@@ -905,6 +914,7 @@ function startStream(id) {
     if (frame.type === "approval.requested") refreshApproval(id, String(frame.data?.request_id ?? ""));
     if (frame.type === "approval.resolved") approvalStates.delete(String(frame.data?.request_id ?? ""));
     noteFrame(frame);
+    browser.note(frame);
     chatStatus.bump();
     renderMessages(false);
     syncUI();
@@ -1860,6 +1870,8 @@ function approvalNow() {
 // How the card talks to its view: the chat view redraws its messages and
 // answers a session's approval; the Tasks view passes its own (tasks.mjs).
 const chatApproval = {
+  // True when the chat shown is the main chat: its own questions are answered for every chat.
+  get main() { return mainActive(); },
   rerender: () => { messageSnapshot = ""; renderMessages(false); },
   answer: (request, state, choice) => answerApproval(request, state, choice),
   reload: (id) => refreshApproval(S.activeId, id),
@@ -1912,11 +1924,14 @@ function approvalCard(request, view = chatApproval, asked = "") {
   const workspace = request.workspace_label || view.workspace || S.view?.session?.workspace_label || t("approval.theWorkspace");
   const folder = workspace.replace(/\/+$/, "").split("/").pop() || workspace;
   const scope = t(`approval.scope.${view.scope === "task" ? "task" : "chat"}`);
+  // The main chat's own question (a task's card keeps "this task"): what the person allows in the main
+  // chat counts in every chat, the tasks they start and the terminal, so each answer that is kept says so.
+  const everywhere = view.scope !== "task" && view.main === true;
   // A plain question, with the tool id in a caption and what "Allow for this chat" covers.
   let title = t("approval.useTool", { tool });
   let caption = tool;
   let content = JSON.stringify(args, null, 2);
-  let rule = t("approval.rule.tool", { tool, scope });
+  let rule = everywhere ? t("approval.rule.toolMain", { tool }) : t("approval.rule.tool", { tool, scope });
   let what = t("approval.arguments");
   let diff = null; // What a file write replaces, when the gateway could compare.
   let why = ""; // Why it could not, in words.
@@ -1936,7 +1951,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
     const path = target?.path_label || String(args.path ?? t("approval.theFile"));
     content = String(args.content ?? "");
     what = t("approval.fileContent");
-    rule = t("approval.rule.write", { scope });
+    rule = everywhere ? t("approval.rule.writeMain") : t("approval.rule.write", { scope });
     if (target?.diff?.note) why = target.diff.note;
     else diff = target?.diff ?? null;
     if (diff) what = t("approval.changesTo", { path });
@@ -1951,8 +1966,10 @@ function approvalCard(request, view = chatApproval, asked = "") {
     what = t("approval.willDo");
     title = t(reading ? "approval.readSite" : "approval.openSite", { site });
     caption = t(reading ? "approval.readCaption" : "approval.browserCaption");
-    rule = t(reading ? "approval.rule.read" : "approval.rule.open", { site, scope });
-    content = t(reading ? "approval.readContent" : "approval.siteContent", { site });
+    rule = everywhere ? t(reading ? "approval.rule.readMain" : "approval.rule.openMain", { site })
+      : t(reading ? "approval.rule.read" : "approval.rule.open", { site, scope });
+    // Chrome in the background (`args.browser`) is worded for itself: no window comes to the front.
+    content = t(reading ? "approval.readContent" : args.browser === "chrome" ? "approval.siteContentChrome" : "approval.siteContent", { site });
     if (reading && args.url) {
       // The whole address reaches the site, path and query too: the card shows it.
       why = content;
@@ -1969,8 +1986,12 @@ function approvalCard(request, view = chatApproval, asked = "") {
     what = t("approval.willDo");
     title = t(sending ? "approval.submitSite" : typing ? "approval.typeSite" : "approval.actSite", { site });
     caption = t(sending ? "approval.submitCaption" : typing ? "approval.typeCaption" : "approval.actCaption");
-    rule = t(sending ? "approval.rule.submitOnce" : typing ? "approval.rule.typeOnce" : "approval.rule.act", { site, scope });
-    content = t(sending ? "approval.submitContent" : typing ? "approval.typeContent" : "approval.actContent", { site });
+    rule = sending || typing ? t(sending ? "approval.rule.submitOnce" : "approval.rule.typeOnce")
+      : everywhere ? t("approval.rule.actMain", { site }) : t("approval.rule.act", { site, scope });
+    const chrome = args.browser === "chrome";
+    content = t(sending ? "approval.submitContent"
+      : typing ? (chrome ? "approval.typeContentChrome" : "approval.typeContent")
+      : chrome ? "approval.actContentChrome" : "approval.actContent", { site });
     if (sending) {
       // Where the form goes (or that the page decides) and what it holds, nothing secret in it.
       why = content;
@@ -1983,6 +2004,27 @@ function approvalCard(request, view = chatApproval, asked = "") {
       content = String(args.text ?? "");
       what = t("approval.actTyped");
     }
+  } else if (tool.startsWith("handoff:")) {
+    // A page asked to open an address of another app's kind, which the browser in the background does not
+    // open itself: melo opens it on a yes, and a kept answer covers that kind of address where it is kept
+    // (in the main chat, every chat). In Auto the step is high impact: no kept answer is offered.
+    const app = String(args.app || tool.slice(tool.indexOf(":") + 1));
+    const site = String(args.site || "");
+    what = t("approval.handoffAddress");
+    title = t("approval.handoffTitle", { app });
+    caption = t("approval.handoffCaption");
+    rule = everywhere ? t("approval.rule.handoffMain", { app }) : t("approval.rule.handoff", { app, scope });
+    why = t("approval.handoffContent", { app, site });
+    content = String(args.url || "");
+  } else if (tool.startsWith("browser-dialog:")) {
+    // A confirm box the page put up while melo acted: OK is asked every time; Cancel otherwise.
+    const site = String(args.site || tool.slice(tool.indexOf(":") + 1));
+    what = t("approval.dialogText");
+    title = t("approval.dialogTitle", { site });
+    caption = t("approval.dialogCaption");
+    rule = t("approval.rule.dialogOnce");
+    why = t("approval.dialogContent", { site });
+    content = String(args.text ?? "");
   } else if (tool.startsWith("desktop-act:")) {
     // A button in another app's window that appeared after melo's own step in the browser: asked every
     // time, and the card names the app, the window and what is pressed.
@@ -1992,12 +2034,36 @@ function approvalCard(request, view = chatApproval, asked = "") {
     caption = t("approval.desktopCaption");
     rule = t("approval.rule.desktopOnce");
     content = t("approval.desktopContent", { app, on: String(args.on || ""), window: String(args.window || "") });
+  } else if (tool.startsWith("takeover:")) {
+    // melo reached something only the person can do on a page (a sign-in, a code, a QR code, a human check): the
+    // card offers them the page in the Browser panel. Their yes is "Take over"; nothing of it is kept for the chat.
+    const site = String(args.site || tool.slice(tool.indexOf(":") + 1));
+    const need = ["sign-in", "password", "code", "card", "qr", "captcha"].includes(args.need) ? args.need : "sign-in";
+    what = t("approval.willDo");
+    title = t(`approval.takeover.${need}`, { site });
+    caption = t("approval.takeoverCaption");
+    rule = t("approval.rule.takeover");
+    why = t("approval.takeoverContent");
+    content = "";
+    noBox = true;
+  } else if (tool.startsWith("window-read:")) {
+    // A window another app put up right after melo's own step: nothing about it goes to the model unless
+    // the person allows it here, in Ask and in Auto alike. The window's title is for the person only.
+    const app = String(args.app || tool.slice(tool.indexOf(":") + 1));
+    what = t("approval.seeWindow");
+    title = t("approval.seeTitle", { app });
+    caption = t("approval.seeCaption");
+    rule = everywhere ? t("approval.rule.seeMain", { app })
+      : t(view.scope === "task" ? "approval.rule.seeTask" : "approval.rule.see", { app });
+    content = String(args.window || "");
   }
   // A high-impact call (installs, downloads, changes outside the folder) asks every time: the
   // card says why, offers no chat-wide allow, and starts on Deny. A site Auto stopped only because the
   // request did not ask for it (#465) says why too, but may be allowed for the chat: the server says so.
   const review = request.review;
-  const stopped = review?.verdict === "high";
+  // The take-over card is only ever the person's: Auto's "only you" review does not reword it.
+  const takeover = tool.startsWith("takeover:");
+  const stopped = review?.verdict === "high" && !takeover;
   const siteChoice = stopped && request.offers_chat === true;
   const high = stopped && !siteChoice;
   const reviewed = stopped ? reviewWords({ ...review, gist: request.gist }, folder) : { title: "", reasons: [] };
@@ -2075,19 +2141,34 @@ function approvalCard(request, view = chatApproval, asked = "") {
   const actions = el("div", "approval-actions");
   const denyView = el("div", "deny-view");
   // On a high-impact card the safe answer is the filled one.
-  const once = button(high ? "outline-button" : "primary-button", t("common.allowOnce"), () => view.answer(request, state, "once"));
+  const once = button(high ? "outline-button" : "primary-button", takeover ? t("approval.takeoverYes") : t("common.allowOnce"), () => {
+    view.answer(request, state, "once");
+    // The panel opens and the keys go to the page as soon as the gateway hands it over.
+    if (takeover && view === chatApproval) browser.takeOver();
+  });
   once.dataset.approvalOnce = "";
   once.dataset.approvalFocus = "once";
-  const session = button("outline-button", outside ? t("approval.outside.chat", { scope }) : t("approval.allowFor", { scope }),
-    () => view.answer(request, state, "session"));
+  const seeing = tool.startsWith("window-read:");
+  const seeApp = String(args.app || "");
+  const sessionWords = outside ? (everywhere ? t("approval.outside.everywhere") : t("approval.outside.chat", { scope }))
+    : seeing ? (everywhere ? t("approval.seeEverywhere", { app: seeApp })
+      : t(view.scope === "task" ? "approval.seeTask" : "approval.seeChat", { app: seeApp }))
+      : everywhere ? t("approval.allowEverywhere") : t("approval.allowFor", { scope });
+  const session = button("outline-button", sessionWords, () => view.answer(request, state, "session"));
   session.dataset.approvalFocus = "session";
   const always = button("outline-button", t("approval.outside.always"), () => view.answer(request, state, "always"));
   always.dataset.approvalFocus = "always";
   always.dataset.approvalAlways = "";
-  const deny = button(high ? "primary-button" : "quiet-button", t("common.deny"), () => {
+  const deny = button(high ? "primary-button" : "quiet-button", takeover ? t("approval.takeoverNo") : t("common.deny"), () => {
+    if (takeover) {
+      // "Not now" needs no reason: melo carries on without the page.
+      view.answer(request, state, "deny");
+      return;
+    }
     state.deny = true;
     actions.hidden = true;
     grant.hidden = true;
+    if (wide) wide.hidden = true;
     if (kept) kept.hidden = true;
     denyView.hidden = false;
     reason.focus();
@@ -2096,7 +2177,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
   deny.dataset.approvalFocus = "deny";
   // The answers offered: a folder outside the workspace that may be kept has four.
   // Typing and a form's send ask every time, like a high-impact call: their answers are never kept for the chat.
-  const everyTime = high || tool.startsWith("browser-submit:") || tool.startsWith("browser-type:")
+  const everyTime = high || takeover || tool.startsWith("browser-submit:") || tool.startsWith("browser-type:")
     || tool.startsWith("desktop-act:");
   const offered = everyTime ? [once, deny] : outside ? (grantable ? [once, session, always, deny] : [once, deny]) : [once, session, deny];
   actions.append(...offered);
@@ -2104,17 +2185,32 @@ function approvalCard(request, view = chatApproval, asked = "") {
   const command = tool === "shell_exec" || tool === "python_exec";
   if (outside) {
     rule = outside.access === "write" ? t("approval.rule.outsideWrite", { workspace })
-      : grantable ? t("approval.rule.outsideRead", { scope, folder: outsideFolder }) : t("approval.rule.outsideOnce");
-  } else if (high) rule = t("approval.rule.high", { scope, workspace });
-  else if (command) rule = t(tool === "shell_exec" ? "approval.rule.shell" : "approval.rule.python", { scope, workspace });
+      : grantable ? (everywhere ? t("approval.rule.outsideReadMain", { folder: outsideFolder })
+        : t("approval.rule.outsideRead", { scope, folder: outsideFolder })) : t("approval.rule.outsideOnce");
+  } else if (high) rule = everywhere ? t("approval.rule.highMain", { workspace }) : t("approval.rule.high", { scope, workspace });
+  else if (command) {
+    const shell = tool === "shell_exec";
+    rule = everywhere ? t(shell ? "approval.rule.shellMain" : "approval.rule.pythonMain", { workspace })
+      : t(shell ? "approval.rule.shell" : "approval.rule.python", { scope, workspace });
+  }
   const grant = el("p", "approval-warning", rule);
   grant.id = `approval-scope-${id}`;
   if (offered.includes(session)) session.setAttribute("aria-describedby", grant.id);
   if (offered.includes(always)) always.setAttribute("aria-describedby", grant.id);
   card.append(grant);
+  // In the main chat a kept answer counts everywhere: one line says so, where, and how to take it back.
+  const wide = everywhere && offered.includes(session)
+    ? el("p", "approval-warning approval-everywhere", t("approval.everywhere"))
+    : null;
+  if (wide) {
+    wide.id = `approval-wide-${id}`;
+    session.setAttribute("aria-describedby", `${grant.id} ${wide.id}`);
+    card.append(wide);
+  }
   // The server says, by code, when the person's Allow is kept for the chat's later tasks (#369).
+  const rememberedKey = view.scope === "task" ? "task" : everywhere ? "everywhere" : "chat";
   const kept = !high && request.remembered === true
-    ? el("p", "approval-remembered", t(`approval.remembered.${view.scope === "task" ? "task" : "chat"}`))
+    ? el("p", "approval-remembered", t(`approval.remembered.${rememberedKey}`))
     : null;
   if (kept) card.append(kept);
   const note = t("approval.instead");
@@ -2142,6 +2238,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
     denyView.hidden = true;
     actions.hidden = false;
     grant.hidden = false;
+    if (wide) wide.hidden = false;
     if (kept) kept.hidden = false;
     deny.focus();
   });
@@ -2162,6 +2259,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
   denyView.hidden = !state.deny;
   actions.hidden = state.deny;
   grant.hidden = state.deny;
+  if (wide) wide.hidden = state.deny;
   if (kept) kept.hidden = state.deny;
   card.append(denyView);
   if (request.arguments_complete !== true) {
@@ -3005,6 +3103,7 @@ async function showTask(id) {
     if (S.activeId) await openSession(S.activeId, { route: false });
   }
   drawer.close();
+  giveWayToPanel();
   panel.openTask(id);
   // A waiting task's approval is the panel's now, not the chat card's.
   renderMessages(false, true);
@@ -3225,9 +3324,15 @@ async function showScheduled() {
   const id = S.activeId || S.main?.id || "";
   if (id && S.activeId !== id) await openSession(id);
   else if (id) setRoute(id); // the address names the chat again
+  giveWayToPanel();
   panel.select("scheduled");
   // Below 900 px the panel is a sheet; wider, it already sits beside the chat.
   if (!matchMedia("(min-width: 900px)").matches) panel.openSheet();
+}
+
+/** Where Melo's panel and the Browser panel do not both fit, a task or the schedule shown in Melo's panel takes the place. */
+function giveWayToPanel() {
+  if (!matchMedia("(min-width: 1480px)").matches) browser.hide();
 }
 
 function hashId() {
@@ -3282,6 +3387,48 @@ const panel = setupPanel({
   },
 });
 const pictureBox = setupPictureBox({ dialog: $("picture-box") });
+
+// The Browser panel: a live window onto the page melo is working in, which the person can take over (browser-live.mjs). The macOS app
+// can show it alone in a window of its own; it says so by offering the `localmeloBrowser` message handler.
+const browserBridge = globalThis.webkit?.messageHandlers?.localmeloBrowser;
+const browser = setupBrowser({
+  api,
+  els: {
+    root: $("browser-panel"),
+    chip: $("browser-chip"),
+    chipText: $("browser-chip-text"),
+    title: $("bp-title"),
+    host: $("bp-host"),
+    rest: $("bp-rest"),
+    status: $("bp-status"),
+    viewport: $("bp-viewport"),
+    canvas: $("bp-canvas"),
+    note: $("bp-note"),
+    hide: $("bp-hide"),
+    pop: $("bp-pop"),
+    take: $("bp-take"),
+    give: $("bp-give"),
+    viewOnly: $("bp-view-only"),
+    hint: $("bp-hint"),
+    keys: $("bp-keys"),
+    dialog: $("bp-dialog"),
+    dialogTitle: $("bp-dialog-title"),
+    dialogText: $("bp-dialog-text"),
+    dialogInput: $("bp-dialog-input"),
+    dialogOk: $("bp-dialog-ok"),
+    dialogCancel: $("bp-dialog-cancel"),
+  },
+  openSocket: (url) => new WebSocket(url),
+  decode: (bytes) => createImageBitmap(new Blob([bytes], { type: "image/jpeg" })),
+  observe: (node, fn) => { if (typeof ResizeObserver === "function") new ResizeObserver(fn).observe(node); },
+  wide: () => matchMedia("(min-width: 900px)").matches,
+  popOut: browserBridge ? (session) => browserBridge.postMessage({ action: "popOut", session }) : null,
+  // The gateway ended the stream for the token's sake: any call finds out whether the page is still signed in.
+  denied: () => { api("/health").catch(() => {}); },
+});
+$("browser-chip").addEventListener("click", () => browser.toggle());
+$("bp-hide").addEventListener("click", () => browser.hide());
+$("bp-pop").addEventListener("click", () => browser.popOut());
 
 // ── Pictures and files in the composer ──
 
@@ -3475,15 +3622,20 @@ const modeChip = setupModeChip({
       busy: S.modeSaving,
       // The chat's grants: the menu lists the sites it allowed for its rest (#465).
       grants: S.activeId && S.view?.id === S.activeId ? S.view.grants ?? [] : [],
+      everywhere: S.activeId && S.view?.id === S.activeId ? S.view.grantsEverywhere ?? [] : [],
     };
   },
   remove: async (name) => {
     const id = S.activeId;
     if (!id) return;
     try {
-      await api(`/sessions/${encodeURIComponent(id)}/grants/${encodeURIComponent(name)}`, { method: "DELETE" });
-      if (S.view?.id === id) S.view.grants = (S.view.grants ?? []).filter((grant) => grant !== name);
-      notify(t("auto.menu.removed"));
+      const taken = await api(`/sessions/${encodeURIComponent(id)}/grants/${encodeURIComponent(name)}`, { method: "DELETE" });
+      if (S.view?.id === id) {
+        S.view.grants = (S.view.grants ?? []).filter((grant) => grant !== name);
+        S.view.grantsEverywhere = (S.view.grantsEverywhere ?? []).filter((grant) => grant !== name);
+      }
+      // A grant of the main chat is gone from every chat, not only this one.
+      notify(t(taken?.everywhere === true ? "auto.menu.removedEverywhere" : "auto.menu.removed"));
     } catch (error) {
       notify(t("auto.menu.removeFailed", { problem: error.message }), { sticky: true });
     }
@@ -3717,6 +3869,14 @@ async function init() {
   delete document.documentElement.dataset.locked;
   $("app").hidden = false;
   $("app").inert = false;
+  // `#/live/<chat>`: the macOS app's pop-out window shows the chat's Browser panel and nothing else.
+  const livePopOut = liveRoute(globalThis.location?.hash);
+  if (livePopOut) {
+    document.documentElement.dataset.view = "live";
+    await browser.follow(livePopOut, { liveOnly: true });
+    document.documentElement.dataset.ready = "1";
+    return;
+  }
   S.drafts = stored(KEY + "-drafts", {}, "sessionStorage");
   const savedOutbox = stored(KEY + "-outbox", {}, "sessionStorage");
   S.outbox = {};
@@ -3889,6 +4049,8 @@ matchMedia("(max-width: 700px)").addEventListener?.("change", () => sidebar(fals
 // Back and Forward move the hash; the chat follows it, as a reload would.
 globalThis.addEventListener?.("hashchange", async (event) => {
   if (!S.authenticated) return;
+  // The pop-out window is the Browser panel alone: it has no chats to follow.
+  if (document.documentElement.dataset.view === "live") return;
   const task = taskRoute();
   if (task !== null) { stampArrival(event); await showTask(task); return; }
   closeTaskPage();
@@ -3958,6 +4120,7 @@ document.addEventListener("keydown", (event) => {
   // A task shown in the panel goes back to the chat first; the sheet closes on the next Escape.
   if (panel.stepBack()) return;
   if (panel.closeSheet()) return;
+  if (browser.closeSheet()) return;
   if ($("app").classList.contains("sidebar-open")) {
     sidebar(false);
     return;
@@ -3977,5 +4140,15 @@ document.addEventListener("keydown", (event) => {
 document.addEventListener("visibilitychange", () => {
   if (S.authenticated && !document.hidden) refreshList();
 });
+// Nobody watches a page that is hidden for a while or kept for Back: its stream stops, and starts when it returns.
+let hiddenTimer = null;
+document.addEventListener("visibilitychange", () => {
+  clearTimeout(hiddenTimer);
+  hiddenTimer = null;
+  if (document.hidden) hiddenTimer = setTimeout(() => browser.suspend(), BROWSER_HIDDEN_MS);
+  else browser.resume();
+});
+globalThis.addEventListener?.("pagehide", () => browser.suspend());
+globalThis.addEventListener?.("pageshow", () => browser.resume());
 
 init();

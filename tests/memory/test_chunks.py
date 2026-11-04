@@ -72,6 +72,30 @@ def test_a_turn_that_fits_is_one_document_as_it_was() -> None:
     assert not is_cut("Hi", fits)
 
 
+def test_the_users_words_alone_have_no_reply_line_however_long() -> None:
+    # No answer at all (a turn that ended on a blocked step): "User: <words>".
+    assert document_chunks("Hi", None) == ["User: Hi"]
+    assert document_chunks("Hi", None, title="Plan") == ["Task: Plan\nUser: Hi"]
+    assert document_text("Hi", None) == "User: Hi"
+    assert document_chunks("Hi \n", None) == ["User: Hi"]
+    # An empty answer is a reply of nothing, as it always was (an ingested turn).
+    assert document_chunks("Hi", "") == ["User: Hi\nmelo: "]
+    assert not is_cut("Hi", None)
+    typed = "".join(SENTENCE.format(n=n) for n in range(80))[:5_000]
+    chunks = document_chunks(typed, None)
+    assert len(chunks) == 3 and not is_cut(typed, None)
+    assert all(c.startswith("User: ") and len(c) <= DOC_CHARS for c in chunks)
+    assert all("melo:" not in c and c == c.rstrip() for c in chunks)
+    assert chunks[-1].endswith(typed.strip()[-40:])
+    # Past the last chunk's room, text is left out and the cut is said, as before.
+    huge = "".join(SENTENCE.format(n=n) for n in range(2_000))
+    chunks = document_chunks(huge, None)
+    assert len(chunks) == MAX_CHUNKS and is_cut(huge, None)
+    assert all("melo:" not in c for c in chunks)
+    # Secrets stay out of it, as in any turn.
+    assert KEY not in "".join(document_chunks(f"my key is {KEY}", None))
+
+
 def test_a_7000_character_answer_is_4_chunks_that_overlap_and_repeat_the_user_head() -> (
     None
 ):

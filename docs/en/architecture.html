@@ -107,6 +107,10 @@
               <span class="node-title">Approvals</span>
               <span class="node-sub">You, or Auto's review</span>
             </a>
+            <a class="node approval" id="f-grants" href="#c-grants" style="left:570px;top:568px;width:210px;min-height:72px">
+              <span class="node-title">Grants</span>
+              <span class="node-sub">What you allowed</span>
+            </a>
 
             <svg class="conns" id="svg-flow" aria-hidden="true" focusable="false"></svg>
           </div>
@@ -115,11 +119,12 @@
         <div class="legend">
           <div class="legend-item"><div class="legend-line"></div>calls and data inside localmelo</div>
         </div>
+        <p class="diagram-caption">You, or Auto's review, approve a step. What you allow is kept as a grant, and it survives a restart.</p>
         <ul>
           <li>You talk to the main chat. Side chats have the same abilities and share its memory.</li>
           <li>Bigger work goes to the task scheduler, from the main chat, a side chat or a scheduled chore. It orders tasks by level, P0 to P5, and by model slot, then starts workers; a worker's name says which chat it works for.</li>
           <li>A task belongs to the chat that started it: its news and result come back there, and a finished side chat leaves a summary for the main chat.</li>
-          <li>A chat can check on a worker and message it. A worker asks its chat for help; only the chat asks you, and only you, or Auto's review, approve a step.</li>
+          <li>A chat can check on a worker and message it. A worker asks its chat for help; only the chat asks you.</li>
           <li>A task a chat starts comes with your own words, what the chat picks, and a context pack of notes about you, your preferences and this project.</li>
         </ul>
 
@@ -331,6 +336,42 @@
           <li>Scheduled chores start tasks on time, and a check-in every 30 minutes tells the main chat what finished or waits.</li>
           <li>Workers and chats run the same agent; a chat recalls memory into each turn, a worker keeps none of its own and starts with a context pack from its chat.</li>
         </ul>
+
+        <h3 id="browser">The background browser</h3>
+        <p>With browsing on, melo can read and act on pages in a Chrome that has no window. Select a box to jump to its card.</p>
+
+        <div class="diagram-scroll">
+          <div class="diagram" id="dia-browser" style="width:800px;height:300px">
+            <a class="node" id="b-agent" href="#c-agent" style="left:10px;top:20px;width:170px;min-height:90px">
+              <span class="node-title">Agent</span>
+              <span class="node-sub">Calls a browser tool</span>
+            </a>
+            <a class="node" id="b-gateway" href="#c-gateway" style="left:310px;top:20px;width:180px;min-height:90px">
+              <span class="node-title">Gateway</span>
+              <span class="node-sub">Starts Chrome and drives it</span>
+            </a>
+            <a class="node" id="b-chrome" href="#c-browser" style="left:620px;top:20px;width:170px;min-height:90px">
+              <span class="node-title">Chrome</span>
+              <span class="node-sub">No window · a profile of its own</span>
+            </a>
+            <a class="node" id="b-console" href="#c-gateway" style="left:310px;top:190px;width:180px;min-height:90px">
+              <span class="node-title">Console and app</span>
+              <span class="node-sub">Browser panel · live picture</span>
+            </a>
+            <svg class="conns" id="svg-browser" aria-hidden="true" focusable="false"></svg>
+          </div>
+        </div>
+
+        <div class="legend">
+          <div class="legend-item"><div class="legend-line"></div>calls and data between the parts</div>
+        </div>
+        <ul>
+          <li>A browser tool call reaches Chrome through the gateway, which starts it with no window, never in front of your apps.</li>
+          <li>The gateway talks to Chrome over a private pipe, never a network port, on a profile of melo's own.</li>
+          <li>The console and the app show the page live; the pictures stay in memory and are sent only while the Browser panel is open.</li>
+          <li>Take over hands the page to you so you can sign in yourself; melo's steps on it wait until you give it back.</li>
+          <li>Safari's automation windows are the other browser: they come to the front and have no live view.</li>
+        </ul>
       </section>
 
       <section class="section" id="components">
@@ -429,8 +470,20 @@
               <li>A refused call does not run; the model sees why.</li>
               <li>Calls that send, delete or publish always ask, and say why.</li>
               <li>In Auto, a review decides each step instead of a click; a blocked step is explained, and Allow once lets that exact step run once.</li>
+              <li>What you allow for a chat is kept as a grant.</li>
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md#what-the-checks-do">What the checks do</a>
+          </div>
+          <div class="comp-card" id="c-grants">
+            <h3>Grants</h3>
+            <p>What you allowed for a chat, kept in one table.</p>
+            <ul>
+              <li>A grant is a tool, a site, a folder outside the workspace, or another app's window.</li>
+              <li>The table is in the gateway's session file, so grants survive a restart.</li>
+              <li>What you allow in the main chat counts in every chat; in a side chat, only there.</li>
+              <li>Settings → Permissions lists them, and Revoke takes effect at once.</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/web-console.md#permissions">Permissions guide</a>
           </div>
           <div class="comp-card" id="c-executor">
             <h3>Executor</h3>
@@ -448,9 +501,20 @@
             <ul>
               <li>Local MCP servers from <code>--mcp PATH</code> run as stdio processes.</li>
               <li>Their tools are named <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>.</li>
-              <li>With browsing on, melo reads pages in Safari's automation windows.</li>
+              <li>With browsing on, melo reads and acts on pages in Chrome in the background or in Safari's automation windows.</li>
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md">Tools and MCP guide</a>
+          </div>
+          <div class="comp-card" id="c-browser">
+            <h3>Background browser</h3>
+            <p>Chrome with no window, for the pages melo reads and acts on.</p>
+            <ul>
+              <li>It is opt-in: Settings → Chats and folders → <strong>Browser</strong>, or <code>/browser chrome</code>.</li>
+              <li>The gateway starts the Chrome installed on this Mac, headless, on a profile of melo's own.</li>
+              <li>The Browser panel shows the page live; Take over lets you sign in yourself.</li>
+              <li>A window another app opens after a click asks you first.</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/browsing.md#chrome-in-the-background">Browsing guide</a>
           </div>
           <div class="comp-card" id="c-memory">
             <h3>Memory</h3>
@@ -524,14 +588,14 @@
               <tr><td>Main chat and side chats</td><td>One main chat that answers, or hands bigger work to tasks by priority</td><td><span class="chip done">done</span></td></tr>
               <tr><td>Memory across chats</td><td>Notes kept when you ask or melo judges them worth keeping, the newer value wins, recall with sources, the Memory tab</td><td><span class="chip done">done</span></td></tr>
               <tr><td>Scheduled chores</td><td>Chores and one-time reminders that run on time, and a check-in every 30 minutes</td><td><span class="chip done">done</span></td></tr>
-              <tr><td>Tools and approvals</td><td>Five built-ins, MCP servers, review of high-impact calls, Ask or Auto for each chat</td><td><span class="chip done">done</span></td></tr>
-              <tr><td>Browsing</td><td>Read and follow pages in Safari windows you can watch</td><td><span class="chip done">done</span></td></tr>
+              <tr><td>Tools and approvals</td><td>Five built-ins, MCP servers, review of high-impact calls, Ask or Auto for each chat, grants you can list and revoke</td><td><span class="chip done">done</span></td></tr>
+              <tr><td>Browsing</td><td>Read, click and type on pages in Chrome in the background, with a live view you can take over, or in Safari windows</td><td><span class="chip done">done</span></td></tr>
               <tr><td>Scheduler and workers</td><td>Task queue, levels, workers, fair turns, an opt-in gate and the GPU lock</td><td><span class="chip testing">testing</span></td></tr>
               <tr><td>Side chats as equals</td><td>Side chats start tasks and get their results, and a finished side chat leaves a summary for the main chat</td><td><span class="chip done">done</span></td></tr>
               <tr><td>Workers asking their chat</td><td>A worker sends its chat a short request for help, each task comes with a context pack of notes about you, your preferences and this project, and only the chat asks you</td><td><span class="chip done">done</span></td></tr>
               <tr><td>Reasoning notes</td><td>Compress modes that keep notes and recall them in the loop</td><td><span class="chip testing">testing</span></td></tr>
               <tr><td>Your words in a task</td><td>A task sees your own words, and the memory items its chat picks for it</td><td><span class="chip done">done</span></td></tr>
-              <tr><td>Computer use</td><td>Acting on pages in the browser, asking before anything that matters</td><td>planned</td></tr>
+              <tr><td>Computer use</td><td>Acting in your own signed-in browser and in other apps, asking before anything that matters</td><td>planned</td></tr>
               <tr><td>Learning while idle</td><td>Offline review of past work</td><td>planned</td></tr>
             </tbody>
           </table>
@@ -580,7 +644,8 @@
           { from: "f-main", fs: "bottom", ff: 0.4636, to: "f-chan", ts: "top", tf: 0.523, bidi: true },
           { from: "f-chan", fs: "bottom", ff: 0.523, to: "f-workers", ts: "top", tf: 0.134, bidi: true },
           { from: "f-side", fs: "bottom", ff: 0.78, to: "f-workers", ts: "top", tf: 0.9, bidi: true, label: "same channel" },
-          { from: "f-workers", fs: "bottom", ff: 0.5, to: "f-appr", ts: "top", tf: 0.5, bidi: true }
+          { from: "f-workers", fs: "bottom", ff: 0.5, to: "f-appr", ts: "top", tf: 0.5, bidi: true },
+          { from: "f-appr", fs: "right", to: "f-grants", ts: "left", bidi: true }
         ],
         "svg-worker": [
           { from: "w-sched", fs: "bottom", ff: 0.5, to: "w-agent", ts: "top", tf: 0.227 },
@@ -602,6 +667,11 @@
           { from: "n-agent", fs: "right", ff: 0.75, to: "n-providers", ts: "left", tf: 0.3, type: "dashed", label: "chat" },
           { from: "n-memory", fs: "right", to: "n-providers", ts: "left", tf: 0.7, type: "dashed", label: "embeddings" },
           { from: "n-backends", fs: "top", to: "n-providers", ts: "bottom", label: "builds" }
+        ],
+        "svg-browser": [
+          { from: "b-agent", fs: "right", to: "b-gateway", ts: "left", bidi: true, label: "browser tools" },
+          { from: "b-gateway", fs: "right", to: "b-chrome", ts: "left", bidi: true, label: "private pipe" },
+          { from: "b-gateway", fs: "bottom", to: "b-console", ts: "top", bidi: true, label: "live view\ntake over" }
         ],
         "svg-around": [
           { from: "a-cli", fs: "bottom", ff: 0.8, to: "a-gateway", ts: "top", tf: 0.1, label: "main chat" },

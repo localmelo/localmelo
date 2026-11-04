@@ -143,7 +143,9 @@ from localmelo.support.sessions.approvals import (
     RememberingPolicy,
     chat_mode,
 )
+from localmelo.support.sessions.grants import GrantBook
 from localmelo.support.sessions.hub import SessionHub
+from localmelo.support.sessions.identity import ACTING_RULE
 from localmelo.support.sessions.runner import SessionRunner
 from localmelo.support.sessions.store import SessionStore, SessionStoreError
 from localmelo.support.web import WebFetchProvider
@@ -177,7 +179,7 @@ WORKER_GUIDE = (
     "just to ask the person in your report. End your report with one line, "
     "Ending: ready (done as asked), Ending: blocked: <what only the person can "
     "give> (say blocked only then), Ending: failed or Ending: dropped (made "
-    "moot); code checks it against your own test runs and commits."
+    "moot); code checks it against your own test runs and commits. " + ACTING_RULE
 )
 # The heading of a task's context pack on its first request: the notes are data.
 TASK_PACK_HEADER: Final = (
@@ -595,6 +597,10 @@ class TaskWorkers:
         # once that chat is gone), what a step that ran on an earlier
         # approval shows, and what starts when a task asks the person.
         self.ledger = ledger or ApprovalLedger()
+        # Every grant, in the store's table (the console sets its book): a
+        # task keeps what the person allowed for it; its chat's grants and the
+        # main chat's reach it through its chat (#369).
+        self.grants = GrantBook()
         self.chat_of: Callable[[str | None], Awaitable[str | None]] | None = None
         self.on_earlier: Callable[[ApprovalUse], Awaitable[None]] | None = None
         self.on_ask: Callable[[str, ApprovalRequest], None] | None = None
@@ -2462,6 +2468,7 @@ class TaskWorkers:
                 runner.observe(paused_ask),
                 folders=_remembers(record.origin),
                 saved=SavedFolders(),
+                grants=self.grants.view(task_id, "task", inherit=False),
             )
             policy: ApprovalPolicy = asking
             if task_mode == "auto":

@@ -869,6 +869,179 @@ async def test_a_press_in_another_apps_window_is_reviewed_on_the_goal(
         assert not grant_offered(asker.asked[0])
 
 
+class OpensAnApp(PressesInAnotherApp):
+    """A provided tool that asks to open another app a page asked for, as the browser's hand-off does."""
+
+    async def _press(self, button: str) -> str:
+        ask = TOOL_ASK.get()
+        assert ask is not None
+        decision = await ask(
+            "handoff:chat",
+            {
+                "site": "news.example",
+                "access": "handoff",
+                "app": "Chat",
+                "scheme": "chat",
+                "url": "chat://login?x=1",
+                "browser": "chrome",
+            },
+            "open Chat for a page on news.example (chat: address)",
+        )
+        self.answers.append(decision)
+        return "opened" if decision.allow else decision.reason
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("watched", [True, False])
+async def test_opening_another_app_for_a_page_is_always_the_persons_on_the_card(
+    tmp_path: Path, watched: bool
+) -> None:
+    """Even when the request asks for it: no review allows it, the person does (or nobody)."""
+    tool = OpensAnApp()
+    asker = CardAsker()
+    call = ("press_in_app", {"button": "Open in Chat"}, "c1")
+    llm = FakeModel([_calls(call), _answer("done")], [verdict()])
+    (tmp_path / "ws").mkdir()
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset(),
+            tool_exposure="all",
+            workspace_root=str(tmp_path / "ws"),
+        ),
+        tool_providers=[tool],
+    )
+    agent.chat.sleep = _no_wait
+
+    await agent.run_task(
+        "sign in to news.example with the Chat app",
+        approval=AutoPolicy(asking=asker if watched else None),
+    )
+
+    [answer] = tool.answers
+    assert answer.allow is False
+    assert llm.review_requests == []  # no model decides it
+    if watched:
+        [card] = asker.asked
+        assert card.review is not None and card.review.categories == ("open_app",)
+        assert "Opens Chat, an app on this Mac" in card.review.reasons[0]
+        assert not grant_offered(card)
+    else:
+        assert asker.asked == [] and "opens Chat, an app on this Mac" in answer.reason
+
+
+class SeesAWindow(OpensSite):
+    """A provided tool that asks whether melo may see a window another app opened, as the browser provider does."""
+
+    async def start(self) -> list[ProvidedTool]:
+        return [
+            ProvidedTool(
+                definition=ToolDef(
+                    name="see_window",
+                    description="Look at the window that appeared.",
+                    parameters={"type": "object", "properties": {}},
+                    annotations={"readOnlyHint": True},
+                ),
+                function=self._see,
+            )
+        ]
+
+    async def _see(self) -> str:
+        ask = TOOL_ASK.get()
+        assert ask is not None
+        decision = await ask(
+            "window-read:com.example.chat",
+            {
+                "app": "Chat",
+                "window": "Sign in to news.example",
+                "bundle": "com.example.chat",
+                "access": "window-read",
+            },
+            "Chat opened a window right after melo's click: let melo see it?",
+        )
+        self.answers.append(decision)
+        return "seen" if decision.allow else "not shown"
+
+
+class AnswersTheCard(CardAsker):
+    """The policy that asks a person on the card and answers with *allow*."""
+
+    def __init__(self, allow: bool) -> None:
+        super().__init__()
+        self.allow = allow
+
+    async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
+        self.asked.append(request)
+        return ApprovalDecision(self.allow, "", origin="user")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("allow", [True, False])
+@pytest.mark.parametrize(
+    "words",
+    [
+        "check in with the Chat app",
+        # Even the person's own words about the window never allow it: only the card does.
+        "sign in with the Chat app and let melo look at any window Chat opens",
+    ],
+)
+async def test_a_window_another_app_opened_is_never_reviewed_and_always_asks_the_person(
+    tmp_path: Path, allow: bool, words: str
+) -> None:
+    tool = SeesAWindow()
+    asker = AnswersTheCard(allow)
+    # No review is scripted: a review of this question would raise in the model.
+    llm = FakeModel([_calls(("see_window", {}, "c1")), _answer("done")])
+    (tmp_path / "ws").mkdir()
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset(),
+            tool_exposure="all",
+            workspace_root=str(tmp_path / "ws"),
+        ),
+        tool_providers=[tool],
+    )
+    agent.chat.sleep = _no_wait
+
+    await agent.run_task(words, approval=AutoPolicy(asking=asker))
+
+    [answer] = tool.answers
+    assert answer.allow is allow and answer.origin == "user", answer
+    [card] = asker.asked
+    assert card.tool_name == "window-read:com.example.chat"
+    assert card.review is not None and card.review.categories == ("opaque",)
+    assert grant_offered(card), "the card may be allowed for the chat"
+    assert llm.review_requests == [], "no review model ever sees the window"
+    seen = json.dumps([[m.content for m in sent] for sent in llm.requests])
+    assert "Sign in to news.example" not in seen and "com.example.chat" not in seen
+
+
+@pytest.mark.asyncio
+async def test_a_window_another_app_opened_is_denied_in_auto_when_nobody_can_be_asked(
+    tmp_path: Path,
+) -> None:
+    tool = SeesAWindow()
+    llm = FakeModel([_calls(("see_window", {}, "c1")), _answer("done")])
+    (tmp_path / "ws").mkdir()
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset(),
+            tool_exposure="all",
+            workspace_root=str(tmp_path / "ws"),
+        ),
+        tool_providers=[tool],
+    )
+    agent.chat.sleep = _no_wait
+
+    await agent.run_task("check in with the Chat app", approval=AutoPolicy())
+
+    [answer] = tool.answers
+    assert not answer.allow, answer
+    assert llm.review_requests == []
+
+
 @pytest.mark.asyncio
 async def test_typing_the_same_text_twice_is_two_reviews(tmp_path: Path) -> None:
     tool = ActsOnSite()

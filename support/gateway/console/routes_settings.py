@@ -44,7 +44,7 @@ from localmelo.support import settings as setting_keys
 from localmelo.support.backends import discovery
 from localmelo.support.backends.discovery import DISCOVERY_TIMEOUT_S, DiscoveryError
 from localmelo.support.backends.registry import get_backend
-from localmelo.support.browser import desktop
+from localmelo.support.browser import chrome, desktop
 from localmelo.support.gateway.console.errors import ApiError
 from localmelo.support.gateway.console.probe import redact_userinfo, url_label
 from localmelo.support.gateway.console.registry import DEFAULT_WORKSPACE
@@ -131,8 +131,14 @@ class SettingsPutBody(_SettingsBaseBody):
     language: StrictStr | None = None
     # ``[approvals] mode``, how new chats start: ``ask`` or ``auto``; absent leaves it.
     approvals: StrictStr | None = None
-    # ``[browser] driver``: true reads web pages in Safari (``/browser on``), false turns it off; absent leaves it.
+    # ``[browser] driver``: true turns browsing on (``/browser on``: the driver
+    # chosen before, else Safari's automation windows), false turns it off;
+    # absent leaves it.
     browser: StrictBool | None = None
+    # ``[browser] driver`` by name: ``off``, ``safari-automation`` or ``chrome``
+    # (Settings' Browser choice, ``/browser chrome``); absent leaves it. It wins
+    # over ``browser``.
+    browser_driver: StrictStr | None = None
     # ``[browser] app_windows``: whether melo sees and answers a window another app
     # opens after its act in the browser; absent leaves it.
     app_windows: StrictBool | None = None
@@ -238,7 +244,30 @@ def model_json(cfg: Any) -> dict[str, Any]:
     }
 
 
-async def health_json(console: Console) -> dict[str, Any]:
+async def desktop_helper_json(
+    cfg: config.Config, *, check: bool = False
+) -> dict[str, Any]:
+    """The desktop control helper's status, as health reports it.
+
+    ``state`` is ``missing`` (not installed), ``installed`` (its permissions
+    not checked yet), ``granted``, ``no_grant`` (Accessibility is off) or
+    ``failed`` (it did not start); ``app`` is the app that needs the grants and
+    ``pictures`` whether it also holds Screen Recording (null: not known). The
+    status is what a chat last found. Only with *check*, and only while melo
+    watches other apps' windows, is the helper started (and stopped) to look.
+    """
+    watching = cfg.browser.driver != "off" and cfg.browser.app_windows is True
+    try:
+        status = await desktop.helper_status(check=check and watching)
+    except Exception:  # health never fails for one part (see running_status)
+        logger.warning("Could not read the desktop helper's status", exc_info=True)
+        return {"state": "failed", "app": "", "pictures": None, "problem": "unknown"}
+    return status.to_json()
+
+
+async def health_json(
+    console: Console, *, check_helper: bool = False
+) -> dict[str, Any]:
     """The whole ``GET /api/health`` body."""
     entries = console.sessions.entries()
     return {
@@ -267,6 +296,7 @@ async def health_json(console: Console) -> dict[str, Any]:
             "resume_mode": DEFAULT_RESUME_MODE,
         },
         "status": await running_status(console),
+        "desktop_helper": await desktop_helper_json(console.cfg, check=check_helper),
         "uptime_s": round(console.uptime_s(), 1),
     }
 
@@ -456,6 +486,14 @@ def settings_json() -> dict[str, Any]:
             cfg.approvals.mode if cfg.approvals.mode in config.APPROVAL_MODES else "ask"
         ),
         "browser": cfg.browser.driver != "off",
+        "browser_driver": (
+            cfg.browser.driver
+            if cfg.browser.driver in config.BROWSER_DRIVERS
+            else "off"
+        ),
+        # Whether Google Chrome is installed: without it the Chrome choice says
+        # to install it first.
+        "chrome_installed": chrome.chrome_installed(),
         "app_windows": cfg.browser.app_windows is True,
         # Whether the desktop control helper is installed: without it melo can
         # only name the app that came to the front.
@@ -590,6 +628,13 @@ def _build_candidate(
             f"language: Must be one of {config.CONSOLE_LANGUAGES}.",
         )
 
+    driver = getattr(body, "browser_driver", None)
+    if driver is not None and driver not in config.BROWSER_DRIVERS:
+        raise ApiError(
+            400,
+            "invalid_request",
+            f"browser_driver: Must be one of {config.BROWSER_DRIVERS}.",
+        )
     approvals = getattr(body, "approvals", None)
     if approvals is not None and approvals not in config.APPROVAL_MODES:
         raise ApiError(
@@ -626,8 +671,11 @@ def _build_candidate(
     if approvals is not None:
         candidate.approvals.mode = approvals
     browser = getattr(body, "browser", None)
-    if browser is not None:
-        candidate.browser.driver = "safari-automation" if browser else "off"
+    if browser is not None and driver is None:
+        on = candidate.browser.driver if candidate.browser.driver != "off" else ""
+        candidate.browser.driver = (on or "safari-automation") if browser else "off"
+    if driver is not None:
+        candidate.browser.driver = driver
     app_windows = getattr(body, "app_windows", None)
     if app_windows is not None:
         candidate.browser.app_windows = app_windows
@@ -841,8 +889,11 @@ def add_routes(app: FastAPI, console: Console) -> None:
     """Register the health, settings and models routes on *app*."""
 
     @app.get("/api/health")
-    async def api_health() -> JSONResponse:
-        return JSONResponse(content=await health_json(console))
+    async def api_health(helper: str = "") -> JSONResponse:
+        # ``?helper=check`` starts the desktop control helper once to read its permissions.
+        return JSONResponse(
+            content=await health_json(console, check_helper=helper == "check")
+        )
 
     @app.get("/api/settings")
     async def api_get_settings() -> JSONResponse:

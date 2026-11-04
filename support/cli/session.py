@@ -39,6 +39,7 @@ from localmelo.support import config
 from localmelo.support.backends import discovery
 from localmelo.support.backends.openai_compat import normalize_url
 from localmelo.support.cli import browsing, commands, hanging, usershell
+from localmelo.support.cli import grants as grant_commands
 from localmelo.support.cli.agents import AgentFactory
 from localmelo.support.cli.app import InteractiveApp, StatusBar
 from localmelo.support.cli.approvals import (
@@ -85,8 +86,10 @@ from localmelo.support.sessions.display import (
     format_tokens,
     home_label,
 )
+from localmelo.support.sessions.grants import GrantBook, MainChatGrants
 from localmelo.support.sessions.runner import ResumeLoader, ResumeMode, SessionRunner
 from localmelo.support.sessions.store import (
+    GATEWAY_SESSIONS_DB,
     NewSession,
     SessionBusyError,
     SessionStore,
@@ -272,6 +275,10 @@ class CliSession:
         self.renderer.tool_tiers = lambda: {
             tool.name: tool.tier for tool in self.agent.list_tools()
         }
+        # The grants of the terminal's own chat, kept in its sessions file;
+        # what the person allowed in the main chat holds here too, read from
+        # the gateway's file at every check, so a revoke there holds at once.
+        self.grant_book = GrantBook(store, outside=MainChatGrants(GATEWAY_SESSIONS_DB))
         # [approvals] auto_asks: Auto asks on the panel while someone is at
         # the terminal (#465).
         self.approvals = Approvals(
@@ -279,6 +286,7 @@ class CliSession:
             mode,
             snapshots=self.approver.snapshots,
             watch=terminal_watch(self.approver, auto_asks=auto_asks),
+            grants=self.grant_book.view(self._session_id, "terminal"),
         )
         self.runner: SessionRunner | None = None
         self.app: InteractiveApp | None = None
@@ -306,6 +314,21 @@ class CliSession:
         self.saved_resume_hint = ""
         # The main chat through the gateway; None: the terminal's own chat.
         self.remote: MainChat | None = None
+
+    def _session_id(self) -> str | None:
+        """The terminal's own chat's id; ``None`` before its first turn."""
+        return self.runner.session_id if self.runner is not None else None
+
+    async def grants_ready(self) -> None:
+        """Read the grants of the terminal's file once (the main chat's are read at every check).
+
+        A file that cannot be read leaves the grants in this process only.
+        """
+        if not self.grant_book.opened:
+            try:
+                await self.grant_book.open()
+            except Exception as exc:
+                logger.warning("The grants of this chat are not kept: %s", exc)
 
     # ── What the app reads ──
 
@@ -704,6 +727,7 @@ class CliSession:
                 if attachments
                 else {}
             )
+            await self.grants_ready()
             token = (
                 STREAM_DISPLAY.set(self.renderer.stream_feed()) if self.stream else None
             )
@@ -1024,6 +1048,8 @@ class CliSession:
             self.progress()
         elif name == "approvals":
             await self.approvals_command(arguments)
+        elif name == "grants":
+            await grant_commands.command(self, arguments)
         elif name == "status":
             await self.status(arguments)
         elif name == "retry":
@@ -1592,7 +1618,7 @@ class CliSession:
             if what in ("ask", "auto", "deny"):
                 await self.switch_mode(cast(Literal["ask", "auto", "deny"], what))
             elif what == "forget":
-                approvals.forget(parts[1] if len(parts) > 1 else None)
+                await grant_commands.forget(self, parts[1] if len(parts) > 1 else None)
             else:
                 self.out.print(
                     self._text(

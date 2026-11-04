@@ -148,12 +148,12 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 
 ## 浏览
 
-在 Mac 上，melo 可以在 Safari 里阅读网页，并在自己的浏览器窗口里点击、输入和选择。它默认关闭；[浏览指南](browsing.md)有设置步骤、melo 能做和不能做的事，以及故障排查。
+在 Mac 上，melo 可以阅读网页，并在网页上点击、输入和选择：在后台的 Chrome 中（没有窗口），或在 Safari 的自动化窗口中。它默认关闭；[浏览指南](browsing.md)有设置步骤、melo 能做和不能做的事，以及故障排查。
 
-- 在终端聊天里用 `/browser on` 打开它，或用 `melo -X browser.driver=safari-automation` 只对一次运行生效。
-- 在 Safari 里打开“设置 > 开发者”，把 “Allow remote automation” 打开一次。
+- 在终端聊天里用 `/browser on`（Safari 窗口）或 `/browser chrome`（后台的 Chrome）打开它，或用 `melo -X browser.driver=chrome` 只对一次运行生效。
+- 用 Safari 时，在 Safari 里打开“设置 > 开发者”，把 “Allow remote automation” 打开一次。用 Chrome 时只需要安装 Google Chrome。
 - 之后终端聊天以及网页控制台和 App 的每个聊天会得到十二个工具：`browser_open`、`browser_read`、`browser_find`、`browser_follow`、`browser_click`、`browser_type`、`browser_select`、`browser_back`、`browser_tabs`、`browser_wait`、`browser_screenshot` 和 `browser_click_point`。
-- 它们在 Safari 自己的自动化窗口里工作，这些窗口启动时不带你的任何登录状态。
+- 它们在 Safari 自己的自动化窗口里工作，这些窗口启动时不带你的任何登录状态；或在使用 melo 自己配置的 Chrome 里工作，从不使用你的配置。
 - melo 加载网页之前会问 “Open a website?”，每个网站在一个聊天里问一次（`auto` 模式同样会问），在网站上点击、输入或选择前会再问一次，发送表单前每次都会单独问（会显示表单发往哪里、里面有什么；发送表单没有“在这个聊天里允许”）；它在一个标签页里工作，从不输入密码、银行卡号或一次性验证码，也不会替你登录或发布。直接运行、worker 和保存的任务从不会得到这些工具。
 
 不用 Safari 时，每个聊天和任务都可以用 `web_fetch` 读取公开网页，它默认开启（见[不用浏览器读取网页](browsing.md#read-a-page-without-the-browser)）。
@@ -296,7 +296,7 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 | 回答 | 允许什么 |
 |---|---|
 | **允许一次** | 只有这一次调用。 |
-| **在这个对话里允许这个文件夹** | 在对话结束之前，读取这个文件夹及其下的内容（在任务里：到任务结束）。这个对话发起的任务也使用它允许的文件夹。 |
+| **在这个对话里允许这个文件夹** | 在那个对话里读取这个文件夹及其下的内容，直到你收回它或删除这个对话（在任务里：到任务结束）。你在主对话里允许的文件夹在每个对话里都算；这个对话发起的任务也使用它允许的文件夹。 |
 | **总是允许这个文件夹** | 在你发起的每个对话和任务里都可以读取；这个文件夹记在设置的 **对话和文件夹** 里，你可以在那里移除（`[workspace] extra_folders`）。 |
 | **拒绝** | 什么都不运行；模型会读到一行写明文件夹的话，然后是通常的拒绝说明。 |
 
@@ -334,7 +334,7 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 
 | 主题 | 行为 |
 |---|---|
-| 会话授权 | “Allow for this chat”（终端中为 “Yes, and allow every … call in this session”）只覆盖常规调用。同一工具的高影响或无法判定的调用每次都会询问，对它选择授权只允许这一次调用。终端的 `auto` 模式运行常规调用，其余调用会先询问。在自动模式下，你没要求的网站可以授权给整个对话，它覆盖本对话余下时间里打开这个网站，或在上面点击和选择；输入文字和发送表单从不授权。在自动模式的卡片上点 **Deny** 后，模型读到 `The user chose Don't allow for this step, so it did not run.` 和你的说明，在你发下一条消息之前不会再问同一步。 |
+| 会话授权 | “Allow for this chat”（终端中为 “Yes, and allow every … call in this session”）只覆盖常规调用。它会一直保留到你收回为止，重启后也一样；你在主对话里允许的，在每个对话里都算（见[你允许过的事](terminal.md#what-you-allowed)和[授权](web-console.md#permissions)）。同一工具的高影响或无法判定的调用每次都会询问，对它选择授权只允许这一次调用。终端的 `auto` 模式运行常规调用，其余调用会先询问。在自动模式下，你没要求的网站可以授权给整个对话，它覆盖在那个对话里打开这个网站，或在上面点击和选择；输入文字和发送表单从不授权。在自动模式的卡片上点 **Deny** 后，模型读到 `The user chose Don't allow for this step, so it did not run.` 和你的说明，在你发下一条消息之前不会再问同一步。 |
 | localmelo 本身 | 安装到运行 localmelo 的 Python、或写入 `~/.cache/localmelo` 或应用程序的调用会被直接拒绝，不会询问：`The approval policy denied this call: melo never lets a call change its own runtime, settings or keys. …` |
 | 模型会读到什么 | 拒绝会说明调用的作用，例如 `The user denied this call: not now. melo asked because it installs httpx with pip into .venv. Do not run it again or reach the same result another way unless the user asks. If the task needs it, say in your answer what for and ask the user.` |
 | 任务中被拒绝的网站 | 在对话继续的任务里，`shell_exec` 或 `python_exec` 调用如果写出了你或 Auto 拒绝过的网站上的地址，会在审查之前就被拒绝：`curl` 和 `wget` 的参数（不带 `http://` 的地址也算，但选项的值从不算，例如 `-o out.txt`），不管命令写在哪里（`if curl …`、`( … )`、`$( … )`、`bash -c`、`eval`、跟在 `watch` 这类程序后面），它们经过的代理（`-x`、`https_proxy=`、`git -c http.proxy=`），Python 里的任何字符串（`urllib`、换了导入名的 `requests`、`httpx`、`pycurl`、`httplib2`、变量、写出了主机名的 f-string），`http.client` 和 socket 连接的主机，嵌在另一个地址路径里或编码在查询参数里的地址（阅读器或存档网站），主机名用大写、带端口、百分号编码、国际化的拼写，或者 IP 地址写成一个数字，都一样。没有写出被拒绝网站的调用从不会因此被拒绝。运行时才拼出来的主机名（`$HOST`、`{host}`、要展开的花括号或范围、从文件读出的变量、运行时拼出的命令）无法读取：有网站被拒绝时，这样的调用即使规则认为是常规的，也会由你的模型审查（Auto 下和会话授权下都是），审查时会被告知任务中哪些网站已被拒绝（只有网站名，从不包括原因）。没有网站被拒绝的运行不受影响。melo 无法解码的编码主机名，只要有网站被拒绝过就会被拒绝。 |

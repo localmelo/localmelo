@@ -148,8 +148,8 @@ for counts in [none, busy, chat, chats, runsOnly, nil] {
     subprocess.run([str(binary)], check=True, timeout=5)
 
 
-def run_policy(tmp_path: Path, source: str) -> None:
-    """Compile the policy file with a test main and run it."""
+def run_policy(tmp_path: Path, source: str, *more: str) -> None:
+    """Compile the policy file (and any other of the app's files named) with a test main and run it."""
     main = tmp_path / "main.swift"
     main.write_text("import Foundation\n" + source)
     binary = tmp_path / "test-policy"
@@ -159,6 +159,7 @@ def run_policy(tmp_path: Path, source: str) -> None:
             "swiftc",
             str(ROOT / "macos/LocalMeloApp/GatewayPolicy.swift"),
             str(ROOT / "macos/LocalMeloApp/L10n.swift"),
+            *(str(ROOT / "macos/LocalMeloApp" / name) for name in more),
             str(main),
             "-o",
             str(binary),
@@ -361,6 +362,68 @@ precondition(refused.allSatisfy { !quitRequest($0) })
 precondition(acceptsBridgeMessage(scheme: "http", host: "127.0.0.1", port: 9, isMainFrame: true, gatewayPort: 9))
 precondition(!acceptsBridgeMessage(scheme: "http", host: "127.0.0.1", port: 10, isMainFrame: true, gatewayPort: 9))
 """,
+    )
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
+def test_the_browser_bridge_takes_one_message_from_the_gateway_page_and_the_pop_out_stays_on_the_gateway(
+    tmp_path: Path,
+) -> None:
+    run_policy(
+        tmp_path,
+        r"""
+// The Browser panel asks for its own window with exactly this message.
+precondition(browserRequest(["action": "popOut", "session": "abc"]) == .popOut("abc"))
+precondition(browserRequest(["action": "popOut", "session": "a.b:c-d_9"]) == .popOut("a.b:c-d_9"))
+precondition(browserRequest(["action": "popOut", "session": String(repeating: "a", count: 128)]) != nil)
+let refused: [Any] = [
+    ["action": "close", "session": "abc"], ["action": 1, "session": "abc"], ["session": "abc"], ["action": "popOut"],
+    ["action": "popOut", "session": "abc", "force": true],
+    ["action": "popOut", "session": "a/b"], ["action": "popOut", "session": "a#b"], ["action": "popOut", "session": "a b"],
+    ["action": "popOut", "session": "../x"], ["action": "popOut", "session": "a\u{0}b"], ["action": "popOut", "session": ""],
+    ["action": "popOut", "session": String(repeating: "a", count: 129)],
+    ["action": "popOut", "session": 7], ["action": "popOut", "session": ["abc"]], ["action": "popOut", "session": NSNull()],
+    [String: Any](), "popOut", ["popOut", "abc"], 7,
+]
+precondition(refused.allSatisfy { browserRequest($0) == nil })
+// Only the gateway's own page is heard, as for the other bridges.
+precondition(acceptsBridgeMessage(scheme: "http", host: "127.0.0.1", port: 9, isMainFrame: true, gatewayPort: 9))
+precondition(!acceptsBridgeMessage(scheme: "http", host: "127.0.0.1", port: 9, isMainFrame: false, gatewayPort: 9))
+precondition(!acceptsBridgeMessage(scheme: "http", host: "127.0.0.1", port: 10, isMainFrame: true, gatewayPort: 9))
+
+// The window shows the chat's live page; an id the console would not open, or no port, gives none.
+precondition(browserLiveURL(session: "abc", port: 9)?.absoluteString == "http://127.0.0.1:9/#/live/abc")
+precondition(browserLiveURL(session: "a.b:c-d_9", port: 51234)?.absoluteString == "http://127.0.0.1:51234/#/live/a.b:c-d_9")
+for session in ["", "a/b", "a#b", "a b", "a\u{0}b", "a%2Fb", String(repeating: "a", count: 129)] {
+    precondition(browserLiveURL(session: session, port: 9) == nil, session)
+}
+precondition(browserLiveURL(session: "abc", port: 0) == nil && browserLiveURL(session: "abc", port: -1) == nil)
+precondition(browserLiveURL(session: "abc", port: 65536) == nil)
+// That address is a gateway page, so the pop-out's own navigation rule lets it in.
+precondition(isGatewayPage(browserLiveURL(session: "abc", port: 9)!, port: 9))
+
+// The pop-out's main frame goes to the gateway's page alone, its subframes to the gateway; nothing else.
+func allows(_ text: String, main: Bool = true, port: Int = 9) -> Bool {
+    browserWindowAllows(URL(string: text)!, port: port, isMainFrame: main)
+}
+precondition(allows("http://127.0.0.1:9/") && allows("http://127.0.0.1:9/#/live/abc") && allows("http://127.0.0.1:9/?x=1#/live/abc"))
+for other in ["http://127.0.0.1:10/", "http://localhost:9/", "http://127.0.0.1/", "https://127.0.0.1:9/",
+              "http://example.com/", "http://127.0.0.1.example.com:9/", "http://u:p@127.0.0.1:9/", "ftp://127.0.0.1:9/",
+              "file:///etc/hosts", "about:blank", "javascript:alert(1)", "data:text/html,x",
+              "http://127.0.0.1:9/api/health", "http://127.0.0.1:9/static/app.js"] {
+    precondition(!allows(other), other)
+}
+// A subframe may load the gateway's files and API but nothing from another origin.
+precondition(allows("http://127.0.0.1:9/static/app.js", main: false) && allows("http://127.0.0.1:9/api/health", main: false))
+precondition(allows("http://127.0.0.1:9/", main: false))
+for other in ["http://127.0.0.1:10/", "http://localhost:9/", "https://127.0.0.1:9/", "http://example.com/", "about:blank",
+              "http://u:p@127.0.0.1:9/"] {
+    precondition(!allows(other, main: false), other)
+}
+// Before the gateway has a port, nothing is allowed.
+precondition(!allows("http://127.0.0.1:0/", port: 0) && !allows("http://127.0.0.1:0/", main: false, port: 0))
+""",
+        "BrowserPolicy.swift",
     )
 
 

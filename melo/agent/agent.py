@@ -125,7 +125,9 @@ from localmelo.melo.contracts.approvals import (
     BLOCKED_EARLIER,
     SELF_ASKING_TOOLS,
     STOPPED_NOTE,
+    TAKEOVER,
     TOOL_ASK,
+    WINDOW_READ,
     ApprovalDecision,
     ApprovalPolicy,
     ApprovalRequest,
@@ -138,6 +140,7 @@ from localmelo.melo.contracts.approvals import (
     find_auto,
     find_earlier,
     find_folder_asker,
+    holds_grant,
     question_key,
     review_mode,
     site_key,
@@ -2159,7 +2162,15 @@ _SITE_DOUBT = {
     "point": "Clicks at a point on {site}.",
     "submit": "Sends a form from {site}, which needs its own review.",
     "desktop-act": "Presses a button in another app's window that a browser act opened.",
+    "dialog": "Answers OK to a question the page on {site} asks.",
 }
+# A page asked to open another app (an address of the app's kind): only a
+# person's answer lets melo open it, in auto mode too.
+_HANDOFF = "Opens {app}, an app on this Mac, because a page on {site} asked for it."
+# What a card for another app's window says in Auto (only the person sees it).
+_WINDOW_WORDS = "Another app put up a window right after a step; only you decide whether melo sees it."
+# What the card that asks the person to take over a page says in Auto (only they can do it).
+_TAKEOVER_WORDS = "melo needs you on this page (a sign-in or a check only you can do); only you can take it over."
 _TYPING_DOUBT = (
     "Types text on {site}, which needs its own review: the text is the model's own."
 )
@@ -2171,7 +2182,7 @@ _UNKNOWN_TARGET = "Clicks on {site} where melo cannot tell what it clicks."
 # on a page, a click at a point, a press in an app's window. Only these can
 # turn a model's ``credentials`` into no category; a read (its address can hold
 # a key), a search, typing, a form sent, or any access not listed never does.
-_VALUE_FREE_ACCESS: Final = frozenset({"act", "point", "desktop-act"})
+_VALUE_FREE_ACCESS: Final = frozenset({"act", "point", "desktop-act", "dialog"})
 
 
 def _site_doubt(access: str, site: str, preview: str) -> str:
@@ -2231,6 +2242,10 @@ class _ToolAsk:
         """Whether the user's recent messages name *host* itself (``www.`` aside)."""
         return self._reviewer is not None and self._reviewer.names_host(host)
 
+    def granted(self, name: str) -> bool:
+        """Whether the run's chat holds a grant of the question *name* (``window-read:<app>``)."""
+        return holds_grant(self._policy, name)
+
     def refused_earlier(
         self, tool_name: str, arguments: Mapping[str, Any], preview: str
     ) -> ApprovalDecision | None:
@@ -2255,9 +2270,51 @@ class _ToolAsk:
             tier="network",
         )
 
+    async def _window(
+        self,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+        preview: str,
+        words: str = _WINDOW_WORDS,
+    ) -> ApprovalDecision:
+        """The question whether melo may see another app's window: only the person answers it.
+
+        Nothing about the window (its app, its title) goes to any model: not
+        to the review model, which never sees this question, and not into a
+        blocked step's record or a later review's prompt. In Auto the policy
+        is handed a review that only a card can settle (the one category
+        ``opaque``, which words and the model never allow), so it asks the
+        person like a card-only kind, or denies when nobody is watching. An
+        answer of "Allow <App> in this chat" is the policy's grant of this
+        name (``window-read:<bundle id>``).
+
+        The card that asks the person to take over a page of melo's browser
+        (``takeover:<site>``, *words* its own) goes the same way: only the person
+        can sign in or pass a check, so no review decides it.
+        """
+        request = self._request(tool_name, arguments, preview)
+        if review_mode(self._policy, request) == "auto":
+            if self._run.reviews.stop:
+                return ApprovalDecision(False, STOPPED_NOTE, origin="auto")
+            request = dataclasses.replace(
+                request,
+                review=ActionReview("high", ("opaque",), (words,)),
+            )
+        decided: object = await self._policy.decide(request)
+        if not isinstance(decided, ApprovalDecision):
+            raise TypeError(
+                f"the approval policy returned {type(decided).__name__}, "
+                "not an ApprovalDecision"
+            )
+        return decided
+
     async def __call__(
         self, tool_name: str, arguments: Mapping[str, Any], preview: str
     ) -> ApprovalDecision:
+        if tool_name.startswith(WINDOW_READ):
+            return await self._window(tool_name, arguments, preview)
+        if tool_name.startswith(TAKEOVER):
+            return await self._window(tool_name, arguments, preview, _TAKEOVER_WORDS)
         request = self._request(tool_name, arguments, preview)
         earlier = self._earlier(request)
         if earlier is not None:
@@ -2298,6 +2355,12 @@ class _ToolAsk:
                 # on the goal, so the person is asked (#465).
                 review = ActionReview(
                     "high", ("opaque",), (_UNKNOWN_TARGET.format(site=site),)
+                )
+            elif access == "handoff":
+                # Another app comes to the front: the person's choice, always.
+                app = " ".join(str(arguments.get("app") or "an app").split())[:80]
+                review = ActionReview(
+                    "high", ("open_app",), (_HANDOFF.format(app=app, site=site),)
                 )
             elif reading and reviewer.names_host(site):
                 review = ActionReview(
@@ -2824,6 +2887,11 @@ class Agent:
             self._recall_tool_registered = True
 
     # ── Workspace, tools and conversation ──
+
+    @property
+    def tool_providers(self) -> tuple[BaseToolProvider, ...]:
+        """The tool providers this Agent was made with (read only)."""
+        return self._tool_providers
 
     @property
     def workspace_root(self) -> str | None:

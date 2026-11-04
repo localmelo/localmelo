@@ -17,6 +17,7 @@ from localmelo.melo.contracts.approvals import (
     AutoPolicy,
     Chosen,
     DenyAllPolicy,
+    grant_offered,
 )
 from localmelo.melo.contracts.review import ActionReview
 from localmelo.melo.schema import ToolTier
@@ -29,6 +30,7 @@ from localmelo.support.cli.approvals import (
     TerminalApprover,
     approval_words,
     grant_listed,
+    grant_words,
     panel_text,
     session_option,
     session_warning,
@@ -270,6 +272,107 @@ def test_a_press_in_another_apps_window_names_the_app_and_asks_every_time() -> N
     assert "never types into other apps" in words and "asks every time" in words
 
 
+def test_a_page_that_asks_for_an_app_shows_the_app_and_the_address() -> None:
+    handing = panel_text(
+        _request(
+            "handoff:chat",
+            site="example.com",
+            access="handoff",
+            app="Chat",
+            scheme="chat",
+            url="chat://login?x=1",
+            browser="chrome",
+        ),
+        width=80,
+    )
+    assert handing.title == "Open Chat?"
+    assert handing.header == "example.com · a page asks for an app"
+    words = " ".join(" ".join(line for _, line in handing.body).split())
+    assert "A page on example.com wants to open Chat." in words
+    assert "chat://login?x=1" in words and "Chat comes to the front" in words
+    assert "A kept answer lets pages open such addresses again." in words
+    request = _request("handoff:chat", app="Chat", access="handoff")
+    assert session_option(request) == (
+        "Yes, and let pages open Chat for the rest of this chat"
+    )
+    assert session_option(request, everywhere=True) == (
+        "Yes, and let pages open Chat in every chat"
+    )
+    assert grant_words("handoff:chat") == "opening chat: addresses in their app"
+
+
+def test_a_question_the_page_asks_shows_its_words_and_asks_every_time() -> None:
+    asking = panel_text(
+        _request(
+            "browser-dialog:https://example.com",
+            site="example.com",
+            access="dialog",
+            how="confirm",
+            text="Delete the draft?",
+        ),
+        width=80,
+    )
+    assert asking.title == "Answer OK on a website?"
+    words = " ".join(" ".join(line for _, line in asking.body).split())
+    assert "Delete the draft?" in words and "Asked every time" in words
+
+
+def test_chrome_in_the_background_is_named_on_the_cards() -> None:
+    opening = panel_text(
+        _request(
+            "browser:https://example.com",
+            site="example.com",
+            access="read",
+            browser="chrome",
+        ),
+        width=80,
+    )
+    words = " ".join(" ".join(line for _, line in opening.body).split())
+    assert "open example.com in Chrome and read it" in words
+    assert "nowindowcomestothefront" in "".join(words.split())
+    clicking = panel_text(
+        _request(
+            "browser-act:https://example.com",
+            site="example.com",
+            access="act",
+            browser="chrome",
+        ),
+        width=80,
+    )
+    words = " ".join(" ".join(line for _, line in clicking.body).split())
+    assert "inmelo'sbrowser,whichrunsinthebackground" in "".join(words.split())
+
+
+def test_a_window_another_app_opened_is_asked_with_its_title_and_an_allow_for_the_chat() -> (
+    None
+):
+    asked = _request(
+        "window-read:com.example.chat",
+        app="Chat",
+        window="Sign in to example.com",
+        bundle="com.example.chat",
+        access="window-read",
+    )
+    panel = panel_text(asked, width=80)
+    assert panel.title == "Let melo see another app's window?"
+    assert panel.header == "Chat · another app's window"
+    words = " ".join(" ".join(line for _, line in panel.body).split())
+    assert "Chat opened a window right after melo's click: let melo see it?" in words
+    assert "The window: “Sign in to example.com”." in words
+    assert session_option(asked) == "Yes, and allow Chat in this chat"
+    assert grant_offered(asked), "the chat-wide answer is offered"
+    # Auto stopped it without deciding it: the panel keeps its own question and the chat-wide answer.
+    in_auto = dataclasses.replace(
+        asked,
+        review=ActionReview(
+            "high", ("opaque",), ("Another app put up a window right after a step.",)
+        ),
+    )
+    again = panel_text(in_auto, width=80)
+    assert again.title == "Let melo see another app's window?"
+    assert grant_offered(in_auto)
+
+
 def test_a_typing_panel_shows_all_the_text_and_says_the_page_may_send_it() -> None:
     text = "hello there\n" + "a long line of words " * 40 + "THE END"
     typing = panel_text(
@@ -299,6 +402,25 @@ def test_the_chat_wide_answer_names_what_it_allows() -> None:
     )
     assert "clicking and choosing on example.com" in option(
         "browser-act:https://example.com"
+    )
+
+
+def test_in_the_main_chat_the_answer_says_it_counts_in_every_chat() -> None:
+    def option(name: str, **arguments: Any) -> str:
+        return session_option(_request(name, **arguments), everywhere=True)
+
+    assert option("browser:https://example.com", site="example.com") == (
+        "Yes, and allow example.com in every chat"
+    )
+    assert option("browser-act:https://example.com", site="example.com") == (
+        "Yes, and allow clicking and choosing on example.com in every chat"
+    )
+    assert option("window-read:com.example.chat", app="Chat") == (
+        "Yes, and allow Chat everywhere"
+    )
+    assert option("shell_exec") == "Yes, and allow every shell_exec call in every chat"
+    assert "for the rest of this chat" in session_option(
+        _request("browser:https://example.com", site="example.com")
     )
 
 

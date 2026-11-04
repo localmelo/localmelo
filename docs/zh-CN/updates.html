@@ -64,7 +64,7 @@
           <div class="board-col">
             <h3>接下来 <small>5</small></h3>
             <ul>
-              <li class="board-card"><strong>浏览器里的计算机操作</strong><span>melo 在你能看到的窗口里操作网页，重要的操作先问你。</span></li>
+              <li class="board-card"><strong>浏览器的下一步</strong><span>让 Chrome 成为默认浏览器、为拒绝无窗口浏览器的网站提供“在窗口中打开”、一个备用浏览器，以及清除 melo 的 Chrome 登录信息的按钮。</span></li>
               <li class="board-card"><strong>在 melo 里安装模型服务器</strong><span>什么都没装时，确认一次就能得到第一个答案。</span></li>
               <li class="board-card"><strong>其他智能体把工作交给 melo</strong><span>任务 API 上的 worker，以及供编程智能体使用的 MCP 服务器。</span></li>
               <li class="board-card"><strong>共享同一项目的 worker</strong><span>并行的 worker 共用一段已缓存的开头；每个任务彼此独立。</span></li>
@@ -83,7 +83,7 @@
           </div>
         </div>
         <div class="board-done">
-          <h3>已完成 <small>17</small></h3>
+          <h3>已完成 <small>21</small></h3>
           <ul>
             <li class="board-card"><strong>主对话和旁支对话</strong><span>一个对话：自己回答，或按优先级把更大的工作交给任务；终端打开的是同一个对话。</span><span class="chip done">已完成</span></li>
             <li class="board-card"><strong>看得见的记忆</strong><span>跨对话的笔记，新的值取代旧的；在“记忆”标签页里编辑或删除。</span><span class="chip done">已完成</span></li>
@@ -102,6 +102,10 @@
             <li class="board-card"><strong>主对话开始任务</strong><span>用平常的话提出工作，主对话就开始任务；任务失败时，它跟进一次。</span><span class="chip done">已完成</span></li>
             <li class="board-card"><strong>Melo 会动了</strong><span>Melo 会醒来、在笔记本电脑前打字、歪着头、举起爪子、休息和玩耍，在控制台和你的桌面上都是。</span><span class="chip done">已完成</span></li>
             <li class="board-card"><strong>换上你自己的 Melo 美术</strong><span>一条命令检查一个文件夹或 zip 里的美术，并替换 Melo 的每一张图片。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>melo 以你的名义办事</strong><span>一句“我授权你……”就是放行，melo 以你的名义开始做；登录是你来完成的一步，表单按你告诉 melo 的内容填写。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>在后台浏览</strong><span>melo 在没有窗口的 Chrome 里浏览，你在控制台和 App 里实时观看，需要登录时接管。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>其他应用的窗口先问你</strong><span>其他应用在 melo 点击之后打开的窗口，会先问你，之后它的任何信息才会交给模型。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>你允许过的事，一张清单</strong><span>设置 → 授权列出你允许过的每一项，分“所有对话”和“单个对话”，每项可收回；主对话里允许的，到处都算。</span><span class="chip done">已完成</span></li>
           </ul>
         </div>
         <p class="more-link"><a href="https://github.com/localmelo/localmelo/issues/2">GitHub 上的完整计划</a>；尚未实现的记忆设计见<a href="./memory-design.html">记忆设计</a>。</p>
@@ -110,6 +114,49 @@
       <section class="section" id="updates">
         <h2>更新</h2>
         <p class="more-link">每一项变化的细节见<a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>。</p>
+        <section class="day" id="day-2026-11-04">
+          <h3><time datetime="2026-11-04">11 月 4 日</time></h3>
+          <div class="day-entry" id="u-2026-11-04-acts-for-you">
+            <h4>melo 以你的名义替你办事</h4>
+            <ul class="day-points">
+              <li>说 <code class="wrap">我授权你去投简历</code>：这就是放行，melo 以你的名义开始做，而不是丢回一串链接。</li>
+              <li>登录是一步，而不是停下：你自己输入密码，之后 melo 接着做。</li>
+              <li>表单按你告诉 melo 的内容填写。</li>
+              <li>会伤害别人的事仍然会被拒绝。</li>
+            </ul>
+          </div>
+          <div class="day-entry" id="u-2026-11-04-other-app-windows">
+            <h4>其他应用的窗口先问你</h4>
+            <ul class="day-points">
+              <li>网页可能让另一个应用打开窗口，比如聊天应用的登录窗口。窗口出现在 melo 的点击之后，哪怕晚了一会儿，melo 也会注意到。</li>
+              <li>它先问你：允许一次、允许这个应用，或不允许。</li>
+              <li>在你允许之前，这个窗口的任何信息都不会交给模型，连应用的名字也不会。</li>
+            </ul>
+            <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/browsing.md#windows-from-other-apps">指南里的其他应用窗口</a></p>
+          </div>
+          <div class="day-entry" id="u-2026-11-04-permissions">
+            <h4>你允许过的事，一张清单</h4>
+            <ul class="day-points">
+              <li>设置 → 授权列出你允许过的每一项，分“所有对话”和“单个对话”。</li>
+              <li>每一行写明是什么、哪个对话、谁决定的和时间，并有<strong>收回</strong>；立即生效，正在运行的对话也一样。</li>
+              <li>在主对话里允许的，在每个对话里都算；在旁支对话里允许的，只在那里算。</li>
+              <li>你允许的事在 melo 重启后仍然有效。终端里的 <code>/grants</code> 显示同一份清单。</li>
+            </ul>
+            <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#permissions">指南里的授权</a></p>
+          </div>
+          <div class="day-entry" id="u-2026-11-04-background-browser">
+            <h4>melo 在后台浏览</h4>
+            <figure class="shot"><a href="../assets/img/browser-live-zh.webp"><img src="../assets/img/browser-live-zh.webp" alt="控制台里，melo 正在后台读一个商店页面：对话旁边的浏览器面板实时显示这个页面，旁边有“接管”按钮。" width="1280" height="900" loading="lazy"></a></figure>
+            <ul class="day-points">
+              <li>需要你自己开启：melo 可以在没有窗口的 Chrome 里浏览，不会再把你带到另一个桌面。</li>
+              <li>控制台和 App 里的实时画面显示 melo 工作时的页面。</li>
+              <li>需要登录时，接管网页，自己输入密码，再交还。</li>
+              <li>在设置 → 对话和文件夹 → 浏览器里开启，或输入 <code>/browser chrome</code>。</li>
+            </ul>
+            <!-- usage:browser-chrome --><figure class="usage" aria-label="在后台浏览" data-copy="/browser chrome"><div class="usage-bar"><span class="usage-title">在后台浏览</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">›</span> <span class="c">/browser</span> <span class="a">chrome</span></span></code></pre><figcaption>在终端对话或控制台里输入。/browser on 用你之前选的浏览器，没选过时用 Safari；/browser off 关闭浏览。</figcaption></figure><!-- /usage -->
+            <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/browsing.md#chrome-in-the-background">指南里的后台 Chrome</a></p>
+          </div>
+        </section>
         <section class="day" id="day-2026-11-01">
           <h3><time datetime="2026-11-01">11 月 1 日</time></h3>
           <div class="day-entry" id="u-2026-11-01-melo-moves">

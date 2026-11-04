@@ -39,6 +39,7 @@ CONSOLE = ROOT / "support/gateway/console"
 USAGE = ROOT / "support/usage_snapshot.py"
 DISPLAY = ROOT / "support/sessions/display.py"
 HOSTED_CHECK = ROOT / "support/hosted_check.py"
+DESKTOP = ROOT / "support/browser/desktop.py"
 # The terminal's main chat, which writes the catalog's English (``t_in("en", …)``).
 TERMINAL = ROOT / "support/cli/main_chat.py"
 APP = ROOT / "macos/LocalMeloApp"
@@ -48,6 +49,7 @@ _PARAM = re.compile(r"\{(\w+)\}")
 # The files whose words come from the catalog: a new English literal in one fails the scan.
 CONVERTED_JS = (
     "blocked.mjs",
+    "browser-live.mjs",
     "composer-media.mjs",
     "drawer.mjs",
     "endings.mjs",
@@ -59,6 +61,7 @@ CONVERTED_JS = (
     "memory.mjs",
     "mode.mjs",
     "panel.mjs",
+    "permissions-tab.mjs",
     "pictures.mjs",
     "running.mjs",
     "scheduled-tab.mjs",
@@ -95,6 +98,18 @@ JS_ENGLISH = {
     "Escape",
     "Enter",
     "Tab",
+    # The browser's own names of keys (`KeyboardEvent.key`), which the Browser panel passes on.
+    "Backspace",
+    "Delete",
+    "Home",
+    "End",
+    "Shift",
+    "Control",
+    "Alt",
+    "Meta",
+    "Unidentified",
+    "Dead",
+    "Process",
     "Reservation",
     "melo did not finish an answer",
     "tool call written as text",
@@ -266,6 +281,7 @@ def named_keys() -> tuple[set[str], set[str], set[str]]:
         USAGE,
         DISPLAY,
         TERMINAL,
+        DESKTOP,
     ]:
         text = path.read_text("utf-8")
         found |= set(_PY_KEY.findall(text)) | set(_WORDS_KEY.findall(text))

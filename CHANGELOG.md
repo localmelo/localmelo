@@ -9,6 +9,78 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Chrome in the background. `[browser] driver = "chrome"` (Settings → Chats and folders → **Browser**: Chrome,
+  Safari or Off; `/browser chrome` and `/browser safari` in the terminal and the console; browsing stays off
+  until you turn it on, and `/browser on` uses the browser chosen before, or Safari's windows when none was)
+  browses in the Google Chrome installed on this Mac with no window: it never comes to the front and never
+  switches the desktop. melo drives it over a private pipe, never a network port, on a profile of its own in
+  `~/.cache/localmelo/browser/chrome` (readable only by you; Chrome keeps off the Keychain there, so its cookies
+  are protected by the folder's permissions and FileVault), never your own Chrome profile. Cookies a site keeps
+  for days stay from one chat to the next; session cookies go when Chrome stops. A site sees an ordinary Chrome
+  (no headless user agent, no automation flag), downloads are refused, and Chrome still makes a few connections of
+  its own to Google. The same twelve tools, refs, questions and checks apply; clicks and typing are Chrome's own
+  trusted input at the middle of the element melo checked, a choice in a list is the page script's, and each
+  chat sees only its own tabs and the tabs they opened. A page that asks to open another app (a chat app's
+  `chat://` sign-in link) is never followed by Chrome: melo names the app this Mac would use and asks "Open
+  Chat?" with the address (`handoff:<scheme>`; *Allow for this chat* is a grant of that kind of address, in the
+  main chat *Allow in every chat*, listed and revoked with the others; in Auto always on the card, under a new
+  card-only kind, "Open another app?", and never by a grant), then opens it itself on a yes and watches for the app's window like
+  after any click. A question box the page puts up during melo's step ("Delete the draft?") asks you every time
+  (`browser-dialog:<site>`, Cancel otherwise); a message is closed with OK, a box that asks for text gets Cancel,
+  and *what changed* lists each one. Without Chrome the choice says "Install Google Chrome to browse in the
+  background" and nothing changes. To sign in, take it over (below). When melo opens the app a page asked for, that
+  app's window is told on the step, and a window of any other app still asks you first. Enter in a field with an approved send now lets the form's own send button take the browser's
+  click, which melo's guard stopped before. `PUT /api/settings` takes `browser_driver`; the settings carry
+  `browser_driver` and `chrome_installed`.
+- Watch melo's Chrome. While melo browses in Chrome in the background, the web console and the app show a Browser
+  panel beside the chat: the page's title and address, a live picture, a ring and "melo is browsing" while a step
+  runs, and calm states for no page open, the first picture on its way, a picture that stopped updating, and why it
+  ended. It opens by itself when melo starts browsing, follows melo to another tab, hides with **Hide browser** (the
+  **Browser** button in the header brings it back), shares the width with the panel beside the chat on a narrower
+  window and opens as a sheet under 900 pixels. In the app, **Pop out** opens it alone in its own window. **Take over** makes
+  the page yours (below). The pictures stay in memory, are never saved, and are sent only
+  while someone watches; a page that does not change costs almost nothing and a moving one is held to 15 pictures a
+  second (`[browser] live`, on by default, and `live_fps`, 1 to 60). `GET /api/sessions/{id}/browser` and
+  `WS /api/sessions/{id}/browser/live` are the routes (#488); the gateway extra now installs `websockets`.
+- Take over melo's Chrome. **Take over** in the Browser panel (the console and the app's pop-out) makes the page
+  yours: "You are in control", a green ring round the picture, and your clicks, drags, wheel, keys, input method
+  (Chinese and others) and pastes (plain text, up to 1,000 characters) go to the page while melo waits. When melo
+  reaches a sign-in, a password, code or card field, a QR code or a check that you are human, a card asks "melo
+  needs you to sign in on example.com" with **Take over** and **Not now**; only you answer it, in Ask and in Auto,
+  and it is never kept for the chat. While you have the page, melo's steps on it wait (up to 45 seconds at a time)
+  and tell the model you are using it, and the page's boxes are yours to answer in the panel. **Give back to melo**
+  returns it; melo reads the page again before it acts, and the step says how long you had it. Leave the panel and
+  the page goes back to melo after 2 minutes. What you type goes from the panel to melo's Chrome only: never to a
+  log, the chat's record, melo's memory or the model. Control-Esc moves out of the page (#488).
+- Permissions: everything you allow "for this chat" is one kind of record, a grant, and it is kept. A grant
+  is a tool (shell commands, Python code, file writes), a site melo may open and read or click and choose on,
+  a folder outside the workspace it may read, or another app's window. Grants live in one table (`grants`,
+  component version 1) of the gateway's `~/.cache/localmelo/gateway/sessions.db` and survive a restart of the
+  gateway; the terminal's own chat (`melo -X cli.chat=local`) keeps its own in
+  `~/.cache/localmelo/cli/sessions.db`. What you allow in the main chat counts everywhere: in every side chat,
+  in the tasks you start and in the terminal (the terminal's own chat reads the main chat's grants too). A side
+  chat's grant, the terminal's own chat's and a task's **Allow for this task** hold in that chat or task only,
+  and what Auto keeps by itself (a site it let the chat read) holds in that chat only, the main chat included:
+  only your own word counts everywhere. A task still uses its chat's grants, and so the main chat's, after melo
+  reviews the files changed since that chat began. Never kept, never listed and asked every time: Allow once,
+  typing on a page, sending a form, a click on a password, code or card field, a consent control or a box from
+  another site, a press in another app's window, paying, changing an account's settings and every high-impact
+  step. Settings → Permissions (zh-Hans 授权) lists them in two groups, Everywhere and Per chat, each row with
+  what, the chat, who decided (You or Auto), when and **Revoke**, which counts at once in chats that are
+  running too. `/grants` in the terminal and in the console prints the same list numbered (Everywhere first,
+  newest first; then each chat, the one with the newest grant first) and `/grants revoke N` takes the N-th back;
+  in the terminal's own chat it lists that chat's grants and the main chat's, and a main-chat grant is taken
+  back in the main chat or in the console. New routes `GET /api/grants` (`id`, `scope`, `session_id`,
+  `session_kind`, `chat_title`, `kind`, `key`, `label`, `action`, `target`, `by`, `granted_at`) and
+  `DELETE /api/grants/{id}` (204; 404 `not_found` for an unknown or already revoked id); `GET /api/commands`
+  lists `grants` with page action `grants`. A tool can ask whether the run's chat holds a grant with
+  `TOOL_ASK.get().granted(name)` (`holds_grant(policy, name)` in `melo.contracts.approvals`); it is never true for
+  a question that asks every time. The table has the columns `id, session_id, session_kind, scope, kind, key,
+  label, target, decided_by, granted_at, request_id, revoked_at`; a revoke sets `revoked_at`, revoked rows are
+  deleted after the store's thinking retention (30 days by default), a session's rows go with it
+  (`ON DELETE CASCADE`), and a row that breaks a rule (a `global` row not from you in the main chat, an Auto row
+  that is more than a site read, a key that must ask every time, a folder that is never offered) is ignored when
+  read, so an edited file cannot widen access. No new config keys.
 - Pictures and files in the web console and the app, and words added while melo works. Drop a picture
   or a text file on the page, paste it with Cmd-V or pick it with the paperclip (`/attach` opens the same
   picker; `/attachments` and `/detach N` list and remove). PNG, JPEG, GIF (first frame), WebP and HEIC
@@ -52,7 +124,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   against a listing of that app's windows from before the step; otherwise it is named, never read), and melo
   never types into other apps. Settings → Chats and
   folders → **Other apps' windows** (shown while browsing is on; `[browser] app_windows`, on by default)
-  turns it off, and says when the helper is missing.
+  turns it off, and says under the switch whether the helper is installed and has Accessibility.
+  A window that comes a moment after the step is still seen: after a click, a click on a point or a send,
+  melo tells a window that appeared (once; the app the page asked for is read right away, and a window of
+  any other app asks you first, "Chat opened a window right after melo's click: let melo see it?", with
+  Allow once, Allow Chat in this chat and Don't allow; Auto never answers it, and nothing about a window you
+  do not allow, not even the app's name, goes to the model) in that step and, whenever it comes, in the next
+  one: for those 15 seconds melo also looks at the
+  screen about once a second in the background, so a window that comes while the model is still working out
+  its next step is noticed when it appears, not when the step runs. After a click, a click on a point or a send
+  that changed nothing on the page it also watches for up to 3 seconds in all, slow calls included, and
+  stops as soon as a window appears or the tab goes to another address or opens another tab. Only such a
+  step opens those 15 seconds, counted from the moment the act is sent (after any approval it waited on);
+  reading, waiting, pictures and searching never do or extend them, so a window you open later, or one
+  that was already there when the act was sent, is never named, read or pressed. A chat is told
+  once when the helper is installed but cannot run: it needs Accessibility (System Settings → Privacy &
+  Security → Accessibility), which is Cua Driver's own permission, not melo's. `GET /api/health` carries
+  `desktop_helper` (`missing`, `installed`, `granted`, `no_grant` or `failed`; `?helper=check` looks once).
 
 - Web search, one switch for every chat and task (#468). `[web] search` (off by default; Settings →
   Chats and folders → **Web search**, `melo config set web.search true`, `-X web.search=true`) gives the
@@ -786,6 +874,32 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- "Allow for this chat" is no longer memory-only. `GET /api/sessions/{id}` `grants` and `granted_at` list what
+  holds in the chat whether it is open or not, the main chat's grants included for a side chat.
+  `DELETE /api/sessions/{id}/grants/{name}` takes back the chat's own grant and a main-chat grant of that name
+  (everywhere), and answers 404 when none holds there; `DELETE /api/sessions/{id}/grants` takes back the chat's own
+  grants (in the main chat, every Everywhere grant); `DELETE /api/sessions/{id}/folders?path=` works for a chat
+  that is not open too. `/approvals forget NAME` in a side chat on a grant that came from the main chat takes it
+  back everywhere, and `/approvals forget` with no name takes back only that chat's own grants (in the main chat
+  every Everywhere grant). Deleting a chat deletes its grants, and moving a side chat to another folder takes back
+  its own (the main chat's still hold). In the terminal's own chat `/new` and `/clear` start a chat with none of the
+  last chat's grants (the main chat's still hold), and resuming a chat brings its grants back; a resume used to
+  clear them. The exact steps a chat's tasks may reuse ("Used your approval from 2:02 PM", **Revoke**, **Steps you
+  approved here**) still live in memory only: a gateway restart or deleting the chat forgets them.
+- The main chat's grants are plain about counting everywhere and stop at once. The main chat's own approval card
+  says **Allow in every chat** (**Allow this folder in every chat**, **Allow Chat everywhere**) and the terminal's
+  list `Yes, and allow … in every chat`, with a line that it counts in every chat, the tasks you start and the
+  terminal until revoked; a side chat's and a task's keep **this chat** and **this task**. The terminal's own chat
+  reads the main chat's grants again at every check, so one taken back in the main chat stops in the middle of a
+  running turn; an unreadable gateway file, or one with a newer grants table, gives it none. A side chat's menu marks
+  a grant from the main chat **From the main chat**: removing it takes it away everywhere, and
+  `DELETE /api/sessions/{id}/grants/{name}` now answers 200 `{"revoked": [...], "everywhere": true|false}`;
+  clearing a side chat's grants answers `{"revoked": N, "still_everywhere": M}` and says the main chat's still hold.
+  `DELETE /api/sessions/{id}/folders?path=` answers the same way (a main-chat folder goes everywhere, and the
+  drawer says so); a task's window card says **Allow Chat for this task**. `GET /api/sessions/{id}` adds
+  `grants_everywhere`. A revoke the store cannot save is 503 on every route. In the
+  terminal's own chat `/approvals forget` says when a grant is the main chat's and where to take it back.
+- melo acts for you, in your name. Applying with your resume, signing in, filling in and submitting a form, sending a message as you and booking are done when you ask or authorize them: the model no longer refuses a step because it speaks in your name or cannot be undone, and it does not hand back a list of links or leave the last click to you. The approval cards (Ask) and Auto's review decide which steps you confirm, never the model, and only what would harm other people is declined. Every chat's and every task's instructions say so, the main chat and the side chats add a one-line reminder after your message, and a recalled reply in which melo refused or said a step was blocked is no precedent. The main chat is told that a request to do something online is work (the browser, or a task for the many-step part), not advice, and a go-ahead such as `I authorize you to apply` or `我授权你去投简历` starts that work like any other request.
 - Chats with memory answer faster on long turns: each step's request now extends the one before
   it, so a local model server reuses its cache and prefills only the new step. The long-term recall
   a chat puts right after the system prompt is read at the turn's first step and kept, instead of
@@ -1349,6 +1463,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Words added to a chat while melo works are now remembered with that turn; before, only the first message of the turn was. Part of #428.
+- melo no longer recalls its own old replies about a blocked step as if they were still the rule; only what you said in that turn is remembered. Part of #428.
 - `browser_find` reads the page again before it searches, so its refs are always of the page as it is now;
   before, a page reloaded since the last reading gave refs that only failed with "The page was reloaded or
   replaced since it was read". A ref from before a reload at the same address is used when the new page has
@@ -2003,6 +2119,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Docs
 
+- The website shows the background browser and the permissions list, in English and Chinese. The Updates page has a November 4 entry (melo acts for you in your name, another app's window asks first, one list of what you allowed, melo browses in the background) with a terminal block for `/browser chrome` (`browser-chrome` in `scripts/usage_blocks.toml`); the roadmap board, on the home page and the Updates page, moves those four to Done and replaces "Computer use in the browser" in Next with the later browser stage (Chrome as the default, an "open in a window" choice, a fallback browser, a button that clears melo's Chrome sign-ins); the home page's "Read the web" card becomes "Browse the web", and its approvals card and Auto list name Settings → Permissions. The Architecture page has a fifth diagram, "The background browser" (`#dia-browser`: the agent, the gateway, headless Chrome over a private pipe, and the console and app with the live view and Take over), a Grants box beside Approvals in "How work flows", cards for Grants and the Background browser, and new Browsing, Tools and approvals and Computer use rows in the status table. `docs/guides/browsing.md` (and its Chinese copy) said "Safari is the default for now": it now says browsing is off until you turn it on, and `/browser on` uses the browser chosen before, or Safari if none was.
 - The architecture page drops its last planned mark, in English and Chinese. A task seeing your own words and the memory items its chat picks is built (#463), so the channel line and the brief line in the two diagrams, the notes under them and the status table row read as built text, and the diagrams' legends lose the planned entry; the page's lead points to the status table for what is not built yet.
 - The architecture page shows what is built, in English and Chinese. A side chat starting tasks, a finished side chat's summary for the main chat, a worker asking its chat for help and a task's context pack of notes about you, your preferences and this project lose their planned mark, and the status table marks them done; the one part still planned is a task seeing your own words and the memory items its chat picks (#463). In "Inside a worker" the brief and the channel are one part, "From its chat", next to the chat box, because both come from the owning chat. The Workers, Chats and Around-the-agent notes say the same.
 - The architecture page has two new diagrams, in English and Chinese. "How work flows" shows the main chat and a group of side chats, scheduled chores, the task scheduler, one group of workers (told apart by the chat each works for), the channel between a chat and its workers, and approvals; "Inside a worker" is the agent's core without long-term memory, with its brief, step budget and finishing note, scheduler level and slot, channel to its chat, and approvals with the Auto sandbox. Parts not built yet (side chats starting tasks, a worker asking its chat for help, the context pack, a side chat's summary for the main chat) are tagged planned and drawn dotted; the status table lists them, the Workers card says a worker keeps no long-term memory of its own, and the "Around the agent" note no longer says workers recall memory. The two existing diagrams are unchanged ([#371]).

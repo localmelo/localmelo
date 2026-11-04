@@ -279,6 +279,18 @@
       "action": "approvals"
     },
     {
+      "name": "grants",
+      "aliases": [],
+      "args": "[revoke N]",
+      "help": {
+        "en": "List what you allowed, or revoke one",
+        "zh-Hans": "列出你允许过的事，或收回一项"
+      },
+      "during_turn": true,
+      "keys": "",
+      "action": "grants"
+    },
+    {
       "name": "progress",
       "aliases": [],
       "args": "",
@@ -293,10 +305,10 @@
     {
       "name": "browser",
       "aliases": [],
-      "args": "[on|off]",
+      "args": "[on|off|chrome|safari]",
       "help": {
-        "en": "Show or switch web browsing in Safari",
-        "zh-Hans": "查看或切换在 Safari 中浏览网页"
+        "en": "Show or switch web browsing (Chrome or Safari)",
+        "zh-Hans": "查看或切换网页浏览（Chrome 或 Safari）"
       },
       "during_turn": "show",
       "keys": "",

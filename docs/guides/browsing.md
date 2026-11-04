@@ -1,13 +1,14 @@
 # Browsing with melo
 
-Let melo read web pages in Safari, and click, type and choose on them, on a Mac, from the terminal or the web console. Read the safety section before you turn it on; the settings are in the [configuration reference](../reference/configuration.md).
+Let melo read web pages, and click, type and choose on them, on a Mac, from the terminal or the web console: in Chrome in the background, or in Safari's automation windows. Read the safety section before you turn it on; the settings are in the [configuration reference](../reference/configuration.md).
 
 ![A terminal chat in which melo opens a web page and says what it contains.](../assets/img/browser.webp)
 
-- Browsing is **off by default**.
-- melo opens pages in Safari's *automation windows*, follows links and reads what it finds. It works in one tab, like a person would.
+- Browsing is **off until you turn it on**.
+- Two browsers: **Chrome in the background** (no window, never comes to the front; see [Chrome in the background](#chrome-in-the-background)) or **Safari's automation windows**, which come to the front. `/browser on` uses the browser you chose before, or Safari if you never chose one.
+- melo opens pages, follows links and reads what it finds. It works in one tab, like a person would.
 - It can click a button or link, type into a text box and choose from a list, all **inside melo's own browser window**, with Safari's own clicks and keystrokes, and it says what changed after each one. It never types a password, a card number or a one-time code, never reads your cookies, and asks every time before it types a text and before it sends a form. Once a text is in a page, the page itself may send it: melo cannot stop every such send (see [Clicking, typing and choosing](#clicking-typing-and-choosing)).
-- It does not sign in for you, post or buy; moving the mouse on your desktop is a different feature and is not part of this (see [What is coming](#what-is-coming)).
+- It never types your password for you. In Chrome in the background, when a page needs you (a sign-in, a code, a QR code or a check that you are human), melo asks you to [take the page over](#taking-over-melos-browser) and carries on after you give it back. Moving the mouse on your desktop is a different feature and is not part of this (see [What is coming](#what-is-coming)).
 
 ## Read a page without the browser
 
@@ -24,8 +25,8 @@ The rest of this page is about browsing in Safari, which also follows links, cli
 
 ## What you need
 
-- A Mac with Safari 27 or later. melo uses the automation server that Safari ships, `/usr/bin/safaridriver --mcp`; nothing is installed.
-- Two switches in Safari, turned on once (see [Set up Safari](#set-up-safari)).
+- For Safari windows: a Mac with Safari 27 or later. melo uses the automation server that Safari ships, `/usr/bin/safaridriver --mcp`; nothing is installed. Two switches in Safari, turned on once (see [Set up Safari](#set-up-safari)).
+- For Chrome in the background: [Google Chrome](https://www.google.com/chrome/) in `/Applications` (or `~/Applications`). Nothing else.
 - Optional, for [windows from other apps](#windows-from-other-apps): the desktop control helper, [Cua Driver](https://cua.ai/docs/cua-driver), installed as `/Applications/CuaDriver.app` (melo also finds `cua-driver` on your `PATH`). Give it Accessibility in System Settings → Privacy & Security; Screen Recording adds a picture of the window. melo itself needs neither.
 - The terminal chat (`melo`) or the web console. Direct runs (`melo "task"`), worker runs and saved tasks never get the browser tools.
 
@@ -37,8 +38,9 @@ In the terminal chat:
 /browser
 ```
 
-- It shows whether browsing is on and, when it is, checks that Safari answers; then a list offers **Turn browsing on** or **Leave it off**.
-- `/browser on` and `/browser off` do the same without the list.
+- It shows whether browsing is on and, when it is, checks that the browser answers; then a list offers to turn it on (Safari windows, or Chrome in the background), to switch browser, or to turn it off.
+- `/browser chrome` and `/browser safari` choose the browser and turn browsing on; `/browser on` turns it on with the browser chosen before (Safari when none was), and `/browser off` turns it off.
+- In the web console and the app: Settings → Chats and folders → **Browser** (Chrome, Safari or Off), or the same `/browser` words. Without Chrome, the choice says "Install Google Chrome to browse in the background", and nothing changes.
 - The choice is saved as `[browser] driver` in `~/.cache/localmelo/config.toml` when you have a saved configuration, and the chat goes on in a new Agent, so nothing you said is lost.
 
 For one run only, without saving:
@@ -51,12 +53,12 @@ In the config file:
 
 ```toml
 [browser]
-driver = "safari-automation"
+driver = "safari-automation"   # or "chrome": Chrome in the background
 keep_tabs = false   # true leaves the tabs melo opened in the window
 app_windows = true  # false: melo no longer looks for other apps' windows
 ```
 
-`"off"` is the default. The web console and the app read the same setting when they open a chat, the main chat included: change it with `/browser on` there, or `melo config set browser.driver safari-automation`, and open a new chat.
+`"off"` is the default. The web console and the app read the same setting when they open a chat, the main chat included: change it in Settings or with `/browser` there, or `melo config set browser.driver chrome`, and open a new chat.
 
 ## Set up Safari
 
@@ -82,6 +84,44 @@ Safari is not set up for melo yet. In Safari, open Settings > Developer and turn
 - Only one automation session runs at a time; a pane over the window catches your mouse and keyboard, and breaking it offers to stop the session.
 - So melo reads pages that need no sign-in; pages for signed-in people, and sites that challenge automated browsers, may not work yet.
 
+## Chrome in the background
+
+With `driver = "chrome"`, melo browses in Google Chrome with no window at all.
+
+- **Never in your way.** Chrome runs headless: no window, no Dock icon, it never comes to the front and never switches your desktop (Space). The app in front stays yours while melo reads, clicks and types.
+- **Only melo drives it.** melo starts the Chrome installed on this Mac and talks to it over a private pipe. Chrome opens no network port for this, so no other program can drive it.
+- **A profile of melo's own.** It lives in `~/.cache/localmelo/browser/chrome`, readable only by you (mode 0700). Your own Chrome profile, its sign-ins and its Keychain item are never used.
+- **What it keeps.** Cookies that a site keeps for days stay in that profile from one chat to the next, so a site you are signed in to there stays signed in. Chrome does not use your Keychain here, so those cookies are protected by the folder's permissions and FileVault only. Cookies that last only for a session are gone when Chrome stops. To clear everything, quit melo and delete that folder.
+- **You can watch it and take it over.** You can [watch melo's page live](#watching-melos-browser) and [take it over](#taking-over-melos-browser) to sign in yourself.
+- **What a site sees.** An ordinary Chrome: no "HeadlessChrome" in its user agent and no automation flag. Some bot checks may still notice; then use Safari windows.
+- **Chrome's own traffic.** Chrome makes a few connections of its own to Google even with background networking off; nothing comes back to melo through them. Downloads are refused.
+- **Clicks and typing are Chrome's own.** A click is a real one at the middle of the element melo checked, and typing selects what the box holds and puts the text in, so a page that ignores script clicks still works. A choice in a list is made by the page script.
+- **When a page wants an app, or asks a question.** See [When a page wants to open an app](#when-a-page-wants-to-open-an-app).
+
+## Watching melo's browser
+
+In the web console and the app, a **Browser** panel beside the chat shows the page melo has open, live. It needs Chrome in the background; Safari's windows are already on your screen.
+
+- **It opens by itself** when melo starts browsing. **Hide browser** closes it, and the **Browser** button in the header opens it again; on a narrow window it opens as a sheet when you ask.
+- **It shows** the page's title and address, a live picture, and a blue ring around the picture with "melo is browsing" while melo is in the middle of a step. It follows melo to another tab.
+- **It stays calm.** "No page open" before melo browses; "Opening the page…" until the first picture arrives; a dimmed last picture marked "Not updating" while the picture stops; and one sentence of why when it ends (the tab was closed, melo's browser stopped, the chat ended, or the live view is not available).
+- **Take over** lets you use the page yourself ([Taking over melo's browser](#taking-over-melos-browser)). The pictures stay in memory, are never saved, and are sent only while the panel is open.
+- **In the app**, **Pop out** opens the panel alone in its own window.
+- **Cost.** A page that does not change costs almost nothing; a moving page is held to 15 pictures a second (60 while you have it). The options `live` and `live_fps` are in the [configuration reference](../reference/configuration.md).
+
+## Taking over melo's browser
+
+The page in the Browser panel can be yours for a while: to sign in, type a code, scan a QR code or pass a check that you are human. melo never types your password; you do, and only you see it.
+
+- **Take over** in the panel's footer hands you the page. The footer turns into the control bar, "You are in control", and a green ring goes round the picture. Click the page, then type: clicks, drags, the wheel, keys, an input method (Chinese, Japanese and others) and pastes go to the page.
+- **melo needs you.** When melo reaches a sign-in, a password or code field, a QR code or a check that you are human, it asks on a card in the chat: "melo needs you to sign in on example.com". **Take over** opens the panel with the page yours; **Not now** lets melo carry on without it. Only you answer this card, in Ask and in Auto alike.
+- **melo waits.** While you have the page, melo's next browser step on it waits for you (up to 45 seconds at a time) and tells the model that you are using the page. Its other tabs carry on.
+- **Give back to melo** returns the page. melo reads it again before it does anything, since you may have changed it, and the step says how long you had it: "The user had tab t1 for 42 s and gave it back to melo." Nothing of what you typed is in it.
+- **If you leave.** Close the panel, hide the page or let the console sign out, and the page stays yours for 2 minutes, then goes back to melo. Come back sooner and it is still yours.
+- **The page's own boxes** (an alert, a confirm, a question) show in the panel while you have the page, and you answer them there.
+- **Moving out of the page.** While the page has the keys, Control-Esc moves to **Give back to melo**.
+- **Nothing you type is kept.** Your keys and text go from the panel to melo's Chrome and nowhere else: not to a log, the chat's record, melo's memory or the model. A paste is plain text, at most 1,000 characters at a time.
+
 ## What melo can do
 
 | Tool | What it does |
@@ -95,7 +135,7 @@ Safari is not set up for melo yet. In Safari, open Settings > Developer and turn
 | `browser_select` | Choose an option in a select list from the last reading, by its text. |
 | `browser_back` | Go back one page in the tab. |
 | `browser_tabs` | List melo's tabs, switch to one, or close one. A tab whose page melo has not checked shows as *(not checked)*. |
-| `browser_wait` | Wait (30 seconds at most) for the page melo opened to load, or for some text to appear or go. A page with no body yet, such as a bot check, counts as still loading. The wait ends early when another app puts a window on the screen. |
+| `browser_wait` | Wait (30 seconds at most) for the page melo opened to load, or for some text to appear or go. A page with no body yet, such as a bot check, counts as still loading. The wait ends early when another app puts a window on the screen during the 15 seconds after a click or send, also one that came before the wait began. |
 | `browser_screenshot` | Take a picture of the page. The picture is kept with the chat, and the web console shows it; the terminal does not draw images. A model that reads images also receives it, in the next step (see `tool_images` in the [configuration reference](../reference/configuration.md)). |
 | `browser_click_point` | Click a point of the last picture (`x` and `y` from 0 to 1000 across and down it), for what the element list lacks: a drawn button, a box from another site. The answer has a new picture with the point marked. |
 | `window_read` | Read a window another app opened after melo's own step (see [Windows from other apps](#windows-from-other-apps)): its text, its buttons and a picture of only that window. |
@@ -164,21 +204,35 @@ what changed:
 - **A link's address is checked before the click**, the same way, and again at the mouse press. A click that lands on a local address anyway (a script sent it there) is blanked and refused.
 - **Your session stays yours.** melo never reads cookies or page storage, and the automation windows have none of your sign-ins.
 
+### When a page wants to open an app
+
+A page can ask the browser to open an address meant for an app, such as a chat app's `chat://` sign-in link. Chrome in the background never opens it by itself.
+
+- **melo asks you.** It names the app this Mac would use and asks "Open Chat?" with the address. *Allow for this chat* lets pages open that kind of address again without asking. It is a grant like any other: in the main chat the button reads *Allow in every chat* and counts everywhere, and **Settings › Permissions** or `/grants` takes it back. In Auto mode it always asks you on the card, never rides such a grant, and does nothing when nobody is watching.
+- **On yes, melo opens it.** The app comes to the front, as it would from your own browser, and melo watches for the window it opens (a sign-in window, say), like after any click: see [Windows from other apps](#windows-from-other-apps).
+- **What the model reads.** The step says what happened: "The page asked to open Chat (chat:…). You allowed it; melo opened it, so Chat comes to the front." Only the kind of address is shown; the rest of it can hold a sign-in token.
+- **Questions from the page.** In the background a page's question box would stop the page, so melo answers it. A message is closed with OK. A question during melo's own step ("Delete the draft?") is put to you every time, and No answers Cancel. A box that asks for text gets Cancel. The step lists each one under *what changed*.
+
 <a id="windows-from-other-apps"></a>
 
 ## Windows from other apps
 
 A page melo acts on can make another app open a window, such as a chat app's sign-in window that asks you to authorize. melo looks for one after each of its own steps in the browser.
 
+- **A window that comes a moment late is still seen.** An app often opens its window a second or two after the click. After a click, a click on a point of a picture or a send that changes nothing on the page, melo watches the screen for up to 3 seconds in all (slow calls included) and stops as soon as a window appears or the tab goes to another address or opens another tab. For 15 seconds after such a step, melo also looks at the screen about once a second in the background, so a window that comes while the model is still working out its next step is noticed when it appears, and the next step, whatever it is (reading, waiting, a picture), tells it once, even if that step comes after the 15 seconds. Only that click, point click or send opens those 15 seconds; reading, waiting, pictures and searching never do and never extend them. A window that opens later than that is taken to be one you opened yourself: melo does not name it, read it or press it, whichever app it is from. Inside the 15 seconds, a window of the app the page asked for is read right away and said to be that app's. A window of any other app asks you first.
+
+- **A window of another app asks you first.** A sign-in often asks from a helper app, but a window that opens in the same seconds may also be yours, so melo asks you, in Ask and in Auto: "Chat opened a window right after melo's click: let melo see it?" The card shows the window's title; the model never gets it. *Allow once* lets melo see that window, *Allow Chat in this chat* lets it see that app's later windows without asking again (`/new` and `/approvals forget` take it back), and *Don't allow*, or no answer, tells the model nothing about the window, not even the app's name. Auto never answers this card for you; only an approval setting that allows everything lets it through without the card.
+
 - **With the desktop control helper.** The helper is a separate app that holds the Mac's Accessibility and Screen Recording permissions, so melo never needs them. melo names the new window and its buttons in that step's answer, can read it with a picture of only that window, and can press one of its buttons. With Accessibility alone it reads the window's text and buttons and presses by name, without a picture.
 - **Pressing asks.** In Ask mode you see a card for each press. In Auto mode a press the task needs, such as authorizing the sign-in you asked for, goes ahead; anything else stops.
-- **Without the helper.** melo cannot read the window. It still notices that another app came to the front and tells you which one, so you can answer it there.
+- **Without the helper.** melo cannot read the window. It still notices that another app came to the front, also when that happens a moment late, and tells you which one, so you can answer it there.
+- **When the helper cannot run.** If it is installed but has no Accessibility permission, or did not start, melo says so once in each chat: "melo can't read other apps' windows: the desktop control helper needs Accessibility (System Settings → Privacy & Security → Accessibility)". The permission belongs to **Cua Driver** itself, not to melo or to the app that started melo: Cua Driver runs its own background app, which is the one to turn on in that list. A new chat looks at the permission again, so turn it on and start a new chat.
 - **Only what melo's step opened.** melo never looks at your other windows and never types into other apps. A panel of an app that only came to the front is read only when melo listed that app's windows before its step; otherwise melo names it and asks you to answer it.
-- **The setting.** Settings → Chats and folders → **Other apps' windows**, shown while browsing is on. It is on by default; `[browser] app_windows = false` turns it off.
+- **The setting.** Settings → Chats and folders → **Other apps' windows**, shown while browsing is on. It is on by default; `[browser] app_windows = false` turns it off. Under the switch a line says whether the helper is installed and has Accessibility, or which permission it lacks.
 
 ## Who decides which sites melo opens
 
-- **Each site asks once per chat.** Before melo loads a page, you see "Open a website?" with the site's name and the answers *Yes*, *Yes, and allow this site for the rest of this chat*, and *No*. In the web console it is the usual approval card. "For the rest of this chat" is the only lasting answer; there is no "always" in this part. `/new`, and `/approvals forget`, take the grants back.
+- **Each site asks once per chat.** Before melo loads a page, you see "Open a website?" with the site's name and the answers *Yes*, *Yes, and allow this site for the rest of this chat*, and *No*. In the web console it is the usual approval card. "For the rest of this chat" is the only lasting answer; there is no "always" in this part. What you allow in the main chat counts in every chat, and in a side chat only there. `/grants` lists the sites you allowed and `/grants revoke N` takes one back (`/approvals forget NAME` does too, in the console and in the terminal's own chat). `/new` in the terminal's own chat starts with none of that chat's; see [What you allowed](terminal.md#what-you-allowed).
 - **A redirect asks again.** If a link or a redirect lands on another site, melo asks about that site before it reads the page. If you say no, the window goes back to a blank page and the model reads that you refused.
 - **Only `http` and `https`.** `file:`, `about:`, `javascript:`, `data:` and the browser's own pages are never opened. Nor is an address with a user name or password in it (`user@site`).
 - **Never this Mac, your network or melo's console.** As with `web_fetch`, melo does not open `localhost`, private, link-local or carrier-shared addresses, `.local` names, names without a dot, an address written as one number, or a name whose DNS answer is one of these. melo's own console is refused too, wherever it listens. A redirect or a page that moves to such an address is blanked before anything is read from it; this is checked before any question about the site, and it is a check on what melo reads, not a network block. For a task's result, the main chat reads the task itself (`task_get`).
@@ -187,8 +241,9 @@ A page melo acts on can make another app open a window, such as a chat app's sig
 
 ## What is coming
 
-Browsing is built in parts; none of the next two exists yet.
+Browsing is built in parts; none of these exists yet.
 
+- Chrome becoming the default browser, an "open in a window" choice for sites that refuse a browser without a window, and a button that clears melo's Chrome sign-ins.
 - Acting in your own signed-in browser (a Chrome extension): clicks and typing there, with a confirmation that `auto` and `--yolo` cannot skip for sending, posting, buying and signing in. The clicks on this page happen only inside melo's own automation window; moving your mouse on the desktop (computer use, for apps outside the browser) is a separate feature and the next way after a point of a picture.
 - Saved chores that run on a schedule (for example a daily check-in), with steps you approved once.
 
@@ -197,6 +252,10 @@ Browsing is built in parts; none of the next two exists yet.
 | You see | What to do |
 |---|---|
 | `Safari is not set up for melo yet` | Turn on the two switches in [Set up Safari](#set-up-safari). |
+| `Google Chrome is not installed, so melo cannot browse in the background` | Install Google Chrome, or switch to Safari windows (`/browser safari`). |
+| `Chrome stopped` | Ask again: melo starts Chrome again on the next step. Session-only sign-ins are gone. |
+| `Chrome could not load that page (net::...)` | The address did not answer, or the page is a download (melo's Chrome refuses downloads). |
+| `The page tried to open ... ; melo did not open it` | You answered no, or nobody was watching in Auto mode. Ask again to be asked again. |
 | `Safari's automation helper did not start` | Check that Safari 27 or later is installed and the switches are on; `/browser` runs the check again. |
 | `This Safari's automation server lacks the tools melo needs` | Update macOS and Safari. |
 | A page reads as empty | It may need a sign-in or be built by scripts after loading; try `browser_wait`, or open it yourself. |
@@ -208,7 +267,7 @@ Browsing is built in parts; none of the next two exists yet.
 | `(via page-script: ...)` after an action | Safari could not reach that element itself, so a page script acted. A page that ignores script clicks may then do nothing: take a `browser_screenshot` and use `browser_click_point`. |
 | `A real click or key press landed on another element` | Something covered the element between melo's check and the click, so melo stopped it. `browser_read` and try again. |
 | `... came to the front: it may show a window melo cannot see` | Another app opened a window and the desktop control helper is not installed or lacks its permissions. Answer the window in that app yourself. |
-| `melo cannot read other apps' windows: ...` | Install the desktop control helper (see [What you need](#what-you-need)), or give it Accessibility in System Settings → Privacy & Security. |
+| `melo cannot read other apps' windows: ...` or `melo can't read other apps' windows: ...` | Install the desktop control helper (see [What you need](#what-you-need)), or turn on Cua Driver in System Settings → Privacy & Security → Accessibility, then start a new chat. |
 | `no Screen Recording permission` | The helper reads text and buttons and presses by name, but has no picture. Give it Screen Recording for pictures and point clicks. |
 | `a box from ... that melo can't reach` | A frame from another site, often a sign-in box, with nothing Safari lists in it. Fill it in yourself, or let melo click a point of a picture of it. |
 | `Take a browser_screenshot of this tab first` or `The page scrolled since the picture` | A point belongs to the last picture of the same page and view; take a new picture. |
