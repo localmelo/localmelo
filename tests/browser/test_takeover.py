@@ -574,6 +574,29 @@ class Takeable(Streaming):
         return json.dumps([params for _, _, params in self.inputs], ensure_ascii=False)
 
 
+class HeldStart(Takeable):
+    """A browser whose start waits for the test once ``hold()`` is called."""
+
+    def __init__(self, *pages: Any) -> None:
+        super().__init__(*pages)
+        self.starting = asyncio.Event()
+        self._go = asyncio.Event()
+        self._go.set()
+
+    def hold(self) -> None:
+        """The next start stops, and says so with ``starting``, until ``release()``."""
+        self.starting.clear()
+        self._go.clear()
+
+    def release(self) -> None:
+        self._go.set()
+
+    async def start(self) -> None:
+        self.starting.set()
+        await self._go.wait()
+        await super().start()
+
+
 def textbox(label: str, **more: Any) -> Element:
     return Element("textbox", label, **more)
 
@@ -822,6 +845,31 @@ async def test_a_step_naming_another_tab_never_acts_on_the_persons_tab(
     assert driver.calls[calls:] == [], "no page was opened, read or touched"
     assert driver.open_in == [], "nothing was loaded into a tab of before"
     assert provider.owners.owner("t1") == "you"
+    await provider.close()
+
+
+async def test_a_step_keeps_its_tab_when_the_current_tab_moves_in_the_start() -> None:
+    # A step finds its tab once, before the browser starts, and Chrome may take a
+    # moment to start. If the chat's current tab moves in the meantime, the step
+    # still works on the tab it found: it never lands on the new current tab.
+    driver = HeldStart(*browser().pages.values())
+    provider, tools, _ = await started(driver)
+    await run(tools, "browser_open", url=HOME)  # t1: e1 is "Sign in", e2 is "Go"
+    await run(tools, "browser_open", url=LOGIN, tab="new")  # t2: e3 on
+    await run(tools, "browser_tabs", action="switch", tab="t1")
+    assert provider._tab == "t1"
+
+    driver.hold()
+    step = asyncio.ensure_future(run(tools, "browser_click", ref="e2"))
+    await asyncio.wait_for(driver.starting.wait(), 2)
+    # Another tool call waits for the step's lock, so the current tab is moved
+    # directly: whatever moves it while the browser starts.
+    provider._tab = "t2"
+    driver.release()
+
+    out = await asyncio.wait_for(step, 2)
+    assert not out.is_error, out.text
+    assert [(act.element.label, act.url) for act in driver.acts] == [("Go", HOME)]
     await provider.close()
 
 
