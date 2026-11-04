@@ -2,9 +2,11 @@
 
 ``records.unsupported(note, evidence)`` lists the content words of a note the
 typed texts lack, or nothing when the note is grounded. Every value (a digit, a
-weekday or number word, a capitalised word inside a sentence, a quoted span, a
-Chinese character) must be found, and at least 80% of the other content words.
-The cases are notes a chat's model really wrote for what the user typed.
+weekday or number word, a capitalised word inside a sentence, a quoted span, and
+in Chinese a quoted span, a number character or a character the user never typed
+that is no common wording) must be found, and at least 80% of the other content
+words. The cases are notes a chat's model really wrote for what the user typed;
+``test_note_gate_restate.py`` runs a labelled set of Chinese and English ones.
 """
 
 from __future__ import annotations

@@ -73,6 +73,9 @@ from localmelo.support.config import (
     CHAT_RECENT_DIGEST_MINUTES,
     MEMORY_COMPRESS_AT_CHARS,
     MEMORY_COMPRESS_PARALLEL,
+    MEMORY_GATHER,
+    MEMORY_GATHER_DEFAULT,
+    MEMORY_GATHER_MIN_COSINE,
     MEMORY_NOTE_GATE,
     MEMORY_NOTE_MIN_COSINE,
     MEMORY_RECALL_CHARS,
@@ -118,6 +121,8 @@ from localmelo.support.memory.recall import (
     AUTO_RECORDS,
     BLOCK_CHARS,
     CUT_GUIDE,
+    GATHER_COSINE,
+    GATHER_GUIDE,
     ITEM_CHARS,
     ITEM_LIST_GUIDE,
     LIST_GUIDE,
@@ -131,6 +136,7 @@ from localmelo.support.memory.recall import (
     Corpus,
     Item,
     Shown,
+    asks_to_gather,
     block,
     chat_label,
     current_only,
@@ -240,6 +246,12 @@ class Recall:
     search was for: ``message`` (the message's own words), ``recent`` (a message
     with no content of its own, searched with the user's words of the chat's last
     turns, :func:`follow_up_query`) or ``none`` (nothing: no recall ran).
+    With ``[memory] gather`` on (``guide``, the default, or ``wide``), *gather* says
+    the message asks to count, total or compare and speaks of its speaker
+    (:func:`~.recall.asks_to_gather`) and *floor*
+    is the vector bar the search used, on every turn (``False`` and the recall bar
+    for a message that does not ask); both are ``None``, and left out of
+    :meth:`to_json`, with it off.
     """
 
     retriever: str = "bm25"
@@ -254,9 +266,16 @@ class Recall:
     used: int = 0
     block_chars: int = 0
     query_from: str = "message"
+    gather: bool | None = None
+    floor: float | None = None
 
     def to_json(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        if self.gather is None:
+            del data["gather"]
+        if self.floor is None:
+            del data["floor"]
+        return data
 
 
 def _resolve(mode: str, failure: str) -> tuple[str, str]:
@@ -286,9 +305,12 @@ class RecallSettings(NamedTuple):
     its own is searched with the user's words of the chat's last turns (``[memory]
     followup_query = "recent"``, the default) instead of its own. *excerpt_open* (on by default) says
     an excerpt that shows less than the whole turn carries the turn's id and the model
-    may open it (:attr:`opens_excerpts`). The defaults are the shipped ones: a block
-    of :data:`BLOCK_CHARS` and a turn of :data:`ITEM_CHARS` (#349), *followup* and
-    *excerpt_open* on, and what recall did before these were settings for the rest.
+    may open it (:attr:`opens_excerpts`). *gather* is ``[memory] gather`` (``off``,
+    ``wide`` or ``guide``) and *gather_floor* ``gather_min_cosine``: the vector bar
+    of a question that counts, totals or compares. The defaults are the shipped
+    ones: a block of :data:`BLOCK_CHARS` and a turn of :data:`ITEM_CHARS` (#349),
+    *followup* and *excerpt_open* on, *gather* ``guide`` (:data:`MEMORY_GATHER_DEFAULT`),
+    and what recall did before these were settings for the rest.
     """
 
     records: int = AUTO_RECORDS
@@ -307,6 +329,8 @@ class RecallSettings(NamedTuple):
     open_sources: bool = False
     followup: bool = True
     excerpt_open: bool = True
+    gather: str = MEMORY_GATHER_DEFAULT
+    gather_floor: float = GATHER_COSINE
 
     @property
     def opens_excerpts(self) -> bool:
@@ -320,6 +344,28 @@ class RecallSettings(NamedTuple):
         return Shown.of(
             self.item_chars, question if self.match else None, self.opens_excerpts
         )
+
+    @property
+    def gathers(self) -> bool:
+        """Whether recall looks wider for a question that counts or compares
+        (``[memory] gather`` is ``wide`` or ``guide``)."""
+        return self.gather != "off"
+
+    @property
+    def wide_floor(self) -> float:
+        """The vector bar of a list-form search that looks wider: the lower of the
+        recall bar and ``gather_min_cosine``."""
+        return min(self.min_cosine, self.gather_floor)
+
+
+def _guide(settings: RecallSettings, gathers: bool) -> str:
+    """The line above a list of turns or items: :data:`LIST_GUIDE` (or
+    :data:`ITEM_LIST_GUIDE`) and, with ``[memory] gather = "guide"`` on a turn that
+    asks to count, total or compare (*gathers*), :data:`GATHER_GUIDE` after it."""
+    guide = ITEM_LIST_GUIDE if settings.items else LIST_GUIDE
+    if gathers and settings.gather == "guide":
+        return f"{guide} {GATHER_GUIDE}"
+    return guide
 
 
 class NoteSettings(NamedTuple):
@@ -931,6 +977,7 @@ class ChatMemory:
         if cfg is None:
             return RecallSettings()
         memory = cfg.memory
+        gathering = getattr(memory, "gather", MEMORY_GATHER_DEFAULT)
 
         def bounded(name: str, default: int, bounds: tuple[int, int]) -> int:
             value = getattr(memory, name, default)
@@ -959,6 +1006,8 @@ class ChatMemory:
             getattr(memory, "open_sources", "off") == "on",
             getattr(memory, "followup_query", "recent") != "message",
             getattr(memory, "excerpt_open", "on") != "off",
+            gathering if gathering in MEMORY_GATHER else MEMORY_GATHER_DEFAULT,
+            bar("gather_min_cosine", GATHER_COSINE, MEMORY_GATHER_MIN_COSINE),
         )
 
     def note_settings(self) -> NoteSettings:
@@ -1129,13 +1178,15 @@ class ChatMemory:
         keep_from_turn: int | None = None,
         recall: Recall | None = None,
         listing: bool = False,
+        min_cosine: float | None = None,
     ) -> list[Item]:
         """The items that match *query*; embeds it when the retriever uses vectors.
 
         The turns of *exclude_session* from *keep_from_turn* on (all of them
         without one) are left out: the chat shows them. *recall*, when given,
         is filled in with how the search went. With *listing* (the list form)
-        a chat's turns are not capped and each carries its similarity.
+        a chat's turns are not capped and each carries its similarity. With
+        *min_cosine* the vector bar is that, not ``recall_min_cosine``.
         """
         query = query[:_QUERY_CHARS]
         recall = recall if recall is not None else Recall()
@@ -1151,7 +1202,7 @@ class ChatMemory:
             docs_k=docs_k,
             exclude_session=exclude_session,
             keep_from_turn=keep_from_turn,
-            min_cosine=bars.min_cosine,
+            min_cosine=bars.min_cosine if min_cosine is None else min_cosine,
             min_coverage=bars.min_coverage,
             listing=listing,
         )
@@ -1480,6 +1531,8 @@ class ChatMemory:
         query = (info.user_text if asked else typed)[:_QUERY_CHARS]
         recall = Recall()
         budget = self.recall_settings()
+        if budget.gathers:
+            recall.gather, recall.floor = False, budget.min_cosine
         # A message with no content of its own ("go look it up", "continue") is
         # searched with what the person said last in this chat, not with its own
         # words, which match whatever holds them. With no earlier turn to follow
@@ -1510,6 +1563,13 @@ class ChatMemory:
             [query, *(cand.text for cand in found)], EMBED_TIMEOUT_S, query=True
         )
         recall.embed_ms = elapsed_ms(started)
+        # A question that counts, totals or compares needs every item of a kind,
+        # which sit further from it than one answer to a single fact does: the list
+        # form looks wider for it (``[memory] gather``). Nothing else changes.
+        gathers = budget.gathers and asks_to_gather(query)
+        floor = budget.wide_floor if gathers and budget.listing else budget.min_cosine
+        if budget.gathers:
+            recall.gather, recall.floor = gathers, floor
         used = await self._find(
             query,
             embedded,
@@ -1519,7 +1579,7 @@ class ChatMemory:
             exclude_session=info.session_id,
             keep_from_turn=keep_from,
             notes=budget.notes,
-            min_cosine=budget.min_cosine,
+            min_cosine=floor,
             min_coverage=budget.min_coverage,
             listing=budget.listing,
         )
@@ -1532,7 +1592,7 @@ class ChatMemory:
             budget.chars,
             budget.shown(query),
             listing=budget.listing,
-            guide=ITEM_LIST_GUIDE if budget.items else LIST_GUIDE,
+            guide=_guide(budget, gathers),
         )
         hinted = budget.hint and not used
         if hinted:
@@ -3258,6 +3318,14 @@ class MemoryTools(BaseToolProvider):
         turns_k = (
             settings.list_max if k is None else max(1, min(int(k), settings.list_max))
         )
+        # Only a turn whose message asks to count, total or compare looks wider; a
+        # search under any other turn, or outside a turn, reads as it does with
+        # ``[memory] gather = "off"``.
+        gathers = settings.gathers and bool(
+            chat is not None
+            and chat.memory.recall is not None
+            and chat.memory.recall.gather
+        )
         items = await self._memory.search(
             query,
             records_k=0 if scope == "chats" else notes_k,
@@ -3265,6 +3333,7 @@ class MemoryTools(BaseToolProvider):
             exclude_session=own.info.session_id if own else "",
             keep_from_turn=own.keep_from_turn if own else None,
             listing=True,
+            min_cosine=settings.wide_floor if gathers else None,
         )
         notes = [item for item in items if item.is_record][:notes_k]
         turns = [item for item in items if not item.is_record][:turns_k]
@@ -3280,7 +3349,7 @@ class MemoryTools(BaseToolProvider):
             chat.add_searched([*notes, *turns])
         lines = [f"{n}. {item.shown}" for n, item in enumerate(notes, 1)]
         if turns:
-            lines.append(ITEM_LIST_GUIDE if settings.items else LIST_GUIDE)
+            lines.append(_guide(settings, gathers))
             lines.extend(item.shown for item in turns)
         return "\n".join(lines)
 

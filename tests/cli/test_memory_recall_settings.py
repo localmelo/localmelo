@@ -4,8 +4,9 @@
 ``search_when_empty``, ``recall_min_cosine``, ``recall_min_coverage``,
 ``recall_item_chars``, ``recall_excerpt``, ``recall_form``, ``recall_list_max``,
 ``recall_open_chars``, ``excerpt_open``, ``recall_source``, ``open_sources``,
-``compress_at_chars``, ``compress_parallel``, ``compress_cache``, ``note_gate``, ``note_min_cosine`` and
-``followup_query`` are checked against their bounds and values, set for one run with ``-X``, and listed by the
+``compress_at_chars``, ``compress_parallel``, ``compress_cache``, ``note_gate``, ``note_min_cosine``,
+``followup_query``, ``gather`` (``guide`` by default) and ``gather_min_cosine`` are checked
+against their bounds and values, set for one run with ``-X``, and listed by the
 developer help only, each with the issue that decides it.
 """
 
@@ -42,6 +43,8 @@ CHANGED = {
     "note_gate": "model",
     "note_min_cosine": 0.65,
     "followup_query": "message",
+    "gather": "off",  # "guide" is the default
+    "gather_min_cosine": 0.3,
 }
 # The issue that decides each setting, as the developer help names it.
 ISSUE = {name: "#349" for name in CHANGED} | {
@@ -57,6 +60,8 @@ ISSUE = {name: "#349" for name in CHANGED} | {
     "note_gate": "#442",
     "note_min_cosine": "#442",
     "followup_query": "#452",
+    "gather": "#428",
+    "gather_min_cosine": "#428",
 }
 
 
@@ -164,6 +169,12 @@ def test_a_file_without_followup_query_gets_the_new_default(tmp_path: Path) -> N
         ("note_min_cosine", 0.55),
         ("followup_query", "recent"),
         ("followup_query", "message"),
+        ("gather", "off"),
+        ("gather", "wide"),
+        ("gather", "guide"),
+        ("gather_min_cosine", 0.2),
+        ("gather_min_cosine", 0.55),
+        ("gather_min_cosine", 0.4),
     ],
 )
 def test_the_bounds_and_values_are_accepted(name: str, value: object) -> None:
@@ -337,6 +348,27 @@ def test_the_bounds_and_values_are_accepted(name: str, value: object) -> None:
             "Must be one of ('recent', 'message').",
         ),
         (
+            "gather",
+            "narrow",
+            "[memory] gather 'narrow' is not recognised. "
+            "Must be one of ('off', 'wide', 'guide').",
+        ),
+        (
+            "gather_min_cosine",
+            0.19,
+            "[memory] gather_min_cosine must be from 0.2 to 0.55, got 0.19",
+        ),
+        (
+            "gather_min_cosine",
+            0.56,
+            "[memory] gather_min_cosine must be from 0.2 to 0.55, got 0.56",
+        ),
+        (
+            "gather_min_cosine",
+            float("nan"),
+            "[memory] gather_min_cosine must be from 0.2 to 0.55, got nan",
+        ),
+        (
             "recall_min_coverage",
             float("nan"),
             "[memory] recall_min_coverage must be from 0.1 to 1.0, got nan",
@@ -407,6 +439,11 @@ def test_x_sets_each_for_one_run_and_only_the_developer_help_lists_them(
         "memory.note_min_cosine=high",
         "memory.followup_query=history",
         "memory.followup_query=on",
+        "memory.gather=narrow",
+        "memory.gather=true",
+        "memory.gather_min_cosine=0.1",
+        "memory.gather_min_cosine=0.6",
+        "memory.gather_min_cosine=low",
     ],
 )
 def test_x_refuses_a_bad_value_with_a_clear_message(

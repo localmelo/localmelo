@@ -874,6 +874,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Developer only: in the list form of recall, when you ask melo to count, total or compare things you told it across chats, it now looks wider in its memory and checks each kind it may have missed, by default; a search on any other turn keeps the usual bar. Part of #428.
 - "Allow for this chat" is no longer memory-only. `GET /api/sessions/{id}` `grants` and `granted_at` list what
   holds in the chat whether it is open or not, the main chat's grants included for a side chat.
   `DELETE /api/sessions/{id}/grants/{name}` takes back the chat's own grant and a main-chat grant of that name
@@ -1464,6 +1465,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 ### Fixed
 
 - The config file is read and saved from the settings' own fields, so a setting no longer needs hand-written load and save code: `[cli] chat` is kept when it is saved, a value of the wrong kind in any table (a quoted port, `"yes"` for an on/off setting) is reported as one plain sentence instead of a traceback or a silent change, the saved file lists only settings that differ from the defaults, and spaces around a backend URL or model name are removed. Closes #496.
+- melo no longer refuses to remember something you said in Chinese just because it put it in slightly different words. Part of #442.
 - A long unbroken paste (tens of thousands of characters with no spaces, or a long dotted or underscored text) no longer freezes the gateway for seconds while the main chat decides whether it is a request. The routing rules read the first 4,000 characters, and a file name or path is matched up to 200 characters per part; the task that starts still gets all of the text. Part of #493.
 - Words added to a chat while melo works are now remembered with that turn; before, only the first message of the turn was. Part of #428.
 - melo no longer recalls its own old replies about a blocked step as if they were still the rule; only what you said in that turn is remembered. Part of #428.
