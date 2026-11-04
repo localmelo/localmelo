@@ -1463,6 +1463,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Pictures from tools now reach a model whose server says it reads them. With `[agent] tool_images = "auto"`, melo asked
+  only oMLX's status route and Ollama's `/api/show`, so on any other OpenAI-compatible server the pictures were dropped;
+  it now reads the model's own entry in `GET /v1/models` first (`vision` true, `image` among `input_modalities` or
+  `vision` among `capabilities`; an explicit `vision` false, or `input_modalities` without `image`, says no). And when a
+  picture is not sent, whether images are off or the server does not say, the tool's message now ends with a line that
+  tells the model it cannot see the picture and should read the page as text, instead of letting it describe a picture it never saw.
 - Words added to a chat while melo works are now remembered with that turn; before, only the first message of the turn was. Part of #428.
 - melo no longer recalls its own old replies about a blocked step as if they were still the rule; only what you said in that turn is remembered. Part of #428.
 - `browser_find` reads the page again before it searches, so its refs are always of the page as it is now;

@@ -105,9 +105,11 @@ A tool can return pictures, such as an MCP server's screenshot.
 
 | Value | What the model gets |
 |---|---|
-| `auto` (default) | The pixels when the server says the model reads images: oMLX's `GET /v1/models/status` gives the model `model_type` `vlm`, or Ollama's `POST /api/show` lists `vision` in its `capabilities`. localmelo asks once, when a tool first returns a picture. For a hosted service the preset answers instead of the server: see [Hosted models](hosted-models.md#pictures). Any other answer, or none (vLLM, SGLang and MLC do not say), counts as `off`. |
+| `auto` (default) | The pixels when the server says the model reads images. localmelo asks once, when a tool first returns a picture, in this order, and the first route that says yes or no answers: the model's own entry in `GET /v1/models` (yes: `"vision": true`, `image` among `input_modalities`, or `vision` among `capabilities`; no: `"vision": false`, or `input_modalities` without `image`), oMLX's `GET /v1/models/status` (`model_type` `vlm`), then Ollama's `POST /api/show` (`vision` in its `capabilities`). A route that answers 401 or 404, or says nothing about the model, passes to the next. For a hosted service the preset answers instead of the server: see [Hosted models](hosted-models.md#pictures). Any other answer, or none, counts as `off`. |
 | `on` | The pixels, without asking. |
 | `off` | Only the line that names each picture, as before this setting. |
+
+When a picture is not sent (`off`, or `auto` with no answer), the tool's message ends with one more line after the one that names the picture: "You cannot see this picture (this model is not sent pictures); the person can. Do not describe it or guess what it shows." With the browser's text tools on, it adds "Read the page with browser_read or browser_find." The model then reads the page as text instead of inventing what a picture shows.
 
 Set it for one run with `-X`:
 

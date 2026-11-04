@@ -115,9 +115,11 @@ melo --mcp mcp.json "What time is it in Tokyo?"
 
 | 值 | 模型得到的内容 |
 |---|---|
-| `auto`（默认） | 服务器表明模型能读图时发送像素：oMLX 的 `GET /v1/models/status` 给出该模型的 `model_type` 为 `vlm`，或 Ollama 的 `POST /api/show` 在 `capabilities` 中列出 `vision`。localmelo 在工具第一次返回图片时询问一次。对云端服务，由预设代替服务器回答：见[云端模型](hosted-models.md#pictures)。其他回答或没有回答（vLLM、SGLang 和 MLC 不提供此信息）都按 `off` 处理。 |
+| `auto`（默认） | 服务器表明模型能读图时发送像素。localmelo 在工具第一次返回图片时按下面的顺序询问一次，第一个给出是或否的路径作答：`GET /v1/models` 中该模型自己的条目（能读：`"vision": true`、`input_modalities` 含 `image`，或 `capabilities` 含 `vision`；不能读：`"vision": false`，或 `input_modalities` 不含 `image`），oMLX 的 `GET /v1/models/status`（`model_type` 为 `vlm`），然后是 Ollama 的 `POST /api/show`（`capabilities` 中有 `vision`）。回答 401 或 404、或没有提到该模型的路径，交给下一条。对云端服务，由预设代替服务器回答：见[云端模型](hosted-models.md#pictures)。其他回答或没有回答都按 `off` 处理。 |
 | `on` | 不询问，直接发送像素。 |
 | `off` | 只发送注明每张图片的那一行，与引入此设置之前相同。 |
+
+图片没有发送时（`off`，或 `auto` 没有得到回答），工具的消息在注明图片的那一行之后再多一行："You cannot see this picture (this model is not sent pictures); the person can. Do not describe it or guess what it shows." 浏览器的文本工具可用时，还会加上 "Read the page with browser_read or browser_find." 这样模型会把页面当作文本来读，而不是凭空编造图片的内容。
 
 用 `-X` 为一次运行设置：
 

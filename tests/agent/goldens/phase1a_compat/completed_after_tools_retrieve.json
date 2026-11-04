@@ -100,7 +100,7 @@
         },
         {
           "role": "tool",
-          "content": "Sunny, 21 °C in Paris\n[1 image: sha256:e3311164b2dc image/png]",
+          "content": "Sunny, 21 °C in Paris\n[1 image: sha256:e3311164b2dc image/png]\nYou cannot see this picture (this model is not sent pictures); the person can. Do not describe it or guess what it shows.",
           "tool_calls": [],
           "tool_call_id": "<call:1>"
         }
@@ -143,7 +143,7 @@
         },
         {
           "role": "tool",
-          "content": "Sunny, 21 °C in Paris\n[1 image: sha256:e3311164b2dc image/png]",
+          "content": "Sunny, 21 °C in Paris\n[1 image: sha256:e3311164b2dc image/png]\nYou cannot see this picture (this model is not sent pictures); the person can. Do not describe it or guess what it shows.",
           "tool_calls": [],
           "tool_call_id": "<call:1>"
         },
@@ -210,7 +210,7 @@
     },
     {
       "role": "tool",
-      "content": "Sunny, 21 °C in Paris\n[1 image: sha256:e3311164b2dc image/png]",
+      "content": "Sunny, 21 °C in Paris\n[1 image: sha256:e3311164b2dc image/png]\nYou cannot see this picture (this model is not sent pictures); the person can. Do not describe it or guess what it shows.",
       "thinking": "",
       "tool_calls": [],
       "tool_call_id": "<call:1>",

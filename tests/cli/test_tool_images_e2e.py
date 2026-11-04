@@ -3,10 +3,11 @@
 The bench's plumbing run: ``melo --mcp FILE --mcp-only -o json -- TASK``. The
 fake MCP server's ``screenshot`` returns a picture and repeats its base64 in
 ``structuredContent``. With ``-X agent.tool_images=on`` (or ``auto`` on a
-server that says the model reads images) the second request carries the
-picture as an ``image_url`` data URL in a user message after the tool result;
-off, it carries only the line that names it. The base64 never reaches the
-model as text.
+server that says the model reads images, in its model listing or on oMLX's
+status route) the second request carries the picture as an ``image_url`` data
+URL in a user message after the tool result; off, it carries only the line that
+names it and a line that says the model cannot see it. The base64 never reaches
+the model as text.
 """
 
 from __future__ import annotations
@@ -46,6 +47,14 @@ SCENARIOS: dict[str, dict[str, Any]] = {
         "replies": REPLIES,
         "sequential": True,
     },
+    # A server whose model listing says the model reads images (no status route).
+    "listed": {
+        "models": [
+            {"id": "stub-vl", "vision": True, "input_modalities": ["text", "image"]}
+        ],
+        "replies": REPLIES,
+        "sequential": True,
+    },
 }
 
 
@@ -67,7 +76,7 @@ def run(tmp_path: Path, stub: StubServer, scenario: str, *setting: str) -> None:
     env = {k: v for k, v in os.environ.items() if not k.startswith("LOCALMELO_")}
     env.update(HOME=str(home), NO_PROXY="127.0.0.1,localhost")
     url = stub.base_url.removesuffix("/v1") + f"/s/{scenario}/v1"
-    model = "stub-vl" if scenario == "vlm" else "stub-model"
+    model = "stub-vl" if scenario in ("vlm", "listed") else "stub-model"
     argv = [sys.executable, "-I", "-m", "localmelo", *setting, "--base-url", url]
     argv += ["--chat-model", model, "--mcp-only", "--mcp", str(config), "-o", "json"]
     done = subprocess.run(
@@ -106,7 +115,7 @@ def image_parts(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 @pytest.mark.parametrize(
     ("scenario", "setting"),
-    [("plain", ["-X", "agent.tool_images=on"]), ("vlm", [])],
+    [("plain", ["-X", "agent.tool_images=on"]), ("vlm", []), ("listed", [])],
 )
 def test_the_picture_reaches_the_model(
     tmp_path: Path, stub: StubServer, scenario: str, setting: list[str]
@@ -120,6 +129,10 @@ def test_the_picture_reaches_the_model(
         "tool",
         "user",
     ]
+    # Pictures that are sent need no line saying they are not.
+    assert (
+        "cannot see" not in next(m for m in messages if m["role"] == "tool")["content"]
+    )
     label, part = messages[-1]["content"]
     assert label["text"].startswith(
         "Output of tool call call_1 (mcp__fake__screenshot): [1 image: sha256:"
@@ -132,7 +145,11 @@ def test_the_picture_reaches_the_model(
 
 @pytest.mark.parametrize(
     ("scenario", "setting"),
-    [("plain", []), ("vlm", ["-X", "agent.tool_images=off"])],
+    [
+        ("plain", []),
+        ("vlm", ["-X", "agent.tool_images=off"]),
+        ("listed", ["-X", "agent.tool_images=off"]),
+    ],
 )
 def test_without_the_switch_only_the_name_goes(
     tmp_path: Path, stub: StubServer, scenario: str, setting: list[str]
@@ -141,6 +158,10 @@ def test_without_the_switch_only_the_name_goes(
     messages = second_request(stub)
     assert [m["role"] for m in messages] == ["system", "user", "assistant", "tool"]
     assert image_parts(messages) == []
+    # The name of the picture, then a line that says the model cannot see it.
+    tool = messages[-1]["content"]
+    assert tool.startswith("[1 image: sha256:")
+    assert tool.splitlines()[-1].startswith("You cannot see this picture")
 
 
 class TestSetting:

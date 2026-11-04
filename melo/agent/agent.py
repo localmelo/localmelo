@@ -92,7 +92,11 @@ from localmelo.melo.agent._step_review import (
     plain_page_key,
 )
 from localmelo.melo.agent._task_aids import FINISH_NOTE, refusal_note
-from localmelo.melo.agent._tool_images import ToolImageStore
+from localmelo.melo.agent._tool_images import (
+    TEXT_READERS,
+    ToolImageStore,
+    withheld_note,
+)
 from localmelo.melo.agent.options import (
     REPLAY_TURN_CAP,
     AgentOptions,
@@ -845,7 +849,9 @@ def _tool_result_text(result: ToolResult) -> str:
     return "" if result.images else "(no output)"
 
 
-def _tool_message_content(text: str, images: Sequence[ImagePart]) -> str:
+def _tool_message_content(
+    text: str, images: Sequence[ImagePart], unseen: str = ""
+) -> str:
     """Content of the ``role="tool"`` message that answers a call.
 
     *text* is the result's text (see :func:`_tool_result_text`), cut to
@@ -854,8 +860,12 @@ def _tool_message_content(text: str, images: Sequence[ImagePart]) -> str:
     with ``tool_images`` on, see :class:`ToolImageStore`), so a result
     with images ends with a line that names them (see
     :func:`describe_images`), whether its text is kept, cut or withheld.
+    When the pixels do not reach the model, *unseen* is the line that
+    says so (see :func:`withheld_note`); it follows the one that names the
+    images, and a result without images gets none.
     """
-    return "\n".join(part for part in (text, describe_images(images)) if part)
+    lines = (text, describe_images(images), unseen if images else "")
+    return "\n".join(part for part in lines if part)
 
 
 def _withheld_notice(text: str, reason: str) -> str:
@@ -2918,6 +2928,18 @@ class Agent:
                 logger.info("Could not ask whether the model reads images")
                 self._images_on = False
         return self._images_on
+
+    def _unseen_line(self) -> str:
+        """The line that ends the tool message of a picture the model is not sent.
+
+        Empty unless :meth:`_sends_images` decided no. It names the tools that read
+        a page as text among those the agent has.
+        """
+        if self._images_on is not False:
+            return ""
+        return withheld_note(
+            [name for name in TEXT_READERS if self.hippo.get_tool(name) is not None]
+        )
 
     async def start(self) -> None:
         """Start the tool providers and register their tools now.
@@ -5511,10 +5533,11 @@ class Agent:
                 images=[] if index in withheld else result.images,
             )
 
+        unseen = self._unseen_line()
         tool_msgs = [
             Message(
                 role="tool",
-                content=_tool_message_content(text, result.images),
+                content=_tool_message_content(text, result.images, unseen),
                 tool_call_id=call.id,
                 tool_result=message_result(result, text, index),
                 images=[] if index in withheld else result.images,

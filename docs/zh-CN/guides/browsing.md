@@ -156,7 +156,7 @@ Safari is not set up for melo yet. In Safari, open Settings > Developer and turn
 | `browser_back` | 在该标签页中后退一页。 |
 | `browser_tabs` | 列出 melo 的标签页、切换或关闭其中一个。melo 没有检查过页面的标签页显示为 *(not checked)*。 |
 | `browser_wait` | 等待（最多 30 秒）melo 打开的页面加载完成，或某段文字出现或消失。还没有正文的页面（比如人机验证页）算作仍在加载。在点击或发送之后的 15 秒内，其他应用在屏幕上弹出窗口时（包括等待开始之前就已出现的），等待会提前结束。 |
-| `browser_screenshot` | 给页面拍一张图。图片随对话保存，网页控制台会显示；终端不绘制图片。能读图的模型会在下一步收到它（见[配置参考](../reference/configuration.md)中的 `tool_images`）。 |
+| `browser_screenshot` | 给页面拍一张图。图片随对话保存，网页控制台会显示；终端不绘制图片。能读图的模型会在下一步收到它（见[配置参考](../reference/configuration.md)中的 `tool_images`）；不能读图的模型会被告知它看不到这张图，并改为以文本读取页面。 |
 | `browser_click_point` | 点击上一张图上的某一点（`x` 和 `y` 横向、纵向都从 0 到 1000），用于元素列表里没有的东西：画出来的按钮、来自其他网站的框。回答附一张新图，标出这一点。 |
 | `window_read` | 读取 melo 自己的操作之后其他应用打开的窗口（见[其他应用的窗口](#windows-from-other-apps)）：它的文字、按钮，以及只拍这个窗口的一张图。 |
 | `window_press` | 按名字按下这个窗口里的按钮；按不下去时，点击它截图上的一点。每次都会先问你。 |
