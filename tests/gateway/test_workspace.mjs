@@ -1345,6 +1345,28 @@ test("a window another app opened is a question for the person, with the title f
     "Chat opened a window right after melo's click: let melo see it?");
   assert.deepEqual(focuses(auto).filter((name) => name !== 'reason'), ['once', 'session', 'deny']);
   assert.ok(labels(auto).includes('Allow Chat in this chat'));
+  // No reasons list under it: the question says it all, and Auto's generic sentence would not.
+  const bare = (card) => ['approval-why', 'approval-reasons'].map((name) => findNode(card, (node) => node.className === name));
+  assert.deepEqual(bare(auto), [null, null]);
+  // The take-over card is the same in Auto, and so is the window card in Simplified Chinese.
+  const only = {verdict: 'high', categories: ['opaque'], reasons: ['Only you can take it over.']};
+  h.context.request = {request_id: 'take-auto', tool_name: 'takeover:https://example.com', workspace_label: '~/w', offers_chat: false,
+    arguments: {site: 'example.com', access: 'takeover', need: 'sign-in'}, review: only};
+  const take = h.run('approvalCard(request)');
+  assert.equal(findNode(take, (node) => node.className === 'approval-title').textContent, 'melo needs you to sign in on example.com');
+  assert.deepEqual(bare(take), [null, null]);
+  const {useLanguage} = await import('../../support/gateway/static/i18n.mjs');
+  await useLanguage('zh-Hans');
+  try {
+    h.context.request = {request_id: 'see-auto-zh', tool_name: 'window-read:com.example.chat', arguments: args, workspace_label: '~/w',
+      offers_chat: true, review: only};
+    const zh = h.run('approvalCard(request)');
+    assert.equal(findNode(zh, (node) => node.className === 'approval-title').textContent,
+      'Chat 在 melo 点击之后立刻打开了一个窗口：让 melo 看看吗？');
+    assert.deepEqual(bare(zh), [null, null]);
+  } finally {
+    await useLanguage('en');
+  }
 });
 
 test('a form send and typing show what goes, say when the page decides, and offer no answer that is kept', async () => {

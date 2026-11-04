@@ -127,7 +127,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   1280 pixels and 256 KB) and `window_press` (a button by its name through accessibility, or, when that
   does not go through, a point of the window's picture, marked on the picture that comes back). A press is a
   question of its own every time (`desktop-act:<app>`) that only you answer, in Ask and in Auto: a card, with
-  no model shown the window or the press, and nothing is pressed when nobody is watching the chat in Auto.
+  no model shown the window or the press, and when nobody is watching the chat in Auto nothing is pressed and the model is told that only you can answer.
   With Accessibility alone the helper reads text and buttons and presses by name, with no picture. Without the helper or its Accessibility permission melo
   still notices that another app came to the front and says which one, so you can answer it there. The
   browsing guide's setup list says where to get the helper. Only windows that appeared after

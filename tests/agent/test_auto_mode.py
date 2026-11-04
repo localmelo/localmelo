@@ -25,6 +25,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     ApprovalRequest,
     AutoPolicy,
+    denial_text,
     grant_offered,
 )
 from localmelo.melo.contracts.providers import LLM_REQUEST_KIND, BaseLLMProvider
@@ -1018,6 +1019,11 @@ async def test_a_window_another_app_opened_is_denied_in_auto_when_nobody_can_be_
     [answer] = tool.answers
     assert not answer.allow and answer.origin == "auto", (question, answer)
     assert llm.review_requests == []
+    # What the model reads says the truth (only the person can answer, nobody has the chat
+    # open), never a category of code melo cannot check, so it has no reason to invent one.
+    told = denial_text(answer)
+    assert "only the user can answer" in told and "nobody has the chat open" in told
+    assert "cannot check" not in told and "other reason" in told
 
 
 @pytest.mark.asyncio

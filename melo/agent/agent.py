@@ -129,6 +129,7 @@ from localmelo.melo.contracts.approvals import (
     BLOCKED_ALIKE,
     BLOCKED_EARLIER,
     DESKTOP_ACT,
+    NOBODY_TO_ASK,
     SELF_ASKING_TOOLS,
     STOPPED_NOTE,
     TAKEOVER,
@@ -2325,7 +2326,8 @@ class _ToolAsk:
         into a blocked step's record or a later review's prompt. In Auto the policy
         is handed a review that only a card can settle (the one category
         ``opaque``, which words and the model never allow), so it asks the
-        person like a card-only kind, or denies when nobody is watching. An
+        person like a card-only kind, or denies when nobody is watching (the reason
+        is :data:`NOBODY_TO_ASK`, not the category's words). An
         answer of "Allow <App> in this chat" is the policy's grant of this
         name (``window-read:<bundle id>``). A press (``desktop-act:<app>``) is
         asked every time and never kept.
@@ -2349,6 +2351,10 @@ class _ToolAsk:
                 f"the approval policy returned {type(decided).__name__}, "
                 "not an ApprovalDecision"
             )
+        if not decided.allow and decided.origin == "auto":
+            # Auto refused it only because nobody can be asked: say that, not the
+            # category of code melo cannot check that the fixed review carries.
+            return dataclasses.replace(decided, reason=NOBODY_TO_ASK)
         return decided
 
     async def __call__(

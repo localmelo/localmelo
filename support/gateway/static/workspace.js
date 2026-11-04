@@ -2084,10 +2084,11 @@ function approvalCard(request, view = chatApproval, asked = "") {
   // card says why, offers no chat-wide allow, and starts on Deny. A site Auto stopped only because the
   // request did not ask for it (#465) says why too, but may be allowed for the chat: the server says so.
   const review = request.review;
-  // The take-over card and a press in another app's window are only ever the person's: Auto's "only you"
-  // review does not reword them.
+  // A take-over, a window another app opened and a press in one are only ever the person's: Auto's "only you"
+  // review does not reword them or add reasons, so the card keeps its own words in Ask and in Auto.
   const takeover = tool.startsWith("takeover:");
-  const stopped = review?.verdict === "high" && !takeover && !tool.startsWith("desktop-act:");
+  const personOnly = takeover || tool.startsWith("window-read:") || tool.startsWith("desktop-act:");
+  const stopped = review?.verdict === "high" && !personOnly;
   const siteChoice = stopped && request.offers_chat === true;
   const high = stopped && !siteChoice;
   const reviewed = stopped ? reviewWords({ ...review, gist: request.gist }, folder) : { title: "", reasons: [] };
