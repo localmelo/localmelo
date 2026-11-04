@@ -1481,6 +1481,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   exist, on any Space, before melo's step. A window whose buttons the app draws itself is pressed at a point
   of its picture; when that click in the background changes nothing, melo asks again and clicks once more in
   the foreground, where the pointer moves and the app comes to the front for a moment.
+- You see what melo does in Chrome in the background. The Browser panel of a chat that started on Safari never
+  opened after Settings switched to Chrome, and its button stayed hidden: the page asked only once, when the chat
+  opened. Now it asks again, and the panel opens by itself while melo browses and closes when the turn ends,
+  unless you opened it or have the page. **Pop out** shows it large in a browser too. The pictures melo takes of a
+  page or of another app's window were only inside each folded step; they now show in a row under the turn's
+  steps and open at full size. A browser chosen while a chat's turn ran now reaches that chat at its next message
+  (it waited until the chat was closed), and switching between Chrome and Safari says each keeps its own sign-ins.
 - Words added to a chat while melo works are now remembered with that turn; before, only the first message of the turn was. Part of #428.
 - A button that a sticky header or an anchored ad stands over can be clicked. Before a real click, melo
   scrolls the element to the middle of the view at once (also on a page that scrolls smoothly, where the middle

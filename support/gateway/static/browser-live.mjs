@@ -3,9 +3,13 @@ import {t} from './i18n.mjs';
 /**
  * The Browser panel: a live window onto the page melo is working in, which the person can take over.
  *
- * It sits beside the chat, opens by itself when melo starts browsing (a `browser_*` tool call in the chat's event
- * stream) or when the chat already has a page open, and can be hidden; the chat's header then keeps a chip that
- * brings it back. The pictures come from one WebSocket per open panel,
+ * It sits beside the chat and opens by itself while melo browses: when a `browser_*` tool call starts in the chat's
+ * event stream, or when the chat is opened in the middle of a browser step or with a page the person took over. When
+ * the turn ends it goes again, unless the person opened it or has the page; the chat's header keeps a chip that
+ * brings it back, and a panel the person hid does not open by itself again for that chat. Whether the chat can be
+ * watched (`available`: its browser is Chrome and the live view is on) is asked when the chat is followed, again when
+ * melo browses in a chat that could not be watched (the browser was changed in Settings elsewhere), and on
+ * `recheck()` (this page saved Settings). The pictures come from one WebSocket per open panel,
  * `/api/sessions/<id>/browser/live` (support/gateway/console/routes_browser.py): JSON `meta` messages say the state
  * (`idle`, `loading`, `live`, `stale`, `closed`), the tab, its address and title, whether melo is in the middle of a
  * browser step, and the size of the page view; binary messages are JPEG pictures, of which only the newest is
@@ -13,7 +17,8 @@ import {t} from './i18n.mjs';
  *
  * `follow(id)` / `release()` bind the panel to the chat that is open, `note(frame)` reads that chat's events, and
  * A page that is hidden for a while, or kept by the browser for Back, lets go of its socket (`suspend`) and asks
- * again when it is back (`resume`). `#/live/<id>` (`liveRoute`) is the panel alone, which the macOS app's pop-out window opens. The pure helpers
+ * again when it is back (`resume`). `#/live/<id>` (`liveRoute`, `liveUrl`) is the panel alone, which **Pop out** opens
+ * large: in its own window in the macOS app, in a window of the browser elsewhere. The pure helpers
  * (`parseMeta`, `view`, `layout`, `toPage`, `addressParts`, `control` and the input messages) are what the tests check.
  *
  * Take over: **Take over** (or the "melo needs you" card, `takeOver()`) hands the tab to the person (`meta.owner` is
@@ -51,6 +56,9 @@ const SENTINEL = ' ';
 
 /** The chat id of a `#/live/<id>` address, or ''. */
 export const liveRoute = (hash) => /^#\/live\/([A-Za-z0-9._:-]+)$/.exec(hash ?? '')?.[1] ?? '';
+
+/** The page that shows one chat's Browser panel alone (`#/live/<id>`) on this page's own origin: Pop out opens it. */
+export const liveUrl = (location, session) => `${location.origin}/#/live/${encodeURIComponent(session)}`;
 
 /** The WebSocket address of one chat's browser on this page's own origin, optionally pinned to a tab. */
 export function socketUrl(location, session, tab = '') {
@@ -350,6 +358,10 @@ export function setupBrowser({
     picture: false,
     calls: new Set(), // browser tool calls of the chat that are running (from its events)
     dismissed: new Set(), // chats whose panel the person hid: it does not open by itself again
+    auto: false, // the panel opened by itself: it goes again when the browsing ends
+    stepped: false, // melo browsed in the turn that runs
+    asked: false, // the gateway was asked again in this turn (a chat that could not be watched)
+    asking: false, // a question to the gateway is on its way
     generation: 0,
     focused: false, // the hidden text box has the keys (take over)
     wantFocus: false, // the person asked to take over: the keys go to the page once it is theirs
@@ -789,6 +801,7 @@ export function setupBrowser({
     S.dismissed.delete(S.session);
     S.available = S.available ?? true;
     S.wantFocus = true;
+    S.auto = false;
     show();
     if (ask) send({type: 'take'});
     render();
@@ -815,14 +828,29 @@ export function setupBrowser({
   /** Whether the panel may open by itself: not for a chat whose panel was hidden, and below 900 px only on request. */
   const wantsOpen = () => S.liveOnly || (!S.dismissed.has(S.session) && wide());
 
-  function reveal() {
+  /** Open the panel by itself while melo browses (a step runs, or *awake*: the gateway says so or the page is the person's). */
+  function reveal(awake = false) {
     if (!S.session) return;
     if (S.liveOnly) {
       show();
       return;
     }
-    if (S.available === true && S.known && !S.shown && wantsOpen()) show();
-    else render();
+    if (S.available === true && S.known && !S.shown && wantsOpen() && (hint() || awake)) {
+      S.auto = true;
+      show();
+    } else render();
+  }
+
+  /** The browsing ended (the turn did): a panel that opened by itself goes, and the chip stays to bring it back. */
+  function settle() {
+    const browsed = S.stepped;
+    S.stepped = false;
+    S.asked = false;
+    S.calls.clear();
+    if (browsed && S.auto && S.shown && S.meta?.owner !== 'you') {
+      S.auto = false;
+      hide();
+    } else render();
   }
 
   function reset() {
@@ -833,6 +861,10 @@ export function setupBrowser({
     S.known = false;
     S.available = null;
     S.calls.clear();
+    S.auto = false;
+    S.stepped = false;
+    S.asked = false;
+    S.asking = false;
     const was = S.shown;
     S.shown = false;
     if (was) changed({shown: false});
@@ -842,18 +874,24 @@ export function setupBrowser({
     const id = S.session;
     const generation = S.generation;
     let state = null;
+    S.asking = true;
     try {
       state = await api(`/sessions/${encodeURIComponent(id)}/browser`);
     } catch {
       state = null;
     }
     if (S.session !== id || S.generation !== generation) return;
+    S.asking = false;
     S.available = state?.available === true;
     if (state?.open) S.known = true;
     if (S.liveOnly && !S.available) {
       S.meta = parseMeta('{"type":"meta","state":"closed","reason":"unavailable"}');
+    } else if (!S.available && S.shown && !S.liveOnly) {
+      // The browser now chosen cannot be watched: the panel goes, and it was not the person who hid it.
+      S.auto = false;
+      hide();
     }
-    reveal();
+    reveal(state?.browsing === true || state?.yours === true);
   }
 
   return {
@@ -879,7 +917,11 @@ export function setupBrowser({
       render();
     },
 
-    /** Read one event of the followed chat: a browser tool call starting is melo beginning to browse. */
+    /**
+     * Read one event of the followed chat: a browser tool call starting is melo beginning to browse, and the turn
+     * finishing is the browsing ending. In a chat that could not be watched, the first browser step of a turn asks
+     * the gateway again: the browser may have been changed in Settings since the chat was followed.
+     */
     note(frame) {
       if (!S.session || S.liveOnly) return;
       const type = String(frame?.type ?? '');
@@ -887,17 +929,32 @@ export function setupBrowser({
       if (type === 'tool.started' && String(data.name ?? '').startsWith('browser_')) {
         S.calls.add(String(data.call_id ?? ''));
         S.known = true;
+        S.stepped = true;
+        if (S.available === false && !S.asked && !S.asking) {
+          S.asked = true;
+          probe();
+        }
         reveal();
       } else if (type === 'tool.finished') {
         if (S.calls.delete(String(data.call_id ?? ''))) render();
-      } else if (type === 'turn.finished' && S.calls.size > 0) {
-        S.calls.clear();
-        render();
+      } else if (type === 'turn.finished') {
+        settle();
       }
+    },
+
+    /**
+     * Ask the gateway again whether the chat can be watched (this page saved Settings: the browser may be another
+     * now). The chip and the panel follow the answer; nothing opens unless melo is browsing.
+     */
+    async recheck() {
+      if (!S.session || S.liveOnly) return;
+      S.known = S.calls.size > 0;
+      await probe();
     },
 
     /** The header chip: show the panel, or hide it (a hidden panel stays hidden for this chat until asked). */
     toggle() {
+      S.auto = false;
       if (S.shown) {
         S.dismissed.add(S.session);
         hide();
@@ -910,6 +967,7 @@ export function setupBrowser({
 
     hide() {
       if (!S.shown || S.liveOnly) return;
+      S.auto = false;
       S.dismissed.add(S.session);
       hide();
     },

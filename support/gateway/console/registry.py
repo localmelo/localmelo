@@ -205,6 +205,9 @@ class OpenSession:
     last_used: float = 0.0
     # The main chat, which works in the default folder as it is now.
     main: bool = False
+    # The settings change its Agent was built after (ConsoleSessions' count):
+    # an older Agent is built again at the chat's next open.
+    settings_epoch: int = 0
 
     @property
     def grants(self) -> SessionGrants:
@@ -277,6 +280,9 @@ class ConsoleSessions:
         self._create_locks: dict[str, asyncio.Lock] = {}
         # Stops that arrived for a turn a create had not registered yet.
         self._deferred_cancels: set[str] = set()
+        # How many times the settings changed: an Agent built before the last
+        # change (one that was busy then) is built again at its next open.
+        self._settings_epoch = 0
         self._closed = False
 
     # ── Reading ──
@@ -384,9 +390,17 @@ class ConsoleSessions:
         if entry is not None and entry.agent is not None:
             root = entry.agent.workspace_root
             assert root is not None
-            if entry.main and not entry.runner.busy and root != self._main_folder():
+            if not entry.runner.busy and (
+                (entry.main and root != self._main_folder())
+                or (
+                    entry.settings_epoch != self._settings_epoch
+                    and not self._broker.pending(session_id)
+                )
+            ):
                 # The default folder changed: the main chat follows it with
                 # a new Agent on the same conversation (after a running turn).
+                # So does a chat whose turn ran when the settings changed (a
+                # browser chosen in Settings): its next turn gets them.
                 await self._keep_locked(entry)
             else:
                 # A folder deleted while the Agent was open is still the 400
@@ -442,6 +456,7 @@ class ConsoleSessions:
         if self._closed:
             raise RuntimeError("The console's sessions are closed")
         is_new = entry is None
+        epoch = self._settings_epoch
         settings = self._settings()
         mcp_config = getattr(settings, "mcp_config", "") or None
         agent = await self._build_agent(
@@ -483,6 +498,7 @@ class ConsoleSessions:
                 lock=self.lock(session_id),
                 last_used=self._clock(),
                 main=info.kind == "front",
+                settings_epoch=epoch,
             )
             self._sessions[session_id] = entry
         else:
@@ -494,6 +510,7 @@ class ConsoleSessions:
                     await agent.close()
                 raise ApiError(409, "session_busy", str(exc)) from exc
             entry.agent = agent
+            entry.settings_epoch = epoch
             entry.built_with_mcp = False
             entry.last_used = self._clock()
 
@@ -960,6 +977,7 @@ class ConsoleSessions:
             if admit is not None:
                 await admit()
         path = self._resolve_workspace(workspace)
+        epoch = self._settings_epoch
         settings = self._settings()
         model = self._settings_model()
         # A create opens an Agent too, so the cap counts it like an open.
@@ -981,6 +999,7 @@ class ConsoleSessions:
                 client_request_id,
                 has_turn=first is not None,
                 extras=extras,
+                epoch=epoch,
             )
 
     async def _fill_new(
@@ -994,8 +1013,12 @@ class ConsoleSessions:
         *,
         has_turn: bool,
         extras: TurnExtras | None = None,
+        epoch: int = 0,
     ) -> tuple[OpenSession, TurnInfo | None]:
-        """Build the Agent of a new row, start its first turn and register it."""
+        """Build the Agent of a new row, start its first turn and register it.
+
+        *epoch* is the settings change *settings* were read after.
+        """
         extras = extras or TurnExtras()
         try:
             # MCP is deferred (U3 decision 5 B): the builder gets no config.
@@ -1064,6 +1087,7 @@ class ConsoleSessions:
             built_with_mcp=False,
             lock=self.lock(session_id),
             last_used=self._clock(),
+            settings_epoch=epoch,
         )
         self._sessions[session_id] = entry
         if turn is not None:
@@ -1259,6 +1283,7 @@ class ConsoleSessions:
                     "session_busy",
                     t("errors.turnRunning"),
                 )
+            epoch = self._settings_epoch
             settings = self._settings()
             old_root = entry.agent.workspace_root
             agent = await self._build_agent(
@@ -1293,6 +1318,7 @@ class ConsoleSessions:
                     ) from exc
                 raise
             old, entry.agent = entry.agent, agent
+            entry.settings_epoch = epoch
             with contextlib.suppress(Exception):
                 await old.close()
             await self._forget_moved(session_id)
@@ -1363,8 +1389,11 @@ class ConsoleSessions:
     async def settings_changed(self) -> None:
         """Close every idle Agent at once, keeping each conversation.
 
-        A busy Agent is closed after its turn; PR 3 adds that path.
+        An Agent that is busy (a turn runs, a question waits, an open is
+        queued) keeps the settings it was built with until its turn ends: the
+        chat's next open builds it again (:meth:`_open_locked`).
         """
+        self._settings_epoch += 1
         for entry in list(self._sessions.values()):
             if entry.agent is None or entry.runner.busy:
                 continue

@@ -148,6 +148,35 @@ async def test_settings_changed_closes_idle_agents(
     assert one.kept is not None and two.kept is not None
 
 
+async def test_a_chat_busy_at_a_settings_change_takes_it_at_its_next_turn(
+    console: Console,
+    builder: FakeBuilder,
+    workspace: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A browser chosen in Settings while a chat's turn runs: that turn keeps the
+    # browser it has, and the chat's next turn gets a new Agent with the new one.
+    turn = await seed_turn(console.store, workspace)
+    reg = registry(console, builder)
+    entry = await open_session(reg, turn.session_id)
+    old = cast(FakeAgent, entry.agent)
+    old.messages = [Message(role="user", content="kept")]
+    running = {"now": True}
+    monkeypatch.setattr(SessionRunner, "busy", property(lambda self: running["now"]))
+    await reg.settings_changed()
+    assert entry.agent is old and not old.closed, "a running turn keeps its Agent"
+    assert (await open_session(reg, turn.session_id)).agent is old
+    running["now"] = False
+    reopened = await open_session(reg, turn.session_id)
+    assert reopened is entry and old.closed
+    new = cast(FakeAgent, reopened.agent)
+    assert new is not old and new.conversation() == old.messages
+    assert len(builder.calls) == 2
+    # Built after the change, it is not built again.
+    assert (await open_session(reg, turn.session_id)).agent is new
+    assert len(builder.calls) == 2
+
+
 async def test_delete_removes_the_row_and_closes_the_agent(
     console: Console, builder: FakeBuilder, workspace: str
 ) -> None:

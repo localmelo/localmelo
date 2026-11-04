@@ -319,6 +319,11 @@ When a turn makes a picture it shows under the answer, in the browser and in the
 [macOS app](macos-app.md) alike, so a chart you asked for is there without opening the
 folder.
 
+- **Pictures melo took.** A picture a step took (a page melo looked at with
+  `browser_screenshot`, another app's window) shows in its own row under the turn's steps,
+  also when they are folded: "Picture 1", "Picture 2" and so on, each once, opening at full
+  size like the others. These are the chat's own copies
+  (`GET /api/sessions/{id}/blobs/<sha256>`), so they stay with the chat.
 - **Which pictures.** The PNG, JPEG, GIF, WebP and SVG files the turn created or changed in
   the chat's folder, and the picture files its answer names by a path inside that folder.
   The gateway looks at the folder when the turn starts and when it ends, so a file written by
@@ -454,7 +459,9 @@ In developer mode, **Details** opens in the panel, in place of the tabs, until y
 
 While melo browses in Chrome in the background ([Browsing with melo](browsing.md#watching-melos-browser)), a **Browser** panel beside the chat shows its page, live, and lets you take it over.
 
-- It opens by itself when melo starts browsing and follows melo to another tab. **Hide browser** in its header closes it; the **Browser** button in the header opens it again.
+- It opens by itself while melo browses and follows melo to another tab. When the turn ends it closes again, unless you opened it yourself or have the page; the **Browser** button in the header brings it back. **Hide browser** in its header closes it until you open it again.
+- After you switch the browser to Chrome in Settings, it opens at the chat's next browser step. A chat in the middle of a turn finishes it in the browser it has.
+- **Pop out** shows the panel alone and large: in the app in a window of its own, in a browser in a new window.
 - It shows the page's title and address, the picture, and a ring with "melo is browsing" while a step runs. When the picture stops it dims and reads "Not updating"; when it ends it says why.
 - On a window 1480 pixels wide or more it sits between the chat and the [panel beside the chat](#the-panel-beside-a-chat). On a narrower one it takes that panel's place while it is open, and under 900 pixels it opens as a sheet when you ask.
 - It sends nothing while it is hidden or its tab is in the background, and closing the tab ends the picture stream.

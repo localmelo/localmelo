@@ -263,7 +263,10 @@ class LiveView:
     async def snapshot(self) -> dict[str, Any]:
         """Whether the chat has a page open and which: the current tab, its address and title.
 
-        Nothing streams for this; the address and title are asked of the browser.
+        Also whether melo is in the middle of a browser step (``browsing``) and
+        whether the person has one of the chat's pages (``yours``): the console
+        opens its panel for either. Nothing streams for this; the address and
+        title are asked of the browser.
         """
         short = self._host.live_current()
         raw = self._host.live_raw(short) if short else None
@@ -282,6 +285,7 @@ class LiveView:
             "url": url,
             "title": title,
             "browsing": bool(self._host.live_busy()),
+            "yours": bool(self._owners is not None and self._owners.held),
             "viewers": len(self._viewers),
         }
 

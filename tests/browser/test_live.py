@@ -22,6 +22,7 @@ from localmelo.support.browser.chrome import ChromeBackgroundDriver
 from localmelo.support.browser.driver import BrowserError, TabInfo
 from localmelo.support.browser.live import Frame, LiveRefusedError, LiveView
 from localmelo.support.browser.provider import BrowserToolProvider
+from localmelo.support.browser.takeover import Owners
 from localmelo.tests.browser.fakes import FakeDriver, link, page
 from localmelo.tests.browser.test_chrome import FAKE, Peer
 from localmelo.tests.browser.test_provider import run
@@ -404,6 +405,28 @@ async def test_the_snapshot_says_which_page_is_open_and_streams_nothing(
         "Home",
     )
     assert snap["viewers"] == 0 and stream.started == []
+
+
+async def test_the_snapshot_says_whether_the_person_has_a_page(
+    stream: Stream, host: Host
+) -> None:
+    # A console that opens the chat again shows the page the person took over.
+    owners = Owners(
+        later=lambda seconds, fn: asyncio.get_running_loop().call_later(seconds, fn)
+    )
+    view = LiveView(stream, host, poll_s=3600, owners=owners)
+    try:
+        host.add("t1", "R1", HOME, "Home")
+        assert (await view.snapshot())["yours"] is False
+        owners.take("t1")
+        assert (await view.snapshot())["yours"] is True
+        owners.give("t1")
+        assert (await view.snapshot())["yours"] is False
+        no_takeover = LiveView(stream, host, poll_s=3600)
+        assert (await no_takeover.snapshot())["yours"] is False
+        await no_takeover.aclose()
+    finally:
+        await view.aclose()
 
 
 # ── The relay under the browser tools ──

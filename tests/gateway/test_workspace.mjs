@@ -14,12 +14,12 @@ import {formatTime, t} from '../../support/gateway/static/i18n.mjs';
 import {workerHistory} from '../../support/gateway/static/worker-history.mjs';
 import {setupTasks} from '../../support/gateway/static/tasks.mjs';
 import {setupPanel as realSetupPanel} from '../../support/gateway/static/panel.mjs';
-import {liveRoute} from '../../support/gateway/static/browser-live.mjs';
+import {liveRoute, liveUrl} from '../../support/gateway/static/browser-live.mjs';
 import {plainSegments, setupStatusRow} from '../../support/gateway/static/status-row.mjs';
 import {setupRunning} from '../../support/gateway/static/running.mjs';
 import {setupModelCard} from '../../support/gateway/static/setup-card.mjs';
 import {folderChoices, folderName, setupFolderPicker} from '../../support/gateway/static/folder.mjs';
-import {picturesNode, setupPictureBox} from '../../support/gateway/static/pictures.mjs';
+import {picturesNode, setupPictureBox, shotsNode, takenPictures} from '../../support/gateway/static/pictures.mjs';
 import * as composerMedia from '../../support/gateway/static/composer-media.mjs';
 import {memoryNodes} from '../../support/gateway/static/memory.mjs';
 import * as mainChat from '../../support/gateway/static/main-chat.mjs';
@@ -892,7 +892,7 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     opened: false, calls: [],
     open(tab) { this.opened = true; this.calls.push(tab); },
     close() { if (!this.opened) return false; this.opened = false; return true; },
-    selectTab(tab) { this.calls.push(`select:${tab}`); }, sessionChanged() {},
+    selectTab(tab) { this.calls.push(`select:${tab}`); }, sessionChanged() {}, modeChanged() {},
   };
   const context = vm.createContext({
     ...turns,
@@ -911,6 +911,8 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     setupFolderPicker,
     picturesNode,
     setupPictureBox,
+    shotsNode,
+    takenPictures,
     ...composerMedia,
     memoryNodes,
     ...mainChat,
@@ -926,6 +928,7 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     setupDrawer: () => drawer,
     // The Browser panel has its own tests (test_browser_live.mjs); here the page only has to bind it to the open chat.
     liveRoute,
+    liveUrl,
     setupBrowser: () => ({
       follow: async (id, options = {}) => { browserLog.push(['follow', id, options.liveOnly === true]); },
       release: (next = '') => { browserLog.push(['release', next]); },
@@ -936,6 +939,7 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
       popOut() { browserLog.push(['popOut']); },
       suspend() { browserLog.push(['suspend']); },
       resume() { browserLog.push(['resume']); },
+      recheck: async () => { browserLog.push(['recheck']); },
     }),
     // The panel beside the chat has its own tests (test_panel.mjs); here it only hears health.
     // `/memory import` opens its tab and presses "Look for notes": a test sets `notesOn` and reads `notesLooked`.
@@ -1648,6 +1652,39 @@ test('pictures a turn made show as a row under its answer, and the row is reacha
   tiles[1].click();
   assert.equal(h.element('picture-box').open, true);
   assert.match(flatten(h.element('picture-box')), /plot\.svg/);
+});
+
+test('the pictures melo took show under its steps, also once they are folded, and open at full size', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const sha = 'a'.repeat(64);
+  h.stream().emit({id: 8, turn: 2, ts: 21, type: 'turn.started', data: {turn: 2, turn_id: 'turn-2', user_text: 'look at the page', client_request_id: null}});
+  h.stream().emit({id: 9, turn: 2, ts: 22, type: 'tool.started', data: {call_id: 'c1', name: 'browser_screenshot', step: 1, arguments: {}}});
+  h.stream().emit({id: 10, turn: 2, ts: 23, type: 'tool.finished', data: {call_id: 'c1', name: 'browser_screenshot', status: 'success',
+    output: 'A picture of https://example.com was taken and kept with this chat.', images: [{sha256: sha, mime_type: 'image/jpeg', size_bytes: 52000}]}});
+  const shots = () => findNode(h.element('messages'), (node) => node.className === 'pictures picture-shots');
+  assert.ok(shots(), 'the row shows while the turn runs');
+  h.stream().emit({id: 11, turn: 2, ts: 24, type: 'run.finished', data: {result: {result: 'Seen.', steps: 2}}});
+  h.stream().emit({id: 12, turn: 2, ts: 25, type: 'turn.finished', data: {turn: 2, turn_id: 'turn-2', status: 'completed'}});
+  const articles = findNodes(h.element('messages'), (node) => node.className === 'msg assistant');
+  const order = articles.at(-1).children.map((child) => child.className);
+  assert.ok(order.indexOf('pictures picture-shots') > order.indexOf('work-group'), 'under the steps');
+  assert.ok(order.indexOf('pictures picture-shots') < order.indexOf('answer'), 'above the answer');
+  const group = findNode(articles.at(-1), (node) => node.className === 'work-group');
+  assert.equal(group.open, false, 'the steps are folded');
+  const image = findNode(shots(), (node) => node.tag === 'img');
+  assert.equal(image.src, `/api/sessions/a/blobs/${sha}`);
+  findNode(shots(), (node) => node.className === 'picture').click();
+  assert.equal(h.element('picture-box').open, true);
+  assert.match(flatten(h.element('picture-box')), /Picture 1/);
+});
+
+test('saving Settings asks the Browser panel again whether the chat can be watched', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.browserLog.length = 0;
+  await h.run('settingsSaved({mode: "default"})');
+  assert.deepEqual(h.browserLog, [['recheck']]);
 });
 
 test('what memory recalled and kept shows under the message, and Undo forgets the note', async () => {
