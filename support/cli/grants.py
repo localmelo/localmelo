@@ -13,12 +13,14 @@ the main chat's.
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Final
 
 from localmelo.support.cli.approvals import grant_listed, grant_site
 from localmelo.support.cli.main_chat import GatewayError
+from localmelo.support.sessions.display import home_label
 from localmelo.support.sessions.grants import listed
 from localmelo.support.sessions.store import SessionStoreError
 
@@ -72,15 +74,29 @@ async def forget(session: CliSession, name: str | None) -> None:
         await session.grant_book.settle()
     except SessionStoreError as exc:
         out.print(session._text(f"⚠ Taken back here, but not saved: {exc}", "warn"))
-    from_main = {g.key for g in session.grant_book.outside()}
+    main = session.grant_book.outside()
+    from_main = {g.key for g in main if g.kind != "folder"}
+    main_folders = {g.key for g in main if g.kind == "folder"}
     still = approvals.allowed_tools & from_main
+    still_folders = [f for f in approvals.allowed_folders if f in main_folders]
     if name is not None:
-        if _names(name, frozenset(still)):
+        if _names(name, frozenset(still)) or _folder_named(name, still_folders):
             out.print(session._text(FROM_MAIN_FORGET.format(name=name), "error"))
         return
-    if still:
-        names = ", ".join(grant_listed(grant) for grant in sorted(still))
+    if still or still_folders:
+        names = ", ".join(
+            [grant_listed(grant) for grant in sorted(still)]
+            + [home_label(folder) for folder in still_folders]
+        )
         out.print(session._text(STILL_FROM_MAIN.format(names=names), "muted"))
+
+
+def _folder_named(name: str, folders: list[str]) -> bool:
+    """Whether *name* (a path, ``~/…`` or the folder as listed) is one of *folders*."""
+    path = os.path.realpath(os.path.expanduser(name)).rstrip("/")
+    return any(
+        name in (folder, home_label(folder)) or path == folder for folder in folders
+    )
 
 
 def _when(at: object) -> str:

@@ -2122,8 +2122,10 @@ Take back one grant that holds in the chat, so the tool asks again next time.
 - A revoke the store cannot save is 503 `store_unavailable`; the checks have
   stopped using the grant all the same, but it would come back after a restart.
 - `DELETE /api/sessions/{id}/folders?path=PATH` takes back a folder allowed
-  for reading in the chat (204; 404 `not_found` when none holds there; 503
-  when the store cannot save it). It works for a chat that is not open too.
+  for reading in the chat, with the same 200 answer as a named grant: a folder
+  the main chat allowed goes everywhere, and `everywhere` is then `true` (404
+  `not_found` when none holds there; 503 when the store cannot save it). It
+  works for a chat that is not open too.
 - A site's grant is named after the question, such as
   `browser-act:https://news.example`; the name may hold slashes, and is sent
   percent-encoded or as it is.

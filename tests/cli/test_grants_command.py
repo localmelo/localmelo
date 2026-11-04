@@ -8,6 +8,7 @@ list and Revoke are the gateway's.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -111,6 +112,34 @@ async def test_approvals_forget_says_a_main_chat_grant_is_taken_back_there(
     session.enter("/approvals forget")
     await _until(lambda: "these still hold here" in out.text())
     assert session.approvals.allowed_tools == {"python_exec"}
+
+
+async def test_approvals_forget_names_a_main_chat_folder_too(
+    setup: Setup, tmp_path: Path
+) -> None:
+    session, out = setup.session, setup.out
+    letters = Path(os.path.realpath(tmp_path)) / "Documents" / "letters"
+    letters.mkdir(parents=True)
+    gateway = SessionStore(Path(GATEWAY_SESSIONS_DB).expanduser(), writer="gateway")
+    await gateway.open()
+    try:
+        book = GrantBook(gateway)
+        await book.open()
+        main = (await gateway.main_chat()).id
+        await book.view(main, "main").grant(str(letters), kind="folder")
+    finally:
+        await gateway.aclose()
+    await _first_turn(setup)
+    assert session.approvals.allowed_folders == (str(letters),)
+
+    def said() -> str:
+        return " ".join(out.text().split())
+
+    session.enter(f"/approvals forget {letters}")
+    await _until(lambda: "was allowed in the main chat" in said())
+    session.enter("/approvals forget")
+    await _until(lambda: "~/Documents/letters" in said().split("these still")[-1])
+    assert session.approvals.allowed_folders == (str(letters),)
 
 
 class FakeGateway:

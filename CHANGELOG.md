@@ -895,7 +895,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   a grant from the main chat **From the main chat**: removing it takes it away everywhere, and
   `DELETE /api/sessions/{id}/grants/{name}` now answers 200 `{"revoked": [...], "everywhere": true|false}`;
   clearing a side chat's grants answers `{"revoked": N, "still_everywhere": M}` and says the main chat's still hold.
-  `GET /api/sessions/{id}` adds `grants_everywhere`. A revoke the store cannot save is 503 on every route. In the
+  `DELETE /api/sessions/{id}/folders?path=` answers the same way (a main-chat folder goes everywhere, and the
+  drawer says so); a task's window card says **Allow Chat for this task**. `GET /api/sessions/{id}` adds
+  `grants_everywhere`. A revoke the store cannot save is 503 on every route. In the
   terminal's own chat `/approvals forget` says when a grant is the main chat's and where to take it back.
 - melo acts for you, in your name. Applying with your resume, signing in, filling in and submitting a form, sending a message as you and booking are done when you ask or authorize them: the model no longer refuses a step because it speaks in your name or cannot be undone, and it does not hand back a list of links or leave the last click to you. The approval cards (Ask) and Auto's review decide which steps you confirm, never the model, and only what would harm other people is declined. Every chat's and every task's instructions say so, the main chat and the side chats add a one-line reminder after your message, and a recalled reply in which melo refused or said a step was blocked is no precedent. The main chat is told that a request to do something online is work (the browser, or a task for the many-step part), not advice, and a go-ahead such as `I authorize you to apply` or `我授权你去投简历` starts that work like any other request.
 - In Auto, the goal decides: the steps a task plainly needs run without asking, and the risky

@@ -209,6 +209,32 @@ async def test_a_side_chat_shows_and_takes_back_the_main_chat_s_grants_everywher
         assert console.sessions.grants(main) == {"shell_exec"}
 
 
+async def test_a_main_chat_folder_taken_back_in_a_side_chat_goes_everywhere(
+    tmp_path: Path,
+) -> None:
+    folder = tmp_path / "letters"
+    folder.mkdir()
+    async with console_with(tmp_path, answer("hi")) as (console, client, _):
+        body = await _create(client, tmp_path, "Hello")
+        side = body["session"]["id"]
+        await _wait_turn(client, side)
+        main = console.main_id
+        assert main is not None
+        await console.sessions.book.view(main, "main").grant(str(folder), kind="folder")
+        assert console.sessions.folder_grants(side) == (str(folder),)
+
+        gone = await client.delete(
+            f"/api/sessions/{side}/folders", params={"path": str(folder)}
+        )
+
+        assert gone.status_code == 200
+        assert gone.json() == {
+            "revoked": [{"key": str(folder), "scope": "global"}],
+            "everywhere": True,
+        }
+        assert console.sessions.folder_grants(main) == ()
+
+
 async def test_a_revoke_the_store_cannot_save_is_503_and_holds_here(
     tmp_path: Path,
 ) -> None:
