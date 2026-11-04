@@ -11,6 +11,7 @@ import {
   addressParts,
   layout,
   liveRoute,
+  liveUrl,
   parseMeta,
   retryDelay,
   setupBrowser,
@@ -20,6 +21,11 @@ import {
 } from '../../support/gateway/static/browser-live.mjs';
 
 // ── The pure parts ──
+
+test('Pop out opens the chat\'s live page on this page\'s own origin', () => {
+  assert.equal(liveUrl({origin: 'http://127.0.0.1:9000'}, 'a b'), 'http://127.0.0.1:9000/#/live/a%20b');
+  assert.equal(liveRoute(new URL(liveUrl({origin: 'http://127.0.0.1:9000'}, 's1')).hash), 's1');
+});
 
 test('a #/live address names the chat; anything else names none', () => {
   assert.equal(liveRoute('#/live/abc-1.2:x'), 'abc-1.2:x');
@@ -241,7 +247,7 @@ class FakeSocket {
   drop(code = 1006, reason = '') { this.onclose?.({code, reason}); }
 }
 
-function panel({wide = true, state = {available: true, open: true}, popOut = null, bridge = false} = {}) {
+function panel({wide = true, state = {available: true, open: true, browsing: true}, popOut = null, bridge = false} = {}) {
   FakeSocket.all = [];
   const els = {
     root: node({hidden: true}),
@@ -285,7 +291,7 @@ function panel({wide = true, state = {available: true, open: true}, popOut = nul
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
-test('a chat with a page open shows the panel and watches it', async () => {
+test('a chat melo is browsing in shows the panel and watches it', async () => {
   const {browser, els, calls} = panel();
   await browser.follow('s1');
   assert.deepEqual(calls.api, ['/sessions/s1/browser']);
@@ -335,6 +341,92 @@ test('a browser step that starts before the gateway has answered opens the panel
   assert.equal(els.root.hidden, false);
 });
 
+test('a chat with a page open that melo is not browsing shows the chip, not the panel', async () => {
+  const {browser, els} = panel({state: {available: true, open: true, browsing: false}});
+  await browser.follow('s1');
+  assert.equal(els.root.hidden, true, 'the browsing ended: the panel waits behind the chip');
+  assert.equal(els.chip.hidden, false);
+  assert.equal(FakeSocket.all.length, 0);
+  browser.note({type: 'tool.started', data: {name: 'browser_read', call_id: 'c1'}});
+  assert.equal(els.root.hidden, false, 'melo browses again: it opens');
+  const yours = panel({state: {available: true, open: true, browsing: false, yours: true}});
+  await yours.browser.follow('s1');
+  assert.equal(yours.els.root.hidden, false, 'a page the person took over opens with the chat');
+});
+
+test('a browser step in a chat that could not be watched asks the gateway again, so a switch to Chrome shows', async () => {
+  const {browser, els, calls, setApi} = panel({state: {available: false, open: false}});
+  await browser.follow('s1');
+  browser.note({type: 'tool.started', data: {name: 'browser_open', call_id: 'c1'}});
+  await settle();
+  assert.equal(els.root.hidden, true, 'still Safari: nothing to watch');
+  assert.equal(calls.api.length, 2);
+  // Settings -> Browser became Chrome: the chat's next turn browses in it.
+  setApi({available: true, open: false});
+  browser.note({type: 'turn.finished', data: {}});
+  browser.note({type: 'tool.started', data: {name: 'browser_open', call_id: 'c2'}});
+  await settle();
+  assert.equal(calls.api.length, 3);
+  assert.equal(els.root.hidden, false, 'the live view opens by itself');
+  assert.equal(els.chip.hidden, false);
+  assert.equal(FakeSocket.all.length, 1);
+  browser.note({type: 'tool.started', data: {name: 'browser_read', call_id: 'c3'}});
+  await settle();
+  assert.equal(calls.api.length, 3, 'a chat that can be watched is not asked again');
+});
+
+test('a settings change is checked at once: the chip and panel follow the browser now chosen', async () => {
+  const {browser, els, calls, setApi} = panel({state: {available: false, open: false}});
+  await browser.follow('s1');
+  setApi({available: true, open: false});
+  await browser.recheck();
+  assert.deepEqual(calls.api, ['/sessions/s1/browser', '/sessions/s1/browser']);
+  assert.equal(els.root.hidden, true, 'nothing to show until melo browses');
+  browser.note({type: 'tool.started', data: {name: 'browser_open', call_id: 'c1'}});
+  assert.equal(els.root.hidden, false, 'no second question: the answer is known');
+  const socket = FakeSocket.all[0];
+  setApi({available: false, open: false});
+  await browser.recheck();
+  assert.equal(els.root.hidden, true, 'Safari now: no live view');
+  assert.equal(els.chip.hidden, true);
+  assert.equal(socket.closed, 1000);
+  setApi({available: true, open: true, browsing: true});
+  await browser.recheck();
+  assert.equal(els.root.hidden, false, 'not hidden by the person, so it may open again');
+});
+
+test('the panel that opened by itself goes when the browsing ends, and comes back at the next browser step', async () => {
+  const {browser, els, calls} = panel({state: {available: true, open: false}});
+  await browser.follow('s1');
+  browser.note({type: 'tool.started', data: {name: 'browser_open', call_id: 'c1'}});
+  const socket = FakeSocket.all[0];
+  browser.note({type: 'tool.finished', data: {call_id: 'c1'}});
+  assert.equal(els.root.hidden, false, 'between two steps it stays');
+  browser.note({type: 'turn.finished', data: {}});
+  assert.equal(els.root.hidden, true);
+  assert.equal(socket.closed, 1000, 'nobody watches: the stream stops');
+  assert.equal(els.chip.hidden, false, 'the chip brings it back');
+  assert.deepEqual(calls.changed, [true, false]);
+  browser.note({type: 'tool.started', data: {name: 'browser_read', call_id: 'c2'}});
+  assert.equal(els.root.hidden, false, 'it was not hidden by the person');
+  assert.equal(FakeSocket.all.length, 2);
+});
+
+test('a panel the person opened, or a page they have, stays when the browsing ends', async () => {
+  const opened = panel({state: {available: true, open: true, browsing: false}});
+  await opened.browser.follow('s1');
+  opened.browser.toggle();
+  opened.browser.note({type: 'tool.started', data: {name: 'browser_read', call_id: 'c1'}});
+  opened.browser.note({type: 'turn.finished', data: {}});
+  assert.equal(opened.els.root.hidden, false);
+  const held = panel({state: {available: true, open: false}});
+  await held.browser.follow('s1');
+  held.browser.note({type: 'tool.started', data: {name: 'browser_open', call_id: 'c1'}});
+  FakeSocket.all.at(-1).say(message({owner: 'you'}));
+  held.browser.note({type: 'turn.finished', data: {}});
+  assert.equal(held.els.root.hidden, false, 'the person has the page');
+});
+
 test('a gateway that cannot be asked leaves the panel closed', async () => {
   const {browser, els} = panel({state: new Error('down')});
   await browser.follow('s1');
@@ -380,7 +472,7 @@ test('a slow decode drops the pictures in between', async () => {
   const asked = [];
   const release = [];
   const browser = setupBrowser({
-    api: async () => ({available: true, open: true}),
+    api: async () => ({available: true, open: true, browsing: true}),
     els,
     openSocket: (url) => new FakeSocket(url),
     decode: (bytes) => {
@@ -633,7 +725,7 @@ test('a picture that arrives after the chat was left is not drawn', async () => 
   assert.equal(els.canvas.hidden, true);
 });
 
-test('the pop-out button is only offered inside the app, for a shown panel', async () => {
+test('the pop-out button is offered where the page can pop out (the app, or a browser window), for a shown panel', async () => {
   const plain = panel();
   await plain.browser.follow('s1');
   assert.equal(plain.els.pop.hidden, true);

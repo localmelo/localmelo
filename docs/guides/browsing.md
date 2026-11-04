@@ -42,6 +42,8 @@ In the terminal chat:
 - `/browser chrome` and `/browser safari` choose the browser and turn browsing on; `/browser on` turns it on with the browser chosen before (Safari when none was), and `/browser off` turns it off.
 - In the web console and the app: Settings → Chats and folders → **Browser** (Chrome, Safari or Off), or the same `/browser` words. Without Chrome, the choice says "Install Google Chrome to browse in the background", and nothing changes.
 - The choice is saved as `[browser] driver` in `~/.cache/localmelo/config.toml` when you have a saved configuration, and the chat goes on in a new Agent, so nothing you said is lost.
+- **Open chats switch at their next message.** In the web console and the app, a chat in the middle of a turn finishes it in the browser it has; its next message uses the new one.
+- **Each browser keeps its own sign-ins.** melo's Chrome has its own profile, and Safari's automation windows start with none, so after a switch you may need to sign in to a site again. Settings says so when you switch.
 
 For one run only, without saving:
 
@@ -102,11 +104,14 @@ With `driver = "chrome"`, melo browses in Google Chrome with no window at all.
 
 In the web console and the app, a **Browser** panel beside the chat shows the page melo has open, live. It needs Chrome in the background; Safari's windows are already on your screen.
 
-- **It opens by itself** when melo starts browsing. **Hide browser** closes it, and the **Browser** button in the header opens it again; on a narrow window it opens as a sheet when you ask.
+- **It opens by itself while melo browses**: when a browser step starts, or when you open a chat in the middle of one or with a page you took over. When the turn ends it closes again, unless you opened it yourself or have the page; the **Browser** button in the header brings it back.
+- **It follows Settings.** Switch to Chrome in the middle of a chat, and the panel opens at the chat's next browser step.
+- **Hide browser** closes it, and it stays closed in that chat until you open it again. On a narrow window it opens as a sheet when you ask.
 - **It shows** the page's title and address, a live picture, and a blue ring around the picture with "melo is browsing" while melo is in the middle of a step. It follows melo to another tab.
 - **It stays calm.** "No page open" before melo browses; "Opening the page…" until the first picture arrives; a dimmed last picture marked "Not updating" while the picture stops; and one sentence of why when it ends (the tab was closed, melo's browser stopped, the chat ended, or the live view is not available).
 - **Take over** lets you use the page yourself ([Taking over melo's browser](#taking-over-melos-browser)). The pictures stay in memory, are never saved, and are sent only while the panel is open.
-- **In the app**, **Pop out** opens the panel alone in its own window.
+- **Pop out** opens the panel alone and large: in the app in a window of its own, in a browser in a new window.
+- **Pictures in the chat.** The pictures melo takes of a page (`browser_screenshot`) or of another app's window show in a row under the turn's steps, in Chrome and Safari alike, also when the steps are folded. Click one to see it at full size. They are kept with the chat.
 - **Cost.** A page that does not change costs almost nothing; a moving page is held to 15 pictures a second (60 while you have it). The options `live` and `live_fps` are in the [configuration reference](../reference/configuration.md).
 
 ## Taking over melo's browser

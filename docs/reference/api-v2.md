@@ -436,8 +436,10 @@ sessions.
   `extra_body`, `mcp_config`, `request_timeout_s`, `[agent]` and
   `[scheduler]`, validates the candidate (`400 invalid_settings` with
   `details.errors` on failure), writes `config.toml` atomically, closes
-  idle session Agents so the next turn opens with the new settings, and
-  returns the updated `GET /api/settings` body.
+  idle session Agents so the next turn opens with the new settings (a
+  session whose turn runs, or whose question waits, keeps its Agent until
+  then and gets a new one at its next turn), and returns the updated
+  `GET /api/settings` body.
 
 ## POST /api/settings/test
 
@@ -1443,12 +1445,12 @@ Whether the chat has a page open in melo's browser, and which. The console asks 
 ```
 
 ```json
-{"open": true, "tab": "t2", "url": "https://example.com/", "title": "Example Domain", "browsing": false, "viewers": 1, "available": true, "driver": "chrome"}
+{"open": true, "tab": "t2", "url": "https://example.com/", "title": "Example Domain", "browsing": false, "yours": false, "viewers": 1, "available": true, "driver": "chrome"}
 ```
 
 - `open` is true when the chat's current tab exists; `tab`, `url` and `title` describe it (`tab` is null and the others are empty when `open` is false, as for a chat that has not browsed or is not open in the gateway).
-- `browsing` is true while a browser step of the chat runs. `viewers` counts the open live views of the chat.
-- `available` is true when `[browser] driver` is `chrome` and `[browser] live` is on; `driver` repeats the driver. An unknown session is 404 `not_found`. The answer has `Cache-Control: no-store`.
+- `browsing` is true while a browser step of the chat runs, and `yours` while the person has one of its pages (take over). The console opens its Browser panel by itself for either. `viewers` counts the open live views of the chat.
+- `available` says whether the chat's browser can be watched now. `[browser] live` must be on. A chat with an Agent open is watched in the browser that Agent has: a chat whose turn ran when the browser setting changed keeps its browser until its next turn. A chat with no Agent open follows `[browser] driver` (`chrome`). `driver` is the setting. An unknown session is 404 `not_found`. The answer has `Cache-Control: no-store`.
 
 ## WS /api/sessions/{id}/browser/live
 

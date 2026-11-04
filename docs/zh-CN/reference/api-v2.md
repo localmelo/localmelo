@@ -224,7 +224,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `browser_driver` 可选：`off`、`safari-automation` 或 `chrome`，按名字设置 `[browser] driver`，并优先于 `browser`（其他值返回 400 `invalid_request`）；省略时保留已保存的值。设置中的**浏览器**选项、`/browser chrome` 和 `/browser safari` 保存的就是它。响应中带有 `browser_driver` 和 `chrome_installed`（是否已安装 Google Chrome，以便选项提示先安装）。
 - 控制台一次保存一项更改：带上读取时的 `revision`，只发送改动的字段；它的 Undo 是同一个请求，换成之前的值。
 - 与磁盘上的文件不匹配的 `revision` 会返回 409 `settings_changed`。两个并发的 `PUT` 请求若读取了同一个 `revision`，两者都可能通过检查；最后写入者胜出，`os.replace` 保证文件不会被撕裂。
-- 服务器会重新加载 `config.toml`，因此命令行的 `--host` 和 `--port` 覆盖值从不写入磁盘；它会保留其他节、`extra_body`、`mcp_config`、`request_timeout_s`、`[agent]` 和 `[scheduler]`，校验候选设置（失败时返回 `400 invalid_settings` 并附 `details.errors`），以原子方式写入 `config.toml`，关闭空闲的会话智能体，使下一轮以新设置打开，并返回更新后的 `GET /api/settings` 响应体。
+- 服务器会重新加载 `config.toml`，因此命令行的 `--host` 和 `--port` 覆盖值从不写入磁盘；它会保留其他节、`extra_body`、`mcp_config`、`request_timeout_s`、`[agent]` 和 `[scheduler]`，校验候选设置（失败时返回 `400 invalid_settings` 并附 `details.errors`），以原子方式写入 `config.toml`，关闭空闲的会话智能体，使下一轮以新设置打开（正在进行一轮或有问题在等待回答的会话，会保留原来的智能体，到下一轮再换新的），并返回更新后的 `GET /api/settings` 响应体。
 
 ## POST /api/settings/test
 
@@ -684,12 +684,12 @@ worker 运行或终端对话从 CLI 的文件读取。
 ```
 
 ```json
-{"open": true, "tab": "t2", "url": "https://example.com/", "title": "Example Domain", "browsing": false, "viewers": 1, "available": true, "driver": "chrome"}
+{"open": true, "tab": "t2", "url": "https://example.com/", "title": "Example Domain", "browsing": false, "yours": false, "viewers": 1, "available": true, "driver": "chrome"}
 ```
 
 - 对话的当前标签页存在时 `open` 为 true；`tab`、`url` 和 `title` 描述它（`open` 为 false 时，比如对话还没有浏览过或在网关里没有打开，`tab` 为 null，其余为空）。
-- 对话的浏览器步骤正在运行时 `browsing` 为 true。`viewers` 是该对话已打开的实时画面数量。
-- `[browser] driver` 为 `chrome` 且 `[browser] live` 开启时 `available` 为 true；`driver` 重复返回驱动名。未知的会话是 404 `not_found`。响应带有 `Cache-Control: no-store`。
+- 对话的浏览器步骤正在运行时 `browsing` 为 true；你接管了它的某个页面时 `yours` 为 true。两者之一为 true 时，控制台会自动打开浏览器面板。`viewers` 是该对话已打开的实时画面数量。
+- `available` 表示现在能否观看这个对话的浏览器。`[browser] live` 必须开启。已打开智能体的对话，看的是这个智能体自己的浏览器：浏览器设置改变时正在进行一轮的对话，会保留原来的浏览器，直到下一轮。没有打开智能体的对话按 `[browser] driver`（`chrome`）判断。`driver` 是设置值。未知的会话是 404 `not_found`。响应带有 `Cache-Control: no-store`。
 
 ## WS /api/sessions/{id}/browser/live
 

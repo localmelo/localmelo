@@ -21,14 +21,14 @@ import { setupTasks } from "./tasks.mjs";
 import { plainSegments, setupStatusRow } from "./status-row.mjs";
 import { setupRunning } from "./running.mjs";
 import { setupPanel } from "./panel.mjs";
-import { liveRoute, setupBrowser } from "./browser-live.mjs";
+import { liveRoute, liveUrl, setupBrowser } from "./browser-live.mjs";
 import { levelCode, levelLabel } from "./levels.mjs";
 import { setupModelCard } from "./setup-card.mjs";
 import { setupImportCard } from "./import-card.mjs";
 import { folderName, setupFolderPicker } from "./folder.mjs";
 import { modeOf, setupModeChip } from "./mode.mjs";
 import { allowState, blockCard, blockFacts, gistWords, reviewWords } from "./blocked.mjs";
-import { picturesNode, setupPictureBox } from "./pictures.mjs";
+import { picturesNode, setupPictureBox, shotsNode, takenPictures } from "./pictures.mjs";
 import { isStandIn, requestOf, setupMedia, splitAttachments, turnPictures, uploadType } from "./composer-media.mjs";
 import { memoryNodes } from "./memory.mjs";
 import { parseCommand, setupSlash } from "./slash.mjs";
@@ -1505,6 +1505,8 @@ function assistantNode(turn, newest = false) {
   label.append(icon, el("span", "", "localmelo"));
   article.append(label);
   if (!turn.finishedAt || shownItems(turn).length > 0) article.append(workGroup(turn));
+  // The pictures melo took (a page it looked at, another app's window) show under the steps, also when they are folded.
+  article.append(...shotsOf(turn));
   article.append(...blockedCards(turn));
   if (turn.finishedAt && turn.status !== "completed") {
     if (turn.answer) {
@@ -1602,6 +1604,21 @@ function picturesOf(turn) {
     open: (picture, url) => pictureBox(picture, url),
     toggle: () => {
       turn.picturesOpen = !turn.picturesOpen;
+      renderMessages(false, true);
+    },
+  });
+  return row ? [row] : [];
+}
+
+function shotsOf(turn) {
+  const row = shotsNode({
+    doc: document,
+    shots: takenPictures(turn),
+    sessionId: S.activeId ?? "",
+    expanded: turn.shotsOpen === true,
+    open: (picture, url) => pictureBox(picture, url),
+    toggle: () => {
+      turn.shotsOpen = !turn.shotsOpen;
       renderMessages(false, true);
     },
   });
@@ -3388,8 +3405,9 @@ const panel = setupPanel({
 });
 const pictureBox = setupPictureBox({ dialog: $("picture-box") });
 
-// The Browser panel: a live window onto the page melo is working in, which the person can take over (browser-live.mjs). The macOS app
-// can show it alone in a window of its own; it says so by offering the `localmeloBrowser` message handler.
+// The Browser panel: a live window onto the page melo is working in, which the person can take over (browser-live.mjs). Pop out
+// shows it alone and large: the macOS app in a window of its own (it offers the `localmeloBrowser` message handler), a
+// browser in a window of the page's own `#/live/<id>`.
 const browserBridge = globalThis.webkit?.messageHandlers?.localmeloBrowser;
 const browser = setupBrowser({
   api,
@@ -3422,7 +3440,9 @@ const browser = setupBrowser({
   decode: (bytes) => createImageBitmap(new Blob([bytes], { type: "image/jpeg" })),
   observe: (node, fn) => { if (typeof ResizeObserver === "function") new ResizeObserver(fn).observe(node); },
   wide: () => matchMedia("(min-width: 900px)").matches,
-  popOut: browserBridge ? (session) => browserBridge.postMessage({ action: "popOut", session }) : null,
+  popOut: browserBridge
+    ? (session) => browserBridge.postMessage({ action: "popOut", session })
+    : (session) => globalThis.open?.(liveUrl(globalThis.location, session), `melo-live-${session}`, "popup,width=1000,height=680"),
   // The gateway ended the stream for the token's sake: any call finds out whether the page is still signed in.
   denied: () => { api("/health").catch(() => {}); },
 });
@@ -3550,6 +3570,8 @@ const drawer = setupDrawer({ api, currentId: () => S.activeId, root: $("details-
 /** The page after Settings (or a slash command) saved: the mode, the status row and the model chip follow. */
 async function settingsSaved(saved) {
   await refreshMode(saved);
+  // The browser may be another now: the open chat's Browser panel asks again whether it can be watched.
+  browser.recheck();
   drawer.modeChanged();
   chatStatus.bump();
   if (!developerMode) await findSections();

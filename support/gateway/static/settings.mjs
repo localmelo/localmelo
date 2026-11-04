@@ -1016,8 +1016,11 @@ export function setupSettings({
         showError(t("settings.browser.chromeMissing"));
         return;
       }
-      const words = (driver) => t("settings.browser.saved", {browser: t(`settings.browser.${BROWSER_WORDS[driver]}`)});
-      settingCommit("browser_driver", name, words(name), before, words(before));
+      // From one browser to the other: each keeps its own sign-ins, and an open chat switches at its next message.
+      const switched = (driver, from) => driver !== "off" && from !== "off" && driver !== from;
+      const words = (driver, from) => t(switched(driver, from) ? "settings.browser.savedSwitch" : "settings.browser.saved",
+        {browser: t(`settings.browser.${BROWSER_WORDS[driver]}`)});
+      settingCommit("browser_driver", name, words(name, before), before, words(before, name));
     });
   }
 
