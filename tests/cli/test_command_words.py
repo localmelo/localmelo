@@ -44,7 +44,6 @@ EQUIVALENT = [
     ("serve", "--serve"),
     ("serve -p 9000 --host 0.0.0.0", "--serve --host 0.0.0.0 --port 9000"),
     ("serve --port 0", "--serve --port 0"),
-    ("serve --playground", "--serve --enable-playground"),
     # The macOS app's command line.
     (
         "serve --force --host 127.0.0.1 -p 8123",
@@ -353,7 +352,7 @@ def test_the_real_command_runs_the_word_as_a_task_after_the_separator(
     ("argv", "message"),
     [
         (["serve", "--bogus"], "unrecognized arguments: --bogus"),
-        (["serve", "install", "--force"], "--playground and --force are for running"),
+        (["serve", "install", "--force"], "--force is for running"),
         (["serve", "-p", "many"], "invalid int value: 'many'"),
         (["setup", "--yolo"], "unrecognized arguments: --yolo"),
         (["worker"], "the brief file comes first"),

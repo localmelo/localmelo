@@ -100,7 +100,6 @@ uv run --offline --locked --extra dev python scripts/build_docs.py --output "$SI
 | gateway, gateway mode | 网关，网关模式 |
 | session | 会话 |
 | turn | 轮次 |
-| web UI (playground) | 网页界面（playground） |
 | web workspace | 网页工作区 |
 | conversation loop (`melo ""`) | 对话循环（`melo ""`） |
 | interactive CLI | 交互式命令行 |

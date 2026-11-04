@@ -1,4 +1,4 @@
-"""One gate per gateway process: the console and the workspace page share it."""
+"""The console's call gate: where it comes from, what shares it, who closes it."""
 
 from __future__ import annotations
 
@@ -7,9 +7,6 @@ import contextlib
 import time
 from pathlib import Path
 from typing import Any
-
-import pytest
-from fastapi.testclient import TestClient
 
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ToolDef
@@ -77,26 +74,6 @@ def _cfg(*, host: str = "127.0.0.1", policy: str = "off", n_srv: int = 8) -> Con
     )
 
 
-def test_the_console_uses_the_workspace_pages_gate(tmp_path: Path) -> None:
-    cfg = _cfg()
-    cfg._enable_playground = True
-    server = GatewayServer(
-        cfg,
-        console_options=ConsoleOptions(
-            store_path=str(tmp_path / "sessions.db"), probe=QuietProbe()
-        ),
-    )
-    playground = server.app.state.smoke_playground
-
-    assert server.console is not None
-    assert server.console.gate is playground.gate
-    # The registry that builds the Agent's providers got the same gate, so a
-    # console turn's model call lands in the page's one budget.
-    assert server.console.sessions._gate is playground.gate
-    # The console built no monitor of its own: the page's feeds the gate.
-    assert server.console._monitor is None
-
-
 def test_the_gate_takes_its_focus_window_from_the_config(tmp_path: Path) -> None:
     cfg = _cfg(policy="class")
     cfg.scheduler.focus_s = 7.0
@@ -124,47 +101,7 @@ def test_a_test_supplied_gate_is_kept(tmp_path: Path) -> None:
     assert server.console.gate is gate
 
 
-def test_a_non_loopback_gateway_is_refused() -> None:
-    with pytest.raises(ValueError, match="loopback"):
-        GatewayServer(_cfg(host="0.0.0.0"))
-
-
-async def test_two_surfaces_share_one_slot_budget() -> None:
-    gate = ChatGate(policy="fcfs", n_srv=1, call_log_dir=None)
-    inner = _HeldLLM()
-    console = GatedLLM(inner, gate.client("3f9c2a7b1d4e"))
-    page = GatedLLM(inner, gate.client("workspace-chat"))
-    try:
-        first = asyncio.create_task(console.chat([Message(role="user", content="one")]))
-        await inner.entered.wait()
-        second = asyncio.create_task(page.chat([Message(role="user", content="two")]))
-        await asyncio.sleep(0.05)
-
-        # One slot, two sessions: the page's call waits for the console's.
-        assert inner.max_in_flight == 1
-        inner.release.set()
-        await asyncio.gather(first, second)
-        assert inner.calls == 2 and inner.max_in_flight == 1
-    finally:
-        await gate.close()
-
-
-def test_the_console_still_serves_with_the_shared_gate(tmp_path: Path) -> None:
-    server = GatewayServer(
-        _cfg(),
-        console_options=ConsoleOptions(
-            store_path=str(tmp_path / "sessions.db"), probe=QuietProbe()
-        ),
-    )
-    client = TestClient(
-        server.app,
-        base_url="http://127.0.0.1:8401",
-        headers={"Authorization": "Bearer " + server.auth.read_token().decode("ascii")},
-    )
-    assert client.get("/api/health").status_code == 200
-
-
-async def test_a_shared_gate_stays_open_when_the_console_closes(
+async def test_a_given_gate_stays_open_when_the_console_closes(
     tmp_path: Path,
 ) -> None:
     gate = ChatGate(policy="off", call_log_dir=None)
@@ -179,8 +116,7 @@ async def test_a_shared_gate_stays_open_when_the_console_closes(
 
     await console.aclose()
 
-    # The gateway closes the one shared gate, after both surfaces' sessions;
-    # the console leaves a gate it did not build alone.
+    # The console leaves a gate it did not build to whoever built it.
     assert gate.closed is False
     await gate.close()
 
@@ -237,7 +173,7 @@ async def test_a_console_turn_goes_through_the_given_gate(tmp_path: Path) -> Non
         entry, turn = await console.sessions.create(str(workspace), ("Hi", "Hi"))
         assert turn is not None
         await asyncio.sleep(0.05)
-        # The page holds the one slot, so the turn's call waits for it.
+        # Another session holds the one slot, so the turn's call waits for it.
         assert inner.calls == 1 and inner.max_in_flight == 1
         inner.release.set()
         deadline = time.monotonic() + 5
@@ -266,16 +202,13 @@ async def test_a_turn_waiting_for_a_slot_ends_cancelled_at_shutdown(
     async def build(
         settings: Any, workspace: str, mcp_config: str | None, session_id: str
     ) -> Any:
-        # The server hands the page's one gate to the console; the builder
-        # asks for it once the server exists.
+        # The builder asks for the console's gate once the server exists.
         return await started_agent(
             Path(workspace), GatedLLM(inner, holder["gate"].client(session_id))
         )
 
-    cfg = _cfg(policy="fcfs", n_srv=1)
-    cfg._enable_playground = True
     server = GatewayServer(
-        cfg,
+        _cfg(policy="fcfs", n_srv=1),
         console_options=ConsoleOptions(
             store_path=str(tmp_path / "sessions.db"),
             builder=build,
@@ -286,7 +219,6 @@ async def test_a_turn_waiting_for_a_slot_ends_cancelled_at_shutdown(
     assert console is not None
     gate = console.gate
     holder["gate"] = gate
-    assert server.app.state.smoke_playground.gate is gate
     workspace = tmp_path / "ws"
     workspace.mkdir()
     page = asyncio.create_task(
@@ -302,16 +234,16 @@ async def test_a_turn_waiting_for_a_slot_ends_cancelled_at_shutdown(
             assert turn is not None
             session_id = entry.session_id
             await asyncio.sleep(0.05)
-            # The turn's model call queues behind the page's one slot.
+            # The turn's model call queues behind the other session's slot.
             assert inner.calls == 1
     finally:
         page.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await page
 
-    # The gateway closes the one shared gate after both surfaces' sessions,
-    # so a turn waiting for its slot ends as a stop, not as a call that
-    # failed on a gate closed under it.
+    # The console closes its gate after its sessions, so a turn waiting for
+    # its slot ends as a stop, not as a call that failed on a gate closed
+    # under it.
     store = SessionStore(str(tmp_path / "sessions.db"), writer="gateway")
     try:
         turns = await store.list_turns(session_id)

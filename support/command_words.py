@@ -63,7 +63,6 @@ _HELP = {
         "manage it as a login service on macOS; stop ends the one that is running.",
         "  --host H        listen address (default 127.0.0.1)\n"
         "  -p, --port N    listen port (default 8401; 0 picks a free one)\n"
-        "  --playground    enable the development playground routes\n"
         "  --force         start even when no model server is set up yet",
         "melo serve -p 9000",
     ),
@@ -210,18 +209,16 @@ def _serve(rest: list[str]) -> list[str]:
     def build(parser: argparse.ArgumentParser) -> None:
         parser.add_argument("action", nargs="?")
         _gateway_address(parser)
-        parser.add_argument("--playground", action="store_true")
         parser.add_argument("--force", action="store_true")
 
     parser, args = _strict("serve", rest, build)
     if args.action not in (None, *DAEMON_ACTIONS):
         refuse("serve", rest)
-    if args.action and (args.playground or args.force):
-        parser.error("--playground and --force are for running the gateway")
+    if args.action and args.force:
+        parser.error("--force is for running the gateway")
     return [
         *(["--daemon", args.action] if args.action else ["--serve"]),
         *_address(args),
-        *(["--enable-playground"] if args.playground else []),
         *(["--allow-unconfigured"] if args.force else []),
     ]
 

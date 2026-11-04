@@ -257,8 +257,8 @@ async def test_a_revoke_the_store_cannot_save_is_503_and_holds_here(
 # ── The guard ──
 
 
-def test_the_grants_routes_need_the_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    gateway = _build_gateway(monkeypatch)
+def test_the_grants_routes_need_the_token() -> None:
+    gateway = _build_gateway()
     try:
         bare = gateway.client.get(
             "/api/grants", headers={"Authorization": "Bearer wrong"}
@@ -272,10 +272,8 @@ def test_the_grants_routes_need_the_token(monkeypatch: pytest.MonkeyPatch) -> No
         gateway.server.auth.close()
 
 
-def test_a_page_on_another_origin_cannot_revoke(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    gateway = _build_gateway(monkeypatch)
+def test_a_page_on_another_origin_cannot_revoke() -> None:
+    gateway = _build_gateway()
     try:
         refused = gateway.client.delete(
             "/api/grants/0123456789ab", headers={"Origin": FOREIGN_ORIGIN}

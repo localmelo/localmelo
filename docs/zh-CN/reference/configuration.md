@@ -453,7 +453,6 @@ chat_model = "Qwen/Qwen3-8B"
 | `--memory-dir` 指定的目录 | 同上的文件，供那次运行使用。 | 运行开始时创建；新目录的权限为 0700。 |
 | `~/.cache/localmelo/gateway/sessions.db` | 控制台的对话和任务，以及你在其中允许过的事（`grants` 表；见[你允许过的事](#what-you-allowed)）。 | 由网关创建。 |
 | `~/.cache/localmelo/cli/sessions.db` | 终端自己的对话，以及终端自己的对话的授权。 | 终端收到第一条消息时。 |
-| `~/.cache/localmelo/playground/` | 旧版 playground 的记忆。 | 默认关闭的 playground 启动时（security-1b 进行中）。 |
 | `~/.localmelo/logs/` | 后台服务的日志。 | 由 `melo --daemon install` 创建。 |
 | `~/Library/LaunchAgents/ai.localmelo.gateway.plist` | 后台服务的定义。 | 由 `melo --daemon install` 创建。 |
 

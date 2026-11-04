@@ -11,8 +11,7 @@ function that receives them.
 > enabled; the `melo ""` loop runs without a sink. The interactive UI and
 > the gateway's `/api` console run turns with event sinks and save events in
 > sessions; the console exposes them over SSE and shows them in the web
-> workspace. The legacy `/v1/playground` sink keeps only the `run.finished`
-> outcome for Stop and does not show live events.
+> workspace.
 
 ## Follow a run
 

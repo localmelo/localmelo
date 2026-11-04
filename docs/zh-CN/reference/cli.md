@@ -15,7 +15,6 @@ melo -u URL [-m NAME]                        # the interactive UI on this server
 melo [-u URL] [-m NAME] ""                   # the plain conversation loop
 melo setup                                   # run setup, then the interactive UI
 melo serve [-p PORT] [--host HOST]           # start the gateway (-p 0: a free port)
-melo serve --playground                      # opt in to legacy playground (in progress)
 melo import dsh-jsonl FILE [--title TITLE]   # import worker history
 melo serve install|uninstall|status          # macOS background service
 melo serve stop                              # stop the gateway that is running
@@ -39,7 +38,7 @@ melo -h all                                  # every option, command and setting
 | `melo setup` | 重新选择模型服务器，然后打开对话。 | |
 | `melo config` | 显示配置文件的位置，以及哪些设置与默认值不同。 | |
 | `melo memory VERB` | 查看和修改 melo 保存的笔记：`list`、`forget`、`status`、`reindex`、`import`（开发者模式下还有 `sleep`、`ingest`）。 | `list -n N`、`forget ID`、`forget -y`、`import --undo BATCH` |
-| `melo serve [install\|uninstall\|status\|stop]` | 运行网关，把它作为登录服务管理（macOS），或停止正在运行的网关。 | `--host H`, `-p`/`--port N`, `--playground`, `--force` |
+| `melo serve [install\|uninstall\|status\|stop]` | 运行网关，把它作为登录服务管理（macOS），或停止正在运行的网关。 | `--host H`, `-p`/`--port N`, `--force` |
 | `melo console [--reset]` | 在浏览器中打开已登录的网页控制台；通过 SSH 或没有浏览器能启动时，改为输出一次性链接。`--reset` 轮换访问令牌。 | `--host H`, `-p`/`--port N` |
 | `melo task VERB` | `melo-task` 客户端。 | 同 `melo-task` |
 | `melo worker BRIEF` | 运行一个 worker brief。 | `--inbox FILE`, `--inbox-fd N`, `--parent ID`, `--title T`, `-o json\|stream-json` |
@@ -66,7 +65,7 @@ melo -h all                                  # every option, command and setting
 | `--daemon` | `melo serve install|uninstall|status|stop` |
 | `--host` | `melo serve --host` |
 | `--port` | `melo serve -p` |
-| `--enable-playground` | `melo serve --playground` |
+| `--enable-playground` | `melo serve` |
 | `--allow-unconfigured` | `melo serve --force` |
 | `--gateway-login` | `melo console` |
 | `--gateway-rotate-token` | `melo console --reset` |
@@ -169,7 +168,7 @@ Forgot note 3.
 | `melo --base-url URL`（无任务） | 在该服务器上打开交互式界面，模型为 `--chat-model`，否则为服务器唯一的对话模型或它说明已加载的那一个。有多个对话模型且不知道哪个已加载时，退出码为 2，列出这些模型并要求使用 `--chat-model <id>`。 |
 | `melo --base-url URL -- "<task>"` | 在该服务器上以直接模式运行，模型为 `--chat-model`，否则在一次模型列表请求之后，按上一行的方式选定（见[通用](#general)）。读不到列表时请求模型 `default`。`--brief` 和 `melo ""` 同样如此。 |
 | `melo --reconfigure` | 运行设置向导，然后打开交互式界面；默认模式下会先提供它找到的服务器（`Use this model server?`，一个列表），只有选择 `Use another server`、使用 `--developer`（`melo --developer --reconfigure`）或处于开发者模式（`[ui] mode = "developer"`），或已保存后端但没有找到服务器时才显示完整的后端菜单（什么都没保存且没有找到服务器时，会显示[只读设置预览](../guides/model-servers.md#setup-preview)；管道和 `TERM=dumb` 会附上手动指南链接）。没有终端时，设置向导从标准输入读取答案，完成后退出。 |
-| `melo --serve` | 启动网关。若尚无配置，则先运行设置向导（需要终端；没有终端时以退出码 1 退出）。在仍在进行的 security-1b 改动中，`--enable-playground` 会启用经过认证的旧版 playground 路由，且只在 `--serve` 下有效。 |
+| `melo --serve` | 启动网关。若尚无配置，则先运行设置向导（需要终端；没有终端时以退出码 1 退出）。`--enable-playground` 仍被接受：它什么也不做，只会提示它已被移除。 |
 | `melo ""`（空任务） | 打开纯对话循环：你输入的每一行都是同一个智能体的一项任务，只打印回答。`/help` 列出它的命令；`/exit`、`/quit`、`exit`、`quit` 或 Ctrl-D 退出。 |
 | `melo --daemon …` | 管理在 macOS 上运行网关的后台服务；见[登录时运行网关](../guides/gateway.md#run-the-gateway-at-login-macos)。 |
 

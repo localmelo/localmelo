@@ -10,7 +10,7 @@ The gateway serves the agent over HTTP: an API for your own programs and a web w
 melo serve
 ```
 
-The old spellings (`melo --serve`, `--daemon`, `--gateway-login`, `--gateway-rotate-token`, `--enable-playground`, `--allow-unconfigured`) still work, for the macOS app and for launchers; [Old spelling to new](../reference/cli.md#old-spelling-to-new) lists them.
+The old spellings (`melo --serve`, `--daemon`, `--gateway-login`, `--gateway-rotate-token`, `--allow-unconfigured`) still work, for the macOS app and for launchers; [Old spelling to new](../reference/cli.md#old-spelling-to-new) lists them.
 
 - With no config file yet, `melo serve` asks first, as `melo setup` does (`Found a model server at …`, `Use this model server?`; see [Configuration](configure.md#set-up-with-the-wizard)); without a terminal it prints `melo: no backend is configured; run melo setup in a terminal` and exits with code 1.
 - `melo serve --force` starts the gateway without the wizard even when no backend is configured or the config file has validation errors, so a client or the web console can inspect `GET /api/health` and save a configuration through `PUT /api/settings`.

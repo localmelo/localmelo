@@ -9,7 +9,6 @@ pytest = __import__("pytest")
 pytest.importorskip("fastapi")
 pytest.importorskip("uvicorn")
 
-from typing import Any  # noqa: E402
 from unittest.mock import patch  # noqa: E402
 
 from fastapi.testclient import TestClient  # noqa: E402
@@ -513,38 +512,6 @@ async def test_cancelled_request_returns_session_to_idle() -> None:
             await request
         assert session.status == "idle"
         assert not session.is_busy
-
-
-def test_gateway_lifespan_closes_playground(monkeypatch: Any) -> None:
-    from types import SimpleNamespace
-    from unittest.mock import AsyncMock
-
-    server = _build_server()
-    order: list[str] = []
-
-    async def sessions() -> None:
-        order.append("sessions")
-
-    async def gate_close() -> None:
-        order.append("gate")
-
-    gate = SimpleNamespace(close=AsyncMock(side_effect=gate_close))
-    server.app.state.smoke_playground = SimpleNamespace(
-        close_sessions=AsyncMock(side_effect=sessions), gate=gate
-    )
-    console = server.console
-    assert console is not None
-    aclose = console.aclose
-
-    async def recording() -> None:
-        order.append("console")
-        await aclose()
-
-    monkeypatch.setattr(console, "aclose", recording)
-    with TestClient(server.app):
-        assert order == []
-    # The one shared gate closes last: after both surfaces' sessions.
-    assert order == ["sessions", "console", "gate"]
 
 
 def test_a_session_agent_keeps_its_answers() -> None:

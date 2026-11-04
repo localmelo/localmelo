@@ -8,7 +8,7 @@ hands one :class:`MachineSnapshot` to the gate whenever the machine changes.
 
 The module lives in ``support/gateway`` and not under ``support/scheduler``
 because S1's determinism tests forbid a clock and a non-stdlib import there
-(decision D4). It imports no ``fastapi`` and no ``playground``; the clock,
+(decision D4). It imports no ``fastapi``; the clock,
 sleep, ``pmset`` runner, reader and ``kqueue`` factory are injectable so the
 tests never wait on a real interval or touch the real lock.
 """

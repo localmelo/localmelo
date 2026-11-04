@@ -14,7 +14,6 @@ melo -u URL [-m NAME]                        # the interactive UI on this server
 melo [-u URL] [-m NAME] ""                   # the plain conversation loop
 melo setup                                   # run setup, then the interactive UI
 melo serve [-p PORT] [--host HOST]           # start the gateway (-p 0: a free port)
-melo serve --playground                      # opt in to legacy playground (in progress)
 melo import dsh-jsonl FILE [--title TITLE]   # import worker history
 melo serve install|uninstall|status          # macOS background service
 melo serve stop                              # stop the gateway that is running
@@ -46,7 +45,7 @@ way, and the message says where the word goes (`melo serve -X gateway.port=9000`
 | `melo setup` | Choose the model server again, then open the chat. | |
 | `melo config` | Show where the config file is and which settings differ from the defaults. | |
 | `melo memory VERB` | See and change the notes melo keeps: `list`, `forget`, `status`, `reindex`, `import` (and `sleep`, `ingest` in developer mode). | `list -n N`, `forget ID`, `forget -y`, `import --undo BATCH` |
-| `melo serve [install\|uninstall\|status\|stop]` | Run the gateway, manage it as a login service (macOS), or stop the one that is running. | `--host H`, `-p`/`--port N`, `--playground`, `--force` |
+| `melo serve [install\|uninstall\|status\|stop]` | Run the gateway, manage it as a login service (macOS), or stop the one that is running. | `--host H`, `-p`/`--port N`, `--force` |
 | `melo console [--reset]` | Open the web console in your browser, signed in; over SSH or when no browser starts, print a one-use link instead. `--reset` rotates the access token. | `--host H`, `-p`/`--port N` |
 | `melo task VERB` | The `melo-task` client. | as `melo-task` |
 | `melo worker BRIEF` | Run a worker brief. | `--inbox FILE`, `--inbox-fd N`, `--parent ID`, `--title T`, `-o json\|stream-json` |
@@ -76,7 +75,7 @@ and `melo config set KEY VALUE` saves it (see [Settings](#settings)).
 | `--daemon` | `melo serve install|uninstall|status|stop` |
 | `--host` | `melo serve --host` |
 | `--port` | `melo serve -p` |
-| `--enable-playground` | `melo serve --playground` |
+| `--enable-playground` | `melo serve` |
 | `--allow-unconfigured` | `melo serve --force` |
 | `--gateway-login` | `melo console` |
 | `--gateway-rotate-token` | `melo console --reset` |
@@ -200,7 +199,7 @@ Forgot note 3.
 | `melo --base-url URL` (no task) | Opens the interactive UI on that server, with `--chat-model`, else the server's only chat model or the one it says is loaded. With several chat models and none known to be loaded it exits 2, lists them and asks for `--chat-model <id>`. |
 | `melo --base-url URL -- "<task>"` | Direct mode on that server, with `--chat-model`, else the model chosen the same way as in the row above, after a list request (see [General](#general)). With a list it cannot read, it asks for the model `default`. The same holds for `--brief` and `melo ""`. |
 | `melo --reconfigure` | Runs the setup wizard, then opens the interactive UI; in default mode it first offers the server it finds (`Use this model server?`, a list) and shows the full backend menu only after `Use another server`, with `--developer` (`melo --developer --reconfigure`) or in developer mode (`[ui] mode = "developer"`), or with none found while a backend is saved (with nothing saved and none found, it shows the [read-only setup preview](../guides/model-servers.md#setup-preview); pipes and `TERM=dumb` include a manual-guide link). Without a terminal it runs the wizard, reading the answers from stdin, and exits. |
-| `melo --serve` | Starts the gateway. Runs the setup wizard first if there is no configuration (in a terminal; without one it exits with code 1). In the in-progress security-1b changes, `--enable-playground` opts into authenticated legacy playground routes and is only valid with `--serve`. |
+| `melo --serve` | Starts the gateway. Runs the setup wizard first if there is no configuration (in a terminal; without one it exits with code 1). `--enable-playground` is still accepted: it does nothing and prints that it was removed. |
 | `melo ""` (empty task) | Opens the plain conversation loop: each line you type is a task for the same agent, and only the answer prints. `/help` lists its commands; `/exit`, `/quit`, `exit`, `quit` or Ctrl-D exits. |
 | `melo --daemon …` | Manages the macOS background service that runs the gateway; see [Run the gateway at login](../guides/gateway.md#run-the-gateway-at-login-macos). |
 

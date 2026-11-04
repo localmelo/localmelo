@@ -206,7 +206,6 @@ Python 调用方可以通过 `AgentOptions(typed_assertions=True)` 选择启用�
   ```
 
 - `procedures.db` 保存[程序记忆](../concepts/procedures.md)。启用持久化后，第一个结束的运行会创建它，每次运行都会在结束时添加其记录，包括 `--memory off` 的运行。关闭持久化时，程序记忆保留在 RAM 中，且不写入任何内容。
-- 旧的 playground 默认禁用；`melo --serve --enable-playground` 会启用它，并创建 `~/.cache/localmelo/playground/`。其 `history.db` 会在相同的天数内保留模型的推理，并在某个聊天第一次使用它时清除更早的推理：每个聊天都会打开自己到共享文件的连接。其聊天也共享那里的 `procedures.db`。
 
 ```text
 ~/.cache/localmelo/gateway/sessions.db   the gateway's sessions
@@ -227,7 +226,7 @@ Python 调用方可以通过 `AgentOptions(typed_assertions=True)` 选择启用�
 | `result` | 运行的结果；若结果为空，则为其错误。 |
 
 - 无论什么原因结束，运行结束时都会再次保存该行。被 SIGTERM 或 SIGHUP 结束的直接运行会保存为 `crashed`，结果为 `Cancelled by SIGTERM` 或 `Cancelled by SIGHUP`。
-- 被取消的交互式运行会保存为 `cancelled`，原因作为其结果：即在 Python API 中以 `on_event` 或 `approval` 启动的运行，或者由 Stop 或其 600 秒上限停止的旧版 playground 聊天（启用时，其历史记录位于 `~/.cache/localmelo/playground/` 中）。其被中断的步骤在 `steps` 中每个工具调用有一行（见[停止运行](../guides/python.md#stop-a-run)）。其他被取消的运行保存为 `crashed`。
+- 被取消的交互式运行会保存为 `cancelled`，原因作为其结果：即在 Python API 中以 `on_event` 或 `approval` 启动的运行，或者由 Stop 或其 600 秒上限停止的控制台轮次。其被中断的步骤在 `steps` 中每个工具调用有一行（见[停止运行](../guides/python.md#stop-a-run)）。其他被取消的运行保存为 `crashed`。
 - 仍显示 `running` 的行属于一个进行中的运行，或属于在能保存该行之前就被杀死的进程（例如被 SIGKILL 杀死）。
 - 较早版本的行只使用 `running`、`completed` 和 `failed`。在那些版本中，`failed` 也涵盖了现在会以 `gate_stopped`、`budget_exhausted` 或 `stuck` 结束的运行，而异常终止的运行则保持 `running`。
 

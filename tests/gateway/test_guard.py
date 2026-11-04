@@ -3,8 +3,8 @@
 A web page can reach a gateway on 127.0.0.1 through the browser: through
 DNS rebinding, with the page's own name in the Host header, or as a
 cross-origin request, with the page's Origin. These tests send such
-requests to the real gateway app, whose sessions and playground are
-fakes that record what runs, and send what a test client cannot (no
+requests to the real gateway app, whose sessions are a fake that
+records what runs, and send what a test client cannot (no
 Host, a repeated header) to LoopbackGuard directly.
 
 Requires fastapi + uvicorn (gateway extra). Collection-safe without either.
@@ -12,11 +12,9 @@ Requires fastapi + uvicorn (gateway extra). Collection-safe without either.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import logging
 from dataclasses import dataclass
-from types import ModuleType
 from typing import Any
 
 import pytest
@@ -39,11 +37,6 @@ from localmelo.support.gateway.chat_gate import ChatGate  # noqa: E402
 from localmelo.support.gateway.console import ConsoleOptions  # noqa: E402
 from localmelo.support.gateway.guard import LoopbackGuard, is_loopback  # noqa: E402
 from localmelo.support.gateway.session import AgentLike, SessionManager  # noqa: E402
-
-# mount() registers its shutdown hook with FastAPI's deprecated on_event.
-pytestmark = pytest.mark.filterwarnings(
-    r"ignore:\s*on_event is deprecated:DeprecationWarning"
-)
 
 PORT = 8401
 GATEWAY = f"http://127.0.0.1:{PORT}"
@@ -75,28 +68,6 @@ ROUTES = [
     pytest.param("GET", "/v1/sessions", None, id="sessions"),
     pytest.param("DELETE", "/v1/sessions/s1", None, id="close-session"),
     pytest.param("POST", "/v1/agent/run", {"query": "ls"}, id="agent-run"),
-    pytest.param("GET", "/v1/playground/scenarios", None, id="playground-scenarios"),
-    pytest.param(
-        "POST",
-        "/v1/playground/discover",
-        {"chat_url": "http://evil.example/v1"},
-        id="playground-discover",
-    ),
-    pytest.param(
-        "POST",
-        "/v1/playground/session",
-        {"chat_url": "http://evil.example/v1", "chat_model": "m"},
-        id="playground-session",
-    ),
-    pytest.param(
-        "POST", "/v1/playground/session/pg1/run", {"query": "ls"}, id="playground-run"
-    ),
-    pytest.param("DELETE", "/v1/playground/session/pg1", None, id="playground-close"),
-    pytest.param("GET", "/v1/playground/sessions", None, id="playground-sessions"),
-    pytest.param("GET", "/v1/playground/session/pg1", None, id="playground-get"),
-    pytest.param(
-        "POST", "/v1/playground/session/pg1/cancel", None, id="playground-cancel"
-    ),
     pytest.param("GET", "/assets/workspace.js", None, id="workspace-assets"),
     pytest.param("GET", "/no/such/route", None, id="404"),
     pytest.param("POST", "/v1/agent/run", ["not", "an", "object"], id="422"),
@@ -149,64 +120,18 @@ class QuietProbe:
         pass
 
 
-class _QuietGate:
-    async def close(self) -> None:
-        pass
-
-
-class RecordingPlayground:
-    """Stands in for SmokePlayground: records each call, contacts no server."""
-
-    def __init__(self) -> None:
-        self.calls: list[str] = []
-        self.gate = _QuietGate()
-
-    def scenarios_payload(self) -> list[dict[str, Any]]:
-        self.calls.append("scenarios")
-        return []
-
-    async def discover(self, **kwargs: Any) -> dict[str, Any]:
-        self.calls.append("discover")
-        return {"adapter": "mlc", "chat_models": [], "embedding_models": []}
-
-    async def create_session(self, **kwargs: Any) -> dict[str, Any]:
-        self.calls.append("create_session")
-        return {"session_id": "pg1"}
-
-    async def run(self, session_id: str, query: str) -> dict[str, Any]:
-        self.calls.append("run")
-        return {"result": f"echo: {query}"}
-
-    async def close(self, session_id: str) -> bool:
-        self.calls.append("close")
-        return True
-
-    async def close_all(self) -> None:
-        pass
-
-    async def close_sessions(self) -> None:
-        pass
-
-
 @dataclass
 class Gateway:
     server: GatewayServer
     sessions: RecordingSessions
-    playground: RecordingPlayground
     client: TestClient
 
     def ran_nothing(self) -> bool:
-        return not self.sessions.runs and not self.playground.calls
+        return not self.sessions.runs
 
 
-def _build_gateway(
-    monkeypatch: pytest.MonkeyPatch, *, host: str = "127.0.0.1", port: int = PORT
-) -> Gateway:
-    """The real gateway app with the web UI, its sessions and playground faked."""
-    playground = RecordingPlayground()
-    monkeypatch.setattr(
-        "localmelo.support.gateway.webapp.SmokePlayground", lambda **kwargs: playground
-    )
+def _build_gateway(*, host: str = "127.0.0.1", port: int = PORT) -> Gateway:
+    """The real gateway app with the web UI and its sessions faked."""
     cfg = Config(
         chat_backend="mlc",
         embedding_backend="mlc",
@@ -217,7 +142,6 @@ def _build_gateway(
             embedding_model="e",
         ),
         gateway=GatewayConfig(port=port, host=host),
-        _enable_playground=True,
     )
     server = GatewayServer(
         cfg,
@@ -234,12 +158,12 @@ def _build_gateway(
         raise_server_exceptions=False,
         headers={"Authorization": "Bearer " + server.auth.read_token().decode("ascii")},
     )
-    return Gateway(server, sessions, playground, client)
+    return Gateway(server, sessions, client)
 
 
 @pytest.fixture()
-def gateway(monkeypatch: pytest.MonkeyPatch) -> Gateway:
-    return _build_gateway(monkeypatch)
+def gateway() -> Gateway:
+    return _build_gateway()
 
 
 class InnerApp:
@@ -411,10 +335,8 @@ async def test_a_missing_empty_or_repeated_host_is_refused(
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "[::1]", "LOCALHOST"])
-def test_port_80_also_accepts_the_bare_host(
-    monkeypatch: pytest.MonkeyPatch, host: str
-) -> None:
-    gateway = _build_gateway(monkeypatch, port=80)
+def test_port_80_also_accepts_the_bare_host(host: str) -> None:
+    gateway = _build_gateway(port=80)
     for value in (host, f"{host}:80"):
         resp = gateway.client.get("/v1/health", headers={"Host": value})
         assert resp.status_code == 200
@@ -464,8 +386,8 @@ def test_a_foreign_origin_is_refused(
     ("path", "body"),
     [
         ("/", None),
-        ("/v1/playground/session", {"chat_url": "http://evil.example/v1"}),
-        ("/v1/playground/session/pg1/run", {"query": "ls"}),
+        ("/v1/sessions", {"query": "ls"}),
+        ("/no/such/route", {"query": "ls"}),
     ],
 )
 def test_a_foreign_origin_is_refused_on_any_path(
@@ -541,10 +463,8 @@ async def test_the_origin_rule_ignores_the_case_of_the_method(method: str) -> No
     assert inner.scopes == []
 
 
-def test_port_80_accepts_an_origin_without_the_port(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    gateway = _build_gateway(monkeypatch, port=80)
+def test_port_80_accepts_an_origin_without_the_port() -> None:
+    gateway = _build_gateway(port=80)
     for origin in ("http://localhost", "http://127.0.0.1:80", "http://[::1]"):
         resp = gateway.client.post(
             "/v1/agent/run",
@@ -566,7 +486,6 @@ def test_port_80_accepts_an_origin_without_the_port(
         ("GET", "/v1/health", None),
         ("GET", "/v1/sessions", None),
         ("POST", "/v1/agent/run", {"query": "ls"}),
-        ("GET", "/v1/playground/scenarios", None),
     ],
 )
 def test_a_request_from_another_site_is_refused_under_v1(
@@ -723,10 +642,10 @@ def test_every_response_forbids_framing(
     ],
 )
 def test_a_loopback_host_installs_the_guard(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, host: str
+    caplog: pytest.LogCaptureFixture, host: str
 ) -> None:
     with caplog.at_level(logging.WARNING, logger="localmelo.gateway"):
-        gateway = _build_gateway(monkeypatch, host=host)
+        gateway = _build_gateway(host=host)
     # The guard is outermost; the console's error middleware is inside it.
     assert gateway.server.app.user_middleware[0].cls is LoopbackGuard
     assert not caplog.records
@@ -734,17 +653,15 @@ def test_a_loopback_host_installs_the_guard(
     assert resp.status_code == 421
 
 
-def test_a_host_in_brackets_listens_without_them(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    gateway = _build_gateway(monkeypatch, host="[::1]")
+def test_a_host_in_brackets_listens_without_them() -> None:
+    gateway = _build_gateway(host="[::1]")
     assert gateway.server.host == "::1"
     assert gateway.server.uvicorn_server().config.host == "::1"
 
 
-def test_a_non_loopback_host_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_non_loopback_host_is_refused() -> None:
     with pytest.raises(ValueError, match="loopback"):
-        _build_gateway(monkeypatch, host="0.0.0.0")
+        _build_gateway(host="0.0.0.0")
 
 
 def test_the_guarded_gateway_starts_and_stops(gateway: Gateway) -> None:
@@ -812,67 +729,6 @@ def test_a_websocket_from_the_gateway_page_or_a_script_is_accepted(
         f"ws://127.0.0.1:{PORT}/v1/ws", headers=dict(headers)
     ) as websocket:
         assert websocket.receive_text() == "hello"
-
-
-# ---------------------------------------------------------------------------
-# The standalone playground server
-# ---------------------------------------------------------------------------
-
-
-def _standalone_playground_server(
-    monkeypatch: pytest.MonkeyPatch, playground: RecordingPlayground
-) -> ModuleType:
-    """A fresh copy of _test_webapp whose playground is *playground*."""
-    monkeypatch.setattr(
-        "localmelo.support.gateway.webapp.SmokePlayground", lambda **kwargs: playground
-    )
-    spec = importlib.util.find_spec("localmelo.support.gateway._test_webapp")
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def test_the_standalone_playground_server_is_guarded(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # python -m localmelo.support.gateway._test_webapp serves the same
-    # playground routes, which run tasks with tools.
-    playground = RecordingPlayground()
-    monkeypatch.setattr(
-        "localmelo.support.config.load",
-        lambda: Config(
-            chat_backend="mlc",
-            embedding_backend="none",
-            mlc=LocalBackendConfig(chat_url="http://llm.test/v1", chat_model="m"),
-        ),
-    )
-    server = _standalone_playground_server(monkeypatch, playground)
-    assert server.PORT == PORT
-    client = TestClient(
-        server.app,
-        base_url=GATEWAY,
-        headers={
-            "Authorization": "Bearer " + server.server.auth.read_token().decode("ascii")
-        },
-    )
-    body: dict[str, str] = {}
-
-    resp = client.post(
-        "/v1/playground/session", json=body, headers={"Host": FOREIGN_HOST}
-    )
-    assert resp.status_code == 421
-    assert resp.json() == HOST_ERROR
-    resp = client.post(
-        "/v1/playground/session", json=body, headers={"Origin": FOREIGN_ORIGIN}
-    )
-    assert resp.status_code == 403
-    assert resp.json() == ORIGIN_ERROR
-    assert playground.calls == []
-
-    resp = client.post("/v1/playground/session", json=body, headers={"Origin": GATEWAY})
-    assert resp.status_code == 200
-    assert playground.calls == ["create_session"]
 
 
 # ---------------------------------------------------------------------------

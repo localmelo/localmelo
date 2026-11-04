@@ -2,7 +2,7 @@
 
 The page talks only to ``/api``, so the S2/S2b header it keeps (the machine
 line, the P1-P4 chip, ``Waiting: <held>``) reads and writes the one gate
-through these routes instead of ``/v1/playground``.
+through these routes.
 """
 
 from __future__ import annotations

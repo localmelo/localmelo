@@ -14,7 +14,7 @@
 melo serve
 ```
 
-旧写法（`melo --serve`、`--daemon`、`--gateway-login`、`--gateway-rotate-token`、`--enable-playground`、`--allow-unconfigured`）仍然可用，macOS 应用和启动脚本就在用；完整对照见[旧写法对应的新写法](../reference/cli.md#old-spelling-to-new)。
+旧写法（`melo --serve`、`--daemon`、`--gateway-login`、`--gateway-rotate-token`、`--allow-unconfigured`）仍然可用，macOS 应用和启动脚本就在用；完整对照见[旧写法对应的新写法](../reference/cli.md#old-spelling-to-new)。
 
 - 还没有配置文件时，`melo serve` 会像 `melo setup` 一样先提问（`Found a model server at …`、`Use this model server?`；参见[使用向导配置](configure.md#set-up-with-the-wizard)）；如果没有终端，它会输出 `melo: no backend is configured; run melo setup in a terminal`，并以退出码 1 退出。
 - 即使没有配置后端或配置文件存在验证错误，`melo serve --force` 也会跳过向导并启动网关，让客户端或网页控制台通过 `GET /api/health` 检查状态，并通过 `PUT /api/settings` 保存配置。

@@ -716,7 +716,6 @@ class Config:
     # Configuration only: no price is bundled.
     pricing: dict[str, dict[str, float]] = field(default_factory=dict)
     _allow_unconfigured: bool = field(default=False, repr=False, compare=False)
-    _enable_playground: bool = field(default=False, repr=False, compare=False)
     # ``-X`` values applied by ``load()``: key -> (what the file had, what is set).
     _overridden: dict[str, tuple[Any, Any]] = field(
         default_factory=dict, repr=False, compare=False
