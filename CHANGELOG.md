@@ -1463,6 +1463,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A long unbroken paste (tens of thousands of characters with no spaces, or a long dotted or underscored text) no longer freezes the gateway for seconds while the main chat decides whether it is a request. The routing rules read the first 4,000 characters, and a file name or path is matched up to 200 characters per part; the task that starts still gets all of the text. Part of #493.
 - Words added to a chat while melo works are now remembered with that turn; before, only the first message of the turn was. Part of #428.
 - melo no longer recalls its own old replies about a blocked step as if they were still the rule; only what you said in that turn is remembered. Part of #428.
 - `browser_find` reads the page again before it searches, so its refs are always of the page as it is now;
