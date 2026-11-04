@@ -155,6 +155,8 @@ async def test_the_accepted_event_names_the_note_and_holds_no_pixels() -> None:
     inbox = Inbox(llm, {5: "look"}, {5: [picture(3)]})
     seen = Seen()
     await agent_for(llm).run_task("start", inbox=inbox, on_event=seen)
+    # The picture travels in the request, so only the event could leak its pixels.
+    assert len(carried(llm.requests[1])) == 1
     accepted = [e for e in seen.events if e.type == "inbox.accepted"]
     assert [e.data["offset"] for e in accepted] == [5]
     assert "iVBOR" not in str(accepted[0].data)

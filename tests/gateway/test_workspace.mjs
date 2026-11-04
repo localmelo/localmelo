@@ -6794,15 +6794,20 @@ test('while melo works, a picture is dropped, pasted or picked into the strip li
 });
 
 test('while melo works, a text file is told it cannot join, from a drop and from the picker', async () => {
-  const h = await runningChat();
+  const h = await runningChat({'POST /uploads?name=shot.png': stagedPicture('up1', 'shot.png')});
   await dropFiles(h, [textFile('notes.md', 'hello')]);
   assert.match(h.text('notice'), /Text files cannot join a turn that is running\./);
   assert.equal(h.element('media-tray').hidden, true, 'nothing was added');
+  // Dropped together, the picture joins and only the text file is refused.
+  await dropFiles(h, [fileOf('shot.png', 'image/png'), textFile('notes.md', 'hello')]);
+  assert.equal(tiles(h, 'media-thumb').length, 1);
+  assert.match(h.text('notice'), /Text files cannot join a turn that is running\./);
   const chooser = h.element('media-input');
   chooser.files = [textFile('more.txt', 'x')];
   chooser.listeners.change[0]();
   await settle();
-  assert.equal(h.element('media-tray').hidden, true);
+  assert.equal(tiles(h, 'media-thumb').length, 1, 'the picker added nothing');
+  assert.equal(h.element('media-tray').hidden, false);
 });
 
 test('Send while melo works posts the strip\'s pictures with the words as one note, and no turn', async () => {
