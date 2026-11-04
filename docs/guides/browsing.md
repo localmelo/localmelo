@@ -4,8 +4,8 @@ Let melo read web pages, and click, type and choose on them, on a Mac, from the 
 
 ![A terminal chat in which melo opens a web page and says what it contains.](../assets/img/browser.webp)
 
-- Browsing is **off by default**.
-- Two browsers: **Chrome in the background** (no window, never comes to the front; see [Chrome in the background](#chrome-in-the-background)) or **Safari's automation windows**, which come to the front. Safari is the default for now.
+- Browsing is **off until you turn it on**.
+- Two browsers: **Chrome in the background** (no window, never comes to the front; see [Chrome in the background](#chrome-in-the-background)) or **Safari's automation windows**, which come to the front. `/browser on` uses the browser you chose before, or Safari if you never chose one.
 - melo opens pages, follows links and reads what it finds. It works in one tab, like a person would.
 - It can click a button or link, type into a text box and choose from a list, all **inside melo's own browser window**, with Safari's own clicks and keystrokes, and it says what changed after each one. It never types a password, a card number or a one-time code, never reads your cookies, and asks every time before it types a text and before it sends a form. Once a text is in a page, the page itself may send it: melo cannot stop every such send (see [Clicking, typing and choosing](#clicking-typing-and-choosing)).
 - It never types your password for you. In Chrome in the background, when a page needs you (a sign-in, a code, a QR code or a check that you are human), melo asks you to [take the page over](#taking-over-melos-browser) and carries on after you give it back. Moving the mouse on your desktop is a different feature and is not part of this (see [What is coming](#what-is-coming)).
