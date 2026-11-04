@@ -136,12 +136,12 @@ With pixels on, the tool's text stays in its `role: "tool"` message. The picture
 
 ## Browsing
 
-On a Mac, melo can read web pages in Safari, and click, type and choose on them inside its own browser window. It is off by default; [the browsing guide](browsing.md) has the setup, what melo can and cannot do, and troubleshooting.
+On a Mac, melo can read web pages, and click, type and choose on them, in Chrome in the background (no window) or in Safari's automation windows. It is off by default; [the browsing guide](browsing.md) has the setup, what melo can and cannot do, and troubleshooting.
 
-- Turn it on with `/browser on` in the terminal chat, or `melo -X browser.driver=safari-automation` for one run.
-- In Safari, open Settings > Developer and turn on "Allow remote automation" once.
+- Turn it on with `/browser on` (Safari windows) or `/browser chrome` (Chrome in the background) in the terminal chat, or `melo -X browser.driver=chrome` for one run.
+- For Safari, open Settings > Developer and turn on "Allow remote automation" once. Chrome needs only Google Chrome installed.
 - The terminal chat and every chat of the web console and the app then get twelve tools: `browser_open`, `browser_read`, `browser_find`, `browser_follow`, `browser_click`, `browser_type`, `browser_select`, `browser_back`, `browser_tabs`, `browser_wait`, `browser_screenshot` and `browser_click_point`.
-- They work in Safari's own automation windows, which start without any of your sign-ins.
+- They work in Safari's own automation windows, which start without any of your sign-ins, or in Chrome with a profile of melo's own, never yours.
 - melo asks "Open a website?" before it loads a page, once per site and chat (`auto` mode still asks), asks again before it clicks, types or chooses on a site, and asks by itself, every time, before it sends a form (showing where it goes and what it holds; there is no "allow for this chat" for a send); it works in one tab, never types a password, card number or one-time code, and does not sign in or post for you. Direct runs, workers and saved tasks never get these tools.
 
 Without Safari, every chat and task can read a public page with `web_fetch`, which is on by default (see [Read a page without the browser](browsing.md#read-a-page-without-the-browser)).

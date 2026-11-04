@@ -49,6 +49,14 @@ uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 - 日志是 `~/Library/Logs/LocalMelo/gateway.log`；问题不会弹出对话框，也不会关闭应用。
 - 首次设置在控制台的 **Settings**（它的 **Model server** 分区）中完成；应用使用 `~/.cache/localmelo` 里常规的配置和对话。
 
+<a id="the-browser-window"></a>
+
+## 浏览器窗口
+
+- 在后台 Chrome 中浏览的对话里，控制台的**浏览器**面板有一个**弹出为窗口**按钮。它把面板单独放进一个标题为“浏览器”的窗口，这样你在别的窗口工作时也能看着 melo 的页面。
+- 窗口显示同样的实时画面（[观看 melo 的浏览器](browsing.md#watching-melos-browser)），也可以在这里**接管**：点击、按键、Mac 的输入法和 Command-V 粘贴都会发给网页，Command-A、Command-X 和 Command-Z 作用在网页上（见[接管 melo 的浏览器](browsing.md#taking-over-melos-browser)）。关闭它就会结束画面流，你手里的网页 2 分钟后回到 melo；网关停止或应用退出时它也会关闭。
+- 它只能显示网关自己的页面。里面的链接从不会被打开，也不会跳转到其他网站。
+
 <a id="language"></a>
 
 ## 语言

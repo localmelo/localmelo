@@ -61,6 +61,7 @@ from . import (
     activity,
     errors,
     front,
+    routes_browser,
     routes_chores,
     routes_commands,
     routes_details,
@@ -474,6 +475,7 @@ class Console:
         routes_settings.add_routes(app, self)
         routes_sessions.add_routes(app, self)
         routes_status.add_routes(app, self)
+        routes_browser.add_routes(app, self)
         routes_turns.add_routes(app, self)
         routes_details.add_routes(app, self)
         routes_grants.add_routes(app, self)

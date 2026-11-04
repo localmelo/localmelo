@@ -261,7 +261,7 @@ The commands of the [terminal](terminal.md#commands) work on this page and in th
 | `/memory [window\|import]` | Open the Memory tab; `window` shows the model's window; `import` also presses **Look for notes**, so the files other assistants keep are listed (a row says so when memory is off). |
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | Show the chat's mode and grants; `ask` and `auto` switch it and `forget` takes grants back. In a side chat, `forget NAME` on a grant from the main chat takes it back everywhere, and `forget` alone takes back only that chat's own (in the main chat: every grant that holds everywhere). `deny` is for the terminal. |
 | `/grants [revoke N]` | What you allowed, numbered as **Settings › Permissions** lists it; `revoke N` takes the N-th back. |
-| `/browser [on\|off]` | Show or switch reading web pages in Safari, saved in `[browser] driver`. |
+| `/browser [on\|off\|chrome\|safari]` | Show or switch reading web pages, in Chrome in the background or in Safari's windows, saved in `[browser] driver`. |
 | `/attach`, `/attachments`, `/detach` | `/attach` opens the picker for a picture or a text file; `/attachments` lists what waits and `/detach N` (or `/detach all`) removes it. |
 | `/verbose`, `/thinking`, `/stream [on\|off]` | How the page shows a chat, kept in this browser: tool calls open, thinking open, or steps shown only when a turn ends. |
 | `/expand [turn.call]` | Open a tool call with its whole output. |
@@ -447,6 +447,19 @@ Closing a chat that made notes asks `Also forget the 2 notes from this chat?`: *
 **Forget the 2 notes too**, or **Don’t delete the chat**.
 
 In developer mode, **Details** opens in the panel, in place of the tabs, until you close it.
+
+## The Browser panel
+
+While melo browses in Chrome in the background ([Browsing with melo](browsing.md#watching-melos-browser)), a **Browser** panel beside the chat shows its page, live, and lets you take it over.
+
+- It opens by itself when melo starts browsing and follows melo to another tab. **Hide browser** in its header closes it; the **Browser** button in the header opens it again.
+- It shows the page's title and address, the picture, and a ring with "melo is browsing" while a step runs. When the picture stops it dims and reads "Not updating"; when it ends it says why.
+- On a window 1480 pixels wide or more it sits between the chat and the [panel beside the chat](#the-panel-beside-a-chat). On a narrower one it takes that panel's place while it is open, and under 900 pixels it opens as a sheet when you ask.
+- It sends nothing while it is hidden or its tab is in the background, and closing the tab ends the picture stream.
+- **Take over** in its footer makes the page yours: "You are in control", and your clicks, keys, input method and pastes go to the page while melo waits. **Give back to melo** returns it, and melo reads the page again before it acts ([Taking over melo's browser](browsing.md#taking-over-melos-browser)).
+- When melo needs you on a page (a sign-in, a code, a QR code, a check that you are human), a card in the chat says "melo needs you to sign in on example.com" with **Take over** and **Not now**. Take over opens the panel with the page yours.
+- A box the page puts up while you have it (an alert, a confirm, a question) shows in the panel. Leave the panel and the page goes back to melo after 2 minutes.
+- Nothing you type is kept, and the picture is not saved anywhere.
 
 ## Melo in the page
 
@@ -973,7 +986,7 @@ commands and file changes.
 
 ## Permissions
 
-Everything you allow "for this chat" is a grant: a tool, a site, a folder outside the workspace or another app's window. **Settings › Permissions** lists them, and they survive a restart of the gateway.
+Everything you allow "for this chat" is a grant: a tool, a site, a folder outside the workspace, another app's window or an app a page may open. **Settings › Permissions** lists them, and they survive a restart of the gateway.
 
 - **The rule:** what you allow in the main chat counts everywhere; in a side chat, only there. Everywhere means every side chat, the tasks you start and the terminal.
 - **The card says so:** in the main chat the button that keeps a grant reads **Allow in every chat** (**Allow this folder in every chat**, **Allow Chat everywhere** for another app's window), with a line saying it counts in every chat, the tasks you start and the terminal until you revoke it here. A side chat's card says **this chat**, a task's **this task**.
@@ -981,7 +994,7 @@ Everything you allow "for this chat" is a grant: a tool, a site, a folder outsid
 - **Only there:** a side chat's grant holds in that chat. A task's **Allow for this task** holds in that task. A site Auto let the chat read holds in that chat only, even in the main chat.
 - **The page:** two groups, **Everywhere** and **Per chat** (a small heading per chat). A row says what is allowed in plain words, the chat, who decided (You or Auto), when, and **Revoke**, which works at once, in chats that are running too. With none, the page says so. **Always allow this folder** is not a grant: it stays in **Chats and folders**.
 - **`/grants`** lists the same rows with numbers (everywhere first, newest first, then each chat, the one with the newest grant first); `/grants revoke N` takes the N-th back.
-- **Never kept, never listed:** **Allow once**, typing on a page, sending a form, a click on a password, code or card field, a consent control or a box from another site, a press in another app's window, paying, changing an account's settings, and every high-impact step ask every time.
+- **Never kept, never listed:** **Allow once**, typing on a page, sending a form, a click on a password, code or card field, a consent control or a box from another site, a press in another app's window, paying, changing an account's settings, and every high-impact step (in Auto, opening an app a page asked for too) ask every time.
 
 Deleting a chat deletes its grants. Moving a side chat to another folder takes back its own (the main chat's still hold).
 

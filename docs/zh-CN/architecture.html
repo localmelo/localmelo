@@ -107,6 +107,10 @@
               <span class="node-title">审批</span>
               <span class="node-sub">你，或自动模式的复核</span>
             </a>
+            <a class="node approval" id="f-grants" href="#c-grants" style="left:570px;top:568px;width:210px;min-height:72px">
+              <span class="node-title">授权</span>
+              <span class="node-sub">你允许过的事</span>
+            </a>
 
             <svg class="conns" id="svg-flow" aria-hidden="true" focusable="false"></svg>
           </div>
@@ -115,11 +119,12 @@
         <div class="legend">
           <div class="legend-item"><div class="legend-line"></div>localmelo 内部的调用和数据</div>
         </div>
+        <p class="diagram-caption">批准每一步的只有你，或自动模式的复核。你允许的事会保存为授权，重启后仍然有效。</p>
         <ul>
           <li>你和主对话交流。旁支对话能力相同，共享记忆。</li>
           <li>较大的工作交给调度器，来自主对话、旁支对话或定时事项。调度器按级别（P0 到 P5）和模型槽位给任务排序，再启动后台任务；后台任务的名字说明它为哪个对话工作。</li>
           <li>任务属于启动它的对话：进展和结果回到那里；旁支对话结束时会给主对话留一份总结。</li>
-          <li>对话可以查看后台任务的状态，也可以给它发消息。后台任务向所属对话求助；只有对话会来问你，批准每一步的只有你，或自动模式的复核。</li>
+          <li>对话可以查看后台任务的状态，也可以给它发消息。后台任务向所属对话求助；只有对话会来问你。</li>
           <li>对话启动的任务开始时带着你的原话、所属对话挑选的内容，以及一份上下文包：关于你、你的偏好和这个项目的笔记。</li>
         </ul>
 
@@ -331,6 +336,42 @@
           <li>定时事项按时启动任务；每 30 分钟，check-in 告诉主对话什么做完了或在等你。</li>
           <li>Worker 和对话运行同一个智能体；对话把记忆召回到每一轮里，worker 自己不保留记忆，开始时带一份来自所属对话的上下文包。</li>
         </ul>
+
+        <h3 id="browser">后台浏览器</h3>
+        <p>打开浏览功能后，melo 可以在没有窗口的 Chrome 里读网页，并在网页上操作。选择一个方框可以跳到它的卡片。</p>
+
+        <div class="diagram-scroll">
+          <div class="diagram" id="dia-browser" style="width:800px;height:300px">
+            <a class="node" id="b-agent" href="#c-agent" style="left:10px;top:20px;width:170px;min-height:90px">
+              <span class="node-title">智能体</span>
+              <span class="node-sub">调用浏览器工具</span>
+            </a>
+            <a class="node" id="b-gateway" href="#c-gateway" style="left:310px;top:20px;width:180px;min-height:90px">
+              <span class="node-title">网关</span>
+              <span class="node-sub">启动并驱动 Chrome</span>
+            </a>
+            <a class="node" id="b-chrome" href="#c-browser" style="left:620px;top:20px;width:170px;min-height:90px">
+              <span class="node-title">Chrome</span>
+              <span class="node-sub">没有窗口 · 自己的配置</span>
+            </a>
+            <a class="node" id="b-console" href="#c-gateway" style="left:310px;top:190px;width:180px;min-height:90px">
+              <span class="node-title">控制台和 App</span>
+              <span class="node-sub">浏览器面板 · 实时画面</span>
+            </a>
+            <svg class="conns" id="svg-browser" aria-hidden="true" focusable="false"></svg>
+          </div>
+        </div>
+
+        <div class="legend">
+          <div class="legend-item"><div class="legend-line"></div>各部分之间的调用和数据</div>
+        </div>
+        <ul>
+          <li>浏览器工具的调用经网关到达 Chrome；网关启动它时没有窗口，从不来到你的应用前面。</li>
+          <li>网关通过私有管道和 Chrome 通信，从不用网络端口，Chrome 使用 melo 自己的配置。</li>
+          <li>控制台和 App 实时显示网页；画面只保存在内存里，并且只在浏览器面板打开时才会发送。</li>
+          <li>接管把网页交给你，你可以自己登录；在你交还之前，melo 在它上面的步骤会等着。</li>
+          <li>Safari 的自动化窗口是另一种浏览器：它们会来到最前面，没有实时画面。</li>
+        </ul>
       </section>
 
       <section class="section" id="components">
@@ -429,8 +470,20 @@
               <li>被拒绝的调用不会运行；模型会看到原因。</li>
               <li>发送、删除或发布之类的调用总会询问，并说明原因。</li>
               <li>在“自动”下，由审查而不是一次点击来决定每一步；被拦下的步骤会得到解释，“允许一次”只让那一步运行一次。</li>
+              <li>你为某个对话允许的事会保存为授权。</li>
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/tools-mcp.md#what-the-checks-do">检查的作用</a>
+          </div>
+          <div class="comp-card" id="c-grants">
+            <h3>授权</h3>
+            <p>你为某个对话允许过的事，保存在一张表里。</p>
+            <ul>
+              <li>一项授权是一个工具、一个网站、工作区之外的一个文件夹，或另一个应用的窗口。</li>
+              <li>这张表在网关的会话文件里，所以授权在重启后仍然有效。</li>
+              <li>在主对话里允许的，在每个对话里都算；在旁支对话里允许的，只在那里算。</li>
+              <li>设置 → 授权列出它们，收回立即生效。</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#permissions">授权指南</a>
           </div>
           <div class="comp-card" id="c-executor">
             <h3>执行器</h3>
@@ -448,9 +501,20 @@
             <ul>
               <li><code>--mcp PATH</code> 中列出的本地 MCP 服务器以 stdio 进程运行。</li>
               <li>它们的工具名为 <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>。</li>
-              <li>打开浏览功能后，melo 在 Safari 的自动化窗口里读网页。</li>
+              <li>打开浏览功能后，melo 在后台的 Chrome 或 Safari 的自动化窗口里读网页，并在网页上操作。</li>
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/tools-mcp.md">工具和 MCP 指南</a>
+          </div>
+          <div class="comp-card" id="c-browser">
+            <h3>后台浏览器</h3>
+            <p>没有窗口的 Chrome，用来读网页并在网页上操作。</p>
+            <ul>
+              <li>需要你自己开启：设置 → 对话和文件夹 → <strong>浏览器</strong>，或 <code>/browser chrome</code>。</li>
+              <li>网关启动这台 Mac 上安装的 Chrome，没有界面，使用 melo 自己的配置。</li>
+              <li>浏览器面板实时显示网页；接管让你自己登录。</li>
+              <li>其他应用在点击之后打开的窗口，会先问你。</li>
+            </ul>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/browsing.md#chrome-in-the-background">浏览指南</a>
           </div>
           <div class="comp-card" id="c-memory">
             <h3>记忆</h3>
@@ -524,14 +588,14 @@
               <tr><td>主对话和旁支对话</td><td>一个主对话：自己回答，或按优先级把更大的工作交给任务</td><td><span class="chip done">已完成</span></td></tr>
               <tr><td>跨对话记忆</td><td>你要求或 melo 判断值得时记下的笔记、新的值取代旧的、带来源的召回、“记忆”标签页</td><td><span class="chip done">已完成</span></td></tr>
               <tr><td>定时事项</td><td>按时运行的事项和一次性提醒，以及每 30 分钟的 check-in</td><td><span class="chip done">已完成</span></td></tr>
-              <tr><td>工具和审批</td><td>五个内置工具、MCP 服务器、对高影响调用的复核、每个对话可选“询问”或“自动”</td><td><span class="chip done">已完成</span></td></tr>
-              <tr><td>浏览</td><td>在你能看到的 Safari 窗口里读网页、跟随链接</td><td><span class="chip done">已完成</span></td></tr>
+              <tr><td>工具和审批</td><td>五个内置工具、MCP 服务器、对高影响调用的复核、每个对话可选“询问”或“自动”、可以列出也可以收回的授权</td><td><span class="chip done">已完成</span></td></tr>
+              <tr><td>浏览</td><td>在后台的 Chrome（有实时画面，可以接管）或 Safari 窗口里读网页、点击和输入</td><td><span class="chip done">已完成</span></td></tr>
               <tr><td>调度器和 worker</td><td>任务队列、级别、worker、公平的排队、可选的闸门和 GPU 锁</td><td><span class="chip testing">测试中</span></td></tr>
               <tr><td>旁支对话与主对话对等</td><td>旁支对话可以启动任务并收到结果，旁支对话结束时给主对话留一份总结</td><td><span class="chip done">已完成</span></td></tr>
               <tr><td>后台任务向对话求助</td><td>后台任务把一份简短的求助发给所属对话，每个任务带一份关于你、你的偏好和这个项目的笔记的上下文包，只有对话会来问你</td><td><span class="chip done">已完成</span></td></tr>
               <tr><td>推理笔记</td><td>保留笔记并在循环中召回的压缩模式</td><td><span class="chip testing">测试中</span></td></tr>
               <tr><td>任务看到你的原话</td><td>任务能看到你的原话，以及所属对话为它挑选的记忆条目</td><td><span class="chip done">已完成</span></td></tr>
-              <tr><td>计算机操作</td><td>在浏览器里操作网页，重要的操作先问你</td><td>计划中</td></tr>
+              <tr><td>计算机操作</td><td>在你自己登录的浏览器和其他应用里操作，重要的操作先问你</td><td>计划中</td></tr>
               <tr><td>空闲时学习</td><td>离线回顾过去的工作</td><td>计划中</td></tr>
             </tbody>
           </table>
@@ -580,7 +644,8 @@
           { from: "f-main", fs: "bottom", ff: 0.4636, to: "f-chan", ts: "top", tf: 0.523, bidi: true },
           { from: "f-chan", fs: "bottom", ff: 0.523, to: "f-workers", ts: "top", tf: 0.134, bidi: true },
           { from: "f-side", fs: "bottom", ff: 0.78, to: "f-workers", ts: "top", tf: 0.9, bidi: true, label: "同一条通道" },
-          { from: "f-workers", fs: "bottom", ff: 0.5, to: "f-appr", ts: "top", tf: 0.5, bidi: true }
+          { from: "f-workers", fs: "bottom", ff: 0.5, to: "f-appr", ts: "top", tf: 0.5, bidi: true },
+          { from: "f-appr", fs: "right", to: "f-grants", ts: "left", bidi: true }
         ],
         "svg-worker": [
           { from: "w-sched", fs: "bottom", ff: 0.5, to: "w-agent", ts: "top", tf: 0.227 },
@@ -602,6 +667,11 @@
           { from: "n-agent", fs: "right", ff: 0.75, to: "n-providers", ts: "left", tf: 0.3, type: "dashed", label: "对话" },
           { from: "n-memory", fs: "right", to: "n-providers", ts: "left", tf: 0.7, type: "dashed", label: "嵌入" },
           { from: "n-backends", fs: "top", to: "n-providers", ts: "bottom", label: "创建" }
+        ],
+        "svg-browser": [
+          { from: "b-agent", fs: "right", to: "b-gateway", ts: "left", bidi: true, label: "浏览器工具" },
+          { from: "b-gateway", fs: "right", to: "b-chrome", ts: "left", bidi: true, label: "私有管道" },
+          { from: "b-gateway", fs: "bottom", to: "b-console", ts: "top", bidi: true, label: "实时画面\n接管" }
         ],
         "svg-around": [
           { from: "a-cli", fs: "bottom", ff: 0.8, to: "a-gateway", ts: "top", tf: 0.1, label: "主对话" },

@@ -1105,6 +1105,51 @@ def test_the_settings_carry_whether_melo_may_browse_and_save_it_only_when_sent(
     assert word.status_code == 400, "only true or false"
 
 
+def test_the_browser_choice_names_the_driver_and_says_whether_chrome_is_installed(
+    client: TestClient, isolated_config: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Settings' Browser choice: off, Safari windows or Chrome in the background."""
+    from localmelo.support.browser import chrome
+
+    _saved_cfg()
+    monkeypatch.setattr(chrome, "chrome_installed", lambda: False)
+    loaded = client.get("/api/settings").json()
+    assert loaded["browser_driver"] == "off" and loaded["chrome_installed"] is False
+    monkeypatch.setattr(chrome, "chrome_installed", lambda: True)
+    picked = client.put(
+        "/api/settings",
+        json=_put_body(loaded["revision"], browser_driver="chrome"),
+    )
+    assert picked.status_code == 200
+    assert picked.json()["browser_driver"] == "chrome"
+    assert picked.json()["browser"] is True and picked.json()["chrome_installed"]
+    assert 'driver = "chrome"' in isolated_config.read_text()
+    # On again after off keeps nothing: on is Safari's windows, the default.
+    off = client.put(
+        "/api/settings", json=_put_body(picked.json()["revision"], browser=False)
+    )
+    assert off.json()["browser_driver"] == "off"
+    again = client.put(
+        "/api/settings", json=_put_body(off.json()["revision"], browser=True)
+    )
+    assert again.json()["browser_driver"] == "safari-automation"
+    # /browser on while a driver is chosen keeps it.
+    chosen = client.put(
+        "/api/settings",
+        json=_put_body(again.json()["revision"], browser_driver="chrome"),
+    )
+    kept = client.put(
+        "/api/settings", json=_put_body(chosen.json()["revision"], browser=True)
+    )
+    assert kept.json()["browser_driver"] == "chrome"
+    bad = client.put(
+        "/api/settings",
+        json=_put_body(kept.json()["revision"], browser_driver="firefox"),
+    )
+    assert bad.status_code == 400
+    assert bad.json()["error"]["code"] == "invalid_request"
+
+
 def test_the_settings_carry_whether_melo_reads_web_pages_and_save_it_only_when_sent(
     client: TestClient, isolated_config: Path
 ) -> None:

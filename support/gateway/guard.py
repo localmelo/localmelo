@@ -12,6 +12,7 @@ refuses the requests before they reach any route, and forbids framing.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import re
 from http.cookies import CookieError, SimpleCookie
@@ -283,7 +284,10 @@ class LoopbackGuard:
             if (
                 rotation is not None
                 and generation is not None
-                and str(scope.get("path", "")).endswith("/events")
+                and (
+                    scope["type"] == "websocket"
+                    or str(scope.get("path", "")).endswith("/events")
+                )
             ):
                 await self._serve_stream(scope, receive, send, rotation, generation)
             else:
@@ -426,6 +430,16 @@ class LoopbackGuard:
             if not app_task.done():
                 app_task.cancel()
             await asyncio.gather(app_task, rotated, return_exceptions=True)
+            if revoked and scope["type"] == "websocket":
+                # A socket whose token was revoked is closed, not left to the server's own end.
+                with contextlib.suppress(Exception):
+                    await send(
+                        {
+                            "type": "websocket.close",
+                            "code": _WS_POLICY_VIOLATION,
+                            "reason": "token_rotated",
+                        }
+                    )
 
     async def _read_body(
         self, scope: Scope, receive: Receive

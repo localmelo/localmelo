@@ -688,13 +688,29 @@ test('/grants lists what was allowed, numbered as Settings orders it, and /grant
 test('/browser shows whether melo may browse, and /browser on or off saves it through the settings route', async () => {
   const p = page({routes: ROUTES});
   await p.slash.handle('/browser');
-  assert.match(lastRow(p), /Browsing is off\. \/browser on lets melo read web pages in Safari\./);
+  assert.match(lastRow(p), /Browsing is off\. \/browser on lets melo read web pages in Safari; \/browser chrome, in Chrome in the background\./);
   await p.slash.handle('/browser on');
   assert.deepEqual(p.calls.at(-1).body, {chat_backend: 'mlc', embedding_backend: 'none', workspace: '~/ws', revision: 'r1', sections: {}, browser: true});
   assert.match(lastRow(p), /Browsing is on/);
   assert.equal(p.events.filter(([name]) => name === 'settingsSaved').length, 1);
   await p.slash.handle('/browser maybe');
-  assert.match(lastRow(p), /Use \/browser, \/browser on or \/browser off\./);
+  assert.match(lastRow(p), /Use \/browser, \/browser on, \/browser off, \/browser chrome or \/browser safari\./);
+});
+
+test('/browser chrome and /browser safari choose where melo browses; without Chrome it says to install it', async () => {
+  const routes = {...ROUTES, 'GET /settings': {...ROUTES['GET /settings'], browser_driver: 'off', chrome_installed: true},
+    'PUT /settings': (body) => ({...body, browser: true, browser_driver: body.browser_driver, chrome_installed: true})};
+  const p = page({routes});
+  await p.slash.handle('/browser chrome');
+  assert.equal(p.calls.at(-1).body.browser_driver, 'chrome');
+  assert.match(lastRow(p), /Browsing is on: melo reads pages in Chrome, in the background\./);
+  await p.slash.handle('/browser safari');
+  assert.equal(p.calls.at(-1).body.browser_driver, 'safari-automation');
+  assert.match(lastRow(p), /Safari's automation windows/);
+  const missing = page({routes: {...routes, 'GET /settings': {...routes['GET /settings'], chrome_installed: false}}});
+  await missing.slash.handle('/browser chrome');
+  assert.match(lastRow(missing), /Install Google Chrome to browse in the background\./);
+  assert.equal(missing.calls.filter((call) => call.method === 'PUT').length, 0);
 });
 
 test('/verbose, /thinking and /stream set how the page shows a chat', async () => {

@@ -134,11 +134,11 @@
           </a>
           <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/tools-mcp.md#what-the-checks-do">
             <img src="../assets/img/terminal-approval.webp" alt="终端里的审批面板：写文件将做出的改动，以及一组可选的回答。" width="1280" height="946" loading="lazy">
-            <span class="show-text"><strong>重要操作由你批准</strong><span>melo 运行命令或改文件之前会先问你，并展示改动。</span></span>
+            <span class="show-text"><strong>重要操作由你批准</strong><span>melo 运行命令或改文件之前会先问你，并展示改动。你允许过的事汇成设置里的一张清单，可以收回。</span></span>
           </a>
           <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/browsing.md">
             <img src="../assets/img/browser.webp" alt="终端里的对话：melo 打开一个网页并说出它的内容。" width="1280" height="552" loading="lazy">
-            <span class="show-text"><strong>读网页</strong><span>打开浏览功能后，melo 在你能看到的 Safari 窗口里读网页。</span></span>
+            <span class="show-text"><strong>浏览网页</strong><span>打开浏览功能后，melo 在没有窗口的 Chrome 里浏览，不会把你带到别的桌面。实时观看，需要登录时接管。</span></span>
           </a>
           <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#language">
             <img src="../assets/img/console-zh.webp" alt="简体中文的网页控制台：主对话、一个设为 8:30 的定时事项和面板的标签页，时间按中文习惯书写。" width="1280" height="800" loading="lazy">
@@ -157,7 +157,7 @@
         <ul>
           <li>用输入框下模型旁边的小标签选择<strong>自动</strong>，或在设置里让每个新对话都从它开始。</li>
           <li>常规步骤不问就运行；遇到你没要求的步骤，melo 会用和“询问”相同的卡片问你。</li>
-          <li>对你没要求的网站选<strong>本对话允许</strong>，它会一直有效，直到你在小标签的菜单里移除。</li>
+          <li>对你没要求的网站选<strong>本对话允许</strong>（在主对话里是<strong>在所有对话中允许</strong>），它会一直有效，直到你在小标签的菜单里或“设置 → 授权”里收回。</li>
           <li>风险最高的步骤会被拦下，melo 会说明原因；<strong>允许一次</strong>让那一步只运行一次。</li>
           <li>步骤只在对话的文件夹里动文件，碰不到 melo 自己的登录信息：“自动”是审查员，不是围墙。</li>
           <li>任务沿用创建它的对话的模式。</li>
@@ -217,7 +217,7 @@
           <div class="board-col">
             <h3>接下来 <small>5</small></h3>
             <ul>
-              <li class="board-card"><strong>浏览器里的计算机操作</strong><span>melo 在你能看到的窗口里操作网页，重要的操作先问你。</span></li>
+              <li class="board-card"><strong>浏览器的下一步</strong><span>让 Chrome 成为默认浏览器、为拒绝无窗口浏览器的网站提供“在窗口中打开”、一个备用浏览器，以及清除 melo 的 Chrome 登录信息的按钮。</span></li>
               <li class="board-card"><strong>在 melo 里安装模型服务器</strong><span>什么都没装时，确认一次就能得到第一个答案。</span></li>
               <li class="board-card"><strong>其他智能体把工作交给 melo</strong><span>任务 API 上的 worker，以及供编程智能体使用的 MCP 服务器。</span></li>
               <li class="board-card"><strong>共享同一项目的 worker</strong><span>并行的 worker 共用一段已缓存的开头；每个任务彼此独立。</span></li>
@@ -236,7 +236,7 @@
           </div>
         </div>
         <div class="board-done">
-          <h3>已完成 <small>17</small></h3>
+          <h3>已完成 <small>21</small></h3>
           <ul>
             <li class="board-card"><strong>主对话和旁支对话</strong><span>一个对话：自己回答，或按优先级把更大的工作交给任务；终端打开的是同一个对话。</span><span class="chip done">已完成</span></li>
             <li class="board-card"><strong>看得见的记忆</strong><span>跨对话的笔记，新的值取代旧的；在“记忆”标签页里编辑或删除。</span><span class="chip done">已完成</span></li>
@@ -255,6 +255,10 @@
             <li class="board-card"><strong>主对话开始任务</strong><span>用平常的话提出工作，主对话就开始任务；任务失败时，它跟进一次。</span><span class="chip done">已完成</span></li>
             <li class="board-card"><strong>Melo 会动了</strong><span>Melo 会醒来、在笔记本电脑前打字、歪着头、举起爪子、休息和玩耍，在控制台和你的桌面上都是。</span><span class="chip done">已完成</span></li>
             <li class="board-card"><strong>换上你自己的 Melo 美术</strong><span>一条命令检查一个文件夹或 zip 里的美术，并替换 Melo 的每一张图片。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>melo 以你的名义办事</strong><span>一句“我授权你……”就是放行，melo 以你的名义开始做；登录是你来完成的一步，表单按你告诉 melo 的内容填写。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>在后台浏览</strong><span>melo 在没有窗口的 Chrome 里浏览，你在控制台和 App 里实时观看，需要登录时接管。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>其他应用的窗口先问你</strong><span>其他应用在 melo 点击之后打开的窗口，会先问你，之后它的任何信息才会交给模型。</span><span class="chip done">已完成</span></li>
+            <li class="board-card"><strong>你允许过的事，一张清单</strong><span>设置 → 授权列出你允许过的每一项，分“所有对话”和“单个对话”，每项可收回；主对话里允许的，到处都算。</span><span class="chip done">已完成</span></li>
           </ul>
         </div>
         <p class="more-link"><a href="./updates.html#updates">最新变化</a>和<a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">变更详情（英文）</a>。</p>

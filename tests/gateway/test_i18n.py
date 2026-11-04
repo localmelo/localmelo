@@ -49,6 +49,7 @@ _PARAM = re.compile(r"\{(\w+)\}")
 # The files whose words come from the catalog: a new English literal in one fails the scan.
 CONVERTED_JS = (
     "blocked.mjs",
+    "browser-live.mjs",
     "composer-media.mjs",
     "drawer.mjs",
     "endings.mjs",
@@ -97,6 +98,18 @@ JS_ENGLISH = {
     "Escape",
     "Enter",
     "Tab",
+    # The browser's own names of keys (`KeyboardEvent.key`), which the Browser panel passes on.
+    "Backspace",
+    "Delete",
+    "Home",
+    "End",
+    "Shift",
+    "Control",
+    "Alt",
+    "Meta",
+    "Unidentified",
+    "Dead",
+    "Process",
     "Reservation",
     "melo did not finish an answer",
     "tool call written as text",

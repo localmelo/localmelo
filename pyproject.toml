@@ -31,6 +31,7 @@ dependencies = [
 gateway = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
+    "websockets>=13",
 ]
 dev = [
     "ruff",

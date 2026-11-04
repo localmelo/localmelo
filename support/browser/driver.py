@@ -203,6 +203,20 @@ class Changes:
 
 
 @dataclass(frozen=True)
+class Dialog:
+    """A box the page put up while melo acted, and how melo answered it.
+
+    ``kind`` is ``alert``, ``confirm``, ``prompt`` or ``beforeunload``;
+    ``message`` is the page's own words (data, cut short); ``accepted`` is
+    whether melo answered OK (or Leave), as against Cancel.
+    """
+
+    kind: str
+    message: str
+    accepted: bool
+
+
+@dataclass(frozen=True)
 class ActResult:
     """What :meth:`BrowserDriver.act` did.
 
@@ -212,6 +226,11 @@ class ActResult:
     passed over); ``changes`` what it saw change, or None when the page became
     another document. ``native_failed`` says the browser's own input did not
     work there, so the site starts with the page script next time.
+    ``handoff`` is an address of another app's kind (``chat://...``) the page
+    asked the browser to open meanwhile, which the browser did not open
+    (``""``: none); melo asks the person before it opens it itself.
+    ``dialogs`` are the boxes the page put up meanwhile and how they were
+    answered.
     """
 
     note: str = ""
@@ -219,6 +238,8 @@ class ActResult:
     why: str = ""
     changes: Changes | None = None
     native_failed: bool = False
+    handoff: str = ""
+    dialogs: tuple[Dialog, ...] = ()
 
 
 ActionKind = Literal["click", "type", "select"]

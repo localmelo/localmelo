@@ -44,7 +44,7 @@ from localmelo.support import settings as setting_keys
 from localmelo.support.backends import discovery
 from localmelo.support.backends.discovery import DISCOVERY_TIMEOUT_S, DiscoveryError
 from localmelo.support.backends.registry import get_backend
-from localmelo.support.browser import desktop
+from localmelo.support.browser import chrome, desktop
 from localmelo.support.gateway.console.errors import ApiError
 from localmelo.support.gateway.console.probe import redact_userinfo, url_label
 from localmelo.support.gateway.console.registry import DEFAULT_WORKSPACE
@@ -131,8 +131,14 @@ class SettingsPutBody(_SettingsBaseBody):
     language: StrictStr | None = None
     # ``[approvals] mode``, how new chats start: ``ask`` or ``auto``; absent leaves it.
     approvals: StrictStr | None = None
-    # ``[browser] driver``: true reads web pages in Safari (``/browser on``), false turns it off; absent leaves it.
+    # ``[browser] driver``: true turns browsing on (``/browser on``: the driver
+    # chosen before, else Safari's automation windows), false turns it off;
+    # absent leaves it.
     browser: StrictBool | None = None
+    # ``[browser] driver`` by name: ``off``, ``safari-automation`` or ``chrome``
+    # (Settings' Browser choice, ``/browser chrome``); absent leaves it. It wins
+    # over ``browser``.
+    browser_driver: StrictStr | None = None
     # ``[browser] app_windows``: whether melo sees and answers a window another app
     # opens after its act in the browser; absent leaves it.
     app_windows: StrictBool | None = None
@@ -480,6 +486,14 @@ def settings_json() -> dict[str, Any]:
             cfg.approvals.mode if cfg.approvals.mode in config.APPROVAL_MODES else "ask"
         ),
         "browser": cfg.browser.driver != "off",
+        "browser_driver": (
+            cfg.browser.driver
+            if cfg.browser.driver in config.BROWSER_DRIVERS
+            else "off"
+        ),
+        # Whether Google Chrome is installed: without it the Chrome choice says
+        # to install it first.
+        "chrome_installed": chrome.chrome_installed(),
         "app_windows": cfg.browser.app_windows is True,
         # Whether the desktop control helper is installed: without it melo can
         # only name the app that came to the front.
@@ -614,6 +628,13 @@ def _build_candidate(
             f"language: Must be one of {config.CONSOLE_LANGUAGES}.",
         )
 
+    driver = getattr(body, "browser_driver", None)
+    if driver is not None and driver not in config.BROWSER_DRIVERS:
+        raise ApiError(
+            400,
+            "invalid_request",
+            f"browser_driver: Must be one of {config.BROWSER_DRIVERS}.",
+        )
     approvals = getattr(body, "approvals", None)
     if approvals is not None and approvals not in config.APPROVAL_MODES:
         raise ApiError(
@@ -650,8 +671,11 @@ def _build_candidate(
     if approvals is not None:
         candidate.approvals.mode = approvals
     browser = getattr(body, "browser", None)
-    if browser is not None:
-        candidate.browser.driver = "safari-automation" if browser else "off"
+    if browser is not None and driver is None:
+        on = candidate.browser.driver if candidate.browser.driver != "off" else ""
+        candidate.browser.driver = (on or "safari-automation") if browser else "off"
+    if driver is not None:
+        candidate.browser.driver = driver
     app_windows = getattr(body, "app_windows", None)
     if app_windows is not None:
         candidate.browser.app_windows = app_windows

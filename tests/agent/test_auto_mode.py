@@ -869,6 +869,67 @@ async def test_a_press_in_another_apps_window_is_reviewed_on_the_goal(
         assert not grant_offered(asker.asked[0])
 
 
+class OpensAnApp(PressesInAnotherApp):
+    """A provided tool that asks to open another app a page asked for, as the browser's hand-off does."""
+
+    async def _press(self, button: str) -> str:
+        ask = TOOL_ASK.get()
+        assert ask is not None
+        decision = await ask(
+            "handoff:chat",
+            {
+                "site": "news.example",
+                "access": "handoff",
+                "app": "Chat",
+                "scheme": "chat",
+                "url": "chat://login?x=1",
+                "browser": "chrome",
+            },
+            "open Chat for a page on news.example (chat: address)",
+        )
+        self.answers.append(decision)
+        return "opened" if decision.allow else decision.reason
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("watched", [True, False])
+async def test_opening_another_app_for_a_page_is_always_the_persons_on_the_card(
+    tmp_path: Path, watched: bool
+) -> None:
+    """Even when the request asks for it: no review allows it, the person does (or nobody)."""
+    tool = OpensAnApp()
+    asker = CardAsker()
+    call = ("press_in_app", {"button": "Open in Chat"}, "c1")
+    llm = FakeModel([_calls(call), _answer("done")], [verdict()])
+    (tmp_path / "ws").mkdir()
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset(),
+            tool_exposure="all",
+            workspace_root=str(tmp_path / "ws"),
+        ),
+        tool_providers=[tool],
+    )
+    agent.chat.sleep = _no_wait
+
+    await agent.run_task(
+        "sign in to news.example with the Chat app",
+        approval=AutoPolicy(asking=asker if watched else None),
+    )
+
+    [answer] = tool.answers
+    assert answer.allow is False
+    assert llm.review_requests == []  # no model decides it
+    if watched:
+        [card] = asker.asked
+        assert card.review is not None and card.review.categories == ("open_app",)
+        assert "Opens Chat, an app on this Mac" in card.review.reasons[0]
+        assert not grant_offered(card)
+    else:
+        assert asker.asked == [] and "opens Chat, an app on this Mac" in answer.reason
+
+
 class SeesAWindow(OpensSite):
     """A provided tool that asks whether melo may see a window another app opened, as the browser provider does."""
 

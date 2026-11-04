@@ -271,6 +271,10 @@ def test_the_browser_tools_take_no_hook() -> None:
         "idle_close_s",
         "settle_s",
         "desktop",
+        "opener",
+        # The live view only watches; it opens and reads nothing.
+        "live",
+        "live_fps",
     }
     assert not [name for name in parameters if "allow" in name or "local" in name]
     for function in (require_public, addresses.console_sites):

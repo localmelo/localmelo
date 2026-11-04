@@ -577,6 +577,38 @@ test('Web search: hidden for a gateway that does not report it, else a switch th
   assert.equal(h.element('s-web-search').checked, false);
 });
 
+test('Browser: a choice of Chrome, Safari or off that saves browser_driver, and says when Chrome is missing', async () => {
+  const older = harness({'GET /settings': full()});
+  await older.open('chats');
+  assert.equal(older.element('s-browser-row').hidden, true, 'a gateway that does not report it has no choice');
+  let revision = 1;
+  const h = harness({
+    'GET /settings': full({browser: false, browser_driver: 'off', chrome_installed: true}),
+    'PUT /settings': (body) => full({revision: `rev${++revision}`, browser: body.browser_driver !== 'off',
+      browser_driver: body.browser_driver ?? 'off', chrome_installed: true}),
+  });
+  await h.open('chats');
+  assert.equal(h.element('s-browser-row').hidden, false);
+  assert.equal(h.element('s-browser-off').checked, true);
+  assert.equal(h.element('s-browser-chrome-missing').hidden, true);
+  h.element('s-browser-chrome').checked = true;
+  await h.element('s-browser-chrome').emit('change');
+  await flush();
+  assert.equal(h.puts().at(-1).options.body.browser_driver, 'chrome');
+  assert.equal(h.element('settings-saved-text').textContent, 'Saved: Browser: Chrome');
+  assert.equal(h.element('s-browser-chrome').checked, true);
+  await h.element('settings-undo').emit('click');
+  await flush();
+  assert.equal(h.puts().at(-1).options.body.browser_driver, 'off');
+  const missing = harness({'GET /settings': full({browser: false, browser_driver: 'off', chrome_installed: false})});
+  await missing.open('chats');
+  assert.equal(missing.element('s-browser-chrome-missing').hidden, false, 'the line says to install Chrome');
+  missing.element('s-browser-chrome').checked = true;
+  await missing.element('s-browser-chrome').emit('change');
+  await flush();
+  assert.equal(missing.puts().length, 0, 'nothing is saved without Chrome');
+});
+
 test("Other apps' windows: shown while browsing is on, saves app_windows, and says when the helper is missing", async () => {
   const off = harness({'GET /settings': full({app_windows: true, desktop_helper: true, browser: false})});
   await off.open('chats');

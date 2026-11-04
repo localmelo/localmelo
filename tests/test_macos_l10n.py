@@ -105,12 +105,14 @@ precondition(languagesScript(["zh-Hans-CN", "en-US"]) == #"window.localmeloLangu
 // English needs no strings: the words are the code's.
 precondition(L10n.language == "en")
 precondition(quitTitle(attached: false) == "Quit localmelo")
+precondition(L10n.t("app.browser.title", "Browser") == "Browser")
 precondition(quitMessage(RunningCounts(chats: 1, tasks: 2, runs: 1, terminal: 0), statusKnown: true)
     == "Quitting stops what is running: 2 tasks and 1 chat. Not affected: 1 run.")
 let bundle = Bundle(path: {swift(str(resources))})!
 L10n.use("zh-Hans", bundle: bundle)
 precondition(L10n.language == "zh-Hans")
 precondition(quitTitle(attached: true) == "退出 localmelo（网关继续运行）")
+precondition(L10n.t("app.browser.title", "Browser") == "浏览器")
 precondition(L10n.plural("app.quit.tasks", 1, one: "{{n}} task", other: "{{n}} tasks") == "1 个任务")
 precondition(L10n.t("app.no-such-key", "Kept {{x}}", ["x": "as is"]) == "Kept as is")
 print(quitMessage(RunningCounts(chats: 1, tasks: 2, runs: 1, terminal: 0), statusKnown: true))

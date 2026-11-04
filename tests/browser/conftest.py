@@ -1,4 +1,4 @@
-"""No browsing test may start the real ``safaridriver`` (it would open Safari) or look a name up."""
+"""No browsing test may start the real ``safaridriver`` (it would open Safari), the real Chrome, or look a name up."""
 
 from __future__ import annotations
 
@@ -15,6 +15,12 @@ def _never_the_real_safaridriver(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(
         "LOCALMELO_SAFARIDRIVER", "/nonexistent/not-the-real-safaridriver"
     )
+
+
+@pytest.fixture(autouse=True)
+def _never_the_real_chrome(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A driver built without a command starts this, which is no Chrome; the real-Chrome smoke test passes its own."""
+    monkeypatch.setenv("LOCALMELO_CHROME", "/nonexistent/not-the-real-chrome")
 
 
 @pytest.fixture(autouse=True)

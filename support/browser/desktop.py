@@ -1498,9 +1498,26 @@ async def helper_status(*, check: bool = False) -> HelperStatus:
     return known[0] if known else HelperStatus("installed")
 
 
-def watch_for(enabled: bool) -> DesktopWatch | None:
-    """The watch a browsing chat gets: with the helper when it is installed; None when *enabled* is off."""
+# melo itself and the helper: never another app, whichever browser melo drives.
+MELO_APPS = ("LocalMelo", "org.localmelo.app", "CuaDriver")
+SAFARI_APPS = (
+    "Safari",
+    "Safari Technology Preview",
+    "com.apple.Safari",
+    "com.apple.SafariTechnologyPreview",
+)
+
+
+def watch_for(enabled: bool, driver: str = "safari-automation") -> DesktopWatch | None:
+    """The watch a browsing chat gets: with the helper when it is installed; None when *enabled* is off.
+
+    With Safari's automation windows Safari itself comes to the front, so it
+    is never "another app". Chrome in the background never comes to the front,
+    so with the ``chrome`` driver every app that does, Safari and Chrome
+    included, is another app.
+    """
     if not enabled:
         return None
     command = helper_command()
-    return DesktopWatch(DesktopHelper(command) if command else None)
+    skip = MELO_APPS if driver == "chrome" else (*SAFARI_APPS, *MELO_APPS)
+    return DesktopWatch(DesktopHelper(command) if command else None, skip=skip)

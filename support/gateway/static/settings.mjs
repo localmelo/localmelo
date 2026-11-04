@@ -26,6 +26,9 @@ const HELPER_LINES = {installed: "installed", granted: "granted", no_grant: "noG
 const LANGUAGE_SETTINGS = ["auto", "en", "zh-Hans"];
 // How a new chat starts (#339): `[approvals] mode`.
 const APPROVAL_MODES = ["ask", "auto"];
+// Where melo browses: `[browser] driver` (Chrome in the background, Safari's windows, or off).
+const BROWSER_DRIVERS = ["chrome", "safari-automation", "off"];
+const BROWSER_WORDS = {"chrome": "chrome", "safari-automation": "safari", "off": "off"};
 // `melo -h all` lists the settings by section; `settings.group.<section>` are the names people read.
 const GROUPS = new Set(["agent", "retrieval", "memory", "endpoint", "sessions", "cli", "ui", "scheduler", "browser", "tools", "gateway", "console", "workspace"]);
 const groupName = (section) => (section === "" ? t("settings.group.general") : GROUPS.has(section) ? t(`settings.group.${section}`) : section);
@@ -120,7 +123,8 @@ export function setupSettings({
     "s-chat-model", "s-thinking", "s-embed-backend", "s-embed-url", "s-embed-model", "s-embed-use"];
   // Each saves on its own; they wait while a change is being saved.
   const switchIds = ["s-across-chats", "s-web-fetch", "s-web-search", "s-app-windows", "s-follow-up", "s-reflection", "s-developer", ...RECALL.map((name) => `s-recall-${name}`),
-    ...LANGUAGE_SETTINGS.map((name) => `s-language-${name}`), ...APPROVAL_MODES.map((name) => `s-approvals-${name}`)];
+    ...LANGUAGE_SETTINGS.map((name) => `s-language-${name}`), ...APPROVAL_MODES.map((name) => `s-approvals-${name}`),
+    ...BROWSER_DRIVERS.map((name) => `s-browser-${name}`)];
   let settings = null;
   let sections = {};
   let generation = 0;
@@ -577,6 +581,11 @@ export function setupSettings({
     // Searching the web (`[web] search`, off until switched on); a gateway that does not report it has no switch.
     $("s-web-search-row").hidden = settings.web_search === undefined;
     $("s-web-search").checked = settings.web_search === true;
+    // Where melo browses (`[browser] driver`); a gateway that does not report it has no choice. Without
+    // Google Chrome a line says to install it first.
+    $("s-browser-row").hidden = settings.browser_driver === undefined;
+    for (const name of BROWSER_DRIVERS) $(`s-browser-${name}`).checked = name === (settings.browser_driver || "off");
+    $("s-browser-chrome-missing").hidden = settings.chrome_installed !== false;
     // Other apps' windows (`[browser] app_windows`): shown while browsing is on; a gateway that does not
     // report it has no switch. Without the desktop control helper, a line says what it needs.
     $("s-app-windows-row").hidden = settings.app_windows === undefined || settings.browser !== true;
@@ -994,6 +1003,22 @@ export function setupSettings({
     const answer = handler ? await handler.postMessage({action: "get"}).catch(() => null) : null;
     place = DESKTOP.includes(answer) ? answer : null;
     appearance();
+  }
+
+  for (const name of BROWSER_DRIVERS) {
+    $(`s-browser-${name}`).addEventListener("change", (event) => {
+      if (!event.target.checked || !settings) return;
+      const before = settings.browser_driver || "off";
+      if (saving || settings.browser_driver === undefined) { folder(); return; }
+      if (name === "chrome" && settings.chrome_installed === false) {
+        // Chrome is not there to start: the choice stays, and the line under it says why.
+        folder();
+        showError(t("settings.browser.chromeMissing"));
+        return;
+      }
+      const words = (driver) => t("settings.browser.saved", {browser: t(`settings.browser.${BROWSER_WORDS[driver]}`)});
+      settingCommit("browser_driver", name, words(name), before, words(before));
+    });
   }
 
   for (const name of APPROVAL_MODES) {

@@ -14,6 +14,7 @@ import {formatTime, t} from '../../support/gateway/static/i18n.mjs';
 import {workerHistory} from '../../support/gateway/static/worker-history.mjs';
 import {setupTasks} from '../../support/gateway/static/tasks.mjs';
 import {setupPanel as realSetupPanel} from '../../support/gateway/static/panel.mjs';
+import {liveRoute} from '../../support/gateway/static/browser-live.mjs';
 import {plainSegments, setupStatusRow} from '../../support/gateway/static/status-row.mjs';
 import {setupRunning} from '../../support/gateway/static/running.mjs';
 import {setupModelCard} from '../../support/gateway/static/setup-card.mjs';
@@ -682,6 +683,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{[^}]*\} from "\.\/status-row\.mjs";\n/m, '')
   .replace(/^import \{ setupRunning \} from "\.\/running\.mjs";\n/m, '')
   .replace(/^import \{ setupPanel \} from "\.\/panel\.mjs";\n/m, '')
+  .replace(/^import \{[^}]*\} from "\.\/browser-live\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/levels\.mjs";\n/m, '')
   .replace(/^import \{ setupModelCard \} from "\.\/setup-card\.mjs";\n/m, '')
   .replace(/^import \{ setupImportCard \} from "\.\/import-card\.mjs";\n/m, '')
@@ -852,6 +854,7 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
   const timers = [];
   const asked = [];
   const answer = {notes: 'keep'};
+  const browserLog = [];
   const documentListeners = {};
   const windowListeners = {};
   const root = makeElement('html');
@@ -921,6 +924,19 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     askAboutNotes: async (ask) => { asked.push(ask); return answer.notes; },
     setupSettings: () => async (section) => { context.settingsOpened = (context.settingsOpened || 0) + 1; context.settingsSection = section; },
     setupDrawer: () => drawer,
+    // The Browser panel has its own tests (test_browser_live.mjs); here the page only has to bind it to the open chat.
+    liveRoute,
+    setupBrowser: () => ({
+      follow: async (id, options = {}) => { browserLog.push(['follow', id, options.liveOnly === true]); },
+      release: (next = '') => { browserLog.push(['release', next]); },
+      note: (frame) => { browserLog.push(['note', frame.type]); },
+      toggle() { browserLog.push(['toggle']); },
+      hide() { browserLog.push(['hide']); },
+      closeSheet() { return false; },
+      popOut() { browserLog.push(['popOut']); },
+      suspend() { browserLog.push(['suspend']); },
+      resume() { browserLog.push(['resume']); },
+    }),
     // The panel beside the chat has its own tests (test_panel.mjs); here it only hears health.
     // `/memory import` opens its tab and presses "Look for notes": a test sets `notesOn` and reads `notesLooked`.
     // A task is drawn by tasks.mjs, which the real panel owns the place of: the double shows and leaves it the same way.
@@ -983,6 +999,7 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     timers,
     asked,
     answer,
+    browserLog,
     run: (expression) => vm.runInContext(expression, context),
     state: () => vm.runInContext('S', context),
     text: (id) => flatten(element(id)),
@@ -1228,6 +1245,8 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
     ['browser-type:https://example.com', {site: 'example.com', access: 'type', how: 'type', text: 'hi'}, null, 'Let melo type on example.com?', 'browser · types text'],
     ['browser-submit:https://example.com', {site: 'example.com', access: 'submit', to: 'https://other.org/post', how: 'click'}, null, 'Let melo send a form from example.com?', 'browser · sends a form'],
     ['desktop-act:Chat', {app: 'Chat', access: 'desktop-act', how: 'press', on: '"Allow"', window: 'Sign in', button: 'Allow'}, null, 'Let melo press a button in Chat?', 'another app · presses a button'],
+    ['handoff:chat', {site: 'example.com', access: 'handoff', app: 'Chat', scheme: 'chat', url: 'chat://login?x=1', browser: 'chrome'}, null, 'Open Chat?', 'a page asks for an app'],
+    ['browser-dialog:https://example.com', {site: 'example.com', access: 'dialog', how: 'confirm', text: 'Delete the draft?', browser: 'chrome'}, null, 'Answer OK on example.com?', 'browser · the page asks'],
     ['window-read:com.example.chat', {app: 'Chat', window: 'Sign in', bundle: 'com.example.chat', access: 'window-read'}, null, "Chat opened a window right after melo's click: let melo see it?", 'another app · its window'],
   ];
   for (const [tool, args, target, title, caption] of asks) {
@@ -1255,6 +1274,18 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
   const sending = findNode(h.run('approvalCard(request)'), (node) => node.className === 'approval-content');
   assert.equal(sending.textContent, 'https://other.org/post');
   assert.equal(sending.attributes['aria-label'], 'Where the form goes');
+  // A page that asks for another app shows the address melo would open, and what comes to the front.
+  h.context.request = {request_id: 'hand-off', tool_name: 'handoff:chat',
+    arguments: {site: 'example.com', access: 'handoff', app: 'Chat', scheme: 'chat', url: 'chat://login?x=1'}, workspace_label: '~/w'};
+  const handing = h.run('approvalCard(request)');
+  assert.equal(findNode(handing, (node) => node.className === 'approval-content').textContent, 'chat://login?x=1');
+  assert.match(findNode(handing, (node) => node.className === 'approval-note').textContent, /Chat comes to the front/);
+  assert.equal(findNode(handing, (node) => node.id === 'approval-scope-hand-off').textContent, 'In this chat, pages may open Chat again without asking.');
+  // Chrome in the background is worded for itself.
+  h.context.request = {request_id: 'open-chrome', tool_name: 'browser:https://example.com',
+    arguments: {site: 'example.com', access: 'read', browser: 'chrome'}, workspace_label: '~/w'};
+  const opening = h.run('approvalCard(request)');
+  assert.match(findNode(opening, (node) => node.className === 'approval-content').textContent, /in Chrome and read it\. Chrome runs in the background/);
 });
 
 test("a press in another app's window says what is pressed and is asked every time", async () => {
@@ -6140,6 +6171,9 @@ test('the main chat\'s own approval card says each kept answer counts in every c
     'melo will not ask again before reading or opening a.example in any chat.');
   assert.equal(rules({tool_name: 'browser-act:https://a.example', arguments: {site: 'a.example'}})[1],
     'melo will not ask again before clicking or choosing on a.example in any chat. Typing still asks every time.');
+  // A page that asks for another app: the kept answer covers that kind of address in any chat.
+  assert.deepEqual(rules({tool_name: 'handoff:chat', arguments: {site: 'example.com', access: 'handoff', app: 'Chat', scheme: 'chat', url: 'chat://login?x=1'}}),
+    ['Allow in every chat', 'In any chat, pages may open Chat again without asking.', EVERYWHERE]);
   // A window another app opened names the app.
   const see = rules({tool_name: 'window-read:com.example.chat', arguments: {app: 'Chat', window: 'Sign in'}, offers_chat: true});
   assert.deepEqual([see[0], see[2]], ['Allow Chat everywhere', EVERYWHERE]);
@@ -6796,4 +6830,87 @@ test('closing the chat that held pictures forgets them at the gateway', async ()
   await settle();
   assert.equal(h.net.callsTo('/uploads/up1').length, 1);
   assert.equal(h.element('media-tray').hidden, true, 'the new chat that follows starts clean');
+});
+
+// ── The Browser panel (browser-live.mjs; its own tests are in test_browser_live.mjs) ──
+
+test('the Browser panel follows the open chat, reads its events and lets go when the chat is left', async () => {
+  const h = harness(baseRoutes({'GET /sessions': {sessions: [session('a'), session('b')], machine: null, has_more: false},
+    'GET /sessions/b': {session: session('b'), pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'not_loaded', tokens: 0},
+    'GET /sessions/b/turns?limit=10': {turns: [], has_earlier: false, replay_from: 0}}));
+  await h.run('init()');
+  assert.deepEqual(h.browserLog.filter(([kind]) => kind === 'follow'), [['follow', 'a', false]]);
+  h.stream().emit({id: 20, turn: 2, ts: 50, type: 'tool.started', data: {call_id: 'c1', name: 'browser_open', step: 1, arguments: {}}});
+  assert.ok(h.browserLog.some((entry) => entry[0] === 'note' && entry[1] === 'tool.started'));
+  h.browserLog.length = 0;
+  await h.run('openSession("b")');
+  assert.deepEqual(h.browserLog.filter(([kind]) => kind !== 'note'), [['release', 'b'], ['follow', 'b', false]]);
+  h.browserLog.length = 0;
+  h.run('newChat()');
+  assert.deepEqual(h.browserLog, [['release', '']]);
+});
+
+test('a stream that starts again for the same chat does not drop the Browser panel', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.browserLog.length = 0;
+  h.stream().fail();
+  assert.equal(h.browserLog.some(([kind]) => kind === 'release'), false);
+});
+
+test('locking the page lets the Browser panel go', async () => {
+  const h = harness(baseRoutes({'GET /sessions/a/tools': {status: 401}}));
+  await h.run('init()');
+  h.browserLog.length = 0;
+  await h.run('api("/sessions/a/tools").catch(() => {})');
+  assert.deepEqual(h.browserLog.filter(([kind]) => kind === 'release'), [['release', '']]);
+});
+
+test('#/live/<chat> shows the Browser panel alone and loads no chats', async () => {
+  const h = harness(baseRoutes());
+  h.context.location.hash = '#/live/a';
+  await h.run('init()');
+  assert.equal(h.element('app').hidden, false);
+  assert.equal(h.root.dataset.view, 'live');
+  assert.deepEqual(h.browserLog, [['follow', 'a', true]]);
+  assert.equal(h.net.callsTo('/sessions').length, 0, 'the window has no chat list to load');
+  assert.equal(h.stream(), undefined, 'and no event stream');
+  assert.equal(h.root.dataset.ready, '1');
+  await h.windowListeners.hashchange?.[0]?.({});
+  assert.deepEqual(h.browserLog, [['follow', 'a', true]], 'a changed address does not turn the window into the workspace');
+});
+
+test('a task or the schedule shown in Melo\'s panel gives way to the Browser panel where they do not both fit', async () => {
+  const h = harness(baseRoutes({'GET /tasks/t1': {id: 't1'}}));
+  await h.run('init()');
+  h.browserLog.length = 0;
+  await h.run('showScheduled()');
+  assert.ok(h.browserLog.some(([kind]) => kind === 'hide'));
+});
+
+test('a page that is hidden for a while, or kept for Back, lets go of the Browser stream and takes it up again', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.browserLog.length = 0;
+  const hide = h.documentListeners.visibilitychange.at(-1);
+  h.context.document.hidden = true;
+  hide();
+  assert.deepEqual(h.browserLog, [], 'not at once: a glance away is not leaving');
+  const wait = h.timers.filter((timer) => !timer.interval && timer.ms === 20000 && !timer.cleared).at(-1);
+  wait.handler();
+  assert.deepEqual(h.browserLog, [['suspend']]);
+  h.context.document.hidden = false;
+  hide();
+  assert.deepEqual(h.browserLog, [['suspend'], ['resume']]);
+  h.browserLog.length = 0;
+  h.context.document.hidden = true;
+  hide();
+  h.context.document.hidden = false;
+  hide();
+  assert.ok(h.timers.filter((timer) => timer.ms === 20000).every((timer, index, all) => index === all.length - 1 || timer.cleared), 'coming back in time cancels the wait');
+  assert.deepEqual(h.browserLog, [['resume']]);
+  h.browserLog.length = 0;
+  h.windowListeners.pagehide[0]({persisted: true});
+  h.windowListeners.pageshow[0]({persisted: true});
+  assert.deepEqual(h.browserLog, [['suspend'], ['resume']]);
 });

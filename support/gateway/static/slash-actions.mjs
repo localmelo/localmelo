@@ -309,14 +309,20 @@ export function createActions(host) {
     },
 
     async browser({args}) {
-      if (args && args !== 'on' && args !== 'off') throw new Error(t('slash.useBrowser'));
+      // `on` and `off` switch browsing; `chrome` and `safari` choose where melo browses.
+      const drivers = {chrome: 'chrome', safari: 'safari-automation'};
+      if (args && args !== 'on' && args !== 'off' && !drivers[args]) throw new Error(t('slash.useBrowser'));
       let settings = await api('/settings');
       if (args) {
+        if (args === 'chrome' && settings.chrome_installed === false) throw new Error(t('settings.browser.chromeMissing'));
         const {chat_backend: backend, embedding_backend: embedding, workspace, revision} = settings;
-        settings = await api('/settings', {method: 'PUT', body: {chat_backend: backend, embedding_backend: embedding, workspace, revision, sections: {}, browser: args === 'on'}});
+        const change = drivers[args] ? {browser_driver: drivers[args]} : {browser: args === 'on'};
+        settings = await api('/settings', {method: 'PUT', body: {chat_backend: backend, embedding_backend: embedding, workspace, revision, sections: {}, ...change}});
         await host.settingsSaved(settings);
       }
-      return [say(t(settings.browser ? 'slash.browserOn' : 'slash.browserOff'), settings.browser ? 'ok' : 'muted')];
+      const driver = settings.browser_driver ?? (settings.browser ? 'safari-automation' : 'off');
+      const said = driver === 'off' ? 'slash.browserOff' : driver === 'chrome' ? 'slash.browserOnChrome' : 'slash.browserOn';
+      return [say(t(said), driver === 'off' ? 'muted' : 'ok')];
     },
 
     // ── Pictures and files: the picker, the strip above the box ──
