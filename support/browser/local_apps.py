@@ -19,7 +19,7 @@ itself:
   port are a listed helper's, the page that sent it is one of that helper's
   own pages (the ``Origin`` header, which Chrome sets and a page cannot), and
   the port is not one of melo's own (its gateway and console, and every model
-  server in the config: :func:`localmelo.support.web_local.own_ports`).
+  server in the config: :func:`localmelo.support.local_ports.own_ports`).
   melo connects to the address the list pins (never looking the name up),
   checks the certificate for the helper's name, follows no redirect, and gives
   Chrome the answer. Chrome itself never connects to this computer for it, so
@@ -48,7 +48,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from localmelo.support import config, web_local
+from localmelo.support import config, local_ports
 from localmelo.support.web.guard import (
     LOCAL_NAMES,
     LOCAL_SUFFIXES,
@@ -168,7 +168,7 @@ _PASS = Verdict("pass")
 
 
 def _melos_own_ports() -> Mapping[int, str]:
-    return web_local.own_ports(config.load(), running=True)
+    return local_ports.own_ports(config.load(), running=True)
 
 
 class LocalRule:

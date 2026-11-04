@@ -32,7 +32,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.executor.models import ToolOutput
-from localmelo.support import config, web_local
+from localmelo.support import config, local_ports
 from localmelo.support.browser import chrome, local_apps
 from localmelo.support.browser.chrome import ChromeBackgroundDriver
 from localmelo.support.browser.local_apps import (
@@ -62,7 +62,7 @@ MODEL_PORT = 8500
 def rule(*helpers: SigninHelper) -> LocalRule:
     return LocalRule(
         helpers or (HELPER,),
-        own=lambda: {GATEWAY_PORT: web_local.GATEWAY, MODEL_PORT: web_local.MODEL},
+        own=lambda: {GATEWAY_PORT: local_ports.GATEWAY, MODEL_PORT: local_ports.MODEL},
     )
 
 

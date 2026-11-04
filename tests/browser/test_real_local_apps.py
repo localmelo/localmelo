@@ -33,7 +33,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 import pytest
 import websockets
 
-from localmelo.support import web_local
+from localmelo.support import local_ports
 from localmelo.support.browser import chrome
 from localmelo.support.browser.chrome import ChromeBackgroundDriver
 from localmelo.support.browser.local_apps import LocalRule, SigninHelper
@@ -217,7 +217,7 @@ async def world(tmp_path: Path, servers: dict[str, int]) -> AsyncIterator[World]
         "127.0.0.1",
         (f"http://login.test:{pages}",),
     )
-    rule = LocalRule((helper,), own=lambda: {servers["gateway"]: web_local.GATEWAY})
+    rule = LocalRule((helper,), own=lambda: {servers["gateway"]: local_ports.GATEWAY})
     command = [
         BINARY,
         f"--ip-address-space-overrides=127.0.0.1:{pages}=public",
