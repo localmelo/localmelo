@@ -441,7 +441,11 @@ async def test_an_app_the_person_did_not_allow_is_not_named_when_it_comes_back_t
             await settled(provider)
             screen.front = Front("Safari", "com.apple.Safari", 10)
             read = await run(tools, "browser_read")
-            chat = Front(SIGN_IN["app_name"], SIGN_IN["bundle"], SIGN_IN["pid"])
+            chat = Front(
+                str(SIGN_IN["app_name"]),
+                str(SIGN_IN["bundle"]),
+                int(str(SIGN_IN["pid"])),
+            )
             screen.clock.at(1.0, lambda: setattr(screen, "front", chat))
             again = await run(tools, "browser_click", ref=ref_of(read))
             await settled(provider)

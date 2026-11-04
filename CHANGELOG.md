@@ -1457,6 +1457,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Words added to a chat while melo works are now remembered with that turn; before, only the first message of the turn was. Part of #428.
+- melo no longer recalls its own old replies about a blocked step as if they were still the rule; only what you said in that turn is remembered. Part of #428.
 - `browser_find` reads the page again before it searches, so its refs are always of the page as it is now;
   before, a page reloaded since the last reading gave refs that only failed with "The page was reloaded or
   replaced since it was read". A ref from before a reload at the same address is used when the new page has
