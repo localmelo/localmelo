@@ -270,6 +270,31 @@ def test_a_press_in_another_apps_window_names_the_app_and_asks_every_time() -> N
     words = " ".join(" ".join(line for _, line in pressing.body).split())
     assert 'press "Allow" in Chat\'s window “Sign in”.' in words
     assert "never types into other apps" in words and "asks every time" in words
+    assert "pointer" not in words
+
+
+def test_a_press_in_the_foreground_says_the_pointer_moves_and_the_app_comes_forward() -> (
+    None
+):
+    pressing = panel_text(
+        _request(
+            "desktop-act:Chat",
+            app="Chat",
+            access="desktop-act",
+            how="press",
+            on="a point (700, 850) of its picture",
+            window="Allow example.com?",
+            delivery="foreground",
+        ),
+        width=80,
+    )
+    assert pressing.title == "Press a button in another app?"
+    words = "".join(line for _, line in pressing.body)  # rows wrap inside words
+    assert "press a point (700, 850) of its picture in Chat's window" in words
+    assert (
+        "A click in the background did not reach it, so melo presses in the "
+        "foreground: the pointer moves there and Chat comes to the front for a moment."
+    ) in words
 
 
 def test_a_page_that_asks_for_an_app_shows_the_app_and_the_address() -> None:

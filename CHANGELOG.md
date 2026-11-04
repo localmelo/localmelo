@@ -108,7 +108,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - Windows from other apps (#280). A page melo acts on can make another app open a window, such as a chat
   app's sign-in window that asks you to authorize; the browser never shows it. With the desktop control
   helper (a separate app that holds the Mac's Accessibility and Screen Recording permissions, so melo needs
-  neither), melo lists the windows on the screen before and after each click, typing, choice and point, and
+  neither), melo lists the windows of every Space before and after each click, typing, choice and point, and
   while `browser_wait` waits. A window of another app that appeared is named in that step's answer, under
   *what changed*, with its title and its buttons, and `browser_wait` ends early. Two tools come with the
   helper: `window_read` (the window's text and buttons, and a picture of only that window, as a JPEG within
@@ -120,9 +120,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   buttons and presses by name, with no picture. Without the helper or its Accessibility permission melo
   still notices that another app came to the front and says which one, so you can answer it there. The
   browsing guide's setup list says where to get the helper. Only windows that appeared after
-  melo's own step are named, read or pressed (a panel of an app that only came to the front is read only
-  against a listing of that app's windows from before the step; otherwise it is named, never read), and melo
-  never types into other apps. Settings → Chats and
+  melo's own step are named, read or pressed (a panel above the main layer is read only when melo can tell
+  it is new; otherwise its app is named, never read), and melo never types into other apps. Settings → Chats and
   folders → **Other apps' windows** (shown while browsing is on; `[browser] app_windows`, on by default)
   turns it off, and says under the switch whether the helper is installed and has Accessibility.
   A window that comes a moment after the step is still seen: after a click, a click on a point or a send,
@@ -1463,6 +1462,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Windows from other apps: a panel that stays above other windows, such as a chat app's authorization panel,
+  is now seen even when its app does not come to the front, and switching Spaces or showing an app you had
+  hidden no longer raises a card about your own windows, because a window counts as new only if it did not
+  exist, on any Space, before melo's step. A window whose buttons the app draws itself is pressed at a point
+  of its picture; when that click in the background changes nothing, melo asks again and clicks once more in
+  the foreground, where the pointer moves and the app comes to the front for a moment.
 - Words added to a chat while melo works are now remembered with that turn; before, only the first message of the turn was. Part of #428.
 - melo no longer recalls its own old replies about a blocked step as if they were still the rule; only what you said in that turn is remembered. Part of #428.
 - `browser_find` reads the page again before it searches, so its refs are always of the page as it is now;

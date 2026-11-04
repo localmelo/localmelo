@@ -156,9 +156,10 @@ BACKGROUND_NOTE = PAGE_NOTE.replace(
 DESKTOP_NOTE = (
     "Other apps' windows: a step's result names a window another app opened "
     "after your act (a sign-in or permission window, say), with its buttons. "
-    "window_read reads it and window_press presses a button by name; never "
-    "type into other apps. When melo can only name the app, tell the person "
-    "to answer that window."
+    "window_read reads it and window_press presses a button by name; a window "
+    "that names no buttons draws its own: press a point of its picture (x and "
+    "y). Never type into other apps. When melo can only name the app, tell the "
+    "person to answer that window."
 )
 
 _ROLES = ["link", "button", "textbox", "checkbox", "select", "any"]

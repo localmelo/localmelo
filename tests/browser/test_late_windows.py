@@ -511,8 +511,10 @@ async def test_a_wait_stops_polling_the_screen_once_the_deadline_has_closed(
     finally:
         await provider.close()
     assert out.text.startswith("Timed out")
-    listed = [n for n, _ in screen.calls()[before:] if n == "list_windows"]
-    assert len(listed) <= 2  # the first look and the one after the first slice
+    looks = [
+        n for n, a in screen.calls()[before:] if n == "list_windows" and "pid" not in a
+    ]
+    assert len(looks) <= 2  # the first look and the one after the first slice
 
 
 # ── A window that comes while the model plans its next step ──
