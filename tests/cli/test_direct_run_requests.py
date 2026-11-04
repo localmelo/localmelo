@@ -12,15 +12,15 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-import threading
 from collections.abc import Iterator
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from localmelo.tests.cli.test_direct_mode_process import _env
+from localmelo.tests.fixtures.http_stub import HttpStub
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX processes")
 
@@ -31,7 +31,7 @@ _LISTING = {
 _STATUS = {"models": [{"id": "Qwen3-8B-4bit", "model_alias": "q", "loaded": True}]}
 
 
-class RecordingServer:
+class RecordingServer(HttpStub):
     """An oMLX-shaped server that records every request it gets."""
 
     def __init__(self) -> None:
@@ -63,21 +63,7 @@ class RecordingServer:
                 message = {"role": "assistant", "content": "done"}
                 self._answer({"choices": [{"index": 0, "message": message}]}, body)
 
-            def log_message(self, format: str, *args: Any) -> None:
-                pass
-
-        self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
-        self._thread.start()
-
-    @property
-    def base_url(self) -> str:
-        return f"http://127.0.0.1:{self._httpd.server_port}/v1"
-
-    def close(self) -> None:
-        self._httpd.shutdown()
-        self._httpd.server_close()
-        self._thread.join(timeout=5)
+        super().__init__(Handler, path="/v1")
 
 
 @pytest.fixture

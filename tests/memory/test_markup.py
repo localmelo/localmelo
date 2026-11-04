@@ -1266,11 +1266,7 @@ SHAPES: dict[str, Any] = {
 }
 
 
-@pytest.mark.parametrize("name", sorted(SHAPES))
-def test_the_reading_takes_time_linear_in_the_text(name: str) -> None:
-    assert_linear(SHAPES[name], markup.without_markup)
-
-
+# material_text reads the text with ``markup.without_markup``, so this sweep bounds that too.
 @pytest.mark.parametrize("name", sorted(SHAPES))
 def test_material_text_takes_time_linear_in_the_text_whatever_the_shape(
     name: str,

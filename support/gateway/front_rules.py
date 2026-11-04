@@ -737,6 +737,9 @@ def hands_off(typed: str) -> bool:
     return bool(_HANDS_OFF.search(norm(_QUOTED.sub(" ", typed or ""))))
 
 
+# The rules read a long text by its opening: the person's intent is in the first
+# few thousand characters, and a long paste behind it is for the task to read.
+OPENING_CHARS: Final = 4_000
 # The routes a model's task_create starts at once: the person asked for work.
 START_ROUTES: Final = frozenset({"delegate", "work", "plan"})
 StartRule = Literal["start", "answer", "offer"]
@@ -770,9 +773,12 @@ def start_rule(typed: str) -> StartRule:
     - ``answer`` for a short message with no verb that acts ("ok", "thanks",
       "谢谢你", "今天天气不错");
     - else ``start``: a request starts at once, the person's message its objective.
+
+    Only the first :data:`OPENING_CHARS` characters are read.
     """
     if not typed.strip():
         return "offer"
+    typed = typed.lstrip()[:OPENING_CHARS]
     text = norm(typed)
     if _STEERS.match(text):
         return "offer"
@@ -853,12 +859,15 @@ _EXTENSIONS: Final = (
     "py|pyi|js|mjs|cjs|ts|tsx|jsx|md|rst|txt|json|toml|ya?ml|html?|css|scss|sh|zsh|"
     "rs|go|java|kt|swift|c|cc|cpp|h|hpp|rb|php|sql|cfg|ini|csv|ipynb|xml|lock"
 )
-_FILE_NAME: Final = re.compile(rf"\b[\w.-]*\w\.(?:{_EXTENSIONS})\b")
+# A part of a name or a path is read up to 200 characters, so a scan that starts
+# at each character of one long token stays linear in the text.
+_FILE_NAME: Final = re.compile(rf"\b[\w.-]{{0,200}}\w\.(?:{_EXTENSIONS})\b")
 _PATH: Final = re.compile(
     r"(?:^|[\s`'\"(（：:，,])(?:~/|\.\.?/|/)[\w.-]"  # ~/x, ./x, ../x, /x
-    r"|[\w.-]+/[\w.-]+/[\w./-]*"  # a/b/c
-    r"|\b[\w.-]*[_.][\w.-]*/[\w.-]+|\b[\w.-]+/[\w.-]*[_.][\w.-]*"  # one slash, a _ or .
-    r"|\b[\w.-]+/(?:\s|$)"  # a folder: name/
+    r"|[\w.-]{1,200}/[\w.-]{1,200}/[\w./-]{0,200}"  # a/b/c
+    r"|\b(?=[\w.-]{0,200}[_.])[\w.-]{1,200}/[\w.-]{1,200}"  # one slash, a _ or .
+    r"|\b[\w.-]{1,200}/(?=[\w.-]{0,200}[_.])[\w.-]{1,200}"
+    r"|\b[\w.-]{1,200}/(?:\s|$)"  # a folder: name/
 )
 # Verbs that change what is there; making something new ("make slides from
 # notes.md") is left to the front's step.
@@ -1051,7 +1060,9 @@ def work_request(typed: str) -> bool:
     after a leading "in <path>:"), names a file or a path, and is not a
     question. With no file named, the same happens when the message asks for
     the whole pipeline at once (`_pipeline`: change it, run the tests, commit).
+    Only the first :data:`OPENING_CHARS` characters are read.
     """
+    typed = typed.lstrip()[:OPENING_CHARS]
     text = norm(typed)
     if not text or is_question(typed):
         return False
@@ -1195,12 +1206,15 @@ def route(
     *tasks* are the chat's own tasks; *fallback* are the other chats' ones,
     which the words reach only when they name none of the chat's own. Words
     that name more than one task are a ``choose`` route: the chat asks which.
+    The rules read the first :data:`OPENING_CHARS` characters; a ``work`` or
+    ``delegate`` route carries all of the text.
     """
-    stripped = typed.strip()
-    command = re.match(r"^/task(?:\s+|$)", stripped)
+    whole = typed.strip()
+    command = re.match(r"^/task(?:\s+|$)", whole)
     if as_task or command:
-        work = stripped[command.end() :] if command else stripped
+        work = whole[command.end() :] if command else whole
         return Routed("delegate", text=work.strip())
+    stripped = whole[:OPENING_CHARS]
     text = norm(stripped)
     everyone = [*tasks, *fallback]
     if len(text) <= CONTROL_CHARS:
@@ -1244,7 +1258,7 @@ def route(
     ):
         # A follow-up word with a task's name may continue that task: the
         # front's step decides.
-        return Routed("work", text=stripped, title=short_title(stripped))
+        return Routed("work", text=whole, title=short_title(stripped))
     if (
         len(text) <= SHORT_CHARS
         and is_question(text)

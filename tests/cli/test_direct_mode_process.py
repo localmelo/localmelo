@@ -16,16 +16,16 @@ import signal
 import sqlite3
 import subprocess
 import sys
-import threading
 import time
 from collections.abc import Callable, Iterator
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from localmelo.__main__ import SIGNAL_CLEANUP_S
+from localmelo.tests.fixtures.http_stub import HttpStub
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32", reason="POSIX signals and process groups"
@@ -54,7 +54,7 @@ def _sse(message: dict[str, Any]) -> bytes:
     return (body + "data: [DONE]\n\n").encode()
 
 
-class FakeChatServer:
+class FakeChatServer(HttpStub):
     """An OpenAI-compatible ``/chat/completions`` that replays queued replies.
 
     Once ``replies`` is empty, every reply is the final answer ``done``. A
@@ -121,21 +121,7 @@ class FakeChatServer:
                 self.end_headers()
                 self.wfile.write(body)
 
-            def log_message(self, format: str, *args: Any) -> None:
-                pass  # no request log in the test output
-
-        self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
-        self._thread.start()
-
-    @property
-    def base_url(self) -> str:
-        return f"http://127.0.0.1:{self._httpd.server_port}/v1"
-
-    def close(self) -> None:
-        self._httpd.shutdown()
-        self._httpd.server_close()
-        self._thread.join(timeout=5)
+        super().__init__(Handler, path="/v1")
 
 
 @pytest.fixture
@@ -321,7 +307,9 @@ def test_a_signal_stops_the_run_and_everything_it_started(
 
         sent = time.monotonic()
         os.killpg(melo.pid, sig)
-        out, err = melo.communicate(timeout=30)
+        # The bound that matters is SIGNAL_CLEANUP_S below; this one only stops
+        # a hang from holding up the suite.
+        out, err = melo.communicate(timeout=120)
         elapsed = time.monotonic() - sent
         stderr = err.decode(errors="replace")
 
