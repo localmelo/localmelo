@@ -157,6 +157,9 @@ MAX_LAYERED = 6
 # before it compares the window with what it was, and how often it looks meanwhile.
 POINT_SETTLE_S = 1.0
 POINT_POLL_S = 0.25
+# How the helper starts the error of a click whose point it could not mark on a picture: it
+# takes that picture after the click, so the click itself went out.
+MARK_FAILED = "debug_image_out write failed"
 # After an act that may hand off to another app, the screen is looked at this often for
 # up to this long in all (the wait's own helper and lsappinfo calls count), and the wait
 # ends when a window appears or the tab moves to another address or another tab opens.
@@ -1464,23 +1467,30 @@ class DesktopWatch:
         *,
         foreground: bool,
     ) -> list[ImagePart]:
-        """Click (*x*, *y*), 0-1000 on the window's last picture; the picture with the point marked, if any."""
+        """Click (*x*, *y*), 0-1000 on the window's last picture; the picture with the point marked, if any.
+
+        A click that closed the window before its picture was taken was delivered:
+        the helper's error is then only about the picture (:data:`MARK_FAILED`),
+        and the result has no picture. Any other helper error is raised.
+        """
         assert kept.view is not None
         width, height = kept.view
         px, py = round(x / 1000 * width, 1), round(y / 1000 * height, 1)
         folder = tempfile.mkdtemp(prefix="melo-desktop-")
         marked = os.path.join(folder, "point.png")
-        images: list[ImagePart] = []
+        picture: str | None = None
         try:
             await helper.click_at(kept.window, px, py, marked, foreground=foreground)
             picture = _read_file(marked)
-            if picture is not None:
-                fitted = await fit_picture("image/png", picture)
-                if fitted is not None:
-                    images.append(fitted)
+        except DesktopError as exc:
+            # Only the picture of the point failed, and the window it was taken of is
+            # gone: the click closed it. No picture, and _settled says "closed".
+            if not await self._clicked_then_gone(helper, kept, exc):
+                raise
         finally:
             shutil.rmtree(folder, ignore_errors=True)
-        return images
+        fitted = await fit_picture("image/png", picture) if picture else None
+        return [fitted] if fitted is not None else []
 
     async def _settled(self, helper: DesktopHelper, kept: _Kept) -> str:
         """What a click at a point left: ``closed`` (the window went away or off the screen), ``changed``, ``same`` (still there and reading as before) or ``""`` (cannot tell).
@@ -1493,10 +1503,9 @@ class DesktopWatch:
         waited = 0.0
         while True:
             try:
-                listed = await helper.windows(pid=kept.window.pid)
+                found = await self._listed(helper, kept)
             except DesktopError:
                 return ""
-            found = next((w for w in listed if w.id == kept.window.id), None)
             if found is None or not found.on_screen:
                 return "closed"
             if waited >= POINT_SETTLE_S:
@@ -1512,10 +1521,29 @@ class DesktopWatch:
             kept.view = state.size
         return "same" if _look_of(state) == kept.look else "changed"
 
+    async def _listed(self, helper: DesktopHelper, kept: _Kept) -> AppWindow | None:
+        """The window as the helper lists it now, or None when it is not listed (gone)."""
+        listed = await helper.windows(pid=kept.window.pid)
+        return next((w for w in listed if w.id == kept.window.id), None)
+
+    async def _clicked_then_gone(
+        self, helper: DesktopHelper, kept: _Kept, error: DesktopError
+    ) -> bool:
+        """Whether *error* came after a click went out: only its picture failed, of a window that is gone now.
+
+        An error before the click was delivered is none of this, and stays an error.
+        """
+        if MARK_FAILED not in str(error):
+            return False
+        try:
+            found = await self._listed(helper, kept)
+        except DesktopError:
+            return False
+        return found is None or not found.on_screen
+
     async def _after(self, helper: DesktopHelper, name: str, kept: _Kept) -> str:
         with contextlib.suppress(DesktopError):
-            listed = await helper.windows(pid=kept.window.pid)
-            found = next((w for w in listed if w.id == kept.window.id), None)
+            found = await self._listed(helper, kept)
             if found is None:
                 del self._kept[name]
                 return f" Window {name} closed."

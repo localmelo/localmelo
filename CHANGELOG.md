@@ -1486,7 +1486,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   of its picture; when that click in the background changes nothing, melo clicks once more in the foreground,
   where the pointer moves and the app comes to the front for a moment. You are asked once, before the first
   click, and the card says so; after the second click melo waits a moment, as after the first, before it says
-  whether the window closed. A point click that finds nothing now says that x and y run 0-1000 across the
+  whether the window closed. A click that closes the window before the picture of its point can be taken
+  is reported as clicked, with no picture, not as a refusal. A point click that finds nothing now says that x and y run 0-1000 across the
   picture, not in pixels, and where a point written in pixels would be on that scale.
 - You see what melo does in Chrome in the background. The Browser panel of a chat that started on Safari never
   opened after Settings switched to Chrome, and its button stayed hidden: the page asked only once, when the chat

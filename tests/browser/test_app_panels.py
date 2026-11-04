@@ -350,11 +350,20 @@ async def panel_pressed(
     return click, read, pressed
 
 
+@pytest.mark.parametrize(
+    ("closes", "shown"),
+    [
+        ("close", " The picture shows where."),
+        # The click closed the window before the helper took the picture that marks the
+        # point, so that picture failed: the click was delivered, and it is no refusal.
+        ("close_then_fail", ""),
+    ],
+)
 async def test_a_window_that_names_no_buttons_is_pressed_at_a_point_of_its_picture(
-    screen: Screen,
+    screen: Screen, closes: str, shown: str
 ) -> None:
     asks = Asks()
-    click, read, pressed = await panel_pressed(screen, {"background": "close"}, asks)
+    click, read, pressed = await panel_pressed(screen, {"background": closes}, asks)
     assert "it names no buttons" in click.text
     assert "(no readable text)" in read.text
     assert (
@@ -362,10 +371,12 @@ async def test_a_window_that_names_no_buttons_is_pressed_at_a_point_of_its_pictu
         "y, 0-1000 across and down this picture, presses a point of it. melo does "
         "not type into other apps.]"
     ) in read.text
+    assert not pressed.is_error
     assert pressed.text == (
-        "Clicked (700, 850) on the picture of Chat's window (via point). The "
-        "picture shows where. Window w1 closed."
+        f"Clicked (700, 850) on the picture of Chat's window (via point).{shown} "
+        "Window w1 closed."
     )
+    assert bool(pressed.images) is bool(shown)
     [only] = clicks(screen)
     assert only.get("delivery_mode", "background") == "background"
     assert [name for name in asks.names if name.startswith("desktop-act:")] == [
@@ -461,6 +472,15 @@ async def test_a_point_click_that_changed_the_window_is_not_repeated(
     assert [name for name in asks.names if name.startswith("desktop-act:")] == [
         "desktop-act:Chat"
     ]
+
+
+async def test_a_click_the_helper_refused_stays_an_error_even_when_the_window_is_gone(
+    screen: Screen,
+) -> None:
+    # The window went away just before the click, and the helper refused it: nothing was clicked.
+    _, _, pressed = await panel_pressed(screen, {"background": "gone"}, Asks())
+    assert pressed.is_error and "window_id_not_found" in pressed.text
+    assert "Clicked" not in pressed.text
 
 
 async def test_a_second_point_needs_a_new_read(screen: Screen) -> None:

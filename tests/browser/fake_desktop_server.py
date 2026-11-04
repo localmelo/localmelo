@@ -29,7 +29,9 @@ A click at a point (``x``, ``y``) needs a read of that window
 and uses it up. What it does is the window's ``clicks``, by ``delivery_mode``
 (``background``, the default, or ``foreground``): ``"close"`` closes the
 window, ``"change"`` changes its picture and text, ``"nothing"`` (the default)
-does nothing. Every call is appended to the file named by the second argument
+does nothing. ``"close_then_fail"`` closes the window too, but before the picture that
+marks the point is taken, so that picture fails (the helper takes it after the click).
+``"gone"`` is a window that went away just before the click, which the helper refuses. Every call is appended to the file named by the second argument
 (one JSON line each).
 """
 
@@ -116,7 +118,7 @@ def row(window: dict[str, Any], space: int) -> dict[str, Any]:
 def clicked(state: dict[str, Any], window: dict[str, Any], how: str) -> None:
     """What a click at a point does to *window*, as its ``clicks`` say for *how*."""
     done = (window.get("clicks") or {}).get(how, "nothing")
-    if done == "close":
+    if done in ("close", "close_then_fail"):
         state["windows"] = [w for w in state["windows"] if w is not window]
     elif done == "change":
         window["picture"] = "changed"
@@ -192,10 +194,24 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         if window["window_id"] not in READ:
             return answer({"refusal": "window_never_read"}, error=True)
         READ.discard(window["window_id"])
-        if args.get("debug_image_out"):
+        how = str(args.get("delivery_mode") or "background")
+        if (window.get("clicks") or {}).get(how) == "gone":
+            state["windows"] = [w for w in windows if w is not window]
+            save(state)
+            return answer({"refusal": "window_id_not_found"}, error=True)
+        closes = (window.get("clicks") or {}).get(how) == "close_then_fail"
+        if args.get("debug_image_out") and not closes:
             with open(args["debug_image_out"], "wb") as handle:
                 handle.write(PNG)
-        clicked(state, window, str(args.get("delivery_mode") or "background"))
+        clicked(state, window, how)
+        if args.get("debug_image_out") and closes:
+            wid = window["window_id"]
+            return answer(
+                {"refusal": f"debug_image_out write failed: window {wid} capture "
+                 f"failed: native: ScreenCaptureKit capture failed for window {wid}: "
+                 f"WindowServer no longer lists window id {wid}; using shell fallback"},
+                error=True,
+            )  # fmt: skip
         return answer({"effect": "unverifiable"})
     return answer({"refusal": f"unknown tool {name}"}, error=True)
 
