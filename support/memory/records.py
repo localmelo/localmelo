@@ -229,7 +229,9 @@ _VALUE_WORD = re.compile(
 )
 _QUOTED = re.compile(r"\"([^\"]+)\"|“([^”]+)”|「([^」]+)」|『([^』]+)』")
 _SENTENCE = re.compile(r"(?<=[.!?。！？])\s+|\n")
-# What share of a note's other content words the evidence must hold.
+# What share of a note's other content words the evidence must hold (a word of
+# another script, or a single Chinese or Japanese character: a pair of characters
+# only counts when it is a value).
 WORDS_FOUND: Final = 0.8
 _CJK_FILLER: Final = frozenset("的了是在我你他她它们和与就也都吗呢吧啊么")
 # Characters of common wording: a note that restates what the user typed may add
@@ -965,7 +967,10 @@ def unsupported(note: str, evidence: Sequence[str]) -> list[str]:
     span, and in Chinese or Japanese a character that was never typed and is no
     common wording, :func:`value_terms`) must be found, and so must at least
     :data:`WORDS_FOUND` of the other content words (:func:`_missing` says when
-    one is found). The words listed are all the missing ones, values first.
+    one is found; in Chinese or Japanese the share counts single characters, since
+    one added or swapped character spoils two pairs of characters as well, and a
+    pair only has to be found when it is a value). The words listed are all the
+    missing ones, values first.
     """
     gone = _missing(note, evidence)
     if not gone:
@@ -974,9 +979,17 @@ def unsupported(note: str, evidence: Sequence[str]) -> list[str]:
     values = [term for term in gone if term in valued]
     others = [term for term in note_terms(note) if term not in valued]
     lost = [term for term in gone if term not in values]
-    if not values and len(others) - len(lost) >= WORDS_FOUND * len(others):
+    if not values and _counted(others) - _counted(lost) >= WORDS_FOUND * _counted(
+        others
+    ):
         return []
     return values + lost
+
+
+def _counted(terms: Iterable[str]) -> int:
+    """How many of *terms* count toward the share of words found: each word, and
+    each CJK character; a CJK pair is only ever a value, never part of the share."""
+    return sum(1 for term in terms if term.isascii() or len(term) == 1)
 
 
 def other_script(words: Sequence[str], evidence: Sequence[str]) -> bool:
