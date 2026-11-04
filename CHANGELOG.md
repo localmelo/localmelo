@@ -9,6 +9,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- WeChat quick login in Chrome in the background. A sign-in box may reach the app on this Mac it signs in with
+  when melo lists that app (today WeChat's quick login, so its button shows as in Safari): melo makes those
+  requests itself, only for that box, only to the app's own ports and never to melo's own. Chrome's own check
+  stays on, and any other request a page makes to this Mac or your network is blocked before it is sent; the
+  step says `The page tried to reach an app on this Mac (port N); melo blocked it.`
 - Chrome in the background. `[browser] driver = "chrome"` (Settings → Chats and folders → **Browser**: Chrome,
   Safari or Off; `/browser chrome` and `/browser safari` in the terminal and the console; browsing stays off
   until you turn it on, and `/browser on` uses the browser chosen before, or Safari's windows when none was)

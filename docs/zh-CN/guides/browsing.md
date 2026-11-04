@@ -111,6 +111,10 @@ Safari is not set up for melo yet. In Safari, open Settings > Developer and turn
 - **Chrome 自己的流量。** 即使关闭了后台联网，Chrome 仍会自己连接几次 Google；这些连接不会把任何东西带给 melo。下载会被拒绝。
 - **点击和输入由 Chrome 自己完成。** 点击是在 melo 检查过的元素中间的一次真实点击；输入会先选中框里原有的内容，再放入文字，所以忽略脚本点击的网页也能用。从列表里选择由页面脚本完成。
 - **网页要打开应用或提问时。** 见[网页要打开应用时](#when-a-page-wants-to-open-an-app)。
+- **这台 Mac 上的应用。** Chrome 自己的检查让网页无法访问这台 Mac 或你的局域网（melo 的控制台、模型服务器、开发服务器），这项检查一直开着。后台的 Chrome 没法询问你，所以答案是不允许。只有一个例外：melo 列出的应用，它的登录框可以访问这个应用。目前列表里只有微信快捷登录：来自 `open.weixin.qq.com` 的登录框可以访问这台 Mac 上的微信，和在 Safari 里一样，所以会显示快捷登录按钮。
+  - 这些请求由 melo 自己发出：只为这个登录框，只发到这个应用自己的端口，从不发到 melo 的控制台或模型服务器的端口。
+  - 网页发往这台 Mac 或你的局域网的其他请求，都会在发出前被拦下。网页把自己的标签页送到这类地址时，如果地址本身写的就是这类地址（`localhost`、`127.0.0.1`、`.local` 名字），也会被拦下；只是解析到这里的名字，会像在 Safari 中一样，在加载后变为空白页。这一步会说 `The page tried to reach an app on this Mac (port N); melo blocked it.`
+  - 这个列表是 melo 的一部分，没有对应的设置。
 
 <a id="watching-melos-browser"></a>
 
@@ -261,7 +265,7 @@ melo 操作的网页可能让另一个应用打开窗口，比如聊天应用请
 - **每个网站每次对话问一次。** melo 加载页面之前，你会看到“Open a website?”，其中有网站名称和三个答案：*Yes*、*Yes, and allow this site for the rest of this chat* 和 *No*。在网页控制台中则是常见的批准卡片。“本次对话余下时间”是唯一持久的答案；这一部分没有“始终允许”。你在主对话里允许的，在每个对话里都算；在旁支对话里允许的，只在那里算。`/grants` 列出你允许过的网站，`/grants revoke N` 收回一项（`/approvals forget NAME` 在控制台和终端自己的对话里也可以）。终端自己的对话里的 `/new` 开始时不带那个对话的授权；见[你允许过的事](terminal.md#what-you-allowed)。
 - **重定向会再问一次。** 如果链接或重定向落在另一个网站，melo 读取页面之前会先询问该网站。你拒绝后，窗口回到空白页，模型会读到你已拒绝。
 - **只有 `http` 和 `https`。** 从不打开 `file:`、`about:`、`javascript:`、`data:` 和浏览器自己的页面。带用户名或密码的地址（`user@site`）也不打开。
-- **从不打开这台 Mac、你的局域网或 melo 的控制台。** 和 `web_fetch` 一样，melo 不打开 `localhost`、私有、链路本地或运营商共享地址、`.local` 名字、不带点的名字、写成一个数字的地址，也不打开 DNS 结果是这些地址的名字。melo 自己的控制台无论在哪里监听也都拒绝。重定向或页面自行跳到这类地址时，窗口变为空白页，其中任何内容都不会被读取；这一检查在询问网站之前进行，它检查的是 melo 读到的内容，不是网络封锁。要看任务的结果，主对话会直接读取任务（`task_get`）。
+- **从不打开这台 Mac、你的局域网或 melo 的控制台。** 和 `web_fetch` 一样，melo 不打开 `localhost`、私有、链路本地或运营商共享地址、`.local` 名字、不带点的名字、写成一个数字的地址，也不打开 DNS 结果是这些地址的名字。melo 自己的控制台无论在哪里监听也都拒绝。重定向或页面自行跳到这类地址时，窗口变为空白页，其中任何内容都不会被读取；这一检查在询问网站之前进行。在 Safari 中，它检查的是 melo 读到的内容，不是网络封锁；在后台的 Chrome 中，网页自己发往这些地址的请求也会被拦下（见[后台的 Chrome](#chrome-in-the-background)）。要看任务的结果，主对话会直接读取任务（`task_get`）。
 - **自动模式下什么都不问。** 你自己最近的消息提到的网站直接打开（就是那个网站，带不带 `www.` 都算，不包括它下面的网站）；其他网站只有在你的模型认为它符合你的请求时才打开（每个网站每个对话检查一次），否则会被拦下。在网站上点击或选择，按打开它来审查。输入会单独审查，即使是你提到的网站；每一次发送表单也一样，对一段输入或一次发送的裁决不会留给下一次。`--yolo` 跳过所有问题。
 - **网页文字是数据。** 网页可以写任何内容。melo 的系统提示告诉模型：页面标记之间的文字是网页的内容，绝不是指令；结束标记带有页面无法知道的随机数，所以页面无法自行结束它的块。这降低网页操纵模型的风险，但不能消除。不要允许你不信任的网站；也不要在含有你不会粘贴到网页里的机密的对话中开启浏览。
 
@@ -286,6 +290,7 @@ melo 操作的网页可能让另一个应用打开窗口，比如聊天应用请
 | `Chrome stopped` | 再问一次：melo 会在下一步重新启动 Chrome。只在会话期间有效的登录会丢失。 |
 | `Chrome could not load that page (net::...)` | 这个地址没有响应，或页面是一个下载（melo 的 Chrome 拒绝下载）。 |
 | `The page tried to open ... ; melo did not open it` | 你回答了“否”，或在“自动”模式下没有人在看。再问一次就会再次询问你。 |
+| `The page tried to reach an app on this Mac (port N); melo blocked it.` | 网页（通常是登录框）在找这台 Mac 上的某个应用。只有 melo 列出的登录应用能被访问；请换一种方式登录，比如扫二维码，或在浏览器面板里输入密码。 |
 | `Safari's automation helper did not start` | 确认已安装 Safari 27 或更高版本且开关已打开；`/browser` 会重新检查。 |
 | `This Safari's automation server lacks the tools melo needs` | 更新 macOS 和 Safari。 |
 | 页面读出来是空的 | 可能需要登录，或页面在加载后由脚本生成；试试 `browser_wait`，或自己打开它。 |
