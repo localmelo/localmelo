@@ -457,7 +457,7 @@ def test_other_tools_are_not_reviewed(places: dict[str, Path]) -> None:
     assert review(places, "mcp__files__write", "x") == ActionReview("routine")
 
 
-def test_six_kilobytes_of_code_are_reviewed_in_milliseconds(
+def test_the_review_of_code_takes_time_linear_in_its_size(
     places: dict[str, Path],
 ) -> None:
     block = (
@@ -467,16 +467,23 @@ def test_six_kilobytes_of_code_are_reviewed_in_milliseconds(
         "subprocess.run(['git', 'status'], capture_output=True)\n"
         "with open('out/summary.txt', 'w') as fh:\n    fh.write(str(len(rows)))\n"
     )
-    code = block * (6000 // len(block) + 1)
-    assert len(code) >= 6000
-    review(places, PY, code)  # warm up the imports
-    # CPU time of the fastest of fifteen runs, so that a busy machine (a
-    # parallel test run) cannot fail it: the work itself takes about 2.3 ms on
-    # an M5, and the bound is ten times that. A rule that reads the code
-    # twice, or backtracks, would still cross it.
-    times = []
-    for _ in range(15):
-        start = time.process_time()
-        assert review(places, PY, code).verdict == "routine"
-        times.append(time.process_time() - start)
-    assert min(times) < 0.025, times
+
+    def cpu_time(size: int) -> float:
+        """CPU time of the fastest of seven reviews of *size* characters of code."""
+        code = block * (size // len(block) + 1)
+        times = []
+        for _ in range(7):
+            start = time.process_time()
+            assert review(places, PY, code).verdict == "routine"
+            times.append(time.process_time() - start)
+        return min(times)
+
+    review(places, PY, block)  # warm up the imports
+    # The work takes about 2.3 ms for 6 kilobytes on an M5. A bound on that
+    # would fail on a busy machine (a parallel test run), so the review is
+    # held to a loose bound, and to a time that grows with the code: four
+    # times the code may take at most eight times as long. A rule that
+    # backtracks would cross that.
+    small, large = cpu_time(6_000), cpu_time(24_000)
+    assert small < 0.25, small
+    assert large <= 8 * small + 0.02, (small, large)

@@ -307,7 +307,9 @@ def test_a_signal_stops_the_run_and_everything_it_started(
 
         sent = time.monotonic()
         os.killpg(melo.pid, sig)
-        out, err = melo.communicate(timeout=30)
+        # The bound that matters is SIGNAL_CLEANUP_S below; this one only stops
+        # a hang from holding up the suite.
+        out, err = melo.communicate(timeout=120)
         elapsed = time.monotonic() - sent
         stderr = err.decode(errors="replace")
 
