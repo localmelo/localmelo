@@ -18,7 +18,6 @@ import socket
 import sqlite3
 import subprocess
 import sys
-import threading
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -26,6 +25,7 @@ from typing import Any
 
 import pytest
 
+from localmelo.tests.fixtures.http_stub import HttpStub
 from localmelo.tests.fixtures.stub_llm import StubServer
 
 from .test_e2e_pty import GUARD_S, Melo
@@ -191,18 +191,12 @@ class _NotAGateway(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"<p>not here</p>")
 
-    def log_message(self, format: str, *args: Any) -> None:
-        pass
-
 
 def test_without_the_main_chat_melo_says_why_and_keeps_its_own_chat(
     main_melo: tuple[Callable[..., Melo], _Main],
 ) -> None:
     start, main = main_melo
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", main.port), _NotAGateway)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
+    with HttpStub(_NotAGateway, port=main.port):
         term = start()
         term.see(
             f"No main chat (port {main.port} is used by another program)", START_WAIT_S
@@ -212,7 +206,4 @@ def test_without_the_main_chat_melo_says_why_and_keeps_its_own_chat(
         term.type("hello\r")
         term.see("Hello! I am melo, running on a stub model.")
         assert term.quit() == 0, term.text()
-    finally:
-        server.shutdown()
-        server.server_close()
     assert "Starting the gateway" not in term.text()

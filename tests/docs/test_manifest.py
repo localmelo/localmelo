@@ -73,6 +73,7 @@ def inline_text(children: list) -> str:
     )
 
 
+@cache  # a page is read for each link to it; the callers only read the lists
 def inventory(text: str, suffix: str) -> tuple[list[str], list[str]]:
     html = HTMLInventory()
     if suffix in {".html", ".htm"}:
