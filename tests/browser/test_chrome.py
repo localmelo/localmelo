@@ -30,6 +30,7 @@ from localmelo.support.browser.driver import (
     Act,
     BrowserError,
     BrowserSetupError,
+    CoveredError,
     Dialog,
     Element,
     RawPage,
@@ -39,6 +40,7 @@ from localmelo.support.browser.driver import (
 FAKE = str(Path(__file__).with_name("fake_chrome_peer.py"))
 FORM = "https://example.com/form"
 APP = "https://example.com/app"
+COVER = "https://example.com/cover"
 
 
 class Peer:
@@ -235,6 +237,12 @@ async def test_tabs_back_wait_blank_and_a_picture(
         await driver.back(tab.id)
     assert await driver.wait(tab.id, "text", "news", 1) is True
     assert await driver.wait(tab.id, "load", "", 1) is True
+    # One look at the same condition, with no waiting.
+    assert await driver.holds(tab.id, "load", "") is True
+    assert await driver.holds(tab.id, "text", "news") is True
+    assert await driver.holds(tab.id, "text", "nowhere") is False
+    assert await driver.holds(tab.id, "gone", "nowhere") is True
+    assert await driver.holds(tab.id, "gone", "news") is False
     shot = await driver.screenshot(tab.id)
     assert shot.mime_type == "image/jpeg"
     assert base64.b64decode(shot.data).startswith(b"\xff\xd8")
@@ -324,6 +332,82 @@ async def test_a_choice_and_a_covered_element_are_the_page_scripts(
     )
     assert covered.via == "page-script" and "covers it" in covered.why
     assert not peer.calls("Input.dispatchMouseEvent")
+
+
+def clicks(peer: Peer) -> list[tuple[float, float]]:
+    """Where the trusted mouse went, once per press."""
+    return [
+        (c["params"]["x"], c["params"]["y"])
+        for c in peer.calls("Input.dispatchMouseEvent")
+        if c["params"]["type"] == "mousePressed"
+    ]
+
+
+def scrolls(peer: Peer) -> int:
+    return len([line for line in peer.lines() if line.get("act_mode") == "scroll"])
+
+
+async def test_a_target_whose_middle_is_covered_is_clicked_at_a_part_that_is_clear(
+    driver: ChromeBackgroundDriver, peer: Peer
+) -> None:
+    raw = await opened(driver, COVER)
+    done = await driver.act(
+        None, Act("click", raw.url, named(raw, "Half covered"), doc=raw.doc)
+    )
+    assert (done.via, done.why) == ("browser", "")
+    assert clicks(peer) == [(130, 400)]
+    assert await driver.location(None) == "https://example.com/done"
+
+
+async def test_a_covered_target_is_scrolled_to_the_middle_once_more_before_it_is_given_up(
+    driver: ChromeBackgroundDriver, peer: Peer
+) -> None:
+    raw = await opened(driver, COVER)
+    done = await driver.act(
+        None, Act("click", raw.url, named(raw, "Clears later"), doc=raw.doc)
+    )
+    assert (done.via, done.why) == ("browser", "")
+    assert scrolls(peer) == 2 and len(clicks(peer)) == 1
+    assert await driver.location(None) == "https://example.com/done"
+
+
+async def test_a_target_that_stays_covered_goes_to_the_page_script_and_names_what_covers_it(
+    driver: ChromeBackgroundDriver, peer: Peer
+) -> None:
+    raw = await opened(driver, COVER)
+    done = await driver.act(
+        None, Act("click", raw.url, named(raw, "Under the header"), doc=raw.doc)
+    )
+    assert done.via == "page-script"
+    assert "a sticky header (h1) covers it" in done.why
+    assert scrolls(peer) == 2 and not clicks(peer)
+
+
+async def test_a_click_that_lands_on_another_element_is_tried_once_more(
+    driver: ChromeBackgroundDriver, peer: Peer
+) -> None:
+    raw = await opened(driver, COVER)
+    done = await driver.act(
+        None, Act("click", raw.url, named(raw, "Slips away"), doc=raw.doc)
+    )
+    assert (done.via, done.why) == ("browser", "")
+    assert len(clicks(peer)) == 2 and scrolls(peer) == 2
+    assert await driver.location(None) == "https://example.com/done"
+
+
+async def test_a_click_that_lands_on_another_element_twice_is_stopped_and_names_it(
+    driver: ChromeBackgroundDriver, peer: Peer
+) -> None:
+    raw = await opened(driver, COVER)
+    with pytest.raises(CoveredError) as stopped:
+        await driver.act(
+            None, Act("click", raw.url, named(raw, "Always slips"), doc=raw.doc)
+        )
+    said = str(stopped.value)
+    assert said.startswith("An ad (iframe from ads.example.net) covers that button")
+    assert "Nothing was clicked or typed" in said
+    assert len(clicks(peer)) == 2
+    assert await driver.location(None) == COVER
 
 
 async def test_input_that_reaches_nothing_falls_to_the_page_script_and_says_so(

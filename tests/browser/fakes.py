@@ -12,6 +12,7 @@ from localmelo.support.browser.driver import (
     BrowserError,
     BrowserSetupError,
     Changes,
+    CoveredError,
     Element,
     PointHit,
     RawPage,
@@ -98,6 +99,9 @@ class FakeDriver:
     input failed for the site), ``changes`` maps a label to what an act on it
     changed, and ``redraw`` maps a label to the address whose page an act on it
     finds redrawn (stale, once). ``hits`` maps a rounded point to what is there.
+    ``covers`` maps a label to what the browser says when something stands over
+    it (the click is stopped and nothing is done). ``held_already`` is what
+    ``holds`` answers (a condition that held before any waiting).
     """
 
     name = "fake"
@@ -133,6 +137,8 @@ class FakeDriver:
         self.refuse_native = False
         self.changes: dict[str, Changes] = {}
         self.redraw: dict[str, RawPage] = {}
+        self.covers: dict[str, str] = {}
+        self.held_already = False
         self.hits: dict[tuple[int, int], PointHit] = {}
         self.marks: list[tuple[View, float, float] | None] = []
         self.shot_view: View | None = View("", "d1", 1000.0, 500.0)
@@ -242,6 +248,12 @@ class FakeDriver:
             return False  # the condition holds only on the page's own site
         return text != "never"
 
+    async def holds(
+        self, tab: str | None, until: str, text: str, *, origin: str = ""
+    ) -> bool:
+        self.calls.append(("holds", f"{until}:{text}"))
+        return self.held_already
+
     async def screenshot(
         self, tab: str | None, mark: tuple[View, float, float] | None = None
     ) -> Shot:
@@ -282,6 +294,8 @@ class FakeDriver:
             # under another place, and the act on the old reading is stale.
             self.pages[self._url(tab)] = self.redraw.pop(label)
             raise StaleElementError("That element is no longer on the page.", "gone")
+        if label in self.covers:
+            raise CoveredError(self.covers[label])
         self.acts.append(act)
         key = ("enter:" if act.enter else "") + label
         via = "point" if act.point is not None else self.via
