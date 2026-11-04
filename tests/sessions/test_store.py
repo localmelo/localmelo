@@ -788,7 +788,7 @@ def test_the_session_event_keys_are_pinned() -> None:
         "turn.finished": {"turn", "turn_id", "status", "error", "cause"},
         "turn.undone": {"turn", "turn_id"},
         "turn.pictures": {"turn", "turn_id", "pictures"},
-        "turn.note": {"turn", "turn_id", "note", "text"},
+        "turn.note": {"turn", "turn_id", "note", "text", "images"},
         "turn.memory": {
             "turn",
             "turn_id",
@@ -824,6 +824,7 @@ def test_the_session_event_keys_are_pinned() -> None:
     }
     assert dict(OPTIONAL_SESSION_EVENT_FIELDS) == {
         "turn.started": {"origin", "images"},
+        "turn.note": {"images"},
         "turn.memory": {"searched", "opened", "search_hint", "digest"},
     }
     assert RESERVED_EVENT_PREFIXES == ("task.", "sched.", "attention.")
@@ -1623,6 +1624,32 @@ async def test_blobs_are_stored_once_per_digest(tmp_path: Path) -> None:
         b"\x89PNG data",
     )
     assert await store.get_blob(turn.session_id, "0" * 64) is None
+    await store.aclose()
+
+
+async def test_put_blobs_keeps_pictures_of_a_session_once_per_digest(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "s.db"
+    store = gateway(path)
+    session = await store.create_session()
+    image = ImagePart.from_bytes(b"\x89PNG note data", "image/png")
+    other = ImagePart.from_bytes(b"\xff\xd8\xff other", "image/jpeg")
+    await store.put_blobs(session.id, [image, other])
+    await store.put_blobs(session.id, [image])
+    assert rows(path, "SELECT COUNT(*) FROM blobs") == [(2,)]
+    assert await store.get_blob(session.id, image.sha256) == (
+        "image/png",
+        b"\x89PNG note data",
+    )
+    # Another session has its own copy: a blob is read by session and digest.
+    elsewhere = await store.create_session()
+    assert await store.get_blob(elsewhere.id, image.sha256) is None
+    # A reference has no payload to keep, and an unknown session is refused.
+    with pytest.raises(ValueError):
+        await store.put_blobs(session.id, [image.as_reference()])
+    with pytest.raises(SessionStoreError):
+        await store.put_blobs("f" * 32, [image])
     await store.aclose()
 
 

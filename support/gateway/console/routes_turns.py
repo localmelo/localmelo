@@ -64,7 +64,7 @@ from .task_submissions import (
     started_echo,
     submission_of,
 )
-from .uploads import images_of
+from .uploads import Staged, images_of
 
 if TYPE_CHECKING:
     from localmelo.support.sessions.runner import ResumeInfo
@@ -107,9 +107,11 @@ class RetryRequest(Body):
 
 
 class NoteRequest(Body):
-    """Words the person adds to a turn that runs."""
+    """Words the person adds to a turn that runs, and the pictures that go with them."""
 
     text: str
+    # Pictures the person added: ids from ``POST /api/uploads`` (at most 4).
+    images: list[str] = []
     client_request_id: str | None = None
 
 
@@ -211,6 +213,24 @@ def _check_text(console: Console, text: str, session_id: str | None) -> str:
     return str(sanitized.query)
 
 
+async def _staged(console: Console, ids: list[str]) -> list[Staged]:
+    """The staged pictures a message or a note names, checked.
+
+    400 for more than the limit, one named twice, or one gone from the stage;
+    409 ``model_text_only`` when the chat model is known not to read pictures.
+    """
+    if len(ids) > MAX_PICTURES:
+        raise ApiError(
+            400, "invalid_request", t("errors.tooManyPictures", n=MAX_PICTURES)
+        )
+    if len(set(ids)) != len(ids):
+        raise ApiError(400, "invalid_request", t("errors.pictureTwice"))
+    staged = console.pictures.resolve(ids)
+    if staged and await console.vision.reads() is False:
+        raise ApiError(409, "model_text_only", t("errors.modelTextOnly"))
+    return staged
+
+
 class _Sent:
     """A checked send: its words, the whole text a code rule reads, and what it carries."""
 
@@ -240,15 +260,7 @@ async def _sent(
     ``model_text_only`` when the chat model is known not to read pictures.
     """
     attached = _files(request.attachments)
-    if len(request.images) > MAX_PICTURES:
-        raise ApiError(
-            400, "invalid_request", t("errors.tooManyPictures", n=MAX_PICTURES)
-        )
-    if len(set(request.images)) != len(request.images):
-        raise ApiError(400, "invalid_request", t("errors.pictureTwice"))
-    staged = console.pictures.resolve(request.images)
-    if staged and await console.vision.reads() is False:
-        raise ApiError(409, "model_text_only", t("errors.modelTextOnly"))
+    staged = await _staged(console, request.images)
     words = request.text.strip()
     if not words:
         if not staged and not attached:
@@ -593,11 +605,13 @@ def add_routes(app: FastAPI, console: Console) -> None:
 
     @app.post("/api/turns/{turn_id}/notes")
     async def add_note(turn_id: str, body: NoteRequest) -> JSONResponse:
-        """Add words to a turn that runs: its run reads them at its next step (202).
+        """Add words, and pictures, to a turn that runs: its run reads them at its next step (202).
 
         If the turn ends before another step, they run as the chat's next turn.
-        409 ``turn_not_running`` when the turn is not running, or is being
-        stopped; a client then sends the words as a message.
+        A note may carry pictures on the terms of a message: the same kinds and
+        limits, and no words are needed with a picture. 409 ``turn_not_running``
+        when the turn is not running, or is being stopped; a client then sends
+        the words as a message.
         """
         console.require_store()
         key = _key(body.client_request_id)
@@ -613,17 +627,22 @@ def add_routes(app: FastAPI, console: Console) -> None:
             current is not None and current.origin
         ):
             raise ApiError(409, "not_your_turn", t("errors.noteInternalTurn"))
+        staged = await _staged(console, body.images)
         text = body.text.strip()
-        if not text:
+        if not text and not staged:
             raise ApiError(400, "invalid_request", t("errors.blankMessage"))
         if len(text) > MAX_NOTE_CHARS:
             raise ApiError(
                 400, "invalid_request", t("errors.noteTooLong", n=MAX_NOTE_CHARS)
             )
-        composed = _check_text(console, text, entry.session_id)
+        # The words a picture stands in for when there are none, as a message has.
+        words = text or _marker(len(staged), [])
+        composed = _check_text(console, words, entry.session_id)
         note = await _store_call(
             console,
-            console.asks.add_note(entry.session_id, turn_id, text, composed, key),
+            console.asks.add_note(
+                entry.session_id, turn_id, text, composed, key, staged
+            ),
             entry.session_id,
         )
         return JSONResponse(status_code=202, content={"note": note})

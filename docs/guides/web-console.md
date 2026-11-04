@@ -282,13 +282,14 @@ The commands of the [terminal](terminal.md#commands) work on this page and in th
 
 ## Add words while melo works
 
-While melo answers, the message box stays open. Its placeholder reads `Add to what melo is doing…`, and Enter adds your words to the turn that runs instead of waiting for it to end. Shift + Enter still starts a new line, and Esc still stops the turn.
+While melo answers, the message box stays open. Its placeholder reads `Add to what melo is doing…`, and Enter adds your words, and any pictures in the row above the box, to the turn that runs instead of waiting for it to end. Shift + Enter still starts a new line, and Esc still stops the turn.
 
 - **melo reads them at its next step.** The model gets the words as your message, marked as added while it worked, so a correction (`use the 2024 file instead`) changes the rest of the turn, not only the next one. A turn takes at most 20 added messages of 8,000 characters each.
 - **Sent, then seen.** The words show in the turn's work as `Sent. melo reads it at its next step.` and change to `Seen by melo at step 3` when the run has read them. They are stored with the turn, so a reopened chat shows them too.
-- **If the turn ends first**, they become your next message: `melo finished first. This goes next as your message.` They wait with the chat's other queued messages, in order, and a restart of the gateway keeps them.
-- **Stop gives them back.** Stop cancels the turn as before. Words melo had not read go back into the message box instead of starting another turn; words it had read stay in the turn's work.
-- **What does not change.** Only a turn you started takes added words; the turn melo starts to answer a task's question does not, and a task's question is still answered as [described above](#when-a-task-is-stuck-it-asks-its-chat). Pictures and files cannot join a turn that runs (`Pictures and files cannot join a turn that is running. Send them when melo is done, or press Stop.`).
+- **Pictures go along.** Drop, paste or pick a picture while melo works, as for [any message](#pictures-and-files-in-a-message), and Send adds it to the turn with your words. A picture alone is enough. The note shows its pictures in the turn's work, and the model gets them beside the words at the next step. The same pictures, the same limit of 4 and the same refusal for a model that cannot read pictures apply. If the model turns out not to read pictures before the note is read, the model is told you attached them and that it cannot see them, and the pictures stay in the chat for you.
+- **If the turn ends first**, they become your next message, pictures too: `melo finished first. This goes next as your message.` They wait with the chat's other queued messages, in order, and a restart of the gateway keeps them.
+- **Stop gives them back.** Stop cancels the turn as before. Words and pictures melo had not read go back into the message box and the row above it instead of starting another turn; what it had read stays in the turn's work.
+- **What does not change.** Only a turn you started takes added words; the turn melo starts to answer a task's question does not, and a task's question is still answered as [described above](#when-a-task-is-stuck-it-asks-its-chat). Text files cannot join a turn that runs (`Text files cannot join a turn that is running. Send them when melo is done, or press Stop.`).
 - The same words reach a client through [`POST /api/turns/{turn_id}/notes`](../reference/api-v2.md#post-apiturnsturn_idnotes).
 
 ## Pictures and files in a message
@@ -309,7 +310,8 @@ What you add shows as a row above the box: a thumbnail for a picture, a chip wit
 - **A model that cannot read pictures.** When the chosen model is known not to read them, a line under the thumbnails says so and links to Settings → Model. melo never drops a picture silently: sending anyway is refused with `This model cannot read pictures. Choose a model that can in Settings → Model, or send the message without the picture.` When melo cannot tell, it sends the picture. If the model or its server then refuses the turn because it does not take the picture (an error that says so; a bare error, a message about length or a picture it could not decode keeps its own text), the turn ends with one line, `This model can't see pictures; choose one that can in Settings → Model`, and melo treats the model as text-only for the next minute or until you choose another model; after that it asks the model's server again and goes by its answer. While it lasts, the composer warns, and **Try again** on that turn is refused (`model_text_only`) instead of sending the same picture again.
 - **Waiting pictures stay in memory.** A picture you added and did not send is kept in memory on this Mac for 30 minutes at most (24 pictures, 64 MB), and is gone when you remove it or close the chat. Nothing is written to disk until the message is sent.
 - **Not a task.** A message with a picture goes to the model; no rule reads it, so it cannot start a task, and **Run as a task** and `/task` are refused with pictures (`Pictures cannot start a task. Send them as a message.`).
-- A client sends a picture with [`POST /api/uploads`](../reference/api-v2.md#post-apiuploads) and names it in the turn's `images`.
+- **While melo works**, a picture is added the same way and goes to the turn as [added words](#add-words-while-melo-works) do; a text file is told it cannot.
+- A client sends a picture with [`POST /api/uploads`](../reference/api-v2.md#post-apiuploads) and names it in the turn's `images`, or in the `images` of a [note](../reference/api-v2.md#post-apiturnsturn_idnotes).
 
 ## Pictures in the answer
 

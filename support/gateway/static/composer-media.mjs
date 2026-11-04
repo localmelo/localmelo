@@ -9,6 +9,8 @@ import { formatBytes } from "./turns.mjs";
  * scales it, and answers with an id and whether the chat model reads pictures); a text file is read
  * here and travels in the message. Both wait in the strip, each with a remove button. The numbers
  * mirror the gateway's (`picture_input.py`, `sessions/attachments.py`); the gateway judges again.
+ * While melo works, the strip's pictures go with the words the person adds to the turn (a note);
+ * its text files cannot, and `host.refuse` says so.
  */
 
 /** Pictures one message may carry: a vision model reads about a thousand tokens per picture. */
@@ -93,7 +95,8 @@ let counter = 0;
  * The composer's media. *host* gives: `doc`, `tray` (the strip), `warning` (the text-only line),
  * `fileInput`, `upload(file)` (resolves to the gateway's answer, throws an Error with a sentence),
  * `discard(uploadId)`, `notify(message)`, `changed()` (the strip changed), `openSettings()` and
- * `open(name, url, bytes)` (a picture at full size).
+ * `open(name, url, bytes)` (a picture at full size). Optional: `refuse(file, kind)`, a sentence when
+ * that file cannot be added now (a text file while melo works), else nothing.
  */
 export function setupMedia(host) {
   const { doc, tray, warning, fileInput } = host;
@@ -255,6 +258,11 @@ export function setupMedia(host) {
     const work = [];
     for (const file of found) {
       const kind = kindOf(file);
+      const why = host.refuse?.(file, kind);
+      if (why) {
+        host.notify(why);
+        continue;
+      }
       if (kind === "picture") work.push(addPicture(file));
       else if (kind === "text") work.push(addText(file));
       else host.notify(t("composer.notSupported", { name: file.name || t("composer.thatFile") }));
@@ -280,6 +288,8 @@ export function setupMedia(host) {
     /** Whether a picture is still on its way to the gateway. */
     busy: () => items.some((item) => item.state !== "ready"),
     hasPictures: () => pictures().length > 0,
+    /** Whether a text file waits in the strip. */
+    hasFiles: () => files().length > 0,
     /** A turn was refused for its pictures: warn about the pictures in the strip from now on. */
     refusedPictures() {
       refused = true;
@@ -326,6 +336,28 @@ export function requestOf(taken) {
     .filter((item) => item.kind === "file")
     .map((item) => ({ name: item.name, text: item.text, chars: item.text.length }));
   return { ...(images.length ? { images } : {}), ...(attachments.length ? { attachments } : {}) };
+}
+
+/**
+ * Strip items for pictures the gateway staged again (`unread_notes[].images` of a Stop): the same
+ * items an upload makes, so they go back into the strip and are sent with the next message.
+ */
+export function pictureItems(staged) {
+  return (staged ?? []).map((body) => {
+    counter += 1;
+    return {
+      id: `m${counter}`,
+      kind: "picture",
+      name: body.name || t("composer.pictureName"),
+      state: "ready",
+      uploadId: body.id,
+      url: `/api/uploads/${encodeURIComponent(body.id)}`,
+      bytes: body.size_bytes,
+      width: body.width,
+      height: body.height,
+      modelReads: body.model_reads ?? null,
+    };
+  });
 }
 
 /** The pictures of a turn (`turn.started`'s `images`) as shown: where each is served, and its size. */
