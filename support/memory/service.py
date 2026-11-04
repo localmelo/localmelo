@@ -74,6 +74,7 @@ from localmelo.support.config import (
     MEMORY_COMPRESS_AT_CHARS,
     MEMORY_COMPRESS_PARALLEL,
     MEMORY_GATHER,
+    MEMORY_GATHER_DEFAULT,
     MEMORY_GATHER_MIN_COSINE,
     MEMORY_NOTE_GATE,
     MEMORY_NOTE_MIN_COSINE,
@@ -245,10 +246,11 @@ class Recall:
     search was for: ``message`` (the message's own words), ``recent`` (a message
     with no content of its own, searched with the user's words of the chat's last
     turns, :func:`follow_up_query`) or ``none`` (nothing: no recall ran).
-    With ``[memory] gather`` on (``wide`` or ``guide``), *gather* says the message
-    asks to count, total or compare and speaks of its speaker
+    With ``[memory] gather`` on (``guide``, the default, or ``wide``), *gather* says
+    the message asks to count, total or compare and speaks of its speaker
     (:func:`~.recall.asks_to_gather`) and *floor*
-    is the vector bar the search used; both are ``None``, and left out of
+    is the vector bar the search used, on every turn (``False`` and the recall bar
+    for a message that does not ask); both are ``None``, and left out of
     :meth:`to_json`, with it off.
     """
 
@@ -307,8 +309,8 @@ class RecallSettings(NamedTuple):
     ``wide`` or ``guide``) and *gather_floor* ``gather_min_cosine``: the vector bar
     of a question that counts, totals or compares. The defaults are the shipped
     ones: a block of :data:`BLOCK_CHARS` and a turn of :data:`ITEM_CHARS` (#349),
-    *followup* and *excerpt_open* on, *gather* off, and what recall did before these
-    were settings for the rest.
+    *followup* and *excerpt_open* on, *gather* ``guide`` (:data:`MEMORY_GATHER_DEFAULT`),
+    and what recall did before these were settings for the rest.
     """
 
     records: int = AUTO_RECORDS
@@ -327,7 +329,7 @@ class RecallSettings(NamedTuple):
     open_sources: bool = False
     followup: bool = True
     excerpt_open: bool = True
-    gather: str = "off"
+    gather: str = MEMORY_GATHER_DEFAULT
     gather_floor: float = GATHER_COSINE
 
     @property
@@ -975,7 +977,7 @@ class ChatMemory:
         if cfg is None:
             return RecallSettings()
         memory = cfg.memory
-        gathering = getattr(memory, "gather", "off")
+        gathering = getattr(memory, "gather", MEMORY_GATHER_DEFAULT)
 
         def bounded(name: str, default: int, bounds: tuple[int, int]) -> int:
             value = getattr(memory, name, default)
@@ -1004,7 +1006,7 @@ class ChatMemory:
             getattr(memory, "open_sources", "off") == "on",
             getattr(memory, "followup_query", "recent") != "message",
             getattr(memory, "excerpt_open", "on") != "off",
-            gathering if gathering in MEMORY_GATHER else "off",
+            gathering if gathering in MEMORY_GATHER else MEMORY_GATHER_DEFAULT,
             bar("gather_min_cosine", GATHER_COSINE, MEMORY_GATHER_MIN_COSINE),
         )
 
@@ -3316,6 +3318,14 @@ class MemoryTools(BaseToolProvider):
         turns_k = (
             settings.list_max if k is None else max(1, min(int(k), settings.list_max))
         )
+        # Only a turn whose message asks to count, total or compare looks wider; a
+        # search under any other turn, or outside a turn, reads as it does with
+        # ``[memory] gather = "off"``.
+        gathers = settings.gathers and bool(
+            chat is not None
+            and chat.memory.recall is not None
+            and chat.memory.recall.gather
+        )
         items = await self._memory.search(
             query,
             records_k=0 if scope == "chats" else notes_k,
@@ -3323,7 +3333,7 @@ class MemoryTools(BaseToolProvider):
             exclude_session=own.info.session_id if own else "",
             keep_from_turn=own.keep_from_turn if own else None,
             listing=True,
-            min_cosine=settings.wide_floor if settings.gathers else None,
+            min_cosine=settings.wide_floor if gathers else None,
         )
         notes = [item for item in items if item.is_record][:notes_k]
         turns = [item for item in items if not item.is_record][:turns_k]
@@ -3339,9 +3349,6 @@ class MemoryTools(BaseToolProvider):
             chat.add_searched([*notes, *turns])
         lines = [f"{n}. {item.shown}" for n, item in enumerate(notes, 1)]
         if turns:
-            gathers = chat is not None and bool(
-                chat.memory.recall is not None and chat.memory.recall.gather
-            )
             lines.append(_guide(settings, gathers))
             lines.extend(item.shown for item in turns)
         return "\n".join(lines)

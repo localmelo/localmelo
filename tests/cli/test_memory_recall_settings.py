@@ -5,7 +5,7 @@
 ``recall_item_chars``, ``recall_excerpt``, ``recall_form``, ``recall_list_max``,
 ``recall_open_chars``, ``excerpt_open``, ``recall_source``, ``open_sources``,
 ``compress_at_chars``, ``compress_parallel``, ``compress_cache``, ``note_gate``, ``note_min_cosine``,
-``followup_query``, ``gather`` and ``gather_min_cosine`` are saved only when they differ from the default, checked
+``followup_query``, ``gather`` (``guide`` by default) and ``gather_min_cosine`` are saved only when they differ from the default, checked
 against their bounds and values, set for one run with ``-X``, and listed by the
 developer help only, each with the issue that decides it.
 """
@@ -43,7 +43,7 @@ CHANGED = {
     "note_gate": "model",
     "note_min_cosine": 0.65,
     "followup_query": "message",
-    "gather": "guide",
+    "gather": "off",  # "guide" is the default
     "gather_min_cosine": 0.3,
 }
 # The issue that decides each setting, as the developer help names it.
@@ -91,7 +91,7 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
             recall_min_cosine=0.55,
             followup_query="recent",
             excerpt_open="on",
-            gather="off",
+            gather="guide",
             gather_min_cosine=0.40,
         )
         save(cfg)
@@ -110,7 +110,7 @@ def test_they_are_saved_only_when_changed_and_read_back(tmp_path: Path) -> None:
             'compress_at_chars = 20000\ncompress_parallel = 4\ncompress_cache = "cache/compress.jsonl"\n'
             'note_gate = "model"\nnote_min_cosine = 0.65\n'
             'followup_query = "message"\n'
-            'gather = "guide"\ngather_min_cosine = 0.3\n'
+            'gather = "off"\ngather_min_cosine = 0.3\n'
         ) in text
         assert config.load().memory == MemoryConfig(**CHANGED)  # type: ignore[arg-type]
         for name, value in CHANGED.items():  # each alone
@@ -153,6 +153,44 @@ def test_excerpt_open_is_on_by_default_and_saved_only_when_off(tmp_path: Path) -
         assert loaded.memory.excerpt_open == "on"
         save(loaded)
         assert "excerpt_open" not in path.read_text()
+
+
+def test_gather_is_guide_by_default_and_saved_only_when_it_is_not(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "config.toml"
+    cfg = Config(chat_backend="vllm", embedding_backend="none")
+    assert MemoryConfig().gather == "guide" and cfg.memory.gather == "guide"
+    with (
+        mock.patch.object(config, "CONFIG_PATH", str(path)),
+        mock.patch.object(config, "CONFIG_DIR", str(tmp_path)),
+    ):
+        # The default is not written, and a config without the key reads as guide.
+        save(cfg)
+        assert "gather" not in path.read_text()
+        assert config.load().memory.gather == "guide"
+        cfg.memory = MemoryConfig(gather="guide")
+        save(cfg)
+        assert "gather" not in path.read_text() and "[memory]" not in path.read_text()
+        # The other two values are written, read back, and written again the same.
+        for value in ("off", "wide"):
+            cfg.memory = MemoryConfig(gather=value)
+            save(cfg)
+            text = path.read_text()
+            assert f'[memory]\ngather = "{value}"\n' in text
+            loaded = config.load()
+            assert loaded.memory.gather == value
+            save(loaded)
+            assert path.read_text() == text
+        # A file that still says "guide" is the default, and saves without the key.
+        path.write_text('chat_backend = "vllm"\n[memory]\ngather = "guide"\n')
+        loaded = config.load()
+        assert loaded.memory.gather == "guide"
+        save(loaded)
+        assert "gather" not in path.read_text()
+        # A file written while the default was off keeps its off.
+        path.write_text('chat_backend = "vllm"\n[memory]\ngather = "off"\n')
+        assert config.load().memory.gather == "off"
 
 
 def test_a_saved_value_is_kept_and_a_missing_one_is_the_larger_default(

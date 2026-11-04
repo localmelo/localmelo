@@ -17,7 +17,13 @@ from pathlib import Path
 
 import pytest
 
-from localmelo.support.config import MEMORY_GATHER, MEMORY_GATHER_MIN_COSINE, Config
+from localmelo.support.config import (
+    MEMORY_GATHER,
+    MEMORY_GATHER_DEFAULT,
+    MEMORY_GATHER_MIN_COSINE,
+    Config,
+    MemoryConfig,
+)
 from localmelo.support.memory import ChatMemory
 from localmelo.support.memory.recall import (
     BLOCK_HEADER,
@@ -191,7 +197,11 @@ def test_the_constants_and_the_defaults() -> None:
     assert MEMORY_GATHER == ("off", "wide", "guide")
     assert MEMORY_GATHER_MIN_COSINE == (0.20, 0.55)
     assert GATHER_COSINE == 0.40 and MIN_COSINE == 0.55
-    assert RecallSettings().gather == "off" and RecallSettings().gather_floor == 0.40
+    # ``guide`` is the shipped default; ``off`` and ``wide`` stay developer values.
+    assert MEMORY_GATHER_DEFAULT == "guide"
+    assert MemoryConfig().gather == "guide" and MemoryConfig().gather_min_cosine == 0.40
+    assert RecallSettings().gather == "guide" and RecallSettings().gather_floor == 0.40
+    assert RecallSettings().gathers is True
     assert GATHER_GUIDE == (
         "This asks for a count, total or comparison: open every listed item that "
         "may belong, search again with other words for each kind not listed yet, "
@@ -206,7 +216,13 @@ async def test_the_settings_are_read_each_turn_and_a_bad_one_is_the_default(
     memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
     try:
         first = memory.recall_settings()
-        assert (first.gather, first.gather_floor, first.gathers) == ("off", 0.40, False)
+        assert (first.gather, first.gather_floor, first.gathers) == (
+            "guide",
+            0.40,
+            True,
+        )
+        cfg.memory.gather = "off"
+        assert memory.recall_settings().gathers is False
         cfg.memory.gather = "wide"
         cfg.memory.gather_min_cosine = 0.30
         wide = memory.recall_settings()
@@ -218,7 +234,7 @@ async def test_the_settings_are_read_each_turn_and_a_bad_one_is_the_default(
         assert memory.recall_settings().gather == "guide"
         for bad in ("narrow", True, 1, None):
             cfg.memory.gather = bad  # type: ignore[assignment]
-            assert memory.recall_settings().gather == "off", bad
+            assert memory.recall_settings().gather == "guide", bad
         for value in (0.19, 0.56, True, "0.4", float("nan")):
             cfg.memory.gather_min_cosine = value  # type: ignore[assignment]
             assert memory.recall_settings().gather_floor == 0.40, value
@@ -305,13 +321,11 @@ AS_ALWAYS = f"\n\n{BLOCK_HEADER}\n"
 # ── Off changes nothing ──
 
 
-@pytest.mark.parametrize("setting", [None, "off"])
 @pytest.mark.parametrize("form", ["list", "excerpt"])
 async def test_off_leaves_the_block_the_search_result_and_the_recall_data_as_they_were(
-    tmp_path: Path, store: SessionStore, form: str, setting: str | None
+    tmp_path: Path, store: SessionStore, form: str
 ) -> None:
-    extra: dict[str, object] = {} if setting is None else {"gather": setting}
-    memory, _, _ = await memory_of(tmp_path, store, recall_form=form, **extra)
+    memory, _, _ = await memory_of(tmp_path, store, recall_form=form, gather="off")
     try:
         for question in (GATHER, PLAIN):
             found = await ask(memory, store, question)
@@ -389,7 +403,9 @@ async def test_wide_keeps_the_default_bar_for_a_plain_question_on_the_same_memor
 async def test_wide_changes_the_excerpt_form_not_at_all(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    off, _, _ = await memory_of(tmp_path / "a", store, recall_form="excerpt")
+    off, _, _ = await memory_of(
+        tmp_path / "a", store, recall_form="excerpt", gather="off"
+    )
     wide, _, _ = await memory_of(
         tmp_path / "b", store, recall_form="excerpt", gather="wide"
     )
@@ -478,18 +494,25 @@ async def test_a_follow_up_is_checked_with_the_words_it_is_searched_with(
 # ── Wide: the search tool ──
 
 
-async def test_every_list_form_search_goes_down_to_the_gather_bar_under_wide(
+async def test_a_list_form_search_goes_down_to_the_gather_bar_only_under_a_gathering_turn(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    off, _, _ = await memory_of(tmp_path / "a", store, recall_form="list")
+    off, _, _ = await memory_of(tmp_path / "a", store, recall_form="list", gather="off")
     wide, ids, cfg = await memory_of(
         tmp_path / "b", store, recall_form="list", gather="wide"
     )
     try:
-        # No turn is under way: the search has no message to read, and its words
-        # hold no counting word, yet the bar is the gather bar.
+        # No turn is under way: the search has no message to read, so it reads as it
+        # does with gather off, whatever its words.
         assert CHAT_TURN.get() is None
         assert await MemoryTools(off).search(query=WORDS) == listed(STRONG)
+        assert await MemoryTools(wide).search(query=WORDS) == listed(STRONG)
+        # A plain turn: the same.
+        await ask(wide, store, PLAIN)
+        assert await MemoryTools(wide).search(query=WORDS) == listed(STRONG)
+        # A gathering turn: the bar is the gather bar, whatever the model searched for
+        # (its words hold no counting word).
+        await ask(wide, store, GATHER)
         reply = await MemoryTools(wide).search(query=WORDS)
         assert reply == listed(STRONG, *EVIDENCE)
         assert ids_of(reply) == ids[:4]
@@ -576,8 +599,7 @@ async def test_guide_puts_the_sentence_in_the_search_of_a_gathering_turn(
         # A plain turn, and a search outside any turn, get the guide line as before.
         await ask(memory, store, PLAIN)
         plain = await tools.search(query=WORDS)
-        assert plain.split("\n")[0] == LIST_GUIDE and GATHER_GUIDE not in plain
-        assert len(lines_of(plain)) == 4  # the bar is still the gather bar
+        assert plain == listed(STRONG)  # and the default bar
         CHAT_TURN.set(None)
         assert (await tools.search(query=WORDS)).split("\n")[0] == LIST_GUIDE
         # With no list there is no guide line, so no sentence.
@@ -608,6 +630,89 @@ async def test_guide_follows_the_item_guide_of_the_items_arm(
         assert plain.block == ""  # an item at 0.45 is under the default bar
     finally:
         await memory.aclose()
+
+
+# ── The default ──
+
+
+@pytest.mark.parametrize("form", ["list", "excerpt"])
+async def test_the_default_leaves_a_turn_that_does_not_gather_as_off_has_it(
+    tmp_path: Path, store: SessionStore, form: str
+) -> None:
+    off, _, _ = await memory_of(tmp_path / "a", store, recall_form=form, gather="off")
+    default, _, cfg = await memory_of(tmp_path / "b", store, recall_form=form)
+    assert cfg.memory.gather == "guide"  # nothing set it
+    try:
+        assert [t.definition for t in await MemoryTools(default).start()] == [
+            t.definition for t in await MemoryTools(off).start()
+        ]
+        for question in (PLAIN, "What is the capital of France?", "   "):
+            before = await ask(off, store, question)
+            after = await ask(default, store, question)
+            assert after.block == before.block, question
+            assert [i.key for i in after.used] == [i.key for i in before.used]
+            assert after.recall is not None and before.recall is not None
+            # The turn's data says the detector did not fire and the bar it used.
+            assert after.recall.gather is False and after.recall.floor == 0.55
+            assert before.recall.gather is None and before.recall.floor is None
+            shown = after.event()["recall"]  # type: ignore[index]
+            asked = before.event()["recall"]  # type: ignore[index]
+            assert set(shown) - set(asked) == {"gather", "floor"}
+            for key in ("retriever", "fallback", "candidates", "used", "block_chars"):
+                assert shown[key] == asked[key], key
+            assert shown["query_from"] == asked["query_from"]
+            for words in (WORDS, "saxophone", "cardiologist appointment"):
+                assert await MemoryTools(default).search(query=words) == (
+                    await MemoryTools(off).search(query=words)
+                ), words
+    finally:
+        await off.aclose()
+        await default.aclose()
+
+
+async def test_the_default_looks_wider_with_the_guide_for_a_gathering_message_in_list_form(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    off, _, _ = await memory_of(tmp_path / "a", store, recall_form="list", gather="off")
+    default, ids, _ = await memory_of(tmp_path / "b", store, recall_form="list")
+    try:
+        before = await ask(off, store, GATHER)
+        assert before.block == AS_ALWAYS + listed(STRONG)
+        found = await ask(default, store, GATHER)
+        lines = found.block.split("\n")
+        assert lines[2:4] == [BLOCK_HEADER, f"{LIST_GUIDE} {GATHER_GUIDE}"]
+        assert found.block.count(GATHER_GUIDE) == 1
+        assert ids_of(found.block) == ids[:4]  # the wide bar, 0.40
+        assert found.recall is not None
+        assert found.recall.gather is True and found.recall.floor == 0.40
+        reply = await MemoryTools(default).search(query=WORDS)
+        assert reply.split("\n")[0] == f"{LIST_GUIDE} {GATHER_GUIDE}"
+        assert ids_of(reply) == ids[:4]
+    finally:
+        await off.aclose()
+        await default.aclose()
+
+
+async def test_the_default_changes_the_excerpt_form_of_a_gathering_message_not_at_all(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    off, _, _ = await memory_of(
+        tmp_path / "a", store, recall_form="excerpt", gather="off"
+    )
+    default, _, _ = await memory_of(tmp_path / "b", store, recall_form="excerpt")
+    try:
+        before = await ask(off, store, GATHER)
+        after = await ask(default, store, GATHER)
+        assert after.block == before.block and GATHER_GUIDE not in after.block
+        # The detector fires, but the excerpt form has no floor to lower.
+        assert after.recall is not None
+        assert after.recall.gather is True and after.recall.floor == 0.55
+        assert await MemoryTools(default).search(query=WORDS) == (
+            await MemoryTools(off).search(query=WORDS)
+        )
+    finally:
+        await off.aclose()
+        await default.aclose()
 
 
 # ── The recall data ──

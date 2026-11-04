@@ -109,6 +109,7 @@ MEMORY_RECALL_MIN_COVERAGE = (0.10, 1.00)
 # How recall looks wider for a question that counts, totals or compares, and the
 # vector bar it uses then: see MemoryConfig.gather and gather_min_cosine.
 MEMORY_GATHER = ("off", "wide", "guide")
+MEMORY_GATHER_DEFAULT = "guide"
 MEMORY_GATHER_MIN_COSINE = (0.20, 0.55)
 # How far back a new chat's first turn looks into the other chats: see
 # ChatConfig.recent_digest_minutes (0 turns it off).
@@ -494,12 +495,14 @@ class MemoryConfig:
     that has no content recalls nothing. Two more are for questions about the person's
     own life that count, total or compare across things (#428), and apply to
     ``recall_form = "list"``.
-    ``gather``, ``off`` (the default: recall as before), ``wide`` (for such a
-    question the block's vector bar is the lower of ``recall_min_cosine`` and
-    ``gather_min_cosine``, and every list-form ``search_memory`` uses that lower bar)
-    or ``guide`` (``wide`` and one more sentence under the list that says to open every
-    item that may belong and to search again for each kind not listed yet);
-    ``gather_min_cosine`` (0.20-0.55, 0.40 by default) is that lower bar.
+    ``gather``, ``guide`` (the default: for such a question the block's vector bar is
+    the lower of ``recall_min_cosine`` and ``gather_min_cosine``, every list-form
+    ``search_memory`` uses that lower bar, and one more sentence under the list says to
+    open every item that may belong and to search again for each kind not listed yet),
+    ``wide`` (the lower bar without the sentence) or ``off`` (recall as before; a
+    message that does not ask to count, total or compare is recalled for the same way
+    under every value); ``gather_min_cosine`` (0.20-0.55, 0.40 by default) is that
+    lower bar.
     ``project_instructions = "off"`` stops a
     task that the person made from reading the instruction file of its folder (``AGENTS.md``,
     ``CLAUDE.md`` or ``GEMINI.md``, the nearest first) when it starts.
@@ -534,7 +537,7 @@ class MemoryConfig:
     note_gate: str = "typed"  # typed | pointed | meaning | model: note sources.
     note_min_cosine: float = 0.55  # Least similarity of a note to its source.
     followup_query: str = "recent"  # recent | message: what "continue" searches with.
-    gather: str = "off"  # off | wide | guide: recall looks wider to count or compare.
+    gather: str = MEMORY_GATHER_DEFAULT  # guide | wide | off: look wider to count.
     gather_min_cosine: float = 0.40  # The vector bar for such a question.
     project_instructions: str = "on"  # on | off: a task reads its folder's AGENTS.md.
 

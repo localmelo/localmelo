@@ -9,7 +9,6 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
-- Developer only: memory can look wider when a question counts, totals or compares, so items from every chat it needs are listed. Part of #428.
 - Chrome in the background. `[browser] driver = "chrome"` (Settings → Chats and folders → **Browser**: Chrome,
   Safari or Off; `/browser chrome` and `/browser safari` in the terminal and the console; browsing stays off
   until you turn it on, and `/browser on` uses the browser chosen before, or Safari's windows when none was)
@@ -875,6 +874,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- When you ask melo to count, total or compare things you told it across chats, it now looks wider in its memory and checks each kind it may have missed. Part of #428.
 - "Allow for this chat" is no longer memory-only. `GET /api/sessions/{id}` `grants` and `granted_at` list what
   holds in the chat whether it is open or not, the main chat's grants included for a side chat.
   `DELETE /api/sessions/{id}/grants/{name}` takes back the chat's own grant and a main-chat grant of that name
