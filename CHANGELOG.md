@@ -900,6 +900,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `grants_everywhere`. A revoke the store cannot save is 503 on every route. In the
   terminal's own chat `/approvals forget` says when a grant is the main chat's and where to take it back.
 - melo acts for you, in your name. Applying with your resume, signing in, filling in and submitting a form, sending a message as you and booking are done when you ask or authorize them: the model no longer refuses a step because it speaks in your name or cannot be undone, and it does not hand back a list of links or leave the last click to you. The approval cards (Ask) and Auto's review decide which steps you confirm, never the model, and only what would harm other people is declined. Every chat's and every task's instructions say so, the main chat and the side chats add a one-line reminder after your message, and a recalled reply in which melo refused or said a step was blocked is no precedent. The main chat is told that a request to do something online is work (the browser, or a task for the many-step part), not advice, and a go-ahead such as `I authorize you to apply` or `我授权你去投简历` starts that work like any other request.
+- Chats with memory answer faster on long turns: each step's request now extends the one before
+  it, so a local model server reuses its cache and prefills only the new step. The long-term recall
+  a chat puts right after the system prompt is read at the turn's first step and kept, instead of
+  being read again on every step, when the turn's own steps (already in view) kept changing it and
+  every later message had to be prefilled again. It is read again after older messages leave the
+  window, and at the next turn. Its place in the request is unchanged.
 - In Auto, the goal decides: the steps a task plainly needs run without asking, and the risky
   ones still ask. On the site or app the chat is about, opening and reading it, signing in the
   way you described, picking options, filling in and sending the task's own form and reading

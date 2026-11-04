@@ -323,7 +323,13 @@ run, and `fixed_prefix = false` (or `--fixed-prefix off`) sends the requests fro
 it became the default. It snapshots the local date and UTC offset at each run's start, including across
 midnight, and places changing recall and reflections in labelled user-side data.
 
-Recall goes before the task. With `cache_layout = "v2"` the latest reflection goes last, in a
+Recall goes before the task. Long-term recall (`reasoning = "legacy"`) is read at a run's first
+step and kept for its later steps, so each planning request extends the one before it. It is read
+again only at a step after the window dropped its oldest messages, where the request has changed
+already, and at the next run. Read on every step, it changed whenever the run's own step summaries
+entered it, and the server prefilled every later message again.
+
+With `cache_layout = "v2"` the latest reflection goes last, in a
 final user message after the window, so a new attempt changes only what follows the shared
 history; the default, `v3`, appends the reflection to the window once (see below).
 
