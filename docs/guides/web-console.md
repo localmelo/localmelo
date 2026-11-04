@@ -137,6 +137,8 @@ under the main chat. A side chat's header begins with **Main chat ›**, which g
 and closing the open side chat goes back to the main chat too. Chats made before the main
 chat existed are its side chats, as they were.
 
+What you allow in the main chat counts everywhere; in a side chat, only there (see [Permissions](#permissions)).
+
 ### Who "he" or "she" means
 
 - **A new side chat knows what you were just discussing.** Its first message also reads up to five short lines on your other chats of the last 30 minutes: what each turn was about, and where. `read his résumé first` (`先读他的简历`) then means the friend you were talking about in the main chat. Your own words come first. Under your message, **From your other chats (last 30 min)** opens the lines melo read, and a chat's name opens that chat. `[chat] recent_digest_minutes = 0` turns it off ([Configuration](../reference/configuration.md)).
@@ -168,6 +170,7 @@ worker runs did** (once a run or a terminal chat exists, and always in developer
 - **Ask, or ask for work.** The main chat does what its own tools can: it answers a quick question, searches your folder for "which file defines X?", and reads files and public web pages. A question that says `briefly`, `in short`, `one line`, `简单说一下` or `一句话` is always answered here, after a quick look: it is never offered as a task.
 - **It starts the work itself.** A request it cannot do with its own tools (running commands, changing files, many steps of research or writing) starts as a task right away, with one line and **Stop**: `Started: Plan the trip · P2`. It does not ask first. Your message is the task's request, word for word. Starting is not a risky step: every step inside the task still asks you, or is blocked in Auto, as in the chat. Its result comes back as a card. It never answers with only what it is about to do: a reply like "I'll start by looking at the test file" starts the work as a task instead.
 - **A request in steps starts too, in any language.** A message that asks it to look at something outside the chat first (a site, a link, a file, a repo or folder, your own things) and then tell or do something (`look at this site and tell me the latest prices`, `去这个网站看一下，然后告诉我最新的价格`, `分析一下这个仓库，告诉我它的结构`) is a request, even when its last part asks a question, and starts as a task when the chat cannot do it in a step or two. `看看天气然后告诉我`, `look at this and tell me what you think`, a look at one of your tasks, and text given after a colon to translate or explain (`翻译成英文：…`) are answered in the chat.
+- **A go-ahead starts too.** `I authorize you to apply`, `you have my permission` or `我授权你去投简历` asks for the work the chat talked about, so it starts that work (as a task, or with the browser tools in the chat itself) instead of ending in advice or a list of links. `What does authorization mean?` is still a question.
 - **When it does not start one.** A greeting, a short message with nothing to do in it (`thanks`, `今天天气不错`), a short question it can answer, a question about a task (`is it done?`, `what did it find?`, `跑完了吗`; `Is the report ready? If not, write it to report.md` asks for work), or a request to be told something (`please explain what a monad is`, `帮我看看 x.py 是做什么的`) is answered in the chat. A request too unclear to act on gets one short question back. **Start this as a task?** is offered only where starting would be wrong: a question, which asks to know rather than to act (`why do the tests fail?`; a polite request that asks for work, such as `can you run the tests?`, is a request), words that say not to act and ask for nothing else (`just explain how`, `don't change anything`, `no need for a task`, `只解释一下`, `不用开任务`; `fix the login bug without changing anything else` asks for the fix and starts), words that steer a task (`cancel it`, `continue the report task`), a message with no words of its own (an attachment alone), or a repeating chore or a reminder code could not schedule.
 - **Say it in code's words.** `/task …`, or **Run as a task** beside the send button, starts the message as a task at once; no model reads it to decide. So does a request to change files it names (`Fix tests/cli/test_e2e_pty.py and commit`). A task the main chat starts this way begins at once under the first words of your message, and is renamed in 3 to 8 words in the language of your message (`Hide the recovery card in default mode`) when the model answers one short request, made at the lowest priority so it never waits ahead of real work; a short message is its own title, a name you gave the task meanwhile stays, and the first words stay when the model does not answer in 6 seconds. `stop`, `pause`, `resume` or `first` with a task's name (`pause the slides`, `暂停 Fix CI`, `先做 slides`) changes that task at once, with **Undo**. A request you forbid or only quote is never read as work: `don't delete a.md` and `不要删除 a.md` start nothing.
 - **Priorities as P0 to P5.** A line shows the code (`P1`); hover it for what it means. Your words choose: "urgent", "asap", a deadline today (`by 5pm`, `今天下午三点前`) or "today" anywhere in the request (not "not today", "今天不用") make it P1 (today), "no rush" makes it P3 (when there is time), anything else is P2 (normal). **Change** on the line opens the list (`P0 · runs first; others wait`, `P1 · today`, `P2 · normal`, `P3 · when there is time`, `P4 · only when the computer is idle`, `P5 · on hold until you start it`) and sets your own priority, which stays.
@@ -205,9 +208,9 @@ worker runs did** (once a run or a terminal chat exists, and always in developer
 - **Asked in the chat that started it.** A task's step that needs your approval shows in that chat, inside its card (`Needs your approval: Fix CI`): the step as code shows it, why melo asks, and **Allow once**, **Allow for this task** and **Deny**. The task's page shows the same card.
 - **melo explains, you decide.** For your own tasks and chores, under the step, **melo's explanation** says in a few sentences what the task is doing, why it needs this step, what could go wrong and what each answer does. melo writes it from the task's title and goal, the step and the review's reasons, never from what a tool printed; it takes up to 20 seconds, and the card works without it. It cannot approve anything: the step, the buttons and what your answer allows come from code. A task another program or melo itself started gets no explanation.
 - **The same step is not asked twice.** Once you allowed a step in a chat or in one of its tasks, that chat's later tasks run the exact same step (same tool, same command or file content, same folder, and the files melo read for it unchanged) without asking, when melo's rules read the whole step and found it routine: Python code, a shell command or a file write. The card says so under its buttons: `Your Allow also lets this chat's tasks run this exact step later without asking, until you revoke it.` The chat shows `Used your approval from 2:02 PM` with **Revoke**, and the task's page lists it under **Ran on your earlier approval**. A step that differs in one argument, or runs in another folder, asks. melo reads every file changed since the chat began, so a file an earlier task wrote is checked before your approval counts again.
-- **"Allow for this chat" covers its tasks.** A tool you allowed for a chat runs its routine steps in that chat's tasks too, as in the chat. Another chat's approvals never count.
+- **"Allow for this chat" covers its tasks.** A tool you allowed for a chat runs its routine steps in that chat's tasks too, as in the chat, after melo reads the files changed since the chat began. What you allowed in the main chat counts there too; another side chat's grants never do, and **Allow for this task** holds in that task only.
 - **What always asks.** A high-impact step (installs, downloads, deletes, sends data out, changes outside the folder, uses your keys, changes melo itself) asks every time, however often you allowed it before. So does a step melo could not see all of (a file too big to read, a command built while it runs), and every call of a tool melo's rules do not read (a web or MCP tool, such as one that pays an invoice). Chores, and tasks another program or melo itself started, never use or record your approvals. Auto's **Allow once** is one step, once, and is never recorded. A task you create with your gateway token (`melo task new`) is yours, and uses the main chat's approvals.
-- **Revoke.** **Revoke** on the chat's row, on the task's page, or under **Steps you approved here** in a chat's **Details** (developer mode) takes an approval back: that step asks again; what ran stays done. Approvals live in memory: restarting the gateway or deleting the chat forgets them.
+- **Revoke.** **Revoke** on the chat's row, on the task's page, or under **Steps you approved here** in a chat's **Details** (developer mode) takes an approval back: that step asks again; what ran stays done. These recorded steps live in memory only: restarting the gateway or deleting the chat forgets them. Your "allow for this chat" grants are not among them; they are kept (see [Permissions](#permissions)).
 - **In Auto.** A step Auto stops in a task you started asks in its chat, on the same card, and the task waits. A step Auto blocked in a task shows in its chat too, with what was blocked, why, and **Allow once**. An earlier approval never lifts Auto's stop: Auto stops only steps that are not routine, and those are never kept.
 
 ## When a task it started stops, the chat follows up
@@ -256,7 +259,8 @@ The commands of the [terminal](terminal.md#commands) work on this page and in th
 | `/copy [turn]` | Copy an answer to the clipboard; without a number, the latest. |
 | `/title [text]` | Show or set the chat's title. |
 | `/memory [window\|import]` | Open the Memory tab; `window` shows the model's window; `import` also presses **Look for notes**, so the files other assistants keep are listed (a row says so when memory is off). |
-| `/approvals [ask\|auto\|deny\|forget [tool]]` | Show the chat's mode and grants; `ask` and `auto` switch it and `forget` takes grants back. `deny` is for the terminal. |
+| `/approvals [ask\|auto\|deny\|forget [tool]]` | Show the chat's mode and grants; `ask` and `auto` switch it and `forget` takes grants back. In a side chat, `forget NAME` on a grant from the main chat takes it back everywhere, and `forget` alone takes back only that chat's own (in the main chat: every grant that holds everywhere). `deny` is for the terminal. |
+| `/grants [revoke N]` | What you allowed, numbered as **Settings › Permissions** lists it; `revoke N` takes the N-th back. |
 | `/browser [on\|off]` | Show or switch reading web pages in Safari, saved in `[browser] driver`. |
 | `/attach`, `/attachments`, `/detach` | `/attach` opens the picker for a picture or a text file; `/attachments` lists what waits and `/detach N` (or `/detach all`) removes it. |
 | `/verbose`, `/thinking`, `/stream [on\|off]` | How the page shows a chat, kept in this browser: tool calls open, thinking open, or steps shown only when a turn ends. |
@@ -625,10 +629,10 @@ confirmation, a finished task, Stop winning the race) shows the server's text.
 ## Inspect a chat
 
 In developer mode, **Details** opens the session's details in the [panel](#the-panel-beside-a-chat), in place of
-its tabs: its tools and session grants, working
+its tabs: its tools and the grants that hold in it (a side chat shows the main chat's too, open or not), working
 and long-term memory status, and finished runs with paging when a page supplies
 a turn cursor. Granted tools can be
-revoked there; the tools view may open a paused session. **Close details** or Esc returns to the tabs. On a narrow
+revoked there, and a main chat grant revoked there is revoked everywhere; the tools view may open a paused session. **Close details** or Esc returns to the tabs. On a narrow
 screen the panel's sheet opens with them.
 
 <a id="language"></a>
@@ -680,6 +684,7 @@ save carries the revision it read, so a change made elsewhere meanwhile asks you
   **Other folders melo may read** (the folders you chose **Always allow this folder** for, each with **Remove**; see
   [Folders outside the workspace](tools-mcp.md#folders-outside-the-workspace)) and the recent
   folders, each with **Make default**.
+- **Permissions**: what you allowed, in two groups, **Everywhere** and **Per chat** (see [Permissions](#permissions)).
 - **Scheduled**: the check-in switch with its next time, and **Open Scheduled** for the chores.
 - **Appearance**: the theme (System, Light, Dark, kept in this browser), the
   [language](#language) (Automatic, English, 简体中文), **Melo on the desktop** in the macOS
@@ -788,7 +793,7 @@ alone. The comparison is for you to read: the answers below work as they do for
 any other file write. **Allow once**, the filled button, runs this call only.
 **Allow for this
 chat** (**Allow for this task** on a task's page) stops asking about the routine calls
-of that tool for the rest of the chat; the line under the buttons says so, and
+of that tool in the chat (see [Permissions](#permissions) for how long and where it holds); the line under the buttons says so, and
 for a command or Python code it adds that installs, downloads and changes
 outside the workspace still ask. **Deny**
 opens an optional box, "Tell melo what to do instead", and sends the denial
@@ -829,7 +834,7 @@ When melo wants a file outside the chat's folder, the card asks about that folde
 ("Let melo read in ~/Documents/letters?") and shows its real path in a box, with what melo
 wants to do there ("melo wants to read cover-letter.md in this folder."). A read offers **Allow once**,
 **Allow this folder for this chat**, **Always allow this folder** and **Deny**: "this chat"
-ends with the chat, and "always" keeps the folder in Settings, under **Chats and folders**,
+is a grant (see [Permissions](#permissions)), and "always" keeps the folder in Settings, under **Chats and folders**,
 where you can remove it. A write there is a high-impact card with **Allow once** and **Deny**
 only, every time. The folders a chat may read are listed in **Details › Tools**, each with
 **Revoke**. Keys, melo's own data, system folders and your whole home folder are never
@@ -882,6 +887,7 @@ not ask for, or one only you can allow, melo asks you on the usual card; the
 riskiest steps are blocked and explained. **Ask**, the default, asks before
 commands and file changes.
 
+- **melo acts in your name; the cards ask.** What you ask for is done as you: applying with your resume, signing in, filling in and submitting a form, sending a message as you, booking. The model does not refuse it because it speaks in your name or cannot be undone, and it does not ask you to type a permission; which steps you confirm is decided by the cards in Ask and by Auto's review in Auto. Only what would harm other people is declined.
 - **Switch.** The chip beside the model under the message box reads **Ask**
   or **Auto**; its menu, "How melo works in this chat", switches the chat
   from melo's next step (a card already waiting stays). A new chat starts in
@@ -936,11 +942,11 @@ commands and file changes.
   **Deny** shows the same way.
 - **Allowed in this chat.** **Allow for this chat** on a site's card lets the
   same kind of step on that site (opening and reading it, or clicking and
-  choosing on it) run for the rest of the chat. A site Auto let the chat open
-  stays allowed for reading its pages for the rest of the chat too, also
-  after you switch to Ask; a click on it still asks in Ask. The chip's menu lists the sites the chat allowed, each with
+  choosing on it) run in the chat. A site Auto let the chat open
+  stays allowed for reading its pages in that chat too, also
+  after you switch to Ask, and holds in that chat only, even the main chat; a click on it still asks in Ask. The chip's menu lists the sites the chat allowed, each with
   **Remove**. Typing on a page and sending a form ask every time, a
-  high-impact step never rides an allowance, and a new chat starts with none.
+  high-impact step never rides an allowance, and a new chat starts with only what you allowed in the main chat.
 - **What is blocked.** Typing or reading a secret (a password, a one-time
   code, a key; clicking a sign-in button is none), system settings, scripts
   that operate another app, something that runs later and code from the
@@ -960,15 +966,31 @@ commands and file changes.
   with nobody watching, it blocks the step instead: its page shows **Mode**
   and lists **Blocked steps**, each opening the same card; the task goes on
   without them, and **Allow once** there sends the message to the task.
-- Allowances and sites allowed for a chat live in memory: restarting
-  localmelo forgets them, and an allowance the retried turn did not use goes
-  when that turn ends.
+- An **Allow once** on a blocked step lives in memory: restarting
+  localmelo forgets it, and an allowance the retried turn did not use goes
+  when that turn ends. Sites allowed for a chat are grants, which are kept
+  (see [Permissions](#permissions)).
+
+## Permissions
+
+Everything you allow "for this chat" is a grant: a tool, a site, a folder outside the workspace or another app's window. **Settings › Permissions** lists them, and they survive a restart of the gateway.
+
+- **The rule:** what you allow in the main chat counts everywhere; in a side chat, only there. Everywhere means every side chat, the tasks you start and the terminal.
+- **The card says so:** in the main chat the button that keeps a grant reads **Allow in every chat** (**Allow this folder in every chat**, **Allow Chat everywhere** for another app's window), with a line saying it counts in every chat, the tasks you start and the terminal until you revoke it here. A side chat's card says **this chat**, a task's **this task**.
+- **In a side chat:** the chat's menu marks a grant that came from the main chat, **From the main chat**; removing it takes it away everywhere, and the chat says so. Clearing a side chat's grants (`/approvals forget`) takes back only its own, and says how many of the main chat's still hold there.
+- **Only there:** a side chat's grant holds in that chat. A task's **Allow for this task** holds in that task. A site Auto let the chat read holds in that chat only, even in the main chat.
+- **The page:** two groups, **Everywhere** and **Per chat** (a small heading per chat). A row says what is allowed in plain words, the chat, who decided (You or Auto), when, and **Revoke**, which works at once, in chats that are running too. With none, the page says so. **Always allow this folder** is not a grant: it stays in **Chats and folders**.
+- **`/grants`** lists the same rows with numbers (everywhere first, newest first, then each chat, the one with the newest grant first); `/grants revoke N` takes the N-th back.
+- **Never kept, never listed:** **Allow once**, typing on a page, sending a form, a click on a password, code or card field, a consent control or a box from another site, a press in another app's window, paying, changing an account's settings, and every high-impact step ask every time.
+
+Deleting a chat deletes its grants. Moving a side chat to another folder takes back its own (the main chat's still hold).
 
 ## Persistence and limits
 
 The page's chats are sessions in the gateway's own session file,
 `~/.cache/localmelo/gateway/sessions.db`; the terminal keeps its own in
-`~/.cache/localmelo/cli/sessions.db`. They last until you close them: a
+`~/.cache/localmelo/cli/sessions.db`. They last until you close them, and so do
+the grants you gave them: a
 gateway restart keeps them, and a chat reopens with its transcript read from
 the file, no Agent built yet (`not_loaded`); its Agent is built on the
 conversation the file holds when the next turn or retry starts.

@@ -279,6 +279,18 @@
       "action": "approvals"
     },
     {
+      "name": "grants",
+      "aliases": [],
+      "args": "[revoke N]",
+      "help": {
+        "en": "List what you allowed, or revoke one",
+        "zh-Hans": "列出你允许过的事，或收回一项"
+      },
+      "during_turn": true,
+      "keys": "",
+      "action": "grants"
+    },
+    {
       "name": "progress",
       "aliases": [],
       "args": "",

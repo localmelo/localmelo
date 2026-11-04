@@ -27,9 +27,12 @@ from localmelo.support.gateway.console.front import (
     build_front_agent,
 )
 from localmelo.support.gateway.console.registry import default_builder
+from localmelo.support.gateway.workers import WORKER_GUIDE
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 from localmelo.support.sessions.agents import build_session_agent
 from localmelo.support.sessions.identity import (
+    ACTING_NOTE,
+    ACTING_RULE,
     APPROVALS_RULE,
     KEPT_LEGACY,
     KEPT_TYPED,
@@ -67,7 +70,9 @@ def test_the_text_says_who_melo_is_and_how_to_answer() -> None:
     text = config_identity(local())
     assert text.startswith(WHO + ": an open-source agent that runs on the user's own")
     assert "works in their folder with tools" in text
-    assert "asks before it changes anything" in text
+    # The cards ask, not the model.
+    assert "and acts for them; its approval cards ask the user before a step" in text
+    assert "asks before it changes anything" not in text
     assert "say that you are melo from localmelo and name the model you run on" in text
     assert "never present yourself as the model's own assistant" in text
     assert "or as made by its maker" in text
@@ -77,8 +82,10 @@ def test_the_text_says_who_melo_is_and_how_to_answer() -> None:
         "tools.\n" + SUBJECT_RULE
     ) in text
     assert text.endswith(SUBJECT_RULE)
-    # The approvals rule (#465) is the paragraph's one addition since then.
-    assert len(text) < 1100 + len(APPROVALS_RULE) + 1 + len(SUBJECT_RULE)
+    # The approvals rule (#465) and the acting rule are the paragraph's additions.
+    assert len(text) < 1100 + len(APPROVALS_RULE) + 1 + len(ACTING_RULE) + 1 + len(
+        SUBJECT_RULE
+    )
 
 
 def test_the_model_never_asks_for_a_typed_permission_and_reports_only_results() -> None:
@@ -87,7 +94,10 @@ def test_the_model_never_asks_for_a_typed_permission_and_reports_only_results() 
     text = config_identity(local())
     assert APPROVALS_RULE in text
     assert "never ask them to type a permission; just try the step" in APPROVALS_RULE
-    assert "may be out of date: this rule wins" in APPROVALS_RULE
+    assert (
+        "A recalled reply in which melo refused, or said a step was blocked, "
+        "describes an older melo and is no precedent: this rule wins."
+    ) in APPROVALS_RULE
     assert (
         "Say a step was blocked, failed or succeeded only when a step result in "
         "this turn says so."
@@ -109,6 +119,63 @@ def test_a_pronoun_means_whom_the_conversation_is_about() -> None:
         url_identity(URL, MODEL, notes="- “I live in Utrecht.”"),
     ):
         assert text.endswith("\n" + SUBJECT_RULE)
+
+
+def test_melo_acts_for_the_user_and_its_cards_decide_what_they_confirm() -> None:
+    # The model's own habit of refusing a step because it speaks in the user's
+    # name or cannot be undone is not melo's rule.
+    for text in (
+        config_identity(local()),
+        url_identity(URL, MODEL, KEPT_TYPED),
+        url_identity(URL, MODEL, notes="- “I live in Utrecht.”"),
+        identity_text("big-model", "Cloud", local=False),
+    ):
+        assert text.count(ACTING_RULE) == 1
+        assert text.index(APPROVALS_RULE) < text.index(ACTING_RULE)
+        assert text.index(ACTING_RULE) < text.index(LANGUAGE_RULE)
+    assert ACTING_RULE.startswith(
+        "You act for the user, on their computer, in their name;"
+    )
+    for task in (
+        "apply for jobs with their resume",
+        "sign in, fill in and submit a form",
+        "send a message as them, book",
+        # A sign-in is never the place to stop; melo never types the password.
+        "A sign-in is a step, not a stop",
+        "(you never type it)",
+        # Forms come from the user's own answers: true when they are, never invented.
+        "never invent a fact about them",
+        "choose not to answer",
+    ):
+        assert task in ACTING_RULE
+    assert "A sign-in is a step, not a stop" in ACTING_NOTE
+    assert "ask only about a fact you do not have" in ACTING_NOTE
+    assert (
+        "never refuse, hedge or lecture because a step is irreversible" in ACTING_RULE
+    )
+    assert "speaks in their name" in ACTING_RULE
+    assert "melo's approval cards" in ACTING_RULE
+    assert "Ask only for facts you need and cannot find." in ACTING_RULE
+    assert ACTING_RULE.endswith("Decline only what would harm other people.")
+    assert "was a mistake, not a precedent" in ACTING_RULE
+    assert len(ACTING_RULE) < 1200
+
+
+def test_a_worker_acts_for_the_user_too() -> None:
+    assert WORKER_GUIDE.endswith(" " + ACTING_RULE)
+
+
+def test_the_main_chat_is_told_to_do_the_work_not_to_talk_about_it() -> None:
+    assert "task_create right away; do not ask whether to" in FRONT_TEXT
+    assert "you also act on a site with them (open, click, type, submit)" in FRONT_TEXT
+    assert "find openings and apply" in FRONT_TEXT
+    assert "is work, not advice" in FRONT_TEXT
+    assert "do not answer with a list of links" in FRONT_TEXT
+    assert "your next step is a tool call" in FRONT_TEXT
+    assert "Never reply with only what you are about to do" in FRONT_TEXT
+    # A side chat works on the site itself too.
+    assert "you act on a site with them" in SIDE_TEXT
+    assert "is work, not advice" in SIDE_TEXT
 
 
 @pytest.mark.parametrize(
@@ -397,6 +464,26 @@ async def test_each_chats_system_prompt_has_the_language_rule_once(
     assert (SIDE_TEXT in system) is (surface == "side")
 
 
+@pytest.mark.parametrize("surface", ["terminal", "main", "side"])
+async def test_each_chat_acts_for_the_user_and_the_chats_remind_it_next_to_the_message(
+    tmp_path: Path, surface: str
+) -> None:
+    stub = StubServer().start()
+    try:
+        url = stub.base_url.rsplit("/v1", 1)[0] + "/s/answer/v1"
+        await say_hello(surface, url, str(tmp_path))
+        [request] = stub.requests
+        system = request["messages"][0]["content"]
+        last = request["messages"][-1]["content"]
+    finally:
+        stub.close()
+    assert system.count(ACTING_RULE) == 1
+    assert system.count(APPROVALS_RULE) == 1
+    # The main chat and the side chats carry the reminder after the user's words.
+    assert last.startswith("hello")
+    assert last.endswith(ACTING_NOTE) is (surface != "terminal")
+
+
 def test_the_option_must_be_a_text() -> None:
     assert AgentOptions().identity is None
     for bad in ("", "  \n", 3):
@@ -669,3 +756,28 @@ def test_the_notes_text_says_the_model_sees_only_the_recent_messages_of_the_conv
     assert "search_memory looks up more" in NOTES_TEXT
     # The chat without notes says the same of the window: recent messages.
     assert ALONE.startswith("You remember the recent messages of this chat")
+
+
+@pytest.mark.parametrize("surface", ["main", "side"])
+async def test_a_direct_call_keeps_the_persons_words_free_of_the_reminder(
+    tmp_path: Path, surface: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The reviews read user_words; a caller that gives none must not hand them
+    # the query with melo's own reminder appended.
+    from localmelo.melo.agent.agent import Agent
+
+    seen: list[object] = []
+    original = Agent.run_task
+
+    async def spy(self: Agent, query: str, **kwargs: object) -> object:
+        seen.append(kwargs.get("user_words"))
+        return await original(self, query, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Agent, "run_task", spy)
+    stub = StubServer().start()
+    try:
+        url = stub.base_url.rsplit("/v1", 1)[0] + "/s/answer/v1"
+        await say_hello(surface, url, str(tmp_path))
+    finally:
+        stub.close()
+    assert seen and seen[0] == "hello"

@@ -9,7 +9,10 @@ settings (:class:`SavedFolders`).
 an answer from elsewhere, such as the web console's approval route.
 :class:`ApprovalLedger` keeps the approvals the person gave in each chat,
 and :class:`OwnedTaskPolicy` lets a task of that chat use them (#369).
-Grants, recorded approvals and pending requests live in memory only: a
+A policy's grants live in a :class:`~localmelo.support.sessions.grants.GrantBook`
+(one table of every grant, kept in the session store when the book has one,
+so they outlive a restart; what the person allows in the main chat counts
+everywhere). Recorded approvals and pending requests live in memory only: a
 restart forgets them.
 """
 
@@ -44,9 +47,11 @@ from localmelo.melo.contracts.approvals import (
     find_auto,
     find_folder_asker,
     grant_offered,
+    holds_grant,
     review_mode,
     site_grant,
     stays_for_chat,
+    window_grant,
 )
 from localmelo.melo.contracts.folders import covers
 from localmelo.melo.contracts.review import (
@@ -55,6 +60,7 @@ from localmelo.melo.contracts.review import (
     covered_by_grant,
     step_key,
 )
+from localmelo.support.sessions.grants import GrantBook, SessionGrants
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +118,11 @@ class RememberingPolicy:
     stops (:func:`~localmelo.melo.contracts.approvals.stays_for_chat`).
     Both are listed in :attr:`allowed_tools` and taken back by
     :meth:`forget`.
-    Grants are per tool name and per policy object, and never stored.
+    The grants live in *grants*, a session's view of a
+    :class:`~localmelo.support.sessions.grants.GrantBook`: in the main chat
+    what the person allows counts everywhere, elsewhere in that session
+    only, and the book keeps them across a restart when it has a store.
+    Without *grants*, they are this policy object's own and never stored.
 
     With *folders*, it is also asked about a file tool's path outside the
     workspace (:meth:`decide_folder`, #405); *saved* holds the folders kept
@@ -126,58 +136,54 @@ class RememberingPolicy:
         *,
         folders: bool = False,
         saved: SavedFolders | None = None,
+        grants: SessionGrants | None = None,
     ) -> None:
         self._ask = ask
-        self._granted: set[str] = set()
-        # The site questions auto mode let run in this chat (#465).
-        self._passed: set[str] = set()
+        # The grants that hold in this chat, and where new ones go.
+        self.grants = grants if grants is not None else GrantBook().view("", "side")
         self.asks_folders = folders
         self._saved = saved
-        # The folders allowed for reading in this chat, as real paths.
-        self._folders: list[str] = []
 
     @property
     def allowed_tools(self) -> frozenset[str]:
         """The names granted for the chat, and the sites Auto let it use."""
-        return frozenset(self._granted | self._passed)
+        return self.grants.names() | self.grants.passed()
+
+    def granted(self, name: str) -> bool:
+        """Whether the question *name* is allowed for this chat (``window-read:<app>``, a site, a tool)."""
+        return name in self.allowed_tools
 
     def passed_in_auto(self, tool_name: str) -> None:
         """Keep a site read auto mode let run: it stays allowed for the chat (#465).
 
         Only a question about opening or reading a site (:data:`STAYS_FOR_CHAT`)
-        is kept; any other name is ignored.
+        is kept, as Auto's (``auto``): for this chat only, even the main chat;
+        any other name is ignored.
         """
         if tool_name.startswith(STAYS_FOR_CHAT):
-            self._passed.add(tool_name)
+            self.grants.grant_now(tool_name, by="auto")
 
     @property
     def allowed_folders(self) -> tuple[str, ...]:
         """The folders outside the workspace allowed for reading in this chat."""
-        return tuple(self._folders)
+        return self.grants.folders()
 
     def forget(self, tool_name: str | None = None) -> None:
         """Take back the grant of *tool_name*, or every grant with ``None``.
 
-        ``None`` takes back the chat's folder grants too.
+        ``None`` takes back the chat's folder grants too. A grant from the
+        main chat that holds here is taken back everywhere by its name, and
+        stays when every grant of a side chat is taken back.
         """
-        if tool_name is None:
-            self._granted.clear()
-            self._passed.clear()
-            self._folders.clear()
-        else:
-            self._granted.discard(tool_name)
-            self._passed.discard(tool_name)
+        self.grants.forget_now(tool_name)
 
     def forget_folder(self, folder: str) -> bool:
         """Take back the chat's grant of *folder*; whether there was one."""
-        if folder not in self._folders:
-            return False
-        self._folders.remove(folder)
-        return True
+        return self.grants.forget_folder_now(folder)
 
     def covered(self, path: str) -> str:
         """What lets the read of *path* run unasked: :data:`FOLDER_FOR_CHAT`, :data:`FOLDER_SAVED` or ``""``."""
-        if _covered(self._folders, path):
+        if _covered(self.grants.folders(), path):
             return FOLDER_FOR_CHAT
         if self._saved is not None:
             try:
@@ -228,15 +234,17 @@ class RememberingPolicy:
         if (
             decision.allow
             and (decision.remember or decision.always)
-            and outside.folder not in self._folders
+            and outside.folder not in self.grants.folders()
         ):
-            self._folders.append(outside.folder)
+            await self.grants.grant(
+                outside.folder, kind="folder", request=request, decision=decision
+            )
         return decision
 
     def silent_for(self, request: ApprovalRequest) -> bool:
         """Whether a grant would let *request* run unasked: the gate then lets
         the user's model review an undecided call first (#279 §3.3)."""
-        return request.tool_name in self._granted
+        return request.tool_name in self.grants.names()
 
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
         if request.outside is not None:
@@ -246,12 +254,14 @@ class RememberingPolicy:
                 "a folder outside the workspace needs its own question",
                 origin="policy",
             )
-        if request.tool_name in self._granted and (
-            covered_by_grant(request.review) or site_grant(request)
+        if request.tool_name in self.grants.names() and (
+            covered_by_grant(request.review)
+            or site_grant(request)
+            or window_grant(request)
         ):
             return ApprovalDecision(True, origin="session")
         if (
-            request.tool_name in self._passed
+            request.tool_name in self.grants.passed()
             and covered_by_grant(request.review)
             and stays_for_chat(request)
         ):
@@ -266,7 +276,9 @@ class RememberingPolicy:
             and decision.allow
             and decision.remember
         ):
-            self._granted.add(request.tool_name)
+            await self.grants.grant(
+                request.tool_name, request=request, decision=decision
+            )
         return decision
 
 
@@ -390,9 +402,10 @@ class ChatPolicy:
         *,
         saved: SavedFolders | None = None,
         watch: AskWatch | None = None,
+        grants: SessionGrants | None = None,
     ) -> None:
         self.mode: ChatMode = mode
-        self.ask = RememberingPolicy(ask, folders=True, saved=saved)
+        self.ask = RememberingPolicy(ask, folders=True, saved=saved, grants=grants)
         # A step Auto stops that the person may allow asks them on the
         # chat's card while *watch* says someone sees the chat, and an
         # answer for the chat is a grant of the Ask policy (#465).
@@ -410,6 +423,13 @@ class ChatPolicy:
     @property
     def allowed_folders(self) -> tuple[str, ...]:
         return self.ask.allowed_folders
+
+    @property
+    def grants(self) -> SessionGrants:
+        return self.ask.grants
+
+    def granted(self, name: str) -> bool:
+        return self.ask.granted(name)
 
     def forget(self, tool_name: str | None = None) -> None:
         """Take back one grant, or every grant and folder (allowances stay)."""
@@ -876,6 +896,10 @@ class OwnedTaskPolicy:
     def review_mode(self, request: ApprovalRequest) -> ReviewMode:
         mode = review_mode(self.inner, request)
         return "silent" if mode == "ask" and self._granted(request.tool_name) else mode
+
+    def granted(self, name: str) -> bool:
+        """Whether the question *name* is allowed: by the task's own grants, or its chat's."""
+        return self._granted(name) or holds_grant(self.inner, name)
 
     async def _earlier(
         self, chat: str, request: ApprovalRequest

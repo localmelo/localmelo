@@ -174,9 +174,8 @@ async def test_browser_lists_the_sites_this_chat_allowed(chat: Any) -> None:
     session, out, app, factory = chat
     session.enter("/browser on")
     await _until(lambda: _tools(session) != [] and session.state == "idle")
-    session.approvals._policy._granted.update(
-        {"browser:https://b.org", "browser:http://a.net:8080"}
-    )
+    for name in ("browser:https://b.org", "browser:http://a.net:8080"):
+        session.approvals._policy.grants.grant_now(name)
     app.answers = ["n"]
     session.enter("/browser")
     await _until(lambda: "Sites allowed in this chat: a.net:8080, b.org" in out.text())

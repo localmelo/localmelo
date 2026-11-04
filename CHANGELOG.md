@@ -9,6 +9,35 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Permissions: everything you allow "for this chat" is one kind of record, a grant, and it is kept. A grant
+  is a tool (shell commands, Python code, file writes), a site melo may open and read or click and choose on,
+  a folder outside the workspace it may read, or another app's window. Grants live in one table (`grants`,
+  component version 1) of the gateway's `~/.cache/localmelo/gateway/sessions.db` and survive a restart of the
+  gateway; the terminal's own chat (`melo -X cli.chat=local`) keeps its own in
+  `~/.cache/localmelo/cli/sessions.db`. What you allow in the main chat counts everywhere: in every side chat,
+  in the tasks you start and in the terminal (the terminal's own chat reads the main chat's grants too). A side
+  chat's grant, the terminal's own chat's and a task's **Allow for this task** hold in that chat or task only,
+  and what Auto keeps by itself (a site it let the chat read) holds in that chat only, the main chat included:
+  only your own word counts everywhere. A task still uses its chat's grants, and so the main chat's, after melo
+  reviews the files changed since that chat began. Never kept, never listed and asked every time: Allow once,
+  typing on a page, sending a form, a click on a password, code or card field, a consent control or a box from
+  another site, a press in another app's window, paying, changing an account's settings and every high-impact
+  step. Settings → Permissions (zh-Hans 授权) lists them in two groups, Everywhere and Per chat, each row with
+  what, the chat, who decided (You or Auto), when and **Revoke**, which counts at once in chats that are
+  running too. `/grants` in the terminal and in the console prints the same list numbered (Everywhere first,
+  newest first; then each chat, the one with the newest grant first) and `/grants revoke N` takes the N-th back;
+  in the terminal's own chat it lists that chat's grants and the main chat's, and a main-chat grant is taken
+  back in the main chat or in the console. New routes `GET /api/grants` (`id`, `scope`, `session_id`,
+  `session_kind`, `chat_title`, `kind`, `key`, `label`, `action`, `target`, `by`, `granted_at`) and
+  `DELETE /api/grants/{id}` (204; 404 `not_found` for an unknown or already revoked id); `GET /api/commands`
+  lists `grants` with page action `grants`. A tool can ask whether the run's chat holds a grant with
+  `TOOL_ASK.get().granted(name)` (`holds_grant(policy, name)` in `melo.contracts.approvals`); it is never true for
+  a question that asks every time. The table has the columns `id, session_id, session_kind, scope, kind, key,
+  label, target, decided_by, granted_at, request_id, revoked_at`; a revoke sets `revoked_at`, revoked rows are
+  deleted after the store's thinking retention (30 days by default), a session's rows go with it
+  (`ON DELETE CASCADE`), and a row that breaks a rule (a `global` row not from you in the main chat, an Auto row
+  that is more than a site read, a key that must ask every time, a folder that is never offered) is ignored when
+  read, so an edited file cannot widen access. No new config keys.
 - Pictures and files in the web console and the app, and words added while melo works. Drop a picture
   or a text file on the page, paste it with Cmd-V or pick it with the paperclip (`/attach` opens the same
   picker; `/attachments` and `/detach N` list and remove). PNG, JPEG, GIF (first frame), WebP and HEIC
@@ -52,7 +81,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   against a listing of that app's windows from before the step; otherwise it is named, never read), and melo
   never types into other apps. Settings → Chats and
   folders → **Other apps' windows** (shown while browsing is on; `[browser] app_windows`, on by default)
-  turns it off, and says when the helper is missing.
+  turns it off, and says under the switch whether the helper is installed and has Accessibility.
+  A window that comes a moment after the step is still seen: after a click, a click on a point or a send,
+  melo tells a window that appeared (once; the app the page asked for is read right away, and a window of
+  any other app asks you first, "Chat opened a window right after melo's click: let melo see it?", with
+  Allow once, Allow Chat in this chat and Don't allow; Auto never answers it, and nothing about a window you
+  do not allow, not even the app's name, goes to the model) in that step and, whenever it comes, in the next
+  one: for those 15 seconds melo also looks at the
+  screen about once a second in the background, so a window that comes while the model is still working out
+  its next step is noticed when it appears, not when the step runs. After a click, a click on a point or a send
+  that changed nothing on the page it also watches for up to 3 seconds in all, slow calls included, and
+  stops as soon as a window appears or the tab goes to another address or opens another tab. Only such a
+  step opens those 15 seconds, counted from the moment the act is sent (after any approval it waited on);
+  reading, waiting, pictures and searching never do or extend them, so a window you open later, or one
+  that was already there when the act was sent, is never named, read or pressed. A chat is told
+  once when the helper is installed but cannot run: it needs Accessibility (System Settings → Privacy &
+  Security → Accessibility), which is Cua Driver's own permission, not melo's. `GET /api/health` carries
+  `desktop_helper` (`missing`, `installed`, `granted`, `no_grant` or `failed`; `?helper=check` looks once).
 
 - Web search, one switch for every chat and task (#468). `[web] search` (off by default; Settings →
   Chats and folders → **Web search**, `melo config set web.search true`, `-X web.search=true`) gives the
@@ -786,6 +831,32 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- "Allow for this chat" is no longer memory-only. `GET /api/sessions/{id}` `grants` and `granted_at` list what
+  holds in the chat whether it is open or not, the main chat's grants included for a side chat.
+  `DELETE /api/sessions/{id}/grants/{name}` takes back the chat's own grant and a main-chat grant of that name
+  (everywhere), and answers 404 when none holds there; `DELETE /api/sessions/{id}/grants` takes back the chat's own
+  grants (in the main chat, every Everywhere grant); `DELETE /api/sessions/{id}/folders?path=` works for a chat
+  that is not open too. `/approvals forget NAME` in a side chat on a grant that came from the main chat takes it
+  back everywhere, and `/approvals forget` with no name takes back only that chat's own grants (in the main chat
+  every Everywhere grant). Deleting a chat deletes its grants, and moving a side chat to another folder takes back
+  its own (the main chat's still hold). In the terminal's own chat `/new` and `/clear` start a chat with none of the
+  last chat's grants (the main chat's still hold), and resuming a chat brings its grants back; a resume used to
+  clear them. The exact steps a chat's tasks may reuse ("Used your approval from 2:02 PM", **Revoke**, **Steps you
+  approved here**) still live in memory only: a gateway restart or deleting the chat forgets them.
+- The main chat's grants are plain about counting everywhere and stop at once. The main chat's own approval card
+  says **Allow in every chat** (**Allow this folder in every chat**, **Allow Chat everywhere**) and the terminal's
+  list `Yes, and allow … in every chat`, with a line that it counts in every chat, the tasks you start and the
+  terminal until revoked; a side chat's and a task's keep **this chat** and **this task**. The terminal's own chat
+  reads the main chat's grants again at every check, so one taken back in the main chat stops in the middle of a
+  running turn; an unreadable gateway file, or one with a newer grants table, gives it none. A side chat's menu marks
+  a grant from the main chat **From the main chat**: removing it takes it away everywhere, and
+  `DELETE /api/sessions/{id}/grants/{name}` now answers 200 `{"revoked": [...], "everywhere": true|false}`;
+  clearing a side chat's grants answers `{"revoked": N, "still_everywhere": M}` and says the main chat's still hold.
+  `DELETE /api/sessions/{id}/folders?path=` answers the same way (a main-chat folder goes everywhere, and the
+  drawer says so); a task's window card says **Allow Chat for this task**. `GET /api/sessions/{id}` adds
+  `grants_everywhere`. A revoke the store cannot save is 503 on every route. In the
+  terminal's own chat `/approvals forget` says when a grant is the main chat's and where to take it back.
+- melo acts for you, in your name. Applying with your resume, signing in, filling in and submitting a form, sending a message as you and booking are done when you ask or authorize them: the model no longer refuses a step because it speaks in your name or cannot be undone, and it does not hand back a list of links or leave the last click to you. The approval cards (Ask) and Auto's review decide which steps you confirm, never the model, and only what would harm other people is declined. Every chat's and every task's instructions say so, the main chat and the side chats add a one-line reminder after your message, and a recalled reply in which melo refused or said a step was blocked is no precedent. The main chat is told that a request to do something online is work (the browser, or a task for the many-step part), not advice, and a go-ahead such as `I authorize you to apply` or `我授权你去投简历` starts that work like any other request.
 - In Auto, the goal decides: the steps a task plainly needs run without asking, and the risky
   ones still ask. On the site or app the chat is about, opening and reading it, signing in the
   way you described, picking options, filling in and sending the task's own form and reading

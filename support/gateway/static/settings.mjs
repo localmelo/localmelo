@@ -1,5 +1,6 @@
 import { folderChoices, folderName } from "./folder.mjs";
 import { formatTime, t } from "./i18n.mjs";
+import { setupPermissionsTab } from "./permissions-tab.mjs";
 import { whenWords } from "./scheduled-tab.mjs";
 
 // A message that tells the user to run a melo command ("... (run 'melo setup')") is advice for a
@@ -12,13 +13,15 @@ const WORD_NAMES = ["description", "adapter", "url", "urlHint", "discover", "nee
 const wordsOf = (set) => Object.fromEntries(WORD_NAMES.map((name) => [name, t(`settings.${set}.${name}`)]));
 
 /** The sections, in the order of the list; each is named `settings.section.<id>`. Developer is listed in developer mode only. */
-export const SECTIONS = ["model", "memory", "chats", "scheduled", "appearance", "developer"];
+export const SECTIONS = ["model", "memory", "chats", "permissions", "scheduled", "appearance", "developer"];
 const THEMES = ["system", "light", "dark"];
 const RECALL = ["auto", "bm25", "embedding", "llm"];
 // How memory finds notes, in the words of the Memory section and the phone's list.
 const recallWords = (name) => t(`settings.recall.${RECALL.includes(name) ? name : "auto"}`);
 // What the app shows on the desktop (the words are the app's menu's: `app.desktop.<place>`).
 const DESKTOP = ["pill", "pet", "nothing"];
+// The words under "Other apps' windows" for each state of the desktop control helper (`settings.appWindows.status.<key>`).
+const HELPER_LINES = {installed: "installed", granted: "granted", no_grant: "noGrant", failed: "failed"};
 // The console's language: automatic, or one the console has. Each language is named in itself.
 const LANGUAGE_SETTINGS = ["auto", "en", "zh-Hans"];
 // How a new chat starts (#339): `[approvals] mode`.
@@ -66,7 +69,8 @@ export function keyWords(key) {
  * the settings load; `health()` the last `GET /api/health`; `sessions()` the listed chats, for the recent folders;
  * `openTab(id)` closes the dialog and opens the panel's Memory or Scheduled tab; `desktop()` and `folders()` are the
  * macOS app's message handlers (none in a browser); `narrow()` says whether the dialog is the phone's sheet;
- * `reloadPage()` loads the page again once a new language is saved, so every screen reads in it.
+ * `reloadPage()` loads the page again once a new language is saved, so every screen reads in it. The Permissions
+ * section (`permissions-tab.mjs`) lists what the person allowed and revokes it; it reads the list each time it is chosen.
  * Returns `open(section)`.
  */
 export function setupSettings({
@@ -90,6 +94,10 @@ export function setupSettings({
   const envStatus = $("s-key-env-status");
   const testButton = $("settings-test");
   const testStatus = $("settings-test-status");
+
+  // What the person allowed (`GET /api/grants`): the section draws and revokes by itself and tells the list when its count changes.
+  const permissions = setupPermissionsTab({ doc: document, api, clock, onChange: () => notes() });
+  $("s-permissions").append(permissions.root);
 
   let theme = "system";
   try {
@@ -136,6 +144,8 @@ export function setupSettings({
   // The last test of this dialog: {at, ok, failed} (`failed` is "chat" or "embedding"), or null.
   let tested = null;
   let checkin = null;
+  let helper = null; // the desktop control helper's status from the health route; null until it is read
+  let helperAsked = false;
   let place = null; // what is on the desktop, as the app says; null without the app
   let undo = null;
 
@@ -157,6 +167,7 @@ export function setupSettings({
     if (show) view("section");
     if (focus) $(`settings-tab-${name}`).focus?.();
     if (name === "scheduled") loadCheckin();
+    if (name === "permissions") permissions.show();
   }
   for (const id of SECTIONS) {
     const tab = $(`settings-tab-${id}`);
@@ -571,11 +582,38 @@ export function setupSettings({
     $("s-app-windows-row").hidden = settings.app_windows === undefined || settings.browser !== true;
     $("s-app-windows").checked = settings.app_windows === true;
     $("s-app-windows-helper").hidden = settings.desktop_helper !== false;
+    renderHelper();
     followUp();
     // Reflecting after many steps (`[agent] reflection`, on by default); a gateway that does not report it has no switch.
     $("s-reflection-row").hidden = settings.reflection === undefined;
     $("s-reflection").checked = settings.reflection !== false;
     notes();
+  }
+
+  // What the desktop control helper last reported (`GET /api/health?helper=check`, asked once while the row shows a
+  // helper that is installed and melo watches other apps' windows): installed, granted, or the grant it lacks.
+  function renderHelper() {
+    const line = $("s-app-windows-status");
+    const watching = settings?.browser === true && settings.app_windows === true && settings.desktop_helper === true;
+    if (!watching) { helper = null; helperAsked = false; } else if (!helperAsked) loadHelper();
+    const key = watching && helper ? HELPER_LINES[helper.state] : undefined;
+    line.hidden = key === undefined;
+    if (key === undefined) return;
+    const quiet = key === "granted" && helper.pictures === false ? "grantedNoPictures" : key;
+    line.textContent = t(`settings.appWindows.status.${quiet}`, {app: helper.app});
+  }
+  async function loadHelper() {
+    helperAsked = true;
+    const currentGeneration = generation;
+    try {
+      const body = await api("/health?helper=check");
+      if (currentGeneration !== generation) return;
+      helper = body?.desktop_helper ?? null;
+    } catch {
+      if (currentGeneration !== generation) return;
+      helper = null; // the line stays out
+    }
+    renderHelper();
   }
 
   // The folders "Always allow this folder" kept (#405): each can be removed, with Undo. One melo never
@@ -677,6 +715,8 @@ export function setupSettings({
     const on = $("s-across-chats").checked;
     put("memory", on ? t("settings.note.memoryOn", {how: recallWords(settings.memory_retriever)}) : t("common.off"));
     put("chats", folderName(settings.workspace));
+    const granted = permissions.count();
+    put("permissions", granted === null ? "" : granted ? t("settings.note.grants", {n: granted}) : t("settings.note.grantsNone"));
     put("scheduled", checkin ? t(checkin.on ? "settings.note.checkinOn" : "settings.note.checkinOff") : "");
     put("appearance", t(`settings.note.theme.${theme}`));
     put("developer", t("settings.note.count", {n: (settings.developer_settings || []).reduce((sum, group) => sum + group.keys.length, 0)}));
@@ -1030,6 +1070,9 @@ export function setupSettings({
     saving = false;
     tested = null;
     checkin = null;
+    helper = null;
+    helperAsked = false;
+    permissions.reset();
     invalidateTest();
     enable(false);
     showError("");

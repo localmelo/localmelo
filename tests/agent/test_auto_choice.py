@@ -23,6 +23,7 @@ from localmelo.melo.contracts.approvals import (
     AutoPolicy,
     Chosen,
 )
+from localmelo.melo.contracts.review import ActionReview
 from localmelo.support.sessions.approvals import ChatPolicy, RememberingPolicy
 from localmelo.tests.agent.test_approvals import Recorder, _answer, _calls, _no_wait
 from localmelo.tests.agent.test_auto_mode import (
@@ -619,3 +620,38 @@ async def test_a_destructive_or_system_step_never_runs_without_a_click(
     [approval] = _approvals(recorder)
     assert approval["origin"] == ("user" if asks else "auto")
     assert approval["allowed"] is False and llm.review_requests == []
+
+
+def _window_question(bundle: str, review: ActionReview | None) -> ApprovalRequest:
+    return ApprovalRequest(
+        request_id="w1",
+        run_id="run",
+        call_id="c1",
+        tool_name=f"window-read:{bundle}",
+        arguments={"app": "Chat", "window": "Sign in", "access": "window-read"},
+        preview="Chat opened a window right after melo's click: let melo see it?",
+        workspace_root="/ws",
+        review=review,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "review", [None, ActionReview("high", ("opaque",), ("Another app.",))]
+)
+async def test_allowing_an_app_in_this_chat_keeps_the_grant_of_its_window_question(
+    review: ActionReview | None,
+) -> None:
+    card = Card(ApprovalDecision(True, remember=True), ApprovalDecision(False))
+    policy = RememberingPolicy(card)
+
+    first = await policy.decide(_window_question("com.example.chat", review))
+    again = await policy.decide(_window_question("com.example.chat", review))
+    other = await policy.decide(_window_question("com.example.other", review))
+
+    assert first.allow and again.allow and again.origin == "session"
+    assert not other.allow, "another app is asked on its own"
+    assert len(card.asked) == 2
+    assert policy.allowed_tools == {"window-read:com.example.chat"}
+    policy.forget()
+    assert not policy.allowed_tools

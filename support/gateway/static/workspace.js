@@ -770,6 +770,8 @@ async function loadSession(id) {
   view.session = detail.session ?? view.session;
   view.tokens = detail.tokens ?? 0;
   view.grants = detail.grants ?? [];
+  // The grants that hold here because the main chat allowed them: taking one back takes it away everywhere.
+  view.grantsEverywhere = detail.grants_everywhere ?? [];
   view.grantedAt = detail.granted_at ?? {};
   view.pending = new Map();
   for (const approval of detail.pending_approvals ?? []) {
@@ -1860,6 +1862,8 @@ function approvalNow() {
 // How the card talks to its view: the chat view redraws its messages and
 // answers a session's approval; the Tasks view passes its own (tasks.mjs).
 const chatApproval = {
+  // True when the chat shown is the main chat: its own questions are answered for every chat.
+  get main() { return mainActive(); },
   rerender: () => { messageSnapshot = ""; renderMessages(false); },
   answer: (request, state, choice) => answerApproval(request, state, choice),
   reload: (id) => refreshApproval(S.activeId, id),
@@ -1912,11 +1916,14 @@ function approvalCard(request, view = chatApproval, asked = "") {
   const workspace = request.workspace_label || view.workspace || S.view?.session?.workspace_label || t("approval.theWorkspace");
   const folder = workspace.replace(/\/+$/, "").split("/").pop() || workspace;
   const scope = t(`approval.scope.${view.scope === "task" ? "task" : "chat"}`);
+  // The main chat's own question (a task's card keeps "this task"): what the person allows in the main
+  // chat counts in every chat, the tasks they start and the terminal, so each answer that is kept says so.
+  const everywhere = view.scope !== "task" && view.main === true;
   // A plain question, with the tool id in a caption and what "Allow for this chat" covers.
   let title = t("approval.useTool", { tool });
   let caption = tool;
   let content = JSON.stringify(args, null, 2);
-  let rule = t("approval.rule.tool", { tool, scope });
+  let rule = everywhere ? t("approval.rule.toolMain", { tool }) : t("approval.rule.tool", { tool, scope });
   let what = t("approval.arguments");
   let diff = null; // What a file write replaces, when the gateway could compare.
   let why = ""; // Why it could not, in words.
@@ -1936,7 +1943,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
     const path = target?.path_label || String(args.path ?? t("approval.theFile"));
     content = String(args.content ?? "");
     what = t("approval.fileContent");
-    rule = t("approval.rule.write", { scope });
+    rule = everywhere ? t("approval.rule.writeMain") : t("approval.rule.write", { scope });
     if (target?.diff?.note) why = target.diff.note;
     else diff = target?.diff ?? null;
     if (diff) what = t("approval.changesTo", { path });
@@ -1951,7 +1958,8 @@ function approvalCard(request, view = chatApproval, asked = "") {
     what = t("approval.willDo");
     title = t(reading ? "approval.readSite" : "approval.openSite", { site });
     caption = t(reading ? "approval.readCaption" : "approval.browserCaption");
-    rule = t(reading ? "approval.rule.read" : "approval.rule.open", { site, scope });
+    rule = everywhere ? t(reading ? "approval.rule.readMain" : "approval.rule.openMain", { site })
+      : t(reading ? "approval.rule.read" : "approval.rule.open", { site, scope });
     content = t(reading ? "approval.readContent" : "approval.siteContent", { site });
     if (reading && args.url) {
       // The whole address reaches the site, path and query too: the card shows it.
@@ -1969,7 +1977,8 @@ function approvalCard(request, view = chatApproval, asked = "") {
     what = t("approval.willDo");
     title = t(sending ? "approval.submitSite" : typing ? "approval.typeSite" : "approval.actSite", { site });
     caption = t(sending ? "approval.submitCaption" : typing ? "approval.typeCaption" : "approval.actCaption");
-    rule = t(sending ? "approval.rule.submitOnce" : typing ? "approval.rule.typeOnce" : "approval.rule.act", { site, scope });
+    rule = sending || typing ? t(sending ? "approval.rule.submitOnce" : "approval.rule.typeOnce")
+      : everywhere ? t("approval.rule.actMain", { site }) : t("approval.rule.act", { site, scope });
     content = t(sending ? "approval.submitContent" : typing ? "approval.typeContent" : "approval.actContent", { site });
     if (sending) {
       // Where the form goes (or that the page decides) and what it holds, nothing secret in it.
@@ -1992,6 +2001,16 @@ function approvalCard(request, view = chatApproval, asked = "") {
     caption = t("approval.desktopCaption");
     rule = t("approval.rule.desktopOnce");
     content = t("approval.desktopContent", { app, on: String(args.on || ""), window: String(args.window || "") });
+  } else if (tool.startsWith("window-read:")) {
+    // A window another app put up right after melo's own step: nothing about it goes to the model unless
+    // the person allows it here, in Ask and in Auto alike. The window's title is for the person only.
+    const app = String(args.app || tool.slice(tool.indexOf(":") + 1));
+    what = t("approval.seeWindow");
+    title = t("approval.seeTitle", { app });
+    caption = t("approval.seeCaption");
+    rule = everywhere ? t("approval.rule.seeMain", { app })
+      : t(view.scope === "task" ? "approval.rule.seeTask" : "approval.rule.see", { app });
+    content = String(args.window || "");
   }
   // A high-impact call (installs, downloads, changes outside the folder) asks every time: the
   // card says why, offers no chat-wide allow, and starts on Deny. A site Auto stopped only because the
@@ -2078,8 +2097,13 @@ function approvalCard(request, view = chatApproval, asked = "") {
   const once = button(high ? "outline-button" : "primary-button", t("common.allowOnce"), () => view.answer(request, state, "once"));
   once.dataset.approvalOnce = "";
   once.dataset.approvalFocus = "once";
-  const session = button("outline-button", outside ? t("approval.outside.chat", { scope }) : t("approval.allowFor", { scope }),
-    () => view.answer(request, state, "session"));
+  const seeing = tool.startsWith("window-read:");
+  const seeApp = String(args.app || "");
+  const sessionWords = outside ? (everywhere ? t("approval.outside.everywhere") : t("approval.outside.chat", { scope }))
+    : seeing ? (everywhere ? t("approval.seeEverywhere", { app: seeApp })
+      : t(view.scope === "task" ? "approval.seeTask" : "approval.seeChat", { app: seeApp }))
+      : everywhere ? t("approval.allowEverywhere") : t("approval.allowFor", { scope });
+  const session = button("outline-button", sessionWords, () => view.answer(request, state, "session"));
   session.dataset.approvalFocus = "session";
   const always = button("outline-button", t("approval.outside.always"), () => view.answer(request, state, "always"));
   always.dataset.approvalFocus = "always";
@@ -2088,6 +2112,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
     state.deny = true;
     actions.hidden = true;
     grant.hidden = true;
+    if (wide) wide.hidden = true;
     if (kept) kept.hidden = true;
     denyView.hidden = false;
     reason.focus();
@@ -2104,17 +2129,32 @@ function approvalCard(request, view = chatApproval, asked = "") {
   const command = tool === "shell_exec" || tool === "python_exec";
   if (outside) {
     rule = outside.access === "write" ? t("approval.rule.outsideWrite", { workspace })
-      : grantable ? t("approval.rule.outsideRead", { scope, folder: outsideFolder }) : t("approval.rule.outsideOnce");
-  } else if (high) rule = t("approval.rule.high", { scope, workspace });
-  else if (command) rule = t(tool === "shell_exec" ? "approval.rule.shell" : "approval.rule.python", { scope, workspace });
+      : grantable ? (everywhere ? t("approval.rule.outsideReadMain", { folder: outsideFolder })
+        : t("approval.rule.outsideRead", { scope, folder: outsideFolder })) : t("approval.rule.outsideOnce");
+  } else if (high) rule = everywhere ? t("approval.rule.highMain", { workspace }) : t("approval.rule.high", { scope, workspace });
+  else if (command) {
+    const shell = tool === "shell_exec";
+    rule = everywhere ? t(shell ? "approval.rule.shellMain" : "approval.rule.pythonMain", { workspace })
+      : t(shell ? "approval.rule.shell" : "approval.rule.python", { scope, workspace });
+  }
   const grant = el("p", "approval-warning", rule);
   grant.id = `approval-scope-${id}`;
   if (offered.includes(session)) session.setAttribute("aria-describedby", grant.id);
   if (offered.includes(always)) always.setAttribute("aria-describedby", grant.id);
   card.append(grant);
+  // In the main chat a kept answer counts everywhere: one line says so, where, and how to take it back.
+  const wide = everywhere && offered.includes(session)
+    ? el("p", "approval-warning approval-everywhere", t("approval.everywhere"))
+    : null;
+  if (wide) {
+    wide.id = `approval-wide-${id}`;
+    session.setAttribute("aria-describedby", `${grant.id} ${wide.id}`);
+    card.append(wide);
+  }
   // The server says, by code, when the person's Allow is kept for the chat's later tasks (#369).
+  const rememberedKey = view.scope === "task" ? "task" : everywhere ? "everywhere" : "chat";
   const kept = !high && request.remembered === true
-    ? el("p", "approval-remembered", t(`approval.remembered.${view.scope === "task" ? "task" : "chat"}`))
+    ? el("p", "approval-remembered", t(`approval.remembered.${rememberedKey}`))
     : null;
   if (kept) card.append(kept);
   const note = t("approval.instead");
@@ -2142,6 +2182,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
     denyView.hidden = true;
     actions.hidden = false;
     grant.hidden = false;
+    if (wide) wide.hidden = false;
     if (kept) kept.hidden = false;
     deny.focus();
   });
@@ -2162,6 +2203,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
   denyView.hidden = !state.deny;
   actions.hidden = state.deny;
   grant.hidden = state.deny;
+  if (wide) wide.hidden = state.deny;
   if (kept) kept.hidden = state.deny;
   card.append(denyView);
   if (request.arguments_complete !== true) {
@@ -3475,15 +3517,20 @@ const modeChip = setupModeChip({
       busy: S.modeSaving,
       // The chat's grants: the menu lists the sites it allowed for its rest (#465).
       grants: S.activeId && S.view?.id === S.activeId ? S.view.grants ?? [] : [],
+      everywhere: S.activeId && S.view?.id === S.activeId ? S.view.grantsEverywhere ?? [] : [],
     };
   },
   remove: async (name) => {
     const id = S.activeId;
     if (!id) return;
     try {
-      await api(`/sessions/${encodeURIComponent(id)}/grants/${encodeURIComponent(name)}`, { method: "DELETE" });
-      if (S.view?.id === id) S.view.grants = (S.view.grants ?? []).filter((grant) => grant !== name);
-      notify(t("auto.menu.removed"));
+      const taken = await api(`/sessions/${encodeURIComponent(id)}/grants/${encodeURIComponent(name)}`, { method: "DELETE" });
+      if (S.view?.id === id) {
+        S.view.grants = (S.view.grants ?? []).filter((grant) => grant !== name);
+        S.view.grantsEverywhere = (S.view.grantsEverywhere ?? []).filter((grant) => grant !== name);
+      }
+      // A grant of the main chat is gone from every chat, not only this one.
+      notify(t(taken?.everywhere === true ? "auto.menu.removedEverywhere" : "auto.menu.removed"));
     } catch (error) {
       notify(t("auto.menu.removeFailed", { problem: error.message }), { sticky: true });
     }

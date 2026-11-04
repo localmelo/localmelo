@@ -39,6 +39,7 @@ CONSOLE = ROOT / "support/gateway/console"
 USAGE = ROOT / "support/usage_snapshot.py"
 DISPLAY = ROOT / "support/sessions/display.py"
 HOSTED_CHECK = ROOT / "support/hosted_check.py"
+DESKTOP = ROOT / "support/browser/desktop.py"
 # The terminal's main chat, which writes the catalog's English (``t_in("en", …)``).
 TERMINAL = ROOT / "support/cli/main_chat.py"
 APP = ROOT / "macos/LocalMeloApp"
@@ -59,6 +60,7 @@ CONVERTED_JS = (
     "memory.mjs",
     "mode.mjs",
     "panel.mjs",
+    "permissions-tab.mjs",
     "pictures.mjs",
     "running.mjs",
     "scheduled-tab.mjs",
@@ -266,6 +268,7 @@ def named_keys() -> tuple[set[str], set[str], set[str]]:
         USAGE,
         DISPLAY,
         TERMINAL,
+        DESKTOP,
     ]:
         text = path.read_text("utf-8")
         found |= set(_PY_KEY.findall(text)) | set(_WORDS_KEY.findall(text))

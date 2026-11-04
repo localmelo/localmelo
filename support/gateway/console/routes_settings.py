@@ -238,7 +238,30 @@ def model_json(cfg: Any) -> dict[str, Any]:
     }
 
 
-async def health_json(console: Console) -> dict[str, Any]:
+async def desktop_helper_json(
+    cfg: config.Config, *, check: bool = False
+) -> dict[str, Any]:
+    """The desktop control helper's status, as health reports it.
+
+    ``state`` is ``missing`` (not installed), ``installed`` (its permissions
+    not checked yet), ``granted``, ``no_grant`` (Accessibility is off) or
+    ``failed`` (it did not start); ``app`` is the app that needs the grants and
+    ``pictures`` whether it also holds Screen Recording (null: not known). The
+    status is what a chat last found. Only with *check*, and only while melo
+    watches other apps' windows, is the helper started (and stopped) to look.
+    """
+    watching = cfg.browser.driver != "off" and cfg.browser.app_windows is True
+    try:
+        status = await desktop.helper_status(check=check and watching)
+    except Exception:  # health never fails for one part (see running_status)
+        logger.warning("Could not read the desktop helper's status", exc_info=True)
+        return {"state": "failed", "app": "", "pictures": None, "problem": "unknown"}
+    return status.to_json()
+
+
+async def health_json(
+    console: Console, *, check_helper: bool = False
+) -> dict[str, Any]:
     """The whole ``GET /api/health`` body."""
     entries = console.sessions.entries()
     return {
@@ -267,6 +290,7 @@ async def health_json(console: Console) -> dict[str, Any]:
             "resume_mode": DEFAULT_RESUME_MODE,
         },
         "status": await running_status(console),
+        "desktop_helper": await desktop_helper_json(console.cfg, check=check_helper),
         "uptime_s": round(console.uptime_s(), 1),
     }
 
@@ -841,8 +865,11 @@ def add_routes(app: FastAPI, console: Console) -> None:
     """Register the health, settings and models routes on *app*."""
 
     @app.get("/api/health")
-    async def api_health() -> JSONResponse:
-        return JSONResponse(content=await health_json(console))
+    async def api_health(helper: str = "") -> JSONResponse:
+        # ``?helper=check`` starts the desktop control helper once to read its permissions.
+        return JSONResponse(
+            content=await health_json(console, check_helper=helper == "check")
+        )
 
     @app.get("/api/settings")
     async def api_get_settings() -> JSONResponse:

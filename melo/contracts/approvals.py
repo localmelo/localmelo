@@ -298,6 +298,31 @@ SELF_ASKING_TOOLS: Final = frozenset(
 )
 
 
+# The question the browser provider asks when another app puts up a window right after
+# melo's own act and the page did not ask for that app (``window-read:<bundle id>``). Only
+# the person answers it, in Ask and in Auto: no model sees the window, so none reviews it.
+# "Allow <App> in this chat" grants this name for the chat (the per-chat grant of
+# :class:`~localmelo.support.sessions.approvals.RememberingPolicy`).
+WINDOW_READ: Final = "window-read:"
+
+
+def window_question(request: ApprovalRequest) -> bool:
+    """Whether *request* is the question whether melo may see another app's window."""
+    return request.tool_name.startswith(WINDOW_READ) and request.outside is None
+
+
+def window_grant(request: ApprovalRequest) -> bool:
+    """Whether a chat's grant of the app's window question lets its later windows through unasked.
+
+    Only for that question, as asked in Ask (no review) or as Auto shows it to the person
+    (a ``high`` review of the one category ``opaque``): nothing else is covered.
+    """
+    review = request.review
+    return window_question(request) and (
+        review is None or review.categories == ("opaque",)
+    )
+
+
 def never_granted(tool_name: str) -> bool:
     """Whether an answer to the question *tool_name* names may never be kept for a chat."""
     return tool_name.startswith(NEVER_GRANTED)
@@ -384,7 +409,7 @@ def grant_offered(request: ApprovalRequest) -> bool:
     """
     if request.outside is not None or never_granted(request.tool_name):
         return False
-    return offers_grant(request.review) or site_grant(request)
+    return offers_grant(request.review) or site_grant(request) or window_grant(request)
 
 
 # Set around each tool call of a run that has a policy: asks that policy about
@@ -395,7 +420,8 @@ def grant_offered(request: ApprovalRequest) -> bool:
 # also answers ``names_host(host)``: whether the user's own words name a site,
 # and ``refused_earlier(name, arguments, preview)``: the refusal of a question
 # blocked earlier in the task (#431), which a tool checks before it lets a
-# named site through.
+# named site through; and ``granted(name)``: whether the run's chat holds a
+# grant of the question *name* (:func:`holds_grant`).
 ToolAsk = Callable[[str, Mapping[str, Any], str], Awaitable[ApprovalDecision]]
 TOOL_ASK: ContextVar[ToolAsk | None] = ContextVar("localmelo_tool_ask", default=None)
 
@@ -438,6 +464,30 @@ def find_folder_asker(policy: object) -> Any:
             return layer
         layer, depth = getattr(layer, "inner", None), depth + 1
     return None
+
+
+def holds_grant(policy: object, name: str) -> bool:
+    """Whether *policy* holds a grant of the question *name* for the chat.
+
+    The first layer with a ``granted(name)`` method answers: *policy*, or a
+    layer behind its ``inner`` wrappers or an Auto policy's ``asking``. A
+    tool that keeps no question of its own asks this before it uses
+    something the person allowed for the chat, such as another app's
+    window (``window-read:<app>``). A question of :data:`NEVER_GRANTED`
+    is never held.
+    """
+    if never_granted(name):
+        return False
+    layer, depth = policy, 0
+    while layer is not None and depth < 8:
+        check = getattr(layer, "granted", None)
+        if callable(check):
+            return check(name) is True
+        found = getattr(layer, "inner", None)
+        layer, depth = (
+            found if found is not None else getattr(layer, "asking", None)
+        ), depth + 1
+    return False
 
 
 def find_auto(policy: object) -> AutoPolicy | None:

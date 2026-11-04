@@ -407,7 +407,7 @@ async def test_new_starts_a_new_session_with_no_grants(setup: Setup) -> None:
     session = setup.session
     session.enter("one")
     await setup.idle()
-    session.approvals._policy._granted.add("shell_exec")
+    session.approvals._policy.grants.grant_now("shell_exec")
     await session.new()
     assert session.runner is None and session.approvals.allowed_tools == frozenset()
     assert session.agent.conversation() == []
@@ -2062,7 +2062,7 @@ async def test_a_file_melo_cannot_compare_is_named_without_counts(
 
 async def test_approvals_forget_takes_back_a_grant(setup: Setup) -> None:
     session, out = setup.session, setup.out
-    session.approvals._policy._granted.add("file_write")
+    session.approvals._policy.grants.grant_now("file_write")
     session.enter("/approvals forget file_write")
     await _until(lambda: "Approvals: ask · grants: none" in out.text())
     assert session.approvals.allowed_tools == frozenset()

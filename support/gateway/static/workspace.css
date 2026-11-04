@@ -2445,6 +2445,15 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 /* The hint of a list sits between its title and the list (the extra folders, #405). */
 .st-group-hint { max-width: 62ch; margin: 0 0 var(--space-2); }
 .st-row[data-valid="false"] .st-mono { text-decoration: line-through; text-decoration-color: var(--ink-3); }
+/* Permissions: what was allowed, by where it counts; a chat's grants sit under that chat's title. */
+.perm-tab:focus { outline: none; }
+.perm-status { margin: 0 0 var(--space-3); color: var(--ink-3); font-size: var(--text-small); line-height: 20px; }
+.perm-status:empty { display: none; }
+.perm-status[data-state="error"] { color: var(--error); }
+.perm-body > .st-group-title:first-child { margin-top: 0; }
+.perm-chat { margin-top: var(--space-4); }
+.st-group-title + .perm-chat { margin-top: 0; }
+.perm-chat-title { margin: 0 0 var(--space-2); color: var(--ink-2); font-size: var(--text-small); font-weight: 500; line-height: 20px; overflow-wrap: anywhere; }
 /* "Saved · Undo" after a change, at the foot of the section. */
 .st-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); min-height: 44px; padding: var(--space-2) var(--space-7); border-top: 1px solid var(--line); color: var(--ink-3); font-size: var(--text-small); }
 .st-foot > p { margin: 0; }
