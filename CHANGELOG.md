@@ -16,6 +16,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   read pictures is refused with the usual sentence. Text files still cannot join a running turn. `POST
   /api/turns/{turn_id}/notes` takes `images` (ids from `POST /api/uploads`) and answers them under `images`; the
   `turn.note` event and each entry of the cancel answer's `unread_notes` carry them too.
+- WeChat quick login in Chrome in the background. A sign-in box may reach the app on this Mac it signs in with
+  when melo lists that app (today WeChat's quick login, so its button shows as in Safari): melo makes those
+  requests itself, only for that box, only to the app's own ports and never to melo's own. Chrome's own check
+  stays on, and any other request a page makes to this Mac or your network is blocked before it is sent; the
+  step says `The page tried to reach an app on this Mac (port N); melo blocked it.`
 - Chrome in the background. `[browser] driver = "chrome"` (Settings → Chats and folders → **Browser**: Chrome,
   Safari or Off; `/browser chrome` and `/browser safari` in the terminal and the console; browsing stays off
   until you turn it on, and `/browser on` uses the browser chosen before, or Safari's windows when none was)

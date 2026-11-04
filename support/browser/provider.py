@@ -75,7 +75,14 @@ from localmelo.melo.contracts.approvals import (
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool, ToolFunction
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.schema import ImagePart, ToolDef
-from localmelo.support.browser import addresses, apps, fields, render, sites
+from localmelo.support.browser import (
+    addresses,
+    apps,
+    fields,
+    local_apps,
+    render,
+    sites,
+)
 from localmelo.support.browser.desktop import (
     KEEP_S,
     LATE_S,
@@ -99,6 +106,7 @@ from localmelo.support.browser.driver import (
     View,
 )
 from localmelo.support.browser.live import DEFAULT_FPS, LiveView
+from localmelo.support.browser.local_apps import LocalAttempt
 from localmelo.support.browser.takeover import (
     STEP_WAIT_S,
     YOU,
@@ -396,7 +404,7 @@ def _guarded(fn: ToolFunction) -> ToolFunction:
                 else:
                     result = await fn(self, **arguments)
                     result = await self._needs_you_after(result, before)
-                return await self._with_screen(_led(back, result))
+                return await self._with_screen(self._with_local(_led(back, result)))
             except BrowserError as exc:
                 return ToolOutput(text=_led_text(back, str(exc)), is_error=True)
             finally:
@@ -1972,6 +1980,23 @@ class BrowserToolProvider(BaseToolProvider):
                 return True
 
         return moved
+
+    def _with_local(self, result: str | ToolOutput) -> str | ToolOutput:
+        """*result* with the requests to this computer melo blocked on this chat's pages since the last step."""
+        take = getattr(self._driver, "local_attempts", None)
+        if not callable(take):
+            return result
+        lines = self._local_lines(list(take()))
+        if not lines:
+            return result
+        text = "\n".join(lines)
+        if isinstance(result, ToolOutput):
+            return dataclasses.replace(result, text=f"{result.text}\n{text}")
+        return f"{result}\n{text}"
+
+    def _local_lines(self, attempts: list[LocalAttempt]) -> list[str]:
+        """What the step says about *attempts*. A card that offers to allow an app's helper would be offered here."""
+        return local_apps.told(attempts)
 
     async def _with_screen(self, result: str | ToolOutput) -> str | ToolOutput:
         """*result* with what other apps put on the screen since the last look, if the step did not tell it itself."""
