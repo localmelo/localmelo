@@ -13,7 +13,7 @@ import json
 import threading
 import time
 from collections.abc import Iterator
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -27,6 +27,7 @@ from localmelo.melo.schema import RunResult
 from localmelo.support.config import Config, LocalBackendConfig, load, save
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
+from localmelo.tests.fixtures.http_stub import HttpStub
 
 ANSWER = {"choices": [{"message": {"role": "assistant", "content": "42"}}]}
 
@@ -168,7 +169,7 @@ async def test_the_flag_replaces_a_bad_configured_value(config_path: Path) -> No
 # ── A slow model server ─────────────────────────────────────────────────────
 
 
-class SlowChatServer:
+class SlowChatServer(HttpStub):
     """``POST /chat/completions`` on 127.0.0.1 that answers ``42`` after a delay.
 
     ``attempts`` keeps the ``X-Localmelo-Attempt`` header of every request.
@@ -194,22 +195,11 @@ class SlowChatServer:
                 except OSError:
                     pass  # the client stopped waiting
 
-            def log_message(self, format: str, *args: Any) -> None:
-                pass  # no request log in the test output
-
-        self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
-        self._thread.start()
-
-    @property
-    def base_url(self) -> str:
-        return f"http://127.0.0.1:{self._httpd.server_port}/v1"
+        super().__init__(Handler, path="/v1")
 
     def close(self) -> None:
         self._closing.set()  # requests still waiting answer at once
-        self._httpd.shutdown()
-        self._httpd.server_close()
-        self._thread.join(timeout=5)
+        super().close()
 
 
 class Sleeps:

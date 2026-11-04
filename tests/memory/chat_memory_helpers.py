@@ -14,9 +14,8 @@ import hashlib
 import json
 import math
 import re
-import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import TYPE_CHECKING, Any
+from http.server import BaseHTTPRequestHandler
+from typing import TYPE_CHECKING
 
 from localmelo.melo.contracts.providers import (
     BaseEmbeddingProvider,
@@ -27,6 +26,7 @@ from localmelo.melo.memory.notes import split_sentences
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.memory import records
 from localmelo.support.memory.service import CHAT_TURN
+from localmelo.tests.fixtures.http_stub import HttpStub
 
 if TYPE_CHECKING:
     from localmelo.support.memory import ChatMemory, TurnMemory
@@ -84,7 +84,7 @@ class FakeEmbedding(BaseEmbeddingProvider):
         return None
 
 
-class EmbeddingServer:
+class EmbeddingServer(HttpStub):
     """``POST /v1/embeddings`` on 127.0.0.1 and a port the system picks."""
 
     def __init__(self) -> None:
@@ -92,9 +92,6 @@ class EmbeddingServer:
         server = self
 
         class Handler(BaseHTTPRequestHandler):
-            def log_message(self, *args: Any) -> None:
-                return None
-
             def do_POST(self) -> None:  # noqa: N802
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 texts = list(body["input"])
@@ -110,22 +107,7 @@ class EmbeddingServer:
                 self.end_headers()
                 self.wfile.write(raw)
 
-        self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self._httpd.daemon_threads = True
-        self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
-
-    @property
-    def base_url(self) -> str:
-        return f"http://127.0.0.1:{self._httpd.server_port}/v1"
-
-    def start(self) -> EmbeddingServer:
-        self._thread.start()
-        return self
-
-    def close(self) -> None:
-        self._httpd.shutdown()
-        self._httpd.server_close()
-        self._thread.join(timeout=5)
+        super().__init__(Handler, path="/v1", start=False)
 
 
 class FakeChat(BaseLLMProvider):

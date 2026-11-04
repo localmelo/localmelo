@@ -22,10 +22,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import threading
 import time
 from collections.abc import Iterator
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +43,7 @@ from localmelo.tests.browser.test_real_live import (
     settled,
     sign_in,
 )
+from localmelo.tests.fixtures.http_stub import HttpStub
 from localmelo.tests.gateway.console.test_browser_live import Served
 
 # The live view smoke test's own: skipped unless asked for, its fixtures (the app in
@@ -72,8 +72,6 @@ SECRET = "hunter2-Secret"
 
 
 class Pages(BaseHTTPRequestHandler):
-    def log_message(self, *args: Any) -> None:
-        pass
 
     def do_GET(self) -> None:
         data = FORM.encode()
@@ -86,13 +84,8 @@ class Pages(BaseHTTPRequestHandler):
 
 @pytest.fixture
 def base() -> Iterator[str]:
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Pages)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    try:
-        yield f"http://127.0.0.1:{server.server_address[1]}"
-    finally:
-        server.shutdown()
-        server.server_close()
+    with HttpStub(Pages) as stub:
+        yield stub.base_url
 
 
 def as_dict(raw: Any) -> dict[str, Any]:
