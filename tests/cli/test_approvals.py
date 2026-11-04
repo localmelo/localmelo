@@ -277,7 +277,7 @@ def test_a_press_in_another_apps_window_names_the_app_and_asks_every_time() -> N
     assert not grant_offered(in_auto)
 
 
-def test_a_press_in_the_foreground_says_the_pointer_moves_and_the_app_comes_forward() -> (
+def test_a_press_at_a_point_says_it_may_go_to_the_foreground_and_the_app_comes_forward() -> (
     None
 ):
     pressing = panel_text(
@@ -288,7 +288,7 @@ def test_a_press_in_the_foreground_says_the_pointer_moves_and_the_app_comes_forw
             how="press",
             on="a point (700, 850) of its picture",
             window="Allow example.com?",
-            delivery="foreground",
+            delivery="foreground_retry",
         ),
         width=80,
     )
@@ -296,8 +296,8 @@ def test_a_press_in_the_foreground_says_the_pointer_moves_and_the_app_comes_forw
     words = "".join(line for _, line in pressing.body)  # rows wrap inside words
     assert "press a point (700, 850) of its picture in Chat's window" in words
     assert (
-        "A click in the background did not reach it, so melo presses in the "
-        "foreground: the pointer moves there and Chat comes to the front for a moment."
+        "If a click in the background does not reach it, melo clicks once more in "
+        "the foreground: the pointer moves there and Chat comes to the front for a moment."
     ) in words
 
 

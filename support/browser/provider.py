@@ -2178,7 +2178,8 @@ class BrowserToolProvider(BaseToolProvider):
         if hit.surface == "none" or item is None:
             raise BrowserError(
                 "There is nothing to click at that point (text or background). "
-                "Pick a point on a button, link, field or drawing in the picture."
+                "Pick a point on a button, link, field or drawing in the picture. "
+                + _scale_hint(px, py, view)
             )
         what = _point_words(hit.surface, item, hit.site)
         if item.sensitive:
@@ -2655,6 +2656,22 @@ def parse_point(x: Any, y: Any, rest: dict[str, Any]) -> tuple[float, float]:
             "x and y run from 0 to 1000 across and down the picture, whatever its size."
         )
     return px, py
+
+
+def _scale_hint(x: float, y: float, view: View) -> str:
+    """The scale of a point, for a click that found nothing: a model often writes pixels.
+
+    When (*x*, *y*) would fit inside the picture as pixels, it also says where
+    that point is on the 0-1000 scale.
+    """
+    hint = "x and y run 0-1000 across and down the picture, not in pixels."
+    if x <= view.width and y <= view.height:
+        hint += (
+            f" As pixels of the {view.width:.0f}x{view.height:.0f} picture, "
+            f"({x:g}, {y:g}) is ({x * 1000 / view.width:.0f}, "
+            f"{y * 1000 / view.height:.0f}) on that scale."
+        )
+    return hint
 
 
 def _stale_ref(ref: object) -> str:

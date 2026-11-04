@@ -1483,8 +1483,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   is now seen even when its app does not come to the front, and switching Spaces or showing an app you had
   hidden no longer raises a card about your own windows, because a window counts as new only if it did not
   exist, on any Space, before melo's step. A window whose buttons the app draws itself is pressed at a point
-  of its picture; when that click in the background changes nothing, melo asks again and clicks once more in
-  the foreground, where the pointer moves and the app comes to the front for a moment.
+  of its picture; when that click in the background changes nothing, melo clicks once more in the foreground,
+  where the pointer moves and the app comes to the front for a moment. You are asked once, before the first
+  click, and the card says so; after the second click melo waits a moment, as after the first, before it says
+  whether the window closed. A point click that finds nothing now says that x and y run 0-1000 across the
+  picture, not in pixels, and where a point written in pixels would be on that scale.
 - You see what melo does in Chrome in the background. The Browser panel of a chat that started on Safari never
   opened after Settings switched to Chrome, and its button stayed hidden: the page asked only once, when the chat
   opened. Now it asks again, and the panel opens by itself while melo browses and closes when the turn ends,

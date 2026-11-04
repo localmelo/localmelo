@@ -396,39 +396,57 @@ async def test_a_point_click_that_changes_nothing_is_tried_once_in_the_foregroun
     at = calls.index(("click", foreground))
     assert calls[at - 1][0] == "get_window_state"
     assert calls[at - 1][1]["include_screenshot"] is True
-    # The foreground press is its own question, and says what it does.
-    presses = [item for item in asks.asked if item[0] == "desktop-act:Chat"]
-    assert len(presses) == 2
-    _, arguments, preview = presses[1]
-    assert arguments["delivery"] == "foreground" and "delivery" not in presses[0][1]
+    # One question covers both clicks, and says what the second does.
+    [(_, arguments, preview)] = [
+        item for item in asks.asked if item[0] == "desktop-act:Chat"
+    ]
+    assert arguments["delivery"] == "foreground_retry"
     assert preview == (
         "press a point (700, 850) of its picture in Chat's window \"Allow "
-        'example.com?" in the foreground: the pointer moves there and Chat comes '
+        'example.com?"; if a click in the background does not reach it, melo '
+        "clicks once more in the foreground: the pointer moves there and Chat comes "
         "to the front for a moment"
     )
     assert sum(screen.clock.slept) >= 1.0  # it gave the click a second first
 
 
-class NoForeground(Asks):
-    """Every question allowed but a press in the foreground."""
+class ClosesLate(Asks):
+    """The panel closes a moment after the foreground click, not at once."""
+
+    def __init__(self, screen: Screen) -> None:
+        super().__init__()
+        self.screen = screen
 
     async def __call__(
         self, name: str, arguments: Mapping[str, Any], preview: str
     ) -> ApprovalDecision:
-        await super().__call__(name, arguments, preview)
-        if arguments.get("delivery") == "foreground":
-            return ApprovalDecision(False, "not in front")
-        return ApprovalDecision(True, remember=True)
+        if name.startswith("desktop-act:"):
+            # The background click and its second of waiting come first, so this is
+            # half a second after the foreground click.
+            self.screen.clock.at(1.5, lambda: remove(self.screen, 41))
+        return await super().__call__(name, arguments, preview)
 
 
-async def test_a_refused_foreground_press_clicks_only_once(screen: Screen) -> None:
-    asks = NoForeground()
+def remove(screen: Screen, window_id: int) -> None:
+    """The window (the panel is 41) is gone from the screen."""
+    screen.state = screen.load()
+    screen.state["windows"] = [
+        w for w in screen.state["windows"] if w["window_id"] != window_id
+    ]
+    screen.save()
+
+
+async def test_the_foreground_click_is_given_a_moment_before_the_window_is_reported(
+    screen: Screen,
+) -> None:
     _, _, pressed = await panel_pressed(
-        screen, {"background": "nothing", "foreground": "close"}, asks
+        screen, {"background": "nothing", "foreground": "nothing"}, ClosesLate(screen)
     )
-    assert len(clicks(screen)) == 1
-    assert "melo did not click again in the foreground" in pressed.text
-    assert pressed.text.endswith("Window w1 is still open.")
+    assert len(clicks(screen)) == 2
+    assert pressed.text.endswith(
+        "in the foreground: the pointer moved and Chat came to the front for a moment. Window w1 closed."
+    )
+    assert "still open" not in pressed.text
 
 
 async def test_a_point_click_that_changed_the_window_is_not_repeated(

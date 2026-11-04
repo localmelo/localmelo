@@ -142,7 +142,7 @@
   "approval.create": "Create {path}?",
   "approval.desktopCaption": "another app · presses a button",
   "approval.desktopContent": "melo wants to press {on} in {app}'s window “{window}”. The window appeared after melo's own step in the browser. melo never types into other apps.",
-  "approval.desktopForeground": "A click in the background did not reach it, so melo presses in the foreground: the pointer moves there and {app} comes to the front for a moment.",
+  "approval.desktopForeground": "If a click in the background does not reach it, melo clicks once more in the foreground: the pointer moves there and {app} comes to the front for a moment.",
   "approval.desktopTitle": "Let melo press a button in {app}?",
   "approval.dialogCaption": "browser · the page asks",
   "approval.dialogContent": "The page on {site} asks this while melo acts. OK goes on; otherwise melo answers Cancel.",

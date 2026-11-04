@@ -68,8 +68,9 @@ never the time it is told, is what counts.
 Some apps draw their own buttons, so the window's accessibility tree names none.
 melo then presses a point of the window's picture. A click in the background
 does not reach every such window: when the window is still there a second later
-and looks as it did, melo asks again and clicks once more in the foreground,
-which moves the pointer and brings the app to the front for a moment.
+and looks as it did, melo clicks once more in the foreground, which moves the
+pointer and brings the app to the front for a moment. The person is asked once,
+before the first click, and the question says so.
 """
 
 from __future__ import annotations
@@ -1402,12 +1403,15 @@ class DesktopWatch:
     ) -> tuple[str, list[ImagePart]]:
         """Click (*x*, *y*), 0-1000 across and down the window's last picture; the point is marked.
 
+        The person is asked once, before the first click, and the question says
+        that a click that does not reach the window is repeated in the foreground.
         The click goes in the background. When the window is still there
         :data:`POINT_SETTLE_S` seconds later and reads as it did, the click did
         not reach it (a window that draws its own buttons may take clicks only in
-        front): melo asks again, saying the pointer will move and the app come to
-        the front, and clicks once more in the foreground. Each click uses up the
-        picture it was read on, so another point needs ``window_read`` first.
+        front): melo clicks once more in the foreground, the pointer moving and
+        the app coming to the front, and gives that click the same time before it
+        says what the window did. Each click uses up the picture it was read on,
+        so another point needs ``window_read`` first.
         """
         helper, name, kept = await self._ready_for(short)
         app = kept.window.app
@@ -1422,27 +1426,25 @@ class DesktopWatch:
                 f"Use window_read {name} first: a point is read on the window's last picture."
             )
         what = f"a point ({x:g}, {y:g}) of its picture"
-        await ask_press(kept.window, what, "")
+        await ask_press(kept.window, what, "", foreground_retry=True)
         images = await self._point(helper, kept, x, y, foreground=False)
         then = ""
         after = await self._settled(helper, kept)
         if after == "same":
-            try:
-                await ask_press(kept.window, what, "", foreground=True)
-            except DesktopError as refused:
-                then = (
-                    " Nothing changed in the window a second later, and melo did not "
-                    f"click again in the foreground: {refused}"
+            images = await self._point(helper, kept, x, y, foreground=True)
+            then = (
+                " The click in the background changed nothing, so melo clicked "
+                "there again in the foreground: the pointer moved and "
+                f"{app} came to the front for a moment."
+            )
+            after = await self._settled(helper, kept)
+            if after == "same":
+                then += (
+                    " The window looks as it did a moment after that click too; "
+                    f"it may still be closing: window_read {name} shows it."
                 )
-            else:
-                images = await self._point(helper, kept, x, y, foreground=True)
-                then = (
-                    " The click in the background changed nothing, so melo clicked "
-                    "there again in the foreground: the pointer moved and "
-                    f"{app} came to the front for a moment."
-                )
-        elif after == "changed":
-            then = f" The window changed: window_read {name} shows it now."
+        if after == "changed":
+            then += f" The window changed: window_read {name} shows it now."
         line = f"Clicked ({x:g}, {y:g}) on the picture of {app}'s window (via point)."
         if images:
             line += " The picture shows where."
@@ -1641,15 +1643,17 @@ def seen_lines(seen: Sequence[Seen]) -> list[str]:
 
 
 async def ask_press(
-    window: AppWindow, what: str, button: str, *, foreground: bool = False
+    window: AppWindow, what: str, button: str, *, foreground_retry: bool = False
 ) -> None:
     """Ask about pressing *what* in *window*: :class:`DesktopError` if refused.
 
     Asked every time (``desktop-act:`` answers are never kept for the chat).
     Only the person answers it, in Ask and in Auto alike (no model is shown the
-    window or the press; with nobody to ask, Auto refuses). A press in the
-    *foreground* is its own question (``delivery`` ``foreground``), which says
-    that the pointer moves and the app comes to the front.
+    window or the press; with nobody to ask, Auto refuses). A click at a point
+    (*foreground_retry*, ``delivery`` ``foreground_retry``) is asked once for
+    both tries: the question says that when a click in the background does not
+    reach the window, melo clicks once more in the foreground, where the pointer
+    moves and the app comes to the front.
     """
     ask = TOOL_ASK.get()
     if ask is None:
@@ -1667,11 +1671,12 @@ async def ask_press(
         arguments["button"] = render.field_text(button, 80)
     shown = f' "{title}"' if title else ""
     preview = f"press {what} in {app}'s window{shown}"
-    if foreground:
-        arguments["delivery"] = "foreground"
+    if foreground_retry:
+        arguments["delivery"] = "foreground_retry"
         preview += (
-            f" in the foreground: the pointer moves there and {app} comes to the "
-            "front for a moment"
+            "; if a click in the background does not reach it, melo clicks once "
+            f"more in the foreground: the pointer moves there and {app} comes to "
+            "the front for a moment"
         )
     decision = await ask(DESKTOP_ACT + app, arguments, preview)
     if not decision.allow:

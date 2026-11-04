@@ -1303,10 +1303,10 @@ test("a press in another app's window says what is pressed and is asked every ti
   assert.match(findNode(card, (node) => node.className === 'approval-warning').textContent, /asks every time/);
   assert.deepEqual(focuses(card).filter((name) => name !== 'reason'), ['once', 'deny'], 'no "allow for this chat" on a press');
   assert.equal(findNode(card, (node) => node.className === 'approval-note'), null, 'a press in the background has no note');
-  // A press in the foreground says the pointer moves and the app comes to the front.
+  // A press at a point is asked once: the card says that the repeat in the foreground moves the pointer and brings the app forward.
   h.context.request = {request_id: 'press-front', tool_name: 'desktop-act:Chat',
     arguments: {app: 'Chat', access: 'desktop-act', how: 'press', on: 'a point (700, 850) of its picture', window: 'Sign in',
-      delivery: 'foreground'}, workspace_label: '~/w'};
+      delivery: 'foreground_retry'}, workspace_label: '~/w'};
   const front = h.run('approvalCard(request)');
   assert.match(findNode(front, (node) => node.className === 'approval-note').textContent,
     /the pointer moves there and Chat comes to the front for a moment/);

@@ -397,13 +397,13 @@ def _tool_panel(
             "types into other apps, and asks every time it presses."
         )
         body = [("", row) for row in _wrapped([said], width)]
-        if arguments.get("delivery") == "foreground":
-            # A click in the background did not reach the window: this one moves the
+        if arguments.get("delivery") == "foreground_retry":
+            # A click at a point is asked once for both tries: the second one moves the
             # pointer and brings the app to the front.
             front = (
-                "A click in the background did not reach it, so melo presses in the "
-                f"foreground: the pointer moves there and {app} comes to the front "
-                "for a moment."
+                "If a click in the background does not reach it, melo clicks once "
+                f"more in the foreground: the pointer moves there and {app} comes to "
+                "the front for a moment."
             )
             body += [("", row) for row in _wrapped([front], width)]
         body += [("muted", row) for row in _wrapped([note], width)]
