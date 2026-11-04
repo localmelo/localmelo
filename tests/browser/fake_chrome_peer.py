@@ -15,7 +15,11 @@ the request is told as Chrome tells it, and nothing opens), ``dialog`` (a box
 the click puts up: the page waits until it is answered; a confirm answered OK
 then goes to ``goes``), ``popup`` (a tab the click opens), ``notice`` (text the
 page shows after a real click), ``trusted_only`` (a script's click does
-nothing) or ``covered``.
+nothing) or ``covered``. A covered element may say ``by`` (what covers it, as the
+page script tells it), ``alt`` (a point of it that is clear: the script then aims
+there), ``clears_on_scroll`` (the scroll to the middle that finds it clear, the
+first being 1) and ``moves`` (how many real clicks on it land on another element
+first, which the guards stop; ``moved_by`` says which).
 
 A screencast (``Page.startScreencast``) sends ``FAKE_CHROME_FRAMES`` pictures
 (default 60; ``1`` is a page that does not change), at most three unacknowledged
@@ -87,6 +91,51 @@ PAGES: dict[str, dict[str, Any]] = {
             },
         ],
     },
+    "https://example.com/cover": {
+        "title": "Cover",
+        "text": "A page with a bar over its buttons.",
+        "elements": [
+            {
+                "kind": "button",
+                "label": "Half covered",
+                "fp": "button|half",
+                "covered": True,
+                "alt": [130, 400],
+                "goes": "https://example.com/done",
+            },
+            {
+                "kind": "button",
+                "label": "Clears later",
+                "fp": "button|later",
+                "covered": True,
+                "clears_on_scroll": 2,
+                "goes": "https://example.com/done",
+            },
+            {
+                "kind": "button",
+                "label": "Under the header",
+                "fp": "button|under",
+                "covered": True,
+                "by": {"what": "a sticky header", "detail": "h1 '每日签到'"},
+            },
+            {
+                "kind": "button",
+                "label": "Slips away",
+                "fp": "button|slips",
+                "moves": 1,
+                "moved_by": {"what": "a sticky header", "detail": "h1 'Daily'"},
+                "goes": "https://example.com/done",
+            },
+            {
+                "kind": "button",
+                "label": "Always slips",
+                "fp": "button|always",
+                "moves": 9,
+                "moved_by": {"what": "an ad", "detail": "iframe from ads.example.net"},
+                "goes": "https://example.com/done",
+            },
+        ],
+    },
     "https://example.com/app": {
         "title": "App",
         "text": "Sign in with the chat app.",
@@ -138,6 +187,9 @@ typed: dict[str, str] = {}
 waiting: dict[str, list[dict[str, Any]]] = {}  # target -> calls held while a box is up
 dialog_after: dict[str, tuple[int, dict[str, Any]]] = {}  # target -> (call id, element)
 n_targets = 0
+scrolls: dict[int, int] = (
+    {}
+)  # element place -> how many times it was scrolled to the middle
 FRAMES = int(os.environ.get("FAKE_CHROME_FRAMES", "60"))
 casts: dict[str, dict[str, int]] = (
     {}
@@ -290,15 +342,27 @@ def do_act(target: str, spec: dict[str, Any]) -> dict[str, Any]:
     ):
         return {"ok": False, "stale": "gone"}
     mode, key = spec.get("mode", "script"), spec.get("key", "")
+    if mode in ("scroll", "arm"):
+        log({"act_mode": mode, "at": at})
     if mode == "scroll":
-        return {
+        scrolls[at] = scrolls.get(at, 0) + 1
+        covered = bool(element.get("covered"))
+        if scrolls[at] >= element.get("clears_on_scroll", 99):
+            covered = False
+        said: dict[str, Any] = {
             "ok": True,
-            "covered": bool(element.get("covered")),
+            "covered": covered,
             "cx": 100,
             "cy": 50 + 40 * at,
             "tag": "button",
             "text": element.get("label", ""),
         }
+        if covered and element.get("alt"):
+            said.update(covered=False, shifted=True)
+            said["cx"], said["cy"] = element["alt"]
+        if covered and element.get("by"):
+            said["by"] = element["by"]
+        return said
     option = ""
     if spec["act"] == "select":
         if spec["text"] not in element.get("options", []):
@@ -334,9 +398,15 @@ def run_script(target: str, source: str) -> Any:
         if asked["doc"] != DOC or look is None or look.get("url", here) != here:
             return {"doc": False} if "settle" in source[:20] else {"lost": True}
         if "settle" in source[:20]:
-            return {"doc": True, "count": look.get("count", 0), "quiet": 5000}
+            return {
+                "doc": True,
+                "count": look.get("count", 0),
+                "quiet": 5000,
+                "moved": "moved" in look.get("blocked", []),
+            }
         looks.pop(asked["key"])
         return {
+            "movedBy": look.get("moved_by"),
             "blocked": look.get("blocked", []),
             "texts": look.get("texts", []),
             "before": look.get("before", ""),
@@ -373,7 +443,10 @@ def run_script(target: str, source: str) -> Any:
 
 def at_point(target: str, x: float, y: float) -> dict[str, Any] | None:
     for i, element in enumerate(elements_of(target)):
-        if round(x) == 100 and round(y) == 50 + 40 * i:
+        if (round(x), round(y)) in (
+            (100, 50 + 40 * i),
+            tuple(element.get("alt") or ()),
+        ):
             return element
     return None
 
@@ -496,7 +569,13 @@ def handle(message: dict[str, Any]) -> dict[str, Any] | None:
         if MODE == "native_missed":
             return {}
         hit = at_point(target, params["x"], params["y"])
-        if params["type"] == "mouseReleased" and hit is not None:
+        if params["type"] == "mouseReleased" and hit is not None and hit.get("moves"):
+            # The page slid another element under the click: the guards stop it.
+            hit["moves"] -= 1
+            look = looks.setdefault(armed.get(target, ""), {})
+            look["blocked"] = ["moved"]
+            look["moved_by"] = hit.get("moved_by")
+        elif params["type"] == "mouseReleased" and hit is not None:
             if hit["kind"] == "textbox":
                 focused[target] = hit
                 looks.setdefault(armed.get(target, ""), {}).setdefault("seen", {})[

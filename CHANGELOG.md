@@ -1464,6 +1464,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 ### Fixed
 
 - Words added to a chat while melo works are now remembered with that turn; before, only the first message of the turn was. Part of #428.
+- A button that a sticky header or an anchored ad stands over can be clicked. Before a real click, melo
+  scrolls the element to the middle of the view at once (also on a page that scrolls smoothly, where the middle
+  used to be measured before the page had moved) and, in Chrome, clicks the part of it that nothing covers. An
+  element with no clear part is scrolled to once more after a moment; one that stays covered goes to the page
+  script and the answer names what covers it (`a sticky header (h1 'Daily check-in')`, `an ad (iframe from
+  ads.example.net)`). A real click that still lands on another element is stopped, scrolled to again and tried
+  once more; when it lands elsewhere twice the answer says what got it, and the page and its refs stay as they
+  were, so the model no longer has to open the page again. Safari's windows get the retry and the names too, but
+  still click the node itself, so an element with only a part clear goes to the page script there.
+- `browser_wait` says when its condition already held ("Reached: the page had already loaded; nothing was
+  waited."), and that it is not a pause; before, it answered "Reached: the page loaded." at once and a model
+  that used it to pause waited for nothing, over and over.
 - melo no longer recalls its own old replies about a blocked step as if they were still the rule; only what you said in that turn is remembered. Part of #428.
 - `browser_find` reads the page again before it searches, so its refs are always of the page as it is now;
   before, a page reloaded since the last reading gave refs that only failed with "The page was reloaded or

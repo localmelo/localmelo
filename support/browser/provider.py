@@ -113,6 +113,16 @@ logger = logging.getLogger(__name__)
 GROUP = "browser"
 WAIT_DEFAULT_S = 10.0
 WAIT_MAX_S = 30.0
+# What a wait says when its condition held before any waiting.
+_ALREADY = {
+    "load": "the page had already loaded",
+    "text": "the text was already on the page",
+    "gone": "the text was already gone",
+}
+_NOT_A_PAUSE = (
+    "browser_wait returns as soon as its condition holds, so it is not a pause: "
+    "to let a slow page finish, wait for text that shows it is ready."
+)
 # Tabs melo opened are closed after this long without a browser call.
 IDLE_CLOSE_S = 600.0
 # The most tabs one action adopts (a page that opens more has the rest left alone).
@@ -278,7 +288,8 @@ TOOLS: tuple[ToolDef, ...] = (
     ),
     _def(
         "browser_wait",
-        "Wait until the page has loaded, some text appears, or some text is gone (30 s at most).",
+        "Wait until the page has loaded, some text appears, or some text is gone "
+        "(30 s at most). It returns at once when that already holds: it is not a pause.",
         ("until",),
         tab=_TAB,
         until=_p("string", enum=["load", "text", "gone"]),
@@ -2295,6 +2306,9 @@ class BrowserToolProvider(BaseToolProvider):
         # The condition counts only on the approved site, read in the same step,
         # and the tab is checked again after: a wait says nothing about a page
         # that went elsewhere while it was watched.
+        already = await self._driver.holds(
+            self._raw[tab_id], until, str(text), origin=self._origins[tab_id]
+        )
         reached, others = await self._watched_wait(tab_id, until, str(text), limit)
         try:
             await self._recheck(tab_id)
@@ -2308,7 +2322,10 @@ class BrowserToolProvider(BaseToolProvider):
                 + _screen_block(others)
             )
         if reached:
-            line = f"Reached: {reached_words}."
+            if already:
+                line = f"Reached: {_ALREADY[until]}; nothing was waited. {_NOT_A_PAUSE}"
+            else:
+                line = f"Reached: {reached_words}."
             if others:
                 line += " Another app put a window on the screen.\n"
                 line += _screen_block(others)

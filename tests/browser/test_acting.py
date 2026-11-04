@@ -95,6 +95,27 @@ def world(*elements: Element, **kwargs: Any) -> Anywhere:
 # ── Clicking ──
 
 
+async def test_a_click_stopped_by_what_covers_the_element_keeps_the_page_and_its_refs() -> (
+    None
+):
+    driver = world(button("Check in"), button("Again"))
+    words = "A sticky header (h1 'Daily') covers that button, so melo stopped it."
+    driver.covers["Check in"] = words
+    tools = await tools_of(driver)
+    await run(tools, "browser_open", url=HOME)
+    out = await run(tools, "browser_click", ref="e1")
+    assert out.is_error and out.text == words
+    # Nothing was done, so the reading stays: no page has to be opened or read again.
+    shot = await run(tools, "browser_screenshot")
+    assert not shot.is_error
+    assert [c for c in driver.calls if c[0] in ("open", "page")] == [
+        ("open", HOME),
+        ("page", "t1"),
+    ]
+    other = await run(tools, "browser_click", ref="e2")
+    assert not other.is_error and other.text.startswith("Clicked e2")
+
+
 async def test_a_click_acts_on_the_page_and_reads_it_again() -> None:
     driver = world(button("Check in"))
     tools = await tools_of(driver)

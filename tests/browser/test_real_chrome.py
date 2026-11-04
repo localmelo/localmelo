@@ -53,6 +53,46 @@ PAGE = """<!doctype html><meta charset="utf-8"><title>melo fixture</title>
 <script>probe.textContent = (navigator.webdriver ? 'webdriver' : 'person') + ' ' + navigator.userAgent;</script>
 </main></body>"""
 SENT = "<!doctype html><title>Sent</title><body><p>Form received.</p></body>"
+# Pages whose buttons something stands over. Every button answers a trusted click
+# only, with the words "Chosen true".
+BUTTON = "onclick=\"said.textContent = 'Chosen ' + event.isTrusted\""
+STYLE = """<style>html { scroll-behavior: smooth } body { margin: 0; font: 16px sans-serif }
+.pad { height: 1500px } button { display: block; width: 100%; border: 1px solid #888 }
+header { position: sticky; top: 0; height: 110px; margin-bottom: -110px; background: #ddd; z-index: 5 }
+#ad-slot { position: fixed; left: 0; width: 100%; bottom: 0; height: 160px; border: 0; z-index: 9 }
+#said { margin: 0; height: 24px }</style>"""
+COVERED = {
+    # A smooth-scrolling page: the button is far down and a sticky header is over the top.
+    "/smooth": f"""<!doctype html><meta charset="utf-8"><title>Smooth</title>{STYLE}
+<header><h1>Daily check-in</h1></header><p id="said">Nothing yet.</p><div class="pad"></div>
+<button style="height:50px" {BUTTON}>Happy</button><div class="pad"></div>""",
+    # The button is the first thing on the page, under the sticky header, and cannot be scrolled clear.
+    "/under-header": f"""<!doctype html><meta charset="utf-8"><title>Under</title>{STYLE}
+<header><h1>Daily check-in</h1></header><button style="height:40px" {BUTTON}>Happy</button>
+<p id="said">Nothing yet.</p><div class="pad"></div>""",
+    # A tall button at the end of the page, its lower part under an anchored ad.
+    "/tall-above-ad": f"""<!doctype html><meta charset="utf-8"><title>Tall</title>{STYLE}
+<p id="said">Nothing yet.</p><div class="pad"></div><button style="height:300px" {BUTTON}>Submit</button>
+<iframe id="ad-slot" src="/news"></iframe>""",
+    # A short button at the end of the page, all of it under the anchored ad.
+    "/under-ad": f"""<!doctype html><meta charset="utf-8"><title>Short</title>{STYLE}
+<p id="said">Nothing yet.</p><div class="pad"></div><button style="height:40px" {BUTTON}>Submit</button>
+<iframe id="ad-slot" src="/news"></iframe>""",
+    # A square slides over the middle of the button on the first move of the mouse.
+    "/slides-in": f"""<!doctype html><meta charset="utf-8"><title>Slides</title>{STYLE}
+<p id="said">Nothing yet.</p><button id="big" style="height:240px" {BUTTON}>Pick</button>
+<div id="cover"></div>
+<script>
+var slid = false;
+document.addEventListener('mousemove', function () {{
+  if (slid) return;
+  slid = true;
+  var r = big.getBoundingClientRect();
+  cover.style.cssText = 'position:fixed;z-index:9;background:#f00;width:80px;height:80px;left:' +
+    (r.left + r.width / 2 - 40) + 'px;top:' + (r.top + r.height / 2 - 40) + 'px';
+}});
+</script>""",
+}
 NEWS = "<!doctype html><title>News</title><body><p>Today's news.</p></body>"
 
 
@@ -71,7 +111,10 @@ class Site(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self) -> None:
-        self._send(NEWS if self.path.startswith("/news") else PAGE)
+        if self.path in COVERED:
+            self._send(COVERED[self.path])
+        else:
+            self._send(NEWS if self.path.startswith("/news") else PAGE)
 
     def do_POST(self) -> None:
         size = int(self.headers.get("content-length") or 0)
@@ -251,3 +294,67 @@ async def test_a_tab_the_page_opens_is_melos_and_tabs_close(
         await driver.close_tab(extra)
     await driver.close_tab(tab.id)
     assert await driver.tabs() == []
+
+
+# ── A button something stands over ──
+
+
+async def chosen(
+    driver: ChromeBackgroundDriver, base: str, path: str, label: str
+) -> Any:
+    """Open the page, click the button *label*, and say how and what the page showed."""
+    await driver.open(base.rstrip("/") + path, new_tab=True)
+    raw = await driver.page(None)
+    done = await driver.act(None, Act("click", raw.url, named(raw, label), doc=raw.doc))
+    return done, await text_of(driver)
+
+
+async def test_a_page_that_scrolls_smoothly_still_gets_a_trusted_click_in_the_middle(
+    driver: ChromeBackgroundDriver, base: str
+) -> None:
+    done, said = await chosen(driver, base, "/smooth", "Happy")
+    assert (done.via, done.why) == ("browser", "")
+    assert "Chosen true" in said
+
+
+async def test_a_tall_button_half_under_an_anchored_ad_is_clicked_where_it_is_clear(
+    driver: ChromeBackgroundDriver, base: str
+) -> None:
+    done, said = await chosen(driver, base, "/tall-above-ad", "Submit")
+    assert (done.via, done.why) == ("browser", "")
+    assert "Chosen true" in said
+
+
+async def test_a_button_all_under_a_sticky_header_goes_to_the_page_script_and_the_header_is_named(
+    driver: ChromeBackgroundDriver, base: str
+) -> None:
+    done, said = await chosen(driver, base, "/under-header", "Happy")
+    assert done.via == "page-script"
+    assert "a sticky header (h1 'Daily check-in') covers it" in done.why
+    assert "Chosen false" in said  # the page script's click is not a trusted one
+
+
+async def test_a_button_all_under_an_anchored_ad_goes_to_the_page_script_and_the_ad_is_named(
+    driver: ChromeBackgroundDriver, base: str
+) -> None:
+    done, _ = await chosen(driver, base, "/under-ad", "Submit")
+    assert done.via == "page-script"
+    assert "an ad (iframe from 127.0.0.1) covers it" in done.why
+
+
+async def test_a_square_that_slides_over_the_click_is_stopped_and_the_click_tried_again(
+    driver: ChromeBackgroundDriver, base: str
+) -> None:
+    done, said = await chosen(driver, base, "/slides-in", "Pick")
+    assert (done.via, done.why) == ("browser", "")
+    assert "Chosen true" in said
+
+
+async def test_holds_is_one_look_at_a_condition(
+    driver: ChromeBackgroundDriver, base: str
+) -> None:
+    await driver.open(base, new_tab=True)
+    assert await driver.holds(None, "load", "") is True
+    assert await driver.holds(None, "text", "Nothing yet") is True
+    assert await driver.holds(None, "gone", "Nothing yet") is False
+    assert await driver.holds(None, "text", "Nowhere") is False

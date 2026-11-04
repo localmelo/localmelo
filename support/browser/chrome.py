@@ -89,7 +89,6 @@ from localmelo.support.browser.driver import (
 )
 from localmelo.support.browser.live import DEFAULT_FPS, DEFAULT_QUALITY, Frame
 from localmelo.support.browser.safari import (
-    _MOVED,
     _PASSED,
     _STALE,
     BLANK_TRIES,
@@ -100,9 +99,12 @@ from localmelo.support.browser.safari import (
     VIEW_JS,
     PageScriptActs,
     _changes,
+    _cover_stop,
+    _covered_why,
     _decode,
     _element,
     _key,
+    _nothing_reached,
     _number,
     _reached,
     _spec,
@@ -112,6 +114,7 @@ from localmelo.support.browser.safari import (
     hit_script,
     mark_script,
     same_page,
+    wait_probe,
 )
 
 # A command line that replaces Chrome's, for tests (a fake peer) and a Chrome
@@ -1288,16 +1291,7 @@ class ChromeBackgroundDriver(PageScriptActs):
         origin: str = "",
     ) -> bool:
         await self._focus(tab)
-        # A page with no body yet (a bot check or an interstitial between two
-        # documents) is not loaded: nothing on it counts, and the wait goes on.
-        words = json.dumps(text)
-        probe = {
-            "load": "document.readyState === 'complete' && !!document.body",
-            "text": f"!!document.body && (document.body.innerText || '').indexOf({words}) >= 0",
-            "gone": f"!!document.body && (document.body.innerText || '').indexOf({words}) < 0",
-        }[until]
-        if origin:
-            probe = f"location.origin === {json.dumps(origin)} && ({probe})"
+        probe = wait_probe(until, text, origin)
         loop = asyncio.get_running_loop()
         end = loop.time() + seconds
         while True:
@@ -1311,6 +1305,17 @@ class ChromeBackgroundDriver(PageScriptActs):
             if loop.time() >= end:
                 return False
             await asyncio.sleep(POLL_S)
+
+    async def holds(
+        self, tab: str | None, until: str, text: str, *, origin: str = ""
+    ) -> bool:
+        await self._focus(tab)
+        try:
+            return await self._read(wait_probe(until, text, origin)) is True
+        except BrowserError:
+            if self._browser is None or self._browser.closed:
+                raise
+            return False  # a page between two documents does not answer yet
 
     async def screenshot(
         self, tab: str | None, mark: tuple[View, float, float] | None = None
@@ -1445,36 +1450,38 @@ class ChromeBackgroundDriver(PageScriptActs):
     async def _native(
         self, session: str, spec: dict[str, Any], act: Act
     ) -> ActResult | tuple[str, bool]:
-        """The act by Chrome's own input; else why not, and whether that holds for the site."""
-        if act.point is not None:
-            x, y = act.point
-        else:
-            if act.element.frame:
-                return _PASSED["frame"], False
-            ready = await self._script(act_script({**spec, "mode": "scroll"}))
-            if ready.get("covered") is True:
-                return _PASSED["covered"], False
-            if not isinstance(ready.get("cx"), int | float) or not isinstance(
-                ready.get("cy"), int | float
-            ):
-                return _PASSED["name"], False
-            x, y = _number(ready["cx"]), _number(ready["cy"])
-        key = _key()
-        armed = await self._script(act_script({**spec, "mode": "arm", "key": key}))
-        try:
-            if act.kind == "type" and act.point is None:
-                await self._type_at(session, x, y, act.text, act.enter)
-            else:
-                await self._click_at(session, x, y)
-        except BrowserError:
-            if self._browser is None or self._browser.closed:
-                raise
-            # Whether it acted before it failed is read from the page: an act
-            # that shows there is kept, one that does not falls to the page script.
-        data, quiet = await self._look(key, spec["doc"], act)
-        blocked = [str(k) for k in data.get("blocked") or []]
-        if "moved" in blocked:
-            raise BrowserError(_MOVED)
+        """The act by Chrome's own input; else why not, and whether that holds for the site.
+
+        The element is scrolled to the middle of the view and a point of it
+        that nothing covers is found (:meth:`_aim`). A real click that still
+        lands on another element is stopped by the guards, so nothing is done;
+        the element is then scrolled to once more and the click tried again.
+        When that lands elsewhere too the error says what got it.
+        """
+        for attempt in range(2):
+            aimed = await self._aim(spec, act)
+            if isinstance(aimed, str):
+                return aimed, False
+            x, y = aimed
+            key = _key()
+            armed = await self._script(act_script({**spec, "mode": "arm", "key": key}))
+            try:
+                if act.kind == "type" and act.point is None:
+                    await self._type_at(session, x, y, act.text, act.enter)
+                else:
+                    await self._click_at(session, x, y)
+            except BrowserError:
+                if self._browser is None or self._browser.closed:
+                    raise
+                # Whether it acted before it failed is read from the page: an act
+                # that shows there is kept, one that does not falls to the page script.
+            data, quiet = await self._look(key, spec["doc"], act)
+            blocked = [str(k) for k in data.get("blocked") or []]
+            if "moved" in blocked:
+                if attempt == 0 and act.point is None and _nothing_reached(data):
+                    continue  # the page moved under the click: scroll to it again
+                raise _cover_stop(data.get("movedBy"), act.element.kind)
+            break
         if not _reached(act, data, frame=armed.get("frame") is True):
             return _PASSED["missed"], True
         self._check_typed(act, data)
@@ -1484,6 +1491,28 @@ class ChromeBackgroundDriver(PageScriptActs):
             "",
             _changes(data, quiet),
         )
+
+    async def _aim(self, spec: dict[str, Any], act: Act) -> tuple[float, float] | str:
+        """Where Chrome's input goes for *act*: a point of the view, else why not.
+
+        An element is scrolled to the middle of the view at once. Its middle
+        is the place when nothing covers it; else the part of it with most
+        room that nothing covers; else, after a moment, the same once more.
+        An element still covered is left to the page script, and the reason
+        names what covers it.
+        """
+        if act.point is not None:
+            return act.point
+        if act.element.frame:
+            return _PASSED["frame"]
+        ready = await self._scrolled(spec)
+        if ready.get("covered") is True:
+            return _covered_why(ready.get("by"))
+        if not isinstance(ready.get("cx"), int | float) or not isinstance(
+            ready.get("cy"), int | float
+        ):
+            return _PASSED["name"]
+        return _number(ready["cx"]), _number(ready["cy"])
 
     async def _mouse(self, session: str, kind: str, x: float, y: float) -> None:
         params: dict[str, Any] = {"type": kind, "x": x, "y": y}
