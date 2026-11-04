@@ -234,7 +234,8 @@ async def test_a_preference_in_the_models_words_is_kept_with_the_users_quote(
     [
         # Another language than the message's: refused, and told to match it.
         (PARKING, "你的公司停车位是 C14。", "公, 司, 停", True),
-        ("My weekly sync is on Friday.", "你的每周例会是在周五。", "每, 周, 例", True),
+        # 每 and 会 are common wording, so the details come first: 周, 例, 五.
+        ("My weekly sync is on Friday.", "你的每周例会是在周五。", "周, 例, 五", True),
         # A value changed: refused, in the same language.
         (PARKING, "Your parking spot at work is C15.", "c15", False),
         (
@@ -680,6 +681,29 @@ async def test_a_note_that_adds_who_is_kept_and_one_that_adds_a_value_is_not(
     assert refused.startswith(f"{NOT_SAID} osaka: not in what the user typed")
     kept = "You have a cousin named Ren who lives in Kyoto."
     assert (await memory.remember(kept, "people")).startswith(f"Remembered: {kept} ")
+    (entry,) = await memory.records()
+    assert entry.text == kept and entry.provenance["quote"] == typed
+
+
+async def test_a_chinese_note_in_other_words_is_kept_and_one_with_a_new_site_is_not(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    typed = (
+        "按照我说的用微信登录：点「微信登录」，等一会儿会出现「微信快捷登录」，"
+        "点它就登进去了，然后完成签到"
+    )
+    await memory.before_turn(store, await _turn(store, typed), typed)
+    # The site is a detail the user never typed: refused, and the detail named.
+    refused = await memory.remember(
+        "你让melo用微信登录一亩三分地，点「微信登录」，再点「微信快捷登录」，然后完成签到。"
+    )
+    assert refused.startswith(NOT_SAID) and "亩" in refused
+    # The same steps with a word added (让, was refused for it) are kept.
+    kept = (
+        "你让melo按照你说的用微信登录：点「微信登录」，等一会儿会出现「微信快捷登录」，"
+        "点它就登进去了，然后完成签到。"
+    )
+    assert (await memory.remember(kept)).startswith(f"Remembered: {kept} ")
     (entry,) = await memory.records()
     assert entry.text == kept and entry.provenance["quote"] == typed
 

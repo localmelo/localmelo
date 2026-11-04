@@ -1463,6 +1463,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- melo no longer refuses to remember something you said in Chinese just because it put it in slightly different words. Part of #442.
 - Words added to a chat while melo works are now remembered with that turn; before, only the first message of the turn was. Part of #428.
 - melo no longer recalls its own old replies about a blocked step as if they were still the rule; only what you said in that turn is remembered. Part of #428.
 - `browser_find` reads the page again before it searches, so its refs are always of the page as it is now;
