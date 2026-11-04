@@ -51,6 +51,7 @@ KEYS = {
     "block_chars",
     "query_from",
 }
+GATHER_KEYS = {"gather", "floor"}
 
 
 @pytest.fixture()
@@ -258,7 +259,10 @@ async def test_every_turn_reports_its_recall_even_when_nothing_is_used(
             turn = await _turn(store, "Ask")
             found = await memory.before_turn(store, turn, typed)
             data = found.event()
-            assert data is not None and set(data["recall"]) == KEYS
+            # With the default ``[memory] gather``, every turn says whether the message
+            # asks to count, total or compare, and the bar it searched with.
+            assert data is not None and set(data["recall"]) == KEYS | GATHER_KEYS
+            assert data["recall"]["gather"] is False and data["recall"]["floor"] == 0.55
             assert data["recall"]["retriever"] == "llm"
             assert data["recall"]["used"] == len(data["used"])
             assert data["recall"]["block_chars"] == len(found.block)
@@ -268,6 +272,10 @@ async def test_every_turn_reports_its_recall_even_when_nothing_is_used(
             )
         assert data is not None
         assert data["used"] and data["recall"]["select_tokens"]["prompt"] == 321
+        cfg.memory.gather = "off"  # the shape recall data had before the setting
+        turn = await _turn(store, "Ask")
+        off = (await memory.before_turn(store, turn, "hi")).event()
+        assert off is not None and set(off["recall"]) == KEYS
         cfg.memory.across_chats = False
         assert (await memory.before_turn(store, turn, "hi")).event() is None
     finally:
