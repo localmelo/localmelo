@@ -112,7 +112,7 @@
         <ul>
           <li><code>uv</code> builds <code>.venv/</code> from <code>uv.lock</code>, with Python 3.13 from <code>.python-version</code>; localmelo supports 3.11 or later.</li>
           <li><code>--extra dev</code> adds pytest, ruff, black, mypy and pre-commit; <code>--extra gateway</code> adds FastAPI and uvicorn.</li>
-          <li><code>uv run pre-commit install</code> adds hooks that run ruff, black, mypy and the whole suite on every commit.</li>
+          <li><code>uv run pre-commit install</code> adds hooks that run ruff, black, mypy and the tests a change affects (<code>pytest --testmon</code>) on every commit.</li>
         </ul>
       </section>
 
