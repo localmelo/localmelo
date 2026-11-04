@@ -1549,16 +1549,6 @@ _BACKEND_SECTIONS = (*_LOCAL_SECTIONS, *_CLOUD_SECTIONS)
 # them alone. ``[approvals]`` is not one: it changes what runs without asking.
 _FALLBACK_SECTIONS = ("sessions", "cli", "ui", "console", "workspace")
 
-# -- Migration helpers --
-
-_CLOUD_API_PROVIDER_MIGRATION: dict[str, str] = {
-    "openai": "openai",
-    "gemini": "gemini",
-    "anthropic": "anthropic",
-    "nvidia": "nvidia",
-}
-
-
 # Settings ``-X KEY=VALUE`` gives this process: ``load()`` applies them, and ``save()``
 # never writes them. A key is ``section.name``, or a top-level name without a dot.
 _OVERRIDES: dict[str, Any] = {}
@@ -1637,17 +1627,15 @@ _SPELLINGS: dict[str, Callable[[Any], Any]] = {
 }
 
 
-def _read(
-    cfg: Config, data: Mapping[str, Any], tables: Container[str] | None = None
-) -> None:
-    """Set each field that a table of *data* (those in *tables*, else all) holds.
+def _read(cfg: Config, data: Mapping[str, Any]) -> None:
+    """Set each field that a table of *data* holds.
 
     A value is not checked or changed here: a wrong one is kept for ``validate()``
     to report. A key that is no field, and a table that is not one, are ignored.
     """
     fields = flat(cfg)
     for table, values in data.items():
-        if isinstance(values, dict) and (tables is None or table in tables):
+        if isinstance(values, dict):
             for name, value in values.items():
                 key = f"{table}.{name}"
                 if key in fields:
@@ -1662,36 +1650,21 @@ def _load_file() -> Config:
     with open(path, "rb") as f:
         data = tomllib.load(f)
 
-    # -- Migration: old single `backend` field --
-    if "backend" in data and "chat_backend" not in data:
-        return _migrate_legacy(data)
-
     cfg = Config()
 
-    # -- Migration: old `mlc-llm` / `cloud_api` keys in chat_backend/embedding_backend --
-    raw_chat = data.get("chat_backend", "")
-    raw_emb = data.get("embedding_backend", "")
-    cfg.chat_backend = _migrate_backend_key(raw_chat, data)
-    cfg.embedding_backend = _migrate_embedding_key(raw_emb)
     # "omlx" is another spelling of "vllm" (one backend, one [vllm] table):
     # everything reads "vllm", and save() writes the spelling back.
+    raw_chat = data.get("chat_backend", "")
+    raw_emb = data.get("embedding_backend", "")
+    cfg.chat_backend = _backend_key(raw_chat)
+    cfg.embedding_backend = _backend_key(raw_emb)
     cfg.chat_alias = raw_chat if raw_chat == OMLX_ALIAS else ""
     cfg.embedding_alias = raw_emb if raw_emb == OMLX_ALIAS else ""
 
     _read(cfg, data)
     for section in _BACKEND_SECTIONS:
-        # Migration: flat chat_template_kwargs -> extra_body
         if isinstance(data.get(section), dict):
             _migrate_extra_body(getattr(cfg, section), data[section])
-    # Migration: old [mlc] section with chat_port -> chat_url
-    if "mlc" in data:
-        _migrate_mlc_section(cfg.mlc, data["mlc"])
-
-    # Migration: old [cloud_api] section -> vendor-specific section
-    if "cloud_api" in data and cfg.chat_backend in _CLOUD_SECTIONS:
-        _migrate_cloud_api_section(cfg, data["cloud_api"])
-    elif "online" in data and cfg.chat_backend in _CLOUD_SECTIONS:
-        _migrate_cloud_api_section(cfg, data["online"])
 
     cfg.request_timeout_s = data.get("request_timeout_s")
     cfg.mcp_config = str(data.get("mcp_config") or "")
@@ -1701,34 +1674,9 @@ def _load_file() -> Config:
     return cfg
 
 
-def _migrate_backend_key(raw: str, data: dict) -> str:
-    """Migrate old chat_backend keys to new ones."""
-    if raw == "mlc-llm":
-        return "mlc"
-    if raw == OMLX_ALIAS:
-        return "vllm"
-    if raw == "cloud_api":
-        provider = data.get("cloud_api", {}).get("provider", "")
-        return _CLOUD_API_PROVIDER_MIGRATION.get(provider, raw)
-    return raw
-
-
-def _migrate_embedding_key(raw: str) -> str:
-    """Migrate old embedding_backend keys to new ones."""
-    if raw == "mlc-llm":
-        return "mlc"
-    if raw == OMLX_ALIAS:
-        return "vllm"
-    return raw
-
-
-def _migrate_mlc_section(mlc: LocalBackendConfig, section: dict) -> None:
-    """Migrate old [mlc] with chat_port/gpu_memory_gb to URL-based config."""
-    if "chat_port" in section and not mlc.chat_url:
-        port = section["chat_port"]
-        mlc.chat_url = f"http://127.0.0.1:{port}/v1"
-        if not mlc.embedding_url:
-            mlc.embedding_url = mlc.chat_url
+def _backend_key(raw: Any) -> Any:
+    """The backend a config file names; the ``omlx`` spelling reads as ``vllm``."""
+    return "vllm" if raw == OMLX_ALIAS else raw
 
 
 def _migrate_extra_body(
@@ -1747,54 +1695,6 @@ def _migrate_extra_body(
         return
     if "chat_template_kwargs" not in target.extra_body:
         target.extra_body = {**target.extra_body, "chat_template_kwargs": flat}
-
-
-def _migrate_cloud_api_section(cfg: Config, section: dict) -> None:
-    """Migrate old [cloud_api] or [online] section to vendor-specific config."""
-    vendor = cfg.chat_backend
-    target = getattr(cfg, vendor, None)
-    if target is None:
-        return
-    _read(cfg, {vendor: section})
-    _migrate_extra_body(target, section)
-
-
-def _migrate_legacy(data: dict) -> Config:
-    """Migrate the oldest format with a single `backend` field."""
-    cfg = Config()
-    old = data["backend"]
-
-    if old == "mlc-llm":
-        cfg.chat_backend = "mlc"
-        cfg.embedding_backend = "mlc"
-        if "mlc" in data:
-            _read(cfg, data, ("mlc",))
-            _migrate_mlc_section(cfg.mlc, data["mlc"])
-            _migrate_extra_body(cfg.mlc, data["mlc"])
-    elif old == "online":
-        online_sec = data.get("online", {})
-        provider = online_sec.get("provider", "")
-        cfg.chat_backend = _CLOUD_API_PROVIDER_MIGRATION.get(provider, "")
-        if online_sec.get("local_embedding", False):
-            cfg.embedding_backend = "mlc"
-        else:
-            cfg.embedding_backend = "none"
-        if cfg.chat_backend in _CLOUD_SECTIONS:
-            _migrate_cloud_api_section(cfg, online_sec)
-    elif old == "ollama":
-        cfg.chat_backend = "ollama"
-        ollama_sec = data.get("ollama", {})
-        cfg.embedding_backend = (
-            "ollama" if ollama_sec.get("embedding_model", "") else "none"
-        )
-        if "ollama" in data:
-            _read(cfg, data, ("ollama",))
-            _migrate_extra_body(cfg.ollama, data["ollama"])
-
-    _read(cfg, data, ("gateway", "agent", "sessions"))
-    cfg.request_timeout_s = data.get("request_timeout_s")
-
-    return cfg
 
 
 _BARE_TOML_KEY = re.compile(r"^[A-Za-z0-9_-]+$")

@@ -413,33 +413,6 @@ class TestExtraBodyConfig:
         )
         assert cfg.vllm.extra_body == NO_THINKING
 
-    def test_legacy_single_backend_file_keeps_extra_body(self, tmp_path: Path) -> None:
-        cfg = _load_text(
-            tmp_path,
-            'backend = "mlc-llm"\n\n'
-            "[mlc]\n"
-            'chat_model = "Qwen3-4B"\n'
-            "chat_port = 8400\n"
-            "chat_template_kwargs = { enable_thinking = false }\n",
-        )
-        assert cfg.chat_backend == "mlc"
-        assert cfg.mlc.chat_url == "http://127.0.0.1:8400/v1"
-        assert cfg.mlc.extra_body == NO_THINKING
-
-    def test_legacy_cloud_api_section_keeps_extra_body(self, tmp_path: Path) -> None:
-        cfg = _load_text(
-            tmp_path,
-            'chat_backend = "cloud_api"\n'
-            'embedding_backend = "none"\n\n'
-            "[cloud_api]\n"
-            'provider = "openai"\n'
-            'api_key_env = "OPENAI_API_KEY"\n'
-            'chat_model = "gpt-4o"\n'
-            'chat_template_kwargs = { reasoning_effort = "low" }\n',
-        )
-        assert cfg.chat_backend == "openai"
-        assert cfg.openai.extra_body == LOW_EFFORT
-
     def test_validate_rejects_reserved_key(self) -> None:
         cfg = Config(
             chat_backend="vllm",

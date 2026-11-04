@@ -659,17 +659,3 @@ See [Keep memory between runs](../guides/memory.md#keep-memory-between-runs).
 - **Not a grant:** **Always allow this folder** is kept in `[workspace] extra_folders`.
 
 The people-facing rules are in [What you allowed](../guides/terminal.md#what-you-allowed) and [Permissions](../guides/web-console.md#permissions); the routes are in [API v2](api-v2.md#get-apigrants).
-
-## Upgrading from an older config
-
-Older config files still load. localmelo reads:
-
-- a single `backend` key, the oldest format;
-- the backend name `mlc-llm`, now `mlc`;
-- `[cloud_api]` and `[online]` tables, now one table per vendor;
-- `chat_port` in `[mlc]`, now `chat_url`;
-- a flat `chat_template_kwargs`, now inside `extra_body`.
-
-A file without `[agent] reflection` or `steps_per_attempt` reads the defaults: reflection on, attempts of 50 steps and runs of 100. Runs that need the earlier lengths set `-X agent.steps_per_attempt=10 -s 30`.
-
-Running the wizard again writes the file in the current format.

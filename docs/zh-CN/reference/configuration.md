@@ -469,19 +469,3 @@ chat_model = "Qwen/Qwen3-8B"
 - **不是授权：** **总是允许这个文件夹** 记在 `[workspace] extra_folders` 里。
 
 面向读者的规则见[你允许过的事](../guides/terminal.md#what-you-allowed)和[授权](../guides/web-console.md#permissions)；路由见 [API v2](api-v2.md#get-apigrants)。
-
-<a id="upgrading-from-an-older-config"></a>
-
-## 从旧版配置升级
-
-较旧的配置文件仍然能加载。localmelo 会读取：
-
-- 单个 `backend` 键，最旧的格式；
-- 后端名称 `mlc-llm`，现在是 `mlc`；
-- `[cloud_api]` 和 `[online]` 表，现在每个厂商一张表；
-- `[mlc]` 中的 `chat_port`，现在是 `chat_url`；
-- 扁平的 `chat_template_kwargs`，现在位于 `extra_body` 之内。
-
-没有 `[agent] reflection` 或 `steps_per_attempt` 的文件读取默认值：反思开启、尝试 50 步、运行 100 步。需要以前长度的运行设置 `-X agent.steps_per_attempt=10 -s 30`。
-
-再次运行向导会以当前格式写入该文件。
