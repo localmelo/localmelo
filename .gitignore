@@ -21,8 +21,6 @@ build/
 
 # smoke-test artifacts (generated reports)
 tests/artifacts/
-tests/smoke/output/*
-!tests/smoke/output/.gitkeep
 
 # Dev dependency of the browser script tests (npm ci --prefix tests/browser/js)
 tests/browser/js/node_modules/

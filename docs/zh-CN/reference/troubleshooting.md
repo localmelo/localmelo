@@ -59,8 +59,8 @@ error: externally-managed-environment
 FileNotFoundError: [Errno 2] No such file or directory: '…/localmelo/tests/smoke/data/scenarios.json'
 ```
 
-- **原因：** 旧版本的构建没有把这个必需的数据文件打包进 wheel。当前版本会把它与网页工作区的资源一起打包。
-- **修复：** 按[更新 localmelo](../guides/configure.md#update-localmelo)中的说明更新并重新安装 localmelo。使用 `pip install -e ".[gateway]"` 进行的可编辑源码安装也包含该文件。
+- **原因：** 旧版本的构建需要这个数据文件，却没有把它打包进 wheel。当前版本不再使用它。
+- **修复：** 按[更新 localmelo](../guides/configure.md#update-localmelo)中的说明更新并重新安装 localmelo。
 
 <a id="setup-and-configuration"></a>
 

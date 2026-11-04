@@ -22,11 +22,8 @@ Or skip them globally with:
 
 from __future__ import annotations
 
-import json
 import os
 import socket
-from pathlib import Path
-from typing import Any
 from urllib.parse import urlparse
 
 import pytest
@@ -34,7 +31,19 @@ import pytest
 from localmelo.melo.agent import Agent
 from localmelo.support.config import Config, LocalBackendConfig
 
-_BACKENDS_JSON = Path(__file__).resolve().parent / "data" / "backends.json"
+# Where each local backend listens by default, and the URL that shows it is up.
+_BACKENDS = {
+    "ollama": {
+        "chat_url": "http://127.0.0.1:11434/v1",
+        "chat_model": "qwen3:4b",
+        "health_url": "http://127.0.0.1:11434/api/tags",
+    },
+    "mlc": {
+        "chat_url": "http://127.0.0.1:8400/v1",
+        "chat_model": "qwen3-4b",
+        "health_url": "http://127.0.0.1:8400/v1/models",
+    },
+}
 
 _SMOKE_ENV = "LOCALMELO_SMOKE"
 _SMOKE_ENABLED = os.environ.get(_SMOKE_ENV) == "1"
@@ -47,10 +56,6 @@ pytestmark = [
     pytest.mark.smoke_backend,
     pytest.mark.skipif(not _SMOKE_ENABLED, reason=_SKIP_REASON),
 ]
-
-
-def _load_backends() -> dict[str, dict[str, Any]]:
-    return json.loads(_BACKENDS_JSON.read_text("utf-8"))  # type: ignore[no-any-return]
 
 
 def _can_reach(url: str, timeout: float = 0.5) -> bool:
@@ -67,11 +72,8 @@ def _can_reach(url: str, timeout: float = 0.5) -> bool:
         return False
 
 
-_BACKENDS = _load_backends()
-
-
 def _build_config(backend_key: str) -> Config:
-    """Build a chat-only :class:`Config` from ``backends.json``.
+    """Build a chat-only :class:`Config` from ``_BACKENDS``.
 
     Embedding is set to ``"none"`` so the smoke does not require an
     embedding endpoint. The chat side goes through the registered

@@ -158,7 +158,7 @@
               <tr><td><code>tests/sessions</code></td><td>Conversations in SQLite: the store, the runner, resume, restarts, approvals and the event window</td><td><code>dev</code></td></tr>
               <tr><td><code>tests/gateway</code></td><td>Sessions, the HTTP API, the <code>Host</code> and <code>Origin</code> checks and the web workspace; the <code>.mjs</code> files test the workspace's JavaScript</td><td><code>dev</code> and <code>gateway</code>; Node for the <code>.mjs</code> files</td></tr>
               <tr><td><code>tests/integration</code></td><td>Several parts together</td><td><code>dev</code> and <code>gateway</code></td></tr>
-              <tr><td><code>tests/smoke</code></td><td>Offline tests of the smoke tools (parsing, metrics, logging), plus the opt-in <code>test_backend_smoke.py</code></td><td><code>dev</code>; a model server for that file</td></tr>
+              <tr><td><code>tests/smoke</code></td><td>The opt-in <code>test_backend_smoke.py</code></td><td><code>dev</code>; a model server</td></tr>
             </tbody>
           </table>
         </div>
@@ -168,7 +168,6 @@
         <!-- usage:dev-smoke --><figure class="usage" aria-label="Real-backend smoke tests" data-copy="LOCALMELO_SMOKE=1 uv run pytest -m smoke_backend tests/smoke/test_backend_smoke.py -q"><div class="usage-bar"><span class="usage-title">Real-backend smoke tests</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="f">LOCALMELO_SMOKE</span><span class="x">=</span><span class="a">1</span> <span class="c">uv</span> <span class="s">run</span> <span class="c">pytest</span> <span class="f">-m</span> <span class="a">smoke_backend</span> <span class="a">tests/<wbr>smoke/<wbr>test_backend_smoke.py</span> <span class="f">-q</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li>They ask Ollama on <code>127.0.0.1:11434</code> and MLC LLM on <code>127.0.0.1:8400</code>, and skip a server that does not answer.</li>
-          <li><code class="wrap">tests/smoke/core_loop_test.py</code> runs longer memory scenarios; see its <a href="https://github.com/localmelo/localmelo/blob/main/tests/smoke/README.md">README</a>.</li>
         </ul>
       </section>
 
