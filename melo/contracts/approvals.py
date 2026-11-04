@@ -266,6 +266,11 @@ class ApprovalPolicy(Protocol):
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision: ...
 
 
+# The question the browser provider asks before it presses a button in a window of
+# another app (``desktop-act:<app>``). Like the window question below, only the person
+# answers it, in Ask and in Auto: no model sees the window or the press.
+DESKTOP_ACT: Final = "desktop-act:"
+
 # Questions a tool asks itself whose answer is never kept for the chat, whatever a
 # client sends: each call asks again. Sending a form is one (``browser-submit:<site>``)
 # and so is typing (``browser-type:<site>``): a grant would cover every later form
@@ -278,7 +283,7 @@ NEVER_GRANTED: Final = (
     "browser-submit:",
     "browser-type:",
     "browser-point:",
-    "desktop-act:",
+    DESKTOP_ACT,
     "browser-dialog:",
     "takeover:",
 )

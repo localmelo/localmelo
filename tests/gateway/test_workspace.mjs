@@ -1310,6 +1310,16 @@ test("a press in another app's window says what is pressed and is asked every ti
   const front = h.run('approvalCard(request)');
   assert.match(findNode(front, (node) => node.className === 'approval-note').textContent,
     /the pointer moves there and Chat comes to the front for a moment/);
+  // Auto stopped it for the person (no review decides a press): the card keeps its own question and its two answers.
+  h.context.request = {request_id: 'press-auto', tool_name: 'desktop-act:Chat',
+    arguments: {app: 'Chat', access: 'desktop-act', how: 'press', on: '"Allow"', window: 'Sign in', button: 'Allow'},
+    workspace_label: '~/w', offers_chat: false,
+    review: {verdict: 'high', categories: ['opaque'], reasons: ['Pressing a button in another app\'s window is yours to decide, every time.']}};
+  const auto = h.run('approvalCard(request)');
+  assert.equal(findNode(auto, (node) => node.className === 'approval-title').textContent, 'Let melo press a button in Chat?');
+  assert.equal(findNode(auto, (node) => node.className === 'approval-caption').textContent, 'another app · presses a button');
+  assert.equal(findNode(auto, (node) => node.className === 'approval-why'), null, 'no review reason for the person to read');
+  assert.deepEqual(focuses(auto).filter((name) => name !== 'reason'), ['once', 'deny']);
 });
 
 test("a window another app opened is a question for the person, with the title for the person only and an allow for the chat", async () => {

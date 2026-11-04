@@ -253,24 +253,28 @@ def test_a_click_at_a_point_says_what_it_lands_on_and_that_it_asks_every_time() 
 
 
 def test_a_press_in_another_apps_window_names_the_app_and_asks_every_time() -> None:
-    pressing = panel_text(
-        _request(
-            "desktop-act:Chat",
-            app="Chat",
-            access="desktop-act",
-            how="press",
-            on='"Allow"',
-            window="Sign in",
-            button="Allow",
-        ),
-        width=80,
+    asked = _request(
+        "desktop-act:Chat",
+        app="Chat",
+        access="desktop-act",
+        how="press",
+        on='"Allow"',
+        window="Sign in",
+        button="Allow",
     )
+    pressing = panel_text(asked, width=80)
     assert pressing.title == "Press a button in another app?"
     assert pressing.header == "Chat · another app's window"
     words = " ".join(" ".join(line for _, line in pressing.body).split())
     assert 'press "Allow" in Chat\'s window “Sign in”.' in words
     assert "never types into other apps" in words and "asks every time" in words
     assert "pointer" not in words
+    # Auto stopped it for the person (no review decides a press): the panel keeps its own question.
+    in_auto = dataclasses.replace(
+        asked, review=ActionReview("high", ("opaque",), ("Yours to decide.",))
+    )
+    assert panel_text(in_auto, width=80) == pressing
+    assert not grant_offered(in_auto)
 
 
 def test_a_press_in_the_foreground_says_the_pointer_moves_and_the_app_comes_forward() -> (

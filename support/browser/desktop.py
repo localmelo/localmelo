@@ -23,7 +23,8 @@ Only windows that appeared soon after one of melo's own acts are melo's to read
 or press (and then for :data:`KEEP_S` seconds, while they stay open); melo never
 lists the person's other windows to the model, never roams the desktop, and never
 types into another app. Pressing a button asks its own question
-(``desktop-act:<app>``), reviewed as a browser act is, every time.
+(``desktop-act:<app>``) every time. Only the person answers it, in Ask and in
+Auto: no model reviews a press.
 
 A window may come a moment after the act (a chat app starts, then asks), so the
 look at the screen does not end with the act. What melo knows of the screen is
@@ -95,6 +96,7 @@ from typing import Any, TypeVar
 from urllib.parse import urlsplit
 
 from localmelo.melo.contracts.approvals import (
+    DESKTOP_ACT,
     TOOL_ASK,
     WINDOW_READ,
     ToolAsk,
@@ -167,7 +169,6 @@ SAMPLE_S = 1.0
 # How long one call to the helper or to lsappinfo may take.
 CALL_S = 10.0
 FRONT_S = 2.0
-PREFIX = "desktop-act:"
 SIPS = "/usr/bin/sips"
 # The system's own surfaces: never "another app's window".
 SYSTEM_APPS = frozenset(
@@ -1644,10 +1645,11 @@ async def ask_press(
 ) -> None:
     """Ask about pressing *what* in *window*: :class:`DesktopError` if refused.
 
-    Asked every time (``desktop-act:`` answers are never kept for the chat),
-    and in auto mode reviewed against the chat's goal, as a browser act is. A
-    press in the *foreground* is its own question (``delivery`` ``foreground``),
-    which says that the pointer moves and the app comes to the front.
+    Asked every time (``desktop-act:`` answers are never kept for the chat).
+    Only the person answers it, in Ask and in Auto alike (no model is shown the
+    window or the press; with nobody to ask, Auto refuses). A press in the
+    *foreground* is its own question (``delivery`` ``foreground``), which says
+    that the pointer moves and the app comes to the front.
     """
     ask = TOOL_ASK.get()
     if ask is None:
@@ -1671,7 +1673,7 @@ async def ask_press(
             f" in the foreground: the pointer moves there and {app} comes to the "
             "front for a moment"
         )
-    decision = await ask(PREFIX + app, arguments, preview)
+    decision = await ask(DESKTOP_ACT + app, arguments, preview)
     if not decision.allow:
         raise DesktopError(f"melo did not press it in {app}. " + denial_text(decision))
 
