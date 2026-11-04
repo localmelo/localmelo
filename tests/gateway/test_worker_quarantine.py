@@ -14,6 +14,7 @@ from localmelo.melo.agent import Agent
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.config import Config
+from localmelo.support.gateway import workers as workers_module
 from localmelo.support.gateway.chat_gate import ChatGate
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.errors import ApiError
@@ -281,6 +282,13 @@ async def test_stop_wins_when_park_cleanup_fails(
         monkeypatch.setattr(SessionRunner, "close", original)
 
 
+@pytest.fixture
+def short_close_at_shutdown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Shutdown gives up on a worker that will not close after 0.3 s, not 10 s."""
+    monkeypatch.setattr(workers_module, "_CLOSE_AT_SHUTDOWN_SECONDS", 0.3)
+
+
+@pytest.mark.usefixtures("short_close_at_shutdown")
 async def test_shutdown_bounds_a_blocked_initial_cleanup(
     worker_env: tuple[TaskWorkers, ChatGate, list[list[Message]], Path],
     monkeypatch: pytest.MonkeyPatch,
@@ -299,7 +307,7 @@ async def test_shutdown_bounds_a_blocked_initial_cleanup(
     try:
         await workers.update(task_id, state="pause")
         await asyncio.wait_for(entered.wait(), 3)
-        async with asyncio.timeout(11):
+        async with asyncio.timeout(3):
             await workers.aclose()
         assert not calls
     finally:
@@ -307,6 +315,7 @@ async def test_shutdown_bounds_a_blocked_initial_cleanup(
         monkeypatch.setattr(SessionRunner, "close", original)
 
 
+@pytest.mark.usefixtures("short_close_at_shutdown")
 async def test_quarantined_shutdown_is_bounded(
     worker_env: tuple[TaskWorkers, ChatGate, list[list[Message]], Path],
     monkeypatch: pytest.MonkeyPatch,
@@ -334,7 +343,7 @@ async def test_quarantined_shutdown_is_bounded(
             await asyncio.sleep(0.001)
     assert task_id in workers._runs
     try:
-        async with asyncio.timeout(11):
+        async with asyncio.timeout(3):
             await workers.aclose()
         assert shutdown_close.is_set()
         assert not calls

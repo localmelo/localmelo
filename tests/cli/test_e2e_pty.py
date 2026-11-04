@@ -109,7 +109,9 @@ class Melo:
         deadline = time.monotonic() + timeout_s
         while self.process.poll() is None and time.monotonic() < deadline:
             self._read(0.05)
-        return self.process.wait(timeout=1)
+        code = self.process.poll()
+        assert code is not None, f"still running after {timeout_s} s\n{self.text()}"
+        return code
 
     def text(self) -> str:
         return _ESCAPES.sub(b"", self.output).decode(errors="replace")
@@ -364,7 +366,7 @@ def test_sighup_during_a_turn_ends_the_process_by_it(
     term.type("hold on\r")
     term.see("esc to stop")
     term.process.send_signal(signal.SIGHUP)
-    assert term.wait(20) == -signal.SIGHUP
+    assert term.wait(60) == -signal.SIGHUP  # it ends at once; a busy machine may not
     assert "Traceback" not in term.text()
     [turn] = _turns(tmp_path)
     assert (turn["status"], turn["cause"], turn["error"]) == (

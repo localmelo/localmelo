@@ -23,8 +23,9 @@ cd localmelo                 # keep this name: the package is built from it
 uv sync --extra dev --extra gateway
 ```
 
-Optionally, `uv run pre-commit install` makes the hooks run the checks below on
-every commit.
+Optionally, `uv run pre-commit install` makes the hooks run ruff, black, mypy
+and `uv run pytest --testmon -q` (only the tests a change affects) on every
+commit. The whole suite is a separate run, below.
 
 ## Run the checks
 

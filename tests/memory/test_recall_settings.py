@@ -142,6 +142,8 @@ def test_the_defaults_are_the_shipped_numbers() -> None:
         False,
         True,  # followup: a message with no content recalls from the recent turns
         True,  # excerpt_open: a cut excerpt can be opened, by default
+        "guide",  # gather: recall looks wider for a question that counts
+        0.40,  # gather_floor: used only with gather on
     )
     assert cfg.followup_query == "recent"
     assert (cfg.recall_min_cosine, cfg.recall_min_coverage) == (0.55, 0.6)

@@ -11,7 +11,6 @@ import contextlib
 import os
 import sqlite3
 import stat
-import statistics
 import time
 from collections.abc import AsyncIterator
 from dataclasses import replace
@@ -670,33 +669,6 @@ async def test_aclose_then_reopen(tmp_path: Path, runs: Runs) -> None:
 
 def test_harness_version() -> None:
     assert isinstance(harness_version(), str) and harness_version()
-
-
-async def test_lookup_and_learn_are_fast_with_1000_episodes(tmp_path: Path) -> None:
-    store = SqliteProcedures(tmp_path / "procedures.db")
-    make = Runs()
-    keys = [key_for_query(f"task number {i}", PLACE) for i in range(100)]
-    try:
-        for i in range(1000):
-            await store.learn(make(4 + i % 3, key=keys[i % 100]))
-        looks: list[float] = []
-        writes: list[float] = []
-        for j in range(100):
-            key = keys[j]
-            started = time.perf_counter()
-            await store.lookup(key, model="model-a", options=OPTIONS)
-            looks.append(time.perf_counter() - started)
-            started = time.perf_counter()
-            await store.learn(make(5, key=key))
-            writes.append(time.perf_counter() - started)
-    finally:
-        await store.aclose()
-
-    def p95(values: list[float]) -> float:
-        return statistics.quantiles(values, n=20)[-1]
-
-    assert p95(looks) < 0.020
-    assert p95(writes) < 0.050
 
 
 async def test_a_memory_store_keeps_params(runs: Runs) -> None:

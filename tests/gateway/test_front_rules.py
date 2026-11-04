@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Final
+
 import pytest
 
 from localmelo.support.gateway.front_rules import (
@@ -30,6 +32,7 @@ from localmelo.support.gateway.front_rules import (
     triage,
     work_request,
 )
+from localmelo.tests.linear import assert_linear
 
 SLIDES = TaskRef("a1b2c3d4e5f6", "Slides for the 15:00 meeting", "running")
 CI = TaskRef("0f0f0f0f0f0f", "Fix CI", "queued")
@@ -626,3 +629,32 @@ def test_a_go_ahead_starts_the_work_it_gives_the_go_ahead_for(
     typed: str, rule: str
 ) -> None:
     assert start_rule(typed) == rule
+
+
+# ── A long paste is read by its opening ──
+
+LONG_PASTES: Final = {
+    "one_token": lambda size: "x" * size,
+    "dotted": lambda size: "a.b" * (size // 3),
+    "underscored": lambda size: "a_b" * (size // 3),
+    "slashes": lambda size: "a/b." * (size // 4),
+    "prose": lambda size: "Please look at this paragraph. " * (size // 31),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(LONG_PASTES))
+def test_the_rules_read_a_long_paste_in_time_linear_in_its_length(shape: str) -> None:
+    assert_linear(
+        LONG_PASTES[shape], lambda text: (start_rule(text), route(text).route)
+    )
+
+
+def test_a_request_in_the_opening_of_a_long_text_is_a_task_with_all_of_the_text() -> (
+    None
+):
+    pasted = "Please fix src/app.py, the log is below.\n" + "x" * 100_000
+    found = route(pasted)
+
+    assert found.route == "work"
+    assert found.text == pasted
+    assert start_rule(pasted) == "start"

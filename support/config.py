@@ -106,6 +106,11 @@ MEMORY_COMPRESS_PARALLEL = (1, 8)
 # MemoryConfig.recall_min_cosine and recall_min_coverage.
 MEMORY_RECALL_MIN_COSINE = (0.20, 0.95)
 MEMORY_RECALL_MIN_COVERAGE = (0.10, 1.00)
+# How recall looks wider for a question that counts, totals or compares, and the
+# vector bar it uses then: see MemoryConfig.gather and gather_min_cosine.
+MEMORY_GATHER = ("off", "wide", "guide")
+MEMORY_GATHER_DEFAULT = "guide"
+MEMORY_GATHER_MIN_COSINE = (0.20, 0.55)
 # How far back a new chat's first turn looks into the other chats: see
 # ChatConfig.recent_digest_minutes (0 turns it off).
 CHAT_RECENT_DIGEST_MINUTES = (0, 1440)
@@ -145,6 +150,8 @@ RECALL_KEYS = (
     "note_gate",
     "note_min_cosine",
     "followup_query",
+    "gather",
+    "gather_min_cosine",
 )
 RECALL_TRIGGERS = ("start", "attempt", "step", "tool")
 RECALL_KINDS = ("note", "draft", "thought", "digest", "reflection", "long")
@@ -485,7 +492,18 @@ class MemoryConfig:
     with: ``recent`` (the default) the message and the user's words of the chat's
     last two turns that the model still shows, or ``message`` the message's own
     words, as recall did before; with ``recent`` the first message of a new chat
-    that has no content recalls nothing. ``project_instructions = "off"`` stops a
+    that has no content recalls nothing. Two more are for questions about the person's
+    own life that count, total or compare across things (#428), and apply to
+    ``recall_form = "list"``.
+    ``gather``, ``guide`` (the default: for such a question the block's vector bar is
+    the lower of ``recall_min_cosine`` and ``gather_min_cosine``, every list-form
+    ``search_memory`` uses that lower bar, and one more sentence under the list says to
+    open every item that may belong and to search again for each kind not listed yet),
+    ``wide`` (the lower bar without the sentence) or ``off`` (recall as before; a
+    message that does not ask to count, total or compare is recalled for the same way
+    under every value); ``gather_min_cosine`` (0.20-0.55, 0.40 by default) is that
+    lower bar.
+    ``project_instructions = "off"`` stops a
     task that the person made from reading the instruction file of its folder (``AGENTS.md``,
     ``CLAUDE.md`` or ``GEMINI.md``, the nearest first) when it starts.
     """
@@ -519,6 +537,8 @@ class MemoryConfig:
     note_gate: str = "typed"  # typed | pointed | meaning | model: note sources.
     note_min_cosine: float = 0.55  # Least similarity of a note to its source.
     followup_query: str = "recent"  # recent | message: what "continue" searches with.
+    gather: str = MEMORY_GATHER_DEFAULT  # guide | wide | off: look wider to count.
+    gather_min_cosine: float = 0.40  # The vector bar for such a question.
     project_instructions: str = "on"  # on | off: a task reads its folder's AGENTS.md.
 
 
@@ -876,6 +896,7 @@ class Config:
             ("recall_min_cosine", MEMORY_RECALL_MIN_COSINE),
             ("recall_min_coverage", MEMORY_RECALL_MIN_COVERAGE),
             ("note_min_cosine", MEMORY_NOTE_MIN_COSINE),
+            ("gather_min_cosine", MEMORY_GATHER_MIN_COSINE),
         ):
             value = getattr(self.memory, name)
             if not isinstance(value, int | float) or isinstance(value, bool):
@@ -892,6 +913,7 @@ class Config:
             ("excerpt_open", MEMORY_EXCERPT_OPEN),
             ("note_gate", MEMORY_NOTE_GATE),
             ("followup_query", MEMORY_FOLLOWUP_QUERY),
+            ("gather", MEMORY_GATHER),
             ("recall_source", MEMORY_RECALL_SOURCE),
             ("open_sources", MEMORY_OPEN_SOURCES),
             ("project_instructions", MEMORY_PROJECT_INSTRUCTIONS),

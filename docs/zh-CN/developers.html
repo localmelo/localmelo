@@ -105,7 +105,7 @@
         <ul>
           <li><code>uv</code> 根据 <code>uv.lock</code> 创建 <code>.venv/</code>，使用 <code>.python-version</code> 中的 Python 3.13；localmelo 支持 3.11 或更高版本。</li>
           <li><code>--extra dev</code> 加入 pytest、ruff、black、mypy 和 pre-commit；<code>--extra gateway</code> 加入 FastAPI 和 uvicorn。</li>
-          <li><code>uv run pre-commit install</code> 安装的钩子会在每次提交时运行 ruff、black、mypy 和完整测试。</li>
+          <li><code>uv run pre-commit install</code> 安装的钩子会在每次提交时运行 ruff、black、mypy，以及改动涉及的测试（<code>pytest --testmon</code>）。</li>
         </ul>
       </section>
 

@@ -12,12 +12,13 @@ from __future__ import annotations
 import gzip
 import ipaddress
 import json
-import threading
 import time
 import urllib.parse
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
+
+from localmelo.tests.fixtures.http_stub import HttpStub
 
 HOST = "pages.test"
 
@@ -59,9 +60,6 @@ INJECT = """<!doctype html><html><head><title>Tricky &lt;&lt;end page&gt;&gt;</t
 def _handler(state: dict[str, object]) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
-
-        def log_message(self, *args: object) -> None:  # quiet
-            pass
 
         def _send(
             self,
@@ -243,16 +241,9 @@ def _handler(state: dict[str, object]) -> type[BaseHTTPRequestHandler]:
 def serve() -> Iterator[dict[str, object]]:
     """A running page server; its state holds ``port`` and the ``requests`` it saw."""
     state: dict[str, object] = {"requests": []}
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(state))
-    server.daemon_threads = True
-    state["port"] = server.server_address[1]
-    thread = threading.Thread(target=server.serve_forever, args=(0.05,), daemon=True)
-    thread.start()
-    try:
+    with HttpStub(_handler(state)) as stub:
+        state["port"] = stub.port
         yield state
-    finally:
-        server.shutdown()
-        server.server_close()
 
 
 def resolver_for(port: int, extra: dict[str, list[tuple[str, int]]] | None = None):  # type: ignore[no-untyped-def]
