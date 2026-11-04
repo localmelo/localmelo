@@ -99,7 +99,7 @@ async def test_a_click_stopped_by_what_covers_the_element_keeps_the_page_and_its
     None
 ):
     driver = world(button("Check in"), button("Again"))
-    words = "A sticky header (h1 'Daily') covers that button, so melo stopped it."
+    words = "A sticky header (h1) covers that button, so melo stopped it."
     driver.covers["Check in"] = words
     tools = await tools_of(driver)
     await run(tools, "browser_open", url=HOME)

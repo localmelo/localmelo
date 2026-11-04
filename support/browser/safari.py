@@ -43,7 +43,7 @@ from typing import Any, cast
 from urllib.parse import urlsplit
 
 from localmelo.melo.executor.models import ToolOutput
-from localmelo.support.browser import fields, render
+from localmelo.support.browser import fields
 from localmelo.support.browser.driver import (
     MAX_TYPED_CHARS,
     Act,
@@ -153,6 +153,74 @@ _BLOCKED = {
 }
 POLL_S = 0.4
 BLANK_TRIES = 4
+
+# What may be said of an element that stands over another: its tag when it is one of these
+# (any other is "element"), and one of these kinds. The page script builds its answer from
+# the same list, and the words are checked against it again here, so nothing the page wrote
+# (its text, a custom tag, a frame's title) reaches the model through them.
+COVER_TAGS = [
+    "html",
+    "body",
+    "header",
+    "footer",
+    "nav",
+    "main",
+    "aside",
+    "section",
+    "article",
+    "div",
+    "span",
+    "p",
+    "a",
+    "b",
+    "i",
+    "em",
+    "strong",
+    "small",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "ul",
+    "ol",
+    "li",
+    "table",
+    "tr",
+    "td",
+    "form",
+    "label",
+    "button",
+    "input",
+    "textarea",
+    "select",
+    "img",
+    "svg",
+    "canvas",
+    "video",
+    "picture",
+    "figure",
+    "dialog",
+    "center",
+    "iframe",
+]
+COVER_KINDS = frozenset(
+    [
+        "an ad",
+        "an ad at the top",
+        "an ad at the bottom",
+        "a dialog",
+        "a frame",
+        "another element",
+    ]
+    + [
+        f"a {how} {place}"
+        for how in ("sticky", "fixed")
+        for place in ("header", "bar at the bottom", "layer")
+    ]
+)
+_COVER_HOST = re.compile(r"^iframe(?: from [a-z0-9.-]{1,60})?$", re.IGNORECASE)
 
 # The page script's pieces, shared by reading a page and by acting on it, so
 # an element is found again by the same rules that listed it. ``SEL`` lists
@@ -440,10 +508,12 @@ var hitAt = function (x, y) {
   return {node: null, surface: "none", doc: D, path: path, x: x, y: y};
 };
 // What stands over a point: where it sits (a sticky or fixed bar, a dialog, a frame) and
-// what it is, in words for the model: {what: "a sticky header", detail: "h1 'Daily'"}.
-// A bar is told by its place in the view, a frame by the site it comes from; an ad is
-// one that says so in its id, class or title.
+// what it is, in words for the model: {what: "a sticky header", detail: "h1"}. Never a word
+// the page wrote: a bar is told by its place in the view, an element by its tag when that is
+// a standard one, a frame by the host of its address. An ad is one that says so in its id,
+// class or title (only that yes or no is used).
 var AD_WORDS = /(^|[^a-z])(ads?|adverts?|advertisements?|sponsored|banners?)([^a-z]|$)/i;
+var COVER_TAGS = new RegExp(__COVER_TAGS__);
 var coverOf = function (t) {
   if (!t || t.nodeType !== 1) return {what: "another element", detail: ""};
   var tag = t.tagName.toLowerCase(), bar = null, pos = "", c, i;
@@ -456,10 +526,10 @@ var coverOf = function (t) {
   if (tag === "iframe" || tag === "frame") {
     var host = "";
     try { host = new URL(attr(t, "src"), document.baseURI).hostname; } catch (e) { host = ""; }
+    if (!/^[a-z0-9.-]{1,60}$/i.test(host)) host = "";
     return {what: adLike ? "an ad" : "a frame", detail: "iframe" + (host ? " from " + host : "")};
   }
-  var text = cap(tag === "input" ? attr(t, "aria-label") || attr(t, "placeholder") : t.innerText || t.textContent, 40);
-  var detail = tag + (text ? " '" + text + "'" : "");
+  var detail = COVER_TAGS.test(tag) ? tag : "element";
   if (P.closest.call(t, "dialog,[role=dialog],[role=alertdialog],[aria-modal=true]")) return {what: "a dialog", detail: detail};
   if (!bar) return {what: adLike ? "an ad" : "another element", detail: detail};
   var r = P.rect.call(bar), vh = window.innerHeight || 0;
@@ -491,7 +561,7 @@ var linesOf = function (node, into, limit) {
   return into;
 };
 """
-)
+).replace("__COVER_TAGS__", json.dumps("^(?:" + "|".join(COVER_TAGS) + ")$"))
 
 # Returns JSON: the page's text (the main part when there is one) and its
 # visible links, buttons and fields, each with its place (``at``) among the
@@ -2154,14 +2224,23 @@ def _reached(act: Act, data: dict[str, Any], *, frame: bool = False) -> bool:
 
 
 def _cover_words(info: Any) -> str:
-    """What stands over an element, as the page script told it: ``a sticky header (h1 'Daily')``; ``""`` when it did not say."""
+    """What stands over an element, as the page script told it: ``a sticky header (h1)``; ``""`` when it did not say.
+
+    Only words from a fixed list pass (see :data:`COVER_KINDS`): the kind, and
+    the tag of a standard element or ``iframe from <host>``. What else the page
+    sent is left out, so a page cannot put its own words into the answer.
+    """
     if not isinstance(info, dict):
         return ""
-    what = render.field_text(str(info.get("what") or ""), 40)
-    detail = render.field_text(str(info.get("detail") or ""), 80)
-    if not what:
+    what = info.get("what")
+    if not isinstance(what, str) or what not in COVER_KINDS:
         return ""
-    return f"{what} ({detail})" if detail else what
+    detail = info.get("detail")
+    if not isinstance(detail, str) or not (
+        detail in COVER_TAGS or detail == "element" or _COVER_HOST.match(detail)
+    ):
+        return what
+    return f"{what} ({detail})"
 
 
 def _covered_why(by: Any) -> str:

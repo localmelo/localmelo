@@ -379,7 +379,7 @@ async def test_a_target_that_stays_covered_goes_to_the_page_script_and_names_wha
         None, Act("click", raw.url, named(raw, "Under the header"), doc=raw.doc)
     )
     assert done.via == "page-script"
-    assert "a sticky header (h1 '每日签到') covers it" in done.why
+    assert "a sticky header (h1) covers it" in done.why
     assert scrolls(peer) == 2 and not clicks(peer)
 
 

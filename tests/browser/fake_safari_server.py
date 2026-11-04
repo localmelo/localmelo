@@ -171,7 +171,7 @@ PAGES: dict[str, dict[str, Any]] = {
                 "label": "Half hidden",
                 "fp": "button|half|1",
                 "shifted": True,
-                "by": {"what": "a sticky header", "detail": "h1 'Daily'"},
+                "by": {"what": "a sticky header", "detail": "h1"},
             },
         ],
         "points": {
@@ -448,7 +448,7 @@ def interact(args: dict[str, Any]) -> dict[str, Any]:
     if MODE == "native_redirect" or (MODE == "native_redirect_once" and not redirected):
         redirected.append(1)
         look["blocked"] = ["moved"]
-        look["moved_by"] = {"what": "a sticky header", "detail": "h1 'Daily'"}
+        look["moved_by"] = {"what": "a sticky header", "detail": "h1"}
         return text("Clicked.")
     if "point" in item:
         spot = page.get("points", {}).get(

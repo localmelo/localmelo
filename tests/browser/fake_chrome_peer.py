@@ -116,14 +116,14 @@ PAGES: dict[str, dict[str, Any]] = {
                 "label": "Under the header",
                 "fp": "button|under",
                 "covered": True,
-                "by": {"what": "a sticky header", "detail": "h1 '每日签到'"},
+                "by": {"what": "a sticky header", "detail": "h1"},
             },
             {
                 "kind": "button",
                 "label": "Slips away",
                 "fp": "button|slips",
                 "moves": 1,
-                "moved_by": {"what": "a sticky header", "detail": "h1 'Daily'"},
+                "moved_by": {"what": "a sticky header", "detail": "h1"},
                 "goes": "https://example.com/done",
             },
             {

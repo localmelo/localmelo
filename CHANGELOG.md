@@ -1468,7 +1468,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   scrolls the element to the middle of the view at once (also on a page that scrolls smoothly, where the middle
   used to be measured before the page had moved) and, in Chrome, clicks the part of it that nothing covers. An
   element with no clear part is scrolled to once more after a moment; one that stays covered goes to the page
-  script and the answer names what covers it (`a sticky header (h1 'Daily check-in')`, `an ad (iframe from
+  script and the answer names what covers it, by kind and tag and never in words the page wrote (`a sticky header (h1)`, `an ad (iframe from
   ads.example.net)`). A real click that still lands on another element is stopped, scrolled to again and tried
   once more; when it lands elsewhere twice the answer says what got it, and the page and its refs stay as they
   were, so the model no longer has to open the page again. Safari's windows get the retry and the names too, but
