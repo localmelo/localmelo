@@ -94,6 +94,7 @@ from localmelo.melo.agent._step_review import (
 from localmelo.melo.agent._task_aids import FINISH_NOTE, refusal_note
 from localmelo.melo.agent._tool_images import (
     TEXT_READERS,
+    USER_KEEP,
     ToolImageStore,
     withheld_note,
 )
@@ -847,6 +848,32 @@ def _tool_result_text(result: ToolResult) -> str:
     if result.output.strip():
         return result.output
     return "" if result.images else "(no output)"
+
+
+def _read_notes(
+    inbox: InboxSource, pending: list[tuple[int, str]]
+) -> tuple[list[tuple[int, str]], list[ImagePart]]:
+    """The notes a step reads, and the pictures that go with them.
+
+    An inbox that can name the pictures of a note (``pictures(offset)``, see
+    :class:`~localmelo.melo.contracts.inbox.PictureInbox`) has them sent with
+    its words. A step reads whole notes while their pictures stay within what
+    the store keeps (:data:`USER_KEEP`): the first note is always read, and any
+    after it that would pass the limit wait, unread, for the next step. A
+    picture the checker would refuse is left out.
+    """
+    ask = getattr(inbox, "pictures", None)
+    if not callable(ask):
+        return pending, []
+    taken: list[tuple[int, str]] = []
+    shown: list[ImagePart] = []
+    for offset, text in pending:
+        own = [p for p in ask(offset) if p.data and not image_problem(p)][:USER_KEEP]
+        if taken and len(shown) + len(own) > USER_KEEP:
+            break
+        taken.append((offset, text))
+        shown.extend(own)
+    return taken, shown
 
 
 def _tool_message_content(
@@ -6112,8 +6139,12 @@ class Agent:
             pending = run.inbox.poll() if run.inbox is not None else []
             inserted = None
             if pending:
+                assert run.inbox is not None
+                pending, shown = _read_notes(run.inbox, pending)
                 inserted = Message(
-                    role="user", content="\n\n".join(text for _, text in pending)
+                    role="user",
+                    content="\n\n".join(text for _, text in pending),
+                    images=self._tool_images.keep_user(shown),
                 )
                 self.hippo.working.append(inserted)
                 run.pinned.append(inserted)

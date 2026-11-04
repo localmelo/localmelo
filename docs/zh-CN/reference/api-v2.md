@@ -848,11 +848,11 @@ worker 运行或终端对话从 CLI 的文件读取。
 - 本网关运行该轮次时返回 202；对于已结束的轮次，或本网关不运行的轮次，返回 409 `turn_not_running`。
 - 轮次在其下一个边界处停止，并以 `cancelled` 结束，原因为 `user_stop`；`turn.finished` 会说明这一点。若它没有说任何话，其保存的 `answer` 为 `[interrupt: no assistant output for this turn]`。
 - 在审批等待期间取消，会撤回该卡片：请求会被答复为 `withdrawn`，并离开 `pending_approvals`。
-- [补充到该轮次](#post-apiturnsturn_idnotes)、但其运行尚未读到的话不会开始另一个轮次：它们会从队列中移除，并以 `"unread_notes": [{"note": 3, "text": "use the 2024 file"}]` 返回，由客户端放回消息框。没有时不会有这个键。
+- [补充到该轮次](#post-apiturnsturn_idnotes)、但其运行尚未读到的话不会开始另一个轮次：它们会从队列中移除，并以 `"unread_notes": [{"note": 3, "text": "use the 2024 file"}]` 返回，由客户端放回消息框。带图片的补充还有 `"images"`：这些图片重新暂存后的样子，每张与 [`POST /api/uploads`](#post-apiuploads) 的回答相同（`id`、`name`、`mime_type`、`size_bytes`、`width`、`height`、`model_reads`），由客户端放回图片那一行，随下一条消息发送。没有时不会有这个键。
 
 ## POST /api/turns/{turn_id}/notes
 
-向正在运行的轮次补充话语。它的运行会在下一步读到这些话。
+向正在运行的轮次补充话语和图片。它的运行会在下一步读到这些内容。
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/turns/9c1f0e2d4b6a48c1a3e5f7091b2d4c6e/notes \
@@ -864,11 +864,22 @@ worker 运行或终端对话从 CLI 的文件读取。
 {"note": {"note": 3, "turn_id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e", "text": "use the 2024 file instead", "client_request_id": "curl-note-1", "state": "sent"}}
 ```
 
+带一张图片（[先暂存](#post-apiuploads)，把它的 id 写进 `images`）：
+
+```json
+{"text": "this is the file I mean", "images": ["46fb64ffc2a04ad98a9a0bb3a1a0f0c1"], "client_request_id": "curl-note-2"}
+```
+
+```json
+{"note": {"note": 4, "turn_id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e", "text": "this is the file I mean", "client_request_id": "curl-note-2", "state": "sent", "images": [{"sha256": "3f2a9c0d1b7e4a58b6c3d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4", "mime_type": "image/png", "size_bytes": 20481}]}}
+```
+
 - 返回 202。`state` 为 `sent` 表示正在运行的轮次接收了这些话，为 `next` 表示这些话保存期间轮次已经结束：它们会作为对话的下一个轮次运行。`client_request_id` 是可选的，使调用可以安全地重复（同样的内容会原样返回，轮次结束之后也一样）。
 - 运行会把每条补充放进下一次模型请求，作为用户的消息，并标明是它工作时补充的，同时用 `inbox.accepted` 说明已读到（它的 `offset` 就是这条补充的编号）。运行在轮次结束前没有读到的补充，会作为对话的下一个轮次发送，与排队的消息按顺序排列；它们在同一个存储里，所以重启后仍会保留。停止会把没读到的还给客户端（见[取消](#post-apiturnsturn_idcancel)）。
-- `text` 会去掉首尾空白，不能为空，最多 8,000 个字符，并经过与普通消息相同的检查器（400 `invalid_request`，400 `text_rejected`）。一个轮次最多接收 20 条补充。
-- 对没有在运行、正在被停止或其运行已结束的轮次返回 409 `turn_not_running`：客户端应把这些话作为一条消息发送。对不是用户开始的轮次，以及任务会话，返回 409 `not_your_turn`。
-- 图片和文件不能加入正在运行的轮次。
+- `text` 会去掉首尾空白，最多 8,000 个字符，并经过与普通消息相同的检查器（400 `invalid_request`，400 `text_rejected`）。除非 `images` 里有图片，否则不能为空；此时模型读到的是 `[1 picture]`，`text` 为 `""`。一个轮次最多接收 20 条补充。
+- `images` 可选：来自 [`POST /api/uploads`](#post-apiuploads) 的 id，最多 4 个，不能重复，且都还在暂存区，规则与消息的 `images` 相同（400 `invalid_request`、400 `picture_gone`；已知聊天模型读不了图片时为 409 `model_text_only`）。回答在 `images` 下列出它们，写法与轮次的 `images` 相同（`sha256`、`mime_type`、`size_bytes`；图片本身用 [`GET /api/sessions/{id}/blobs/{sha256}`](#get-apisessionsidblobssha256) 取），`turn.note` 事件也一样。它们在调用返回之前就已保存在对话里，所以变成下一个轮次、或等过一次重启的补充仍然带着它们。运行在下一步把它们作为这条补充消息的图片部分发送（每一步最多 8 张，其余的补充在再下一步读到）；若到那时发现模型读不了图片，补充的文字里会说明这一点，并且不发送图片。
+- 对没有在运行、正在被停止或其运行已结束的轮次返回 409 `turn_not_running`：客户端应把这些话和图片作为一条消息发送。对不是用户开始的轮次，以及任务会话，返回 409 `not_your_turn`。
+- 文本文件不能加入正在运行的轮次。
 
 ## POST /api/uploads
 

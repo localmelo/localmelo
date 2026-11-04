@@ -184,13 +184,14 @@
 <a id="add-words-while-melo-works"></a>
 ## 边做边补充
 
-melo 回答时，消息框仍然可用。它的提示是 `Add to what melo is doing…`，按回车会把你的话加到正在运行的这一轮，而不是等它结束。Shift + 回车仍然换行，Esc 仍然停止这一轮。
+melo 回答时，消息框仍然可用。它的提示是 `Add to what melo is doing…`，按回车会把你的话，以及消息框上方那一行里的图片，加到正在运行的这一轮，而不是等它结束。Shift + 回车仍然换行，Esc 仍然停止这一轮。
 
 - **melo 在下一步读到。** 模型会把这些话当作你的消息收到，并标明是它工作时补充的，所以一句更正（例如 `use the 2024 file instead`）会改变这一轮余下的部分，而不只是下一轮。一轮最多收 20 条补充，每条最多 8,000 个字符。
 - **先“已发送”，再“已看到”。** 这些话在这一轮的工作里先显示 `Sent. melo reads it at its next step.`，运行读到后变成 `Seen by melo at step 3`。它们随这一轮一起保存，所以重新打开的对话也会显示。
-- **这一轮先结束了**，它们就成为你的下一条消息：`melo finished first. This goes next as your message.` 它们和对话里其他排队的消息一起按顺序等待，网关重启后也会保留。
-- **停止会把它们还给你。** 停止仍然取消这一轮；melo 还没读到的话会回到消息框里，不会再开始新的一轮；已经读到的话留在这一轮的工作里。
-- **不变的部分。** 只有你自己开始的一轮才能补充；melo 为回答任务的问题而开始的一轮不行，任务的问题仍按[上文](#when-a-task-is-stuck-it-asks-its-chat)所述回答。图片和文件不能加入正在运行的一轮（`Pictures and files cannot join a turn that is running. Send them when melo is done, or press Stop.`）。
+- **图片一起发送。** melo 工作时，像给[任何消息](#pictures-and-files-in-a-message)加图片那样拖放、粘贴或选择图片，点发送就会把它和你的话一起加到这一轮。只有图片也可以。补充会在这一轮的工作里显示它的图片，模型在下一步把图片和话放在一起读到。图片的种类、最多 4 张的限制，以及对读不了图片的模型的拒绝，都与普通消息相同。如果在读到这条补充之前发现模型读不了图片，模型会被告知你附了图片、而它看不到，图片仍留在对话里给你。
+- **这一轮先结束了**，它们（包括图片）就成为你的下一条消息：`melo finished first. This goes next as your message.` 它们和对话里其他排队的消息一起按顺序等待，网关重启后也会保留。
+- **停止会把它们还给你。** 停止仍然取消这一轮；melo 还没读到的话和图片会回到消息框和它上方的那一行里，不会再开始新的一轮；已经读到的留在这一轮的工作里。
+- **不变的部分。** 只有你自己开始的一轮才能补充；melo 为回答任务的问题而开始的一轮不行，任务的问题仍按[上文](#when-a-task-is-stuck-it-asks-its-chat)所述回答。文本文件不能加入正在运行的一轮（`Text files cannot join a turn that is running. Send them when melo is done, or press Stop.`）。
 - 客户端用 [`POST /api/turns/{turn_id}/notes`](../../reference/api-v2.md#post-apiturnsturn_idnotes)（英文）发送同样的话。
 
 <a id="pictures-and-files-in-a-message"></a>
@@ -212,7 +213,8 @@ melo 回答时，消息框仍然可用。它的提示是 `Add to what melo is do
 - **不能读图片的模型。** 当所选模型已知读不了图片时，缩略图下面会有一行说明，并链接到 设置 → 模型。melo 不会悄悄丢掉图片：仍然发送会被拒绝，并说明 `This model cannot read pictures. Choose a model that can in Settings → Model, or send the message without the picture.`。如果 melo 无法判断，就会发送图片。如果模型或其服务器随后因为不接受图片而拒绝这一轮（错误本身这样说才算；只有状态码的错误、关于长度的提示，或图片无法解码的提示，都保持原来的文字），这一轮会以一行话结束，`This model can't see pictures; choose one that can in Settings → Model`，此后一分钟内，或直到你换了模型，melo 把该模型当作只能读文字；之后会再次询问模型的服务器，并以它的回答为准。这期间输入框会提醒，而这一轮的 **Try again** 会被拒绝（`model_text_only`），不会再次发送同一张图片。
 - **等待中的图片留在内存里。** 加了但没发送的图片最多在本机内存里保留 30 分钟（24 张、64 MB），移除或关闭对话后就没有了。消息发送之前不会写入磁盘。
 - **不是任务。** 带图片的消息交给模型，没有任何规则读它，所以不会开始任务；有图片时 **Run as a task** 和 `/task` 会被拒绝（`Pictures cannot start a task. Send them as a message.`）。
-- 客户端用 [`POST /api/uploads`](../../reference/api-v2.md#post-apiuploads)（英文）发送图片，并把它写进这一轮的 `images`。
+- **melo 工作时**，图片的加法相同，并像[补充的话](#add-words-while-melo-works)那样进入这一轮；文本文件则会被告知不能加。
+- 客户端用 [`POST /api/uploads`](../../reference/api-v2.md#post-apiuploads)（英文）发送图片，并把它写进这一轮的 `images`，或[补充](../../reference/api-v2.md#post-apiturnsturn_idnotes)的 `images`。
 
 <a id="pictures-in-the-answer"></a>
 ## 回答里的图片

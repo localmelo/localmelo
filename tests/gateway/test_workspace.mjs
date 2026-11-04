@@ -3130,6 +3130,34 @@ test('Stop gives the unread words back to the box and the turn starts nothing el
 
 // ── The note reducer on its own ──
 
+test('a note with pictures shows the ones it was sent with, then the references the gateway lists', () => {
+  const {view, turn} = started();
+  const shown = [{name: 'shot.png', url: '/api/uploads/up1', bytes: 3000}];
+  const item = turns.startNote(turn, 'look', 'k1', shown);
+  assert.deepEqual([item.pictures, item.images], [shown, []]);
+  const refs = [{sha256: 'ab'.repeat(32), mime_type: 'image/png', size_bytes: 3000}];
+  // The event comes before the answer: one item, with the references.
+  applyEvent(view, {id: 2, turn: 1, ts: 101, type: 'turn.note', data: {turn: 1, turn_id: 'turn-1', note: 5, text: 'look', images: refs}});
+  assert.equal(turn.items.filter((entry) => entry.kind === 'note').length, 1);
+  assert.deepEqual(item.images, refs);
+  turns.acknowledgeNote(turn, item, 5, refs);
+  assert.equal(turn.items.filter((entry) => entry.kind === 'note').length, 1);
+  assert.deepEqual(item.images, refs);
+});
+
+test('the answer of a send lists the pictures when the event has not come, and a note from another tab has them from its event', () => {
+  const {view, turn} = started();
+  const refs = [{sha256: 'cd'.repeat(32), mime_type: 'image/jpeg', size_bytes: 10}];
+  const item = turns.startNote(turn, '', 'k1', [{name: 'a.jpg', url: '/api/uploads/u', bytes: 10}]);
+  turns.acknowledgeNote(turn, item, 6, refs);
+  assert.deepEqual(item.images, refs);
+  applyEvent(view, {id: 3, turn: 1, ts: 102, type: 'turn.note', data: {turn: 1, turn_id: 'turn-1', note: 7, text: 'elsewhere', images: [...refs, {sha256: 'nope'}]}});
+  const heard = turn.items.find((entry) => entry.kind === 'note' && entry.note === 7);
+  assert.deepEqual([heard.text, heard.images, heard.pictures], ['elsewhere', refs, []], 'a reference that names no blob is ignored');
+  applyEvent(view, {id: 4, turn: 1, ts: 103, type: 'turn.note', data: {turn: 1, turn_id: 'turn-1', note: 8, text: 'plain'}});
+  assert.deepEqual(turn.items.find((entry) => entry.kind === 'note' && entry.note === 8).images, []);
+});
+
 test('a note is one item however its answer and its event arrive', () => {
   const {view, turn} = started();
   const item = turns.startNote(turn, 'hello', 'k1');
@@ -6746,26 +6774,155 @@ test('a drop the page cannot use never leaves the page: files, links, and files 
   assert.equal(h.element('drop-hint').hidden, true);
 });
 
-test('while melo works, a picture cannot join the turn: a drop is told so, and Send keeps the picture and posts nothing', async () => {
-  const h = await runningChat({'POST /uploads?name=shot.png': stagedPicture('up1', 'shot.png')});
+const WORKING = {id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'turn-2', user_text: 'A long task', client_request_id: 'k2'}};
+const noteWithPicture = (number, text, extra = {}) => noteReply(number, text, {images: [{sha256: SHA, mime_type: 'image/png', size_bytes: 3000}], ...extra});
+
+test('while melo works, a picture is dropped, pasted or picked into the strip like any other time', async () => {
+  const h = await runningChat({
+    'POST /uploads?name=shot.png': stagedPicture('up1', 'shot.png'),
+    'POST /uploads?name=image.png': stagedPicture('up2', 'image.png'),
+    'POST /uploads?name=chosen.jpg': stagedPicture('up3', 'chosen.jpg', {mime_type: 'image/jpeg'}),
+  });
   await dropFiles(h, [fileOf('shot.png', 'image/png')]);
-  assert.deepEqual(h.net.callsTo('/uploads?name=shot.png'), []);
-  assert.match(h.text('notice'), /Pictures and files cannot join a turn that is running\./);
+  assert.equal(h.net.callsTo('/uploads?name=shot.png').length, 1);
+  const [paste] = h.element('input').listeners.paste;
+  paste({clipboardData: {files: [fileOf('image.png', 'image/png')], getData: () => ''}, preventDefault() {}});
+  await settle();
+  assert.equal(h.net.callsTo('/uploads?name=image.png').length, 1);
+  let opened = 0;
+  h.element('media-input').click = () => { opened += 1; };
   h.element('attach-btn').click();
-  assert.match(h.text('notice'), /Pictures and files cannot join a turn that is running\./);
+  assert.equal(opened, 1, 'the picker opens while melo works');
+  const chooser = h.element('media-input');
+  chooser.files = [fileOf('chosen.jpg', 'image/jpeg')];
+  chooser.listeners.change[0]();
+  await settle();
+  assert.equal(tiles(h, 'media-thumb').length, 3);
+  assert.equal(h.text('notice'), '', 'nothing is refused');
 });
 
-test('a picture that waits in the strip when a turn starts is not lost to a note', async () => {
-  const h = harness(baseRoutes({'POST /uploads?name=shot.png': stagedPicture('up1', 'shot.png'), 'POST /turns/turn-2/notes': noteReply(1, 'hello')}));
-  await h.run('init()');
+test('while melo works, a text file is told it cannot join, from a drop and from the picker', async () => {
+  const h = await runningChat({'POST /uploads?name=shot.png': stagedPicture('up1', 'shot.png')});
+  await dropFiles(h, [textFile('notes.md', 'hello')]);
+  assert.match(h.text('notice'), /Text files cannot join a turn that is running\./);
+  assert.equal(h.element('media-tray').hidden, true, 'nothing was added');
+  // Dropped together, the picture joins and only the text file is refused.
+  await dropFiles(h, [fileOf('shot.png', 'image/png'), textFile('notes.md', 'hello')]);
+  assert.equal(tiles(h, 'media-thumb').length, 1);
+  assert.match(h.text('notice'), /Text files cannot join a turn that is running\./);
+  const chooser = h.element('media-input');
+  chooser.files = [textFile('more.txt', 'x')];
+  chooser.listeners.change[0]();
+  await settle();
+  assert.equal(tiles(h, 'media-thumb').length, 1, 'the picker added nothing');
+  assert.equal(h.element('media-tray').hidden, false);
+});
+
+test('Send while melo works posts the strip\'s pictures with the words as one note, and no turn', async () => {
+  const h = await runningChat({
+    'POST /uploads?name=shot.png': stagedPicture('up1', 'shot.png'),
+    'POST /turns/turn-2/notes': noteWithPicture(1, 'use this one'),
+  });
   await dropFiles(h, [fileOf('shot.png', 'image/png')]);
-  h.stream().emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'turn-2', user_text: 'A long task', client_request_id: 'k2'}});
+  h.element('input').value = 'use this one';
+  h.element('input').listeners.input?.forEach((handler) => handler());
+  assert.equal(h.element('send-btn').disabled, false);
+  await h.run('send()');
+  const [call] = h.net.callsTo('/turns/turn-2/notes');
+  assert.equal(call.body.text, 'use this one');
+  assert.deepEqual(call.body.images, ['up1']);
+  assert.ok(call.body.client_request_id);
+  assert.deepEqual(h.net.callsTo('/sessions/a/turns'), [], 'no second turn is started');
+  assert.equal(h.element('media-tray').hidden, true, 'the strip is empty once the note is out');
+  assert.equal(h.element('input').value, '');
+  // The note shows its picture beside its words, and says melo reads it at the next step.
+  const bubble = findNodes(h.element('messages'), (node) => node.className === 'user-bubble note-bubble has-media')[0];
+  assert.ok(bubble, 'the note bubble has media');
+  assert.equal(findNodes(bubble, (node) => node.className === 'bubble-picture').length, 1);
+  assert.match(flatten(bubble), /use this one/);
+  assert.match(h.text('messages'), /Sent\. melo reads it at its next step\./);
+});
+
+test('a picture alone, with no words, is a note too', async () => {
+  const h = await runningChat({
+    'POST /uploads?name=shot.png': stagedPicture('up1', 'shot.png'),
+    'POST /turns/turn-2/notes': noteWithPicture(1, ''),
+  });
+  await dropFiles(h, [fileOf('shot.png', 'image/png')]);
+  assert.equal(h.element('send-btn').disabled, false, 'a picture can be sent without words');
+  await h.run('send()');
+  const [call] = h.net.callsTo('/turns/turn-2/notes');
+  assert.deepEqual([call.body.text, call.body.images], ['', ['up1']]);
+  const bubble = findNodes(h.element('messages'), (node) => node.className.startsWith('user-bubble note-bubble'))[0];
+  assert.equal(findNodes(bubble, (node) => node.className === 'bubble-words').length, 0, 'no empty line of words');
+  assert.equal(findNodes(bubble, (node) => node.className === 'bubble-picture').length, 1);
+});
+
+test('a text file in the strip when Send is pressed during a turn is kept, with the words, and nothing is posted', async () => {
+  const h = harness(baseRoutes({'POST /turns/turn-2/notes': noteReply(1, 'hello')}));
+  await h.run('init()');
+  await dropFiles(h, [textFile('notes.md', 'body')]);
+  h.stream().emit(WORKING);
   h.element('input').value = 'hello';
   await h.run('send()');
-  assert.deepEqual(h.net.callsTo('/turns/turn-2/notes'), [], 'the words do not go alone while a picture waits');
-  assert.equal(tiles(h, 'media-thumb').length, 1, 'the picture stays');
+  assert.deepEqual(h.net.callsTo('/turns/turn-2/notes'), [], 'the words do not go alone while a file waits');
+  assert.deepEqual(tiles(h, 'media-chip-name').map((node) => node.textContent), ['notes.md']);
   assert.equal(h.element('input').value, 'hello');
-  assert.match(h.text('notice'), /cannot join a turn that is running/);
+  assert.match(h.text('notice'), /Text files cannot join a turn that is running/);
+});
+
+test('a note the gateway refuses gives the words and the pictures back', async () => {
+  const refused = {status: 409, body: {error: {code: 'model_text_only', message: 'The chosen model cannot read pictures.'}}};
+  const h = await runningChat({'POST /uploads?name=shot.png': stagedPicture('up1', 'shot.png'), 'POST /turns/turn-2/notes': refused});
+  await dropFiles(h, [fileOf('shot.png', 'image/png')]);
+  h.element('input').value = 'look';
+  await h.run('send()');
+  assert.equal(h.element('input').value, 'look');
+  assert.equal(tiles(h, 'media-thumb').length, 1, 'the picture is back in the strip');
+  assert.match(h.text('notice'), /Could not add that: The chosen model cannot read pictures\./);
+  assert.doesNotMatch(h.text('messages'), /Sent\. melo reads it/);
+});
+
+test('a note refused because the turn just ended is sent as a message with its pictures', async () => {
+  const h = await runningChat({
+    'POST /uploads?name=shot.png': stagedPicture('up1', 'shot.png'),
+    'POST /turns/turn-2/notes': {status: 409, body: {error: {code: 'turn_not_running', message: 'that turn is not running'}}},
+    'POST /sessions/a/turns': {status: 202, body: {turn_id: 'turn-3', turn: turnRow({turn_id: 'turn-3', turn: 3, user_text: 'late'})}},
+  });
+  await dropFiles(h, [fileOf('shot.png', 'image/png')]);
+  // The page still thinks the turn runs when the words are sent; the gateway knows it ended.
+  h.element('input').value = 'late';
+  await h.run('send()');
+  assert.equal(h.net.callsTo('/turns/turn-2/notes').length, 1, 'the note was tried first');
+  const [sent] = h.net.callsTo('/sessions/a/turns');
+  assert.ok(sent, 'it went out as a message');
+  assert.deepEqual([sent.body.text, sent.body.images], ['late', ['up1']]);
+  assert.equal(h.element('media-tray').hidden, true, 'the pictures went with it');
+});
+
+test('Stop gives the pictures of unread notes back to the strip beside their words', async () => {
+  const back = {id: 'up9', name: 'photo.png', mime_type: 'image/png', size_bytes: 3000, width: 640, height: 480, model_reads: true};
+  const h = await runningChat({
+    'POST /uploads?name=shot.png': stagedPicture('up1', 'shot.png'),
+    'POST /turns/turn-2/notes': noteWithPicture(4, 'not that way'),
+    'POST /turns/turn-2/cancel': {status: 202, body: {turn_id: 'turn-2', cancelling: true, unread_notes: [{note: 4, text: 'not that way', images: [back]}]}},
+  });
+  await dropFiles(h, [fileOf('shot.png', 'image/png')]);
+  h.element('input').value = 'not that way';
+  await h.run('send()');
+  assert.equal(h.element('media-tray').hidden, true);
+  await h.run('stop()');
+  assert.equal(h.element('input').value, 'not that way');
+  const [thumb] = tiles(h, 'media-thumb');
+  assert.equal(thumb.src, '/api/uploads/up9', 'the picture is staged again and waits in the strip');
+});
+
+test('a note\'s pictures are drawn from the chat\'s blobs once the event lists them', async () => {
+  const h = await runningChat();
+  h.stream().emit({id: 21, turn: 2, ts: 51, type: 'turn.note', data: {turn: 2, turn_id: 'turn-2', note: 3, text: 'from the stream', images: [{sha256: SHA, mime_type: 'image/png', size_bytes: 3000}]}});
+  const shown = findNodes(h.element('messages'), (node) => node.className === 'bubble-picture');
+  assert.equal(shown.length, 1);
+  assert.equal(findNode(shown[0], (node) => node.tag === 'img').src, `/api/sessions/a/blobs/${SHA}`);
 });
 
 test('a picture and words that the gateway refuses stay visible in the failed message, and Cancel gives them back', async () => {

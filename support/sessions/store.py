@@ -179,7 +179,8 @@ SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
         "turn.finished": frozenset({"turn", "turn_id", "status", "error", "cause"}),
         "turn.undone": frozenset({"turn", "turn_id"}),
         "turn.pictures": frozenset({"turn", "turn_id", "pictures"}),
-        "turn.note": frozenset({"turn", "turn_id", "note", "text"}),
+        # images: the pictures that came with the words, as references into blobs.
+        "turn.note": frozenset({"turn", "turn_id", "note", "text", "images"}),
         "turn.memory": frozenset(
             {
                 "turn",
@@ -228,6 +229,8 @@ OPTIONAL_SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProx
     {
         # images: the pictures the person added, as references into blobs.
         "turn.started": frozenset({"origin", "images"}),
+        # Only on a note that carried pictures.
+        "turn.note": frozenset({"images"}),
         # searched and opened: only once a memory search found something, or the
         # model opened a turn, in the turn.
         "turn.memory": frozenset({"searched", "opened", "search_hint", "digest"}),
@@ -2086,6 +2089,33 @@ class SessionStore:
                 return []
             found.append(ImagePart.from_bytes(blob[1], blob[0]))
         return found
+
+    async def put_blobs(self, session_id: str, images: Sequence[ImagePart]) -> None:
+        """Keep the payloads of *images* in the session's blobs, once per digest.
+
+        For pictures that come with words added to a running turn: they are
+        kept before the note is accepted, so the page can show them and a note
+        that becomes the next turn, or survives a restart, can send them.
+        ``ValueError`` for an image without its payload;
+        :class:`SessionStoreError` for an unknown session.
+        """
+        rows: list[tuple[str, str, str, bytes]] = []
+        for image in images:
+            raw = decode_base64(image.data) if image.data else None
+            if raw is None:
+                raise ValueError("a picture of a note needs its data")
+            rows.append((session_id, image.sha256, image.mime_type, raw))
+        async with self._lock:
+            conn = await self._ready()
+            self._check_writable()
+            async with self._transaction(conn, "put_blobs"):
+                await self._require_session(conn, session_id)
+                for row in rows:
+                    await conn.execute(
+                        "INSERT OR IGNORE INTO blobs (session_id, sha256, mime_type, "
+                        "data) VALUES (?, ?, ?, ?)",
+                        row,
+                    )
 
     async def get_window(self, session_id: str) -> StoredWindow | None:
         """The session's window checkpoint, or ``None``."""

@@ -29,7 +29,7 @@ import { folderName, setupFolderPicker } from "./folder.mjs";
 import { modeOf, setupModeChip } from "./mode.mjs";
 import { allowState, blockCard, blockFacts, gistWords, reviewWords } from "./blocked.mjs";
 import { picturesNode, setupPictureBox } from "./pictures.mjs";
-import { isStandIn, requestOf, setupMedia, splitAttachments, turnPictures, uploadType } from "./composer-media.mjs";
+import { isStandIn, pictureItems, requestOf, setupMedia, splitAttachments, turnPictures, uploadType } from "./composer-media.mjs";
 import { memoryNodes } from "./memory.mjs";
 import { parseCommand, setupSlash } from "./slash.mjs";
 import { askAboutNotes } from "./memory-tab.mjs";
@@ -1840,7 +1840,11 @@ function itemNode(item, turn, context = {}) {
       // The person's words added while melo worked: a small bubble, and whether melo has read it.
       const node = el("div", "note-item");
       node.dataset.state = noteState(turn, item);
-      node.append(el("div", "user-bubble note-bubble", item.text), el("p", "note-state", noteLine(turn, item)));
+      const bubble = el("div", "user-bubble note-bubble");
+      // Its pictures come from the chat's blobs once the gateway lists them; until then, as added.
+      const pictures = item.images.length > 0 ? turnPictures(S.view?.id ?? S.activeId, item.images) : item.pictures;
+      fillBubble(bubble, item.text, { pictures, files: [] });
+      node.append(bubble, el("p", "note-state", noteLine(turn, item)));
       return node;
     }
     case "reflection": {
@@ -2566,20 +2570,21 @@ async function send({ asTask = false } = {}) {
   return queueMessage(draft.trim(), { clearInput: true, asTask });
 }
 
-async function queueMessage(text, {clearInput = false, asTask = false} = {}) {
+async function queueMessage(text, {clearInput = false, asTask = false, carry = null} = {}) {
   if (workerMode) return;
   const slot = S.activeId ?? "new";
   const previous = S.outbox[slot];
   if (composerTurn() !== null) {
-    // Pictures and files cannot join a running turn; they stay where they are.
-    if (clearInput && media.has()) {
-      notify(t("composer.mediaWhileWorking"));
+    // Text files cannot join a running turn; they stay where they are.
+    if (clearInput && media.hasFiles()) {
+      notify(t("composer.filesWhileWorking"));
       return;
     }
-    // While melo works, the words join the work: its run reads them at its next step.
-    if (text) return addNote(text, { clearInput });
+    if (clearInput && media.busy()) return;
+    // While melo works, the words and pictures join the work: its run reads them at its next step.
+    if (text || (clearInput && media.has())) return addNote(text, { clearInput });
   }
-  if (!text && !(clearInput && media.has())) return;
+  if (!text && !carry?.length && !(clearInput && media.has())) return;
   if (clearInput && media.busy()) return;
   if (asTask && media.hasPictures()) {
     notify(t("composer.picturesNoTask"));
@@ -2593,7 +2598,7 @@ async function queueMessage(text, {clearInput = false, asTask = false} = {}) {
   slash.clearRows(slot);
   // A failed message that is replaced gives its pictures and files back to the strip first, so they go with the new one.
   if (previous && !again && previous.media?.length) media.restore(previous.media);
-  const carried = again ? previous.media ?? [] : clearInput ? media.take() : [];
+  const carried = again ? previous.media ?? [] : carry ?? (clearInput ? media.take() : []);
   S.outbox[slot] = {
     clientRequestId: key,
     text,
@@ -2614,15 +2619,19 @@ async function queueMessage(text, {clearInput = false, asTask = false} = {}) {
 }
 
 /**
- * Add *text* to the turn that runs. The gateway keeps it for the run's next step, or, when the turn
- * ends first, sends it as the next message. A turn that ended while the words were typed makes
- * them a message; a refusal gives the words back to the box.
+ * Add *text*, and the pictures in the strip, to the turn that runs. The gateway keeps them for the
+ * run's next step, or, when the turn ends first, sends them as the next message. A turn that ended
+ * while the words were typed makes them a message; a refusal gives the words and pictures back.
  */
 async function addNote(text, { clearInput = false } = {}) {
   const turn = composerTurn();
   const sessionId = S.activeId;
   if (workerMode || !turn?.id || !sessionId) return;
-  const item = startNote(turn, text, newClientRequestId());
+  // The strip's pictures go with the words; they come back to it if the note is not accepted.
+  const carried = clearInput ? media.take() : [];
+  const shown = entryMedia(carried).pictures;
+  const images = requestOf(carried).images ?? [];
+  const item = startNote(turn, text, newClientRequestId(), shown);
   if (clearInput) {
     input.value = "";
     saveDraft();
@@ -2630,7 +2639,10 @@ async function addNote(text, { clearInput = false } = {}) {
   }
   renderMessages(true);
   syncUI();
-  const post = () => api(`/turns/${encodeURIComponent(turn.id)}/notes`, { body: { text, client_request_id: item.key } });
+  const post = () =>
+    api(`/turns/${encodeURIComponent(turn.id)}/notes`, {
+      body: { text, ...(images.length ? { images } : {}), client_request_id: item.key },
+    });
   let body;
   try {
     try {
@@ -2640,18 +2652,20 @@ async function addNote(text, { clearInput = false } = {}) {
       if (typeof error.status === "number") throw error;
       body = await post();
     }
-    acknowledgeNote(turn, item, body.note.note);
+    acknowledgeNote(turn, item, body.note.note, body.note.images);
     renderMessages(false);
     syncUI();
     return;
   } catch (error) {
     dropNote(turn, item);
     if (error.code === "turn_not_running" && S.activeId === sessionId) {
-      // The turn ended first: these words are a message now.
+      // The turn ended first: these words and pictures are a message now.
       await reloadSession(sessionId);
-      if (composerTurn() === null) return queueMessage(text);
+      // A message still on its way (the outbox holds one) cannot take them: they go back to the box.
+      if (composerTurn() === null && pendingOutbox() === null) return queueMessage(text, { carry: carried });
     }
-    giveBack(text);
+    if (carried.length) returnMedia(sessionId, carried);
+    if (text) giveBack(text);
     notify(t("composer.noteFailed", { problem: error.message }), { sticky: true });
   }
   renderMessages(false);
@@ -2853,7 +2867,10 @@ async function stop() {
     if (unread.length > 0) {
       returnNotes(turn, unread);
       renderMessages(false);
-      giveBack(unread.map((note) => note.text).join("\n\n"));
+      const pictures = unread.flatMap((note) => note.images ?? []);
+      if (pictures.length > 0) returnMedia(S.activeId ?? "new", pictureItems(pictures));
+      const words = unread.map((note) => note.text).filter(Boolean).join("\n\n");
+      if (words) giveBack(words);
     }
   } catch (error) {
     if (error.status !== 409 && error.status !== 404) {
@@ -3473,6 +3490,8 @@ const media = setupMedia({
   changed: () => syncUI(),
   openSettings: () => openSettings("model"),
   open: (name, url, bytes) => pictureBox({ path: name, size: bytes, mtime: 0, state: "" }, url),
+  // A text file cannot join the turn that runs; a picture can, as a note.
+  refuse: (file, kind) => (kind === "text" && composerTurn() !== null ? t("composer.filesWhileWorking") : null),
 });
 
 /** Whether the composer takes pictures and files now. */
@@ -3480,13 +3499,9 @@ function takesMedia() {
   return S.authenticated && !workerMode && !input.disabled;
 }
 
-/** Add files from a drop, a paste or the picker, unless melo is working on a turn (these cannot join it). */
+/** Add files from a drop or a paste. While melo works, pictures join the turn as a note; the strip refuses text files then. */
 function addMedia(files) {
   if (!takesMedia() || files.length === 0) return;
-  if (composerTurn() !== null) {
-    notify(t("composer.mediaWhileWorking"));
-    return;
-  }
   return media.add(files);
 }
 
@@ -3541,11 +3556,10 @@ input.addEventListener("paste", (event) => {
   event.preventDefault();
   addMedia(files);
 });
-/** Open the file picker (the paperclip, `/attach`), unless melo is working on a turn. */
+/** Open the file picker (the paperclip, `/attach`). */
 function addMediaFromPicker() {
   if (!takesMedia()) return;
-  if (composerTurn() !== null) notify(t("composer.mediaWhileWorking"));
-  else media.pick();
+  media.pick();
 }
 $("attach-btn").addEventListener("click", addMediaFromPicker);
 const drawer = setupDrawer({ api, currentId: () => S.activeId, root: $("details-drawer"), trigger: $("details-trigger"), developer: () => developerMode });

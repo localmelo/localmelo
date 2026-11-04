@@ -1625,21 +1625,40 @@ class SessionRunner:
             and not self.run_ended
         )
 
-    def publish_note(self, turn_id: str, note: int, text: str) -> bool:
+    def publish_note(
+        self,
+        turn_id: str,
+        note: int,
+        text: str,
+        images: Sequence[ImagePart] = (),
+    ) -> bool:
         """Queue the ``turn.note`` event of words added to turn *turn_id*.
 
         *note* is the number the run's inbox reads them by (``inbox.accepted``
-        names it as ``offset``). False, and nothing stored, when the turn no
-        longer takes events.
+        names it as ``offset``). *images* are the pictures that came with the
+        words, already kept in the store's blobs (``SessionStore.put_blobs``):
+        the event lists them as references. False, and nothing stored, when
+        the turn no longer takes events.
         """
         turn = self._active
         if turn is None or turn.turn.id != turn_id or not turn.accepting:
             return False
-        self._enqueue(
-            turn,
-            NOTE_EVENT_TYPE,
-            {"turn": turn.turn.turn, "turn_id": turn_id, "note": note, "text": text},
-        )
+        data: dict[str, Any] = {
+            "turn": turn.turn.turn,
+            "turn_id": turn_id,
+            "note": note,
+            "text": text,
+        }
+        if images:
+            data["images"] = [
+                {
+                    "sha256": image.sha256,
+                    "mime_type": image.mime_type,
+                    "size_bytes": image.size_bytes,
+                }
+                for image in images
+            ]
+        self._enqueue(turn, NOTE_EVENT_TYPE, data)
         return True
 
     def _enqueue(self, turn: _Turn, type_: str, data: Mapping[str, Any]) -> None:

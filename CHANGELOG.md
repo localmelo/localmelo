@@ -9,6 +9,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Pictures while melo works. Drop, paste or pick a picture while a turn runs and Send adds it, with your words or
+  alone, to the turn: melo reads it at its next step beside the words, the note shows it in the turn's work, and it is
+  kept in the chat. If the turn ends first, the words and the pictures run as your next message, also after a
+  restart; Stop gives both back to the message box. Same kinds and limit as a message (up to 4); a model known not to
+  read pictures is refused with the usual sentence. Text files still cannot join a running turn. `POST
+  /api/turns/{turn_id}/notes` takes `images` (ids from `POST /api/uploads`) and answers them under `images`; the
+  `turn.note` event and each entry of the cancel answer's `unread_notes` carry them too.
 - Chrome in the background. `[browser] driver = "chrome"` (Settings → Chats and folders → **Browser**: Chrome,
   Safari or Off; `/browser chrome` and `/browser safari` in the terminal and the console; browsing stays off
   until you turn it on, and `/browser on` uses the browser chosen before, or Safari's windows when none was)

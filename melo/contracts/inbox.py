@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Protocol
+
+from localmelo.melo.schema import ImagePart
 
 
 class InboxError(ValueError):
@@ -23,3 +26,14 @@ class InboxSource(Protocol):
     def poll(self) -> list[tuple[int, str]]: ...
 
     def accept(self, offset: int) -> None: ...
+
+
+class PictureInbox(InboxSource, Protocol):
+    """An inbox whose messages can carry pictures (a chat's added words).
+
+    ``pictures(offset)`` returns the pictures, with their data, of the message
+    ``poll`` listed under *offset*; the run sends them with its words. An inbox
+    without the method carries words only.
+    """
+
+    def pictures(self, offset: int) -> Sequence[ImagePart]: ...
