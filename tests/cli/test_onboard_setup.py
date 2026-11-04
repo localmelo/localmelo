@@ -39,14 +39,13 @@ _REAL_DETECT = discovery.detect_local_server
 
 @pytest.fixture(autouse=True)
 def _setup_metadata(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """No setup preview reads the person's model cache or real disk/RAM probes."""
+    """No setup preview reads the person's model cache or real RAM probe."""
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path / "hf"))
     monkeypatch.setattr(setup_plan.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(setup_plan.platform, "machine", lambda: "arm64")
     monkeypatch.setattr(setup_plan.platform, "mac_ver", lambda: ("27.2", (), ""))
     monkeypatch.setattr(setup_plan, "ram_bytes", lambda: 16 * 1024**3)
-    monkeypatch.setattr(setup_plan, "_disk", lambda path: ("/fake", 10_000_000_000))
 
 
 @pytest.fixture(autouse=True)
@@ -138,7 +137,6 @@ def _first_setup(
     found: FoundServer | list[FoundServer | None] | None = None,
     lists: dict[str, list[str] | Exception] | None = None,
     urls: tuple[str, ...] = ("http://127.0.0.1:8000/v1", "http://127.0.0.1:11434/v1"),
-    developer: bool = False,
 ) -> tuple[FirstSetup | None, mock.AsyncMock, mock.AsyncMock]:
     detect, list_models = _servers(found, lists)
     with (
@@ -147,7 +145,7 @@ def _first_setup(
         mock.patch.object(discovery, "list_models", list_models),
         mock.patch("builtins.input", answers),
     ):
-        result = run_first_setup(developer=developer)
+        result = run_first_setup()
     return result, detect, list_models
 
 
@@ -821,14 +819,9 @@ def test_with_no_server_the_screen_shows_an_honest_pinned_setup_preview(
     assert len(summary.splitlines()) <= 6 and all(
         len(line) < 80 for line in out.splitlines()
     )
-    assert "SetupPlan" not in out and "SHA256" not in out
-    assert "bytes" not in out and "hf download" not in out
-    assert discovery.GUIDE_URL in out and "Show manual steps" not in out
-    assert "lifetime" not in out  # Default mode has no lifetime control.
-    if system == "Darwin":
-        assert "Download: up to 3.2 GB · Cached: 0 GB · Free: 10.0 GB" in out
-    else:
-        assert "Manual only" in out and "Cached" not in out
+    assert "SHA256" not in out and "bytes" not in out and "hf download" not in out
+    assert discovery.GUIDE_URL in out
+    assert ("Download: up to 3.2 GB" if system == "Darwin" else "Manual only") in out
 
 
 def test_intro_is_visible_before_any_server_discovery(
@@ -849,8 +842,8 @@ def test_intro_is_visible_before_any_server_discovery(
     assert not config_path.exists()
 
 
-@pytest.mark.parametrize("failure", ["home", "cache", "detect", "plan"])
-def test_setup_probe_or_plan_failure_preserves_legacy_manual_guidance(
+@pytest.mark.parametrize("failure", ["home", "cache", "detect"])
+def test_a_failed_setup_check_still_says_how_to_start_a_server(
     config_path: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
@@ -873,7 +866,6 @@ def test_setup_probe_or_plan_failure_preserves_legacy_manual_guidance(
     how = discovery.how_to_start()
     assert all(command in out for command in how.commands)
     assert how.note in out and discovery.GUIDE_URL in out
-    assert "SetupPlan" not in out
 
 
 @pytest.mark.parametrize("warning", [False, True])
@@ -895,67 +887,13 @@ def test_plain_terminal_offers_a_usable_guide_not_a_nonexistent_menu_action(
     result, _, _ = _first_setup(answers)
     assert result is None and answers.prompts == [_WAIT_PROMPT]
     out = capsys.readouterr().out
-    assert f"Guide: {discovery.GUIDE_URL}" in out and "Show manual steps" not in out
-    assert "Details" not in out
+    assert f"Guide: {discovery.GUIDE_URL}" in out
     if warning:
         assert "the manual guide" in out
     summary = out[out.index("No model server is running yet.") :]
     assert len(summary.splitlines()) <= 6 and all(
         len(line) < 80 or discovery.GUIDE_URL in line for line in summary.splitlines()
     )
-
-
-def test_manual_only_review_has_no_unusable_start_or_lifetime_control(
-    config_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    detected = setup_plan.detect()
-    from dataclasses import replace
-
-    rows: list[str] = []
-
-    def choose(
-        title: str, choices: Any, default: int, escape: int | None = None
-    ) -> int:
-        rows.extend(choices)
-        assert default == 0 and escape == 2
-        return 2
-
-    monkeypatch.setattr(onboard, "_choose_from", choose)
-    onboard._review_setup(setup_plan.plan(replace(detected, asset=None)))
-    assert rows == ["Show manual steps", "Details", "Back"]
-    assert not config_path.exists()
-
-
-@pytest.mark.parametrize("system", ["Darwin", "Linux", "Windows"])
-def test_developer_piped_manual_steps_are_copy_only_and_keep_platform_guidance(
-    config_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    system: str,
-) -> None:
-    monkeypatch.setattr(setup_plan.platform, "system", lambda: system)
-    monkeypatch.setattr(
-        discovery.sys,
-        "platform",
-        {"Darwin": "darwin", "Linux": "linux", "Windows": "win32"}[system],
-    )
-    answers = _Answers("q")
-    result, detect, listed = _first_setup(answers, developer=True)
-    assert result is None and answers.prompts == [_WAIT_PROMPT]
-    detect.assert_awaited_once()
-    listed.assert_not_called()
-    assert not config_path.exists()
-    out = capsys.readouterr().out
-    assert "Manual commands run independently; stop them yourself with Ctrl+C." in out
-    if system == "Darwin":
-        assert setup_plan.PINNED_RECIPE.download_base in out
-        assert "hf download" in out and "--local-dir" not in out
-    else:
-        how = discovery.how_to_start()
-        assert "Manual fallback" in out and ".dmg" not in out
-        assert all(command in out.splitlines() for command in how.commands)
-        assert how.note in out and "copy only; check compatibility" in out
 
 
 def test_enter_looks_again_until_a_server_answers(
@@ -1020,8 +958,6 @@ def test_default_menu_shows_the_summary_once_and_numbered_steps_on_request(
 
     monkeypatch.setattr(onboard, "_arrow_keys", lambda: True)
     monkeypatch.setattr(onboard, "_choose_from", choose)
-    review = mock.Mock(side_effect=AssertionError("default mode has no review menu"))
-    monkeypatch.setattr(onboard, "_review_setup", review)
     _forbid_side_effects(monkeypatch)
     result, detect, listed = _first_setup(_Answers(), found=None)
     assert result is None and not config_path.exists()
@@ -1037,128 +973,27 @@ def test_default_menu_shows_the_summary_once_and_numbered_steps_on_request(
     assert [a[1] for a in asked] == [rows] * 3
     assert all(a[2] == 0 and a[3] == 4 for a in asked)  # Check again is the default.
     out = capsys.readouterr().out
-    assert "Set up and start" not in out and "Review setup" not in out
-    assert "No approval" not in out and "Show manual steps" not in out
     assert out.count("No model server is running yet.") == 1  # the summary, once
     assert out.count("Download: up to 3.2 GB") == 1
     assert out.count(setup_plan.AUTOMATIC_SOON) == 1
-    port = setup_plan.choose_port()
-    assert (
-        out.count(
-            f"6. Back in melo, choose Enter an address and type http://127.0.0.1:{port}/v1"
-        )
-        == 2
-    )
+    url = f"http://127.0.0.1:{setup_plan.PORT}/v1"
+    assert out.count(f"6. Back in melo, choose Enter an address and type {url}") == 2
     assert out.count("1. Download oMLX") == 2  # the steps, each time they are asked for
 
 
-def test_default_menu_summary_is_printed_again_only_when_a_look_changed_it(
-    config_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
+def test_the_steps_keep_each_shell_command_whole_in_a_narrow_terminal(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from dataclasses import replace
-
-    real = setup_plan.detect()
-    readings = iter([real, real, replace(real, missing_model_bytes=0)])
-    monkeypatch.setattr(setup_plan, "detect_bounded", lambda: next(readings))
-    script = iter([0, 0, 4])  # Check again twice (nothing, then a change), Quit.
-    monkeypatch.setattr(onboard, "_arrow_keys", lambda: True)
-    monkeypatch.setattr(onboard, "_choose_from", lambda *args: next(script))
-    result, detect, _ = _first_setup(_Answers(), found=None)
-    assert result is None and detect.await_count == 3
-    out = capsys.readouterr().out
-    missing = "✗ No model server found yet (looked at ports 8000, 11434).\n"
-    assert out.count(missing) == 2
-    assert out.count("Download: up to 3.2 GB") == 1
-    assert out.count("Download: up to 0.9 GB · Cached: 2.3 GB") == 1
-    assert out.index("up to 0.9 GB") > out.rindex(missing)
-    assert out.count("No model server is running yet.") == 2
-
-
-def test_a_failed_look_that_cannot_be_planned_keeps_the_screen_as_it_was(
-    config_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    real = setup_plan.detect()
-    calls = iter([real])
-
-    def bounded() -> Any:
-        try:
-            return next(calls)
-        except StopIteration as exc:
-            raise RuntimeError("setup metadata unavailable") from exc
-
-    monkeypatch.setattr(setup_plan, "detect_bounded", bounded)
-    script = iter([0, 4])
-    monkeypatch.setattr(onboard, "_arrow_keys", lambda: True)
-    monkeypatch.setattr(onboard, "_choose_from", lambda *args: next(script))
-    result, _, _ = _first_setup(_Answers(), found=None)
-    assert result is None
-    out = capsys.readouterr().out
-    assert out.count("No model server is running yet.") == 1
-    assert out.count("✗ No model server found yet") == 1
-
-
-def test_developer_review_keeps_its_menu_and_details_without_reprinting_the_summary(
-    config_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    script = iter(
-        [1, 1, 2, 0, 3, 4, 4]
-    )  # Review, lifetime, manual, start, details, back, quit.
-    asked: list[tuple[str, list[str], int, int | None]] = []
-    displayed: list[setup_plan.SetupPlan] = []
-    real_details = setup_plan.details
-
-    def choose(title: str, rows: Any, default: int, escape: int | None = None) -> int:
-        asked.append((title, list(rows), default, escape))
-        return next(script)
-
-    def details(plan: setup_plan.SetupPlan) -> tuple[str, ...]:
-        displayed.append(plan)
-        return real_details(plan)
-
-    monkeypatch.setattr(onboard, "_arrow_keys", lambda: True)
-    monkeypatch.setattr(onboard, "_choose_from", choose)
-    monkeypatch.setattr(setup_plan, "details", details)
-    _forbid_side_effects(monkeypatch)
-    result, detect, listed = _first_setup(_Answers(), found=None, developer=True)
-    assert result is None and not config_path.exists()
-    detect.assert_awaited_once()  # Opening/toggling the preview never rediscovers.
-    listed.assert_not_called()
-    # The manifest is printed on entry and again for the Details choice only.
-    assert len(displayed) == 2
-    assert displayed[0].keep_running is False
-    assert displayed[1].keep_running is True
-    assert all(p.allowed_operations == () for p in displayed)
-    assert asked[0][1] == [
-        "Check again",
-        "Review setup plan",
-        "Enter an address",
-        "Use a hosted service",
-        "Quit",
+    monkeypatch.setattr(onboard, "_columns", lambda: 40)
+    detected = setup_plan.detect()
+    onboard._show_steps(detected)
+    lines = capsys.readouterr().out.splitlines()
+    commands = [
+        line
+        for line in setup_plan.numbered_steps(detected)
+        if line.startswith(setup_plan.COMMAND_INDENT)
     ]
-    assert asked[1][1] == [
-        "Set up and start",
-        "Keep available after melo closes: Off",
-        "Show manual steps",
-        "Details",
-        "Back",
-    ]
-    assert asked[2][1][1] == "Keep available after melo closes: On"
-    assert asked[0][2] == 0  # Check again remains the safe default.
-    assert asked[1][3] == 4 and asked[-1][3] == 4
-    assert all("(preview)" not in row for _, rows, _, _ in asked for row in rows)
-    out = capsys.readouterr().out
-    assert out.count(displayed[0].digest) == 1  # not printed per choice
-    assert out.count(displayed[1].digest) == 1
-    assert "Planned lifetime: keep running until explicitly stopped." in out
-    assert out.count("Manual steps (copy only;") == 2
-    assert out.count(setup_plan.AUTOMATIC_SOON) == 1  # only after Set up and start
-    assert "No approval" not in out and "1. Download oMLX" not in out
+    assert len(commands) == 3 and all(command in lines for command in commands)
 
 
 def test_no_server_picker_uses_existing_address_question(
@@ -1218,33 +1053,6 @@ def test_piped_addresses_are_not_reinterpreted_as_new_setup_commands(
     monkeypatch.setattr(onboard, "_arrow_keys", lambda: False)
     assert onboard._wait_for_a_server((URL,)) == address
     assert answers.prompts == [_WAIT_PROMPT]
-    assert not config_path.exists()
-
-
-def test_developer_first_run_keeps_full_metadata_and_copy_only_manual_steps(
-    config_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    result, detect, listed = _first_setup(_Answers("q"), developer=True)
-    assert result is None and not config_path.exists()
-    detect.assert_awaited_once()
-    listed.assert_not_called()
-    out = capsys.readouterr().out
-    assert "SetupPlan v1 SHA256:" in out and "HF cache:" in out
-    assert "Prospective loopback port: 49152" in out
-    assert "Disk expansion/staging overhead: unknown" in out
-    assert "hf download" in out and "Manual commands run independently" in out
-
-
-def test_manual_shell_commands_are_not_word_wrapped_in_a_narrow_terminal(
-    config_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    monkeypatch.setattr(onboard, "_columns", lambda: 40)
-    expected = setup_plan.manual_steps(setup_plan.plan(setup_plan.detect()))
-    _first_setup(_Answers("q"), developer=True)
-    lines = capsys.readouterr().out.splitlines()
-    assert all(command in lines for command in expected)
     assert not config_path.exists()
 
 
@@ -2032,7 +1840,7 @@ def test_a_guided_reconfigure_with_no_server_uses_the_full_backend_menu(
     detect.assert_not_called()
     out = capsys.readouterr().out
     assert "Welcome to localmelo" in out
-    assert "SetupPlan" not in out and "Download:" not in out
+    assert "Download:" not in out
 
 
 @pytest.mark.parametrize(

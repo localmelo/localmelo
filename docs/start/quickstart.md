@@ -205,18 +205,16 @@ Try: What is this project? · / commands · ctrl+d quit
 The first row shows the package version, and on a git checkout the short commit, as in `melo 0.1.0 (baab21e)`; `melo --version` prints the same line and exits 0. `/status` checks that the model answers and shows the folder, session, approvals and context use; `/status all` adds the tools, memory, limits and files.
 
 With no backend saved and no model server running, first-run `melo` and
-`melo setup` show a short, read-only preview: the recommendation, download upper
-bound, cached amount and free disk space. On supported
+`melo setup` show a short, read-only preview: the recommendation and download upper
+bound. On supported
 Apple-silicon Macs the recommendation is oMLX with Qwen3 4B Instruct. The
 summary is printed once. Choose `Show how to set one up` for at most six
 numbered steps: download oMLX, move it to Applications, download the model,
 start the server, then `Enter an address` in melo. Automatic setup is coming
-soon, and nothing installs, downloads, starts or saves. Developer mode keeps
-the detailed view and a review menu with `Details` for exact versions, paths and
-checksums.
+soon, and nothing installs, downloads, starts or saves.
 Pipes retain `Press Enter to check again, type an address, or q to quit:`;
 other systems keep their platform's manual-server guidance. Start the server
-yourself and enter its address: the suggested high port is outside default
+yourself and enter its address: the high port in the steps is outside default
 discovery. [Model servers](../guides/model-servers.md#setup-preview) explains
 the manual path. Existing connections and direct tasks are unchanged.
 

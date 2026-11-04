@@ -1,20 +1,17 @@
-"""Pinned, immutable setup previews. Probes read metadata; nothing executes or writes."""
+"""The no-server screen: a pinned recommendation and the steps to do it by hand.
+
+Nothing here runs, downloads, writes or opens a port; it only reads the platform.
+"""
 
 from __future__ import annotations
 
 import ctypes
-import hashlib
-import json
 import os
 import platform
 import shlex
-import shutil
-import stat
-from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from queue import Empty, Queue
-from threading import Thread
 
 from localmelo.support.backends.discovery import GUIDE_URL, how_to_start
 
@@ -30,21 +27,20 @@ class Asset:
 @dataclass(frozen=True)
 class Recipe:
     runtime_version: str
-    runtime_commit: str
     download_base: str
-    release_source: str
     assets: tuple[Asset, ...]
     model_repo: str
     model_revision: str
     files: tuple[tuple[str, int], ...]
-    model_source: str
+
+    @property
+    def model_bytes(self) -> int:
+        return sum(size for _, size in self.files)
 
 
 PINNED_RECIPE = Recipe(
     "0.7.3",
-    "9de79bc39a01c1f3fec1e849903aaf0dd5478d7a",
     "https://github.com/jundot/omlx/releases/download/v0.7.3/",
-    "https://api.github.com/repos/jundot/omlx/releases/tags/v0.7.3",
     (
         Asset(
             "oMLX-0.7.3-macos15-sequoia.dmg",
@@ -76,50 +72,24 @@ PINNED_RECIPE = Recipe(
         ("tokenizer_config.json", 5440),
         ("vocab.json", 2776833),
     ),
-    "https://huggingface.co/api/models/mlx-community/Qwen3-4B-Instruct-2507-4bit/tree/50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b?recursive=true",
 )
 
-
-@dataclass(frozen=True)
-class DiskSpace:
-    volume: str
-    paths: tuple[str, ...]
-    payload_bytes: int
-    free_bytes: int | None
-    # Expansion/staging/native cache overhead has not been measured.
-    overhead_bytes: int | None = None
+# The loopback port the steps start the server on: in the dynamic range, away
+# from the ports melo and the common model servers use. Never bound by melo.
+PORT = 49152
 
 
 @dataclass(frozen=True)
 class Detection:
+    """What this computer is, and where the manual steps put things."""
+
+    recipe: Recipe
     system: str
-    architecture: str
-    os_version: str
     ram_bytes: int | None
-    existing_servers: tuple[str, ...]
+    asset: Asset | None  # None: no validated installer for this computer
     cache_root: str
     snapshot: str
     state_path: str
-    completed_files: tuple[str, ...]
-    missing_model_bytes: int
-    asset: Asset | None
-    support: str
-    disks: tuple[DiskSpace, ...]
-
-
-@dataclass(frozen=True)
-class SetupPlan:
-    version: int
-    recipe: Recipe
-    detection: Detection
-    port: int
-    keep_running: bool = False
-    allowed_operations: tuple[str, ...] = ()  # Preview only, never consent.
-
-    @property
-    def digest(self) -> str:
-        manifest = json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
-        return hashlib.sha256(manifest.encode()).hexdigest()
 
 
 def cache_root(env: Mapping[str, str], home: Path) -> Path:
@@ -158,48 +128,8 @@ def ram_bytes() -> int | None:
         return None
 
 
-def _completed(snapshot: Path, store: Path, cache: Path, name: str, size: int) -> bool:
-    try:
-        repo = cache.resolve() / store.name
-        if (
-            store.resolve() != repo
-            or snapshot.resolve() != repo / "snapshots" / snapshot.name
-        ):
-            return False
-        target = (snapshot / name).resolve(strict=True)
-        if not target.is_relative_to(repo) or target.name.endswith(".incomplete"):
-            return False
-        info = target.stat()
-        return (
-            stat.S_ISREG(info.st_mode)
-            and info.st_size == size
-            and os.access(target, os.R_OK)
-        )
-    except (OSError, RuntimeError, ValueError):
-        return False
-
-
-def _disk(path: Path) -> tuple[str, int | None]:
-    """Find the existing ancestor and mount for a prospective directory."""
-    try:
-        at = path.resolve()
-        while not at.exists():
-            if at.parent == at:
-                return str(path), None
-            at = at.parent
-        device = at.stat().st_dev
-        mount = at
-        while mount.parent != mount and mount.parent.stat().st_dev == device:
-            mount = mount.parent
-        return str(mount), shutil.disk_usage(at).free
-    except (OSError, RuntimeError, ValueError):
-        return str(path), None
-
-
-def detect(
-    *, existing_servers: Sequence[str] = (), recipe: Recipe = PINNED_RECIPE
-) -> Detection:
-    """Reuse discovery's result; never probe endpoints or read server settings."""
+def detect(recipe: Recipe = PINNED_RECIPE) -> Detection:
+    """Read the platform and work out the paths; nothing is probed or contacted."""
     try:
         system, arch, version = (
             platform.system(),
@@ -208,11 +138,14 @@ def detect(
         )
     except (OSError, ValueError):
         system, arch, version = "unknown", "unknown", ""
-    memory = ram_bytes()
     home = Path.home()
     cache = cache_root(os.environ, home)
-    store = cache / ("models--" + recipe.model_repo.replace("/", "--"))
-    snapshot = store / "snapshots" / recipe.model_revision
+    snapshot = (
+        cache
+        / ("models--" + recipe.model_repo.replace("/", "--"))
+        / "snapshots"
+        / recipe.model_revision
+    )
     state = (
         home
         / ".cache"
@@ -226,126 +159,13 @@ def detect(
         if system == "Darwin" and arch == "arm64"
         else None
     )
-    if asset is None:
-        support = "Manual only: no validated oMLX installer for this platform/architecture/version."
-    elif memory is None:
-        support = "RAM unknown; at least 16 GB RAM recommended."
-    elif memory < 16 * 1024**3:
-        support = "Under 16 GB RAM: this model may be slow."
-    else:
-        support = "Hardware matches recommendation (16 GB RAM recommended); memory/quality not measured."
-    completed = tuple(
-        name
-        for name, size in recipe.files
-        if _completed(snapshot, store, cache, name, size)
-    )
-    missing = sum(size for name, size in recipe.files if name not in completed)
-    volumes: dict[str, DiskSpace] = {}
-    for path, needed in ((cache, missing), (state, asset.bytes if asset else 0)):
-        volume, free = _disk(path)
-        old = volumes.get(volume)
-        if old:
-            needed += old.payload_bytes
-            free = (
-                min(old.free_bytes, free)
-                if old.free_bytes is not None and free is not None
-                else None
-            )
-        volumes[volume] = DiskSpace(
-            volume, (*old.paths, str(path)) if old else (str(path),), needed, free
-        )
     return Detection(
-        system,
-        arch,
-        version,
-        memory,
-        tuple(existing_servers),
-        str(cache),
-        str(snapshot),
-        str(state),
-        completed,
-        missing,
-        asset,
-        support,
-        tuple(volumes.values()),
+        recipe, system, ram_bytes(), asset, str(cache), str(snapshot), str(state)
     )
 
 
-def detect_bounded(*, timeout: float = 2.0) -> Detection:
-    """Bound slow metadata I/O; daemon threads never delay interpreter shutdown."""
-    results: Queue[Detection | Exception] = Queue(maxsize=1)
-
-    def probe() -> None:
-        try:
-            results.put(detect())
-        except Exception as exc:
-            results.put(exc)
-
-    Thread(target=probe, name="melo-setup-detect", daemon=True).start()
-    try:
-        result = results.get(timeout=timeout)
-    except Empty:
-        return Detection(
-            "unknown",
-            "unknown",
-            "",
-            None,
-            (),
-            "unknown",
-            "unknown",
-            "unknown",
-            (),
-            sum(size for _, size in PINNED_RECIPE.files),
-            None,
-            "Setup checks timed out; use the manual guide.",
-            (),
-        )
-    if isinstance(result, Exception):
-        raise result
-    return result
-
-
-def port_allowed(port: int) -> bool:
-    return (
-        port not in {8955, 11434, 11500}
-        and not 8400 <= port <= 8799
-        and 49152 <= port <= 65535
-    )
-
-
-def choose_port(occupied: Sequence[int] = ()) -> int:
-    """Prospective choice only, excluding known occupiers; never bind/reserve."""
-    return next(
-        port
-        for port in range(49152, 65536)
-        if port_allowed(port) and port not in occupied
-    )
-
-
-def plan(
-    detection: Detection, *, recipe: Recipe = PINNED_RECIPE, keep_running: bool = False
-) -> SetupPlan:
-    return SetupPlan(1, recipe, detection, choose_port(), keep_running)
-
-
-def _bytes(value: int | None) -> str:
-    return (
-        "unknown"
-        if value is None
-        else f"{value / 1_000_000_000:.2f} GB ({value:,} bytes)"
-    )
-
-
-def _size(value: int | None) -> str:
-    if value is None:
-        return "unknown"
-    if 0 < value < 100_000_000:
-        return "<0.1 GB"
-    return f"{value / 1_000_000_000:.1f} GB" if value else "0 GB"
-
-
-def _ram(value: int | None) -> str:
-    return "unknown" if value is None else f"{value / 1024**3:g} GB ({value:,} bytes)"
+def _size(value: int) -> str:
+    return f"{value / 1_000_000_000:.1f} GB"
 
 
 def _shell_path(path: str, home: Path | None = None) -> str:
@@ -375,9 +195,8 @@ def _shell_path(path: str, home: Path | None = None) -> str:
 AUTOMATIC_SOON = "Automatic setup is coming soon; melo can show you how to do it now."
 
 
-def preview(setup: SetupPlan, *, interactive: bool = True) -> tuple[str, ...]:
-    """A human summary; technical metadata requires Details or developer mode."""
-    d = setup.detection
+def preview(d: Detection, *, interactive: bool = True) -> tuple[str, ...]:
+    """The short summary the no-server screen prints."""
     if d.asset is None:
         return (
             "No model server is running yet.",
@@ -390,80 +209,16 @@ def preview(setup: SetupPlan, *, interactive: bool = True) -> tuple[str, ...]:
             "Manual guide:",
             GUIDE_URL,
         )
-    total = sum(size for _, size in setup.recipe.files)
-    download = d.missing_model_bytes + d.asset.bytes
-    free = " / ".join(_size(disk.free_bytes) for disk in d.disks) or "unknown"
-    space = "Free/volume" if len(d.disks) > 1 else "Free"
     lines = [
         "No model server is running yet.",
         "Recommended: oMLX with Qwen3 4B Instruct.",
-        f"Download: up to {_size(download)} · Cached: {_size(total - d.missing_model_bytes)} · {space}: {free}",
+        f"Download: up to {_size(d.recipe.model_bytes + d.asset.bytes)}",
         (AUTOMATIC_SOON if interactive else f"Guide: {GUIDE_URL}"),
     ]
-    warnings = []
-    help_target = "the manual guide"  # Default mode has no Details row.
     if d.ram_bytes is None:
-        warnings.append(
-            f"RAM unknown; check the 16 GB recommendation in {help_target}."
-        )
+        lines.append("RAM unknown; check the 16 GB recommendation in the manual guide.")
     elif d.ram_bytes < 16 * 1024**3:
-        warnings.append(
-            f"Under 16 GB RAM: this model may be slow; check {help_target}."
-        )
-    if any(disk.free_bytes is None for disk in d.disks):
-        warnings.append(f"Free space unknown; check {help_target} before manual setup.")
-    if any(
-        disk.free_bytes is not None and disk.free_bytes < disk.payload_bytes
-        for disk in d.disks
-    ):
-        warnings.append(f"Not enough disk space for the download; check {help_target}.")
-    if warnings:
-        lines.append(
-            warnings[0]
-            if len(warnings) == 1
-            else f"Several setup checks need attention; see {help_target} before manual setup."
-        )
-    return tuple(lines)
-
-
-def details(setup: SetupPlan) -> tuple[str, ...]:
-    """The full read-only manifest, including unmeasured overhead and sources."""
-    d, r = setup.detection, setup.recipe
-    lines = [
-        "No model server is running yet. Setup preview only; nothing installed or started.",
-        *(["Recommended: oMLX + Qwen3 4B Instruct."] if d.asset else []),
-        f"Platform: {d.system} {d.os_version} / {d.architecture}; RAM: {_ram(d.ram_bytes)}.",
-        d.support,
-        f"SetupPlan v{setup.version} SHA256: {setup.digest}",
-        f"Pinned: oMLX {r.runtime_version} ({r.runtime_commit}); {r.model_repo} @ {r.model_revision}.",
-        f"Model download: up to {_bytes(d.missing_model_bytes)} missing of {_bytes(sum(n for _, n in r.files))}; {len(d.completed_files)}/{len(r.files)} exact-size cached files (not integrity-verified).",
-        f"HF cache: {d.cache_root}",
-        f"Snapshot (read-only): {d.snapshot}",
-        f"New melo-owned state: {d.state_path}",
-    ]
-    if d.asset:
-        lines += [
-            f"Runtime download: {_bytes(d.asset.bytes)}; {r.download_base}{d.asset.name}",
-            f"Runtime SHA256: {d.asset.sha256}",
-        ]
-    for disk in d.disks:
-        lines += [
-            f"Disk at {disk.volume}: {_bytes(disk.payload_bytes)} payload needed; {_bytes(disk.free_bytes)} free. Paths: {', '.join(disk.paths)}."
-        ]
-        if disk.free_bytes is not None and disk.free_bytes < disk.payload_bytes:
-            lines += ["Not enough space for payload alone. Nothing installed."]
-    lines += [
-        "Disk expansion/staging overhead: unknown (unmeasured); payload is a lower bound, not a guaranteed fit.",
-        f"Keep available after melo closes: {'On' if setup.keep_running else 'Off'} (preview only).",
-        (
-            "Planned lifetime: keep running until explicitly stopped."
-            if setup.keep_running
-            else "Planned lifetime: stop when this melo session closes."
-        ),
-        "Manual commands run independently; stop them yourself with Ctrl+C.",
-        f"Prospective loopback port: {setup.port} (availability unverified; not reserved).",
-        "Automatic setup is not available yet.",
-    ]
+        lines.append("Under 16 GB RAM: this model may be slow; check the manual guide.")
     return tuple(lines)
 
 
@@ -472,13 +227,13 @@ def details(setup: SetupPlan) -> tuple[str, ...]:
 COMMAND_INDENT = " " * 5
 
 
-def numbered_steps(setup: SetupPlan) -> tuple[str, ...]:
+def numbered_steps(d: Detection) -> tuple[str, ...]:
     """At most six plain numbered steps to set a server up by hand, then the guide.
 
     Copy-only: melo runs none of this. Commands are indented by
     ``COMMAND_INDENT``; paths inside the home folder are written as ``$HOME``.
     """
-    d, r = setup.detection, setup.recipe
+    r = d.recipe
     if d.asset is None:
         how = how_to_start()
         return (
@@ -488,12 +243,6 @@ def numbered_steps(setup: SetupPlan) -> tuple[str, ...]:
             "2. Back in melo, choose Enter an address and type the server's address.",
             f"More help: {GUIDE_URL}",
         )
-    missing = d.missing_model_bytes
-    model = (
-        f"4. Download the model ({_size(missing)}):"
-        if missing
-        else "4. Download the model (it is already cached, so this only checks it):"
-    )
     download = f'"$HOME/Downloads/{d.asset.name}"'
     return (
         f"1. Download oMLX ({_size(d.asset.bytes)}): {r.download_base}{d.asset.name}",
@@ -503,41 +252,15 @@ def numbered_steps(setup: SetupPlan) -> tuple[str, ...]:
         "3. Open the file and move oMLX to Applications. Use the normal macOS "
         "prompts; do not bypass Gatekeeper. Then make Contents/MacOS/omlx-cli "
         "inside the app available as the command omlx.",
-        model,
+        f"4. Download the model (up to {_size(r.model_bytes)}; files already cached "
+        "are skipped):",
         f"{COMMAND_INDENT}HF_HUB_CACHE={_shell_path(d.cache_root)} hf download "
         f"{shlex.quote(r.model_repo)} --revision {shlex.quote(r.model_revision)}",
         "5. Start the server. Leave that window open; Ctrl+C stops it:",
         f"{COMMAND_INDENT}OMLX_HF_CACHE_ENABLED=0 omlx serve "
         f"--base-path {_shell_path(d.state_path)} "
         f"--model-dir {_shell_path(d.snapshot)} "
-        f"--host 127.0.0.1 --port {setup.port}",
-        f"6. Back in melo, choose Enter an address and type "
-        f"http://127.0.0.1:{setup.port}/v1",
+        f"--host 127.0.0.1 --port {PORT}",
+        f"6. Back in melo, choose Enter an address and type http://127.0.0.1:{PORT}/v1",
         f"More help: {GUIDE_URL}",
-    )
-
-
-def manual_steps(setup: SetupPlan) -> tuple[str, ...]:
-    d, r = setup.detection, setup.recipe
-    lifetime = "Manual commands run independently; stop them yourself with Ctrl+C."
-    if d.asset is None:
-        how = how_to_start()
-        return (
-            "Manual fallback: use an existing compatible model server, then melo setup.",
-            lifetime,
-            f"Existing platform guide for {how.name} (copy only; check compatibility on this machine):",
-            *how.commands,
-            how.note,
-            f"Official release information: {r.release_source}",
-            GUIDE_URL,
-        )
-    return (
-        "Manual steps (copy only; melo does not run these):",
-        lifetime,
-        f"Download: {r.download_base}{d.asset.name}",
-        f"Verify SHA256 {d.asset.sha256}; install through normal macOS controls. Make the bundled Contents/MacOS/omlx-cli available as omlx; do not bypass Gatekeeper.",
-        f"HF_HUB_CACHE={_shell_path(d.cache_root)} hf download {shlex.quote(r.model_repo)} --revision {shlex.quote(r.model_revision)}",
-        f"OMLX_HF_CACHE_ENABLED=0 omlx serve --base-path {_shell_path(d.state_path)} --model-dir {_shell_path(d.snapshot)} --host 127.0.0.1 --port {setup.port}",
-        f"Check the port is free before starting; enumerate http://127.0.0.1:{setup.port}/v1/models. The direct snapshot's served ID may be its revision hash rather than the repository ID; use the server-returned ID.",
-        "Run melo setup and enter that server address (the prospective port is outside default discovery).",
     )
