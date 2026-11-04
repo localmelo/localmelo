@@ -51,6 +51,7 @@ from localmelo.support.browser.driver import (
     BrowserError,
     BrowserSetupError,
     Changes,
+    CoveredError,
     Element,
     ElementKind,
     FieldAttrs,
@@ -127,8 +128,14 @@ _PASSED = {
 }
 _MOVED = (
     "A real click or key press landed on another element than the one melo checked, "
-    "so melo stopped it. Use browser_read and try again."
+    "so melo stopped it. Nothing was clicked or typed, and the page and its refs "
+    "are as they were: close or move what is in the way, or ask the person."
 )
+# The words for the kind of element something stands over.
+_NOUN = {"textbox": "field", "select": "list", "checkbox": "box"}
+# A page that is still settling (a bar sliding in, an ad loading) gets this long
+# before an element found covered is looked at once more.
+COVER_AGAIN_S = 0.25
 # Looking at the page after an act: a poll this often, done once nothing changed for
 # QUIET_S (a click waits up to LOOK_CAP_S for the page's first change), never longer.
 LOOK_STEP_S = 0.1
@@ -146,6 +153,74 @@ _BLOCKED = {
 }
 POLL_S = 0.4
 BLANK_TRIES = 4
+
+# What may be said of an element that stands over another: its tag when it is one of these
+# (any other is "element"), and one of these kinds. The page script builds its answer from
+# the same list, and the words are checked against it again here, so nothing the page wrote
+# (its text, a custom tag, a frame's title) reaches the model through them.
+COVER_TAGS = [
+    "html",
+    "body",
+    "header",
+    "footer",
+    "nav",
+    "main",
+    "aside",
+    "section",
+    "article",
+    "div",
+    "span",
+    "p",
+    "a",
+    "b",
+    "i",
+    "em",
+    "strong",
+    "small",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "ul",
+    "ol",
+    "li",
+    "table",
+    "tr",
+    "td",
+    "form",
+    "label",
+    "button",
+    "input",
+    "textarea",
+    "select",
+    "img",
+    "svg",
+    "canvas",
+    "video",
+    "picture",
+    "figure",
+    "dialog",
+    "center",
+    "iframe",
+]
+COVER_KINDS = frozenset(
+    [
+        "an ad",
+        "an ad at the top",
+        "an ad at the bottom",
+        "a dialog",
+        "a frame",
+        "another element",
+    ]
+    + [
+        f"a {how} {place}"
+        for how in ("sticky", "fixed")
+        for place in ("header", "bar at the bottom", "layer")
+    ]
+)
+_COVER_HOST = re.compile(r"^iframe(?: from [a-z0-9.-]{1,60})?$", re.IGNORECASE)
 
 # The page script's pieces, shared by reading a page and by acting on it, so
 # an element is found again by the same rules that listed it. ``SEL`` lists
@@ -432,6 +507,37 @@ var hitAt = function (x, y) {
   if (P.gcs(h).cursor === "pointer") return {node: h, surface: "control", doc: D, path: path, x: x, y: y, raw: h};
   return {node: null, surface: "none", doc: D, path: path, x: x, y: y};
 };
+// What stands over a point: where it sits (a sticky or fixed bar, a dialog, a frame) and
+// what it is, in words for the model: {what: "a sticky header", detail: "h1"}. Never a word
+// the page wrote: a bar is told by its place in the view, an element by its tag when that is
+// a standard one, a frame by the host of its address. An ad is one that says so in its id,
+// class or title (only that yes or no is used).
+var AD_WORDS = /(^|[^a-z])(ads?|adverts?|advertisements?|sponsored|banners?)([^a-z]|$)/i;
+var COVER_TAGS = new RegExp(__COVER_TAGS__);
+var coverOf = function (t) {
+  if (!t || t.nodeType !== 1) return {what: "another element", detail: ""};
+  var tag = t.tagName.toLowerCase(), bar = null, pos = "", c, i;
+  for (c = t, i = 0; c && c.nodeType === 1 && i < 15; c = c.parentElement, i++) {
+    var p = P.gcs(c).position;
+    if (p === "sticky" || p === "fixed") { bar = c; pos = p; break; }
+  }
+  var named = function (e) { return [attr(e, "id"), attr(e, "class"), attr(e, "title"), attr(e, "name")].join(" "); };
+  var adLike = AD_WORDS.test(named(t)) || (bar ? AD_WORDS.test(named(bar)) : false);
+  if (tag === "iframe" || tag === "frame") {
+    var host = "";
+    try { host = new URL(attr(t, "src"), document.baseURI).hostname; } catch (e) { host = ""; }
+    if (!/^[a-z0-9.-]{1,60}$/i.test(host)) host = "";
+    return {what: adLike ? "an ad" : "a frame", detail: "iframe" + (host ? " from " + host : "")};
+  }
+  var detail = COVER_TAGS.test(tag) ? tag : "element";
+  if (P.closest.call(t, "dialog,[role=dialog],[role=alertdialog],[aria-modal=true]")) return {what: "a dialog", detail: detail};
+  if (!bar) return {what: adLike ? "an ad" : "another element", detail: detail};
+  var r = P.rect.call(bar), vh = window.innerHeight || 0;
+  var place = r.bottom <= vh * 0.6 && r.top < vh * 0.25 ? "header" : r.top >= vh * 0.4 && r.bottom > vh * 0.75 ? "bar at the bottom" : "layer";
+  var which = pos === "sticky" ? "sticky" : "fixed";
+  if (adLike) return {what: "an ad" + (place === "bar at the bottom" ? " at the bottom" : place === "header" ? " at the top" : ""), detail: detail};
+  return {what: "a " + which + " " + place, detail: detail};
+};
 // The state of an element that an action may change, never the value of a secret field.
 var stateOf = function (n) {
   if (!n || !n.isConnected) return {gone: true};
@@ -455,7 +561,7 @@ var linesOf = function (node, into, limit) {
   return into;
 };
 """
-)
+).replace("__COVER_TAGS__", json.dumps("^(?:" + "|".join(COVER_TAGS) + ")$"))
 
 # Returns JSON: the page's text (the main part when there is one) and its
 # visible links, buttons and fields, each with its place (``at``) among the
@@ -541,14 +647,19 @@ def act_script(spec: dict[str, Any]) -> str:
       it works it tries to stop a form the page sends that melo did not ask
       about, and a link whose address is no longer the one that was read when
       it is pressed or clicked.
-    - ``scroll`` brings the element into view, says whether another element
-      covers its middle and describes it (tag, role, text, label, name, id), so
-      melo can find it in the browser's own reading of the page.
+    - ``scroll`` brings the element to the middle of the view at once (not
+      smoothly) and says where it can be clicked: ``cx``, ``cy`` is its middle,
+      or, when another element covers the middle, the clear point of the part
+      inside the view with most room around it (``shifted``); with no clear
+      point ``covered`` is true and ``by`` says what stands over it (``what``
+      and ``detail``). It also describes the element (tag, role, text, label,
+      name, id), so melo can find it in the browser's own reading of the page.
     - ``arm`` keeps the same guards up while the browser itself acts on the
       node melo found (``uid``), or at the point: also, until
       the first look after the act, a real press, click or keystroke that lands
-      on another element is stopped (``moved``). With a ``point`` the place is
-      shown by a short-lived ring that takes no clicks.
+      on another element is stopped (``moved``; the report's ``movedBy`` says
+      what it landed on). With a ``point`` the place is shown by a short-lived
+      ring that takes no clicks.
 
     With ``key``, an observer set before the act keeps what the page shows new
     and the element's state for :data:`SETTLE_JS` and :data:`DISARM_JS`, which
@@ -608,11 +719,40 @@ def act_script(spec: dict[str, Any]) -> str:
     if (!hits.length) hits = opts.filter(function (o) { return !o.disabled && want && cap(o.text, 60).toLowerCase().indexOf(want) >= 0; });
     return hits.length === 1 ? hits[0] : hits.length;
   };
+  // To the middle of the view, at once: a page that scrolls smoothly would still be on its way
+  // when the place is measured, and the click would land where the element was.
+  var centre = function () {
+    try { n.scrollIntoView({block: "center", inline: "center", behavior: "instant"}); }
+    catch (e) { n.scrollIntoView({block: "center", inline: "center"}); }
+  };
   if (mode === "scroll") {
-    n.scrollIntoView({block: "center", inline: "center"});
-    var r = P.rect.call(n), top = D && P.efp ? P.efp.call(D, r.left + r.width / 2, r.top + r.height / 2) : n;
-    var tag = n.tagName.toLowerCase();
-    return say({ok: true, covered: !within(n, top), cx: r.left + r.width / 2, cy: r.top + r.height / 2, tag: tag, role: attr(n, "role").toLowerCase(),
+    centre();
+    var r = P.rect.call(n), tag = n.tagName.toLowerCase();
+    var vw = W.innerWidth || 0, vh = W.innerHeight || 0;
+    var topAt = function (x, y) { return D && P.efp ? P.efp.call(D, x, y) : n; };
+    var clear = function (x, y) { return !P.efp || (x >= 0 && y >= 0 && x < vw && y < vh && within(n, topAt(x, y))); };
+    var cx = r.left + r.width / 2, cy = r.top + r.height / 2, covered = !clear(cx, cy), shifted = false, by = null;
+    if (covered) {
+      by = coverOf(topAt(cx, cy));  // what stands over the middle
+      // Another part of it may be clear: the part with most room around it, nearest the middle.
+      var l = Math.max(r.left, 0), tp = Math.max(r.top, 0), rt = Math.min(r.right, vw), bt = Math.min(r.bottom, vh);
+      if (rt - l >= 2 && bt - tp >= 2) {
+        var G = 7, ok = [], best = null, gx, gy, dx, dy;
+        for (gy = 0; gy < G; gy++) {
+          ok[gy] = [];
+          for (gx = 0; gx < G; gx++) ok[gy][gx] = clear(l + (rt - l) * (gx + 0.5) / G, tp + (bt - tp) * (gy + 0.5) / G);
+        }
+        for (gy = 0; gy < G; gy++) for (gx = 0; gx < G; gx++) {
+          if (!ok[gy][gx]) continue;
+          var room = 0, px = l + (rt - l) * (gx + 0.5) / G, py = tp + (bt - tp) * (gy + 0.5) / G;
+          for (dy = -1; dy <= 1; dy++) for (dx = -1; dx <= 1; dx++) if (ok[gy + dy] && ok[gy + dy][gx + dx]) room++;
+          var away = Math.abs(px - cx) + Math.abs(py - cy);
+          if (!best || room > best.room || (room === best.room && away < best.away)) best = {x: px, y: py, room: room, away: away};
+        }
+        if (best) { cx = best.x; cy = best.y; covered = false; shifted = true; }
+      }
+    }
+    return say({ok: true, covered: covered, shifted: shifted, by: by, cx: cx, cy: cy, tag: tag, role: attr(n, "role").toLowerCase(),
       text: cap(tag === "input" ? "" : n.innerText || n.textContent, 200), value: tag === "input" && /^(submit|button|reset)$/.test(attr(n, "type").toLowerCase()) ? cap(n.value, 120) : "",
       label: cap(labelsOf(n), 120), aria: cap(attr(n, "aria-label"), 120), name: cap(attr(n, "name"), 80), id: cap(n.id, 80),
       title: cap(attr(n, "title") || attr(n, "alt"), 120), placeholder: cap(attr(n, "placeholder"), 120)});
@@ -668,11 +808,13 @@ def act_script(spec: dict[str, Any]) -> str:
   // Enter in a field clicks its form's default button: the browser's own send, asked about already.
   if (spec.act === "type" && spec.enter && spec.send && n.form) { var first = defaultButton(n.form); if (first) zone.push(first); }
   var inZone = function (t) { return zone.some(function (z) { return within(z, t); }); };
+  var hitBy = null;  // what a stopped real click or key press landed on
   var contain = function () {
     var on = function (e) {
       if (inZone(e.target)) { seen[e.type] = (seen[e.type] || 0) + 1; return; }
       if (e.isTrusted === false) return;  // the page's own events are its business
       e.preventDefault(); e.stopImmediatePropagation(); blocked.push("moved");
+      if (!hitBy) { try { hitBy = coverOf(e.target); } catch (x) { hitBy = null; } }
     };
     ["pointerdown", "mousedown", "pointerup", "mouseup", "click", "keydown", "beforeinput"].forEach(function (t) {
       wins.forEach(function (w) { listen(w, t, on, true, held); });
@@ -738,11 +880,11 @@ def act_script(spec: dict[str, Any]) -> str:
       var s1 = P.json(stateOf(n));
       unguard(held); unguard(undo);
       try { delete window[spec.key]; } catch (e) { /* kept */ }
-      return P.json({blocked: blocked, texts: texts, before: s0, after: s1, seen: seen, stale: later === "gone" ? "" : later, count: count});
+      return P.json({blocked: blocked, texts: texts, before: s0, after: s1, seen: seen, stale: later === "gone" ? "" : later, count: count, movedBy: hitBy});
     };
     var poll = function () {
       unguard(held);  // the act is over: the person's own clicks are theirs again
-      return P.json({doc: true, count: count, quiet: Date.now() - last, target: P.json(stateOf(n)) !== s0});
+      return P.json({doc: true, count: count, quiet: Date.now() - last, target: P.json(stateOf(n)) !== s0, moved: blocked.indexOf("moved") >= 0});
     };
     var timer = window.setTimeout(finish, 20000);
     undo.push(function () { window.clearTimeout(timer); });
@@ -777,7 +919,7 @@ def act_script(spec: dict[str, Any]) -> str:
     if (spec.key) { if (pt) mark(); watch(); }
     temp = undo; undo = [];
     guard();
-    if (!pt) n.scrollIntoView({block: "center", inline: "center"});
+    if (!pt) centre();
     if (spec.act === "click") {
       if (hit && hit.surface === "frame") return done({ok: false, stale: "reach"});
       if (n.tagName === "A" || n.tagName === "AREA") P.ra.call(n, "ping");
@@ -1086,6 +1228,18 @@ class PageScriptActs:
             raise BrowserError("The page did not take that action.")
         return result
 
+    async def _scrolled(self, spec: dict[str, Any]) -> dict[str, Any]:
+        """Scroll the element to the middle of the view and say where it can be clicked.
+
+        An element found covered gets one more try after a moment: a bar
+        sliding in or an ad loading may still be moving into place.
+        """
+        ready = await self._script(act_script({**spec, "mode": "scroll"}))
+        if ready.get("covered") is True:
+            await asyncio.sleep(COVER_AGAIN_S)
+            ready = await self._script(act_script({**spec, "mode": "scroll"}))
+        return ready
+
     async def _scripted(
         self, spec: dict[str, Any], act: Act, passed: str, failed: bool
     ) -> ActResult:
@@ -1148,6 +1302,8 @@ class PageScriptActs:
                 with contextlib.suppress(BrowserError):
                     await self._ready()
                 return {"lost": True}, True
+            if now.get("moved") is True:
+                break  # a real click or key press was stopped: nothing more will happen
             changed = bool(now.get("count")) or now.get("target") is True
             still = _number(now.get("quiet")) >= QUIET_S * 1000
             if spent >= QUIET_S and still and (changed or not first):
@@ -1479,16 +1635,7 @@ class SafariAutomationDriver(PageScriptActs):
         origin: str = "",
     ) -> bool:
         await self._focus(tab)
-        # A page with no body yet (a bot check or an interstitial between two
-        # documents) is not loaded: nothing on it counts, and the wait goes on.
-        words = json.dumps(text)
-        probe = {
-            "load": "document.readyState === 'complete' && !!document.body",
-            "text": f"!!document.body && (document.body.innerText || '').indexOf({words}) >= 0",
-            "gone": f"!!document.body && (document.body.innerText || '').indexOf({words}) < 0",
-        }[until]
-        if origin:
-            probe = f"location.origin === {json.dumps(origin)} && ({probe})"
+        probe = wait_probe(until, text, origin)
         loop = asyncio.get_running_loop()
         end = loop.time() + seconds
         while True:
@@ -1497,6 +1644,17 @@ class SafariAutomationDriver(PageScriptActs):
             if loop.time() >= end:
                 return False
             await asyncio.sleep(POLL_S)
+
+    async def holds(
+        self, tab: str | None, until: str, text: str, *, origin: str = ""
+    ) -> bool:
+        await self._focus(tab)
+        try:
+            return await self._eval(wait_probe(until, text, origin)) is True
+        except BrowserSetupError:
+            raise
+        except BrowserError:
+            return False  # a page between two documents does not answer yet
 
     async def screenshot(
         self, tab: str | None, mark: tuple[View, float, float] | None = None
@@ -1619,41 +1777,54 @@ class SafariAutomationDriver(PageScriptActs):
     async def _native(
         self, spec: dict[str, Any], act: Act
     ) -> ActResult | tuple[str, bool]:
-        """The act by the browser's own input; else why not, and whether that holds for the site."""
+        """The act by the browser's own input; else why not, and whether that holds for the site.
+
+        The element is scrolled to the middle of the view first. This Safari
+        clicks the node itself, not a point melo picks, so an element whose
+        middle is covered is left to the page script (and the result names what
+        covers it). A real click that still lands on another element is stopped
+        by the guards; the element is then scrolled to once more and the
+        click tried again, and when that lands elsewhere too the error says what
+        got it.
+        """
         if not self._has("interact"):
             return _PASSED["tool"], False
-        uid = ""
-        if act.point is None:
-            if act.element.frame:
-                return _PASSED["frame"], False
-            if not self._has("content"):
-                return _PASSED["tool"], False
-            ready = await self._script(act_script({**spec, "mode": "scroll"}))
-            if ready.get("covered") is True:
-                return _PASSED["covered"], False
-            uid = bind(ready, await self._nodes())
-            if not uid:
-                return _PASSED["name"], False
-        key = _key()
-        armed = await self._script(
-            act_script({**spec, "mode": "arm", "key": key, "uid": uid})
-        )
-        try:
-            await self._call_with(
-                "interact", {"interactions": [_interaction(act, uid, armed)]}
+        for attempt in range(2):
+            uid = ""
+            if act.point is None:
+                if act.element.frame:
+                    return _PASSED["frame"], False
+                if not self._has("content"):
+                    return _PASSED["tool"], False
+                ready = await self._scrolled(spec)
+                if ready.get("covered") is True or ready.get("shifted") is True:
+                    return _covered_why(ready.get("by")), False
+                uid = bind(ready, await self._nodes())
+                if not uid:
+                    return _PASSED["name"], False
+            key = _key()
+            armed = await self._script(
+                act_script({**spec, "mode": "arm", "key": key, "uid": uid})
             )
-        except BrowserSetupError:
-            with contextlib.suppress(BrowserError):
-                await self._finish(key, spec["doc"])
-            raise
-        except BrowserError:
-            # Whether it acted before it failed is read from the page: an act
-            # that shows there is kept, one that does not falls to the page script.
-            pass
-        data, quiet = await self._look(key, spec["doc"], act)
-        blocked = [str(k) for k in data.get("blocked") or []]
-        if "moved" in blocked:
-            raise BrowserError(_MOVED)
+            try:
+                await self._call_with(
+                    "interact", {"interactions": [_interaction(act, uid, armed)]}
+                )
+            except BrowserSetupError:
+                with contextlib.suppress(BrowserError):
+                    await self._finish(key, spec["doc"])
+                raise
+            except BrowserError:
+                # Whether it acted before it failed is read from the page: an act
+                # that shows there is kept, one that does not falls to the page script.
+                pass
+            data, quiet = await self._look(key, spec["doc"], act)
+            blocked = [str(k) for k in data.get("blocked") or []]
+            if "moved" in blocked:
+                if attempt == 0 and act.point is None and _nothing_reached(data):
+                    continue  # the page moved under the click: scroll to it again
+                raise _cover_stop(data.get("movedBy"), act.element.kind)
+            break
         if not _reached(act, data, frame=armed.get("frame") is True):
             if act.point is not None and armed.get("frame") is True:
                 raise BrowserError(_STALE["reach"])
@@ -1934,6 +2105,24 @@ def bind(described: dict[str, Any], nodes: list[Node]) -> str:
     return found[0] if len(found) == 1 else ""
 
 
+def wait_probe(until: str, text: str, origin: str = "") -> str:
+    """The script that says whether what ``wait`` waits for (*until*: ``load``, ``text``, ``gone``) holds now.
+
+    A page with no body yet (a bot check or an interstitial between two
+    documents) is not loaded: nothing on it counts. With *origin* the
+    condition counts only while the page is on that origin.
+    """
+    words = json.dumps(text)
+    probe = {
+        "load": "document.readyState === 'complete' && !!document.body",
+        "text": f"!!document.body && (document.body.innerText || '').indexOf({words}) >= 0",
+        "gone": f"!!document.body && (document.body.innerText || '').indexOf({words}) < 0",
+    }[until]
+    if origin:
+        probe = f"location.origin === {json.dumps(origin)} && ({probe})"
+    return probe
+
+
 def _key() -> str:
     """A fresh name for what an act script leaves on the page for the look after it."""
     return f"__melo_{uuid.uuid4().hex}"
@@ -2032,6 +2221,57 @@ def _reached(act: Act, data: dict[str, Any], *, frame: bool = False) -> bool:
         str(data.get("after") or "")
     )
     return before != after or _number(data.get("count")) > 0
+
+
+def _cover_words(info: Any) -> str:
+    """What stands over an element, as the page script told it: ``a sticky header (h1)``; ``""`` when it did not say.
+
+    Only words from a fixed list pass (see :data:`COVER_KINDS`): the kind, and
+    the tag of a standard element or ``iframe from <host>``. What else the page
+    sent is left out, so a page cannot put its own words into the answer.
+    """
+    if not isinstance(info, dict):
+        return ""
+    what = info.get("what")
+    if not isinstance(what, str) or what not in COVER_KINDS:
+        return ""
+    detail = info.get("detail")
+    if not isinstance(detail, str) or not (
+        detail in COVER_TAGS or detail == "element" or _COVER_HOST.match(detail)
+    ):
+        return what
+    return f"{what} ({detail})"
+
+
+def _covered_why(by: Any) -> str:
+    """Why the browser's own input was passed over for an element something covers."""
+    words = _cover_words(by)
+    return (
+        f"{words} covers it, so only the page script reaches it"
+        if words
+        else _PASSED["covered"]
+    )
+
+
+def _cover_stop(by: Any, kind: str = "") -> CoveredError:
+    """The error for a real click or key press that landed on what covers the element, saying what that is."""
+    words = _cover_words(by)
+    if not words:
+        return CoveredError(_MOVED)
+    noun = _NOUN.get(kind, kind or "element")
+    return CoveredError(
+        f"{words[:1].upper()}{words[1:]} covers that {noun}, so a real click or key "
+        "press would land on it, and melo stopped it. Nothing was clicked or typed, "
+        "and the page and its refs are as they were: close or move what covers it "
+        "(its close button, say), or ask the person. Do not open the page again."
+    )
+
+
+def _nothing_reached(data: dict[str, Any]) -> bool:
+    """Whether no event reached the element (the stop came before anything happened)."""
+    seen = data.get("seen")
+    seen = seen if isinstance(seen, dict) else {}
+    return not any(_number(v) > 0 for v in seen.values())
 
 
 def _stopped(blocked: list[str]) -> str:

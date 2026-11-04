@@ -78,6 +78,9 @@ class FakeVision(Vision):
         self.asked += 1
         return self.verdict
 
+    def known(self) -> bool | None:
+        return self.verdict
+
     async def aclose(self) -> None:
         pass
 

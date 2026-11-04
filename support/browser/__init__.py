@@ -68,11 +68,13 @@ def provider_for(
         )
     if driver == "chrome":
         from localmelo.support.browser.chrome import ChromeBackgroundDriver
+        from localmelo.support.browser.local_apps import LocalRule
 
         # LOCALMELO_CHROME replaces Chrome's command line (read when the driver
-        # starts), so tests run a fake and never the real Chrome.
+        # starts), so tests run a fake and never the real Chrome. A page reaches
+        # a listed sign-in app on this Mac and nothing else there (local_apps).
         return BrowserToolProvider(
-            ChromeBackgroundDriver(),
+            ChromeBackgroundDriver(local=LocalRule()),
             keep_tabs=keep_tabs,
             desktop=watch_for(app_windows, driver),
             live=live,

@@ -2,12 +2,15 @@ import { t } from "./i18n.mjs";
 import { formatBytes } from "./turns.mjs";
 
 /**
- * Pictures under a turn's answer: a row of previews, and a light box for one at full size.
+ * Pictures in a turn: a row of previews, and a light box for one at full size.
  *
- * The pictures are the `turn.pictures` event's list (`{path, size, mtime, state}`, paths relative
- * to the chat's folder); each preview is an `<img>` of `GET /api/sessions/{id}/pictures?path=…`,
- * which serves a picture only from inside that folder. At most `PICTURES_SHOWN` show; the rest
- * wait behind `+N more`. A picture the folder no longer has says so in place of its image.
+ * Two rows use it. The pictures a turn made or named are the `turn.pictures` event's list
+ * (`{path, size, mtime, state}`, paths relative to the chat's folder); each preview is an `<img>` of
+ * `GET /api/sessions/{id}/pictures?path=…`, which serves a picture only from inside that folder. The
+ * pictures melo took in the turn's steps (a page it looked at, another app's window) are the steps'
+ * images (`takenPictures`), kept with the chat; each is `GET /api/sessions/{id}/blobs/<sha256>`
+ * (`shotsNode`). At most `PICTURES_SHOWN` show; the rest wait behind `+N more`. A picture that is
+ * gone says so in place of its image.
  */
 export const PICTURES_SHOWN = 4;
 
@@ -42,12 +45,67 @@ export function pictureFacts(picture) {
   return [formatBytes(picture.size), picture.state === "modified" ? t("pictures.updated") : ""].filter(Boolean).join(" · ");
 }
 
+// The kinds of picture a step's image may be for the row: what the gateway serves inline.
+const SHOT_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+const SHA256 = /^[0-9a-f]{64}$/;
+
+/** Where a picture a step took is served: the chat's own copy. */
+export function shotUrl(sessionId, sha256) {
+  return `/api/sessions/${encodeURIComponent(sessionId)}/blobs/${encodeURIComponent(sha256)}`;
+}
+
+/**
+ * The pictures the turn's steps took (`{sha256, mime_type, size, tool}`), each once, in the order
+ * taken: a page melo looked at with `browser_screenshot`, another app's window, any step's image.
+ * Only the chat's own copies count (a sha256 and a picture kind the gateway serves).
+ */
+export function takenPictures(turn) {
+  const seen = new Set();
+  const found = [];
+  for (const item of Array.isArray(turn?.items) ? turn.items : []) {
+    if (item?.kind !== "tool" || !Array.isArray(item.images)) continue;
+    for (const image of item.images) {
+      const sha256 = String(image?.sha256 ?? "");
+      if (!SHA256.test(sha256) || seen.has(sha256) || !SHOT_TYPES.has(image.mime_type)) continue;
+      seen.add(sha256);
+      found.push({ sha256, mime_type: image.mime_type, size: Number(image.size_bytes) || 0, tool: String(item.name ?? "") });
+    }
+  }
+  return found;
+}
+
+/**
+ * The row of the pictures melo took in a turn (`takenPictures`), or null when it took none: the
+ * same previews and light box as the turn's own pictures, named `Picture 1`, `Picture 2`… in the
+ * order taken.
+ */
+export function shotsNode({ doc, shots, sessionId, expanded = false, open, toggle, status }) {
+  const pictures = shots.map((shot, index) => ({
+    path: t("pictures.shot", { n: index + 1 }), size: shot.size, mtime: 0, state: "", sha256: shot.sha256,
+  }));
+  const row = picturesNode({
+    doc, pictures, sessionId, expanded, open, toggle, status,
+    urlOf: (picture) => shotUrl(sessionId, picture.sha256),
+    label: (count) => t(count === 1 ? "pictures.takenLabel.one" : "pictures.takenLabel.many"),
+    failure: () => t("pictures.cannotShow"),
+  });
+  if (row) row.className = "pictures picture-shots";
+  return row;
+}
+
 /**
  * The row for one turn, or null when it has no pictures. `open(picture, url)` shows one at full
  * size; `toggle()` flips `expanded`; `status(url)` resolves the HTTP status of a picture that
- * failed to load (default: a plain fetch).
+ * failed to load (default: a plain fetch). `urlOf(picture)`, `label(count)` and `failure(status)`
+ * are where a picture is served, the row's name and what stands in for one that failed; by default
+ * the folder's.
  */
-export function picturesNode({ doc, pictures, sessionId, expanded = false, open, toggle, status }) {
+export function picturesNode({
+  doc, pictures, sessionId, expanded = false, open, toggle, status,
+  urlOf = (picture) => pictureUrl(sessionId, picture),
+  label = (count) => t(count === 1 ? "pictures.rowLabel.one" : "pictures.rowLabel.many"),
+  failure = failureNote,
+}) {
   if (pictures.length === 0) return null;
   const ask = status ?? (async (url) => (await fetch(url, { credentials: "same-origin" })).status);
   const node = (tag, className, text) => {
@@ -58,12 +116,12 @@ export function picturesNode({ doc, pictures, sessionId, expanded = false, open,
   };
   const row = node("div", "pictures");
   row.setAttribute("role", "group");
-  row.setAttribute("aria-label", t(pictures.length === 1 ? "pictures.rowLabel.one" : "pictures.rowLabel.many"));
+  row.setAttribute("aria-label", label(pictures.length));
   const grid = node("div", "picture-grid");
   row.append(grid);
   const { shown, more } = pictureRow(pictures, expanded);
   for (const picture of shown) {
-    const url = pictureUrl(sessionId, picture);
+    const url = urlOf(picture);
     const tile = node("button", "picture");
     tile.type = "button";
     const stage = node("span", "picture-stage");
@@ -85,7 +143,7 @@ export function picturesNode({ doc, pictures, sessionId, expanded = false, open,
         // The gateway itself did not answer: the generic note below.
       }
       tile.disabled = true;
-      stage.replaceChildren(node("span", "picture-missing", failureNote(code)));
+      stage.replaceChildren(node("span", "picture-missing", failure(code)));
       facts.textContent = "";
     });
     grid.append(tile);

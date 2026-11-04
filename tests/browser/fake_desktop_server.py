@@ -7,6 +7,7 @@ screen is a JSON file, the first argument, read on every call so a test can
 change it between calls::
 
     {"grants": {"accessibility": true, "screen_recording": true},
+     "space": 1,
      "windows": [{"window_id": 7, "pid": 70, "app_name": "Chat", "title": "Sign in",
                   "z_index": 9, "layer": 0, "elements": [...], "press": {...}}],
      "press_fails": false}
@@ -14,8 +15,24 @@ change it between calls::
 A window's ``elements`` are the rows ``get_window_state`` answers (role, label,
 element_token); ``press`` maps a token to what pressing it does: ``{"close":
 true}`` closes the window, ``{"effect": "..."}`` is the effect the answer
-names. ``layer`` above 0 is listed only for its own ``pid``. Every call is
-appended to the file named by the second argument (one JSON line each).
+names.
+
+Like the real helper, ``list_windows`` lists every Space and off-screen windows
+too: layer 0 only without a ``pid``, every layer of that ``pid`` with one, and
+only what is on the screen with ``on_screen_only``. A window is on the screen
+when it is on the current ``space`` (its ``spaces``, a list of Space ids; none
+given: every Space), not ``hidden`` (its app hidden or it is minimized) and not
+``on_screen: false`` (made but never shown).
+
+A click at a point (``x``, ``y``) needs a read of that window
+(``get_window_state``) earlier in the same session, as the real helper does,
+and uses it up. What it does is the window's ``clicks``, by ``delivery_mode``
+(``background``, the default, or ``foreground``): ``"close"`` closes the
+window, ``"change"`` changes its picture and text, ``"nothing"`` (the default)
+does nothing. ``"close_then_fail"`` closes the window too, but before the picture that
+marks the point is taken, so that picture fails (the helper takes it after the click).
+``"gone"`` is a window that went away just before the click, which the helper refuses. Every call is appended to the file named by the second argument
+(one JSON line each).
 """
 
 from __future__ import annotations
@@ -29,7 +46,14 @@ PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kg"
     "AAAABJRU5ErkJggg=="
 )
+# The picture of a window that changed after a click: another 1x1 PNG.
+CHANGED_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgaGAAAAEEAIFw9selAAAAAElFTkSuQmCC"
+)
 STATE, LOG = sys.argv[1], sys.argv[2]
+# The windows read in this session (this process is one helper session): a click at a
+# point needs one, and uses it up.
+READ: set[int] = set()
 TOOLS = [
     {"name": "list_windows", "inputSchema": {"type": "object", "properties": {
         "app": {"type": "string"}, "pid": {"type": "integer"},
@@ -41,7 +65,7 @@ TOOLS = [
     {"name": "click", "inputSchema": {"type": "object", "properties": {
         "element_token": {"type": "string"}, "pid": {"type": "integer"},
         "window_id": {"type": "integer"}, "x": {"type": "number"}, "y": {"type": "number"},
-        "debug_image_out": {"type": "string"}}}},
+        "debug_image_out": {"type": "string"}, "delivery_mode": {"type": "string"}}}},
     {"name": "check_permissions", "inputSchema": {"type": "object", "properties": {
         "prompt": {"type": "boolean"}}}},
 ]  # fmt: skip
@@ -58,23 +82,49 @@ def save(state: dict[str, Any]) -> None:
         json.dump(state, handle)
 
 
-def answer(data: dict[str, Any], *, error: bool = False, image: bool = False) -> dict:
+def answer(
+    data: dict[str, Any], *, error: bool = False, image: bytes | None = None
+) -> dict:
     content: list[dict[str, Any]] = [{"type": "text", "text": json.dumps(data)}]
-    if image:
+    if image is not None:
         content.append(
             {
                 "type": "image",
-                "data": base64.b64encode(PNG).decode(),
+                "data": base64.b64encode(image).decode(),
                 "mimeType": "image/png",
             }
         )
     return {"content": content, "structuredContent": data, "isError": error}
 
 
-def row(window: dict[str, Any]) -> dict[str, Any]:
-    keys = ("window_id", "pid", "app_name", "title", "z_index", "layer")
-    return {**{k: window.get(k) for k in keys}, "is_on_screen": True, "bounds": {
-        "x": 0, "y": 0, "width": 400, "height": 300}}  # fmt: skip
+def on_screen(window: dict[str, Any], space: int) -> bool:
+    spaces = window.get("spaces")
+    return (
+        window.get("on_screen", True) is not False
+        and not window.get("hidden")
+        and (spaces is None or space in spaces)
+    )
+
+
+def row(window: dict[str, Any], space: int) -> dict[str, Any]:
+    keys = ("window_id", "pid", "app_name", "title", "z_index")
+    spaces = window.get("spaces")
+    return {**{k: window.get(k) for k in keys}, "layer": window.get("layer", 0),
+            "is_on_screen": on_screen(window, space),
+            "space_ids": [1, 2, 3] if spaces is None else spaces,
+            "bounds": {"x": 0, "y": 0, "width": 400, "height": 300}}  # fmt: skip
+
+
+def clicked(state: dict[str, Any], window: dict[str, Any], how: str) -> None:
+    """What a click at a point does to *window*, as its ``clicks`` say for *how*."""
+    done = (window.get("clicks") or {}).get(how, "nothing")
+    if done in ("close", "close_then_fail"):
+        state["windows"] = [w for w in state["windows"] if w is not window]
+    elif done == "change":
+        window["picture"] = "changed"
+        window["elements"] = [{"role": "AXStaticText", "label": "Done"}]
+    if done != "nothing":
+        save(state)
 
 
 def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -85,12 +135,15 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
             state.get("grants", {"accessibility": True, "screen_recording": True})
         )
     if name == "list_windows":
+        space = int(state.get("space", 1))
         found = []
         for window in windows:
             if "pid" in args:
                 if window["pid"] != args["pid"]:
                     continue
             elif window.get("layer", 0) != 0:
+                continue
+            if args.get("on_screen_only") and not on_screen(window, space):
                 continue
             app = str(args.get("app") or "")
             if (
@@ -99,14 +152,15 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
                 and app != window.get("bundle")
             ):
                 continue
-            found.append(row(window))
-        return answer({"windows": found})
+            found.append(row(window, space))
+        return answer({"current_space_id": space, "windows": found})
     if name == "get_window_state":
         window = next(
             (w for w in windows if w["window_id"] == args.get("window_id")), None
         )
         if window is None:
             return answer({"refusal": "window_id_not_found"}, error=True)
+        READ.add(window["window_id"])
         picture = args.get("include_screenshot", True) is not False
         data = {
             "pid": window["pid"],
@@ -116,7 +170,8 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         }
         if picture:
             data.update(screenshot_width=800, screenshot_height=600)
-        return answer(data, image=picture)
+        shown = CHANGED_PNG if window.get("picture") == "changed" else PNG
+        return answer(data, image=shown if picture else None)
     if name == "click":
         token = args.get("element_token")
         if token:
@@ -131,9 +186,32 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
                     save(state)
                 return answer({"effect": done.get("effect", "confirmed")})
             return answer({"refusal": "stale element_token"}, error=True)
-        if args.get("debug_image_out"):
+        window = next(
+            (w for w in windows if w["window_id"] == args.get("window_id")), None
+        )
+        if window is None:
+            return answer({"refusal": "window_id_not_found"}, error=True)
+        if window["window_id"] not in READ:
+            return answer({"refusal": "window_never_read"}, error=True)
+        READ.discard(window["window_id"])
+        how = str(args.get("delivery_mode") or "background")
+        if (window.get("clicks") or {}).get(how) == "gone":
+            state["windows"] = [w for w in windows if w is not window]
+            save(state)
+            return answer({"refusal": "window_id_not_found"}, error=True)
+        closes = (window.get("clicks") or {}).get(how) == "close_then_fail"
+        if args.get("debug_image_out") and not closes:
             with open(args["debug_image_out"], "wb") as handle:
                 handle.write(PNG)
+        clicked(state, window, how)
+        if args.get("debug_image_out") and closes:
+            wid = window["window_id"]
+            return answer(
+                {"refusal": f"debug_image_out write failed: window {wid} capture "
+                 f"failed: native: ScreenCaptureKit capture failed for window {wid}: "
+                 f"WindowServer no longer lists window id {wid}; using shell fallback"},
+                error=True,
+            )  # fmt: skip
         return answer({"effect": "unverifiable"})
     return answer({"refusal": f"unknown tool {name}"}, error=True)
 

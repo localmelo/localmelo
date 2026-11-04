@@ -43,6 +43,16 @@ after the last was acknowledged, so the acknowledgements are held to a
 rate (default 15 a second) and a busy page costs a fraction of its full rate.
 A picture goes to the one function that asked for it and is kept nowhere else.
 
+Chrome's Local Network Access check stays on: a page cannot reach this
+computer or its network, and Chrome in the background cannot ask the person
+to allow it. With a :class:`~localmelo.support.browser.local_apps.LocalRule`
+(``local``, which melo's browser tools pass), Chrome pauses the requests to a
+listed sign-in helper and to addresses that name this computer or its
+network (``Fetch`` for the whole browser). melo answers a listed helper's
+request from its own sign-in page itself, blocks the others before they are
+sent and tells the step (:meth:`ChromeBackgroundDriver.local_attempts`), and
+lets anything else go on. No permission is ever granted.
+
 A box the page puts up blocks it until it is answered: an ``alert`` is closed
 with OK; a ``confirm`` during an act is put to the person through
 :attr:`ChromeBackgroundDriver.on_dialog` and is otherwise answered Cancel; a
@@ -72,7 +82,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from localmelo.support import config
-from localmelo.support.browser import apps, fields
+from localmelo.support.browser import apps, fields, local_apps
 from localmelo.support.browser.driver import (
     MAX_TYPED_CHARS,
     Act,
@@ -88,8 +98,8 @@ from localmelo.support.browser.driver import (
     View,
 )
 from localmelo.support.browser.live import DEFAULT_FPS, DEFAULT_QUALITY, Frame
+from localmelo.support.browser.local_apps import LocalAttempt, LocalRule
 from localmelo.support.browser.safari import (
-    _MOVED,
     _PASSED,
     _STALE,
     BLANK_TRIES,
@@ -100,9 +110,12 @@ from localmelo.support.browser.safari import (
     VIEW_JS,
     PageScriptActs,
     _changes,
+    _cover_stop,
+    _covered_why,
     _decode,
     _element,
     _key,
+    _nothing_reached,
     _number,
     _reached,
     _spec,
@@ -112,6 +125,7 @@ from localmelo.support.browser.safari import (
     hit_script,
     mark_script,
     same_page,
+    wait_probe,
 )
 
 # A command line that replaces Chrome's, for tests (a fake peer) and a Chrome
@@ -176,6 +190,11 @@ PERSON_METHODS = frozenset(
     }
 )
 MAX_INFLIGHT = 64
+# The most blocked requests kept for one page until a step tells them, and the most pages kept.
+MAX_ATTEMPTS = 10
+MAX_ATTEMPT_PAGES = 50
+# How far up melo looks for the page a frame is in (a frame in a frame in a page).
+MAX_FRAME_DEPTH = 8
 
 
 def chrome_command() -> list[str] | None:
@@ -313,9 +332,21 @@ class _Chrome:
         self.casts: dict[str, _Cast] = {}  # session -> its stream of pictures
         self.spare: set[str] = set()  # the pages Chrome started with: nobody's
         self.claimed: set[str] = set()  # the pages some driver has as its own
+        # The rule for requests to this computer (None: Chrome's own check alone),
+        # the requests it is answering, and what it blocked, by page, until told.
+        self.local: LocalRule | None = None
+        self.jobs: set[asyncio.Task[None]] = set()
+        self.attempts: dict[str, list[LocalAttempt]] = {}
+        self.relays = asyncio.Semaphore(local_apps.MAX_RELAYS)
 
     @classmethod
-    async def launch(cls, argv: list[str], profile: str, timeout_s: float) -> _Chrome:
+    async def launch(
+        cls,
+        argv: list[str],
+        profile: str,
+        timeout_s: float,
+        local: LocalRule | None = None,
+    ) -> _Chrome:
         loop = asyncio.get_running_loop()
         program = shutil.which(argv[0]) or argv[0]
         cmd_r, cmd_w = os.pipe()  # melo writes, Chrome reads on fd 3
@@ -362,6 +393,10 @@ class _Chrome:
             async with asyncio.timeout(timeout_s):
                 await chrome.request("Browser.getVersion")
             await chrome.request("Browser.setDownloadBehavior", {"behavior": "deny"})
+            if local is not None:
+                # For the whole browser: every tab, frame and worker, before any loads.
+                chrome.local = local
+                await chrome.request("Fetch.enable", {"patterns": local.patterns()})
             listed = await chrome.request("Target.getTargets")
         except TimeoutError:
             chrome.kill()
@@ -438,6 +473,110 @@ class _Chrome:
         elif method == "Page.navigatedWithinDocument":
             if params.get("frameId") == self.main.get(session):
                 self.navs[session] = self.navs.get(session, 0) + 1
+        elif method == "Fetch.requestPaused" and not session and self.local is not None:
+            job = self.loop.create_task(self._paused(self.local, params))
+            self.jobs.add(job)
+            job.add_done_callback(self.jobs.discard)
+
+    async def _paused(self, rule: LocalRule, params: dict[str, Any]) -> None:
+        """Answer one request Chrome paused for *rule*: relayed, blocked or let go on; exactly once."""
+        ident = params.get("requestId")
+        if not isinstance(ident, str) or not ident:
+            return
+        method = "Fetch.failRequest"
+        answer: dict[str, Any] = {"requestId": ident, "errorReason": "Failed"}
+        blocked: LocalAttempt | None = None
+        try:
+            request = params.get("request")
+            request = request if isinstance(request, dict) else {}
+            origin = local_apps.origin_of(request.get("headers"))
+            verdict = rule.decide(str(request.get("url") or ""), origin)
+            if verdict.kind == "pass":
+                method, answer = "Fetch.continueRequest", {"requestId": ident}
+            elif verdict.kind == "relay" and verdict.helper is not None:
+                # A relay waits for a free place a bounded time, then fails;
+                # requests that are not relayed never wait for one.
+                async with asyncio.timeout(local_apps.RELAY_S):
+                    await self.relays.acquire()
+                try:
+                    got = await local_apps.relay(verdict.helper, verdict.port, request)
+                finally:
+                    self.relays.release()
+                method, answer = "Fetch.fulfillRequest", local_apps.fulfilled(
+                    ident, got
+                )
+            else:
+                answer["errorReason"] = "BlockedByClient"
+                named = verdict.helper.name if verdict.helper is not None else None
+                blocked = LocalAttempt(verdict.host, verdict.port, origin, named)
+        except local_apps.RelayError as exc:
+            answer["errorReason"] = exc.reason
+        except Exception:  # never leave a request paused: it fails instead
+            pass
+        try:
+            await self.request(method, answer)
+        except CdpError:
+            # Chrome refused the answer (a header it would not take, say): the request fails.
+            if method != "Fetch.failRequest":
+                with contextlib.suppress(BrowserError):
+                    await self.request(
+                        "Fetch.failRequest",
+                        {"requestId": ident, "errorReason": "Failed"},
+                    )
+        except BrowserError:
+            pass  # Chrome stopped
+        if blocked is not None:
+            with contextlib.suppress(BrowserError):
+                page = await self._page_of(str(params.get("frameId") or ""))
+                if page:
+                    self._keep(page, blocked)
+
+    async def _page_of(self, frame: str) -> str:
+        """The page (target id) *frame* is in, or ``""`` when melo cannot tell.
+
+        A page's main frame has the page's id; a frame from another site is a
+        target of its own, whose parent leads to the page; a frame in the
+        page's own process is found in the frames of the pages melo drives.
+        """
+        if not frame:
+            return ""
+        if frame in self.claimed or frame in self.spare:
+            return frame
+        # Chrome lists a frame from another site, but tells nothing of it by its id alone.
+        try:
+            listed = await self.request("Target.getTargets")
+        except BrowserError:
+            listed = {}
+        infos = {
+            str(t.get("targetId")): t
+            for t in listed.get("targetInfos") or []
+            if isinstance(t, dict)
+        }
+        current = frame
+        for _ in range(MAX_FRAME_DEPTH):
+            info = infos.get(current)
+            if info is None:
+                break
+            if info.get("type") == "page":
+                return current
+            current = str(info.get("parentId") or "")
+            if current in self.claimed or current in self.spare:
+                return current
+        for session, main in list(self.main.items()):
+            try:
+                tree = await self.request("Page.getFrameTree", {}, session)
+            except BrowserError:
+                continue
+            if _holds(tree.get("frameTree"), frame):
+                return main
+        return ""
+
+    def _keep(self, page: str, attempt: LocalAttempt) -> None:
+        kept = self.attempts.setdefault(page, [])
+        if attempt not in kept and len(kept) < MAX_ATTEMPTS:
+            kept.append(attempt)
+        while len(self.attempts) > MAX_ATTEMPT_PAGES:
+            self.attempts.pop(next(iter(self.attempts)))
 
     def _dialog_changed(self, session: str) -> None:
         cast = self.casts.get(session)
@@ -503,6 +642,8 @@ class _Chrome:
 
     def _stopped(self) -> None:
         self.closed = True
+        for job in list(self.jobs):
+            job.cancel()
         for future in self._pending.values():
             if not future.done():
                 future.set_exception(BrowserError(STOPPED_MESSAGE))
@@ -605,8 +746,13 @@ def _kill_all() -> None:
         chrome.kill()
 
 
-async def _shared(argv: list[str], profile: str, timeout_s: float) -> _Chrome:
-    """The Chrome of *profile*, started now when it is not running; one more user of it."""
+async def _shared(
+    argv: list[str], profile: str, timeout_s: float, local: LocalRule | None = None
+) -> _Chrome:
+    """The Chrome of *profile*, started now when it is not running; one more user of it.
+
+    A Chrome that starts takes *local*; one that runs keeps the rule it started with.
+    """
     loop = asyncio.get_running_loop()
     key = (profile, id(loop))
     lock = _LOCKS.get(key)
@@ -621,10 +767,21 @@ async def _shared(argv: list[str], profile: str, timeout_s: float) -> _Chrome:
             for (other, _), chrome in list(_SHARED.items()):
                 if other == profile and chrome.loop.is_closed():
                     chrome.kill()  # a Chrome left by a loop that ended holds the profile
-            found = await _Chrome.launch(argv, profile, timeout_s)
+            found = await _Chrome.launch(argv, profile, timeout_s, local)
             _SHARED[key] = found
         found.users += 1
         return found
+
+
+def _holds(tree: object, frame: str) -> bool:
+    """Whether the frame tree *tree* (``Page.getFrameTree``) has *frame* in it."""
+    if not isinstance(tree, dict):
+        return False
+    found = tree.get("frame")
+    if isinstance(found, dict) and found.get("id") == frame:
+        return True
+    children = tree.get("childFrames")
+    return isinstance(children, list) and any(_holds(c, frame) for c in children)
 
 
 def _picture(params: dict[str, Any]) -> Frame | None:
@@ -670,6 +827,8 @@ class ChromeBackgroundDriver(PageScriptActs):
     *command* replaces the program (default: :func:`chrome_command`),
     *profile* the profile folder (default: :func:`default_profile`) and
     *version* the Chrome version the user agent names (default: the app's).
+    *local* is the rule for requests to this computer (see the module
+    docstring); without one, Chrome's own check alone applies.
     :attr:`on_dialog` is asked about a ``confirm`` a page puts up during an
     act (its kind, its words and the page's address): True answers OK.
     """
@@ -686,8 +845,10 @@ class ChromeBackgroundDriver(PageScriptActs):
         gpu: bool = False,
         startup_timeout_s: float = STARTUP_S,
         call_timeout_s: float = CALL_S,
+        local: LocalRule | None = None,
     ) -> None:
         self._command = list(command) if command else None
+        self.local = local
         self._profile = profile
         self._version = version
         self._gpu = gpu
@@ -726,7 +887,7 @@ class ChromeBackgroundDriver(PageScriptActs):
             self._version if self._version is not None else chrome_version(argv[0])
         )
         full = [*argv, *launch_args(profile, version, gpu=self._gpu)]
-        self._browser = await _shared(full, profile, self._startup_s)
+        self._browser = await _shared(full, profile, self._startup_s, self.local)
 
     async def close(self) -> None:
         browser = self._release()
@@ -748,6 +909,8 @@ class ChromeBackgroundDriver(PageScriptActs):
                 browser.end_cast(session)
                 for kept in (browser.dialogs, browser.handoffs, browser.navs):
                     kept.pop(session, None)
+            for target in self._mine:
+                browser.attempts.pop(target, None)
         self._mine.clear()
         self._sessions.clear()
         self._targets.clear()
@@ -1014,6 +1177,7 @@ class ChromeBackgroundDriver(PageScriptActs):
             if session is not None:
                 self._browser.end_cast(session)
             self._browser.claimed.discard(target)
+            self._browser.attempts.pop(target, None)
         if self._current == target:
             self._current = None
 
@@ -1121,6 +1285,16 @@ class ChromeBackgroundDriver(PageScriptActs):
             raise BrowserError("Chrome no longer has that tab.")
         self._current = target
         return await self._here(target)
+
+    def local_attempts(self) -> list[LocalAttempt]:
+        """The requests to this computer melo blocked on this driver's pages since the last call, once."""
+        browser = self._browser
+        if browser is None:
+            return []
+        found: list[LocalAttempt] = []
+        for target in [t for t in browser.attempts if t in self._mine]:
+            found.extend(browser.attempts.pop(target))
+        return found
 
     async def close_tab(self, tab: str) -> None:
         target = self._resolve(tab)
@@ -1288,16 +1462,7 @@ class ChromeBackgroundDriver(PageScriptActs):
         origin: str = "",
     ) -> bool:
         await self._focus(tab)
-        # A page with no body yet (a bot check or an interstitial between two
-        # documents) is not loaded: nothing on it counts, and the wait goes on.
-        words = json.dumps(text)
-        probe = {
-            "load": "document.readyState === 'complete' && !!document.body",
-            "text": f"!!document.body && (document.body.innerText || '').indexOf({words}) >= 0",
-            "gone": f"!!document.body && (document.body.innerText || '').indexOf({words}) < 0",
-        }[until]
-        if origin:
-            probe = f"location.origin === {json.dumps(origin)} && ({probe})"
+        probe = wait_probe(until, text, origin)
         loop = asyncio.get_running_loop()
         end = loop.time() + seconds
         while True:
@@ -1311,6 +1476,17 @@ class ChromeBackgroundDriver(PageScriptActs):
             if loop.time() >= end:
                 return False
             await asyncio.sleep(POLL_S)
+
+    async def holds(
+        self, tab: str | None, until: str, text: str, *, origin: str = ""
+    ) -> bool:
+        await self._focus(tab)
+        try:
+            return await self._read(wait_probe(until, text, origin)) is True
+        except BrowserError:
+            if self._browser is None or self._browser.closed:
+                raise
+            return False  # a page between two documents does not answer yet
 
     async def screenshot(
         self, tab: str | None, mark: tuple[View, float, float] | None = None
@@ -1445,36 +1621,38 @@ class ChromeBackgroundDriver(PageScriptActs):
     async def _native(
         self, session: str, spec: dict[str, Any], act: Act
     ) -> ActResult | tuple[str, bool]:
-        """The act by Chrome's own input; else why not, and whether that holds for the site."""
-        if act.point is not None:
-            x, y = act.point
-        else:
-            if act.element.frame:
-                return _PASSED["frame"], False
-            ready = await self._script(act_script({**spec, "mode": "scroll"}))
-            if ready.get("covered") is True:
-                return _PASSED["covered"], False
-            if not isinstance(ready.get("cx"), int | float) or not isinstance(
-                ready.get("cy"), int | float
-            ):
-                return _PASSED["name"], False
-            x, y = _number(ready["cx"]), _number(ready["cy"])
-        key = _key()
-        armed = await self._script(act_script({**spec, "mode": "arm", "key": key}))
-        try:
-            if act.kind == "type" and act.point is None:
-                await self._type_at(session, x, y, act.text, act.enter)
-            else:
-                await self._click_at(session, x, y)
-        except BrowserError:
-            if self._browser is None or self._browser.closed:
-                raise
-            # Whether it acted before it failed is read from the page: an act
-            # that shows there is kept, one that does not falls to the page script.
-        data, quiet = await self._look(key, spec["doc"], act)
-        blocked = [str(k) for k in data.get("blocked") or []]
-        if "moved" in blocked:
-            raise BrowserError(_MOVED)
+        """The act by Chrome's own input; else why not, and whether that holds for the site.
+
+        The element is scrolled to the middle of the view and a point of it
+        that nothing covers is found (:meth:`_aim`). A real click that still
+        lands on another element is stopped by the guards, so nothing is done;
+        the element is then scrolled to once more and the click tried again.
+        When that lands elsewhere too the error says what got it.
+        """
+        for attempt in range(2):
+            aimed = await self._aim(spec, act)
+            if isinstance(aimed, str):
+                return aimed, False
+            x, y = aimed
+            key = _key()
+            armed = await self._script(act_script({**spec, "mode": "arm", "key": key}))
+            try:
+                if act.kind == "type" and act.point is None:
+                    await self._type_at(session, x, y, act.text, act.enter)
+                else:
+                    await self._click_at(session, x, y)
+            except BrowserError:
+                if self._browser is None or self._browser.closed:
+                    raise
+                # Whether it acted before it failed is read from the page: an act
+                # that shows there is kept, one that does not falls to the page script.
+            data, quiet = await self._look(key, spec["doc"], act)
+            blocked = [str(k) for k in data.get("blocked") or []]
+            if "moved" in blocked:
+                if attempt == 0 and act.point is None and _nothing_reached(data):
+                    continue  # the page moved under the click: scroll to it again
+                raise _cover_stop(data.get("movedBy"), act.element.kind)
+            break
         if not _reached(act, data, frame=armed.get("frame") is True):
             return _PASSED["missed"], True
         self._check_typed(act, data)
@@ -1484,6 +1662,28 @@ class ChromeBackgroundDriver(PageScriptActs):
             "",
             _changes(data, quiet),
         )
+
+    async def _aim(self, spec: dict[str, Any], act: Act) -> tuple[float, float] | str:
+        """Where Chrome's input goes for *act*: a point of the view, else why not.
+
+        An element is scrolled to the middle of the view at once. Its middle
+        is the place when nothing covers it; else the part of it with most
+        room that nothing covers; else, after a moment, the same once more.
+        An element still covered is left to the page script, and the reason
+        names what covers it.
+        """
+        if act.point is not None:
+            return act.point
+        if act.element.frame:
+            return _PASSED["frame"]
+        ready = await self._scrolled(spec)
+        if ready.get("covered") is True:
+            return _covered_why(ready.get("by"))
+        if not isinstance(ready.get("cx"), int | float) or not isinstance(
+            ready.get("cy"), int | float
+        ):
+            return _PASSED["name"]
+        return _number(ready["cx"]), _number(ready["cy"])
 
     async def _mouse(self, session: str, kind: str, x: float, y: float) -> None:
         params: dict[str, Any] = {"type": kind, "x": x, "y": y}

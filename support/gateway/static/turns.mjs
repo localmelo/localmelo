@@ -512,14 +512,16 @@ export function approvalTag(status, errorCategory, approval) {
 
 /**
  * The person's words added to a turn while melo works. Each is an item of the turn's work:
- * `{kind: "note", key, note, text, sending, seen, step, returned}`. `note` is the number the
- * gateway gave it (the run's `inbox.accepted` names it as `offset`); it is null until the
+ * `{kind: "note", key, note, text, pictures, images, sending, seen, step, returned}`. `note` is the
+ * number the gateway gave it (the run's `inbox.accepted` names it as `offset`); it is null until the
  * gateway answers or its `turn.note` event arrives, whichever is first. A note is shown as
  * sending, sent (the run reads it at its next step), seen, or, when its turn ended first,
- * as the next message, or, after a Stop, as given back to the box.
+ * as the next message, or, after a Stop, as given back to the box. A note may carry pictures:
+ * `pictures` are the ones the person added, `{name, url, bytes}`, shown until the gateway lists
+ * them as `images` (the references a turn's events carry, served by the chat's blobs).
  */
-export function startNote(turn, text, key) {
-  const item = {kind: "note", key, note: null, text, sending: true, seen: false, step: 0, returned: false};
+export function startNote(turn, text, key, pictures = []) {
+  const item = {kind: "note", key, note: null, text, pictures, images: [], sending: true, seen: false, step: 0, returned: false};
   turn.items.push(item);
   return item;
 }
@@ -529,8 +531,8 @@ function findNote(turn, number) {
   return number === null ? null : turn.items.find((item) => item.kind === "note" && item.note === number) ?? null;
 }
 
-/** The gateway answered a send: *item* has its number, unless its event came first and made another item. */
-export function acknowledgeNote(turn, item, number) {
+/** The gateway answered a send: *item* has its number (and its pictures, *images*), unless its event came first and made another item. */
+export function acknowledgeNote(turn, item, number, images = []) {
   const heard = findNote(turn, number);
   if (heard !== null && heard !== item) {
     const at = turn.items.indexOf(item);
@@ -540,19 +542,24 @@ export function acknowledgeNote(turn, item, number) {
   }
   item.note = number;
   item.sending = false;
+  if (item.images.length === 0) item.images = pictureRefs(images);
   return item;
 }
 
 /** A `turn.note` event: a note of this turn, shown once however it came. */
-function noteHeard(turn, number, text) {
+function noteHeard(turn, number, text, images) {
   if (number === null || findNote(turn, number) !== null) return;
-  const local = turn.items.find((item) => item.kind === "note" && item.note === null && item.text === text);
+  const refs = pictureRefs(images);
+  const local = turn.items.find(
+    (item) => item.kind === "note" && item.note === null && item.text === text && item.pictures.length === refs.length,
+  );
   if (local) {
     local.note = number;
     local.sending = false;
+    local.images = refs;
     return;
   }
-  turn.items.push({kind: "note", key: "", note: number, text, sending: false, seen: false, step: 0, returned: false});
+  turn.items.push({kind: "note", key: "", note: number, text, pictures: [], images: refs, sending: false, seen: false, step: 0, returned: false});
 }
 
 /** An `inbox.accepted` event: the run read note *offset*. False when the turn has no such note. */
@@ -1041,7 +1048,7 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
       // The status row shows the numbers; a line per request would bury the work.
       break;
     case "turn.note": {
-      noteHeard(turn, int(data.note), String(data.text ?? ""));
+      noteHeard(turn, int(data.note), String(data.text ?? ""), data.images);
       break;
     }
     case "inbox.accepted": {

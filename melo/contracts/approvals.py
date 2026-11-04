@@ -266,6 +266,11 @@ class ApprovalPolicy(Protocol):
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision: ...
 
 
+# The question the browser provider asks before it presses a button in a window of
+# another app (``desktop-act:<app>``). Like the window question below, only the person
+# answers it, in Ask and in Auto: no model sees the window or the press.
+DESKTOP_ACT: Final = "desktop-act:"
+
 # Questions a tool asks itself whose answer is never kept for the chat, whatever a
 # client sends: each call asks again. Sending a form is one (``browser-submit:<site>``)
 # and so is typing (``browser-type:<site>``): a grant would cover every later form
@@ -278,7 +283,7 @@ NEVER_GRANTED: Final = (
     "browser-submit:",
     "browser-type:",
     "browser-point:",
-    "desktop-act:",
+    DESKTOP_ACT,
     "browser-dialog:",
     "takeover:",
 )
@@ -957,6 +962,20 @@ ALLOW_WHEN_OPEN: Final = (
     "that this step needs them and nobody could be asked now: they can allow "
     "this step once from the chat, switch the chat to Ask, or keep the chat open "
     "so that melo asks them on a card the next time."
+)
+# A question only the person can answer (another app's window, a press in one, a page to
+# take over) that Auto refused because nobody has the chat open: the model reads the
+# truth, so it does not make up a reason.
+NOBODY_TO_ASK: Final = (
+    "Auto mode did not run this step: only the user can answer it, and nobody has "
+    "the chat open to ask.\n"
+    "In your answer, tell the user in plain words:\n"
+    "- what you wanted to do, and that only they can answer it;\n"
+    "- that they can keep the chat open so that melo asks them on a card the "
+    "next time, or switch the chat to Ask.\n"
+    "That is the only reason. Do not give any other reason (a network problem, a "
+    "fault, a limit) and do not guess one.\n"
+    "Do not try to reach the same result another way."
 )
 ALLOW_IN_TASK: Final = (
     "that they can allow it once from the task's page; the task goes on " "without it."

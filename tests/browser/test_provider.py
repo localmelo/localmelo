@@ -327,6 +327,28 @@ async def test_tabs_list_switch_and_close() -> None:
     assert (await run(tools, "browser_tabs", action="explode")).is_error
 
 
+async def test_a_wait_whose_condition_already_held_says_nothing_was_waited() -> None:
+    driver = world()
+    driver.held_already = True
+    tools = await tools_of(driver)
+    await run(tools, "browser_open", url=HOME)
+    loaded = (await run(tools, "browser_wait", until="load", seconds=15)).text
+    assert loaded.startswith(
+        "Reached: the page had already loaded; nothing was waited."
+    )
+    assert "not a pause" in loaded
+    text = (await run(tools, "browser_wait", until="text", text="Hi")).text
+    assert text.startswith(
+        "Reached: the text was already on the page; nothing was waited."
+    )
+    gone = (await run(tools, "browser_wait", until="gone", text="Bye")).text
+    assert gone.startswith("Reached: the text was already gone; nothing was waited.")
+    # A condition that did not hold at the start is reported as before.
+    driver.held_already = False
+    waited = (await run(tools, "browser_wait", until="load")).text
+    assert waited == "Reached: the page loaded."
+
+
 async def test_wait_reports_what_happened() -> None:
     driver = world()
     tools = await tools_of(driver)

@@ -160,7 +160,7 @@ async function panel() {
   els.keys = node();
   const frames = [];
   const browser = setupBrowser({
-    api: async () => ({available: true, open: true}),
+    api: async () => ({available: true, open: true, browsing: true}),
     els,
     openSocket: (url) => new FakeSocket(url),
     decode: () => Promise.resolve({width: 1280, height: 713, close() {}}),

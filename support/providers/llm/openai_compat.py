@@ -440,9 +440,10 @@ class OpenAICompatLLM(BaseLLMProvider):
         service's preset), or ``None``. A known answer is returned by
         :meth:`takes_images` without asking the server.
     probe_images : bool
-        Whether :meth:`takes_images` asks the server (oMLX's and Ollama's routes)
-        when *reads_images* is ``None``. ``True`` by default; a hosted service has
-        no such routes, so its backend turns it off.
+        Whether :meth:`takes_images` asks the server (its model listing, oMLX's
+        status route and Ollama's show route) when *reads_images* is ``None``.
+        ``True`` by default; a hosted service answers none of them, so its backend
+        turns it off.
     """
 
     def __init__(
@@ -822,14 +823,18 @@ class OpenAICompatLLM(BaseLLMProvider):
         yield StreamFragment(kind="reply", reply=reply, finish_reason=finish)
 
     async def takes_images(self) -> bool | None:
-        """Whether the model reads images: the caller's answer, else the server's (oMLX, Ollama); else None."""
+        """Whether the model reads images: the caller's answer, else the server's (its model listing, oMLX, Ollama); else None."""
         if self.reads_images is not None:
             return self.reads_images
         if not self.probe_images:
             return None
         root = str(self._http.base_url).rstrip("/").removesuffix("/v1")
         return await server_takes_images(
-            self._http, self.model, status="/models/status", show=f"{root}/api/show"
+            self._http,
+            self.model,
+            listing="/models",
+            status="/models/status",
+            show=f"{root}/api/show",
         )
 
     async def close(self) -> None:

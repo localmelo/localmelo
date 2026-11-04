@@ -32,6 +32,8 @@ from typing import Any, Final, Literal
 
 from localmelo.melo.checker.review.gist import step_gist
 from localmelo.melo.contracts.approvals import (
+    DESKTOP_ACT,
+    WINDOW_READ,
     ApprovalDecision,
     ApprovalPolicy,
     ApprovalRequest,
@@ -40,7 +42,6 @@ from localmelo.melo.contracts.approvals import (
     DenyAllPolicy,
     grant_offered,
     never_granted,
-    window_question,
 )
 from localmelo.melo.contracts.review import because, review_title, url_site
 from localmelo.support.cli import edits
@@ -200,8 +201,13 @@ def panel_text(
     text = _says(request, _tool_panel(request, target, width, minus, show_tier))
     review = request.review
     title = review_title(review, folder_name(request.workspace_root))
-    if review is None or not title or window_question(request):
-        # Another app's window is asked about the same way in Ask and in Auto: its own words.
+    if (
+        review is None
+        or not title
+        or request.tool_name.startswith((WINDOW_READ, DESKTOP_ACT, "browser-point:"))
+    ):
+        # Another app's window, a press in one and a click melo cannot check are asked the
+        # same way in Ask and in Auto: their own words, never a review's title.
         return text
     note, changed = escape_arguments(f"melo asks because this call {because(review)}.")
     return dataclasses.replace(
@@ -391,6 +397,15 @@ def _tool_panel(
             "types into other apps, and asks every time it presses."
         )
         body = [("", row) for row in _wrapped([said], width)]
+        if arguments.get("delivery") == "foreground_retry":
+            # A click at a point is asked once for both tries: the second one moves the
+            # pointer and brings the app to the front.
+            front = (
+                "If a click in the background does not reach it, melo clicks once "
+                f"more in the foreground: the pointer moves there and {app} comes to "
+                "the front for a moment."
+            )
+            body += [("", row) for row in _wrapped([front], width)]
         body += [("muted", row) for row in _wrapped([note], width)]
         return PanelText(
             "Press a button in another app?",

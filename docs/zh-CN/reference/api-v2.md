@@ -224,7 +224,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `browser_driver` 可选：`off`、`safari-automation` 或 `chrome`，按名字设置 `[browser] driver`，并优先于 `browser`（其他值返回 400 `invalid_request`）；省略时保留已保存的值。设置中的**浏览器**选项、`/browser chrome` 和 `/browser safari` 保存的就是它。响应中带有 `browser_driver` 和 `chrome_installed`（是否已安装 Google Chrome，以便选项提示先安装）。
 - 控制台一次保存一项更改：带上读取时的 `revision`，只发送改动的字段；它的 Undo 是同一个请求，换成之前的值。
 - 与磁盘上的文件不匹配的 `revision` 会返回 409 `settings_changed`。两个并发的 `PUT` 请求若读取了同一个 `revision`，两者都可能通过检查；最后写入者胜出，`os.replace` 保证文件不会被撕裂。
-- 服务器会重新加载 `config.toml`，因此命令行的 `--host` 和 `--port` 覆盖值从不写入磁盘；它会保留其他节、`extra_body`、`mcp_config`、`request_timeout_s`、`[agent]` 和 `[scheduler]`，校验候选设置（失败时返回 `400 invalid_settings` 并附 `details.errors`），以原子方式写入 `config.toml`，关闭空闲的会话智能体，使下一轮以新设置打开，并返回更新后的 `GET /api/settings` 响应体。
+- 服务器会重新加载 `config.toml`，因此命令行的 `--host` 和 `--port` 覆盖值从不写入磁盘；它会保留其他节、`extra_body`、`mcp_config`、`request_timeout_s`、`[agent]` 和 `[scheduler]`，校验候选设置（失败时返回 `400 invalid_settings` 并附 `details.errors`），以原子方式写入 `config.toml`，关闭空闲的会话智能体，使下一轮以新设置打开（正在进行一轮或有问题在等待回答的会话，会保留原来的智能体，到下一轮再换新的），并返回更新后的 `GET /api/settings` 响应体。
 
 ## POST /api/settings/test
 
@@ -684,12 +684,12 @@ worker 运行或终端对话从 CLI 的文件读取。
 ```
 
 ```json
-{"open": true, "tab": "t2", "url": "https://example.com/", "title": "Example Domain", "browsing": false, "viewers": 1, "available": true, "driver": "chrome"}
+{"open": true, "tab": "t2", "url": "https://example.com/", "title": "Example Domain", "browsing": false, "yours": false, "viewers": 1, "available": true, "driver": "chrome"}
 ```
 
 - 对话的当前标签页存在时 `open` 为 true；`tab`、`url` 和 `title` 描述它（`open` 为 false 时，比如对话还没有浏览过或在网关里没有打开，`tab` 为 null，其余为空）。
-- 对话的浏览器步骤正在运行时 `browsing` 为 true。`viewers` 是该对话已打开的实时画面数量。
-- `[browser] driver` 为 `chrome` 且 `[browser] live` 开启时 `available` 为 true；`driver` 重复返回驱动名。未知的会话是 404 `not_found`。响应带有 `Cache-Control: no-store`。
+- 对话的浏览器步骤正在运行时 `browsing` 为 true；你接管了它的某个页面时 `yours` 为 true。两者之一为 true 时，控制台会自动打开浏览器面板。`viewers` 是该对话已打开的实时画面数量。
+- `available` 表示现在能否观看这个对话的浏览器。`[browser] live` 必须开启。已打开智能体的对话，看的是这个智能体自己的浏览器：浏览器设置改变时正在进行一轮的对话，会保留原来的浏览器，直到下一轮。没有打开智能体的对话按 `[browser] driver`（`chrome`）判断。`driver` 是设置值。未知的会话是 404 `not_found`。响应带有 `Cache-Control: no-store`。
 
 ## WS /api/sessions/{id}/browser/live
 
@@ -848,11 +848,11 @@ worker 运行或终端对话从 CLI 的文件读取。
 - 本网关运行该轮次时返回 202；对于已结束的轮次，或本网关不运行的轮次，返回 409 `turn_not_running`。
 - 轮次在其下一个边界处停止，并以 `cancelled` 结束，原因为 `user_stop`；`turn.finished` 会说明这一点。若它没有说任何话，其保存的 `answer` 为 `[interrupt: no assistant output for this turn]`。
 - 在审批等待期间取消，会撤回该卡片：请求会被答复为 `withdrawn`，并离开 `pending_approvals`。
-- [补充到该轮次](#post-apiturnsturn_idnotes)、但其运行尚未读到的话不会开始另一个轮次：它们会从队列中移除，并以 `"unread_notes": [{"note": 3, "text": "use the 2024 file"}]` 返回，由客户端放回消息框。没有时不会有这个键。
+- [补充到该轮次](#post-apiturnsturn_idnotes)、但其运行尚未读到的话不会开始另一个轮次：它们会从队列中移除，并以 `"unread_notes": [{"note": 3, "text": "use the 2024 file"}]` 返回，由客户端放回消息框。带图片的补充还有 `"images"`：这些图片重新暂存后的样子，每张与 [`POST /api/uploads`](#post-apiuploads) 的回答相同（`id`、`name`、`mime_type`、`size_bytes`、`width`、`height`、`model_reads`），由客户端放回图片那一行，随下一条消息发送。没有时不会有这个键。
 
 ## POST /api/turns/{turn_id}/notes
 
-向正在运行的轮次补充话语。它的运行会在下一步读到这些话。
+向正在运行的轮次补充话语和图片。它的运行会在下一步读到这些内容。
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/turns/9c1f0e2d4b6a48c1a3e5f7091b2d4c6e/notes \
@@ -864,11 +864,22 @@ worker 运行或终端对话从 CLI 的文件读取。
 {"note": {"note": 3, "turn_id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e", "text": "use the 2024 file instead", "client_request_id": "curl-note-1", "state": "sent"}}
 ```
 
+带一张图片（[先暂存](#post-apiuploads)，把它的 id 写进 `images`）：
+
+```json
+{"text": "this is the file I mean", "images": ["46fb64ffc2a04ad98a9a0bb3a1a0f0c1"], "client_request_id": "curl-note-2"}
+```
+
+```json
+{"note": {"note": 4, "turn_id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e", "text": "this is the file I mean", "client_request_id": "curl-note-2", "state": "sent", "images": [{"sha256": "3f2a9c0d1b7e4a58b6c3d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4", "mime_type": "image/png", "size_bytes": 20481}]}}
+```
+
 - 返回 202。`state` 为 `sent` 表示正在运行的轮次接收了这些话，为 `next` 表示这些话保存期间轮次已经结束：它们会作为对话的下一个轮次运行。`client_request_id` 是可选的，使调用可以安全地重复（同样的内容会原样返回，轮次结束之后也一样）。
 - 运行会把每条补充放进下一次模型请求，作为用户的消息，并标明是它工作时补充的，同时用 `inbox.accepted` 说明已读到（它的 `offset` 就是这条补充的编号）。运行在轮次结束前没有读到的补充，会作为对话的下一个轮次发送，与排队的消息按顺序排列；它们在同一个存储里，所以重启后仍会保留。停止会把没读到的还给客户端（见[取消](#post-apiturnsturn_idcancel)）。
-- `text` 会去掉首尾空白，不能为空，最多 8,000 个字符，并经过与普通消息相同的检查器（400 `invalid_request`，400 `text_rejected`）。一个轮次最多接收 20 条补充。
-- 对没有在运行、正在被停止或其运行已结束的轮次返回 409 `turn_not_running`：客户端应把这些话作为一条消息发送。对不是用户开始的轮次，以及任务会话，返回 409 `not_your_turn`。
-- 图片和文件不能加入正在运行的轮次。
+- `text` 会去掉首尾空白，最多 8,000 个字符，并经过与普通消息相同的检查器（400 `invalid_request`，400 `text_rejected`）。除非 `images` 里有图片，否则不能为空；此时模型读到的是 `[1 picture]`，`text` 为 `""`。一个轮次最多接收 20 条补充。
+- `images` 可选：来自 [`POST /api/uploads`](#post-apiuploads) 的 id，最多 4 个，不能重复，且都还在暂存区，规则与消息的 `images` 相同（400 `invalid_request`、400 `picture_gone`；已知聊天模型读不了图片时为 409 `model_text_only`）。回答在 `images` 下列出它们，写法与轮次的 `images` 相同（`sha256`、`mime_type`、`size_bytes`；图片本身用 [`GET /api/sessions/{id}/blobs/{sha256}`](#get-apisessionsidblobssha256) 取），`turn.note` 事件也一样。它们在调用返回之前就已保存在对话里，所以变成下一个轮次、或等过一次重启的补充仍然带着它们。运行在下一步把它们作为这条补充消息的图片部分发送（每一步最多 8 张，其余的补充在再下一步读到）；若到那时发现模型读不了图片，补充的文字里会说明这一点，并且不发送图片。
+- 对没有在运行、正在被停止或其运行已结束的轮次返回 409 `turn_not_running`：客户端应把这些话和图片作为一条消息发送。对不是用户开始的轮次，以及任务会话，返回 409 `not_your_turn`。
+- 文本文件不能加入正在运行的轮次。
 
 ## POST /api/uploads
 

@@ -92,7 +92,12 @@ from localmelo.melo.agent._step_review import (
     plain_page_key,
 )
 from localmelo.melo.agent._task_aids import FINISH_NOTE, refusal_note
-from localmelo.melo.agent._tool_images import ToolImageStore
+from localmelo.melo.agent._tool_images import (
+    TEXT_READERS,
+    USER_KEEP,
+    ToolImageStore,
+    withheld_note,
+)
 from localmelo.melo.agent.options import (
     REPLAY_TURN_CAP,
     AgentOptions,
@@ -123,6 +128,8 @@ from localmelo.melo.contracts.approvals import (
     ALLOWED_ONCE,
     BLOCKED_ALIKE,
     BLOCKED_EARLIER,
+    DESKTOP_ACT,
+    NOBODY_TO_ASK,
     SELF_ASKING_TOOLS,
     STOPPED_NOTE,
     TAKEOVER,
@@ -845,7 +852,35 @@ def _tool_result_text(result: ToolResult) -> str:
     return "" if result.images else "(no output)"
 
 
-def _tool_message_content(text: str, images: Sequence[ImagePart]) -> str:
+def _read_notes(
+    inbox: InboxSource, pending: list[tuple[int, str]]
+) -> tuple[list[tuple[int, str]], list[ImagePart]]:
+    """The notes a step reads, and the pictures that go with them.
+
+    An inbox that can name the pictures of a note (``pictures(offset)``, see
+    :class:`~localmelo.melo.contracts.inbox.PictureInbox`) has them sent with
+    its words. A step reads whole notes while their pictures stay within what
+    the store keeps (:data:`USER_KEEP`): the first note is always read, and any
+    after it that would pass the limit wait, unread, for the next step. A
+    picture the checker would refuse is left out.
+    """
+    ask = getattr(inbox, "pictures", None)
+    if not callable(ask):
+        return pending, []
+    taken: list[tuple[int, str]] = []
+    shown: list[ImagePart] = []
+    for offset, text in pending:
+        own = [p for p in ask(offset) if p.data and not image_problem(p)][:USER_KEEP]
+        if taken and len(shown) + len(own) > USER_KEEP:
+            break
+        taken.append((offset, text))
+        shown.extend(own)
+    return taken, shown
+
+
+def _tool_message_content(
+    text: str, images: Sequence[ImagePart], unseen: str = ""
+) -> str:
     """Content of the ``role="tool"`` message that answers a call.
 
     *text* is the result's text (see :func:`_tool_result_text`), cut to
@@ -854,8 +889,12 @@ def _tool_message_content(text: str, images: Sequence[ImagePart]) -> str:
     with ``tool_images`` on, see :class:`ToolImageStore`), so a result
     with images ends with a line that names them (see
     :func:`describe_images`), whether its text is kept, cut or withheld.
+    When the pixels do not reach the model, *unseen* is the line that
+    says so (see :func:`withheld_note`); it follows the one that names the
+    images, and a result without images gets none.
     """
-    return "\n".join(part for part in (text, describe_images(images)) if part)
+    lines = (text, describe_images(images), unseen if images else "")
+    return "\n".join(part for part in lines if part)
 
 
 def _withheld_notice(text: str, reason: str) -> str:
@@ -2161,16 +2200,19 @@ _SITE_DOUBT = {
     "act": "Clicks or chooses on {site}.",
     "point": "Clicks at a point on {site}.",
     "submit": "Sends a form from {site}, which needs its own review.",
-    "desktop-act": "Presses a button in another app's window that a browser act opened.",
     "dialog": "Answers OK to a question the page on {site} asks.",
 }
 # A page asked to open another app (an address of the app's kind): only a
 # person's answer lets melo open it, in auto mode too.
 _HANDOFF = "Opens {app}, an app on this Mac, because a page on {site} asked for it."
-# What a card for another app's window says in Auto (only the person sees it).
-_WINDOW_WORDS = "Another app put up a window right after a step; only you decide whether melo sees it."
-# What the card that asks the person to take over a page says in Auto (only they can do it).
-_TAKEOVER_WORDS = "melo needs you on this page (a sign-in or a check only you can do); only you can take it over."
+# The questions only the person answers, in Ask and in Auto alike: no model sees them, so no
+# review decides them. In Auto each is stopped for a card with these words (nobody else sees
+# them): a window another app put up, a press in one, and a page that needs the person.
+_PERSON_WORDS = {
+    WINDOW_READ: "Another app put up a window right after a step; only you decide whether melo sees it.",
+    DESKTOP_ACT: "Pressing a button in another app's window is yours to decide, every time.",
+    TAKEOVER: "melo needs you on this page (a sign-in or a check only you can do); only you can take it over.",
+}
 _TYPING_DOUBT = (
     "Types text on {site}, which needs its own review: the text is the model's own."
 )
@@ -2179,17 +2221,17 @@ _NAMED_SITE = " The user's words name this site."
 # A click whose target melo cannot tell (#465): the person is asked.
 _UNKNOWN_TARGET = "Clicks on {site} where melo cannot tell what it clicks."
 # The site questions that carry no value of melo's (#465): a click or a choice
-# on a page, a click at a point, a press in an app's window. Only these can
-# turn a model's ``credentials`` into no category; a read (its address can hold
-# a key), a search, typing, a form sent, or any access not listed never does.
-_VALUE_FREE_ACCESS: Final = frozenset({"act", "point", "desktop-act", "dialog"})
+# on a page, a click at a point, an OK to a box. Only these can turn a model's
+# ``credentials`` into no category; a read (its address can hold a key), a
+# search, typing, a form sent, or any access not listed never does.
+_VALUE_FREE_ACCESS: Final = frozenset({"act", "point", "dialog"})
 
 
 def _site_doubt(access: str, site: str, preview: str) -> str:
     """What a running tool's question does, for its review.
 
-    A question of a kind this table does not know (another tool's, such as
-    pressing a button in an app's window) is described by its preview.
+    A question of a kind this table does not know (another tool's) is
+    described by its preview.
     """
     if access == "type":
         return _TYPING_DOUBT.format(site=site)
@@ -2275,22 +2317,25 @@ class _ToolAsk:
         tool_name: str,
         arguments: Mapping[str, Any],
         preview: str,
-        words: str = _WINDOW_WORDS,
+        words: str,
     ) -> ApprovalDecision:
-        """The question whether melo may see another app's window: only the person answers it.
+        """A question only the person answers: whether melo may see another app's window, or press a button in one.
 
-        Nothing about the window (its app, its title) goes to any model: not
-        to the review model, which never sees this question, and not into a
-        blocked step's record or a later review's prompt. In Auto the policy
+        Nothing about the window (its app, its title) or the press goes to any
+        model: not to the review model, which never sees this question, and not
+        into a blocked step's record or a later review's prompt. In Auto the policy
         is handed a review that only a card can settle (the one category
         ``opaque``, which words and the model never allow), so it asks the
-        person like a card-only kind, or denies when nobody is watching. An
+        person like a card-only kind, or denies when nobody is watching (the reason
+        is :data:`NOBODY_TO_ASK`, not the category's words). An
         answer of "Allow <App> in this chat" is the policy's grant of this
-        name (``window-read:<bundle id>``).
+        name (``window-read:<bundle id>``). A press (``desktop-act:<app>``) is
+        asked every time and never kept.
 
         The card that asks the person to take over a page of melo's browser
-        (``takeover:<site>``, *words* its own) goes the same way: only the person
-        can sign in or pass a check, so no review decides it.
+        (``takeover:<site>``) goes the same way: only the person can sign in or
+        pass a check, so no review decides it. *words* are the card's own, per
+        kind (:data:`_PERSON_WORDS`).
         """
         request = self._request(tool_name, arguments, preview)
         if review_mode(self._policy, request) == "auto":
@@ -2306,15 +2351,18 @@ class _ToolAsk:
                 f"the approval policy returned {type(decided).__name__}, "
                 "not an ApprovalDecision"
             )
+        if not decided.allow and decided.origin == "auto":
+            # Auto refused it only because nobody can be asked: say that, not the
+            # category of code melo cannot check that the fixed review carries.
+            return dataclasses.replace(decided, reason=NOBODY_TO_ASK)
         return decided
 
     async def __call__(
         self, tool_name: str, arguments: Mapping[str, Any], preview: str
     ) -> ApprovalDecision:
-        if tool_name.startswith(WINDOW_READ):
-            return await self._window(tool_name, arguments, preview)
-        if tool_name.startswith(TAKEOVER):
-            return await self._window(tool_name, arguments, preview, _TAKEOVER_WORDS)
+        for prefix, words in _PERSON_WORDS.items():
+            if tool_name.startswith(prefix):
+                return await self._window(tool_name, arguments, preview, words)
         request = self._request(tool_name, arguments, preview)
         earlier = self._earlier(request)
         if earlier is not None:
@@ -2918,6 +2966,18 @@ class Agent:
                 logger.info("Could not ask whether the model reads images")
                 self._images_on = False
         return self._images_on
+
+    def _unseen_line(self) -> str:
+        """The line that ends the tool message of a picture the model is not sent.
+
+        Empty unless :meth:`_sends_images` decided no. It names the tools that read
+        a page as text among those the agent has.
+        """
+        if self._images_on is not False:
+            return ""
+        return withheld_note(
+            [name for name in TEXT_READERS if self.hippo.get_tool(name) is not None]
+        )
 
     async def start(self) -> None:
         """Start the tool providers and register their tools now.
@@ -5511,10 +5571,11 @@ class Agent:
                 images=[] if index in withheld else result.images,
             )
 
+        unseen = self._unseen_line()
         tool_msgs = [
             Message(
                 role="tool",
-                content=_tool_message_content(text, result.images),
+                content=_tool_message_content(text, result.images, unseen),
                 tool_call_id=call.id,
                 tool_result=message_result(result, text, index),
                 images=[] if index in withheld else result.images,
@@ -6089,8 +6150,12 @@ class Agent:
             pending = run.inbox.poll() if run.inbox is not None else []
             inserted = None
             if pending:
+                assert run.inbox is not None
+                pending, shown = _read_notes(run.inbox, pending)
                 inserted = Message(
-                    role="user", content="\n\n".join(text for _, text in pending)
+                    role="user",
+                    content="\n\n".join(text for _, text in pending),
+                    images=self._tool_images.keep_user(shown),
                 )
                 self.hippo.working.append(inserted)
                 run.pinned.append(inserted)

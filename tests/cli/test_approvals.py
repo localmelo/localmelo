@@ -250,26 +250,75 @@ def test_a_click_at_a_point_says_what_it_lands_on_and_that_it_asks_every_time() 
     words = " ".join(line for _, line in pointing.body)
     assert "click a password field on example.com" in words
     assert "asks every time" in words
+    # Auto asks the same question with a fixed review about code melo cannot check:
+    # its title would be wrong for a click, so the panel keeps its own words.
+    unchecked = dataclasses.replace(
+        _request(
+            "browser-point:https://example.com",
+            site="example.com",
+            access="point",
+            how="click",
+            on="inside a box from login.example.org that melo cannot check",
+            target="unknown",
+        ),
+        review=ActionReview(
+            "high",
+            ("opaque",),
+            ("Clicks on example.com where melo cannot tell what it clicks.",),
+        ),
+    )
+    auto = panel_text(unchecked, width=80)
+    assert auto.title == "Click on a website?"
+    assert auto.notes == ()
 
 
 def test_a_press_in_another_apps_window_names_the_app_and_asks_every_time() -> None:
+    asked = _request(
+        "desktop-act:Chat",
+        app="Chat",
+        access="desktop-act",
+        how="press",
+        on='"Allow"',
+        window="Sign in",
+        button="Allow",
+    )
+    pressing = panel_text(asked, width=80)
+    assert pressing.title == "Press a button in another app?"
+    assert pressing.header == "Chat · another app's window"
+    words = " ".join(" ".join(line for _, line in pressing.body).split())
+    assert 'press "Allow" in Chat\'s window “Sign in”.' in words
+    assert "never types into other apps" in words and "asks every time" in words
+    assert "pointer" not in words
+    # Auto stopped it for the person (no review decides a press): the panel keeps its own question.
+    in_auto = dataclasses.replace(
+        asked, review=ActionReview("high", ("opaque",), ("Yours to decide.",))
+    )
+    assert panel_text(in_auto, width=80) == pressing
+    assert not grant_offered(in_auto)
+
+
+def test_a_press_at_a_point_says_it_may_go_to_the_foreground_and_the_app_comes_forward() -> (
+    None
+):
     pressing = panel_text(
         _request(
             "desktop-act:Chat",
             app="Chat",
             access="desktop-act",
             how="press",
-            on='"Allow"',
-            window="Sign in",
-            button="Allow",
+            on="a point (700, 850) of its picture",
+            window="Allow example.com?",
+            delivery="foreground_retry",
         ),
         width=80,
     )
     assert pressing.title == "Press a button in another app?"
-    assert pressing.header == "Chat · another app's window"
-    words = " ".join(" ".join(line for _, line in pressing.body).split())
-    assert 'press "Allow" in Chat\'s window “Sign in”.' in words
-    assert "never types into other apps" in words and "asks every time" in words
+    words = "".join(line for _, line in pressing.body)  # rows wrap inside words
+    assert "press a point (700, 850) of its picture in Chat's window" in words
+    assert (
+        "If a click in the background does not reach it, melo clicks once more in "
+        "the foreground: the pointer moves there and Chat comes to the front for a moment."
+    ) in words
 
 
 def test_a_page_that_asks_for_an_app_shows_the_app_and_the_address() -> None:

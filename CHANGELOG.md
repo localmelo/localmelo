@@ -9,6 +9,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Pictures while melo works. Drop, paste or pick a picture while a turn runs and Send adds it, with your words or
+  alone, to the turn: melo reads it at its next step beside the words, the note shows it in the turn's work, and it is
+  kept in the chat. If the turn ends first, the words and the pictures run as your next message, also after a
+  restart; Stop gives both back to the message box. Same kinds and limit as a message (up to 4); a model known not to
+  read pictures is refused with the usual sentence. Text files still cannot join a running turn. `POST
+  /api/turns/{turn_id}/notes` takes `images` (ids from `POST /api/uploads`) and answers them under `images`; the
+  `turn.note` event and each entry of the cancel answer's `unread_notes` carry them too.
+- WeChat quick login in Chrome in the background. A sign-in box may reach the app on this Mac it signs in with
+  when melo lists that app (today WeChat's quick login, so its button shows as in Safari): melo makes those
+  requests itself, only for that box, only to the app's own ports and never to melo's own. Chrome's own check
+  stays on, and any other request a page makes to this Mac or your network is blocked before it is sent; the
+  step says `The page tried to reach an app on this Mac (port N); melo blocked it.`
 - Chrome in the background. `[browser] driver = "chrome"` (Settings → Chats and folders → **Browser**: Chrome,
   Safari or Off; `/browser chrome` and `/browser safari` in the terminal and the console; browsing stays off
   until you turn it on, and `/browser on` uses the browser chosen before, or Safari's windows when none was)
@@ -108,21 +120,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - Windows from other apps (#280). A page melo acts on can make another app open a window, such as a chat
   app's sign-in window that asks you to authorize; the browser never shows it. With the desktop control
   helper (a separate app that holds the Mac's Accessibility and Screen Recording permissions, so melo needs
-  neither), melo lists the windows on the screen before and after each click, typing, choice and point, and
+  neither), melo lists the windows of every Space before and after each click, typing, choice and point, and
   while `browser_wait` waits. A window of another app that appeared is named in that step's answer, under
   *what changed*, with its title and its buttons, and `browser_wait` ends early. Two tools come with the
   helper: `window_read` (the window's text and buttons, and a picture of only that window, as a JPEG within
   1280 pixels and 256 KB) and `window_press` (a button by its name through accessibility, or, when that
   does not go through, a point of the window's picture, marked on the picture that comes back). A press is a
-  question of its own every time (`desktop-act:<app>`): a card in Ask mode, and in Auto mode reviewed against
-  the chat's goal like a browser act, so the press that authorizes the sign-in you asked for runs with no
-  card, while an off-goal or high-impact press asks. With Accessibility alone the helper reads text and
-  buttons and presses by name, with no picture. Without the helper or its Accessibility permission melo
+  question of its own every time (`desktop-act:<app>`) that only you answer, in Ask and in Auto: a card, with
+  no model shown the window or the press, and when nobody is watching the chat in Auto nothing is pressed and the model is told that only you can answer.
+  With Accessibility alone the helper reads text and buttons and presses by name, with no picture. Without the helper or its Accessibility permission melo
   still notices that another app came to the front and says which one, so you can answer it there. The
   browsing guide's setup list says where to get the helper. Only windows that appeared after
-  melo's own step are named, read or pressed (a panel of an app that only came to the front is read only
-  against a listing of that app's windows from before the step; otherwise it is named, never read), and melo
-  never types into other apps. Settings → Chats and
+  melo's own step are named, read or pressed (a panel above the main layer is read only when melo can tell
+  it is new; otherwise its app is named, never read), and melo never types into other apps. Settings → Chats and
   folders → **Other apps' windows** (shown while browsing is on; `[browser] app_windows`, on by default)
   turns it off, and says under the switch whether the helper is installed and has Accessibility.
   A window that comes a moment after the step is still seen: after a click, a click on a point or a send,
@@ -1465,9 +1475,50 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 ### Fixed
 
 - The config file is read and saved from the settings' own fields, so a setting no longer needs hand-written load and save code: `[cli] chat` is kept when it is saved, a value of the wrong kind in any table (a quoted port, `"yes"` for an on/off setting) is reported as one plain sentence instead of a traceback or a silent change, the saved file lists only settings that differ from the defaults, and spaces around a backend URL or model name are removed. Closes #496.
+- Pictures from tools now reach a model whose server says it reads them. With `[agent] tool_images = "auto"`, melo asked
+  only oMLX's status route and Ollama's `/api/show`, so on any other OpenAI-compatible server the pictures were dropped;
+  it now reads the model's own entry in `GET /v1/models` first (`vision` true, `image` among `input_modalities` or
+  `vision` among `capabilities`; an explicit `vision` false, or `input_modalities` without `image`, says no). And when a
+  picture is not sent, whether images are off or the server does not say, the tool's message now ends with a line that
+  tells the model it cannot see the picture and should read the page as text, instead of letting it describe a picture it never saw.
+- Windows from other apps: a panel that stays above other windows, such as a chat app's authorization panel,
+  is now seen even when its app does not come to the front, and switching Spaces or showing an app you had
+  hidden no longer raises a card about your own windows, because a window counts as new only if it did not
+  exist, on any Space, before melo's step. A window whose buttons the app draws itself is pressed at a point
+  of its picture; when that click in the background changes nothing, melo clicks once more in the foreground,
+  where the pointer moves and the app comes to the front for a moment. You are asked once, before the first
+  click, and the card says so; after the second click melo waits a moment, as after the first, before it says
+  whether the window closed. A click that closes the window before the picture of its point can be taken
+  is reported as clicked, with no picture, not as a refusal. A point click that finds nothing now says that x and y run 0-1000 across the
+  picture, not in pixels, and where a point written in pixels would be on that scale.
+- A click melo cannot check has words of its own on its card. For a click on a secret field, a consent control or a
+  control inside a box from another site that melo cannot read, the console and the app showed "Let melo use
+  browser-point:...?" in Ask and, in Auto, "Run code melo cannot check?" with a reason about code; the terminal
+  panel took that title in Auto too. Now every surface says what the click lands on and that melo cannot check it
+  itself, in English and Simplified Chinese, the same in Ask and in Auto, with Allow once or Deny only.
+- You see what melo does in Chrome in the background. The Browser panel of a chat that started on Safari never
+  opened after Settings switched to Chrome, and its button stayed hidden: the page asked only once, when the chat
+  opened. Now it asks again, and the panel opens by itself while melo browses and closes when the turn ends,
+  unless you opened it or have the page. **Pop out** shows it large in a browser too. The pictures melo takes of a
+  page or of another app's window were only inside each folded step; they now show in a row under the turn's
+  steps and open at full size. A browser chosen while a chat's turn ran now reaches that chat at its next message
+  (it waited until the chat was closed), and switching between Chrome and Safari says each keeps its own sign-ins.
 - melo no longer refuses to remember something you said in Chinese just because it put it in slightly different words. Part of #442.
+- melo keeps more of what you said in Chinese as notes when it words them differently. Part of #442.
 - A long unbroken paste (tens of thousands of characters with no spaces, or a long dotted or underscored text) no longer freezes the gateway for seconds while the main chat decides whether it is a request. The routing rules read the first 4,000 characters, and a file name or path is matched up to 200 characters per part; the task that starts still gets all of the text. Part of #493.
 - Words added to a chat while melo works are now remembered with that turn; before, only the first message of the turn was. Part of #428.
+- A button that a sticky header or an anchored ad stands over can be clicked. Before a real click, melo
+  scrolls the element to the middle of the view at once (also on a page that scrolls smoothly, where the middle
+  used to be measured before the page had moved) and, in Chrome, clicks the part of it that nothing covers. An
+  element with no clear part is scrolled to once more after a moment; one that stays covered goes to the page
+  script and the answer names what covers it, by kind and tag and never in words the page wrote (`a sticky header (h1)`, `an ad (iframe from
+  ads.example.net)`). A real click that still lands on another element is stopped, scrolled to again and tried
+  once more; when it lands elsewhere twice the answer says what got it, and the page and its refs stay as they
+  were, so the model no longer has to open the page again. Safari's windows get the retry and the names too, but
+  still click the node itself, so an element with only a part clear goes to the page script there.
+- `browser_wait` says when its condition already held ("Reached: the page had already loaded; nothing was
+  waited."), and that it is not a pause; before, it answered "Reached: the page loaded." at once and a model
+  that used it to pause waited for nothing, over and over.
 - melo no longer recalls its own old replies about a blocked step as if they were still the rule; only what you said in that turn is remembered. Part of #428.
 - `browser_find` reads the page again before it searches, so its refs are always of the page as it is now;
   before, a page reloaded since the last reading gave refs that only failed with "The page was reloaded or

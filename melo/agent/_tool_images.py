@@ -35,6 +35,21 @@ SCALE_TIMEOUT_S: Final = 20.0
 USER_KEEP: Final = 8
 # Added to the tool message of an image whose pixels an earlier one carries.
 UNCHANGED_NOTE: Final = "[same image as an earlier tool result; its pixels are above]"
+# Ends the tool message of a picture that does not reach the model (images off, or the
+# server does not say it reads them), so the model does not describe what it cannot see.
+WITHHELD_NOTE: Final = (
+    "You cannot see this picture (this model is not sent pictures); the person can. "
+    "Do not describe it or guess what it shows."
+)
+# The tools that read a page as text; the note points to those the model has.
+TEXT_READERS: Final = ("browser_read", "browser_find")
+
+
+def withheld_note(readers: Sequence[str]) -> str:
+    """The line that ends a tool message whose picture is withheld; *readers* are the text tools the model has."""
+    if not readers:
+        return WITHHELD_NOTE
+    return f"{WITHHELD_NOTE} Read the page with {' or '.join(readers)}."
 
 
 def _sips_jpeg(raw: bytes, width: int) -> bytes | None:

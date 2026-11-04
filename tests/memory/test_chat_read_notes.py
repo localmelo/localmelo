@@ -197,6 +197,41 @@ async def test_a_note_that_holds_nothing_after_the_lead_is_left_out(
     assert text == f"User: {TYPED}\n\n{ADDED_MARK}\nmy seat is 4A\nmelo: {ANSWER}"
 
 
+def test_the_picture_lines_of_a_note_are_not_the_persons_words() -> None:
+    withheld = (
+        "[You cannot see these pictures (this model is not sent pictures); the "
+        "person can. Do not describe them; ask the person if it matters.]"
+    )
+    # A note of pictures only holds the stand-in for them, which is no statement.
+    assert with_read_notes("typed", [f"{LEAD}[1 picture]"]) == "typed"
+    assert with_read_notes("typed", [f"{LEAD}[3 pictures]"]) == "typed"
+    assert with_read_notes("", [f"{LEAD}[2 pictures]\n{withheld}"]) == ""
+    # The line to a model that was not sent them is left off the words.
+    assert (
+        with_read_notes("typed", [f"{LEAD}my seat is 4A\n{withheld}"])
+        == f"typed\n\n{ADDED_MARK}\nmy seat is 4A"
+    )
+    # Words that only mention a picture, or hold the stand-in inside, stay.
+    for words in ("[1 picture] is my seat", "see [1 picture]", "[1 picture of me]"):
+        assert with_read_notes("", [f"{LEAD}{words}"]) == f"{ADDED_MARK}\n{words}"
+
+
+async def test_the_picture_lines_memory_drops_are_the_ones_the_console_writes() -> None:
+    notes = pytest.importorskip("localmelo.support.gateway.console.notes")
+    routes = pytest.importorskip("localmelo.support.gateway.console.routes_turns")
+    for count in (1, 2, 4):
+        assert with_read_notes("", [f"{LEAD}{routes._marker(count, [])}"]) == ""
+        line = notes.withheld_line(count)
+        assert with_read_notes("", [f"{LEAD}words\n{line}"]) == f"{ADDED_MARK}\nwords"
+
+
+async def test_a_note_of_pictures_only_leaves_the_turns_document_as_if_none_was_added(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    info = await _turn(store, read=(f"{LEAD}[2 pictures]",))
+    assert await _index(memory, store, info, TYPED) == [document_text(TYPED, ANSWER)]
+
+
 async def test_a_note_is_read_for_what_it_states_like_the_typed_words(
     memory: ChatMemory, store: SessionStore
 ) -> None:

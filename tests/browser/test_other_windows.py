@@ -289,9 +289,12 @@ async def test_a_window_another_app_opens_after_a_click_is_named_with_its_button
     ) in out.text
     # Only windows that appeared are named; the person's own windows never are.
     assert "Groceries" not in out.text and "Notes" not in out.text
-    # The cheapest call watches: one listing before the act and one after.
-    names = [name for name, _ in screen.calls()]
-    assert names[:3] == ["check_permissions", "list_windows", "list_windows"]
+    # The cheapest call watches: each look lists the main layer of every app on every
+    # Space, then every layer of the apps with a window on the screen (Notes here; the
+    # browser is not another app).
+    calls = screen.calls()
+    assert [name for name, _ in calls][:1] == ["check_permissions"]
+    assert calls[1:3] == [("list_windows", {}), ("list_windows", {"pid": 20})]
     assert all(
         args.get("include_screenshot") is False
         for name, args in screen.calls()
@@ -363,7 +366,8 @@ async def test_when_accessibility_fails_a_point_on_the_picture_is_clicked_and_ma
     screen: Screen,
 ) -> None:
     driver = world(button("Quick sign-in"))
-    on_act(driver, lambda: screen.show(SIGN_IN))
+    # The click reaches the window in the background: it changes, so it is not repeated.
+    on_act(driver, lambda: screen.show({**SIGN_IN, "clicks": {"background": "change"}}))
     screen.set(press_fails=True)
     provider, tools = await tools_with(driver, watch(screen))
     try:
@@ -456,7 +460,7 @@ async def test_a_panel_of_an_app_that_came_to_the_front_is_new_only_against_its_
     assert "Chat opened a window 'Confirm sign-in' (w1)" in again.text
     assert "Sign in to example.com" not in again.text  # there before: not new
     assert "(w2)" not in again.text  # the menu bar item is never taken for it
-    assert ("list_windows", {"on_screen_only": True, "pid": 70}) in screen.calls()
+    assert ("list_windows", {"pid": 70}) in screen.calls()
 
 
 async def test_a_panel_open_before_the_act_is_never_read_when_its_app_comes_forward(
