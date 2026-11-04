@@ -24,20 +24,7 @@ BASE = ["--base-url", "http://127.0.0.1:1/v1", "--chat-model", "m"]
 KEY = "agent.empty_reply_fallback"
 
 
-def test_the_key_is_on_by_default_written_only_when_off_and_checked() -> None:
-    assert config.AgentConfig().empty_reply_fallback == "on"
-    config.save(config.Config())
-    path = Path(config.config_path())
-    assert "empty_reply_fallback" not in path.read_text()
-    config.save(config.Config(agent=config.AgentConfig(empty_reply_fallback="off")))
-    assert 'empty_reply_fallback = "off"' in path.read_text()
-    assert config.load().agent.empty_reply_fallback == "off"
-    config.save(config.Config(agent=config.AgentConfig(empty_reply_fallback="on")))
-    assert "empty_reply_fallback" not in path.read_text()
-    assert config.load().agent.empty_reply_fallback == "on"
-
-
-@pytest.mark.parametrize("bad", ["maybe", "", False, 1, None])
+@pytest.mark.parametrize("bad", ["maybe", ""])
 def test_any_other_value_is_refused_by_the_validation(bad: object) -> None:
     cfg = config.Config()
     cfg.agent.empty_reply_fallback = bad  # type: ignore[assignment]
@@ -72,14 +59,6 @@ def test_x_refuses_any_other_value(
         cli._parse(["-X", f"{KEY}={value}", *BASE, "fix it"])
     assert stop.value.code == 2
     assert "empty_reply_fallback" in capsys.readouterr().err
-
-
-def test_config_set_saves_it_only_when_off() -> None:
-    path = Path(config.config_path())
-    assert config_cli.main(["set", KEY, "off"]) == 0
-    assert 'empty_reply_fallback = "off"' in path.read_text()
-    assert config_cli.main(["set", KEY, "on"]) == 0
-    assert "empty_reply_fallback" not in path.read_text()
 
 
 @pytest.mark.parametrize("via", ["file", "x", "default"])

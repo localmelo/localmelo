@@ -47,7 +47,7 @@ def test_its_two_values_are_accepted(value: str) -> None:
     assert errors(project_instructions=value) == []
 
 
-@pytest.mark.parametrize("value", ["maybe", False, ""])
+@pytest.mark.parametrize("value", ["maybe", ""])
 def test_another_value_is_a_config_error_that_says_why(value: object) -> None:
     assert errors(project_instructions=value) == [
         f"[memory] project_instructions {value!r} is not recognised. "

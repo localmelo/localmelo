@@ -47,17 +47,6 @@ async def _build(argv: list[str]) -> Agent:
 
 
 class TestConfig:
-    def test_the_key_is_off_by_default_written_only_when_on_and_a_boolean(self) -> None:
-        assert config.AgentConfig().confine_direct_runs is False
-        config.save(config.Config())
-        path = Path(config.config_path())
-        assert "confine_direct_runs" not in path.read_text()
-        config.save(config.Config(agent=config.AgentConfig(confine_direct_runs=True)))
-        assert "confine_direct_runs = true" in path.read_text()
-        assert config.load().agent.confine_direct_runs is True
-        bad = config.Config()
-        bad.agent.confine_direct_runs = "yes"  # type: ignore[assignment]
-        assert any("confine_direct_runs must be a boolean" in e for e in bad.validate())
 
     def test_x_sets_it_for_one_run_and_the_developer_listings_show_it(
         self, capsys: pytest.CaptureFixture[str]

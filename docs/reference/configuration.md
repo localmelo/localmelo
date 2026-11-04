@@ -25,6 +25,15 @@ chat_model = "qwen3:8b"
 The wizard writes a table for every backend, but localmelo reads only the
 tables of the chosen backends.
 
+localmelo saves only the settings that differ from their defaults, so a saved
+file stays short: a key at its default is left out, and a backend table with
+nothing set is left out too. The two backend keys are always written. Spaces
+around the text of a backend table (a URL or a model name) are removed when the
+file is read and when Settings saves; `api_key` is never changed. A value of the
+wrong kind, such as `port = "8401"` where a whole number belongs, stops `melo`
+before the run with a plain message (see
+[Configuration errors](troubleshooting.md#configuration-errors)).
+
 | Key | Table | Default | Description |
 |---|---|---|---|
 | `chat_backend` | top level | not set | The chat backend; see [Backends](../guides/model-servers.md#backends). For oMLX, use `omlx`, which first-run setup writes for a server that names itself oMLX, or `vllm`: both load as `vllm` and are saved as written. Required. |

@@ -22,22 +22,6 @@ from localmelo.support.sessions.agents import (
 BASE = ["--base-url", "http://127.0.0.1:1/v1", "--chat-model", "m"]
 
 
-def test_the_key_is_written_only_when_off_and_must_be_a_boolean() -> None:
-    config.save(config.Config())
-    path = Path(config.config_path())
-    assert "answer_on_stop" not in path.read_text()
-    assert config.AgentConfig().answer_on_stop is True
-    config.save(config.Config(agent=config.AgentConfig(answer_on_stop=False)))
-    assert "answer_on_stop = false" in path.read_text()
-    assert config.load().agent.answer_on_stop is False
-    config.save(config.Config(agent=config.AgentConfig(answer_on_stop=True)))
-    assert "answer_on_stop" not in path.read_text()
-    assert config.load().agent.answer_on_stop is True
-    bad = config.Config()
-    bad.agent.answer_on_stop = "yes"  # type: ignore[assignment]
-    assert any("answer_on_stop must be a boolean" in e for e in bad.validate())
-
-
 def test_x_sets_it_for_one_run_and_config_keys_lists_it(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

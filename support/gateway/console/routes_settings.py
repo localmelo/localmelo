@@ -394,7 +394,7 @@ def _developer_settings(cfg: config.Config) -> list[dict[str, Any]]:
     hold it. ``flag`` is the old option that sets it, ``issue`` the issue that
     decides a comparison.
     """
-    values = setting_keys.flat(cfg)
+    values = config.flat(cfg)
     groups: dict[str, list[dict[str, Any]]] = {}
     for key in setting_keys.catalog().values():
         default = _shown(key.default)
@@ -697,6 +697,7 @@ def _build_candidate(
         target = getattr(candidate, sec_name)
         for field_name, field_val in sec_fields.items():
             setattr(target, field_name, field_val)
+        config.trim_text(target)
 
     errors = [_redact(err) for err in candidate.validate()]
     if errors:

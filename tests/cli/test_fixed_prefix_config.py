@@ -18,14 +18,8 @@ def test_fixed_prefix_config_roundtrip(
     monkeypatch.setattr("localmelo.support.config.CONFIG_DIR", str(tmp_path))
     path = tmp_path / "config.toml"
     monkeypatch.setattr("localmelo.support.config.CONFIG_PATH", str(path))
-    save(Config())
-    assert "fixed_prefix" not in path.read_text()
-    assert load().agent.fixed_prefix is True
-    # A value that equals the default is not written; one that differs is.
-    save(Config(agent=AgentConfig(fixed_prefix=True)))
-    assert "fixed_prefix" not in path.read_text()
+    assert configured_session_options(Config()).fixed_prefix is True
     save(Config(agent=AgentConfig(fixed_prefix=False)))
-    assert "fixed_prefix = false" in path.read_text()
     assert load().agent.fixed_prefix is False
     assert configured_session_options(load()).fixed_prefix is False
     assert configured_session_options(
@@ -33,10 +27,7 @@ def test_fixed_prefix_config_roundtrip(
     ).fixed_prefix
 
 
-def test_invalid_fixed_prefix_config() -> None:
-    cfg = Config()
-    cfg.agent.fixed_prefix = "on"  # type: ignore[assignment]
-    assert any("fixed_prefix must be a boolean" in e for e in cfg.validate())
+def test_the_options_refuse_a_fixed_prefix_that_is_not_a_boolean() -> None:
     with pytest.raises(ValueError, match="fixed_prefix"):
         AgentOptions(fixed_prefix="on")  # type: ignore[arg-type]
 

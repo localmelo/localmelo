@@ -939,6 +939,25 @@ def test_a_hand_written_mode_wins_and_a_bad_one_reads_default(
     assert "expert" not in isolated_config.read_text()
 
 
+def test_a_model_name_saved_from_the_page_is_saved_without_the_blanks_around_it(
+    client: TestClient, isolated_config: Path
+) -> None:
+    import tomllib
+
+    _saved_cfg()
+    revision = client.get("/api/settings").json()["revision"]
+    section = {"chat_url": "http://127.0.0.1:9/v1 ", "chat_model": "Qwen3-8B "}
+    resp = client.put(
+        "/api/settings", json=_put_body(revision, sections={"mlc": section})
+    )
+    assert resp.status_code == 200
+    saved = tomllib.loads(isolated_config.read_text())["mlc"]
+    assert (saved["chat_url"], saved["chat_model"]) == (
+        "http://127.0.0.1:9/v1",
+        "Qwen3-8B",
+    )
+
+
 # ── The spelling of an oMLX server ──
 
 
@@ -1269,7 +1288,9 @@ def test_the_settings_carry_the_follow_up_switch_and_save_it_only_when_sent(
     assert word.status_code == 400
     bad = config.Config()
     bad.tasks.follow_up = "no"  # type: ignore[assignment]
-    assert any("[tasks] follow_up must be a bool" in e for e in bad.setting_errors())
+    assert any(
+        "[tasks] follow_up must be true or false" in e for e in bad.setting_errors()
+    )
 
 
 def test_the_settings_carry_the_reflection_switch_and_save_it_only_when_off(

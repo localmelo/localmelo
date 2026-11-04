@@ -24,6 +24,8 @@ chat_model = "qwen3:8b"
 
 向导会为每个后端写一张表，但 localmelo 只读取所选后端的表。
 
+localmelo 只保存与默认值不同的设置，所以保存的文件很短：默认值的键不写出，没有设置任何项的后端表也不写出。两个后端键总会写出。后端表中文本（URL 或模型名）两端的空格，会在读取文件和在设置中保存时去掉；`api_key` 永远不改动。类型不对的值，例如应为整数的 `port = "8401"`，会让 `melo` 在运行之前停止并给出一句清楚的消息（见 [Configuration errors](troubleshooting.md#configuration-errors)）。
+
 | 键 | 表 | 默认值 | 说明 |
 |---|---|---|---|
 | `chat_backend` | 顶层 | 未设置 | 对话后端；见[后端](../guides/model-servers.md#backends)。对于 oMLX，使用 `omlx`（服务器自称 oMLX 时，首次运行的设置会写入它）或 `vllm`：两者都按 `vllm` 加载，并按原样保存。必需。 |
