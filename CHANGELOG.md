@@ -874,7 +874,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
-- When you ask melo to count, total or compare things you told it across chats, it now looks wider in its memory and checks each kind it may have missed. Part of #428.
+- Developer only: in the list form of recall, when you ask melo to count, total or compare things you told it across chats, it now looks wider in its memory and checks each kind it may have missed, by default; a search on any other turn keeps the usual bar. Part of #428.
 - "Allow for this chat" is no longer memory-only. `GET /api/sessions/{id}` `grants` and `granted_at` list what
   holds in the chat whether it is open or not, the main chat's grants included for a side chat.
   `DELETE /api/sessions/{id}/grants/{name}` takes back the chat's own grant and a main-chat grant of that name
