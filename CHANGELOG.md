@@ -1489,6 +1489,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   whether the window closed. A click that closes the window before the picture of its point can be taken
   is reported as clicked, with no picture, not as a refusal. A point click that finds nothing now says that x and y run 0-1000 across the
   picture, not in pixels, and where a point written in pixels would be on that scale.
+- A click melo cannot check has words of its own on its card. For a click on a secret field, a consent control or a
+  control inside a box from another site that melo cannot read, the console and the app showed "Let melo use
+  browser-point:...?" in Ask and, in Auto, "Run code melo cannot check?" with a reason about code; the terminal
+  panel took that title in Auto too. Now every surface says what the click lands on and that melo cannot check it
+  itself, in English and Simplified Chinese, the same in Ask and in Auto, with Allow once or Deny only.
 - You see what melo does in Chrome in the background. The Browser panel of a chat that started on Safari never
   opened after Settings switched to Chrome, and its button stayed hidden: the page asked only once, when the chat
   opened. Now it asks again, and the panel opens by itself while melo browses and closes when the turn ends,

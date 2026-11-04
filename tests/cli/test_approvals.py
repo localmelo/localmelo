@@ -250,6 +250,26 @@ def test_a_click_at_a_point_says_what_it_lands_on_and_that_it_asks_every_time() 
     words = " ".join(line for _, line in pointing.body)
     assert "click a password field on example.com" in words
     assert "asks every time" in words
+    # Auto asks the same question with a fixed review about code melo cannot check:
+    # its title would be wrong for a click, so the panel keeps its own words.
+    unchecked = dataclasses.replace(
+        _request(
+            "browser-point:https://example.com",
+            site="example.com",
+            access="point",
+            how="click",
+            on="inside a box from login.example.org that melo cannot check",
+            target="unknown",
+        ),
+        review=ActionReview(
+            "high",
+            ("opaque",),
+            ("Clicks on example.com where melo cannot tell what it clicks.",),
+        ),
+    )
+    auto = panel_text(unchecked, width=80)
+    assert auto.title == "Click on a website?"
+    assert auto.notes == ()
 
 
 def test_a_press_in_another_apps_window_names_the_app_and_asks_every_time() -> None:

@@ -2046,6 +2046,17 @@ function approvalCard(request, view = chatApproval, asked = "") {
     rule = t("approval.rule.dialogOnce");
     why = t("approval.dialogContent", { site });
     content = String(args.text ?? "");
+  } else if (tool.startsWith("browser-point:")) {
+    // A click (or a text) at a point melo cannot check: a secret field, a consent control, or a control inside a
+    // box from another site that melo knows nothing of. Asked every time; the card says where it lands, in
+    // the engine's words (English), and the same in Ask and in Auto.
+    const site = String(args.site || tool.slice(tool.indexOf(":") + 1));
+    what = t("approval.pointOn");
+    title = t(String(args.how || "click").startsWith("type") ? "approval.pointTypeSite" : "approval.pointSite", { site });
+    caption = t("approval.pointCaption");
+    rule = t("approval.rule.pointOnce");
+    why = t(args.browser === "chrome" ? "approval.pointContentChrome" : "approval.pointContent", { site });
+    content = `${String(args.how || "click")} ${String(args.on || "a point of the page")}`;
   } else if (tool.startsWith("desktop-act:")) {
     // A button in another app's window that appeared after melo's own step in the browser: asked every
     // time, and the card names the app, the window and what is pressed.
@@ -2085,10 +2096,12 @@ function approvalCard(request, view = chatApproval, asked = "") {
   // card says why, offers no chat-wide allow, and starts on Deny. A site Auto stopped only because the
   // request did not ask for it (#465) says why too, but may be allowed for the chat: the server says so.
   const review = request.review;
-  // A take-over, a window another app opened and a press in one are only ever the person's: Auto's "only you"
-  // review does not reword them or add reasons, so the card keeps its own words in Ask and in Auto.
+  // A take-over, a window another app opened, a press in one and a click at a point melo cannot check are asked
+  // of the person every time: Auto's fixed "opaque" review does not reword them or add reasons (its title is
+  // about code, and its sentence is English), so the card keeps its own words in Ask and in Auto.
   const takeover = tool.startsWith("takeover:");
-  const personOnly = takeover || tool.startsWith("window-read:") || tool.startsWith("desktop-act:");
+  const pointing = tool.startsWith("browser-point:");
+  const personOnly = takeover || pointing || tool.startsWith("window-read:") || tool.startsWith("desktop-act:");
   const stopped = review?.verdict === "high" && !personOnly;
   const siteChoice = stopped && request.offers_chat === true;
   const high = stopped && !siteChoice;
@@ -2203,7 +2216,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
   deny.dataset.approvalFocus = "deny";
   // The answers offered: a folder outside the workspace that may be kept has four.
   // Typing and a form's send ask every time, like a high-impact call: their answers are never kept for the chat.
-  const everyTime = high || takeover || tool.startsWith("browser-submit:") || tool.startsWith("browser-type:")
+  const everyTime = high || takeover || pointing || tool.startsWith("browser-submit:") || tool.startsWith("browser-type:")
     || tool.startsWith("desktop-act:");
   const offered = everyTime ? [once, deny] : outside ? (grantable ? [once, session, always, deny] : [once, deny]) : [once, session, deny];
   actions.append(...offered);

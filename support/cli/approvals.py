@@ -204,10 +204,10 @@ def panel_text(
     if (
         review is None
         or not title
-        or request.tool_name.startswith((WINDOW_READ, DESKTOP_ACT))
+        or request.tool_name.startswith((WINDOW_READ, DESKTOP_ACT, "browser-point:"))
     ):
-        # Another app's window, and a press in one, are asked the same way in Ask and in
-        # Auto: their own words, never a review's title.
+        # Another app's window, a press in one and a click melo cannot check are asked the
+        # same way in Ask and in Auto: their own words, never a review's title.
         return text
     note, changed = escape_arguments(f"melo asks because this call {because(review)}.")
     return dataclasses.replace(

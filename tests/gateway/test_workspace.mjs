@@ -1249,6 +1249,8 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
     ['browser-type:https://example.com', {site: 'example.com', access: 'type', how: 'type', text: 'hi'}, null, 'Let melo type on example.com?', 'browser · types text'],
     ['browser-submit:https://example.com', {site: 'example.com', access: 'submit', to: 'https://other.org/post', how: 'click'}, null, 'Let melo send a form from example.com?', 'browser · sends a form'],
     ['desktop-act:Chat', {app: 'Chat', access: 'desktop-act', how: 'press', on: '"Allow"', window: 'Sign in', button: 'Allow'}, null, 'Let melo press a button in Chat?', 'another app · presses a button'],
+    ['browser-point:https://example.com', {site: 'example.com', access: 'point', how: 'click', on: 'a password field'}, null, 'Let melo click at one spot on example.com?', 'browser · acts at one point'],
+    ['browser-point:https://example.com', {site: 'example.com', access: 'point', how: 'type into', on: 'a text field inside a box from login.example.org that melo cannot check', target: 'unknown'}, null, 'Let melo type into one spot on example.com?', 'browser · acts at one point'],
     ['handoff:chat', {site: 'example.com', access: 'handoff', app: 'Chat', scheme: 'chat', url: 'chat://login?x=1', browser: 'chrome'}, null, 'Open Chat?', 'a page asks for an app'],
     ['browser-dialog:https://example.com', {site: 'example.com', access: 'dialog', how: 'confirm', text: 'Delete the draft?', browser: 'chrome'}, null, 'Answer OK on example.com?', 'browser · the page asks'],
     ['window-read:com.example.chat', {app: 'Chat', window: 'Sign in', bundle: 'com.example.chat', access: 'window-read'}, null, "Chat opened a window right after melo's click: let melo see it?", 'another app · its window'],
@@ -1290,6 +1292,45 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
     arguments: {site: 'example.com', access: 'read', browser: 'chrome'}, workspace_label: '~/w'};
   const opening = h.run('approvalCard(request)');
   assert.match(findNode(opening, (node) => node.className === 'approval-content').textContent, /in Chrome and read it\. Chrome runs in the background/);
+  // A click inside a box melo cannot check has its own words, the same in Ask and in Auto: where it lands, that melo cannot
+  // check it, and two answers. Auto's fixed "opaque" review is about code, so neither its title nor its reasons show.
+  const unknown = {site: 'example.com', access: 'point', how: 'click', target: 'unknown', browser: 'chrome',
+    on: 'inside a box from login.example.org that melo cannot check'};
+  const pointed = (id, review) => {
+    h.context.request = {request_id: id, tool_name: 'browser-point:https://example.com', arguments: unknown, workspace_label: '~/w',
+      offers_chat: false, ...(review ? {review} : {})};
+    return h.run('approvalCard(request)');
+  };
+  const opaque = {verdict: 'high', categories: ['opaque'], reasons: ['Clicks on example.com where melo cannot tell what it clicks.']};
+  const shape = (card) => ({
+    title: findNode(card, (node) => node.className === 'approval-title').textContent,
+    caption: findNode(card, (node) => node.className === 'approval-caption').textContent,
+    lands: findNode(card, (node) => node.className === 'approval-content').textContent,
+    note: findNode(card, (node) => node.className === 'approval-note').textContent,
+    rule: findNode(card, (node) => node.className === 'approval-warning').textContent,
+    reasons: ['approval-why', 'approval-reasons'].map((name) => findNode(card, (node) => node.className === name)),
+    answers: findNodes(card, (node) => 'approvalFocus' in node.dataset).map((node) => node.dataset.approvalFocus).filter((name) => name !== 'reason'),
+  });
+  const ask = shape(pointed('point-ask'));
+  assert.equal(ask.title, 'Let melo click at one spot on example.com?');
+  assert.equal(ask.lands, 'click inside a box from login.example.org that melo cannot check');
+  assert.match(ask.note, /in melo's browser, which runs in the background/);
+  assert.match(ask.note, /melo cannot check this one itself, so it asks every time/);
+  assert.deepEqual(ask.answers, ['once', 'deny'], 'no "allow for this chat" on a click melo cannot check');
+  assert.deepEqual(shape(pointed('point-auto', opaque)), ask, 'Auto asks with the same card, not "Run code melo cannot check?"');
+  assert.deepEqual(ask.reasons, [null, null]);
+  const {useLanguage} = await import('../../support/gateway/static/i18n.mjs');
+  await useLanguage('zh-Hans');
+  try {
+    const zh = shape(pointed('point-auto-zh', opaque));
+    assert.equal(zh.title, '让 melo 在 example.com 的某一处点击？');
+    assert.equal(zh.caption, '浏览器 · 在页面的某一处操作');
+    assert.match(zh.note, /这一步 melo 自己无法检查，所以每次都会问你/);
+    assert.deepEqual(zh.reasons, [null, null]);
+    assert.deepEqual(zh.answers, ['once', 'deny']);
+  } finally {
+    await useLanguage('en');
+  }
 });
 
 test("a press in another app's window says what is pressed and is asked every time", async () => {
