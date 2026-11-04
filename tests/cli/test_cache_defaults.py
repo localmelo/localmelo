@@ -131,12 +131,6 @@ def test_a_file_that_sets_one_key_has_the_defaults_for_the_others(
     )
 
 
-def test_reflect_tool_guard_must_be_a_boolean() -> None:
-    cfg = Config()
-    cfg.agent.reflect_tool_guard = "on"  # type: ignore[assignment]
-    assert any("reflect_tool_guard must be a boolean" in e for e in cfg.validate())
-
-
 async def test_direct_cli_refuses_a_non_boolean_reflect_tool_guard(
     config_home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

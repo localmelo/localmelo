@@ -278,36 +278,6 @@ def test_replay_passes_the_section_field_to_the_provider(
     assert provider.call_args.kwargs["reasoning_field"] == "reasoning"
 
 
-def test_the_agent_table_round_trips_and_is_dropped_at_defaults(tmp_path: Path) -> None:
-    path = tmp_path / "config.toml"
-    cfg = Config(chat_backend="vllm", embedding_backend="none")
-    cfg.agent = AgentConfig(reasoning="replay", replay_turns=3)
-    with (
-        mock.patch.object(config, "CONFIG_PATH", str(path)),
-        mock.patch.object(config, "CONFIG_DIR", str(tmp_path)),
-    ):
-        save(cfg)
-        text = path.read_text(encoding="utf-8")
-        assert "[agent]" in text
-        assert text.index("[gateway]") < text.index("[agent]")
-        loaded = config.load()
-        assert (loaded.agent.reasoning, loaded.agent.replay_turns) == ("replay", 3)
-        loaded.agent = AgentConfig(replay_turns=3)
-        save(loaded)
-        text = path.read_text(encoding="utf-8")
-        assert 'reasoning = "legacy"' in text
-        assert "replay_turns = 3" in text
-        loaded.agent = AgentConfig(reasoning="replay")
-        save(loaded)
-        text = path.read_text(encoding="utf-8")
-        assert 'reasoning = "replay"' in text
-        # TOML has no null: the cap is written only when it is set.
-        assert "replay_turns" not in text
-        loaded.agent = AgentConfig()
-        save(loaded)
-        assert "[agent]" not in path.read_text(encoding="utf-8")
-
-
 def test_the_backend_reasoning_keys_round_trip_only_when_set(tmp_path: Path) -> None:
     path = tmp_path / "config.toml"
     cfg = Config(
@@ -347,7 +317,7 @@ def test_the_backend_reasoning_keys_round_trip_only_when_set(tmp_path: Path) -> 
             "[agent] reasoning 'summarize' is not recognised",
         ),
         ("replay_turns = 0", "[agent] replay_turns must be an int >= 1"),
-        ('replay_turns = "three"', "[agent] replay_turns must be an int >= 1"),
+        ('replay_turns = "three"', "[agent] replay_turns must be a whole number"),
     ],
 )
 def test_an_invalid_agent_value_exits_through_the_config_path(

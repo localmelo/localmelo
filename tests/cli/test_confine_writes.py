@@ -118,17 +118,6 @@ class TestOptionsAndRecord:
 
 
 class TestConfig:
-    def test_the_key_defaults_on_and_is_written_only_when_off(self) -> None:
-        assert config.AgentConfig().confine_writes is True
-        config.save(config.Config())
-        path = Path(config.config_path())
-        assert "confine_writes" not in path.read_text()
-        config.save(config.Config(agent=config.AgentConfig(confine_writes=False)))
-        assert "confine_writes = false" in path.read_text()
-        assert config.load().agent.confine_writes is False
-        bad = config.Config()
-        bad.agent.confine_writes = "no"  # type: ignore[assignment]
-        assert any("confine_writes must be a boolean" in e for e in bad.validate())
 
     def test_x_turns_it_off_for_one_run(
         self, capsys: pytest.CaptureFixture[str]

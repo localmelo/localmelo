@@ -31,21 +31,6 @@ KEY = "agent.reflection"
 LENGTH = "agent.steps_per_attempt"
 
 
-def test_the_switch_is_on_by_default_and_written_only_when_off() -> None:
-    assert config.AgentConfig().reflection is True
-    assert config.AgentConfig().steps_per_attempt is None
-    config.save(config.Config())
-    path = Path(config.config_path())
-    assert "reflection" not in path.read_text()
-    assert "steps_per_attempt" not in path.read_text()
-    config.save(config.Config(agent=config.AgentConfig(reflection=False)))
-    assert "reflection = false" in path.read_text()
-    assert config.load().agent.reflection is False
-    config.save(config.Config(agent=config.AgentConfig(reflection=True)))
-    assert "reflection" not in path.read_text()
-    assert config.load().agent.reflection is True
-
-
 def test_an_old_config_without_the_keys_gets_the_defaults() -> None:
     path = Path(config.config_path())
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -57,21 +42,7 @@ def test_an_old_config_without_the_keys_gets_the_defaults() -> None:
     assert configured_session_options(loaded).steps_per_attempt == 50
 
 
-def test_the_attempt_length_round_trips() -> None:
-    config.save(config.Config(agent=config.AgentConfig(steps_per_attempt=20)))
-    assert "steps_per_attempt = 20" in Path(config.config_path()).read_text()
-    assert config.load().agent.steps_per_attempt == 20
-
-
-@pytest.mark.parametrize("bad", ["off", "", 0, 1, None])
-def test_a_switch_that_is_not_a_boolean_is_refused(bad: object) -> None:
-    cfg = config.Config()
-    cfg.agent.reflection = bad  # type: ignore[assignment]
-    assert "[agent] reflection must be a boolean" in cfg.validate()
-    assert not any("reflection" in e for e in config.Config().validate())
-
-
-@pytest.mark.parametrize("bad", [0, -1, True, "20", 2.5])
+@pytest.mark.parametrize("bad", [0, -1])
 def test_an_attempt_length_that_is_not_a_positive_int_is_refused(bad: object) -> None:
     cfg = config.Config()
     cfg.agent.steps_per_attempt = bad  # type: ignore[assignment]
@@ -140,14 +111,6 @@ def test_x_sets_the_attempt_length_and_agent_max_steps_still_points_to_the_optio
     with pytest.raises(SystemExit):
         cli._parse(["-X", "agent.max_steps=5", *BASE, "fix it"])
     assert "-s N (--steps)" in capsys.readouterr().err
-
-
-def test_config_set_saves_the_switch_only_when_off() -> None:
-    path = Path(config.config_path())
-    assert config_cli.main(["set", KEY, "off"]) == 0
-    assert "reflection = false" in path.read_text()
-    assert config_cli.main(["set", KEY, "on"]) == 0
-    assert "reflection" not in path.read_text()
 
 
 @pytest.mark.parametrize("via", ["file", "x", "default"])

@@ -43,12 +43,7 @@ def _show_changes() -> int:
     read = _read()
     if read is None:
         return 1
-    defaults = settings.flat(config.Config())
-    changed = {
-        key: value
-        for key, value in settings.flat(read[0]).items()
-        if value != defaults[key]
-    }
+    changed = config.changed(read[0])
     print(_home_relative(path) + ("" if os.path.isfile(path) else " (no file yet)"))
     for key, value in changed.items():
         print(f"{key} = {settings.show(value)}")

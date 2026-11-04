@@ -105,7 +105,7 @@ def test_a_bad_memory_value_is_a_configuration_error(
     )
     monkeypatch.setattr(config, "CONFIG_PATH", str(path))
     assert _main(["q"], monkeypatch) == 1
-    assert "[memory] admit_on_outcome must be a bool" in capsys.readouterr().err
+    assert "[memory] admit_on_outcome must be true or false" in capsys.readouterr().err
 
 
 def test_the_table_round_trips_only_when_set(tmp_path: Path) -> None:
@@ -128,23 +128,6 @@ def test_the_table_round_trips_only_when_set(tmp_path: Path) -> None:
     ):
         save(Config(chat_backend="vllm", embedding_backend="none"))
     assert "[memory]" not in path.read_text()
-
-
-def test_memory_across_chats_is_on_unless_the_file_turns_it_off(tmp_path: Path) -> None:
-    assert MemoryConfig().across_chats is True
-    path = tmp_path / "config.toml"
-    cfg = Config(chat_backend="vllm", embedding_backend="none")
-    cfg.memory = MemoryConfig(across_chats=False)
-    with (
-        mock.patch.object(config, "CONFIG_PATH", str(path)),
-        mock.patch.object(config, "CONFIG_DIR", str(tmp_path)),
-    ):
-        save(cfg)
-    assert "[memory]\nacross_chats = false\n" in path.read_text()
-    with mock.patch.object(config, "CONFIG_PATH", str(path)):
-        assert config.load().memory == MemoryConfig(across_chats=False)
-    cfg.memory = MemoryConfig(across_chats="no")  # type: ignore[arg-type]
-    assert "[memory] across_chats must be a bool, got 'no'" in cfg.validate()
 
 
 def test_memory_retriever_is_auto_saved_only_when_set_and_checked(

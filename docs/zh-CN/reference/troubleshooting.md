@@ -140,6 +140,7 @@ No model server is running yet.
 | `api_key: … is not a keychain reference` | 写成 `api_key = "keychain:localmelo.<name>"`，或留空。 |
 | `embedding_url is empty`, `embedding_model is empty` | 在后端的表中添加这两项，或设置 `embedding_backend = "none"`。 |
 | `request_timeout_s must be a finite number of seconds > 0` | 写成不带引号的数字，例如 `request_timeout_s = 600`。 |
+| `[gateway] port must be a whole number, got '8401'` | 值的类型不对（这里是数字加了引号）。按消息写：整数不带引号，开关用 `true` 或 `false`，文本加引号。 |
 | `extra_body must not set 'model'` | 从 `extra_body` 中删除该键。 |
 
 ### LOCALMELO_THINKING_RETENTION_DAYS must be a number of days

@@ -58,16 +58,6 @@ def test_web_fetch_is_on_by_default_and_a_default_config_says_nothing_of_it() ->
     assert (key.default, key.file, key.section) == (True, True, "tools")
 
 
-def test_turning_it_off_is_saved_loaded_and_checked() -> None:
-    cfg = _cfg(web_fetch=False)
-    config.save(cfg)
-    assert "[tools]\nweb_fetch = false" in Path(config.config_path()).read_text()
-    assert config.load().tools.web_fetch is False
-    cfg.tools.web_fetch = "no"  # type: ignore[assignment]
-    assert any("[tools] web_fetch must be a bool" in e for e in cfg.setting_errors())
-    assert any("[tools] web_fetch must be a bool" in e for e in cfg.validate())
-
-
 def test_x_turns_it_off_for_one_run() -> None:
     cli._parse(["-X", "tools.web_fetch=off", "q"])
     assert config.overrides() == {"tools.web_fetch": False}

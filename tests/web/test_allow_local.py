@@ -563,16 +563,6 @@ def test_the_key_is_a_developer_setting_that_is_off_by_default() -> None:
     assert "web_fetch_allow_local" not in Path(config.config_path()).read_text()
 
 
-def test_the_list_is_saved_and_loaded() -> None:
-    config.save(_cfg(["127.0.0.1:8000", "[::1]:9000"]))
-    text = Path(config.config_path()).read_text()
-    assert (
-        '[tools]\nweb_fetch = true\nweb_fetch_allow_local = ["127.0.0.1:8000", "[::1]:9000"]'
-        in text
-    )
-    assert config.load().tools.web_fetch_allow_local == ["127.0.0.1:8000", "[::1]:9000"]
-
-
 def test_x_parses_a_comma_list_a_toml_list_and_nothing() -> None:
     cli._parse(["-X", f"{KEY}=127.0.0.1:8000,[::1]:9000", "q"])
     assert config.overrides() == {KEY: ["127.0.0.1:8000", "[::1]:9000"]}

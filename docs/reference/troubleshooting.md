@@ -177,6 +177,7 @@ saving · q quits:`.
 | `api_key: … is not a keychain reference` | Write `api_key = "keychain:localmelo.<name>"`, or leave it empty. |
 | `embedding_url is empty`, `embedding_model is empty` | Add both to the backend's table, or set `embedding_backend = "none"`. |
 | `request_timeout_s must be a finite number of seconds > 0` | Write a number without quotes, such as `request_timeout_s = 600`. |
+| `[gateway] port must be a whole number, got '8401'` | The value has the wrong kind (here, quotes around a number). Write it as the message says: a whole number without quotes, `true` or `false` for an on/off setting, text in quotes. |
 | `extra_body must not set 'model'` | Remove that key from `extra_body`. |
 
 ### LOCALMELO_THINKING_RETENTION_DAYS must be a number of days
