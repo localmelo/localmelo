@@ -50,6 +50,7 @@ def core_event(
             "approval": False,
         },
         "step.started": {"step": 1, "attempt": 1},
+        "inbox.accepted": {"offset": 1, "text": "a note", "step": 1, "attempt": 1},
         "assistant.message": {
             "step": 1,
             "content": "",

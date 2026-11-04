@@ -115,6 +115,7 @@
               hidden
             ></div>
           </div>
+          <button type="button" class="secondary-button browser-chip" id="browser-chip" aria-controls="browser-panel" aria-expanded="false" hidden><span class="browser-dot" aria-hidden="true"></span><span id="browser-chip-text" data-i18n="browser.title">Browser</span></button>
           <button type="button" class="secondary-button" id="details-trigger" aria-expanded="false" aria-controls="details-drawer" disabled data-i18n="html.detailsTrigger">Details</button>
           <button type="button" class="panel-chip" id="panel-chip" aria-controls="panel" aria-expanded="false" hidden></button>
           <button class="connection-chip" id="connection-btn">
@@ -246,6 +247,41 @@
           </p>
         </div>
       </main>
+      <aside class="browser-panel" id="browser-panel" aria-label="Browser" data-i18n-aria-label="browser.title" data-state="idle" hidden>
+        <header class="bp-head">
+          <div class="bp-titles">
+            <strong class="bp-title" id="bp-title"></strong>
+            <p class="bp-address" aria-label="Address" data-i18n-aria-label="browser.addressLabel"><span class="bp-host" id="bp-host"></span><span class="bp-rest" id="bp-rest"></span></p>
+          </div>
+          <button type="button" class="bp-pop" id="bp-pop" hidden data-i18n="browser.popOut">Pop out</button>
+          <button type="button" class="icon-button bp-hide" id="bp-hide" aria-label="Hide browser" data-i18n-aria-label="browser.hide">×</button>
+        </header>
+        <div class="bp-stage">
+          <div class="bp-viewport" id="bp-viewport">
+            <canvas class="bp-canvas" id="bp-canvas" role="img" hidden></canvas>
+            <p class="bp-note" id="bp-note"></p>
+            <textarea class="bp-keys" id="bp-keys" aria-label="Type into the page" data-i18n-aria-label="browser.keys" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" rows="1" tabindex="-1" disabled></textarea>
+            <div class="bp-dialog" id="bp-dialog" role="alertdialog" aria-modal="false" aria-labelledby="bp-dialog-title" aria-describedby="bp-dialog-text" hidden>
+              <p class="bp-dialog-title" id="bp-dialog-title"></p>
+              <p class="bp-dialog-text" id="bp-dialog-text"></p>
+              <input class="bp-dialog-input" id="bp-dialog-input" type="text" autocomplete="off" aria-label="Your answer" data-i18n-aria-label="browser.dialog.answer" hidden />
+              <div class="bp-dialog-actions">
+                <button type="button" class="quiet-button" id="bp-dialog-cancel"></button>
+                <button type="button" class="primary-button" id="bp-dialog-ok"></button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <footer class="bp-foot">
+          <div class="bp-foot-row">
+            <span class="bp-status" id="bp-status" role="status" aria-live="polite"></span>
+            <span class="bp-view-only" id="bp-view-only" data-i18n="browser.viewOnly">View only</span>
+            <button type="button" class="outline-button bp-take" id="bp-take" hidden data-i18n="browser.takeOver">Take over</button>
+            <button type="button" class="primary-button bp-give" id="bp-give" hidden data-i18n="browser.giveBack">Give back to melo</button>
+          </div>
+          <p class="bp-hint" id="bp-hint" hidden></p>
+        </footer>
+      </aside>
       <aside class="panel" id="panel" aria-label="Melo">
         <section class="details-drawer" id="details-drawer" hidden></section>
         <section id="task-panel" class="task-panel" aria-label="Tasks" data-i18n-aria-label="html.tasks" hidden></section>
@@ -261,6 +297,7 @@
             <button type="button" class="st-tab" role="tab" id="settings-tab-model" aria-controls="settings-panel-model" aria-selected="true"><span class="st-glyph" aria-hidden="true">◉</span><span class="st-tab-text"><span data-i18n="settings.section.model">Model server</span><span class="st-tab-note" id="settings-note-model"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
             <button type="button" class="st-tab" role="tab" id="settings-tab-memory" aria-controls="settings-panel-memory" aria-selected="false" tabindex="-1"><span class="st-glyph" aria-hidden="true">◎</span><span class="st-tab-text"><span data-i18n="settings.section.memory">Memory</span><span class="st-tab-note" id="settings-note-memory"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
             <button type="button" class="st-tab" role="tab" id="settings-tab-chats" aria-controls="settings-panel-chats" aria-selected="false" tabindex="-1"><span class="st-glyph" aria-hidden="true">▤</span><span class="st-tab-text"><span data-i18n="settings.section.chats">Chats and folders</span><span class="st-tab-note" id="settings-note-chats"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
+            <button type="button" class="st-tab" role="tab" id="settings-tab-permissions" aria-controls="settings-panel-permissions" aria-selected="false" tabindex="-1"><span class="st-glyph" aria-hidden="true">◈</span><span class="st-tab-text"><span data-i18n="settings.section.permissions">Permissions</span><span class="st-tab-note" id="settings-note-permissions"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
             <button type="button" class="st-tab" role="tab" id="settings-tab-scheduled" aria-controls="settings-panel-scheduled" aria-selected="false" tabindex="-1"><span class="st-glyph" aria-hidden="true">◷</span><span class="st-tab-text"><span data-i18n="settings.section.scheduled">Scheduled</span><span class="st-tab-note" id="settings-note-scheduled"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
             <button type="button" class="st-tab" role="tab" id="settings-tab-appearance" aria-controls="settings-panel-appearance" aria-selected="false" tabindex="-1"><span class="st-glyph" aria-hidden="true">◐</span><span class="st-tab-text"><span data-i18n="settings.section.appearance">Appearance</span><span class="st-tab-note" id="settings-note-appearance"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
             <button type="button" class="st-tab" role="tab" id="settings-tab-developer" aria-controls="settings-panel-developer" aria-selected="false" tabindex="-1" hidden><span class="st-glyph" aria-hidden="true">⌘</span><span class="st-tab-text"><span data-i18n="settings.section.developer">Developer</span><span class="st-tab-note" id="settings-note-developer"></span></span><span class="st-chevron" aria-hidden="true">›</span></button>
@@ -428,8 +465,16 @@
                   <div class="st-text"><label class="st-label" for="s-web-search" data-i18n="settings.webSearch.title">Web search</label><span class="st-key" data-developer hidden>web.search</span><p class="st-hint" data-i18n="settings.webSearch.hint">Melo can search the web when it needs to check something, in every chat and task. The words it searches for leave this computer.</p></div>
                   <span class="st-switch"><input type="checkbox" role="switch" id="s-web-search" disabled /><span class="st-track" aria-hidden="true"></span></span>
                 </li>
+                <li class="st-row" id="s-browser-row" hidden>
+                  <div class="st-text"><span class="st-label" id="s-browser-legend" data-i18n="settings.browser.title">Browser</span><span class="st-key" data-developer hidden>browser.driver</span><p class="st-hint" data-i18n="settings.browser.hint">Where melo reads and uses web pages, asking you about each site. Chrome works in the background with no window; Safari's windows come to the front.</p><p class="st-hint" id="s-browser-chrome-missing" data-i18n="settings.browser.chromeMissing" hidden>Install Google Chrome to browse in the background.</p></div>
+                  <div class="st-segments" role="radiogroup" aria-labelledby="s-browser-legend">
+                    <label><input type="radio" name="s-browser" id="s-browser-chrome" value="chrome" disabled /><span data-i18n="settings.browser.chrome">Chrome</span></label>
+                    <label><input type="radio" name="s-browser" id="s-browser-safari-automation" value="safari-automation" disabled /><span data-i18n="settings.browser.safari">Safari</span></label>
+                    <label><input type="radio" name="s-browser" id="s-browser-off" value="off" disabled /><span data-i18n="settings.browser.off">Off</span></label>
+                  </div>
+                </li>
                 <li class="st-row" id="s-app-windows-row" hidden>
-                  <div class="st-text"><label class="st-label" for="s-app-windows" data-i18n="settings.appWindows.title">Other apps' windows</label><span class="st-key" data-developer hidden>browser.app_windows</span><p class="st-hint" data-i18n="settings.appWindows.hint">When a page melo uses in the browser opens a window in another app, such as a chat app's sign-in window, melo sees it and can press its buttons with your say. It never types into other apps.</p><p class="st-hint" id="s-app-windows-helper" data-i18n="settings.appWindows.helper" hidden>Needs the desktop control helper. Without it melo only says which app to answer.</p></div>
+                  <div class="st-text"><label class="st-label" for="s-app-windows" data-i18n="settings.appWindows.title">Other apps' windows</label><span class="st-key" data-developer hidden>browser.app_windows</span><p class="st-hint" data-i18n="settings.appWindows.hint">When a page melo uses in the browser opens a window in another app, such as a chat app's sign-in window, melo sees it and can press its buttons with your say. It never types into other apps.</p><p class="st-hint" id="s-app-windows-helper" data-i18n="settings.appWindows.helper" hidden>Needs the desktop control helper. Without it melo only says which app to answer.</p><p class="st-hint" id="s-app-windows-status" role="status" hidden></p></div>
                   <span class="st-switch"><input type="checkbox" role="switch" id="s-app-windows" disabled /><span class="st-track" aria-hidden="true"></span></span>
                 </li>
                 <li class="st-row" id="s-follow-up-row" hidden>
@@ -446,6 +491,11 @@
               <ul class="st-group" id="s-extra" aria-labelledby="s-extra-title" aria-describedby="s-extra-hint"></ul>
               <h4 class="st-group-title" id="s-recent-title" data-i18n="html.sRecentTitle">Recent folders</h4>
               <ul class="st-group" id="s-recent" aria-labelledby="s-recent-title"></ul>
+            </section>
+            <section class="st-section" id="settings-panel-permissions" role="tabpanel" aria-labelledby="settings-head-permissions" hidden>
+              <h3 id="settings-head-permissions" data-i18n="settings.section.permissions">Permissions</h3>
+              <p class="st-help" data-i18n="permissions.help">What you allow in the main chat counts everywhere; in a side chat, only there. Spending money, account steps, and typing or sending forms always ask again and never show here.</p>
+              <div id="s-permissions"></div>
             </section>
             <section class="st-section" id="settings-panel-scheduled" role="tabpanel" aria-labelledby="settings-head-scheduled" hidden>
               <h3 id="settings-head-scheduled" data-i18n="settings.section.scheduled">Scheduled</h3>

@@ -378,8 +378,9 @@ const ROUTES = {
   'GET /sessions/chat-1/memory': {working: [{}, {}], working_max: 20, long_term: {enabled: true, backend: 'ollama'}},
   'POST /sessions/chat-1/retry': {},
   'POST /sessions/chat-1/undo': {},
-  'DELETE /sessions/chat-1/grants': {},
-  'DELETE /sessions/chat-1/grants/file_write': {},
+  // What a revoke answers: the grants taken back, and whether the main chat's reach everywhere (see `GRANTS_*` below).
+  'DELETE /sessions/chat-1/grants': {revoked: 1, still_everywhere: 0},
+  'DELETE /sessions/chat-1/grants/file_write': {revoked: [{key: 'file_write', scope: 'session'}], everywhere: false},
 };
 const TURN = {id: 't1', turn: 1, userText: 'Plan a trip to Rome', answer: 'Here is a plan.', finishedAt: 100, startedAt: 90, status: 'completed', undone: false, outputTokens: 1500, items: [{kind: 'tool', name: 'file_read', status: 'success'}], result: {}};
 
@@ -620,16 +621,96 @@ test('/approvals switches the chat\'s mode, forgets a grant, and shows the mode 
   assert.match(lastRow(missing), /No grant for nope in this chat\./);
 });
 
+test('/approvals forget says when a grant of the main chat went everywhere, and how many still hold here', async () => {
+  const taken = {revoked: [{key: 'shell_exec', scope: 'global'}], everywhere: true};
+  const p = page({routes: {...ROUTES, 'DELETE /sessions/chat-1/grants/shell_exec': taken}});
+  await p.slash.handle('/approvals forget shell_exec');
+  // A row is the command echoed, then the lines it answered with.
+  assert.equal(lastRow(p), '/approvals forget shell_exec Took back shell_exec everywhere: it was allowed in the main chat.');
+  // Without a name only this chat's own grants go; the main chat's still hold, as many as the gateway counts.
+  for (const [still, words] of [
+    [0, 'Forgot every grant in this chat.'],
+    [1, 'Forgot every grant in this chat. 1 grant from the main chat still holds here; Settings → Permissions takes it back.'],
+    [3, 'Forgot every grant in this chat. 3 grants from the main chat still hold here; Settings → Permissions takes them back.'],
+  ]) {
+    const all = page({routes: {...ROUTES, 'DELETE /sessions/chat-1/grants': {revoked: 2, still_everywhere: still}}});
+    await all.slash.handle('/approvals forget');
+    assert.equal(lastRow(all), `/approvals forget ${words}`);
+  }
+  // A gateway that answers with nothing (an older one) keeps today's lines.
+  const old = page({routes: {...ROUTES, 'DELETE /sessions/chat-1/grants': {}, 'DELETE /sessions/chat-1/grants/file_write': {}}});
+  await old.slash.handle('/approvals forget');
+  assert.equal(lastRow(old), '/approvals forget Forgot every grant in this chat.');
+  await old.slash.handle('/approvals forget file_write');
+  assert.equal(lastRow(old), '/approvals forget file_write Forgot the grant for file_write.');
+});
+
+test('/approvals forget reads in Chinese when a grant came from the main chat', async () => {
+  await useLanguage('zh-Hans');
+  try {
+    const p = page({routes: {...ROUTES,
+      'DELETE /sessions/chat-1/grants/shell_exec': {revoked: [{key: 'shell_exec', scope: 'global'}], everywhere: true},
+      'DELETE /sessions/chat-1/grants': {revoked: 1, still_everywhere: 2}}});
+    await p.slash.handle('/approvals forget shell_exec');
+    assert.equal(lastRow(p), '/approvals forget shell_exec 已在所有对话中收回 shell_exec：它是在主对话里允许的。');
+    await p.slash.handle('/approvals forget');
+    assert.equal(lastRow(p), '/approvals forget 已忘掉这个对话的全部授权。来自主对话的 2 项授权在这里仍然有效；到“设置 → 授权”里可以收回。');
+  } finally {
+    await useLanguage('en');
+  }
+});
+
+const GRANTS = {grants: [
+  {id: 'a1', scope: 'global', session_id: 'main', session_kind: 'main', chat_title: '', action: 'tool', target: 'shell_exec', label: 'Run shell commands', by: 'person', granted_at: 1},
+  {id: 'b2', scope: 'session', session_id: 's1', session_kind: 'side', chat_title: 'Trip', action: 'open', target: 'example.com', label: 'Open example.com', by: 'auto', granted_at: 2},
+]};
+
+test('/grants lists what was allowed, numbered as Settings orders it, and /grants revoke N takes one back', async () => {
+  const p = page({routes: {'GET /grants': GRANTS, 'DELETE /grants/b2': {}}});
+  assert.equal(typeof p.slash.actions.grants, 'function');
+  const rows = await p.slash.actions.grants({args: ''});
+  assert.deepEqual(rows.map((row) => row.text), ['1. Run shell commands · everywhere · You', '2. Open example.com · Trip · Auto']);
+  assert.deepEqual(p.calls, [{method: 'GET', path: '/grants', body: undefined}]);
+  assert.deepEqual(await page({routes: {'GET /grants': {grants: []}}}).slash.actions.grants({args: ''}), [{text: 'No grants.', tone: 'muted'}]);
+  await assert.rejects(p.slash.actions.grants({args: 'revoke x'}), {message: 'Use /grants or /grants revoke N.'});
+  await assert.rejects(p.slash.actions.grants({args: 'revoke 7'}), {message: 'There is no grant 7. /grants lists them.'});
+  assert.deepEqual(await p.slash.actions.grants({args: 'revoke 2'}), [{text: 'Revoked: Open example.com.', tone: 'ok'}]);
+  assert.deepEqual(p.calls.at(-1), {method: 'DELETE', path: '/grants/b2', body: undefined});
+  // Typed in the composer, once the terminal's table has the command (tests/fixtures/slash_commands.json), the rows say the same.
+  if (LIST.some((command) => command.name === 'grants')) {
+    await p.slash.handle('/grants');
+    assert.match(lastRow(p), /2\. Open example\.com · Trip · Auto/);
+    await p.slash.handle('/grants revoke x');
+    assert.match(lastRow(p), /Use \/grants or \/grants revoke N\./);
+  }
+});
+
 test('/browser shows whether melo may browse, and /browser on or off saves it through the settings route', async () => {
   const p = page({routes: ROUTES});
   await p.slash.handle('/browser');
-  assert.match(lastRow(p), /Browsing is off\. \/browser on lets melo read web pages in Safari\./);
+  assert.match(lastRow(p), /Browsing is off\. \/browser on lets melo read web pages in Safari; \/browser chrome, in Chrome in the background\./);
   await p.slash.handle('/browser on');
   assert.deepEqual(p.calls.at(-1).body, {chat_backend: 'mlc', embedding_backend: 'none', workspace: '~/ws', revision: 'r1', sections: {}, browser: true});
   assert.match(lastRow(p), /Browsing is on/);
   assert.equal(p.events.filter(([name]) => name === 'settingsSaved').length, 1);
   await p.slash.handle('/browser maybe');
-  assert.match(lastRow(p), /Use \/browser, \/browser on or \/browser off\./);
+  assert.match(lastRow(p), /Use \/browser, \/browser on, \/browser off, \/browser chrome or \/browser safari\./);
+});
+
+test('/browser chrome and /browser safari choose where melo browses; without Chrome it says to install it', async () => {
+  const routes = {...ROUTES, 'GET /settings': {...ROUTES['GET /settings'], browser_driver: 'off', chrome_installed: true},
+    'PUT /settings': (body) => ({...body, browser: true, browser_driver: body.browser_driver, chrome_installed: true})};
+  const p = page({routes});
+  await p.slash.handle('/browser chrome');
+  assert.equal(p.calls.at(-1).body.browser_driver, 'chrome');
+  assert.match(lastRow(p), /Browsing is on: melo reads pages in Chrome, in the background\./);
+  await p.slash.handle('/browser safari');
+  assert.equal(p.calls.at(-1).body.browser_driver, 'safari-automation');
+  assert.match(lastRow(p), /Safari's automation windows/);
+  const missing = page({routes: {...routes, 'GET /settings': {...routes['GET /settings'], chrome_installed: false}}});
+  await missing.slash.handle('/browser chrome');
+  assert.match(lastRow(missing), /Install Google Chrome to browse in the background\./);
+  assert.equal(missing.calls.filter((call) => call.method === 'PUT').length, 0);
 });
 
 test('/verbose, /thinking and /stream set how the page shows a chat', async () => {

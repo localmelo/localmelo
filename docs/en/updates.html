@@ -64,7 +64,7 @@
           <div class="board-col">
             <h3>Next <small>5</small></h3>
             <ul>
-              <li class="board-card"><strong>Computer use in the browser</strong><span>melo acts on pages in a window you can watch, and asks before anything that matters.</span></li>
+              <li class="board-card"><strong>The next browser stage</strong><span>Chrome as the default, an “open in a window” choice for sites that refuse a browser without one, a fallback browser, and a button that clears melo's Chrome sign-ins.</span></li>
               <li class="board-card"><strong>Set up a model server from melo</strong><span>With nothing installed, reach a first answer with one confirmation.</span></li>
               <li class="board-card"><strong>Other agents hand work to melo</strong><span>Workers on the task API, and an MCP server for coding agents.</span></li>
               <li class="board-card"><strong>Workers that share a project</strong><span>Parallel workers share one cached start; each task stays separate.</span></li>
@@ -83,7 +83,7 @@
           </div>
         </div>
         <div class="board-done">
-          <h3>Done <small>17</small></h3>
+          <h3>Done <small>21</small></h3>
           <ul>
             <li class="board-card"><strong>Main chat and side chats</strong><span>One chat that answers, or hands bigger work to a task by priority; the terminal opens the same chat.</span><span class="chip done">done</span></li>
             <li class="board-card"><strong>Memory you can see</strong><span>Notes across chats, the newer value wins, and a Memory tab to edit or forget.</span><span class="chip done">done</span></li>
@@ -102,6 +102,10 @@
             <li class="board-card"><strong>The main chat starts tasks</strong><span>Ask for work in plain words and the main chat starts the task, then follows up once if it fails.</span><span class="chip done">done</span></li>
             <li class="board-card"><strong>Melo moves</strong><span>Melo wakes up, types at its laptop, tilts its head, raises a paw, rests and plays, in the console and on your desktop.</span><span class="chip done">done</span></li>
             <li class="board-card"><strong>Bring your own Melo art</strong><span>One command checks a folder or a zip of art and replaces every picture of Melo.</span><span class="chip done">done</span></li>
+            <li class="board-card"><strong>melo acts for you</strong><span>A go-ahead like “I authorize you” starts the work in your name; a sign-in is a step you take, and forms are filled from what you told melo.</span><span class="chip done">done</span></li>
+            <li class="board-card"><strong>Browsing in the background</strong><span>melo browses in Chrome with no window, you watch it live in the console and the app, and take over to sign in.</span><span class="chip done">done</span></li>
+            <li class="board-card"><strong>Other apps' windows ask first</strong><span>A window another app opens after melo's click asks you before anything about it reaches the model.</span><span class="chip done">done</span></li>
+            <li class="board-card"><strong>One list of what you allowed</strong><span>Settings → Permissions lists every allow, Everywhere and Per chat, with Revoke; the main chat's counts everywhere.</span><span class="chip done">done</span></li>
           </ul>
         </div>
         <p class="more-link"><a href="https://github.com/localmelo/localmelo/issues/2">The full plan on GitHub</a>; the parts of the memory design not built yet are on the <a href="./memory-design.html">memory design</a> page.</p>
@@ -110,6 +114,50 @@
       <section class="section" id="updates">
         <h2>Updates</h2>
         <p class="more-link">Each change in detail is in the <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">changelog</a>.</p>
+        <section class="day" id="day-2026-11-04">
+          <h3><time datetime="2026-11-04">November 4</time></h3>
+          <div class="day-entry" id="u-2026-11-04-acts-for-you">
+            <h4>melo acts for you, in your name</h4>
+            <ul class="day-points">
+              <li>Say <code class="wrap">I authorize you to apply</code>: that is the go-ahead, and melo starts the work in your name instead of handing back a list of links.</li>
+              <li>A sign-in is a step, not a stop: you type the password, then melo carries on.</li>
+              <li>Forms are filled in from what you told melo.</li>
+              <li>Anything that would harm other people is still declined.</li>
+            </ul>
+          </div>
+          <div class="day-entry" id="u-2026-11-04-other-app-windows">
+            <h4>Another app's window asks first</h4>
+            <ul class="day-points">
+              <li>A page can make another app open a window, such as a chat app's sign-in. If one comes after melo's click, even a moment late, melo notices it.</li>
+              <li>It asks you first: allow once, allow that app, or don't allow.</li>
+              <li>Until you allow, nothing about the window reaches the model, not even the app's name.</li>
+            </ul>
+            <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/browsing.md#windows-from-other-apps">Other apps' windows in the guide</a></p>
+          </div>
+          <div class="day-entry" id="u-2026-11-04-permissions">
+            <h4>One list of what you allowed</h4>
+            <ul class="day-points">
+              <li>Settings → Permissions lists everything you allowed, under Everywhere and Per chat.</li>
+              <li>Each row says what, which chat, who decided and when, with <strong>Revoke</strong>; it takes effect at once, in chats that are running too.</li>
+              <li>What you allow in the main chat counts in every chat; in a side chat, only there.</li>
+              <li>Your allows are kept when melo restarts. <code>/grants</code> shows the same list in the terminal.</li>
+            </ul>
+            <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/web-console.md#permissions">Permissions in the guide</a></p>
+          </div>
+          <div class="day-entry" id="u-2026-11-04-background-browser">
+            <h4>melo browses in the background</h4>
+            <figure class="shot"><a href="../assets/img/browser-live.webp"><img src="../assets/img/browser-live.webp" alt="The console while melo reads a shop page in the background: the Browser panel beside the chat shows the page live, with a Take over button." width="1280" height="900" loading="lazy"></a></figure>
+            <ul class="day-points">
+              <li>It is opt-in: melo can browse in Chrome with no window, so it no longer pulls you to another desktop.</li>
+              <li>A live view in the console and the app shows the page as melo works.</li>
+              <li>To sign in, take over the page, type the password yourself and give it back.</li>
+              <li>Turn it on in Settings → Chats and folders → Browser, or type <code>/browser chrome</code>.</li>
+            </ul>
+            <figure class="shot"><a href="../assets/img/browser-takeover.webp"><img src="../assets/img/browser-takeover.webp" alt="The Browser panel after Take over: it says you are in control, the email address you typed is in the sign-in form, and Give back to melo returns the page." width="1280" height="900" loading="lazy"></a></figure>
+            <!-- usage:browser-chrome --><figure class="usage" aria-label="Browse in the background" data-copy="/browser chrome"><div class="usage-bar"><span class="usage-title">Browse in the background</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">›</span> <span class="c">/browser</span> <span class="a">chrome</span></span></code></pre><figcaption>Type it in the terminal chat or the console. /browser on uses the browser you chose before, or Safari if you never chose one; /browser off turns browsing off.</figcaption></figure><!-- /usage -->
+            <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/browsing.md#chrome-in-the-background">Chrome in the background in the guide</a></p>
+          </div>
+        </section>
         <section class="day" id="day-2026-11-01">
           <h3><time datetime="2026-11-01">November 1</time></h3>
           <div class="day-entry" id="u-2026-11-01-melo-moves">

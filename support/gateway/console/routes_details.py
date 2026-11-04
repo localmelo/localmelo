@@ -4,9 +4,9 @@ These are the drawer's three tabs. `tools` opens the session, because the
 list is the Agent's and a provider's tools appear only once it started;
 `memory` never opens it, so a paused session shows the conversation the
 gateway kept, every text redacted; `runs` reads the turns it has, with each
-`RunResult` but its answer text. Two `DELETE` routes take back a session grant, which lives
-in the registry's `RememberingPolicy` and never in the store; a third takes back one approval
-the chat recorded for its tasks (#369), which lives in memory too.
+`RunResult` but its answer text. Two `DELETE` routes take back a grant that holds in the chat
+(the grants live in the store's table, see `routes_grants`); a third takes back one approval
+the chat recorded for its tasks (#369), which lives in memory only.
 """
 
 from __future__ import annotations
@@ -118,35 +118,74 @@ def add_routes(app: FastAPI, console: Console) -> None:
     # A site's grant is named after its address (``browser-act:https://…``,
     # #465): the name may hold slashes.
     @app.delete("/api/sessions/{session_id}/grants/{tool:path}")
-    async def forget_grant(session_id: str, tool: str) -> Response:
-        console.require_store()
-        await _require_session(console, session_id)
-        entry = console.sessions.get(session_id)
-        if entry is None or tool not in entry.policy.allowed_tools:
-            raise ApiError(404, "not_found", t("errors.noGrant"))
-        console.sessions.forget_grant(session_id, tool)
-        return Response(status_code=204)
+    async def forget_grant(session_id: str, tool: str) -> JSONResponse:
+        """Take back the grant of *tool* that holds in the chat, open or not.
 
-    @app.delete("/api/sessions/{session_id}/grants")
-    async def forget_grants(session_id: str) -> Response:
-        console.require_store()
-        await _require_session(console, session_id)
-        console.sessions.forget_grant(session_id)
-        return Response(status_code=204)
-
-    @app.delete("/api/sessions/{session_id}/folders")
-    async def forget_folder(session_id: str, path: str = "") -> Response:
-        """Take back the chat's grant of one folder outside the workspace (#405).
-
-        The folder is the ``path`` query parameter; without one, or for a
-        folder the chat was not granted, the answer is 404.
+        A grant from the main chat holds everywhere, so taking it back here
+        takes it back everywhere: ``everywhere`` says so. A write that fails
+        is 503 (the checks stopped using it already).
         """
         console.require_store()
         await _require_session(console, session_id)
-        entry = console.sessions.get(session_id)
-        if entry is None or not entry.policy.forget_folder(path):
+        if tool not in console.sessions.grants(session_id):
             raise ApiError(404, "not_found", t("errors.noGrant"))
-        return Response(status_code=204)
+        gone = await _sessions_call(
+            console, console.sessions.forget_grant(session_id, tool), session_id
+        )
+        return JSONResponse(
+            content={
+                "revoked": [{"key": g.key, "scope": g.scope} for g in gone],
+                "everywhere": any(g.scope == "global" for g in gone),
+            }
+        )
+
+    @app.delete("/api/sessions/{session_id}/grants")
+    async def forget_grants(session_id: str) -> JSONResponse:
+        """Take back every grant the chat gave (the main chat's: every global one).
+
+        A side chat's clear leaves the main chat's grants, which still hold
+        here: ``still_everywhere`` counts them.
+        """
+        console.require_store()
+        await _require_session(console, session_id)
+        gone = await _sessions_call(
+            console, console.sessions.forget_grant(session_id), session_id
+        )
+        still = {
+            g.key
+            for g in console.sessions.book.visible(session_id)
+            if g.scope == "global"
+        }
+        return JSONResponse(
+            content={"revoked": len(gone), "still_everywhere": len(still)}
+        )
+
+    @app.delete("/api/sessions/{session_id}/folders")
+    async def forget_folder(session_id: str, path: str = "") -> JSONResponse:
+        """Take back the chat's grant of one folder outside the workspace (#405).
+
+        The folder is the ``path`` query parameter; without one, or for a
+        folder the chat was not granted, the answer is 404. The answer is a
+        named revoke's: a folder the main chat allowed goes everywhere, and
+        ``everywhere`` says so.
+        """
+        console.require_store()
+        await _require_session(console, session_id)
+        gone = (
+            await _sessions_call(
+                console, console.sessions.forget_folder(session_id, path), session_id
+            )
+            if path
+            else []
+        )
+        if not gone:
+            raise ApiError(404, "not_found", t("errors.noGrant"))
+        return JSONResponse(
+            content={
+                "revoked": [{"key": g.key, "scope": g.scope} for g in gone],
+                "everywhere": any(g.scope == "global" for g in gone),
+            }
+        )
 
     @app.delete("/api/sessions/{session_id}/approvals/{entry_id}")
     async def revoke_approval(session_id: str, entry_id: str) -> Response:

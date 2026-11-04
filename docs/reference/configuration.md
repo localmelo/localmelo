@@ -126,9 +126,11 @@ tables of the chosen backends.
 | `call_log_dir` | `[scheduler]` | `""` | The log's parent directory; the default is `~/.cache/localmelo/scheduler`. |
 | `gpu_lock_file` | `[scheduler]` | `""` | The shared GPU lock to read; empty means no lock reader (and idle sleep does not look for a lock). The battery reader is always on in the gateway. |
 | `lock_self` | `[scheduler]` | `""` | This bench's own holder: the exact `holder:` value, or `holder:run` when the lock carries a `run:` line. Matching is exact and case-sensitive. |
-| `driver` | `[browser]` | `"off"` | Whether melo may read web pages in a browser: `off` gives it no browser tools; `safari-automation` gives the terminal chat and every chat of the web console and the app twelve tools that open, read, click, type into and choose on pages in Safari's automation windows, inside melo's own browser window (asks once per site per chat, again for clicking, typing and choosing, and every time for sending a form; see [Browsing with melo](../guides/browsing.md)). `/browser` switches it in the terminal; `-X browser.driver=safari-automation` for one run. Direct runs, worker runs and saved tasks never get the tools. Any other value is a configuration error. |
+| `driver` | `[browser]` | `"off"` | Whether melo may read web pages in a browser, and which: `off` gives it no browser tools; `safari-automation` and `chrome` give the terminal chat and every chat of the web console and the app twelve tools that open, read, click, type into and choose on pages (asks once per site per chat, again for clicking, typing and choosing, and every time for sending a form; see [Browsing with melo](../guides/browsing.md)). `safari-automation` uses Safari's automation windows, which come to the front; `chrome` uses Google Chrome in the background, with no window and a profile of melo's own in `~/.cache/localmelo/browser/chrome` (see [Chrome in the background](../guides/browsing.md#chrome-in-the-background)), and needs Google Chrome installed. `/browser`, `/browser chrome` and `/browser safari` switch it in the terminal and the console, as does Settings → Chats and folders → **Browser**; `-X browser.driver=chrome` for one run. Direct runs, worker runs and saved tasks never get the tools. Any other value is a configuration error. |
 | `keep_tabs` | `[browser]` | `false` | Whether the tabs melo opened stay open. By default melo reuses one tab per chat and closes the tabs it opened when the chat ends and after ten minutes without a browser call (the last one is kept, empty). `true` leaves them all open. Tabs melo did not open are never touched. See [Browsing with melo](../guides/browsing.md#tabs). |
-| `app_windows` | `[browser]` | `true` | Whether melo sees a window another app opens after its own step in the browser, such as a chat app's sign-in window, and can press its buttons with your say. Needs the desktop control helper to read and press; without it melo only says which app came to the front. Settings → Chats and folders → **Other apps' windows**. See [Windows from other apps](../guides/browsing.md#windows-from-other-apps). |
+| `app_windows` | `[browser]` | `true` | Whether melo sees a window another app opens after its own step in the browser, such as a chat app's sign-in window, and can press its buttons with your say. Needs the desktop control helper to read and press; without it melo only says which app came to the front. A window that opens a moment after the step is still seen. Settings → Chats and folders → **Other apps' windows**. See [Windows from other apps](../guides/browsing.md#windows-from-other-apps). |
+| `live` | `[browser]` | `true` | Whether the web console and the app may show the page melo has open in Chrome in the background, live and view only, in their Browser panel (see [Watching melo's browser](../guides/browsing.md#watching-melos-browser)). `false` refuses the live view. Safari's windows are never streamed. Any value that is not a bool is a configuration error. |
+| `live_fps` | `[browser]` | `15` | The most pictures a second the live view carries, a whole number from 1 to 60. A page that does not change sends one picture and then none; nothing is sent while nobody watches. Any other value is a configuration error. |
 | `web_fetch` | `[tools]` | `true` | Whether chats and tasks may read public web pages with the `web_fetch` tool (read-only; never this computer or its local network; a site your own recent messages do not name asks once per chat, shared with the browser; see [Tools](tools.md#reading-a-public-web-page)). `false` takes the tool away; Settings → Chats and folders → **Read web pages** is the same switch; `-X tools.web_fetch=off` for one run. Direct runs never have it. Any value that is not a bool is a configuration error. |
 | `web_fetch_allow_local` | `[tools]` | `[]` | Developer setting, empty (off) by default, for a test that needs `web_fetch` to read a fixture page served on this computer. A list of exact entries, `"127.0.0.1:PORT"` or `"[::1]:PORT"` (a port from 1 to 65535); `web_fetch` then reads those addresses and no other local one. Any other entry is a configuration error and is never used: a name (`localhost`), another address (a private or local-network range, `127.0.0.2`, `0.0.0.0`), a range of ports, a wildcard, no port. The port of melo's own gateway and console (the one it really listens on, `melo serve --port` included, and a running gateway's), and of any model server the config names or the run's `-u` URL names, is refused even when listed; a model server in neither is not protected. A chat or task reads the list when it starts, and a listed server asks the person first (in Auto it is reviewed by itself; it is read where nobody can be asked, such as `--yolo`). Only `web_fetch` reads it; the browser tools never do. Set it in the file or with `-X tools.web_fetch_allow_local=127.0.0.1:PORT[,…]` for one run: the model, the console's Settings and the API cannot, and a shell or Python call that runs `melo config set` or `-X` on it counts as a change to localmelo itself (it asks every time, and Auto mode blocks it). A fetch it allows is marked in its `tool.finished` event and in what the call shows. `melo config keys` lists it with a warning; the rules are in [Tools](tools.md#test-servers-on-this-computer). |
 | `search` | `[web]` | `false` | Whether chats and tasks may search the web with the `web_search` tool (read-only; the words of a search leave this computer; a search whose words look like a secret or like pasted text asks first; see [Tools](tools.md#searching-the-web) and [Searching the web with melo](../guides/web-search.md)). Settings → Chats and folders → **Web search** is the same switch, `-X web.search=true` turns it on for one run, and `melo config set web.search true` saves it. Direct runs never have it. |
@@ -323,7 +325,13 @@ run, and `fixed_prefix = false` (or `--fixed-prefix off`) sends the requests fro
 it became the default. It snapshots the local date and UTC offset at each run's start, including across
 midnight, and places changing recall and reflections in labelled user-side data.
 
-Recall goes before the task. With `cache_layout = "v2"` the latest reflection goes last, in a
+Recall goes before the task. Long-term recall (`reasoning = "legacy"`) is read at a run's first
+step and kept for its later steps, so each planning request extends the one before it. It is read
+again only at a step after the window dropped its oldest messages, where the request has changed
+already, and at the next run. Read on every step, it changed whenever the run's own step summaries
+entered it, and the server prefilled every later message again.
+
+With `cache_layout = "v2"` the latest reflection goes last, in a
 final user message after the window, so a new attempt changes only what follows the shared
 history; the default, `v3`, appends the reflection to the window once (see below).
 
@@ -563,7 +571,7 @@ enable_thinking = false
 - `--base-url` does not read the config file, so `extra_body` does not apply
   there.
 
-A `[browser]` table whose driver is `off`, whose `keep_tabs` is `false` and whose `app_windows` is `true` is not written (`keep_tabs` is written only when `true`, `app_windows` only when `false`), nor a `[tools]` table whose `web_fetch` is `true` and whose `web_fetch_allow_local` is empty, nor a `[web]` table whose `search` is `false`, whose `search_order` is empty and whose `search_count` is `6`, nor a `[tasks]` table whose `follow_up` is `true`, nor a `[chat]` table whose `recent_digest_minutes` is `30`.
+A `[browser]` table whose driver is `off`, whose `keep_tabs` is `false`, whose `app_windows` is `true`, whose `live` is `true` and whose `live_fps` is `15` is not written (`keep_tabs` is written only when `true`, `app_windows` and `live` only when `false`, `live_fps` only when it is not `15`), nor a `[tools]` table whose `web_fetch` is `true` and whose `web_fetch_allow_local` is empty, nor a `[web]` table whose `search` is `false`, whose `search_order` is empty and whose `search_count` is `6`, nor a `[tasks]` table whose `follow_up` is `true`, nor a `[chat]` table whose `recent_digest_minutes` is `30`.
 
 ## MCP servers
 
@@ -626,9 +634,23 @@ See [Keep memory between runs](../guides/memory.md#keep-memory-between-runs).
 | `~/.cache/localmelo/config.toml` | The configuration. | By the setup wizard. |
 | `~/.cache/localmelo/memory/` | `history.db`, `procedures.db` (procedural memory, written at the end of every run), and `long_term.db` with an embedding backend. | When an agent starts with `LOCALMELO_PERSIST_MEMORY` set, with mode 0700. An existing one that is open to group or others is set to 0700. |
 | The `--memory-dir` directory | The same files, for that run. | When the run starts, with mode 0700 when it is new. |
+| `~/.cache/localmelo/gateway/sessions.db` | The console's chats and tasks, and what you allowed in them (the `grants` table; see [What you allowed](#what-you-allowed)). | By the gateway. |
+| `~/.cache/localmelo/cli/sessions.db` | The terminal's own chats, and the grants of the terminal's own chat. | At the terminal's first message. |
 | `~/.cache/localmelo/playground/` | Legacy playground memory. | When the opt-in playground starts (security-1b in progress). |
 | `~/.localmelo/logs/` | The background service's logs. | By `melo --daemon install`. |
 | `~/Library/LaunchAgents/ai.localmelo.gateway.plist` | The background service's definition. | By `melo --daemon install`. |
+
+## What you allowed
+
+"Allow for this chat" answers are grants. They live in one table, `grants`, in the sessions file (component `grants`, version 1); no config key controls them.
+
+- **Columns:** `id`, `session_id`, `session_kind`, `scope`, `kind`, `key`, `label`, `target`, `decided_by`, `granted_at`, `request_id`, `revoked_at`.
+- **Revoke and retention:** a revoke sets `revoked_at`. Revoked rows are deleted after the store's thinking retention (30 days by default; see `LOCALMELO_THINKING_RETENTION_DAYS`).
+- **With the session:** a session's rows go with it (`ON DELETE CASCADE`).
+- **Fails closed:** a row that breaks a rule is ignored when read, so an edited file cannot widen access: a `global` row that is not the person's in the main chat, an Auto row that is more than a site read, a key that must ask every time, or a folder that is never offered.
+- **Not a grant:** **Always allow this folder** is kept in `[workspace] extra_folders`.
+
+The people-facing rules are in [What you allowed](../guides/terminal.md#what-you-allowed) and [Permissions](../guides/web-console.md#permissions); the routes are in [API v2](api-v2.md#get-apigrants).
 
 ## Upgrading from an older config
 

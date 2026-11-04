@@ -215,6 +215,13 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
       if (valid(token, session, selected)) busy = false;
     }
   }
+  // What a revoke did beyond this chat: a grant of the main chat is gone from every chat, and "revoke all"
+  // leaves the main chat's grants, which still hold here.
+  function takenWords(taken) {
+    if (taken?.everywhere === true) return t('auto.menu.removedEverywhere');
+    const still = Number(taken?.still_everywhere) || 0;
+    return still > 0 ? t('slash.stillEverywhere', {n: still}) : '';
+  }
   function revokeGrants(tool) {
     return revokeAt(`grants${tool === undefined ? '' : '/' + encodeURIComponent(tool)}`);
   }
@@ -227,12 +234,12 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
     if (content.contains(doc.activeElement)) closeButton.focus();
     for (const item of content.querySelectorAll('button')) item.disabled = true;
     try {
-      await api(path(session, suffix), {method: 'DELETE'});
+      const taken = await api(path(session, suffix), {method: 'DELETE'});
       if (!open || id !== session || currentId() !== session || tab !== 'tools') return;
       // A tab may have been reopened while the DELETE was pending. Refresh
       // even then: an earlier GET may have observed the old grant.
       busy = false;
-      await load();
+      await load(false, takenWords(taken));
     } catch (error) {
       if (error?.status === 404 && open && id === session && currentId() === session && tab === 'tools') {
         busy = false;

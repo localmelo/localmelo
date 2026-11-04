@@ -1068,7 +1068,10 @@ class MainChat:
                     "warn",
                 )
                 return
-            decision = await self.host.approver.ask(approval_request(pending))
+            # The main chat's own "allow" counts in every chat: its list says so.
+            decision = await self.host.approver.ask(
+                approval_request(pending), everywhere=chat_id == self.main_id
+            )
             # Answered here: the gateway's "resolved" for it cancels nothing now.
             if self._asks.get(request_id) is asyncio.current_task():
                 del self._asks[request_id]

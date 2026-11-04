@@ -2,11 +2,11 @@ import {formatTime, gistSentence, language, nameList, t} from './i18n.mjs';
 
 // The kinds of step auto mode blocks (#339), as the review names them.
 export const CATEGORIES = new Set([
-  'self', 'credentials', 'money', 'account', 'system', 'app_control', 'persistence', 'remote_code', 'install', 'restore',
+  'self', 'credentials', 'money', 'account', 'system', 'app_control', 'open_app', 'persistence', 'remote_code', 'install', 'restore',
   'env', 'download', 'outside_write', 'delete', 'service', 'send_out', 'opaque', 'beyond_request', 'unreviewed',
 ]);
 // What the person's words can allow (their request names the step); the rest (`app_control`, `system`,
-// `money` and `account` among them) only an Allow once, and `self` never.
+// `money`, `account` and `open_app` among them) only an Allow once, and `self` never.
 const WORDS_ALLOW = new Set(['install', 'restore', 'env', 'download', 'outside_write', 'delete', 'send_out', 'service', 'beyond_request']);
 // How long an Allow once holds, as the server keeps it.
 export const ALLOW_ONCE_S = 30 * 60;

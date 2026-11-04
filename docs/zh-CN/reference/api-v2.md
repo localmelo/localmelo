@@ -83,6 +83,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
     "recent": {"kind": "chat", "id": "e5f60718293a", "title": "Plan the trip", "outcome": "done", "ended_s_ago": 3.2},
     "focus": {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test", "activity": "Running the tests", "icon": "run", "answering": false}
   },
+  "desktop_helper": {"state": "granted", "app": "Cua Driver", "pictures": true, "problem": ""},
   "uptime_s": 132.4
 }
 ```
@@ -98,6 +99,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `activity` 用平实的话说明该项正在做什么（请求带 `X-LocalMelo-Language` 时用那种语言，macOS 的活动胶囊就是这样；否则是英文），`icon` 是它的类别：`Waiting for your approval`（`wait`）、`Needs your approval`（`wait`，因批准而被扣住的任务）、`Waiting for the model`（`held`，调度器暂缓了它的模型调用；原因已知时会说明原因：`Waiting for a higher-priority task`、`Waiting for a free model slot`、`Waiting while another job uses the model`、`Waiting for free memory`、`Waiting for the battery`、`Waiting for the Mac to cool down` 或 `Waiting until the Mac is idle`）、`Reading notes.md` 和 `Looking through
   ~/talk`（`read`）、`Writing slides.md`（`write`）、`Running the tests`（运行测试套件的命令）、`Running a command` 和 `Running Python`（`run`）、`Reading example.com`、`Reading the page` 和 `Following a link`（`web`）、`Remembering`（`memory`）、`Checking its work` 和 `Thinking`（`think`），其他任何工具为 `Using a tool`（`tool`）。它们来自该项最新的 40 个事件；只显示文件名、文件夹和网页的主机名，绝不显示命令行、代码或文本。无法读取的存储显示 `Thinking`。
 - `answering` 只有在该项最新的事件是已开始的步骤、轮次或反思，且其后没有未结束的工具调用、审批或暂缓时才为 true：模型正在作答。因为没有事件可读（还没读到，或存储无法读取）而说的 `Thinking` 为 `false`。macOS 应用的桌面 Melo 和控制台的头像只在它为 true 时显示 Melo 在思考。`GET /api/activity` 中运行中的行也带有它。
+- `desktop_helper` 是桌面控制助手的状态，取最近一次对话或检查得到的结果：`state` 为 `missing`（未安装）、`installed`（还没检查）、`granted`（它能运行并有“辅助功能”权限；`pictures` 表示它是否也有“录屏”权限）、`no_grant`（“辅助功能”权限没有打开）或 `failed`（没有启动）；`app` 是要给予权限的应用，`problem` 说明问题所在。`GET /api/health?helper=check` 会启动助手一次来读取它的权限（不弹出提示，至少相隔 30 秒，并且只在浏览已开启且 `[browser] app_windows` 为 true 时）；其他情况下不会启动任何东西。
 - `status.focus` 是一眼看过去时显示的那一项（形式与 `status.items` 中的相同）：先取等待审批的一项，否则取最新事件最晚的一项；没有任何内容运行时为 `null`。
 - `status.waiting` 列出有工具审批请求在等待回答的对话和任务，先是对话，最多 20 项，每项为 `{"kind", "id"}`（`kind` 为 `chat` 或 `task`）。控制台用 `#/s/<id>` 和 `#/tasks/<id>` 打开它们，macOS 应用的菜单栏在每次轮询时读取这个列表。`sessions.pending_approvals` 只统计已打开对话的请求。
 - `status.recent` 说明最近结束的对话轮次、任务、运行或终端对话轮次是怎么结束的：`{"kind", "id", "title", "outcome", "ended_s_ago"}`；还没有结束过任何一个（或读不到任何存储）时为 `null`。`kind` 与 `status.items` 中的相同；`title` 是它的名称（最多 200 个字符，读不到时为空）。`outcome` 为 `done`（运行已完成，或任务已完成）、`stopped`（用户停止了它，或任务被取消或已过期）或 `failed`（运行的其他任何结局，例如 `provider_error`、`budget_exhausted` 或 `stuck`，以及失败的任务）；用词与控制台一致，控制台显示为警告或错误的都是 `failed`。`ended_s_ago` 是它结束至今的秒数，精确到十分之一秒。因关机、崩溃恢复、接管、关闭或挂起而结束的轮次不算结果，已撤销的轮次也不计。它供展示上一次运行结果的客户端使用：macOS 应用中的桌面 Melo 和活动胶囊会读取它。一次调用通过索引读取每个文件中最近更新的几个会话里最新结束的轮次。
@@ -218,7 +220,8 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `memory_retriever` 可选：`auto`、`bm25`、`embedding` 或 `llm`，设置 `[memory] retriever`（其他值返回 400 `invalid_request`；没有嵌入模型时设为 `embedding` 返回 400 `invalid_settings`）；省略时保留已保存的值。
 - `language` 可选：`auto`、`en` 或 `zh-Hans`，设置 `[console] language`（其他值返回 400 `invalid_request`）；省略时保留已保存的值。页面会重新载入，显示新的语言。
 - `approvals` 可选：`ask` 或 `auto`，设置 `[approvals] mode`，即新对话开始时的模式（其他值返回 400 `invalid_request`）；省略时保留已保存的值。之前创建的对话保留各自的模式。
-- `browser` 可选：`true` 把 `[browser] driver` 设为 `safari-automation`，`false` 设为 `off`（其他值返回 400 `invalid_request`）；省略时保留已保存的值。`/browser on` 和 `/browser off` 保存的就是它。
+- `browser` 可选：`true` 开启浏览（`[browser] driver` 保留之前选过的浏览器，否则设为 `safari-automation`），`false` 设为 `off`（其他值返回 400 `invalid_request`）；省略时保留已保存的值。`/browser on` 和 `/browser off` 保存的就是它。
+- `browser_driver` 可选：`off`、`safari-automation` 或 `chrome`，按名字设置 `[browser] driver`，并优先于 `browser`（其他值返回 400 `invalid_request`）；省略时保留已保存的值。设置中的**浏览器**选项、`/browser chrome` 和 `/browser safari` 保存的就是它。响应中带有 `browser_driver` 和 `chrome_installed`（是否已安装 Google Chrome，以便选项提示先安装）。
 - 控制台一次保存一项更改：带上读取时的 `revision`，只发送改动的字段；它的 Undo 是同一个请求，换成之前的值。
 - 与磁盘上的文件不匹配的 `revision` 会返回 409 `settings_changed`。两个并发的 `PUT` 请求若读取了同一个 `revision`，两者都可能通过检查；最后写入者胜出，`os.replace` 保证文件不会被撕裂。
 - 服务器会重新加载 `config.toml`，因此命令行的 `--host` 和 `--port` 覆盖值从不写入磁盘；它会保留其他节、`extra_body`、`mcp_config`、`request_timeout_s`、`[agent]` 和 `[scheduler]`，校验候选设置（失败时返回 `400 invalid_settings` 并附 `details.errors`），以原子方式写入 `config.toml`，关闭空闲的会话智能体，使下一轮以新设置打开，并返回更新后的 `GET /api/settings` 响应体。
@@ -471,7 +474,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 }
 ```
 
-- `grants` 是本会话剩余部分允许使用的工具；`granted_at` 把每一项映射到授权开始的时间。
+- `grants` 是对话里允许的名称（工具、网站、窗口），无论对话是否打开：它自己的，以及（旁支对话）主对话的，后者在所有对话里都算；`granted_at` 把每一项映射到授权开始的时间。`grants_everywhere` 列出旁支对话的 `grants` 里因为主对话允许而算数的那些（主对话和任务里为 `[]`）：在这里收回其中一项，会在所有对话里一并收回。[`GET /api/grants`](#get-apigrants) 列出同样的授权及其详情。
 - `mcp_error` 说明本会话为何在没有 MCP 工具的情况下运行，否则为 `""`。目前它始终为 `""`：控制台尚未实现 MCP。
 - `agent` 为 `open`、`paused`（已关闭，但保留其对话）或 `not_loaded`（本网关尚未打开的会话，例如重启之后）。创建操作即使没有轮次也会打开会话；读取路由从不打开会话，而轮次或重试会打开。因此，`not_loaded` 会持续到网关启动后的第一次打开，而已关闭的智能体读作 `paused`。
 - `tokens` 汇总该会话已结束轮次的 `completion_tokens`，与回答所报告的字段相同。
@@ -610,6 +613,7 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 
 - 列表就是终端自己的命令表，顺序相同，所以终端里新增的命令会出现在这里。`help` 是 `en` 和 `zh-Hans` 的一行说明；`args` 是用法文字（`[name]`、`PATH`）；`keys` 是效果相同的按键。
 - `during_turn` 为 `true`（一轮运行时可用）、`false`（那时被拒绝）或 `"show"`（那时只有不带参数才可用）。`action` 是页面对该命令的处理；`everyday` 是 `/help` 先列出的命令。
+- `grants`（`[revoke N]`）在表里，`action` 为 `grants`：页面列出本人允许过的事并可收回一项，与 [`GET /api/grants`](#get-apigrants) 和 [`DELETE /api/grants/{id}`](#delete-apigrantsid) 相同。
 - 一条消息只有以 `/` 加小写名字开头、后面是空白或结尾时才是命令。页面自己运行命令，从不把它发给对话。
 
 ## GET /api/sessions/{id}/status
@@ -670,6 +674,40 @@ worker 运行或终端对话从 CLI 的文件读取。
 - 文件的真实路径（跟随所有链接后）必须位于会话的真实文件夹内，并会在已打开的文件上再检查一次；否则返回 403 `outside_workspace`（带 `..` 的路径、其他位置的绝对路径、指向外部的链接、另一个会话的文件夹）。只提供普通文件。
 - 名称必须以 `.png`、`.jpg`、`.jpeg`、`.gif`、`.webp` 或 `.svg` 结尾，内容也必须是这类图片（根据开头几个字节判断；`Content-Type` 取自内容而不是名称）；否则返回 415 `not_a_picture`（名为 `chart.png` 的文本文件，或实为 HTML 页面的 SVG）。超过 20 MB 的文件返回 413 `too_large`。
 - 每个响应都带有 `Content-Disposition: inline`、`X-Content-Type-Options: nosniff` 和 `Cache-Control: private`。PNG、JPEG、GIF 或 WebP 带有 `Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'`；SVG 带有 `Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'`，因此它可以绘制，但绝不会运行脚本，也不会作为页面打开。该路由只读取一个文件，不写入也不列出任何内容。
+
+## GET /api/sessions/{id}/browser
+
+对话在 melo 的浏览器里是否有打开的页面，以及是哪一个。melo 开始浏览时，控制台用它来打开**浏览器**面板。它不启动任何东西，也不传送画面。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/browser
+```
+
+```json
+{"open": true, "tab": "t2", "url": "https://example.com/", "title": "Example Domain", "browsing": false, "viewers": 1, "available": true, "driver": "chrome"}
+```
+
+- 对话的当前标签页存在时 `open` 为 true；`tab`、`url` 和 `title` 描述它（`open` 为 false 时，比如对话还没有浏览过或在网关里没有打开，`tab` 为 null，其余为空）。
+- 对话的浏览器步骤正在运行时 `browsing` 为 true。`viewers` 是该对话已打开的实时画面数量。
+- `[browser] driver` 为 `chrome` 且 `[browser] live` 开启时 `available` 为 true；`driver` 重复返回驱动名。未知的会话是 404 `not_found`。响应带有 `Cache-Control: no-store`。
+
+## WS /api/sessions/{id}/browser/live
+
+对话浏览器的实时画面：melo 正在操作的页面，以 JPEG 画面的形式送出，相关信息每次变化时再送一条小小的 JSON 消息。用户也可以通过它接管这个网页。控制台和 App 的弹出窗口使用它。
+
+```text
+{"type":"meta","state":"live","tab":"t2","url":"https://example.com/","title":"Example Domain","browsing":true,"owner":"melo","w":1280,"h":713,"offsetTop":0,"scale":1}
+<binary frame: one JPEG>
+```
+
+- 服务器发送文本帧和二进制帧。文本帧是 `meta` 消息：`state` 为 `idle`（没有打开的页面）、`loading`（有页面打开，但第一张画面还没到）、`live`、`stale`（画面流出错，最后一张画面不再更新）或 `closed`；`reason` 说明 `closed` 的原因（`tab`、`browser`、`chat` 或 `unavailable`）。`tab`、`url`、`title` 和 `browsing` 同上，`owner` 为 `melo` 或 `you`（用户接管了这个标签页），第一张画面到来后还会有 `w` 和 `h`（页面视口，单位为 CSS 像素）、`offsetTop` 和 `scale`（页面的缩放）。`takeover: true` 表示可以接管这个网页。`owner` 为 `you` 时，`grace` 是没有观看者之后标签页仍归用户的秒数（120），`dialog`（`kind` 为 `alert`、`confirm`、`prompt` 或 `beforeunload`，以及 `message`、`default`）是网页弹出、等用户回答的对话框。
+- 二进制帧是一张 JPEG。每个观看者只保留最新的一张画面，所以慢的观看者会跳过画面，而不是排队。不变的页面发送一张画面后不再发送；会动的页面被限制在 `[browser] live_fps`（默认 15）以内。
+- 可选的查询参数 `tab=tN` 把画面固定在该对话的一个标签页上。不带时，画面跟随 melo 正在操作的标签页，每次切换都有一条 `meta` 消息。另一个对话的标签页、未知的标签页和格式错误的名称都会被拒绝。
+- 只有在有人观看时才传送：没有观看者的对话，浏览器不会保持画面流；一个对话同时最多有 4 个观看者；传送的内容不会写入磁盘或会话存储。
+- 它与所有 `/api` 路由使用同一道防护：Host 请求头、带有时必须同源的 Origin，以及 Bearer 令牌或控制台的 Cookie。脚本发送 `Authorization: Bearer <token>`，不带 Origin。
+- 客户端发送 JSON 文本消息。`{"type":"take"}` 把它观看的标签页交给用户，`{"type":"give"}` 交还给 melo。标签页在用户手里、且 melo 不在某一步中间时，下面这些是用户的输入：`{"type":"mouse","action":"move|down|up","x","y","button","buttons","clicks","mods"}`（页面 CSS 像素：画面上的点减去 `offsetTop` 后再除以 `scale`）、`{"type":"wheel","x","y","dx","dy","mods"}`、`{"type":"key","action":"down|up","key","code","keyCode","mods","repeat"}`、`{"type":"compose","text","start","end"}`（输入法正在组字的文字）、`{"type":"text","text"}`（输入法提交的文字）和 `{"type":"paste","text"}`（纯文本），每条最多 1,000 个字符；`{"type":"dialog","accept","text"}` 回答网页的对话框。`mods` 是 Alt 1、Control 2、Meta 4 和 Shift 8 之和。每个观看者每秒最多 120 条输入。其他消息，以及 melo 持有标签页时的输入，都会被丢弃且不回复。消息里的任何内容都不会写入日志、保存或交给模型。
+- 用户手里的标签页没人观看时（最后一个观看者关闭，或令牌轮换），它还会归用户 120 秒，然后回到 melo。在此期间，melo 在这个标签页上的浏览步骤会等待，每次最多 45 秒。
+- 画面结束时服务器以 1000 关闭；拒绝时以 1008 关闭（原因为 `not_found`、`not_a_tab`、`not_available`（驱动不是 `chrome` 或 `live = false`）、`refused`（浏览器已停止、另一个对话的标签页，或该对话已有 4 个观看者），或网关令牌轮换时的 `token_rotated`）；客户端单条消息超过 4,096 字节时以 1009 关闭；会话存储不可用时以 1013 关闭。
 
 ## GET /api/sessions/{id}/submissions/{client_request_id}
 
@@ -887,7 +925,8 @@ worker 运行或终端对话从 CLI 的文件读取。
 - `choice` 为 `once`（仅本次调用）、`session`（本次调用及本会话中该工具之后的每一次常规调用）或 `deny`。对 `high` 调用（见 `GET /api/sessions/{id}` 的 `review`），`session` 只允许这一次调用：回复为 `"remember": false`，不会产生授权。
 - `reason` 只属于 `deny`，最多 500 个字符；与其他 choice 一起使用的 reason 会返回 400 `invalid_request`。
 - 未知或已过期的请求返回 404 `not_found`；已被答复的请求返回 409 `already_answered`，因此两个客户端竞争同一张卡片时，只会得到一个答复。
-- 审批保存在网关的内存中。网关停止时，等待某个审批的轮次会以 `cancelled` 结束，原因为 `shutdown`，且其卡片被保存为已撤回。
+- 被保留的 `session` 答复会成为 [`GET /api/grants`](#get-apigrants) 所列表格里的一项授权：在主对话里给出的，在所有对话里都算（`scope` 为 `global`），在其他对话里给出的只在那个对话里算。
+- 等待中的审批保存在网关的内存中。网关停止时，等待某个审批的轮次会以 `cancelled` 结束，原因为 `shutdown`，且其卡片被保存为已撤回。
 
 <a id="a-tasks-approvals-go-through-its-chat"></a>
 
@@ -895,8 +934,8 @@ worker 运行或终端对话从 CLI 的文件读取。
 
 本人开始的任务，通过拥有它的对话（它的 `front_id`，否则是主对话）来问。在问任何人之前，代码先查这个对话记录的批准；是否匹配从不由模型决定。
 
-- **记录。** 本人在某个对话里、或在它的任务（`origin` 为 `user` 的任务）的审批中给出的每次允许，只要这次调用可以复用，就为这个对话记录下来：工具是 melo 的规则会读的（`python_exec`、`shell_exec`、`file_write`、`file_edit`），且规则自己判定为 `routine`、没有类别。Auto 的允许一次、定时事项里的允许，以及对话被删除之后才给出的允许，从不记录。记录只保存在网关内存里；重启或删除对话都会忘掉它们。等待中的审批的 `remembered` 由代码说明它的允许是否会被记录。
-- **匹配。** 当这个对话的某条记录与任务的这一步工具相同、步骤相同（Python 按语法树，命令按确切文本，文件写入按路径和内容，规则为它读过的文件没有变化）、文件夹相同，且这一步也可以复用时，这一步不再询问就运行，审批的 `origin` 为 `earlier`。对话会得到一条 `earlier` 回执，任务的 `earlier` 列出这一步（在记录被撤回之前 `live` 为 true）。对话的会话授权也覆盖它的任务对该工具的常规调用。使用对话记录或授权的任务，审查时会读这个对话开始以来改动过的所有文件，所以早先的任务写下的文件会在记录或授权放行一步之前被读到；读不到对话的开始时间时，两者都不适用，改为问本人。
+- **记录。** 本人在某个对话里、或在它的任务（`origin` 为 `user` 的任务）的审批中给出的每次允许，只要这次调用可以复用，就为这个对话记录下来：工具是 melo 的规则会读的（`python_exec`、`shell_exec`、`file_write`、`file_edit`），且规则自己判定为 `routine`、没有类别。Auto 的允许一次、定时事项里的允许，以及对话被删除之后才给出的允许，从不记录。记录只保存在网关内存里（授权则保存在表格里）；重启或删除对话都会忘掉它们。等待中的审批的 `remembered` 由代码说明它的允许是否会被记录。
+- **匹配。** 当这个对话的某条记录与任务的这一步工具相同、步骤相同（Python 按语法树，命令按确切文本，文件写入按路径和内容，规则为它读过的文件没有变化）、文件夹相同，且这一步也可以复用时，这一步不再询问就运行，审批的 `origin` 为 `earlier`。对话会得到一条 `earlier` 回执，任务的 `earlier` 列出这一步（在记录被撤回之前 `live` 为 true）。在这个对话里算数的授权（它自己的或主对话的）也覆盖它的任务对该工具的常规调用；任务自己的授权只在那个任务里算。使用对话记录或授权的任务，审查时会读这个对话开始以来改动过的所有文件，所以早先的任务写下的文件会在记录或授权放行一步之前被读到；读不到对话的开始时间时，两者都不适用，改为问本人。
 - **从不。** 高影响、`undecided`、由模型判定或未经审查的步骤，以及规则不读的工具（网络、MCP 和其他工具）的每次调用，每次都问；`origin` 不是 `user` 的任务（包括定时事项的 `user_rule`）既不使用也不记录批准；别的对话的记录从不算数；Auto 从不凭记录运行它拦下的步骤。通过 `POST /api/tasks` 创建的任务属于本人（`origin` 为 `user`），除非 `front_id` 指向别的对话，否则属于主对话。
 - **说明。** `origin` 为 `user` 或 `user_rule` 的任务问本人时，它的对话的模型会就这一步写几句话（一次请求，最多 20 秒，依据任务的标题和目标、这次调用以及审查的理由，从不读取工具的输出）。它是审批的 `explanation`：`{"state": "pending" | "ready" | "none", "text"}`；其他任务的为 `none`。没有任何东西会读回它；决定的是答复。
 
@@ -930,7 +969,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 
 - 任务会话对任一变更都返回 409 `task_session_read_only`。
 - `title` 会被去除首尾空白，且必须为 1 到 200 个字符；其他长度返回 400 `invalid_request`。重命名的标题永远不会被自动标题替换。
-- `workspace` 会移动会话：在新文件夹中，用会话的对话构建一个新的智能体，并且会话的工具授权会被遗忘。规则与创建时相同：绝对路径或 `~/`，且为现有目录，否则返回 400 `invalid_workspace`。轮次运行期间返回 409 `session_busy`；被拒绝的移动会使该行保持原样。
+- `workspace` 会移动会话：在新文件夹中，用会话的对话构建一个新的智能体，并且会话自己的授权会被收回（主对话的授权仍然有效）。规则与创建时相同：绝对路径或 `~/`，且为现有目录，否则返回 400 `invalid_workspace`。轮次运行期间返回 409 `session_busy`；被拒绝的移动会使该行保持原样。
 - `approvals` 是 `ask` 或 `auto`：从下一步起对话的[模式](#ask-and-auto)；已经在等待回答的调用继续等待。它在一个事务中写入会话的 `meta`，并保留其他键；`session.updated` 带有新的 `meta`。不是控制台对话（`chat` 或 `front`）的会话返回 409 `not_a_chat`。
 - 变更之后，回答为 200，附带会话。
 
@@ -1021,22 +1060,60 @@ worker 运行或终端对话从 CLI 的文件读取。
 
 - `approvals` 是本人在这个对话里允许过的步骤，从新到旧，它的任务会不再询问就再次运行它们（[任务的批准](#a-tasks-approvals-go-through-its-chat)）。
 
-- `source` 为 `builtin`、`provided`（MCP 服务器的工具）或 `custom`。`requires_approval` 表示调用它之前会先询问；`granted` 表示本会话在网关本次运行的剩余时间内允许它。
+- `source` 为 `builtin`、`provided`（MCP 服务器的工具）或 `custom`。`requires_approval` 表示调用它之前会先询问；`granted` 表示有一项授权在本会话里算数：它自己的、主对话的，或 Auto 让它读的网站。
 - 控制台会话处于网关模式：它列出 `file_read`、`file_write`、`list_files` 和 `python_exec`，从不列出 `shell_exec`。
 - 任务会话返回 409 `task_session_read_only`；此路由不能把它作为对话打开。
 - 此路由会打开会话，因为提供方的工具只有在其智能体启动之后才会出现。它可能需要数秒，而启动失败则返回 502 `agent_start_failed`。
 - 控制台尚未实现 MCP，因此不加载任何 MCP 工具：`mcp_config_label` 始终为 `""`，`mcp_error` 始终为 `MCP is not built in the console yet`。
 
+## GET /api/grants
+
+本人给出且尚未收回的每一项“为这个对话允许”，放在同一个列表里：它是 **设置 › 授权** 和 `/grants` 的数据。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/grants
+```
+
+```json
+{"grants": [
+  {"id": "5c1e0a9d47b2", "scope": "global", "session_id": "7b0f3c2e9a41", "session_kind": "main", "chat_title": "Main chat", "kind": "tool", "key": "shell_exec", "label": "Run shell commands", "action": "tool", "target": "shell_exec", "by": "person", "granted_at": 1793482098.4},
+  {"id": "a83d11f6c05e", "scope": "session", "session_id": "3f9c2a7b1d4e", "session_kind": "side", "chat_title": "Trip plans", "kind": "site", "key": "browser:https://example.com", "label": "Open example.com", "action": "open", "target": "example.com", "by": "person", "granted_at": 1793482131.9}
+]}
+```
+
+- `id` 是 12 位十六进制字符。`scope` 为 `global`（在主对话里给出，所以在每个对话、任务和终端里都算）或 `session`（只在 `session_id` 那个对话里算）。`session_kind` 为 `main`、`side`、`task` 或 `terminal`；`chat_title` 是那个对话的标题（主对话为 `Main chat`）。
+- `kind` 为 `tool`、`site`、`folder` 或 `window`。`key` 是检查时匹配的确切名称：`shell_exec`、`browser:https://example.com`、`browser-act:https://example.com`、文件夹路径、`window-read:<app>`。
+- `label` 是页面显示的文字（英文）。`action` 为 `tool`、`open`、`act`（点击和选择）、`read`（Auto 让对话读的网站）、`folder` 或 `window`。`target` 是工具名、网站、写成 `~/…` 的文件夹或应用。
+- `by` 为 `person` 或 `auto`；`granted_at` 是 Unix 秒。Auto 的授权只是读网站，且只在它所属的对话里算，主对话也一样。
+- 顺序与页面和 `/grants` 的编号一致：先是 `global` 授权，从新到旧；然后是各个对话，有最新授权的对话在前。
+- 从不保留，所以从不列出：允许一次、输入、提交表单、点击密码、验证码或银行卡字段、同意控件或来自其他网站的框、在其他应用的窗口里按键、付款、更改账号设置，以及每一个高影响的步骤。
+- 与其他路由使用相同的令牌和来源防护：没有令牌返回 401，来自其他来源返回 403 `foreign_origin`。
+
+## DELETE /api/grants/{id}
+
+收回一项授权。它立即停止生效，正在运行的对话也一样；下一个需要它的步骤会再次询问。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X DELETE http://127.0.0.1:8401/api/grants/a83d11f6c05e
+```
+
+- 204 且无响应体。
+- id 未知或已收回时返回 404 `not_found`。
+- 与其他路由使用相同的令牌和来源防护。
+
 ## DELETE /api/sessions/{id}/grants/{tool}
 
-收回一项会话授权，使该工具下次再次询问。
+收回一项在对话里算数的授权，使该工具下次再次询问。
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X DELETE http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/grants/python_exec
 ```
 
-- 204 且无响应体；`GET /api/sessions/{id}` 的 `grants` 和 `granted_at` 都会去掉它。
-- 会话未打开或该工具没有授权时返回 404 `not_found`。`DELETE /api/sessions/{id}/grants` 不带工具名时，会忘记每一项授权，并返回 204，无论会话是否打开。
+- 200，响应体为 `{"revoked": [{"key": "python_exec", "scope": "session"}], "everywhere": false}`；`GET /api/sessions/{id}` 的 `grants` 和 `granted_at` 都会去掉它。它会收回这个对话自己的同名授权，以及主对话的同名授权（后者在所有对话里一并收回：这时 `everywhere` 为 `true`，那一行的 `scope` 为 `global`）。
+- 没有同名授权在该对话里算数时返回 404 `not_found`。对话不必处于打开状态。
+- `DELETE /api/sessions/{id}/grants` 不带名称时，会收回这个对话自己的授权并返回 200，响应体为 `{"revoked": N, "still_everywhere": M}`：旁支对话里还有 `M` 项主对话的授权仍然算数；在主对话里则收回每一项 `global` 授权。
+- 存储无法保存收回时返回 503 `store_unavailable`；检查已经不再使用这项授权，但重启后它会回来。
+- `DELETE /api/sessions/{id}/folders?path=PATH` 收回对话里允许读取的一个文件夹，回答和收回具名授权一样是 200：主对话允许的文件夹会在所有对话里一并收回，这时 `everywhere` 为 `true`（没有这样的授权时返回 404 `not_found`；存储无法保存时返回 503）。对话不处于打开状态时也可用。
 - 网站的授权以问题命名，例如 `browser-act:https://news.example`；名称里可以有斜杠，可以百分号编码后发送，也可以原样发送。
 
 ## DELETE /api/sessions/{id}/approvals/{entry_id}

@@ -117,9 +117,11 @@ chat_model = "qwen3:8b"
 | `resume_mode` | `[sessions]` | `"pairs"` | 终端对话恢复：`pairs` 加载最近的用户/答案对；`window` 加载保存的工作窗口加上之后的问答对，没有可用的检查点时回退。无效值只在界面中警告或回退；直接运行不读取此设置。 |
 | `record_direct` | `[sessions]` | `true` | 把每次直接运行（`melo "<task>"`、`melo --brief FILE`）记录为 `~/.cache/localmelo/cli/sessions.db` 中的 worker 会话，网页控制台的 Workers 视图和 macOS 应用会读取它。只有 `false` 会关闭；`--no-save-session` 对单次运行起同样作用，`--save-session` 或 `--parent-run` 仍会记录。只在为 `false` 时写入。见 [Worker 历史记录](cli.md#worker-历史记录)。 |
 | `policy` | `[scheduler]` | `"off"` | 网页工作区的调用如何到达模型服务器：`off` 只记录，`fcfs` 先到先得，`class` 让 P1 先于 P2 得到准入（依此类推）；见[调度器](../guides/scheduler.md#the-gate-on-chats-s2)。 |
-| `driver` | `[browser]` | `"off"` | melo 是否可以在浏览器中读取网页：`off` 不提供浏览工具；`safari-automation` 为终端对话以及网页控制台和 App 的每个对话提供十二个工具，在 Safari 的自动化窗口中打开、读取、点击、输入和选择网页内容，全部发生在 melo 自己的浏览器窗口里（每个网站每次对话询问一次，点击、输入和选择会再询问，发送表单每次都会单独询问；见[用 melo 浏览网页](../guides/browsing.md)）。终端中用 `/browser` 切换；`-X browser.driver=safari-automation` 仅用于一次运行。直接运行、worker 运行和已保存的任务从不获得这些工具。其他任何值都是配置错误。 |
+| `driver` | `[browser]` | `"off"` | melo 是否可以在浏览器中读取网页，以及用哪个浏览器：`off` 不提供浏览工具；`safari-automation` 和 `chrome` 为终端对话以及网页控制台和 App 的每个对话提供十二个工具，用来打开、读取、点击、输入和选择网页内容（每个网站每次对话询问一次，点击、输入和选择会再询问，发送表单每次都会单独询问；见[用 melo 浏览网页](../guides/browsing.md)）。`safari-automation` 使用会来到最前面的 Safari 自动化窗口；`chrome` 使用后台的 Google Chrome，没有窗口，使用 melo 自己位于 `~/.cache/localmelo/browser/chrome` 的配置（见[后台的 Chrome](../guides/browsing.md#chrome-in-the-background)），需要已安装 Google Chrome。终端和控制台中用 `/browser`、`/browser chrome` 和 `/browser safari` 切换，也可以在设置 → 对话和文件夹 → **浏览器** 中切换；`-X browser.driver=chrome` 仅用于一次运行。直接运行、worker 运行和已保存的任务从不获得这些工具。其他任何值都是配置错误。 |
 | `keep_tabs` | `[browser]` | `false` | melo 打开的标签页是否保持打开。默认情况下 melo 每个对话复用一个标签页，并在对话结束时、以及十分钟没有浏览调用后关闭它打开的标签页（最后一个保留为空白页）。`true` 让它们全部保持打开。不是 melo 打开的标签页从不触碰。见[用 melo 浏览网页](../guides/browsing.md#tabs)。 |
 | `app_windows` | `[browser]` | `true` | melo 在浏览器中操作之后，其他应用打开的窗口（比如聊天应用的登录授权窗口）melo 是否能看到，并在你同意后按下其中的按钮。读取和按按钮需要桌面控制助手；没有它时，melo 只会说明是哪个应用到了最前面。设置 → 对话和文件夹 → **其他应用的窗口**。见[其他应用的窗口](../guides/browsing.md#windows-from-other-apps)。 |
+| `live` | `[browser]` | `true` | 网页控制台和 App 是否可以在**浏览器**面板里实时显示 melo 在后台 Chrome 中打开的页面（仅查看，见[观看 melo 的浏览器](../guides/browsing.md#watching-melos-browser)）。`false` 会拒绝实时画面。Safari 窗口从不推送画面。不是布尔值的值属于配置错误。 |
+| `live_fps` | `[browser]` | `15` | 实时画面每秒最多传送的画面数，1 到 60 的整数。不变的页面只发一张画面，之后不再发送；没有人观看时什么也不发送。其他值属于配置错误。 |
 | `web_fetch` | `[tools]` | `true` | 对话和任务是否可以用 `web_fetch` 工具读取公开网页（只读；从不访问这台电脑或它所在的局域网；你自己最近的消息没有提到的网站每个对话问一次，与浏览器共用；见[工具](tools.md#reading-a-public-web-page)）。`false` 移除这个工具；设置 → 对话和文件夹 → **读取网页** 是同一个开关；`-X tools.web_fetch=off` 仅用于一次运行。直接运行从不获得它。不是布尔值的任何值都是配置错误。 |
 | `web_fetch_allow_local` | `[tools]` | `[]` | 开发者设置，默认为空（关闭），用于需要 `web_fetch` 读取这台电脑上一个测试页面的测试。一个由精确条目组成的列表：`"127.0.0.1:PORT"` 或 `"[::1]:PORT"`（端口 1 到 65535）；`web_fetch` 随后会读取这些地址，不会读取其他任何本机地址。其他任何条目都是配置错误，且永远不会被使用：名字（`localhost`）、其他地址（私有或局域网地址段、`127.0.0.2`、`0.0.0.0`）、端口范围、通配符、没有端口。melo 自己的网关和控制台的端口（它真正监听的端口，包括 `melo serve --port` 设置的，以及正在运行的网关的端口），以及配置里写明的或这次运行的 `-u` URL 指向的任何模型服务器的端口，即使列出也会被拒绝；两者都没有写明的模型服务器不受保护。对话或任务在开始时读取这份列表，已列出的服务器会先问人（自动模式下单独审查；没有人可问时，例如 `--yolo`，会直接读取）。只有 `web_fetch` 读取它，浏览工具从不读取。在文件中设置，或用 `-X tools.web_fetch_allow_local=127.0.0.1:PORT[,…]` 仅用于一次运行：模型、控制台的设置和 API 都不能设置它，运行 `melo config set` 或对它使用 `-X` 的 shell 或 Python 调用算作改动 localmelo 本身（每次都要问，自动模式会拦下）。它放行的读取会在该调用的 `tool.finished` 事件和调用显示的内容中标出。`melo config keys` 会带着警告列出它；规则见[工具](tools.md#test-servers-on-this-computer)。 |
 | `search` | `[web]` | `false` | 对话和任务是否可以用 `web_search` 工具搜索网页（只读；搜索的关键词会离开这台电脑；关键词看起来像机密或粘贴来的文字时会先询问；见[工具](tools.md#searching-the-web)和[用 melo 搜索网页](../guides/web-search.md)）。设置 → 对话和文件夹 → **网页搜索** 是同一个开关，`-X web.search=true` 只在这一次运行中开启，`melo config set web.search true` 会保存它。直接运行从不获得它。 |
@@ -251,7 +253,7 @@ tool_env = ["SSH_AUTH_SOCK", "HTTPS_PROXY"]
 
 事件和 JSON 结果报告估算值、可用时的实际提示计数，以及裁剪计数，但不保存提示文本。输出预留不是提供方的生成长度上限；独立的字符限制仍然适用。
 
-`[agent] fixed_prefix`（默认 `true`）让直接运行、交互式界面和 API v2 控制台运行采用 `fixed-prefix-v2`；`--fixed-prefix on|off` 为一次直接运行或交互式运行覆盖它，`fixed_prefix = false`（或 `--fixed-prefix off`）会发送它成为默认值之前的请求。它在每次运行开始时（包括跨越午夜时）快照本地日期和 UTC 偏移，并把会变化的召回和反思放进带标签的用户侧数据：召回在任务之前；使用 `cache_layout = "v2"` 时，最新的反思放在最后（窗口之后的一条最终用户消息），默认的 `v3` 则把反思只追加到窗口一次（见下文）；反思请求重复最近一次规划请求（相同的系统文本、相同的 `tools`、相同的轮次，再加上之后的轮次），并追加一条带反思提示的最终用户消息。
+`[agent] fixed_prefix`（默认 `true`）让直接运行、交互式界面和 API v2 控制台运行采用 `fixed-prefix-v2`；`--fixed-prefix on|off` 为一次直接运行或交互式运行覆盖它，`fixed_prefix = false`（或 `--fixed-prefix off`）会发送它成为默认值之前的请求。它在每次运行开始时（包括跨越午夜时）快照本地日期和 UTC 偏移，并把会变化的召回和反思放进带标签的用户侧数据：召回在任务之前。长期召回（`reasoning = "legacy"`）在一次运行的第一步读取，之后的步骤沿用同一份，因此每个规划请求都是上一个请求的延续；只有当窗口丢掉最早的消息之后（这一步的请求本来就已改变）以及下一次运行时，才会重新读取。若每一步都重新读取，运行自己的步骤摘要一进入召回，召回就会变化，服务器就要重新预填之后的所有消息。使用 `cache_layout = "v2"` 时，最新的反思放在最后（窗口之后的一条最终用户消息），默认的 `v3` 则把反思只追加到窗口一次（见下文）；反思请求重复最近一次规划请求（相同的系统文本、相同的 `tools`、相同的轮次，再加上之后的轮次），并追加一条带反思提示的最终用户消息。
 
 一个显式的结束分隔符让任务和反思请求留在该数据之外；以该分隔符开头的数据行会被确定性地加上引号。固定的系统部分依次是基础文本，（在终端界面或控制台的对话中）说明 melo 是谁、运行在哪个模型、服务器和位置上、记得什么以及用哪种语言和文字回答的身份段落，各条说明，召回和反思是数据的那句话，以及日期行。
 
@@ -391,7 +393,7 @@ enable_thinking = false
 - 对 `ollama` 后端，这些字段进入 Ollama `/api/chat` 的请求体。localmelo 默认向 Ollama 请求模型的思考；`extra_body = { think = false }` 会关闭它。
 - `--base-url` 不读取配置文件，因此 `extra_body` 在那里不适用。
 
-驱动为 `off`、`keep_tabs` 为 `false` 且 `app_windows` 为 `true` 的 `[browser]` 表不会写入（`keep_tabs` 仅在为 `true` 时写入，`app_windows` 仅在为 `false` 时写入），`web_fetch` 为 `true` 且 `web_fetch_allow_local` 为空的 `[tools]` 表、`search` 为 `false`、`search_order` 为空且 `search_count` 为 `6` 的 `[web]` 表、`follow_up` 为 `true` 的 `[tasks]` 表和 `recent_digest_minutes` 为 `30` 的 `[chat]` 表也不会。
+驱动为 `off`、`keep_tabs` 为 `false`、`app_windows` 为 `true`、`live` 为 `true` 且 `live_fps` 为 `15` 的 `[browser]` 表不会写入（`keep_tabs` 仅在为 `true` 时写入，`app_windows` 和 `live` 仅在为 `false` 时写入，`live_fps` 仅在不是 `15` 时写入），`web_fetch` 为 `true` 且 `web_fetch_allow_local` 为空的 `[tools]` 表、`search` 为 `false`、`search_order` 为空且 `search_count` 为 `6` 的 `[web]` 表、`follow_up` 为 `true` 的 `[tasks]` 表和 `recent_digest_minutes` 为 `30` 的 `[chat]` 表也不会。
 
 <a id="mcp-servers"></a>
 
@@ -447,9 +449,25 @@ chat_model = "Qwen/Qwen3-8B"
 | `~/.cache/localmelo/config.toml` | 配置。 | 由设置向导创建。 |
 | `~/.cache/localmelo/memory/` | `history.db`、`procedures.db`（程序性记忆，每次运行结束时写入），以及使用嵌入后端时的 `long_term.db`。 | 智能体在设置了 `LOCALMELO_PERSIST_MEMORY` 时启动，权限为 0700。已存在且允许组或其他用户读写的目录会被设为 0700。 |
 | `--memory-dir` 指定的目录 | 同上的文件，供那次运行使用。 | 运行开始时创建；新目录的权限为 0700。 |
+| `~/.cache/localmelo/gateway/sessions.db` | 控制台的对话和任务，以及你在其中允许过的事（`grants` 表；见[你允许过的事](#what-you-allowed)）。 | 由网关创建。 |
+| `~/.cache/localmelo/cli/sessions.db` | 终端自己的对话，以及终端自己的对话的授权。 | 终端收到第一条消息时。 |
 | `~/.cache/localmelo/playground/` | 旧版 playground 的记忆。 | 默认关闭的 playground 启动时（security-1b 进行中）。 |
 | `~/.localmelo/logs/` | 后台服务的日志。 | 由 `melo --daemon install` 创建。 |
 | `~/Library/LaunchAgents/ai.localmelo.gateway.plist` | 后台服务的定义。 | 由 `melo --daemon install` 创建。 |
+
+<a id="what-you-allowed"></a>
+
+## 你允许过的事
+
+“为这个对话允许”的回答就是授权。它们放在会话文件的同一张表 `grants` 里（组件 `grants`，版本 1）；没有配置键控制它们。
+
+- **列：** `id`、`session_id`、`session_kind`、`scope`、`kind`、`key`、`label`、`target`、`decided_by`、`granted_at`、`request_id`、`revoked_at`。
+- **收回与保留：** 收回会设置 `revoked_at`。已收回的行在存储的思考保留期之后删除（默认 30 天；见 `LOCALMELO_THINKING_RETENTION_DAYS`）。
+- **随会话：** 会话的行随会话一起删除（`ON DELETE CASCADE`）。
+- **失败时关闭：** 违反规则的行在读取时被忽略，所以改过的文件无法扩大权限：不是本人在主对话里给出的 `global` 行、超过读取网站的 Auto 行、必须每次都询问的键，或从不提供的文件夹。
+- **不是授权：** **总是允许这个文件夹** 记在 `[workspace] extra_folders` 里。
+
+面向读者的规则见[你允许过的事](../guides/terminal.md#what-you-allowed)和[授权](../guides/web-console.md#permissions)；路由见 [API v2](api-v2.md#get-apigrants)。
 
 <a id="upgrading-from-an-older-config"></a>
 

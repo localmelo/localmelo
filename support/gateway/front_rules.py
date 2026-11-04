@@ -542,6 +542,28 @@ def acts(typed: str) -> bool:
     return False
 
 
+# The go-ahead for work the chat has talked about: "I authorize you to submit
+# them", "我授权你去提交". Such words carry no verb that acts, yet they ask for
+# the work, so a chat starts it (a negated one, "I do not authorize it", does not).
+_AUTHORIZES: Final = re.compile(
+    r"\bI\s+(?:hereby\s+)?authori[sz]e\s+(?:you|melo|it|this|that|them)\b"
+    r"|\byou\s+(?:are|['’]re)\s+authori[sz]ed\b"
+    r"|\b(?:you\s+)?have\s+my\s+(?:permission|approval)\b|\bI\s+(?:allow|permit)\s+you\b"
+    r"|授权(?:你|给你|melo)|我授权|我(?:允许|准许|同意)你",
+    re.IGNORECASE,
+)
+
+
+def authorizes(typed: str) -> bool:
+    """Whether *typed* gives melo the go-ahead for work: "I authorize you to apply",
+    "我授权你去投", not under a negation ("I don't authorize it", "我没授权")."""
+    text = norm(_QUOTED.sub(" ", typed or ""))
+    for found in _AUTHORIZES.finditer(text):
+        if not _NEGATION.search(text[: found.start()]):
+            return True
+    return False
+
+
 def polite_request(typed: str) -> bool:
     """Whether *typed* asks melo to do something, however politely: "can you run …?",
     "请帮我装…". A polite opening with no verb that acts ("please explain …",
@@ -736,7 +758,8 @@ def start_rule(typed: str) -> StartRule:
       names a file or a link;
     - ``offer`` for words that say not to act (:func:`hands_off`) and ask for
       nothing else (:func:`acts`): "fix the bug without changing anything
-      else" asks for the fix;
+      else" asks for the fix; words that authorize work (:func:`authorizes`:
+      "I authorize you to apply") ask for it too;
     - ``answer`` for a polite opening, or one that asks to be told, with no
       verb that acts ("please explain …", "帮我看看 …"), and for what
       :func:`route` answers (a greeting, a brief or short plain question),
@@ -760,7 +783,7 @@ def start_rule(typed: str) -> StartRule:
         return "answer"
     # A request in steps acts too, unless the words say not to act.
     steps = steps_request(typed) and not hands_off(typed)
-    doing = acts(typed) or steps
+    doing = acts(typed) or steps or (authorizes(typed) and not hands_off(typed))
     if hands_off(typed) and not doing:
         return "offer"
     if not doing and (_REQUEST.match(text) or _EXPLAINS.match(text)):
