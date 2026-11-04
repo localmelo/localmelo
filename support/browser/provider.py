@@ -75,7 +75,14 @@ from localmelo.melo.contracts.approvals import (
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool, ToolFunction
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.schema import ImagePart, ToolDef
-from localmelo.support.browser import addresses, apps, fields, render, sites
+from localmelo.support.browser import (
+    addresses,
+    apps,
+    fields,
+    local_apps,
+    render,
+    sites,
+)
 from localmelo.support.browser.desktop import (
     KEEP_S,
     LATE_S,
@@ -99,6 +106,7 @@ from localmelo.support.browser.driver import (
     View,
 )
 from localmelo.support.browser.live import DEFAULT_FPS, LiveView
+from localmelo.support.browser.local_apps import LocalAttempt
 from localmelo.support.browser.takeover import (
     STEP_WAIT_S,
     YOU,
@@ -113,6 +121,16 @@ logger = logging.getLogger(__name__)
 GROUP = "browser"
 WAIT_DEFAULT_S = 10.0
 WAIT_MAX_S = 30.0
+# What a wait says when its condition held before any waiting.
+_ALREADY = {
+    "load": "the page had already loaded",
+    "text": "the text was already on the page",
+    "gone": "the text was already gone",
+}
+_NOT_A_PAUSE = (
+    "browser_wait returns as soon as its condition holds, so it is not a pause: "
+    "to let a slow page finish, wait for text that shows it is ready."
+)
 # Tabs melo opened are closed after this long without a browser call.
 IDLE_CLOSE_S = 600.0
 # The most tabs one action adopts (a page that opens more has the rest left alone).
@@ -156,9 +174,10 @@ BACKGROUND_NOTE = PAGE_NOTE.replace(
 DESKTOP_NOTE = (
     "Other apps' windows: a step's result names a window another app opened "
     "after your act (a sign-in or permission window, say), with its buttons. "
-    "window_read reads it and window_press presses a button by name; never "
-    "type into other apps. When melo can only name the app, tell the person "
-    "to answer that window."
+    "window_read reads it and window_press presses a button by name; a window "
+    "that names no buttons draws its own: press a point of its picture (x and "
+    "y). Never type into other apps. When melo can only name the app, tell the "
+    "person to answer that window."
 )
 
 _ROLES = ["link", "button", "textbox", "checkbox", "select", "any"]
@@ -278,7 +297,8 @@ TOOLS: tuple[ToolDef, ...] = (
     ),
     _def(
         "browser_wait",
-        "Wait until the page has loaded, some text appears, or some text is gone (30 s at most).",
+        "Wait until the page has loaded, some text appears, or some text is gone "
+        "(30 s at most). It returns at once when that already holds: it is not a pause.",
         ("until",),
         tab=_TAB,
         until=_p("string", enum=["load", "text", "gone"]),
@@ -384,7 +404,7 @@ def _guarded(fn: ToolFunction) -> ToolFunction:
                 else:
                     result = await fn(self, **arguments)
                     result = await self._needs_you_after(result, before)
-                return await self._with_screen(_led(back, result))
+                return await self._with_screen(self._with_local(_led(back, result)))
             except BrowserError as exc:
                 return ToolOutput(text=_led_text(back, str(exc)), is_error=True)
             finally:
@@ -1961,6 +1981,23 @@ class BrowserToolProvider(BaseToolProvider):
 
         return moved
 
+    def _with_local(self, result: str | ToolOutput) -> str | ToolOutput:
+        """*result* with the requests to this computer melo blocked on this chat's pages since the last step."""
+        take = getattr(self._driver, "local_attempts", None)
+        if not callable(take):
+            return result
+        lines = self._local_lines(list(take()))
+        if not lines:
+            return result
+        text = "\n".join(lines)
+        if isinstance(result, ToolOutput):
+            return dataclasses.replace(result, text=f"{result.text}\n{text}")
+        return f"{result}\n{text}"
+
+    def _local_lines(self, attempts: list[LocalAttempt]) -> list[str]:
+        """What the step says about *attempts*. A card that offers to allow an app's helper would be offered here."""
+        return local_apps.told(attempts)
+
     async def _with_screen(self, result: str | ToolOutput) -> str | ToolOutput:
         """*result* with what other apps put on the screen since the last look, if the step did not tell it itself."""
         if self._desktop is None:
@@ -2141,7 +2178,8 @@ class BrowserToolProvider(BaseToolProvider):
         if hit.surface == "none" or item is None:
             raise BrowserError(
                 "There is nothing to click at that point (text or background). "
-                "Pick a point on a button, link, field or drawing in the picture."
+                "Pick a point on a button, link, field or drawing in the picture. "
+                + _scale_hint(px, py, view)
             )
         what = _point_words(hit.surface, item, hit.site)
         if item.sensitive:
@@ -2295,6 +2333,9 @@ class BrowserToolProvider(BaseToolProvider):
         # The condition counts only on the approved site, read in the same step,
         # and the tab is checked again after: a wait says nothing about a page
         # that went elsewhere while it was watched.
+        already = await self._driver.holds(
+            self._raw[tab_id], until, str(text), origin=self._origins[tab_id]
+        )
         reached, others = await self._watched_wait(tab_id, until, str(text), limit)
         try:
             await self._recheck(tab_id)
@@ -2308,7 +2349,10 @@ class BrowserToolProvider(BaseToolProvider):
                 + _screen_block(others)
             )
         if reached:
-            line = f"Reached: {reached_words}."
+            if already:
+                line = f"Reached: {_ALREADY[until]}; nothing was waited. {_NOT_A_PAUSE}"
+            else:
+                line = f"Reached: {reached_words}."
             if others:
                 line += " Another app put a window on the screen.\n"
                 line += _screen_block(others)
@@ -2612,6 +2656,22 @@ def parse_point(x: Any, y: Any, rest: dict[str, Any]) -> tuple[float, float]:
             "x and y run from 0 to 1000 across and down the picture, whatever its size."
         )
     return px, py
+
+
+def _scale_hint(x: float, y: float, view: View) -> str:
+    """The scale of a point, for a click that found nothing: a model often writes pixels.
+
+    When (*x*, *y*) would fit inside the picture as pixels, it also says where
+    that point is on the 0-1000 scale.
+    """
+    hint = "x and y run 0-1000 across and down the picture, not in pixels."
+    if x <= view.width and y <= view.height:
+        hint += (
+            f" As pixels of the {view.width:.0f}x{view.height:.0f} picture, "
+            f"({x:g}, {y:g}) is ({x * 1000 / view.width:.0f}, "
+            f"{y * 1000 / view.height:.0f}) on that scale."
+        )
+    return hint
 
 
 def _stale_ref(ref: object) -> str:

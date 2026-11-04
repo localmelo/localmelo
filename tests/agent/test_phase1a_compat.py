@@ -21,7 +21,9 @@ golden:
 The goldens were recorded at c295ce2, which holds Phase 1a (#30), the
 reflection retry (#31), the built-ins offered on every step (#32) and the
 reflection gate (#34) with its default ``reflection_gate="flags"``. Every
-later change must leave them as they are.
+later change must leave them as they are, with one exception: the tool message of
+a picture that the model is not sent ends with a line that says so, as it did
+not before (``completed_after_tools_*``).
 
 Before a golden is compared, generated ids (task, step and tool-call ids)
 become ordinals in order of first appearance, such as ``<task:1>``;

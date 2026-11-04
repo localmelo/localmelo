@@ -550,7 +550,7 @@ class Takeable(Streaming):
         super().__init__(*pages)
         self.cast: TakeStream = TakeStream()
         self.inputs: list[tuple[str, str, dict[str, Any]]] = []
-        self.holds: dict[str, bool] = {}
+        self.held: dict[str, bool] = {}
         self.box: dict[str, str] | None = None
         self.answers: list[tuple[str, bool, str]] = []
 
@@ -559,7 +559,7 @@ class Takeable(Streaming):
         return True
 
     def hold_dialogs(self, tab: str, held: bool) -> None:
-        self.holds[tab] = held
+        self.held[tab] = held
 
     def dialog_of(self, tab: str) -> dict[str, str] | None:
         return self.box
@@ -650,10 +650,10 @@ async def test_the_person_takes_the_tab_from_the_panel_and_gives_it_back() -> No
     assert (
         driver.cast.rates[-1] == TAKEN_FPS
     ), "the person sees what they do at full rate"
-    assert driver.holds == {"t1": True}, "the page's boxes are theirs now"
+    assert driver.held == {"t1": True}, "the page's boxes are theirs now"
     assert await live.give(viewer) is True
     await until(lambda: viewer.meta["owner"] == "melo")
-    assert driver.cast.rates[-1] == live.fps and driver.holds == {"t1": False}
+    assert driver.cast.rates[-1] == live.fps and driver.held == {"t1": False}
     await provider.close()
 
 

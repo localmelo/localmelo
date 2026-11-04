@@ -22,8 +22,10 @@ from localmelo.melo.agent._request_accounting import _image_dimensions
 from localmelo.melo.agent._tool_images import (
     MAX_IMAGE_WIDTH,
     UNCHANGED_NOTE,
+    WITHHELD_NOTE,
     ToolImageStore,
     shrink,
+    withheld_note,
 )
 from localmelo.melo.checker.checker import IMAGE_PROMPT_CHARS, Checker
 from localmelo.melo.contracts.providers import BaseLLMProvider
@@ -194,6 +196,107 @@ class TestModes:
             assert await agent.run("take screenshots") == "done"
             assert llm.asked == 0  # no image: nothing to ask about
         assert requests(mode) == requests("off")
+
+
+def tool_contents(request: list[Message]) -> list[str]:
+    return [m.content for m in request if m.role == "tool"]
+
+
+class TestWithheld:
+    """A picture that does not reach the model says so in its tool message."""
+
+    @pytest.mark.parametrize(
+        "setting",
+        [
+            {"takes": None},  # the server does not say
+            {"takes": False},
+            {"takes": RuntimeError("no route")},
+            {"takes": True, "tool_images": "off"},  # the person turned them off
+        ],
+    )
+    async def test_the_tool_message_says_the_model_cannot_see_it(
+        self, setting: dict[str, Any]
+    ) -> None:
+        options = {k: v for k, v in setting.items() if k != "takes"}
+        llm = ScriptedLLM(shots(2), takes=setting["takes"])
+        await run(llm, 2, **options)
+        assert all(sent_images(r) == [] for r in llm.requests)
+        note = withheld_note(())
+        assert tool_contents(llm.requests[-1]) == [
+            f"frame 0\n[1 image: {frame(0).ref}]\n{note}",
+            f"frame 1\n[1 image: {frame(1).ref}]\n{note}",
+        ]
+        assert note.startswith("You cannot see this picture")
+        assert "the person can" in note and "Do not describe it" in note
+
+    async def test_the_line_is_not_a_tool_message_of_its_own(self) -> None:
+        llm = ScriptedLLM(shots(1), takes=None)
+        await run(llm, 1)
+        roles = [m.role for m in llm.requests[-1]]
+        assert roles == ["system", "user", "assistant", "tool"]
+
+    async def test_an_image_only_result_gets_the_line_after_its_marker(self) -> None:
+        llm = ScriptedLLM(shots(1), takes=None)
+        agent = agent_for(llm)
+
+        async def bare(n: int = 0, same: bool = False) -> ToolOutput:
+            return ToolOutput(text="", images=[frame(9)])
+
+        agent.executor.register("shot", bare)
+        assert await agent.run("take a screenshot") == "done"
+        assert tool_contents(llm.requests[-1]) == [
+            f"[1 image: {frame(9).ref}]\n{withheld_note(())}"
+        ]
+
+    async def test_a_server_that_reads_images_gets_the_pixels_and_no_line(self) -> None:
+        llm = ScriptedLLM(shots(2), takes=True)
+        await run(llm, 2)
+        assert sent_images(llm.requests[-1]) == ["frame 0", "frame 1"]
+        assert not any(WITHHELD_NOTE in c for c in tool_contents(llm.requests[-1]))
+
+    async def test_on_says_nothing_either(self) -> None:
+        llm = ScriptedLLM(shots(2))
+        await run(llm, 2, tool_images="on")
+        assert tool_contents(llm.requests[-1]) == [
+            f"frame 0\n[1 image: {frame(0).ref}]",
+            f"frame 1\n[1 image: {frame(1).ref}]",
+        ]
+
+    async def test_a_result_without_a_picture_gets_no_line(self) -> None:
+        llm = ScriptedLLM(shots(2), takes=None)
+        agent = agent_for(llm, text_only=True)
+        assert await agent.run("take screenshots") == "done"
+        assert tool_contents(llm.requests[-1]) == ["frame 0 as text", "frame 1 as text"]
+        assert llm.asked == 0
+
+    async def test_the_prefix_stays_the_same_from_one_request_to_the_next(self) -> None:
+        llm = ScriptedLLM(shots(3), takes=None)
+        await run(llm, 3)
+        for earlier, later in zip(llm.requests, llm.requests[1:], strict=False):
+            assert [(m.role, m.content) for m in later[: len(earlier)]] == [
+                (m.role, m.content) for m in earlier
+            ]
+
+    async def test_it_names_the_text_tools_the_model_has(self) -> None:
+        llm = ScriptedLLM(shots(1), takes=None)
+        agent = agent_for(llm)
+        for name in ("browser_read", "browser_find"):
+            agent.hippo.register_tool(
+                ToolDef(name=name, description=name, parameters={})
+            )
+        assert await agent.run("take a screenshot") == "done"
+        (content,) = tool_contents(llm.requests[-1])
+        assert content.endswith(withheld_note(("browser_read", "browser_find")))
+        assert "browser_read or browser_find" in content
+
+    def test_the_line_names_only_the_tools_given(self) -> None:
+        assert withheld_note(()) == WITHHELD_NOTE
+        assert withheld_note(("browser_read",)).endswith(
+            "Read the page with browser_read."
+        )
+        assert withheld_note(("browser_read", "browser_find")).endswith(
+            "Read the page with browser_read or browser_find."
+        )
 
 
 class TestBudget:

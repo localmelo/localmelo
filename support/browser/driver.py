@@ -295,6 +295,18 @@ class StaleElementError(BrowserError):
         self.why = why
 
 
+class CoveredError(StaleElementError):
+    """A real click or key press would land on another element, so melo stopped it.
+
+    Nothing was done and the page is as it was read, so the readings stay (the
+    refs work as before). The message says what stands over the element when
+    the page said so. ``why`` is ``covered``.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, "covered")
+
+
 class BrowserDriver(Protocol):
     """A browser melo reads pages in. ``tab`` None means the current tab."""
 
@@ -342,6 +354,11 @@ class BrowserDriver(Protocol):
         origin (``location.origin``), read in the same step as the condition,
         so a page that goes elsewhere for a moment answers nothing about it.
         """
+
+    async def holds(
+        self, tab: str | None, until: str, text: str, *, origin: str = ""
+    ) -> bool:
+        """Whether the condition of :meth:`wait` holds right now: one look, no waiting."""
 
     async def screenshot(
         self, tab: str | None, mark: tuple[View, float, float] | None = None

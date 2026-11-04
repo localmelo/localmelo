@@ -96,6 +96,17 @@ class Vision:
         assert self._result is not None
         return self._result[1] if self._result[0] == self._key() else None
 
+    def known(self) -> bool | None:
+        """The last verdict on the model of the settings, without asking the server again.
+
+        ``None`` before any verdict, and after the model setting changed. A run
+        that reads words added mid-turn asks this: it cannot wait for a server.
+        """
+        result = self._result
+        if result is None or result[0] != self._key():
+            return None
+        return result[1]
+
     def refused(self) -> None:
         """A turn was refused for its pictures: the model of the settings is text only, for now."""
         self._result = (self._key(), False, time.monotonic())

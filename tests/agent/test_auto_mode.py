@@ -25,6 +25,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     ApprovalRequest,
     AutoPolicy,
+    denial_text,
     grant_offered,
 )
 from localmelo.melo.contracts.providers import LLM_REQUEST_KIND, BaseLLMProvider
@@ -820,55 +821,6 @@ class CardAsker:
         return ApprovalDecision(False, "not this one", origin="user")
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("button", "reviews", "card"),
-    [
-        # Authorizing the sign-in the person asked for: on the goal, it runs with
-        # no card, although a press is never kept as a grant for the chat.
-        ("Allow", [verdict()], False),
-        # Off the goal, or high-impact (sending, deleting): the card asks.
-        ("Allow", [verdict(fits_request="no", category="beyond_request")], True),
-        ("Send to all contacts", [verdict(verdict="ask", category="send_out")], True),
-        ("Delete chat history", [verdict(verdict="ask", category="delete")], True),
-    ],
-)
-async def test_a_press_in_another_apps_window_is_reviewed_on_the_goal(
-    tmp_path: Path, button: str, reviews: list[Message], card: bool
-) -> None:
-    tool = PressesInAnotherApp()
-    asker = CardAsker()
-    call = ("press_in_app", {"button": button}, "c1")
-    llm = FakeModel([_calls(call), _answer("done")], reviews)
-    (tmp_path / "ws").mkdir()
-    agent = Agent(
-        llm=llm,
-        options=AgentOptions(
-            builtins=frozenset(),
-            tool_exposure="all",
-            workspace_root=str(tmp_path / "ws"),
-        ),
-        tool_providers=[tool],
-    )
-    agent.chat.sleep = _no_wait
-
-    await agent.run_task(
-        "sign in to news.example with the Chat app and check in",
-        approval=AutoPolicy(asking=asker),
-    )
-
-    [answer] = tool.answers
-    assert answer.allow is not card, answer
-    assert (
-        len(llm.review_requests) == 1
-    ), answer  # a press is never routine by a word match
-    words = json.dumps([m.content for m in llm.review_requests[0]])
-    assert "another app's window" in words and button in words
-    assert len(asker.asked) == (1 if card else 0), answer
-    if card:  # the card offers Allow once and Deny, never a grant for the chat
-        assert not grant_offered(asker.asked[0])
-
-
 class OpensAnApp(PressesInAnotherApp):
     """A provided tool that asks to open another app a page asked for, as the browser's hand-off does."""
 
@@ -975,7 +927,24 @@ class AnswersTheCard(CardAsker):
         return ApprovalDecision(self.allow, "", origin="user")
 
 
+# The two questions only the person answers in Auto: whether melo may see a window another
+# app opened, and whether it may press a button in one.
+APP_WINDOW_QUESTIONS = pytest.mark.parametrize(
+    ("tool_class", "call", "question"),
+    [
+        (SeesAWindow, ("see_window", {}, "c1"), "window-read:com.example.chat"),
+        (
+            PressesInAnotherApp,
+            ("press_in_app", {"button": "Allow"}, "c1"),
+            "desktop-act:Chat",
+        ),
+    ],
+    ids=["see", "press"],
+)
+
+
 @pytest.mark.asyncio
+@APP_WINDOW_QUESTIONS
 @pytest.mark.parametrize("allow", [True, False])
 @pytest.mark.parametrize(
     "words",
@@ -986,12 +955,17 @@ class AnswersTheCard(CardAsker):
     ],
 )
 async def test_a_window_another_app_opened_is_never_reviewed_and_always_asks_the_person(
-    tmp_path: Path, allow: bool, words: str
+    tmp_path: Path,
+    tool_class: type[OpensSite],
+    call: tuple[str, dict[str, str], str],
+    question: str,
+    allow: bool,
+    words: str,
 ) -> None:
-    tool = SeesAWindow()
+    tool = tool_class()
     asker = AnswersTheCard(allow)
     # No review is scripted: a review of this question would raise in the model.
-    llm = FakeModel([_calls(("see_window", {}, "c1")), _answer("done")])
+    llm = FakeModel([_calls(call), _answer("done")])
     (tmp_path / "ws").mkdir()
     agent = Agent(
         llm=llm,
@@ -1009,20 +983,25 @@ async def test_a_window_another_app_opened_is_never_reviewed_and_always_asks_the
     [answer] = tool.answers
     assert answer.allow is allow and answer.origin == "user", answer
     [card] = asker.asked
-    assert card.tool_name == "window-read:com.example.chat"
+    assert card.tool_name == question
     assert card.review is not None and card.review.categories == ("opaque",)
-    assert grant_offered(card), "the card may be allowed for the chat"
+    # A window may be allowed for the chat; a press is asked every time.
+    assert grant_offered(card) is question.startswith("window-read:")
     assert llm.review_requests == [], "no review model ever sees the window"
     seen = json.dumps([[m.content for m in sent] for sent in llm.requests])
     assert "Sign in to news.example" not in seen and "com.example.chat" not in seen
 
 
 @pytest.mark.asyncio
+@APP_WINDOW_QUESTIONS
 async def test_a_window_another_app_opened_is_denied_in_auto_when_nobody_can_be_asked(
     tmp_path: Path,
+    tool_class: type[OpensSite],
+    call: tuple[str, dict[str, str], str],
+    question: str,
 ) -> None:
-    tool = SeesAWindow()
-    llm = FakeModel([_calls(("see_window", {}, "c1")), _answer("done")])
+    tool = tool_class()
+    llm = FakeModel([_calls(call), _answer("done")])
     (tmp_path / "ws").mkdir()
     agent = Agent(
         llm=llm,
@@ -1038,8 +1017,13 @@ async def test_a_window_another_app_opened_is_denied_in_auto_when_nobody_can_be_
     await agent.run_task("check in with the Chat app", approval=AutoPolicy())
 
     [answer] = tool.answers
-    assert not answer.allow, answer
+    assert not answer.allow and answer.origin == "auto", (question, answer)
     assert llm.review_requests == []
+    # What the model reads says the truth (only the person can answer, nobody has the chat
+    # open), never a category of code melo cannot check, so it has no reason to invent one.
+    told = denial_text(answer)
+    assert "only the user can answer" in told and "nobody has the chat open" in told
+    assert "cannot check" not in told and "other reason" in told
 
 
 @pytest.mark.asyncio

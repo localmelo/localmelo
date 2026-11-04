@@ -8,7 +8,7 @@ import {readFileSync} from 'node:fs';
 import test from 'node:test';
 
 import {
-  MAX_FILES, MAX_PICTURES, isStandIn, kindOf, requestOf, setupMedia, splitAttachments, turnPictures, uploadType,
+  MAX_FILES, MAX_PICTURES, isStandIn, kindOf, pictureItems, requestOf, setupMedia, splitAttachments, turnPictures, uploadType,
 } from '../../support/gateway/static/composer-media.mjs';
 
 const COMPOSED = JSON.parse(readFileSync(new URL('../fixtures/composed_attachments.json', import.meta.url), 'utf8'));
@@ -97,7 +97,7 @@ function fakeDocument() {
   return {doc: {createElement: make}, make};
 }
 
-function strip({upload, notify = [], discarded = [], changes = []} = {}) {
+function strip({upload, notify = [], discarded = [], changes = [], refuse} = {}) {
   const {doc, make} = fakeDocument();
   const parts = {tray: make('div'), warning: make('p'), fileInput: make('input')};
   const media = setupMedia({
@@ -108,6 +108,7 @@ function strip({upload, notify = [], discarded = [], changes = []} = {}) {
     changed: () => changes.push(1),
     openSettings: () => {},
     open: () => {},
+    ...(refuse ? {refuse} : {}),
   });
   return {media, ...parts, notify, discarded, changes};
 }
@@ -225,4 +226,38 @@ test('the file input\'s change adds what was chosen and clears the input', async
   await later();
   assert.equal(s.fileInput.value, '');
   assert.equal(s.media.items().length, 1);
+});
+
+test('a host can refuse a kind of file for now: it is told why, and the pictures beside it are still added', async () => {
+  const kinds = [];
+  const s = strip({refuse: (file, kind) => { kinds.push([file.name, kind]); return kind === 'text' ? 'Text files cannot join now.' : null; }});
+  await s.media.add([picture('a.png'), textual('n.txt', 'hi')]);
+  assert.deepEqual(kinds, [['a.png', 'picture'], ['n.txt', 'text']]);
+  assert.deepEqual(s.notify, ['Text files cannot join now.']);
+  assert.deepEqual(s.media.items().map((item) => item.name), ['a.png']);
+  assert.equal(s.media.hasFiles(), false);
+  assert.equal(s.media.hasPictures(), true);
+});
+
+test('hasFiles says whether a text file waits in the strip', async () => {
+  const s = strip();
+  await s.media.add([picture('a.png')]);
+  assert.equal(s.media.hasFiles(), false);
+  await s.media.add([textual('n.txt', 'hi')]);
+  assert.equal(s.media.hasFiles(), true);
+});
+
+test('pictures the gateway staged again are strip items that go back out as picture ids', () => {
+  const items = pictureItems([
+    {id: 'up9', name: 'shot.png', mime_type: 'image/png', size_bytes: 3000, width: 640, height: 480, model_reads: false},
+    {id: 'up8', mime_type: 'image/png', size_bytes: 10, width: 1, height: 1},
+  ]);
+  assert.deepEqual(items.map((item) => [item.kind, item.state, item.uploadId, item.url, item.modelReads]), [
+    ['picture', 'ready', 'up9', '/api/uploads/up9', false],
+    ['picture', 'ready', 'up8', '/api/uploads/up8', null],
+  ]);
+  assert.notEqual(items[0].id, items[1].id);
+  assert.equal(items[0].name, 'shot.png');
+  assert.deepEqual(requestOf(items), {images: ['up9', 'up8']});
+  assert.deepEqual(pictureItems(undefined), []);
 });

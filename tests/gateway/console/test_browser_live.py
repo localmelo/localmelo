@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import socket
 from collections.abc import AsyncIterator, MutableMapping
 from pathlib import Path
@@ -31,6 +32,7 @@ from localmelo.support.gateway import _ConsoleServer
 from localmelo.support.gateway.auth import GatewayAuth
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.guard import LoopbackGuard
+from localmelo.tests.browser.fakes import FakeDriver, page
 from localmelo.tests.browser.test_live import site
 from localmelo.tests.browser.test_provider import run
 
@@ -48,12 +50,15 @@ MARKER = b"\xff\xd8secret-picture-bytes"
 
 
 class BrowsingAgent(FakeAgent):
-    """A chat's Agent with a browser that streams."""
+    """A chat's Agent with a browser that streams (Chrome), or one that cannot (as Safari's windows)."""
 
-    def __init__(self, workspace: str, *, browser: bool = True) -> None:
+    def __init__(
+        self, workspace: str, *, browser: bool = True, streams: bool = True
+    ) -> None:
         super().__init__(workspace)
         self.driver = site()
-        self.provider = BrowserToolProvider(self.driver)  # type: ignore[arg-type]
+        driver = self.driver if streams else FakeDriver(page(HOME, "Welcome."))
+        self.provider = BrowserToolProvider(driver)  # type: ignore[arg-type]
         self.tool_providers = (self.provider,) if browser else ()
 
     async def close(self) -> None:
@@ -64,12 +69,14 @@ class BrowsingAgent(FakeAgent):
 class Builder:
     def __init__(self, *, browser: bool = True) -> None:
         self.browser = browser
+        # Whether the next Agents' browser streams: the browser the settings name when it is built.
+        self.streams = True
         self.agents: dict[str, BrowsingAgent] = {}
 
     async def __call__(
         self, settings: Config, workspace: str, mcp_config: str | None, session_id: str
     ) -> Agent:
-        agent = BrowsingAgent(workspace, browser=self.browser)
+        agent = BrowsingAgent(workspace, browser=self.browser, streams=self.streams)
         self.agents[session_id] = agent
         return cast(Agent, agent)
 
@@ -240,17 +247,51 @@ async def test_the_state_of_a_chat_that_is_not_open_is_calm(
 async def test_the_view_is_unavailable_with_another_browser_or_when_turned_off(
     console: Console, builder: Builder, workspace: Path, served: Served
 ) -> None:
+    turn = await seed_turn(console.store, str(workspace))  # in the store, not open
+    url = f"http://127.0.0.1:{served.port}/api/sessions/{turn.session_id}/browser"
     session_id = await chat(console, builder, workspace)
-    url = f"http://127.0.0.1:{served.port}/api/sessions/{session_id}/browser"
+    open_url = f"http://127.0.0.1:{served.port}/api/sessions/{session_id}/browser"
     async with httpx.AsyncClient(headers=served.bearer) as client:
         console.cfg.browser.driver = "safari-automation"
         assert (await client.get(url)).json()["available"] is False
         console.cfg.browser.driver = "chrome"
         console.cfg.browser.live = False
         assert (await client.get(url)).json()["available"] is False
+        # Turning the live view off holds at once, also for a chat whose browser streams.
+        assert (await client.get(open_url)).json()["available"] is False
         with pytest.raises(InvalidStatus) as refused:
             async with connect(
                 served.url(session_id), additional_headers=served.bearer
+            ):
+                pass
+    assert refused.value.response.status_code == 403
+
+
+async def test_an_open_chat_is_watched_in_the_browser_it_browses_in(
+    console: Console, builder: Builder, workspace: Path, served: Served
+) -> None:
+    # A chat whose turn ran when Settings changed the browser keeps the browser it
+    # has until its next turn: the state says what that browser can do, not the setting.
+    chrome_chat = await chat(console, builder, workspace)
+    await browse(builder, chrome_chat, HOME)
+    builder.streams = False
+    safari_chat = await chat(console, builder, workspace)
+    base = f"http://127.0.0.1:{served.port}/api/sessions"
+    async with httpx.AsyncClient(headers=served.bearer) as client:
+        console.cfg.browser.driver = "safari-automation"
+        body = (await client.get(f"{base}/{chrome_chat}/browser")).json()
+        assert body["available"] is True and body["open"] is True
+        assert body["driver"] == "safari-automation", "the setting, for the next turn"
+        async with connect(
+            served.url(chrome_chat), additional_headers=served.bearer
+        ) as ws:
+            assert json.loads(str((await messages(ws, 1))[0]))["tab"] == "t1"
+        console.cfg.browser.driver = "chrome"
+        body = (await client.get(f"{base}/{safari_chat}/browser")).json()
+        assert body["available"] is False and body["open"] is False
+        with pytest.raises(InvalidStatus) as refused:
+            async with connect(
+                served.url(safari_chat), additional_headers=served.bearer
             ):
                 pass
     assert refused.value.response.status_code == 403

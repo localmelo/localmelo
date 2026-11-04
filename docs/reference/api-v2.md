@@ -436,8 +436,10 @@ sessions.
   `extra_body`, `mcp_config`, `request_timeout_s`, `[agent]` and
   `[scheduler]`, validates the candidate (`400 invalid_settings` with
   `details.errors` on failure), writes `config.toml` atomically, closes
-  idle session Agents so the next turn opens with the new settings, and
-  returns the updated `GET /api/settings` body.
+  idle session Agents so the next turn opens with the new settings (a
+  session whose turn runs, or whose question waits, keeps its Agent until
+  then and gets a new one at its next turn), and returns the updated
+  `GET /api/settings` body.
 
 ## POST /api/settings/test
 
@@ -1443,12 +1445,12 @@ Whether the chat has a page open in melo's browser, and which. The console asks 
 ```
 
 ```json
-{"open": true, "tab": "t2", "url": "https://example.com/", "title": "Example Domain", "browsing": false, "viewers": 1, "available": true, "driver": "chrome"}
+{"open": true, "tab": "t2", "url": "https://example.com/", "title": "Example Domain", "browsing": false, "yours": false, "viewers": 1, "available": true, "driver": "chrome"}
 ```
 
 - `open` is true when the chat's current tab exists; `tab`, `url` and `title` describe it (`tab` is null and the others are empty when `open` is false, as for a chat that has not browsed or is not open in the gateway).
-- `browsing` is true while a browser step of the chat runs. `viewers` counts the open live views of the chat.
-- `available` is true when `[browser] driver` is `chrome` and `[browser] live` is on; `driver` repeats the driver. An unknown session is 404 `not_found`. The answer has `Cache-Control: no-store`.
+- `browsing` is true while a browser step of the chat runs, and `yours` while the person has one of its pages (take over). The console opens its Browser panel by itself for either. `viewers` counts the open live views of the chat.
+- `available` says whether the chat's browser can be watched now. `[browser] live` must be on. A chat with an Agent open is watched in the browser that Agent has: a chat whose turn ran when the browser setting changed keeps its browser until its next turn. A chat with no Agent open follows `[browser] driver` (`chrome`). `driver` is the setting. An unknown session is 404 `not_found`. The answer has `Cache-Control: no-store`.
 
 ## WS /api/sessions/{id}/browser/live
 
@@ -1684,12 +1686,14 @@ Stop a running turn, from the id the events gave.
   answered `withdrawn` and leaves `pending_approvals`.
 - Words [added to the turn](#post-apiturnsturn_idnotes) that its run had not read do not start
   another turn: they are dropped from the queue and come back as `"unread_notes": [{"note": 3,
-  "text": "use the 2024 file"}]`, for the client to put back into its message box. The key is absent
-  when there are none.
+  "text": "use the 2024 file"}]`, for the client to put back into its message box. A note that had
+  pictures also has `"images"`: those pictures staged again, each as [`POST /api/uploads`](#post-apiuploads)
+  answers (`id`, `name`, `mime_type`, `size_bytes`, `width`, `height`, `model_reads`), for the client to put back
+  in its row of pictures and send with a message. The key is absent when there are none.
 
 ## POST /api/turns/{turn_id}/notes
 
-Add words to a turn that is running. Its run reads them at its next step.
+Add words, and pictures, to a turn that is running. Its run reads them at its next step.
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/turns/9c1f0e2d4b6a48c1a3e5f7091b2d4c6e/notes \
@@ -1701,6 +1705,16 @@ Add words to a turn that is running. Its run reads them at its next step.
 {"note": {"note": 3, "turn_id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e", "text": "use the 2024 file instead", "client_request_id": "curl-note-1", "state": "sent"}}
 ```
 
+With a picture ([staged first](#post-apiuploads); its id goes in `images`):
+
+```json
+{"text": "this is the file I mean", "images": ["46fb64ffc2a04ad98a9a0bb3a1a0f0c1"], "client_request_id": "curl-note-2"}
+```
+
+```json
+{"note": {"note": 4, "turn_id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e", "text": "this is the file I mean", "client_request_id": "curl-note-2", "state": "sent", "images": [{"sha256": "3f2a9c0d1b7e4a58b6c3d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4", "mime_type": "image/png", "size_bytes": 20481}]}}
+```
+
 - 202. `state` is `sent` when the running turn takes the words, and `next` when the turn ended while they
   were stored: they run as the chat's next turn. `client_request_id` is optional and makes the call safe
   to repeat (the same body comes back, also after the turn ended).
@@ -1708,12 +1722,22 @@ Add words to a turn that is running. Its run reads them at its next step.
   worked, and says so with `inbox.accepted` (its `offset` is the note's number). A note the run did not
   read before the turn ended is sent as the chat's next turn, in order with the queued messages; they live in
   the same store, so a restart keeps them. A Stop gives the unread ones back ([cancel](#post-apiturnsturn_idcancel)).
-- `text` is trimmed, must not be empty, has at most 8,000 characters and goes through the same checker as a
-  message (400 `invalid_request`, 400 `text_rejected`). A turn takes at most 20 notes.
+- `text` is trimmed, has at most 8,000 characters and goes through the same checker as a message (400
+  `invalid_request`, 400 `text_rejected`). It must not be empty unless `images` names a picture; the note
+  then reads `[1 picture]` to the model and `text` is `""`. A turn takes at most 20 notes.
+- `images` is optional: ids from [`POST /api/uploads`](#post-apiuploads), at most 4, none twice, each still
+  staged, on the terms of a message's `images` (400 `invalid_request`, 400 `picture_gone`; 409
+  `model_text_only` when the chat model is known not to read pictures). The answer lists them under `images`
+  as a turn's `images` are listed (`sha256`, `mime_type`, `size_bytes`; the picture itself is
+  [`GET /api/sessions/{id}/blobs/{sha256}`](#get-apisessionsidblobssha256)), and the `turn.note` event does the
+  same. They are kept in the chat before the call answers, so a note that becomes the next turn, or waits through
+  a restart, still has them. The run sends them as image parts of the note's message at its next step (at
+  most 8 pictures a step: further notes are read at the step after); a model found not to read pictures by
+  then is told so in the note's words and sent none.
 - 409 `turn_not_running` for a turn that is not running, is being stopped or has finished its run: the
-  client sends the words as a message instead. 409 `not_your_turn` for a turn the person did not
+  client sends the words, and the pictures, as a message instead. 409 `not_your_turn` for a turn the person did not
   start, and for a session that is a task.
-- Pictures and files cannot be added to a running turn.
+- Text files cannot be added to a running turn.
 
 ## POST /api/uploads
 

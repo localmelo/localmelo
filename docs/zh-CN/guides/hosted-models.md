@@ -107,7 +107,7 @@ melo setup
 
 - 有些工具会返回图片，例如浏览器截图。当 `[agent] tool_images = "auto"` 时，melo 会在已知模型能读图的情况下把图片发给它。
 - 服务的模型列表不会说明这一点，所以每个服务自己列出哪些模型能读图：GPT-4o、GPT-4.1 和 GPT-5（OpenAI）、所有 Gemini 模型、Claude 系列以及 `deepseek-flash` 能读图；`deepseek-v4-pro` 和 NVIDIA 的 `nemotron` 不能。
-- 其他模型按未知处理，不会收到图片。如果你的模型能读图，请设置 `tool_images = "on"`。
+- 其他模型按未知处理，不会收到图片；它的工具消息会注明它看不到图片。如果你的模型能读图，请设置 `tool_images = "on"`。
 
 <a id="the-config-file"></a>
 

@@ -1,8 +1,13 @@
 """The live view of a chat's browser: ``GET /api/sessions/{id}/browser`` and the stream ``/browser/live``.
 
 ``GET`` says whether the chat has a page open in melo's browser (the current tab, its
-address and title) and whether the live view is available, so the console can
-open its Browser panel when melo starts browsing. It starts nothing.
+address and title), whether melo is in the middle of a browser step
+(``browsing``), whether the person has one of its pages (``yours``), and whether
+the live view is available, so the console can open its Browser panel when melo
+starts browsing. It starts nothing. ``available`` is about the browser the chat
+browses in now: an open chat's own (a chat whose turn ran when Settings changed
+the browser keeps the one it has until its next turn), or, for a chat with no
+browser open, the one the settings name; ``driver`` is the setting.
 
 ``/browser/live`` is a WebSocket for one chat's browser (see
 :mod:`localmelo.support.browser.live`). The server sends:
@@ -86,10 +91,21 @@ def live_of(console: Console, session_id: str) -> LiveView | None:
     return None
 
 
-def available(console: Console) -> bool:
-    """Whether a chat's browser can be watched: Chrome is the browser and the live view is on."""
+def available(console: Console, session_id: str) -> bool:
+    """Whether chat *session_id*'s browser can be watched now.
+
+    The live view must be on (turning it off holds at once). Then a chat with
+    an Agent open is watched in the browser that Agent has, which streams or
+    not; a chat with none open will get the browser the settings name:
+    Chrome streams, Safari's windows do not.
+    """
     browser = console.cfg.browser
-    return browser.driver == "chrome" and browser.live is True
+    if browser.live is not True:
+        return False
+    entry = console.sessions.get(session_id)
+    if entry is not None and entry.agent is not None:
+        return live_of(console, session_id) is not None
+    return browser.driver == "chrome"
 
 
 def add_routes(app: FastAPI, console: Console) -> None:
@@ -110,10 +126,11 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 "url": "",
                 "title": "",
                 "browsing": False,
+                "yours": False,
                 "viewers": 0,
             }
         )
-        state["available"] = available(console)
+        state["available"] = available(console, session_id)
         state["driver"] = console.cfg.browser.driver
         return JSONResponse(content=state, headers={"Cache-Control": "no-store"})
 
@@ -135,7 +152,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         if known is None:
             await websocket.close(code=_POLICY, reason="not_found")
             return
-        if not available(console):
+        if not available(console, session_id):
             await websocket.close(code=_POLICY, reason="not_available")
             return
         live = live_of(console, session_id)

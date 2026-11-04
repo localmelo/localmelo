@@ -196,6 +196,14 @@ ADDED_MARK: Final = "(added while melo worked)"
 # The line a console chat puts before a note in the request the run reads (so also
 # in the ``inbox.accepted`` text); memory leaves it out, :data:`ADDED_MARK` says it.
 _NOTE_LEAD: Final = "[The user added this while you were working]"
+# What the console adds to a note that carries pictures and no words (a stand-in,
+# ``[2 pictures]``), and after the words of a note whose pictures a text-only
+# model was not sent (a line to the model). Neither is the person's.
+_PICTURE_STANDIN: Final = re.compile(r"\[\d+ pictures?\]")
+_PICTURES_WITHHELD: Final = re.compile(
+    r"\s*\[You cannot see (?:this picture|these pictures) "
+    r"\(this model is not sent pictures\); [^\]]*\]\s*$"
+)
 NOT_THE_USER: Final = (
     "Not remembered: this turn is a task's question, not the user's words."
 )
@@ -733,12 +741,16 @@ def with_read_notes(typed: str, notes: Sequence[str]) -> str:
 
     The mark is a line of its own so a statement in the note reads as one (a
     sentence that starts with a mark is no statement). A note that holds nothing
-    after the console's own lead (:data:`_NOTE_LEAD`) is left out. Without notes,
-    *typed* exactly.
+    after the console's own lead (:data:`_NOTE_LEAD`) is left out, so is one that
+    is only the stand-in for its pictures, and the console's line about pictures
+    a model was not sent never counts as words. Without notes, *typed* exactly.
     """
     marked = []
     for note in notes:
         words = note.strip().removeprefix(_NOTE_LEAD).strip()
+        words = _PICTURES_WITHHELD.sub("", words).strip()
+        if _PICTURE_STANDIN.fullmatch(words):
+            words = ""
         if words:
             marked.append(f"{ADDED_MARK}\n{words}")
     if not marked:

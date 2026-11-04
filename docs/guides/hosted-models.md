@@ -91,7 +91,7 @@ melo setup
 
 - Some tools return pictures, such as a browser screenshot. With `[agent] tool_images = "auto"`, melo sends them to the model when it is known to read images.
 - A service's model list does not say, so each service names the models: GPT-4o, GPT-4.1 and GPT-5 (OpenAI), every Gemini model, the Claude models and `deepseek-flash` read images; `deepseek-v4-pro` and NVIDIA's `nemotron` do not.
-- Any other model counts as unknown and gets no pictures. If yours reads images, set `tool_images = "on"`.
+- Any other model counts as unknown and gets no pictures; its tool messages say it cannot see them. If yours reads images, set `tool_images = "on"`.
 
 ## The config file
 

@@ -441,7 +441,7 @@ asyncio.run(main())
 | 类型 | 何时 | `data` 键 |
 |---|---|---|
 | `turn.started` | 一轮开始，先于其运行的事件。 | `turn`, `turn_id`, `user_text`, `client_request_id`；`origin`（`ask_owner`）只出现在不是用户开始的轮次上；`images`（`[{sha256, mime_type, size_bytes}]`，指向会话 blob 的引用）只出现在带有用户所加图片的轮次上 |
-| `turn.note` | 用户在一轮运行期间补充了话语（[`POST /api/turns/{turn_id}/notes`](api-v2.md#post-apiturnsturn_idnotes)）：随该轮的事件一起保存。`inbox.accepted` 说明运行何时读到它，其 `offset` 就是 `note`。 | `turn`, `turn_id`, `note`, `text` |
+| `turn.note` | 用户在一轮运行期间补充了话语（[`POST /api/turns/{turn_id}/notes`](api-v2.md#post-apiturnsturn_idnotes)）：随该轮的事件一起保存。`inbox.accepted` 说明运行何时读到它，其 `offset` 就是 `note`。 | `turn`, `turn_id`, `note`, `text`；`images`（`[{sha256, mime_type, size_bytes}]`，指向会话 blob 的引用）只出现在带图片的补充上 |
 | `turn.finished` | 该轮结束：它的最后一个事件。 | `turn`, `turn_id`, `status`, `error`, `cause` |
 | `turn.undone` | 某轮被撤销；该事件不属于任何轮次。 | `turn`, `turn_id` |
 | `turn.pictures` | 控制台的一轮产生了图片：在其运行的最后一个事件之后、`turn.finished` 之前。没有图片时不存在，终端的文件里也没有。 | `turn`, `turn_id`, `pictures` |
