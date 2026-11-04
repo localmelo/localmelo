@@ -34,7 +34,7 @@ import json
 import os
 import sys
 import time
-from typing import Any
+from typing import Any, cast
 
 MODE = os.environ.get("FAKE_CHROME_MODE", "")
 LOG = os.environ.get("FAKE_CHROME_LOG", "")
@@ -175,11 +175,13 @@ def new_target(url: str, opener: str = "") -> str:
 
 def url_of(target: str) -> str:
     t = targets[target]
-    return t["history"][t["index"]]
+    return str(t["history"][t["index"]])
 
 
 def elements_of(target: str) -> list[dict[str, Any]]:
-    return PAGES.get(url_of(target), {}).get("elements", [])
+    return cast(
+        "list[dict[str, Any]]", PAGES.get(url_of(target), {}).get("elements", [])
+    )
 
 
 def navigate(target: str, url: str) -> None:
@@ -226,7 +228,7 @@ def page_now(target: str) -> dict[str, Any]:
 def spec_of(source: str) -> dict[str, Any]:
     start = source.rindex('})({"')
     spec, _ = json.JSONDecoder().raw_decode(source, start + 3)
-    return spec
+    return cast("dict[str, Any]", spec)
 
 
 def clicked(target: str, element: dict[str, Any], key: str, *, real: bool) -> int:
@@ -493,15 +495,15 @@ def handle(message: dict[str, Any]) -> dict[str, Any] | None:
     if method == "Input.dispatchMouseEvent":
         if MODE == "native_missed":
             return {}
-        element = at_point(target, params["x"], params["y"])
-        if params["type"] == "mouseReleased" and element is not None:
-            if element["kind"] == "textbox":
-                focused[target] = element
+        hit = at_point(target, params["x"], params["y"])
+        if params["type"] == "mouseReleased" and hit is not None:
+            if hit["kind"] == "textbox":
+                focused[target] = hit
                 looks.setdefault(armed.get(target, ""), {}).setdefault("seen", {})[
                     "click"
                 ] = 1
-            elif clicked(target, element, armed.get(target, ""), real=True):
-                dialog_after[target] = (message["id"], element)
+            elif clicked(target, hit, armed.get(target, ""), real=True):
+                dialog_after[target] = (message["id"], hit)
                 return None
         return {}
     if method == "Input.dispatchKeyEvent":
