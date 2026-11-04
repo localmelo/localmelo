@@ -973,6 +973,21 @@ class TestWrongKindOfValue:
             "[gateway] port must be a whole number, got '8401'"
         ]
 
+    def test_a_quoted_false_in_approvals_stops_the_check(
+        self, config_path: Path
+    ) -> None:
+        # "false" in quotes would read as true and turn on what the person
+        # meant to turn off: [approvals] changes behaviour, so it is checked.
+        save(_timeout_cfg())
+        config_path.write_text(
+            config_path.read_text(encoding="utf-8")
+            + '\n[approvals]\nauto_asks = "false"\n',
+            encoding="utf-8",
+        )
+        assert load().validate() == [
+            "[approvals] auto_asks must be true or false, got 'false'"
+        ]
+
     def test_a_table_that_is_not_a_table_is_ignored(self, config_path: Path) -> None:
         config_path.write_text(
             'chat_backend = "vllm"\nembedding_backend = "none"\ngateway = 5\n',

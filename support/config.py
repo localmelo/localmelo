@@ -1551,8 +1551,8 @@ _CLOUD_SECTIONS = ("openai", "gemini", "anthropic", "nvidia")
 _BACKEND_SECTIONS = (*_LOCAL_SECTIONS, *_CLOUD_SECTIONS)
 # The tables of display preferences: a bad value warns and falls back (see
 # ``cli_errors()`` and the like) instead of stopping a run, so ``validate()`` leaves
-# them alone.
-_FALLBACK_SECTIONS = ("sessions", "cli", "ui", "console", "approvals", "workspace")
+# them alone. ``[approvals]`` is not one: it changes what runs without asking.
+_FALLBACK_SECTIONS = ("sessions", "cli", "ui", "console", "workspace")
 
 # -- Migration helpers --
 
