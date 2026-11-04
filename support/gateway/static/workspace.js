@@ -2034,6 +2034,8 @@ function approvalCard(request, view = chatApproval, asked = "") {
     caption = t("approval.desktopCaption");
     rule = t("approval.rule.desktopOnce");
     content = t("approval.desktopContent", { app, on: String(args.on || ""), window: String(args.window || "") });
+    // A click in the background did not reach the window: this press moves the pointer and brings the app forward.
+    if (args.delivery === "foreground") why = t("approval.desktopForeground", { app });
   } else if (tool.startsWith("takeover:")) {
     // melo reached something only the person can do on a page (a sign-in, a code, a QR code, a human check): the
     // card offers them the page in the Browser panel. Their yes is "Take over"; nothing of it is kept for the chat.

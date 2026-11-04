@@ -130,6 +130,7 @@
   "approval.create": "创建 {path}？",
   "approval.desktopCaption": "其他应用 · 按下按钮",
   "approval.desktopContent": "melo 想在 {app} 的窗口“{window}”中按下 {on}。这个窗口是 melo 在浏览器中操作后出现的。melo 从不在其他应用中输入文字。",
+  "approval.desktopForeground": "在后台点击没有作用，所以 melo 会在前台按下：鼠标指针会移到那里，{app} 会短暂来到最前面。",
   "approval.desktopTitle": "让 melo 在 {app} 中按下按钮？",
   "approval.dialogCaption": "浏览器 · 网页在提问",
   "approval.dialogContent": "melo 操作时，{site} 上的网页问了这个问题。选“确定”会继续；否则 melo 回答“取消”。",
