@@ -21,7 +21,6 @@ import copy
 import hashlib
 import logging
 import os
-import re
 from typing import TYPE_CHECKING, Any, Final
 
 from fastapi import FastAPI
@@ -86,7 +85,6 @@ probe_all = _ORIG_PROBE_ALL
 list_models = _ORIG_LIST_MODELS
 check_hosted = _ORIG_CHECK_HOSTED
 
-_ENV_NAME_RE: Final = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 _LOCAL_FIELDS: Final = (
     "chat_url",
     "chat_model",
@@ -567,7 +565,7 @@ def _validate_sections(sections: dict[str, Any]) -> None:
                 sec_name in config._CLOUD_SECTIONS
                 and field_name == "api_key_env"
                 and field_val
-                and not _ENV_NAME_RE.fullmatch(field_val)
+                and not hosted.ENV_NAME_RE.fullmatch(field_val)
             ):
                 raise ApiError(
                     400,
@@ -914,7 +912,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             state = await asyncio.to_thread(keychain.status, found.service)
             env = bool(found.key_env and os.environ.get(found.key_env))
             return JSONResponse(content={"keychain": state, "env_set": env})
-        if not name or not _ENV_NAME_RE.fullmatch(name):
+        if not name or not hosted.ENV_NAME_RE.fullmatch(name):
             raise ApiError(
                 400,
                 "invalid_request",

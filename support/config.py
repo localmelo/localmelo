@@ -1114,9 +1114,11 @@ class Config:
 
     def _tool_env_errors(self) -> list[str]:
         """``[agent] tool_env`` is a list of valid environment variable names."""
+        from localmelo.support import hosted
+
         names = self.agent.tool_env
         if isinstance(names, list) and all(
-            isinstance(name, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name)
+            isinstance(name, str) and hosted.ENV_NAME_RE.fullmatch(name)
             for name in names
         ):
             return []
@@ -1536,12 +1538,6 @@ def _is_positive_seconds(value: object) -> bool:
         return False
     return math.isfinite(seconds) and seconds > 0
 
-
-# -- Compatibility aliases (temporary, reduces churn in files not yet migrated) --
-MlcConfig = LocalBackendConfig
-OllamaConfig = LocalBackendConfig
-VllmConfig = LocalBackendConfig
-SglangConfig = LocalBackendConfig
 
 # -- Section names for iteration --
 
