@@ -101,7 +101,7 @@ With `driver = "chrome"`, melo browses in Google Chrome with no window at all.
 - **When a page wants an app, or asks a question.** See [When a page wants to open an app](#when-a-page-wants-to-open-an-app).
 - **Apps on this Mac.** Chrome's own check keeps a page from reaching this Mac or your network (melo's console, a model server, a dev server), and it stays on. Chrome in the background cannot ask you, so the answer is no. One exception: a sign-in box may reach the app it signs in with, when melo lists that app. Today the list holds WeChat's quick login: its sign-in box from `open.weixin.qq.com` reaches the WeChat app on this Mac, as it does in Safari, so the quick login button shows.
   - melo makes those requests itself: only for that sign-in box, only to the app's own ports, never to melo's console or a model server's port.
-  - Any other request a page makes to this Mac or your network is blocked before it is sent. A page that sends its tab to such an address is stopped too when the address is written as one (`localhost`, `127.0.0.1`, a `.local` name); a name that only leads here is blanked after it loads, as in Safari. The step says `The page tried to reach an app on this Mac (port N); melo blocked it.`
+  - Any other request a page makes to this Mac or your network is blocked before it is sent. A page that sends its tab to such an address is stopped too when the address is written as one (`localhost`, `127.0.0.1`, a `.local` name, a name of one word); a name that only leads here is blanked after it loads, as in Safari. The step says `The page tried to reach an app on this Mac (port N); melo blocked it.`
   - The list is part of melo; there is no setting for it.
 
 ## Watching melo's browser

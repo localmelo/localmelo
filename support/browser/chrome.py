@@ -494,8 +494,14 @@ class _Chrome:
             if verdict.kind == "pass":
                 method, answer = "Fetch.continueRequest", {"requestId": ident}
             elif verdict.kind == "relay" and verdict.helper is not None:
-                async with self.relays:
+                # A relay waits for a free place a bounded time, then fails;
+                # requests that are not relayed never wait for one.
+                async with asyncio.timeout(local_apps.RELAY_S):
+                    await self.relays.acquire()
+                try:
                     got = await local_apps.relay(verdict.helper, verdict.port, request)
+                finally:
+                    self.relays.release()
                 method, answer = "Fetch.fulfillRequest", local_apps.fulfilled(
                     ident, got
                 )
@@ -507,8 +513,18 @@ class _Chrome:
             answer["errorReason"] = exc.reason
         except Exception:  # never leave a request paused: it fails instead
             pass
-        with contextlib.suppress(BrowserError):
+        try:
             await self.request(method, answer)
+        except CdpError:
+            # Chrome refused the answer (a header it would not take, say): the request fails.
+            if method != "Fetch.failRequest":
+                with contextlib.suppress(BrowserError):
+                    await self.request(
+                        "Fetch.failRequest",
+                        {"requestId": ident, "errorReason": "Failed"},
+                    )
+        except BrowserError:
+            pass  # Chrome stopped
         if blocked is not None:
             with contextlib.suppress(BrowserError):
                 page = await self._page_of(str(params.get("frameId") or ""))

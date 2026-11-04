@@ -115,7 +115,7 @@ Safari is not set up for melo yet. In Safari, open Settings > Developer and turn
 - **网页要打开应用或提问时。** 见[网页要打开应用时](#when-a-page-wants-to-open-an-app)。
 - **这台 Mac 上的应用。** Chrome 自己的检查让网页无法访问这台 Mac 或你的局域网（melo 的控制台、模型服务器、开发服务器），这项检查一直开着。后台的 Chrome 没法询问你，所以答案是不允许。只有一个例外：melo 列出的应用，它的登录框可以访问这个应用。目前列表里只有微信快捷登录：来自 `open.weixin.qq.com` 的登录框可以访问这台 Mac 上的微信，和在 Safari 里一样，所以会显示快捷登录按钮。
   - 这些请求由 melo 自己发出：只为这个登录框，只发到这个应用自己的端口，从不发到 melo 的控制台或模型服务器的端口。
-  - 网页发往这台 Mac 或你的局域网的其他请求，都会在发出前被拦下。网页把自己的标签页送到这类地址时，如果地址本身写的就是这类地址（`localhost`、`127.0.0.1`、`.local` 名字），也会被拦下；只是解析到这里的名字，会像在 Safari 中一样，在加载后变为空白页。这一步会说 `The page tried to reach an app on this Mac (port N); melo blocked it.`
+  - 网页发往这台 Mac 或你的局域网的其他请求，都会在发出前被拦下。网页把自己的标签页送到这类地址时，如果地址本身写的就是这类地址（`localhost`、`127.0.0.1`、`.local` 名字、只有一个词的名字），也会被拦下；只是解析到这里的名字，会像在 Safari 中一样，在加载后变为空白页。这一步会说 `The page tried to reach an app on this Mac (port N); melo blocked it.`
   - 这个列表是 melo 的一部分，没有对应的设置。
 
 <a id="watching-melos-browser"></a>

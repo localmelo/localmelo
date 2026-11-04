@@ -57,6 +57,9 @@ from localmelo.support.web.guard import (
     check_url,
 )
 
+# How long the app may take to answer a request that waits for the person (``SigninHelper.waits``).
+PERSON_S = 180.0
+
 
 @dataclass(frozen=True)
 class SigninHelper:
@@ -65,6 +68,9 @@ class SigninHelper:
     ``host`` and ``ports`` are where the page sends its requests (with
     ``scheme``); ``address`` is where melo connects instead of looking the
     name up; ``pages`` are the origins of the pages that may use it.
+    ``waits`` are the paths the app holds open until the person answers its
+    own window; their answer may take ``wait_s`` seconds, any other one
+    :data:`RELAY_S`.
     """
 
     name: str
@@ -73,6 +79,8 @@ class SigninHelper:
     ports: tuple[int, ...]
     address: str
     pages: tuple[str, ...]
+    waits: tuple[str, ...] = ()
+    wait_s: float = PERSON_S
 
 
 # The sign-in helpers a page may reach, and why each is here.
@@ -89,13 +97,18 @@ SIGNIN_HELPERS: tuple[SigninHelper, ...] = (
         ports=(14013, 14014, 14015, 13013, 13014, 13015),
         address="127.0.0.1",
         pages=("https://open.weixin.qq.com",),
+        # The quick-login click: WeChat answers when the person presses Allow
+        # or Decline in its window, and closes the window if the request ends.
+        waits=("/api/authorize",),
     ),
 )
 
-# A relayed request's body and its answer, at most; the time it may take; how many at once.
+# A relayed request's body and its answer, at most; the time it may take (connecting
+# within the first part); how many at once.
 MAX_BODY_BYTES = 1024 * 1024
 MAX_ANSWER_BYTES = 1024 * 1024
 RELAY_S = 10.0
+CONNECT_S = 5.0
 MAX_RELAYS = 8
 METHODS = frozenset({"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"})
 # Headers of the connection, not of the request or the answer: never passed on.
@@ -114,8 +127,13 @@ _HOP = frozenset(
         "content-length",
     }
 )
-_NOT_SENT = _HOP | {"host", "accept-encoding"}
-_NOT_RETURNED = _HOP | {"content-encoding"}
+# A cookie never goes to the app; Chrome has none at this stage, and melo adds none.
+_NOT_SENT = _HOP | {"host", "accept-encoding", "cookie"}
+# The only headers of the app's answer that reach the page: never a cookie. A
+# redirect's ``location`` comes back too: Chrome checks where it leads, again.
+_RETURNED = frozenset(
+    {"content-type", "cache-control", "expires", "vary", "date", "location"}
+)
 # The addresses of this computer and its network that a URL can name as written.
 _IPV4_STARTS = ("127.", "0.", "10.", "172.", "192.168.", "169.254.", "100.")
 _SCHEME_PORTS = {"http": 80, "https": 443}
@@ -188,10 +206,13 @@ class LocalRule:
         self._own = own
 
     def patterns(self) -> list[dict[str, str]]:
-        """The requests Chrome pauses (``Fetch.enable``): every helper address, and every local address written as such.
+        """The requests Chrome pauses (``Fetch.enable``): every helper address, every local address written as such, and every navigation.
 
         A pattern may match more (``*`` matches any text, a query string
-        too); :meth:`decide` lets those go on.
+        too); :meth:`decide` lets those go on. Every navigation (a tab's or a
+        frame's document) is paused, since Chrome does not check where a page
+        sends its tab, and an address with a user part (``x@127.0.0.1``) or
+        a name of one word matches no other pattern.
         """
         found: list[str] = []
         for helper in self.helpers:
@@ -206,7 +227,13 @@ class LocalRule:
                 found += [f"*://*{suffix}{end}/*", f"*://*{suffix}{end}:*"]
         found += [f"*://{start}*" for start in _IPV4_STARTS]
         found.append("*://[*")  # an IPv6 address; the public ones go on
-        return [{"urlPattern": pattern, "requestStage": "Request"} for pattern in found]
+        paused = [
+            {"urlPattern": pattern, "requestStage": "Request"} for pattern in found
+        ]
+        paused.append(
+            {"urlPattern": "*", "resourceType": "Document", "requestStage": "Request"}
+        )
+        return paused
 
     def decide(self, url: str, origin: str) -> Verdict:
         """What to do with a request to *url* sent by a page of *origin* (``""`` when it had none)."""
@@ -283,7 +310,8 @@ async def relay(
     The name is never looked up: melo connects to ``helper.address``, sends
     the helper's name in ``Host`` and, for https, checks the certificate for
     that name (*verify*: the trusted authorities). A redirect is handed back,
-    not followed. :class:`RelayError` when there is no usable answer.
+    not followed. Connecting may take :data:`CONNECT_S`; the answer
+    :data:`RELAY_S`, or the helper's ``wait_s`` on a path it ``waits`` on. :class:`RelayError` when there is no usable answer.
     """
     method = str(request.get("method") or "GET").upper()
     if method not in METHODS:
@@ -303,13 +331,15 @@ async def relay(
     address = f"[{helper.address}]" if ":" in helper.address else helper.address
     pinned = f"{helper.scheme}://{address}:{port}{path}"
     extensions = {"sni_hostname": helper.host} if helper.scheme == "https" else {}
+    waits = any((parts.path or "/").startswith(waited) for waited in helper.waits)
+    limit = helper.wait_s if waits else RELAY_S
     try:
-        async with asyncio.timeout(RELAY_S):
+        async with asyncio.timeout(CONNECT_S + limit):
             async with httpx.AsyncClient(
                 trust_env=False,
                 follow_redirects=False,
                 verify=verify,
-                timeout=RELAY_S,
+                timeout=httpx.Timeout(limit, connect=CONNECT_S),
                 limits=httpx.Limits(max_connections=1, max_keepalive_connections=0),
             ) as client:
                 built = client.build_request(
@@ -335,7 +365,7 @@ async def relay(
     returned = [
         (name, value)
         for name, value in answer.headers.multi_items()
-        if name.lower() not in _NOT_RETURNED
+        if name.lower() in _RETURNED or name.lower().startswith("access-control-")
     ]
     return Relayed(answer.status_code, answer.reason_phrase, returned, bytes(data))
 

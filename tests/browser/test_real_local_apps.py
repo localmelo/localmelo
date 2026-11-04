@@ -330,6 +330,17 @@ async def test_a_name_that_leads_to_this_mac_is_blocked(world: World) -> None:
     assert world.other not in App.seen
 
 
+async def test_a_page_cannot_send_its_tab_to_this_mac_with_a_user_part(
+    world: World,
+) -> None:
+    await world.driver.open(
+        world.site("nav", f"http://x@127.0.0.1:{world.other}/x"), new_tab=True
+    )
+    assert await world.ports_told() == [world.other]
+    await asyncio.sleep(0.5)
+    assert world.other not in App.seen
+
+
 async def test_a_page_cannot_send_its_tab_to_this_mac(world: World) -> None:
     await world.driver.open(
         world.site("nav", f"http://127.0.0.1:{world.other}/x"), new_tab=True

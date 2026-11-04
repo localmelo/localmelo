@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import dataclasses
 import gzip
 import json
 import os
@@ -24,6 +25,7 @@ import ssl
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -185,8 +187,12 @@ def _chrome_glob(pattern: str) -> re.Pattern[str]:
     return re.compile("".join(out), re.DOTALL)
 
 
-def _paused(found: LocalRule, url: str) -> bool:
-    return any(_chrome_glob(p["urlPattern"]).fullmatch(url) for p in found.patterns())
+def _paused(found: LocalRule, url: str, kind: str = "XHR") -> bool:
+    return any(
+        _chrome_glob(p["urlPattern"]).fullmatch(url)
+        and p.get("resourceType", kind) == kind
+        for p in found.patterns()
+    )
 
 
 def test_chrome_pauses_every_helper_address_and_every_local_one_written_as_such() -> (
@@ -220,6 +226,22 @@ def test_chrome_pauses_every_helper_address_and_every_local_one_written_as_such(
     assert not _paused(found, "https://example.com/app.js")
 
 
+def test_a_navigation_with_a_user_part_or_a_one_word_name_is_paused_and_blocked() -> (
+    None
+):
+    # Chrome does not check where a page sends its tab; no glob sees these hosts.
+    found = rule()
+    for url, port in (
+        ("http://x@127.0.0.1:8401/v1/agent/run", 8401),
+        ("http://x@localhost:8401/", 8401),
+        ("http://x@[::1]:8401/", 8401),
+        ("http://router/admin", 80),
+    ):
+        assert _paused(found, url, "Document"), url
+        verdict = found.decide(url, "https://example.com")
+        assert (verdict.kind, verdict.port) == ("block", port), url
+
+
 def test_the_listed_helpers_are_wechats_local_service_for_its_quick_login_page() -> (
     None
 ):
@@ -229,6 +251,7 @@ def test_the_listed_helpers_are_wechats_local_service_for_its_quick_login_page()
     assert set(wechat.ports) == {14013, 14014, 14015, 13013, 13014, 13015}
     assert wechat.address == "127.0.0.1"
     assert wechat.pages == ("https://open.weixin.qq.com",)
+    assert wechat.waits == ("/api/authorize",)  # held open until the person answers
     for helper in SIGNIN_HELPERS:
         assert not set(helper.ports) & set(range(8400, 8800)), "melo's own range"
 
@@ -255,6 +278,9 @@ class Helper(BaseHTTPRequestHandler):
 
     seen: list[dict[str, Any]] = []
     other_port = 0
+    delay = (
+        0.0  # how long a request to /wait takes, as an app that waits for the person
+    )
 
     def log_message(self, *args: Any) -> None:
         pass
@@ -270,6 +296,8 @@ class Helper(BaseHTTPRequestHandler):
                 "body": body,
             }
         )
+        if self.path.startswith("/wait"):
+            time.sleep(Helper.delay)
         if self.path.startswith("/redir"):
             self.send_response(302)
             self.send_header("location", f"http://127.0.0.1:{Helper.other_port}/x")
@@ -348,6 +376,7 @@ def _paused_request(url: str, method: str = "GET", body: bytes = b"") -> dict[st
             "Connection": "keep-alive",
             "Host": "evil.example",
             "User-Agent": "Mozilla/5.0",
+            "Cookie": "session=secret",
         },
     }
     if body:
@@ -367,7 +396,7 @@ async def test_the_relay_sends_the_request_to_the_pinned_address_and_returns_the
     assert json.loads(answer.body) == {"app": "signed-in user"}
     headers = [(k.lower(), v) for k, v in answer.headers]
     assert ("access-control-allow-origin", LOGIN) in headers
-    assert [v for k, v in headers if k == "set-cookie"] == ["a=1", "b=2"]
+    assert "set-cookie" not in dict(headers)  # the app sets no cookie in melo's Chrome
     assert "connection" not in dict(headers) and "content-length" not in dict(headers)
     (seen,) = Helper.seen
     assert (seen["method"], seen["path"], seen["body"]) == (
@@ -379,8 +408,34 @@ async def test_the_relay_sends_the_request_to_the_pinned_address_and_returns_the
     assert seen["headers"]["origin"] == LOGIN
     assert seen["headers"]["accept-encoding"] == "identity"
     assert seen["headers"]["user-agent"] == "Mozilla/5.0"
+    assert "cookie" not in seen["headers"]
     # The name is never looked up: melo connects to the address the list pins.
     assert "signin.test" not in numbers.asked
+
+
+async def test_a_request_that_waits_for_the_person_is_not_cut_at_the_usual_limit(
+    helper_server: int, numbers: FakeDns, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # WeChat holds its authorize request open until the person answers its panel.
+    monkeypatch.setattr(local_apps, "RELAY_S", 0.2)  # the usual limit, made short
+    Helper.delay = 0.8
+    helper = dataclasses.replace(_plain(helper_server), waits=("/wait",), wait_s=5.0)
+    try:
+        answer = await local_apps.relay(
+            helper,
+            helper_server,
+            _paused_request(f"http://signin.test:{helper_server}/wait"),
+        )
+        assert answer.status == 200
+        with pytest.raises(RelayError) as caught:  # any other request keeps the limit
+            await local_apps.relay(
+                dataclasses.replace(helper, waits=()),
+                helper_server,
+                _paused_request(f"http://signin.test:{helper_server}/wait"),
+            )
+        assert caught.value.reason == "TimedOut"
+    finally:
+        Helper.delay = 0.0
 
 
 async def test_the_relay_hands_a_redirect_back_without_following_it(
@@ -561,7 +616,7 @@ async def test_the_relay_checks_the_certificate_for_the_helpers_name_not_its_add
 class Calls:
     """Stands in for Chrome's pipe: records each call and answers at once."""
 
-    def __init__(self, answers: dict[str, dict[str, Any]] | None = None) -> None:
+    def __init__(self, answers: dict[str, Any] | None = None) -> None:
         self.made: list[tuple[str, dict[str, Any], str | None]] = []
         self.answers = answers or {}
 
@@ -701,6 +756,16 @@ async def test_every_paused_request_gets_exactly_one_answer_even_when_melo_fails
     await _pause(browser, "https://signin.example:14013/x", LOGIN)
     assert calls.answered() == [
         ("Fetch.failRequest", {"requestId": "r1", "errorReason": "Failed"})
+    ]
+
+
+async def test_an_answer_chrome_refuses_is_followed_by_one_failure() -> None:
+    calls = Calls({"Fetch.continueRequest": chrome.CdpError("Invalid state")})
+    browser = _browser(rule(), calls)
+    await _pause(browser, "https://example.com/?u=http://127.0.0.1/")
+    assert calls.answered() == [
+        ("Fetch.continueRequest", {"requestId": "r1"}),
+        ("Fetch.failRequest", {"requestId": "r1", "errorReason": "Failed"}),
     ]
 
 
