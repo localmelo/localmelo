@@ -175,11 +175,11 @@ enable_thinking = false
 
 3. 想换模型时随时切换：`melo-serve use <pick>`。
 
-- `chat_model` 为空表示 melo_serve 当前提供的模型。localmelo 在创建提供方时从 melo_serve 的状态文件读取它，因此切换会被跟上；`embedding_model` 也一样。正在运行的聊天会在下一轮跟上：网关的聊天（`melo` 主聊天、侧聊天、网页控制台和应用），以及没有用 `/model` 选过模型的本地终端聊天（`[cli] chat = "local"`、`-c`、`-r`）。终端聊天会打印 `The model changed to <model> (via melo_serve).`，网关运行该轮时也一样。只有控制套接字接受连接，并且该套接字属于你自己、所在文件夹只有你能写入时，melo_serve 才算在运行，所以崩溃或停止后留下的状态什么也不提供。
+- `chat_model` 为空表示 melo_serve 当前提供的模型。localmelo 在创建提供方时从 melo_serve 的状态文件读取它，因此切换会被跟上；`embedding_model` 也一样。正在运行的聊天会在下一轮跟上：网关的聊天（`melo` 主聊天、侧聊天、网页控制台和应用），以及没有用 `/model` 选过模型的本地终端聊天（`[cli] chat = "local"`、`-c`、`-r`）。终端聊天会打印 `The model changed to <model> (via melo_serve).`，网关运行该轮时也一样。在某个模型上构建的聊天，若现在提供的是另一个模型，会在下一轮重新构建；正在运行一轮的聊天先完成这一轮。只有控制套接字接受连接，并且套接字和状态文件都属于你自己、所在文件夹只有你能写入时，melo_serve 才算在运行，所以崩溃或停止后留下的状态什么也不提供。
 - 没有提供任何模型时，`melo "task"`（以及 `POST /v1/agent/run`，返回 502 `agent_start_failed`）会以一行说明要运行什么命令结束：`melo-serve up`、安装命令，或 `melo-serve use <pick>`。直接运行的退出码为 1。
 - 首次运行的设置优先选择正在运行的 melo_serve，并且不写入模型。设置、设置页和启动时的检查都不需要已有模型在提供：是否有模型，在需要模型时才检查。
 - 配置使用 melo_serve 时，`melo serve` 会检查它；见[网关](gateway.md#start-the-gateway)。
-- localmelo 运行第一个属于你自己的 `melo-serve` 文件，依次查找 PATH（须为绝对路径）和 `uv tool install` 的安装文件夹（`$UV_TOOL_BIN_DIR`，其次 `$XDG_BIN_HOME`，再其次 `~/.local/bin`；登录项的 PATH 里没有它）。
+- localmelo 运行第一个只有你能写入的 `melo-serve` 文件，依次查找 PATH（须为绝对路径）和 `uv tool install` 的安装文件夹（`$UV_TOOL_BIN_DIR`，其次 `$XDG_BIN_HOME`，再其次 `~/.local/bin`；登录项的 PATH 里没有它）。
 - melo_serve 的 [README](https://github.com/localmelo/melo_serve#readme) 介绍可选项（pick）、登录项和其他命令。
 
 <a id="ollama-with-embeddings"></a>
