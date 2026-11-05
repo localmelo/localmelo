@@ -1268,6 +1268,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   packages, the step-estimate request and its `estimate` call kind, and gateway
   and store methods that only tests called. Settings, commands and what you see
   are otherwise unchanged.
+- The experimental, Python-only typed assertions option is removed. Nothing could turn it on from the command line or settings, and it had no measured gain.
 
 ### Security
 

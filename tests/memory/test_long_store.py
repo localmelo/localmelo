@@ -8,7 +8,9 @@ import os
 import sqlite3
 import stat
 import time
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -356,22 +358,105 @@ async def test_update_supersedes_and_a_missing_target_becomes_new(
         await store.aclose()
 
 
-async def test_the_in_memory_store_clears_the_target_of_a_downgraded_update() -> None:
-    # Review finding 12: the SQLite twin clears target_id when UPDATE becomes
-    # NEW, so the in-memory twin must do the same.
-    store = LongTerm()
-    await _apply(store, "I live in Berlin", kind="profile")
-    _entry_id, action = await _apply(
-        store,
-        "I live in Rome",
-        kind="profile",
-        action="UPDATE",
-        target_id=999,
+async def test_both_stores_make_the_same_decisions_and_answer_the_same_searches(
+    tmp_path: Path,
+) -> None:
+    writes: list[dict[str, Any]] = [
+        {"text": "alpha one", "embedding": [1.0, 0.0]},
+        {"text": "alpha two", "embedding": [0.0, 1.0], "admitted_by": "rehearsal"},
+        # A duplicate is ignored and bumps the use count of what it matched.
+        {"text": "alpha two", "action": "IGNORE", "target_id": 2},
+        {"text": "alpha one", "action": "IGNORE", "target_id": 99},
+        # An update supersedes its target; a second one finds it superseded
+        # and a third finds no target: both become new entries, unlinked.
+        {"text": "alpha uno", "action": "UPDATE", "target_id": 1},
+        {"text": "alpha eins", "action": "UPDATE", "target_id": 1},
+        {"text": "alpha ein", "action": "UPDATE", "target_id": 99},
+        # Links point at a row that exists; a missing target stays in the
+        # decision row with no link.
+        {"text": "alpha near", "action": "RELATED", "target_id": 2},
+        {"text": "alpha clash", "action": "CONFLICT", "target_id": 2},
+        {"text": "alpha lost", "action": "RELATED", "target_id": 99},
+        {"text": "alpha gone", "action": "CONFLICT", "target_id": 99},
+        {"text": "alpha long", "reason": "x" * 600},
+        {
+            "text": "alpha think",
+            "kind": "reflection",
+            "source": "reflection",
+            "provenance": {"origin_task_ids": ["t8", "t9"]},
+        },
+    ]
+
+    async def run(store: LongTerm) -> tuple[Any, ...]:
+        outcomes = []
+        for index, write in enumerate(writes):
+            params: dict[str, Any] = {
+                "kind": "semantic",
+                "source": "user",
+                "admitted_by": "outcome",
+                "provenance": {},
+                "task_id": f"t{index}",
+                "session_id": "s1",
+                "created_at": 100.0 + index,
+                "embedding": None,
+                "action": "NEW",
+                "target_id": None,
+                "reason": "test",
+                "source_ids": ["r1"],
+                "keep_text": True,
+                "candidate_id": f"c{index}",
+                **write,
+            }
+            outcomes.append(await store.apply(**params))
+        decisions = [
+            {key: value for key, value in row.items() if key != "timestamp"}
+            for row in await store.decisions()
+        ]
+        entries = [
+            replace(entry, last_used_at=float(entry.last_used_at > 0))
+            for entry in await store.active_entries()
+        ]
+        searches = []
+        for query in ("alpha", "alpha one", "think"):
+            for kinds in (None, ("semantic",)):
+                for exclude in ((), ("t0", "t1")):
+                    kwargs: dict[str, Any] = {
+                        "kinds": kinds,
+                        "exclude_task_ids": exclude,
+                    }
+                    for rows in (
+                        await store.search([1.0, 0.0], 20, **kwargs),
+                        await store.search_text(query, 20, **kwargs),
+                    ):
+                        searches.append(
+                            [
+                                (text, round(score, 5), {**meta, "last_used_at": 0})
+                                for text, score, meta in rows
+                            ]
+                        )
+        return outcomes, decisions, entries, searches
+
+    ram = LongTerm()
+    sqlite = SqliteLongTerm(tmp_path / "long_term.db")
+    try:
+        expected = await run(ram)
+        assert await run(sqlite) == expected
+    finally:
+        await sqlite.aclose()
+    outcomes, decisions, entries, _searches = expected
+    assert " ".join(action for _id, action in outcomes) == (
+        "NEW NEW IGNORE IGNORE UPDATE NEW NEW RELATED CONFLICT RELATED CONFLICT "
+        "NEW NEW"
     )
-    assert action == "NEW"
-    row = (await store.decisions())[-1]
-    assert row["action"] == "NEW"
-    assert row["target_id"] is None
+    by_text = {entry.text: entry for entry in entries}
+    assert by_text["alpha uno"].supersedes == 1 and by_text["alpha uno"].links == (1,)
+    assert by_text["alpha eins"].links == () and by_text["alpha ein"].links == ()
+    assert by_text["alpha near"].links == (2,) and by_text["alpha clash"].links == (2,)
+    assert by_text["alpha lost"].links == () and by_text["alpha gone"].links == ()
+    assert by_text["alpha two"].uses == 1 and "alpha one" not in by_text
+    assert [row["target_id"] for row in decisions[2:7]] == [2, 99, 1, None, None]
+    assert [row["target_id"] for row in decisions[9:11]] == [99, 99]
+    assert len(decisions[11]["reason"]) == 500
 
 
 async def test_search_returns_the_metadata_merged_with_the_typed_columns(

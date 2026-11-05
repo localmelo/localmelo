@@ -419,7 +419,7 @@ remember: yes if a fact or decision here should be kept after this task, else no
 | 什么会成为一项 | 每个带强键的项目符号、编号条目或表格行，以及普通段落中每个带强键的句子（见[长期记忆](../../reference/memory.md#long-term-memory)（英文））：按文本顺序各成为一项，每次回复最多 12 项。显式 `<note>` 也最多可列出 12 项 `found`。 |
 | 问题、计划 | 问题进入 `open`；计划和选项进入 `plan` 或被省略。 |
 | 否定 | 少量明确的英文否定和取消陈述，以及中文居住和取消形式，可以原样保留，不会丢掉否定；其他形式可能被遗漏。规则是启发式的，不是语义验证器。 |
-| 冲突 | 准入策略会将相似断言中检测到的相反极性标为冲突，而不是把其中一项作为重复项忽略。它仍可能忽略简短事实。结构化、能识别极性的更新替代默认关闭，Python 调用方可以选择启用实验性[类型化陈述](../../reference/memory.md#experimental-typed-assertions)（英文）。 |
+| 冲突 | 准入策略会将相似断言中检测到的相反极性标为冲突，而不是把其中一项作为重复项忽略。它仍可能忽略简短事实。 |
 | 预算 | 渲染后的笔记仍受 1,200 字符预算限制，因此显示的条目可能少于存储的；长期记忆可获得的是这 12 项。 |
 | 对智能体自身工作的报告 | "The session is complete."、"I've read and remembered all of the records…" 不会作为事实存储：策略以 `meta claim about the agent's own work` 为原因忽略它。工作表述中的日期、人名、时间和数量不会使其成为内容；`that`、`says`、`said`、`shows`、`reads`、冒号或破折号之后带键的从句则会。 |
 | 任务摘要 | `task:` 行、文件、路径或函数名会将文本标记为内容，绝不会以此方式过滤，因此 Aider 风格的最终摘要（"task: Implement transpose in transpose.py … outcome: completed"）会保留。 |
