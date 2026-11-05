@@ -17,6 +17,8 @@ Rules for a policy's :meth:`ApprovalPolicy.decide`:
   exception, raises a ``CancelledError`` while the run is not being
   cancelled, or returns something other than an :class:`ApprovalDecision`.
 
+The agent asks every policy through :func:`ask`, which applies these rules.
+
 A file tool's call on a path outside the workspace (#405) carries an
 :class:`~localmelo.melo.contracts.folders.OutsideAccess`; only a policy
 layer with ``decide_folder`` and ``asks_folders`` (see
@@ -30,11 +32,20 @@ module, so the executor can use it without an import cycle.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any, Final, Literal, Protocol, get_args, runtime_checkable
+from typing import (
+    Any,
+    Final,
+    Literal,
+    Protocol,
+    TypeGuard,
+    get_args,
+    runtime_checkable,
+)
 
 from localmelo.melo.contracts.folders import OutsideAccess
 from localmelo.melo.contracts.review import (
@@ -266,6 +277,66 @@ class ApprovalPolicy(Protocol):
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision: ...
 
 
+def is_cancellation(exc: BaseException) -> TypeGuard[asyncio.CancelledError]:
+    """Whether *exc* is a cancellation of the current task.
+
+    That is a ``CancelledError`` while something cancels the task: its
+    ``cancelling()`` count is above 0, as after ``task.cancel()``, a
+    scope such as ``asyncio.timeout`` that cancels it, or the run's own
+    ``timeout_s`` until the deadline turns the cancellation into a
+    ``TimeoutError``. A ``CancelledError`` that a component raises while
+    nothing cancels the task, for example a tool function's, is that
+    component's failure.
+    """
+    if not isinstance(exc, asyncio.CancelledError):
+        return False
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0
+
+
+async def ask(
+    decide: Callable[[ApprovalRequest], Awaitable[object]],
+    request: ApprovalRequest,
+    *,
+    record: Callable[[str, BaseException | None], None],
+) -> ApprovalDecision:
+    """``await decide(request)``, which must give an :class:`ApprovalDecision`.
+
+    The one place a policy is asked, so that every site fails the same way,
+    by the rules of the module docstring. *record* is told what came of a
+    question that got no decision, and the caller refuses the call:
+
+    - ``("withdrawn", None)``: the run was cancelled while it decided; the
+      ``CancelledError`` propagates.
+    - ``("error", exc)``: *exc* is raised. That is the exception *decide*
+      raised, a ``RuntimeError`` for a ``CancelledError`` while nothing
+      cancels the run, or a ``TypeError`` for a return that is no decision.
+    """
+    try:
+        decided: object = await decide(request)
+    except asyncio.CancelledError as exc:
+        if is_cancellation(exc):
+            record("withdrawn", None)
+            raise
+        spurious = RuntimeError(
+            "the approval policy raised CancelledError while the run was not "
+            "cancelled"
+        )
+        record("error", spurious)
+        raise spurious from None
+    except BaseException as exc:
+        record("error", exc)
+        raise
+    if not isinstance(decided, ApprovalDecision):
+        no_decision = TypeError(
+            f"the approval policy returned {type(decided).__name__}, "
+            "not an ApprovalDecision"
+        )
+        record("error", no_decision)
+        raise no_decision
+    return decided
+
+
 # The question the browser provider asks before it presses a button in a window of
 # another app (``desktop-act:<app>``). Like the window question below, only the person
 # answers it, in Ask and in Auto: no model sees the window or the press.
@@ -426,8 +497,10 @@ def grant_offered(request: ApprovalRequest) -> bool:
 # Set around each tool call of a run that has a policy: asks that policy about
 # something the tool found out while it ran, such as the site a redirect led
 # to. The arguments are the tool name the policy sees (a grant of the run
-# covers that name), the arguments to show and a one-line preview. It raises
-# like the policy does; unset (no policy) means nobody is asked. The agent's
+# covers that name), the arguments to show and a one-line preview. It fails
+# as a call's approval does (:func:`ask`): the policy's exception is raised, a
+# ``CancelledError`` while the run is not cancelled and a return that is no
+# decision are raised as an error; unset (no policy) means nobody is asked. The agent's
 # also answers ``names_host(host)``: whether the user's own words name a site,
 # and ``refused_earlier(name, arguments, preview)``: the refusal of a question
 # blocked earlier in the task (#431), which a tool checks before it lets a

@@ -16,6 +16,7 @@ import sqlite3
 import time
 import uuid
 from collections.abc import (
+    Awaitable,
     Callable,
     Collection,
     Coroutine,
@@ -24,7 +25,7 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
-from typing import TYPE_CHECKING, Any, Final, Literal, TypeGuard
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 from localmelo.melo.agent._answer_format import (
     closing_line_of,
@@ -142,12 +143,14 @@ from localmelo.melo.contracts.approvals import (
     Chosen,
     ReviewMode,
     Withdrawal,
+    ask,
     block_note,
     call_key,
     find_auto,
     find_earlier,
     find_folder_asker,
     holds_grant,
+    is_cancellation,
     question_key,
     review_mode,
     site_key,
@@ -1580,23 +1583,6 @@ def _exception_text(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 
-def _is_cancellation(exc: BaseException) -> TypeGuard[asyncio.CancelledError]:
-    """Whether *exc* is a cancellation of the current task.
-
-    That is a ``CancelledError`` while something cancels the task: its
-    ``cancelling()`` count is above 0, as after ``task.cancel()``, a
-    scope such as ``asyncio.timeout`` that cancels it, or the run's own
-    ``timeout_s`` until the deadline turns the cancellation into a
-    ``TimeoutError``. A ``CancelledError`` that a component raises while
-    nothing cancels the task, for example a tool function's, is that
-    component's failure.
-    """
-    if not isinstance(exc, asyncio.CancelledError):
-        return False
-    task = asyncio.current_task()
-    return task is not None and task.cancelling() > 0
-
-
 def _reviews_of(run: _RunState) -> dict[str, Any] | None:
     """What ``run.finished`` reports of the run's reviews: only when a policy ran."""
     return None if run.approval is None else run.reviews.summary()
@@ -1711,8 +1697,7 @@ class _ApprovalGate:
             return ApprovalDecision(True, origin="policy")
         if request.outside is not None:
             return await self._folder(request, request.outside)
-        run, call = self._run, self._call
-        preview = call_preview(request.tool_name, request.arguments)
+        run = self._run
         if self._checker is not None:
             # In a thread: a runner's review walks the workspace.
             self.review = await asyncio.to_thread(
@@ -1725,17 +1710,8 @@ class _ApprovalGate:
                     destructive=self._destructive,
                 ),
             )
-        asking = ApprovalRequest(
-            request_id=uuid.uuid4().hex,
-            run_id=run.task_id,
-            call_id=call.id,
-            tool_name=request.tool_name,
-            arguments=copy.deepcopy(request.arguments),
-            preview=preview,
-            workspace_root=self._workspace_root,
-            tier=self._tier,
-            review=self.review,
-        )
+        asking = self._asking(request, review=self.review)
+        preview = asking.preview
         self._mode = review_mode(self._policy, asking)
         auto = find_auto(self._policy) if self._mode == "auto" else None
         if (
@@ -1797,8 +1773,21 @@ class _ApprovalGate:
                 self.asked["declined"] = True
                 self.asked.update(again.record())
                 return again
-        run.waiting_call_id = call.id
-        try:
+        if self.review is not None and "self" in self.review.categories:
+            # No model reviews it and no policy is asked.
+            self._counted(request.tool_name, preview)
+            if self._mode == "auto":
+                words = CATEGORY_WORDS["self"]
+                self._record(asking, origin="auto", reason=words, denial=True)
+                return ApprovalDecision(
+                    False, self._block(asking, auto, words), origin="auto"
+                )
+            self._record(asking, origin="policy", reason=SELF_DENIAL, denial=True)
+            return ApprovalDecision(False, SELF_DENIAL, origin="policy")
+
+        async def settle(asked: ApprovalRequest) -> ApprovalDecision:
+            # The review is asked in the same guard as the policy: a failure of
+            # either refuses the call alike.
             if (
                 self._reviewer is not None
                 and self.review is not None
@@ -1815,49 +1804,11 @@ class _ApprovalGate:
                     workspace=self._workspace_root,
                     refused_sites=refused,
                 )
-                asking = dataclasses.replace(asking, review=self.review)
-            run.reviews.calls.append(
-                (
-                    request.tool_name,
-                    preview,
-                    "routine" if self.review is None else self.review.verdict,
-                )
-            )
-            if self.review is not None and "self" in self.review.categories:
-                run.waiting_call_id = ""
-                if self._mode == "auto":
-                    words = CATEGORY_WORDS["self"]
-                    self._record(asking, origin="auto", reason=words, denial=True)
-                    return ApprovalDecision(
-                        False, self._block(asking, auto, words), origin="auto"
-                    )
-                self._record(asking, origin="policy", reason=SELF_DENIAL, denial=True)
-                return ApprovalDecision(False, SELF_DENIAL, origin="policy")
-            decided: object = await self._policy.decide(asking)
-        except asyncio.CancelledError as exc:
-            if _is_cancellation(exc):
-                # waiting_call_id stays set: the call did not start.
-                self._record(asking, origin="withdrawn")
-                raise
-            run.waiting_call_id = ""
-            spurious = RuntimeError(
-                "the approval policy raised CancelledError while the run was "
-                "not cancelled"
-            )
-            self._record(asking, origin="error", reason=_exception_text(spurious))
-            raise spurious from None
-        except BaseException as exc:
-            run.waiting_call_id = ""
-            self._record(asking, origin="error", reason=_exception_text(exc))
-            raise
-        run.waiting_call_id = ""
-        if not isinstance(decided, ApprovalDecision):
-            no_decision = TypeError(
-                f"the approval policy returned {type(decided).__name__}, "
-                "not an ApprovalDecision"
-            )
-            self._record(asking, origin="error", reason=_exception_text(no_decision))
-            raise no_decision
+                asked = dataclasses.replace(asked, review=self.review)
+            self._counted(request.tool_name, preview)
+            return await self._policy.decide(asked)
+
+        decided = await self._ask(settle, asking)
         # Who decided, not the mode the call began in: a chat may switch
         # while the call is reviewed. Auto's card nobody answered is auto
         # mode's decision (#465).
@@ -1929,17 +1880,7 @@ class _ApprovalGate:
         if found is None:
             return None
         who, exact = found
-        asking = ApprovalRequest(
-            request_id=uuid.uuid4().hex,
-            run_id=self._run.task_id,
-            call_id=self._call.id,
-            tool_name=request.tool_name,
-            arguments=copy.deepcopy(request.arguments),
-            preview=call_preview(request.tool_name, request.arguments),
-            workspace_root=self._workspace_root,
-            tier=self._tier,
-            outside=request.outside,
-        )
+        asking = self._asking(request, outside=request.outside)
         reason = (BLOCKED_EARLIER if exact else BLOCKED_ALIKE).format(who=who)
         self._record(asking, origin="policy", reason=reason)
         assert self.asked is not None
@@ -1957,9 +1898,8 @@ class _ApprovalGate:
         into localmelo itself is denied without asking. Failures and the
         run's cancellation go as they go for any other call.
         """
-        run, call = self._run, self._call
+        run = self._run
         self._mode = "ask"
-        preview = call_preview(request.tool_name, request.arguments)
         if outside.access == "write":
             review = None
             if self._checker is not None:
@@ -1973,18 +1913,7 @@ class _ApprovalGate:
                 )
             self.review = _outside_write(review, outside)
             run.reviews.count(self.review)
-        asking = ApprovalRequest(
-            request_id=uuid.uuid4().hex,
-            run_id=run.task_id,
-            call_id=call.id,
-            tool_name=request.tool_name,
-            arguments=copy.deepcopy(request.arguments),
-            preview=preview,
-            workspace_root=self._workspace_root,
-            tier=self._tier,
-            review=self.review,
-            outside=outside,
-        )
+        asking = self._asking(request, review=self.review, outside=outside)
         asker = find_folder_asker(self._policy)
         if asker is None or not run.from_person:
             # asks_folders said yes, so only a policy changed meanwhile.
@@ -1993,32 +1922,7 @@ class _ApprovalGate:
         if self.review is not None and "self" in self.review.categories:
             self._record(asking, origin="policy", reason=SELF_DENIAL)
             return ApprovalDecision(False, SELF_DENIAL, origin="policy")
-        run.waiting_call_id = call.id
-        try:
-            decided: object = await asker.decide_folder(asking)
-        except asyncio.CancelledError as exc:
-            if _is_cancellation(exc):
-                self._record(asking, origin="withdrawn")
-                raise
-            run.waiting_call_id = ""
-            spurious = RuntimeError(
-                "the approval policy raised CancelledError while the run was "
-                "not cancelled"
-            )
-            self._record(asking, origin="error", reason=_exception_text(spurious))
-            raise spurious from None
-        except BaseException as exc:
-            run.waiting_call_id = ""
-            self._record(asking, origin="error", reason=_exception_text(exc))
-            raise
-        run.waiting_call_id = ""
-        if not isinstance(decided, ApprovalDecision):
-            no_decision = TypeError(
-                f"the approval policy returned {type(decided).__name__}, "
-                "not an ApprovalDecision"
-            )
-            self._record(asking, origin="error", reason=_exception_text(no_decision))
-            raise no_decision
+        decided = await self._ask(asker.decide_folder, asking)
         if decided.allow and decided.origin in ("auto", "earlier"):
             # Only a person, a grant of the folder or the settings allow it.
             refused = ApprovalDecision(False, NO_FOLDER_ASKER, origin="policy")
@@ -2034,6 +1938,61 @@ class _ApprovalGate:
         assert self.asked is not None
         self.asked["folder"] = {**outside.to_json(), "scope": _folder_scope(decided)}
         return decided
+
+    def _asking(
+        self,
+        request: ExecutionRequest,
+        *,
+        review: ActionReview | None = None,
+        outside: OutsideAccess | None = None,
+    ) -> ApprovalRequest:
+        """The request to the policy for the call *request* would run."""
+        return ApprovalRequest(
+            request_id=uuid.uuid4().hex,
+            run_id=self._run.task_id,
+            call_id=self._call.id,
+            tool_name=request.tool_name,
+            arguments=copy.deepcopy(request.arguments),
+            preview=call_preview(request.tool_name, request.arguments),
+            workspace_root=self._workspace_root,
+            tier=self._tier,
+            review=review,
+            outside=outside,
+        )
+
+    async def _ask(
+        self,
+        decide: Callable[[ApprovalRequest], Awaitable[object]],
+        asking: ApprovalRequest,
+    ) -> ApprovalDecision:
+        """:func:`ask` with the call named in ``run.waiting_call_id`` meanwhile."""
+        run = self._run
+        run.waiting_call_id = self._call.id
+        decided = await ask(
+            decide, asking, record=functools.partial(self._failed, asking)
+        )
+        run.waiting_call_id = ""
+        return decided
+
+    def _failed(
+        self, asking: ApprovalRequest, origin: str, error: BaseException | None
+    ) -> None:
+        """Keep a question that got no decision (see :func:`ask`)."""
+        if error is not None:
+            # A withdrawn question keeps the name: the call did not start.
+            self._run.waiting_call_id = ""
+        reason = "" if error is None else _exception_text(error)
+        self._record(asking, origin=origin, reason=reason)
+
+    def _counted(self, tool_name: str, preview: str) -> None:
+        """Count the call among those that a later model review is told came before it."""
+        self._run.reviews.calls.append(
+            (
+                tool_name,
+                preview,
+                "routine" if self.review is None else self.review.verdict,
+            )
+        )
 
     def _block(
         self, asking: ApprovalRequest, auto: AutoPolicy | None, words: str = ""
@@ -2217,7 +2176,10 @@ class _ToolAsk:
     The request is for a name and arguments the tool chooses, not for the
     tool's own call, so a policy that keeps grants by name keeps one per name.
     It has the call's id, so a surface shows the question with the call. The
-    run's cancellation propagates, and the prompt counts as withdrawn.
+    run's cancellation propagates, and the prompt counts as withdrawn. The
+    policy fails closed as it does for a call (:func:`ask`), and a question that
+    got no decision is kept in *refused* with its ``origin`` (``withdrawn`` or
+    ``error``).
 
     In auto mode (#339) a site the browser would open is reviewed first:
     routine when the user's words name it, otherwise the user's model asks
@@ -2280,6 +2242,27 @@ class _ToolAsk:
             tier="network",
         )
 
+    async def _ask(self, request: ApprovalRequest) -> ApprovalDecision:
+        """:func:`ask` the policy; a question that got no decision is kept in *refused*."""
+        return await ask(
+            self._policy.decide,
+            request,
+            record=functools.partial(self._failed, request),
+        )
+
+    def _failed(
+        self, request: ApprovalRequest, origin: str, error: BaseException | None
+    ) -> None:
+        """Keep a question that got no decision (see :func:`ask`).
+
+        Without its preview, which can name a window of another app.
+        """
+        self.refused.append(
+            {"request_id": request.request_id, "tool": request.tool_name,
+             "allowed": False, "origin": origin,
+             "reason": "" if error is None else _exception_text(error)}
+        )  # fmt: skip
+
     async def _window(
         self,
         tool_name: str,
@@ -2313,12 +2296,7 @@ class _ToolAsk:
                 request,
                 review=ActionReview("high", ("opaque",), (words,)),
             )
-        decided: object = await self._policy.decide(request)
-        if not isinstance(decided, ApprovalDecision):
-            raise TypeError(
-                f"the approval policy returned {type(decided).__name__}, "
-                "not an ApprovalDecision"
-            )
+        decided = await self._ask(request)
         if not decided.allow and decided.origin == "auto":
             # Auto refused it only because nobody can be asked: say that, not the
             # category of code melo cannot check that the fixed review carries.
@@ -2410,12 +2388,7 @@ class _ToolAsk:
                     secret_free=access in _VALUE_FREE_ACCESS,
                 )
             request = dataclasses.replace(request, review=review)
-        decided: object = await self._policy.decide(request)
-        if not isinstance(decided, ApprovalDecision):
-            raise TypeError(
-                f"the approval policy returned {type(decided).__name__}, "
-                "not an ApprovalDecision"
-            )
+        decided = await self._ask(request)
         if (
             not decided.allow
             and decided.origin in ("user", "auto", "policy")
@@ -4977,7 +4950,7 @@ class Agent:
         is handed to the executor and one ``tool.finished`` after: with the
         checked result, or, when an exception ends the call, before the
         exception propagates, with the status ``cancelled`` for a
-        cancellation of the run (see :func:`_is_cancellation`), its
+        cancellation of the run (see ``is_cancellation``), its
         ``timeout_s`` included, and ``crashed`` for any other exception. A
         cancelled call's error says that it did not start when the policy
         was still deciding about it, and that it may have partly run
@@ -5090,7 +5063,7 @@ class Agent:
             events.tool_stopped(
                 call,
                 exc,
-                cancelled=_is_cancellation(exc),
+                cancelled=is_cancellation(exc),
                 exit_codes=exit_codes,
                 not_started=run.waiting_call_id == call.id,
                 approval=None if gate is None else gate.asked,
@@ -6896,7 +6869,7 @@ class Agent:
                     logger.exception("Task %s crashed", task.task_id)
                     run.end("crashed", error=_exception_text(exc))
             except BaseException as exc:
-                if run.interactive and _is_cancellation(exc):
+                if run.interactive and is_cancellation(exc):
                     # A caller stopped a run that it follows.
                     await self._on_cancelled(query, run, exc)
                 else:

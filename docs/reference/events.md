@@ -389,8 +389,11 @@ The number of `tool.started` events is `RunResult.n_tool`.
   a site, `ask:site:<host>` among them), so a task its chat continues never
   asks it, or anything else about that host however its address is written,
   again; a refusal of such a repeat has `earlier` (who refused it
-  first) and no `call_key`. Every other call, and an event stored before this
-  key, has no `tool_asks`.
+  first) and no `call_key`. A question that got no decision is there too, as
+  `{request_id, tool, allowed: false, origin, reason}` with no `call_key`:
+  `origin` is `error` when the policy failed (`reason` is the failure) or
+  `withdrawn` when the run was cancelled while it decided. Every other call,
+  and an event stored before this key, has no `tool_asks`.
 - `allowed_local`: `true`, and only for a `web_fetch` call that read a test server on this
   computer which the developer setting `[tools] web_fetch_allow_local` lists (see
   [Tools](tools.md#test-servers-on-this-computer)); it is there even when the page then
