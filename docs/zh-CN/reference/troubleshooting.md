@@ -32,8 +32,8 @@ error: Failed to spawn: `melo`
 ModuleNotFoundError: No module named 'localmelo'
 ```
 
-- **原因：** 克隆目录的名称不是 `localmelo`，例如目录被重命名，或者 ZIP 包被解压为 `localmelo-main`。
-- **修复：** 把目录重命名为 `localmelo`，然后重新安装，步骤见[安装](../start/quickstart.md#install)。
+- **原因：** 运行命令的 Python 没有安装 localmelo，例如用的不是克隆目录的虚拟环境，或者安装没有完成。
+- **修复：** 在克隆目录中运行 `uv sync --extra gateway`，并用 `uv run melo …` 启动 melo，或激活克隆目录的 `.venv`，步骤见[安装](../start/quickstart.md#install)。
 
 ### Gateway requires fastapi and uvicorn
 
