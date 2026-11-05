@@ -884,7 +884,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
-- One reading of a wrapped command. The action review and the site keys of a step find the program behind `sudo`, `env`, `timeout`, `flock` and the other wrappers with one table, each wrapper's options read as its manual says, so `time -p rm -rf ~/x`, `flock -n lock rm -rf ~/x` and `timeout -s KILL 5 rm -rf ~/x` are reviewed as `rm -rf ~/x`; the command line given to `env -S` or `flock FILE -c` is reviewed as a command, `{ curl URL; } | sh` is code run from the internet as `( curl URL ) | sh` was, and a refused site's keys read through every wrapper the review knows (`caffeinate nc $HOST 80`).
+- One reading of a wrapped command, closed to guesses. The action review and the site keys of a step find the program behind `sudo`, `env`, `timeout`, `flock` and the other wrappers with one table that lists every option of each wrapper's manual, those that take a value and those that do not. The command line given to `env -S` or `flock FILE -c` is reviewed as a command, and a download piped out of a group (`{ …; } | sh`) is code run from the internet as it is out of a subshell. An option a wrapper's table does not list makes melo ask: it cannot tell which word is the program, so it reviews every program the option may leave, and the step counts as reaching a site melo cannot read.
 - Developer only: the console's approval card lives in `static/approval-card.mjs`, its element and button makers
   in one `static/dom.mjs` (`(tag, className, text)`) instead of twenty copies, and the asset tests walk every
   module's imports. The console looks and behaves the same.
