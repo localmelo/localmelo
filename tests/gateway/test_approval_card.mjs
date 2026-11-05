@@ -88,17 +88,21 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
     ['file_write', {path: 'b.txt', content: 'abc'}, {path_label: 'b.txt', exists: false, size_bytes: 0}, 'Create b.txt?', 'file_write'],
     ['file_write', {path: 'c.txt', content: 'abc'}, null, 'Write c.txt?', 'file_write · checking the file'],
     ['demo_lookup', {query: 'x'}, null, 'Let melo use demo_lookup?', 'demo_lookup'],
-    ['browser:https://example.com', {site: 'example.com', access: 'read'}, null, 'Let melo open example.com?', 'browser · read only'],
-    ['browser:https://example.com', {site: 'example.com', access: 'read', via: 'web_fetch'}, null, 'Let melo read example.com?', 'web_fetch · read only'],
-    ['browser-act:https://example.com', {site: 'example.com', access: 'act'}, null, 'Let melo click and choose on example.com?', 'browser · acts on the page'],
-    ['browser-type:https://example.com', {site: 'example.com', access: 'type', how: 'type', text: 'hi'}, null, 'Let melo type on example.com?', 'browser · types text'],
-    ['browser-submit:https://example.com', {site: 'example.com', access: 'submit', to: 'https://other.org/post', how: 'click'}, null, 'Let melo send a form from example.com?', 'browser · sends a form'],
-    ['desktop-act:Chat', {app: 'Chat', access: 'desktop-act', how: 'press', on: '"Allow"', window: 'Sign in', button: 'Allow'}, null, 'Let melo press a button in Chat?', 'another app · presses a button'],
-    ['browser-point:https://example.com', {site: 'example.com', access: 'point', how: 'click', on: 'a password field'}, null, 'Let melo click at one spot on example.com?', 'browser · acts at one point'],
-    ['browser-point:https://example.com', {site: 'example.com', access: 'point', how: 'type into', on: 'a text field inside a box from login.example.org that melo cannot check', target: 'unknown'}, null, 'Let melo type into one spot on example.com?', 'browser · acts at one point'],
+    ['browser:https://example.com', {site: 'example.com', access: 'read'}, null, 'Let melo open example.com?', 'Reading a web page'],
+    ['browser:https://example.com', {site: 'example.com', access: 'read', via: 'web_fetch'}, null, 'Let melo read example.com?', 'Reading a web page as text'],
+    ['browser-act:https://example.com', {site: 'example.com', access: 'act'}, null, 'Let melo click and choose on example.com?', 'A click or a choice on a web page'],
+    ['browser-act:https://example.com', {site: 'example.com', access: 'act', how: 'click', on: 'a button "Sign in"'}, null, 'Click “Sign in” on example.com?', 'A click or a choice on a web page'],
+    ['browser-act:https://example.com', {site: 'example.com', access: 'act', how: 'click', on: 'a link'}, null, 'Click a link on example.com?', 'A click or a choice on a web page'],
+    ['browser-act:https://example.com', {site: 'example.com', access: 'act', how: 'choose an option', on: 'a select "Country"'}, null, 'Choose an option in “Country” on example.com?', 'A click or a choice on a web page'],
+    ['browser-type:https://example.com', {site: 'example.com', access: 'type', how: 'type', text: 'hi'}, null, 'Let melo type on example.com?', 'Typing on a web page'],
+    ['browser-type:https://example.com', {site: 'example.com', access: 'type', how: 'type', text: 'hi', on: 'a textbox "Comment"'}, null, 'Type into “Comment” on example.com?', 'Typing on a web page'],
+    ['browser-submit:https://example.com', {site: 'example.com', access: 'submit', to: 'https://other.org/post', how: 'click'}, null, 'Let melo send a form from example.com?', 'Sending a form from a web page'],
+    ['desktop-act:Chat', {app: 'Chat', access: 'desktop-act', how: 'press', on: '"Allow"', window: 'Sign in', button: 'Allow'}, null, 'Let melo press a button in Chat?', 'A button in another app'],
+    ['browser-point:https://example.com', {site: 'example.com', access: 'point', how: 'click', on: 'a password field'}, null, 'Let melo click at one spot on example.com?', 'An action at one spot of a web page'],
+    ['browser-point:https://example.com', {site: 'example.com', access: 'point', how: 'type into', on: 'a text field inside a box from login.example.org that melo cannot check', target: 'unknown'}, null, 'Let melo type into one spot on example.com?', 'An action at one spot of a web page'],
     ['handoff:chat', {site: 'example.com', access: 'handoff', app: 'Chat', scheme: 'chat', url: 'chat://login?x=1', browser: 'chrome'}, null, 'Open Chat?', 'a page asks for an app'],
-    ['browser-dialog:https://example.com', {site: 'example.com', access: 'dialog', how: 'confirm', text: 'Delete the draft?', browser: 'chrome'}, null, 'Answer OK on example.com?', 'browser · the page asks'],
-    ['window-read:com.example.chat', {app: 'Chat', window: 'Sign in', bundle: 'com.example.chat', access: 'window-read'}, null, "Chat opened a window right after melo's click: let melo see it?", 'another app · its window'],
+    ['browser-dialog:https://example.com', {site: 'example.com', access: 'dialog', how: 'confirm', text: 'Delete the draft?', browser: 'chrome'}, null, 'Answer OK on example.com?', 'A question from a web page'],
+    ['window-read:com.example.chat', {app: 'Chat', window: 'Sign in', bundle: 'com.example.chat', access: 'window-read'}, null, "Chat opened a window right after melo's click: let melo see it?", 'A window of another app'],
   ];
   for (const [tool, args, target, title, caption] of asks) {
     request = {request_id: `ask-${tool}-${title}`, tool_name: tool, arguments: args, workspace_label: '~/w', target};
@@ -136,7 +140,21 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
   request = {request_id: 'open-chrome', tool_name: 'browser:https://example.com',
     arguments: {site: 'example.com', access: 'read', browser: 'chrome'}, workspace_label: '~/w'};
   const opening = c.draw(request);
-  assert.match(findNode(opening, (node) => node.className === 'approval-content').textContent, /in Chrome and read it\. Chrome runs in the background/);
+  assert.match(findNode(opening, (node) => node.className === 'approval-note').textContent, /in Chrome and read it\. Chrome runs in the background/);
+  // The sentence of a site that opens, and of a click or a choice, is plain text in the card, never a code box; a control in
+  // another site's box says so.
+  for (const [tool, args] of [
+    ['browser:https://example.com', {site: 'example.com', access: 'read'}],
+    ['browser-act:https://example.com', {site: 'example.com', access: 'act', how: 'click', on: 'a button "Sign in" inside a box from login.example.org'}],
+  ]) {
+    const plain = c.draw({request_id: `plain-${tool}`, tool_name: tool, arguments: args, workspace_label: '~/w'});
+    assert.equal(findNode(plain, (node) => node.className === 'approval-content'), null, 'no code box');
+    assert.match(findNode(plain, (node) => node.className === 'approval-note').textContent, /^melo (wants to open|does this on) example\.com/);
+  }
+  const framed = c.draw({request_id: 'framed', tool_name: 'browser-act:https://example.com', workspace_label: '~/w',
+    arguments: {site: 'example.com', access: 'act', how: 'click', on: 'a button "Sign in" inside a box from login.example.org'}});
+  assert.equal(findNode(framed, (node) => node.className === 'approval-title').textContent, 'Click “Sign in” on example.com?');
+  assert.match(findNode(framed, (node) => node.className === 'approval-note').textContent, /It is in a box from login\.example\.org, another site\.$/);
   // A click inside a box melo cannot check has its own words, the same in Ask and in Auto: where it lands, that melo cannot
   // check it, and two answers. Auto's fixed "opaque" review is about code, so neither its title nor its reasons show.
   const unknown = {site: 'example.com', access: 'point', how: 'click', target: 'unknown', browser: 'chrome',
@@ -168,7 +186,7 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
   try {
     const zh = shape(pointed('point-auto-zh', opaque));
     assert.equal(zh.title, '让 melo 在 example.com 的某一处点击？');
-    assert.equal(zh.caption, '浏览器 · 在页面的某一处操作');
+    assert.equal(zh.caption, '在网页的某一处操作');
     assert.match(zh.note, /这一步 melo 自己无法检查，所以每次都会问你/);
     assert.deepEqual(zh.reasons, [null, null]);
     assert.deepEqual(zh.answers, ['once', 'deny']);
@@ -219,7 +237,7 @@ test("a press in another app's window says what is pressed and is asked every ti
     review: {verdict: 'high', categories: ['opaque'], reasons: ['Pressing a button in another app\'s window is yours to decide, every time.']}};
   const auto = c.draw(request);
   assert.equal(findNode(auto, (node) => node.className === 'approval-title').textContent, 'Let melo press a button in Chat?');
-  assert.equal(findNode(auto, (node) => node.className === 'approval-caption').textContent, 'another app · presses a button');
+  assert.equal(findNode(auto, (node) => node.className === 'approval-caption').textContent, 'A button in another app');
   assert.equal(findNode(auto, (node) => node.className === 'approval-why'), null, 'no review reason for the person to read');
   assert.deepEqual(focuses(auto).filter((name) => name !== 'reason'), ['once', 'deny']);
 });
@@ -551,9 +569,9 @@ test('a card says when the person\'s Allow is kept for later tasks, as the serve
     return findNode(c.draw(request, {scope}), (node) => node.className === 'approval-remembered');
   };
   assert.equal(kept('chat', true).textContent,
-    'Your Allow also lets this chat\'s tasks run this exact step later without asking, until you revoke it.');
+    'Whichever Allow you choose, this exact step is also kept for the tasks this chat starts: they may run it again without asking, until you revoke it. Any other step still asks.');
   assert.equal(kept('task', true).textContent,
-    'Your Allow also lets later tasks from the same chat run this exact step without asking, until you revoke it.');
+    'Whichever Allow you choose, this exact step is also kept for later tasks from the same chat: they may run it again without asking, until you revoke it. Any other step still asks.');
   assert.equal(kept('task', false), null);
   assert.equal(kept('task', undefined), null);
   // A high-impact card asks every time: it never says so, whatever it is sent.
@@ -760,7 +778,7 @@ test('in the main chat the remembered note and the Deny view follow the wider an
   const request = askOf({remembered: true});
   const card = c.draw(request);
   const kept = findNode(card, (node) => node.className === 'approval-remembered');
-  assert.equal(kept.textContent, 'Your Allow also lets every chat, the tasks you start and the terminal run this exact step later without asking, until you revoke it.');
+  assert.equal(kept.textContent, 'Whichever Allow you choose, this exact step is also kept for every chat, the tasks you start and the terminal: they may run it again without asking, until you revoke it. Any other step still asks.');
   const line = everywhereLine(card);
   c.settle('q');
   quietDeny(card).click();
@@ -775,7 +793,7 @@ test('a side chat\'s card says this chat, and a task\'s card says this task, eve
   assert.deepEqual(answersOf(card), ['Allow once', 'Allow for this chat', 'Deny']);
   assert.equal(ruleOf(card, 'q'), 'melo will not ask again before using file_read in this chat.');
   assert.equal(everywhereLine(card), null);
-  assert.match(findNode(card, (node) => node.className === 'approval-remembered').textContent, /^Your Allow also lets this chat's tasks/);
+  assert.match(findNode(card, (node) => node.className === 'approval-remembered').textContent, /^Whichever Allow you choose, this exact step is also kept for the tasks this chat starts/);
   assert.deepEqual(answersOf(side.draw(outsideRead())), ['Allow once', 'Allow this folder for this chat', 'Always allow this folder', 'Deny']);
   const window = askOf({tool_name: 'window-read:com.example.chat', arguments: {app: 'Chat', window: 'x'}, offers_chat: true});
   assert.equal(answersOf(side.draw(window))[1], 'Allow Chat in this chat');
@@ -785,7 +803,7 @@ test('a side chat\'s card says this chat, and a task\'s card says this task, eve
   assert.deepEqual(answersOf(card), ['Allow once', 'Allow for this task', 'Deny']);
   assert.equal(ruleOf(card, 'q'), 'melo will not ask again before using file_read in this task.');
   assert.equal(everywhereLine(card), null);
-  assert.match(findNode(card, (node) => node.className === 'approval-remembered').textContent, /^Your Allow also lets later tasks from the same chat/);
+  assert.match(findNode(card, (node) => node.className === 'approval-remembered').textContent, /^Whichever Allow you choose, this exact step is also kept for later tasks from the same chat/);
   assert.equal(answersOf(main.draw(outsideRead(), {scope: 'task'}))[1], 'Allow this folder for this task');
   card = main.draw({...window, request_id: 'see-task'}, {scope: 'task'});
   assert.equal(answersOf(card)[1], 'Allow Chat for this task');
@@ -802,7 +820,7 @@ test('the main chat\'s card reads in Simplified Chinese', async () => {
     assert.deepEqual(answersOf(card), ['允许一次', '在所有对话中允许', '拒绝']);
     assert.equal(ruleOf(card, 'q'), '在所有对话里，melo 使用 file_read 前不会再问你。');
     assert.equal(everywhereLine(card).textContent, '在主对话里允许的在所有对话、你开始的任务和终端里都算，直到你在“设置 → 授权”里收回。');
-    assert.match(findNode(card, (node) => node.className === 'approval-remembered').textContent, /^你的允许也会让所有对话、你开始的任务和终端/);
+    assert.match(findNode(card, (node) => node.className === 'approval-remembered').textContent, /^无论你选哪种允许，完全相同的这一步还会留给所有对话、你开始的任务和终端/);
     request = outsideRead({request_id: 'zh'});
     assert.equal(answersOf(c.draw(request))[1], '在所有对话中允许这个文件夹');
     request = askOf({request_id: 'see', tool_name: 'window-read:com.example.chat', arguments: {app: 'Chat', window: 'x'}, offers_chat: true});

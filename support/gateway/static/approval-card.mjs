@@ -38,6 +38,22 @@ export function guardLeft(state) {
   return Math.max(0, Math.ceil(GUARD_MS - (approvalNow() - state.mountedAt)));
 }
 
+// The engine's words for a control, `a button "Sign in"` (and ` inside a box from accounts.example.org`), as the
+// request carries them in `on`: its kind, its label and the other site's box. null when the words are not those.
+const CONTROL_KINDS = ["link", "button", "textbox", "checkbox", "select"];
+function controlOf(on) {
+  const found = /^an? ([a-z]+)(?: "(.*)")?(?: inside a box from (\S+))?$/.exec(String(on ?? "").trim());
+  if (!found || !CONTROL_KINDS.includes(found[1])) return null;
+  return { kind: found[1], label: found[2] ?? "", frame: found[3] ?? "" };
+}
+
+// What a click, a choice or typing is on, in a question: “Sign in” when it is named, else the kind of control.
+function actionTitle(key, control, site) {
+  return control.label
+    ? t(`approval.${key}`, { label: control.label, site })
+    : t(`approval.${key}Kind`, { kind: t(`approval.kind.${control.kind}`), site });
+}
+
 // "5 lines removed, 1 added": the size of what a file write replaces.
 function diffSummary({added, removed}) {
   const lines = (n) => t("diff.lines", { n });
@@ -131,12 +147,15 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     caption = t(reading ? "approval.readCaption" : "approval.browserCaption");
     rule = everywhere ? t(reading ? "approval.rule.readMain" : "approval.rule.openMain", { site })
       : t(reading ? "approval.rule.read" : "approval.rule.open", { site, scope });
-    // Chrome in the background (`args.browser`) is worded for itself: no window comes to the front.
-    content = t(reading ? "approval.readContent" : args.browser === "chrome" ? "approval.siteContentChrome" : "approval.siteContent", { site });
+    // Chrome in the background (`args.browser`) is worded for itself: no window comes to the front. The
+    // sentence is plain text; a read of an address shows the whole address in the box below it.
+    why = t(reading ? "approval.readContent" : args.browser === "chrome" ? "approval.siteContentChrome" : "approval.siteContent", { site });
+    content = "";
+    noBox = true;
     if (reading && args.url) {
       // The whole address reaches the site, path and query too: the card shows it.
-      why = content;
       content = String(args.url);
+      noBox = false;
       what = t("approval.readAddress");
     }
   } else if (tool.startsWith("browser-act:") || tool.startsWith("browser-type:") || tool.startsWith("browser-submit:")) {
@@ -147,7 +166,14 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     const typing = tool.startsWith("browser-type:");
     const site = String(args.site || tool.slice(tool.indexOf(":") + 1));
     what = t("approval.willDo");
+    // The title names the action and its target when melo knows them; the words of an older request, or a
+    // control the engine did not name, keep the question about the kind of action.
+    const control = sending ? null : controlOf(args.on);
+    const choosing = /^choose\b/.test(String(args.how ?? "")); // the engine's own word for a choice
     title = t(sending ? "approval.submitSite" : typing ? "approval.typeSite" : "approval.actSite", { site });
+    if (control && typing) title = actionTitle("typeInto", control, site);
+    else if (control && choosing) title = control.label ? t("approval.actChoose", { label: control.label, site }) : t("approval.actChooseKind", { site });
+    else if (control) title = actionTitle("actClick", control, site);
     caption = t(sending ? "approval.submitCaption" : typing ? "approval.typeCaption" : "approval.actCaption");
     rule = sending || typing ? t(sending ? "approval.rule.submitOnce" : "approval.rule.typeOnce")
       : everywhere ? t("approval.rule.actMain", { site }) : t("approval.rule.act", { site, scope });
@@ -155,6 +181,12 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     content = t(sending ? "approval.submitContent"
       : typing ? (chrome ? "approval.typeContentChrome" : "approval.typeContent")
       : chrome ? "approval.actContentChrome" : "approval.actContent", { site });
+    if (!sending && !typing) {
+      // A click or a choice: the sentence is plain text, and a control in another site's box says so.
+      why = control?.frame ? `${content} ${t("approval.inBox", { host: control.frame })}` : content;
+      content = "";
+      noBox = true;
+    }
     if (sending) {
       // Where the form goes (or that the page decides) and what it holds, nothing secret in it.
       why = content;
