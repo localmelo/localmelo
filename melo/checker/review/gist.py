@@ -42,6 +42,7 @@ from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.review import apps as app_names
 from localmelo.melo.checker.review import destroys, targets
 from localmelo.melo.checker.review.paths import loopback
+from localmelo.melo.contracts import shell_lexer
 from localmelo.melo.contracts.review import MAX_TEXT, ActionReview, command_steps
 
 # The argument that carries the model's own words about a call. Another
@@ -110,6 +111,9 @@ _AGREES: Final[dict[str, re.Pattern[str]]] = {
     ),
 }
 _EFFECTS: Final = ("delete", "send_out")
+# What a command clearly does, strongest first, as the card's titles go
+# (TITLES: controlling an app, deleting, sending data out).
+_STRONGEST: Final = ("operate", *_EFFECTS)
 # What an honest description of a git command that discards work says besides
 # "delete": reverting, restoring, resetting, rolling back. These cover only a
 # step that is nothing but such commands (checkout, restore, switch, stash):
@@ -119,25 +123,10 @@ _GIT_AGREES: Final = re.compile(
     r"(?i)\b(?:revert|restor|reset|undo|roll\s?back|throw\s+away|check\s?out"
     r"|clear|drop|abandon|reject)\w*|还原|撤销|回滚|放弃|重置|恢复"
 )
-# Words that start a command line and run the command after them, with the
-# options of each that take a value (so the value is not read as the program).
-_WRAPPERS: Final = frozenset(
-    ["sudo", "doas", "xargs", "nice", "time", "env", "command", "exec", "nohup"]
-    + ["timeout", "caffeinate", "stdbuf", "ionice", "builtin"]
-    # shell keywords that put a command after them
-    + ["do", "then", "else", "elif", "if", "while", "until", "{", "(", "!"]
-)
-_WRAPPER_VALUES: Final[dict[str, frozenset[str]]] = {
-    "sudo": frozenset(
-        ["-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U", "-r", "-t"]
-    ),
-    "doas": frozenset(["-u", "-C"]),
-    "env": frozenset(["-u", "-C", "-S"]),
-    "timeout": frozenset(["-s", "-k", "--signal", "--kill-after"]),
-    "nice": frozenset(["-n"]),
-    "ionice": frozenset(["-c", "-n", "-p"]),
-    "xargs": frozenset(["-I", "-n", "-P", "-L", "-s", "-d", "-E", "-a"]),
-}
+# Words that start a command line and run the command after them: the
+# wrappers (with the options of each that take a value, so the value is not
+# read as the program), the shell keywords and a subshell's parenthesis.
+_WRAPPERS: Final = frozenset([*shell_lexer.WRAPPERS, *shell_lexer.KEYWORDS, "("])
 # The ends of a block, which name no command of their own.
 # ``command -v rm``: a lookup of a program, not a run of it.
 _LOOKUP: Final = re.compile(r"-[pvV]*[vV][pvV]*")
@@ -507,7 +496,19 @@ def _classify(words: list[str], text: str = "") -> _Item | None:
     """
     if not words or words[0].startswith("#") or words[0] in _CLOSERS:
         return None
-    program, rest = _program(words)
+    readings = [_program(words)]
+    found = shell_lexer.unwrap(words)
+    if found.unread:  # a wrapper option melo could not read: any program it may run
+        readings += [(shell_lexer.program(r[0]), r[1:]) for r in found.readings if r]
+    items = [item for reading in readings if (item := _clear_item(*reading))]
+    if items:
+        return min(items, key=lambda item: _STRONGEST.index(item.kind))
+    shown = text or shlex.join(words)
+    return _Item("command", text=_unformatted(shown))
+
+
+def _clear_item(program: str, rest: list[str]) -> _Item | None:
+    """What *program* run with *rest* clearly does: an effect or an app it operates."""
     discard = destroys.git_discards(rest) if program == "git" else None
     effect = _command_effect(program, rest, discard)
     if effect:
@@ -523,10 +524,7 @@ def _classify(words: list[str], text: str = "") -> _Item | None:
         named = app_names.osascript_app(rest)
     elif program == "open":
         named = app_names.open_app(rest)
-    if named:
-        return _Item("operate", apps=(named,))
-    shown = text or shlex.join(words)
-    return _Item("command", text=_unformatted(shown))
+    return _Item("operate", apps=(named,)) if named else None
 
 
 def _program(words: list[str]) -> tuple[str, list[str]]:
@@ -543,7 +541,8 @@ def _program(words: list[str]) -> tuple[str, list[str]]:
                 words[at + 1 :],
             )  # command -v rm looks rm up, it does not run it
         opening = base.lstrip("({")  # a group: (rm x), { rm x; }
-        if word in _WRAPPER_VALUES.get(wrapper, ()):
+        options = shell_lexer.WRAPPERS.get(wrapper)
+        if options is not None and word in options.valued:
             at += 2
         elif (
             word.startswith("-")

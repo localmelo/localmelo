@@ -420,6 +420,20 @@ def test_looking_a_program_up_is_no_run_of_it() -> None:
     assert gist("shell_exec", {"command": "command -p rm x"}).id == "effect_delete"
 
 
+@pytest.mark.parametrize("command", ["env -Z rm x", "env -Z name rm x"])
+def test_a_wrapper_option_melo_cannot_read_leaves_the_effect_named(
+    command: str,
+) -> None:
+    """The option may take ``name`` as its value or not: the card says what either does."""
+    assert gist("shell_exec", {"command": command}).id == "effect_delete"
+
+
+def test_of_the_readings_of_a_command_the_card_names_the_strongest() -> None:
+    """Sending comes after deleting in the card's titles."""
+    found = gist("shell_exec", {"command": "env -Z scp rm x me@example.com:x"})
+    assert found.id == "effect_delete"
+
+
 @pytest.mark.parametrize(
     "command",
     [

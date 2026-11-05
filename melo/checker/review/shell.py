@@ -5,7 +5,9 @@ from __future__ import annotations
 import base64
 import os
 import re
-from collections.abc import Collection
+from collections.abc import Collection, Iterable, Sequence
+from itertools import chain, islice
+from typing import NamedTuple
 from urllib.parse import urlparse
 
 from localmelo.melo.checker.review import apps, destroys
@@ -63,6 +65,8 @@ _LAUNCHABLE = (
 # files a ``find -exec`` hands over). It is not a name a shell variable can
 # have, so it is never taken for one.
 UNKNOWN_ARG = "$(?)"
+# The doubt for a command whose words melo could not read.
+UNREAD = "Runs a command melo could not read."
 _DRIVES = re.compile(
     r"\btell\s+(application|app)\b|do shell script|run script|Application\(|doShellScript"
     r"|\bdo script\b|«",
@@ -137,10 +141,6 @@ _SEARCH_VALUED = set(
     ["-e", "-f", "--regexp", "--file", "--include", "--exclude", "--exclude-dir"]
     + ["-A", "-B", "-C", "-m", "--max-count", "-g", "--glob", "-t", "--type", "-T"]
 )
-_OPS = re.compile(r"&&|\|\||;;|\|&|&>>|&>|>>|>&|<&|<<<|<<|<\(|>\(|>\||[;&|()<>\n]")
-_SEPARATORS = set([";", "&&", "||", "|", "|&", "&", "(", ")", "<(", ">(", ";;"]) | {
-    "\n"
-}
 _WRITES = set([">", ">>", "&>", "&>>", ">|", ">&"])
 _PY = re.compile(r"python(\d(\.\d+)?)?w?$")
 _SHELLS = set(["sh", "bash", "zsh", "dash", "fish"])
@@ -160,55 +160,8 @@ _PIP_TARGET = {"-t", "--target", "--prefix", "--root", "-d", "--dest"}
 _PIP_VALUED = (
     _PIP_MANIFEST | _PIP_TARGET | set(["-c", "-i", "-f", "--index-url", "--python"])
 )
-_WRAPPERS = set(
-    [
-        "env",
-        "nice",
-        "time",
-        "command",
-        "builtin",
-        "exec",
-        "caffeinate",
-        "timeout",
-        "xargs",
-        "stdbuf",
-        "unbuffer",
-        "chronic",
-        "ionice",
-        "taskpolicy",
-        "arch",
-        "xcrun",
-        "watch",
-        "flock",
-    ]
-)
 # Programs that fetch a package and run it (see _package_run).
 _PACKAGE_RUNNERS = set(["npx", "bunx", "pnpx", "uvx"])
-# Options of one wrapper that take a value, beyond _VALUED.
-_WRAPPER_VALUED: dict[str, set[str]] = {
-    "stdbuf": {"-i", "-o", "-e"},
-    "taskpolicy": {"-c", "-t", "-l", "-g"},
-    "xcrun": {"--sdk", "-sdk", "--toolchain", "-toolchain"},
-    "ionice": {"-c", "-n", "-p"},
-}
-_VALUED = set(
-    [
-        "-n",
-        "-u",
-        "-I",
-        "-P",
-        "-L",
-        "-s",
-        "-E",
-        "-d",
-        "-k",
-        "--with",
-        "--python",
-        "-p",
-        "--project",
-        "--from",
-    ]
-)
 # Writes: the last argument (cp …), every argument, or every one but the first.
 _WRITERS = {
     **dict.fromkeys(["cp", "mv", "ln", "link", "rsync", "install", "ditto"], "last"),
@@ -358,6 +311,28 @@ _RUNNERS |= set(["ninja", "rake", "gradle", "gradlew", "mvn", "npx", "bunx", "pn
 _RUNNERS |= set(["jest", "vitest", "mocha", "pre-commit", "ctest", "hatch"])
 # `<tool> run …` runs a script the project's configuration names.
 _RUN_WRAPPERS = set(["uv", "poetry", "pdm", "hatch", "pipenv"])
+# The options of ``uv run``, from ``uv run --help`` (uv 0.12), and those of
+# the other runners that take a value: any other option is unread.
+_UV_RUN = shell_lexer.Options.of(
+    "--all-extras --no-dev --only-dev --no-default-groups --all-groups -m --module"
+    " --no-editable --exact --no-env-file --isolated --active --no-sync --locked"
+    " --frozen -s --script --gui-script --all-packages --no-project --no-index"
+    " -U --upgrade --no-sources --reinstall --compile-bytecode"
+    " --no-build-isolation --no-build --no-binary -n --no-cache --refresh"
+    " --managed-python --no-managed-python --no-python-downloads -q --quiet"
+    " -v --verbose --system-certs --offline --no-progress --no-config -h --help --",
+    "--extra --no-extra --group --no-group --only-group --no-editable-package"
+    " --env-file -w --with --with-editable --with-requirements --package"
+    " --python-platform --index --default-index -i --index-url --extra-index-url"
+    " -f --find-links --index-strategy --keyring-provider -P --upgrade-package"
+    " --upgrade-group --resolution --prerelease --prerelease-package"
+    " --fork-strategy --exclude-newer --exclude-newer-package --no-sources-package"
+    " --reinstall-package --link-mode -C --config-setting --config-settings-package"
+    " --no-build-isolation-package --no-build-package --no-binary-package"
+    " --cache-dir --refresh-package -p --python --color --allow-insecure-host"
+    " --directory --project --config-file",
+)
+_RUN_OPTIONS = shell_lexer.Options.of("", "--with --python -p -P --project --from")
 # git commands that run the repository's hooks.
 _HOOKED = set(["commit", "push", "merge", "rebase", "am", "pull", "checkout"])
 _FILE_RUNNERS = set(["node", "deno", "bun", "ruby", "perl", "php", "tsx", "ts-node"])
@@ -779,38 +754,6 @@ def _quoted_substitutions(text: str) -> tuple[list[str], bool]:
     return found, exact
 
 
-def _tokens(command: str) -> list[str]:
-    """*command* as words and operators (``;``, ``&&``, ``(``, ``>``…), quote-aware."""
-    lexer = shell_lexer.Lexer(command, posix=True, punctuation_chars="();<>|&\n")
-    lexer.whitespace, lexer.whitespace_split, lexer.commenters = " \t\r", True, ""
-    tokens: list[str] = []
-    for token in lexer:
-        punct = token and all(c in "();<>|&\n" for c in token)
-        tokens += _OPS.findall(token) if punct else [token]
-    return tokens
-
-
-def _segments(command: str) -> list[tuple[str, list[str], list[tuple[str, str]]]]:
-    """The simple commands: the operator before each, its argv, its redirections."""
-    tokens = _tokens(command)
-    argv: list[str] = []
-    redirs: list[tuple[str, str]] = []
-    out, op, i = [], "", 0
-    while i < len(tokens):
-        if tokens[i] in _SEPARATORS:
-            out.append((op, argv, redirs))
-            op, argv, redirs = tokens[i], [], []
-        elif _OPS.fullmatch(tokens[i]):
-            if argv and argv[-1].isdigit():
-                argv.pop()
-            redirs.append((tokens[i], tokens[i + 1] if i + 1 < len(tokens) else ""))
-            i += 1
-        else:
-            argv.append(tokens[i])
-        i += 1
-    return [s for s in [*out, (op, argv, redirs)] if s[1] or s[2]]
-
-
 def _ansi_c(text: str) -> bool:
     """Whether *text* has an ANSI-C quote (``$'…'``) outside other quotes.
 
@@ -936,7 +879,7 @@ def _head(words: list[str]) -> list[str]:
 
     ``IFS= read -r pid`` and ``while read pid`` both run ``read``.
     """
-    rest = _past_keywords(words)
+    rest = shell_lexer.past_keywords(words)
     at = 0
     while at < len(rest) and (_ASSIGN.fullmatch(rest[at]) or rest[at] in _PREFIXES):
         at += 1
@@ -1032,7 +975,7 @@ def _own_pids(text: str) -> set[str]:
     if "$!" not in text and "${!}" not in text:
         return set()  # no process was started here (and nothing to lex again)
     try:
-        tokens = _tokens(text)
+        tokens = shell_lexer.tokens(text)
     except ValueError:
         return set()
     held: set[str] = set()
@@ -1046,8 +989,8 @@ def _own_pids(text: str) -> set[str]:
     words: list[str] = []
     depth, before = 0, ""
     for token in [*tokens, ";"]:
-        if token not in _SEPARATORS:
-            if not _OPS.fullmatch(token):
+        if token not in shell_lexer.CUTS:
+            if not shell_lexer.OPERATOR.fullmatch(token):
                 words.append(token)
             continue
         piped = token in ("|", "|&")
@@ -1075,7 +1018,7 @@ def _bindings(
     """
     head = _head(words)
     lead = words
-    while lead and lead[0] in _KEYWORDS:
+    while lead and lead[0] in shell_lexer.KEYWORDS:
         lead = lead[1:]
     if lead[:1] == ["coproc"] and lead[2:3] == ["{"] and _NAME.fullmatch(lead[1]):
         other.add(lead[1])  # coproc NAME { …; } makes NAME an array
@@ -1123,7 +1066,7 @@ def _is_runner(argv: list[str]) -> bool:
 def _pipe_status(
     f: Findings,
     text: str,
-    segments: list[tuple[str, list[str], list[tuple[str, str]]]],
+    segments: list[shell_lexer.Command],
     status_read: bool,
 ) -> None:
     """Note a pipeline whose exit status something goes by, without ``pipefail``.
@@ -1165,7 +1108,7 @@ def _review_shell(
     if _ansi_c(text):
         f.doubt("Uses a quote melo cannot read ($'…').")
     try:
-        segments = _segments(text)
+        segments = shell_lexer.commands(shell_lexer.tokens(text))
     except ValueError:
         return f.doubt("Has a quote that does not close.")
     _pipe_status(f, text, segments, status_read)
@@ -1193,33 +1136,48 @@ def _review_shell(
         f.started = outer
 
 
+class _After(NamedTuple):
+    """What a command leaves for the next one in the same text."""
+
+    cwd: str
+    said: str | None  # what it printed, when literal
+    before: str  # "fetch" when it downloaded, "decode" when it decoded
+    url: str
+    bare_before: bool
+    last_site: str
+    searched: tuple[str, ...]  # the folders it searched, when it was a find
+
+
 def _run_segments(
     ctx: Context,
     f: Findings,
-    segments: list[tuple[str, list[str], list[tuple[str, str]]]],
+    segments: list[shell_lexer.Command],
     bodies: list[str],
     ticked: Collection[str] = (),
 ) -> None:
-    cwd, before, url, bare_before = ctx.root, "", "", False
-    said: str | None = None  # what the last command printed, when literal
-    # The last command's site, and the folders it searched when it was a find.
-    last_site, searched = "", list[str]()
+    # What the commands so far leave for the next one: one state for each
+    # distinct reading of them, the first reading's first, at most
+    # MAX_READINGS (past them, the first ones).
+    states = [_After(ctx.root, None, "", "", False, "", ())]
     for op, argv, redirs in segments:
         # A finding's site: the command as its words (see Findings.hits).
         f.site = "sh:" + " ".join([op, *argv, *(k + t for k, t in redirs)])[:300]
-        if op in ("|", "|&"):
-            # What a search printed goes on to another command: it reads it.
-            for root in searched:
-                search(ctx, f, root, cwd)
         body, writes = None, []
         for kind, target in redirs:
             if kind in _WRITES and not target.isdigit():
-                touch(ctx, f, target, "write", cwd)
                 writes.append((kind, target))
-            elif kind == "<":
-                touch(ctx, f, target, "read", cwd)
             elif kind == "<<" and bodies:
                 body = bodies.pop(0)
+        for state in states:
+            if op in ("|", "|&"):
+                # What a search printed goes on to another command: it reads it.
+                for root in state.searched:
+                    search(ctx, f, root, state.cwd)
+            for kind, target in redirs:
+                if (kind, target) in writes:
+                    touch(ctx, f, target, "write", state.cwd)
+                elif kind == "<":
+                    touch(ctx, f, target, "read", state.cwd)
         for token in argv:
             for inner in re.findall(r"\$\((.*)\)|`([^`]*)`", token, re.S):
                 # A backquoted command that was read from the text is done.
@@ -1227,130 +1185,169 @@ def _run_segments(
                     review_shell(ctx.deeper(), f, inner[0] or inner[1])
         if argv[1:2] == ["run"] and os.path.basename(argv[0]) in _RUN_WRAPPERS:
             file_rules.runner(ctx, f, f"{os.path.basename(argv[0])} run")
-        argv = _unwrap(f, _past_keywords(argv))
-        if not argv:
-            continue
-        prog = os.path.basename(argv[0]).lower()
-        piped = said if op in ("|", "|&") else None
-        said = _literal_output(argv, body, piped)
-        _writes_code(ctx, f, argv, said, writes, cwd)
-        if prog == "cd":
-            cwd = resolve(ctx, (argv + ["~"])[1], cwd) or cwd
-            continue
-        flags = all(a.startswith("-") and a not in ("-c", "-e", "-m") for a in argv[1:])
-        bare = (prog in _BARE or bool(_PY.match(prog))) and flags
-        links = [a for a in argv if "://" in a]
-        if bare and body is not None:
-            _code(ctx, f, prog, body)
-        elif (
-            bare
-            and op in ("|", "|&")
-            and before == "fetch"
-            or (op == "<(" and bare_before and prog in ("curl", "wget"))
-        ):
-            host = urlparse(url or (links + [""])[0]).netloc or "the internet"
-            # The site is the whole pipeline, its URL with it: a new address
-            # in an edit is a new finding.
-            site = f.site
-            f.site = f"{last_site} {site}"[:600]
-            f.add("remote_code", f"Runs code downloaded from {host}.")
-            if "get-pip" in url + " ".join(links):
-                f.add("install", "Installs pip with get-pip.py.")
-            f.site = site
-        elif bare and op in ("|", "|&") and before == "decode":
-            f.add("opaque", "Runs encoded text as code.")
-        elif bare and op in ("|", "|&"):
-            f.doubt(f"Runs code that another command prints, with {prog}.")
+        readings = _unwrap(ctx, f, argv) or [[]]
         given = op in ("|", "|&") or any(
             k in ("<", "<<", "<<-", "<<<") for k, _ in redirs
         )
-        run_argv(ctx, f, argv, cwd, given)
-        decode = prog in ("base64", "xxd", "openssl") and bool(
-            {"-d", "-D", "--decode", "-r"} & set(argv)
+        site, after = f.site, list[_After]()
+        for state in states:
+            for reading in readings:
+                f.site = site
+                after.append(_step(ctx, f, op, reading, body, writes, given, state))
+        states = list(dict.fromkeys(after))[: shell_lexer.MAX_READINGS]
+
+
+def _step(
+    ctx: Context,
+    f: Findings,
+    op: str,
+    argv: list[str],
+    body: str | None,
+    writes: list[tuple[str, str]],
+    given: bool,
+    state: _After,
+) -> _After:
+    """Review the program *argv* of one command after *state*; what it leaves."""
+    if not argv:
+        return state
+    cwd, said, before, url, bare_before, last_site, _ = state
+    prog = os.path.basename(argv[0]).lower()
+    piped = said if op in ("|", "|&") else None
+    said = _literal_output(argv, body, piped)
+    _writes_code(ctx, f, argv, said, writes, cwd)
+    if prog == "cd":
+        return state._replace(
+            cwd=resolve(ctx, (argv + ["~"])[1], cwd) or cwd, said=said
         )
-        fetch = prog in ("curl", "wget") and not _output(argv)[0]
-        before = "fetch" if fetch else "decode" if decode else ""
-        url, bare_before = (links + [""])[0], bare
-        last_site = f.site
-        searched = _find_roots(argv[1:]) if prog == "find" else []
+    flags = all(a.startswith("-") and a not in ("-c", "-e", "-m") for a in argv[1:])
+    bare = (prog in _BARE or bool(_PY.match(prog))) and flags
+    links = [a for a in argv if "://" in a]
+    if bare and body is not None:
+        _code(ctx, f, prog, body)
+    elif (
+        bare
+        and op in ("|", "|&")
+        and before == "fetch"
+        or (op == "<(" and bare_before and prog in ("curl", "wget"))
+    ):
+        host = urlparse(url or (links + [""])[0]).netloc or "the internet"
+        # The site is the whole pipeline, its URL with it: a new address
+        # in an edit is a new finding.
+        site = f.site
+        f.site = f"{last_site} {site}"[:600]
+        f.add("remote_code", f"Runs code downloaded from {host}.")
+        if "get-pip" in url + " ".join(links):
+            f.add("install", "Installs pip with get-pip.py.")
+        f.site = site
+    elif bare and op in ("|", "|&") and before == "decode":
+        f.add("opaque", "Runs encoded text as code.")
+    elif bare and op in ("|", "|&"):
+        f.doubt(f"Runs code that another command prints, with {prog}.")
+    run_argv(ctx, f, argv, cwd, given)
+    decode = prog in ("base64", "xxd", "openssl") and bool(
+        {"-d", "-D", "--decode", "-r"} & set(argv)
+    )
+    fetch = prog in ("curl", "wget") and not _output(argv)[0]
+    return _After(
+        cwd,
+        said,
+        "fetch" if fetch else "decode" if decode else "",
+        (links + [""])[0],
+        bare,
+        f.site,
+        tuple(_find_roots(argv[1:])) if prog == "find" else (),
+    )
 
 
-# Words that start a part of a loop, a condition or a group and are followed
-# by the command it runs: `for x in a; do CMD; done`, `if c; then CMD; fi`.
-_KEYWORDS = frozenset(["do", "then", "else", "elif", "if", "while", "until", "!", "{"])
+def _unwrap(ctx: Context, f: Findings, argv: list[str]) -> list[list[str]]:
+    """Each program *argv* may run, with its words: past keywords, ``VAR=x`` and wrappers.
 
-
-def _past_keywords(argv: list[str]) -> list[str]:
-    """*argv* without the shell keywords in front of the command.
-
-    Those are ``do``, ``then``, ``if``… and the head of a function or a
-    coprocess that has the command inside it: ``function NAME {`` and
-    ``coproc NAME {`` (``coproc`` alone is followed by the command itself).
+    The words before the program are read by
+    :func:`~localmelo.melo.contracts.shell_lexer.unwrap` (``sudo``, ``env``,
+    ``timeout``…); here they are judged, and ``busybox``, ``uv run`` and the
+    package runners are read past too, each place once. An option melo does
+    not know is a doubt, and the program of each reading of it is reviewed,
+    at most ``MAX_READINGS``: past them, a doubt and the first ones. A
+    command line a wrapper has a shell run (``env -S``) is reviewed as a
+    command. With ``PATH=.:$PATH`` (a folder named relatively first), a
+    program named bare may be a file there: it is named by that path then
+    (``./tool``).
     """
-    at = 0
-    while at < len(argv):
-        if argv[at] in _KEYWORDS:
-            at += 1
-        elif argv[at] == "function" and at + 1 < len(argv):
-            at += 2
-        elif argv[at] == "coproc":
-            at += 2 if argv[at + 2 : at + 3] == ["{"] else 1
-        else:
+    programs: list[list[str]] = []
+    # Words, where the command starts in them, what xargs adds after them,
+    # the folder PATH= names; the first reading's last, so it is read first.
+    todo: list[tuple[Sequence[str], int, tuple[str, ...], str]] = [(argv, 0, (), "")]
+    # Each place read, with its words kept so that no other list takes their id.
+    seen: dict[tuple[int, int], Sequence[str]] = {}
+    while todo:
+        if len(programs) == shell_lexer.MAX_READINGS:
+            f.doubt(UNREAD)
             break
-    return argv[at:]
-
-
-def _unwrap(f: Findings, argv: list[str]) -> list[str]:
-    """*argv* without ``VAR=x`` prefixes and wrappers such as ``nice`` or ``uv run``.
-
-    With ``PATH=.:$PATH`` (a folder named relatively first), a program named
-    bare may be a file there: it is named by that path then (``./tool``).
-    """
-    local = ""
-    while argv:
-        prog = os.path.basename(argv[0]).lower()
-        if re.match(r"[A-Za-z_]\w*=", argv[0]):
-            _runs_var(f, argv[0])
-            local = local or _local_path(argv[0])
-            argv = argv[1:]
+        words, at, added, local = todo.pop()
+        if (id(words), at) in seen:
             continue
-        if prog == "busybox" and argv[1:]:
-            argv = argv[1:]  # busybox ln …: the applet is the program
-            continue
-        if prog in ("sudo", "doas"):
-            f.add("system", "Runs a command as the administrator.")
-        elif prog in ("nohup", "setsid", "disown"):
-            f.add("persistence", "Keeps a program running after this call ends.")
-        elif prog in ("uv", "poetry", "pdm", "hatch", "pipenv") and argv[1:2] == [
-            "run"
-        ]:
-            argv = argv[1:]
-        elif _package_run(f, prog, argv):
-            if prog not in _PACKAGE_RUNNERS:
-                argv = [prog, *argv[2:]]  # without dlx / exec / x
-        elif prog not in _WRAPPERS and prog != "gtimeout":
-            break
-        rest, i = argv[1:], 0
-        valued = _VALUED | _WRAPPER_VALUED.get(prog, set())
-        while i < len(rest) and (
-            rest[i][:1] == "-" or "=" in rest[i] or "timeout" in prog and i == 0
-        ):
-            if "=" in rest[i] and rest[i][:1] != "-":
-                _runs_var(f, rest[i])
-                local = local or _local_path(rest[i])
-            i += 2 if rest[i] in valued else 1
-        if prog == "flock" and i < len(rest):
-            i += 1  # its lock file, then the command
+        seen[id(words), at] = words
         # xargs adds arguments melo cannot see.
-        argv = rest[i:] + ([UNKNOWN_ARG] if prog == "xargs" and rest[i:] else [])
-    if local and argv and "/" not in argv[0]:
-        argv = [os.path.join(local, argv[0]), *argv[1:]]
-    return argv
+        found = shell_lexer.unwrap(words, [UNKNOWN_ARG], at)
+        if found.unread:
+            f.doubt(UNREAD)
+        local = local or _note_assignments(f, found.assignments)
+        for wrapper in found.wrappers:
+            if wrapper in ("sudo", "doas"):
+                f.add("system", "Runs a command as the administrator.")
+            elif wrapper in ("nohup", "setsid", "disown"):
+                f.add("persistence", "Keeps a program running after this call ends.")
+        for code in found.codes:
+            review_shell(ctx.deeper(), f, code)
+        added = (*found.added, *added)
+        for words, at in reversed(found.starts):
+            prog = os.path.basename(words[at]).lower() if at < len(words) else ""
+            head = [*words[at : at + 3], *added][:3]
+            if prog == "busybox" and head[1:]:
+                todo.append((words, at + 1, added, local))  # the applet runs
+                continue
+            if prog in _RUN_WRAPPERS and head[1:2] == ["run"]:
+                skip = 2
+            elif _package_run(f, prog, _after(words, at, added)):
+                skip = 1 if prog in _PACKAGE_RUNNERS else 2  # past dlx / exec / x
+            else:
+                program = [*words[at:], *added]
+                if local and program and "/" not in program[0]:
+                    program[0] = os.path.join(local, program[0])
+                programs.append(program)
+                continue
+            options = _UV_RUN if prog == "uv" else _RUN_OPTIONS
+            passed = shell_lexer.past_options(words, options, at + skip)
+            if passed.unread:
+                f.doubt(UNREAD)
+            here = local or _note_assignments(f, passed.assignments)
+            # uv run --script FILE, -m MODULE: Python runs the file, the module.
+            named = {option for option, _ in passed.options}
+            python = (
+                ["python", "-m"]
+                if named & {"-m", "--module"}
+                else ["python"] if named & {"-s", "--script", "--gui-script"} else []
+            )
+            for end, _ in reversed(passed.ends):
+                todo.append(
+                    ([*python, *words[end:]], 0, added, here)
+                    if prog == "uv" and python
+                    else (words, end, added, here)
+                )
+    return programs
 
 
-def _local_path(assignment: str) -> str:
+def _note_assignments(f: Findings, assignments: list[tuple[str, str]]) -> str:
+    """Note each ``VAR=value`` that has a program start another; the folder ``PATH=`` puts first."""
+    local = ""
+    for name, value in assignments:
+        _runs_var(f, name)
+        local = local or _local_path(name, value)
+    return local
+
+
+def _local_path(name: str, value: str) -> str:
     """For ``PATH=…``: the first folder it names relatively (``.``, ``bin``), else ``""``."""
-    name, _, value = assignment.partition("=")
     if name != "PATH":
         return ""
     for part in value.split(":"):
@@ -1359,13 +1356,14 @@ def _local_path(assignment: str) -> str:
     return ""
 
 
-def _package_run(f: Findings, prog: str, argv: list[str]) -> bool:
+def _package_run(f: Findings, prog: str, after: Iterable[str]) -> bool:
     """``npx pkg``, ``uvx pkg``, ``pnpm dlx pkg`` and the like: a doubt, then its program.
 
-    They fetch a package when it is not there and run it; melo reads
-    neither the package nor what it runs.
+    *after* are the words after *prog*. They fetch a package when it is not
+    there and run it; melo reads neither the package nor what it runs.
     """
-    sub = argv[1:2]
+    rest = iter(after)
+    sub = list(islice(rest, 1))
     runs = (
         prog in _PACKAGE_RUNNERS
         or prog in ("pnpm", "yarn")
@@ -1376,28 +1374,36 @@ def _package_run(f: Findings, prog: str, argv: list[str]) -> bool:
         and sub == ["x"]
     )
     if runs:
-        words = [
-            a
-            for a in argv[1:]
-            if not a.startswith("-") and a not in ("dlx", "exec", "x")
-        ]
+        words = chain(sub, rest)
+        named = next(
+            (
+                a
+                for a in words
+                if not a.startswith("-") and a not in ("dlx", "exec", "x")
+            ),
+            "it names",
+        )
         f.doubt(
-            f"Runs the package {words[0] if words else 'it names'} with {prog}, which may "
+            f"Runs the package {named} with {prog}, which may "
             "download it; melo does not read it."
         )
     return runs
 
 
-def _runs_var(f: Findings, assignment: str) -> None:
+def _after(words: Sequence[str], at: int, added: Iterable[str]) -> Iterable[str]:
+    """The words after the one at *at*, then *added*, without copying them."""
+    return chain(map(words.__getitem__, range(at + 1, len(words))), added)
+
+
+def _runs_var(f: Findings, name: str) -> None:
     """``VAR=value`` before a command: a doubt when *VAR* names a program to start."""
-    name = assignment.split("=", 1)[0]
     if name in _RUNS_VARS or name.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
         f.doubt(f"Sets {name}, which can make a program start another one.")
 
 
-def unwrap(f: Findings, argv: list[str]) -> list[str]:
-    """*argv* as the program it runs (see _unwrap), for a Python process call."""
-    return _unwrap(f, argv) or argv
+def unwrap(ctx: Context, f: Findings, argv: list[str]) -> list[list[str]]:
+    """Each program *argv* may run (see _unwrap), for a Python process call."""
+    return [found for found in _unwrap(ctx, f, argv) if found] or [argv]
 
 
 def _find_roots(args: list[str]) -> list[str]:
