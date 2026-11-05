@@ -74,6 +74,7 @@ def _edit(change: Callable[[dict[str, Any]], None]) -> Callable[[Path], None]:
 def _nested(home: Path) -> None:
     deep = "[" * 100_000 + "]" * 100_000
     (home / "state.json").write_text(f'{{"schema": "melo_serve.state/1", "x": {deep}}}')
+    (home / "state.json").chmod(0o600)
 
 
 def _oversized(home: Path) -> None:
@@ -202,17 +203,21 @@ def test_validation_reads_no_state_so_melo_serve_can_be_started() -> None:
 
 
 def _fake_command(folder: Path) -> Path:
-    folder.mkdir(parents=True, exist_ok=True)
+    folder.mkdir(mode=0o755, parents=True, exist_ok=True)  # whatever the umask
     path = folder / "melo-serve"
     path.write_text("#!/bin/sh\n")
     path.chmod(0o755)
     return path
 
 
+_real_refusal = melo_serve.refusal
+
+
 @pytest.fixture
 def real_command(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """The real lookup of ``melo-serve`` (the suite stubs ``command``), with an empty PATH."""
     monkeypatch.setattr(melo_serve, "command", melo_serve._find_command)
+    monkeypatch.setattr(melo_serve, "refusal", _real_refusal)
     monkeypatch.setenv("PATH", str(tmp_path / "empty"))
     for name in ("UV_TOOL_BIN_DIR", "XDG_BIN_HOME"):
         monkeypatch.delenv(name, raising=False)
@@ -234,19 +239,28 @@ def test_melo_serve_is_found_in_the_uv_tool_folder_when_path_lacks_it(
     assert melo_serve.command() == str(uv)
     uv.chmod(0o644)  # not executable
     assert melo_serve.command() is None
+    assert melo_serve.refusal() == (
+        f"melo_serve: {uv} is not run: it is not a regular executable file"
+    )
     uv.chmod(0o777)  # others could change it
     assert melo_serve.command() is None
+    assert melo_serve.refusal() == f"melo_serve: {uv} is not run: others can write it"
     uv.chmod(0o755)
     uv.parent.chmod(0o777)  # or the folder it is in
     assert melo_serve.command() is None
+    assert melo_serve.refusal() == (
+        f"melo_serve: {uv} is not run: others can write its folder {uv.parent}"
+    )
     uv.parent.chmod(0o755)
     assert melo_serve.command() == str(uv)
     # uv tool install: a link in the bin folder into the tool's own folder.
+    # The file that was checked is the one that is run.
     link = real_command / "links"
-    link.mkdir()
-    (link / "melo-serve").symlink_to(_fake_command(real_command / "tool" / "bin"))
+    link.mkdir(mode=0o755)
+    tool = _fake_command(real_command / "tool" / "bin")
+    (link / "melo-serve").symlink_to(tool)
     monkeypatch.setenv("UV_TOOL_BIN_DIR", str(link))
-    assert melo_serve.command() == str(link / "melo-serve")
+    assert melo_serve.command() == str(tool)
     (link / "melo-serve").unlink()
     (link / "melo-serve").symlink_to(real_command / "gone")  # a dangling link
     assert melo_serve.command() is None
@@ -269,6 +283,11 @@ def test_a_melo_serve_another_user_owns_is_refused(
     with monkeypatch.context() as everyone_else:
         everyone_else.setattr(os, "getuid", lambda: os.stat(fake).st_uid + 1)
         assert melo_serve.command() is None
+        # Found, but not run: the line says why, never "not installed".
+        why = "melo_serve: ~/.local/bin/melo-serve is not run: another user owns it"
+        assert melo_serve.refusal() == why
+        assert melo_serve.ensure_running() == why == melo_serve.start_hint()
+        assert str(melo_serve.unavailable(melo_serve.Snapshot(), "chat")) == why
     stale = _fake_command(real_command / "stale")  # first on PATH, not the user's
     monkeypatch.setenv("PATH", str(stale.parent))
     real = os.stat
@@ -281,6 +300,7 @@ def test_a_melo_serve_another_user_owns_is_refused(
 
     monkeypatch.setattr(os, "stat", stat)
     assert melo_serve.command() == str(fake)  # passed over: the uv folder's is used
+    assert melo_serve.refusal() is None  # one runs, so none is refused
 
 
 def _symlink(sock: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -227,28 +227,48 @@ class MeloServeError(Exception):
     """melo_serve cannot answer for a model; the message says what to run."""
 
 
-def _executable(path: str | None) -> bool:
-    """Whether *path* is an absolute path to a file this user can run, and no one else can change.
+def _check(path: str | None) -> str | None:
+    """Why *path* is not run: None when nothing is there, ``""`` when it may be run.
 
-    Links are followed. The file they lead to must be a regular file that the
-    user owns and can run, and it and the folders of the path and of the file
-    must pass :func:`_own`. (``uv tool install`` makes ``~/.local/bin/melo-serve``
-    a link into its own folder.)
+    A reason is a clause that follows ``is not run:``. *path* must be absolute,
+    and the file it leads to a regular file that the user owns and can run.
+    That file, and the folders of *path* and of the file, must pass :func:`_own`.
+    Links are followed (``uv tool install`` makes ``~/.local/bin/melo-serve`` a
+    link into its own folder).
     """
-    if not path or not os.path.isabs(path):
-        return False
+    if not path or not os.path.lexists(path):
+        return None
+    if not os.path.isabs(path):
+        return "its path is relative"
     try:
         real = os.path.realpath(path)
         info = os.stat(real)
-        folders = (os.stat(os.path.dirname(path)), os.stat(os.path.dirname(real)))
+        folders = (os.path.dirname(path), os.path.dirname(real))
+        infos = [os.stat(folder) for folder in folders]
     except OSError:
-        return False
-    return (
-        stat.S_ISREG(info.st_mode)
-        and bool(info.st_mode & stat.S_IXUSR)
-        and _own(info)
-        and all(_own(folder) for folder in folders)
+        return "it cannot be read"
+    if not stat.S_ISREG(info.st_mode) or not info.st_mode & stat.S_IXUSR:
+        return "it is not a regular executable file"
+    if info.st_uid != os.getuid():
+        return "another user owns it"
+    if info.st_mode & 0o022:
+        return "others can write it"
+    for folder, found in zip(folders, infos, strict=True):
+        if found.st_uid != os.getuid():
+            return f"another user owns its folder {folder}"
+        if not _own(found):
+            return f"others can write its folder {folder}"
+    return ""
+
+
+def _candidates() -> tuple[str | None, str]:
+    """Where ``melo-serve`` may be: on PATH, then in the uv tool folder."""
+    folder = (
+        os.environ.get("UV_TOOL_BIN_DIR")
+        or os.environ.get("XDG_BIN_HOME")
+        or "~/.local/bin"
     )
+    return shutil.which(COMMAND), os.path.join(os.path.expanduser(folder), COMMAND)
 
 
 def _find_command() -> str | None:
@@ -256,22 +276,14 @@ def _find_command() -> str | None:
 
     A launchd login item has no ``~/.local/bin`` on its PATH, where
     ``uv tool install`` puts it: ``$UV_TOOL_BIN_DIR``, else ``$XDG_BIN_HOME``,
-    else ``~/.local/bin``. A candidate that is relative, not a regular
-    executable file, or that another user owns or that others can write is
-    passed over, so a stale file in a system folder does not hide the
-    installed one.
+    else ``~/.local/bin``. A candidate that :func:`_check` refuses is passed
+    over, so a stale file in a system folder does not hide the installed one.
+    The path returned is the file the links lead to, which is what was checked
+    and what is run.
     """
-    folder = (
-        os.environ.get("UV_TOOL_BIN_DIR")
-        or os.environ.get("XDG_BIN_HOME")
-        or "~/.local/bin"
-    )
-    for path in (
-        shutil.which(COMMAND),
-        os.path.join(os.path.expanduser(folder), COMMAND),
-    ):
-        if path is not None and _executable(path):
-            return path
+    for path in _candidates():
+        if path is not None and _check(path) == "":
+            return os.path.realpath(path)
     return None
 
 
@@ -280,9 +292,23 @@ def command() -> str | None:
     return _find_command()
 
 
+def refusal() -> str | None:
+    """The line for a ``melo-serve`` that was found but is not run, or None.
+
+    None when one runs, and when none was found (then it is not installed).
+    """
+    checked = [(path, _check(path)) for path in _candidates()]
+    if any(why == "" for _, why in checked):
+        return None
+    for path, why in checked:
+        if why:
+            return _clean(f"melo_serve: {path} is not run: {why}")
+    return None
+
+
 def start_hint() -> str:
     """How to get a melo_serve that is not running: start it, or install it first."""
-    return f"{COMMAND} up" if command() else INSTALL_HINT
+    return f"{COMMAND} up" if command() else refusal() or INSTALL_HINT
 
 
 def unavailable(snap: Snapshot, role: str) -> MeloServeError:
@@ -293,7 +319,7 @@ def unavailable(snap: Snapshot, role: str) -> MeloServeError:
         )
     if command():
         return MeloServeError(f"melo_serve is not running. Run `{COMMAND} up`.")
-    return MeloServeError(NOT_INSTALLED)
+    return MeloServeError(refusal() or NOT_INSTALLED)
 
 
 def _clean(text: str) -> str:
@@ -343,7 +369,8 @@ def ensure_running(role: str = "chat") -> str:
     detached) and the state is then waited for, all within one budget of
     :data:`UP_WAIT_S` (15 s); a non-zero exit of ``up`` returns at once with the
     last line it printed (its stderr, else its stdout), the home folder shown as
-    ``~``. Not installed: the line says how to install it. It never raises, so
+    ``~``. Not installed: the line says how to install it; a ``melo-serve`` that is
+    found but not run (see :func:`refusal`) says why instead. It never raises, so
     the gateway starts either way.
     """
     snap = snapshot()
@@ -351,7 +378,7 @@ def ensure_running(role: str = "chat") -> str:
         return _line(snap, role)
     path = command()
     if path is None:
-        return NOT_INSTALLED
+        return refusal() or NOT_INSTALLED
     late = f"melo_serve did not start in {UP_WAIT_S:g} s; try `{COMMAND} up`"
     deadline = time.monotonic() + UP_WAIT_S
     try:

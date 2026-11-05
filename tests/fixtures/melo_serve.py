@@ -44,7 +44,9 @@ def write_state(
         "service": {"login": login},
         "roles": {"chat": chat, "embedding": embedding},
     }
-    (home / "state.json").write_text(json.dumps(state), encoding="utf-8")
+    path = home / "state.json"
+    path.write_text(json.dumps(state), encoding="utf-8")
+    path.chmod(0o600)  # as melo_serve writes it: the umask cannot matter
 
 
 class _Hangup(socketserver.BaseRequestHandler):

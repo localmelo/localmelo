@@ -130,7 +130,8 @@ def melo_serve_home(
 
     The state file and the control socket of the melo_serve that may run here
     are never read or connected to, and no test finds this Mac's own
-    ``melo-serve`` command either: ``melo_serve.command()`` is None. A test
+    ``melo-serve`` command either: ``melo_serve.command()`` and
+    ``melo_serve.refusal()`` are None. A test
     writes a fake ``state.json`` in the folder (``tests/fixtures/melo_serve.py``)
     and asks for ``melo_serve_socket`` to make it running.
     """
@@ -140,6 +141,7 @@ def melo_serve_home(
     monkeypatch.setenv("MELO_SERVE_HOME", str(home))
     monkeypatch.delenv("MELO_SERVE_SOCKET", raising=False)
     monkeypatch.setattr(melo_serve, "command", lambda: None)
+    monkeypatch.setattr(melo_serve, "refusal", lambda: None)
     return home
 
 
