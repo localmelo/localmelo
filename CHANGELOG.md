@@ -883,6 +883,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Gateway internals: one handler answers a store failure and a busy chat for every route, the guard alone checks the size
+  and type of a request body (the console's copy of those checks is gone), and an unused store helper is deleted.
+  Requests are refused and answered as before.
 - Developer only: in the list form of recall, when you ask melo to count, total or compare things you told it across chats, it now looks wider in its memory and checks each kind it may have missed, by default; a search on any other turn keeps the usual bar. Part of #428.
 - "Allow for this chat" is no longer memory-only. `GET /api/sessions/{id}` `grants` and `granted_at` list what
   holds in the chat whether it is open or not, the main chat's grants included for a side chat.

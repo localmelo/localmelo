@@ -240,3 +240,60 @@ def test_a_text_that_is_not_utf8_is_a_400_before_any_route(
     assert resp.status_code == 400
     assert resp.json()["error"]["code"] == "invalid_request"
     assert resp.json()["error"]["message"] == message
+
+
+@pytest.mark.parametrize(
+    ("query", "body", "message"),
+    [
+        (b"q=%ff", b"", "Query string must be valid UTF-8."),
+        (b"q=%c0%af", b"", "Query string must be valid UTF-8."),
+        (b"q=%ed%a0%80", b"", "Query string must be valid UTF-8."),
+        (b"", b'{"a":"\xff"}', "Request body must be valid UTF-8."),
+        (b"", b"{nope", "Malformed JSON request body."),
+    ],
+)
+def test_a_query_or_body_that_is_not_utf8_json_is_a_400_before_any_route(
+    console: Console, query: bytes, body: bytes, message: str
+) -> None:
+    app = FastAPI()
+
+    @app.post("/api/echo")
+    async def echo() -> None:
+        raise AssertionError("the route was reached")
+
+    console.mount(app)
+    client = TestClient(app, base_url="http://127.0.0.1:8401")
+
+    resp = client.post(
+        f"/api/echo?{query.decode('latin-1')}",
+        content=body,
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["error"] == {
+        "code": "invalid_request",
+        "message": message,
+        "details": {},
+    }
+
+
+def test_a_picture_body_and_a_query_that_is_utf8_reach_the_route(
+    console: Console,
+) -> None:
+    app = FastAPI()
+
+    @app.post("/api/uploads")
+    async def upload() -> dict[str, bool]:
+        return {"reached": True}
+
+    console.mount(app)
+    client = TestClient(app, base_url="http://127.0.0.1:8401")
+
+    resp = client.post(
+        "/api/uploads?name=%E4%BD%A0.png",
+        content=b"\xff\xfe not json",
+        headers={"Content-Type": "image/png"},
+    )
+
+    assert resp.status_code == 200
