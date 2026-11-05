@@ -19,6 +19,7 @@ counts as absent, and :func:`snapshot` never raises.
 
 from __future__ import annotations
 
+import grp
 import json
 import os
 import shutil
@@ -249,14 +250,36 @@ class MeloServeError(Exception):
     """melo_serve cannot answer for a model; the message says what to run."""
 
 
+def _admin_gid() -> int | None:
+    """The group id of macOS's ``admin`` group, looked up now; None when that fails."""
+    try:
+        return grp.getgrnam("admin").gr_gid
+    except Exception:  # no such group, no group database: no exemption (fail closed)
+        return None
+
+
+def _others_write(info: os.stat_result, admin: int | None) -> bool:
+    """Whether someone but the owner can write what *info* describes.
+
+    Group-write counts, except for the ``admin`` group: Homebrew's own folder
+    (``/opt/homebrew/bin``) is the user's with mode 775 and that group.
+    """
+    if info.st_mode & 0o002:
+        return True
+    return bool(info.st_mode & 0o020) and (admin is None or info.st_gid != admin)
+
+
 def _check(path: str | None) -> str | None:
     """Why *path* is not run: None when nothing is there, ``""`` when it may be run.
 
     A reason is a clause that follows ``is not run:``. *path* must be absolute,
     and the file it leads to a regular file that the user owns and can run.
-    That file, and the folders of *path* and of the file, must pass :func:`_own`.
-    Links are followed (``uv tool install`` makes ``~/.local/bin/melo-serve`` a
-    link into its own folder).
+    That file, and the folders of *path* and of the file, must be the user's
+    and not writable by others, as :func:`_own` says, except that the ``admin``
+    group may write (:func:`_others_write`; :func:`_own` itself, which the state
+    file and the socket use, has no such exemption). Links are followed
+    (``uv tool install`` makes ``~/.local/bin/melo-serve`` a link into its own
+    folder).
     """
     if not path or not os.path.lexists(path):
         return None
@@ -273,12 +296,13 @@ def _check(path: str | None) -> str | None:
         return "it is not a regular executable file"
     if info.st_uid != os.getuid():
         return "another user owns it"
-    if info.st_mode & 0o022:
+    admin = _admin_gid()
+    if _others_write(info, admin):
         return "others can write it"
     for folder, found in zip(folders, infos, strict=True):
         if found.st_uid != os.getuid():
             return f"another user owns its folder {folder}"
-        if not _own(found):
+        if _others_write(found, admin):
             return f"others can write its folder {folder}"
     return ""
 

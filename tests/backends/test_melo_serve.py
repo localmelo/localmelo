@@ -251,6 +251,21 @@ def test_melo_serve_is_found_in_the_uv_tool_folder_when_path_lacks_it(
     assert melo_serve.refusal() == (
         f"melo_serve: {uv} is not run: others can write its folder {uv.parent}"
     )
+    # Homebrew's folder is the user's, mode 775, group admin: that group may
+    # write it; another group may not, and when the group lookup fails nobody may.
+    uv.parent.chmod(0o775)
+    gid = os.stat(uv.parent).st_gid
+    refused = f"melo_serve: {uv} is not run: others can write its folder {uv.parent}"
+    for admin, found in ((gid, str(uv)), (gid + 1, None), (None, None)):
+        monkeypatch.setattr(melo_serve, "_admin_gid", lambda admin=admin: admin)
+        assert melo_serve.command() == found
+        assert melo_serve.refusal() == (None if found else refused)
+    uv.chmod(0o775)  # the file itself: another owner or others stay refused
+    monkeypatch.setattr(melo_serve, "_admin_gid", lambda: gid)
+    assert melo_serve.command() == str(uv)
+    uv.chmod(0o757)
+    assert melo_serve.command() is None
+    uv.chmod(0o755)
     uv.parent.chmod(0o755)
     assert melo_serve.command() == str(uv)
     # uv tool install: a link in the bin folder into the tool's own folder.
@@ -361,6 +376,22 @@ def _unknown_user_home(sock: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(melo_serve.HOME_ENV, "~nosuchuser/melo_serve")
 
 
+def _admin_group_folder(sock: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A folder the admin group can write: fine for a command, not for the socket."""
+    sock.parent.chmod(0o775)
+    gid = os.stat(sock.parent).st_gid
+    monkeypatch.setattr(melo_serve, "_admin_gid", lambda: gid)
+
+
+def _state_in_an_admin_group_folder(
+    sock: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = Path(os.environ[melo_serve.HOME_ENV])
+    home.chmod(0o775)
+    gid = os.stat(home).st_gid
+    monkeypatch.setattr(melo_serve, "_admin_gid", lambda: gid)
+
+
 REFUSED = {
     "a symlink to a real socket": _symlink,
     "a regular file": _regular_file,
@@ -368,6 +399,8 @@ REFUSED = {
     "a folder others can write": _shared_folder,
     "a state file another user owns": _state_of_another_user,
     "a state file in a folder others can write": _state_in_a_shared_folder,
+    "a socket in a folder the admin group can write": _admin_group_folder,
+    "a state file in a folder the admin group can write": _state_in_an_admin_group_folder,
     "a state file that is a link": _state_that_is_a_link,
     "a socket path of an unknown user": _unknown_user_socket,
     "a home of an unknown user": _unknown_user_home,

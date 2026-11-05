@@ -435,6 +435,8 @@ def test_uv_is_found_next_to_the_interpreter_then_on_path_then_in_the_usual_fold
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("PATH", str(on_path))
     monkeypatch.setattr(sys, "executable", str(beside / "python"))
+    # The real /opt/homebrew/bin (the user's, group admin, mode 775) is not under test.
+    monkeypatch.setattr(melo_serve, "_admin_gid", lambda: None)
     assert run.find_uv() is None
     local = uv(home / ".local" / "bin")
     assert run.find_uv() == local
