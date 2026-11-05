@@ -10,12 +10,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 ### Added
 
 - The first-run setup job, for the terminal and the gateway to run (`support/server_setup/run.py`). `plan()`
-  asks `melo-serve plan --json` what this Mac can run: the installed melo_serve when it is at least 0.3.1, otherwise
+  asks `melo-serve plan --json` what this Mac can run: the installed melo_serve when it is at least 0.4.0, otherwise
   `uv tool run --python <this interpreter> --from <archive of a pinned melo_serve commit>`, which fetches melo_serve's
   planner into uv's cache and installs nothing. Its answer is read with a 256 KB cap and every field type-checked, and a
   missing uv, no network or an answer that is not a plan gives `available=False` and one line why. `SetupJob` then does
   what the plan says after the user's OK: it installs melo_serve with `uv tool install --managed-python` (or updates one
-  below 0.3.1 with `--force`), runs `melo-serve get --json`, which installs the backends and downloads the models, and
+  below 0.4.0 with `--force`), runs `melo-serve get --json`, which installs the backends and downloads the models, and
   passes on its progress, registers the login services
   (melo_serve's, and the gateway's only when asked), loads the models with `melo-serve use` and saves melo_serve as the
   chat server. Each step ends in one plain line (`installed X into Y`, `already installed (V), skipped`, `updated
@@ -40,8 +40,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   Ctrl-C stops it and keeps what was downloaded, and a failed or stopped try goes back to the menu. When the chat
   model answers, melo saves melo_serve and opens the chat. A pipe is shown the list and told to run melo in a terminal,
   and never starts it; other systems and a failed check print the reason and how to start a server by hand. The
-  read-only preview, `Show how to set one up` and its six numbered steps are gone. melo_serve is now pinned at v0.3.1
-  and 0.3.1 is the oldest accepted (#NNN).
+  read-only preview, `Show how to set one up` and its six numbered steps are gone. melo_serve is now pinned at v0.4.0
+  and 0.4.0 is the oldest accepted (#NNN).
 - melo_serve as a local model server. localmelo can use melo_serve (github.com/localmelo/melo_serve), the per-user
   daemon that serves Splash or oMLX models behind one OpenAI-compatible address and switches them with `melo-serve
   use <pick>`. `chat_backend = "melo_serve"` with a `[melo_serve]` table (`chat_url`, `chat_model`, `embedding_url`,

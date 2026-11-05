@@ -75,7 +75,7 @@ def test_the_list_says_what_is_here_what_was_left_out_and_what_that_leads_to() -
     assert (
         size_left(plan, skip) == 1_600_000_000
     )  # what is here and what is skipped is not counted
-    assert consent_lines(plan, skip, "0.3.1", chosen=True)[1:] == [
+    assert consent_lines(plan, skip, "0.4.0", chosen=True)[1:] == [
         "Chosen: Qwen3 8B on oMLX. Nothing is installed until you say yes.",
         "",
         "  melo_serve            model service             ✓ already here",
