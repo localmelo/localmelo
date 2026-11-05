@@ -484,7 +484,7 @@ plan: …
 | Topic | What happens |
 |---|---|
 | The window | It keeps the last 64 messages (20 on a cloud vendor's backend; see [Working-memory window](../reference/memory.md#working-memory-window)) and drops the oldest first. A tool call is never separated from its results. |
-| The prompt | A planning prompt may hold up to 100,000 characters; when it would hold more, the oldest turns are dropped first. The task always stays: when its own message has been dropped, localmelo puts it back in front. A task too long to fit ends the run as `failed`, with the error `Plan check failed: Prompt too large: <n> chars`. |
+| The prompt | A planning prompt may hold up to 100,000 characters; when it would hold more, it is cut to 70% of that: old tool results are shortened first, then old thinking, old recall and the oldest turns go. The task always stays: when its own message has been dropped, localmelo puts it back in front. A task too long to fit ends the run as `failed`, with the error `Plan check failed: Prompt too large: <n> chars`. |
 | One turn of tools | One turn of tool calls and results may use up to 50,000 characters. A longer result is cut and ends with `... [truncated: <n> more characters]`; a result left less than 200 characters is replaced by a short notice. History keeps the result as the tool returned it, up to 50,000 characters. |
 
 **Long-term memory** behaves differently by reasoning mode. With memory on, `legacy` needs an [embedding backend](../guides/embedding.md) and follows these rules:

@@ -324,9 +324,10 @@ kind calibrates the proxy upward; missing or zero usage resets that calibration.
 estimate, not a bound: templates and vision models differ.
 
 When the estimate exceeds the input limit, the agent fits a request copy: it previews eligible old
-tool outputs, removes optional old thinking and then evicts old complete units, while keeping the
-task, tool schemas, matching call/result pairs, images and failing evidence. It leaves history and
-the retained conversation unchanged.
+tool outputs, removes optional old thinking and old recall, and then evicts old complete units,
+down to 70% of the limit. It keeps the task, tool schemas and matching call/result pairs; images and
+failing evidence go only when nothing else is left. It leaves history and the retained conversation
+unchanged.
 
 If the pinned context cannot fit, the run ends with
 `context_budget_exceeded` and a remediation message. A classified context-overflow response gets at
@@ -415,9 +416,9 @@ caching, a longer window costs input tokens on every request.
 
 A value you set stays as you set
 it, on any backend.
-With a large cap, the prompt-size fit does the dropping: past the 100,000-character cap it drops
-whole units (a tool call with its results, never split) down to 70% of the cap, so the history
-holds for several steps.
+With a large cap, the prompt-size fit does the dropping: past the 100,000-character cap it shortens
+old tool results, then drops old thinking, old recall and whole units (a tool call with its results,
+never split), down to 70% of the cap, so the history holds for several steps.
 
 A count drop takes at most half the window at once, so a cap below 16 drops fewer than eight
 messages. See [Memory](memory.md#working-memory-window).
@@ -474,16 +475,13 @@ calls, a final answer of at most three lines, relative paths without a `sys.path
 reading the files a task names before listing folders.
 
 With
-it the reflection prompt also leaves out the five estimates,
-`progress_made` and `new_information_gained` (nothing reads them) and asks for
-`best_effort_result` only with `done` or `stop`; the action and
-the three flags the gate reads are still asked for, and a reply in the long form is read as
-before. The compress modes keep the system prompt's last line, because their notes are text
+it the reflection prompt asks for `best_effort_result` only with `done` or `stop`; the other keys
+stay the same, and a reply with more keys is read as before. The compress modes keep the system prompt's last line, because their notes are text
 between tool calls.
 
 The interactive
-UI, the `melo ""` loop and the gateway ignore the key. Off, the default, every request is the one
-sent before the option existed; on, the start of the requests stays the same on every turn of a run.
+UI, the `melo ""` loop and the gateway ignore the key. Off, the default, requests use the
+standard prompts; on, the start of the requests stays the same on every turn of a run.
 
 ## Embedding and long-term memory
 

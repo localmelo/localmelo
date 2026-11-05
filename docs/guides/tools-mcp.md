@@ -132,7 +132,7 @@ With pixels on, the tool's text stays in its `role: "tool"` message. The picture
 | Which pictures keep pixels | The newest `tool_images_keep` (default 3). When one more arrives past `tool_images_keep + tool_images_retire - 1`, the oldest `tool_images_retire` (default 2) lose them together: a request carries 3 to 4 pictures, and the prompt prefix a server caches changes once every two pictures, not on every step. |
 | A repeated picture | One with the digest of one already sent is not sent again; its tool message ends with `[same image as an earlier tool result; its pixels are above]`. |
 | A wide picture | Wider than 1,280 pixels, it is scaled to 1,280 wide as a JPEG once, when it is kept (with macOS `sips`; elsewhere it is sent as it is). The label then names the JPEG. |
-| The prompt cap | Each picture sent counts 4,500 characters toward the 100,000-character prompt cap, and its pixel size toward a context budget ([Context accounting](../reference/configuration.md#context-accounting)); older turns leave the window to make room. |
+| The prompt cap | Each picture sent counts 4,500 characters toward the 100,000-character prompt cap, and its pixel size toward a context budget ([Context accounting](../reference/configuration.md#context-accounting)); older turns make room first, and a picture's own turn goes only when nothing else is left. |
 | What is stored | The copy the model gets lives in memory only: history and the working window keep the line that names the picture (a session still stores the picture for the console). After a session is reopened, no picture is sent until a tool returns a new one. |
 | No pictures | A run whose tools return none sends the same requests in every mode. |
 
