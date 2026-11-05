@@ -194,6 +194,62 @@ def split(s: str, comments: bool = False, posix: bool = True) -> list[str]:
     return list(lexer)
 
 
+# ── Words and operators, simple commands ──
+
+# The operators of a shell text, longest first: ``2>&1`` holds ``>&``.
+OPERATOR: Final = re.compile(
+    r"&&|\|\||;;|\|&|&>>|&>|>>|>&|<&|<<<|<<|<\(|>\(|>\||[;&|()<>\n]"
+)
+_OPERATOR_OR_BACKQUOTE: Final = re.compile("`|" + OPERATOR.pattern)
+# The operators that end a simple command; the others redirect one.
+CUTS: Final = frozenset(
+    {";", "&&", "||", "|", "|&", "&", "(", ")", "<(", ">(", ";;", "\n"}
+)
+# A simple command: the operator before it, its words, its redirections.
+Command = tuple[str, list[str], list[tuple[str, str]]]
+
+
+def tokens(text: str, backquotes: bool = False) -> list[str]:
+    """*text* as words and operators (``;``, ``&&``, ``(``, ``>``…), quotes kept together.
+
+    With *backquotes*, a backquote is an operator too. A quote that does not
+    close raises :class:`ValueError`.
+    """
+    chars = "();<>|&\n" + ("`" if backquotes else "")
+    split = (_OPERATOR_OR_BACKQUOTE if backquotes else OPERATOR).findall
+    lexer = Lexer(text, posix=True, punctuation_chars=chars)
+    lexer.whitespace, lexer.whitespace_split, lexer.commenters = " \t\r", True, ""
+    found: list[str] = []
+    for token in lexer:
+        found += split(token) if token and all(c in chars for c in token) else [token]
+    return found
+
+
+def commands(words: Sequence[str], cuts: Collection[str] = CUTS) -> list[Command]:
+    """The simple commands of the tokens *words* (see :func:`tokens`).
+
+    A redirection's operator and target are set apart, without the number
+    of a file descriptor before it (``2>``).
+    """
+    argv: list[str] = []
+    redirs: list[tuple[str, str]] = []
+    out: list[Command] = []
+    op, at = "", 0
+    while at < len(words):
+        if words[at] in cuts:
+            out.append((op, argv, redirs))
+            op, argv, redirs = words[at], [], []
+        elif OPERATOR.fullmatch(words[at]):
+            if argv and argv[-1].isdigit():
+                argv.pop()
+            redirs.append((words[at], words[at + 1] if at + 1 < len(words) else ""))
+            at += 1
+        else:
+            argv.append(words[at])
+        at += 1
+    return [c for c in [*out, (op, argv, redirs)] if c[1] or c[2]]
+
+
 # ── The program a command runs ──
 
 _TIMEOUT: Final = frozenset({"-k", "-s", "--kill-after", "--signal"})

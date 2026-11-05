@@ -137,10 +137,6 @@ _SEARCH_VALUED = set(
     ["-e", "-f", "--regexp", "--file", "--include", "--exclude", "--exclude-dir"]
     + ["-A", "-B", "-C", "-m", "--max-count", "-g", "--glob", "-t", "--type", "-T"]
 )
-_OPS = re.compile(r"&&|\|\||;;|\|&|&>>|&>|>>|>&|<&|<<<|<<|<\(|>\(|>\||[;&|()<>\n]")
-_SEPARATORS = set([";", "&&", "||", "|", "|&", "&", "(", ")", "<(", ">(", ";;"]) | {
-    "\n"
-}
 _WRITES = set([">", ">>", "&>", "&>>", ">|", ">&"])
 _PY = re.compile(r"python(\d(\.\d+)?)?w?$")
 _SHELLS = set(["sh", "bash", "zsh", "dash", "fish"])
@@ -734,38 +730,6 @@ def _quoted_substitutions(text: str) -> tuple[list[str], bool]:
     return found, exact
 
 
-def _tokens(command: str) -> list[str]:
-    """*command* as words and operators (``;``, ``&&``, ``(``, ``>``…), quote-aware."""
-    lexer = shell_lexer.Lexer(command, posix=True, punctuation_chars="();<>|&\n")
-    lexer.whitespace, lexer.whitespace_split, lexer.commenters = " \t\r", True, ""
-    tokens: list[str] = []
-    for token in lexer:
-        punct = token and all(c in "();<>|&\n" for c in token)
-        tokens += _OPS.findall(token) if punct else [token]
-    return tokens
-
-
-def _segments(command: str) -> list[tuple[str, list[str], list[tuple[str, str]]]]:
-    """The simple commands: the operator before each, its argv, its redirections."""
-    tokens = _tokens(command)
-    argv: list[str] = []
-    redirs: list[tuple[str, str]] = []
-    out, op, i = [], "", 0
-    while i < len(tokens):
-        if tokens[i] in _SEPARATORS:
-            out.append((op, argv, redirs))
-            op, argv, redirs = tokens[i], [], []
-        elif _OPS.fullmatch(tokens[i]):
-            if argv and argv[-1].isdigit():
-                argv.pop()
-            redirs.append((tokens[i], tokens[i + 1] if i + 1 < len(tokens) else ""))
-            i += 1
-        else:
-            argv.append(tokens[i])
-        i += 1
-    return [s for s in [*out, (op, argv, redirs)] if s[1] or s[2]]
-
-
 def _ansi_c(text: str) -> bool:
     """Whether *text* has an ANSI-C quote (``$'…'``) outside other quotes.
 
@@ -987,7 +951,7 @@ def _own_pids(text: str) -> set[str]:
     if "$!" not in text and "${!}" not in text:
         return set()  # no process was started here (and nothing to lex again)
     try:
-        tokens = _tokens(text)
+        tokens = shell_lexer.tokens(text)
     except ValueError:
         return set()
     held: set[str] = set()
@@ -1001,8 +965,8 @@ def _own_pids(text: str) -> set[str]:
     words: list[str] = []
     depth, before = 0, ""
     for token in [*tokens, ";"]:
-        if token not in _SEPARATORS:
-            if not _OPS.fullmatch(token):
+        if token not in shell_lexer.CUTS:
+            if not shell_lexer.OPERATOR.fullmatch(token):
                 words.append(token)
             continue
         piped = token in ("|", "|&")
@@ -1078,7 +1042,7 @@ def _is_runner(argv: list[str]) -> bool:
 def _pipe_status(
     f: Findings,
     text: str,
-    segments: list[tuple[str, list[str], list[tuple[str, str]]]],
+    segments: list[shell_lexer.Command],
     status_read: bool,
 ) -> None:
     """Note a pipeline whose exit status something goes by, without ``pipefail``.
@@ -1120,7 +1084,7 @@ def _review_shell(
     if _ansi_c(text):
         f.doubt("Uses a quote melo cannot read ($'…').")
     try:
-        segments = _segments(text)
+        segments = shell_lexer.commands(shell_lexer.tokens(text))
     except ValueError:
         return f.doubt("Has a quote that does not close.")
     _pipe_status(f, text, segments, status_read)
@@ -1151,7 +1115,7 @@ def _review_shell(
 def _run_segments(
     ctx: Context,
     f: Findings,
-    segments: list[tuple[str, list[str], list[tuple[str, str]]]],
+    segments: list[shell_lexer.Command],
     bodies: list[str],
     ticked: Collection[str] = (),
 ) -> None:

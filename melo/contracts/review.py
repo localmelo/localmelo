@@ -830,8 +830,11 @@ _NETWORK: Final = frozenset(
 )
 _GIT_NETWORK: Final = frozenset({"clone", "fetch", "pull", "push", "ls-remote"})
 _SHELLS: Final = frozenset({"sh", "bash", "zsh", "dash", "ksh", "fish"})
-# What separates two commands, or redirects one, in a shell's text.
-_OPERATORS: Final = ";&|()<>`\n"
+# The operators that end a command: a backquote too, as the text between two
+# is a command of its own.
+_CUTS: Final = shell_lexer.CUTS | {"`"}
+# A line that does not lex, as words and operators.
+_ROUGH: Final = re.compile(r"[^\s;&|()<>`]+|`|" + shell_lexer.OPERATOR.pattern)
 # A command substitution in a word: ``$(…)`` or ``\`…\```.
 _SUBSTITUTION: Final = re.compile(r"\$\((.*)\)|`([^`]*)`", re.S)
 # Python: calls that fetch an address, and calls that connect to a host.
@@ -888,58 +891,18 @@ def _shell_tokens(text: str) -> list[str]:
     parse is split at spaces and operators.
     """
     text = _joined_lines(text)
-
-    def split(part: str) -> list[str]:
-        lexer = shell_lexer.Lexer(part, posix=True, punctuation_chars=_OPERATORS)
-        lexer.whitespace = " \t\r"
-        lexer.whitespace_split = True
-        lexer.commenters = ""
-        return list(lexer)
-
     try:
-        return split(text)
+        return shell_lexer.tokens(text, backquotes=True)
     except ValueError:
         pass
     tokens: list[str] = []
     for line in text.split("\n"):
         try:
-            tokens += split(line)
+            tokens += shell_lexer.tokens(line, backquotes=True)
         except ValueError:
-            tokens += re.findall(r"[;&|()<>`]+|[^\s;&|()<>`]+", line)
+            tokens += _ROUGH.findall(line)
         tokens.append("\n")
     return tokens
-
-
-Command = tuple[list[str], list[str]]
-
-
-def _shell_commands_of(tokens: Sequence[str]) -> list[Command]:
-    """The simple commands in *tokens*, each with the here-strings (``<<<``) it reads.
-
-    Split at operators; a redirection's target is dropped.
-    """
-    commands: list[Command] = []
-    current: list[str] = []
-    here: list[str] = []
-    target = ""
-    for token in tokens:
-        if token and all(c in _OPERATORS for c in token):
-            if "(" in token or ")" in token or not ("<" in token or ">" in token):
-                if current or here:
-                    commands.append((current, here))
-                current, here, target = [], [], ""
-            else:
-                target = "here" if "<<<" in token else "file"
-            continue
-        if target:
-            if target == "here":
-                here.append(token)
-            target = ""
-            continue
-        current.append(token)
-    if current or here:
-        commands.append((current, here))
-    return commands
 
 
 def _shell_words(command: Any) -> list[str]:
@@ -1119,7 +1082,15 @@ def _shell_sites(command: Any, depth: int = 0) -> Sites:
             more, hidden = _code_sites(inner[0] or inner[1], False, depth)
             keys |= more
             unread = unread or hidden
-    commands = [(words, [])] if isinstance(command, list) else _shell_commands_of(words)
+    commands = (
+        [(words, [])]
+        if isinstance(command, list)
+        else [
+            # the here-strings (<<<) each reads, for bash <<< "…"
+            (argv, [target for kind, target in redirs if kind == "<<<"])
+            for _, argv, redirs in shell_lexer.commands(words, _CUTS)
+        ]
+    )
     for found, here in commands:
         more, hidden = _command_sites(found, depth, here)
         keys |= more

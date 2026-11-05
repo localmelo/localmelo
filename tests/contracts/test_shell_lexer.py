@@ -33,8 +33,8 @@ import pytest
 from localmelo.melo.contracts import shell_lexer
 
 CHECKER_TESTS = Path(__file__).parent.parent / "checker"
-OPERATORS = ";&|()<>`\n"  # melo.contracts.review: the operators of its lexer
-REVIEW_PUNCTUATION = "();<>|&\n"  # melo.checker.review.shell: its lexer's
+OPERATORS = ";&|()<>`\n"  # shell_lexer.tokens(backquotes=True): the site keys'
+REVIEW_PUNCTUATION = "();<>|&\n"  # shell_lexer.tokens(): the review's
 
 
 def configured(factory: Callable[..., Any], **options: Any) -> Callable[[str], Any]:
@@ -57,7 +57,7 @@ def configured(factory: Callable[..., Any], **options: Any) -> Callable[[str], A
 
 # name -> keyword options of shlex.shlex and the attributes the call sites set
 SETTINGS: dict[str, dict[str, Any]] = {
-    # melo.checker.review.shell._tokens
+    # melo.contracts.shell_lexer.tokens
     "review_tokens": dict(
         posix=True,
         punctuation_chars=REVIEW_PUNCTUATION,
@@ -65,7 +65,7 @@ SETTINGS: dict[str, dict[str, Any]] = {
         whitespace_split=True,
         commenters="",
     ),
-    # melo.contracts.review._shell_tokens
+    # melo.contracts.shell_lexer.tokens(backquotes=True)
     "review_operators": dict(
         posix=True,
         punctuation_chars=OPERATORS,
@@ -238,7 +238,37 @@ def test_one_long_word_costs_time_in_proportion_to_its_length() -> None:
     assert long < 64 * short
 
 
-# ── The program a command runs ──
+# ── Simple commands, and the program each runs ──
+
+
+@pytest.mark.parametrize(
+    ("text", "backquotes", "commands"),
+    [
+        (
+            "a 2>&1 | b x>>log",
+            False,
+            [("", ["a"], [(">&", "1")]), ("|", ["b", "x"], [(">>", "log")])],
+        ),
+        (
+            "bash <<< 'curl x' && c",
+            False,
+            [("", ["bash"], [("<<<", "curl x")]), ("&&", ["c"], [])],
+        ),
+        ("echo `curl x`", False, [("", ["echo", "`curl", "x`"], [])]),
+        ("echo `curl x`", True, [("", ["echo"], []), ("`", ["curl", "x"], [])]),
+        (
+            "(a)>out;b",
+            False,
+            [("(", ["a"], []), (")", [], [(">", "out")]), (";", ["b"], [])],
+        ),
+    ],
+)
+def test_commands_cut_tokens_at_operators_and_set_redirections_apart(
+    text: str, backquotes: bool, commands: list[Any]
+) -> None:
+    cuts = shell_lexer.CUTS | ({"`"} if backquotes else set())
+    found = shell_lexer.commands(shell_lexer.tokens(text, backquotes), cuts)
+    assert found == commands
 
 
 @pytest.mark.parametrize(
