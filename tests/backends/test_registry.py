@@ -168,6 +168,7 @@ _EXPECTED_KEYS = {
     "ollama",
     "vllm",
     "sglang",
+    "melo_serve",
     "openai",
     "gemini",
     "anthropic",
@@ -190,7 +191,7 @@ class TestEnsureDefaultsRegistered:
         backends = list_backends()
         keys = {b.key for b in backends}
         assert keys == _EXPECTED_KEYS
-        assert len(backends) == 8
+        assert len(backends) == 9
 
     def test_idempotent(self) -> None:
         ensure_defaults_registered()
@@ -198,7 +199,7 @@ class TestEnsureDefaultsRegistered:
         backends = list_backends()
         keys = {b.key for b in backends}
         assert keys == _EXPECTED_KEYS
-        assert len(backends) == 8
+        assert len(backends) == 9
 
     def test_get_backend_auto_registers(self) -> None:
         """get_backend() works without explicit registration."""
@@ -217,7 +218,7 @@ class TestEnsureDefaultsRegistered:
         backends = list_backends()
         keys = {b.key for b in backends}
         assert keys == _EXPECTED_KEYS
-        assert len(backends) == 8
+        assert len(backends) == 9
 
     def test_clear_then_list_re_registers(self) -> None:
         """_clear() resets the flag; next list_backends re-registers."""
@@ -226,4 +227,4 @@ class TestEnsureDefaultsRegistered:
         backends = list_backends()
         keys = {b.key for b in backends}
         assert keys == _EXPECTED_KEYS
-        assert len(backends) == 8
+        assert len(backends) == 9

@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING
 
-from localmelo.support.backends.base import BaseBackend
+from localmelo.support.backends.base import BaseBackend, configured_model
 
 if TYPE_CHECKING:
     from localmelo.melo.contracts.providers import (
@@ -62,6 +62,26 @@ def get_backend(name: str) -> BaseBackend:
     except KeyError:
         available = ", ".join(sorted(_BACKENDS)) or "(none)"
         raise KeyError(f"Unknown backend '{name}'. Available: {available}") from None
+
+
+def find(key: str) -> BaseBackend | None:
+    """The registered backend *key*, or None when nothing registered it."""
+    try:
+        return get_backend(key)
+    except KeyError:
+        return None
+
+
+def in_use(cfg: Config, key: str, *, embedding: bool = False) -> tuple[str, str]:
+    """``(label, model)`` of the backend *key* as *cfg* has it used now.
+
+    The one lookup every banner, identity and cache key asks. A backend nothing
+    registered is called by its key and has the model its config section names.
+    """
+    backend = find(key)
+    if backend is None:
+        return key, configured_model(cfg, key, embedding=embedding)
+    return backend.in_use(cfg, embedding=embedding)
 
 
 def list_backends() -> list[BaseBackend]:

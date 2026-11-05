@@ -66,7 +66,11 @@ class BackendInfo:
     listed when melo chose the one it says is loaded, else 0. *key_env* names a
     cloud vendor's key variable. *memory_told* says the first run just told
     the user that long-term memory is off and how to add it, so the banner
-    does not say it again.
+    does not say it again. *note* is the server's words for the welcome row,
+    beside the model, when its backend has some (``Splash via melo_serve``).
+    *follows* says the session chose no model and its backend serves its own
+    (melo_serve): *model* is what it served when the row was made, and an Agent
+    is built with none, so it asks for what is served at that build.
     """
 
     key: str
@@ -78,6 +82,8 @@ class BackendInfo:
     listed: int = 0
     key_env: str = ""
     memory_told: bool = False
+    note: str = ""
+    follows: bool = False
 
     @property
     def local(self) -> bool:
@@ -213,8 +219,11 @@ def welcome(
     if chat is not None:
         # The main chat's model is the gateway's: the row names the chat instead.
         change = [(f" {dot} ", "muted"), (chat, "accent")]
+    note = clean_output(backend.note)
+    tag: Parts = [(f" {dot} ", "muted"), (note, "muted")]
     named: list[Parts] = [
-        [("melo", "brand"), (f" {v} {dot} ", "muted"), (model, ""), *change]
+        [("melo", "brand"), (f" {v} {dot} ", "muted"), (model, ""), *noted, *change]
+        for noted in ([tag, []] if note else [[]])  # the note goes first
         for v in (version, version.split(" (")[0])  # then without the commit
     ]
     tail = "".join(text for text, _ in change)

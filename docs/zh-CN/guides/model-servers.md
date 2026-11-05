@@ -2,7 +2,7 @@
 
 # 模型服务器指南
 
-自行运行模型服务器并让 localmelo 连接到它：oMLX、Ollama、MLC LLM、vLLM、SGLang 或云端 API。设置名称和默认值见[配置参考](../reference/configuration.md)。
+自行运行模型服务器并让 localmelo 连接到它：oMLX、Ollama、MLC LLM、vLLM、SGLang、melo_serve 或云端 API。设置名称和默认值见[配置参考](../reference/configuration.md)。
 
 - 在搭载 Apple silicon 的 Mac 上，推荐使用本地服务器 oMLX。
 - 在其他系统上，可以用 Ollama 作为替代。
@@ -113,6 +113,7 @@ ollama pull qwen3:8b
 | `mlc` | 本地 | [MLC LLM](https://llm.mlc.ai) | `http://localhost:8400/v1`（向导） | 支持 |
 | `vllm` | 本地 | [oMLX](https://github.com/jundot/omlx)、[vLLM](https://docs.vllm.ai) 或其他 OpenAI 兼容服务器 | `http://localhost:8000/v1`（向导） | 支持 |
 | `sglang` | 本地 | [SGLang](https://docs.sglang.ai) | `http://localhost:30000/v1`（向导） | 支持 |
+| `melo_serve` | 本地 | [melo_serve](https://github.com/localmelo/melo_serve) | `http://127.0.0.1:8321/v1` | 支持 |
 | `openai` | 云端 | OpenAI API | `https://api.openai.com/v1` | 不支持 |
 | `anthropic` | 云端 | Anthropic API | `https://api.anthropic.com/v1` | 不支持 |
 | `gemini` | 云端 | Google Gemini API | `https://generativelanguage.googleapis.com/v1beta/openai` | 不支持 |
@@ -150,6 +151,35 @@ enable_thinking = false
 - `request_timeout_s = 600` 为 oMLX 留出时间，加载尚未加载的模型；见[对话请求超时](../reference/configuration.md#chat-request-timeout)。
 - `extra_body` 表会关闭 Qwen3 模型的思考，使每一步更快；省略该表可保持思考开启。除非模型在 oMLX 中的设置强制指定 `enable_thinking`，否则 oMLX 会应用它。
 - 要使用长期记忆，oMLX 可以从同一目录提供嵌入模型：设置 `embedding_backend = "omlx"`，并在 `[vllm]` 中添加 `embedding_url = "http://127.0.0.1:8000/v1"` 和 `embedding_model = "<its id>"`；由于 `GET /v1/models` 不给出类型，需要使用 ID 发送一次 `POST /v1/embeddings` 进行检查。见[配置嵌入模型](embedding.md#omlx)。
+
+### melo_serve
+
+[melo_serve](https://github.com/localmelo/melo_serve) 是单独的守护进程，每个用户一个，用一个与 OpenAI 兼容的地址 `http://127.0.0.1:8321/v1` 提供本地模型（Splash 或 oMLX），并用一条命令切换。
+
+1. 安装它，也可以让它成为登录项：
+
+   ```bash
+   uv tool install git+https://github.com/localmelo/melo_serve
+   melo-serve install
+   ```
+
+2. 设置后端，不写模型：
+
+   ```toml
+   chat_backend = "melo_serve"
+   embedding_backend = "none"
+
+   [melo_serve]
+   chat_url = "http://127.0.0.1:8321/v1"
+   ```
+
+3. 想换模型时随时切换：`melo-serve use <pick>`。
+
+- `chat_model` 为空表示 melo_serve 当前提供的模型。localmelo 在创建提供方时从 melo_serve 的状态文件读取它，因此切换会被跟上；`embedding_model` 也一样。只有控制套接字接受连接时，melo_serve 才算在运行，所以崩溃或停止后留下的状态什么也不提供。
+- 没有提供任何模型时，`melo "task"`（以及 `POST /v1/agent/run`，返回 502 `agent_start_failed`）会以一行说明要运行什么命令结束：`melo-serve up`、安装命令，或 `melo-serve use <pick>`。直接运行的退出码为 1。
+- 首次运行的设置优先选择正在运行的 melo_serve，并且不写入模型。设置、设置页和启动时的检查都不需要已有模型在提供：是否有模型，在需要模型时才检查。
+- 配置使用 melo_serve 时，`melo serve` 会检查它；见[网关](gateway.md#start-the-gateway)。
+- melo_serve 的 [README](https://github.com/localmelo/melo_serve#readme) 介绍可选项（pick）、登录项和其他命令。
 
 <a id="ollama-with-embeddings"></a>
 

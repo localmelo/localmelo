@@ -443,7 +443,9 @@ def run_backend_setup(*, guided: bool = False) -> config.Config | None:
         section = getattr(cfg, selected_emb_key)
         old_embedding = (section.embedding_url, section.embedding_model)
         section.embedding_url = picked.url
-        section.embedding_model = picked.model
+        # A backend that serves its own model keeps none in the config.
+        named = _LOCAL[picked.key].model_required
+        section.embedding_model = picked.model if named else ""
     else:
         selected_emb_key = EMBEDDING_BACKENDS[emb_choice - 1][0]
         if selected_emb_key != "none":

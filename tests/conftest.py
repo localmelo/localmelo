@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -119,6 +120,40 @@ def _forget_servers() -> None:
     from localmelo.support.backends import discovery
 
     discovery.forget_servers()
+
+
+@pytest.fixture(autouse=True)
+def melo_serve_home(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """melo_serve's home is an empty temporary folder: no test reads this Mac's own.
+
+    The state file and the control socket of the melo_serve that may run here
+    are never read or connected to, and no test finds this Mac's own
+    ``melo-serve`` command either: ``melo_serve.command()`` is None. A test
+    writes a fake ``state.json`` in the folder (``tests/fixtures/melo_serve.py``)
+    and asks for ``melo_serve_socket`` to make it running.
+    """
+    from localmelo.support import melo_serve
+
+    home = tmp_path_factory.mktemp("melo-serve")
+    monkeypatch.setenv("MELO_SERVE_HOME", str(home))
+    monkeypatch.delenv("MELO_SERVE_SOCKET", raising=False)
+    monkeypatch.setattr(melo_serve, "command", lambda: None)
+    return home
+
+
+@pytest.fixture
+def melo_serve_socket(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """A control socket that accepts connections, so a fake ``state.json`` is running.
+
+    Without it nothing answers on the socket and no state is running.
+    """
+    from localmelo.tests.fixtures.melo_serve import listening
+
+    with listening() as path:
+        monkeypatch.setenv("MELO_SERVE_SOCKET", str(path))
+        yield path
 
 
 @pytest.fixture(autouse=True)

@@ -346,13 +346,13 @@ def empty_reply_fallback_errors(agent: AgentConfig) -> list[str]:
 def default_window_messages(backend: str) -> int:
     """The working window's message cap when nothing sets one, for a chat *backend*.
 
-    A local server (ollama, mlc, vllm or oMLX, sglang) and an OpenAI-compatible
-    URL reuse the prompt prefix from their cache, so a long window adds few new
-    tokens per request and keeps more of the task in view: 64, the cap that two
-    benchmark rounds measured. Without prompt caching a longer window costs input
-    tokens on every request, so a cloud vendor's backend keeps 20 until a longer
-    window is measured there. An explicit ``[agent] window_messages`` or
-    ``--window-messages`` always wins.
+    A local server (ollama, mlc, vllm or oMLX, sglang, melo_serve) and an
+    OpenAI-compatible URL reuse the prompt prefix from their cache, so a long
+    window adds few new tokens per request and keeps more of the task in view:
+    64, the cap that two benchmark rounds measured. Without prompt caching a
+    longer window costs input tokens on every request, so a cloud vendor's
+    backend keeps 20 until a longer window is measured there. An explicit
+    ``[agent] window_messages`` or ``--window-messages`` always wins.
     """
     return SHORT_TERM_MAX if backend in CLOUD_BACKENDS else LOCAL_WINDOW_MESSAGES
 
@@ -656,9 +656,9 @@ class ChatConfig:
 @dataclass
 class Config:
     chat_backend: str = (
-        ""  # mlc | ollama | vllm | sglang | openai | gemini | anthropic | nvidia
+        ""  # mlc | ollama | vllm | sglang | melo_serve | openai | gemini | ...
     )
-    embedding_backend: str = ""  # mlc | ollama | vllm | sglang | none
+    embedding_backend: str = ""  # mlc | ollama | vllm | sglang | melo_serve | none
     # The file spelled the backend "omlx", an alias of "vllm": the backend
     # field says "vllm" and this says how save() writes it back (see load()).
     chat_alias: str = field(default="", repr=False, compare=False)
@@ -677,6 +677,7 @@ class Config:
     ollama: LocalBackendConfig = field(default_factory=LocalBackendConfig)
     vllm: LocalBackendConfig = field(default_factory=LocalBackendConfig)
     sglang: LocalBackendConfig = field(default_factory=LocalBackendConfig)
+    melo_serve: LocalBackendConfig = field(default_factory=LocalBackendConfig)
 
     # Cloud vendors
     openai: CloudVendorConfig = field(default_factory=CloudVendorConfig)
@@ -745,22 +746,34 @@ class Config:
     ) -> None:
         """Put the chat on the server at *url*, as the first run and ``/backend`` save it.
 
-        *ollama* (the server answered like Ollama) makes the chat backend
-        ``ollama``, which chats on Ollama's native API; otherwise it is
-        ``vllm``, the key for any OpenAI-compatible server. With
+        The backend is :func:`~localmelo.support.backends.discovery.server_backend`'s
+        answer: ``ollama`` (*ollama*: the server answered like Ollama), which
+        chats on Ollama's native API, ``melo_serve`` or ``vllm``, the key for any
+        OpenAI-compatible server. A backend whose config names no model
+        (``model_required`` is false) is saved without one. With
         *embedding_model*, the same table's embedding URL and model are set too.
         A file's ``omlx`` spelling stays while the chat server is the same. The
         other values stay. Nothing is written to disk.
         """
-        if ollama or self.chat_backend != "vllm" or self.vllm.chat_url != url:
+        from localmelo.support.backends import discovery
+        from localmelo.support.backends.registry import get_backend
+
+        backend = discovery.server_backend(url, ollama=ollama)
+        if (
+            backend != "vllm"
+            or self.chat_backend != "vllm"
+            or self.vllm.chat_url != url
+        ):
             self.chat_alias = ""  # the file's "omlx" named another server
-        self.chat_backend = "ollama" if ollama else "vllm"
-        section = getattr(self, self.chat_backend)
-        section.chat_url, section.chat_model = url, model
+        named = get_backend(backend).model_required
+        self.chat_backend = backend
+        section = getattr(self, backend)
+        section.chat_url, section.chat_model = url, model if named else ""
         if embedding_model is not None:
             self.embedding_alias = ""
-            self.embedding_backend = self.chat_backend
-            section.embedding_url, section.embedding_model = url, embedding_model
+            self.embedding_backend = backend
+            section.embedding_url = url
+            section.embedding_model = embedding_model if named else ""
 
     def validate(self) -> list[str]:
         """Return a list of validation errors. Empty list means valid.

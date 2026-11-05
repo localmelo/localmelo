@@ -312,6 +312,33 @@ def test_the_settings_carry_the_memory_switch_and_save_it_only_when_sent(
     assert again.json()["across_chats"] is False, "a body without it leaves it as it is"
 
 
+def test_put_settings_saves_a_backend_that_serves_its_own_model_with_none(
+    client: TestClient, isolated_config: Path, workspace: str
+) -> None:
+    url = "http://127.0.0.1:8321/v1"
+    resp = client.put(
+        "/api/settings",
+        json={
+            "chat_backend": "melo_serve",
+            "embedding_backend": "melo_serve",
+            "workspace": workspace,
+            "sections": {
+                "melo_serve": {
+                    "chat_url": url,
+                    "chat_model": "picked-in-the-card",
+                    "embedding_url": url,
+                    "embedding_model": "e",
+                }
+            },
+            "revision": client.get("/api/settings").json()["revision"],
+        },
+    )
+    assert resp.status_code == 200
+    saved = config.load().melo_serve
+    assert (saved.chat_url, saved.chat_model) == (url, "")
+    assert (saved.embedding_url, saved.embedding_model) == (url, "")
+
+
 def test_put_settings_conflict_on_stale_revision(
     client: TestClient, isolated_config: Path
 ) -> None:

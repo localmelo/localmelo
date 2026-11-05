@@ -45,10 +45,12 @@ class Vision:
 
     def _key(self) -> tuple[Any, ...]:
         cfg = self._console.cfg
+        from localmelo.support.backends.registry import in_use
+
         section = getattr(cfg, cfg.chat_backend, None) if cfg.chat_backend else None
         return (
             cfg.chat_backend,
-            getattr(section, "chat_model", ""),
+            in_use(cfg, cfg.chat_backend)[1],
             getattr(section, "chat_url", ""),
             getattr(section, "base_url", ""),
         )

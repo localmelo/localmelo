@@ -37,7 +37,7 @@ remembers across chats and talks to your own model server or a cloud API.
 - Choose Auto for a chat and melo works on its own: routine steps run, a step you did not ask for asks you on a card (**Allow once**, **Allow for this chat** for a site, or **Deny**), and the riskiest are blocked with the reason.
 - When a task runs out of steps it reads Stopped, and **Continue** picks it up where it left off.
 - Use the console and the app in English or 简体中文.
-- Use oMLX, Ollama, vLLM, SGLang or MLC LLM on your computer, or a cloud API; run one task from a script and get one JSON line.
+- Use oMLX, Ollama, vLLM, SGLang, melo_serve or MLC LLM on your computer, or a cloud API; run one task from a script and get one JSON line.
 
 ## Install
 
