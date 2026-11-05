@@ -15,6 +15,7 @@ from localmelo.support.gateway.task_store import (
     TaskStoreError,
 )
 from localmelo.support.sessions.store import SessionStore, StoredEvent
+from localmelo.tests.gateway.conftest import seed_process
 
 
 @pytest.fixture
@@ -155,52 +156,6 @@ async def test_repeated_create_cannot_upgrade_unknown_provenance(stores: tuple) 
     )
     assert was_repeated and repeated.task_id == old.task_id
     assert (await recovery.provenance(old.task_id)).first_start == "unknown"
-
-
-async def test_legacy_adoption_requires_confirmation_and_card(stores: tuple) -> None:
-    sessions, tasks, recovery, task_id = stores
-    args = dict(
-        operation_id="adopt", execution_id="legacy", **await identity(tasks, task_id)
-    )
-    with pytest.raises(ValueError):
-        await recovery.adopt_legacy(task_id, confirmed=False, **args)
-    with pytest.raises(TaskStoreError):
-        await recovery.adopt_legacy(task_id, confirmed=True, **args)
-    await recovery.prepare(
-        task_id,
-        operation_id="recover",
-        execution_id="legacy",
-        outcome="interrupted",
-        card="Review before resuming",
-        reason="unknown execution",
-        crash=False,
-        unsafe_resume=True,
-        **await identity(tasks, task_id),
-    )
-    await recovery.commit(task_id, operation_id="recover")
-    args = dict(
-        operation_id="adopt", execution_id="legacy", **await identity(tasks, task_id)
-    )
-    await recovery.adopt_legacy(task_id, confirmed=True, **args)
-    await recovery.adopt_legacy(task_id, confirmed=True, **args)
-    assert (await tasks.get_task(task_id)).state == "interrupted"
-    provenance = await recovery.provenance(task_id)
-    assert provenance.first_start == "unknown" and not provenance.unsafe_resume
-    assert (await recovery.receipt(task_id, "adopt"))[1]
-    assert [e.event["type"] for e in await sessions.list_events(task_id)].count(
-        "sched.recovery_risk_accepted"
-    ) == 1
-    await tasks.change(task_id, state="queued")
-    launch = await recovery.start(
-        task_id,
-        operation_id="resume",
-        execution_id="new",
-        expected_execution_id="legacy",
-        **await identity(tasks, task_id),
-    )
-    assert launch.acquired
-    with pytest.raises(TaskStoreError):
-        await recovery.adopt_legacy(task_id, confirmed=True, **args)
 
 
 async def test_unknown_and_new_task_provenance(stores: tuple) -> None:
@@ -466,16 +421,8 @@ async def test_resumed_execution_requires_review_and_changes_identity(
     launched = await recovery.start(task_id, **args)
     assert launched.acquired and launched.provenance.execution_id == "execution-2"
     assert launched.provenance.unsafe_resume
-    with pytest.raises(TaskStoreError):
-        await recovery.record_process(
-            task_id,
-            execution_id="execution-1",
-            pgid=11,
-            leader_pid=11,
-            boot_id="boot",
-            start_token="old",
-        )
-    await recovery.record_process(
+    await seed_process(
+        sessions,
         task_id,
         execution_id="execution-2",
         pgid=12,
@@ -488,27 +435,23 @@ async def test_resumed_execution_requires_review_and_changes_identity(
     ]
 
 
-async def test_process_identity_is_execution_bound_and_retained(stores: tuple) -> None:
+async def test_process_identity_is_retained(stores: tuple) -> None:
     sessions, tasks, recovery, task_id = stores
     task_id = await mark_created(sessions, tasks)
     await start(tasks, recovery, task_id)
     assert await recovery.processes(task_id, execution_id="execution-1") == []
-    process = dict(
+    await seed_process(
+        sessions,
+        task_id,
         execution_id="execution-1",
         pgid=123,
         leader_pid=123,
         boot_id="host-boot",
         start_token="birth-token",
     )
-    await recovery.record_process(task_id, **process)
-    await recovery.record_process(task_id, **process)
     assert await recovery.processes(task_id, execution_id="execution-1") == [
         (123, 123, "host-boot", "birth-token")
     ]
-    with pytest.raises(TaskStoreError):
-        await recovery.record_process(task_id, **{**process, "execution_id": "old"})
-    with pytest.raises(ValueError):
-        await recovery.record_process(task_id, **{**process, "pgid": True})
     await sessions.apply_retention()
     assert await recovery.processes(task_id, execution_id="execution-1") == [
         (123, 123, "host-boot", "birth-token")

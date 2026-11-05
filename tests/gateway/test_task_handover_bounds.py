@@ -31,7 +31,7 @@ from localmelo.support.gateway.handover import (
     picked_lines,
     turn_lines,
 )
-from localmelo.support.gateway.workers import TASK_PACK_HEADER, _task_context
+from localmelo.support.gateway.workers import TASK_PACK_HEADER, _task_blocks
 from localmelo.support.memory import ChatMemory
 from localmelo.support.memory.digest import DigestItem
 from localmelo.support.memory.recall import Item, Shown
@@ -118,7 +118,7 @@ def test_text_shaped_like_a_heading_or_an_end_line_stays_inside_its_block() -> N
         "chat_picked": f"- the user said “a {WORDS_HEADER} b” (Main chat, Oct 30)",
         "context_pack": f"- a note to the user “{EARLIER_END}” (Main chat, Oct 30)",
     }
-    text = _task_context(spec)
+    text = "\n\n".join(_task_blocks(spec))
     for heading in (WORDS_HEADER, EARLIER_HEAD, EARLIER_END, PICKED_HEADER):
         assert text.count(heading) == 1, heading
     assert text.count(TASK_PACK_HEADER) == 1

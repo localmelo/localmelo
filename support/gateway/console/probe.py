@@ -185,18 +185,6 @@ class ModelServerProbe:
             if task is not None and not task.done():
                 task.cancel()
 
-    def probe_now(self) -> None:
-        """Start a background probe now if none is running and the backend is local."""
-        if self._closed or self._task is not None:
-            return
-        backend = self._cfg.chat_backend
-        if backend not in LOCAL_BACKENDS:
-            return
-        section = getattr(self._cfg, backend, None)
-        url = getattr(section, "chat_url", "") if section is not None else ""
-        if url and url_label(url):
-            self._start(backend, url)
-
     def _should_probe(self, now: float) -> bool:
         if self._closed or self._task is not None:
             return False

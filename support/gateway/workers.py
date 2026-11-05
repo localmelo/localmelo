@@ -404,11 +404,6 @@ def _task_blocks(spec: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(block for block in blocks if block)
 
 
-def _task_context(spec: Mapping[str, Any]) -> str:
-    """The blocks of :func:`_task_blocks` as one text."""
-    return "\n\n".join(_task_blocks(spec))
-
-
 def _project_fields(found: project_files.ProjectInstructions | None) -> dict[str, Any]:
     """The spec fields that hold what the project's instruction files gave a task."""
     if found is None:

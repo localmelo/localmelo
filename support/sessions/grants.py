@@ -730,14 +730,6 @@ class GrantBook:
             return None
         return self._queue(self._mark_revoked(saved, at), "grant_revoke")
 
-    def revoke_now(self, grant_id: str) -> Grant | None:
-        """Take back one grant now (its row is marked when the queue reaches it)."""
-        grant = self._rows.get(grant_id)
-        if grant is None:
-            return None
-        self._drop([grant])
-        return replace(grant, revoked_at=self._clock())
-
     async def revoke(self, grant_id: str) -> Grant | None:
         """Take back one grant; ``None`` when there is no live one. A failed write raises.
 
