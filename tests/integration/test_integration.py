@@ -16,7 +16,6 @@ from unittest import mock
 import pytest
 
 from localmelo.melo.agent import Agent
-from localmelo.melo.agent._chat import STEP_ESTIMATE_PROMPT
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.memory.history.sqlite import SqliteHistory
@@ -36,32 +35,16 @@ from localmelo.tests.legacy_options import legacy_options
 
 
 class FakeLLM(BaseLLMProvider):
-    """Programmable fake LLM that pops planning responses from a queue.
+    """Programmable fake LLM that pops planning responses from a queue."""
 
-    Step-estimation requests (identified by ``STEP_ESTIMATE_PROMPT`` in the
-    system message) are answered with ``estimate_response`` without consuming
-    the normal response queue.
-    """
-
-    def __init__(
-        self,
-        responses: list[Message] | None = None,
-        *,
-        estimate_response: str = "30",
-    ) -> None:
+    def __init__(self, responses: list[Message] | None = None) -> None:
         self.responses: deque[Message] = deque(responses or [])
         self.calls: list[dict[str, Any]] = []
-        self.estimate_response = estimate_response
 
     async def chat(
         self, messages: list[Message], tools: list[ToolDef] | None = None
     ) -> Message:
         self.calls.append({"messages": list(messages), "tools": tools})
-        # Intercept step-estimation requests.
-        if any(
-            STEP_ESTIMATE_PROMPT in m.content for m in messages if m.role == "system"
-        ):
-            return Message(role="assistant", content=self.estimate_response)
         if not self.responses:
             return Message(role="assistant", content="(empty)")
         return self.responses.popleft()
@@ -100,23 +83,6 @@ class FakeSessionManager(SessionManager):
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
-
-
-def _planning_calls(llm: FakeLLM) -> list[dict[str, Any]]:
-    """Return only the non-estimation LLM calls (i.e. planning calls).
-
-    Filters out the step-estimation call that ``Agent._estimate_max_steps``
-    makes at the start of each ``run()``.
-    """
-    return [
-        c
-        for c in llm.calls
-        if not any(
-            STEP_ESTIMATE_PROMPT in m.content
-            for m in c["messages"]
-            if m.role == "system"
-        )
-    ]
 
 
 # ── 1. Gateway startup validation failure ───────────────────────────────────
@@ -228,7 +194,7 @@ class TestAgentLoopAfterMerge:
         agent = Agent(llm=llm, embedding=FakeEmbedding())
         await agent.run("unique_marker_xyz")
 
-        planning = _planning_calls(llm)
+        planning = llm.calls
         sent = planning[0]["messages"]
         user_msgs = [m for m in sent if m.role == "user"]
         matches = [m for m in user_msgs if "unique_marker_xyz" in m.content]
@@ -279,7 +245,7 @@ class TestSingleSystemMessageWithMemory:
 
         await agent.run("recall test")
 
-        planning = _planning_calls(llm)
+        planning = llm.calls
         assert len(planning) >= 1
         sent = planning[0]["messages"]
 
@@ -301,7 +267,7 @@ class TestSingleSystemMessageWithMemory:
         agent = Agent(llm=llm, embedding=None)
         await agent.run("no memory test")
 
-        planning = _planning_calls(llm)
+        planning = llm.calls
         sent = planning[0]["messages"]
         sys_msgs = [m for m in sent if m.role == "system"]
         assert len(sys_msgs) == 1
@@ -338,7 +304,7 @@ class TestSingleSystemMessageWithMemory:
 
         await agent.run("echo multi turn recall")
 
-        planning = _planning_calls(llm)
+        planning = llm.calls
         for i, call in enumerate(planning):
             sys_msgs = [m for m in call["messages"] if m.role == "system"]
             assert (
@@ -679,7 +645,7 @@ class TestStructuredExecutorInAgentLoop:
         assert result == "done"
 
         # Verify tool result fed back in second planning call
-        planning = _planning_calls(llm)
+        planning = llm.calls
         sent = planning[1]["messages"]
         tool_msgs = [m for m in sent if m.role == "tool"]
         assert len(tool_msgs) >= 1
@@ -761,7 +727,7 @@ class TestStructuredExecutorInAgentLoop:
         assert result == "done"
 
         # Verify truncation occurred (tool msg in short-term is truncated)
-        window = agent.hippo.short.get_window()
+        window = agent.hippo.working.get_window()
         tool_msgs = [m for m in window if m.role == "tool"]
         if tool_msgs:
             assert len(tool_msgs[-1].content) < 100_000
@@ -1011,7 +977,7 @@ class TestNoEmbeddingFullPath:
         assert len(agent.hippo.long._entries) == 0
 
         # Short-term memory holds the echo call and its paired result
-        window = agent.hippo.short.get_window()
+        window = agent.hippo.working.get_window()
         calls = [tc for m in window for tc in m.tool_calls]
         results = [m for m in window if m.role == "tool"]
         assert [tc.tool_name for tc in calls] == ["echo"]
@@ -1162,7 +1128,7 @@ class TestThreeWayBoundary:
         # cut to that length, and the turn budget cuts it to the room the
         # turn has left, so the prompt holds the output's start, bound to
         # the same tool_call_id.
-        planning = _planning_calls(llm)
+        planning = llm.calls
         assert len(planning) >= 2
         second_plan_msgs = planning[1]["messages"]
         calls = [tc for m in second_plan_msgs for tc in m.tool_calls]
@@ -1237,7 +1203,7 @@ class TestLLMErrorPropagation:
 
     @pytest.mark.asyncio
     async def test_llm_exception_after_tool_call(self) -> None:
-        """LLM works for estimation + first planning call but fails on second."""
+        """LLM works for the first planning call but fails on the second."""
 
         class FailOnSecondPlanLLM(FakeLLM):
             def __init__(self) -> None:
@@ -1245,13 +1211,6 @@ class TestLLMErrorPropagation:
                 self._plan_count = 0
 
             async def chat(self, messages: Any, tools: Any = None) -> Message:
-                # Let estimation pass through the parent handler.
-                if any(
-                    STEP_ESTIMATE_PROMPT in m.content
-                    for m in messages
-                    if hasattr(m, "role") and m.role == "system"
-                ):
-                    return await super().chat(messages, tools)
                 self._plan_count += 1
                 if self._plan_count == 1:
                     return Message(
@@ -1656,7 +1615,7 @@ class TestBackendAdapterArchitecture:
             assert cfg.has_embedding is expected_emb, desc
 
 
-# ── 18. Step-estimation path exercised during Agent.run() ────────────────────
+# ── 18. The attempt-based loop of Agent.run() ────────────────────────────────
 
 
 class TestAttemptBasedLoop:

@@ -85,7 +85,7 @@ Policy = Literal["off", "fcfs", "class"]
 
 # The call kinds a workspace chat can send; anything else is read as a plan
 # (design 1.1, line 133), so a provider built outside Chat is still held.
-_KINDS: tuple[str, ...] = ("plan", "reflect", "retrieve", "estimate", "embed")
+_KINDS: tuple[str, ...] = ("plan", "reflect", "retrieve", "embed")
 
 # A workspace chat call is a planning or reflection request.
 _CHAT_KINDS: tuple[str, ...] = ("plan", "reflect")

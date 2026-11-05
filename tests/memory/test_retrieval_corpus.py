@@ -658,7 +658,6 @@ def test_a_minimal_raw_call_takes_every_default() -> None:
         ({"content": "<note>plan: x</note>"}, "answer"),
         ({"kind": "reflect", "content": "Continue."}, "aux"),
         ({"kind": "retrieve"}, "aux"),
-        ({"kind": "estimate"}, "aux"),
         # A given outcome is kept.
         ({"content": "Done.", "outcome": "empty"}, "empty"),
         ({"kind": "reflect", "outcome": "answer"}, "answer"),
@@ -739,7 +738,7 @@ def _call(**fields: Any) -> dict[str, Any]:
         (_call(seq=True), "seq must be an integer >= 0"),
         (
             _call(kind="chat"),
-            "kind must be one of plan, reflect, retrieve, estimate, review, got 'chat'",
+            "kind must be one of plan, reflect, retrieve, review, got 'chat'",
         ),
         (_call(step=-1), "step must be an integer >= 0"),
         (_call(step="2"), "step must be an integer >= 0"),
@@ -1061,10 +1060,9 @@ def test_the_reflection_test_on_the_edge_cases() -> None:
     ]
 
 
-def test_retrieve_and_estimate_calls_give_nothing() -> None:
+def test_a_retrieve_call_gives_nothing() -> None:
     calls = [
         RawCall("t", 0, kind="retrieve", thinking="Let me read a.py now."),
-        RawCall("t", 1, kind="estimate", content="Let me read a.py now."),
     ]
     assert docs_from_calls(calls) == []
 
@@ -1391,7 +1389,7 @@ def test_a_missing_column_is_named(tmp_path: Path) -> None:
         (
             "UPDATE llm_calls SET kind = 'chat' WHERE task_id = 't-en' AND seq = 1",
             "llm_calls row t-en/1: kind must be one of plan, reflect, retrieve, "
-            "estimate, review, got 'chat'",
+            "review, got 'chat'",
         ),
         (
             "UPDATE llm_calls SET tool_calls_json = '[{' WHERE task_id = 't-zh' "

@@ -193,13 +193,15 @@ async def test_a_bad_retention_value_raises_before_the_directory_is_made(
 # ── Requests outside a run ──────────────────────────────────────────────────
 
 
-async def test_estimate_steps_with_a_recorder_set_by_hand(tmp_path: Path) -> None:
+async def test_a_retrieval_request_with_a_recorder_set_by_hand(tmp_path: Path) -> None:
     path = tmp_path / "history.db"
     history = SqliteHistory(path)
     chat = Chat(FakeLLM([Message(role="assistant", content="3", thinking="About 3.")]))
     token = CALL_RECORDER.set(CallLog(history, "t1", _Counters()))
     try:
-        assert await chat.estimate_steps("List the files.") == 3
+        assert (
+            await chat.retrieve([Message("user", "List the files.")])
+        ).content == "3"
     finally:
         CALL_RECORDER.reset(token)
         await history.aclose()
@@ -208,7 +210,7 @@ async def test_estimate_steps_with_a_recorder_set_by_hand(tmp_path: Path) -> Non
             "SELECT task_id, seq, kind, outcome, content, thinking, step, attempt "
             "FROM llm_calls"
         ).fetchall()
-    assert rows == [("t1", 0, "estimate", "aux", "3", "About 3.", 0, 0)]
+    assert rows == [("t1", 0, "retrieve", "aux", "3", "About 3.", 0, 0)]
 
 
 class _Counters:

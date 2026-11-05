@@ -304,7 +304,7 @@ async def test_a_root_of_slash_holds_every_path(tmp_path: Path) -> None:
     assert (absolute.status, absolute.output) == (ExecutionStatus.SUCCESS, "hello")
     assert (relative.status, relative.output) == (ExecutionStatus.SUCCESS, "hello")
     policy = WorkspacePolicy("/")
-    assert policy.check_path(str(notes))
+    assert policy.resolve(str(notes)) == str(notes)
     assert policy.resolve(str(notes).lstrip("/")) == str(notes)
 
 
@@ -399,8 +399,7 @@ def test_the_policy_compares_whole_components() -> None:
     assert policy.resolve("notes.txt") == os.path.realpath("/srv/work/notes.txt")
     assert policy.resolve("/srv/work") == os.path.realpath("/srv/work")
     assert policy.resolve("/srv/workshop/notes.txt") is None
-    assert not policy.check_path("/srv/workshop/notes.txt")
-    assert policy.check_path("/srv/work/sub/notes.txt")
+    assert policy.resolve("/srv/work/sub/notes.txt") is not None
 
 
 @pytest.mark.parametrize("path", ["", "a\0b", None, 3, ["a"]])

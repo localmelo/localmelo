@@ -133,7 +133,7 @@ melo-retrieve: error: queries.jsonl:1: relevant id 'demo:d9' is not in the corpu
 |---|---|---|
 | `task_id` | 必需 | 任务的 id：不能为空，且不含空白字符。 |
 | `seq` | 必需 | 调用在其任务中的编号：0 或更大的整数，每个任务内唯一。 |
-| `kind` | `plan` | `plan`（规划调用）、`reflect`（反思调用），或 `retrieve` 和 `estimate`（其他调用，不产生文档）。 |
+| `kind` | `plan` | `plan`（规划调用）、`reflect`（反思调用），或 `retrieve`（另一种调用，不产生文档）。 |
 | `step` | `0` | 运行的步骤。 |
 | `attempt` | `1` | 运行的尝试。 |
 | `content` | `""` | 回复的文本。 |

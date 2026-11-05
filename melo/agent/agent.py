@@ -291,9 +291,7 @@ from localmelo.melo.schema import (
     CALL_NOT_STARTED,
     EMPTY_REPLY_LABEL,
     EMPTY_REPLY_NUDGE,
-    MAX_AGENT_STEPS,
     MAX_REFLECTION_CHARS,
-    MIN_AGENT_STEPS,
     PICTURES_REFUSED_ERROR,
     SHORT_TERM_MAX,
     TOOL_CALL_TEXT_ERROR,
@@ -5585,19 +5583,6 @@ class Agent:
             )
         ]
         return assistant_msg, tool_msgs
-
-    # ── Step estimation (kept for backward compat, no longer called by run) ──
-
-    async def _estimate_max_steps(self, query: str) -> int:
-        """Ask the LLM for a conservative step-count estimate.
-
-        The result is clamped to [MIN_AGENT_STEPS, MAX_AGENT_STEPS].
-        On parse failure the hard ceiling is used as a safe fallback.
-        """
-        estimate = await self.chat.estimate_steps(query)
-        if estimate < 0:
-            return MAX_AGENT_STEPS
-        return max(MIN_AGENT_STEPS, min(estimate, MAX_AGENT_STEPS))
 
     # ── Stuck detection ──
 

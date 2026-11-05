@@ -73,8 +73,8 @@ sets it too — a turn through the turn routes, a retry, and a create with a
 first turn. Opening a chat sends the same heartbeat and counts for `focus_s`
 seconds, no longer. Its next call is admitted before
 the background calls and bypasses their limit, but never the server's
-`n_srv`. The non-lane limit is `max(1, n_srv - 1 - r_f)`; embedding,
-`retrieve` and `estimate` calls are never held by the policy and never
+`n_srv`. The non-lane limit is `max(1, n_srv - 1 - r_f)`; embedding
+and `retrieve` calls are never held by the policy and never
 orderable, but they count in flight (and a foreign lock under `lock_gate =
 "wait"` holds them before the policy sees them, below): a foreground
 embedding can fill the last `n_srv` slot, and the lane then waits for it.

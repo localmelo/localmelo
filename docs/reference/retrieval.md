@@ -157,7 +157,7 @@ One model call of a run per line, an input of `--export-run`:
 |---|---|---|
 | `task_id` | required | The task's id: not empty, without whitespace. |
 | `seq` | required | The call's number in its task: an integer, 0 or more, unique per task. |
-| `kind` | `plan` | `plan` (a planning call), `reflect` (a reflection call), or `retrieve` and `estimate` (other calls, which give no documents). |
+| `kind` | `plan` | `plan` (a planning call), `reflect` (a reflection call), or `retrieve` (another call, which gives no documents). |
 | `step` | `0` | The run's step. |
 | `attempt` | `1` | The run's attempt. |
 | `content` | `""` | The text of the reply. |

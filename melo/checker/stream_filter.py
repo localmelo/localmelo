@@ -9,12 +9,10 @@ from __future__ import annotations
 
 import re
 
-from localmelo.melo.checker import redaction
 from localmelo.melo.checker._stream_redaction import LineRedactor, snapshot_rules
 from localmelo.melo.schema import (
     ReasoningTags,
     split_leading_thinking,
-    split_thinking,
 )
 
 _TAG = re.compile(r"</?think>", re.IGNORECASE)
@@ -75,17 +73,6 @@ def _split_for_display(text: str) -> tuple[str, str]:
         else:
             content.append(remainder)
     return "".join(thinking).strip(), "".join(content)
-
-
-def split_framed(text: str, reasoning_tags: ReasoningTags) -> tuple[str, str]:
-    """Split a whole reply according to a caller-declared model framing rule.
-
-    In ``explicit`` only a leading opening tag starts reasoning. In
-    ``closing_only`` everything before the first closing tag is reasoning.
-    In ``none`` tags are ordinary content. These declarations are trusted;
-    use the conservative no-hint filter for unknown model formats.
-    """
-    return split_thinking(text, strip_answer=False, reasoning_tags=reasoning_tags)
 
 
 class StreamFilter:
@@ -218,14 +205,6 @@ class StreamFilter:
         self._raw = LineRedactor(self._snapshot)
         self._content = LineRedactor(self._snapshot)
         self._finished = True
-
-    def redact_for_storage(self, text: str) -> str:
-        """Apply the stream snapshot, then the rules current at storage time.
-
-        Call this separately for each completed display channel. Pattern-based
-        redaction cannot guarantee detection of arbitrary secrets.
-        """
-        return redaction.redact_secrets(self._redact(text)[0])[0]
 
     def feed(self, fragment: str) -> tuple[str, str]:
         self._check_fragment(fragment)

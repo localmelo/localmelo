@@ -21,7 +21,6 @@ from localmelo.melo.executor.models import (
     ExecutionRequest,
     ExecutionStatus,
 )
-from localmelo.melo.executor.policy import WorkspacePolicy
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.schema import ToolDef, ToolResult
 
@@ -316,7 +315,7 @@ class TestFilePathPolicy(unittest.IsolatedAsyncioTestCase):
     async def test_symlink_pointing_outside_root_blocked(self) -> None:
         """A symlink inside the workspace that resolves outside is rejected.
 
-        ``WorkspacePolicy.check_path`` uses ``os.path.realpath`` so the
+        ``WorkspacePolicy.resolve`` uses ``os.path.realpath`` so the
         link target — not the link path — is what's evaluated. The link
         sits inside the workspace but points at a sibling tree.
         """
@@ -472,35 +471,6 @@ class TestStructuredResult(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(outcome.status, ExecutionStatus.ERROR)
         self.assertEqual(outcome.error, "boom")
         self.assertGreater(outcome.duration_ms, 0)
-
-
-# ── WorkspacePolicy unit tests ──
-
-
-class TestWorkspacePolicy(unittest.TestCase):
-    def test_no_root_allows_everything(self) -> None:
-        policy = WorkspacePolicy()
-        self.assertTrue(policy.check_path("/any/path"))
-        self.assertIsNone(policy.root)
-
-    def test_root_allows_children(self) -> None:
-        policy = WorkspacePolicy("/tmp/workspace")
-        self.assertTrue(policy.check_path("/tmp/workspace/file.txt"))
-        self.assertTrue(policy.check_path("/tmp/workspace/sub/deep"))
-
-    def test_root_blocks_siblings(self) -> None:
-        policy = WorkspacePolicy("/tmp/workspace")
-        self.assertFalse(policy.check_path("/tmp/other"))
-        self.assertFalse(policy.check_path("/etc/passwd"))
-
-    def test_root_blocks_dotdot(self) -> None:
-        policy = WorkspacePolicy("/tmp/workspace")
-        self.assertFalse(policy.check_path("/tmp/workspace/../other"))
-
-    def test_root_itself_is_allowed(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            policy = WorkspacePolicy(td)
-            self.assertTrue(policy.check_path(td))
 
 
 # ── 7. All builtins via execute_structured() ──

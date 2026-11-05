@@ -36,11 +36,11 @@ LLM_REQUEST_EXTRA_BODY: contextvars.ContextVar[Mapping[str, Any]] = (
     contextvars.ContextVar("LLM_REQUEST_EXTRA_BODY", default=MappingProxyType({}))
 )
 
-# The call kinds: runs send "plan" and "reflect", Chat.estimate_steps sends
-# "estimate", melo-retrieve's retrieval requests "retrieve", and the review
-# of a step the rules left open "review" (#339). History's llm_calls rows and
-# melo-retrieve's reader of them share this vocabulary.
-LLM_REQUEST_KINDS: Final = ("plan", "reflect", "retrieve", "estimate", "review")
+# The call kinds: runs send "plan" and "reflect", melo-retrieve's retrieval
+# requests "retrieve", and the review of a step the rules left open "review"
+# (#339). History's llm_calls rows and melo-retrieve's reader of them share
+# this vocabulary.
+LLM_REQUEST_KINDS: Final = ("plan", "reflect", "retrieve", "review")
 
 
 def thinking_disabled(body: Mapping[str, Any]) -> bool:

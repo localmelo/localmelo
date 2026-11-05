@@ -7,7 +7,6 @@ import dataclasses
 import json
 import logging
 import math
-import re
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -169,20 +168,6 @@ LEAN_SYSTEM_PROMPT = _SYSTEM_BASE + (
     "sys.path.\n"
     "If the task names files, read them first instead of listing folders."
 )
-
-STEP_ESTIMATE_PROMPT = (
-    "How many tool-call steps will this task need? "
-    "Give a conservative upper bound — it is better to overestimate than underestimate. "
-    "If the task can be answered directly without tools, say 0. "
-    "Reply with ONLY a single integer."
-)
-
-
-def _parse_step_estimate(text: str) -> int:
-    """Extract the first integer from *text*.  Returns -1 on failure."""
-    match = re.search(r"\d+", text)
-    return int(match.group()) if match else -1
-
 
 _REFLECTION_INTRO = (
     "The current attempt has ended without a final answer. "
@@ -1216,15 +1201,6 @@ class Chat:
         finally:
             display.closed()
         return reply
-
-    async def estimate_steps(self, query: str) -> int:
-        """Ask the LLM to estimate how many tool-call steps *query* needs."""
-        messages = [
-            Message(role="system", content=STEP_ESTIMATE_PROMPT),
-            Message(role="user", content=query),
-        ]
-        response = await self._request(messages, tools=None, kind="estimate")
-        return _parse_step_estimate(response.content)
 
     async def plan_step(
         self,

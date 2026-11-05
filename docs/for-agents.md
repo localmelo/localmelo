@@ -226,7 +226,7 @@ The CLI example's JSON line (field order fixed; `RunResult.to_dict()` is the sam
 - `LOCALMELO_PERSIST_MEMORY` (any non-empty value, `0` included) saves memory as SQLite in `LOCALMELO_MEMORY_DIR` (default `~/.cache/localmelo/memory`; `~` not expanded).
 - `LOCALMELO_THINKING_RETENTION_DAYS` (default 30; a number above 0, such as `7` or `0.5`): days of model reasoning kept in `history.db` and `sessions.db`. Any other value: exit 2 with one line before the run.
 - `LOCALMELO_NOW` (developer setting for memory tests; ISO 8601, no zone = local time, or epoch seconds): while valid, `melo.clock.now()` is that instant, and the model's `Date:` line (`_chat.local_date_line`) and recall's age decay (`ChatMemory._find` and the sleep note lookup) read it. Unset, empty or invalid: the wall clock (an invalid value logs one warning per value). Only those reads follow it: session, turn and note times of new chats stay on the wall clock.
-- Every chat request a run sends carries the header `X-Localmelo-Call-Kind`: `plan`, `reflect`, `estimate`, or `retrieve` for the llm retriever (as does `melo-retrieve`); embedding requests and the setup wizard's probe carry none.
+- Every chat request a run sends carries the header `X-Localmelo-Call-Kind`: `plan`, `reflect`, `review`, or `retrieve` for the llm retriever (as does `melo-retrieve`); embedding requests and the setup wizard's probe carry none.
 
 ## Tools and MCP
 

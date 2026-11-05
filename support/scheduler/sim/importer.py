@@ -65,7 +65,6 @@ REQUEST_KIND_TO_CALL_KIND: dict[str, CallKind] = {
     "plan": "plan",
     "reflect": "reflect",
     "retrieve": "retrieve",
-    "estimate": "estimate",
     # A step review is a short request beside the run: an auxiliary call.
     "review": "reflect",
 }
@@ -227,8 +226,8 @@ def _guess_kind(r: dict[str, Any]) -> CallKind | None:
 
     This is what a record without a kind header gets, and what every
     pre-R1 record has: the reflection request has no tools, so the proxy
-    says aux, but retrieval and step-estimate requests have no tools
-    either, which is the misread a header fixes.
+    says aux, but retrieval requests have no tools either, which is the
+    misread a header fixes.
     """
     endpoint = r.get("endpoint")
     if endpoint in ("chat_completions", "messages"):

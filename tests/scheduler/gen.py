@@ -124,7 +124,7 @@ def _call(rng: random.Random, cid: str, ids: list[str], now: Clock) -> Call:
     elif kind == "lane_chat":
         session = "front"
     elif kind == "unheld":
-        ck = rng.choice(("embed", "retrieve", "estimate"))
+        ck = rng.choice(("embed", "retrieve"))
         attempt = rng.choice((1, 2))
     elif kind == "retry":
         attempt = rng.choice((2, 3))
