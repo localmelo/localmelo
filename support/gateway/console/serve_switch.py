@@ -274,14 +274,16 @@ class ServeSwitch:
         try:
             await melo_serve.switch(switch.pick, expected_generation=switch.generation)
         except melo_serve.MeloServeError as exc:
-            switch.state, switch.error = "failed", str(exc)
+            error: str | dict[str, Any] = str(exc)
             if exc.kind == "stale_generation":
                 # Switched elsewhere meanwhile: read what is served now and say so.
                 snap = await asyncio.to_thread(melo_serve.snapshot)
                 served = snap.roles.get("chat")
                 switch.generation = snap.generation
                 if served is not None:
-                    switch.error = said("serve.stale", name=served.name or served.model)
+                    error = said("serve.stale", name=served.name or served.model)
+            # In one step, after the read: a poll must not see "failed" with the raw words.
+            switch.state, switch.error = "failed", error
             return
         switch.state = "done"
 
