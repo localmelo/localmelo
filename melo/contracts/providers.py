@@ -78,6 +78,9 @@ class ProviderError(Exception):
     ``served`` names the model the server serves now when it refused the one the
     request named because it was switched meanwhile (a 409 ``model_switched``);
     a provider asks again, once, for that one.
+    ``switching_s`` is set while the server is switching its model (a 503
+    ``switching``): the seconds it says to wait, 0.0 when it names none, and
+    ``None`` for any other error. A provider waits that out rather than fail.
     """
 
     def __init__(
@@ -89,6 +92,7 @@ class ProviderError(Exception):
         context_overflow: bool = False,
         detail: str = "",
         served: str = "",
+        switching_s: float | None = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
@@ -96,6 +100,7 @@ class ProviderError(Exception):
         self.context_overflow = context_overflow
         self.detail = detail
         self.served = served
+        self.switching_s = switching_s
 
 
 @dataclass(frozen=True)

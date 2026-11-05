@@ -506,3 +506,60 @@ async def test_a_task_mid_step_follows_a_switch_and_asks_again_once() -> None:
         assert asked[2:] == [("old", True), ("new", True)]
     finally:
         await llm.close()
+
+
+async def test_a_load_is_a_wait_that_stop_and_time_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """While melo_serve loads it answers 503 switching: the request asks again after
+    retry_after, then follows the 409 of the model served. Stop ends the wait at once;
+    past the bound the error stands, and is not retried again."""
+    import asyncio
+    import time
+
+    import httpx
+
+    from localmelo.melo.contracts.providers import ProviderError
+    from localmelo.melo.schema import Message
+    from localmelo.support.providers.llm import openai_compat
+
+    loading = {"left": 2}
+    asked: list[str] = []
+
+    def serve(request: httpx.Request) -> httpx.Response:
+        model = json.loads(request.content)["model"]
+        asked.append(model)
+        if loading["left"]:
+            loading["left"] -= 1
+            error = {"type": "switching", "message": "wait", "retry_after": 0.01}
+            return httpx.Response(503, json={"error": error})
+        if model == "old":
+            error = {"type": "model_switched", "message": "no", "current": "new"}
+            return httpx.Response(409, json={"error": error})
+        reply = {"role": "assistant", "content": f"{model} here"}
+        return httpx.Response(200, json={"choices": [{"message": reply}]})
+
+    llm = openai_compat.OpenAICompatLLM(
+        base_url=URL, model="old", transport=httpx.MockTransport(serve)
+    )
+    hi = [Message("user", "hi")]
+    try:
+        assert (await llm.chat(hi)).content == "new here"
+        assert asked == ["old", "old", "old", "new"]
+
+        loading["left"] = 1000  # a load that does not end
+        task = asyncio.create_task(llm.chat(hi))
+        await asyncio.sleep(0.05)
+        started = time.monotonic()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert time.monotonic() - started < 0.05
+
+        monkeypatch.setattr(openai_compat, "SWITCH_WAIT_S", 0.15)
+        with pytest.raises(ProviderError) as ended:
+            async for _ in llm.stream_chat(hi):
+                pass
+        assert ended.value.status_code == 503 and not ended.value.retryable
+    finally:
+        await llm.close()
