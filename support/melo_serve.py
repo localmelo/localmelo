@@ -213,37 +213,42 @@ class MeloServeError(Exception):
     """melo_serve cannot answer for a model; the message says what to run."""
 
 
-def _executable(path: str) -> str | None:
-    """*path* when it is a regular file this user owns and can run, else None."""
+def _executable(path: str | None) -> bool:
+    """Whether *path* is an absolute path to a regular file this user owns and can run."""
+    if not path or not os.path.isabs(path):
+        return False
     try:
         info = os.stat(path)
     except OSError:
-        return None
-    if (
-        not stat.S_ISREG(info.st_mode)
-        or info.st_uid != os.getuid()
-        or not info.st_mode & stat.S_IXUSR
-    ):
-        return None
-    return path
+        return False
+    return (
+        stat.S_ISREG(info.st_mode)
+        and info.st_uid == os.getuid()
+        and bool(info.st_mode & stat.S_IXUSR)
+    )
 
 
 def _find_command() -> str | None:
-    """Where ``melo-serve`` is: on PATH (an absolute hit), else in the uv tool folder.
+    """Where ``melo-serve`` is: the first of PATH and the uv tool folder that is the user's own.
 
     A launchd login item has no ``~/.local/bin`` on its PATH, where
     ``uv tool install`` puts it: ``$UV_TOOL_BIN_DIR``, else ``$XDG_BIN_HOME``,
-    else ``~/.local/bin``. Either way the file must be the user's own.
+    else ``~/.local/bin``. A candidate that is relative, not a regular
+    executable file, or owned by another user is passed over, so a stale file
+    in a system folder does not hide the installed one.
     """
-    found = shutil.which(COMMAND)
-    if found is None or not os.path.isabs(found):
-        folder = (
-            os.environ.get("UV_TOOL_BIN_DIR")
-            or os.environ.get("XDG_BIN_HOME")
-            or str(Path.home() / ".local" / "bin")
-        )
-        found = os.path.join(os.path.expanduser(folder), COMMAND)
-    return _executable(found)
+    folder = (
+        os.environ.get("UV_TOOL_BIN_DIR")
+        or os.environ.get("XDG_BIN_HOME")
+        or str(Path.home() / ".local" / "bin")
+    )
+    for path in (
+        shutil.which(COMMAND),
+        os.path.join(os.path.expanduser(folder), COMMAND),
+    ):
+        if path is not None and _executable(path):
+            return path
+    return None
 
 
 def command() -> str | None:

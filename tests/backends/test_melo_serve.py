@@ -244,10 +244,21 @@ def test_a_melo_serve_another_user_owns_is_refused(
 ) -> None:
     fake = _fake_command(real_command / "home" / ".local" / "bin")
     assert melo_serve.command() == str(fake)
-    monkeypatch.setattr(os, "getuid", lambda: os.stat(fake).st_uid + 1)
-    assert melo_serve.command() is None
-    monkeypatch.setenv("PATH", str(fake.parent))  # on PATH it is refused too
-    assert melo_serve.command() is None
+    with monkeypatch.context() as everyone_else:
+        everyone_else.setattr(os, "getuid", lambda: os.stat(fake).st_uid + 1)
+        assert melo_serve.command() is None
+    stale = _fake_command(real_command / "stale")  # first on PATH, not the user's
+    monkeypatch.setenv("PATH", str(stale.parent))
+    real = os.stat
+
+    def stat(path: Any, *args: Any, **kwargs: Any) -> os.stat_result:
+        info = real(path, *args, **kwargs)
+        if str(path) != str(stale):
+            return info
+        return os.stat_result((*info[:4], info.st_uid + 1, *info[5:]))
+
+    monkeypatch.setattr(os, "stat", stat)
+    assert melo_serve.command() == str(fake)  # passed over: the uv folder's is used
 
 
 def _symlink(sock: Path, monkeypatch: pytest.MonkeyPatch) -> None:
