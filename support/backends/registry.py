@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import threading
+from typing import TYPE_CHECKING
 
 from localmelo.support.backends.base import BaseBackend
+
+if TYPE_CHECKING:
+    from localmelo.support.config import Config
 
 _BACKENDS: dict[str, BaseBackend] = {}
 _DEFAULT_BACKENDS_REGISTERED = False
@@ -54,6 +58,19 @@ def get_backend(name: str) -> BaseBackend:
     except KeyError:
         available = ", ".join(sorted(_BACKENDS)) or "(none)"
         raise KeyError(f"Unknown backend '{name}'. Available: {available}") from None
+
+
+def model_in_use(cfg: Config, key: str, *, embedding: bool = False) -> str:
+    """The model *cfg* has the backend *key* use now; empty for an unknown backend.
+
+    Asks the backend (:meth:`BaseBackend.model_name`), so melo_serve, whose
+    config names no model, answers with the one it serves.
+    """
+    try:
+        return get_backend(key).model_name(cfg, embedding=embedding)
+    except KeyError:
+        field = "embedding_model" if embedding else "chat_model"
+        return str(getattr(getattr(cfg, key, None), field, ""))
 
 
 def list_backends() -> list[BaseBackend]:
