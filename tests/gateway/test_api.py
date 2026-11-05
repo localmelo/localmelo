@@ -154,6 +154,22 @@ class TestAgentRun:
         assert data["result"] == "echo: hello"
         assert "session_id" in data
 
+    def test_an_agent_that_cannot_start_is_a_502_with_what_to_run(
+        self, server: GatewayServer
+    ) -> None:
+        from localmelo.support.melo_serve import MeloServeError
+
+        def refuse() -> FakeAgent:
+            raise MeloServeError("melo_serve is not running. Run `melo-serve up`.")
+
+        server.sessions._create_agent = refuse  # type: ignore[method-assign]
+        resp = _client(server).post("/v1/agent/run", json={"query": "hello"})
+        assert resp.status_code == 502
+        assert resp.json() == {
+            "error": "melo_serve is not running. Run `melo-serve up`.",
+            "code": "agent_start_failed",
+        }
+
     def test_empty_query_returns_400(self, client: TestClient) -> None:
         resp = client.post("/v1/agent/run", json={"query": ""})
         assert resp.status_code == 400

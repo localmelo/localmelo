@@ -66,6 +66,10 @@ CASES = {
         },
         ("found", "oMLX", "vllm", URL, ["a-32b", "b-8b", "c-4b"], ["b-8b"], "b-8b"),
     ),
+    "melo_serve is saved as itself": (
+        {f"{URL}/models": listing("a-32b", owned_by="melo_serve")},
+        ("found", "", "melo_serve", URL, ["a-32b"], [], "a-32b"),
+    ),
     "several models and none known loaded leave the choice to the user": (
         {f"{URL}/models": listing("a-7b", "b-8b")},
         ("found", "", "vllm", URL, ["a-7b", "b-8b"], [], None),

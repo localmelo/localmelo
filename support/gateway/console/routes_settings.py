@@ -43,7 +43,7 @@ from localmelo.support import settings as setting_keys
 from localmelo.support.backends import discovery
 from localmelo.support.backends.discovery import DISCOVERY_TIMEOUT_S, DiscoveryError
 from localmelo.support.backends.openai_family import CLOUD_BACKENDS, LOCAL_BACKENDS
-from localmelo.support.backends.registry import get_backend
+from localmelo.support.backends.registry import get_backend, in_use
 from localmelo.support.browser import chrome, desktop
 from localmelo.support.gateway.console.errors import ApiError
 from localmelo.support.gateway.console.probe import redact_userinfo, url_label
@@ -230,12 +230,7 @@ def model_json(cfg: Any) -> dict[str, Any]:
     in the language the request asks for (English for a client that asks for none).
     """
     backend = cfg.chat_backend
-    section = getattr(cfg, backend, None) if backend else None
-    name = getattr(section, "chat_model", "") if section is not None else ""
-    try:
-        label = get_backend(backend).label(cfg)
-    except KeyError:
-        label = backend
+    label, name = in_use(cfg, backend)
     return {
         "backend": backend,
         "backend_label": _kind_words(label),
@@ -306,10 +301,11 @@ async def setup_detect_json(console: Console) -> dict[str, Any]:
     """The whole ``GET /api/setup/detect`` body: the model server on this Mac.
 
     ``state`` is ``found``, ``needs_key`` or ``none``. ``backend`` is what the
-    terminal's first run would save (``ollama`` or ``vllm``) and ``name`` is
-    ``Ollama``, ``oMLX`` or empty. ``models`` are the chat models, ``loaded``
-    those the server says are in memory, and ``suggested`` the one to offer:
-    null when several are served and none is known loaded, so the user picks.
+    terminal's first run would save (``ollama``, ``melo_serve`` or ``vllm``)
+    and ``name`` is ``Ollama``, ``oMLX`` or empty. ``models`` are the chat
+    models, ``loaded`` those the server says are in memory, and ``suggested``
+    the one to offer: null when several are served and none is known loaded, so
+    the user picks.
     ``start`` is how to start a server on this computer, for the card that finds none.
     """
     transport = console.options.detect_transport
@@ -343,7 +339,7 @@ async def setup_detect_json(console: Console) -> dict[str, Any]:
     return {
         **body,
         "state": "found",
-        "backend": "ollama" if ollama else "vllm",
+        "backend": discovery.server_backend(found.url, ollama=ollama),
         "models": chat,
         "loaded": [model for model in chat if model in loaded.ids],
         "suggested": discovery.pick_model(chat, loaded),
@@ -694,8 +690,11 @@ def _build_candidate(
         candidate.agent.reflection = reflection
     for sec_name, sec_fields in body.sections.items():
         target = getattr(candidate, sec_name)
+        named = get_backend(sec_name).model_required
         for field_name, field_val in sec_fields.items():
-            setattr(target, field_name, field_val)
+            # A backend that serves its own model (melo_serve) keeps none in the config.
+            is_model = field_name in ("chat_model", "embedding_model")
+            setattr(target, field_name, field_val if named or not is_model else "")
         config.trim_text(target)
 
     errors = [_redact(err) for err in candidate.validate()]

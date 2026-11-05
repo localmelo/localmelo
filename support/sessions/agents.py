@@ -476,7 +476,7 @@ async def build_session_agent(
             kept = kept_across_chats(agent_options, has_embedding=embedding is not None)
             identity = url_identity(base_url, model, kept, notes)
         elif cfg is not None:
-            kept = kept_across_chats(agent_options, has_embedding=cfg.has_embedding)
+            kept = kept_across_chats(agent_options, has_embedding=embedding is not None)
             identity = config_identity(cfg, kept, notes)
         agent_options = dataclasses.replace(agent_options, identity=identity)
     try:

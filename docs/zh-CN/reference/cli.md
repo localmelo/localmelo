@@ -38,7 +38,7 @@ melo -h all                                  # every option, command and setting
 | `melo setup` | 重新选择模型服务器，然后打开对话。 | |
 | `melo config` | 显示配置文件的位置，以及哪些设置与默认值不同。 | |
 | `melo memory VERB` | 查看和修改 melo 保存的笔记：`list`、`forget`、`status`、`reindex`、`import`（开发者模式下还有 `sleep`、`ingest`）。 | `list -n N`、`forget ID`、`forget -y`、`import --undo BATCH` |
-| `melo serve [install\|uninstall\|status\|stop]` | 运行网关，把它作为登录服务管理（macOS），或停止正在运行的网关。 | `--host H`, `-p`/`--port N`, `--force` |
+| `melo serve [install\|uninstall\|status\|stop]` | 运行网关，把它作为登录服务管理（macOS），或停止正在运行的网关。使用 `melo_serve` 后端时，`melo serve` 会先检查 melo_serve，`melo serve status` 还会输出一个 `melo_serve:` 块（[网关](../guides/gateway.md#start-the-gateway)）。 | `--host H`, `-p`/`--port N`, `--force` |
 | `melo console [--reset]` | 在浏览器中打开已登录的网页控制台；通过 SSH 或没有浏览器能启动时，改为输出一次性链接。`--reset` 轮换访问令牌。 | `--host H`, `-p`/`--port N` |
 | `melo task VERB` | `melo-task` 客户端。 | 同 `melo-task` |
 | `melo worker BRIEF` | 运行一个 worker brief。 | `--inbox FILE`, `--inbox-fd N`, `--parent ID`, `--title T`, `-o json\|stream-json` |
@@ -429,7 +429,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | `--port PORT` | `8401` | 网关监听的端口。与 `--serve` 同用时，`0` 表示让系统选一个空闲端口：启动信息会打印真实地址，登录提示行（没有打开浏览器时才输出）写明供 `melo --gateway-login --port PORT` 使用的端口，`melo-task` 则需要 `--gateway URL`。与 `--daemon`、网关认证命令同用，以及写在 `[gateway] port` 中，`0` 都会被拒绝。 |
 | `--allow-unconfigured` | 关闭 | 与 `--serve` 一起使用时，即使没有配置任何后端或配置文件有校验错误，也启动网关，以便通过 `/api/settings` 进行配置。 |
 | `--reconfigure` | 关闭 | 运行设置向导（默认模式下不带 `--serve` 时，先显示找到的服务器和 `Use this model server?`；选择 `Use another server`、使用 `--developer` 或 `[ui] mode = "developer"`，或已保存后端但没有找到服务器时显示完整菜单；尚未保存后端且没有找到服务器时显示只读设置预览），然后启动网关（与 `--serve` 一起）或打开交互式界面（不带它时）。没有终端时，它从标准输入读取答案；不带 `--serve` 时，之后会退出。 |
-| `--daemon install\|uninstall\|status` | 未设置 | 管理 macOS 后台服务；`install` 也接受 `--port`。 |
+| `--daemon install\|uninstall\|status` | 未设置 | 管理 macOS 后台服务；`install` 也接受 `--port`；melo_serve 正在运行、在使用或已安装时，`status` 还会输出 `melo_serve:` 块。 |
 
 - `--host` 和 `--port` 的默认值来自配置文件中的 `[gateway]` 表。这些选项只为本次运行改变它们。
 - 给出任务时，`--host`、`--port` 和 `--reconfigure` 会被忽略。

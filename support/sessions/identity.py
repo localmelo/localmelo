@@ -278,17 +278,14 @@ def url_identity(
 
 def config_identity(cfg: Config, kept: str = "", notes: str | None = None) -> str:
     """The identity of a chat on *cfg*'s chat backend and model."""
-    from localmelo.support.backends.registry import get_backend
+    from localmelo.support.backends.registry import in_use
 
     key = cfg.chat_backend
     section = getattr(cfg, key, None)
-    try:
-        server = get_backend(key).label(cfg)
-    except KeyError:
-        server = key
+    server, model = in_use(cfg, key)
     url = getattr(section, "chat_url", "") or getattr(section, "base_url", "")
     return identity_text(
-        getattr(section, "chat_model", ""),
+        model,
         server,
         local=key in LOCAL_BACKENDS,
         url=url,

@@ -40,6 +40,7 @@ from localmelo.melo.schema import (
     RunResult,
 )
 from localmelo.support.flag_options import FLAG_OPTIONS, flag_options
+from localmelo.support.melo_serve import MeloServeError
 
 if TYPE_CHECKING:
     from localmelo.melo.contracts.providers import BaseEmbeddingProvider
@@ -2006,6 +2007,7 @@ def main() -> None:
             info = daemon.status()
             for k, v in info.items():
                 print(f"  {k}: {v}")
+            _print_melo_serve_status()
         elif args.daemon == "stop":
             from localmelo.support import gateway_endpoint
 
@@ -2059,6 +2061,11 @@ def main() -> None:
                 print(
                     f"melo: error: {_direct_confinement_refusal(exc)}", file=sys.stderr
                 )
+                raise SystemExit(EXIT_CRASHED) from None
+            if args.brief is None and isinstance(exc, MeloServeError):
+                # Nothing is served: one line with what to run, as for a backend
+                # that is not set up.
+                print(f"melo: error: {exc}", file=sys.stderr)
                 raise SystemExit(EXIT_CRASHED) from None
             if args.brief is None or (isinstance(exc, SystemExit) and exc.code != 1):
                 raise
@@ -2606,6 +2613,21 @@ def _build_direct_mode_agent(
     if options.memory_dir is not None:
         _make_memory_dir(options.memory_dir)
     llm_provider, embedding_provider = providers_for(cfg, options.reasoning)
+    if (
+        options.reasoning != "legacy"
+        and options.retriever == "embedding"
+        and embedding_provider is None
+    ):
+        # A configured embedding address is not a provider: melo_serve builds
+        # none while it serves no embedding model.
+        if cfg.embedding_backend == "melo_serve":
+            from localmelo.support import melo_serve
+
+            raise melo_serve.unavailable(melo_serve.snapshot(), "embedding")
+        parser.error(
+            "argument --retriever: embedding needs an embedding provider "
+            "in the config"
+        )
     agent = Agent(
         llm=llm_provider,
         embedding=embedding_provider,
@@ -2633,19 +2655,32 @@ def _set_retrieval_extra_body(
     provider.extra_body_by_kind = {"retrieve": prepare_extra_body(body)}
 
 
+def _print_melo_serve_status() -> None:
+    """The ``melo serve status`` block for melo_serve, when it is in use or installed."""
+    from localmelo.support import config, melo_serve
+
+    snap = melo_serve.snapshot()
+    try:
+        cfg = config.load()
+    except (OSError, ValueError, config.ConfigError):
+        uses = False  # a config that does not load names no backend
+    else:
+        uses = "melo_serve" in (cfg.chat_backend, cfg.embedding_backend)
+    if snap.running or uses or melo_serve.command():
+        print()
+        print("\n".join(melo_serve.status_lines(snap)))
+
+
 def _model_line(cfg: Config) -> str:
     """The startup line's model: ``Qwen3-8B-4bit on oMLX``, as the banner names it."""
     key = cfg.chat_backend
     if not key:
         return "none yet (the web console sets one up)"
-    from localmelo.support.backends.registry import get_backend
+    from localmelo.support.backends.registry import in_use
+    from localmelo.support.sessions.display import clean_output
 
-    try:
-        label = get_backend(key).label(cfg)
-    except KeyError:  # a backend nothing registered: say its key
-        label = key
-    model = getattr(getattr(cfg, key, None), "chat_model", "")
-    return f"{model} on {label}" if model else label
+    label, model = in_use(cfg, key)
+    return clean_output(f"{model} on {label}" if model else label)
 
 
 def _start_gateway(cfg: Config) -> None:
@@ -2658,6 +2693,11 @@ def _start_gateway(cfg: Config) -> None:
     host = cfg.gateway.host
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"  # an IPv6 address, which a URL writes in brackets
+    uses = (("chat", cfg.chat_backend), ("embedding", cfg.embedding_backend))
+    if role := next((role for role, key in uses if key == "melo_serve"), ""):
+        from localmelo.support import melo_serve
+
+        print(f"\n  {melo_serve.ensure_running(role)}")
     print("\n  Starting localmelo gateway ...")
     print(f"  Model: {_model_line(cfg)}")
     print(f"  Embedding: {cfg.embedding_backend}")

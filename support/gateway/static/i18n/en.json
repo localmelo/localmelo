@@ -1452,6 +1452,7 @@
   "settings.approvals.hint": "Ask: melo asks before it runs commands or changes files. Auto: it works without asking and blocks risky steps. Each chat can switch under the message box.",
   "settings.approvals.saved": "New chats start in {mode}.",
   "settings.approvals.title": "New chats start in",
+  "settings.backend.melo_serve": "melo_serve (local models, one address)",
   "settings.backend.mlc": "MLC (local endpoint)",
   "settings.backend.none": "None (no long-term memory)",
   "settings.backend.ollama": "Ollama (local endpoint)",

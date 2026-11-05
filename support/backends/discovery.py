@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from localmelo.support import melo_serve
 from localmelo.support.backends.openai_compat import normalize_url
 from localmelo.support.backends.openai_family import (
     LOCAL_BACKENDS,
@@ -57,6 +58,9 @@ OMLX_NAME: Final = "oMLX"
 # The servers whose last model listing named oMLX as its owner, by their
 # normalized URL. A listing is asked for anyway, so this costs no request.
 _OMLX_URLS: Final[set[str]] = set()
+
+# The same for melo_serve, which marks every model it lists with that owner.
+_MELO_SERVE_URLS: Final[set[str]] = set()
 
 
 class DiscoveryError(Exception):
@@ -120,22 +124,49 @@ def parse_model_ids(payload: Any) -> list[str]:
     return names
 
 
+def _owned_by(payload: Any, owner: str) -> bool:
+    """Whether a ``/models`` reply names *owner* as the owner of a model."""
+    items = payload.get("data") if isinstance(payload, dict) else None
+    return isinstance(items, list) and any(
+        isinstance(item, dict) and str(item.get("owned_by", "")).lower() == owner
+        for item in items
+    )
+
+
 def says_omlx(payload: Any) -> bool:
     """Whether a ``/models`` reply names oMLX as the owner of a model.
 
     oMLX sets ``owned_by`` to ``omlx`` on every model it lists, also while
     its status route refuses a request without a key.
     """
-    items = payload.get("data") if isinstance(payload, dict) else None
-    return isinstance(items, list) and any(
-        isinstance(item, dict) and str(item.get("owned_by", "")).lower() == "omlx"
-        for item in items
-    )
+    return _owned_by(payload, "omlx")
+
+
+def says_melo_serve(payload: Any) -> bool:
+    """Whether a ``/models`` reply names melo_serve as the owner of a model."""
+    return _owned_by(payload, "melo_serve")
 
 
 def is_omlx(url: str) -> bool:
     """Whether the last model listing of the server at *url* said it is oMLX."""
     return normalize_url(url) in _OMLX_URLS if url else False
+
+
+def is_melo_serve(url: str) -> bool:
+    """Whether the last model listing of the server at *url* said it is melo_serve."""
+    return normalize_url(url) in _MELO_SERVE_URLS if url else False
+
+
+def server_backend(url: str, *, ollama: bool = False) -> str:
+    """The backend that saves the chat server at *url*: ``ollama``, ``melo_serve`` or ``vllm``.
+
+    *ollama* is the answer to ``GET /api/version``; a server whose model listing
+    named melo_serve as its owner is melo_serve; any other OpenAI-compatible
+    server is ``vllm``.
+    """
+    if ollama:
+        return "ollama"
+    return "melo_serve" if is_melo_serve(url) else "vllm"
 
 
 def server_name(url: str = "", *, declared: bool = False) -> str:
@@ -151,6 +182,7 @@ def server_name(url: str = "", *, declared: bool = False) -> str:
 def forget_servers() -> None:
     """Drop what the model listings said about servers (for tests)."""
     _OMLX_URLS.clear()
+    _MELO_SERVE_URLS.clear()
 
 
 def _exception_text(exc: BaseException) -> str:
@@ -234,10 +266,14 @@ async def list_models(
         raise DiscoveryError(
             "the reply is not a model list", reachable=True, status_code=status
         ) from exc
-    if says_omlx(payload):
-        _OMLX_URLS.add(base_url)
-    else:
-        _OMLX_URLS.discard(base_url)
+    for urls, named in (
+        (_OMLX_URLS, says_omlx(payload)),
+        (_MELO_SERVE_URLS, says_melo_serve(payload)),
+    ):
+        if named:
+            urls.add(base_url)
+        else:
+            urls.discard(base_url)
     return parse_model_ids(payload)
 
 
@@ -619,12 +655,19 @@ async def detect_local_server(
 ) -> FoundServer | None:
     """The server of *urls* to offer first; None if none answered.
 
-    In order of preference: the first of *urls*, in order, that lists a
-    chat model; then the first that lists any model; then the first that
-    answered without a usable list (with ``models`` empty and the
+    In order of preference: a running melo_serve (its state file says so, and
+    no request is sent); the first of *urls*, in order, that lists a chat
+    model, melo_serve's first; then the first that lists any model; then the
+    first that answered without a usable list (with ``models`` empty and the
     ``problem``). All URLs are asked at once, each with ``GET /models``
     only.
     """
+    snap = melo_serve.snapshot()
+    if snap.running:
+        _MELO_SERVE_URLS.add(normalize_url(snap.url))
+        models = [role.model for role in snap.roles.values()]
+        problem = "" if models else f"it serves no model yet ({melo_serve.USE_HINT})"
+        return FoundServer(url=snap.url, models=models, problem=problem)
     results = await asyncio.gather(
         *(
             list_models(
@@ -634,11 +677,14 @@ async def detect_local_server(
         ),
         return_exceptions=True,
     )
-    listed = [
-        (url, result)
-        for url, result in zip(urls, results, strict=True)
-        if isinstance(result, list) and result
-    ]
+    listed = sorted(
+        (
+            (url, result)
+            for url, result in zip(urls, results, strict=True)
+            if isinstance(result, list) and result
+        ),
+        key=lambda found: not is_melo_serve(found[0]),
+    )
     for url, models in listed:
         if any(is_chat_model(model) for model in models):
             return FoundServer(url=url, models=models)

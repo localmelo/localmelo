@@ -26,6 +26,7 @@ from localmelo.support.gateway.auth import COOKIE_TTL, GatewayAuth
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.guard import LoopbackGuard, app_instance, is_loopback
 from localmelo.support.gateway.session import SessionBusyError, SessionManager
+from localmelo.support.melo_serve import MeloServeError
 
 logger = logging.getLogger("localmelo.gateway")
 
@@ -263,6 +264,12 @@ class GatewayServer:
             except SessionBusyError as exc:
                 return JSONResponse(
                     status_code=409, content={"error": str(exc), "code": "session_busy"}
+                )
+            except MeloServeError as exc:
+                # The agent cannot start: as the console says it, with what to run.
+                return JSONResponse(
+                    status_code=502,
+                    content={"error": str(exc), "code": "agent_start_failed"},
                 )
 
             # Per-session serialization: only one run at a time per session

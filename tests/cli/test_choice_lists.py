@@ -80,7 +80,7 @@ def seen(drawn: io.StringIO) -> str:
         (DOWN + ENTER, 4),
         (UP + ENTER, 2),
         ("5", 5),  # a number chooses that row at once
-        ("9" + ENTER, 3),  # there is no ninth row: the key does nothing
+        ("0" + ENTER, 3),  # there is no row 0: the key does nothing
     ],
 )
 def test_the_backend_list_starts_on_the_current_backend(

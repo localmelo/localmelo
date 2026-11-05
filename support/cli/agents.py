@@ -20,45 +20,42 @@ from typing import Any
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.support import config, onboard
 from localmelo.support.backends import discovery
+from localmelo.support.backends.registry import find, in_use
 from localmelo.support.cli.views import BackendInfo
 from localmelo.support.sessions.agents import build_session_agent
 
-
-def _backend_label(cfg: config.Config, key: str, *, embedding: bool = False) -> str:
-    """What the backend *key* of *cfg* is called, or *key* when it is not registered.
-
-    A ``vllm`` backend is ``oMLX`` when the config or a listing says so.
-    """
-    from localmelo.support.backends.registry import get_backend
-
-    try:
-        return get_backend(key).label(cfg, embedding=embedding)
-    except KeyError:
-        return key
+# What the banner says for a backend that serves its own model, when it serves none.
+NONE_SERVED = "none served"
 
 
 def _embedding_name(cfg: config.Config) -> str:
     """How the banner names the configured embedding: backend and model."""
     if not cfg.has_embedding:
         return ""
-    key = cfg.embedding_backend
-    section = getattr(cfg, key, None)
-    model = getattr(section, "embedding_model", "")
-    label = _backend_label(cfg, key, embedding=True)
+    label, model = in_use(cfg, cfg.embedding_backend, embedding=True)
     return f"{label} · {model}" if model else label
 
 
 def config_backend(cfg: config.Config, model: str | None) -> BackendInfo:
-    """The configured chat backend, with *model* when one is given."""
+    """The configured chat backend, with *model* when one is given.
+
+    A backend that serves its own model (melo_serve) with no *model* given
+    *follows* it: the row shows what it serves now, or ``none served``.
+    """
     key = cfg.chat_backend
     section = getattr(cfg, key, None)
+    label, served = in_use(cfg, key)
+    backend = find(key)
+    follows = not model and backend is not None and not backend.model_required
     return BackendInfo(
         key=key,
-        label=_backend_label(cfg, key),
-        model=model or getattr(section, "chat_model", "") or "default",
+        label=label,
+        model=model or served or (NONE_SERVED if follows else "default"),
         base_url=getattr(section, "chat_url", "") or getattr(section, "base_url", ""),
         embedding=_embedding_name(cfg),
         key_env=getattr(section, "api_key_env", ""),
+        note=backend.welcome_note(label) if backend else "",
+        follows=follows,
     )
 
 
@@ -160,7 +157,11 @@ class AgentFactory:
         A configured session keeps its config: on a new *url*, the Agent
         runs on a copy of it as /backend saves it (see :meth:`use_url`).
         """
-        model = model or self.backend.model
+        if self.backend.follows and url is None and model in (None, self.backend.model):
+            model = None  # none was chosen: the Agent asks for what is served now
+            self._follow()
+        else:
+            model = model or self.backend.model
         try:
             agent = await self._build(
                 model, url, self.mcp_config if self.mcp_error is None else None
@@ -177,8 +178,16 @@ class AgentFactory:
         self._live.append(agent)
         return agent
 
+    def _follow(self) -> None:
+        """Show what the backend serves now, which the Agent about to be built asks for."""
+        assert self._cfg is not None  # only a configured backend follows
+        now = config_backend(self._cfg, None)
+        self.backend = replace(
+            self.backend, model=now.model, label=now.label, note=now.note
+        )
+
     async def _build(
-        self, model: str, url: str | None, mcp_config: str | None
+        self, model: str | None, url: str | None, mcp_config: str | None
     ) -> Agent:
         common: dict[str, Any] = {
             "model": model,
@@ -203,7 +212,7 @@ class AgentFactory:
             )
         cfg = self._cfg
         if url is not None:
-            cfg = self._with_server(url, model, ollama=await self._is_ollama(url))
+            cfg = self._with_server(url, model or "", ollama=await self._is_ollama(url))
         return await build_session_agent(cfg=cfg, base_url=None, **common)
 
     def _with_server(self, url: str, model: str, *, ollama: bool) -> config.Config:
@@ -257,7 +266,8 @@ class AgentFactory:
             self.backend = replace(backend, label=discovery.OMLX_NAME)
 
     def use_model(self, model: str) -> None:
-        self.backend = replace(self.backend, model=model, listed=0)
+        follows = self.backend.follows and model == self.backend.model
+        self.backend = replace(self.backend, model=model, listed=0, follows=follows)
 
     async def use_url(self, url: str, model: str) -> None:
         """Talk to the server at *url* from now on, with *model*."""
