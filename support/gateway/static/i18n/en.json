@@ -231,6 +231,7 @@
   "approval.seeTask": "Allow {app} for this task",
   "approval.seeTitle": "{app} opened a window right after melo's click: let melo see it?",
   "approval.seeWindow": "The window",
+  "approval.sending": "Sending your answer…",
   "approval.showLines": "Show all {n} lines",
   "approval.siteContent": "melo wants to open {site} in Safari and read it. Safari opens it in its own window; your sign-ins are not used.",
   "approval.siteContentChrome": "melo wants to open {site} in Chrome and read it. Chrome runs in the background with melo's own profile: no window comes to the front, and your own sign-ins are not used.",

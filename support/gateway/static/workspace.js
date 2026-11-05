@@ -12,7 +12,7 @@
  * modules, served as they are.
  */
 
-import { approvalCard as drawApprovalCard, approvalNow, GUARD_MS } from "./approval-card.mjs";
+import { approvalCard as drawApprovalCard, guardLeft } from "./approval-card.mjs";
 import { maker } from "./dom.mjs";
 import { formatTime, t } from "./i18n.mjs";
 import { renderMarkdown } from "./markdown.mjs";
@@ -1307,7 +1307,7 @@ async function readTaskApproval(id, tries = 0) {
 /** An answer to a task's approval from its chat: the same route and the same choices as the task's page. */
 async function answerTaskApproval(request, state, choice) {
   const id = String(request.request_id);
-  if (workerMode || state.submitting || approvalNow() - state.mountedAt < GUARD_MS) return;
+  if (workerMode || state.submitting || guardLeft(state) > 0) return;
   if (choice !== "deny" && (request.arguments_complete !== true || (request.tool_name === "file_write" && !request.target))) return;
   state.submitting = true;
   messageSnapshot = "";
@@ -1849,7 +1849,7 @@ const approvalCard = (request, view = chatApproval, asked = "") => drawApprovalC
 async function answerApproval(request, state, choice) {
   if (workerMode) return;
   const id = String(request.request_id);
-  if (state.submitting || approvalNow() - state.mountedAt < GUARD_MS || !S.view?.pending.has(id)) return;
+  if (state.submitting || guardLeft(state) > 0 || !S.view?.pending.has(id)) return;
   if (choice !== "deny" && (request.arguments_complete !== true || (request.tool_name === "file_write" && !request.target))) return;
   state.submitting = true;
   messageSnapshot = "";
@@ -1896,7 +1896,7 @@ function goToApproval() {
     const state = approvalStates.get(String(request.request_id));
     setTimeout(() => {
       if (document.activeElement === $("approval-go") && !once.disabled) once.focus();
-    }, Math.max(0, GUARD_MS - (approvalNow() - state.mountedAt)));
+    }, guardLeft(state));
   }
 }
 

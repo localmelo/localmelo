@@ -37,7 +37,7 @@ function cards({main = false} = {}) {
   const states = new Map();
   const timers = [];
   const c = {
-    doc, states, answers: [], reloads: [], rerenders: 0,
+    doc, states, timers, answers: [], reloads: [], rerenders: 0,
     draw(request, {scope = 'chat', asked = '', view = {}} = {}) {
       return approvalCard({
         doc, request, asked, states, openWorkspace: '~/w', later: (fn, ms) => timers.push({fn, ms}),
@@ -608,6 +608,32 @@ test('each answer is its own choice, in a chat, for a folder and in the main cha
     for (const button of buttons) button.click();
     assert.deepEqual(c.answers, answers.map(([, choice]) => [request.request_id, choice]));
   }
+});
+
+test('a guard timer that fires a hair early sets itself again, and an answer under way says so', () => {
+  const c = cards();
+  const request = askOf({request_id: 'early', tool_name: 'shell_exec', arguments: {command: 'pwd'}});
+  // Half a millisecond of the guard is left when the card is drawn: setTimeout cuts a fraction off, so a timer
+  // for exactly that fires early. The card must neither leave its buttons grey nor set a timer it cannot trust.
+  c.states.set('early', {mountedAt: performance.now() - 499.5, deny: false, reason: '', showAll: false, submitting: false});
+  const card = c.draw(request);
+  const once = findNode(card, (node) => node.textContent === 'Allow once');
+  assert.equal(once.disabled, true);
+  assert.ok(c.timers.every(({ms}) => Number.isInteger(ms) && ms >= 1), 'the timer is for whole milliseconds, rounded up');
+  const [early] = c.timers.splice(0);
+  c.states.get('early').mountedAt = performance.now() - 499.9; // the timer fired too soon
+  early.fn();
+  assert.equal(once.disabled, true, 'still inside the guard');
+  assert.equal(c.timers.length, 1, 'so the card sets the timer again');
+  c.settle('early');
+  assert.equal(once.disabled, false, 'and the answer opens once the guard has run out');
+  // After the guard, a button is grey only while the answer is on its way, and the card says so.
+  c.states.get('early').submitting = true;
+  const sending = c.draw(request);
+  assert.equal(findNode(sending, (node) => node.textContent === 'Allow once').disabled, true);
+  assert.equal(findNode(sending, (node) => node.className === 'approval-sending').textContent, 'Sending your answer…');
+  c.states.get('early').submitting = false;
+  assert.equal(findNode(c.draw(request), (node) => node.className === 'approval-sending'), null);
 });
 
 test('listing a folder outside says so, and a file directly in the home folder is allowed once only', () => {

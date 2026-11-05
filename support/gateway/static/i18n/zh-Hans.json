@@ -219,6 +219,7 @@
   "approval.seeTask": "在这个任务里允许 {app}",
   "approval.seeTitle": "{app} 在 melo 点击之后立刻打开了一个窗口：让 melo 看看吗？",
   "approval.seeWindow": "这个窗口",
+  "approval.sending": "正在发送你的回答…",
   "approval.showLines": "显示全部 {n} 行",
   "approval.siteContent": "melo 想在 Safari 中打开并阅读 {site}。Safari 会在它自己的窗口中打开，不会用到你的登录信息。",
   "approval.siteContentChrome": "melo 想在 Chrome 中打开并阅读 {site}。Chrome 用 melo 自己的配置在后台运行：不会有窗口来到最前面，也不会用到你自己的登录信息。",

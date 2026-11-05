@@ -28,6 +28,16 @@ export function approvalNow() {
   return globalThis.performance?.now?.() ?? Date.now();
 }
 
+/**
+ * The milliseconds the guard still holds a card, in whole milliseconds and rounded up (0 once it has run
+ * out). `setTimeout` takes whole milliseconds and cuts a fraction off, so a timer set for the exact rest
+ * fired up to a millisecond too soon, saw the guard still up and left every button grey until the next
+ * redraw, which in a waiting chat is half a minute away.
+ */
+export function guardLeft(state) {
+  return Math.max(0, Math.ceil(GUARD_MS - (approvalNow() - state.mountedAt)));
+}
+
 // "5 lines removed, 1 added": the size of what a file write replaces.
 function diffSummary({added, removed}) {
   const lines = (n) => t("diff.lines", { n });
@@ -384,6 +394,7 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     ? el("p", "approval-remembered", t(`approval.remembered.${rememberedKey}`))
     : null;
   if (kept) card.append(kept);
+  if (state.submitting) card.append(el("p", "approval-sending", t("approval.sending")));
   const note = t("approval.instead");
   const label = el("label", "", note);
   const reason = el("input", "deny-reason");
@@ -441,13 +452,16 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     card.append(button("link-button", t("approval.reload"), () => view.reload(id)));
   }
   const controls = [...offered, confirm];
+  // A button is grey for one of three reasons, and each has words on the card: the guard (half a second),
+  // an answer under way ("Sending your answer…") and details that are missing (the notes above).
   const enable = () => {
-    const waiting = approvalNow() - state.mountedAt < GUARD_MS;
+    const left = guardLeft(state);
     const unavailable = request.arguments_complete !== true || (tool === "file_write" && !request.target);
-    for (const control of controls) control.disabled = waiting || state.submitting || (unavailable && control !== deny && control !== confirm);
+    for (const control of controls) control.disabled = left > 0 || state.submitting || (unavailable && control !== deny && control !== confirm);
+    // A timer that fires before the guard has run out sets itself again: nothing else would.
+    if (left > 0) later(enable, left);
   };
   enable();
-  later(enable, Math.max(0, GUARD_MS - (approvalNow() - state.mountedAt)));
   return card;
 }
 

@@ -901,8 +901,7 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
   const context = vm.createContext({
     ...turns,
     drawApprovalCard: approvals.approvalCard,
-    approvalNow: approvals.approvalNow,
-    GUARD_MS: approvals.GUARD_MS,
+    guardLeft: approvals.guardLeft,
     maker,
     t,
     formatTime,
