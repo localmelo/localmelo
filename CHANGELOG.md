@@ -27,7 +27,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   running interpreter, on PATH, then in `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin`, with the same checked
   lookup as `melo-serve`. On macOS that lookup now accepts a file or folder that the `admin` group can write (Homebrew's
   own `/opt/homebrew/bin` is like that), for command paths only: the state file and the control socket still must be
-  writable by no one else (#NNN).
+  writable by no one else (#530).
 - melo_serve as a local model server. localmelo can use melo_serve (github.com/localmelo/melo_serve), the per-user
   daemon that serves Splash or oMLX models behind one OpenAI-compatible address and switches them with `melo-serve
   use <pick>`. `chat_backend = "melo_serve"` with a `[melo_serve]` table (`chat_url`, `chat_model`, `embedding_url`,
