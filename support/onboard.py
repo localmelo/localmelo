@@ -785,7 +785,10 @@ def _show_list(plan: run.Plan, skip: set[str], recommended: str) -> bool:
         return False
     print()
     for line in lines:
-        print(line) if line.startswith(" ") else _say(line)
+        if line.startswith(" "):  # a row of the list keeps its columns
+            print(line)
+        else:
+            _say(line)
     return True
 
 
@@ -876,7 +879,8 @@ def _offer_setup(plan: run.Plan, urls: Sequence[str]) -> _Waited:
             ("hosted", "Use a hosted service"),
             ("quit", "Quit"),
         ]
-        chosen = _choose_from(_NO_SERVER, [row[1] for row in rows], 0, len(rows) - 1)
+        names = [row[1] for row in rows]
+        chosen = _choose_from("What would you like to do?", names, 0, len(rows) - 1)
         match rows[chosen][0]:
             case "quit":
                 return None

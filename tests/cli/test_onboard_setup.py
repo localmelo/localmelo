@@ -2328,7 +2328,7 @@ def test_the_list_and_the_menu_start_on_setting_up(
     screen = _Screen(monkeypatch, "Quit")
     monkeypatch.setattr(onboard, "_columns", lambda: 100)
     assert screen.first_run() is None
-    assert screen.menu.asked == [("No model server found. What now?", MENU, 0, 5)]
+    assert screen.menu.asked == [("What would you like to do?", MENU, 0, 5)]
     out = capsys.readouterr().out
     assert "Checking what this Mac can run…\n" in out
     assert (
