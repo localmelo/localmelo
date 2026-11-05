@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import os
 import re
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Sequence
 from itertools import chain, islice
 from typing import NamedTuple
 from urllib.parse import urlparse
@@ -1276,9 +1276,9 @@ def _unwrap(ctx: Context, f: Findings, argv: list[str]) -> list[list[str]]:
     programs: list[list[str]] = []
     # Words, where the command starts in them, what xargs adds after them,
     # the folder PATH= names; the first reading's last, so it is read first.
-    todo = [(argv, 0, tuple[str, ...](), "")]
+    todo: list[tuple[Sequence[str], int, tuple[str, ...], str]] = [(argv, 0, (), "")]
     # Each place read, with its words kept so that no other list takes their id.
-    seen: dict[tuple[int, int], list[str]] = {}
+    seen: dict[tuple[int, int], Sequence[str]] = {}
     while todo:
         if len(programs) == shell_lexer.MAX_READINGS:
             f.doubt(UNREAD)
@@ -1390,7 +1390,7 @@ def _package_run(f: Findings, prog: str, after: Iterable[str]) -> bool:
     return runs
 
 
-def _after(words: list[str], at: int, added: Iterable[str]) -> Iterable[str]:
+def _after(words: Sequence[str], at: int, added: Iterable[str]) -> Iterable[str]:
     """The words after the one at *at*, then *added*, without copying them."""
     return chain(map(words.__getitem__, range(at + 1, len(words))), added)
 

@@ -7,11 +7,15 @@ under two seconds on the large one, and 4 times as much text may take at most 8 
 as long (with a little slack for a clock that cannot see so small a time). A failed
 measurement is taken once more: a machine busy with other work can still spoil one, but
 a scan that is quadratic in the text takes 16 times as long, and many seconds, each time.
+
+``assert_memory_linear(make, run)`` bounds the memory *run* holds at once the same way:
+4 times as much text may hold at most 8 times as much (16 when it grows with the square).
 """
 
 from __future__ import annotations
 
 import time
+import tracemalloc
 from collections.abc import Callable
 from typing import Any, TypeVar
 
@@ -56,3 +60,27 @@ def assert_linear(
     if not linear(fast, slow):
         fast, slow = measure(small, large, run)
     assert linear(fast, slow), (fast, slow)
+
+
+def peak(run: Callable[[], object]) -> int:
+    """The most memory *run* holds at once, in bytes."""
+    tracemalloc.start()
+    try:
+        run()
+        return tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+
+def assert_memory_linear(
+    make: Callable[[int], T],
+    run: Callable[[T], Any],
+    small_size: int = SMALL,
+    large_size: int = LARGE,
+) -> None:
+    """*run* on what *make* builds of *large_size* holds at most 8 times the
+    memory it holds on *small_size*, a quarter as much."""
+    small, large = make(small_size), make(large_size)
+    run(small)  # what a first run sets up once is not counted
+    low, high = peak(lambda: run(small)), peak(lambda: run(large))
+    assert high <= 8 * low, (low, high)

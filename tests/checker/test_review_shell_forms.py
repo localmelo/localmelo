@@ -38,7 +38,7 @@ from localmelo.melo.contracts.review import (
     reaches_unread_site,
     site_keys,
 )
-from localmelo.tests.linear import assert_linear
+from localmelo.tests.linear import assert_linear, assert_memory_linear
 
 
 @pytest.fixture
@@ -242,13 +242,17 @@ def test_uv_run_script_runs_a_python_file(ws: Path, option: str) -> None:
     assert is_delete(sh(ws, f"uv run {option} job.py"))
 
 
-@pytest.mark.parametrize("unit", ["-Z a ", "env -Z busybox "])
+@pytest.mark.parametrize("unit", ["-Z a ", "env -Z -S busybox "])
 def test_options_melo_cannot_read_cost_time_in_proportion(ws: Path, unit: str) -> None:
     """Each way to read an option is a place in the words, not a copy of them,
-    and a command has at most a few: the cost grows with the text, not faster.
+    and so is each list of words ``env -S`` makes; a command has at most a few
+    readings: the time and the memory grow with the text, not faster.
 
-    12 000 and 48 000 characters: enough that a cost growing with the
-    square of the text takes 16 times as long, past the bound of 8.
+    The second text is read again past ``busybox`` at each step, both in the
+    list ``env -S`` makes and behind an option melo cannot read. 12 000 and
+    48 000 characters for the time, 3 000 and 12 000 for the memory (measured
+    exactly): enough that a cost growing with the square of the text takes 16
+    times as much, past the bound of 8.
     """
 
     def make(size: int) -> str:
@@ -259,6 +263,7 @@ def test_options_melo_cannot_read_cost_time_in_proportion(ws: Path, unit: str) -
         lambda text: sh(ws, text),
     ):
         assert_linear(make, run, 12_000, 48_000)
+        assert_memory_linear(make, run, 3_000, 12_000)
 
 
 @pytest.mark.parametrize(

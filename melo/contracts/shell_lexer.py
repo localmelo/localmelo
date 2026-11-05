@@ -37,7 +37,7 @@ from collections import deque
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Final, NamedTuple
+from typing import Final, NamedTuple, overload
 
 
 class Lexer(shlex.shlex):
@@ -390,9 +390,47 @@ def program(word: str) -> str:
     return word.replace("\\", "/").rsplit("/", 1)[-1].lower()
 
 
+class Spliced(Sequence[str]):
+    """The words ``env -S`` makes: env's word and the words it splits out
+    (``head``), then the words of ``rest`` from ``end`` on, not copied.
+
+    ``rest`` is the innermost list the rest starts in, so a chain of splits
+    (each read again past ``busybox``) neither copies nor deepens.
+    """
+
+    head: list[str]
+    rest: Sequence[str]
+    end: int
+
+    def __init__(self, head: list[str], rest: Sequence[str], end: int) -> None:
+        while isinstance(rest, Spliced) and end >= len(rest.head):
+            end += rest.end - len(rest.head)
+            rest = rest.rest
+        self.head, self.rest, self.end = head, rest, end
+        self._len = len(head) + len(rest) - end
+
+    def __len__(self) -> int:
+        return self._len
+
+    @overload
+    def __getitem__(self, index: int) -> str: ...
+
+    @overload
+    def __getitem__(self, index: slice) -> list[str]: ...
+
+    def __getitem__(self, index: int | slice) -> str | list[str]:
+        if isinstance(index, slice):
+            return [self[at] for at in range(*index.indices(self._len))]
+        at = index + self._len if index < 0 else index
+        if not 0 <= at < self._len:
+            raise IndexError(index)
+        head = len(self.head)
+        return self.head[at] if at < head else self.rest[self.end + at - head]
+
+
 # Where a reading's program starts: in the command's words, or in the words
 # ``env -S`` splits out followed by the rest.
-Start = tuple[list[str], int]
+Start = tuple[Sequence[str], int]
 
 
 @dataclass(frozen=True)
@@ -436,7 +474,7 @@ def unwrap(
     input.
     """
     # The command's words, then each list env -S makes; a place is (list, word).
-    sources = [words if isinstance(words, list) else list(words)]
+    sources: list[Sequence[str]] = [words]
     starts: list[Start] = []
     assignments: list[tuple[str, str]] = []
     wrappers: list[str] = []
@@ -475,7 +513,7 @@ def unwrap(
                 if split is not None:  # its words in its place, then the rest
                     unread = unread or len(sources) > MAX_READINGS
                     if len(sources) <= MAX_READINGS:
-                        sources.append([words[at], *_split(split), *words[end:]])
+                        sources.append(Spliced([words[at], *_split(split)], words, end))
                         todo.append((len(sources) - 1, 0))
                     continue
                 if name in OPERAND and end < len(words):
