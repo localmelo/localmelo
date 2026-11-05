@@ -628,8 +628,8 @@ class Chat:
     :data:`~localmelo.melo.checker.checker.PROMPT_CAP_CHARS` characters,
     after which *prompt_check* (the agent's ``Checker.pre_plan``) is asked
     and a refusal raises :class:`PromptCapError` before anything is sent.
-    *fit_target* is the share of the limit a fit that drops whole units
-    drops to, and the cut it made holds for the next request of its kind.
+    *fit_target* is the share of the limit a fit cuts down to once it must
+    act, and the cut it made holds for the next requests of its kind.
     """
 
     def __init__(
@@ -665,8 +665,9 @@ class Chat:
         # again.
         self._plan_tools: list[ToolDef] | None = None
         self.fit_target = fit_target
-        # One held cut per request kind: a target below 1 (window_eviction
-        # chunk and boundary) keeps the fit's cut across requests.
+        # One held cut per request kind (a reflection that repeats the planning
+        # request holds the plan's): a target below 1 (window_eviction chunk and
+        # boundary) keeps the fit's cut across requests.
         self._fit_cuts: dict[str, FitCut] = {}
         self.llm = llm
         self.system_notes = tuple(system_notes)
@@ -786,6 +787,7 @@ class Chat:
         on_ready: Callable[[list[Message]], None] | None = None,
         closing: bool = False,
         history: Sequence[Message] = (),
+        held_as: str = "",
     ) -> Message:
         """Send one request to the LLM and count it in :attr:`stats`.
 
@@ -816,8 +818,9 @@ class Chat:
 
         A ``plan`` or ``reflect`` request is fitted first (see the class
         docstring); *history*, the turns before the current task, may go
-        whole. *on_ready*, when given, receives the messages as they will be
-        sent, before the first attempt.
+        whole, and *held_as* names the kind whose held cut it follows (its own
+        by default). *on_ready*, when given, receives the messages as they will
+        be sent, before the first attempt.
         """
         self.check_call_budget(closing)
         if kind == "plan":
@@ -864,11 +867,12 @@ class Chat:
             else PROMPT_CAP_CHARS
         )
         cut = (
-            self._fit_cuts.setdefault(kind, FitCut()) if self.fit_target < 1.0 else None
+            self._fit_cuts.setdefault(held_as or kind, FitCut())
+            if self.fit_target < 1.0
+            else None
         )
         if fitted and (
-            estimate(messages, tools) > limit
-            or (cut is not None and cut.key is not None)
+            estimate(messages, tools) > limit or (cut is not None and cut.active)
         ):
             try:
                 messages, pruned = fit_request(
@@ -1383,7 +1387,9 @@ class Chat:
         )
         messages = [*self._reflect_sent, self.reflect_exchange[-1], note]
         history = self._plan.history if self._plan is not None else []
-        response = await self._reflect_request(messages, offered, on_ready, history)
+        response = await self._reflect_request(
+            messages, offered, on_ready, history=history
+        )
         if response is None:
             return None
         self.reflect_exchange = [*self.reflect_exchange, note, _as_text_reply(response)]
@@ -1394,16 +1400,23 @@ class Chat:
         messages: list[Message],
         tools: list[ToolDef] | None,
         on_ready: Callable[[list[Message]], None] | None,
-        history: Sequence[Message] = (),
+        *,
+        history: Sequence[Message] | None = None,
     ) -> Message | None:
-        """Send one reflection request; ``None`` when the prompt check refused it."""
+        """Send one reflection request; ``None`` when the prompt check refused it.
+
+        With *history* (the plan's), the request repeats the latest planning
+        request and grows it, so it is fitted with the planning requests' held
+        cut: it keeps their prefix, and the next planning request keeps its.
+        """
         try:
             return await self._request(
                 messages,
                 tools=tools or None,
                 kind="reflect",
                 on_ready=on_ready,
-                history=history,
+                history=history or (),
+                held_as="plan" if history is not None else "",
             )
         except PromptCapError:
             return None
@@ -1526,7 +1539,7 @@ class Chat:
             asking = Message(role="user", content="\n\n".join([*lead, compose("")]))
             messages = [*shared.messages, *turns, asking]
             response = await self._reflect_request(
-                messages, shared.tools, on_ready, shared.history
+                messages, shared.tools, on_ready, history=shared.history
             )
             if response is None:
                 return None

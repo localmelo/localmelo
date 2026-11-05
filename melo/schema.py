@@ -16,9 +16,9 @@ from typing import Any, Literal
 
 SHORT_TERM_MAX = 20
 # A full window drops whole units down to SHORT_TERM_MAX - WINDOW_EVICT_CHUNK
-# messages at once, and a request fit that drops whole units drops down to
-# WINDOW_FIT_TARGET of its limit (the prompt cap, or the context budget), so
-# the retained history stays the same for several steps (prompt-cache reuse).
+# messages at once, and a request fit cuts down to WINDOW_FIT_TARGET of its
+# limit (the prompt cap, or the context budget) and holds that cut, so the
+# retained history stays the same for several steps (prompt-cache reuse).
 WINDOW_EVICT_CHUNK = 8
 WINDOW_FIT_TARGET = 0.7
 # The working window's message cap (``window_messages``): any value in this

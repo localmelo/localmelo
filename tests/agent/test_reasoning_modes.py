@@ -401,13 +401,14 @@ async def test_replay_strips_the_oldest_thinking_before_dropping_a_unit() -> Non
     await agent.close()
 
     assert result.memory_stats is not None
-    assert result.memory_stats["replay_stripped"] == 1
+    # Down to 70% of the cap: the newest turn keeps its reasoning, no turn goes.
+    assert result.memory_stats["replay_stripped"] == 2
     assert result.memory_stats["replay_skipped"] == 0
-    assert result.memory_stats["replayed_chars"] == 70_000
+    assert result.memory_stats["replayed_chars"] == 35_000
     sent = _assistant(server.bodies[0])
     assert [m["content"] for m in sent] == ["a", "b", "c"]
-    assert "reasoning_content" not in sent[0]
-    assert sent[1]["reasoning_content"] == "y" * 35_000
+    assert not _has_reasoning(sent[0]) and not _has_reasoning(sent[1])
+    assert sent[2]["reasoning_content"] == "z" * 35_000
 
 
 @pytest.mark.asyncio

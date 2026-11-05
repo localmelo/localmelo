@@ -45,6 +45,25 @@ def _failed(message: Message) -> bool:
     )
 
 
+def _preview(text: str) -> str | None:
+    """*text* cut to a preview that keeps its exit codes, or None when not shorter."""
+    if len(text) <= _PREVIEW_CHARS or _PREVIEW.search(text):
+        return None
+    statuses = list(_EXIT.finditer(text))
+    cut = _PREVIEW_CHARS
+    for status in statuses:
+        if status.start() < cut < status.end():
+            cut = status.start()
+            break
+    kept_statuses = [m.group(0) for m in statuses if m.start() >= cut]
+    preview = text[:cut]
+    omitted = len(text) - len(preview) - sum(map(len, kept_statuses))
+    replacement = f"{preview}\n[tool output preview: {omitted} characters omitted]"
+    if kept_statuses:
+        replacement += "\n" + " ".join(kept_statuses)
+    return replacement if len(replacement) < len(text) else None
+
+
 def _complete_tool_unit(unit: list[Message]) -> bool:
     if not unit[0].tool_calls:
         return False
@@ -62,11 +81,28 @@ def _unit_key(unit: list[Message]) -> tuple[object, ...]:
     return (first.role, first.content, calls, len(unit))
 
 
+def _message_key(message: Message) -> tuple[object, ...]:
+    """What identifies a message across requests, as it came in: by value."""
+    calls = tuple(call.id for call in message.tool_calls)
+    return (message.role, message.tool_call_id, message.content, calls)
+
+
 class FitCut:
-    """The oldest unit a context fit kept, held across a run's requests."""
+    """What a fit cut, held across a run's requests of one kind.
+
+    *key* is the oldest unit it kept after its last drop; *shortened* holds the
+    steps it shortened a message with (a preview, cleared thinking, removed
+    recall), each with the message's key as it came in.
+    """
 
     def __init__(self) -> None:
         self.key: tuple[object, ...] | None = None
+        self.shortened: set[tuple[object, ...]] = set()
+
+    @property
+    def active(self) -> bool:
+        """Whether a request must be fitted to repeat this cut."""
+        return self.key is not None or bool(self.shortened)
 
 
 def _removable(unit: list[Message]) -> bool:
@@ -97,20 +133,22 @@ def fit_request(
     Counts are ``tool_results``, ``thinking`` and ``units``. A retry must
     additionally estimate strictly below ``force_smaller_than``. Failure is
     conservative: malformed/in-flight pairs and user turns stay, and images
-    and failure evidence stay unless nothing else is left to drop; then the
-    oldest go, except the latest failing check. When whole units must go,
-    *drop_target* < 1 removes them down to that share of *limit* (as far as
-    the pinned context allows), so the next request's retained history
-    starts at the same unit.
+    and failure evidence go only when the cut cannot do without them, oldest
+    first and never the latest failing check. Once the fit must act, it
+    shortens (old results to previews, old thinking, old recall) and then
+    drops whole units down to *drop_target* of *limit* (as far as the pinned
+    context allows), so the next requests fit as they are.
 
     *history* names, by identity, messages of *messages* from the turns
     before the current task (a chat's earlier tasks): a unit made only of
     them may go whole, whatever it holds.
 
-    With a *hold*, the units that the held cut's unit follows are dropped first
-    (those the fit may drop), and the fit goes on from there; a cut whose unit
-    is no longer in the request is forgotten. The cut then holds the oldest
-    unit this fit kept after its last drop, so the next request starts there.
+    With a *hold*, the held cut is repeated first: the units that its unit
+    follows are dropped (those the fit may drop) and the messages it shortened
+    are shortened the same way, so the request is byte for byte the last one
+    up to where it grew. Only when that is over *limit* does the fit cut
+    again, down to *drop_target*. A held unit or message no longer in the
+    request is forgotten. The cut then holds what this fit did.
     """
     copies = copy.deepcopy(messages)
     earlier = {id(m) for m in history}
@@ -175,9 +213,15 @@ def fit_request(
             _unit_key(unit) for unit in original[dropped[-1] + 1 :] if id(unit) in kept
         )
 
+    # The steps that shorten one message, keyed by it as it came in.
+    keys = {id(m): _message_key(m) for unit in units for m in unit}
+    done: set[tuple[object, ...]] = set()
+
     def finish() -> tuple[list[Message], dict[str, int]]:
-        if hold is not None and (key := held()) is not None:
-            hold.key = key
+        if hold is not None:
+            if (key := held()) is not None:
+                hold.key = key
+            hold.shortened = done
         return flatten(), counts
 
     if hold is not None and hold.key is not None:
@@ -189,64 +233,49 @@ def fit_request(
             units = [unit for unit in units if not any(unit is d for d in before)]
             counts["units"] += len(before)
 
-    if fits():
-        return finish()
+    def steps() -> list[tuple[str, list[Message], Message]]:
+        """The shortening steps in order: previews, then thinking, then recall."""
+        found = [
+            ("preview", unit, m)
+            for unit in units
+            if _complete_tool_unit(unit)
+            for m in unit
+            if m.role == "tool"
+        ]
+        # Thinking on in-flight or malformed calls stays pinned, and so does the
+        # newest unit's; so does recall there, a whole evictable item elsewhere,
+        # even when attached to a tool result.
+        later = [
+            unit
+            for unit in units
+            if unit is not newest
+            and unit is not units[-1]
+            and not (unit[0].tool_calls and not _complete_tool_unit(unit))
+        ]
+        if not requires_replay:
+            found += [
+                ("thinking", u, m) for u in later for m in u if m.role == "assistant"
+            ]
+        found += [("recall", u, m) for u in later for m in u]
+        return found
 
-    for unit in units:
-        if not _complete_tool_unit(unit):
-            continue
-        for message in unit:
-            if message.role != "tool" or _failed(message):
-                continue
+    def shorten(step: str, unit: list[Message], message: Message) -> bool:
+        if step == "preview":
             text, recall = _recall_suffix(message.content)
-            if len(text) <= _PREVIEW_CHARS or _PREVIEW.search(text):
-                continue
-            statuses = list(_EXIT.finditer(text))
-            cut = _PREVIEW_CHARS
-            for status in statuses:
-                if status.start() < cut < status.end():
-                    cut = status.start()
-                    break
-            kept_statuses = [m.group(0) for m in statuses if m.start() >= cut]
-            preview = text[:cut]
-            omitted = len(text) - len(preview) - sum(map(len, kept_statuses))
-            replacement = (
-                f"{preview}\n[tool output preview: {omitted} characters omitted]"
-            )
-            if kept_statuses:
-                replacement += "\n" + " ".join(kept_statuses)
-            if len(replacement) >= len(text):
-                continue
-            message.content = replacement + ("\n" + recall if recall else "")
+            preview = None if _failed(message) else _preview(text)
+            if preview is None:
+                return False
+            message.content = preview + ("\n" + recall if recall else "")
             counts["tool_results"] += 1
-            if fits():
-                return finish()
-
-    if not requires_replay:
-        for unit in units:
-            # Thinking on in-flight or malformed calls stays pinned.
-            if unit is newest or unit is units[-1]:
-                continue
-            if unit[0].tool_calls and not _complete_tool_unit(unit):
-                continue
-            for message in unit:
-                if message.role == "assistant" and message.thinking:
-                    message.thinking = ""
-                    counts["thinking"] += 1
-                    if fits():
-                        return finish()
-
-    # Recall is a whole evictable item, even when attached to a tool result.
-    # Keep the current unit's recall and every incomplete tool unit intact.
-    for unit in list(units):
-        if unit is newest or unit is units[-1]:
-            continue
-        if unit[0].tool_calls and not _complete_tool_unit(unit):
-            continue
-        for message in list(unit):
+        elif step == "thinking":
+            if not message.thinking:
+                return False
+            message.thinking = ""
+            counts["thinking"] += 1
+        else:
             body, recall = _recall_suffix(message.content)
             if not recall or message.images:
-                continue
+                return False
             if message.role == "user" and not body:
                 unit.remove(message)
                 if not unit:
@@ -254,14 +283,29 @@ def fit_request(
             elif message.role == "tool":
                 message.content = body.rstrip("\n")
             else:
-                continue
+                return False
             counts["units"] += 1
-            if fits():
-                return finish()
+        done.add((step, keys[id(message)]))
+        return True
+
+    if hold is not None and hold.shortened:
+        for step, unit, message in steps():
+            if (step, keys[id(message)]) in hold.shortened:
+                shorten(step, unit, message)
+
+    if fits():
+        return finish()
+
+    for step, unit, message in steps():
+        if (step, keys[id(message)]) in done or not shorten(step, unit, message):
+            continue
+        if fits(drop_target):
+            return finish()
 
     fitting: tuple[list[Message], dict[str, int], tuple[object, ...] | None] | None
     fitting = None
-    # Evidence (a failed check, images) goes only when nothing else is left.
+    # Evidence (a failed check, images) goes only when the cut cannot reach
+    # its target, or fit at all, without it.
     for keep_evidence in (True, False):
         for unit in list(units):
             if not droppable(unit, keep_evidence=keep_evidence):
@@ -272,10 +316,12 @@ def fit_request(
                 return finish()
             if fitting is None and fits():
                 fitting = (flatten(), dict(counts), held())
-        if fitting is not None:
-            if hold is not None and fitting[2] is not None:
+    if fitting is not None:
+        if hold is not None:
+            if fitting[2] is not None:
                 hold.key = fitting[2]
-            return fitting[0], fitting[1]
+            hold.shortened = done
+        return fitting[0], fitting[1]
 
     raise ContextFitError(
         "Request cannot fit without removing pinned context; increase the input "

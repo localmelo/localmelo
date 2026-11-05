@@ -537,9 +537,13 @@ async def test_the_cut_resets_after_a_boundary_drop() -> None:
     assert [s for s in collapsed if 13 < s < 25]
     gaps = [b - a for a, b in zip(collapsed, collapsed[1:], strict=False)]
     assert min(gaps) >= 3
-    # The last attempt (six steps) never reaches the limit: no cut is held, though
-    # the first attempts each held one.
-    assert agent.chat._fit_cuts["plan"].key is None
+    # The last attempt (six steps) never reaches the limit, and nothing held from the
+    # first attempts cuts it: each planning request starts with the one before. (Its
+    # closing reflection may cut, and then holds that cut for the plan.)
+    last = plan_bodies[24:]
+    assert len(last) == 6
+    for earlier, later in zip(last, last[1:], strict=False):
+        assert later["messages"][: len(earlier["messages"])] == earlier["messages"]
 
 
 class _Overflowing(BaseLLMProvider):
