@@ -677,6 +677,9 @@ def drop_leading_ack(rows: Iterable[str]) -> list[str] | None:
 TITLE_WIDTH: Final = 48
 # A clause shorter than this is no title ("Fix this today" says nothing).
 _CLAUSE_WIDTH: Final = 16
+# Only this much of a request is read for its title, so that a huge first line
+# costs no more than a short one.
+_READ_CHARS: Final = 1000
 # Words that set a task's level. The gateway's triage reads them (P1 for the
 # urgent ones, P3 for the easy ones); a title leaves them out when they open it.
 URGENT_WORDS: Final = (
@@ -770,7 +773,7 @@ def short_title(text: str) -> str:
     must be. An empty request reads ``Task``.
     """
     line = next((row for row in text.splitlines() if row.strip()), "")
-    line = " ".join(line.split())
+    line = " ".join(line.lstrip()[:_READ_CHARS].split())
     opening = _OPENING.match(line)
     # A request that is nothing but its opening keeps it.
     line = (line[opening.end() :] if opening else "") or line

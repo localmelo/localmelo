@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from localmelo.support.sessions.display import TITLE_WIDTH, short_title, title_width
+from localmelo.tests.linear import assert_linear
 
 
 @pytest.mark.parametrize(
@@ -114,3 +115,7 @@ def test_a_cut_never_ends_in_the_middle_of_a_word() -> None:
     assert title.endswith("…")
     assert text.startswith(title.removesuffix("…"))
     assert text[len(title) - 1] == " "
+
+
+def test_a_huge_first_line_costs_no_more_than_a_short_one() -> None:
+    assert_linear(lambda size: "word/" * (size // 5), short_title)
