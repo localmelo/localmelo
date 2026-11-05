@@ -219,6 +219,16 @@ async def test_a_chat_follows_a_melo_serve_switch_at_its_next_turn(
     assert asked == ["model-a", "model-b"]
     write_state(melo_serve_home)  # nothing served: the Agent stays
     assert (await open_session(reg, turn.session_id)).agent is new
+    # A chat built while B was served asks for A once A is served again.
+    write_state(melo_serve_home, chat=role("model-b"))
+    created, _ = await reg.create(workspace)  # built on B, as the others
+    assert asked[-1] == "model-b"
+    built_on_b = created.agent
+    write_state(melo_serve_home, chat=role("model-a"))  # back to A
+    assert (await open_session(reg, created.session_id)).agent is not built_on_b
+    assert asked[-1] == "model-a"
+    again = await open_session(reg, turn.session_id)
+    assert again.model == "model-a" and asked[-1] == "model-a"
 
 
 async def test_delete_removes_the_row_and_closes_the_agent(
