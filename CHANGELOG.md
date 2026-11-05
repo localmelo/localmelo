@@ -883,6 +883,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Developer only: one function asks an approval policy for every call, folder and question a tool asks itself, and it fails
+  closed the same way each time. A question a tool asked itself used to pass a policy's `CancelledError` on while the
+  run was not cancelled and kept no trace of a policy that failed or of a cancellation; it now refuses the question as
+  a call is refused, and the call's `tool_asks` says why (`error` or `withdrawn`).
 - One rule names every task and chat. The same request now gets the same title wherever it starts: `melo task`, a task card, **Run as a task**, a chat's first title and a `melo "task"` run in the history. The title is the first sentence of the first line, without an opening "please", "请" or level word followed by a colon or comma (`no rush:`), a path shows as its file name, a question keeps its `?`, and a long one is cut at a word, with no "the" or "in" left hanging, and ends in `…`. A chat's first title is therefore shorter than before (at most 48 columns, 24 Chinese characters) and a first message of several lines is named by its first line, skipping a line of only a greeting (`Hi`, `你好`) and a leading code block.
 - Developer only: one adapter now serves every OpenAI-compatible backend, and one list of local and hosted backends
   feeds the config, the setup lists, Settings, the banner, the probe and the failure hints, so a new backend is one
