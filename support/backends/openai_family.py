@@ -59,8 +59,12 @@ class LocalBackend(BaseBackend):
         root = self.url.rstrip("/").removesuffix("/v1")
         return f"{root.replace('//localhost:', '//127.0.0.1:')}/v1"
 
+    def name_in_errors(self, cfg: Config, *, embedding: bool = False) -> str:
+        """The server's name in a validation message."""
+        return self.label(cfg, embedding=embedding)
+
     def validate(self, cfg: Config) -> list[str]:
-        section, name = getattr(cfg, self.key), self.label(cfg)
+        section, name = getattr(cfg, self.key), self.name_in_errors(cfg)
         errors: list[str] = []
         if not section.chat_url:
             errors.append(
@@ -76,7 +80,8 @@ class LocalBackend(BaseBackend):
         return errors
 
     def validate_embedding(self, cfg: Config) -> list[str]:
-        section, name = getattr(cfg, self.key), self.label(cfg, embedding=True)
+        section = getattr(cfg, self.key)
+        name = self.name_in_errors(cfg, embedding=True)
         errors: list[str] = []
         if not section.embedding_url:
             errors.append(
@@ -206,6 +211,10 @@ class MeloServeBackend(LocalBackend):
     def model_name(self, cfg: Config, *, embedding: bool = False) -> str:
         return self.in_use(cfg, embedding=embedding)[1]
 
+    def name_in_errors(self, cfg: Config, *, embedding: bool = False) -> str:
+        """Validation reads the config only, never melo_serve's state."""
+        return self.display_name
+
     def welcome_note(self, label: str) -> str:
         """The server that really answers: a model served through melo_serve."""
         return label
@@ -218,10 +227,23 @@ class MeloServeBackend(LocalBackend):
         return model
 
     def build_embedding_provider(self, cfg: Config) -> BaseEmbeddingProvider | None:
-        """None while no embedding model is served: the chat still starts."""
-        if not self.model_name(cfg, embedding=True):
+        """None while no embedding model is served: the chat still starts.
+
+        One snapshot answers both whether one is served and which model to ask for.
+        """
+        from localmelo.support.backends.openai_compat import (
+            build_openai_embedding,
+            normalize_url,
+        )
+
+        section = cfg.melo_serve
+        snap = melo_serve.snapshot()
+        model = self._in_use(cfg, snap, True)[1]
+        if not section.embedding_url or not model:
             return None
-        return super().build_embedding_provider(cfg)
+        return build_openai_embedding(
+            base_url=normalize_url(section.embedding_url), model=model
+        )
 
 
 LOCAL_SERVERS: Final[tuple[LocalBackend, ...]] = (

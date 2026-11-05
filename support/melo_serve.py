@@ -28,7 +28,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 HOME_ENV: Final = "MELO_SERVE_HOME"
 SOCKET_ENV: Final = "MELO_SERVE_SOCKET"
@@ -104,14 +104,32 @@ def _read_state() -> dict[str, Any] | None:
     return state
 
 
-def _loopback(url: str) -> bool:
-    """Whether *url* is http(s) on this computer: the only address melo_serve listens on."""
+def _loopback(url: str) -> str | None:
+    """*url* rebuilt from its parts when it is http(s) on this computer, else None.
+
+    melo_serve listens on loopback only, and its URL carries no user info. A URL
+    with whitespace or a control character is refused, so the text kept is clean.
+    """
+    if any(ch.isspace() or not ch.isprintable() for ch in url):
+        return None
     try:
         parts = urlsplit(url)
-        parts.port  # noqa: B018  (a port that is not a number raises)
+        port = parts.port
     except ValueError:
-        return False
-    return parts.scheme in ("http", "https") and parts.hostname in LOOPBACK_HOSTS
+        return None
+    host = parts.hostname
+    if (
+        parts.scheme not in ("http", "https")
+        or host not in LOOPBACK_HOSTS
+        or parts.username is not None
+        or parts.password is not None
+        or "@" in parts.netloc
+    ):
+        return None
+    netloc = f"[{host}]" if ":" in host else host
+    if port is not None:
+        netloc = f"{netloc}:{port}"
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, ""))
 
 
 def _answers() -> bool:
@@ -150,7 +168,8 @@ def snapshot() -> Snapshot:
     status = _text(state.get("status")) or "ready"
     door = state.get("front_door")
     url = (_text(door.get("url")) if isinstance(door, dict) else "") or DEFAULT_URL
-    if status == "stopped" or not _loopback(url) or not _answers():
+    url = _loopback(url) or ""
+    if status == "stopped" or not url or not _answers():
         return Snapshot()
     service, entries = state.get("service"), state.get("roles")
     entries = entries if isinstance(entries, dict) else {}

@@ -82,38 +82,89 @@ def _oversized(home: Path) -> None:
     )
 
 
+NOT_RUNNING = melo_serve.Snapshot()
+RUNNING_NO_ROLES = melo_serve.Snapshot(
+    running=True, url=URL, status="ready", login=True
+)
+RUNNING_LOGINLESS = melo_serve.Snapshot(
+    running=True,
+    url=URL,
+    status="ready",
+    login=False,
+    roles={"chat": melo_serve.Role("m", "m", "Splash", "ready")},
+)
+
+
+def _front_door(url: str) -> Callable[[Path], None]:
+    return _edit(lambda state: state["front_door"].update(url=url))
+
+
+# Each case is written to a state whose control socket accepts connections, so
+# the field checks run. The second item is what the snapshot must be.
 MALFORMED = {
-    "a huge pid": _huge_pid,
-    "json nested past the recursion limit": _nested,
-    "an oversized file": _oversized,
-    "a model that is not a string": _edit(
-        lambda state: state["roles"]["chat"].update(model=["m"])
+    "a huge pid": (_huge_pid, RUNNING_NO_ROLES),  # the pid is not read
+    "json nested past the recursion limit": (_nested, NOT_RUNNING),
+    "an oversized file": (_oversized, NOT_RUNNING),
+    "a model that is not a string": (
+        _edit(lambda state: state["roles"]["chat"].update(model=["m"])),
+        RUNNING_NO_ROLES,
     ),
-    "a service that is not a dict": _edit(lambda state: state.update(service="x")),
-    "a front door url that is not loopback": _edit(
-        lambda state: state["front_door"].update(url="http://example.com:8321/v1")
+    "a service that is not a dict": (
+        _edit(lambda state: state.update(service="x")),
+        RUNNING_LOGINLESS,
+    ),
+    "a front door url that is not loopback": (
+        _front_door("http://example.com:8321/v1"),
+        NOT_RUNNING,
+    ),
+    "a front door url with a control character": (
+        _front_door("http://127.0.0.1:8321/v1\n\x1b[2J"),
+        NOT_RUNNING,
+    ),
+    "a front door url with user info": (
+        _front_door("http://user:pw@127.0.0.1:8321/v1"),
+        NOT_RUNNING,
+    ),
+    "a front door url with a space": (
+        _front_door("http://127.0.0.1:8321/v1 x"),
+        NOT_RUNNING,
     ),
 }
 
 
-@pytest.mark.parametrize("write", MALFORMED.values(), ids=MALFORMED.keys())
+@pytest.mark.parametrize(
+    ("write", "expected"), MALFORMED.values(), ids=MALFORMED.keys()
+)
 async def test_a_malformed_state_is_not_running_and_breaks_nothing(
-    write: Callable[[Path], None], melo_serve_home: Path
+    write: Callable[[Path], None],
+    expected: melo_serve.Snapshot,
+    melo_serve_home: Path,
+    melo_serve_socket: Path,
 ) -> None:
     write(melo_serve_home)
-    assert melo_serve.snapshot() == melo_serve.Snapshot()
-    assert "running: False" in "\n".join(melo_serve.status_lines(melo_serve.snapshot()))
-    assert melo_serve.ensure_running() == melo_serve.NOT_INSTALLED
-    assert await discovery.detect_local_server([]) is None
-    assert model_json(_cfg())["name"] == ""
+    assert melo_serve.snapshot() == expected
+    status = "\n".join(melo_serve.status_lines(expected))
+    assert ("running: False" in status) == (not expected.running)
+    chat = expected.roles.get("chat")
+    assert model_json(_cfg())["name"] == (chat.model if chat else "")
+    if not expected.running:
+        assert melo_serve.ensure_running() == melo_serve.NOT_INSTALLED
+        assert await discovery.detect_local_server([]) is None
+
+
+def test_a_url_is_kept_rebuilt_from_its_parts(
+    melo_serve_home: Path, melo_serve_socket: Path
+) -> None:
+    _front_door("http://LOCALHOST:8321/v1?a=1#frag")(melo_serve_home)
+    assert melo_serve.snapshot().url == "http://localhost:8321/v1?a=1"
 
 
 def test_a_live_socket_does_not_make_a_bad_state_good(
     melo_serve_home: Path, melo_serve_socket: Path
 ) -> None:
-    MALFORMED["a front door url that is not loopback"](melo_serve_home)
+    MALFORMED["a front door url that is not loopback"][0](melo_serve_home)
     assert not melo_serve.snapshot().running  # its address is never offered
-    MALFORMED["a model that is not a string"](melo_serve_home)
+    MALFORMED["a model that is not a string"][0](melo_serve_home)
     assert melo_serve.snapshot() == melo_serve.Snapshot(
         running=True, url=URL, status="ready", login=True
     )  # running, but with no model to serve
