@@ -1,7 +1,7 @@
 """AgentOptions.lean_output: fewer output tokens in direct runs; off, main's requests.
 
-The run is the scripted one of the legacy goldens (a Python call, a reflection that
-continues, an answer) through the OpenAI-compatible provider, with the cache defaults.
+The run is the scripted one of the default golden (a Python call, a reflection that
+continues, an answer) through the OpenAI-compatible provider, with the defaults.
 """
 
 from __future__ import annotations
@@ -23,16 +23,9 @@ from localmelo.melo.agent._chat import (
     REFLECTION_PROMPT,
     SYSTEM_PROMPT,
 )
-from localmelo.tests.agent.test_legacy_golden import SCENARIOS, Reply, record_run
 from localmelo.tests.agent.test_reflection_gate import FakeLLM
+from localmelo.tests.agent.wire_runs import Reply, record_run, reflection_continues
 
-DEFAULTS = {
-    "fixed_prefix": True,
-    "window_eviction": "chunk",
-    "reflect_tool_guard": True,
-    "cache_layout": "v3",
-    "window_messages": 64,
-}
 # The sha256 of the run's three request bodies (plan, reflection, plan) as main sends
 # them, and with the option. Recorded at 139992b5; re-recorded when the fixed system
 # section lost its ``Prefix: fixed-prefix-v2`` line: with that line put back,
@@ -80,19 +73,18 @@ async def _run(
 
     *short*: the reflection reply holds only the keys of ``LEAN_REFLECTION_PROMPT``.
     """
-    provider, build = SCENARIOS["openai_reflection_continues"]
-    scenario = build()
+    scenario = reflection_continues()
     if short:
         long = json.loads(scenario.replies[1].content)
         keep = {k: v for k, v in long.items() if k in _keys(LEAN_REFLECTION_PROMPT)}
         scenario.replies[1] = Reply(content=json.dumps(keep))
-    scenario.options.update(DEFAULTS | options)
+    scenario.options.update(options)
     monkeypatch.setattr(
         _chat, "local_date_line", lambda: "Date: 2026-10-28 (UTC-04:00)", raising=False
     )
     raw: list[str] = []
     run_dir = Path(tempfile.mkdtemp(dir=tmp_path))
-    result, _ = await record_run(provider, scenario, run_dir, monkeypatch, raw)
+    result, _ = await record_run("openai", scenario, run_dir, monkeypatch, raw)
     digests = tuple(hashlib.sha256(body.encode()).hexdigest() for body in raw)
     return result, [json.loads(body) for body in raw], digests
 
@@ -124,24 +116,6 @@ async def test_the_fixed_prefix_is_the_same_on_every_turn(
     for later in bodies[1:]:  # the reflection request and the next planning request
         assert later["messages"][: len(bodies[0]["messages"])] == bodies[0]["messages"]
         assert later["tools"] == bodies[0]["tools"]
-
-
-async def test_the_earlier_layout_also_sends_the_lean_prompts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    options: dict[str, Any] = {"lean_output": True, "fixed_prefix": False}
-    _, bodies, _ = await _run(tmp_path, monkeypatch, **options)
-    assert bodies[0]["messages"][0]["content"].startswith(LEAN_SYSTEM_PROMPT)
-    assert bodies[1]["messages"][0]["content"].startswith(LEAN_REFLECTION_PROMPT)
-
-
-async def test_the_utility_gate_keeps_the_full_reflection_prompt(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    options: dict[str, Any] = {"lean_output": True, "reflection_gate": "utility"}
-    _, bodies, _ = await _run(tmp_path, monkeypatch, **options)
-    assert bodies[1]["messages"][-1]["content"].startswith(REFLECTION_PROMPT)
-    assert bodies[0]["messages"][0]["content"].startswith(LEAN_SYSTEM_PROMPT)
 
 
 async def test_the_compress_modes_keep_the_system_prompt_for_their_notes() -> None:

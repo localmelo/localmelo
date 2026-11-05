@@ -50,7 +50,6 @@ from localmelo.melo.schema import (
     clip_session_text,
     split_thinking,
 )
-from localmelo.tests.legacy_options import LEGACY_ANSWER_OPTIONS
 
 # ── Fakes ───────────────────────────────────────────────────────────────────
 
@@ -173,8 +172,6 @@ def _agent(
     """An agent with the custom tool, offered on every step, and no waits."""
     options.setdefault("builtins", frozenset())
     options.setdefault("tool_exposure", "all")
-    for name, value in LEGACY_ANSWER_OPTIONS.items():
-        options.setdefault(name, value)
     agent = Agent(llm=llm, options=AgentOptions(**options), tool_providers=providers)
     agent.hippo.register_tool(ECHO)
     agent.executor.register("echo", (tools or Tools()).echo)
@@ -302,6 +299,7 @@ class TestRecordAnswers:
             record_answers=True,
             max_attempts=1,
             steps_per_attempt=1,
+            answer_on_stop=False,
         )
 
         result = await agent.run_task("hi")

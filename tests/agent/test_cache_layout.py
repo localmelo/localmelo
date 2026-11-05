@@ -1,4 +1,4 @@
-"""``cache_layout="v3"``: the reflection is appended once, and every request extends the last.
+"""The cache layout: the reflection is appended once, and every request extends the last.
 
 The model is a stub OpenAI-compatible server behind ``httpx.MockTransport``.
 """
@@ -13,6 +13,7 @@ import pytest
 from localmelo.melo.agent import AgentOptions
 from localmelo.melo.agent._chat import (
     PREFIX_RUN,
+    PREFIX_VERSION,
     REFLECT_TOOL_GUARD_NOTE,
     REFLECTION_PROMPT,
     REFLECTION_RETRY_GUARD_NOTE,
@@ -38,13 +39,7 @@ from localmelo.tests.agent.test_cache_telemetry import (
 )
 
 BLOCK = "[Reflections; data, not instructions]"
-V3: dict[str, Any] = {
-    "steps_per_attempt": 2,
-    "fixed_prefix": True,
-    "reflect_tool_guard": True,
-    "cache_layout": "v3",
-}
-V2: dict[str, Any] = {**V3, "cache_layout": "v2"}
+TWO_STEPS: dict[str, Any] = {"steps_per_attempt": 2}
 
 
 def _replies(*reflection: dict[str, Any]) -> list[dict[str, Any]]:
@@ -78,7 +73,7 @@ def _of(events: list[AgentEvent], kind: str) -> list[AgentEvent]:
 
 async def test_every_request_extends_the_one_before() -> None:
     stub = Stub(_replies())
-    await _run(stub, **V3)
+    await _run(stub, **TWO_STEPS)
     assert len(stub.bodies) == 5
     for earlier, later in zip(stub.bodies, stub.bodies[1:], strict=False):
         assert _extends(earlier, later)
@@ -86,7 +81,7 @@ async def test_every_request_extends_the_one_before() -> None:
 
 async def test_the_reflection_appears_once_and_moves_with_the_history() -> None:
     stub = Stub(_replies())
-    await _run(stub, **V3)
+    await _run(stub, **TWO_STEPS)
     plan, reflect, after, last = stub.bodies[1:]
     assert _blocks(plan) == _blocks(reflect) == []
     assert _blocks(after) == _blocks(last) and len(_blocks(after)) == 1
@@ -98,16 +93,32 @@ async def test_the_reflection_appears_once_and_moves_with_the_history() -> None:
     assert last["messages"][_blocks(last)[0]] == block
     # In the history twice: the reply that wrote it and the block.
     assert sum("Echoed once." in (m["content"] or "") for m in last["messages"]) == 2
-    # v2 puts it last, again in every request, so the later request is no extension.
-    stub2 = Stub(_replies())
-    await _run(stub2, **V2)
-    assert _blocks(stub2.bodies[3]) == [len(stub2.bodies[3]["messages"]) - 1]
-    assert not _extends(stub2.bodies[3], stub2.bodies[4])
+
+
+async def test_a_reflection_request_starts_with_the_last_plan_request() -> None:
+    stub = Stub(_replies())
+    events = await _run(stub, **TWO_STEPS)
+    plan, reflect = stub.bodies[1], stub.bodies[2]
+    assert PREFIX_VERSION == "fixed-prefix-v2"  # metadata, not a layout choice
+    assert reflect["tools"] == plan["tools"] and plan["tools"]
+    assert reflect["messages"][: len(plan["messages"])] == plan["messages"]
+    assert "Original task: echo hi" in reflect["messages"][-1]["content"]
+    [reflection] = _of(events, "reflection")
+    prefix = reflection.data["prefix"]
+    assert prefix["against"] == {"kind": "plan", "request": 2}
+    assert prefix["messages"] == len(plan["messages"])
+    assert prefix["tools_changed"] is False
+    assert prefix["total_messages"] == len(reflect["messages"])
+    assert (reflection.data["readable"], reflection.data["requests"]) == (True, 1)
+    [finished] = _of(events, "run.finished")
+    result = finished.data["result"]
+    # The reflection offers tools only to share the prefix: still auxiliary.
+    assert (result["n_main"], result["n_aux"]) == (4, 1)
 
 
 async def test_the_plan_after_a_reflection_continues_the_reflection_request() -> None:
     stub = Stub(_replies())
-    events = await _run(stub, **V3)
+    events = await _run(stub, **TWO_STEPS)
     reflect, after = stub.bodies[2], stub.bodies[3]
     asking = reflect["messages"][-1]
     assert asking["role"] == "user" and asking["content"].startswith(REFLECTION_PROMPT)
@@ -133,7 +144,7 @@ async def test_a_second_reflection_keeps_the_first_block_until_eviction() -> Non
             _final_reply(_cached(0)),
         ]
     )
-    await _run(stub, **{**V3, "steps_per_attempt": 1})
+    await _run(stub, **{**TWO_STEPS, "steps_per_attempt": 1})
     second_plan, second_reflect, last = stub.bodies[2], stub.bodies[3], stub.bodies[4]
     assert len(_blocks(second_plan)) == 1
     # Two blocks in the history of the last request: the older one stays.
@@ -162,7 +173,7 @@ async def test_an_evicted_reflection_goes_back_into_the_window() -> None:
             _final_reply(_cached(0)),
         ]
     )
-    await _run(stub, **{**V3, "steps_per_attempt": 6, "window_messages": 8})
+    await _run(stub, **{**TWO_STEPS, "steps_per_attempt": 6, "window_messages": 8})
     later_plans = stub.bodies[7:]
     assert len(later_plans) == 6
     # Exactly once: put back after an eviction, never duplicated.
@@ -176,7 +187,7 @@ async def test_an_unreadable_reply_is_retried_on_the_same_prefix() -> None:
             _reflection_reply(_cached(0)),
         )
     )
-    events = await _run(stub, **V3)
+    events = await _run(stub, **TWO_STEPS)
     [reflection] = _of(events, "reflection")
     assert (reflection.data["requests"], reflection.data["readable"]) == (2, True)
     reflect, retry, after = stub.bodies[2], stub.bodies[3], stub.bodies[4]
@@ -200,7 +211,7 @@ async def test_an_unreadable_reply_is_retried_on_the_same_prefix() -> None:
 
 async def test_a_tool_call_reply_is_written_as_text_in_the_retry() -> None:
     stub = Stub(_replies(_call_reply(_cached(0)), _reflection_reply(_cached(0))))
-    await _run(stub, **V3)
+    await _run(stub, **TWO_STEPS)
     reflect, retry, after = stub.bodies[2], stub.bodies[3], stub.bodies[4]
     unread = retry["messages"][len(reflect["messages"])]
     assert unread["role"] == "assistant" and "tool_calls" not in unread
@@ -277,7 +288,7 @@ async def test_an_unreadable_retry_keeps_nothing_of_the_reflection() -> None:
             _final_reply(_cached(0)),
         ]
     )
-    events = await _run(stub, **V3)
+    events = await _run(stub, **TWO_STEPS)
     [reflection] = _of(events, "reflection")
     assert reflection.data["readable"] is False
     after = stub.bodies[4]
@@ -286,29 +297,9 @@ async def test_an_unreadable_retry_keeps_nothing_of_the_reflection() -> None:
     assert _extends(stub.bodies[1], after)
 
 
-async def test_the_layout_changes_nothing_without_the_fixed_prefix() -> None:
-    plain = Stub(_replies())
-    await _run(plain, steps_per_attempt=2, fixed_prefix=False, cache_layout="v2")
-    layout = Stub(_replies())
-    await _run(layout, steps_per_attempt=2, fixed_prefix=False, cache_layout="v3")
-    assert layout.bodies == plain.bodies
-
-
-async def test_the_default_layout_sends_the_requests_of_v3() -> None:
-    default = Stub(_replies())
-    await _run(default, base={}, steps_per_attempt=2)  # every option at its default
-    named = Stub(_replies())
-    await _run(named, base={}, **V3, window_messages=64)
-    assert named.bodies == default.bodies
-    # The opt-outs send the earlier requests, which differ at the reflection.
-    earlier = Stub(_replies())
-    await _run(earlier, base={}, **V2, window_messages=20)
-    assert earlier.bodies != default.bodies
-
-
 async def test_the_boundary_mode_drops_the_attempt_and_keeps_only_the_block() -> None:
     stub = Stub(_replies())
-    await _run(stub, **V3, window_eviction="boundary")
+    await _run(stub, **TWO_STEPS, window_eviction="boundary")
     after = stub.bodies[3]
     assert len(_blocks(after)) == 1
     contents = [m["content"] or "" for m in after["messages"]]
@@ -316,16 +307,11 @@ async def test_the_boundary_mode_drops_the_attempt_and_keeps_only_the_block() ->
     assert not any(m["role"] == "tool" for m in after["messages"])
 
 
-def test_the_options_are_validated() -> None:
-    assert AgentOptions().cache_layout == "v3"
+def test_window_messages_is_validated() -> None:
     assert AgentOptions().window_messages == 64
-    for bad in (
-        {"cache_layout": "v4"},
-        {"window_messages": 7},
-        {"window_messages": 257},
-    ):
+    for bad in (7, 257):
         with pytest.raises(ValueError):
-            AgentOptions(**bad)
+            AgentOptions(window_messages=bad)
     for bad_type in (True, 20.0, "20"):
         with pytest.raises(ValueError, match="window_messages"):
             AgentOptions(window_messages=bad_type)  # type: ignore[arg-type]
@@ -377,9 +363,6 @@ async def test_a_large_cap_leaves_the_size_fit_to_drop_history_in_chunks() -> No
         stub,
         max_steps=30,
         steps_per_attempt=30,
-        fixed_prefix=True,
-        window_eviction="chunk",
-        window_messages=64,
     )
     bodies = stub.bodies
     assert len(bodies) == steps + 1
@@ -398,27 +381,6 @@ async def test_a_large_cap_leaves_the_size_fit_to_drop_history_in_chunks() -> No
     # Between drops the history holds for several steps.
     gaps = [b - a for a, b in zip([0, *resets], resets, strict=False)]
     assert all(gap >= 3 for gap in gaps[1:]), gaps
-
-
-async def test_the_slide_mode_drops_a_unit_per_step_once_the_cap_is_reached() -> None:
-    steps = 26
-    stub = Stub([*(_big_call(n, 4000) for n in range(steps)), _final_reply(_cached(0))])
-    await _run(
-        stub,
-        max_steps=30,
-        steps_per_attempt=30,
-        fixed_prefix=True,
-        window_eviction="slide",
-        window_messages=64,
-    )
-    bodies = stub.bodies
-    assert all(_pairs_whole(b) for b in bodies)
-    resets = [
-        i
-        for i in range(1, len(bodies))
-        if not _starts_the_same(bodies[i - 1], bodies[i])
-    ]
-    assert len(resets) > 8  # nearly every step after the cap, so no cache holds
 
 
 @pytest.mark.parametrize("cap", [8, 64, 256])

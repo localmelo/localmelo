@@ -14,11 +14,10 @@ from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMPro
 from localmelo.melo.schema import (
     MAX_REFLECTION_CHARS,
     Message,
-    ReflectionDecision,
     ToolCall,
     ToolDef,
 )
-from localmelo.tests.legacy_options import LEGACY_ANSWER_OPTIONS, legacy_options
+from localmelo.tests.agent.test_reflection_gate import _said
 
 # ── Fake providers ──────────────────────────────────────────────────────────
 
@@ -242,11 +241,9 @@ class TestMaxAttemptsExhausted:
 
     @pytest.mark.asyncio
     async def test_all_attempts_used(self) -> None:
+        # Without the request for an answer, the run reports the error.
         options = AgentOptions(
-            steps_per_attempt=1,
-            max_attempts=2,
-            max_steps=10,
-            **LEGACY_ANSWER_OPTIONS,
+            steps_per_attempt=1, max_attempts=2, max_steps=10, answer_on_stop=False
         )
 
         llm = FakeLLM()
@@ -295,7 +292,7 @@ class TestStuckDetection:
     @pytest.mark.asyncio
     async def test_repeated_tool_calls_detected(self) -> None:
         options = AgentOptions(
-            steps_per_attempt=5, max_attempts=1, **LEGACY_ANSWER_OPTIONS
+            steps_per_attempt=5, max_attempts=1, answer_on_stop=False
         )
 
         llm = FakeLLM()
@@ -336,7 +333,7 @@ class TestReflectionInPrompt:
 
     @pytest.mark.asyncio
     async def test_reflection_section_in_prompt(self) -> None:
-        options = legacy_options(steps_per_attempt=1, max_attempts=3, max_steps=10)
+        options = AgentOptions(steps_per_attempt=1, max_attempts=3, max_steps=10)
 
         llm = FakeLLM()
         # Attempt 0: tool call → budget
@@ -366,10 +363,9 @@ class TestReflectionInPrompt:
         await agent.run("echo test")
 
         # The last LLM call (attempt 1 planning) should have [REFLECTION]
-        last_plan_call = llm.calls[-1]
-        system_msg = last_plan_call["messages"][0]
-        assert "[REFLECTION]" in system_msg.content
-        assert "echo a" in system_msg.content
+        text = _said(llm.calls[-1])
+        assert "[REFLECTION]" in text
+        assert "echo a" in text
 
 
 class TestReflectionPromotion:
@@ -510,133 +506,12 @@ class TestParseReflection:
         assert decision.recommended_action == "stop"
 
 
-class TestUtilityContinuationGate:
-    """Active-learning utility gate controls continuation."""
-
-    def test_high_utility_allows_continue(self) -> None:
-        from localmelo.melo.agent.agent import _should_continue
-
-        decision = ReflectionDecision(
-            recommended_action="continue",
-            task_still_feasible=True,
-            next_step_is_concrete=True,
-            next_step_is_novel=True,
-            estimated_info_gain=0.8,
-            feasibility=0.9,
-            novelty=0.8,
-            estimated_cost=0.1,
-            repeat_risk=0.1,
-        )
-        assert _should_continue(decision) is True
-
-    def test_low_utility_blocks_continue_under_utility(self) -> None:
-        from localmelo.melo.agent.agent import _should_continue
-
-        decision = ReflectionDecision(
-            recommended_action="continue",
-            task_still_feasible=True,
-            next_step_is_concrete=True,
-            next_step_is_novel=True,
-            estimated_info_gain=0.1,
-            feasibility=0.1,
-            novelty=0.1,
-            estimated_cost=0.5,
-            repeat_risk=0.5,
-        )
-        assert _should_continue(decision, "utility") is False
-        # The default gate, "flags", looks only at the action and the checks.
-        assert _should_continue(decision) is True
-
-    def test_stop_action_always_blocks(self) -> None:
-        from localmelo.melo.agent.agent import _should_continue
-
-        decision = ReflectionDecision(
-            recommended_action="stop",
-            task_still_feasible=True,
-            next_step_is_concrete=True,
-            next_step_is_novel=True,
-            estimated_info_gain=1.0,
-            feasibility=1.0,
-            novelty=1.0,
-        )
-        assert _should_continue(decision) is False
-
-    def test_not_feasible_blocks(self) -> None:
-        from localmelo.melo.agent.agent import _should_continue
-
-        decision = ReflectionDecision(
-            recommended_action="continue",
-            task_still_feasible=False,
-            next_step_is_concrete=True,
-            next_step_is_novel=True,
-            estimated_info_gain=1.0,
-            feasibility=1.0,
-            novelty=1.0,
-        )
-        assert _should_continue(decision) is False
-
-    def test_not_concrete_blocks(self) -> None:
-        from localmelo.melo.agent.agent import _should_continue
-
-        decision = ReflectionDecision(
-            recommended_action="continue",
-            task_still_feasible=True,
-            next_step_is_concrete=False,
-            next_step_is_novel=True,
-            estimated_info_gain=1.0,
-            feasibility=1.0,
-            novelty=1.0,
-        )
-        assert _should_continue(decision) is False
-
-    @pytest.mark.asyncio
-    async def test_utility_blocks_continuation_in_loop(self) -> None:
-        """Under reflection_gate="utility", low utility stops the loop even
-        with recommended_action=continue."""
-        options = AgentOptions(
-            steps_per_attempt=1,
-            max_attempts=3,
-            max_steps=10,
-            reflection_gate="utility",
-        )
-
-        llm = FakeLLM()
-        llm.enqueue(
-            Message(
-                role="assistant",
-                content="try",
-                tool_call=ToolCall(tool_name="echo", arguments={"text": "a"}),
-            )
-        )
-        # Reflection says "continue" but utility is terrible
-        llm.enqueue(
-            Message(
-                role="assistant",
-                content=_reflection_json(
-                    "continue",
-                    info_gain=0.01,
-                    cost=0.9,
-                    repeat_risk=0.9,
-                    novelty=0.01,
-                    feasibility_score=0.01,
-                    best_effort="low utility answer",
-                ),
-            )
-        )
-
-        agent = _make_echo_agent(llm, options=options)
-        result = await agent.run("echo test")
-        assert result == "low utility answer"
-        tasks = list(agent.hippo.history._tasks.values())
-        assert tasks[0].status == "gate_stopped"
-
-
 class TestReflectionReceivesPriorReflections:
     """The reflect call should see prior reflection entries."""
 
     @pytest.mark.asyncio
     async def test_prior_reflections_in_reflect_call(self) -> None:
-        options = legacy_options(steps_per_attempt=1, max_attempts=3, max_steps=10)
+        options = AgentOptions(steps_per_attempt=1, max_attempts=3, max_steps=10)
 
         llm = FakeLLM()
         # Attempt 0: tool call
@@ -678,11 +553,11 @@ class TestReflectionReceivesPriorReflections:
         await agent.run("echo test")
 
         # The second reflection call (4th LLM call) should contain
-        # prior reflection info ("tried approach A") in the system prompt
+        # prior reflection info ("tried approach A")
         reflect_call_2 = llm.calls[3]  # 0=plan, 1=reflect, 2=plan, 3=reflect
-        system_msg = reflect_call_2["messages"][0]
-        assert "tried approach A" in system_msg.content
-        assert "approach A" in system_msg.content
+        text = _said(reflect_call_2)
+        assert "tried approach A" in text
+        assert "approach A" in text
 
 
 class TestReflectionInfluencesRetrieval:
@@ -739,66 +614,11 @@ class TestPrePlanIncludesReflections:
     """Pre-plan size check must account for reflection content."""
 
     @pytest.mark.asyncio
-    async def test_oversized_reflection_forces_decompose(self) -> None:
-        """Under ``reflection_gate="utility"``, a parsed reflection whose
-        serialized form exceeds :data:`MAX_REFLECTION_CHARS` must override
-        the model's choice and force ``recommended_action='decompose'`` so
-        the next attempt does not start.
-
-        Single-latest semantics mean a pre-injected huge reflection is
-        replaced by every subsequent ``add_reflection`` call, so the
-        budget cap has to fire on the *parsed* reflection itself.
-        """
-        options = AgentOptions(
-            steps_per_attempt=1,
-            max_attempts=3,
-            max_steps=10,
-            reflection_gate="utility",
-            answer_on_stop=False,
-        )
-
-        llm = FakeLLM()
-        # Attempt 0: a tool call so the attempt exhausts its 1-step budget.
-        llm.enqueue(
-            Message(
-                role="assistant",
-                content="try",
-                tool_call=ToolCall(tool_name="echo", arguments={"text": "a"}),
-            )
-        )
-        # Reflection: model says "continue" but its summary is huge —
-        # serializing the entry pushes it past MAX_REFLECTION_CHARS so
-        # the agent must override to decompose.
-        bloat = "x" * 4000
-        llm.enqueue(
-            Message(
-                role="assistant",
-                content=_reflection_json(
-                    "continue",
-                    summary=bloat,
-                    rationale="model wants to continue",
-                ),
-            )
-        )
-
-        agent = _make_echo_agent(llm, options=options)
-        result = await agent.run("echo test")
-
-        # Decompose is not "continue", so _should_continue returns False
-        # and the gate stops the task. The result string carries the
-        # rationale, which must mention the budget overflow.
-        tasks = list(agent.hippo.history._tasks.values())
-        assert tasks[0].status == "gate_stopped"
-        assert "reflection budget exceeded" in result
-        assert tasks[0].attempts_completed == 1  # second attempt did not start
-
-    @pytest.mark.asyncio
-    async def test_oversized_reflection_is_trimmed_under_flags(self) -> None:
-        """Under ``reflection_gate="flags"``, the default, the same
-        reflection keeps the model's ``continue``: its summary is cut to
-        fit :data:`MAX_REFLECTION_CHARS`, and the next attempt starts and
-        plans with it."""
-        options = legacy_options(steps_per_attempt=1, max_attempts=3, max_steps=10)
+    async def test_oversized_reflection_is_trimmed(self) -> None:
+        """An oversized reflection keeps the model's ``continue``: its summary
+        is cut to fit :data:`MAX_REFLECTION_CHARS`, and the next attempt starts
+        and plans with it."""
+        options = AgentOptions(steps_per_attempt=1, max_attempts=3, max_steps=10)
 
         llm = FakeLLM()
         llm.enqueue(
@@ -832,8 +652,12 @@ class TestPrePlanIncludesReflections:
         # "[reflection] Attempt 0: <summary>" in the budget.
         room = MAX_REFLECTION_CHARS - len("[reflection] Attempt 0: ")
         cut = "x" * (room - 1) + "…"
-        system_msg = llm.calls[-1]["messages"][0].content
-        assert system_msg.endswith(f"[REFLECTION]\nAttempt 0: {cut}")
+        [block] = [
+            m.content
+            for m in llm.calls[-1]["messages"]
+            if m.content.startswith("[Reflections; data")
+        ]
+        assert f"[REFLECTION]\nAttempt 0: {cut}\n[end of reflections]" in block
 
 
 class TestReflectionFailureTypeInPrompt:

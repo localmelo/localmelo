@@ -1,4 +1,4 @@
-"""Opt-in fixed system prefix and per-run date contract."""
+"""The fixed system prefix and the per-run date contract."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ import pytest
 from localmelo.melo.agent import Agent, AgentOptions, _chat
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ReflectionEntry, ToolCall, ToolDef
+from localmelo.tests.agent.wire_runs import Call, Reply, ScriptedServer, _bodies, _llm
 
 
 class Provider(BaseLLMProvider):
@@ -50,7 +51,6 @@ async def test_prefix_frozen_across_steps_and_runs(
     agent = Agent(
         llm=provider,
         options=AgentOptions(
-            fixed_prefix=True,
             workspace_root=str(tmp_path),
             builtins=frozenset({"file_read"}),
             memory=False,
@@ -96,7 +96,6 @@ async def test_tool_schema_behavior_when_registry_changes(
     agent = Agent(
         llm=provider,
         options=AgentOptions(
-            fixed_prefix=True,
             workspace_root=str(tmp_path),
             builtins=frozenset({"file_read"}),
             memory=False,
@@ -123,14 +122,6 @@ async def test_tool_schema_behavior_when_registry_changes(
 async def test_provider_wire_preserves_common_prefix(
     kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from localmelo.tests.agent.test_legacy_golden import (
-        Call,
-        Reply,
-        ScriptedServer,
-        _bodies,
-        _llm,
-    )
-
     monkeypatch.setattr(
         _chat, "local_date_line", lambda: "Date: 2026-10-28 (UTC-04:00)"
     )
@@ -146,7 +137,6 @@ async def test_provider_wire_preserves_common_prefix(
     agent = Agent(
         llm=_llm(kind, httpx.MockTransport(server.handler)),
         options=AgentOptions(
-            fixed_prefix=True,
             workspace_root=str(tmp_path),
             builtins=frozenset({"file_read"}),
             memory=False,
@@ -276,77 +266,25 @@ async def test_empty_recall_coalesces_multiple_task_messages() -> None:
 
 
 @pytest.mark.parametrize("kind", ["openai", "ollama"])
-async def test_retrieve_exposure_offers_same_wire_schemas(
-    kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from localmelo.tests.agent.test_legacy_golden import (
-        Call,
-        Reply,
-        ScriptedServer,
-        _bodies,
-        _llm,
-    )
-
-    monkeypatch.setattr(
-        _chat, "local_date_line", lambda: "Date: 2026-10-28 (UTC-04:00)"
-    )
-    (tmp_path / "sample.txt").write_text("evidence")
-    requests = []
-    for fixed in (False, True):
-        server = ScriptedServer(
-            _bodies(
-                kind,
-                [
-                    Reply(calls=(Call("file_read", {"path": "sample.txt"}),)),
-                    Reply(content="done"),
-                ],
-            )
+async def test_a_retrieval_request_keeps_its_messages_apart(kind: str) -> None:
+    server = ScriptedServer(_bodies(kind, [Reply(content="result")]))
+    provider = _llm(kind, httpx.MockTransport(server.handler))
+    chat = _chat.Chat(provider, fixed_prefix=True)
+    try:
+        await chat.retrieve(
+            [
+                Message("system", "retrieval policy"),
+                Message("user", "first"),
+                Message("user", "second"),
+            ]
         )
-        agent = Agent(
-            llm=_llm(kind, httpx.MockTransport(server.handler)),
-            options=AgentOptions(
-                fixed_prefix=fixed,
-                workspace_root=str(tmp_path),
-                builtins=frozenset({"file_read"}),
-                memory=False,
-                tool_exposure="retrieve",
-            ),
-        )
-        try:
-            assert (await agent.run_task("Read sample.txt")).status == "completed"
-        finally:
-            await agent.close()
-        requests.append([body.get("tools") for body in server.bodies])
-    assert requests[0] == requests[1]
-
-
-@pytest.mark.parametrize("kind", ["openai", "ollama"])
-async def test_retrieval_request_wire_is_unchanged(kind: str) -> None:
-    from localmelo.tests.agent.test_legacy_golden import (
-        Reply,
-        ScriptedServer,
-        _bodies,
-        _llm,
-    )
-
-    bodies = []
-    for fixed in (False, True):
-        server = ScriptedServer(_bodies(kind, [Reply(content="result")]))
-        provider = _llm(kind, httpx.MockTransport(server.handler))
-        chat = _chat.Chat(provider, fixed_prefix=fixed)
-        try:
-            await chat.retrieve(
-                [
-                    Message("system", "retrieval policy"),
-                    Message("user", "first"),
-                    Message("user", "second"),
-                ]
-            )
-        finally:
-            await provider.close()
-        bodies.append(server.bodies[0])
-    assert bodies[0] == bodies[1]
-    assert [m["role"] for m in bodies[0]["messages"]] == ["system", "user", "user"]
+    finally:
+        await provider.close()
+    assert [m["role"] for m in server.bodies[0]["messages"]] == [
+        "system",
+        "user",
+        "user",
+    ]
 
 
 async def test_cache_telemetry_excludes_unprefixed_calls(
@@ -465,7 +403,6 @@ async def test_run_freezes_day_across_midnight_and_dst(
     agent = Agent(
         llm=provider,
         options=AgentOptions(
-            fixed_prefix=True,
             workspace_root=str(tmp_path),
             builtins=frozenset({"file_read"}),
             memory=False,

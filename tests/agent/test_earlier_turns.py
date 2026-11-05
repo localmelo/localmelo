@@ -32,7 +32,6 @@ from localmelo.melo.agent._earlier import (
 from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ToolCall, ToolDef
-from localmelo.tests.legacy_options import LEGACY_CACHE_OPTIONS
 
 NAMES = ("Alex", "Sam")
 TURNS = [
@@ -178,8 +177,8 @@ async def _chat_then_look_up(
 
 
 LAYOUTS = [
-    pytest.param({}, id="fixed-prefix"),
-    pytest.param(LEGACY_CACHE_OPTIONS | {"window_messages": 8}, id="legacy-layout"),
+    pytest.param({}, id="default-window"),
+    pytest.param({"window_messages": 8}, id="small-window"),
 ]
 
 

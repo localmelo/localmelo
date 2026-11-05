@@ -38,7 +38,6 @@ from localmelo.melo.schema import (
     starts_with_reply_label,
     starts_with_reply_nudge,
 )
-from localmelo.tests.legacy_options import LEGACY_ANSWER_OPTIONS
 
 REMEMBER = ToolDef(
     name="remember",
@@ -500,8 +499,6 @@ def _agent(llm: _Scripted, **options: Any) -> tuple[Agent, _Memory]:
     options.setdefault("tool_exposure", "all")
     options.setdefault("retriever", "off")
     options.setdefault("attempt_policy", "none")
-    for name, value in LEGACY_ANSWER_OPTIONS.items():
-        options.setdefault(name, value)
     agent = Agent(llm=llm, options=AgentOptions(**options))
     memory = _Memory()
     agent.hippo.register_tool(REMEMBER)

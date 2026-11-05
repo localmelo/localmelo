@@ -15,7 +15,7 @@ from unittest import mock
 
 import pytest
 
-from localmelo.melo.agent import Agent
+from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.memory.history.sqlite import SqliteHistory
@@ -29,7 +29,6 @@ from localmelo.support.config import (
     LocalBackendConfig,
 )
 from localmelo.support.gateway.session import SessionManager
-from localmelo.tests.legacy_options import legacy_options
 
 # ── Fake providers ──────────────────────────────────────────────────────────
 
@@ -235,9 +234,9 @@ class TestSingleSystemMessageWithMemory:
     @pytest.mark.asyncio
     async def test_single_system_msg_with_long_term_memory(self) -> None:
         """When long-term memory returns [memory] items, plan_step merges
-        them into the first system prompt under a [RECALL] section."""
+        them into one [RECALL] block."""
         llm = FakeLLM([Message(role="assistant", content="ok")])
-        agent = Agent(llm=llm, embedding=FakeEmbedding(), options=legacy_options())
+        agent = Agent(llm=llm, embedding=FakeEmbedding(), options=AgentOptions())
 
         # Seed long-term memory so retrieve_context returns system messages.
         await agent.hippo.long.add("fact alpha", [1.0, 0.0, 0.0, 0.0])
@@ -253,11 +252,14 @@ class TestSingleSystemMessageWithMemory:
         assert (
             len(sys_msgs) == 1
         ), f"Expected exactly 1 system message, got {len(sys_msgs)}"
-        assert "[RECALL]" in sys_msgs[0].content
-        assert "fact alpha" in sys_msgs[0].content
-        assert "fact beta" in sys_msgs[0].content
+        # The fixed prefix keeps the system prompt stable, so the recall block rides
+        # in the user message.
+        said = "\n".join(m.content for m in sent)
+        assert "[RECALL]" in said
+        assert "fact alpha" in said
+        assert "fact beta" in said
         # Memory prefix must be stripped.
-        assert "[memory]" not in sys_msgs[0].content
+        assert "[memory]" not in said
         await agent.close()
 
     @pytest.mark.asyncio

@@ -216,6 +216,7 @@ class TestDroppedNote:
             [*_reads(24), _answer("done")],
             max_steps=40,
             steps_per_attempt=40,
+            window_messages=20,
             brief_probe=_digest(None),
         )
         last = llm.calls[-1]["messages"][-1]
@@ -274,7 +275,7 @@ class TestReflectionPointers:
             replies, max_attempts=3, steps_per_attempt=1, brief_probe=_digest("same")
         )
         want = f"{NO_CHANGE_PUSH} Start with: edit runner.py line 40"
-        assert llm.calls[2]["messages"][-1].content == want
+        assert llm.calls[2]["messages"][-1].content.endswith(want)
 
     @pytest.mark.asyncio
     async def test_a_reflection_without_a_direction_leaves_the_line(self) -> None:
@@ -284,7 +285,7 @@ class TestReflectionPointers:
             steps_per_attempt=1,
             brief_probe=_digest("same"),
         )
-        assert llm.calls[2]["messages"][-1].content == NO_CHANGE_PUSH
+        assert llm.calls[2]["messages"][-1].content.endswith(NO_CHANGE_PUSH)
 
     def test_the_direction_is_redacted_and_capped(self) -> None:
         entry = ReflectionEntry(

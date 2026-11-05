@@ -14,7 +14,6 @@ from localmelo.melo.memory.recall import (
     RECALL_START,
 )
 from localmelo.melo.schema import Message, ToolCall
-from localmelo.tests.legacy_options import LEGACY_CACHE_OPTIONS
 
 from .test_recall_loop import (
     FakeEmbedding,
@@ -62,7 +61,6 @@ async def test_a_long_entry_is_redacted_before_the_block() -> None:
             reasoning="compress",
             retriever="embedding",
             max_steps=1,
-            **LEGACY_CACHE_OPTIONS,
         ),
         embedding=FakeEmbedding(),
     )
@@ -74,7 +72,8 @@ async def test_a_long_entry_is_redacted_before_the_block() -> None:
     finally:
         await agent.close()
     block = llm.requests[0][1].content
-    recall_text = block.split(RECALL_START, 1)[1]
+    # The query follows the block in the same message, with its own secret.
+    recall_text = block.split(RECALL_START, 1)[1].split(RECALL_END, 1)[0]
     assert secret not in recall_text
     assert "redacted" in recall_text.lower()
     assert result.memory_stats is not None
@@ -154,7 +153,6 @@ async def test_the_block_ends_with_its_delimiter_after_sanitizing() -> None:
             reasoning="compress",
             retriever="embedding",
             max_steps=1,
-            **LEGACY_CACHE_OPTIONS,
         ),
         embedding=FakeEmbedding(),
     )
@@ -169,8 +167,11 @@ async def test_the_block_ends_with_its_delimiter_after_sanitizing() -> None:
         await agent.close()
     assert result.status == "completed"
     block = llm.requests[0][1].content
-    assert block.endswith(RECALL_END)
-    recall_text = block.split("\n\n", 1)[1]
+    # The block sits inside the message's retrieved-context frame, before the query.
+    assert block.rstrip().endswith("q")
+    recall_text = block[
+        block.index(RECALL_START) : block.index(RECALL_END) + len(RECALL_END)
+    ]
     assert len(recall_text) == result.memory_stats["recall_chars"]  # type: ignore[index]
 
 
