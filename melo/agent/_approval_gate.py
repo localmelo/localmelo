@@ -1,0 +1,992 @@
+"""The approval gate of a run: what asks the policy before a call runs.
+
+:class:`_ApprovalGate` is the executor's gate for one call of a run with a
+policy; :class:`_ToolAsk` is what a running tool (the browser tools) uses to
+ask the same policy its own questions. Both take the run's state, the policy
+and the checker, never the Agent, and keep what came of a question in the run
+(``run.reviews``) and in the record of the call.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import copy
+import dataclasses
+import functools
+import uuid
+from collections.abc import Awaitable, Callable, Mapping
+from typing import TYPE_CHECKING, Any, Final
+
+from localmelo.melo.agent._step_review import StepReviewer, plain_page_key
+from localmelo.melo.checker import Checker
+from localmelo.melo.checker.payloads import ActionReviewPayload
+from localmelo.melo.checker.review.gist import step_gist
+from localmelo.melo.contracts.approvals import (
+    ALLOWED_ONCE,
+    BLOCKED_ALIKE,
+    BLOCKED_EARLIER,
+    DESKTOP_ACT,
+    NOBODY_TO_ASK,
+    STOPPED_NOTE,
+    TAKEOVER,
+    WINDOW_READ,
+    ApprovalDecision,
+    ApprovalPolicy,
+    ApprovalRequest,
+    AutoPolicy,
+    Chosen,
+    ReviewMode,
+    Withdrawal,
+    ask,
+    block_note,
+    call_key,
+    find_auto,
+    find_earlier,
+    find_folder_asker,
+    holds_grant,
+    question_key,
+    review_mode,
+    site_key,
+)
+from localmelo.melo.contracts.folders import OutsideAccess, home_label
+from localmelo.melo.contracts.review import (
+    CATEGORY_WORDS,
+    RULED_TOOLS,
+    SELF_DENIAL,
+    SITE_KEY,
+    TITLES,
+    ActionReview,
+    address_keys,
+    block_words,
+    loose_keys,
+    reaches_unread_site,
+    step_key,
+)
+from localmelo.melo.executor import AutoConfinement, call_preview
+from localmelo.melo.executor.models import ExecutionRequest
+from localmelo.melo.schema import ToolCall, ToolTier, exception_text
+
+if TYPE_CHECKING:
+    from localmelo.melo.agent.agent import _RunState
+
+
+class _ApprovalGate:
+    """The executor's approval gate for one call of a run with a policy.
+
+    The executor calls it just before a tool that requires approval would
+    run (see :meth:`Executor.execute_structured`). It builds the
+    :class:`ApprovalRequest` from the request that would run, asks the
+    run's policy, and keeps what came of it in :attr:`asked` for the
+    call's ``tool.finished`` event. While the review and the policy decide,
+    ``run.waiting_call_id`` names the call, so that a cancellation there
+    closes the call as not started (see :meth:`Agent._on_cancelled`).
+
+    With a *checker*, the request carries the call's review (#279), kept in
+    :attr:`review` for the denial text; a call that would change localmelo
+    itself (the ``self`` category) is denied without asking the policy.
+    With a *reviewer*, the user's model settles a call the rules left open
+    when the policy would let it run without a person (a session grant, or
+    auto mode; see :mod:`localmelo.melo.agent._step_review`). In auto mode
+    (#339) a denial is a block: the model reads the note of
+    :func:`~localmelo.melo.contracts.approvals.block_note`, and a second
+    block of the same kind sets ``run.reviews.stop``; the step's later
+    calls are then blocked unreviewed. A tool the rules do not read
+    (:data:`~localmelo.melo.checker.review.RULED_TOOLS`) that is not
+    read-only is undecided in auto mode, so the user's model reviews it.
+    While a site is refused in the task (#433), a ``shell_exec`` or
+    ``python_exec`` call the rules find routine that reaches a host melo
+    cannot read (:func:`~localmelo.melo.contracts.review.reaches_unread_site`)
+    is undecided too when it would run without a person, so the user's
+    model reviews it, told which sites were refused.
+
+    A file tool's call on a path outside the workspace (#405) is asked of
+    the policy's folder layer only
+    (:func:`~localmelo.melo.contracts.approvals.find_folder_asker`), and
+    only in a run the person started: auto mode never decides it and no
+    tool grant covers it (see :meth:`asks_folders` and :meth:`_folder`).
+
+    The run's cancellation propagates, and the prompt counts as withdrawn.
+    The policy fails closed otherwise: an exception it raises, a
+    ``CancelledError`` while nothing cancels the run, and a return value
+    other than an :class:`ApprovalDecision` each reach the executor as an
+    exception, and the executor refuses the call.
+    """
+
+    def __init__(
+        self,
+        policy: ApprovalPolicy,
+        run: _RunState,
+        call: ToolCall,
+        workspace_root: str | None,
+        tier: ToolTier,
+        checker: Checker | None = None,
+        reviewer: StepReviewer | None = None,
+        destructive: bool = False,
+        confinement: AutoConfinement | None = None,
+        asks_itself: bool = False,
+    ) -> None:
+        self._policy = policy
+        self._run = run
+        self._call = call
+        self._workspace_root = workspace_root
+        self._tier = tier
+        self._checker = checker
+        self._reviewer = reviewer
+        self._destructive = destructive
+        self._confinement = confinement
+        self._asks_itself = asks_itself
+        self.review: ActionReview | None = None
+        # The approval of tool.finished: request_id, allowed, reason,
+        # remember and origin, once the policy is asked; None until then.
+        self.asked: dict[str, Any] | None = None
+        self._mode: ReviewMode = "ask"
+        self._key = ""
+        self._allowance = False
+
+    def asks_folders(self, outside: OutsideAccess) -> bool:
+        """Whether a person may be asked about *outside* (#405).
+
+        Only in a run the person started, and only when the policy has a
+        layer that asks about folders; otherwise the executor refuses the
+        path as it always did.
+        """
+        return self._run.from_person and find_folder_asker(self._policy) is not None
+
+    async def __call__(self, request: ExecutionRequest) -> ApprovalDecision:
+        earlier = self._earlier(request)
+        if earlier is not None:
+            return earlier
+        if self._asks_itself:
+            # One of melo's own tools that ask their questions themselves (the
+            # browser tools that act: per site, for every text typed and every
+            # form sent) is not asked a second, empty question here about its
+            # call. Only the names melo lists count, never a tool's annotation.
+            return ApprovalDecision(True, origin="policy")
+        if request.outside is not None:
+            return await self._folder(request, request.outside)
+        run = self._run
+        if self._checker is not None:
+            # In a thread: a runner's review walks the workspace.
+            self.review = await asyncio.to_thread(
+                self._checker.review_action,
+                ActionReviewPayload(
+                    request.tool_name,
+                    dict(request.arguments),
+                    self._workspace_root,
+                    since=None if self._reviewer is None else self._reviewer.since,
+                    destructive=self._destructive,
+                ),
+            )
+        asking = self._asking(request, review=self.review)
+        preview = asking.preview
+        self._mode = review_mode(self._policy, asking)
+        auto = find_auto(self._policy) if self._mode == "auto" else None
+        if (
+            self._mode == "auto"
+            and self.review is not None
+            and self.review.verdict == "routine"
+            and request.tool_name not in RULED_TOOLS
+            and self._tier != "read"
+        ):
+            self.review = ActionReview(
+                "undecided",
+                (),
+                (f"Runs {request.tool_name}, a tool melo's rules do not read.",),
+            )
+            asking = dataclasses.replace(asking, review=self.review)
+        refused = _refused_sites(self._policy, run)
+        if (
+            self._mode != "ask"
+            and refused
+            and self.review is not None
+            and self.review.verdict == "routine"
+            and reaches_unread_site(request.tool_name, request.arguments)
+        ):
+            # A site is refused in this task: a step that reaches a host melo
+            # cannot read is reviewed, not run as routine (#433).
+            self.review = dataclasses.replace(
+                self.review, verdict="undecided", reasons=(UNREAD_SITE,)
+            )
+            asking = dataclasses.replace(asking, review=self.review)
+        run.reviews.count(self.review)
+        if self.review is not None and (
+            self._mode != "ask" or self.review.verdict != "routine"
+        ):
+            self._key = step_key(
+                request.tool_name,
+                request.arguments,
+                self._workspace_root,
+                self.review.inputs,
+            )
+        if self._mode == "auto" and run.reviews.stop:
+            # The turn already stopped: the step's later calls do not run.
+            self._record(asking, origin="auto", reason="the turn stopped")
+            return ApprovalDecision(False, STOPPED_NOTE, origin="auto")
+        if self._mode == "auto":
+            again = run.reviews.declined_again(
+                [
+                    call_key(
+                        request.tool_name, request.arguments, self._workspace_root
+                    ),
+                    *loose_keys(request.tool_name, request.arguments),
+                ]
+            )
+            if again is not None:
+                # This step, or one alike, was declined on the card earlier in
+                # this turn (the person's Don't allow, or no answer): nobody is
+                # asked again (#465).
+                self._record(asking, origin=again.origin, reason=again.reason)
+                assert self.asked is not None
+                self.asked["declined"] = True
+                self.asked.update(again.record())
+                return again
+        if self.review is not None and "self" in self.review.categories:
+            # No model reviews it and no policy is asked.
+            self._counted(request.tool_name, preview)
+            if self._mode == "auto":
+                words = CATEGORY_WORDS["self"]
+                self._record(asking, origin="auto", reason=words, denial=True)
+                return ApprovalDecision(
+                    False, self._block(asking, auto, words), origin="auto"
+                )
+            self._record(asking, origin="policy", reason=SELF_DENIAL, denial=True)
+            return ApprovalDecision(False, SELF_DENIAL, origin="policy")
+
+        async def settle(asked: ApprovalRequest) -> ApprovalDecision:
+            # The review is asked in the same guard as the policy: a failure of
+            # either refuses the call alike.
+            if (
+                self._reviewer is not None
+                and self.review is not None
+                and not (auto is not None and auto.allowed_once(self._key))
+            ):
+                self.review = await self._reviewer.review(
+                    run.reviews,
+                    tool_name=request.tool_name,
+                    arguments=dict(request.arguments),
+                    preview=preview,
+                    review=self.review,
+                    mode=self._mode,
+                    key=self._key,
+                    workspace=self._workspace_root,
+                    refused_sites=refused,
+                )
+                asked = dataclasses.replace(asked, review=self.review)
+            self._counted(request.tool_name, preview)
+            return await self._policy.decide(asked)
+
+        decided = await self._ask(settle, asking)
+        # Who decided, not the mode the call began in: a chat may switch
+        # while the call is reviewed. Auto's card nobody answered is auto
+        # mode's decision (#465).
+        allowance = decided.origin == "user" and decided.reason == ALLOWED_ONCE
+        unanswered = isinstance(decided, Chosen) and decided.origin == "timeout"
+        if decided.origin == "auto" or allowance or unanswered:
+            self._mode = "auto"
+            auto = find_auto(self._policy) or auto
+        elif self._mode == "auto":
+            self._mode = "ask"
+        self._allowance = decided.allow and allowance
+        if decided.allow and self._confinement is not None:
+            # A call auto mode let run starts confined; one a person allowed
+            # does not.
+            self._confinement.on = self._mode == "auto"
+            if self._confinement.on:
+                await asyncio.to_thread(self._confinement.ready)
+        self._record(
+            asking,
+            origin=decided.origin,
+            allowed=decided.allow,
+            reason=decided.reason,
+            remember=decided.remember,
+            # A person's Deny, an auto block, a policy's refusal of the step
+            # itself; never a question withdrawn or one that could not be asked.
+            denial=not decided.allow
+            and decided.origin in ("user", "auto", "policy")
+            and not isinstance(decided, Withdrawal),
+        )
+        if isinstance(decided, Chosen) and not decided.allow:
+            # Don't allow on the card, or no answer, holds for the rest of the
+            # turn (#465); a card nobody answered keeps why, for the surfaces.
+            assert self.asked is not None
+            self.asked.update(decided.record())
+            run.reviews.decline(
+                [
+                    call_key(
+                        request.tool_name, request.arguments, self._workspace_root
+                    ),
+                    *loose_keys(
+                        request.tool_name,
+                        request.arguments,
+                        () if self.review is None else self.review.categories,
+                    ),
+                ],
+                decided,
+            )
+        if not decided.allow and decided.origin == "auto":
+            return dataclasses.replace(
+                decided, reason=self._block(asking, auto, decided.reason)
+            )
+        return decided
+
+    def _earlier(self, request: ExecutionRequest) -> ApprovalDecision | None:
+        """A refusal of a step blocked earlier in this task, before any review (#411).
+
+        Only a policy with :class:`~localmelo.melo.contracts.approvals.EarlierBlocks`
+        in it refuses: a task the chat continued on its own. The record says
+        who blocked the step first (``approval.earlier``).
+        """
+        blocks = find_earlier(self._policy)
+        found = (
+            None
+            if blocks is None
+            else blocks.match(
+                request.tool_name, request.arguments, self._workspace_root
+            )
+        )
+        if found is None:
+            return None
+        who, exact = found
+        asking = self._asking(request, outside=request.outside)
+        reason = (BLOCKED_EARLIER if exact else BLOCKED_ALIKE).format(who=who)
+        self._record(asking, origin="policy", reason=reason)
+        assert self.asked is not None
+        self.asked["earlier"] = who
+        return ApprovalDecision(False, reason, origin="policy")
+
+    async def _folder(
+        self, request: ExecutionRequest, outside: OutsideAccess
+    ) -> ApprovalDecision:
+        """Ask the person about a call on a path outside the workspace (#405).
+
+        The policy's folder layer decides; its answer may be a grant of the
+        folder for the chat or in the settings, which only a read uses. A
+        write is reviewed by the rules first and is high-impact: a write
+        into localmelo itself is denied without asking. Failures and the
+        run's cancellation go as they go for any other call.
+        """
+        run = self._run
+        self._mode = "ask"
+        if outside.access == "write":
+            review = None
+            if self._checker is not None:
+                review = await asyncio.to_thread(
+                    self._checker.review_action,
+                    ActionReviewPayload(
+                        request.tool_name,
+                        dict(request.arguments),
+                        self._workspace_root,
+                    ),
+                )
+            self.review = _outside_write(review, outside)
+            run.reviews.count(self.review)
+        asking = self._asking(request, review=self.review, outside=outside)
+        asker = find_folder_asker(self._policy)
+        if asker is None or not run.from_person:
+            # asks_folders said yes, so only a policy changed meanwhile.
+            self._record(asking, origin="policy", reason=NO_FOLDER_ASKER)
+            return ApprovalDecision(False, NO_FOLDER_ASKER, origin="policy")
+        if self.review is not None and "self" in self.review.categories:
+            self._record(asking, origin="policy", reason=SELF_DENIAL)
+            return ApprovalDecision(False, SELF_DENIAL, origin="policy")
+        decided = await self._ask(asker.decide_folder, asking)
+        if decided.allow and decided.origin in ("auto", "earlier"):
+            # Only a person, a grant of the folder or the settings allow it.
+            refused = ApprovalDecision(False, NO_FOLDER_ASKER, origin="policy")
+            self._record(asking, origin="policy", reason=NO_FOLDER_ASKER)
+            return refused
+        self._record(
+            asking,
+            origin=decided.origin,
+            allowed=decided.allow,
+            reason=decided.reason,
+            remember=decided.remember,
+        )
+        assert self.asked is not None
+        self.asked["folder"] = {**outside.to_json(), "scope": _folder_scope(decided)}
+        return decided
+
+    def _asking(
+        self,
+        request: ExecutionRequest,
+        *,
+        review: ActionReview | None = None,
+        outside: OutsideAccess | None = None,
+    ) -> ApprovalRequest:
+        """The request to the policy for the call *request* would run."""
+        return ApprovalRequest(
+            request_id=uuid.uuid4().hex,
+            run_id=self._run.task_id,
+            call_id=self._call.id,
+            tool_name=request.tool_name,
+            arguments=copy.deepcopy(request.arguments),
+            preview=call_preview(request.tool_name, request.arguments),
+            workspace_root=self._workspace_root,
+            tier=self._tier,
+            review=review,
+            outside=outside,
+        )
+
+    async def _ask(
+        self,
+        decide: Callable[[ApprovalRequest], Awaitable[object]],
+        asking: ApprovalRequest,
+    ) -> ApprovalDecision:
+        """:func:`ask` with the call named in ``run.waiting_call_id`` meanwhile."""
+        run = self._run
+        run.waiting_call_id = self._call.id
+        decided = await ask(
+            decide, asking, record=functools.partial(self._failed, asking)
+        )
+        run.waiting_call_id = ""
+        return decided
+
+    def _failed(
+        self, asking: ApprovalRequest, origin: str, error: BaseException | None
+    ) -> None:
+        """Keep a question that got no decision (see :func:`ask`)."""
+        if error is not None:
+            # A withdrawn question keeps the name: the call did not start.
+            self._run.waiting_call_id = ""
+        reason = "" if error is None else exception_text(error)
+        self._record(asking, origin=origin, reason=reason)
+
+    def _counted(self, tool_name: str, preview: str) -> None:
+        """Count the call among those that a later model review is told came before it."""
+        self._run.reviews.calls.append(
+            (
+                tool_name,
+                preview,
+                "routine" if self.review is None else self.review.verdict,
+            )
+        )
+
+    def _block(
+        self, asking: ApprovalRequest, auto: AutoPolicy | None, words: str = ""
+    ) -> str:
+        """Keep an auto-mode block and return the note the model reads."""
+        task = auto is not None and auto.task
+        changed = auto is not None and auto.has_allowances(asking.tool_name)
+        if self._reviewer is None:
+            return block_note(self.review, words=words, task=task, changed=changed)
+        return self._reviewer.blocked(
+            self._run.reviews,
+            review=self.review,
+            key=self._key,
+            call_id=self._call.id,
+            preview=asking.preview,
+            words=words or block_words(self.review),
+            task=task,
+            workspace=self._workspace_root,
+            changed=changed,
+        )
+
+    def _record(
+        self,
+        asking: ApprovalRequest,
+        *,
+        origin: str,
+        allowed: bool = False,
+        reason: str = "",
+        remember: bool = False,
+        denial: bool = False,
+    ) -> None:
+        """Keep the outcome of *asking*.
+
+        *origin* is the decision's, ``"error"`` when the policy failed (the
+        reason is then the failure), or ``"withdrawn"`` when the run was
+        cancelled while the policy decided. In auto mode, and for a call
+        that is not plainly routine, the record also holds the ``mode``, the
+        ``review`` and the ``step_key``; an allowance used is ``"once"``.
+        *denial*: the step itself was denied (a person's Deny, an auto block,
+        a policy's refusal of the step); the record then keeps its
+        ``call_key`` and ``loose_keys``, so a task its chat continues does not
+        run it, or a step alike, again (#411).
+        """
+        self.asked = {
+            "request_id": asking.request_id,
+            "allowed": allowed,
+            "reason": reason,
+            "remember": remember,
+            "origin": origin,
+        }
+        review = self.review
+        if self._mode == "auto":
+            self.asked["mode"] = "auto"
+        if review is not None and (
+            self._mode == "auto" or review.verdict != "routine" or review.by == "model"
+        ):
+            shown = review.to_json()
+            # The sentence the approval card starts with (#454).
+            gist = step_gist(asking.tool_name, asking.arguments, review)
+            if gist is not None:
+                shown["gist"] = gist.to_json()
+            self.asked["review"] = shown
+            if self._key:
+                self.asked["step_key"] = self._key
+        if self._allowance:
+            self.asked["allowance"] = "once"
+        if denial and not allowed:
+            # What makes a later call the same step, or one alike: a task the
+            # chat continues on its own never runs it again (#411).
+            self.asked["call_key"] = call_key(
+                asking.tool_name, asking.arguments, self._workspace_root
+            )
+            self.asked["loose_keys"] = loose_keys(
+                asking.tool_name,
+                asking.arguments,
+                () if review is None else review.categories,
+            )
+
+
+# Why a step is reviewed that the rules found routine: it reaches a host melo
+# cannot read while a site is refused in the task (#433).
+UNREAD_SITE: Final = (
+    "Reaches a host melo cannot read, while a site is refused in this task."
+)
+
+# Why a path outside the workspace was refused when no person could be
+# asked after all (the policy changed while the call was checked).
+NO_FOLDER_ASKER: Final = "no one can allow a folder outside the workspace in this run"
+
+
+def _outside_write(review: ActionReview | None, outside: OutsideAccess) -> ActionReview:
+    """*review* of a write outside the workspace: high-impact, ``outside_write`` included.
+
+    The rules leave the category out of a file tool's review, since the
+    workspace fence used to place every write; here it is outside.
+    """
+    found = review or ActionReview("routine")
+    categories = [*found.categories]
+    if "outside_write" not in categories:
+        categories.append("outside_write")
+    order = list(TITLES)
+    categories.sort(key=lambda name: order.index(name) if name in order else len(order))
+    reasons = (
+        *found.reasons,
+        f"Writes {home_label(outside.path)}, outside the workspace.",
+    )
+    return dataclasses.replace(
+        found, verdict="high", categories=tuple(categories), reasons=reasons[:3]
+    )
+
+
+def _folder_scope(decision: ApprovalDecision) -> str:
+    """What allowed a call outside the workspace: once, chat, always, or "" (denied)."""
+    if not decision.allow:
+        return ""
+    if decision.origin == "session":
+        return "chat"
+    if decision.origin == "policy":
+        return "always"
+    if decision.always:
+        return "always"
+    return "chat" if decision.remember else "once"
+
+
+# The words of auto mode's review of a site question, by what the tool wants to
+# do there: open it (no ``access``), click or choose on a page, click at a
+# point, type on it, or send a form from it. The step is judged on the goal of
+# the chat (#465), so nothing here says the request did not name it.
+_SITE_DOUBT = {
+    "": "Opens {site}.",
+    "read": "Opens {site}.",
+    "act": "Clicks or chooses on {site}.",
+    "point": "Clicks at a point on {site}.",
+    "submit": "Sends a form from {site}, which needs its own review.",
+    "dialog": "Answers OK to a question the page on {site} asks.",
+}
+# A page asked to open another app (an address of the app's kind): only a
+# person's answer lets melo open it, in auto mode too.
+_HANDOFF = "Opens {app}, an app on this Mac, because a page on {site} asked for it."
+# The questions only the person answers, in Ask and in Auto alike: no model sees them, so no
+# review decides them. In Auto each is stopped for a card with these words (nobody else sees
+# them): a window another app put up, a press in one, and a page that needs the person.
+_PERSON_WORDS = {
+    WINDOW_READ: "Another app put up a window right after a step; only you decide whether melo sees it.",
+    DESKTOP_ACT: "Pressing a button in another app's window is yours to decide, every time.",
+    TAKEOVER: "melo needs you on this page (a sign-in or a check only you can do); only you can take it over.",
+}
+_TYPING_DOUBT = (
+    "Types text on {site}, which needs its own review: the text is the model's own."
+)
+# A click on a site the person's words name: still reviewed, by what it is on.
+_NAMED_SITE = " The user's words name this site."
+# A click whose target melo cannot tell (#465): the person is asked.
+_UNKNOWN_TARGET = "Clicks on {site} where melo cannot tell what it clicks."
+# The site questions that carry no value of melo's (#465): a click or a choice
+# on a page, a click at a point, an OK to a box. Only these can turn a model's
+# ``credentials`` into no category; a read (its address can hold a key), a
+# search, typing, a form sent, or any access not listed never does.
+_VALUE_FREE_ACCESS: Final = frozenset({"act", "point", "dialog"})
+
+
+def _site_doubt(access: str, site: str, preview: str) -> str:
+    """What a running tool's question does, for its review.
+
+    A question of a kind this table does not know (another tool's) is
+    described by its preview.
+    """
+    if access == "type":
+        return _TYPING_DOUBT.format(site=site)
+    if access in _SITE_DOUBT:
+        return _SITE_DOUBT[access].format(site=site)
+    said = " ".join(preview.split())[:200].rstrip(".")
+    return (
+        f"{said[:1].upper()}{said[1:]}." if said else _SITE_DOUBT[""].format(site=site)
+    )
+
+
+class _ToolAsk:
+    """What a running tool uses to ask the run's approval policy (``TOOL_ASK``).
+
+    The request is for a name and arguments the tool chooses, not for the
+    tool's own call, so a policy that keeps grants by name keeps one per name.
+    It has the call's id, so a surface shows the question with the call. The
+    run's cancellation propagates, and the prompt counts as withdrawn. The
+    policy fails closed as it does for a call (:func:`ask`), and a question that
+    got no decision is kept in *refused* with its ``origin`` (``withdrawn`` or
+    ``error``).
+
+    In auto mode (#339) a site the browser would open is reviewed first:
+    routine when the user's words name it, otherwise the user's model asks
+    whether it serves the request (cached per site for the chat), and a
+    block is kept as the gate keeps one.
+
+    A question refused is a blocked step like any other (#431): it is kept
+    in *refused* (the call's ``tool_asks``) with its ``call_key`` and its
+    ``loose_keys`` (:func:`question_key` and, for a site, :func:`site_key`
+    among them), and a run its chat continued on its own refuses the same
+    question, one under the same name, or one about the same host however
+    its address is spelt, before any review or prompt (:class:`EarlierBlocks`).
+    """
+
+    def __init__(
+        self,
+        policy: ApprovalPolicy,
+        run: _RunState,
+        call: ToolCall,
+        workspace_root: str | None,
+        reviewer: StepReviewer | None = None,
+        refused: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self._policy = policy
+        self._run = run
+        self._call = call
+        self._workspace_root = workspace_root
+        self._reviewer = reviewer
+        self.refused: list[dict[str, Any]] = [] if refused is None else refused
+
+    def names_host(self, host: str) -> bool:
+        """Whether the user's recent messages name *host* itself (``www.`` aside)."""
+        return self._reviewer is not None and self._reviewer.names_host(host)
+
+    def granted(self, name: str) -> bool:
+        """Whether the run's chat holds a grant of the question *name* (``window-read:<app>``)."""
+        return holds_grant(self._policy, name)
+
+    def refused_earlier(
+        self, tool_name: str, arguments: Mapping[str, Any], preview: str
+    ) -> ApprovalDecision | None:
+        """The refusal of a question blocked earlier in this task, or one alike, or None.
+
+        Asked before anything lets the question through without asking, such
+        as a site the user's words name: a block stands over that (#431).
+        """
+        return self._earlier(self._request(tool_name, arguments, preview))
+
+    def _request(
+        self, tool_name: str, arguments: Mapping[str, Any], preview: str
+    ) -> ApprovalRequest:
+        return ApprovalRequest(
+            request_id=uuid.uuid4().hex,
+            run_id=self._run.task_id,
+            call_id=self._call.id,
+            tool_name=tool_name,
+            arguments=copy.deepcopy(dict(arguments)),
+            preview=preview,
+            workspace_root=self._workspace_root,
+            tier="network",
+        )
+
+    async def _ask(
+        self,
+        decide: Callable[[ApprovalRequest], Awaitable[object]],
+        request: ApprovalRequest,
+    ) -> ApprovalDecision:
+        """:func:`ask`; a question that got no decision is kept in *refused*."""
+        return await ask(
+            decide, request, record=functools.partial(self._failed, request)
+        )
+
+    def _failed(
+        self, request: ApprovalRequest, origin: str, error: BaseException | None
+    ) -> None:
+        """Keep a question that got no decision (see :func:`ask`).
+
+        Without its preview, which can name a window of another app.
+        """
+        self.refused.append(
+            {"request_id": request.request_id, "tool": request.tool_name,
+             "allowed": False, "origin": origin,
+             "reason": "" if error is None else exception_text(error)}
+        )  # fmt: skip
+
+    async def _window(
+        self,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+        preview: str,
+        words: str,
+    ) -> ApprovalDecision:
+        """A question only the person answers: whether melo may see another app's window, or press a button in one.
+
+        Nothing about the window (its app, its title) or the press goes to any
+        model: not to the review model, which never sees this question, and not
+        into a blocked step's record or a later review's prompt. In Auto the policy
+        is handed a review that only a card can settle (the one category
+        ``opaque``, which words and the model never allow), so it asks the
+        person like a card-only kind, or denies when nobody is watching (the reason
+        is :data:`NOBODY_TO_ASK`, not the category's words). An
+        answer of "Allow <App> in this chat" is the policy's grant of this
+        name (``window-read:<bundle id>``). A press (``desktop-act:<app>``) is
+        asked every time and never kept.
+
+        The card that asks the person to take over a page of melo's browser
+        (``takeover:<site>``) goes the same way: only the person can sign in or
+        pass a check, so no review decides it. *words* are the card's own, per
+        kind (:data:`_PERSON_WORDS`).
+        """
+        request = self._request(tool_name, arguments, preview)
+        if review_mode(self._policy, request) == "auto":
+            if self._run.reviews.stop:
+                return ApprovalDecision(False, STOPPED_NOTE, origin="auto")
+            request = dataclasses.replace(
+                request,
+                review=ActionReview("high", ("opaque",), (words,)),
+            )
+        decided = await self._ask(self._policy.decide, request)
+        if not decided.allow and decided.origin == "auto":
+            # Auto refused it only because nobody can be asked: say that, not the
+            # category of code melo cannot check that the fixed review carries.
+            return dataclasses.replace(decided, reason=NOBODY_TO_ASK)
+        return decided
+
+    async def __call__(
+        self, tool_name: str, arguments: Mapping[str, Any], preview: str
+    ) -> ApprovalDecision:
+        for prefix, words in _PERSON_WORDS.items():
+            if tool_name.startswith(prefix):
+                return await self._window(tool_name, arguments, preview, words)
+        request = self._request(tool_name, arguments, preview)
+        earlier = self._earlier(request)
+        if earlier is not None:
+            return earlier
+        reviewer = self._reviewer
+        auto = review_mode(self._policy, request) == "auto" and reviewer is not None
+        key = step_key(tool_name, request.arguments, self._workspace_root)
+        if auto and reviewer is not None and self._run.reviews.stop:
+            # The turn already stopped: no site opens either.
+            return ApprovalDecision(False, STOPPED_NOTE, origin="auto")
+        declined = _declined_keys(tool_name, request.arguments, self._workspace_root)
+        again = self._run.reviews.declined_again(declined) if auto else None
+        if again is not None:
+            # The same question was declined on the card earlier in this turn
+            # (the person's Don't allow, or no answer): nobody is asked again
+            # (#465). A repeat is no new refusal: it keeps no call key.
+            self.refused.append(
+                {"request_id": request.request_id, "tool": tool_name,
+                 "allowed": False, "origin": again.origin,
+                 "reason": again.reason, "declined": True, "preview": preview,
+                 **again.record()}
+            )  # fmt: skip
+            return again
+
+        async def settle(asked: ApprovalRequest) -> ApprovalDecision:
+            # The review is asked in the same guard as the policy, as the
+            # gate does: a failure of either refuses the question alike.
+            nonlocal request
+            if auto and reviewer is not None:
+                site = str(arguments.get("site") or "")
+                access = str(arguments.get("access") or "")
+                # Each step is judged on the goal of the chat (#465). A click or a
+                # choice names what it is on, so each target is reviewed by itself
+                # (once a chat); typed text is the model's own data and a form sent
+                # from a page leaves the computer: each is reviewed by itself, even
+                # on a site you named, and the verdict of one is never kept for the
+                # next.
+                sends = access == "submit"
+                typing = access == "type"
+                reading = access in ("", "read")
+                if arguments.get("target") == "unknown":
+                    # melo cannot tell what the click lands on: nobody can judge it
+                    # on the goal, so the person is asked (#465).
+                    review = ActionReview(
+                        "high", ("opaque",), (_UNKNOWN_TARGET.format(site=site),)
+                    )
+                elif access == "handoff":
+                    # Another app comes to the front: the person's choice, always.
+                    app = " ".join(str(arguments.get("app") or "an app").split())[:80]
+                    review = ActionReview(
+                        "high", ("open_app",), (_HANDOFF.format(app=app, site=site),)
+                    )
+                elif reading and reviewer.names_host(site):
+                    review = ActionReview(
+                        "routine", (), (f"Opens {site}, which you named.",)
+                    )
+                else:
+                    doubt = _site_doubt(access, site, preview)
+                    if site and not reading and reviewer.names_host(site):
+                        doubt += _NAMED_SITE
+                    review = await reviewer.review(
+                        self._run.reviews,
+                        tool_name=tool_name,
+                        arguments=dict(request.arguments),
+                        preview=preview,
+                        review=ActionReview("undecided", (), (doubt,)),
+                        mode="auto",
+                        key=f"{key}|{self._call.id}" if sends or typing else key,
+                        workspace=self._workspace_root,
+                        # One routine verdict reads the site's plain pages.
+                        shared=(
+                            ""
+                            if sends or typing
+                            else plain_page_key(
+                                tool_name, request.arguments, self._workspace_root
+                            )
+                        ),
+                        refused_sites=_refused_sites(self._policy, self._run),
+                        # A click, a choice or a point carries no value: a click on
+                        # a sign-in button is no credential use (#465). A read's
+                        # address can hold a key, so its review stands.
+                        secret_free=access in _VALUE_FREE_ACCESS,
+                    )
+                request = dataclasses.replace(asked, review=review)
+            return await self._policy.decide(request)
+
+        decided = await self._ask(settle, request)
+        if (
+            not decided.allow
+            and decided.origin in ("user", "auto", "policy")
+            and not isinstance(decided, Withdrawal)
+        ):
+            # A person's Deny, an auto block, a policy's refusal of the step:
+            # a task its chat continues on its own never asks it again.
+            self._keep(request, decided)
+        if isinstance(decided, Chosen) and not decided.allow:
+            # Don't allow on the card, or no answer, holds for the rest of the
+            # turn (#465).
+            self._run.reviews.decline(declined, decided)
+            if decided.origin == "timeout":
+                # Nobody's denial of the step (no call key), but the call's
+                # tool_asks say why it did not run, for the surfaces.
+                self.refused.append(
+                    {"request_id": request.request_id, "tool": tool_name,
+                     "allowed": False, "origin": "timeout",
+                     "reason": decided.reason, "preview": preview,
+                     **decided.record()}
+                )  # fmt: skip
+        if (
+            auto
+            and reviewer is not None
+            and not decided.allow
+            and decided.origin == "auto"
+        ):
+            policy = find_auto(self._policy)
+            note = reviewer.blocked(
+                self._run.reviews,
+                review=request.review,
+                key=key,
+                call_id=self._call.id,
+                preview=preview,
+                words=decided.reason,
+                task=policy is not None and policy.task,
+                workspace=self._workspace_root,
+            )
+            return dataclasses.replace(decided, reason=note)
+        return decided
+
+    def _earlier(self, request: ApprovalRequest) -> ApprovalDecision | None:
+        """A refusal of a question refused earlier in this task, or one alike, before any review."""
+        blocks = find_earlier(self._policy)
+        name = request.tool_name
+        found = (
+            None
+            if blocks is None
+            else blocks.match(
+                name,
+                request.arguments,
+                self._workspace_root,
+                # An address nested in its path (a reader, an archive) too:
+                # only to refuse, never kept with a refusal.
+                also=(
+                    *_question_keys(name, request.arguments),
+                    *address_keys(str(request.arguments.get("url") or "")),
+                ),
+            )
+        )
+        if found is None:
+            return None
+        who, exact = found
+        reason = (BLOCKED_EARLIER if exact else BLOCKED_ALIKE).format(who=who)
+        # A refusal of a repeat is no new block: it keeps no call key.
+        self.refused.append(
+            {"request_id": request.request_id, "tool": name, "allowed": False,
+             "origin": "policy", "reason": reason, "earlier": who,
+             "preview": request.preview}
+        )  # fmt: skip
+        return ApprovalDecision(False, reason, origin="policy")
+
+    def _keep(self, request: ApprovalRequest, decided: ApprovalDecision) -> None:
+        """Keep a refused question as a blocked step: its call key and keys alike.
+
+        A refused site joins the run's refused sites, which a later review
+        is told of (#433).
+        """
+        name, arguments = request.tool_name, request.arguments
+        categories = () if request.review is None else request.review.categories
+        site = site_key(arguments)
+        refused = self._run.reviews.refused_sites
+        if site is not None and site[len(SITE_KEY) :] not in refused:
+            refused.append(site[len(SITE_KEY) :])
+        self.refused.append(
+            {"request_id": request.request_id, "tool": name, "allowed": False,
+             "origin": decided.origin, "reason": decided.reason,
+             "preview": request.preview,
+             "call_key": call_key(name, arguments, self._workspace_root),
+             "loose_keys": [*loose_keys(name, arguments, categories),
+                            *_question_keys(name, arguments)]}
+        )  # fmt: skip
+
+
+def _refused_sites(policy: ApprovalPolicy, run: _RunState) -> tuple[str, ...]:
+    """The hosts of the sites refused in this task (#433): earlier runs' first, then this run's."""
+    blocks = find_earlier(policy)
+    found = dict.fromkeys(() if blocks is None else blocks.refused_sites())
+    found.update(dict.fromkeys(run.reviews.refused_sites))
+    return tuple(found)
+
+
+def _question_keys(name: str, arguments: Mapping[str, Any]) -> tuple[str, ...]:
+    """The loose keys of a running tool's question: its name, and its site's host."""
+    site = site_key(arguments)
+    return (question_key(name),) if site is None else (question_key(name), site)
+
+
+def _declined_keys(
+    name: str, arguments: Mapping[str, Any], workspace_root: str | None
+) -> tuple[str, ...]:
+    """The keys a Don't allow of a running tool's question holds for the turn (#465).
+
+    A click or a choice that names what it is on holds for that exact
+    question: Don't allow on "Pay" does not refuse the check-in button. Any
+    other (typing, a form sent, a click melo cannot tell) holds for every
+    question under its name and site.
+    """
+    if (
+        arguments.get("on")
+        and arguments.get("target") != "unknown"
+        and arguments.get("access") not in ("type", "submit")
+    ):
+        return (call_key(name, arguments, workspace_root),)
+    return _question_keys(name, arguments)
