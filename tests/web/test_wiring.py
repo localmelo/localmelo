@@ -149,7 +149,9 @@ async def test_the_terminal_and_the_tasks_pass_the_setting(
     factory._live.clear()
     await factory.build()
     assert seen == [True]
-    assert "web_fetch=session_config.tools.web_fetch is True" in inspect.getsource(launch)
+    assert "web_fetch=session_config.tools.web_fetch is True" in inspect.getsource(
+        launch
+    )
     source = inspect.getsource(workers)
     # A task's provider asks the chat that owns it about a site, or refuses.
     assert "[WebFetchProvider(task=True, cfg=self.settings())]" in source
