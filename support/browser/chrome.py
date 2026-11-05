@@ -21,9 +21,9 @@ another's. Every tab is a page in a window of its own, so no tab is a hidden
 background tab.
 
 Pages are read with the page script Safari's driver uses
-(:data:`~localmelo.support.browser.safari.PAGE_JS`), in an isolated world the
+(:data:`~localmelo.support.browser.pagescript.PAGE_JS`), in an isolated world the
 page's own scripts cannot reach. An act is checked, guarded and looked at by
-the same act scripts (:class:`~localmelo.support.browser.safari.PageScriptActs`),
+the same act scripts (:class:`~localmelo.support.browser.pagescript.PageScriptActs`),
 which run in the page itself as they do in Safari, and done by Chrome's own
 input where it can: trusted mouse and key events at the middle of the element
 melo checked, or at the point of a picture. The page script is the backup, and
@@ -82,7 +82,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from localmelo.support import config
-from localmelo.support.browser import apps, fields, local_apps
+from localmelo.support.browser import apps, local_apps
 from localmelo.support.browser.driver import (
     MAX_TYPED_CHARS,
     Act,
@@ -90,41 +90,28 @@ from localmelo.support.browser.driver import (
     BrowserError,
     BrowserSetupError,
     Dialog,
-    PointHit,
-    RawPage,
     Shot,
-    StaleElementError,
     TabInfo,
     View,
 )
 from localmelo.support.browser.live import DEFAULT_FPS, DEFAULT_QUALITY, Frame
 from localmelo.support.browser.local_apps import LocalAttempt, LocalRule
-from localmelo.support.browser.safari import (
-    _PASSED,
-    _STALE,
-    BLANK_TRIES,
-    FOCUS_JS,
-    PAGE_JS,
-    POLL_S,
+from localmelo.support.browser.pagescript import (
+    PASSED_OVER,
     SETTLE_S,
-    VIEW_JS,
+    STALE,
     PageScriptActs,
-    _changes,
-    _cover_stop,
-    _covered_why,
-    _decode,
-    _element,
-    _key,
-    _nothing_reached,
-    _number,
-    _reached,
-    _spec,
-    _stopped,
-    _view,
     act_script,
-    hit_script,
-    mark_script,
-    same_page,
+    act_spec,
+    as_number,
+    cover_stop,
+    covered_why,
+    decode,
+    new_key,
+    nothing_reached,
+    observed,
+    reached,
+    stopped,
     wait_probe,
 )
 
@@ -1052,7 +1039,7 @@ class ChromeBackgroundDriver(PageScriptActs):
         result = got.get("result")
         value = result.get("value") if isinstance(result, dict) else None
         if isinstance(value, str) and value[:1] in "{[":
-            return _decode(value)
+            return decode(value)
         return value
 
     async def _eval(self, source: str) -> Any:
@@ -1190,38 +1177,6 @@ class ChromeBackgroundDriver(PageScriptActs):
             session, lambda: self._cmd("Page.navigate", {"url": url}, session)
         )
         return await self._here(target)
-
-    async def page(self, tab: str | None) -> RawPage:
-        await self._focus(tab)
-        url = await self._address(tab)
-        data = await self._read(PAGE_JS)
-        if not isinstance(data, dict):
-            raise BrowserError("Chrome returned a page melo could not read.")
-        # The address was checked before the script ran. If the page is no longer
-        # there, what the script read belongs to a page nobody checked.
-        if url and not same_page(url, data.get("url")):
-            raise BrowserError(
-                "The page moved while melo was reading it, so melo did not read it. "
-                "Use browser_read to try again."
-            )
-        elements = [e for e in map(_element, data.get("elements") or []) if e]
-        skipped, frames = data.get("skipped"), data.get("frames")
-        unreached = data.get("unreached")
-        boxes = (
-            tuple(dict.fromkeys(str(f) for f in unreached))[:10]
-            if isinstance(unreached, list)
-            else ()
-        )
-        return RawPage(
-            url,
-            str(data.get("title") or ""),
-            str(data.get("text") or ""),
-            tuple(elements),
-            skipped=skipped if isinstance(skipped, int) and skipped > 0 else 0,
-            doc=str(data.get("doc") or ""),
-            frames=tuple(str(f) for f in frames) if isinstance(frames, list) else (),
-            unreached=boxes,
-        )
 
     async def back(self, tab: str | None) -> TabInfo:
         target = self._resolve(tab)
@@ -1452,97 +1407,35 @@ class ChromeBackgroundDriver(PageScriptActs):
         future.add_done_callback(done)
         return True
 
-    async def wait(
-        self,
-        tab: str | None,
-        until: str,
-        text: str,
-        seconds: float,
-        *,
-        origin: str = "",
-    ) -> bool:
-        await self._focus(tab)
-        probe = wait_probe(until, text, origin)
-        loop = asyncio.get_running_loop()
-        end = loop.time() + seconds
-        while True:
-            try:
-                if await self._read(probe) is True:
-                    return True
-            except BrowserError:
-                # A page between two documents does not answer yet.
-                if self._browser is None or self._browser.closed:
-                    raise
-            if loop.time() >= end:
-                return False
-            await asyncio.sleep(POLL_S)
-
     async def holds(
         self, tab: str | None, until: str, text: str, *, origin: str = ""
     ) -> bool:
         await self._focus(tab)
+        return await self._probe(wait_probe(until, text, origin))
+
+    async def _probe(self, source: str) -> bool:
+        """Whether the wait probe *source* is true now; a page between two documents does not answer yet."""
         try:
-            return await self._read(wait_probe(until, text, origin)) is True
+            return await super()._probe(source)
         except BrowserError:
             if self._browser is None or self._browser.closed:
                 raise
-            return False  # a page between two documents does not answer yet
+            return False
 
-    async def screenshot(
-        self, tab: str | None, mark: tuple[View, float, float] | None = None
-    ) -> Shot:
-        session = await self._focus(tab)
-        if await self._read(FOCUS_JS) is True:
-            raise BrowserError(
-                "A password, code or card field has focus, so melo took no picture."
-            )
-        view = _view(await self._read(VIEW_JS))
-        ring = False
-        if mark is not None and view is not None:
-            with contextlib.suppress(BrowserError):
-                ring = await self._read(mark_script(self._ring, *mark, on=True)) is True
-        try:
-            got = await self._cmd(
-                "Page.captureScreenshot",
-                {"format": "jpeg", "quality": SHOT_QUALITY},
-                session,
-            )
-            data = str(got.get("data") or "")
-            try:
-                raw = base64.b64decode(data, validate=True)
-            except (binascii.Error, ValueError):
-                raw = b""
-            if not raw.startswith(b"\xff\xd8") or len(raw) > MAX_SHOT_BYTES:
-                raise BrowserError("Chrome's picture is not one melo can use.")
-            return Shot("image/jpeg", data, view)
-        finally:
-            if ring and mark is not None:
-                with contextlib.suppress(BrowserError):
-                    await self._read(mark_script(self._ring, *mark, on=False))
-
-    async def hit(self, tab: str | None, view: View, x: float, y: float) -> PointHit:
-        await self._focus(tab)
-        spec = {"url": view.url, "doc": view.doc, "sx": view.x, "sy": view.y}
-        data = await self._read(hit_script({**spec, "x": x, "y": y}))
-        if not isinstance(data, dict):
-            raise BrowserError("Chrome returned an answer melo could not read.")
-        if data.get("stale"):
-            why = str(data["stale"])
-            raise StaleElementError(_STALE.get(why, _STALE["gone"]), why)
-        surface = data.get("surface")
-        if surface not in ("control", "canvas", "frame"):
-            return PointHit("none")
-        item = _element(data.get("el"))
-        site = str(data.get("site") or "") if surface == "frame" else ""
-        mx, my = data.get("x"), data.get("y")
-        moved = isinstance(mx, int | float) and isinstance(my, int | float)
-        return PointHit(
-            cast(Any, surface),
-            item,
-            site=site,
-            consent=fields.consent(str(data.get("words") or "")),
-            at=(_number(mx), _number(my)) if moved else None,
+    async def _capture(self, view: View | None) -> Shot:
+        got = await self._cmd(
+            "Page.captureScreenshot",
+            {"format": "jpeg", "quality": SHOT_QUALITY},
+            await self._session(),
         )
+        data = str(got.get("data") or "")
+        try:
+            raw = base64.b64decode(data, validate=True)
+        except (binascii.Error, ValueError):
+            raw = b""
+        if not raw.startswith(b"\xff\xd8") or len(raw) > MAX_SHOT_BYTES:
+            raise BrowserError("Chrome's picture is not one melo can use.")
+        return Shot("image/jpeg", data, view)
 
     async def blank(self, tab: str | None) -> None:
         """Leave the page in *tab* for an empty one, in its place in the history.
@@ -1563,14 +1456,6 @@ class ChromeBackgroundDriver(PageScriptActs):
             session,
             lambda: self._cmd("Page.navigate", {"url": "about:blank"}, session),
         )
-
-    async def _settled_blank(self, tab: str | None) -> bool:
-        for attempt in range(BLANK_TRIES):
-            if attempt:
-                await asyncio.sleep(POLL_S)
-            if await self._address(tab) == "about:blank":
-                return True
-        return False
 
     async def act(self, tab: str | None, act: Act) -> ActResult:
         """Do *act*: by Chrome's own input first, else by the page script.
@@ -1595,10 +1480,10 @@ class ChromeBackgroundDriver(PageScriptActs):
         browser.handoffs.pop(session, None)
         self._said.pop(target, None)
         if act.element.frame.startswith("x"):
-            raise BrowserError(_STALE["reach"])
+            raise BrowserError(STALE["reach"])
         self._acting.add(session)
         try:
-            spec = _spec(act)
+            spec = act_spec(act)
             passed, failed = "", False
             result: ActResult | None = None
             if act.point is not None or (act.native and act.kind != "select"):
@@ -1634,7 +1519,7 @@ class ChromeBackgroundDriver(PageScriptActs):
             if isinstance(aimed, str):
                 return aimed, False
             x, y = aimed
-            key = _key()
+            key = new_key()
             armed = await self._script(act_script({**spec, "mode": "arm", "key": key}))
             try:
                 if act.kind == "type" and act.point is None:
@@ -1649,18 +1534,18 @@ class ChromeBackgroundDriver(PageScriptActs):
             data, quiet = await self._look(key, spec["doc"], act)
             blocked = [str(k) for k in data.get("blocked") or []]
             if "moved" in blocked:
-                if attempt == 0 and act.point is None and _nothing_reached(data):
+                if attempt == 0 and act.point is None and nothing_reached(data):
                     continue  # the page moved under the click: scroll to it again
-                raise _cover_stop(data.get("movedBy"), act.element.kind)
+                raise cover_stop(data.get("movedBy"), act.element.kind)
             break
-        if not _reached(act, data, frame=armed.get("frame") is True):
-            return _PASSED["missed"], True
+        if not reached(act, data, frame=armed.get("frame") is True):
+            return PASSED_OVER["missed"], True
         self._check_typed(act, data)
         return ActResult(
-            _stopped(blocked),
+            stopped(blocked),
             "point" if act.point is not None else "browser",
             "",
-            _changes(data, quiet),
+            observed(data, quiet),
         )
 
     async def _aim(self, spec: dict[str, Any], act: Act) -> tuple[float, float] | str:
@@ -1675,15 +1560,15 @@ class ChromeBackgroundDriver(PageScriptActs):
         if act.point is not None:
             return act.point
         if act.element.frame:
-            return _PASSED["frame"]
+            return PASSED_OVER["frame"]
         ready = await self._scrolled(spec)
         if ready.get("covered") is True:
-            return _covered_why(ready.get("by"))
+            return covered_why(ready.get("by"))
         if not isinstance(ready.get("cx"), int | float) or not isinstance(
             ready.get("cy"), int | float
         ):
-            return _PASSED["name"]
-        return _number(ready["cx"]), _number(ready["cy"])
+            return PASSED_OVER["name"]
+        return as_number(ready["cx"]), as_number(ready["cy"])
 
     async def _mouse(self, session: str, kind: str, x: float, y: float) -> None:
         params: dict[str, Any] = {"type": kind, "x": x, "y": y}

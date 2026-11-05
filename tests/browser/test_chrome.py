@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from localmelo.support.browser import chrome
+from localmelo.support.browser import chrome, pagescript
 from localmelo.support.browser.chrome import (
     ChromeBackgroundDriver,
     chrome_installed,
@@ -254,6 +254,31 @@ async def test_tabs_back_wait_blank_and_a_picture(
     await driver.close_tab(tab.id)
     assert await driver.tabs() == []
     assert await driver.location(tab.id) == ""
+
+
+async def test_a_wait_goes_on_while_the_page_does_not_answer_but_not_once_chrome_is_gone(
+    driver: ChromeBackgroundDriver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tab = await driver.open(FORM, new_tab=True)
+    monkeypatch.setattr(pagescript, "POLL_S", 0.0)
+    replies: list[object] = [BrowserError("between two documents"), True]
+
+    async def read(source: str) -> object:
+        reply = replies.pop(0)
+        if isinstance(reply, BrowserError):
+            raise reply
+        return reply
+
+    monkeypatch.setattr(driver, "_read", read)
+    assert await driver.wait(tab.id, "load", "", 5) is True
+    # One look gives a page that does not answer as not holding.
+    replies[:] = [BrowserError("between two documents")]
+    assert await driver.holds(tab.id, "load", "") is False
+    assert driver._browser is not None
+    monkeypatch.setattr(driver._browser, "closed", True)
+    replies[:] = [BrowserError("gone")]
+    with pytest.raises(BrowserError, match="gone"):
+        await driver.wait(tab.id, "load", "", 5)
 
 
 async def test_a_page_that_does_not_load_says_why(

@@ -883,6 +883,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Safari's and Chrome's browsing now share one module for the page scripts and for reading a page, waiting,
+  taking a picture and saying what is at a point (`support/browser/pagescript.py`); the Chrome driver no longer
+  imports from the Safari driver. Browsing behaves as before (#505).
 - Developer only: in the list form of recall, when you ask melo to count, total or compare things you told it across chats, it now looks wider in its memory and checks each kind it may have missed, by default; a search on any other turn keeps the usual bar. Part of #428.
 - "Allow for this chat" is no longer memory-only. `GET /api/sessions/{id}` `grants` and `granted_at` list what
   holds in the chat whether it is open or not, the main chat's grants included for a side chat.
