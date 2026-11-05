@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import abc
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
     from localmelo.melo.contracts.providers import (
@@ -11,6 +11,12 @@ if TYPE_CHECKING:
         BaseLLMProvider,
     )
     from localmelo.support.config import Config
+
+
+def configured_model(cfg: Config, key: str, *, embedding: bool = False) -> str:
+    """The chat (or *embedding*) model the config's section *key* names; empty for none."""
+    field = "embedding_model" if embedding else "chat_model"
+    return str(getattr(getattr(cfg, key, None), field, ""))
 
 
 class BaseBackend(abc.ABC):
@@ -24,6 +30,8 @@ class BaseBackend(abc.ABC):
     key: str
     #: Human-readable label for UI / onboarding.
     display_name: str
+    #: Whether the config must name a model (melo_serve serves its own).
+    model_required: ClassVar[bool] = True
 
     def label(self, cfg: Config, *, embedding: bool = False) -> str:
         """What a banner or a status row calls the server *cfg* names.
@@ -33,19 +41,27 @@ class BaseBackend(abc.ABC):
         """
         return self.display_name
 
-    def welcome_note(self, cfg: Config) -> str:
-        """Words the terminal's welcome row shows beside the model; empty for none."""
+    def welcome_note(self, label: str) -> str:
+        """Words the terminal's welcome row shows beside the model; empty for none.
+
+        *label* is what :meth:`in_use` answered for the chat.
+        """
         return ""
 
     def model_name(self, cfg: Config, *, embedding: bool = False) -> str:
-        """The model *cfg* names for this backend; empty when it names none.
+        """The model *cfg* names for this backend; empty when it names none."""
+        return configured_model(cfg, self.key, embedding=embedding)
 
-        A backend whose model is not in the config (melo_serve serves what it
-        serves now) answers from its source, so a banner shows the model in use.
+    def in_use(self, cfg: Config, *, embedding: bool = False) -> tuple[str, str]:
+        """``(label, model)``: what a banner or a request calls the server and model now.
+
+        The label and the model are answered together, so a backend whose
+        model is not in the config (melo_serve serves what it serves now)
+        gives both from one reading of its source.
         """
-        section = getattr(cfg, self.key, None)
-        field = "embedding_model" if embedding else "chat_model"
-        return str(getattr(section, field, ""))
+        return self.label(cfg, embedding=embedding), self.model_name(
+            cfg, embedding=embedding
+        )
 
     @abc.abstractmethod
     def validate(self, cfg: Config) -> list[str]:

@@ -3,15 +3,18 @@
 melo_serve serves the chat and the embedding model behind one OpenAI-compatible
 address and switches them in one command (``melo-serve use <pick>``). It owns
 the runtimes; this module only reads what it says and, for ``melo serve``, asks
-it to start. Two things are read:
+it to start. What it says is read as a :class:`Snapshot`:
 
 - the **state file**, ``$MELO_SERVE_HOME/state.json`` (default
   ``~/.cache/melo_serve``): what is served now, replaced whole on every change;
 - the **control socket**, ``$MELO_SERVE_SOCKET`` (default
-  ``$MELO_SERVE_HOME/control.sock``): plain HTTP, for :class:`Control`.
+  ``$MELO_SERVE_HOME/control.sock``): melo_serve runs only while it accepts a
+  connection, so a state left by a crash or a stop says nothing.
 
-Both paths are resolved at call time. The state file is read at a provider
-build and at a banner, never per request.
+Both paths are resolved at call time, and every surface (a banner, a provider
+build, a status line) takes one snapshot and reads everything from it. The
+state file is data from another process: a field that is not what it should be
+counts as absent, and :func:`snapshot` never raises.
 """
 
 from __future__ import annotations
@@ -19,12 +22,13 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import socket
 import subprocess
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
-
-import httpx
+from urllib.parse import urlsplit
 
 HOME_ENV: Final = "MELO_SERVE_HOME"
 SOCKET_ENV: Final = "MELO_SERVE_SOCKET"
@@ -33,9 +37,14 @@ COMMAND: Final = "melo-serve"
 DEFAULT_URL: Final = "http://127.0.0.1:8321/v1"
 USE_HINT: Final = f"{COMMAND} use <pick>"
 INSTALL_HINT: Final = "uv tool install git+https://github.com/localmelo/melo_serve"
-# How long ``melo serve`` waits for a melo_serve it started to say it runs.
+NOT_INSTALLED: Final = f"melo_serve is not installed: {INSTALL_HINT}"
+# The whole budget of ``melo serve`` for a melo_serve that is not running:
+# ``melo-serve up`` and the wait for the state it writes.
 UP_WAIT_S: Final = 15.0
-CONTROL_TIMEOUT_S: Final = 10.0
+# A state file is a few hundred bytes; a larger one is not read.
+MAX_STATE_BYTES: Final = 256 * 1024
+CONNECT_TIMEOUT_S: Final = 0.2
+LOOPBACK_HOSTS: Final = ("127.0.0.1", "localhost", "::1")
 ROLES: Final = ("chat", "embedding")
 
 
@@ -53,163 +62,110 @@ def socket_path() -> Path:
     return Path(value).expanduser() if value else home() / "control.sock"
 
 
-def read_state() -> dict[str, Any] | None:
+@dataclass(frozen=True)
+class Role:
+    """A served model: its id, the pick's name, its backend and that backend's status."""
+
+    model: str
+    name: str = ""
+    backend_name: str = ""
+    status: str = ""
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    """What melo_serve says now. Not running is the empty one: no URL, no roles."""
+
+    running: bool = False
+    url: str = ""
+    status: str = ""
+    login: bool = False
+    roles: dict[str, Role] = field(default_factory=dict)
+
+
+def _text(value: object) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def _read_state() -> dict[str, Any] | None:
     """The state file as melo_serve wrote it; None if it is missing or not its state."""
     try:
-        state = json.loads(state_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        with state_path().open("rb") as handle:
+            raw = handle.read(MAX_STATE_BYTES + 1)
+        if len(raw) > MAX_STATE_BYTES:
+            return None
+        state = json.loads(raw)
+    except (OSError, ValueError, RecursionError, MemoryError):
         return None
-    schema = state.get("schema") if isinstance(state, dict) else None
-    if not isinstance(schema, str) or not schema.startswith(SCHEMA_PREFIX):
+    if not isinstance(state, dict) or not _text(state.get("schema")).startswith(
+        SCHEMA_PREFIX
+    ):
         return None
-    return state  # type: ignore[no-any-return]
+    return state
 
 
-def served(state: dict[str, Any] | None, role: str = "chat") -> dict[str, Any] | None:
-    """The *role* (``chat`` or ``embedding``) as the state says it is served, else None."""
-    roles = state.get("roles") if state else None
-    entry = roles.get(role) if isinstance(roles, dict) else None
-    return entry if isinstance(entry, dict) and entry.get("model") else None
-
-
-def front_door_url(state: dict[str, Any] | None) -> str:
-    door = state.get("front_door") if state else None
-    url = door.get("url") if isinstance(door, dict) else None
-    return url if isinstance(url, str) and url else DEFAULT_URL
-
-
-def backend_name(entry: dict[str, Any]) -> str:
-    """The display name of a role's backend (``Splash``), else its id (``splash``)."""
-    return str(entry.get("backend_name") or entry.get("backend") or "")
-
-
-def running(state: dict[str, Any] | None) -> bool:
-    """Whether the state says melo_serve runs and the process it names is alive."""
-    if not state or state.get("status") == "stopped":
-        return False
-    door = state.get("front_door")
-    pid = door.get("pid") if isinstance(door, dict) else None
-    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
-        return False
+def _loopback(url: str) -> bool:
+    """Whether *url* is http(s) on this computer: the only address melo_serve listens on."""
     try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
+        parts = urlsplit(url)
+        parts.port  # noqa: B018  (a port that is not a number raises)
+    except ValueError:
         return False
-    except OSError:  # PermissionError: the process exists, under another user
-        return True
+    return parts.scheme in ("http", "https") and parts.hostname in LOOPBACK_HOSTS
+
+
+def _answers() -> bool:
+    """Whether something accepts a connection on the control socket."""
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+            probe.settimeout(CONNECT_TIMEOUT_S)
+            probe.connect(str(socket_path()))
+    except (OSError, ValueError):  # no socket, refused, timed out; a NUL in the path
+        return False
     return True
 
 
+def _role(entry: object) -> Role | None:
+    """The role *entry* names, or None when it is not a dict with a model."""
+    if not isinstance(entry, dict) or not _text(entry.get("model")):
+        return None
+    return Role(
+        entry["model"],
+        _text(entry.get("name")),
+        _text(entry.get("backend_name")) or _text(entry.get("backend")),
+        _text(entry.get("status")),
+    )
+
+
+def snapshot() -> Snapshot:
+    """What melo_serve says now; the empty snapshot when it does not run. Never raises.
+
+    It runs when the state file is its own, does not say ``stopped``, names a
+    loopback address and the control socket accepts a connection. Only then
+    does it serve its roles (those with a model).
+    """
+    state = _read_state()
+    if state is None:
+        return Snapshot()
+    status = _text(state.get("status")) or "ready"
+    door = state.get("front_door")
+    url = (_text(door.get("url")) if isinstance(door, dict) else "") or DEFAULT_URL
+    if status == "stopped" or not _loopback(url) or not _answers():
+        return Snapshot()
+    service, entries = state.get("service"), state.get("roles")
+    entries = entries if isinstance(entries, dict) else {}
+    roles = {name: _role(entries.get(name)) for name in ROLES}
+    return Snapshot(
+        running=True,
+        url=url,
+        status=status,
+        login=isinstance(service, dict) and service.get("login") is True,
+        roles={name: role for name, role in roles.items() if role is not None},
+    )
+
+
 class MeloServeError(Exception):
-    """melo_serve refused a call, or could not be reached.
-
-    *status* is the HTTP status (0: no answer), *type* the ``error.type`` of its
-    reply (``unknown_pick``, ``busy``, ...; ``not_running`` without an answer)
-    and *data* the reply's other error fields (``suggestions``, ``generation``).
-    """
-
-    def __init__(
-        self, status: int, type: str, message: str, data: dict[str, Any] | None = None
-    ) -> None:
-        super().__init__(message)
-        self.status, self.type, self.message = status, type, message
-        self.data = data or {}
-
-
-class Control:
-    """The control socket: ``picks()``, ``switch()``, ``up()`` and ``stop()``.
-
-    *transport* replaces the socket in tests. Every method raises
-    :class:`MeloServeError`.
-    """
-
-    def __init__(self, *, transport: httpx.AsyncBaseTransport | None = None) -> None:
-        self._transport = transport
-
-    async def _call(
-        self,
-        method: str,
-        path: str,
-        body: dict[str, Any] | None = None,
-        *,
-        timeout: float | None = CONTROL_TIMEOUT_S,
-    ) -> dict[str, Any]:
-        transport = self._transport or httpx.AsyncHTTPTransport(uds=str(socket_path()))
-        try:
-            async with httpx.AsyncClient(
-                transport=transport, base_url="http://melo_serve", timeout=timeout
-            ) as client:
-                response = await client.request(method, path, json=body)
-        except httpx.TransportError as exc:
-            raise MeloServeError(
-                0,
-                "not_running",
-                f"melo_serve did not answer ({type(exc).__name__}); "
-                f"start it with `{COMMAND} up`",
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise MeloServeError(
-                0, "bad_reply", f"the reply could not be read ({exc})"
-            ) from exc
-        try:
-            payload = response.json()
-        except ValueError:
-            payload = None
-        if response.status_code >= 400:
-            error = payload.get("error") if isinstance(payload, dict) else None
-            error = error if isinstance(error, dict) else {}
-            data = {k: v for k, v in error.items() if k not in ("type", "message")}
-            raise MeloServeError(
-                response.status_code,
-                str(error.get("type") or "http_error"),
-                str(error.get("message") or f"HTTP {response.status_code}"),
-                data,
-            )
-        if not isinstance(payload, dict):
-            raise MeloServeError(
-                response.status_code, "bad_reply", "the reply is not a JSON object"
-            )
-        return payload
-
-    async def picks(self) -> dict[str, Any]:
-        """``{"memory": ..., "picks": [...]}``: what can be served."""
-        return await self._call("GET", "/picks")
-
-    async def switch(
-        self,
-        pick: str,
-        *,
-        expected_generation: int | None = None,
-        drain_s: float | None = None,
-        force: bool = False,
-    ) -> dict[str, Any]:
-        """Serve *pick* (an id, alias or served name); answers once it is ready.
-
-        There is no timeout: a switch drains requests and loads a model, which
-        can take minutes.
-        """
-        body: dict[str, Any] = {"pick": pick, "force": force}
-        if expected_generation is not None:
-            body["expected_generation"] = expected_generation
-        if drain_s is not None:
-            body["drain_s"] = drain_s
-        return await self._call("POST", "/switch", body, timeout=None)
-
-    async def up(self, role: str = "chat") -> dict[str, Any]:
-        """Load *role*'s pick if it is not ready, and answer the state."""
-        return await self._call("POST", "/up", {"role": role}, timeout=None)
-
-    async def stop(self) -> dict[str, Any]:
-        """Stop the models and melo_serve."""
-        return await self._call("POST", "/stop")
-
-
-def role_text(entry: dict[str, Any] | None) -> str:
-    """``model · backend · status`` of a served role, or ``none``."""
-    if entry is None:
-        return "none"
-    parts = (entry["model"], backend_name(entry), str(entry.get("status") or ""))
-    return " · ".join(part for part in parts if part)
+    """melo_serve cannot answer for a model; the message says what to run."""
 
 
 def command() -> str | None:
@@ -217,29 +173,59 @@ def command() -> str | None:
     return shutil.which(COMMAND)
 
 
-def status_lines(state: dict[str, Any] | None) -> list[str]:
+def start_hint() -> str:
+    """How to get a melo_serve that is not running: start it, or install it first."""
+    return f"{COMMAND} up" if command() else INSTALL_HINT
+
+
+def unavailable(snap: Snapshot, role: str) -> MeloServeError:
+    """The error for a *role* that *snap* does not serve, with the command that fixes it."""
+    if snap.running:
+        return MeloServeError(
+            f"melo_serve serves no {role} model now. Run `{USE_HINT}` to choose one."
+        )
+    if command():
+        return MeloServeError(f"melo_serve is not running. Run `{COMMAND} up`.")
+    return MeloServeError(NOT_INSTALLED)
+
+
+def _clean(text: str) -> str:
+    """*text* as a terminal shows it; a state's words never move the cursor."""
+    from localmelo.support.sessions.display import clean_output
+
+    return clean_output(text)
+
+
+def role_text(role: Role | None) -> str:
+    """``model · backend · status`` of a served role, or ``none``."""
+    if role is None:
+        return "none"
+    return " · ".join(
+        part for part in (role.model, role.backend_name, role.status) if part
+    )
+
+
+def status_lines(snap: Snapshot) -> list[str]:
     """The ``melo serve status`` block: running or not, address, roles, login item."""
-    if not running(state):
-        how = f"{COMMAND} up" if command() else INSTALL_HINT
-        return ["melo_serve:", "  running: False", f"  start: {how}"]
-    assert state is not None  # running() is False without one
-    login = (state.get("service") or {}).get("login")
-    return [
+    if not snap.running:
+        return ["melo_serve:", "  running: False", f"  start: {start_hint()}"]
+    lines = [
         "melo_serve:",
-        f"  running: True ({state.get('status', 'ready')})",
-        f"  address: {front_door_url(state)}",
-        f"  chat: {role_text(served(state, 'chat'))}",
-        f"  embedding: {role_text(served(state, 'embedding'))}",
-        f"  login item: {'installed' if login else 'not installed'}",
+        f"  running: True ({snap.status})",
+        f"  address: {snap.url}",
+        f"  chat: {role_text(snap.roles.get('chat'))}",
+        f"  embedding: {role_text(snap.roles.get('embedding'))}",
+        f"  login item: {'installed' if snap.login else 'not installed'}",
     ]
+    return [_clean(line) for line in lines]
 
 
-def _line(state: dict[str, Any], role: str) -> str:
-    entry = served(state, role)
-    where = f"({front_door_url(state)})"
-    if entry is None:
-        return f"melo_serve: no {role} model yet; run `{USE_HINT}` {where}"
-    return f"melo_serve: {entry['model']} on {backend_name(entry)} {where}"
+def _line(snap: Snapshot, role: str) -> str:
+    where = f"({snap.url})"
+    served = snap.roles.get(role)
+    if served is None:
+        return _clean(f"melo_serve: no {role} model yet; run `{USE_HINT}` {where}")
+    return _clean(f"melo_serve: {served.model} on {served.backend_name} {where}")
 
 
 def ensure_running(role: str = "chat") -> str:
@@ -247,18 +233,19 @@ def ensure_running(role: str = "chat") -> str:
 
     Running: the line names what it serves for *role*. Not running: ``melo-serve
     up`` starts it (through launchd when its login item is installed, otherwise
-    detached) and returns once it is up; the state is then waited for up to
-    :data:`UP_WAIT_S`; a non-zero exit of ``up`` returns at once with the last
-    line it printed (its stderr, else its stdout). Not installed: the line says how to install it. It never
-    raises, so the gateway starts either way.
+    detached) and the state is then waited for, all within one budget of
+    :data:`UP_WAIT_S` (15 s); a non-zero exit of ``up`` returns at once with the
+    last line it printed (its stderr, else its stdout). Not installed: the line
+    says how to install it. It never raises, so the gateway starts either way.
     """
-    state = read_state()
-    if running(state):
-        assert state is not None
-        return _line(state, role)
+    snap = snapshot()
+    if snap.running:
+        return _line(snap, role)
     path = command()
     if path is None:
-        return f"melo_serve is not installed: {INSTALL_HINT}"
+        return NOT_INSTALLED
+    late = f"melo_serve did not start in {UP_WAIT_S:g} s; try `{COMMAND} up`"
+    deadline = time.monotonic() + UP_WAIT_S
     try:
         up = subprocess.run(
             [path, "up"],
@@ -266,23 +253,23 @@ def ensure_running(role: str = "chat") -> str:
             capture_output=True,
             text=True,
             errors="replace",
-            timeout=UP_WAIT_S * 2,
+            timeout=deadline - time.monotonic(),
             check=False,
         )
+    except subprocess.TimeoutExpired:
+        return late
     except (OSError, subprocess.SubprocessError) as exc:
-        return f"melo_serve did not start: {exc}"
+        return _clean(f"melo_serve did not start: {exc}")
     if up.returncode != 0:
         for text in (up.stderr, up.stdout):
             lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
             if lines:
-                return f"melo_serve did not start: {lines[-1]}"
+                return _clean(f"melo_serve did not start: {lines[-1]}")
         return f"melo_serve did not start: {COMMAND} up exited {up.returncode}"
-    deadline = time.monotonic() + UP_WAIT_S
     while True:
-        state = read_state()
-        if running(state):
-            assert state is not None
-            return _line(state, role)
+        snap = snapshot()
+        if snap.running:
+            return _line(snap, role)
         if time.monotonic() >= deadline:
-            return f"melo_serve did not start in {UP_WAIT_S:g} s; try `{COMMAND} up`"
+            return late
         time.sleep(0.2)

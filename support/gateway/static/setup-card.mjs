@@ -219,8 +219,7 @@ export function setupModelCard({
         chat_backend: data.backend,
         embedding_backend: settings.embedding_backend || "none",
         workspace: settings.workspace,
-        // melo_serve is saved with no model: the config follows what it serves.
-        sections: {[data.backend]: {chat_url: data.url, chat_model: data.backend === "melo_serve" ? "" : picked}},
+        sections: {[data.backend]: {chat_url: data.url, chat_model: picked}},
       };
       await api("/settings", {method: "PUT", body: {...candidate, revision: settings.revision}});
       const test = await api("/settings/test", {body: candidate});

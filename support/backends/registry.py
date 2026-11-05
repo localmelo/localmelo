@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING
 
-from localmelo.support.backends.base import BaseBackend
+from localmelo.support.backends.base import BaseBackend, configured_model
 
 if TYPE_CHECKING:
     from localmelo.melo.contracts.providers import (
@@ -64,17 +64,24 @@ def get_backend(name: str) -> BaseBackend:
         raise KeyError(f"Unknown backend '{name}'. Available: {available}") from None
 
 
-def model_in_use(cfg: Config, key: str, *, embedding: bool = False) -> str:
-    """The model *cfg* has the backend *key* use now; empty for an unknown backend.
-
-    Asks the backend (:meth:`BaseBackend.model_name`), so melo_serve, whose
-    config names no model, answers with the one it serves.
-    """
+def find(key: str) -> BaseBackend | None:
+    """The registered backend *key*, or None when nothing registered it."""
     try:
-        return get_backend(key).model_name(cfg, embedding=embedding)
+        return get_backend(key)
     except KeyError:
-        field = "embedding_model" if embedding else "chat_model"
-        return str(getattr(getattr(cfg, key, None), field, ""))
+        return None
+
+
+def in_use(cfg: Config, key: str, *, embedding: bool = False) -> tuple[str, str]:
+    """``(label, model)`` of the backend *key* as *cfg* has it used now.
+
+    The one lookup every banner, identity and cache key asks. A backend nothing
+    registered is called by its key and has the model its config section names.
+    """
+    backend = find(key)
+    if backend is None:
+        return key, configured_model(cfg, key, embedding=embedding)
+    return backend.in_use(cfg, embedding=embedding)
 
 
 def list_backends() -> list[BaseBackend]:

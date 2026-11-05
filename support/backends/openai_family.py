@@ -21,8 +21,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
-from localmelo.support import hosted
-from localmelo.support.backends.base import BaseBackend
+from localmelo.support import hosted, melo_serve
+from localmelo.support.backends.base import BaseBackend, configured_model
 
 if TYPE_CHECKING:
     from localmelo.melo.contracts.providers import (
@@ -52,8 +52,6 @@ class LocalBackend(BaseBackend):
     chat_model: str = ""
     embedding_model: str = ""
     template_kwargs: bool = False
-    #: Whether the config must name a model (melo_serve's row serves its own).
-    model_required: ClassVar[bool] = True
 
     @property
     def detect_url(self) -> str:
@@ -94,7 +92,10 @@ class LocalBackend(BaseBackend):
 
     def has_embedding(self, cfg: Config) -> bool:
         section = getattr(cfg, self.key)
-        return bool(section.embedding_url and section.embedding_model)
+        return bool(
+            section.embedding_url
+            and (section.embedding_model or not self.model_required)
+        )
 
     def request_model(self, cfg: Config, *, embedding: bool = False) -> str:
         """The model a provider built now asks for; raises when there is none."""
@@ -176,57 +177,51 @@ class MeloServeBackend(LocalBackend):
     """melo_serve: one address for the models it serves, switched in one command.
 
     The config names no model (an empty one is the usual): what melo_serve
-    serves now is read from its state file when a provider is built or a banner
-    is drawn, so a switch made with ``melo-serve use`` is followed from the next
-    build. This row only reads; ``melo serve`` is what asks melo_serve to start.
+    serves now is read from a snapshot of its state when a provider is built or
+    a banner is drawn, so a switch made with ``melo-serve use`` is followed from
+    the next build. The label and the model come from the same snapshot. This
+    row only reads; ``melo serve`` is what asks melo_serve to start.
     """
 
     model_required: ClassVar[bool] = False
 
-    def _entry(self, embedding: bool) -> dict[str, Any] | None:
-        from localmelo.support import melo_serve
+    def in_use(self, cfg: Config, *, embedding: bool = False) -> tuple[str, str]:
+        """``Splash via melo_serve`` and the model, or ``melo_serve`` and none."""
+        return self._in_use(cfg, melo_serve.snapshot(), embedding)
 
-        return melo_serve.served(
-            melo_serve.read_state(), "embedding" if embedding else "chat"
-        )
-
-    def model_name(self, cfg: Config, *, embedding: bool = False) -> str:
-        named = super().model_name(cfg, embedding=embedding)
-        entry = None if named else self._entry(embedding)
-        return named or (entry["model"] if entry else "")
-
-    def request_model(self, cfg: Config, *, embedding: bool = False) -> str:
-        model = self.model_name(cfg, embedding=embedding)
-        if not model:
-            from localmelo.support.melo_serve import USE_HINT, MeloServeError
-
-            role = "embedding" if embedding else "chat"
-            raise MeloServeError(
-                0,
-                "no_model",
-                f"melo_serve serves no {role} model now. "
-                f"Run `{USE_HINT}` to choose one.",
-            )
-        return model
-
-    def has_embedding(self, cfg: Config) -> bool:
-        section = getattr(cfg, self.key)
-        return bool(section.embedding_url) and bool(
-            self.model_name(cfg, embedding=True)
-        )
+    def _in_use(
+        self, cfg: Config, snap: melo_serve.Snapshot, embedding: bool
+    ) -> tuple[str, str]:
+        served = snap.roles.get(melo_serve.ROLES[embedding])
+        named = configured_model(cfg, self.key, embedding=embedding)
+        if served is None:
+            return self.display_name, named
+        via = served.backend_name
+        label = f"{via} via {self.display_name}" if via else self.display_name
+        return label, named or served.model
 
     def label(self, cfg: Config, *, embedding: bool = False) -> str:
-        """``Splash via melo_serve`` when it serves the role, else ``melo_serve``."""
-        from localmelo.support import melo_serve
+        return self.in_use(cfg, embedding=embedding)[0]
 
-        entry = self._entry(embedding)
-        if entry is None:
-            return self.display_name
-        return f"{melo_serve.backend_name(entry)} via {self.display_name}"
+    def model_name(self, cfg: Config, *, embedding: bool = False) -> str:
+        return self.in_use(cfg, embedding=embedding)[1]
 
-    def welcome_note(self, cfg: Config) -> str:
+    def welcome_note(self, label: str) -> str:
         """The server that really answers: a model served through melo_serve."""
-        return self.label(cfg)
+        return label
+
+    def request_model(self, cfg: Config, *, embedding: bool = False) -> str:
+        snap = melo_serve.snapshot()
+        model = self._in_use(cfg, snap, embedding)[1]
+        if not model:
+            raise melo_serve.unavailable(snap, melo_serve.ROLES[embedding])
+        return model
+
+    def build_embedding_provider(self, cfg: Config) -> BaseEmbeddingProvider | None:
+        """None while no embedding model is served: the chat still starts."""
+        if not self.model_name(cfg, embedding=True):
+            return None
+        return super().build_embedding_provider(cfg)
 
 
 LOCAL_SERVERS: Final[tuple[LocalBackend, ...]] = (
@@ -268,7 +263,7 @@ LOCAL_SERVERS: Final[tuple[LocalBackend, ...]] = (
         "melo_serve",
         "melo_serve",
         "melo_serve (local models, one address)",
-        "http://127.0.0.1:8321/v1",
+        melo_serve.DEFAULT_URL,
         template_kwargs=True,
     ),
 )

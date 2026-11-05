@@ -157,6 +157,18 @@ def is_melo_serve(url: str) -> bool:
     return normalize_url(url) in _MELO_SERVE_URLS if url else False
 
 
+def server_backend(url: str, *, ollama: bool = False) -> str:
+    """The backend that saves the chat server at *url*: ``ollama``, ``melo_serve`` or ``vllm``.
+
+    *ollama* is the answer to ``GET /api/version``; a server whose model listing
+    named melo_serve as its owner is melo_serve; any other OpenAI-compatible
+    server is ``vllm``.
+    """
+    if ollama:
+        return "ollama"
+    return "melo_serve" if is_melo_serve(url) else "vllm"
+
+
 def server_name(url: str = "", *, declared: bool = False) -> str:
     """What to call the OpenAI-compatible server at *url*: ``oMLX`` or not.
 
@@ -650,14 +662,12 @@ async def detect_local_server(
     ``problem``). All URLs are asked at once, each with ``GET /models``
     only.
     """
-    state = melo_serve.read_state()
-    if melo_serve.running(state):
-        url = melo_serve.front_door_url(state)
-        _MELO_SERVE_URLS.add(normalize_url(url))
-        entries = (melo_serve.served(state, role) for role in melo_serve.ROLES)
-        models = [entry["model"] for entry in entries if entry]
+    snap = melo_serve.snapshot()
+    if snap.running:
+        _MELO_SERVE_URLS.add(normalize_url(snap.url))
+        models = [role.model for role in snap.roles.values()]
         problem = "" if models else f"it serves no model yet ({melo_serve.USE_HINT})"
-        return FoundServer(url=url, models=models, problem=problem)
+        return FoundServer(url=snap.url, models=models, problem=problem)
     results = await asyncio.gather(
         *(
             list_models(
