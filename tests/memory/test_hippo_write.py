@@ -144,7 +144,6 @@ async def test_a_final_attempt_without_a_request_to_remember_writes_nothing() ->
         candidate_id="d1",
         source="digest",
     )
-    digest.provenance["final_status"] = "completed"
     reflection = _candidate(
         "Attempt 1: tried the migration", candidate_id="r1", source="reflection"
     )

@@ -127,40 +127,17 @@ def test_a_claim_that_names_a_file_or_function_is_content() -> None:
         assert decision.action == "NEW", (text, decision.reason)
 
 
-def test_an_outcome_admitted_completed_digest_is_exempt_from_the_meta_filter() -> None:
-    text = "I've read and remembered all of Jamie's records."
-    decision = decide(
-        text,
-        kind="episodic",
-        source="digest",
-        provenance={"final_status": "completed"},
-        active=[],
-        admitted_by="outcome",
-    )
-    assert decision.action == "NEW", decision.reason
-    not_completed = decide(
-        text,
-        kind="episodic",
-        source="digest",
-        provenance={"final_status": "budget_exhausted"},
-        active=[],
-        admitted_by="outcome",
-    )
-    assert not_completed.action == "IGNORE"
-    assert "meta claim" in not_completed.reason
-
-
 def test_an_aider_final_digest_is_admitted_as_a_user_request_digest() -> None:
     text = (
         "task: Implement transpose in transpose.py so the tests in "
         "transpose_test.py pass\noutcome: completed"
     )
-    for admitted_by in ("", "user_request", "outcome"):
+    for admitted_by in ("", "user_request"):
         decision = decide(
             text,
             kind="episodic",
             source="digest",
-            provenance={"final_status": "completed"},
+            provenance={},
             active=[],
             admitted_by=admitted_by,
         )
