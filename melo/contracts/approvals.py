@@ -500,12 +500,12 @@ def grant_offered(request: ApprovalRequest) -> bool:
 # covers that name), the arguments to show and a one-line preview. It fails
 # as a call's approval does (:func:`ask`): the policy's exception is raised, a
 # ``CancelledError`` while the run is not cancelled and a return that is no
-# decision are raised as an error; unset (no policy) means nobody is asked. The agent's
-# also answers ``names_host(host)``: whether the user's own words name a site,
-# and ``refused_earlier(name, arguments, preview)``: the refusal of a question
-# blocked earlier in the task (#431), which a tool checks before it lets a
-# named site through; and ``granted(name)``: whether the run's chat holds a
-# grant of the question *name* (:func:`holds_grant`).
+# decision are raised as an error; unset (no policy) means nobody is asked.
+# The agent's also answers ``names_host(host)``: whether the user's own words
+# name a site, and ``refused_earlier(name, arguments, preview)``: the refusal
+# of a question blocked earlier in the task (#431), which a tool checks before
+# it lets a named site through; and ``granted(name)``: whether the run's chat
+# holds a grant of the question *name* (:func:`holds_grant`).
 ToolAsk = Callable[[str, Mapping[str, Any], str], Awaitable[ApprovalDecision]]
 TOOL_ASK: ContextVar[ToolAsk | None] = ContextVar("localmelo_tool_ask", default=None)
 
