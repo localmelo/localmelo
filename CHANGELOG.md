@@ -22,11 +22,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   up` if it is not running (`up` and the wait share 15 s), or says how to install it. `melo serve status` adds a block
   with whether it runs, its address, the chat and embedding models and its login item, and the welcome row and the
   gateway's startup line read `<model> on Splash via melo_serve` (#523).
-- A running terminal chat follows a melo_serve switch. A chat that chose no model with `/model` used to meet melo_serve's
-  `409 model_switched` on its next turn after `melo-serve use <pick>`; now, before each turn, it asks what melo_serve
-  serves, and if the chat model changed it moves to a new Agent on it and says so in one muted line, `The model changed
-  to <model> (via melo_serve).`; with nothing served it keeps its Agent and the turn shows the usual hint. A melo_serve
-  error is no longer taken for a failed MCP server. localmelo finds `melo-serve` as the first file you own on PATH (an
+- A running chat follows a melo_serve switch. After `melo-serve use <pick>`, a chat used to meet melo_serve's `409
+  model_switched` on its next turn; now, at its next turn, every chat moves to a new Agent on the model now served: the
+  gateway's chats (the `melo` main chat, side chats, the web console and the app), and a local terminal chat that
+  chose no model with `/model` (`[cli] chat = "local"`, `-c`, `-r`). A terminal chat says so in one muted line, `The
+  model changed to <model> (via melo_serve).`, also when the gateway runs its turn; with nothing served the Agent stays
+  and the turn shows the usual hint. A melo_serve error is no longer taken for a failed MCP server. localmelo finds `melo-serve` as the first file you own on PATH (an
   absolute path) or in the folder `uv tool install` uses (`$UV_TOOL_BIN_DIR`, `$XDG_BIN_HOME`, `~/.local/bin`), so the
   gateway login item, whose PATH lacks it, starts melo_serve. It connects to melo_serve's control socket only
   if that is a socket (not a link) you own in a folder only you can write, and the lines `melo serve` prints about a
