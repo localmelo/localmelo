@@ -466,10 +466,10 @@ class SetupJob:
 
     *skip* holds the ids of the items the user turned off: a plan's item ids
     and the localmelo rows (``melo_serve``, ``service:melo_serve``,
-    ``service:gateway``). A pick is downloaded unless its model or its backend
-    is skipped (the plan lists the embedding model's backend only when it is
-    not the chat's). A skipped chat pick is not loaded and the config is not
-    saved; a skipped embedding pick leaves memory by words only.
+    ``service:gateway``). ``melo-serve get`` leaves out exactly those items, and
+    a pick whose model or backend is skipped is not loaded (the plan lists the
+    embedding model's backend only when it is not the chat's). Then a chat pick
+    leaves the config unsaved and an embedding pick leaves memory by words only.
     *gateway_service* is whether to register the gateway's login service (the
     app passes False: it runs its own gateway).
 
@@ -506,26 +506,23 @@ class SetupJob:
         chat_backend = f"backend:{chat.backend}"
         other = {i.id for i in plan.items if i.kind == "backend"} - {chat_backend}
         embedding = next((i for i in plan.items if i.role == "embedding"), None)
+        self._picks = [chat.id]
+        if embedding:
+            self._picks.append(embedding.id.removeprefix("model:"))
         # (model item id, pick id) of each pick to load; None once skipped.
         self._chat: tuple[str, str] | None = (f"model:{chat.id}", chat.id)
         self._embedding: tuple[str, str] | None = (
             (embedding.id, embedding.id.removeprefix("model:")) if embedding else None
         )
-        self._dropped: list[str] = []  # model item ids of picks that are not fetched
         if self._chat[0] in self.skip or chat_backend in self.skip:
-            self._dropped.append(self._chat[0])
             self._chat = None
         if self._embedding and (
             self._embedding[0] in self.skip
             or self.skip & other
             or (chat_backend in self.skip and not other)
         ):
-            self._dropped.append(self._embedding[0])
             self._embedding = None
-        self._skipped_ids = [
-            *(i.id for i in plan.items if i.id in self.skip),
-            *(i for i in self._dropped if i not in self.skip),
-        ]
+        self._get_skips = [i.id for i in plan.items if i.id in self.skip]
 
     # control
 
@@ -641,12 +638,7 @@ class SetupJob:
         return None
 
     def _download(self) -> str | None:
-        """``melo-serve get`` for the picks not skipped; its events become the job's."""
-        for item in self._skipped_ids:
-            self._item(item, "skipped", SKIPPED)
-        picks = [pick[1] for pick in (self._chat, self._embedding) if pick]
-        if not picks:
-            return None
+        """``melo-serve get`` without the skipped items; its events become the job's."""
         path = melo_serve.command()
         if path is None:
             return self._fail(DOWNLOAD, _failed("melo_serve is not installed"))
@@ -661,7 +653,11 @@ class SetupJob:
                     failure = event.line
 
         ran = _run(
-            [path, "get", *picks, "--json"],
+            [
+                path, "get", *self._picks,
+                *(arg for item in self._get_skips for arg in ("--skip", item)),
+                "--json",
+            ],  # fmt: skip
             timeout=None,
             hold=self._hold,
             on_line=on_line,

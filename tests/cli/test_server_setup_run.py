@@ -42,7 +42,7 @@ if name == "uv":
         print("error: network is down", file=sys.stderr)
         sys.exit(1)
     if args[:2] == ["tool", "install"] or args[:3] == ["tool", "install", "--force"]:
-        (d / "version").write_text(text("next_version", "0.2.0"))
+        (d / "version").write_text(text("next_version", "0.3.0"))
         tool = d / "tools" / "melo-serve" / "bin"
         tool.mkdir(parents=True, exist_ok=True)
         for folder in (tool, tool.parent, tool.parent.parent):
@@ -60,10 +60,11 @@ else:
     elif args[0] == "plan":
         print(text("plan.json"))
     elif args[0] == "get":
+        skips = [args[i + 1] for i, arg in enumerate(args) if arg == "--skip"]
+        for item in skips:
+            print(json.dumps({{"item": item, "state": "skipped", "line": "skipped (you chose to skip it)"}}), flush=True)
         for line in text("get.jsonl").splitlines():
-            item = json.loads(line)["item"]  # the events of the picks asked for
-            pick = {{"backend:splash": "qwen3.8-27b-splash", "backend:omlx": "qwen3-embedding-0.6b-omlx"}}.get(item, item[6:])
-            if pick in args:
+            if json.loads(line)["item"] not in skips:
                 print(line, flush=True)
         if flag("get_hangs"):
             signal.signal(signal.SIGTERM, lambda *_: sys.exit(130))
@@ -225,7 +226,7 @@ def test_a_full_run_skips_nothing_and_says_what_each_step_did(fakes: Fakes) -> N
     assert fakes.calls("melo-serve", "get") == [["get", CHAT, EMBED, "--json"]]
     assert fakes.calls("melo-serve", "use") == [["use", CHAT], ["use", EMBED]]
     assert _lines(events) == [
-        ("melo_serve", "done", f"installed melo_serve 0.2.0 into {tool}"),
+        ("melo_serve", "done", f"installed melo_serve 0.3.0 into {tool}"),
         *((e["item"], e["state"], e["line"]) for e in GET),
         (
             "service:melo_serve",
@@ -252,17 +253,10 @@ def test_a_full_run_skips_nothing_and_says_what_each_step_did(fakes: Fakes) -> N
 
 
 SKIPS = [
-    # (skipped id, picks fetched and loaded, melo-serve's service, gateway's, saved, rows that say skipped)
-    (
-        "backend:splash",
-        [EMBED],
-        True,
-        True,
-        False,
-        {"backend:splash", "model:" + CHAT, "save"},
-    ),
+    # (skipped id, picks loaded, melo-serve's service, gateway's, saved, rows that say skipped)
+    ("backend:splash", [EMBED], True, True, False, {"backend:splash", "save"}),
     ("model:" + CHAT, [EMBED], True, True, False, {"model:" + CHAT, "save"}),
-    ("backend:omlx", [CHAT], True, True, True, {"backend:omlx", "model:" + EMBED}),
+    ("backend:omlx", [CHAT], True, True, True, {"backend:omlx"}),
     ("model:" + EMBED, [CHAT], True, True, True, {"model:" + EMBED}),
     ("service:melo_serve", [CHAT, EMBED], False, True, True, {"service:melo_serve"}),
     ("service:gateway", [CHAT, EMBED], True, False, True, {"service:gateway"}),
@@ -282,19 +276,20 @@ def test_each_skip_leaves_out_exactly_its_step(
     saved: bool,
     rows: set[str],
 ) -> None:
-    fakes.installed("0.2.0")  # at the minimum: melo_serve itself is left as it is
+    fakes.installed("0.3.0")  # at the minimum: melo_serve itself is left as it is
     job, events = _job((skip,), gateway=True)
     with mock.patch(GATEWAY, return_value="/lm/g.plist") as install:
         assert job.run() == "done"
     assert fakes.calls("uv", "tool", "install") == []
-    assert [c[1:-1] for c in fakes.calls("melo-serve", "get")] == [picks]
+    asked = ["--skip", skip] if ":" in skip and "service" not in skip else []
+    assert fakes.calls("melo-serve", "get") == [["get", CHAT, EMBED, *asked, "--json"]]
     assert [c[1] for c in fakes.calls("melo-serve", "use")] == picks
     assert bool(fakes.calls("melo-serve", "install")) is service
     assert install.called is gateway
     chosen = {i for i, e in job.items.items() if e.line == run.SKIPPED}
     assert chosen == rows
     if skip != "melo_serve":
-        assert job.items["melo_serve"].line == "already installed (0.2.0), skipped"
+        assert job.items["melo_serve"].line == "already installed (0.3.0), skipped"
     path = Path(config.config_path())
     assert path.exists() is saved
     if saved:  # without the embedding model, memory goes by words only
@@ -305,7 +300,7 @@ def test_each_skip_leaves_out_exactly_its_step(
 
 def test_a_melo_serve_below_the_minimum_is_updated_with_force(fakes: Fakes) -> None:
     fakes.installed("0.1.0")
-    fakes.put("next_version", "0.2.0")
+    fakes.put("next_version", "0.3.0")
     job, events = _job()
     assert job.run() == "done"
     assert fakes.calls("uv", "tool", "run")  # 0.1.0 has no `plan`: asked through uv
@@ -315,14 +310,14 @@ def test_a_melo_serve_below_the_minimum_is_updated_with_force(fakes: Fakes) -> N
     assert _lines(events)[0] == (
         "melo_serve",
         "done",
-        "updated melo_serve 0.1.0 → 0.2.0",
+        "updated melo_serve 0.1.0 → 0.3.0",
     )
 
 
 def test_cancel_during_get_ends_the_job_cancelled_before_anything_else_runs(
     fakes: Fakes,
 ) -> None:
-    fakes.installed("0.2.0")
+    fakes.installed("0.3.0")
     fakes.put("get_hangs", "1")
     job, events = _job(cancel=True)
     assert job.run() == job.state == "cancelled"
@@ -337,7 +332,7 @@ def test_cancel_during_get_ends_the_job_cancelled_before_anything_else_runs(
 
 
 def test_a_failed_get_stops_the_job_with_the_reason(fakes: Fakes) -> None:
-    fakes.installed("0.2.0")
+    fakes.installed("0.3.0")
     fakes.put("get_exit", "2")
     fakes.put(
         "get.jsonl",

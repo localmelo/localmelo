@@ -42,7 +42,7 @@ INSTALL_HINT: Final = "uv tool install git+https://github.com/localmelo/melo_ser
 # The melo_serve that first-run setup installs: one commit (a tag can move) and the
 # oldest version it accepts. The commit is a placeholder until one has ``melo-serve get``.
 MELO_SERVE_REF: Final = "ec5305af3e8dd374a73ae87f6fcf18dc13319819"
-MIN_VERSION: Final = "0.2.0"
+MIN_VERSION: Final = "0.3.0"
 ARCHIVE_URL: Final = (
     f"https://github.com/localmelo/melo_serve/archive/{MELO_SERVE_REF}.zip"
 )
