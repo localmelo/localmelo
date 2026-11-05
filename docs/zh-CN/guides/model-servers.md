@@ -173,14 +173,25 @@ enable_thinking = false
    chat_url = "http://127.0.0.1:8321/v1"
    ```
 
-3. 想换模型时随时切换：`melo-serve use <pick>`。
+3. 想换模型时随时切换：在任一聊天里用 `/model`、控制台的模型标签、应用的 **Model** 菜单，或 `melo-serve use <pick>`；见[切换模型](#switch-the-model)。
 
-- `chat_model` 为空表示 melo_serve 当前提供的模型。localmelo 在创建提供方时从 melo_serve 的状态文件读取它，因此切换会被跟上；`embedding_model` 也一样。正在运行的聊天会在下一轮跟上：网关的聊天（`melo` 主聊天、侧聊天、网页控制台和应用），以及没有用 `/model` 选过模型的本地终端聊天（`[cli] chat = "local"`、`-c`、`-r`）。终端聊天会打印 `The model changed to <model> (via melo_serve).`，网关运行该轮时也一样。在某个模型上构建的聊天，若现在提供的是另一个模型，会在下一轮重新构建；正在运行一轮的聊天先完成这一轮。只有控制套接字接受连接，并且套接字和状态文件都属于你自己、所在文件夹只有你能写入时，melo_serve 才算在运行，所以崩溃或停止后留下的状态什么也不提供。
+- `chat_model` 为空表示 melo_serve 当前提供的模型。localmelo 在创建提供方时从 melo_serve 的状态文件读取它，因此切换会被跟上；`embedding_model` 也一样。正在运行的聊天会在下一轮跟上：网关的聊天（`melo` 主聊天、侧聊天、网页控制台和应用），以及启动时没有带 `--model` 的本地终端聊天（`[cli] chat = "local"`、`-c`、`-r`）。终端聊天会打印 `The model changed to <model> (via melo_serve).`，网关运行该轮时也一样。在某个模型上构建的聊天，若现在提供的是另一个模型，会在下一轮重新构建；正在运行一轮的聊天先完成这一轮。只有控制套接字接受连接，并且套接字和状态文件都属于你自己、所在文件夹只有你能写入时，melo_serve 才算在运行，所以崩溃或停止后留下的状态什么也不提供。
 - 没有提供任何模型时，`melo "task"`（以及 `POST /v1/agent/run`，返回 502 `agent_start_failed`）会以一行说明要运行什么命令结束：`melo-serve up`、安装命令，或 `melo-serve use <pick>`。直接运行的退出码为 1。
 - 首次运行的设置优先选择正在运行的 melo_serve，并且不写入模型。设置、设置页和启动时的检查都不需要已有模型在提供：是否有模型，在需要模型时才检查。
 - 配置使用 melo_serve 时，`melo serve` 会检查它；见[网关](gateway.md#start-the-gateway)。
 - localmelo 运行第一个只有你能写入的 `melo-serve` 文件，依次查找 PATH（须为绝对路径）和 `uv tool install` 的安装文件夹（`$UV_TOOL_BIN_DIR`，其次 `$XDG_BIN_HOME`，再其次 `~/.local/bin`；登录项的 PATH 里没有它）。
 - melo_serve 的 [README](https://github.com/localmelo/melo_serve#readme) 介绍可选项（pick）、登录项和其他命令。
+
+<a id="switch-the-model"></a>
+
+#### 切换模型
+
+- **终端：** `/model` 列出 melo_serve 的对话模型，当前模型标 `✓`，每行写出后端、需要的内存，以及 `fits` 或 `tight fit`。Enter 切换，Esc 保留当前模型。`/model NAME`（短名、ID 或名称）不打开列表直接切换。主聊天里也可以用。
+- **控制台：** 页头的模型标签和输入框下方的模型按钮打开同一个列表，**设置 → 模型服务器** 和 `/model` 也一样。
+- **应用：** 菜单栏菜单的 **Model** 子菜单。
+- 本机的每个聊天都会跟上切换。切换先等待正在运行一轮的聊天（`Waiting for 1 chat to finish`，最多 10 分钟）；这期间发出的一轮会等待（`Waiting for the model switch`），然后在新模型上运行。**Cancel**（终端里按 Esc）结束等待；已经开始的加载会在 melo_serve 中继续。
+- 需要的内存超过空闲内存的模型显示为灰色，写出它需要多少和还有多少空闲，不能选择。正在执行某一步的任务会用新模型重新请求，而不会失败。
+- 网关在运行时，终端通过网关切换，使用主聊天已在用的令牌，因此网关的聊天也会等待；没有网关时，终端直接请求 melo_serve。开发者模式会加上每个模型在磁盘上的大小。
 
 <a id="ollama-with-embeddings"></a>
 

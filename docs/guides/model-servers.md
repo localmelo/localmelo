@@ -191,14 +191,23 @@ enable_thinking = false
    chat_url = "http://127.0.0.1:8321/v1"
    ```
 
-3. Switch the model whenever you like: `melo-serve use <pick>`.
+3. Switch the model whenever you like: `/model` in any chat, the model chip in the console, the app's **Model** menu, or `melo-serve use <pick>`; see [Switch the model](#switch-the-model).
 
-- An empty `chat_model` means the model melo_serve serves now. localmelo reads it from melo_serve's state file when it builds the provider, so a switch is followed; the same goes for `embedding_model`. A running chat follows it at its next turn: the gateway's chats (the `melo` main chat, side chats, the web console and the app) and a local terminal chat (`[cli] chat = "local"`, `-c`, `-r`) that chose no model with `/model`. A terminal chat prints `The model changed to <model> (via melo_serve).`, also when the gateway runs its turn. A chat built on one model while another is served is built again at its next turn; one that is running a turn finishes it first. melo_serve counts as running only while its control socket accepts a connection, and only if the socket and its state file are your own, in a folder only you can write, so a state left by a crash or a stop serves nothing.
+- An empty `chat_model` means the model melo_serve serves now. localmelo reads it from melo_serve's state file when it builds the provider, so a switch is followed; the same goes for `embedding_model`. A running chat follows it at its next turn: the gateway's chats (the `melo` main chat, side chats, the web console and the app) and a local terminal chat (`[cli] chat = "local"`, `-c`, `-r`) started with no `--model`. A terminal chat prints `The model changed to <model> (via melo_serve).`, also when the gateway runs its turn. A chat built on one model while another is served is built again at its next turn; one that is running a turn finishes it first. melo_serve counts as running only while its control socket accepts a connection, and only if the socket and its state file are your own, in a folder only you can write, so a state left by a crash or a stop serves nothing.
 - With nothing served, `melo "task"` (and `POST /v1/agent/run`, as 502 `agent_start_failed`) ends with one line that says what to run: `melo-serve up`, the install command, or `melo-serve use <pick>`. A direct run exits with code 1.
 - First-run setup prefers a running melo_serve and saves it with no model. Setup, Settings and the check at start-up never need a model to be served: that is checked when a model is asked for.
 - `melo serve` checks melo_serve when the config uses it; see [Gateway](gateway.md#start-the-gateway).
 - localmelo runs the first `melo-serve` that is a file only you can write, from your PATH (an absolute path) or from the folder `uv tool install` uses (`$UV_TOOL_BIN_DIR`, else `$XDG_BIN_HOME`, else `~/.local/bin`), which a login item's PATH lacks.
 - The melo_serve [README](https://github.com/localmelo/melo_serve#readme) covers the picks, the login item and the other commands.
+
+#### Switch the model
+
+- **Terminal:** `/model` lists melo_serve's chat models, the current one marked `✓`, each with its backend, the memory it needs and `fits` or `tight fit`. Enter switches, Esc keeps the current one. `/model NAME` (a short name, id or name) switches with no list. It works in the main chat too.
+- **Console:** the model chip in the header and the model button under the message box open the same list, as do **Settings → Model server** and `/model`.
+- **App:** the menu-bar menu's **Model** submenu.
+- Every chat on this Mac follows the switch. It first waits for the chats that are running a turn (`Waiting for 1 chat to finish`, 10 minutes at most); a turn sent meanwhile waits (`Waiting for the model switch`) and runs on the new model. **Cancel** (Esc in the terminal) ends the wait; a load that has started goes on in melo_serve.
+- A model that needs more memory than is free shows dimmed, with what it needs and what is free, and cannot be chosen. A task in the middle of a step asks again with the new model rather than failing.
+- When a gateway runs, the terminal switches through it with the token its main chat already uses, so the gateway's chats wait too; with none, it asks melo_serve itself. Developer mode adds each model's size on disk.
 
 ### Ollama with embeddings
 

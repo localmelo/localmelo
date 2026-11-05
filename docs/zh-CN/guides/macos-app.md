@@ -12,7 +12,7 @@
 
 ## 安装
 
-- 你需要 macOS、`uv`、构建时的网络访问，以及一个 Swift 编译器：位于 `/Applications/Xcode.app` 的正式版 Xcode，没有它时用 Command Line Tools（`xcode-select --install`）。
+- 你需要 macOS 15 或更新版本、`uv`、构建时的网络访问，以及一个 Swift 编译器：位于 `/Applications/Xcode.app` 的正式版 Xcode，没有它时用 Command Line Tools（`xcode-select --install`）。
 - 两者都没有时，构建会立即停止并只打印一行说明；环境中设置的 `DEVELOPER_DIR` 会选择另一个开发者目录。
 - 构建不会安装、启动或下载任何模型服务器，也不会更改任何签名身份或 Xcode 设置。
 
@@ -76,6 +76,7 @@ uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 | 带圈的红点 | 有对话或任务在等你回答审批。 |
 
 - 菜单列出正在运行的内容、**Waiting for your approval**（打开那个对话或任务）、**Open localmelo**、**Settings…** 和 **Quit localmelo**。
+- 使用 melo_serve 时，**Model** 子菜单列出它的对话模型，当前模型打勾；选一个就会切换，每个聊天都跟上（[切换模型](model-servers.md#switch-the-model)）。切换等待期间，**Cancel Switch** 结束等待。
 - **Sign In Again** 只在它能帮上忙时才出现：连续四次登录失败之后、显示锁定画面时，以及开发者模式下始终出现。
 - 应用每 2 秒检查一次，因此审批会在一次轮询之内显示；VoiceOver 和悬停提示用文字说出同样的内容。
 

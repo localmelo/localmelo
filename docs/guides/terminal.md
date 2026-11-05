@@ -61,7 +61,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 - An approval that a turn asks for is the usual list, answered through the gateway; one answered in the console closes here.
 - A card is one coloured line: a side chat or a task that finished, did not finish or waits for you, and how to open it. `/task …` starts a task in the open chat, as in the console; an echo about another chat's task ends with `from` and that chat's name.
 - When a task asks the chat for help, a muted line reads `Task “Fix tests” asks: <problem>` and melo's answer follows, with no message of yours above it. Then `→ melo answered “Fix tests” · <answer>`, or `! “Fix tests” needs your answer: <question>`: when only that task waits, answer it in a message here (`→ Sent to “Fix tests” as your answer`; **Undo** is in `melo console` for 10 seconds); when several wait, the line says `several wait: /answer Fix tests …`.
-- `/model`, `/backend`, `/undo`, `/copy`, `/sessions`, `/resume`, `/title`, `/usage`, `/attach`, `/browser` and `/mcp` work in the terminal's own chat. `/approvals ask`, `/approvals auto` and `/grants` work in every chat. `melo -X cli.chat=local` (or `[cli] chat = "local"`) opens it, as `-u URL`, `-c`, `-r` and `--yolo` do.
+- `/model`, `/backend`, `/undo`, `/copy`, `/sessions`, `/resume`, `/title`, `/usage`, `/attach`, `/browser` and `/mcp` work in the terminal's own chat; with melo_serve, `/model` works in the main chat too. `/approvals ask`, `/approvals auto` and `/grants` work in every chat. `melo -X cli.chat=local` (or `[cli] chat = "local"`) opens it, as `-u URL`, `-c`, `-r` and `--yolo` do.
 
 ### Which model server
 
@@ -140,7 +140,7 @@ When the model is not the saved default, a row after the folder gives the server
 | Command | What it does |
 |---|---|
 | `/help [command]` | The everyday commands in three groups; `/help all` (and `/help` in developer mode) lists every command and the keys; `/help NAME` gives one command's details. |
-| `/model [name\|number]` | Alone: a list of the server's chat models, the current one marked `✓`, the loaded ones `(loaded)`; Enter switches and saves the model as the default, Esc keeps the current one. With a listed id or number: switch from the next message. A name the server does not list is refused. |
+| `/model [name\|number]` | Alone: a list of the server's chat models, the current one marked `✓`, the loaded ones `(loaded)`; Enter switches and saves the model as the default, Esc keeps the current one. With a listed id or number: switch from the next message. A name the server does not list is refused. With melo_serve: its chat models with what each needs and whether it fits, and a switch every chat on this Mac follows ([Switch the model](model-servers.md#switch-the-model)). |
 | `/backend [url]` | Switch to another model server: asks for its URL and a model from its list, checks it with `GET /models`, switches and saves both as the default. |
 | `/new` | Start a new chat: the model forgets the conversation; in the terminal's own chat the new chat starts with none of the last chat's grants (what you allowed in the main chat still holds). A `── New chat ──` rule marks the start. |
 | `/clear` | `/new` on an empty screen: the screen and its scrollback are wiped and the welcome is drawn again. |
