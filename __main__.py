@@ -40,6 +40,7 @@ from localmelo.melo.schema import (
     RunResult,
 )
 from localmelo.support.flag_options import FLAG_OPTIONS, flag_options
+from localmelo.support.melo_serve import MeloServeError
 
 if TYPE_CHECKING:
     from localmelo.melo.contracts.providers import BaseEmbeddingProvider
@@ -2061,6 +2062,11 @@ def main() -> None:
                     f"melo: error: {_direct_confinement_refusal(exc)}", file=sys.stderr
                 )
                 raise SystemExit(EXIT_CRASHED) from None
+            if args.brief is None and isinstance(exc, MeloServeError):
+                # Nothing is served: one line with what to run, as for a backend
+                # that is not set up.
+                print(f"melo: error: {exc}", file=sys.stderr)
+                raise SystemExit(EXIT_CRASHED) from None
             if args.brief is None or (isinstance(exc, SystemExit) and exc.code != 1):
                 raise
             from localmelo.support.cli.worker_contract import failure_record
@@ -2638,12 +2644,16 @@ def _print_melo_serve_status() -> None:
     """The ``melo serve status`` block for melo_serve, when it is in use or installed."""
     from localmelo.support import config, melo_serve
 
-    state = melo_serve.read_state()
-    cfg = config.load()
-    uses = "melo_serve" in (cfg.chat_backend, cfg.embedding_backend)
-    if state is not None or uses or melo_serve.command():
+    snap = melo_serve.snapshot()
+    try:
+        cfg = config.load()
+    except (OSError, ValueError, config.ConfigError):
+        uses = False  # a config that does not load names no backend
+    else:
+        uses = "melo_serve" in (cfg.chat_backend, cfg.embedding_backend)
+    if snap.running or uses or melo_serve.command():
         print()
-        print("\n".join(melo_serve.status_lines(state)))
+        print("\n".join(melo_serve.status_lines(snap)))
 
 
 def _model_line(cfg: Config) -> str:
@@ -2651,14 +2661,11 @@ def _model_line(cfg: Config) -> str:
     key = cfg.chat_backend
     if not key:
         return "none yet (the web console sets one up)"
-    from localmelo.support.backends.registry import get_backend
+    from localmelo.support.backends.registry import in_use
+    from localmelo.support.sessions.display import clean_output
 
-    try:
-        backend = get_backend(key)
-        label, model = backend.label(cfg), backend.model_name(cfg)
-    except KeyError:  # a backend nothing registered: say its key
-        label, model = key, getattr(getattr(cfg, key, None), "chat_model", "")
-    return f"{model} on {label}" if model else label
+    label, model = in_use(cfg, key)
+    return clean_output(f"{model} on {label}" if model else label)
 
 
 def _start_gateway(cfg: Config) -> None:

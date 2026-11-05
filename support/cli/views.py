@@ -68,6 +68,9 @@ class BackendInfo:
     the user that long-term memory is off and how to add it, so the banner
     does not say it again. *note* is the server's words for the welcome row,
     beside the model, when its backend has some (``Splash via melo_serve``).
+    *follows* says the session chose no model and its backend serves its own
+    (melo_serve): *model* is what it served when the row was made, and an Agent
+    is built with none, so it asks for what is served at that build.
     """
 
     key: str
@@ -80,6 +83,7 @@ class BackendInfo:
     key_env: str = ""
     memory_told: bool = False
     note: str = ""
+    follows: bool = False
 
     @property
     def local(self) -> bool:
