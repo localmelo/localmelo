@@ -3203,20 +3203,7 @@ class Agent(_RecallLoop, _NotesLoop):
                 # An eviction took the latest reflection: it goes back once, at
                 # the end, where the eviction has already changed the prefix.
                 self.hippo.working.append(reflection)
-            pending = run.inbox.poll() if run.inbox is not None else []
-            inserted = None
-            if pending:
-                assert run.inbox is not None
-                pending, shown = _read_notes(run.inbox, pending)
-                inserted = Message(
-                    role="user",
-                    content="\n\n".join(text for _, text in pending),
-                    images=self._tool_images.keep_user(shown),
-                )
-                self.hippo.working.append(inserted)
-                run.pinned.append(inserted)
-                for _, text in pending:
-                    self._reviewer.user_message(text)
+            inserted, pending = self._read_inbox(run)
             # Retrieval + tool resolution + boundary checks
             long_context, short_window, tools, fail = await self._do_retrieval(
                 query, task_query=run.task_query_msg, run=run
@@ -3229,25 +3216,7 @@ class Agent(_RecallLoop, _NotesLoop):
                 if not any(message is inserted for message in short_window):
                     run.end("failed", error="inbox instructions do not fit the prompt")
                     return step + 1, ""
-
-                def on_ready(
-                    messages: list[Message],
-                    *,
-                    inserted: Message = inserted,
-                    pending: list[tuple[int, str]] = pending,
-                ) -> None:
-                    assert run.inbox is not None
-                    if (
-                        not messages
-                        or messages[-1].role != "user"
-                        or not messages[-1].content.endswith(inserted.content)
-                    ):
-                        raise ContextFitError(
-                            "Inbox instructions do not fit the request"
-                        )
-                    for offset, text in pending:
-                        run.inbox.accept(offset)
-                        run.events.inbox_accepted(offset, text, run.steps, run.attempts)
+                on_ready = self._accept_inbox(run, inserted, pending)
 
             # LLM planning step (with reflection context). The step counts
             # once the planning call is made, even if it then raises.
@@ -3269,7 +3238,7 @@ class Agent(_RecallLoop, _NotesLoop):
                     query,
                     task_query=run.task_query_msg,
                     run=run,
-                    **({"on_ready": on_ready} if on_ready is not None else {}),
+                    on_ready=on_ready,
                 )
             finally:
                 if retry_token is not None:
@@ -3281,7 +3250,7 @@ class Agent(_RecallLoop, _NotesLoop):
             )
             # What the provider reported as the model's reasoning, before an
             # unfinished reply's text is merged into it: only that is a model
-            # reasoning its way to an answer (see the rescue below).
+            # reasoning its way to an answer (see :meth:`_answer_from_thinking`).
             reasoned = response.thinking
             if unfinished:
                 before = len(response.thinking)
@@ -3298,39 +3267,9 @@ class Agent(_RecallLoop, _NotesLoop):
             if fail is not None:
                 run.end("failed", error=fail)
                 return step + 1, ""
-            # A reply with thinking but no tool call and no words may have its
-            # answer in the thinking (#469). The row's last empty reply first
-            # asks once more with thinking off, where the provider has that
-            # switch; if the row still ends empty, the end of the thinking is
-            # the answer, marked as such.
-            if (
-                self.options.empty_reply_fallback == "on"
-                and not response.tool_calls
-                and not has_content(response.content)
-            ):
-                if reasoned.strip():
-                    run.row_thinking = reasoned
-                if (
-                    run.empty_replies + 1 >= MAX_EMPTY_REPLIES
-                    and run.row_thinking.strip()
-                    and not run.broken_row
-                ):
-                    if (
-                        not run.thinking_retry_used
-                        and step + 1 < budget
-                        and self._thinking_retry_body()
-                    ):
-                        run.thinking_retry_used = True
-                        run.thinking_retry_armed = True
-                        run.fallback_retried = True
-                    else:
-                        marked = thinking_answer(run.row_thinking)
-                        response = dataclasses.replace(
-                            response, content=marked, thinking=run.row_thinking
-                        )
-                        if marked:  # thinking with no words gives no answer
-                            run.fallback_answered = True
-                            run.events.answer_from_thinking()
+            response = self._answer_from_thinking(
+                response, reasoned, run, can_retry=step + 1 < budget
+            )
             rest = response.content
             has_model_note = False
             if self._notes_mode:
@@ -3347,124 +3286,27 @@ class Agent(_RecallLoop, _NotesLoop):
             # text: no fallback may show it as one.
             broken = not response.tool_calls and broken_tool_call(rest, tools)
             # Dots, dashes or emoji alone say nothing: the text is blank.
-            if has_content(rest) and not broken:
+            answered = has_content(rest) and not broken
+            if answered:
                 run.last_text = rest
                 run.last_text_thinking = response.thinking
 
             if not response.tool_calls:
-                if has_content(rest) and not broken:
-                    # No tool call → direct answer. In the compress modes
-                    # the note is stored first and the answer is the text
-                    # without its <note> block.
-                    if self._notes_mode:
-                        note, _ = self._reply_note(
-                            response,
-                            (),
-                            kind="answer",
-                            task_id=task.task_id,
-                            run=run,
-                        )
-                        entry = self._store_note(note, run, source="reasoning_note")
-                        if entry is not None:
-                            await self._restate(note, run)
-                    run.answer_thinking = response.thinking
-                    retry = await self._brief_gate(run, can_retry=step + 1 < budget)
-                    if retry is None:
-                        run.end("completed", result=rest)
-                        return step + 1, ""
-                    # The answer was no end: the model reads what its check
-                    # showed and plans again.
-                    answer = Message(role="assistant", content=rest)
-                    if self.options.reasoning not in ("legacy", "compress"):
-                        answer = dataclasses.replace(answer, thinking=response.thinking)
-                    self.hippo.working.append_turn(
-                        answer, [Message(role="user", content=retry)]
+                if answered:
+                    ended = await self._direct_answer(
+                        task, run, response, rest, can_retry=step + 1 < budget
                     )
-                    continue
-                # An empty reply is no answer: ask for one and plan again. So
-                # is a tool call written as text, with a label and nudge that
-                # say so; its text is no note either.
-                label_text = TOOL_CALL_TEXT_LABEL if broken else EMPTY_REPLY_LABEL
-                label_content = label_text
-                entry = None
-                if self._notes_mode:
-                    note, _ = self._reply_note(
-                        (
-                            dataclasses.replace(response, content="")
-                            if broken
-                            else response
-                        ),
-                        (),
-                        kind="empty",
-                        task_id=task.task_id,
-                        run=run,
+                else:
+                    ended = await self._empty_reply(
+                        task,
+                        run,
+                        response,
+                        broken=broken,
+                        unfinished=unfinished,
+                        thought_aliases=thought_aliases,
                     )
-                    entry = self._store_note(note, run, source="reasoning_note")
-                    if entry is not None:
-                        label_content = f"{label_text}\n{entry.text}"
-                run.empty_replies += 1
-                run.unfinished_row = run.unfinished_row or unfinished
-                run.broken_row = run.broken_row or broken
-                if broken:
-                    # Before the row's limit: the reply that ends the run is
-                    # dropped from the displays too, never shown as text.
-                    run.events.tool_call_as_text(
-                        run.empty_replies,
-                        final=run.empty_replies >= MAX_EMPTY_REPLIES,
-                    )
-                if (
-                    run.empty_replies >= MAX_EMPTY_REPLIES
-                    and not run.thinking_retry_armed
-                ):
-                    run.end(
-                        "failed",
-                        error=(
-                            UNFINISHED_ANSWER_ERROR
-                            if run.unfinished_row
-                            else (
-                                TOOL_CALL_TEXT_ERROR
-                                if run.broken_row
-                                else "empty replies"
-                            )
-                        ),
-                    )
+                if ended:
                     return step + 1, ""
-                # The label stands in for the reply, so the nudge does not
-                # follow another user message; as one unit, the two are
-                # only ever dropped together.
-                label = Message(role="assistant", content=label_content)
-                if self.options.reasoning not in ("legacy", "compress"):
-                    label = dataclasses.replace(label, thinking=response.thinking)
-                nudge = TOOL_CALL_TEXT_NUDGE if broken else EMPTY_REPLY_NUDGE
-                aliases: set[str] = set(thought_aliases)
-                block, _hits = await self._step_recall(
-                    run,
-                    entry,
-                    (),
-                    fallback=label_text,
-                    exclude={
-                        *self.hippo.working.shown_aliases(),
-                        *({entry.alias} if entry is not None else set()),
-                        *thought_aliases,
-                    },
-                )
-                if block:
-                    nudge = f"{nudge}\n\n{block}"
-                    aliases.update(hit.alias for hit in _hits if hit.kind != "long")
-                aliases.update(run.pending_shown)
-                run.pending_shown.clear()
-                self.hippo.working.append_turn(
-                    label,
-                    [Message(role="user", content=nudge)],
-                    aliases=aliases,
-                )
-                if unfinished:
-                    run.events.unfinished_answer()
-                elif not broken:
-                    run.events.empty_reply(run.empty_replies)
-                if run.thinking_retry_armed:
-                    # Armed by this reply: the next request is the retry.
-                    run.events.thinking_off_retry()
                 continue
             run.empty_replies = 0
             run.unfinished_row = False
@@ -3520,6 +3362,216 @@ class Agent(_RecallLoop, _NotesLoop):
 
         run.events.budget_used()
         return budget, "budget"
+
+    def _read_inbox(
+        self, run: _RunState
+    ) -> tuple[Message | None, list[tuple[int, str]]]:
+        """The notes the user sent during the run, read as one user message.
+
+        The message goes into working memory and is pinned. The notes count
+        as accepted only once a request carries them (:meth:`_accept_inbox`).
+        Returns ``(None, [])`` when there are none.
+        """
+        pending = run.inbox.poll() if run.inbox is not None else []
+        if not pending:
+            return None, []
+        assert run.inbox is not None
+        pending, shown = _read_notes(run.inbox, pending)
+        inserted = Message(
+            role="user",
+            content="\n\n".join(text for _, text in pending),
+            images=self._tool_images.keep_user(shown),
+        )
+        self.hippo.working.append(inserted)
+        run.pinned.append(inserted)
+        for _, text in pending:
+            self._reviewer.user_message(text)
+        return inserted, pending
+
+    @staticmethod
+    def _accept_inbox(
+        run: _RunState, inserted: Message, pending: list[tuple[int, str]]
+    ) -> Callable[[list[Message]], None]:
+        """The ``on_ready`` hook that accepts *pending* once the request is built.
+
+        It raises :class:`ContextFitError` when the request does not end with
+        the inserted message.
+        """
+
+        def on_ready(messages: list[Message]) -> None:
+            assert run.inbox is not None
+            if (
+                not messages
+                or messages[-1].role != "user"
+                or not messages[-1].content.endswith(inserted.content)
+            ):
+                raise ContextFitError("Inbox instructions do not fit the request")
+            for offset, text in pending:
+                run.inbox.accept(offset)
+                run.events.inbox_accepted(offset, text, run.steps, run.attempts)
+
+        return on_ready
+
+    def _answer_from_thinking(
+        self, response: Message, reasoned: str, run: _RunState, *, can_retry: bool
+    ) -> Message:
+        """The reply, or the end of the row's thinking when that is the answer.
+
+        A reply with thinking but no tool call and no words may have its
+        answer in the thinking (#469). The row's last empty reply first asks
+        once more with thinking off, where the provider has that switch (and
+        *can_retry*, a step is left); if the row still ends empty, the end of
+        the thinking is the answer, marked as such.
+        """
+        if (
+            self.options.empty_reply_fallback != "on"
+            or response.tool_calls
+            or has_content(response.content)
+        ):
+            return response
+        if reasoned.strip():
+            run.row_thinking = reasoned
+        if (
+            run.empty_replies + 1 >= MAX_EMPTY_REPLIES
+            and run.row_thinking.strip()
+            and not run.broken_row
+        ):
+            if (
+                not run.thinking_retry_used
+                and can_retry
+                and self._thinking_retry_body()
+            ):
+                run.thinking_retry_used = True
+                run.thinking_retry_armed = True
+                run.fallback_retried = True
+            else:
+                marked = thinking_answer(run.row_thinking)
+                response = dataclasses.replace(
+                    response, content=marked, thinking=run.row_thinking
+                )
+                if marked:  # thinking with no words gives no answer
+                    run.fallback_answered = True
+                    run.events.answer_from_thinking()
+        return response
+
+    async def _direct_answer(
+        self,
+        task: TaskRecord,
+        run: _RunState,
+        response: Message,
+        rest: str,
+        *,
+        can_retry: bool,
+    ) -> bool:
+        """A reply with words and no tool call: the answer, unless a check objects.
+
+        In the compress modes the note is stored first and the answer is the
+        text without its ``<note>`` block (*rest*). Returns True when the run
+        ended as ``completed``. When the brief's check shows the answer was no
+        end, the model reads what the check showed and plans again: False.
+        """
+        if self._notes_mode:
+            note, _ = self._reply_note(
+                response, (), kind="answer", task_id=task.task_id, run=run
+            )
+            entry = self._store_note(note, run, source="reasoning_note")
+            if entry is not None:
+                await self._restate(note, run)
+        run.answer_thinking = response.thinking
+        retry = await self._brief_gate(run, can_retry=can_retry)
+        if retry is None:
+            run.end("completed", result=rest)
+            return True
+        answer = Message(role="assistant", content=rest)
+        if self.options.reasoning not in ("legacy", "compress"):
+            answer = dataclasses.replace(answer, thinking=response.thinking)
+        self.hippo.working.append_turn(answer, [Message(role="user", content=retry)])
+        return False
+
+    async def _empty_reply(
+        self,
+        task: TaskRecord,
+        run: _RunState,
+        response: Message,
+        *,
+        broken: bool,
+        unfinished: bool,
+        thought_aliases: list[str],
+    ) -> bool:
+        """A reply with no tool call and no answer: ask for one and plan again.
+
+        So is a tool call written as text (*broken*), with a label and nudge
+        that say so; its text is no note either. Returns True when this reply
+        ended the run as ``failed``.
+        """
+        label_text = TOOL_CALL_TEXT_LABEL if broken else EMPTY_REPLY_LABEL
+        label_content = label_text
+        entry = None
+        if self._notes_mode:
+            note, _ = self._reply_note(
+                dataclasses.replace(response, content="") if broken else response,
+                (),
+                kind="empty",
+                task_id=task.task_id,
+                run=run,
+            )
+            entry = self._store_note(note, run, source="reasoning_note")
+            if entry is not None:
+                label_content = f"{label_text}\n{entry.text}"
+        run.empty_replies += 1
+        run.unfinished_row = run.unfinished_row or unfinished
+        run.broken_row = run.broken_row or broken
+        if broken:
+            # Before the row's limit: the reply that ends the run is
+            # dropped from the displays too, never shown as text.
+            run.events.tool_call_as_text(
+                run.empty_replies, final=run.empty_replies >= MAX_EMPTY_REPLIES
+            )
+        if run.empty_replies >= MAX_EMPTY_REPLIES and not run.thinking_retry_armed:
+            run.end(
+                "failed",
+                error=(
+                    UNFINISHED_ANSWER_ERROR
+                    if run.unfinished_row
+                    else (TOOL_CALL_TEXT_ERROR if run.broken_row else "empty replies")
+                ),
+            )
+            return True
+        # The label stands in for the reply, so the nudge does not
+        # follow another user message; as one unit, the two are
+        # only ever dropped together.
+        label = Message(role="assistant", content=label_content)
+        if self.options.reasoning not in ("legacy", "compress"):
+            label = dataclasses.replace(label, thinking=response.thinking)
+        nudge = TOOL_CALL_TEXT_NUDGE if broken else EMPTY_REPLY_NUDGE
+        aliases: set[str] = set(thought_aliases)
+        block, _hits = await self._step_recall(
+            run,
+            entry,
+            (),
+            fallback=label_text,
+            exclude={
+                *self.hippo.working.shown_aliases(),
+                *({entry.alias} if entry is not None else set()),
+                *thought_aliases,
+            },
+        )
+        if block:
+            nudge = f"{nudge}\n\n{block}"
+            aliases.update(hit.alias for hit in _hits if hit.kind != "long")
+        aliases.update(run.pending_shown)
+        run.pending_shown.clear()
+        self.hippo.working.append_turn(
+            label, [Message(role="user", content=nudge)], aliases=aliases
+        )
+        if unfinished:
+            run.events.unfinished_answer()
+        elif not broken:
+            run.events.empty_reply(run.empty_replies)
+        if run.thinking_retry_armed:
+            # Armed by this reply: the next request is the retry.
+            run.events.thinking_off_retry()
+        return False
 
     # ── Main loop ──
 
