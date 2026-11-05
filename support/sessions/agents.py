@@ -80,6 +80,8 @@ def configured_cache_options(
     return dataclasses.replace(options, **changes) if changes else options
 
 
+# The three that make up the context budget: all set or none (AgentOptions).
+CONTEXT_SETTINGS: Final = ("context_window", "output_reserve", "safety_margin")
 # The settings of the pictures that tools return (AgentOptions.tool_images).
 IMAGE_SETTINGS: Final = ("tool_images", "tool_images_keep", "tool_images_retire")
 # The setting of a turn that ends with only thinking
@@ -146,7 +148,6 @@ def configured_context_options(
     cfg: Config | None, options: AgentOptions, overrides: Mapping[str, int | None]
 ) -> AgentOptions:
     """Resolve context settings together so flags may override individual keys."""
-    names = ("context_window", "output_reserve", "safety_margin")
     fields: dict[str, Any] = {
         name: (
             overrides.get(name)
@@ -157,7 +158,7 @@ def configured_context_options(
                 else getattr(options, name)
             )
         )
-        for name in names
+        for name in CONTEXT_SETTINGS
     }
     if all(getattr(options, name) == value for name, value in fields.items()):
         return options
@@ -170,13 +171,17 @@ def configured_session_options(
     *,
     explicit: Collection[str] = (),
     budget_overrides: Mapping[str, int | None] | None = None,
+    backend: str | None = None,
 ) -> AgentOptions:
-    """Config defaults for a session; names in *explicit* retain the caller's values."""
+    """Config defaults for a session; names in *explicit* retain the caller's values.
+
+    A window that the config leaves unset is the default of *backend*, the key
+    of the server the session talks to (``openai-compatible`` for a URL); it is
+    ``cfg.chat_backend`` when None.
+    """
     options = options or AgentOptions()
     overrides = {
-        name: getattr(options, name)
-        for name in ("context_window", "output_reserve", "safety_margin")
-        if name in explicit
+        name: getattr(options, name) for name in CONTEXT_SETTINGS if name in explicit
     }
     overrides.update(budget_overrides or {})
     options = configured_context_options(cfg, options, overrides)
@@ -185,7 +190,7 @@ def configured_session_options(
     options = configured_attempt_options(cfg, options, explicit)
     if overrides:
         cfg = copy.deepcopy(cfg)
-        for name in ("context_window", "output_reserve", "safety_margin"):
+        for name in CONTEXT_SETTINGS:
             setattr(cfg.agent, name, getattr(options, name))
     fields: dict[str, Any] = {
         name: getattr(cfg.agent, name)
@@ -201,7 +206,7 @@ def configured_session_options(
         if name not in explicit
     }
     if "window_messages" in fields:
-        fields["window_messages"] = cfg.agent.window_for(cfg.chat_backend)
+        fields["window_messages"] = cfg.agent.window_for(backend or cfg.chat_backend)
     if fields.get("reasoning", options.reasoning) != "legacy":
         for name, key in (
             ("retriever", "retriever"),

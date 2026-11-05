@@ -666,7 +666,7 @@ step 4 of 100 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
 |---|---|
 | 0 | 运行以状态 `completed` 结束。 |
 | 1 | 运行以 `crashed` 结束；或者因为没有配置后端或配置文件无效，`melo` 在运行之前就停止了；或者设置向导需要终端但没有终端；或者交互式界面无法打开其会话文件或启动其智能体。 |
-| 2 | 运行以任何其他状态结束；或者用法错误；或者交互式界面没有终端；或者无论哪种模式下 `--workspace` 都不是文件夹；或者 `melo --base-url URL`（无论有无任务）所指的服务器有多个对话模型、没有 `--chat-model` 且不知道哪个已加载（`--brief` 运行把它报告为 `exit_code` 为 2 的 `startup_error` 结果）。 |
+| 2 | 运行以任何其他状态结束；或者用法错误；或者交互式界面没有终端；或者无论哪种模式下 `--workspace` 都不是文件夹；或者直接运行发现配置文件的 `[agent]` 表中有错误的值，无论有无 `--base-url`（`--brief` 运行把它报告为 `startup_error` 结果并以 1 退出）；或者 `melo --base-url URL`（无论有无任务）所指的服务器有多个对话模型、没有 `--chat-model` 且不知道哪个已加载（`--brief` 运行把它报告为 `exit_code` 为 2 的 `startup_error` 结果）。 |
 | 3 | 网关无法启动，例如其端口已被占用。 |
 | 4 | 一次 `--brief` 运行以 `completed` 结束，但其简报的检查最终失败：`tests.state` 为 `failed`，包括被拒绝的检查。`status` 仍为 `completed`，记录的 `exit_code` 为 4。没有 `Check:` 行的简报永远不会以 4 退出。 |
 | 129 | SIGHUP 结束了运行。 |

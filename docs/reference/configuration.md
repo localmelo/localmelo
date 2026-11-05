@@ -221,7 +221,8 @@ cross_task_cold = 0       # 0 or 1
 existing config file is unchanged.
 
 An explicit flag wins over `[agent]` in direct mode and the interactive UI.
-A `--base-url` session or run uses flags, not these saved defaults.
+A direct run on `--base-url` uses flags, not these saved defaults; the interactive UI on
+`--base-url` reads them as it does for a configured backend.
 
 API v2 console sessions use the saved mode, defaulting to `legacy` when none is set;
 they keep the gateway's tool policy. The legacy `/v1` API is unchanged and
@@ -281,8 +282,8 @@ runs, the interactive UI and console sessions resolve the present values at
 startup. Only names are written to TOML; the option values are omitted from
 run configuration records.
 
-A `--base-url` run or session does not read this
-setting. Python callers can instead pass an explicit
+A direct run on `--base-url` does not read this
+setting; the interactive UI on `--base-url` does. Python callers can instead pass an explicit
 `AgentOptions(tool_env={...})` mapping.
 
 This does not change MCP's separate
