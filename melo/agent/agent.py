@@ -320,6 +320,7 @@ from localmelo.melo.schema import (
     broken_tool_call,
     clip_session_text,
     describe_images,
+    exception_text,
     has_content,
     new_record_id,
     new_tool_call_id,
@@ -1481,7 +1482,7 @@ class _RunState:
         except Exception as exc:
             self.tracing = False
             logger.debug(
-                "The trace of task %s stopped: %s", self.task_id, _exception_text(exc)
+                "The trace of task %s stopped: %s", self.task_id, exception_text(exc)
             )
             return
         self.report_progress()
@@ -1505,7 +1506,7 @@ class _RunState:
             logger.debug(
                 "The progress of task %s stopped: %s",
                 self.task_id,
-                _exception_text(exc),
+                exception_text(exc),
             )
             return
         self.events.progress(state)
@@ -1527,12 +1528,6 @@ def _checked_title(text: str) -> str:
         if found and head.strip():
             return shorten(head.strip() + separator.strip(), 120)
     return shorten(first, 120)
-
-
-def _exception_text(exc: BaseException) -> str:
-    """``"<type>: <message>"``, or the type alone when the message is empty."""
-    message = str(exc)
-    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 
 def _reviews_of(run: _RunState) -> dict[str, Any] | None:
@@ -1933,7 +1928,7 @@ class _ApprovalGate:
         if error is not None:
             # A withdrawn question keeps the name: the call did not start.
             self._run.waiting_call_id = ""
-        reason = "" if error is None else _exception_text(error)
+        reason = "" if error is None else exception_text(error)
         self._record(asking, origin=origin, reason=reason)
 
     def _counted(self, tool_name: str, preview: str) -> None:
@@ -2214,7 +2209,7 @@ class _ToolAsk:
         self.refused.append(
             {"request_id": request.request_id, "tool": request.tool_name,
              "allowed": False, "origin": origin,
-             "reason": "" if error is None else _exception_text(error)}
+             "reason": "" if error is None else exception_text(error)}
         )  # fmt: skip
 
     async def _window(
@@ -4276,7 +4271,7 @@ class Agent:
                 self._check_not_closing()
                 self._check_tool_names(provided)
             except BaseException as exc:
-                self._tools_failure = str(exc) or _exception_text(exc)
+                self._tools_failure = str(exc) or exception_text(exc)
                 await self._close_providers(started)
                 raise
             for tool in provided:
@@ -4410,7 +4405,7 @@ class Agent:
             provider.kill()
         except Exception as exc:
             logger.warning(
-                "Could not kill tool provider %s: %s", name, _exception_text(exc)
+                "Could not kill tool provider %s: %s", name, exception_text(exc)
             )
 
     async def _close_provider(self, provider: BaseToolProvider) -> None:
@@ -4422,7 +4417,7 @@ class Agent:
             logger.warning(
                 "Could not close tool provider %s: %s",
                 type(provider).__name__,
-                _exception_text(exc),
+                exception_text(exc),
             )
 
     # ── Stage helpers ──
@@ -6547,7 +6542,7 @@ class Agent:
                     try:
                         await self._ensure_tools()
                     except Exception as exc:
-                        raise _ToolSetupError(str(exc) or _exception_text(exc)) from exc
+                        raise _ToolSetupError(str(exc) or exception_text(exc)) from exc
                     query_msg = Message(
                         role="user",
                         content=query,
@@ -6620,7 +6615,7 @@ class Agent:
             except ProviderError as exc:
                 # Reported in the result, not a crash: no traceback.
                 logger.info("Task %s ended with provider_error: %s", task.task_id, exc)
-                error = str(exc) or _exception_text(exc)
+                error = str(exc) or exception_text(exc)
                 if self._refused_pictures(exc):
                     error = PICTURES_REFUSED_ERROR
                 run.end("provider_error", error=error)
@@ -6635,7 +6630,7 @@ class Agent:
                     run.end("timeout", error=f"Timed out after {timeout_s:g} s")
                 else:
                     logger.exception("Task %s crashed", task.task_id)
-                    run.end("crashed", error=_exception_text(exc))
+                    run.end("crashed", error=exception_text(exc))
             except BaseException as exc:
                 if run.interactive and is_cancellation(exc):
                     # A caller stopped a run that it follows.
@@ -6647,7 +6642,7 @@ class Agent:
                     ):
                         error = self._exit.reason  # cancelled for an exit
                     else:
-                        error = _exception_text(exc)
+                        error = exception_text(exc)
                     run.end("crashed", error=error)
                 raise
             finally:
@@ -6766,7 +6761,7 @@ class Agent:
             if isinstance(exc, TimeoutError) and bound.expired():
                 reason = f"no answer within {LOOKUP_TIMEOUT_S:g} s"
             else:
-                reason = _exception_text(exc)
+                reason = exception_text(exc)
             logger.info("No progress template for task %s: %s", run.task_id, reason)
 
     async def _learn(self, run: _RunState, query: str, outcome: RunResult) -> None:
@@ -6808,7 +6803,7 @@ class Agent:
             if isinstance(exc, TimeoutError) and bound.expired():
                 reason = f"no answer within {LEARN_TIMEOUT_S:g} s"
             else:
-                reason = _exception_text(exc)
+                reason = exception_text(exc)
             logger.info("Could not learn from task %s: %s", outcome.task_id, reason)
 
     def _record_answer(self, run: _RunState) -> None:
@@ -6877,7 +6872,7 @@ class Agent:
                 logger.warning(
                     "Could not save the final state of task %s: %s",
                     task.task_id,
-                    _exception_text(exc),
+                    exception_text(exc),
                 )
             if self.options.reasoning != "legacy":
                 # R4 gates the promotion too: the explicit modes write
@@ -6917,7 +6912,7 @@ class Agent:
                         logger.warning(
                             "Could not promote the reflections of task %s: %s",
                             task.task_id,
-                            _exception_text(exc),
+                            exception_text(exc),
                         )
         finally:
             self.hippo.working.clear_reflections()
@@ -6954,7 +6949,7 @@ class Agent:
                 if isinstance(exc, TimeoutError) and bound.expired():
                     reason = "no time left before the exit"
                 else:
-                    reason = _exception_text(exc)
+                    reason = exception_text(exc)
                 logger.warning(
                     "Could not save the final state of task %s: %s",
                     task.task_id,
@@ -7254,7 +7249,7 @@ class Agent:
                 logger.warning(
                     "Could not save a step of task %s: %s",
                     task_id,
-                    _exception_text(exc),
+                    exception_text(exc),
                 )
         calls = step.response.tool_calls
         for index in range(len(step.records), len(calls)):
@@ -7276,7 +7271,7 @@ class Agent:
                 logger.warning(
                     "Could not save a step of task %s: %s",
                     task_id,
-                    _exception_text(exc),
+                    exception_text(exc),
                 )
 
     async def _save_final_state(self, task: TaskRecord) -> None:
@@ -7287,7 +7282,7 @@ class Agent:
             logger.warning(
                 "Could not save the final state of task %s: %s",
                 task.task_id,
-                _exception_text(exc),
+                exception_text(exc),
             )
 
     def _run_result(
@@ -7455,7 +7450,7 @@ class Agent:
                 raise
             logger.info("Task %s was refused by the server: %s", task.task_id, exc)
             run.early_stop = "refused"
-            run.end("provider_error", error=str(exc) or _exception_text(exc))
+            run.end("provider_error", error=str(exc) or exception_text(exc))
 
     def _keep_best_effort(self, run: _RunState) -> None:
         """A run that stopped on ``max_calls`` or a refusal, with no answer: its latest text."""
@@ -7496,7 +7491,7 @@ class Agent:
             logger.warning(
                 "Could not ask for the explanation of a block in %s: %s",
                 task.task_id,
-                _exception_text(exc),
+                exception_text(exc),
             )
         if not answer:
             blocked = run.reviews.blocked
@@ -7540,7 +7535,7 @@ class Agent:
             logger.warning(
                 "Could not ask for an answer on stop for task %s: %s",
                 task.task_id,
-                _exception_text(exc),
+                exception_text(exc),
             )
             return
         reply = _split_inline_reasoning(reply)
@@ -7606,7 +7601,7 @@ class Agent:
             logger.warning(
                 "Could not ask for the closing line of task %s: %s",
                 task.task_id,
-                _exception_text(exc),
+                exception_text(exc),
             )
             return
         line = closing_line_of(_split_inline_reasoning(reply).content, label)

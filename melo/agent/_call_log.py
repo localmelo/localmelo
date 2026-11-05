@@ -15,7 +15,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Protocol, runtime_checkable
 
 from localmelo.melo.checker.redaction import redact_secrets
-from localmelo.melo.schema import LLMCallRecord, Message
+from localmelo.melo.schema import LLMCallRecord, Message, exception_text
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +39,6 @@ class RunCounters(Protocol):
 
     @property
     def attempts(self) -> int: ...
-
-
-def _exception_text(exc: BaseException) -> str:
-    message = str(exc)
-    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 
 def _cancelling() -> bool:
@@ -145,12 +140,12 @@ class CallLog:
                 raise
             self._log_failure(
                 f"Could not record model call {seq} of task {self._task_id} "
-                f"in history: {_exception_text(exc)}"
+                f"in history: {exception_text(exc)}"
             )
         except Exception as exc:
             self._log_failure(
                 f"Could not record model call {seq} of task {self._task_id} "
-                f"in history: {_exception_text(exc)}"
+                f"in history: {exception_text(exc)}"
             )
 
     async def link_steps(self, step_ids: Sequence[str]) -> None:
@@ -170,12 +165,12 @@ class CallLog:
                 raise
             self._log_failure(
                 f"Could not link model call {seq} of task {self._task_id} "
-                f"to its steps in history: {_exception_text(exc)}"
+                f"to its steps in history: {exception_text(exc)}"
             )
         except Exception as exc:
             self._log_failure(
                 f"Could not link model call {seq} of task {self._task_id} "
-                f"to its steps in history: {_exception_text(exc)}"
+                f"to its steps in history: {exception_text(exc)}"
             )
 
     def _log_failure(self, message: str) -> None:

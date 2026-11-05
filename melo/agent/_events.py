@@ -29,6 +29,7 @@ from localmelo.melo.schema import (
     RunResult,
     ToolCall,
     ToolResult,
+    exception_text,
 )
 
 if TYPE_CHECKING:
@@ -437,7 +438,7 @@ class _Emitter:
         duration_s = time.perf_counter() - self._tool_since
         status = "cancelled" if cancelled else "crashed"
         if not cancelled:
-            error = _error_text(exc)
+            error = exception_text(exc)
         elif not_started:
             error = CALL_NOT_STARTED
         else:
@@ -841,9 +842,3 @@ def _usage(replies: Sequence[Message]) -> dict[str, int]:
             if isinstance(value, int) and not isinstance(value, bool):
                 total[name] = total.get(name, 0) + value
     return total
-
-
-def _error_text(exc: BaseException) -> str:
-    """``"<type>: <message>"``, or the type alone when the message is empty."""
-    message = str(exc)
-    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__

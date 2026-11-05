@@ -261,6 +261,12 @@ def first_nonblank_line(text: str) -> str:
     return ""
 
 
+def exception_text(exc: BaseException) -> str:
+    """``"<type>: <message>"``, or the type alone when the message is empty."""
+    message = str(exc)
+    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
+
+
 def strip_code_fences(text: str) -> str:
     """*text* without a Markdown code fence around it, such as ```json ... ```."""
     body = text.strip()
