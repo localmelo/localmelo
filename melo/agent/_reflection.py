@@ -387,9 +387,7 @@ def _reflection_from_object(
         action = "stop"
 
     decision = ReflectionDecision(
-        progress_made=_coerce_bool(data.get("progress_made")),
         task_still_feasible=_coerce_bool(data.get("task_still_feasible", True)),
-        new_information_gained=_coerce_bool(data.get("new_information_gained")),
         next_step_is_concrete=_coerce_bool(data.get("next_step_is_concrete")),
         next_step_is_novel=_coerce_bool(data.get("next_step_is_novel")),
         recommended_action=action,

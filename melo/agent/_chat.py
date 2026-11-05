@@ -190,49 +190,37 @@ _REFLECTION_INTRO = (
     "Respond with a JSON object (no markdown fences):\n"
 )
 
-REFLECTION_PROMPT = _REFLECTION_INTRO + (
+# The keys a reflection reply holds, up to the answer's wording: the entry the
+# next attempt reads and the gate's action and three checks.
+_REFLECTION_KEYS = _REFLECTION_INTRO + (
     "{\n"
     '  "summary": "one-sentence summary of what was attempted",\n'
     '  "failed_hypotheses": ["approaches that did not work"],\n'
     '  "useful_evidence": ["facts discovered that may help"],\n'
     '  "recommended_avoids": ["actions to avoid next"],\n'
     '  "next_promising_directions": ["concrete next steps to try"],\n'
-    '  "progress_made": true/false,\n'
     '  "task_still_feasible": true/false,\n'
-    '  "new_information_gained": true/false,\n'
     '  "next_step_is_concrete": true/false,\n'
     '  "next_step_is_novel": true/false,\n'
     '  "recommended_action": "continue" | "stop" | "decompose" | "done",\n'
     '  "rationale": "why you chose this action",\n'
-    '  "best_effort_result": "the final answer if done, else the best partial '
-    'answer so far, or empty string",\n'
-    '  "estimated_info_gain": 0.0-1.0,\n'
-    '  "estimated_cost": 0.0-1.0,\n'
-    '  "repeat_risk": 0.0-1.0,\n'
-    '  "novelty": 0.0-1.0,\n'
-    '  "feasibility": 0.0-1.0\n'
+    '  "best_effort_result": '
+)
+
+REFLECTION_PROMPT = _REFLECTION_KEYS + (
+    '"the final answer if done, else the best partial answer so far, or empty '
+    'string"\n'
     "}"
 )
 
-# REFLECTION_PROMPT under ``AgentOptions.lean_output``: the gate's action and three
-# checks, not the five estimates, ``progress_made`` or ``new_information_gained``
-# (nothing reads them), and the answer only with ``done`` or ``stop``.
-LEAN_REFLECTION_PROMPT = _REFLECTION_INTRO + (
-    "{\n"
-    '  "summary": "one-sentence summary of what was attempted",\n'
-    '  "failed_hypotheses": ["approaches that did not work"],\n'
-    '  "useful_evidence": ["facts discovered that may help"],\n'
-    '  "recommended_avoids": ["actions to avoid next"],\n'
-    '  "next_promising_directions": ["concrete next steps to try"],\n'
-    '  "task_still_feasible": true/false,\n'
-    '  "next_step_is_concrete": true/false,\n'
-    '  "next_step_is_novel": true/false,\n'
-    '  "recommended_action": "continue" | "stop" | "decompose" | "done",\n'
-    '  "rationale": "why you chose this action",\n'
-    '  "best_effort_result": "only with done or stop: the final answer if done, '
-    'else the best partial answer so far"\n'
+# REFLECTION_PROMPT under ``AgentOptions.lean_output``: the same keys, with the
+# answer asked for only with ``done`` or ``stop``.
+LEAN_REFLECTION_PROMPT = _REFLECTION_KEYS + (
+    '"only with done or stop: the final answer if done, else the best partial '
+    'answer so far"\n'
     "}"
 )
+
 
 # Ends the request of a reflection after which no further attempt can
 # start: its decision cannot continue the run, only finalize its answer.

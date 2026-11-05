@@ -34,11 +34,13 @@ from localmelo.tests.agent.wire_runs import Reply, record_run, reflection_contin
 # in the tool list, the digests before this change come out. Re-recorded again when
 # shell_exec and python_exec gained the optional ``why`` (and a last sentence in their
 # descriptions): with the earlier tool definitions put back, the digests before this
-# change come out.
+# change come out. Re-recorded again when the reflection prompt lost the seven keys
+# nothing read (UNREAD): with them put back, the digests before this change come out;
+# the lean requests did not change.
 OFF = (
     "5ccaf2488d634fd83628cf6db020d3b930be27752f8d97733af26ea4b154939f",
-    "393e376869c7f673b8d96d5ce9382beaed6cedddd99bfb46da6f9d55d2cd8a25",
-    "d14a13703fd4482f2e7d47a156fbee047a396ae5ee5df6c2151be27543375d86",
+    "eb0e359a146cfc949ce6ca9c4798cb2bedd78c41b10c1d09e331011d6e4dd708",
+    "8edfe1a513570859ae8c8231b34f9ca84a4bc1b87be1c8ff189244f0535f8042",
 )
 ON = (
     "8b86af148262bcd8cb3b62407bfeb466e28fe2bd107ba32e8d801369cd6ba3b1",
@@ -51,7 +53,7 @@ GATE = {
     "next_step_is_concrete",
     "next_step_is_novel",
 }
-DROPPED = {
+UNREAD = {
     "progress_made",
     "new_information_gained",
     "estimated_info_gain",
@@ -106,7 +108,7 @@ async def test_with_the_option_the_system_and_reflection_prompts_are_the_lean_on
     assert system.startswith(LEAN_SYSTEM_PROMPT) and "step by step" not in system
     asking = bodies[1]["messages"][-1]["content"]
     assert asking.startswith(LEAN_REFLECTION_PROMPT)
-    assert not DROPPED & _keys(asking)
+    assert not UNREAD & _keys(asking)
 
 
 async def test_the_fixed_prefix_is_the_same_on_every_turn(
@@ -134,9 +136,10 @@ def test_the_lean_prompts_keep_what_the_loop_reads() -> None:
         assert hint in LEAN_SYSTEM_PROMPT
     assert "sys.path" in LEAN_SYSTEM_PROMPT and "read them first" in LEAN_SYSTEM_PROMPT
     full, lean = _keys(REFLECTION_PROMPT), _keys(LEAN_REFLECTION_PROMPT)
-    assert GATE <= lean <= full and full - lean == DROPPED
+    assert GATE <= lean == full and not UNREAD & full
+    # One prompt: only the answer's wording differs.
     both = os.path.commonprefix([REFLECTION_PROMPT, LEAN_REFLECTION_PROMPT])
-    assert both.startswith(_chat._REFLECTION_INTRO)
+    assert both.startswith(_chat._REFLECTION_KEYS)
 
 
 @pytest.mark.parametrize("short", [True, False])

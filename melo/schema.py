@@ -1142,9 +1142,7 @@ class ReflectionEntry:
 class ReflectionDecision:
     """Structured decision from the reflection step."""
 
-    progress_made: bool = False
     task_still_feasible: bool = True
-    new_information_gained: bool = False
     next_step_is_concrete: bool = False
     next_step_is_novel: bool = False
     recommended_action: str = "stop"  # "continue" | "stop" | "decompose" | "done"
