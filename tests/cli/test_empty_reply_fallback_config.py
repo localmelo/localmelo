@@ -46,8 +46,8 @@ def test_x_sets_it_for_one_run_and_the_developer_listings_show_it(
     assert row == [KEY, '"off"', '"on"', "-X"]
     text = cli._build_parser(developer=True).format_help()
     # An advanced setting: listed, with no issue deciding it.
-    row = next(line for line in text.splitlines() if line.startswith(f"  {KEY} "))
-    assert "(#" not in row, row
+    listed = next(line for line in text.splitlines() if line.startswith(f"  {KEY} "))
+    assert "(#" not in listed, listed
 
 
 @pytest.mark.parametrize("value", ["maybe", "false", "0"])
