@@ -111,6 +111,9 @@ _AGREES: Final[dict[str, re.Pattern[str]]] = {
     ),
 }
 _EFFECTS: Final = ("delete", "send_out")
+# What a command clearly does, strongest first, as the card's titles go
+# (TITLES: controlling an app, deleting, sending data out).
+_STRONGEST: Final = ("operate", *_EFFECTS)
 # What an honest description of a git command that discards work says besides
 # "delete": reverting, restoring, resetting, rolling back. These cover only a
 # step that is nothing but such commands (checkout, restore, switch, stash):
@@ -497,27 +500,31 @@ def _classify(words: list[str], text: str = "") -> _Item | None:
     found = shell_lexer.unwrap(words)
     if found.unread:  # a wrapper option melo could not read: any program it may run
         readings += [(shell_lexer.program(r[0]), r[1:]) for r in found.readings if r]
-    for program, rest in readings:
-        discard = destroys.git_discards(rest) if program == "git" else None
-        effect = _command_effect(program, rest, discard)
-        if effect:
-            places, blind = _places(effect, program, rest, discard)
-            return _Item(
-                effect,
-                places=places,
-                blind=blind,
-                git=program == "git" and _git_sub(rest)[0] in _GIT_UNREAD,
-            )
-    program, rest = readings[0]
+    items = [item for reading in readings if (item := _clear_item(*reading))]
+    if items:
+        return min(items, key=lambda item: _STRONGEST.index(item.kind))
+    shown = text or shlex.join(words)
+    return _Item("command", text=_unformatted(shown))
+
+
+def _clear_item(program: str, rest: list[str]) -> _Item | None:
+    """What *program* run with *rest* clearly does: an effect or an app it operates."""
+    discard = destroys.git_discards(rest) if program == "git" else None
+    effect = _command_effect(program, rest, discard)
+    if effect:
+        places, blind = _places(effect, program, rest, discard)
+        return _Item(
+            effect,
+            places=places,
+            blind=blind,
+            git=program == "git" and _git_sub(rest)[0] in _GIT_UNREAD,
+        )
     named = None
     if program == "osascript":
         named = app_names.osascript_app(rest)
     elif program == "open":
         named = app_names.open_app(rest)
-    if named:
-        return _Item("operate", apps=(named,))
-    shown = text or shlex.join(words)
-    return _Item("command", text=_unformatted(shown))
+    return _Item("operate", apps=(named,)) if named else None
 
 
 def _program(words: list[str]) -> tuple[str, list[str]]:

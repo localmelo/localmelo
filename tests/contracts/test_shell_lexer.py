@@ -332,6 +332,33 @@ def test_unwrap_finds_the_command_line_a_wrapper_hands_to_a_shell(
     assert shell_lexer.unwrap(shlex.split(command)).codes == codes
 
 
+@pytest.mark.parametrize(
+    ("command", "readings"),
+    [
+        ("env -S 'a b' c", [["a", "b", "c"]]),
+        ("env -S a b c", [["a", "b", "c"]]),
+        ("env -iS'a b' c", [["a", "b", "c"]]),
+        ("env -S '-i A=1 a' b", [["a", "b"]]),
+        ("env -u X -S 'a -b' -c d", [["a", "-b", "-c", "d"]]),
+    ],
+)
+def test_env_reads_the_words_of_s_in_its_place(
+    command: str, readings: list[list[str]]
+) -> None:
+    """env(1) splits the value of ``-S`` into arguments of its own, before the rest."""
+    found = shell_lexer.unwrap(shlex.split(command))
+    assert (found.readings, found.unread) == (readings, False)
+
+
+def test_a_command_read_more_ways_than_the_cap_keeps_the_first_and_is_unread() -> None:
+    """Past the cap no more ways are read: the first, each unlisted option
+    without a value, stays among them."""
+    words = ["env", *["-Z", "a"] * 20, "ls"]
+    found = shell_lexer.unwrap(words)
+    assert found.unread and len(found.readings) == shell_lexer.MAX_READINGS
+    assert found.readings[0] == words[2:]
+
+
 # An option word: ``-x``, ``--long-name``, a single-dash name (``-arch``,
 # ``-x86_64``), ``-`` (env's) or ``--`` (the end of the options).
 OPTION_WORD = re.compile(r"--?|-[A-Za-z0-9]|--?[a-z0-9][a-z0-9_-]+")
@@ -343,3 +370,4 @@ def test_every_wrapper_lists_option_words_each_of_one_kind() -> None:
         listed = [*options.flags, *options.valued]
         assert [o for o in listed if not OPTION_WORD.fullmatch(o)] == [], name
         assert options.flags & options.valued == set(), name
+        assert options.splits <= options.valued, name
