@@ -804,9 +804,9 @@ class ConsoleSessions:
         backend = getattr(settings, "chat_backend", "") or ""
         if not backend:
             return ""
-        from localmelo.support.backends.registry import model_in_use
+        from localmelo.support.backends.registry import in_use
 
-        return model_in_use(settings, backend)
+        return in_use(settings, backend)[1]
 
     def check_workspace(self, workspace: str) -> None:
         """400 ``invalid_workspace`` unless *workspace* is still a directory."""
