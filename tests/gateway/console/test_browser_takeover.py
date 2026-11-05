@@ -23,7 +23,7 @@ from localmelo.support.browser.live import Frame
 from localmelo.support.browser.provider import BrowserToolProvider
 from localmelo.support.config import Config
 from localmelo.support.gateway.console import Console, ConsoleOptions
-from localmelo.tests.browser.test_takeover import Takeable, browser
+from localmelo.tests.browser.test_takeover import Takeable, browser, grace_left
 from localmelo.tests.gateway.console import test_browser_live as routes
 from localmelo.tests.gateway.console.conftest import (
     FakeAgent,
@@ -223,12 +223,12 @@ async def test_a_panel_that_leaves_keeps_the_page_for_the_grace_period(
         await ws.send(json.dumps({"type": "take"}))
         await meta_until(ws, lambda m: m.get("owner") == "you")
     owners = agent.provider.owners
-    await until(lambda: owners.grace_left("t1") is not None)
+    await until(lambda: grace_left(owners, "t1") is not None)
     assert owners.owner("t1") == "you"
     async with connect(served.url(session_id), additional_headers=served.bearer) as ws:
         meta = await meta_until(ws, lambda m: m.get("type") == "meta")
         assert meta["owner"] == "you", "the person came back within the grace period"
-        await until(lambda: owners.grace_left("t1") is None)
+        await until(lambda: grace_left(owners, "t1") is None)
 
 
 async def test_rotating_the_token_starts_the_grace_period(
@@ -245,7 +245,7 @@ async def test_rotating_the_token_starts_the_grace_period(
                 while True:
                     await ws.recv()
     owners = agent.provider.owners
-    await until(lambda: owners.grace_left("t1") is not None)
+    await until(lambda: grace_left(owners, "t1") is not None)
     assert owners.owner("t1") == "you"
 
 

@@ -211,8 +211,7 @@ def choose_backend(args: argparse.Namespace) -> Choice | int:
     cfg = config.load()
     if cfg.is_configured:
         return _configured(cfg, args.chat_model, args)
-    developer = bool(getattr(args, "developer", False)) or cfg.ui.mode == "developer"
-    setup = onboard.run_first_setup(developer=developer)
+    setup = onboard.run_first_setup()
     if setup is None:
         return 0
     if setup.saved:

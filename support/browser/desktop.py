@@ -517,12 +517,6 @@ _last: tuple[HelperStatus, tuple[str, ...], float] | None = None
 STATUS_TTL_S = 30.0
 
 
-def forget_status() -> None:
-    """Forget the newest status of the helper (the next one reads as ``installed``)."""
-    global _last
-    _last = None
-
-
 class DesktopHelper:
     """The desktop control helper over MCP: lists windows, reads one, presses in it.
 

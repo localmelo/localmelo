@@ -728,16 +728,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   **Allow once**. The task's page and the chat's Details list what ran this
   way, with Revoke. Part of #369. [#385]
 - A short, read-only setup preview when terminal first run finds no model
-  server: the recommendation, download/cache amounts and free space.
-  `Details` keeps versions, paths and checksums out of the default view. Setup checks have a time limit and manual fallback; pipes include a
+  server: the recommendation and the download amount. If the setup checks
+  fail, the manual guidance still shows; pipes include a
   usable manual guide. Already saved a backend? With no server found, setup
   keeps the full backend menu. The summary is printed once; the list then offers
   **Check again**, **Show how to set one up** (at most six plain numbered steps:
   download oMLX, move it to Applications, download the model, start the server,
   then enter its address in melo), **Enter an address** and **Quit**. Automatic
   setup is coming soon. Nothing installs, downloads, starts or saves, and direct
-  runs and existing connections are unchanged. Developer mode keeps the review
-  menu with **Details**. [#383]
+  runs and existing connections are unchanged. [#383]
 
 - A task starts with what its chat knows about you and the project. When the
   task is made, the notes about you and your preferences, the notes of its
@@ -1235,6 +1234,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   codes. Typing is unchanged: "today", "no rush", "later", the old words,
   `P1` and `1` still set the same levels. The API still answers `level_word`
   beside `level` ([#343]).
+
+### Removed
+
+- Code that nothing used ([#502]). The old playground and the `--playground`
+  option (the web console replaces it; `--enable-playground` is still accepted
+  and says it was removed), the offline smoke-script tests and the core-loop
+  smoke script, the serving scaffold, the token counter and the four config
+  class aliases, the config migrations for formats that never shipped (with
+  the "Upgrading from an older config" section), the first-run setup preview's
+  developer view, disk and cache probing, the stub sleep and personalized-memory
+  packages, the step-estimate request and its `estimate` call kind, and gateway
+  and store methods that only tests called. Settings, commands and what you see
+  are otherwise unchanged.
 
 ### Security
 
@@ -4602,3 +4614,4 @@ earlier milestones.
 [#431]: https://github.com/localmelo/localmelo/issues/431
 [#433]: https://github.com/localmelo/localmelo/issues/433
 [#426]: https://github.com/localmelo/localmelo/issues/426
+[#502]: https://github.com/localmelo/localmelo/issues/502

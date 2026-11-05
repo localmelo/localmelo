@@ -18,6 +18,7 @@ from localmelo.support.browser import desktop
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.console.routes_settings import BODY_BYTES_LIMIT
 from localmelo.support.sessions.store import SessionStoreError
+from localmelo.tests.browser.fakes import forget_helper_status
 
 from .conftest import FakeBuilder, FakeProbe, make_cfg, open_session, seed_turn
 
@@ -176,9 +177,9 @@ def fake_helper(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Pat
     monkeypatch.setenv(
         desktop.HELPER_ENV, f"{sys.executable} -I {FAKE_HELPER} {screen} {log}"
     )
-    desktop.forget_status()
+    forget_helper_status()
     yield screen
-    desktop.forget_status()
+    forget_helper_status()
 
 
 async def test_health_says_the_desktop_helper_is_missing(client: TestClient) -> None:

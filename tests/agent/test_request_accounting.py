@@ -131,7 +131,7 @@ async def test_failed_attempts_and_other_kinds() -> None:
     emitted: list[dict[str, Any]] = []
     chat.on_context_budget = emitted.append
     await chat.plan_step([], [Message(role="user", content="q")], [], "q")
-    await chat.estimate_steps("q")
+    await chat.retrieve([Message(role="user", content="q")])
     records = chat.stats.context_budget
     assert records is not None
     assert emitted == records

@@ -16,7 +16,7 @@ from localmelo.melo.contracts.providers import (
     BaseEmbeddingProvider,
     BaseLLMProvider,
 )
-from localmelo.melo.schema import Message, RunResult, ToolDef
+from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.gateway import chat_gate
 from localmelo.support.gateway.chat_gate import (
     ChatGate,
@@ -24,7 +24,6 @@ from localmelo.support.gateway.chat_gate import (
     GatedLLM,
     _trace_source,
 )
-from localmelo.support.gateway.playground import SmokePlayground
 from localmelo.support.scheduler import REASONS, Clock, Machine, Params
 from localmelo.support.scheduler.sim.trace import SCHEMA, read_trace
 
@@ -171,53 +170,6 @@ async def test_off_copies_model_usage_and_reasoning_key_after_a_call() -> None:
     failing.error = None
     assert (await broken.chat(messages(1))).content == "ok"
     await gate.close()
-
-
-async def test_off_leaves_the_run_timeout_line_unchanged(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from localmelo.support.gateway import playground
-
-    manager = SmokePlayground(memory_dir=tmp_path, policy="off")
-    monkeypatch.setattr(manager, "_build_llm_provider", lambda *args: FakeLLM())
-    try:
-        payload = await manager.create_session(
-            chat_url="http://127.0.0.1:8000/v1", chat_model="Qwen-27B", adapter="omlx"
-        )
-        session_id = str(payload["session_id"])
-
-        async def run_task(query: str, **kwargs: Any) -> RunResult:
-            return RunResult(task_id="t", status="completed", result="hi")
-
-        monkeypatch.setattr(manager._sessions[session_id].agent, "run_task", run_task)
-        seen: list[tuple[object, float | None]] = []
-        original = playground.asyncio.wait_for
-        real_shield = playground.asyncio.shield
-        shields: list[tuple[object, object]] = []
-
-        async def spy(awaitable: Any, timeout: float | None = None) -> Any:
-            seen.append((awaitable, timeout))
-            return await original(awaitable, timeout)
-
-        def shield_spy(inner: Any) -> Any:
-            shielded = real_shield(inner)
-            shields.append((inner, shielded))
-            return shielded
-
-        monkeypatch.setattr(playground.asyncio, "wait_for", spy)
-        monkeypatch.setattr(playground.asyncio, "shield", shield_spy)
-        await manager.run(session_id, "hello")
-        assert len(seen) == 1
-        awaitable, timeout = seen[0]
-        assert timeout == 600.0
-        assert isinstance(awaitable, asyncio.Future)
-        # It is the shielded future, not the run's task itself.
-        assert len(shields) == 1
-        inner, shielded = shields[0]
-        assert awaitable is shielded
-        assert inner is not shielded
-    finally:
-        await manager.close_all()
 
 
 # ── Admissibility (R11-R15) ──

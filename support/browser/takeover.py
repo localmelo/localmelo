@@ -203,13 +203,6 @@ class Owners:
         held = self._held.get(tab)
         return held.since if held is not None else None
 
-    def grace_left(self, tab: str) -> float | None:
-        """Seconds until a held tab nobody watches comes back to melo; None while it is watched or melo has it."""
-        held = self._held.get(tab)
-        if held is None or held.away is None:
-            return None
-        return max(0.0, held.away + self.grace_s - self._clock())
-
     def take(self, tab: str, *, watched: bool = True) -> bool:
         """The person takes *tab*; whether it changed hands (False when they had it).
 

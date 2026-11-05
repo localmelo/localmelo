@@ -38,7 +38,6 @@ TOOL_SEARCH_TOP_K = 3
 # 50 steps without an answer. The earlier defaults were 30, 10 and 5; the
 # options ``max_steps=30, steps_per_attempt=10`` still give that run.
 MAX_AGENT_STEPS = 100
-MIN_AGENT_STEPS = 3
 STEPS_PER_ATTEMPT = 50
 MAX_ATTEMPTS = 5
 
@@ -46,7 +45,6 @@ MAX_ATTEMPTS = 5
 # prompt. If its serialized form exceeds the char cap, the agent trims it to
 # fit (AgentOptions.reflection_gate="flags", the default) or forces a
 # decompose action instead of continuing ("utility").
-MAX_REFLECTIONS_IN_PROMPT = 1
 MAX_REFLECTION_CHARS = 2000
 
 # ── Empty replies ──

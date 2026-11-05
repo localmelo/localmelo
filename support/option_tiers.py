@@ -230,7 +230,7 @@ OLD_SPELLINGS: dict[str, str] = {
     "--daemon": "melo serve install|uninstall|status|stop",
     "--host": "melo serve --host",
     "--port": "melo serve -p",
-    "--enable-playground": "melo serve --playground",
+    "--enable-playground": "melo serve",
     "--allow-unconfigured": "melo serve --force",
     "--gateway-login": "melo console",
     "--gateway-rotate-token": "melo console --reset",

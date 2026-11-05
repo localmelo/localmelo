@@ -22,6 +22,7 @@ from localmelo.support.gateway.task_store import TaskStore, TaskStoreError
 from localmelo.support.gateway.workers import TaskWorkers
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.store import SessionStore
+from localmelo.tests.gateway.conftest import seed_process
 
 CaptureSetup = tuple[SessionStore, TaskStore, TaskWorkers]
 
@@ -453,7 +454,8 @@ async def test_park_resume_starts_a_new_incomplete_execution(
         expected_operation_id=previous,
         _capture=True,
     )
-    await recovery.record_process(
+    await seed_process(
+        store,
         task,
         execution_id="run",
         pgid=11,

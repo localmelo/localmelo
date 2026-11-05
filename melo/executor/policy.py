@@ -40,16 +40,6 @@ class WorkspacePolicy:
         real = canonical_path(os.path.join(self._root, path))
         return real if self._inside(real) else None
 
-    def check_path(self, path: str) -> bool:
-        """Return True if *path* is inside the allowed root (or no root set).
-
-        A relative *path* is resolved against the process directory; see
-        :meth:`resolve` for one resolved against the root.
-        """
-        if self._root is None:
-            return True
-        return self._inside(canonical_path(path))
-
     def _inside(self, real: str) -> bool:
         assert self._root is not None
         return os.path.commonpath([self._root, real]) == self._root

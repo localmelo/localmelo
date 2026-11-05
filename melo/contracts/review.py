@@ -1182,15 +1182,6 @@ def _shell_sites(command: Any, depth: int = 0) -> Sites:
     return keys, unread
 
 
-def _python_texts(code: str) -> list[str]:
-    """The literal strings of *code*: an f-string with each value it fills in marked."""
-    try:
-        tree = ast.parse(code)
-    except (SyntaxError, ValueError, RecursionError):
-        return []  # it does not run
-    return _texts(tree)
-
-
 def _texts(tree: ast.AST) -> list[str]:
     texts: list[str] = []
     parts: set[int] = set()

@@ -224,9 +224,9 @@ agent = Agent(config=load(), tool_providers=[McpToolProvider(servers)])
   the remaining tails. For each completed channel, concatenate its deltas in
   order, including the tail. Thinking is held until finish.
   Redaction rules are snapshotted at stream start; changes apply to the next
-  stream. At commit, apply `redact_for_storage()` separately to each concatenated
-  display channel: it applies the snapshot and then the current rules, so newer
-  rules can add masking. Redaction is pattern-based and does not guarantee secret
+  stream. At commit, pass each concatenated display channel separately through
+  `redact_secrets()` (`localmelo.melo.checker.redaction`), so newer rules can add
+  masking. Redaction is pattern-based and does not guarantee secret
   removal. The interactive terminal UI is the only consumer (`[cli] stream =
   true`): it streams planning requests only, draws released text in its live
   area and stores the completed reply, never the deltas; existing `chat()`

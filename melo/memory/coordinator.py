@@ -210,11 +210,6 @@ class Hippo:
         )
         self.tools = ToolRegistry()
 
-    @property
-    def short(self) -> WorkingMemory:
-        """Backward-compat alias for ``self.working``."""
-        return self.working
-
     def close(self) -> None:
         """Close persistent backends if they support it.
 

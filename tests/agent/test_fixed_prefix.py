@@ -363,7 +363,6 @@ async def test_cache_telemetry_excludes_unprefixed_calls(
             self.last_usage = {
                 "cached_tokens": {
                     "retrieve": 100,
-                    "estimate": 200,
                     "plan": 3,
                     "reflect": 5,
                 }[LLM_REQUEST_KIND.get()]
@@ -377,14 +376,13 @@ async def test_cache_telemetry_excludes_unprefixed_calls(
     token = chat.begin_prefix()
     try:
         await chat.retrieve([Message("user", "find")])
-        await chat.estimate_steps("task")
         assert chat.stats.prefix_cached_tokens is None
         await chat.plan_step([], [Message("user", "task")], [], "task")
         await chat.reflect([Message("user", "task")], "task", 1)
     finally:
         _chat.PREFIX_RUN.reset(token)
     assert chat.stats.prefix_cached_tokens == 8
-    assert chat.stats.details["cached_tokens"] == 308
+    assert chat.stats.details["cached_tokens"] == 108
 
 
 async def test_fit_before_coalescing_preserves_current_recall(

@@ -183,8 +183,8 @@ class Console:
         self.hub = SessionHub(self.store)
         self.broker = ApprovalBroker(timeout_s=None)
         self.gate = self.options.gate or self._build_gate()
-        # A gate the console built is its own to close; a shared one belongs
-        # to the gateway, which closes it after both surfaces' sessions.
+        # A gate the console built is its own to close; one a test passed
+        # stays its owner's.
         self._owns_gate = self.options.gate is None
         self._monitor = None if self.options.gate is not None else self._build_monitor()
         self.memory = ChatMemory(lambda: self.cfg, directory=self.options.memory_dir)
@@ -437,7 +437,7 @@ class Console:
         )
 
     def _build_monitor(self) -> MachineMonitor | None:
-        """Watch machine state without depending on the optional playground."""
+        """Watch machine state for the console's gate."""
         scheduler = self.cfg.scheduler
         return MachineMonitor(
             lock_path=scheduler.gpu_lock_file or None,
@@ -619,7 +619,7 @@ class Console:
                 await self.sessions.close_all()
         finally:
             # Every live call leaves its one line; the log's files close.
-            # A shared gate stays open: the gateway closes it last.
+            # A gate that was passed in stays open for its owner.
             if self._owns_gate:
                 with contextlib.suppress(Exception):
                     await self.gate.close()

@@ -20,10 +20,6 @@ from fastapi import FastAPI  # noqa: E402
 
 from localmelo.melo.schema import PICTURES_REFUSED_ERROR  # noqa: E402
 from localmelo.support.gateway import webapp  # noqa: E402
-from localmelo.support.gateway.playground import (  # noqa: E402
-    _SCENARIOS_PATH,
-    SmokePlayground,
-)
 from localmelo.support.providers._http import UNREACHABLE_PREFIX  # noqa: E402
 
 
@@ -79,62 +75,47 @@ class InputPlaceholders(HTMLParser):
 
 
 @pytest.fixture()
-async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
+async def client() -> AsyncIterator[httpx.AsyncClient]:
     app = FastAPI()
-    manager = SmokePlayground(memory_dir=tmp_path)
-    app.state.smoke_playground = manager
-    webapp.mount(app, enable_playground=True)
-    try:
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            yield client
-    finally:
-        await manager.close_all()
+    webapp.mount(app)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        yield client
 
 
 async def test_instance_header_only_when_configured(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("LOCALMELO_APP_INSTANCE", "0123456789abcdef" * 2)
     app = FastAPI()
-    manager = SmokePlayground(memory_dir=tmp_path)
-    app.state.smoke_playground = manager
     webapp.mount(app)
-    try:
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            page = await client.get("/")
-            assert page.status_code == 200
-            assert page.headers["x-localmelo-instance"] == "0123456789abcdef" * 2
-            assert (
-                "x-localmelo-instance"
-                not in (await client.get("/assets/workspace.js")).headers
-            )
-    finally:
-        await manager.close_all()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        page = await client.get("/")
+        assert page.status_code == 200
+        assert page.headers["x-localmelo-instance"] == "0123456789abcdef" * 2
+        assert (
+            "x-localmelo-instance"
+            not in (await client.get("/assets/workspace.js")).headers
+        )
 
 
 @pytest.mark.parametrize("instance", [None, "wrong-value", "a" * 31])
 async def test_bad_or_absent_instance_has_no_header(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, instance: str | None
+    monkeypatch: pytest.MonkeyPatch, instance: str | None
 ) -> None:
     if instance is None:
         monkeypatch.delenv("LOCALMELO_APP_INSTANCE", raising=False)
     else:
         monkeypatch.setenv("LOCALMELO_APP_INSTANCE", instance)
     app = FastAPI()
-    manager = SmokePlayground(memory_dir=tmp_path)
-    app.state.smoke_playground = manager
     webapp.mount(app)
-    try:
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            assert "x-localmelo-instance" not in (await client.get("/")).headers
-    finally:
-        await manager.close_all()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        assert "x-localmelo-instance" not in (await client.get("/")).headers
 
 
 async def test_shell_assets_and_module_imports_are_served(
@@ -308,18 +289,8 @@ async def test_asset_routes_do_not_return_the_shell_or_python_source(
 ) -> None:
     response = await client.get(path)
     assert response.status_code == 404
-    assert "SmokePlayground" not in response.text
+    assert "def mount" not in response.text
     assert "<html" not in response.text
-
-
-async def test_scenarios_load_with_workspace_resources(
-    client: httpx.AsyncClient,
-) -> None:
-    response = await client.get("/v1/playground/scenarios")
-    assert response.status_code == 200
-    scenarios = response.json()["scenarios"]
-    assert scenarios
-    assert all(scenario["id"] and scenario["name"] for scenario in scenarios)
 
 
 def test_package_data_includes_all_workspace_runtime_resources() -> None:
@@ -332,7 +303,6 @@ def test_package_data_includes_all_workspace_runtime_resources() -> None:
             declared.update(path.resolve() for path in package_root.glob(pattern))
 
     required = {path.resolve() for path in webapp._STATIC.iterdir() if path.is_file()}
-    required.add(_SCENARIOS_PATH.resolve())
     missing = sorted(str(path.relative_to(root)) for path in required - declared)
     assert not missing, f"Runtime resources missing from package-data: {missing}"
 

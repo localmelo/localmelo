@@ -3325,7 +3325,9 @@ class SessionStore:
         so here none is (a call at startup is harmless). One transaction per
         turn (T-3): ``approval.resolved`` (``withdrawn``) for each request
         nobody answered, the outcome, ``turn.finished``, and the lease
-        cleared. Idempotent: a second call changes nothing.
+        cleared. Idempotent: a second call changes nothing. Nothing in melo
+        calls this directly (recovery runs inside the store); it is the public
+        handle the recovery tests use.
         """
         async with self._lock:
             conn = await self._ready()

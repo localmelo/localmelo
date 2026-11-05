@@ -5,8 +5,6 @@ from __future__ import annotations
 import abc
 from typing import TYPE_CHECKING
 
-from localmelo.support.backends.tokenization import count_tokens
-
 if TYPE_CHECKING:
     from localmelo.melo.contracts.providers import (
         BaseEmbeddingProvider,
@@ -20,9 +18,6 @@ class BaseBackend(abc.ABC):
 
     Backends are pure connectors: they validate configuration and build
     provider objects.  They never own or start runtimes.
-
-    Every backend inherits :meth:`count_tokens` — a shared, deterministic
-    token counter used for normalized cross-backend comparison metrics.
     """
 
     @property
@@ -42,18 +37,6 @@ class BaseBackend(abc.ABC):
         *embedding* asks for the embedding server's label.
         """
         return self.display_name
-
-    # ── Shared tokenizer (non-abstract) ────────────────────────
-
-    @staticmethod
-    def count_tokens(text: str) -> int:
-        """Count tokens using the shared deterministic tokenizer.
-
-        All backends share the same implementation so that normalized
-        token metrics are directly comparable.  See
-        :mod:`localmelo.support.backends.tokenization` for details.
-        """
-        return count_tokens(text)
 
     @abc.abstractmethod
     def validate(self, cfg: Config) -> list[str]:

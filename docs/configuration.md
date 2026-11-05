@@ -21,6 +21,5 @@ This page moved. Choose a section below to open its new location.
 ## [Environment variables](reference/configuration.md#environment-variables)
 ## [Files and directories](reference/configuration.md#files-and-directories)
 ## [Update localmelo](guides/configure.md#update-localmelo)
-## [Upgrading from an older config](reference/configuration.md#upgrading-from-an-older-config)
 ## [Uninstall localmelo](guides/configure.md#uninstall-localmelo)
 ## [Context accounting](reference/configuration.md#context-accounting)

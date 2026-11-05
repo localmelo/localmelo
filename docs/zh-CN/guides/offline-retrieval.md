@@ -128,7 +128,7 @@ melo-retrieve: exported 6 documents (2 notes, 1 reflections, 1 drafts, 2 thought
 |---|---|
 | `plan` | 一条笔记 `<task_id>:n<seq>`；当推理或回复包含代码块时，一份草稿 `<task_id>:d<seq>`；思考片段 `<task_id>:t<seq>.<i>`，其中 i 从 1 开始。 |
 | `reflect` | 当回复包含反思时，产生一条反思 `<task_id>:r<seq>`（即智能体读取的 `recommended_action` 为 `continue`、`stop`、`decompose` 或 `done` 的 JSON 对象），以及思考片段。不含反思的回复只产生思考片段。 |
-| `retrieve`、`estimate` | 无。 |
+| `retrieve` | 无。 |
 
 各类文档的内容：
 

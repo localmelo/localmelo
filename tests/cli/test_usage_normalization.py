@@ -1,24 +1,11 @@
-"""Regression tests for provider usage normalization and smoke token safety."""
+"""Regression tests for provider usage normalization."""
 
 from __future__ import annotations
-
-import importlib.util
-from pathlib import Path
 
 from localmelo.support.providers.llm.openai_compat import (
     _coerce_token_count,
     _normalize_usage,
 )
-
-
-def _load_smoke_module():  # type: ignore[no-untyped-def]
-    path = Path(__file__).resolve().parents[1] / "smoke" / "core_loop_test.py"
-    spec = importlib.util.spec_from_file_location("smoke_core_loop_test", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 class TestCoerceTokenCount:
@@ -125,87 +112,3 @@ class TestNormalizeUsage:
         result = _normalize_usage(raw)
         assert result is not None
         assert result["total_tokens"] == 50
-
-
-class TestSmokeReportNormalization:
-    """Disk-loaded summaries with malformed token fields should not crash."""
-
-    def test_render_comparison_markdown_tolerates_null_and_string_metrics(self) -> None:
-        smoke = _load_smoke_module()
-        backend_summaries = [
-            {
-                "backend_id": "x",
-                "backend_name": "X",
-                "scenarios": [
-                    {
-                        "scenario_id": "scenario_a",
-                        "scenario_name": "Scenario A",
-                        "status": "completed",
-                        "backend": "X",
-                        "queries": [],
-                        "metrics": {
-                            "embedding": {"total_ms": 1},
-                            "chat": {
-                                "total_calls": "2",
-                                "total_prompt_tokens": "7",
-                                "total_completion_tokens": None,
-                                "total_tokens": "5",
-                                "completion_tokens_per_s_overall": None,
-                                "total_tokens_per_s_overall": "0.5",
-                                "avg_completion_tokens_per_call": None,
-                                "total_ms": "10",
-                            },
-                            "combined": {"total_ms": 2},
-                        },
-                    }
-                ],
-            }
-        ]
-
-        report = smoke.render_comparison_markdown(backend_summaries, ["x"])
-
-        assert "## 整体 Token 汇总" in report
-        assert "### Token 对比" in report
-        # Summary table: prompt=7, completion=0, total=5
-        assert "| X | 7 | 0 | 5 | 10 |" in report
-        # Per-scenario table: calls=2, prompt=7, completion=0, total=5
-        assert "| Scenario A | 2 | 7 | 0 | 5 |" in report
-
-    def test_token_table_backfills_total_tokens_for_disk_loaded_summary(self) -> None:
-        smoke = _load_smoke_module()
-        backend_summaries = [
-            {
-                "backend_id": "x",
-                "backend_name": "X",
-                "scenarios": [
-                    {
-                        "scenario_id": "scenario_a",
-                        "scenario_name": "Scenario A",
-                        "status": "completed",
-                        "backend": "X",
-                        "queries": [],
-                        "metrics": {
-                            "embedding": {"total_ms": 1},
-                            "chat": {
-                                "total_calls": 3,
-                                "total_prompt_tokens": "7",
-                                "total_completion_tokens": "11",
-                                "total_tokens": None,
-                                "completion_tokens_per_s_overall": "4.4",
-                                "total_tokens_per_s_overall": None,
-                                "avg_completion_tokens_per_call": "3.7",
-                                "total_ms": 2500,
-                            },
-                            "combined": {"total_ms": 2},
-                        },
-                    }
-                ],
-            }
-        ]
-
-        report = smoke.render_comparison_markdown(backend_summaries, ["x"])
-
-        # Summary table: prompt=7, completion=11, total=18 (backfilled)
-        assert "| X | 7 | 11 | 18 | 2500 |" in report
-        # Per-scenario table: calls=3, prompt=7, completion=11, total=18
-        assert "| Scenario A | 3 | 7 | 11 | 18 |" in report

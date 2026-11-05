@@ -1031,8 +1031,6 @@ present, embeddings included. A chat request waits up to 300 seconds, and a
 turn is stopped after 600 seconds of active time: a call the scheduler holds,
 including a foreign-lock hold, does not count against that bound.
 
-The page does not use the disabled-by-default [legacy playground routes](../reference/http-v1.md#legacy-playground).
-
 The workspace has these limits:
 
 - It is for loopback use only. Sign in as described above and open it on this

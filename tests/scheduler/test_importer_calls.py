@@ -501,8 +501,8 @@ def headers_file(
 def test_the_call_kind_header_names_the_kind_of_a_chat_call(
     tmp_path: Path, value: str
 ) -> None:
-    # A plan call keeps the task one with a chat call; retrieve and
-    # estimate are not chat kinds on their own. role aux would guess
+    # A plan call keeps the task one with a chat call; retrieve is
+    # not a chat kind on its own. role aux would guess
     # reflect, so the second call asserts the header won.
     records = [
         rec(0, 0.0, 1.0),
@@ -525,11 +525,11 @@ def test_the_call_kind_header_name_is_case_insensitive(tmp_path: Path) -> None:
             1,
             1.0,
             2.0,
-            **headers_file(tmp_path, 1, "estimate", name="x-LOCALMELO-call-KIND"),
+            **headers_file(tmp_path, 1, "retrieve", name="x-LOCALMELO-call-KIND"),
         ),
     ]
     traces, _ = import_calls(write(tmp_path, records))
-    assert [c.kind for c in traces[0].calls] == ["plan", "estimate"]
+    assert [c.kind for c in traces[0].calls] == ["plan", "retrieve"]
 
 
 def test_an_embeddings_record_keeps_embed_whatever_a_headers_file_says(

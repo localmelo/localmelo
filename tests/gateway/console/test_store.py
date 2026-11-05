@@ -152,11 +152,6 @@ async def test_aclose_is_idempotent(
     assert probe.closed is True
 
 
-class _QuietGate:
-    async def close(self) -> None:
-        pass
-
-
 async def test_the_console_closes_when_a_later_close_raises(
     tmp_path: Path, builder: FakeBuilder, probe: FakeProbe
 ) -> None:
@@ -166,13 +161,11 @@ async def test_the_console_closes_when_a_later_close_raises(
         console_options=ConsoleOptions(store_path=path, builder=builder, probe=probe),
     )
 
-    class BadPlayground:
-        gate = _QuietGate()
+    class BadSessions:
+        async def close_all(self) -> None:
+            raise RuntimeError("sessions close failed")
 
-        async def close_sessions(self) -> None:
-            raise RuntimeError("playground close failed")
-
-    server.app.state.smoke_playground = BadPlayground()
+    server.sessions = BadSessions()  # type: ignore[assignment]
     with pytest.raises(RuntimeError), TestClient(server.app):
         pass
     # The console's aclose ran in the finally: the owner lock is free.

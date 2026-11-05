@@ -112,10 +112,6 @@ class UserSignals:
     # them with ``user_request`` beside the run's digest.
     request_facts: tuple[str, ...] = field(default_factory=tuple)
 
-    @property
-    def states_facts(self) -> bool:
-        return bool(self.facts)
-
 
 def _matches(text: str, marker: str) -> bool:
     pattern = _MARKER_PATTERNS.get(marker)

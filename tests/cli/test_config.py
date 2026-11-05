@@ -483,163 +483,6 @@ class TestHasEmbedding:
         assert cfg.has_embedding is False
 
 
-# -- Migration tests --
-
-
-class TestMigration:
-    """load() should migrate old configs to the new format."""
-
-    def test_migrate_online_without_local_embedding(self, tmp_path: Path) -> None:
-        """Old backend='online' without local_embedding -> openai + none."""
-        config_path = str(tmp_path / "config.toml")
-        content = (
-            'backend = "online"\n\n'
-            "[online]\n"
-            'provider = "openai"\n'
-            'api_key_env = "OPENAI_API_KEY"\n'
-            'chat_model = "gpt-4o"\n'
-            "local_embedding = false\n"
-        )
-        (tmp_path / "config.toml").write_text(content)
-        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
-            loaded = load()
-        assert loaded.chat_backend == "openai"
-        assert loaded.embedding_backend == "none"
-        assert loaded.openai.api_key_env == "OPENAI_API_KEY"
-        assert loaded.openai.chat_model == "gpt-4o"
-
-    def test_migrate_online_with_local_embedding(self, tmp_path: Path) -> None:
-        """Old backend='online' with local_embedding=true -> openai + mlc."""
-        config_path = str(tmp_path / "config.toml")
-        content = (
-            'backend = "online"\n\n'
-            "[online]\n"
-            'provider = "openai"\n'
-            'api_key_env = "OPENAI_API_KEY"\n'
-            'chat_model = "gpt-4o"\n'
-            "local_embedding = true\n"
-        )
-        (tmp_path / "config.toml").write_text(content)
-        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
-            loaded = load()
-        assert loaded.chat_backend == "openai"
-        assert loaded.embedding_backend == "mlc"
-
-    def test_migrate_online_gemini(self, tmp_path: Path) -> None:
-        """Old backend='online' with provider='gemini' -> gemini vendor key."""
-        config_path = str(tmp_path / "config.toml")
-        content = (
-            'backend = "online"\n\n'
-            "[online]\n"
-            'provider = "gemini"\n'
-            'api_key_env = "GEMINI_API_KEY"\n'
-            'chat_model = "gemini-2.0-flash"\n'
-            "local_embedding = false\n"
-        )
-        (tmp_path / "config.toml").write_text(content)
-        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
-            loaded = load()
-        assert loaded.chat_backend == "gemini"
-        assert loaded.embedding_backend == "none"
-        assert loaded.gemini.api_key_env == "GEMINI_API_KEY"
-        assert loaded.gemini.chat_model == "gemini-2.0-flash"
-
-    def test_migrate_mlc_llm_legacy(self, tmp_path: Path) -> None:
-        """Old backend='mlc-llm' -> mlc + mlc."""
-        config_path = str(tmp_path / "config.toml")
-        content = (
-            'backend = "mlc-llm"\n\n'
-            "[mlc]\n"
-            'chat_model = "Qwen3-1.7B"\n'
-            "chat_port = 8400\n"
-        )
-        (tmp_path / "config.toml").write_text(content)
-        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
-            loaded = load()
-        assert loaded.chat_backend == "mlc"
-        assert loaded.embedding_backend == "mlc"
-        assert loaded.mlc.chat_model == "Qwen3-1.7B"
-        assert loaded.mlc.chat_url == "http://127.0.0.1:8400/v1"
-
-    def test_migrate_ollama_without_embedding(self, tmp_path: Path) -> None:
-        """Old backend='ollama' without embedding_model -> ollama + none."""
-        config_path = str(tmp_path / "config.toml")
-        content = (
-            'backend = "ollama"\n\n'
-            "[ollama]\n"
-            'chat_url = "http://localhost:11434"\n'
-            'chat_model = "qwen3:8b"\n'
-        )
-        (tmp_path / "config.toml").write_text(content)
-        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
-            loaded = load()
-        assert loaded.chat_backend == "ollama"
-        assert loaded.embedding_backend == "none"
-
-    def test_migrate_ollama_with_embedding(self, tmp_path: Path) -> None:
-        """Old backend='ollama' with embedding_model -> ollama + ollama."""
-        config_path = str(tmp_path / "config.toml")
-        content = (
-            'backend = "ollama"\n\n'
-            "[ollama]\n"
-            'chat_url = "http://localhost:11434"\n'
-            'chat_model = "qwen3:8b"\n'
-            'embedding_model = "nomic-embed-text"\n'
-        )
-        (tmp_path / "config.toml").write_text(content)
-        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
-            loaded = load()
-        assert loaded.chat_backend == "ollama"
-        assert loaded.embedding_backend == "ollama"
-        assert loaded.ollama.embedding_model == "nomic-embed-text"
-
-    def test_migrate_chat_backend_mlc_llm(self, tmp_path: Path) -> None:
-        """New-ish format with chat_backend='mlc-llm' -> migrated to 'mlc'."""
-        config_path = str(tmp_path / "config.toml")
-        content = (
-            'chat_backend = "mlc-llm"\n'
-            'embedding_backend = "mlc-llm"\n\n'
-            "[mlc]\n"
-            'chat_model = "Qwen3-4B"\n'
-            "chat_port = 8400\n"
-        )
-        (tmp_path / "config.toml").write_text(content)
-        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
-            loaded = load()
-        assert loaded.chat_backend == "mlc"
-        assert loaded.embedding_backend == "mlc"
-        assert loaded.mlc.chat_url == "http://127.0.0.1:8400/v1"
-
-    def test_migrate_chat_backend_cloud_api(self, tmp_path: Path) -> None:
-        """New-ish format with chat_backend='cloud_api' -> migrated to vendor key."""
-        config_path = str(tmp_path / "config.toml")
-        content = (
-            'chat_backend = "cloud_api"\n'
-            'embedding_backend = "none"\n\n'
-            "[cloud_api]\n"
-            'provider = "openai"\n'
-            'api_key_env = "OPENAI_API_KEY"\n'
-            'chat_model = "gpt-4o"\n'
-        )
-        (tmp_path / "config.toml").write_text(content)
-        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
-            loaded = load()
-        assert loaded.chat_backend == "openai"
-        assert loaded.embedding_backend == "none"
-        assert loaded.openai.api_key_env == "OPENAI_API_KEY"
-        assert loaded.openai.chat_model == "gpt-4o"
-
-    def test_new_format_not_migrated(self, tmp_path: Path) -> None:
-        """New format with vendor-specific keys should NOT trigger migration."""
-        config_path = str(tmp_path / "config.toml")
-        content = 'chat_backend = "openai"\n' 'embedding_backend = "ollama"\n'
-        (tmp_path / "config.toml").write_text(content)
-        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
-            loaded = load()
-        assert loaded.chat_backend == "openai"
-        assert loaded.embedding_backend == "ollama"
-
-
 # -- Fail-fast config validation --
 
 
@@ -671,6 +514,15 @@ class TestFailFastValidation:
         errors = cfg.validate()
         assert len(errors) == 1
         assert "chat_backend is not set" in errors[0]
+
+    def test_a_file_in_the_old_single_backend_format_has_no_backend(
+        self, config_path: Path
+    ) -> None:
+        config_path.write_text(
+            'backend = "ollama"\n\n[ollama]\nchat_model = "qwen3:8b"\n',
+            encoding="utf-8",
+        )
+        assert "chat_backend is not set" in load().validate()[0]
 
     def test_invalid_chat_backend_returns_early(self) -> None:
         cfg = Config(chat_backend="nope", embedding_backend="none")
@@ -1039,18 +891,6 @@ class TestRequestTimeoutConfig:
         before = config_path.read_bytes()
         save(loaded)
         assert config_path.read_bytes() == before
-
-    def test_a_legacy_file_keeps_it(self, config_path: Path) -> None:
-        config_path.write_text(
-            'backend = "ollama"\n'
-            "request_timeout_s = 900\n\n"
-            "[ollama]\n"
-            'chat_url = "http://localhost:11434"\n'
-            'chat_model = "qwen3:8b"\n',
-            encoding="utf-8",
-        )
-        loaded = load()
-        assert (loaded.chat_backend, loaded.request_timeout_s) == ("ollama", 900)
 
     def test_a_key_inside_a_table_is_not_the_top_level_key(
         self, config_path: Path

@@ -294,7 +294,6 @@ def test_build_assembles_locked_runtime_and_swift(
         "__main__.py",
         "melo/__init__.py",
         "support/__init__.py",
-        "tests/smoke/data/scenarios.json",
     ):
         path = root / file
         path.parent.mkdir(parents=True, exist_ok=True)

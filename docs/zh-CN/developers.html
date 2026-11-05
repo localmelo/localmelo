@@ -153,7 +153,7 @@
               <tr><td><code>tests/sessions</code></td><td>保存在 SQLite 中的对话：存储、运行器、恢复、重启、审批和事件窗口</td><td><code>dev</code></td></tr>
               <tr><td><code>tests/gateway</code></td><td>会话、HTTP API、<code>Host</code> 和 <code>Origin</code> 检查，以及网页工作区；<code>.mjs</code> 文件测试工作区的 JavaScript</td><td><code>dev</code> 和 <code>gateway</code>；<code>.mjs</code> 文件需要 Node</td></tr>
               <tr><td><code>tests/integration</code></td><td>多个部分协同工作</td><td><code>dev</code> 和 <code>gateway</code></td></tr>
-              <tr><td><code>tests/smoke</code></td><td>冒烟测试工具的离线测试（解析、指标、日志），以及需要手动开启的 <code>test_backend_smoke.py</code></td><td><code>dev</code>；那个文件需要模型服务器</td></tr>
+              <tr><td><code>tests/smoke</code></td><td>需要手动开启的 <code>test_backend_smoke.py</code></td><td><code>dev</code>；需要模型服务器</td></tr>
             </tbody>
           </table>
         </div>
@@ -163,7 +163,6 @@
         <!-- usage:dev-smoke --><figure class="usage" aria-label="真实后端的冒烟测试" data-copy="LOCALMELO_SMOKE=1 uv run pytest -m smoke_backend tests/smoke/test_backend_smoke.py -q"><div class="usage-bar"><span class="usage-title">真实后端的冒烟测试</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="f">LOCALMELO_SMOKE</span><span class="x">=</span><span class="a">1</span> <span class="c">uv</span> <span class="s">run</span> <span class="c">pytest</span> <span class="f">-m</span> <span class="a">smoke_backend</span> <span class="a">tests/<wbr>smoke/<wbr>test_backend_smoke.py</span> <span class="f">-q</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li>它们询问 <code>127.0.0.1:11434</code> 上的 Ollama 和 <code>127.0.0.1:8400</code> 上的 MLC LLM，跳过没有响应的服务器。</li>
-          <li><code class="wrap">tests/smoke/core_loop_test.py</code> 运行更长的记忆场景；见它的 <a href="https://github.com/localmelo/localmelo/blob/main/tests/smoke/README.md">README</a>。</li>
         </ul>
       </section>
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 
 import pytest
@@ -33,12 +32,9 @@ class QuietAgent:
         pass
 
 
-def build(
-    tmp_path: Path, *, host: str = "127.0.0.1", playground: bool = False
-) -> GatewayServer:
+def build(tmp_path: Path, *, host: str = "127.0.0.1") -> GatewayServer:
     cfg = make_cfg()
     cfg.gateway.host = host
-    cfg._enable_playground = playground
     return GatewayServer(
         cfg,
         console_options=ConsoleOptions(
@@ -159,23 +155,6 @@ def test_v1_close_is_byte_identical(tmp_path: Path) -> None:
         b'{"closed":"a1b2c3d4e5f6"}'
     )
     assert client.get("/v1/sessions").content == b'{"sessions":[]}'
-
-
-def test_v1_playground_routes_are_byte_identical(tmp_path: Path) -> None:
-    server = build(tmp_path, playground=True)
-    client = TestClient(
-        server.app,
-        base_url="http://127.0.0.1:8401",
-        headers={"Authorization": "Bearer " + server.auth.read_token().decode("ascii")},
-    )
-    # The scenario list is static, so its digest pins the playground's bytes.
-    scenarios = client.get("/v1/playground/scenarios")
-    assert hashlib.sha256(scenarios.content).hexdigest() == (
-        "691a4c50b0b6c5b08cac8129ca1b0622627789618b1f1111dfc3ce618f70d752"
-    )
-    assert client.get("/v1/playground/session/nope").content == (
-        b'{"error":"session not found"}'
-    )
 
 
 def test_the_api_description_pages_are_off(tmp_path: Path) -> None:

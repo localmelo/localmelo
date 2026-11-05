@@ -645,7 +645,6 @@ See [Keep memory between runs](../guides/memory.md#keep-memory-between-runs).
 | The `--memory-dir` directory | The same files, for that run. | When the run starts, with mode 0700 when it is new. |
 | `~/.cache/localmelo/gateway/sessions.db` | The console's chats and tasks, and what you allowed in them (the `grants` table; see [What you allowed](#what-you-allowed)). | By the gateway. |
 | `~/.cache/localmelo/cli/sessions.db` | The terminal's own chats, and the grants of the terminal's own chat. | At the terminal's first message. |
-| `~/.cache/localmelo/playground/` | Legacy playground memory. | When the opt-in playground starts (security-1b in progress). |
 | `~/.localmelo/logs/` | The background service's logs. | By `melo --daemon install`. |
 | `~/Library/LaunchAgents/ai.localmelo.gateway.plist` | The background service's definition. | By `melo --daemon install`. |
 
@@ -660,17 +659,3 @@ See [Keep memory between runs](../guides/memory.md#keep-memory-between-runs).
 - **Not a grant:** **Always allow this folder** is kept in `[workspace] extra_folders`.
 
 The people-facing rules are in [What you allowed](../guides/terminal.md#what-you-allowed) and [Permissions](../guides/web-console.md#permissions); the routes are in [API v2](api-v2.md#get-apigrants).
-
-## Upgrading from an older config
-
-Older config files still load. localmelo reads:
-
-- a single `backend` key, the oldest format;
-- the backend name `mlc-llm`, now `mlc`;
-- `[cloud_api]` and `[online]` tables, now one table per vendor;
-- `chat_port` in `[mlc]`, now `chat_url`;
-- a flat `chat_template_kwargs`, now inside `extra_body`.
-
-A file without `[agent] reflection` or `steps_per_attempt` reads the defaults: reflection on, attempts of 50 steps and runs of 100. Runs that need the earlier lengths set `-X agent.steps_per_attempt=10 -s 30`.
-
-Running the wizard again writes the file in the current format.

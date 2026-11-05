@@ -8,7 +8,7 @@ import os
 import sys
 import textwrap
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from functools import partial
 
 from localmelo.support import config, hosted, hosted_check, keychain
@@ -733,40 +733,7 @@ def _port(url: str) -> str:
     return tail.rsplit(":", 1)[1] if ":" in tail else tail
 
 
-def _review_setup(setup: server_setup.SetupPlan) -> None:
-    """Developer preview choices: even Set up and start cannot authorize execution.
-
-    The summary is not printed again here; the caller printed it, and Details
-    shows the full manifest on request.
-    """
-    while True:
-        rows = [
-            "Set up and start",
-            f"Keep available after melo closes: {'On' if setup.keep_running else 'Off'}",
-            "Show manual steps",
-            "Details",
-            "Back",
-        ]
-        if setup.detection.asset is None:
-            rows = rows[2:]
-        choice = _choose_from("Review setup (nothing will run)", rows, 0, len(rows) - 1)
-        if setup.detection.asset is None:
-            choice += 2
-        if choice == 4:
-            return
-        if choice == 3:
-            for line in server_setup.details(setup):
-                _say(line)
-        elif choice == 1:
-            setup = replace(setup, keep_running=not setup.keep_running)
-        else:
-            if choice == 0:
-                _say(server_setup.AUTOMATIC_SOON)
-            for line in server_setup.manual_steps(setup):
-                print(line)  # Keep copy-only shell commands on one logical line.
-
-
-def _show_steps(setup: server_setup.SetupPlan) -> None:
+def _show_steps(setup: server_setup.Detection) -> None:
     """Print the numbered steps; a command is kept whole, a sentence is wrapped."""
     print()
     for line in server_setup.numbered_steps(setup):
@@ -777,42 +744,20 @@ def _show_steps(setup: server_setup.SetupPlan) -> None:
     print()
 
 
-def _summary_lines(
-    setup: server_setup.SetupPlan, *, developer: bool
-) -> tuple[str, ...]:
-    """What the no-server screen says: the full manifest, or the short summary."""
-    if developer:
-        return server_setup.details(setup)
-    return server_setup.preview(setup, interactive=_arrow_keys())
-
-
-def _show_summary(setup: server_setup.SetupPlan, *, developer: bool) -> tuple[str, ...]:
-    """Print the no-server summary; the lines, to tell a later change."""
-    lines = _summary_lines(setup, developer=developer)
-    for line in lines:
-        _say(line)
-    if developer and not _arrow_keys():
-        for line in server_setup.manual_steps(setup):
-            print(line)
-    return lines
-
-
 def _wait_for_a_server(
-    urls: Sequence[str], *, developer: bool = False
+    urls: Sequence[str],
 ) -> discovery.FoundServer | str | _UseHosted | None:
-    """Preview setup, then reuse discovery on Enter; return a server/address or quit.
+    """Print how to set one up, then reuse discovery on Enter; return a server/address or quit.
 
-    The summary is printed once. On a terminal it is printed again only when
-    Check again finds no server and the setup readings (cache, space) have
-    changed since. EOFError and KeyboardInterrupt reach the caller. Piped
-    input never enters the setup picker or approves anything; Enter/address/q
-    keep their meanings. On a terminal, "Use a hosted service" is the way
-    in for a person with no server.
+    The summary is printed once. EOFError and KeyboardInterrupt reach the
+    caller. Piped input keeps Enter/address/q; on a terminal, "Use a hosted
+    service" is the way in for a person with no server.
     """
     setup = None
-    shown: tuple[str, ...] = ()
     try:
-        setup = server_setup.plan(server_setup.detect_bounded())
+        setup = server_setup.detect()
+        for line in server_setup.preview(setup, interactive=_arrow_keys()):
+            _say(line)
     except Exception:
         how = discovery.how_to_start()
         _say(f"Setup checks unavailable. Start {how.name} manually:")
@@ -820,12 +765,7 @@ def _wait_for_a_server(
             print(command)
         _say(how.note)
         print(discovery.GUIDE_URL)
-    if setup is not None:
-        shown = _show_summary(setup, developer=developer)
-    if developer:
-        rows = ["Check again", "Review setup plan", "Enter an address"]
-    else:
-        rows = ["Check again", "Show how to set one up", "Enter an address"]
+    rows = ["Check again", "Show how to set one up", "Enter an address"]
     rows += ["Use a hosted service", "Quit"]
     if setup is None:
         del rows[1]
@@ -837,10 +777,7 @@ def _wait_for_a_server(
             if choice == len(rows) - 1:
                 return None
             if setup is not None and choice == 1:
-                if developer:
-                    _review_setup(setup)
-                else:
-                    _show_steps(setup)
+                _show_steps(setup)
                 continue
             if choice == len(rows) - 2:
                 return _UseHosted()
@@ -862,22 +799,6 @@ def _wait_for_a_server(
             return found
         ports = ", ".join(_port(url) for url in urls)
         _say(f"✗ No model server found yet (looked at ports {ports}).", hang=2)
-        if setup is not None and _arrow_keys():
-            setup, shown = _refreshed(setup, shown, developer=developer)
-
-
-def _refreshed(
-    setup: server_setup.SetupPlan, shown: tuple[str, ...], *, developer: bool
-) -> tuple[server_setup.SetupPlan, tuple[str, ...]]:
-    """Look at the cache and free space again; print the summary only if it changed."""
-    try:
-        fresh = server_setup.plan(server_setup.detect_bounded())
-    except Exception:
-        return setup, shown
-    fresh = replace(fresh, keep_running=setup.keep_running)
-    if _summary_lines(fresh, developer=developer) == shown:
-        return setup, shown
-    return fresh, _show_summary(fresh, developer=developer)
 
 
 def _servers_named() -> str:
@@ -1120,9 +1041,7 @@ def _offer_embedding(
     return candidate, ollama
 
 
-def run_first_setup(
-    *, ask_keep: bool = False, developer: bool = False
-) -> FirstSetup | None:
+def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
     """Ask for a model server's URL and model, check them, and save them.
 
     The first line says what the first run needs: a model server. A server
@@ -1148,7 +1067,7 @@ def run_first_setup(
     found = asyncio.run(discovery.detect_local_server(urls)) if urls else None
     typed = ""
     if found is None and urls and first:
-        waited = _wait_for_a_server(urls, developer=developer)
+        waited = _wait_for_a_server(urls)
         if waited is None:
             return None
         if isinstance(waited, _UseHosted):

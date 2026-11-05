@@ -13,7 +13,7 @@ the live overrides of the S2 spec (section 4.2).
 The gate lives here, not in ``support/scheduler/``, because S1's determinism
 tests forbid a clock read and a non-stdlib import under that package
 (decision D1). It imports no ``fastapi`` or ``uvicorn``, so it is testable
-without the gateway extra, and it never imports ``playground`` (R1).
+without the gateway extra (R1).
 """
 
 from __future__ import annotations
@@ -85,7 +85,7 @@ Policy = Literal["off", "fcfs", "class"]
 
 # The call kinds a workspace chat can send; anything else is read as a plan
 # (design 1.1, line 133), so a provider built outside Chat is still held.
-_KINDS: tuple[str, ...] = ("plan", "reflect", "retrieve", "estimate", "embed")
+_KINDS: tuple[str, ...] = ("plan", "reflect", "retrieve", "embed")
 
 # A workspace chat call is a planning or reflection request.
 _CHAT_KINDS: tuple[str, ...] = ("plan", "reflect")
@@ -446,7 +446,7 @@ class SessionClient:
 
 
 class ChatGate:
-    """One in-process gate for a playground's chats (R1).
+    """One in-process gate for the console's chats (R1).
 
     With ``policy="off"`` every method is a recorded pass-through; with
     ``fcfs`` or ``class`` it keeps S1's ``State`` and runs one synchronous
@@ -542,18 +542,10 @@ class ChatGate:
         self._focus: str | None = None
         self._closed = False
 
-        # Set on every hold start and hold end; the run's wait loop clears
-        # it in the same synchronous segment in which it reads the hold.
-        self._wait_event = asyncio.Event()
         # Every distinct alarm this gate saw (tests read it).
         self.alarms: list[str] = []
 
     # ── Small accessors ──
-
-    @property
-    def wait_event(self) -> asyncio.Event:
-        """Set whenever a hold starts or ends."""
-        return self._wait_event
 
     def now(self) -> int:
         """The clock's monotonic instant, in microseconds."""
@@ -1357,7 +1349,6 @@ class ChatGate:
         self._hold_start.clear()
         self._held_reason.clear()
         self._log.close()
-        self._wait_event.set()
 
     # ── The one transition ──
 
@@ -1509,7 +1500,7 @@ class ChatGate:
         self._transition(events)
 
     def _update_holds(self, decided: Decision | None, now: Clock) -> None:
-        """Book hold starts and ends; set ``wait_event`` on each change."""
+        """Book hold starts and ends."""
         by_session: dict[str, list[GateCall]] = {}
         for call in self._calls.values():
             if not call.done:
@@ -1525,7 +1516,6 @@ class ChatGate:
             if waiting:
                 if session_id not in self._hold_start:
                     self._hold_start[session_id] = now.mono_us
-                    self._wait_event.set()
                 self._held_reason[session_id] = self._held_for(
                     session_id, waiting, decided, parked=parked
                 )
@@ -1534,7 +1524,6 @@ class ChatGate:
                     session_id, 0
                 ) + max(0, now.mono_us - self._hold_start.pop(session_id))
                 self._held_reason.pop(session_id, None)
-                self._wait_event.set()
 
     def _alarm(self, alarm: str) -> None:
         """Record *alarm* once per gate; log its first occurrence per process."""

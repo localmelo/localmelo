@@ -1230,10 +1230,11 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
             "--reconfigure sets up the config file, which --base-url does not use; "
             "give one of them"
         )
-    if getattr(args, "enable_playground", False) and (
-        not args.serve or args.daemon or args.query
-    ):
-        parser.error("--enable-playground is only for --serve")
+    if getattr(args, "enable_playground", False):
+        print(
+            "melo: --enable-playground was removed; the web console replaces it",
+            file=sys.stderr,
+        )
     if getattr(args, "allow_unconfigured", False):
         if not args.serve:
             parser.error("--allow-unconfigured is only for --serve")
@@ -1920,7 +1921,7 @@ def _build_parser(
             "--enable-playground",
             action="store_true",
             default=argparse.SUPPRESS,
-            help="Enable authenticated development playground routes",
+            help=argparse.SUPPRESS,
         )
         parser.add_argument(
             "--developer",
@@ -2302,8 +2303,6 @@ def main() -> None:
             raise SystemExit(1) from e
 
     # start gateway
-    if getattr(args, "enable_playground", False):
-        cfg._enable_playground = True
     _start_gateway(cfg)
 
 

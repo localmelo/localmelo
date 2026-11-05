@@ -52,7 +52,7 @@ Phase = Literal[
     "expired",
 ]
 SessionKind = Literal["front", "front_bg", "task", "chat"]
-CallKind = Literal["plan", "reflect", "retrieve", "estimate", "embed"]
+CallKind = Literal["plan", "reflect", "retrieve", "embed"]
 Outcome = Literal["ok", "failed", "timeout", "aborted"]
 Arm = Literal["fifo", "class", "las2"]
 Reason = Literal[

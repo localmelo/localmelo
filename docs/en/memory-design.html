@@ -341,7 +341,7 @@
         <ul>
           <li><code>working</code> is the agent-facing active cache with two-stage LRU-style refresh: <code>fresh</code> memories are promoted to <code>rehearsed</code> only after reuse.</li>
           <li>Only <code>rehearsed</code> working memories are eligible for long-term promotion; <code>fresh</code> memories should not persist directly.</li>
-          <li><code>Hippo</code> routes durable and specialized writes to long/profile, tools, and personalized samples.</li>
+          <li><code>Hippo</code> routes durable and specialized writes to long/profile and tools.</li>
           <li><code>history</code> is a raw append-only record/debug layer outside normal recall.</li>
           <li>Hippo v1 uses <code>NEW</code>, <code>UPDATE</code>, <code>RELATED</code>, <code>CONFLICT</code>, and <code>IGNORE</code> instead of one vector threshold.</li>
         </ul>
@@ -353,7 +353,6 @@
           <li><code>melo/memory/short/</code></li>
           <li><code>melo/memory/history/sqlite.py</code></li>
           <li><code>melo/memory/long/sqlite.py</code></li>
-          <li><code>melo/memory/personalized/</code></li>
           <li><code>melo/memory/tools/</code></li>
         </ul>
         <h4>In the overall diagram</h4>
@@ -368,14 +367,7 @@
         <h3 class="md-component" id="c-sleep">Sleep</h3>
         <p class="md-role">Planned offline personalization pipeline</p>
         <p class="md-tags"><span class="md-badge">offline</span></p>
-        <p>Sleep mode remains offline. Track 2 defines the boundary it will consume later: <code>PersonalizedMemory</code> receives filtered samples, not raw history dumps.</p>
-        <h4>Key files</h4>
-        <ul class="md-files" role="list">
-          <li><code>melo/sleep/preprocess/</code></li>
-          <li><code>melo/sleep/training/</code></li>
-          <li><code>melo/sleep/evaluation/</code></li>
-          <li><code>melo/sleep/state/</code></li>
-        </ul>
+        <p>Sleep mode remains offline and is not built. Track 2 defines the boundary it will consume later: filtered samples, not raw history dumps.</p>
         <h4>In the overall diagram</h4>
         <dl class="md-facts">
           <dt>Label</dt>
@@ -440,7 +432,7 @@
               </li>
               <li class="md-card" id="personalized">
                 <strong>Personalized</strong>
-                <span class="md-text">filtered sleep samples for Track 4, not raw runtime history</span>
+                <span class="md-text">filtered sleep samples for a later sleep stage, not raw runtime history; not built yet</span>
               </li>
               <li class="md-card md-history" id="history">
                 <strong>History</strong>
@@ -481,9 +473,9 @@
                 <td>The agent stays independent of SQLite, vector search, profile tables, tool memory internals, and sleep samples.</td>
               </tr>
               <tr id="b-history-personalized">
-                <td>History to PersonalizedMemory</td>
-                <td><code>PersonalizedMemory</code> only receives selected sleep samples; it must not ingest raw history directly.</td>
-                <td>Track 4 receives curated training inputs without turning the audit log into online recall or training data by default.</td>
+                <td>History to sleep samples</td>
+                <td>Sleep only receives selected samples; it must not ingest raw history directly.</td>
+                <td>A later sleep stage receives curated inputs without turning the audit log into online recall or training data by default.</td>
               </tr>
             </tbody>
           </table>
@@ -506,7 +498,7 @@
           <div class="md-card" id="status-sleep">
             <span class="tag planned">Planned</span>
             <h3>Sleep pipeline</h3>
-            <p>Training and evaluation modules are scaffolds. The next step is a design issue, not immediate implementation.</p>
+            <p>The scaffold modules were removed. The next step is a design issue, not immediate implementation.</p>
           </div>
         </div>
       </section>
@@ -526,7 +518,6 @@
               <tr><td>Document memory env vars, file layout, retention semantics, and reset workflow.</td><td><span class="tag stable">done in v1</span></td></tr>
               <tr><td>Add multi-session SQLite stress coverage.</td><td><span class="tag stable">done in v1</span></td></tr>
               <tr><td>Run and record real-backend long-term retrieval smoke for OMLX, Ollama, and MLC-LLM.</td><td><span class="tag stable">archived</span></td></tr>
-              <tr><td>Freeze and document the <code>PersonalizedMemory</code> selected-sample schema for v1.</td><td><span class="tag stable">done in v1</span></td></tr>
               <tr><td>Implement working-memory <code>fresh</code> / <code>rehearsed</code> stages.</td><td><span class="tag planned">next</span></td></tr>
               <tr><td>Implement Hippo five-action routing and metadata-typed long/profile memory.</td><td><span class="tag planned">next</span></td></tr>
             </tbody>

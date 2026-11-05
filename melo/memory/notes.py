@@ -1851,7 +1851,6 @@ def render_digest(note: ReasoningNote, *, limit: int = DIGEST_CHARS) -> str:
 
 CANDIDATE_TEXT_CHARS = 600  # a note's candidate text
 REFLECTION_CANDIDATE_CHARS = 2_000  # a reflection's
-RECORD_TEXT_CHARS = 500  # a source record's text in ReasoningNote.source_records
 
 _ITEM_NAME_RE = re.compile(r"\b[A-Z][a-z]{2,}\b")
 _ITEM_IDENT_RE = re.compile(
@@ -1862,7 +1861,6 @@ _ITEM_IDENT_RE = re.compile(
 )
 _ITEM_WORD_RE = re.compile(r"[A-Za-z0-9_]{4,}")
 _ITEM_CJK_RE = re.compile(r"[\u4e00-\u9fff]{2,}")
-_SENTENCE_BREAK_RE = re.compile(r"(?:[.!?](?=\s|$))|\n")
 
 # A strong key is typed so that a date, a time, an amount and a number are
 # compared after normalisation, not as the text that happened to carry them.

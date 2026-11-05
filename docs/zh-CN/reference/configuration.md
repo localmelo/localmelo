@@ -453,7 +453,6 @@ chat_model = "Qwen/Qwen3-8B"
 | `--memory-dir` 指定的目录 | 同上的文件，供那次运行使用。 | 运行开始时创建；新目录的权限为 0700。 |
 | `~/.cache/localmelo/gateway/sessions.db` | 控制台的对话和任务，以及你在其中允许过的事（`grants` 表；见[你允许过的事](#what-you-allowed)）。 | 由网关创建。 |
 | `~/.cache/localmelo/cli/sessions.db` | 终端自己的对话，以及终端自己的对话的授权。 | 终端收到第一条消息时。 |
-| `~/.cache/localmelo/playground/` | 旧版 playground 的记忆。 | 默认关闭的 playground 启动时（security-1b 进行中）。 |
 | `~/.localmelo/logs/` | 后台服务的日志。 | 由 `melo --daemon install` 创建。 |
 | `~/Library/LaunchAgents/ai.localmelo.gateway.plist` | 后台服务的定义。 | 由 `melo --daemon install` 创建。 |
 
@@ -470,19 +469,3 @@ chat_model = "Qwen/Qwen3-8B"
 - **不是授权：** **总是允许这个文件夹** 记在 `[workspace] extra_folders` 里。
 
 面向读者的规则见[你允许过的事](../guides/terminal.md#what-you-allowed)和[授权](../guides/web-console.md#permissions)；路由见 [API v2](api-v2.md#get-apigrants)。
-
-<a id="upgrading-from-an-older-config"></a>
-
-## 从旧版配置升级
-
-较旧的配置文件仍然能加载。localmelo 会读取：
-
-- 单个 `backend` 键，最旧的格式；
-- 后端名称 `mlc-llm`，现在是 `mlc`；
-- `[cloud_api]` 和 `[online]` 表，现在每个厂商一张表；
-- `[mlc]` 中的 `chat_port`，现在是 `chat_url`；
-- 扁平的 `chat_template_kwargs`，现在位于 `extra_body` 之内。
-
-没有 `[agent] reflection` 或 `steps_per_attempt` 的文件读取默认值：反思开启、尝试 50 步、运行 100 步。需要以前长度的运行设置 `-X agent.steps_per_attempt=10 -s 30`。
-
-再次运行向导会以当前格式写入该文件。

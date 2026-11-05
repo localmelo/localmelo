@@ -270,7 +270,7 @@ async def test_resume_uncertainty_is_idempotent(
     with pytest.raises(asyncio.CancelledError):
         await tasks.resume_interrupted(task_id, **args)
     monkeypatch.setattr(sessions, "_commit", original)
-    receipt = await tasks.reconcile_pause_operation(task_id, "resume")
+    receipt = await tasks.operation_receipt(task_id, "resume")
     assert receipt is not None and receipt[1]
     assert (await tasks.resume_interrupted(task_id, **args)).state == "queued"
     assert [e.event["type"] for e in await sessions.list_events(task_id)].count(

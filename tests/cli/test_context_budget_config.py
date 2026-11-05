@@ -57,13 +57,9 @@ def test_combined_input_limit(window: int) -> None:
         assert "context_window - output_reserve - safety_margin" in errors[0]
 
 
-@pytest.mark.parametrize("legacy", [False, True])
-def test_invalid_toml_value_is_loaded_for_validation(
-    config_path: Path, legacy: bool
-) -> None:
-    prefix = 'backend = "ollama"\n' if legacy else 'chat_backend = "ollama"\n'
+def test_invalid_toml_value_is_loaded_for_validation(config_path: Path) -> None:
     config_path.write_text(
-        prefix + '[agent]\ncontext_window = "123"\n', encoding="utf-8"
+        'chat_backend = "ollama"\n[agent]\ncontext_window = "123"\n', encoding="utf-8"
     )
     cfg = load()
     assert cfg.agent.context_window == "123"
