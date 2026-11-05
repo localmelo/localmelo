@@ -1929,29 +1929,21 @@ class CliSession:
         )
 
     async def _switch(
-        self,
-        model: str,
-        *,
-        url: str | None,
-        note: str | None = None,
-        follow: bool = False,
+        self, model: str, *, url: str | None, note: str | None = None
     ) -> bool:
         """Move the conversation to a new Agent on *model*, then save it.
 
         With *note*, the switch is not a model change: *note* is printed in
-        place of the saved-model line (``/browser`` rebuilds the Agent). With
-        *follow*, the backend chose *model* by serving it: the Agent asks for
-        what is served, the choice is not saved and *note* is muted.
+        place of the saved-model line (``/browser`` rebuilds the Agent).
         False when it failed. The session stays "switching" until the
         switch is complete: a message sent meanwhile would start on the old
         model. Esc cancels only the start of the new Agent.
         """
-        old = self.agent
         self._state, self.activity = "switching", f"Starting {model}"
         self._work = asyncio.current_task()
         try:
             try:
-                new = await self.factory.build(None if follow else model, url=url)
+                new = await self.factory.build(model, url=url)
             except asyncio.CancelledError:
                 self.out.print(
                     self._text(
@@ -1961,55 +1953,64 @@ class CliSession:
                 )
                 return False
             except Exception as exc:
-                self.out.print(
-                    self._text(
-                        f"✗ Could not start {model}: {exc}. Still using {self.factory.backend.model}.",
-                        style="error",
-                    )
-                )
+                self._start_failed(model, exc)
                 return False
             self._work = None  # past this point the switch completes
-            new.load_conversation(old.conversation())
-            new.load_notes(old.notes())
-            if self.runner is not None:
-                self.runner.replace_agent(new)
-            self.agent = new
             if url is None:
-                if not follow:
-                    self.factory.use_model(model)
+                self.factory.use_model(model)
                 done = f"Model: {model} ({self.factory.backend.label})."
             else:
                 await self.factory.use_url(url, model)
                 done = f"Backend: {url} · {model}."
-            if self.runner is not None and self.runner.session_id is not None:
-                await self.store.update_session(self.runner.session_id, model=model)
-            await self.factory.close(old)
+            await self._carry_over(new, model)
             if note is None:
                 await self._report_switch(done)
             else:
-                self.out.print(self._text(note, "muted" if follow else "ok"))
+                self.out.print(self._text(note, "ok"))
             return True
         finally:
             self._state, self.activity, self._work = "idle", None, None
+
+    def _start_failed(self, model: str, exc: Exception) -> None:
+        self.out.print(
+            self._text(
+                f"✗ Could not start {model}: {exc}. Still using {self.factory.backend.model}.",
+                style="error",
+            )
+        )
+
+    async def _carry_over(self, new: Agent, model: str) -> None:
+        """Move the conversation to *new*, which the caller has started, and close the old Agent."""
+        old = self.agent
+        new.load_conversation(old.conversation())
+        new.load_notes(old.notes())
+        if self.runner is not None:
+            self.runner.replace_agent(new)
+        self.agent = new
+        if self.runner is not None and self.runner.session_id is not None:
+            await self.store.update_session(self.runner.session_id, model=model)
+        await self.factory.close(old)
 
     async def _follow_served(self) -> None:
         """Before a turn: move to a new Agent when the backend now serves another model.
 
         Only a session that follows (see ``BackendInfo.follows``) does. The turn
-        is under way, so what ``_switch`` resets is put back as it was; a failed
-        start keeps the Agent, and the turn shows the usual hint.
+        is under way, so the session stays "running" and Esc is the turn's stop.
+        A failed start keeps the Agent, and the row still names its model, so
+        the next turn tries again; the turn runs on the old Agent meanwhile.
         """
         model = self.factory.served_change()
         if not model:
             return
-        state, work, activity = self._state, self._work, self.activity
-        await self._switch(
-            model,
-            url=None,
-            note=f"The model changed to {model} (via melo_serve).",
-            follow=True,
+        try:
+            new = await self.factory.build()
+        except Exception as exc:
+            self._start_failed(model, exc)
+            return
+        await self._carry_over(new, model)
+        self.out.print(
+            self._text(f"The model changed to {model} (via melo_serve).", "muted")
         )
-        self._state, self._work, self.activity = state, work, activity
 
     async def _report_switch(self, done: str) -> None:
         problem = await self.factory.save()

@@ -2447,11 +2447,15 @@ async def test_a_session_that_follows_melo_serve_moves_to_the_model_it_now_serve
     )
     made: list[Any] = []
     asked: list[str] = []
+    failed: list[bool] = []
 
     def providers(cfg: config.Config, reasoning: str) -> tuple[ScriptedLLM, None]:
         """The real choice of the model to ask for, with a scripted answer, no network."""
         real, _ = providers_for(cfg, reasoning)
         made.append(real)
+        if real.model == "model-b" and not failed:  # type: ignore[attr-defined]
+            failed.append(True)  # the first start of model-b fails
+            raise RuntimeError("the model is not loaded")
         llm = ScriptedLLM([answer(f"{real.model} here.")] * 2)  # type: ignore[attr-defined]
         llm.model = real.model  # type: ignore[attr-defined]
         asked.append(real.model)  # type: ignore[attr-defined]
@@ -2492,7 +2496,15 @@ async def test_a_session_that_follows_melo_serve_moves_to_the_model_it_now_serve
         await _until(lambda: session.state == "idle")
         assert session.agent is old and line not in out.text()
         write_state(melo_serve_home, chat=role("model-b"))  # `melo-serve use`
-        session.enter("after the switch")
+        session.enter("a start that fails")
+        await _until(lambda: session.state == "idle")
+        assert session.agent is old and factory.backend.model == "model-a"
+        assert (
+            "✗ Could not start model-b: the model is not loaded. Still using model-a."
+            in out.text()
+        )
+        assert line not in out.text()
+        session.enter("after the retry")  # the next turn tries again
         await _until(lambda: session.state == "idle")
         assert session.agent is not old
         assert session.agent._llm.model == "model-b"  # type: ignore[attr-defined]
@@ -2503,10 +2515,7 @@ async def test_a_session_that_follows_melo_serve_moves_to_the_model_it_now_serve
         assert [
             t.status
             for t in await store.list_turns((await store.list_sessions())[0].id)
-        ] == [
-            "completed",
-            "completed",
-        ]
+        ] == ["completed"] * 3
         assert asked[-1] == "model-b"
         write_state(melo_serve_home)  # nothing served: the Agent stays
         agent = session.agent

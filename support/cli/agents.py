@@ -158,9 +158,10 @@ class AgentFactory:
         A configured session keeps its config: on a new *url*, the Agent
         runs on a copy of it as /backend saves it (see :meth:`use_url`).
         """
+        followed: BackendInfo | None = None
         if self.backend.follows and url is None and model in (None, self.backend.model):
             model = None  # none was chosen: the Agent asks for what is served now
-            self._follow()
+            followed = self._served()
         else:
             model = model or self.backend.model
         try:
@@ -177,6 +178,10 @@ class AgentFactory:
             # A server that did not start: this session runs without MCP.
             self.mcp_error = str(exc) or type(exc).__name__
             agent = await self._build(model, url, None)
+        if followed is not None:
+            self.backend = (
+                followed  # only now: a failed build leaves the row on its Agent
+            )
         self._live.append(agent)
         return agent
 
@@ -191,13 +196,11 @@ class AgentFactory:
         served = in_use(self._cfg, self.backend.key)[1]
         return served if served != self.backend.model else ""
 
-    def _follow(self) -> None:
-        """Show what the backend serves now, which the Agent about to be built asks for."""
+    def _served(self) -> BackendInfo:
+        """The row as it shows what the backend serves now, which the Agent about to be built asks for."""
         assert self._cfg is not None  # only a configured backend follows
         now = config_backend(self._cfg, None)
-        self.backend = replace(
-            self.backend, model=now.model, label=now.label, note=now.note
-        )
+        return replace(self.backend, model=now.model, label=now.label, note=now.note)
 
     async def _build(
         self, model: str | None, url: str | None, mcp_config: str | None
