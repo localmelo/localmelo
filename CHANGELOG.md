@@ -1486,6 +1486,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- `melo-retrieve` now reads a reflection the same way a run does, so a reflection with a small JSON slip that the run acted on is in its corpus too.
 - The config file is read and saved from the settings' own fields, so a setting no longer needs hand-written load and save code: `[cli] chat` is kept when it is saved, a value of the wrong kind in any table (a quoted port, `"yes"` for an on/off setting) is reported as one plain sentence instead of a traceback or a silent change, the saved file lists only settings that differ from the defaults, and spaces around a backend URL or model name are removed. Closes #496.
 - Pictures from tools now reach a model whose server says it reads them. With `[agent] tool_images = "auto"`, melo asked
   only oMLX's status route and Ollama's `/api/show`, so on any other OpenAI-compatible server the pictures were dropped;

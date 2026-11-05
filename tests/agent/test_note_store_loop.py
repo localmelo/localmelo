@@ -383,7 +383,7 @@ async def test_history_keeps_the_raw_reply_and_gets_no_notes_table(
 
 @pytest.mark.asyncio
 async def test_live_note_kinds_match_the_exported_corpus(tmp_path: Path) -> None:
-    from localmelo.melo.memory.retrieval.corpus import (
+    from localmelo.support.memory.retrieval_corpus import (
         docs_from_calls,
         load_history_calls,
     )
@@ -617,7 +617,7 @@ async def test_a_reflection_refused_for_its_notes_block_sends_nothing() -> None:
 async def test_live_and_exported_draft_targets_agree_on_recent_path(
     tmp_path: Path,
 ) -> None:
-    from localmelo.melo.memory.retrieval.corpus import (
+    from localmelo.support.memory.retrieval_corpus import (
         docs_from_calls,
         load_history_calls,
     )
@@ -666,7 +666,7 @@ async def test_live_and_exported_draft_targets_agree_on_recent_path(
 async def test_live_and_exported_draft_targets_use_the_recent_path(
     tmp_path: Path,
 ) -> None:
-    from localmelo.melo.memory.retrieval.corpus import (
+    from localmelo.support.memory.retrieval_corpus import (
         docs_from_calls,
         load_history_calls,
     )
