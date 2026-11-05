@@ -6,6 +6,7 @@ import dataclasses
 import socket
 from typing import Any
 
+from localmelo.support.browser import desktop
 from localmelo.support.browser.driver import (
     Act,
     ActResult,
@@ -27,6 +28,11 @@ PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA6
 PNG += "AAAABJRU5ErkJggg=="
 # What a name answers when a test gives it no answer of its own: a public address.
 PUBLIC_IP = "93.184.216.34"
+
+
+def forget_helper_status() -> None:
+    """Forget the desktop helper's newest status, so the next read starts fresh."""
+    desktop._last = None
 
 
 class FakeDns:

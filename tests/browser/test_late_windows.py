@@ -32,7 +32,7 @@ from localmelo.support.browser.desktop import (
 )
 from localmelo.support.browser.driver import Changes, Element, PointHit
 from localmelo.support.browser.provider import BrowserToolProvider
-from localmelo.tests.browser.fakes import FakeDriver, button
+from localmelo.tests.browser.fakes import FakeDriver, button, forget_helper_status
 from localmelo.tests.browser.test_acting import HOME, Asks, asking, world
 from localmelo.tests.browser.test_other_windows import (
     FAKE,
@@ -1217,7 +1217,7 @@ async def test_the_app_to_give_the_grant_is_the_one_the_helper_names(
 async def test_the_helper_status_says_missing_installed_granted_or_what_is_wrong(
     screen: Screen, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    desktop_mod.forget_status()
+    forget_helper_status()
     monkeypatch.setenv(desktop_mod.HELPER_ENV, "")
     assert (await helper_status(check=True)).state == "missing"
     command = f"{sys.executable} -I {FAKE} {screen.path} {screen.log_path}"
@@ -1225,10 +1225,10 @@ async def test_the_helper_status_says_missing_installed_granted_or_what_is_wrong
     assert await helper_status() == HelperStatus("installed")  # not looked at yet
     granted = await helper_status(check=True)
     assert granted == HelperStatus("granted", "Cua Driver", True)
-    desktop_mod.forget_status()
+    forget_helper_status()
     screen.set(grants={"accessibility": True, "screen_recording": False})
     assert (await helper_status(check=True)).pictures is False
-    desktop_mod.forget_status()
+    forget_helper_status()
     screen.set(grants={"accessibility": False, "screen_recording": True})
     refused = await helper_status(check=True)
     assert refused.state == "no_grant" and refused.app == "Cua Driver"
@@ -1236,17 +1236,17 @@ async def test_the_helper_status_says_missing_installed_granted_or_what_is_wrong
     # Not looked at again within a few seconds, whatever the person did meanwhile.
     screen.set(grants={"accessibility": True, "screen_recording": True})
     assert (await helper_status(check=True)).state == "no_grant"
-    desktop_mod.forget_status()
+    forget_helper_status()
     monkeypatch.setenv(desktop_mod.HELPER_ENV, "/nonexistent/helper mcp")
     broken = await helper_status(check=True)
     assert broken.state == "failed" and "did not start" in broken.problem
-    desktop_mod.forget_status()
+    forget_helper_status()
 
 
 async def test_a_chats_first_use_of_the_helper_is_the_newest_status(
     screen: Screen, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    desktop_mod.forget_status()
+    forget_helper_status()
     monkeypatch.setenv(
         desktop_mod.HELPER_ENV,
         f"{sys.executable} -I {FAKE} {screen.path} {screen.log_path}",
@@ -1260,4 +1260,4 @@ async def test_a_chats_first_use_of_the_helper_is_the_newest_status(
         await provider.close()
     # Not asked for a check, yet it knows what the chat found.
     assert (await helper_status()).state == "no_grant"
-    desktop_mod.forget_status()
+    forget_helper_status()

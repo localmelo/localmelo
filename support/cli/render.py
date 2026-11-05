@@ -1646,14 +1646,6 @@ class TurnRenderer:
         call_id = data.get("call_id")
         return self._arguments.get(call_id) if isinstance(call_id, str) else None
 
-    def tool_output(self, ref: str | None) -> ToolOutput | None:
-        """The finished call *ref* names, or the latest when *ref* is None."""
-        if not self.tool_outputs:
-            return None
-        if ref is None:
-            return self.tool_outputs[-1]
-        return next((call for call in self.tool_outputs if call.ref == ref), None)
-
     def _preview_of(self, data: Mapping[str, Any]) -> str:
         call_id = data.get("call_id")
         if not isinstance(call_id, str):

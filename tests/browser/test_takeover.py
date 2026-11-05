@@ -46,6 +46,14 @@ CHINESE = "密码是你好"
 VIEW = (1280.0, 713.0)
 
 
+def grace_left(owners: Owners, tab: str) -> float | None:
+    """Seconds until a held tab nobody watches comes back; None while watched or not held."""
+    held = owners._held.get(tab)
+    if held is None or held.away is None:
+        return None
+    return max(0.0, held.away + owners.grace_s - owners._clock())
+
+
 class Later:
     """A test's timers: ``later(seconds, fn)`` keeps them, ``fire()`` runs the due ones."""
 
@@ -107,11 +115,11 @@ def test_a_tab_nobody_watches_comes_back_after_the_grace_period() -> None:
     found, later = owners()
     found.take("t1")
     found.watching("t1", 1)
-    assert found.grace_left("t1") is None
+    assert grace_left(found, "t1") is None
     found.watching(
         "t1", 0
     )  # the panel closed, the page was hidden or the token rotated
-    assert found.grace_left("t1") == takeover.GRACE_S
+    assert grace_left(found, "t1") == takeover.GRACE_S
     later.advance(takeover.GRACE_S - 1)
     assert found.owner("t1") == "you"
     later.advance(2)
@@ -126,7 +134,7 @@ def test_a_panel_that_comes_back_within_the_grace_period_keeps_the_tab() -> None
     found.watching("t1", 0)
     later.advance(60)
     found.watching("t1", 2)
-    assert found.grace_left("t1") is None
+    assert grace_left(found, "t1") is None
     later.advance(takeover.GRACE_S * 2)
     assert found.owner("t1") == "you", "the cancelled timer did not give it back"
 
@@ -136,7 +144,7 @@ def test_a_tab_taken_from_the_card_with_no_panel_open_starts_its_grace_at_once()
 ):
     found, later = owners()
     found.take("t1", watched=False)
-    assert found.grace_left("t1") == takeover.GRACE_S
+    assert grace_left(found, "t1") == takeover.GRACE_S
     later.advance(takeover.GRACE_S + 1)
     assert found.owner("t1") == "melo"
 
@@ -753,12 +761,12 @@ async def test_a_panel_that_goes_away_starts_the_grace_period() -> None:
     viewer = await live.watch()
     framed(driver)
     await live.take(viewer)
-    assert provider.owners.grace_left("t1") is None
+    assert grace_left(provider.owners, "t1") is None
     await live.release(viewer)
-    left = provider.owners.grace_left("t1")
+    left = grace_left(provider.owners, "t1")
     assert left is not None and left > takeover.GRACE_S - 5
     again = await live.watch()
-    assert provider.owners.grace_left("t1") is None and again.target[0] == "t1"
+    assert grace_left(provider.owners, "t1") is None and again.target[0] == "t1"
     await provider.close()
 
 
